@@ -27,22 +27,41 @@ Use `/Users/neonwatty/Desktop/codex-terminal-manager` as the control repo unless
 
 Use a fresh worker name unless the user explicitly wants to reuse prior state.
 
+For a manual startup check, prefer `start-test`. It verifies that the worker can
+update its ignored status file and leaves the tmux session running for attach:
+
+```bash
+scripts/workerctl start-test <name> \
+  --cwd <target-repo> \
+  --accept-trust \
+  --open
+```
+
+The command prints the attach and stop commands. Do not stop a manual test worker
+unless the user asks or you pass `--stop-after`.
+
+Guardrail: `workerctl` refuses to open a second terminal window for the same
+worker after one terminal launch attempt, even if the first app launch did not
+visibly work. Do not use `--force` or `--force-open` unless the user explicitly
+re-prompts and asks for another terminal window.
+
 ```bash
 scripts/workerctl create <name> \
   --cwd <target-repo> \
   --task "<specific task and constraints>" \
   --wait-ready \
-  --accept-trust
+  --accept-trust \
+  --verify \
+  --open
 ```
 
 For low-risk tests, constrain the worker to an ignored status file:
 
 ```bash
-scripts/workerctl create live-worker \
+scripts/workerctl start-test live-worker \
   --cwd "$PWD" \
-  --task "Read README.md and update only .codex-workers/live-worker/status.json with a short summary. Do not edit tracked files." \
-  --wait-ready \
-  --accept-trust
+  --accept-trust \
+  --open
 ```
 
 ## Inspect And Supervise
@@ -103,6 +122,20 @@ Attach from any directory:
 tmux attach -t codex-<name>
 ```
 
+On macOS, open a new terminal window attached to a running worker:
+
+```bash
+scripts/workerctl open <name>
+scripts/workerctl open <name> --terminal ghostty
+scripts/workerctl open <name> --terminal terminal
+```
+
+If the first open did not work and the user explicitly asks to try again:
+
+```bash
+scripts/workerctl open <name> --force
+```
+
 Detach without stopping:
 
 ```text
@@ -111,7 +144,7 @@ Ctrl-b then d
 
 ## Stop And Verify Cleanup
 
-Always stop workers created for tests unless the user asks to leave them running:
+For disposable smoke tests, pass `--stop-after` or stop the worker explicitly:
 
 ```bash
 scripts/workerctl stop <name>
