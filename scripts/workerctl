@@ -1,24 +1,402 @@
 #!/usr/bin/env python3
-"""Placeholder entry point for the Codex worker controller prototype."""
+"""Control tmux-backed Codex worker sessions."""
+
+from __future__ import annotations
 
 import argparse
+import hashlib
+import json
+import shutil
+import subprocess
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
 
 
-def main() -> int:
+ROOT = Path.cwd()
+STATE_ROOT = ".codex-workers"
+DEFAULT_HISTORY_LINES = 200
+VALID_STATES = {"planning", "editing", "running_tests", "blocked", "waiting", "done", "unknown"}
+
+
+class WorkerError(RuntimeError):
+    pass
+
+
+def now_iso() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def ensure_tool(name: str) -> str:
+    path = shutil.which(name)
+    if not path:
+        raise WorkerError(f"Required tool not found on PATH: {name}")
+    return path
+
+
+def run(args: list[str], *, check: bool = True, input_text: str | None = None) -> subprocess.CompletedProcess[str]:
+    proc = subprocess.run(
+        args,
+        input=input_text,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if check and proc.returncode != 0:
+        detail = proc.stderr.strip() or proc.stdout.strip() or f"exit code {proc.returncode}"
+        raise WorkerError(f"{' '.join(args)} failed: {detail}")
+    return proc
+
+
+def state_root() -> Path:
+    return ROOT / STATE_ROOT
+
+
+def worker_dir(name: str) -> Path:
+    validate_name(name)
+    return state_root() / name
+
+
+def validate_name(name: str) -> None:
+    allowed = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_")
+    if not name or any(char not in allowed for char in name):
+        raise WorkerError("Worker names may contain only letters, numbers, hyphens, and underscores.")
+
+
+def tmux_session(name: str) -> str:
+    return f"codex-{name}"
+
+
+def tmux_target(name: str) -> str:
+    return tmux_session(name)
+
+
+def config_path(name: str) -> Path:
+    return worker_dir(name) / "config.json"
+
+
+def status_path(name: str) -> Path:
+    return worker_dir(name) / "status.json"
+
+
+def events_path(name: str) -> Path:
+    return worker_dir(name) / "events.jsonl"
+
+
+def transcript_path(name: str) -> Path:
+    return worker_dir(name) / "transcript.txt"
+
+
+def capture_meta_path(name: str) -> Path:
+    return worker_dir(name) / "capture-meta.json"
+
+
+def load_json(path: Path, default: Any) -> Any:
+    if not path.exists():
+        return default
+    try:
+        return json.loads(path.read_text())
+    except json.JSONDecodeError as exc:
+        raise WorkerError(f"Invalid JSON in {path}: {exc}") from exc
+
+
+def write_json(path: Path, payload: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+
+
+def append_event(name: str, event_type: str, payload: dict[str, Any] | None = None) -> None:
+    event = {
+        "time": now_iso(),
+        "type": event_type,
+        **(payload or {}),
+    }
+    events_path(name).parent.mkdir(parents=True, exist_ok=True)
+    with events_path(name).open("a") as handle:
+        handle.write(json.dumps(event, sort_keys=True) + "\n")
+
+
+def session_exists(name: str) -> bool:
+    proc = run(["tmux", "has-session", "-t", tmux_target(name)], check=False)
+    return proc.returncode == 0
+
+
+def require_worker(name: str) -> dict[str, Any]:
+    config = load_json(config_path(name), None)
+    if config is None:
+        raise WorkerError(f"Unknown worker: {name}")
+    return config
+
+
+def capture_output(name: str, history_lines: int = DEFAULT_HISTORY_LINES) -> str:
+    require_worker(name)
+    if not session_exists(name):
+        raise WorkerError(f"tmux session is not running for worker {name}: {tmux_target(name)}")
+    proc = run(["tmux", "capture-pane", "-p", "-S", f"-{history_lines}", "-t", tmux_target(name)])
+    output = proc.stdout.rstrip("\n")
+    digest = hashlib.sha256(output.encode()).hexdigest()
+    meta = load_json(capture_meta_path(name), {})
+    previous_digest = meta.get("sha256")
+    previous_changed_at = meta.get("changed_at")
+    changed_at = now_iso() if digest != previous_digest else previous_changed_at
+    write_json(
+        capture_meta_path(name),
+        {
+            "captured_at": now_iso(),
+            "changed_at": changed_at or now_iso(),
+            "sha256": digest,
+            "history_lines": history_lines,
+        },
+    )
+    transcript_path(name).write_text(output + ("\n" if output else ""))
+    return output
+
+
+def initial_status(name: str, task: str | None) -> dict[str, Any]:
+    return {
+        "blocker": None,
+        "current_task": task or "Start worker Codex session.",
+        "last_update": now_iso(),
+        "next_action": "Wait for manager instruction or begin assigned task.",
+        "state": "waiting",
+    }
+
+
+def worker_contract(name: str, task: str | None) -> str:
+    status_file = status_path(name)
+    task_text = task or "Wait for a task from the manager."
+    return f"""You are a worker Codex session supervised by a manager Codex session.
+
+Task:
+{task_text}
+
+Keep this file updated whenever you start a new phase, become blocked, begin long-running verification, or finish:
+{status_file}
+
+Use this JSON shape:
+{{
+  "state": "planning | editing | running_tests | blocked | waiting | done",
+  "current_task": "short description",
+  "last_update": "ISO-8601 timestamp",
+  "next_action": "short description",
+  "blocker": null
+}}
+
+Do not perform destructive git actions unless the user explicitly asks.
+If you are blocked or need direction, set state to blocked and explain the blocker.
+"""
+
+
+def command_create(args: argparse.Namespace) -> int:
+    ensure_tool("tmux")
+    ensure_tool("codex")
+    name = args.name
+    validate_name(name)
+    directory = Path(args.cwd).expanduser().resolve()
+    if not directory.exists() or not directory.is_dir():
+        raise WorkerError(f"Worker cwd does not exist or is not a directory: {directory}")
+    if config_path(name).exists() and not args.reuse:
+        raise WorkerError(f"Worker already exists: {name}. Use --reuse to reuse its state directory.")
+    if session_exists(name):
+        raise WorkerError(f"tmux session already exists: {tmux_target(name)}")
+
+    worker_dir(name).mkdir(parents=True, exist_ok=True)
+    write_json(
+        config_path(name),
+        {
+            "created_at": now_iso(),
+            "cwd": str(directory),
+            "name": name,
+            "state_dir": str(worker_dir(name)),
+            "tmux_session": tmux_session(name),
+            "tmux_target": tmux_target(name),
+        },
+    )
+    write_json(status_path(name), initial_status(name, args.task))
+    transcript_path(name).touch()
+
+    contract = worker_contract(name, args.task)
+    shell_command = f"cd {sh_quote(str(directory))} && codex"
+    run(["tmux", "new-session", "-d", "-s", tmux_session(name), shell_command])
+    append_event(name, "create", {"cwd": str(directory), "task": args.task})
+
+    if args.send_contract:
+        send_text(name, contract)
+        append_event(name, "send_contract", {"bytes": len(contract)})
+
+    print(f"created {name}")
+    print(f"tmux session: {tmux_session(name)}")
+    print(f"state dir: {worker_dir(name)}")
+    if args.send_contract:
+        print("contract sent to worker")
+    else:
+        print("contract not sent; run workerctl nudge to provide instructions")
+    return 0
+
+
+def sh_quote(value: str) -> str:
+    return "'" + value.replace("'", "'\"'\"'") + "'"
+
+
+def send_text(name: str, text: str) -> None:
+    require_worker(name)
+    if not session_exists(name):
+        raise WorkerError(f"tmux session is not running for worker {name}: {tmux_target(name)}")
+    buffer_name = f"workerctl-{name}"
+    run(["tmux", "set-buffer", "-b", buffer_name, text])
+    try:
+        run(["tmux", "paste-buffer", "-b", buffer_name, "-t", tmux_target(name)])
+        run(["tmux", "send-keys", "-t", tmux_target(name), "Enter"])
+    finally:
+        run(["tmux", "delete-buffer", "-b", buffer_name], check=False)
+
+
+def command_list(args: argparse.Namespace) -> int:
+    root = state_root()
+    if not root.exists():
+        return 0
+    for path in sorted(root.iterdir()):
+        if not path.is_dir():
+            continue
+        config = load_json(path / "config.json", {})
+        status = load_json(path / "status.json", {})
+        name = config.get("name", path.name)
+        marker = "running" if session_exists(name) else "stopped"
+        print(f"{name}\t{marker}\t{status.get('state', 'unknown')}\t{status.get('current_task', '')}")
+    return 0
+
+
+def command_capture(args: argparse.Namespace) -> int:
+    output = capture_output(args.name, args.lines)
+    if output:
+        print(output)
+    return 0
+
+
+def command_tail(args: argparse.Namespace) -> int:
+    output = capture_output(args.name, args.lines)
+    lines = output.splitlines()
+    print("\n".join(lines[-args.lines :]))
+    return 0
+
+
+def command_status(args: argparse.Namespace) -> int:
+    config = require_worker(args.name)
+    running = session_exists(args.name)
+    status = load_json(status_path(args.name), {})
+    capture_meta = load_json(capture_meta_path(args.name), {})
+    if running and args.refresh:
+        try:
+            capture_output(args.name, args.lines)
+            capture_meta = load_json(capture_meta_path(args.name), {})
+        except WorkerError as exc:
+            capture_meta = {"error": str(exc)}
+
+    state = status.get("state", "unknown")
+    if state not in VALID_STATES:
+        state = "unknown"
+
+    summary = {
+        "name": args.name,
+        "tmux_session": config.get("tmux_session"),
+        "running": running,
+        "state": state,
+        "current_task": status.get("current_task"),
+        "next_action": status.get("next_action"),
+        "blocker": status.get("blocker"),
+        "status_last_update": status.get("last_update"),
+        "terminal_captured_at": capture_meta.get("captured_at"),
+        "terminal_changed_at": capture_meta.get("changed_at"),
+    }
+    print(json.dumps(summary, indent=2, sort_keys=True))
+    return 0
+
+
+def command_nudge(args: argparse.Namespace) -> int:
+    message = args.message
+    send_text(args.name, message)
+    append_event(args.name, "nudge", {"message": message})
+    print(f"sent nudge to {args.name}")
+    return 0
+
+
+def command_stop(args: argparse.Namespace) -> int:
+    require_worker(args.name)
+    if args.message and session_exists(args.name):
+        send_text(args.name, args.message)
+        append_event(args.name, "stop_message", {"message": args.message})
+    if session_exists(args.name):
+        run(["tmux", "kill-session", "-t", tmux_target(args.name)])
+        append_event(args.name, "stop", {"killed_session": True})
+        print(f"stopped {args.name}")
+    else:
+        append_event(args.name, "stop", {"killed_session": False})
+        print(f"{args.name} was not running")
+    return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="workerctl",
         description="Control tmux-backed Codex worker sessions.",
     )
-    parser.add_argument(
-        "command",
-        nargs="?",
-        default="help",
-        choices=["help"],
-        help="Command to run. The first implementation will add create, status, capture, nudge, stop, and list.",
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    create = subparsers.add_parser("create", help="Create and start a worker Codex tmux session.")
+    create.add_argument("name", help="Worker name, e.g. worker-a.")
+    create.add_argument("--cwd", default=str(ROOT), help="Working directory for the worker.")
+    create.add_argument("--task", help="Initial task text for the worker contract.")
+    create.add_argument("--reuse", action="store_true", help="Reuse an existing worker state directory.")
+    create.add_argument(
+        "--no-send-contract",
+        action="store_false",
+        dest="send_contract",
+        help="Start Codex but do not send the worker contract.",
     )
-    parser.parse_args()
-    parser.print_help()
-    return 0
+    create.set_defaults(func=command_create, send_contract=True)
+
+    list_cmd = subparsers.add_parser("list", help="List known workers.")
+    list_cmd.set_defaults(func=command_list)
+
+    capture = subparsers.add_parser("capture", help="Capture recent worker terminal output.")
+    capture.add_argument("name")
+    capture.add_argument("--lines", type=int, default=DEFAULT_HISTORY_LINES)
+    capture.set_defaults(func=command_capture)
+
+    tail = subparsers.add_parser("tail", help="Capture and print the last N lines.")
+    tail.add_argument("name")
+    tail.add_argument("--lines", type=int, default=40)
+    tail.set_defaults(func=command_tail)
+
+    status = subparsers.add_parser("status", help="Print worker status as JSON.")
+    status.add_argument("name")
+    status.add_argument("--no-refresh", action="store_false", dest="refresh", help="Do not refresh terminal capture.")
+    status.add_argument("--lines", type=int, default=DEFAULT_HISTORY_LINES)
+    status.set_defaults(func=command_status, refresh=True)
+
+    nudge = subparsers.add_parser("nudge", help="Send a message into the worker terminal.")
+    nudge.add_argument("name")
+    nudge.add_argument("message")
+    nudge.set_defaults(func=command_nudge)
+
+    stop = subparsers.add_parser("stop", help="Stop a worker tmux session.")
+    stop.add_argument("name")
+    stop.add_argument("--message", help="Optional final message to send before stopping.")
+    stop.set_defaults(func=command_stop)
+
+    return parser
+
+
+def main() -> int:
+    parser = build_parser()
+    args = parser.parse_args()
+    try:
+        return args.func(args)
+    except WorkerError as exc:
+        print(f"workerctl: {exc}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

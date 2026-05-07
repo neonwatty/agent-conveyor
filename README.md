@@ -50,3 +50,26 @@ See [docs/prototype-plan.md](docs/prototype-plan.md) for the detailed plan.
 ## Working Assumption
 
 `tmux` should own the worker PTY. Ghostty, iTerm2, Terminal.app, or `ttyd` can be viewers, but they should not be the source of truth for orchestration.
+
+## Current MVP Usage
+
+From the repo root:
+
+```bash
+scripts/workerctl create worker-a --cwd /path/to/repo --task "Inspect the failing test and report the blocker."
+scripts/workerctl list
+scripts/workerctl status worker-a
+scripts/workerctl capture worker-a
+scripts/workerctl nudge worker-a "Please summarize current progress and next action."
+scripts/workerctl stop worker-a
+```
+
+For a lifecycle smoke test without sending the worker prompt into Codex:
+
+```bash
+scripts/workerctl create smoke --cwd "$PWD" --task "Smoke test only." --no-send-contract
+scripts/workerctl status smoke
+scripts/workerctl stop smoke
+```
+
+Worker runtime files are stored under `.codex-workers/` and are intentionally ignored by git.
