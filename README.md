@@ -65,6 +65,7 @@ scripts/workerctl idle-check worker-a
 scripts/workerctl supervise worker-a
 scripts/workerctl watch worker-a --interval 60
 scripts/workerctl events worker-a --limit 20
+scripts/workerctl interrupt worker-a
 scripts/workerctl capture worker-a
 scripts/workerctl nudge worker-a "Please summarize current progress and next action."
 scripts/workerctl stop worker-a
@@ -91,6 +92,13 @@ scripts/workerctl watch worker-a --interval 60 --max-cycles 3 --dry-run
 ```
 
 `idle-check`, `supervise`, and `watch` also detect known interactive or busy-wait terminal states, such as Codex MCP startup, trust prompts, plan prompts, and rate-limit prompts. These are reported as `health: "busy_wait"` with an inspect-oriented recommendation.
+
+Busy-wait interruption is explicit by default:
+
+```bash
+scripts/workerctl interrupt worker-a
+scripts/workerctl supervise worker-a --interrupt-busy-wait --dry-run
+```
 
 For debugging classifier behavior directly:
 
