@@ -59,6 +59,7 @@ From the repo root:
 scripts/workerctl doctor
 scripts/workerctl create worker-a --cwd /path/to/repo --task "Inspect the failing test and report the blocker."
 scripts/workerctl list
+scripts/workerctl list --json
 scripts/workerctl status worker-a
 scripts/workerctl idle-check worker-a
 scripts/workerctl supervise worker-a

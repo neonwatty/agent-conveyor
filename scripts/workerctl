@@ -407,15 +407,31 @@ def send_text(name: str, text: str) -> None:
 def command_list(args: argparse.Namespace) -> int:
     root = state_root()
     if not root.exists():
+        if args.json:
+            print("[]")
         return 0
+    workers: list[dict[str, Any]] = []
     for path in sorted(root.iterdir()):
         if not path.is_dir():
             continue
         config = load_json(path / "config.json", {})
         status = load_json(path / "status.json", {})
         name = config.get("name", path.name)
-        marker = "running" if session_exists(name) else "stopped"
-        print(f"{name}\t{marker}\t{status.get('state', 'unknown')}\t{status.get('current_task', '')}")
+        running = session_exists(name)
+        workers.append(
+            {
+                "name": name,
+                "running": running,
+                "status": "running" if running else "stopped",
+                "state": status.get("state", "unknown"),
+                "current_task": status.get("current_task", ""),
+            }
+        )
+    if args.json:
+        print(json.dumps(workers, indent=2, sort_keys=True))
+        return 0
+    for worker in workers:
+        print(f"{worker['name']}\t{worker['status']}\t{worker['state']}\t{worker['current_task']}")
     return 0
 
 
@@ -807,6 +823,7 @@ def build_parser() -> argparse.ArgumentParser:
     doctor.set_defaults(func=command_doctor)
 
     list_cmd = subparsers.add_parser("list", help="List known workers.")
+    list_cmd.add_argument("--json", action="store_true", help="Print known workers as JSON.")
     list_cmd.set_defaults(func=command_list)
 
     capture = subparsers.add_parser("capture", help="Capture recent worker terminal output.")
