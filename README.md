@@ -105,7 +105,10 @@ From the repo root:
 
 ```bash
 scripts/workerctl doctor
+scripts/workerctl start-test live-test --cwd "$PWD" --accept-trust --open
+tmux attach -t codex-live-test
 scripts/workerctl create worker-a --cwd /path/to/repo --task "Inspect the failing test and report the blocker."
+scripts/workerctl create worker-b --cwd "$PWD" --task "Read README.md and update status.json." --wait-ready --accept-trust --verify --open
 scripts/workerctl list
 scripts/workerctl list --json
 scripts/workerctl status worker-a
@@ -118,6 +121,36 @@ scripts/workerctl capture worker-a
 scripts/workerctl nudge worker-a "Please summarize current progress and next action."
 scripts/workerctl stop worker-a
 ```
+
+`start-test` is the easiest manual startup check. It creates a low-risk worker,
+asks it to update only its ignored `.codex-workers/<name>/status.json`, waits for
+that status update, and leaves the tmux session running so you can attach:
+
+```bash
+scripts/workerctl start-test live-test --cwd "$PWD" --accept-trust --open
+tmux attach -t codex-live-test
+```
+
+`--open` is macOS-only. It opens a terminal window attached to the existing tmux
+session, preferring Ghostty when installed and falling back to Terminal.app. You
+can also open an already-running worker:
+
+```bash
+scripts/workerctl open live-test
+scripts/workerctl open live-test --terminal terminal
+```
+
+`workerctl` records every terminal launch attempt before opening the app. A
+second open for the same worker is refused by default to prevent accidental
+terminal-window floods, even if the first app launch did not visibly work:
+
+```bash
+scripts/workerctl open live-test --force
+scripts/workerctl create worker-b --cwd "$PWD" --task "..." --wait-ready --verify --open --force-open
+```
+
+Use `--stop-after` only when you want a disposable smoke test that cleans up the
+tmux session automatically.
 
 For a lifecycle smoke test without sending the worker prompt into Codex:
 

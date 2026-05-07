@@ -27,6 +27,8 @@ from workerctl.commands import (
     command_interrupt,
     command_list,
     command_nudge,
+    command_open,
+    command_start_test,
     command_status,
     command_stop,
     command_tail,
@@ -76,7 +78,63 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_WAIT_READY_SECONDS,
         help="Seconds to wait when --wait-ready is enabled.",
     )
+    create.add_argument(
+        "--verify",
+        action="store_true",
+        help="Wait for the worker to update status.json after startup and print attach/stop commands.",
+    )
+    create.add_argument("--verify-timeout", type=int, default=60, help="Seconds to wait when --verify is enabled.")
+    create.add_argument("--open", action="store_true", help="Open a macOS terminal window attached to the worker.")
+    create.add_argument(
+        "--force-open",
+        action="store_true",
+        help="Allow opening another terminal window when this worker already has an open event.",
+    )
+    create.add_argument(
+        "--terminal",
+        choices=("auto", "ghostty", "terminal"),
+        default="auto",
+        help="Terminal app to use with --open.",
+    )
+    create.add_argument("--stop-after", action="store_true", help="Stop the worker after verification.")
     create.set_defaults(func=command_create, initial_prompt=True)
+
+    start_test = subparsers.add_parser("start-test", help="Create a low-risk worker, verify it, and leave it running.")
+    start_test.add_argument("name", nargs="?", default="live-test", help="Worker name.")
+    start_test.add_argument("--cwd", default=str(INVOCATION_CWD), help="Working directory for the worker.")
+    start_test.add_argument("--task", help="Override the default README/status-only verification task.")
+    start_test.add_argument("--reuse", action="store_true", help="Reuse an existing worker state directory.")
+    start_test.add_argument(
+        "--accept-trust",
+        action="store_true",
+        help=dedent(
+            """\
+            Send Enter immediately after launch to accept Codex's workspace trust prompt.
+            Use only for directories you intentionally trust.
+            """
+        ),
+    )
+    start_test.add_argument(
+        "--wait-ready-timeout",
+        type=int,
+        default=DEFAULT_WAIT_READY_SECONDS,
+        help="Seconds to wait for Codex startup classification.",
+    )
+    start_test.add_argument("--verify-timeout", type=int, default=60, help="Seconds to wait for status.json verification.")
+    start_test.add_argument("--open", action="store_true", help="Open a macOS terminal window attached to the worker.")
+    start_test.add_argument(
+        "--force-open",
+        action="store_true",
+        help="Allow opening another terminal window when this worker already has an open event.",
+    )
+    start_test.add_argument(
+        "--terminal",
+        choices=("auto", "ghostty", "terminal"),
+        default="auto",
+        help="Terminal app to use with --open.",
+    )
+    start_test.add_argument("--stop-after", action="store_true", help="Stop the worker after verification.")
+    start_test.set_defaults(func=command_start_test)
 
     doctor = subparsers.add_parser("doctor", help="Check local dependencies and worker state.")
     doctor.add_argument("--cwd", default=str(INVOCATION_CWD), help="Target worker cwd to check.")
@@ -176,6 +234,22 @@ def build_parser() -> argparse.ArgumentParser:
     nudge.add_argument("name")
     nudge.add_argument("message")
     nudge.set_defaults(func=command_nudge)
+
+    open_cmd = subparsers.add_parser("open", help="Open a macOS terminal window attached to a running worker.")
+    open_cmd.add_argument("name")
+    open_cmd.add_argument(
+        "--terminal",
+        choices=("auto", "ghostty", "terminal"),
+        default="auto",
+        help="Terminal app to use.",
+    )
+    open_cmd.add_argument("--dry-run", action="store_true", help="Print the launch command without opening a window.")
+    open_cmd.add_argument(
+        "--force",
+        action="store_true",
+        help="Allow opening another terminal window when this worker already has an open event.",
+    )
+    open_cmd.set_defaults(func=command_open)
 
     stop = subparsers.add_parser("stop", help="Stop a worker tmux session.")
     stop.add_argument("name")

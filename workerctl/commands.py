@@ -3,7 +3,10 @@ from __future__ import annotations
 import argparse
 import json
 import shutil
+import sys
+import time
 from pathlib import Path
+from typing import Any
 
 from workerctl.classify import classify_busy_wait, classify_startup_output
 from workerctl.constants import PROJECT_ROOT, VALID_STATES
@@ -35,7 +38,138 @@ from workerctl.tmux import (
     wait_ready,
 )
 
+
+def attach_command(name: str) -> str:
+    return f"tmux attach -t {tmux_session(name)}"
+
+
+def stop_command(name: str) -> str:
+    return f"scripts/workerctl stop {name}"
+
+
+def print_worker_commands(name: str) -> None:
+    print("")
+    print("Attach:")
+    print(f"  {attach_command(name)}")
+    print("")
+    print("Stop:")
+    print(f"  {stop_command(name)}")
+
+
+def resolve_terminal(terminal: str) -> str:
+    if terminal != "auto":
+        return terminal
+    if Path("/Applications/Ghostty.app").exists():
+        return "ghostty"
+    return "terminal"
+
+
+def last_open_event(name: str) -> dict[str, Any] | None:
+    for event in reversed(read_events(name)):
+        if event.get("type") in {"open", "open_attempt"}:
+            return event
+    return None
+
+
+def open_worker_window(name: str, *, terminal: str, dry_run: bool, force: bool) -> dict[str, Any]:
+    require_worker(name)
+    validate_name(name)
+    if sys.platform != "darwin":
+        raise WorkerError("workerctl open is currently implemented for macOS only.")
+    if not session_exists(name):
+        raise WorkerError(f"tmux session is not running for worker {name}: {tmux_target(name)}")
+
+    prior_open = last_open_event(name)
+    if prior_open and not force:
+        prior_action = "terminal launch attempted" if prior_open.get("type") == "open_attempt" else "terminal opened"
+        raise WorkerError(
+            f"Worker {name} already had a {prior_action} at {prior_open.get('time', 'unknown time')}. "
+            f"Attach manually with `{attach_command(name)}` or rerun with --force if you intentionally want another window."
+        )
+
+    selected_terminal = resolve_terminal(terminal)
+    attach = ["tmux", "attach", "-t", tmux_target(name)]
+    if selected_terminal == "ghostty":
+        command = ["open", "-na", "Ghostty.app", "--args", "-e", *attach]
+    elif selected_terminal == "terminal":
+        script = f'tell application "Terminal" to do script "{attach_command(name)}"'
+        command = ["osascript", "-e", 'tell application "Terminal" to activate', "-e", script]
+    else:
+        raise WorkerError(f"Unsupported terminal: {terminal}")
+
+    result = {
+        "attach_command": attach_command(name),
+        "dry_run": dry_run,
+        "force": force,
+        "name": name,
+        "terminal": selected_terminal,
+        "tmux_session": tmux_session(name),
+    }
+    if dry_run:
+        result["command"] = command
+        return result
+    append_event(name, "open_attempt", {"forced": force, "terminal": selected_terminal})
+    run(command)
+    append_event(name, "open", {"forced": force, "terminal": selected_terminal})
+    return result
+
+
+def wait_for_status_update(
+    name: str,
+    *,
+    initial_last_update: str | None,
+    initial_current_task: str | None,
+    timeout_seconds: int,
+) -> dict[str, Any]:
+    deadline = time.monotonic() + timeout_seconds
+    last_status = load_json(status_path(name), {})
+    while time.monotonic() < deadline:
+        last_status = load_json(status_path(name), {})
+        if (
+            last_status.get("last_update") != initial_last_update
+            or last_status.get("current_task") != initial_current_task
+            or last_status.get("state") in {"planning", "editing", "running_tests", "blocked", "done"}
+        ):
+            append_event(
+                name,
+                "verify",
+                {
+                    "ok": True,
+                    "reason": "status update observed",
+                    "state": last_status.get("state"),
+                },
+            )
+            return {
+                "ok": True,
+                "reason": "status update observed",
+                "status": last_status,
+            }
+        if session_exists(name):
+            try:
+                capture_output(name, 80)
+            except WorkerError:
+                pass
+        time.sleep(1)
+
+    append_event(
+        name,
+        "verify",
+        {
+            "ok": False,
+            "reason": "timed out waiting for status update",
+            "timeout_seconds": timeout_seconds,
+        },
+    )
+    return {
+        "ok": False,
+        "reason": "timed out waiting for status update",
+        "status": last_status,
+    }
+
+
 def command_create(args: argparse.Namespace) -> int:
+    if args.open and args.stop_after:
+        raise WorkerError("--open cannot be combined with --stop-after")
     ensure_tool("tmux")
     ensure_tool("codex")
     name = args.name
@@ -62,7 +196,8 @@ def command_create(args: argparse.Namespace) -> int:
             "tmux_target": tmux_target(name),
         },
     )
-    write_json(status_path(name), initial_status(name, args.task))
+    initial_status_payload = initial_status(name, args.task)
+    write_json(status_path(name), initial_status_payload)
     transcript_path(name).touch()
 
     contract_path = write_worker_contract(name, args.task)
@@ -115,6 +250,60 @@ def command_create(args: argparse.Namespace) -> int:
         print(f"startup: {startup['startup']} ({startup['reason']})")
         if startup.get("recommended_action") != "none":
             print(f"recommended action: {startup['recommended_action']}")
+    if args.verify:
+        result = wait_for_status_update(
+            name,
+            initial_last_update=initial_status_payload.get("last_update"),
+            initial_current_task=initial_status_payload.get("current_task"),
+            timeout_seconds=args.verify_timeout,
+        )
+        print(f"verification: {'ok' if result['ok'] else 'not verified'} ({result['reason']})")
+        status = result["status"]
+        print(f"state: {status.get('state', 'unknown')}")
+        if status.get("current_task"):
+            print(f"current task: {status['current_task']}")
+    print_worker_commands(name)
+    if args.open:
+        result = open_worker_window(name, terminal=args.terminal, dry_run=False, force=args.force_open)
+        print("")
+        print(f"opened {result['terminal']} window for {name}")
+    if args.stop_after:
+        if session_exists(name):
+            run(["tmux", "kill-session", "-t", tmux_target(name)])
+            append_event(name, "stop", {"killed_session": True, "reason": "stop_after"})
+            print("")
+            print(f"stopped {name} (--stop-after)")
+    return 0
+
+
+def command_start_test(args: argparse.Namespace) -> int:
+    name = args.name
+    task = args.task or (
+        f"Read README.md and update only .codex-workers/{name}/status.json with a short summary. "
+        "Do not edit tracked files."
+    )
+    create_args = argparse.Namespace(
+        accept_trust=args.accept_trust,
+        cwd=args.cwd,
+        initial_prompt=True,
+        name=name,
+        reuse=args.reuse,
+        open=args.open,
+        force_open=args.force_open,
+        stop_after=args.stop_after,
+        task=task,
+        terminal=args.terminal,
+        verify=True,
+        verify_timeout=args.verify_timeout,
+        wait_ready=True,
+        wait_ready_timeout=args.wait_ready_timeout,
+    )
+    return command_create(create_args)
+
+
+def command_open(args: argparse.Namespace) -> int:
+    result = open_worker_window(args.name, terminal=args.terminal, dry_run=args.dry_run, force=args.force)
+    print(json.dumps(result, indent=2, sort_keys=True))
     return 0
 
 
@@ -310,4 +499,3 @@ def command_stop(args: argparse.Namespace) -> int:
         append_event(args.name, "stop", {"killed_session": False})
         print(f"{args.name} was not running")
     return 0
-
