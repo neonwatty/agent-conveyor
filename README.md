@@ -114,6 +114,8 @@ Run the dependency-free test suite with:
 python3 -m unittest discover -s tests -v
 ```
 
+GitHub Actions runs the same test suite and a `py_compile` check on every push and pull request.
+
 To have `create` classify the initial Codex screen, use `--wait-ready`:
 
 ```bash
