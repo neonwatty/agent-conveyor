@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+BIN_DIR="$ROOT/bin"
+PROFILE="${WORKERCTL_INSTALL_PROFILE:-$HOME/.zshrc}"
+PATH_LINE="export PATH=\"$BIN_DIR:\$PATH\""
+
+usage() {
+  cat <<EOF
+Usage: scripts/install-local [--write] [--profile PATH]
+
+Print or install the local workerctl PATH setup.
+
+Options:
+  --write         Append the PATH line to the shell profile if missing.
+  --profile PATH  Shell profile to update. Defaults to ~/.zshrc.
+  -h, --help      Show this help.
+EOF
+}
+
+write=false
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --write)
+      write=true
+      shift
+      ;;
+    --profile)
+      if [[ $# -lt 2 ]]; then
+        echo "install-local: --profile requires a path" >&2
+        exit 1
+      fi
+      PROFILE="$2"
+      shift 2
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "install-local: unknown argument: $1" >&2
+      usage >&2
+      exit 1
+      ;;
+  esac
+done
+
+if [[ ! -x "$BIN_DIR/workerctl" ]]; then
+  echo "install-local: expected executable not found: $BIN_DIR/workerctl" >&2
+  exit 1
+fi
+
+if [[ "$write" == false ]]; then
+  echo "$PATH_LINE"
+  echo
+  echo "To install for zsh:"
+  echo "  scripts/install-local --write"
+  echo
+  echo "To use in the current shell:"
+  echo "  $PATH_LINE"
+  exit 0
+fi
+
+mkdir -p "$(dirname "$PROFILE")"
+touch "$PROFILE"
+
+if grep -Fqx "$PATH_LINE" "$PROFILE"; then
+  echo "workerctl PATH already installed in $PROFILE"
+else
+  {
+    echo
+    echo "# codex-terminal-manager"
+    echo "$PATH_LINE"
+  } >> "$PROFILE"
+  echo "installed workerctl PATH in $PROFILE"
+fi
+
+PATH="$BIN_DIR:$PATH" workerctl doctor >/dev/null || {
+  echo "install-local: workerctl doctor failed after PATH update" >&2
+  exit 1
+}
+
+echo "workerctl is available after opening a new shell, or immediately with:"
+echo "  $PATH_LINE"

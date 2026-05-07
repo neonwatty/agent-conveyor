@@ -89,6 +89,12 @@ To run `workerctl` from anywhere, add the local `bin` directory to your shell pa
 export PATH="/Users/neonwatty/Desktop/codex-terminal-manager/bin:$PATH"
 ```
 
+Or install that PATH line into `~/.zshrc`:
+
+```bash
+scripts/install-local --write
+```
+
 Then use:
 
 ```bash

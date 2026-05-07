@@ -1,7 +1,9 @@
 import importlib.util
 import json
+import os
 import subprocess
 import sys
+import tempfile
 import unittest
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
@@ -10,6 +12,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 WORKERCTL_PATH = ROOT / "scripts" / "workerctl"
 WORKERCTL_SHIM_PATH = ROOT / "bin" / "workerctl"
+INSTALL_LOCAL_PATH = ROOT / "scripts" / "install-local"
 
 
 def load_workerctl():
@@ -135,6 +138,40 @@ class CliTests(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stderr)
         data = json.loads(proc.stdout)
         self.assertEqual(data["busy_wait"]["pattern"], "mcp_startup")
+
+    def test_install_local_prints_path_line(self):
+        proc = subprocess.run(
+            [str(INSTALL_LOCAL_PATH)],
+            cwd=ROOT,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn(str(ROOT / "bin"), proc.stdout)
+
+    def test_install_local_write_is_idempotent(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            profile = Path(tmpdir) / ".zshrc"
+            env = os.environ.copy()
+            env["WORKERCTL_INSTALL_PROFILE"] = str(profile)
+            for _ in range(2):
+                proc = subprocess.run(
+                    [str(INSTALL_LOCAL_PATH), "--write"],
+                    cwd=ROOT,
+                    env=env,
+                    text=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    check=False,
+                )
+                self.assertEqual(proc.returncode, 0, proc.stderr)
+
+            profile_text = profile.read_text()
+            path_line = f'export PATH="{ROOT / "bin"}:$PATH"'
+            self.assertEqual(profile_text.count(path_line), 1)
 
 
 if __name__ == "__main__":
