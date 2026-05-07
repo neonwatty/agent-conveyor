@@ -62,6 +62,8 @@ scripts/workerctl list
 scripts/workerctl status worker-a
 scripts/workerctl idle-check worker-a
 scripts/workerctl supervise worker-a
+scripts/workerctl watch worker-a --interval 60
+scripts/workerctl events worker-a --limit 20
 scripts/workerctl capture worker-a
 scripts/workerctl nudge worker-a "Please summarize current progress and next action."
 scripts/workerctl stop worker-a
@@ -80,6 +82,12 @@ scripts/workerctl stop smoke
 Worker runtime files are stored under `.codex-workers/` and are intentionally ignored by git.
 
 `supervise` runs one manager cycle. It reads the same freshness signals as `idle-check`, reports an action, and sends a cooldown-protected status nudge only when the worker is stale.
+
+`watch` runs `supervise` repeatedly and prints one JSON line per cycle. Use `--max-cycles` for bounded trials:
+
+```bash
+scripts/workerctl watch worker-a --interval 60 --max-cycles 3 --dry-run
+```
 
 To have `create` classify the initial Codex screen, use `--wait-ready`:
 

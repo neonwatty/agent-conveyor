@@ -616,33 +616,58 @@ def command_idle_check(args: argparse.Namespace) -> int:
 
 
 def command_supervise(args: argparse.Namespace) -> int:
-    summary = idle_summary(
+    result = supervise_once(
         args.name,
         status_stale_seconds=args.status_stale_seconds,
         terminal_stale_seconds=args.terminal_stale_seconds,
         refresh=args.refresh,
         lines=args.lines,
+        cooldown_seconds=args.cooldown_seconds,
+        message=args.message,
+        dry_run=args.dry_run,
+    )
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0
+
+
+def supervise_once(
+    name: str,
+    *,
+    status_stale_seconds: int,
+    terminal_stale_seconds: int,
+    refresh: bool,
+    lines: int,
+    cooldown_seconds: int,
+    message: str,
+    dry_run: bool,
+) -> dict[str, Any]:
+    summary = idle_summary(
+        name,
+        status_stale_seconds=status_stale_seconds,
+        terminal_stale_seconds=terminal_stale_seconds,
+        refresh=refresh,
+        lines=lines,
     )
 
     action_taken = "none"
-    message = None
+    sent_message = None
     cooldown_remaining = None
     reason = summary["reason"]
     health = summary["health"]
 
     if health == "stale":
-        last_nudge_age = last_event_age_seconds(args.name, "supervise_nudge")
-        if last_nudge_age is not None and last_nudge_age < args.cooldown_seconds:
+        last_nudge_age = last_event_age_seconds(name, "supervise_nudge")
+        if last_nudge_age is not None and last_nudge_age < cooldown_seconds:
             action_taken = "cooldown"
-            cooldown_remaining = args.cooldown_seconds - last_nudge_age
+            cooldown_remaining = cooldown_seconds - last_nudge_age
             reason = f"last supervise nudge was {last_nudge_age}s ago"
-        elif args.dry_run:
+        elif dry_run:
             action_taken = "would_nudge"
-            message = args.message
+            sent_message = message
         else:
-            message = args.message
-            send_text(args.name, message)
-            append_event(args.name, "supervise_nudge", {"message": message, "health": health})
+            sent_message = message
+            send_text(name, sent_message)
+            append_event(name, "supervise_nudge", {"message": sent_message, "health": health})
             action_taken = "nudge"
     elif health == "blocked":
         action_taken = "read_blocker"
@@ -660,17 +685,54 @@ def command_supervise(args: argparse.Namespace) -> int:
         "blocker": summary.get("blocker"),
         "cooldown_remaining_seconds": cooldown_remaining,
         "current_task": summary.get("current_task"),
-        "dry_run": args.dry_run,
+        "dry_run": dry_run,
         "health": health,
-        "message": message,
-        "name": args.name,
+        "message": sent_message,
+        "name": name,
         "next_action": summary.get("next_action"),
         "reason": reason,
         "recommended_action": summary.get("recommended_action"),
         "state": summary.get("state"),
+        "time": now_iso(),
     }
-    append_event(args.name, "supervise", result)
-    print(json.dumps(result, indent=2, sort_keys=True))
+    append_event(name, "supervise", result)
+    return result
+
+
+def command_watch(args: argparse.Namespace) -> int:
+    cycle = 0
+    try:
+        while True:
+            cycle += 1
+            result = supervise_once(
+                args.name,
+                status_stale_seconds=args.status_stale_seconds,
+                terminal_stale_seconds=args.terminal_stale_seconds,
+                refresh=args.refresh,
+                lines=args.lines,
+                cooldown_seconds=args.cooldown_seconds,
+                message=args.message,
+                dry_run=args.dry_run,
+            )
+            result["cycle"] = cycle
+            print(json.dumps(result, sort_keys=True), flush=True)
+            if args.max_cycles is not None and cycle >= args.max_cycles:
+                break
+            time.sleep(args.interval)
+    except KeyboardInterrupt:
+        print(json.dumps({"event": "watch_interrupted", "name": args.name, "time": now_iso()}), flush=True)
+    return 0
+
+
+def command_events(args: argparse.Namespace) -> int:
+    require_worker(args.name)
+    events = read_events(args.name)
+    if args.type:
+        events = [event for event in events if event.get("type") == args.type]
+    if args.limit:
+        events = events[-args.limit :]
+    for event in events:
+        print(json.dumps(event, sort_keys=True))
     return 0
 
 
@@ -781,6 +843,25 @@ def build_parser() -> argparse.ArgumentParser:
     supervise.add_argument("--message", default=DEFAULT_STATUS_NUDGE, help="Status request sent when the worker is stale.")
     supervise.add_argument("--dry-run", action="store_true", help="Report the supervision action without sending nudges.")
     supervise.set_defaults(func=command_supervise, refresh=True)
+
+    watch = subparsers.add_parser("watch", help="Run supervise repeatedly until interrupted.")
+    watch.add_argument("name")
+    watch.add_argument("--interval", type=int, default=60, help="Seconds between supervision cycles.")
+    watch.add_argument("--max-cycles", type=int, help="Stop after this many cycles.")
+    watch.add_argument("--no-refresh", action="store_false", dest="refresh", help="Do not refresh terminal capture.")
+    watch.add_argument("--lines", type=int, default=DEFAULT_HISTORY_LINES)
+    watch.add_argument("--status-stale-seconds", type=int, default=DEFAULT_STATUS_STALE_SECONDS)
+    watch.add_argument("--terminal-stale-seconds", type=int, default=DEFAULT_TERMINAL_STALE_SECONDS)
+    watch.add_argument("--cooldown-seconds", type=int, default=DEFAULT_SUPERVISE_COOLDOWN_SECONDS)
+    watch.add_argument("--message", default=DEFAULT_STATUS_NUDGE, help="Status request sent when the worker is stale.")
+    watch.add_argument("--dry-run", action="store_true", help="Report supervision actions without sending nudges.")
+    watch.set_defaults(func=command_watch, refresh=True)
+
+    events = subparsers.add_parser("events", help="Print worker event log as JSON lines.")
+    events.add_argument("name")
+    events.add_argument("--limit", type=int, help="Print only the last N events.")
+    events.add_argument("--type", help="Print only events of this type.")
+    events.set_defaults(func=command_events)
 
     nudge = subparsers.add_parser("nudge", help="Send a message into the worker terminal.")
     nudge.add_argument("name")
