@@ -1,12 +1,16 @@
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
 from workerctl import classify
+from workerctl import tmux as worker_tmux
+from workerctl.state import config_path, status_path, worker_dir
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -159,6 +163,38 @@ class CliTests(unittest.TestCase):
             profile_text = profile.read_text()
             path_line = f'export PATH="{ROOT / "bin"}:$PATH"'
             self.assertEqual(profile_text.count(path_line), 1)
+
+
+@unittest.skipIf(shutil.which("tmux") is None, "tmux is not installed")
+class TmuxTests(unittest.TestCase):
+    def test_send_text_pastes_and_submits_line(self):
+        name = "submit-smoke"
+        session = f"codex-{name}"
+        output_path = Path(tempfile.gettempdir()) / f"workerctl-{name}.txt"
+        output_path.unlink(missing_ok=True)
+        worker_path = worker_dir(name)
+        if worker_path.exists():
+            shutil.rmtree(worker_path)
+        worker_path.mkdir(parents=True)
+        config_path(name).write_text(json.dumps({"name": name, "tmux_session": session}) + "\n")
+        status_path(name).write_text(json.dumps({"state": "waiting"}) + "\n")
+        subprocess.run(["tmux", "kill-session", "-t", session], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        command = f"IFS= read -r line; printf '%s\\n' \"$line\" > {output_path}; sleep 2"
+        subprocess.run(["tmux", "new-session", "-d", "-s", session, command], check=True)
+        try:
+            time.sleep(0.2)
+            worker_tmux.send_text(name, "hello from workerctl")
+            deadline = time.time() + 3
+            while time.time() < deadline and not output_path.exists():
+                time.sleep(0.1)
+
+            self.assertTrue(output_path.exists(), "tmux read loop did not receive submitted text")
+            self.assertEqual(output_path.read_text().strip(), "hello from workerctl")
+        finally:
+            subprocess.run(["tmux", "kill-session", "-t", session], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            if worker_path.exists():
+                shutil.rmtree(worker_path)
+            output_path.unlink(missing_ok=True)
 
 
 if __name__ == "__main__":

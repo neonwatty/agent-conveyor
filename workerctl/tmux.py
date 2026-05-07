@@ -17,6 +17,10 @@ from workerctl.state import (
 )
 
 
+PASTE_SUBMIT_DELAY_SECONDS = 0.1
+SUBMIT_KEY = "C-m"
+
+
 def tmux_session(name: str) -> str:
     return f"codex-{name}"
 
@@ -106,7 +110,8 @@ def send_text(name: str, text: str) -> None:
     run(["tmux", "set-buffer", "-b", buffer_name, text])
     try:
         run(["tmux", "paste-buffer", "-b", buffer_name, "-t", tmux_target(name)])
-        run(["tmux", "send-keys", "-t", tmux_target(name), "Enter"])
+        time.sleep(PASTE_SUBMIT_DELAY_SECONDS)
+        run(["tmux", "send-keys", "-t", tmux_target(name), SUBMIT_KEY])
     finally:
         run(["tmux", "delete-buffer", "-b", buffer_name], check=False)
 
@@ -129,4 +134,3 @@ def interrupt_worker(name: str, *, key: str, followup: str | None, dry_run: bool
             send_text(name, followup)
         append_event(name, "interrupt", result)
     return result
-
