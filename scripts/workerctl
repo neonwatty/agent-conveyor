@@ -9,6 +9,7 @@ import json
 import shutil
 import subprocess
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from textwrap import dedent
@@ -21,6 +22,7 @@ STATE_ROOT = ".codex-workers"
 DEFAULT_HISTORY_LINES = 200
 DEFAULT_STATUS_STALE_SECONDS = 120
 DEFAULT_TERMINAL_STALE_SECONDS = 120
+DEFAULT_WAIT_READY_SECONDS = 30
 VALID_STATES = {"planning", "editing", "running_tests", "blocked", "waiting", "done", "unknown"}
 
 
@@ -150,12 +152,16 @@ def require_worker(name: str) -> dict[str, Any]:
     return config
 
 
+def capture_tmux_target(target: str, history_lines: int = DEFAULT_HISTORY_LINES) -> str:
+    proc = run(["tmux", "capture-pane", "-p", "-S", f"-{history_lines}", "-t", target])
+    return proc.stdout.rstrip("\n")
+
+
 def capture_output(name: str, history_lines: int = DEFAULT_HISTORY_LINES) -> str:
     require_worker(name)
     if not session_exists(name):
         raise WorkerError(f"tmux session is not running for worker {name}: {tmux_target(name)}")
-    proc = run(["tmux", "capture-pane", "-p", "-S", f"-{history_lines}", "-t", tmux_target(name)])
-    output = proc.stdout.rstrip("\n")
+    output = capture_tmux_target(tmux_target(name), history_lines)
     digest = hashlib.sha256(output.encode()).hexdigest()
     meta = load_json(capture_meta_path(name), {})
     previous_digest = meta.get("sha256")
@@ -172,6 +178,62 @@ def capture_output(name: str, history_lines: int = DEFAULT_HISTORY_LINES) -> str
     )
     transcript_path(name).write_text(output + ("\n" if output else ""))
     return output
+
+
+def classify_startup_output(output: str) -> tuple[str, str]:
+    normalized = output.lower()
+    if "do you trust the contents of this directory" in normalized:
+        return ("needs_trust", "Codex is waiting for workspace trust confirmation")
+    if "openai codex" in normalized and "›" in output:
+        return ("ready", "Codex input prompt is visible")
+    if "working" in normalized and "esc to interrupt" in normalized:
+        return ("working", "Codex is already working")
+    if "error" in normalized or "failed" in normalized:
+        return ("error", "terminal output contains an error-like message")
+    if not output.strip():
+        return ("starting", "terminal output is empty")
+    return ("starting", "Codex has not reached a recognized startup state")
+
+
+def wait_ready(name: str, timeout_seconds: int, accept_trust: bool) -> dict[str, Any]:
+    deadline = time.monotonic() + timeout_seconds
+    trust_accepted = False
+    last_output = ""
+    last_state = "starting"
+    last_reason = "waiting for terminal output"
+
+    while time.monotonic() < deadline:
+        if not session_exists(name):
+            return {
+                "reason": "tmux session exited during startup",
+                "startup": "exited",
+                "trust_accepted": trust_accepted,
+            }
+        last_output = capture_tmux_target(tmux_target(name), 80)
+        last_state, last_reason = classify_startup_output(last_output)
+        if last_state == "needs_trust" and accept_trust and not trust_accepted:
+            run(["tmux", "send-keys", "-t", tmux_target(name), "Enter"])
+            trust_accepted = True
+            append_event(name, "accept_trust")
+            time.sleep(1)
+            continue
+        if last_state in {"ready", "working", "needs_trust", "error"}:
+            break
+        time.sleep(1)
+
+    result = {
+        "reason": last_reason,
+        "startup": last_state,
+        "timeout_seconds": timeout_seconds,
+        "trust_accepted": trust_accepted,
+    }
+    if last_state == "needs_trust" and not accept_trust:
+        result["recommended_action"] = "rerun with --accept-trust if this directory is trusted"
+    elif last_state == "starting":
+        result["recommended_action"] = "inspect terminal capture"
+    else:
+        result["recommended_action"] = "none"
+    return result
 
 
 def initial_status(name: str, task: str | None) -> dict[str, Any]:
@@ -235,6 +297,8 @@ def command_create(args: argparse.Namespace) -> int:
             "created_at": now_iso(),
             "cwd": str(directory),
             "name": name,
+            "startup": "launched",
+            "startup_reason": "worker session created",
             "state_dir": str(worker_dir(name)),
             "tmux_session": tmux_session(name),
             "tmux_target": tmux_target(name),
@@ -263,7 +327,17 @@ def command_create(args: argparse.Namespace) -> int:
         },
     )
 
-    if args.accept_trust:
+    startup = None
+    if args.wait_ready:
+        startup = wait_ready(name, args.wait_ready_timeout, args.accept_trust)
+        config = load_json(config_path(name), {})
+        config["startup"] = startup["startup"]
+        config["startup_reason"] = startup["reason"]
+        config["startup_checked_at"] = now_iso()
+        config["startup_recommended_action"] = startup.get("recommended_action")
+        write_json(config_path(name), config)
+        append_event(name, "wait_ready", startup)
+    elif args.accept_trust:
         run(["tmux", "send-keys", "-t", tmux_target(name), "Enter"])
         append_event(name, "accept_trust")
 
@@ -275,7 +349,14 @@ def command_create(args: argparse.Namespace) -> int:
     else:
         print("contract saved but not provided; run workerctl nudge to provide instructions")
     if args.accept_trust:
-        print("sent Enter for initial trust prompt")
+        if args.wait_ready and startup:
+            print(f"trust handling: accepted={startup['trust_accepted']}")
+        else:
+            print("sent Enter for initial trust prompt")
+    if startup:
+        print(f"startup: {startup['startup']} ({startup['reason']})")
+        if startup.get("recommended_action") != "none":
+            print(f"recommended action: {startup['recommended_action']}")
     return 0
 
 
@@ -345,6 +426,9 @@ def command_status(args: argparse.Namespace) -> int:
         "name": args.name,
         "tmux_session": config.get("tmux_session"),
         "running": running,
+        "startup": config.get("startup"),
+        "startup_reason": config.get("startup_reason"),
+        "startup_recommended_action": config.get("startup_recommended_action"),
         "state": state,
         "current_task": status.get("current_task"),
         "next_action": status.get("next_action"),
@@ -355,6 +439,58 @@ def command_status(args: argparse.Namespace) -> int:
     }
     print(json.dumps(summary, indent=2, sort_keys=True))
     return 0
+
+
+def command_doctor(args: argparse.Namespace) -> int:
+    checks: list[dict[str, Any]] = []
+
+    tmux_path = shutil.which("tmux")
+    codex_path = shutil.which("codex")
+    checks.append({"name": "tmux", "ok": bool(tmux_path), "path": tmux_path})
+    checks.append({"name": "codex", "ok": bool(codex_path), "path": codex_path})
+
+    if tmux_path:
+        proc = run(["tmux", "-V"], check=False)
+        checks.append({"name": "tmux_version", "ok": proc.returncode == 0, "value": proc.stdout.strip()})
+
+    if codex_path:
+        proc = run(["codex", "--version"], check=False)
+        checks.append(
+            {
+                "name": "codex_version",
+                "ok": proc.returncode == 0,
+                "value": (proc.stdout.strip() or proc.stderr.strip()),
+            }
+        )
+
+    target_cwd = Path(args.cwd).expanduser().resolve()
+    checks.append({"name": "target_cwd_exists", "ok": target_cwd.is_dir(), "path": str(target_cwd)})
+    checks.append({"name": "state_root_exists", "ok": state_root().exists(), "path": str(state_root())})
+
+    workers = []
+    if state_root().exists():
+        for path in sorted(state_root().iterdir()):
+            if path.is_dir() and (path / "config.json").exists():
+                config = load_json(path / "config.json", {})
+                name = config.get("name", path.name)
+                workers.append(
+                    {
+                        "name": name,
+                        "running": session_exists(name),
+                        "startup": config.get("startup"),
+                        "state": load_json(path / "status.json", {}).get("state", "unknown"),
+                    }
+                )
+
+    ok = all(check.get("ok", False) for check in checks if check["name"] != "state_root_exists")
+    result = {
+        "checks": checks,
+        "ok": ok,
+        "project_root": str(PROJECT_ROOT),
+        "workers": workers,
+    }
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0 if ok else 1
 
 
 def idle_summary(
@@ -509,7 +645,18 @@ def build_parser() -> argparse.ArgumentParser:
             """
         ),
     )
+    create.add_argument("--wait-ready", action="store_true", help="Poll the worker terminal until startup is classified.")
+    create.add_argument(
+        "--wait-ready-timeout",
+        type=int,
+        default=DEFAULT_WAIT_READY_SECONDS,
+        help="Seconds to wait when --wait-ready is enabled.",
+    )
     create.set_defaults(func=command_create, initial_prompt=True)
+
+    doctor = subparsers.add_parser("doctor", help="Check local dependencies and worker state.")
+    doctor.add_argument("--cwd", default=str(INVOCATION_CWD), help="Target worker cwd to check.")
+    doctor.set_defaults(func=command_doctor)
 
     list_cmd = subparsers.add_parser("list", help="List known workers.")
     list_cmd.set_defaults(func=command_list)

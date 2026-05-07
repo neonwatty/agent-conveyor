@@ -56,6 +56,7 @@ See [docs/prototype-plan.md](docs/prototype-plan.md) for the detailed plan.
 From the repo root:
 
 ```bash
+scripts/workerctl doctor
 scripts/workerctl create worker-a --cwd /path/to/repo --task "Inspect the failing test and report the blocker."
 scripts/workerctl list
 scripts/workerctl status worker-a
@@ -75,3 +76,22 @@ scripts/workerctl stop smoke
 ```
 
 Worker runtime files are stored under `.codex-workers/` and are intentionally ignored by git.
+
+To have `create` classify the initial Codex screen, use `--wait-ready`:
+
+```bash
+scripts/workerctl create worker-a \
+  --cwd /path/to/repo \
+  --task "Inspect the failing test and report the blocker." \
+  --wait-ready
+```
+
+If the target directory is one you intentionally trust, `--accept-trust` lets the startup watcher accept Codex's workspace trust prompt:
+
+```bash
+scripts/workerctl create worker-a \
+  --cwd /path/to/repo \
+  --task "Inspect the failing test and report the blocker." \
+  --wait-ready \
+  --accept-trust
+```
