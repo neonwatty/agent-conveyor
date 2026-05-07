@@ -61,6 +61,7 @@ scripts/workerctl create worker-a --cwd /path/to/repo --task "Inspect the failin
 scripts/workerctl list
 scripts/workerctl status worker-a
 scripts/workerctl idle-check worker-a
+scripts/workerctl supervise worker-a
 scripts/workerctl capture worker-a
 scripts/workerctl nudge worker-a "Please summarize current progress and next action."
 scripts/workerctl stop worker-a
@@ -72,10 +73,13 @@ For a lifecycle smoke test without sending the worker prompt into Codex:
 scripts/workerctl create smoke --cwd "$PWD" --task "Smoke test only." --no-send-contract
 scripts/workerctl status smoke
 scripts/workerctl idle-check smoke
+scripts/workerctl supervise smoke --dry-run
 scripts/workerctl stop smoke
 ```
 
 Worker runtime files are stored under `.codex-workers/` and are intentionally ignored by git.
+
+`supervise` runs one manager cycle. It reads the same freshness signals as `idle-check`, reports an action, and sends a cooldown-protected status nudge only when the worker is stale.
 
 To have `create` classify the initial Codex screen, use `--wait-ready`:
 

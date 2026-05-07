@@ -23,6 +23,11 @@ DEFAULT_HISTORY_LINES = 200
 DEFAULT_STATUS_STALE_SECONDS = 120
 DEFAULT_TERMINAL_STALE_SECONDS = 120
 DEFAULT_WAIT_READY_SECONDS = 30
+DEFAULT_SUPERVISE_COOLDOWN_SECONDS = 300
+DEFAULT_STATUS_NUDGE = (
+    "Please pause and write a concise status update in your status.json: "
+    "current task, what changed, whether you are blocked, and your next action."
+)
 VALID_STATES = {"planning", "editing", "running_tests", "blocked", "waiting", "done", "unknown"}
 
 
@@ -138,6 +143,28 @@ def append_event(name: str, event_type: str, payload: dict[str, Any] | None = No
     events_path(name).parent.mkdir(parents=True, exist_ok=True)
     with events_path(name).open("a") as handle:
         handle.write(json.dumps(event, sort_keys=True) + "\n")
+
+
+def read_events(name: str) -> list[dict[str, Any]]:
+    path = events_path(name)
+    if not path.exists():
+        return []
+    events = []
+    for line in path.read_text().splitlines():
+        if not line.strip():
+            continue
+        try:
+            events.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    return events
+
+
+def last_event_age_seconds(name: str, event_type: str) -> int | None:
+    for event in reversed(read_events(name)):
+        if event.get("type") == event_type:
+            return age_seconds(event.get("time"))
+    return None
 
 
 def session_exists(name: str) -> bool:
@@ -588,6 +615,65 @@ def command_idle_check(args: argparse.Namespace) -> int:
     return 0
 
 
+def command_supervise(args: argparse.Namespace) -> int:
+    summary = idle_summary(
+        args.name,
+        status_stale_seconds=args.status_stale_seconds,
+        terminal_stale_seconds=args.terminal_stale_seconds,
+        refresh=args.refresh,
+        lines=args.lines,
+    )
+
+    action_taken = "none"
+    message = None
+    cooldown_remaining = None
+    reason = summary["reason"]
+    health = summary["health"]
+
+    if health == "stale":
+        last_nudge_age = last_event_age_seconds(args.name, "supervise_nudge")
+        if last_nudge_age is not None and last_nudge_age < args.cooldown_seconds:
+            action_taken = "cooldown"
+            cooldown_remaining = args.cooldown_seconds - last_nudge_age
+            reason = f"last supervise nudge was {last_nudge_age}s ago"
+        elif args.dry_run:
+            action_taken = "would_nudge"
+            message = args.message
+        else:
+            message = args.message
+            send_text(args.name, message)
+            append_event(args.name, "supervise_nudge", {"message": message, "health": health})
+            action_taken = "nudge"
+    elif health == "blocked":
+        action_taken = "read_blocker"
+    elif health == "done":
+        action_taken = "review_result"
+    elif health == "stopped":
+        action_taken = "none"
+    elif health in {"active", "quiet", "status_stale"}:
+        action_taken = "wait"
+    elif health == "unknown":
+        action_taken = "inspect_terminal"
+
+    result = {
+        "action_taken": action_taken,
+        "blocker": summary.get("blocker"),
+        "cooldown_remaining_seconds": cooldown_remaining,
+        "current_task": summary.get("current_task"),
+        "dry_run": args.dry_run,
+        "health": health,
+        "message": message,
+        "name": args.name,
+        "next_action": summary.get("next_action"),
+        "reason": reason,
+        "recommended_action": summary.get("recommended_action"),
+        "state": summary.get("state"),
+    }
+    append_event(args.name, "supervise", result)
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0
+
+
 def command_nudge(args: argparse.Namespace) -> int:
     message = args.message
     send_text(args.name, message)
@@ -684,6 +770,17 @@ def build_parser() -> argparse.ArgumentParser:
     idle_check.add_argument("--status-stale-seconds", type=int, default=DEFAULT_STATUS_STALE_SECONDS)
     idle_check.add_argument("--terminal-stale-seconds", type=int, default=DEFAULT_TERMINAL_STALE_SECONDS)
     idle_check.set_defaults(func=command_idle_check, refresh=True)
+
+    supervise = subparsers.add_parser("supervise", help="Run one manager supervision cycle for a worker.")
+    supervise.add_argument("name")
+    supervise.add_argument("--no-refresh", action="store_false", dest="refresh", help="Do not refresh terminal capture.")
+    supervise.add_argument("--lines", type=int, default=DEFAULT_HISTORY_LINES)
+    supervise.add_argument("--status-stale-seconds", type=int, default=DEFAULT_STATUS_STALE_SECONDS)
+    supervise.add_argument("--terminal-stale-seconds", type=int, default=DEFAULT_TERMINAL_STALE_SECONDS)
+    supervise.add_argument("--cooldown-seconds", type=int, default=DEFAULT_SUPERVISE_COOLDOWN_SECONDS)
+    supervise.add_argument("--message", default=DEFAULT_STATUS_NUDGE, help="Status request sent when the worker is stale.")
+    supervise.add_argument("--dry-run", action="store_true", help="Report the supervision action without sending nudges.")
+    supervise.set_defaults(func=command_supervise, refresh=True)
 
     nudge = subparsers.add_parser("nudge", help="Send a message into the worker terminal.")
     nudge.add_argument("name")
