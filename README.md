@@ -51,6 +51,51 @@ See [docs/prototype-plan.md](docs/prototype-plan.md) for the detailed plan.
 
 `tmux` should own the worker PTY. Ghostty, iTerm2, Terminal.app, or `ttyd` can be viewers, but they should not be the source of truth for orchestration.
 
+## Quickstart: One Managed Worker
+
+From the repo root, install the local shim and check dependencies:
+
+```bash
+scripts/install-local --write
+workerctl doctor
+```
+
+Start a low-risk worker that only updates its ignored runtime status file:
+
+```bash
+workerctl create demo-worker \
+  --cwd "$PWD" \
+  --task "Read README.md and update only .codex-workers/demo-worker/status.json with a short summary." \
+  --wait-ready \
+  --accept-trust
+```
+
+Run a bounded manager loop:
+
+```bash
+workerctl watch demo-worker --interval 10 --max-cycles 3 --dry-run
+```
+
+Inspect the worker:
+
+```bash
+workerctl status demo-worker
+workerctl capture demo-worker
+workerctl events demo-worker --limit 20
+```
+
+Stop it when finished:
+
+```bash
+workerctl stop demo-worker
+```
+
+Healthy worker state usually moves through:
+
+```text
+waiting -> planning -> editing/running_tests -> done
+```
+
 ## Current MVP Usage
 
 From the repo root:
