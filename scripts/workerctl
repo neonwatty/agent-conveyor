@@ -1,0 +1,25 @@
+#!/usr/bin/env python3
+"""Placeholder entry point for the Codex worker controller prototype."""
+
+import argparse
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        prog="workerctl",
+        description="Control tmux-backed Codex worker sessions.",
+    )
+    parser.add_argument(
+        "command",
+        nargs="?",
+        default="help",
+        choices=["help"],
+        help="Command to run. The first implementation will add create, status, capture, nudge, stop, and list.",
+    )
+    parser.parse_args()
+    parser.print_help()
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

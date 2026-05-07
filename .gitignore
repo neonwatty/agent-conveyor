@@ -1,0 +1,5 @@
+.DS_Store
+.codex-workers/
+__pycache__/
+*.pyc
+.venv/
