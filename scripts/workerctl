@@ -11,12 +11,16 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from textwrap import dedent
 from typing import Any
 
 
-ROOT = Path.cwd()
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+INVOCATION_CWD = Path.cwd()
 STATE_ROOT = ".codex-workers"
 DEFAULT_HISTORY_LINES = 200
+DEFAULT_STATUS_STALE_SECONDS = 120
+DEFAULT_TERMINAL_STALE_SECONDS = 120
 VALID_STATES = {"planning", "editing", "running_tests", "blocked", "waiting", "done", "unknown"}
 
 
@@ -26,6 +30,22 @@ class WorkerError(RuntimeError):
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def parse_iso(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def age_seconds(value: str | None) -> int | None:
+    parsed = parse_iso(value)
+    if parsed is None:
+        return None
+    return max(0, int((datetime.now(timezone.utc) - parsed).total_seconds()))
 
 
 def ensure_tool(name: str) -> str:
@@ -51,7 +71,7 @@ def run(args: list[str], *, check: bool = True, input_text: str | None = None) -
 
 
 def state_root() -> Path:
-    return ROOT / STATE_ROOT
+    return PROJECT_ROOT / STATE_ROOT
 
 
 def worker_dir(name: str) -> Path:
@@ -189,6 +209,12 @@ If you are blocked or need direction, set state to blocked and explain the block
 """
 
 
+def write_worker_contract(name: str, task: str | None) -> Path:
+    contract_path = worker_dir(name) / "contract.txt"
+    contract_path.write_text(worker_contract(name, task))
+    return contract_path
+
+
 def command_create(args: argparse.Namespace) -> int:
     ensure_tool("tmux")
     ensure_tool("codex")
@@ -217,22 +243,39 @@ def command_create(args: argparse.Namespace) -> int:
     write_json(status_path(name), initial_status(name, args.task))
     transcript_path(name).touch()
 
-    contract = worker_contract(name, args.task)
-    shell_command = f"cd {sh_quote(str(directory))} && codex"
+    contract_path = write_worker_contract(name, args.task)
+    if args.initial_prompt:
+        shell_command = (
+            f"codex --cd {sh_quote(str(directory))} --no-alt-screen "
+            f"\"$(cat {sh_quote(str(contract_path))})\""
+        )
+    else:
+        shell_command = f"codex --cd {sh_quote(str(directory))} --no-alt-screen"
     run(["tmux", "new-session", "-d", "-s", tmux_session(name), shell_command])
-    append_event(name, "create", {"cwd": str(directory), "task": args.task})
+    append_event(
+        name,
+        "create",
+        {
+            "contract_path": str(contract_path),
+            "cwd": str(directory),
+            "initial_prompt": args.initial_prompt,
+            "task": args.task,
+        },
+    )
 
-    if args.send_contract:
-        send_text(name, contract)
-        append_event(name, "send_contract", {"bytes": len(contract)})
+    if args.accept_trust:
+        run(["tmux", "send-keys", "-t", tmux_target(name), "Enter"])
+        append_event(name, "accept_trust")
 
     print(f"created {name}")
     print(f"tmux session: {tmux_session(name)}")
     print(f"state dir: {worker_dir(name)}")
-    if args.send_contract:
-        print("contract sent to worker")
+    if args.initial_prompt:
+        print("contract provided as initial Codex prompt")
     else:
-        print("contract not sent; run workerctl nudge to provide instructions")
+        print("contract saved but not provided; run workerctl nudge to provide instructions")
+    if args.accept_trust:
+        print("sent Enter for initial trust prompt")
     return 0
 
 
@@ -314,6 +357,101 @@ def command_status(args: argparse.Namespace) -> int:
     return 0
 
 
+def idle_summary(
+    name: str,
+    *,
+    status_stale_seconds: int,
+    terminal_stale_seconds: int,
+    refresh: bool,
+    lines: int,
+) -> dict[str, Any]:
+    config = require_worker(name)
+    running = session_exists(name)
+    status = load_json(status_path(name), {})
+    capture_meta = load_json(capture_meta_path(name), {})
+    capture_error = None
+
+    if running and refresh:
+        try:
+            capture_output(name, lines)
+            capture_meta = load_json(capture_meta_path(name), {})
+        except WorkerError as exc:
+            capture_error = str(exc)
+
+    state = status.get("state", "unknown")
+    if state not in VALID_STATES:
+        state = "unknown"
+
+    status_age = age_seconds(status.get("last_update"))
+    terminal_age = age_seconds(capture_meta.get("changed_at"))
+    status_is_stale = status_age is None or status_age >= status_stale_seconds
+    terminal_is_stale = terminal_age is None or terminal_age >= terminal_stale_seconds
+
+    if not running:
+        health = "stopped"
+        recommended_action = "none"
+        reason = "tmux session is not running"
+    elif state == "blocked":
+        health = "blocked"
+        recommended_action = "read_blocker"
+        reason = "worker status.json reports blocked"
+    elif state == "done":
+        health = "done"
+        recommended_action = "review_result"
+        reason = "worker status.json reports done"
+    elif capture_error:
+        health = "unknown"
+        recommended_action = "inspect_terminal"
+        reason = capture_error
+    elif terminal_is_stale and status_is_stale:
+        health = "stale"
+        recommended_action = "ask_for_status"
+        reason = "terminal output and status.json are both stale"
+    elif terminal_is_stale:
+        health = "quiet"
+        recommended_action = "wait"
+        reason = "terminal output is stale but status.json is fresh"
+    elif status_is_stale:
+        health = "status_stale"
+        recommended_action = "wait"
+        reason = "terminal output changed recently but status.json is stale"
+    else:
+        health = "active"
+        recommended_action = "none"
+        reason = "terminal output and status.json are fresh"
+
+    return {
+        "blocker": status.get("blocker"),
+        "current_task": status.get("current_task"),
+        "health": health,
+        "name": name,
+        "next_action": status.get("next_action"),
+        "reason": reason,
+        "recommended_action": recommended_action,
+        "running": running,
+        "state": state,
+        "status_age_seconds": status_age,
+        "status_last_update": status.get("last_update"),
+        "status_stale_seconds": status_stale_seconds,
+        "terminal_age_seconds": terminal_age,
+        "terminal_changed_at": capture_meta.get("changed_at"),
+        "terminal_stale_seconds": terminal_stale_seconds,
+        "tmux_session": config.get("tmux_session"),
+    }
+
+
+def command_idle_check(args: argparse.Namespace) -> int:
+    summary = idle_summary(
+        args.name,
+        status_stale_seconds=args.status_stale_seconds,
+        terminal_stale_seconds=args.terminal_stale_seconds,
+        refresh=args.refresh,
+        lines=args.lines,
+    )
+    print(json.dumps(summary, indent=2, sort_keys=True))
+    return 0
+
+
 def command_nudge(args: argparse.Namespace) -> int:
     message = args.message
     send_text(args.name, message)
@@ -346,16 +484,32 @@ def build_parser() -> argparse.ArgumentParser:
 
     create = subparsers.add_parser("create", help="Create and start a worker Codex tmux session.")
     create.add_argument("name", help="Worker name, e.g. worker-a.")
-    create.add_argument("--cwd", default=str(ROOT), help="Working directory for the worker.")
+    create.add_argument("--cwd", default=str(INVOCATION_CWD), help="Working directory for the worker.")
     create.add_argument("--task", help="Initial task text for the worker contract.")
     create.add_argument("--reuse", action="store_true", help="Reuse an existing worker state directory.")
     create.add_argument(
+        "--no-initial-prompt",
+        action="store_false",
+        dest="initial_prompt",
+        help="Start Codex but do not provide the worker contract as the initial prompt.",
+    )
+    create.add_argument(
         "--no-send-contract",
         action="store_false",
-        dest="send_contract",
-        help="Start Codex but do not send the worker contract.",
+        dest="initial_prompt",
+        help="Deprecated alias for --no-initial-prompt.",
     )
-    create.set_defaults(func=command_create, send_contract=True)
+    create.add_argument(
+        "--accept-trust",
+        action="store_true",
+        help=dedent(
+            """\
+            Send Enter immediately after launch to accept Codex's workspace trust prompt.
+            Use only for directories you intentionally trust.
+            """
+        ),
+    )
+    create.set_defaults(func=command_create, initial_prompt=True)
 
     list_cmd = subparsers.add_parser("list", help="List known workers.")
     list_cmd.set_defaults(func=command_list)
@@ -375,6 +529,14 @@ def build_parser() -> argparse.ArgumentParser:
     status.add_argument("--no-refresh", action="store_false", dest="refresh", help="Do not refresh terminal capture.")
     status.add_argument("--lines", type=int, default=DEFAULT_HISTORY_LINES)
     status.set_defaults(func=command_status, refresh=True)
+
+    idle_check = subparsers.add_parser("idle-check", help="Classify worker freshness and recommend an action.")
+    idle_check.add_argument("name")
+    idle_check.add_argument("--no-refresh", action="store_false", dest="refresh", help="Do not refresh terminal capture.")
+    idle_check.add_argument("--lines", type=int, default=DEFAULT_HISTORY_LINES)
+    idle_check.add_argument("--status-stale-seconds", type=int, default=DEFAULT_STATUS_STALE_SECONDS)
+    idle_check.add_argument("--terminal-stale-seconds", type=int, default=DEFAULT_TERMINAL_STALE_SECONDS)
+    idle_check.set_defaults(func=command_idle_check, refresh=True)
 
     nudge = subparsers.add_parser("nudge", help="Send a message into the worker terminal.")
     nudge.add_argument("name")

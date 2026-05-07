@@ -59,6 +59,7 @@ From the repo root:
 scripts/workerctl create worker-a --cwd /path/to/repo --task "Inspect the failing test and report the blocker."
 scripts/workerctl list
 scripts/workerctl status worker-a
+scripts/workerctl idle-check worker-a
 scripts/workerctl capture worker-a
 scripts/workerctl nudge worker-a "Please summarize current progress and next action."
 scripts/workerctl stop worker-a
@@ -69,6 +70,7 @@ For a lifecycle smoke test without sending the worker prompt into Codex:
 ```bash
 scripts/workerctl create smoke --cwd "$PWD" --task "Smoke test only." --no-send-contract
 scripts/workerctl status smoke
+scripts/workerctl idle-check smoke
 scripts/workerctl stop smoke
 ```
 
