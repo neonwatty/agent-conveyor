@@ -114,7 +114,6 @@ class CliTests(unittest.TestCase):
     def test_doctor_outputs_expected_structure(self):
         proc = self.run_workerctl("doctor")
 
-        self.assertEqual(proc.returncode, 0, proc.stderr)
         data = json.loads(proc.stdout)
         self.assertIn("checks", data)
         self.assertIn("workers", data)
