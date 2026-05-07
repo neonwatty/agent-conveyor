@@ -24,11 +24,50 @@ DEFAULT_STATUS_STALE_SECONDS = 120
 DEFAULT_TERMINAL_STALE_SECONDS = 120
 DEFAULT_WAIT_READY_SECONDS = 30
 DEFAULT_SUPERVISE_COOLDOWN_SECONDS = 300
+DEFAULT_BUSY_WAIT_SECONDS = 60
 DEFAULT_STATUS_NUDGE = (
     "Please pause and write a concise status update in your status.json: "
     "current task, what changed, whether you are blocked, and your next action."
 )
 VALID_STATES = {"planning", "editing", "running_tests", "blocked", "waiting", "done", "unknown"}
+BUSY_WAIT_PATTERNS = [
+    (
+        "mcp_startup",
+        "Starting MCP servers",
+        "terminal shows Codex waiting on MCP server startup",
+        "inspect_or_interrupt",
+    ),
+    (
+        "rate_limit_prompt",
+        "Approaching rate limits",
+        "terminal shows a rate-limit model switch prompt",
+        "inspect_or_interrupt",
+    ),
+    (
+        "enter_to_confirm",
+        "Press enter to confirm",
+        "terminal is waiting for Enter confirmation",
+        "inspect_or_confirm",
+    ),
+    (
+        "trust_prompt",
+        "Do you trust the contents of this directory",
+        "terminal is waiting for workspace trust confirmation",
+        "inspect_or_accept_trust",
+    ),
+    (
+        "plan_prompt",
+        "Create a plan?",
+        "terminal is waiting at Codex plan-mode suggestion",
+        "inspect_or_confirm",
+    ),
+    (
+        "approval_prompt",
+        "approval",
+        "terminal appears to mention an approval prompt",
+        "inspect_or_approve",
+    ),
+]
 
 
 class WorkerError(RuntimeError):
@@ -220,6 +259,25 @@ def classify_startup_output(output: str) -> tuple[str, str]:
     if not output.strip():
         return ("starting", "terminal output is empty")
     return ("starting", "Codex has not reached a recognized startup state")
+
+
+def classify_busy_wait(output: str, status_age: int | None, busy_wait_seconds: int) -> dict[str, Any] | None:
+    if status_age is not None and status_age < busy_wait_seconds:
+        return None
+    for pattern_id, needle, reason, recommended_action in BUSY_WAIT_PATTERNS:
+        if needle.lower() in output.lower():
+            return {
+                "pattern": pattern_id,
+                "reason": reason,
+                "recommended_action": recommended_action,
+            }
+    if "esc to interrupt" in output.lower() and status_age is not None and status_age >= busy_wait_seconds:
+        return {
+            "pattern": "long_running_interruptible",
+            "reason": "terminal shows an interruptible Codex operation while status.json is stale",
+            "recommended_action": "inspect_or_interrupt",
+        }
+    return None
 
 
 def wait_ready(name: str, timeout_seconds: int, accept_trust: bool) -> dict[str, Any]:
@@ -541,6 +599,7 @@ def idle_summary(
     *,
     status_stale_seconds: int,
     terminal_stale_seconds: int,
+    busy_wait_seconds: int,
     refresh: bool,
     lines: int,
 ) -> dict[str, Any]:
@@ -565,6 +624,13 @@ def idle_summary(
     terminal_age = age_seconds(capture_meta.get("changed_at"))
     status_is_stale = status_age is None or status_age >= status_stale_seconds
     terminal_is_stale = terminal_age is None or terminal_age >= terminal_stale_seconds
+    terminal_output = ""
+    if running:
+        try:
+            terminal_output = capture_tmux_target(tmux_target(name), lines)
+        except WorkerError:
+            terminal_output = transcript_path(name).read_text() if transcript_path(name).exists() else ""
+    busy_wait = classify_busy_wait(terminal_output, status_age, busy_wait_seconds)
 
     if not running:
         health = "stopped"
@@ -582,6 +648,10 @@ def idle_summary(
         health = "unknown"
         recommended_action = "inspect_terminal"
         reason = capture_error
+    elif busy_wait:
+        health = "busy_wait"
+        recommended_action = busy_wait["recommended_action"]
+        reason = busy_wait["reason"]
     elif terminal_is_stale and status_is_stale:
         health = "stale"
         recommended_action = "ask_for_status"
@@ -615,6 +685,8 @@ def idle_summary(
         "terminal_age_seconds": terminal_age,
         "terminal_changed_at": capture_meta.get("changed_at"),
         "terminal_stale_seconds": terminal_stale_seconds,
+        "busy_wait_pattern": busy_wait.get("pattern") if busy_wait else None,
+        "busy_wait_seconds": busy_wait_seconds,
         "tmux_session": config.get("tmux_session"),
     }
 
@@ -624,6 +696,7 @@ def command_idle_check(args: argparse.Namespace) -> int:
         args.name,
         status_stale_seconds=args.status_stale_seconds,
         terminal_stale_seconds=args.terminal_stale_seconds,
+        busy_wait_seconds=args.busy_wait_seconds,
         refresh=args.refresh,
         lines=args.lines,
     )
@@ -636,6 +709,7 @@ def command_supervise(args: argparse.Namespace) -> int:
         args.name,
         status_stale_seconds=args.status_stale_seconds,
         terminal_stale_seconds=args.terminal_stale_seconds,
+        busy_wait_seconds=args.busy_wait_seconds,
         refresh=args.refresh,
         lines=args.lines,
         cooldown_seconds=args.cooldown_seconds,
@@ -651,6 +725,7 @@ def supervise_once(
     *,
     status_stale_seconds: int,
     terminal_stale_seconds: int,
+    busy_wait_seconds: int,
     refresh: bool,
     lines: int,
     cooldown_seconds: int,
@@ -661,6 +736,7 @@ def supervise_once(
         name,
         status_stale_seconds=status_stale_seconds,
         terminal_stale_seconds=terminal_stale_seconds,
+        busy_wait_seconds=busy_wait_seconds,
         refresh=refresh,
         lines=lines,
     )
@@ -693,6 +769,8 @@ def supervise_once(
         action_taken = "none"
     elif health in {"active", "quiet", "status_stale"}:
         action_taken = "wait"
+    elif health == "busy_wait":
+        action_taken = "inspect_or_interrupt"
     elif health == "unknown":
         action_taken = "inspect_terminal"
 
@@ -710,6 +788,7 @@ def supervise_once(
         "recommended_action": summary.get("recommended_action"),
         "state": summary.get("state"),
         "time": now_iso(),
+        "busy_wait_pattern": summary.get("busy_wait_pattern"),
     }
     append_event(name, "supervise", result)
     return result
@@ -724,6 +803,7 @@ def command_watch(args: argparse.Namespace) -> int:
                 args.name,
                 status_stale_seconds=args.status_stale_seconds,
                 terminal_stale_seconds=args.terminal_stale_seconds,
+                busy_wait_seconds=args.busy_wait_seconds,
                 refresh=args.refresh,
                 lines=args.lines,
                 cooldown_seconds=args.cooldown_seconds,
@@ -749,6 +829,26 @@ def command_events(args: argparse.Namespace) -> int:
         events = events[-args.limit :]
     for event in events:
         print(json.dumps(event, sort_keys=True))
+    return 0
+
+
+def command_classify(args: argparse.Namespace) -> int:
+    if args.text is not None:
+        output = args.text
+    elif args.file:
+        output = Path(args.file).read_text()
+    else:
+        output = sys.stdin.read()
+    startup, startup_reason = classify_startup_output(output)
+    busy_wait = classify_busy_wait(output, args.status_age_seconds, args.busy_wait_seconds)
+    result = {
+        "busy_wait": busy_wait,
+        "busy_wait_seconds": args.busy_wait_seconds,
+        "startup": startup,
+        "startup_reason": startup_reason,
+        "status_age_seconds": args.status_age_seconds,
+    }
+    print(json.dumps(result, indent=2, sort_keys=True))
     return 0
 
 
@@ -848,6 +948,7 @@ def build_parser() -> argparse.ArgumentParser:
     idle_check.add_argument("--lines", type=int, default=DEFAULT_HISTORY_LINES)
     idle_check.add_argument("--status-stale-seconds", type=int, default=DEFAULT_STATUS_STALE_SECONDS)
     idle_check.add_argument("--terminal-stale-seconds", type=int, default=DEFAULT_TERMINAL_STALE_SECONDS)
+    idle_check.add_argument("--busy-wait-seconds", type=int, default=DEFAULT_BUSY_WAIT_SECONDS)
     idle_check.set_defaults(func=command_idle_check, refresh=True)
 
     supervise = subparsers.add_parser("supervise", help="Run one manager supervision cycle for a worker.")
@@ -856,6 +957,7 @@ def build_parser() -> argparse.ArgumentParser:
     supervise.add_argument("--lines", type=int, default=DEFAULT_HISTORY_LINES)
     supervise.add_argument("--status-stale-seconds", type=int, default=DEFAULT_STATUS_STALE_SECONDS)
     supervise.add_argument("--terminal-stale-seconds", type=int, default=DEFAULT_TERMINAL_STALE_SECONDS)
+    supervise.add_argument("--busy-wait-seconds", type=int, default=DEFAULT_BUSY_WAIT_SECONDS)
     supervise.add_argument("--cooldown-seconds", type=int, default=DEFAULT_SUPERVISE_COOLDOWN_SECONDS)
     supervise.add_argument("--message", default=DEFAULT_STATUS_NUDGE, help="Status request sent when the worker is stale.")
     supervise.add_argument("--dry-run", action="store_true", help="Report the supervision action without sending nudges.")
@@ -869,6 +971,7 @@ def build_parser() -> argparse.ArgumentParser:
     watch.add_argument("--lines", type=int, default=DEFAULT_HISTORY_LINES)
     watch.add_argument("--status-stale-seconds", type=int, default=DEFAULT_STATUS_STALE_SECONDS)
     watch.add_argument("--terminal-stale-seconds", type=int, default=DEFAULT_TERMINAL_STALE_SECONDS)
+    watch.add_argument("--busy-wait-seconds", type=int, default=DEFAULT_BUSY_WAIT_SECONDS)
     watch.add_argument("--cooldown-seconds", type=int, default=DEFAULT_SUPERVISE_COOLDOWN_SECONDS)
     watch.add_argument("--message", default=DEFAULT_STATUS_NUDGE, help="Status request sent when the worker is stale.")
     watch.add_argument("--dry-run", action="store_true", help="Report supervision actions without sending nudges.")
@@ -879,6 +982,13 @@ def build_parser() -> argparse.ArgumentParser:
     events.add_argument("--limit", type=int, help="Print only the last N events.")
     events.add_argument("--type", help="Print only events of this type.")
     events.set_defaults(func=command_events)
+
+    classify = subparsers.add_parser("classify", help="Classify captured terminal text for startup and busy-wait states.")
+    classify.add_argument("--text", help="Terminal text to classify. Reads stdin when omitted.")
+    classify.add_argument("--file", help="Path to terminal text to classify.")
+    classify.add_argument("--status-age-seconds", type=int, default=DEFAULT_BUSY_WAIT_SECONDS)
+    classify.add_argument("--busy-wait-seconds", type=int, default=DEFAULT_BUSY_WAIT_SECONDS)
+    classify.set_defaults(func=command_classify)
 
     nudge = subparsers.add_parser("nudge", help="Send a message into the worker terminal.")
     nudge.add_argument("name")

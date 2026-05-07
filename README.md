@@ -90,6 +90,14 @@ Worker runtime files are stored under `.codex-workers/` and are intentionally ig
 scripts/workerctl watch worker-a --interval 60 --max-cycles 3 --dry-run
 ```
 
+`idle-check`, `supervise`, and `watch` also detect known interactive or busy-wait terminal states, such as Codex MCP startup, trust prompts, plan prompts, and rate-limit prompts. These are reported as `health: "busy_wait"` with an inspect-oriented recommendation.
+
+For debugging classifier behavior directly:
+
+```bash
+scripts/workerctl classify --text "Starting MCP servers (2/3)"
+```
+
 To have `create` classify the initial Codex screen, use `--wait-ready`:
 
 ```bash
