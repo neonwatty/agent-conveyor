@@ -83,6 +83,20 @@ scripts/workerctl stop smoke
 
 Worker runtime files are stored under `.codex-workers/` and are intentionally ignored by git.
 
+To run `workerctl` from anywhere, add the local `bin` directory to your shell path:
+
+```bash
+export PATH="/Users/neonwatty/Desktop/codex-terminal-manager/bin:$PATH"
+```
+
+Then use:
+
+```bash
+workerctl doctor
+workerctl list
+workerctl watch worker-a
+```
+
 `supervise` runs one manager cycle. It reads the same freshness signals as `idle-check`, reports an action, and sends a cooldown-protected status nudge only when the worker is stale.
 
 `watch` runs `supervise` repeatedly and prints one JSON line per cycle. Use `--max-cycles` for bounded trials:

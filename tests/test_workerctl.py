@@ -9,6 +9,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKERCTL_PATH = ROOT / "scripts" / "workerctl"
+WORKERCTL_SHIM_PATH = ROOT / "bin" / "workerctl"
 
 
 def load_workerctl():
@@ -81,9 +82,10 @@ class ClassifierTests(unittest.TestCase):
 
 
 class CliTests(unittest.TestCase):
-    def run_workerctl(self, *args):
+    def run_workerctl(self, *args, via_shim=False):
+        command = [str(WORKERCTL_SHIM_PATH), *args] if via_shim else [sys.executable, str(WORKERCTL_PATH), *args]
         return subprocess.run(
-            [sys.executable, str(WORKERCTL_PATH), *args],
+            command,
             cwd=ROOT,
             text=True,
             stdout=subprocess.PIPE,
@@ -119,6 +121,20 @@ class CliTests(unittest.TestCase):
         self.assertIn("workers", data)
         self.assertTrue(any(check["name"] == "tmux" for check in data["checks"]))
         self.assertTrue(any(check["name"] == "codex" for check in data["checks"]))
+
+    def test_bin_shim_invokes_workerctl(self):
+        proc = self.run_workerctl(
+            "classify",
+            "--text",
+            "Starting MCP servers (2/3): posthog",
+            "--status-age-seconds",
+            "120",
+            via_shim=True,
+        )
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        self.assertEqual(data["busy_wait"]["pattern"], "mcp_startup")
 
 
 if __name__ == "__main__":
