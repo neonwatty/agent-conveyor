@@ -57,8 +57,11 @@ From the repo root, install the local shim and check dependencies:
 
 ```bash
 scripts/install-local --write
+export PATH="/Users/neonwatty/Desktop/codex-terminal-manager/bin:$PATH"
 workerctl doctor
 ```
+
+`scripts/install-local --write` updates future shells. The `export` line makes `workerctl` available in the current shell.
 
 Start a low-risk worker that only updates its ignored runtime status file:
 
