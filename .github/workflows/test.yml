@@ -19,4 +19,4 @@ jobs:
         run: python3 -m unittest discover -s tests -v
 
       - name: Compile workerctl
-        run: python3 -m py_compile scripts/workerctl
+        run: python3 -m py_compile scripts/workerctl workerctl/*.py

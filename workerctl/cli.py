@@ -1,0 +1,967 @@
+#!/usr/bin/env python3
+"""Control tmux-backed Codex worker sessions."""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import shutil
+import sys
+import time
+from pathlib import Path
+from textwrap import dedent
+from typing import Any
+
+from workerctl.classify import classify_busy_wait, classify_startup_output
+from workerctl.core import WorkerError, age_seconds, ensure_tool, now_iso, run, sh_quote
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+INVOCATION_CWD = Path.cwd()
+STATE_ROOT = ".codex-workers"
+DEFAULT_HISTORY_LINES = 200
+DEFAULT_STATUS_STALE_SECONDS = 120
+DEFAULT_TERMINAL_STALE_SECONDS = 120
+DEFAULT_WAIT_READY_SECONDS = 30
+DEFAULT_SUPERVISE_COOLDOWN_SECONDS = 300
+DEFAULT_BUSY_WAIT_SECONDS = 60
+DEFAULT_INTERRUPT_FOLLOWUP = (
+    "Please pause and update status.json with what was interrupted, whether you are blocked, "
+    "and the next safe action."
+)
+DEFAULT_STATUS_NUDGE = (
+    "Please pause and write a concise status update in your status.json: "
+    "current task, what changed, whether you are blocked, and your next action."
+)
+VALID_STATES = {"planning", "editing", "running_tests", "blocked", "waiting", "done", "unknown"}
+
+
+def state_root() -> Path:
+    return PROJECT_ROOT / STATE_ROOT
+
+
+def worker_dir(name: str) -> Path:
+    validate_name(name)
+    return state_root() / name
+
+
+def validate_name(name: str) -> None:
+    allowed = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_")
+    if not name or any(char not in allowed for char in name):
+        raise WorkerError("Worker names may contain only letters, numbers, hyphens, and underscores.")
+
+
+def tmux_session(name: str) -> str:
+    return f"codex-{name}"
+
+
+def tmux_target(name: str) -> str:
+    return tmux_session(name)
+
+
+def config_path(name: str) -> Path:
+    return worker_dir(name) / "config.json"
+
+
+def status_path(name: str) -> Path:
+    return worker_dir(name) / "status.json"
+
+
+def events_path(name: str) -> Path:
+    return worker_dir(name) / "events.jsonl"
+
+
+def transcript_path(name: str) -> Path:
+    return worker_dir(name) / "transcript.txt"
+
+
+def capture_meta_path(name: str) -> Path:
+    return worker_dir(name) / "capture-meta.json"
+
+
+def load_json(path: Path, default: Any) -> Any:
+    if not path.exists():
+        return default
+    try:
+        return json.loads(path.read_text())
+    except json.JSONDecodeError as exc:
+        raise WorkerError(f"Invalid JSON in {path}: {exc}") from exc
+
+
+def write_json(path: Path, payload: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+
+
+def append_event(name: str, event_type: str, payload: dict[str, Any] | None = None) -> None:
+    event = {
+        "time": now_iso(),
+        "type": event_type,
+        **(payload or {}),
+    }
+    events_path(name).parent.mkdir(parents=True, exist_ok=True)
+    with events_path(name).open("a") as handle:
+        handle.write(json.dumps(event, sort_keys=True) + "\n")
+
+
+def read_events(name: str) -> list[dict[str, Any]]:
+    path = events_path(name)
+    if not path.exists():
+        return []
+    events = []
+    for line in path.read_text().splitlines():
+        if not line.strip():
+            continue
+        try:
+            events.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    return events
+
+
+def last_event_age_seconds(name: str, event_type: str) -> int | None:
+    for event in reversed(read_events(name)):
+        if event.get("type") == event_type:
+            return age_seconds(event.get("time"))
+    return None
+
+
+def session_exists(name: str) -> bool:
+    proc = run(["tmux", "has-session", "-t", tmux_target(name)], check=False)
+    return proc.returncode == 0
+
+
+def require_worker(name: str) -> dict[str, Any]:
+    config = load_json(config_path(name), None)
+    if config is None:
+        raise WorkerError(f"Unknown worker: {name}")
+    return config
+
+
+def capture_tmux_target(target: str, history_lines: int = DEFAULT_HISTORY_LINES) -> str:
+    proc = run(["tmux", "capture-pane", "-p", "-S", f"-{history_lines}", "-t", target])
+    return proc.stdout.rstrip("\n")
+
+
+def capture_output(name: str, history_lines: int = DEFAULT_HISTORY_LINES) -> str:
+    require_worker(name)
+    if not session_exists(name):
+        raise WorkerError(f"tmux session is not running for worker {name}: {tmux_target(name)}")
+    output = capture_tmux_target(tmux_target(name), history_lines)
+    digest = hashlib.sha256(output.encode()).hexdigest()
+    meta = load_json(capture_meta_path(name), {})
+    previous_digest = meta.get("sha256")
+    previous_changed_at = meta.get("changed_at")
+    changed_at = now_iso() if digest != previous_digest else previous_changed_at
+    write_json(
+        capture_meta_path(name),
+        {
+            "captured_at": now_iso(),
+            "changed_at": changed_at or now_iso(),
+            "sha256": digest,
+            "history_lines": history_lines,
+        },
+    )
+    transcript_path(name).write_text(output + ("\n" if output else ""))
+    return output
+
+
+def wait_ready(name: str, timeout_seconds: int, accept_trust: bool) -> dict[str, Any]:
+    deadline = time.monotonic() + timeout_seconds
+    trust_accepted = False
+    last_output = ""
+    last_state = "starting"
+    last_reason = "waiting for terminal output"
+
+    while time.monotonic() < deadline:
+        if not session_exists(name):
+            return {
+                "reason": "tmux session exited during startup",
+                "startup": "exited",
+                "trust_accepted": trust_accepted,
+            }
+        last_output = capture_tmux_target(tmux_target(name), 80)
+        last_state, last_reason = classify_startup_output(last_output)
+        if last_state == "needs_trust" and accept_trust and not trust_accepted:
+            run(["tmux", "send-keys", "-t", tmux_target(name), "Enter"])
+            trust_accepted = True
+            append_event(name, "accept_trust")
+            time.sleep(1)
+            continue
+        if last_state in {"ready", "working", "needs_trust", "error"}:
+            break
+        time.sleep(1)
+
+    result = {
+        "reason": last_reason,
+        "startup": last_state,
+        "timeout_seconds": timeout_seconds,
+        "trust_accepted": trust_accepted,
+    }
+    if last_state == "needs_trust" and not accept_trust:
+        result["recommended_action"] = "rerun with --accept-trust if this directory is trusted"
+    elif last_state == "starting":
+        result["recommended_action"] = "inspect terminal capture"
+    else:
+        result["recommended_action"] = "none"
+    return result
+
+
+def initial_status(name: str, task: str | None) -> dict[str, Any]:
+    return {
+        "blocker": None,
+        "current_task": task or "Start worker Codex session.",
+        "last_update": now_iso(),
+        "next_action": "Wait for manager instruction or begin assigned task.",
+        "state": "waiting",
+    }
+
+
+def worker_contract(name: str, task: str | None) -> str:
+    status_file = status_path(name)
+    task_text = task or "Wait for a task from the manager."
+    return f"""You are a worker Codex session supervised by a manager Codex session.
+
+Task:
+{task_text}
+
+Keep this file updated whenever you start a new phase, become blocked, begin long-running verification, or finish:
+{status_file}
+
+Use this JSON shape:
+{{
+  "state": "planning | editing | running_tests | blocked | waiting | done",
+  "current_task": "short description",
+  "last_update": "ISO-8601 timestamp",
+  "next_action": "short description",
+  "blocker": null
+}}
+
+Do not perform destructive git actions unless the user explicitly asks.
+If you are blocked or need direction, set state to blocked and explain the blocker.
+"""
+
+
+def write_worker_contract(name: str, task: str | None) -> Path:
+    contract_path = worker_dir(name) / "contract.txt"
+    contract_path.write_text(worker_contract(name, task))
+    return contract_path
+
+
+def command_create(args: argparse.Namespace) -> int:
+    ensure_tool("tmux")
+    ensure_tool("codex")
+    name = args.name
+    validate_name(name)
+    directory = Path(args.cwd).expanduser().resolve()
+    if not directory.exists() or not directory.is_dir():
+        raise WorkerError(f"Worker cwd does not exist or is not a directory: {directory}")
+    if config_path(name).exists() and not args.reuse:
+        raise WorkerError(f"Worker already exists: {name}. Use --reuse to reuse its state directory.")
+    if session_exists(name):
+        raise WorkerError(f"tmux session already exists: {tmux_target(name)}")
+
+    worker_dir(name).mkdir(parents=True, exist_ok=True)
+    write_json(
+        config_path(name),
+        {
+            "created_at": now_iso(),
+            "cwd": str(directory),
+            "name": name,
+            "startup": "launched",
+            "startup_reason": "worker session created",
+            "state_dir": str(worker_dir(name)),
+            "tmux_session": tmux_session(name),
+            "tmux_target": tmux_target(name),
+        },
+    )
+    write_json(status_path(name), initial_status(name, args.task))
+    transcript_path(name).touch()
+
+    contract_path = write_worker_contract(name, args.task)
+    if args.initial_prompt:
+        shell_command = (
+            f"codex --cd {sh_quote(str(directory))} --no-alt-screen "
+            f"\"$(cat {sh_quote(str(contract_path))})\""
+        )
+    else:
+        shell_command = f"codex --cd {sh_quote(str(directory))} --no-alt-screen"
+    run(["tmux", "new-session", "-d", "-s", tmux_session(name), shell_command])
+    append_event(
+        name,
+        "create",
+        {
+            "contract_path": str(contract_path),
+            "cwd": str(directory),
+            "initial_prompt": args.initial_prompt,
+            "task": args.task,
+        },
+    )
+
+    startup = None
+    if args.wait_ready:
+        startup = wait_ready(name, args.wait_ready_timeout, args.accept_trust)
+        config = load_json(config_path(name), {})
+        config["startup"] = startup["startup"]
+        config["startup_reason"] = startup["reason"]
+        config["startup_checked_at"] = now_iso()
+        config["startup_recommended_action"] = startup.get("recommended_action")
+        write_json(config_path(name), config)
+        append_event(name, "wait_ready", startup)
+    elif args.accept_trust:
+        run(["tmux", "send-keys", "-t", tmux_target(name), "Enter"])
+        append_event(name, "accept_trust")
+
+    print(f"created {name}")
+    print(f"tmux session: {tmux_session(name)}")
+    print(f"state dir: {worker_dir(name)}")
+    if args.initial_prompt:
+        print("contract provided as initial Codex prompt")
+    else:
+        print("contract saved but not provided; run workerctl nudge to provide instructions")
+    if args.accept_trust:
+        if args.wait_ready and startup:
+            print(f"trust handling: accepted={startup['trust_accepted']}")
+        else:
+            print("sent Enter for initial trust prompt")
+    if startup:
+        print(f"startup: {startup['startup']} ({startup['reason']})")
+        if startup.get("recommended_action") != "none":
+            print(f"recommended action: {startup['recommended_action']}")
+    return 0
+
+
+def send_text(name: str, text: str) -> None:
+    require_worker(name)
+    if not session_exists(name):
+        raise WorkerError(f"tmux session is not running for worker {name}: {tmux_target(name)}")
+    buffer_name = f"workerctl-{name}"
+    run(["tmux", "set-buffer", "-b", buffer_name, text])
+    try:
+        run(["tmux", "paste-buffer", "-b", buffer_name, "-t", tmux_target(name)])
+        run(["tmux", "send-keys", "-t", tmux_target(name), "Enter"])
+    finally:
+        run(["tmux", "delete-buffer", "-b", buffer_name], check=False)
+
+
+def interrupt_worker(name: str, *, key: str, followup: str | None, dry_run: bool) -> dict[str, Any]:
+    require_worker(name)
+    if not session_exists(name):
+        raise WorkerError(f"tmux session is not running for worker {name}: {tmux_target(name)}")
+    result = {
+        "dry_run": dry_run,
+        "followup": followup,
+        "key": key,
+        "name": name,
+        "time": now_iso(),
+    }
+    if not dry_run:
+        run(["tmux", "send-keys", "-t", tmux_target(name), key])
+        if followup:
+            time.sleep(0.5)
+            send_text(name, followup)
+        append_event(name, "interrupt", result)
+    return result
+
+
+def command_list(args: argparse.Namespace) -> int:
+    root = state_root()
+    if not root.exists():
+        if args.json:
+            print("[]")
+        return 0
+    workers: list[dict[str, Any]] = []
+    for path in sorted(root.iterdir()):
+        if not path.is_dir():
+            continue
+        config = load_json(path / "config.json", {})
+        status = load_json(path / "status.json", {})
+        name = config.get("name", path.name)
+        running = session_exists(name)
+        workers.append(
+            {
+                "name": name,
+                "running": running,
+                "status": "running" if running else "stopped",
+                "state": status.get("state", "unknown"),
+                "current_task": status.get("current_task", ""),
+            }
+        )
+    if args.json:
+        print(json.dumps(workers, indent=2, sort_keys=True))
+        return 0
+    for worker in workers:
+        print(f"{worker['name']}\t{worker['status']}\t{worker['state']}\t{worker['current_task']}")
+    return 0
+
+
+def command_capture(args: argparse.Namespace) -> int:
+    output = capture_output(args.name, args.lines)
+    if output:
+        print(output)
+    return 0
+
+
+def command_tail(args: argparse.Namespace) -> int:
+    output = capture_output(args.name, args.lines)
+    lines = output.splitlines()
+    print("\n".join(lines[-args.lines :]))
+    return 0
+
+
+def command_status(args: argparse.Namespace) -> int:
+    config = require_worker(args.name)
+    running = session_exists(args.name)
+    status = load_json(status_path(args.name), {})
+    capture_meta = load_json(capture_meta_path(args.name), {})
+    if running and args.refresh:
+        try:
+            capture_output(args.name, args.lines)
+            capture_meta = load_json(capture_meta_path(args.name), {})
+        except WorkerError as exc:
+            capture_meta = {"error": str(exc)}
+
+    state = status.get("state", "unknown")
+    if state not in VALID_STATES:
+        state = "unknown"
+
+    summary = {
+        "name": args.name,
+        "tmux_session": config.get("tmux_session"),
+        "running": running,
+        "startup": config.get("startup"),
+        "startup_reason": config.get("startup_reason"),
+        "startup_recommended_action": config.get("startup_recommended_action"),
+        "state": state,
+        "current_task": status.get("current_task"),
+        "next_action": status.get("next_action"),
+        "blocker": status.get("blocker"),
+        "status_last_update": status.get("last_update"),
+        "terminal_captured_at": capture_meta.get("captured_at"),
+        "terminal_changed_at": capture_meta.get("changed_at"),
+    }
+    print(json.dumps(summary, indent=2, sort_keys=True))
+    return 0
+
+
+def command_doctor(args: argparse.Namespace) -> int:
+    checks: list[dict[str, Any]] = []
+
+    tmux_path = shutil.which("tmux")
+    codex_path = shutil.which("codex")
+    checks.append({"name": "tmux", "ok": bool(tmux_path), "path": tmux_path})
+    checks.append({"name": "codex", "ok": bool(codex_path), "path": codex_path})
+
+    if tmux_path:
+        proc = run(["tmux", "-V"], check=False)
+        checks.append({"name": "tmux_version", "ok": proc.returncode == 0, "value": proc.stdout.strip()})
+
+    if codex_path:
+        proc = run(["codex", "--version"], check=False)
+        checks.append(
+            {
+                "name": "codex_version",
+                "ok": proc.returncode == 0,
+                "value": (proc.stdout.strip() or proc.stderr.strip()),
+            }
+        )
+
+    target_cwd = Path(args.cwd).expanduser().resolve()
+    checks.append({"name": "target_cwd_exists", "ok": target_cwd.is_dir(), "path": str(target_cwd)})
+    checks.append({"name": "state_root_exists", "ok": state_root().exists(), "path": str(state_root())})
+
+    workers = []
+    if state_root().exists():
+        for path in sorted(state_root().iterdir()):
+            if path.is_dir() and (path / "config.json").exists():
+                config = load_json(path / "config.json", {})
+                name = config.get("name", path.name)
+                workers.append(
+                    {
+                        "name": name,
+                        "running": session_exists(name),
+                        "startup": config.get("startup"),
+                        "state": load_json(path / "status.json", {}).get("state", "unknown"),
+                    }
+                )
+
+    ok = all(check.get("ok", False) for check in checks if check["name"] != "state_root_exists")
+    result = {
+        "checks": checks,
+        "ok": ok,
+        "project_root": str(PROJECT_ROOT),
+        "workers": workers,
+    }
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0 if ok else 1
+
+
+def idle_summary(
+    name: str,
+    *,
+    status_stale_seconds: int,
+    terminal_stale_seconds: int,
+    busy_wait_seconds: int,
+    refresh: bool,
+    lines: int,
+) -> dict[str, Any]:
+    config = require_worker(name)
+    running = session_exists(name)
+    status = load_json(status_path(name), {})
+    capture_meta = load_json(capture_meta_path(name), {})
+    capture_error = None
+
+    if running and refresh:
+        try:
+            capture_output(name, lines)
+            capture_meta = load_json(capture_meta_path(name), {})
+        except WorkerError as exc:
+            capture_error = str(exc)
+
+    state = status.get("state", "unknown")
+    if state not in VALID_STATES:
+        state = "unknown"
+
+    status_age = age_seconds(status.get("last_update"))
+    terminal_age = age_seconds(capture_meta.get("changed_at"))
+    status_is_stale = status_age is None or status_age >= status_stale_seconds
+    terminal_is_stale = terminal_age is None or terminal_age >= terminal_stale_seconds
+    terminal_output = ""
+    if running:
+        try:
+            terminal_output = capture_tmux_target(tmux_target(name), lines)
+        except WorkerError:
+            terminal_output = transcript_path(name).read_text() if transcript_path(name).exists() else ""
+    busy_wait = classify_busy_wait(terminal_output, status_age, busy_wait_seconds)
+
+    if not running:
+        health = "stopped"
+        recommended_action = "none"
+        reason = "tmux session is not running"
+    elif state == "blocked":
+        health = "blocked"
+        recommended_action = "read_blocker"
+        reason = "worker status.json reports blocked"
+    elif state == "done":
+        health = "done"
+        recommended_action = "review_result"
+        reason = "worker status.json reports done"
+    elif capture_error:
+        health = "unknown"
+        recommended_action = "inspect_terminal"
+        reason = capture_error
+    elif busy_wait:
+        health = "busy_wait"
+        recommended_action = busy_wait["recommended_action"]
+        reason = busy_wait["reason"]
+    elif terminal_is_stale and status_is_stale:
+        health = "stale"
+        recommended_action = "ask_for_status"
+        reason = "terminal output and status.json are both stale"
+    elif terminal_is_stale:
+        health = "quiet"
+        recommended_action = "wait"
+        reason = "terminal output is stale but status.json is fresh"
+    elif status_is_stale:
+        health = "status_stale"
+        recommended_action = "wait"
+        reason = "terminal output changed recently but status.json is stale"
+    else:
+        health = "active"
+        recommended_action = "none"
+        reason = "terminal output and status.json are fresh"
+
+    return {
+        "blocker": status.get("blocker"),
+        "current_task": status.get("current_task"),
+        "health": health,
+        "name": name,
+        "next_action": status.get("next_action"),
+        "reason": reason,
+        "recommended_action": recommended_action,
+        "running": running,
+        "state": state,
+        "status_age_seconds": status_age,
+        "status_last_update": status.get("last_update"),
+        "status_stale_seconds": status_stale_seconds,
+        "terminal_age_seconds": terminal_age,
+        "terminal_changed_at": capture_meta.get("changed_at"),
+        "terminal_stale_seconds": terminal_stale_seconds,
+        "busy_wait_pattern": busy_wait.get("pattern") if busy_wait else None,
+        "busy_wait_seconds": busy_wait_seconds,
+        "tmux_session": config.get("tmux_session"),
+    }
+
+
+def command_idle_check(args: argparse.Namespace) -> int:
+    summary = idle_summary(
+        args.name,
+        status_stale_seconds=args.status_stale_seconds,
+        terminal_stale_seconds=args.terminal_stale_seconds,
+        busy_wait_seconds=args.busy_wait_seconds,
+        refresh=args.refresh,
+        lines=args.lines,
+    )
+    print(json.dumps(summary, indent=2, sort_keys=True))
+    return 0
+
+
+def command_supervise(args: argparse.Namespace) -> int:
+    interrupt_followup = args.interrupt_followup or None
+    result = supervise_once(
+        args.name,
+        status_stale_seconds=args.status_stale_seconds,
+        terminal_stale_seconds=args.terminal_stale_seconds,
+        busy_wait_seconds=args.busy_wait_seconds,
+        refresh=args.refresh,
+        lines=args.lines,
+        cooldown_seconds=args.cooldown_seconds,
+        message=args.message,
+        dry_run=args.dry_run,
+        interrupt_busy_wait=args.interrupt_busy_wait,
+        interrupt_key=args.interrupt_key,
+        interrupt_followup=interrupt_followup,
+    )
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0
+
+
+def supervise_once(
+    name: str,
+    *,
+    status_stale_seconds: int,
+    terminal_stale_seconds: int,
+    busy_wait_seconds: int,
+    refresh: bool,
+    lines: int,
+    cooldown_seconds: int,
+    message: str,
+    dry_run: bool,
+    interrupt_busy_wait: bool,
+    interrupt_key: str,
+    interrupt_followup: str | None,
+) -> dict[str, Any]:
+    summary = idle_summary(
+        name,
+        status_stale_seconds=status_stale_seconds,
+        terminal_stale_seconds=terminal_stale_seconds,
+        busy_wait_seconds=busy_wait_seconds,
+        refresh=refresh,
+        lines=lines,
+    )
+
+    action_taken = "none"
+    sent_message = None
+    cooldown_remaining = None
+    reason = summary["reason"]
+    health = summary["health"]
+
+    if health == "stale":
+        last_nudge_age = last_event_age_seconds(name, "supervise_nudge")
+        if last_nudge_age is not None and last_nudge_age < cooldown_seconds:
+            action_taken = "cooldown"
+            cooldown_remaining = cooldown_seconds - last_nudge_age
+            reason = f"last supervise nudge was {last_nudge_age}s ago"
+        elif dry_run:
+            action_taken = "would_nudge"
+            sent_message = message
+        else:
+            sent_message = message
+            send_text(name, sent_message)
+            append_event(name, "supervise_nudge", {"message": sent_message, "health": health})
+            action_taken = "nudge"
+    elif health == "blocked":
+        action_taken = "read_blocker"
+    elif health == "done":
+        action_taken = "review_result"
+    elif health == "stopped":
+        action_taken = "none"
+    elif health in {"active", "quiet", "status_stale"}:
+        action_taken = "wait"
+    elif health == "busy_wait":
+        if interrupt_busy_wait:
+            if dry_run:
+                action_taken = "would_interrupt"
+            else:
+                interrupt_worker(name, key=interrupt_key, followup=interrupt_followup, dry_run=False)
+                action_taken = "interrupt"
+        else:
+            action_taken = "inspect_or_interrupt"
+    elif health == "unknown":
+        action_taken = "inspect_terminal"
+
+    result = {
+        "action_taken": action_taken,
+        "blocker": summary.get("blocker"),
+        "cooldown_remaining_seconds": cooldown_remaining,
+        "current_task": summary.get("current_task"),
+        "dry_run": dry_run,
+        "health": health,
+        "message": sent_message,
+        "name": name,
+        "next_action": summary.get("next_action"),
+        "reason": reason,
+        "recommended_action": summary.get("recommended_action"),
+        "state": summary.get("state"),
+        "time": now_iso(),
+        "busy_wait_pattern": summary.get("busy_wait_pattern"),
+    }
+    append_event(name, "supervise", result)
+    return result
+
+
+def command_watch(args: argparse.Namespace) -> int:
+    cycle = 0
+    interrupt_followup = args.interrupt_followup or None
+    try:
+        while True:
+            cycle += 1
+            result = supervise_once(
+                args.name,
+                status_stale_seconds=args.status_stale_seconds,
+                terminal_stale_seconds=args.terminal_stale_seconds,
+                busy_wait_seconds=args.busy_wait_seconds,
+                refresh=args.refresh,
+                lines=args.lines,
+                cooldown_seconds=args.cooldown_seconds,
+                message=args.message,
+                dry_run=args.dry_run,
+                interrupt_busy_wait=args.interrupt_busy_wait,
+                interrupt_key=args.interrupt_key,
+                interrupt_followup=interrupt_followup,
+            )
+            result["cycle"] = cycle
+            print(json.dumps(result, sort_keys=True), flush=True)
+            if args.max_cycles is not None and cycle >= args.max_cycles:
+                break
+            time.sleep(args.interval)
+    except KeyboardInterrupt:
+        print(json.dumps({"event": "watch_interrupted", "name": args.name, "time": now_iso()}), flush=True)
+    return 0
+
+
+def command_events(args: argparse.Namespace) -> int:
+    require_worker(args.name)
+    events = read_events(args.name)
+    if args.type:
+        events = [event for event in events if event.get("type") == args.type]
+    if args.limit:
+        events = events[-args.limit :]
+    for event in events:
+        print(json.dumps(event, sort_keys=True))
+    return 0
+
+
+def command_interrupt(args: argparse.Namespace) -> int:
+    followup = None if args.no_followup else args.followup
+    result = interrupt_worker(args.name, key=args.key, followup=followup, dry_run=args.dry_run)
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0
+
+
+def command_classify(args: argparse.Namespace) -> int:
+    if args.text is not None:
+        output = args.text
+    elif args.file:
+        output = Path(args.file).read_text()
+    else:
+        output = sys.stdin.read()
+    startup, startup_reason = classify_startup_output(output)
+    busy_wait = classify_busy_wait(output, args.status_age_seconds, args.busy_wait_seconds)
+    result = {
+        "busy_wait": busy_wait,
+        "busy_wait_seconds": args.busy_wait_seconds,
+        "startup": startup,
+        "startup_reason": startup_reason,
+        "status_age_seconds": args.status_age_seconds,
+    }
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0
+
+
+def command_nudge(args: argparse.Namespace) -> int:
+    message = args.message
+    send_text(args.name, message)
+    append_event(args.name, "nudge", {"message": message})
+    print(f"sent nudge to {args.name}")
+    return 0
+
+
+def command_stop(args: argparse.Namespace) -> int:
+    require_worker(args.name)
+    if args.message and session_exists(args.name):
+        send_text(args.name, args.message)
+        append_event(args.name, "stop_message", {"message": args.message})
+    if session_exists(args.name):
+        run(["tmux", "kill-session", "-t", tmux_target(args.name)])
+        append_event(args.name, "stop", {"killed_session": True})
+        print(f"stopped {args.name}")
+    else:
+        append_event(args.name, "stop", {"killed_session": False})
+        print(f"{args.name} was not running")
+    return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="workerctl",
+        description="Control tmux-backed Codex worker sessions.",
+    )
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    create = subparsers.add_parser("create", help="Create and start a worker Codex tmux session.")
+    create.add_argument("name", help="Worker name, e.g. worker-a.")
+    create.add_argument("--cwd", default=str(INVOCATION_CWD), help="Working directory for the worker.")
+    create.add_argument("--task", help="Initial task text for the worker contract.")
+    create.add_argument("--reuse", action="store_true", help="Reuse an existing worker state directory.")
+    create.add_argument(
+        "--no-initial-prompt",
+        action="store_false",
+        dest="initial_prompt",
+        help="Start Codex but do not provide the worker contract as the initial prompt.",
+    )
+    create.add_argument(
+        "--no-send-contract",
+        action="store_false",
+        dest="initial_prompt",
+        help="Deprecated alias for --no-initial-prompt.",
+    )
+    create.add_argument(
+        "--accept-trust",
+        action="store_true",
+        help=dedent(
+            """\
+            Send Enter immediately after launch to accept Codex's workspace trust prompt.
+            Use only for directories you intentionally trust.
+            """
+        ),
+    )
+    create.add_argument("--wait-ready", action="store_true", help="Poll the worker terminal until startup is classified.")
+    create.add_argument(
+        "--wait-ready-timeout",
+        type=int,
+        default=DEFAULT_WAIT_READY_SECONDS,
+        help="Seconds to wait when --wait-ready is enabled.",
+    )
+    create.set_defaults(func=command_create, initial_prompt=True)
+
+    doctor = subparsers.add_parser("doctor", help="Check local dependencies and worker state.")
+    doctor.add_argument("--cwd", default=str(INVOCATION_CWD), help="Target worker cwd to check.")
+    doctor.set_defaults(func=command_doctor)
+
+    list_cmd = subparsers.add_parser("list", help="List known workers.")
+    list_cmd.add_argument("--json", action="store_true", help="Print known workers as JSON.")
+    list_cmd.set_defaults(func=command_list)
+
+    capture = subparsers.add_parser("capture", help="Capture recent worker terminal output.")
+    capture.add_argument("name")
+    capture.add_argument("--lines", type=int, default=DEFAULT_HISTORY_LINES)
+    capture.set_defaults(func=command_capture)
+
+    tail = subparsers.add_parser("tail", help="Capture and print the last N lines.")
+    tail.add_argument("name")
+    tail.add_argument("--lines", type=int, default=40)
+    tail.set_defaults(func=command_tail)
+
+    status = subparsers.add_parser("status", help="Print worker status as JSON.")
+    status.add_argument("name")
+    status.add_argument("--no-refresh", action="store_false", dest="refresh", help="Do not refresh terminal capture.")
+    status.add_argument("--lines", type=int, default=DEFAULT_HISTORY_LINES)
+    status.set_defaults(func=command_status, refresh=True)
+
+    idle_check = subparsers.add_parser("idle-check", help="Classify worker freshness and recommend an action.")
+    idle_check.add_argument("name")
+    idle_check.add_argument("--no-refresh", action="store_false", dest="refresh", help="Do not refresh terminal capture.")
+    idle_check.add_argument("--lines", type=int, default=DEFAULT_HISTORY_LINES)
+    idle_check.add_argument("--status-stale-seconds", type=int, default=DEFAULT_STATUS_STALE_SECONDS)
+    idle_check.add_argument("--terminal-stale-seconds", type=int, default=DEFAULT_TERMINAL_STALE_SECONDS)
+    idle_check.add_argument("--busy-wait-seconds", type=int, default=DEFAULT_BUSY_WAIT_SECONDS)
+    idle_check.set_defaults(func=command_idle_check, refresh=True)
+
+    supervise = subparsers.add_parser("supervise", help="Run one manager supervision cycle for a worker.")
+    supervise.add_argument("name")
+    supervise.add_argument("--no-refresh", action="store_false", dest="refresh", help="Do not refresh terminal capture.")
+    supervise.add_argument("--lines", type=int, default=DEFAULT_HISTORY_LINES)
+    supervise.add_argument("--status-stale-seconds", type=int, default=DEFAULT_STATUS_STALE_SECONDS)
+    supervise.add_argument("--terminal-stale-seconds", type=int, default=DEFAULT_TERMINAL_STALE_SECONDS)
+    supervise.add_argument("--busy-wait-seconds", type=int, default=DEFAULT_BUSY_WAIT_SECONDS)
+    supervise.add_argument("--cooldown-seconds", type=int, default=DEFAULT_SUPERVISE_COOLDOWN_SECONDS)
+    supervise.add_argument("--message", default=DEFAULT_STATUS_NUDGE, help="Status request sent when the worker is stale.")
+    supervise.add_argument("--dry-run", action="store_true", help="Report the supervision action without sending nudges.")
+    supervise.add_argument("--interrupt-busy-wait", action="store_true", help="Interrupt busy-wait states instead of only reporting them.")
+    supervise.add_argument("--interrupt-key", default="C-c", help="tmux key to send when interrupting a busy-wait state.")
+    supervise.add_argument(
+        "--interrupt-followup",
+        default=DEFAULT_INTERRUPT_FOLLOWUP,
+        help="Message to send after an interrupt. Use an empty string to skip.",
+    )
+    supervise.set_defaults(func=command_supervise, refresh=True)
+
+    watch = subparsers.add_parser("watch", help="Run supervise repeatedly until interrupted.")
+    watch.add_argument("name")
+    watch.add_argument("--interval", type=int, default=60, help="Seconds between supervision cycles.")
+    watch.add_argument("--max-cycles", type=int, help="Stop after this many cycles.")
+    watch.add_argument("--no-refresh", action="store_false", dest="refresh", help="Do not refresh terminal capture.")
+    watch.add_argument("--lines", type=int, default=DEFAULT_HISTORY_LINES)
+    watch.add_argument("--status-stale-seconds", type=int, default=DEFAULT_STATUS_STALE_SECONDS)
+    watch.add_argument("--terminal-stale-seconds", type=int, default=DEFAULT_TERMINAL_STALE_SECONDS)
+    watch.add_argument("--busy-wait-seconds", type=int, default=DEFAULT_BUSY_WAIT_SECONDS)
+    watch.add_argument("--cooldown-seconds", type=int, default=DEFAULT_SUPERVISE_COOLDOWN_SECONDS)
+    watch.add_argument("--message", default=DEFAULT_STATUS_NUDGE, help="Status request sent when the worker is stale.")
+    watch.add_argument("--dry-run", action="store_true", help="Report supervision actions without sending nudges.")
+    watch.add_argument("--interrupt-busy-wait", action="store_true", help="Interrupt busy-wait states instead of only reporting them.")
+    watch.add_argument("--interrupt-key", default="C-c", help="tmux key to send when interrupting a busy-wait state.")
+    watch.add_argument(
+        "--interrupt-followup",
+        default=DEFAULT_INTERRUPT_FOLLOWUP,
+        help="Message to send after an interrupt. Use an empty string to skip.",
+    )
+    watch.set_defaults(func=command_watch, refresh=True)
+
+    events = subparsers.add_parser("events", help="Print worker event log as JSON lines.")
+    events.add_argument("name")
+    events.add_argument("--limit", type=int, help="Print only the last N events.")
+    events.add_argument("--type", help="Print only events of this type.")
+    events.set_defaults(func=command_events)
+
+    classify = subparsers.add_parser("classify", help="Classify captured terminal text for startup and busy-wait states.")
+    classify.add_argument("--text", help="Terminal text to classify. Reads stdin when omitted.")
+    classify.add_argument("--file", help="Path to terminal text to classify.")
+    classify.add_argument("--status-age-seconds", type=int, default=DEFAULT_BUSY_WAIT_SECONDS)
+    classify.add_argument("--busy-wait-seconds", type=int, default=DEFAULT_BUSY_WAIT_SECONDS)
+    classify.set_defaults(func=command_classify)
+
+    interrupt = subparsers.add_parser("interrupt", help="Send an explicit interrupt key to a worker.")
+    interrupt.add_argument("name")
+    interrupt.add_argument("--key", default="C-c", help="tmux key to send, e.g. C-c or Escape.")
+    interrupt.add_argument("--followup", default=DEFAULT_INTERRUPT_FOLLOWUP, help="Message to send after interrupting.")
+    interrupt.add_argument("--no-followup", action="store_true", help="Do not send a follow-up message.")
+    interrupt.add_argument("--dry-run", action="store_true", help="Report without sending keys.")
+    interrupt.set_defaults(func=command_interrupt)
+
+    nudge = subparsers.add_parser("nudge", help="Send a message into the worker terminal.")
+    nudge.add_argument("name")
+    nudge.add_argument("message")
+    nudge.set_defaults(func=command_nudge)
+
+    stop = subparsers.add_parser("stop", help="Stop a worker tmux session.")
+    stop.add_argument("name")
+    stop.add_argument("--message", help="Optional final message to send before stopping.")
+    stop.set_defaults(func=command_stop)
+
+    return parser
+
+
+def main() -> int:
+    parser = build_parser()
+    args = parser.parse_args()
+    try:
+        return args.func(args)
+    except WorkerError as exc:
+        print(f"workerctl: {exc}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
