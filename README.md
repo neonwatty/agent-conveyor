@@ -106,6 +106,14 @@ For debugging classifier behavior directly:
 scripts/workerctl classify --text "Starting MCP servers (2/3)"
 ```
 
+## Tests
+
+Run the dependency-free test suite with:
+
+```bash
+python3 -m unittest discover -s tests -v
+```
+
 To have `create` classify the initial Codex screen, use `--wait-ready`:
 
 ```bash
