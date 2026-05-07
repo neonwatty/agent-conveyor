@@ -77,8 +77,8 @@ else
   echo "installed workerctl PATH in $PROFILE"
 fi
 
-PATH="$BIN_DIR:$PATH" workerctl doctor >/dev/null || {
-  echo "install-local: workerctl doctor failed after PATH update" >&2
+PATH="$BIN_DIR:$PATH" workerctl classify --text "workerctl install check" >/dev/null || {
+  echo "install-local: workerctl verification failed after PATH update" >&2
   exit 1
 }
 
