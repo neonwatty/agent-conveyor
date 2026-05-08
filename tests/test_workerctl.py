@@ -858,6 +858,95 @@ class CliTests(unittest.TestCase):
             lifecycle.current_session_name = original_current_session_name
             lifecycle.command_promote = original_command_promote
 
+    def test_manage_names_current_session_then_promotes(self):
+        original_current_session_name = lifecycle.current_session_name
+        original_command_name_session = commands.command_name_session
+        original_command_promote = lifecycle.command_promote
+        named = []
+        promoted = []
+        try:
+            lifecycle.current_session_name = lambda: "raw-worker-session"
+
+            def fake_name_session(args):
+                named.append(args)
+                return 0
+
+            def fake_promote(args):
+                promoted.append(args)
+                return 0
+
+            commands.command_name_session = fake_name_session
+            lifecycle.command_promote = fake_promote
+            args = argparse.Namespace(
+                budget_expires_at=None,
+                budget_hours=24,
+                codex_args=["--model", "gpt-5.4-mini"],
+                cwd=str(ROOT),
+                force_name=False,
+                goal="Spawn a manager from inside the worker.",
+                manager_instructions="Audit before nudging.",
+                max_nudges=2,
+                path=None,
+                session=None,
+                summary="Worker is ready.",
+                task="unit-managed-task",
+                worker="unit-managed-worker",
+                worker_task=None,
+            )
+
+            result = lifecycle.command_manage(args)
+
+            self.assertEqual(result, 0)
+            self.assertEqual(named[0].name, "unit-managed-worker")
+            self.assertEqual(named[0].session, "raw-worker-session")
+            self.assertEqual(named[0].task, "Worker is ready.")
+            self.assertEqual(promoted[0].worker, "unit-managed-worker")
+            self.assertEqual(promoted[0].task, "unit-managed-task")
+            self.assertEqual(promoted[0].codex_args, ["--model", "gpt-5.4-mini"])
+        finally:
+            lifecycle.current_session_name = original_current_session_name
+            commands.command_name_session = original_command_name_session
+            lifecycle.command_promote = original_command_promote
+
+    def test_manage_infers_worker_from_named_current_session(self):
+        original_current_session_name = lifecycle.current_session_name
+        original_command_name_session = commands.command_name_session
+        original_command_promote = lifecycle.command_promote
+        named = []
+        promoted = []
+        try:
+            lifecycle.current_session_name = lambda: "codex-unit-managed-worker"
+            commands.command_name_session = lambda args: named.append(args) or 0
+            lifecycle.command_promote = lambda args: promoted.append(args) or 0
+            args = argparse.Namespace(
+                budget_expires_at=None,
+                budget_hours=24,
+                codex_args=[],
+                cwd=str(ROOT),
+                force_name=False,
+                goal="Spawn a manager from inside the worker.",
+                manager_instructions=None,
+                max_nudges=3,
+                path=None,
+                session=None,
+                summary=None,
+                task="unit-managed-task",
+                worker=None,
+                worker_task="Continue managed work.",
+            )
+
+            result = lifecycle.command_manage(args)
+
+            self.assertEqual(result, 0)
+            self.assertEqual(named[0].name, "unit-managed-worker")
+            self.assertEqual(named[0].session, "codex-unit-managed-worker")
+            self.assertEqual(named[0].task, "Continue managed work.")
+            self.assertEqual(promoted[0].worker, "unit-managed-worker")
+        finally:
+            lifecycle.current_session_name = original_current_session_name
+            commands.command_name_session = original_command_name_session
+            lifecycle.command_promote = original_command_promote
+
     def test_import_compat_dry_run_does_not_mutate_database(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir) / "workers"
@@ -2503,6 +2592,7 @@ class CliTests(unittest.TestCase):
         self.assertIn("audit", proc.stdout)
         self.assertIn("commands", proc.stdout)
         self.assertIn("import-compat", proc.stdout)
+        self.assertIn("manage", proc.stdout)
         self.assertIn("name-session", proc.stdout)
         self.assertIn("pause-manager", proc.stdout)
         self.assertIn("prune", proc.stdout)

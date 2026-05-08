@@ -62,9 +62,9 @@ What it does:
 SQLite records durable intent and durable observed results. It does not make
 tmux or Terminal.app side effects atomic.
 
-`self-promote` can infer the worker from the current named tmux session, while
-`promote` keeps worker identity and task identity explicit for operator-driven
-flows.
+`manage` is the primary worker-facing path: from inside the worker session it
+can register/name the current tmux session and spawn a manager. `promote` keeps
+worker identity and task identity explicit for operator-driven flows.
 
 Everything after `--` is passed as CLI args to the manager's Codex process
 (e.g., `--full-auto`, `--model`, `--sandbox`).
@@ -115,13 +115,26 @@ with a content hash so repeated runs are idempotent and changed compatibility
 files can be imported as new observations. Existing SQLite worker state is
 preserved when a compatibility config is re-read.
 
+### `workerctl manage --worker <worker-name> --task <name> --goal <text>`
+
+Primary worker-facing command for an agent already running inside tmux. It
+infers the current tmux session, registers and renames it to the canonical
+`codex-<worker-name>` form when needed, then starts the durable promotion flow:
+task creation, worker binding, manager prompt generation, manager tmux session
+spawn, and command/event audit rows.
+
+If the current session is already named `codex-<worker-name>`, `--worker` can be
+omitted and `manage` will infer the worker name.
+
+Everything after `--` is passed as CLI args to the manager's Codex process.
+
 ### `workerctl name-session <worker-name>`
 
 Worker-facing command for an agent already running inside tmux. It infers the
 current tmux session, renames it to the canonical `codex-<worker-name>` form,
 writes the worker config/status/contract compatibility artifacts, and registers
-the worker in SQLite. This gives agents a simple path to declare "this session
-is a worker" before self-promotion or manager supervision.
+the worker in SQLite. This lower-level command is useful when registration
+should be separate from manager creation.
 
 ### `workerctl self-promote --task <name> --goal <text>`
 
@@ -129,8 +142,8 @@ Worker-facing command for an agent running inside a named worker session. It
 infers the worker from the current `codex-<worker-name>` tmux session and starts
 the same durable promotion flow as `workerctl promote`: task creation, worker
 binding, manager prompt generation, manager tmux session spawn, and command/event
-audit rows. If the session is not yet in canonical worker form, the agent should
-run `name-session` first.
+audit rows. `manage` is the preferred agent-facing command when the current
+session may not already be registered.
 
 ### `workerctl audit <name>`
 
@@ -799,6 +812,9 @@ intent/result records, and recovery/audit views.
 ### Phase 3: Promote Flow
 
 - `start-work`: create tmux Codex session, register as candidate.
+- `manage --worker <worker-name> --task <task-name>`: from inside a worker
+  session, register/name the current tmux session if needed and then spawn the
+  manager.
 - `promote <worker-name> --task <task-name>`: bind worker, generate manager
   prompt with state machine, request manager spawn, create manager tmux session,
   open terminal, and record every phase as intent/result.
@@ -843,8 +859,10 @@ Implemented in the current SQLite milestone:
   blocked by live managers or unfinished durable commands.
 - First-run compatibility import via `import-compat`, dry-run by default and
   idempotent through `data_migrations`.
-- Worker-facing `name-session` command to register an already-running tmux
-  session as a managed worker.
+- Worker-facing `manage` command to register an already-running tmux session as
+  a worker and spawn a manager in one step.
+- Lower-level `name-session` command to register an already-running tmux session
+  as a managed worker.
 - Worker-facing `self-promote` command so an agent can start manager supervision
   from inside its own named session.
 - Warning-grade manager heartbeat checks in `db-doctor --live`, plus

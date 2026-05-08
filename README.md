@@ -145,20 +145,22 @@ workerctl promote worker-a \
   -- --model gpt-5.4-mini
 ```
 
-An agent already running inside a tmux session can name that current session as
-a worker, which renames the tmux session to `codex-<name>` and records the
-worker identity in SQLite:
+An agent already running inside a tmux session can turn itself into a managed
+worker with one command. If the current tmux session is not already named
+`codex-<worker>`, pass `--worker` and `manage` will register and rename it
+before spawning the manager session:
 
 ```bash
-workerctl name-session worker-a \
-  --task "Continue the current work under workerctl supervision."
-
-workerctl self-promote \
+workerctl manage \
+  --worker worker-a \
   --task auth-refactor \
   --goal "Finish the auth refactor" \
   --summary "Worker is ready for manager supervision" \
   -- --model gpt-5.4-mini
 ```
+
+`name-session` and `self-promote` remain available as lower-level commands when
+you intentionally want to separate registration from manager creation.
 
 Inspect and operate the task through task-scoped commands:
 

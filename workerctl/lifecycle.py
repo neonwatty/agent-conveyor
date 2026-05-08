@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
+import io
 import json
 import re
 import uuid
@@ -9,8 +11,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from workerctl.core import WorkerError, age_seconds, ensure_tool, now_iso, run, sh_quote
 from workerctl.constants import PROJECT_ROOT
+from workerctl.core import WorkerError, age_seconds, ensure_tool, now_iso, run, sh_quote
 from workerctl.db import active_manager
 from workerctl.db import attach_manager_to_binding
 from workerctl.db import bind_task_worker
@@ -344,6 +346,45 @@ def command_self_promote(args: argparse.Namespace) -> int:
         if not session.startswith(prefix):
             raise WorkerError("Current tmux session is not named as a worker. Run `workerctl name-session <name>` first.")
         worker = session[len(prefix) :]
+    promote_args = argparse.Namespace(
+        budget_expires_at=args.budget_expires_at,
+        budget_hours=args.budget_hours,
+        codex_args=args.codex_args,
+        goal=args.goal,
+        manager_instructions=args.manager_instructions,
+        max_nudges=args.max_nudges,
+        path=args.path,
+        summary=args.summary,
+        task=args.task,
+        worker=worker,
+    )
+    return command_promote(promote_args)
+
+
+def command_manage(args: argparse.Namespace) -> int:
+    from workerctl.commands import command_name_session
+
+    session = getattr(args, "session", None) or current_session_name()
+    worker = getattr(args, "worker", None)
+    if not session:
+        raise WorkerError("Cannot infer current tmux session. Run inside tmux or pass --session.")
+    if not worker:
+        prefix = "codex-"
+        if not session.startswith(prefix):
+            raise WorkerError("Current session is not named as a worker. Pass --worker to register it, or run `workerctl name-session <name>` first.")
+        worker = session[len(prefix) :]
+
+    name_args = argparse.Namespace(
+        cwd=args.cwd,
+        force=args.force_name,
+        name=worker,
+        path=args.path,
+        session=session,
+        task=args.worker_task or args.summary or args.goal,
+    )
+    with contextlib.redirect_stdout(io.StringIO()):
+        command_name_session(name_args)
+
     promote_args = argparse.Namespace(
         budget_expires_at=args.budget_expires_at,
         budget_hours=args.budget_hours,

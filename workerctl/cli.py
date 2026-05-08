@@ -53,6 +53,7 @@ from workerctl.export import command_export_task
 from workerctl.importer import command_import_compat
 from workerctl.lifecycle import (
     command_close_stale,
+    command_manage,
     command_pause_manager,
     command_promote,
     command_reconcile,
@@ -230,6 +231,22 @@ def build_parser() -> argparse.ArgumentParser:
     bind_task.add_argument("--worker", required=True, help="Worker name or ID.")
     bind_task.add_argument("--path", help="Override the workerctl database path.")
     bind_task.set_defaults(func=command_bind_task)
+
+    manage = subparsers.add_parser("manage", help="From inside a worker session, register it if needed and spawn a manager.")
+    manage.add_argument("--worker", help="Worker name to assign to the current tmux session when needed.")
+    manage.add_argument("--task", required=True, help="Task name to create or resume.")
+    manage.add_argument("--goal", required=True, help="Task goal.")
+    manage.add_argument("--summary", help="Optional current task summary.")
+    manage.add_argument("--manager-instructions", help="Additional manager instructions.")
+    manage.add_argument("--max-nudges", type=int, default=3, help="Nudge budget for the manager.")
+    manage.add_argument("--budget-hours", type=int, default=24, help="Hours until the default nudge budget expires.")
+    manage.add_argument("--budget-expires-at", help="Explicit ISO timestamp for nudge budget expiry.")
+    manage.add_argument("--cwd", default=str(INVOCATION_CWD), help="Working directory for the worker record.")
+    manage.add_argument("--worker-task", help="Task text for the worker status contract when registering this session.")
+    manage.add_argument("--session", help="Explicit tmux session to manage; defaults to the current tmux session.")
+    manage.add_argument("--force-name", action="store_true", help="Replace an existing worker config when registering this session.")
+    manage.add_argument("--path", help="Override the workerctl database path.")
+    manage.set_defaults(func=command_manage)
 
     promote = subparsers.add_parser("promote", help="Promote an existing worker into a managed task.")
     promote.add_argument("worker", help="Existing worker name.")
@@ -495,7 +512,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     parser = build_parser()
     args, unknown = parser.parse_known_args()
-    if unknown and args.command not in {"promote", "resume-manager", "self-promote"}:
+    if unknown and args.command not in {"promote", "resume-manager", "self-promote", "manage"}:
         parser.error(f"unrecognized arguments: {' '.join(unknown)}")
     args.codex_args = unknown
     try:
