@@ -122,6 +122,84 @@ scripts/workerctl nudge worker-a "Please summarize current progress and next act
 scripts/workerctl stop worker-a
 ```
 
+## SQLite Worker-Manager Lifecycle
+
+`workerctl` now uses `.codex-workers/workerctl.db` as the authoritative
+control-plane store for tasks, workers, managers, bindings, status contracts,
+prompts, transcript captures, command intents/results, and audit events. The
+JSON files under `.codex-workers/<worker>/` remain compatibility artifacts.
+
+Create a worker, then promote it into a managed task:
+
+```bash
+scripts/workerctl create worker-a \
+  --cwd "$PWD" \
+  --task "Work on the assigned task and report status with workerctl." \
+  --no-initial-prompt
+
+scripts/workerctl promote worker-a \
+  --task auth-refactor \
+  --goal "Finish the auth refactor" \
+  --summary "Worker is ready for supervision" \
+  --max-nudges 3 \
+  -- --model gpt-5.4-mini
+```
+
+Inspect and operate the task through task-scoped commands:
+
+```bash
+scripts/workerctl task-status auth-refactor --json
+scripts/workerctl task-capture auth-refactor --lines 120 --json
+scripts/workerctl task-idle-check auth-refactor
+scripts/workerctl task-nudge auth-refactor "Please update status and state your next action."
+scripts/workerctl task-interrupt auth-refactor
+scripts/workerctl audit auth-refactor --json
+scripts/workerctl commands --task auth-refactor --json
+scripts/workerctl commands --task auth-refactor --type task_nudge --state failed --json
+scripts/workerctl task-events auth-refactor --json
+```
+
+Pause, resume, reconcile, recover, export, and close the task:
+
+```bash
+scripts/workerctl pause-manager auth-refactor
+scripts/workerctl resume-manager auth-refactor -- --model gpt-5.4-mini
+scripts/workerctl reconcile auth-refactor
+scripts/workerctl recover auth-refactor
+scripts/workerctl recover auth-refactor --sync-pane-ids
+scripts/workerctl export-task auth-refactor --zip
+scripts/workerctl stop-task auth-refactor --stop-worker
+```
+
+`task-nudge` reserves SQLite budget before sending. Mutating task commands write
+durable command intent/result rows, and `audit` shows the resulting timeline.
+Use `commands` to inspect durable side-effect command rows directly, including
+filtered views by task, type, state, worker ID, or manager ID. Use `task-events`
+for a task-scoped event stream when reconstructing what happened.
+Before task-scoped text, interrupt, or kill side effects, workerctl verifies the
+recorded worker/manager identity, tmux session, and pane ID for the active
+binding.
+When a live session is intentionally reused and `reconcile` reports a pane
+mismatch, `recover --sync-pane-ids` records the repair and updates SQLite to the
+current live pane IDs.
+
+Transcript capture content can be pruned while retaining metadata:
+
+```bash
+scripts/workerctl prune --keep-latest 20 --dry-run
+scripts/workerctl prune --keep-latest 20
+```
+
+Run the optional live lifecycle smoke test when `tmux`, `codex`, and `rg` are
+available:
+
+```bash
+scripts/live-smoke
+```
+
+The smoke script creates unique `codex-smoke-*` sessions and cleans them up on
+exit.
+
 `start-test` is the easiest manual startup check. It creates a low-risk worker,
 asks it to update only its ignored `.codex-workers/<name>/status.json`, waits for
 that status update, and leaves the tmux session running so you can attach:
