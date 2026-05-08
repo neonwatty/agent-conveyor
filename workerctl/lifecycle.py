@@ -162,12 +162,12 @@ def git_snapshot(cwd: str | None) -> dict[str, Any]:
 
 
 def command_promote(args: argparse.Namespace) -> int:
+    config = require_worker(args.worker)
     ensure_tool("tmux")
     ensure_tool("codex")
     if args.max_nudges < 0:
         raise WorkerError("--max-nudges must be >= 0")
 
-    config = require_worker(args.worker)
     if not session_exists(args.worker):
         raise WorkerError(f"Worker tmux session is not running: {tmux_target(args.worker)}")
 

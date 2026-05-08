@@ -858,7 +858,9 @@ class CliTests(unittest.TestCase):
             original_current_session_name = commands.current_session_name
             original_current_pane_id = commands.current_pane_id
             original_run = commands.run
+            original_ensure_tool = commands.ensure_tool
             try:
+                commands.ensure_tool = lambda tool: tool
                 commands.current_session_name = lambda: "raw-session"
                 commands.current_pane_id = lambda target: "%7"
 
@@ -905,13 +907,16 @@ class CliTests(unittest.TestCase):
                 commands.current_session_name = original_current_session_name
                 commands.current_pane_id = original_current_pane_id
                 commands.run = original_run
+                commands.ensure_tool = original_ensure_tool
                 if worker_path.exists():
                     shutil.rmtree(worker_path)
 
     def test_start_launches_normal_codex_tmux_session(self):
         launched = []
         original_run = commands.run
+        original_ensure_tool = commands.ensure_tool
         try:
+            commands.ensure_tool = lambda tool: tool
             def fake_run(argv, **kwargs):
                 if argv[:3] == ["tmux", "has-session", "-t"]:
                     return subprocess.CompletedProcess(argv, 1, "", "")
@@ -940,10 +945,13 @@ class CliTests(unittest.TestCase):
             self.assertIn("/bin':$PATH", launched[0][5])
         finally:
             commands.run = original_run
+            commands.ensure_tool = original_ensure_tool
 
     def test_start_refuses_existing_tmux_session(self):
         original_run = commands.run
+        original_ensure_tool = commands.ensure_tool
         try:
+            commands.ensure_tool = lambda tool: tool
             commands.run = lambda argv, **kwargs: subprocess.CompletedProcess(argv, 0, "", "")
             args = argparse.Namespace(codex_args=[], cwd=str(ROOT), session="qa-raw")
 
@@ -951,6 +959,7 @@ class CliTests(unittest.TestCase):
                 commands.command_start(args)
         finally:
             commands.run = original_run
+            commands.ensure_tool = original_ensure_tool
 
     def test_name_session_denies_existing_worker_name_from_different_session(self):
         name = "unit-claimed-worker"
@@ -970,7 +979,9 @@ class CliTests(unittest.TestCase):
                 )
                 conn.commit()
             original_current_session_name = commands.current_session_name
+            original_ensure_tool = commands.ensure_tool
             try:
+                commands.ensure_tool = lambda tool: tool
                 commands.current_session_name = lambda: "raw-session"
                 args = argparse.Namespace(
                     cwd=str(ROOT),
@@ -985,6 +996,7 @@ class CliTests(unittest.TestCase):
                     commands.command_name_session(args)
             finally:
                 commands.current_session_name = original_current_session_name
+                commands.ensure_tool = original_ensure_tool
                 if worker_path.exists():
                     shutil.rmtree(worker_path)
 
@@ -1008,7 +1020,9 @@ class CliTests(unittest.TestCase):
             original_current_session_name = commands.current_session_name
             original_current_pane_id = commands.current_pane_id
             original_run = commands.run
+            original_ensure_tool = commands.ensure_tool
             try:
+                commands.ensure_tool = lambda tool: tool
                 commands.current_session_name = lambda: "raw-session"
                 commands.current_pane_id = lambda target: "%8"
                 commands.run = lambda argv, **kwargs: subprocess.CompletedProcess(argv, 0, "", "")
@@ -1043,6 +1057,7 @@ class CliTests(unittest.TestCase):
                 commands.current_session_name = original_current_session_name
                 commands.current_pane_id = original_current_pane_id
                 commands.run = original_run
+                commands.ensure_tool = original_ensure_tool
                 if worker_path.exists():
                     shutil.rmtree(worker_path)
 
@@ -3027,6 +3042,7 @@ class CliTests(unittest.TestCase):
                 {
                     "cwd": str(ROOT),
                     "name": name,
+                    "tmux_pane_id": "%1",
                     "tmux_session": f"codex-{name}",
                 }
             )
