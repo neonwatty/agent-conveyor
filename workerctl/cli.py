@@ -31,6 +31,7 @@ from workerctl.commands import (
     command_events,
     command_interrupt,
     command_list,
+    command_name_session,
     command_nudge,
     command_open,
     command_prune,
@@ -57,6 +58,7 @@ from workerctl.lifecycle import (
     command_reconcile,
     command_recover,
     command_resume_manager,
+    command_self_promote,
     command_stop_task,
 )
 from workerctl.supervise import command_idle_check, command_supervise, command_watch
@@ -123,6 +125,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     create.add_argument("--stop-after", action="store_true", help="Stop the worker after verification.")
     create.set_defaults(func=command_create, initial_prompt=True)
+
+    name_session = subparsers.add_parser(
+        "name-session",
+        help="Name the current tmux session as a worker and register it in SQLite.",
+    )
+    name_session.add_argument("name", help="Worker name to assign to the current tmux session.")
+    name_session.add_argument("--cwd", default=str(INVOCATION_CWD), help="Working directory for the worker.")
+    name_session.add_argument("--task", help="Optional task text for the generated worker contract/status.")
+    name_session.add_argument("--session", help="Explicit tmux session to name; defaults to the current tmux session.")
+    name_session.add_argument("--force", action="store_true", help="Replace an existing worker config for this name.")
+    name_session.add_argument("--path", help="Override the workerctl database path.")
+    name_session.set_defaults(func=command_name_session)
 
     start_test = subparsers.add_parser("start-test", help="Create a low-risk worker, verify it, and leave it running.")
     start_test.add_argument("name", nargs="?", default="live-test", help="Worker name.")
@@ -228,6 +242,19 @@ def build_parser() -> argparse.ArgumentParser:
     promote.add_argument("--budget-expires-at", help="Explicit ISO timestamp for nudge budget expiry.")
     promote.add_argument("--path", help="Override the workerctl database path.")
     promote.set_defaults(func=command_promote)
+
+    self_promote = subparsers.add_parser("self-promote", help="Promote the current named worker session into a managed task.")
+    self_promote.add_argument("--task", required=True, help="Task name to create or resume.")
+    self_promote.add_argument("--goal", required=True, help="Task goal.")
+    self_promote.add_argument("--summary", help="Optional current task summary.")
+    self_promote.add_argument("--manager-instructions", help="Additional manager instructions.")
+    self_promote.add_argument("--max-nudges", type=int, default=3, help="Nudge budget for the manager.")
+    self_promote.add_argument("--budget-hours", type=int, default=24, help="Hours until the default nudge budget expires.")
+    self_promote.add_argument("--budget-expires-at", help="Explicit ISO timestamp for nudge budget expiry.")
+    self_promote.add_argument("--worker", help="Override current-session worker inference.")
+    self_promote.add_argument("--session", help="Explicit tmux session to infer worker name from.")
+    self_promote.add_argument("--path", help="Override the workerctl database path.")
+    self_promote.set_defaults(func=command_self_promote)
 
     pause_manager = subparsers.add_parser("pause-manager", help="Stop a task manager while leaving the worker running.")
     pause_manager.add_argument("task", help="Task name or ID.")
@@ -468,7 +495,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     parser = build_parser()
     args, unknown = parser.parse_known_args()
-    if unknown and args.command not in {"promote", "resume-manager"}:
+    if unknown and args.command not in {"promote", "resume-manager", "self-promote"}:
         parser.error(f"unrecognized arguments: {' '.join(unknown)}")
     args.codex_args = unknown
     try:

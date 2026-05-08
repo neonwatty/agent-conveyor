@@ -145,6 +145,21 @@ scripts/workerctl promote worker-a \
   -- --model gpt-5.4-mini
 ```
 
+An agent already running inside a tmux session can name that current session as
+a worker, which renames the tmux session to `codex-<name>` and records the
+worker identity in SQLite:
+
+```bash
+scripts/workerctl name-session worker-a \
+  --task "Continue the current work under workerctl supervision."
+
+scripts/workerctl self-promote \
+  --task auth-refactor \
+  --goal "Finish the auth refactor" \
+  --summary "Worker is ready for manager supervision" \
+  -- --model gpt-5.4-mini
+```
+
 Inspect and operate the task through task-scoped commands:
 
 ```bash

@@ -47,6 +47,14 @@ def current_pane_id(target: str) -> str | None:
     return None
 
 
+def current_session_name() -> str | None:
+    proc = run(["tmux", "display-message", "-p", "#S"], check=False)
+    if proc.returncode != 0:
+        return None
+    session = proc.stdout.strip()
+    return session or None
+
+
 def capture_tmux_target(target: str, history_lines: int = DEFAULT_HISTORY_LINES) -> str:
     proc = run(["tmux", "capture-pane", "-p", "-S", f"-{history_lines}", "-t", target])
     return proc.stdout.rstrip("\n")

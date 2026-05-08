@@ -44,6 +44,7 @@ from workerctl.state import transcript_path
 from workerctl.state import write_json
 from workerctl.tmux import send_text
 from workerctl.tmux import session_exists
+from workerctl.tmux import current_session_name
 from workerctl.tmux import tmux_session
 from workerctl.tmux import tmux_target
 
@@ -326,6 +327,31 @@ def command_promote(args: argparse.Namespace) -> int:
         raise
     print(json.dumps(result_payload, indent=2, sort_keys=True))
     return 0
+
+
+def command_self_promote(args: argparse.Namespace) -> int:
+    worker = getattr(args, "worker", None)
+    session = getattr(args, "session", None) or current_session_name()
+    if not worker:
+        if not session:
+            raise WorkerError("Cannot infer current tmux session. Run inside tmux or pass --worker.")
+        prefix = "codex-"
+        if not session.startswith(prefix):
+            raise WorkerError("Current tmux session is not named as a worker. Run `workerctl name-session <name>` first.")
+        worker = session[len(prefix) :]
+    promote_args = argparse.Namespace(
+        budget_expires_at=args.budget_expires_at,
+        budget_hours=args.budget_hours,
+        codex_args=args.codex_args,
+        goal=args.goal,
+        manager_instructions=args.manager_instructions,
+        max_nudges=args.max_nudges,
+        path=args.path,
+        summary=args.summary,
+        task=args.task,
+        worker=worker,
+    )
+    return command_promote(promote_args)
 
 
 def command_pause_manager(args: argparse.Namespace) -> int:

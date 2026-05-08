@@ -50,6 +50,7 @@ from workerctl.supervise import command_idle_check, command_supervise, command_w
 from workerctl.lifecycle import manager_liveness_warnings, reconcile_rows
 from workerctl.tmux import (
     capture_output,
+    current_session_name,
     current_pane_id,
     interrupt_worker,
     send_text,
@@ -340,6 +341,113 @@ def command_create(args: argparse.Namespace) -> int:
             append_event(name, "stop", {"killed_session": True, "reason": "stop_after"})
             print("")
             print(f"stopped {name} (--stop-after)")
+    return 0
+
+
+def command_name_session(args: argparse.Namespace) -> int:
+    ensure_tool("tmux")
+    name = args.name
+    validate_name(name)
+    db_path = Path(args.path).expanduser().resolve() if args.path else None
+    directory = Path(args.cwd).expanduser().resolve()
+    if not directory.exists() or not directory.is_dir():
+        raise WorkerError(f"Worker cwd does not exist or is not a directory: {directory}")
+
+    source_session = args.session or current_session_name()
+    if not source_session:
+        raise WorkerError("Cannot infer current tmux session. Run inside tmux or pass --session.")
+    desired_session = tmux_session(name)
+    existing_config = load_json(config_path(name), {}) if config_path(name).exists() else {}
+    if existing_config and existing_config.get("tmux_session") not in {None, desired_session} and not args.force:
+        raise WorkerError(f"Worker {name} already refers to {existing_config.get('tmux_session')}; rerun with --force to replace it.")
+
+    with connect_db(db_path) as conn:
+        initialize_database(conn)
+        existing_worker = conn.execute(
+            "select identity_token from workers where name = ?",
+            (name,),
+        ).fetchone()
+    identity_token = existing_config.get("identity_token") or (
+        existing_worker["identity_token"] if existing_worker else f"workerctl-{uuid.uuid4()}"
+    )
+
+    if source_session != desired_session:
+        if session_exists(name):
+            raise WorkerError(f"tmux session already exists for worker {name}: {desired_session}")
+        run(["tmux", "rename-session", "-t", source_session, desired_session])
+
+    worker_dir(name).mkdir(parents=True, exist_ok=True)
+    timestamp = now_iso()
+    status = load_json(status_path(name), None)
+    if status is None:
+        status = initial_status(name, args.task or "Named current tmux session as worker.")
+        status["last_update"] = timestamp
+        write_json(status_path(name), status)
+    transcript_path(name).touch()
+    config = {
+        **existing_config,
+        "created_at": existing_config.get("created_at") or timestamp,
+        "cwd": str(directory),
+        "identity_token": identity_token,
+        "name": name,
+        "state_dir": str(worker_dir(name)),
+        "tmux_pane_id": current_pane_id(desired_session),
+        "tmux_session": desired_session,
+        "tmux_target": desired_session,
+    }
+    config["named_at"] = timestamp
+    write_json(config_path(name), config)
+    contract_path = write_worker_contract(name, args.task, identity_token)
+
+    with connect_db(db_path) as conn:
+        initialize_database(conn)
+        worker_id = upsert_worker(
+            conn,
+            name=name,
+            cwd=str(directory),
+            tmux_session=desired_session,
+            identity_token=identity_token,
+            tmux_pane_id=config.get("tmux_pane_id"),
+            state="active",
+            timestamp=timestamp,
+        )
+        insert_db_status(conn, worker_id=worker_id, status=status, timestamp=status.get("last_update"))
+        insert_db_event(
+            conn,
+            "worker_session_named",
+            actor="workerctl",
+            worker_id=worker_id,
+            payload={
+                "contract_path": str(contract_path),
+                "cwd": str(directory),
+                "source_session": source_session,
+                "tmux_pane_id": config.get("tmux_pane_id"),
+                "tmux_session": desired_session,
+                "worker": name,
+            },
+        )
+        conn.commit()
+    append_event(
+        name,
+        "session_named",
+        {
+            "contract_path": str(contract_path),
+            "cwd": str(directory),
+            "source_session": source_session,
+            "tmux_pane_id": config.get("tmux_pane_id"),
+            "tmux_session": desired_session,
+        },
+    )
+    result = {
+        "contract_path": str(contract_path),
+        "name": name,
+        "renamed": source_session != desired_session,
+        "source_session": source_session,
+        "state_dir": str(worker_dir(name)),
+        "tmux_pane_id": config.get("tmux_pane_id"),
+        "tmux_session": desired_session,
+    }
+    print(json.dumps(result, indent=2, sort_keys=True))
     return 0
 
 

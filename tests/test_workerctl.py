@@ -763,6 +763,101 @@ class CliTests(unittest.TestCase):
         self.assertIn("--live", proc.stdout)
         self.assertIn("--manager-stale-seconds", proc.stdout)
 
+    def test_name_session_registers_current_tmux_session_as_worker(self):
+        name = "unit-self-worker"
+        worker_path = worker_dir(name)
+        if worker_path.exists():
+            shutil.rmtree(worker_path)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            renamed = []
+            original_current_session_name = commands.current_session_name
+            original_current_pane_id = commands.current_pane_id
+            original_run = commands.run
+            try:
+                commands.current_session_name = lambda: "raw-session"
+                commands.current_pane_id = lambda target: "%7"
+
+                def fake_run(argv, **kwargs):
+                    if argv[:2] == ["tmux", "rename-session"]:
+                        renamed.append(argv)
+                    return subprocess.CompletedProcess(argv, 0, "", "")
+
+                commands.run = fake_run
+                args = argparse.Namespace(
+                    cwd=str(ROOT),
+                    force=False,
+                    name=name,
+                    path=str(db_path),
+                    session=None,
+                    task="Self-register for manager supervision.",
+                )
+
+                with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                    result = commands.command_name_session(args)
+
+                payload = json.loads(stdout.getvalue())
+                self.assertEqual(result, 0)
+                self.assertEqual(payload["name"], name)
+                self.assertTrue(payload["renamed"])
+                self.assertEqual(payload["tmux_session"], "codex-unit-self-worker")
+                self.assertEqual(renamed, [["tmux", "rename-session", "-t", "raw-session", "codex-unit-self-worker"]])
+                config = json.loads(config_path(name).read_text())
+                self.assertEqual(config["tmux_session"], "codex-unit-self-worker")
+                self.assertEqual(config["tmux_pane_id"], "%7")
+                self.assertIn(config["identity_token"], (worker_path / "contract.txt").read_text())
+                with worker_db.connect(db_path) as conn:
+                    worker_db.initialize_database(conn)
+                    worker = conn.execute("select * from workers where name = ?", (name,)).fetchone()
+                    event = conn.execute("select * from events where worker_id = ? and type = 'worker_session_named'", (name,)).fetchone()
+                    status = conn.execute("select * from statuses where worker_id = ?", (name,)).fetchone()
+                self.assertEqual(worker["state"], "active")
+                self.assertEqual(worker["tmux_session"], "codex-unit-self-worker")
+                self.assertEqual(event["type"], "worker_session_named")
+                self.assertEqual(status["current_task"], "Self-register for manager supervision.")
+            finally:
+                commands.current_session_name = original_current_session_name
+                commands.current_pane_id = original_current_pane_id
+                commands.run = original_run
+                if worker_path.exists():
+                    shutil.rmtree(worker_path)
+
+    def test_self_promote_infers_worker_from_current_named_session(self):
+        original_current_session_name = lifecycle.current_session_name
+        original_command_promote = lifecycle.command_promote
+        captured = []
+        try:
+            lifecycle.current_session_name = lambda: "codex-unit-self-worker"
+
+            def fake_promote(args):
+                captured.append(args)
+                return 0
+
+            lifecycle.command_promote = fake_promote
+            args = argparse.Namespace(
+                budget_expires_at=None,
+                budget_hours=24,
+                codex_args=["--model", "gpt-5.4-mini"],
+                goal="Let a worker create its own manager.",
+                manager_instructions=None,
+                max_nudges=2,
+                path=None,
+                session=None,
+                summary="Self promotion test",
+                task="unit-self-task",
+                worker=None,
+            )
+
+            result = lifecycle.command_self_promote(args)
+
+            self.assertEqual(result, 0)
+            self.assertEqual(captured[0].worker, "unit-self-worker")
+            self.assertEqual(captured[0].task, "unit-self-task")
+            self.assertEqual(captured[0].codex_args, ["--model", "gpt-5.4-mini"])
+        finally:
+            lifecycle.current_session_name = original_current_session_name
+            lifecycle.command_promote = original_command_promote
+
     def test_import_compat_dry_run_does_not_mutate_database(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir) / "workers"
@@ -2408,12 +2503,14 @@ class CliTests(unittest.TestCase):
         self.assertIn("audit", proc.stdout)
         self.assertIn("commands", proc.stdout)
         self.assertIn("import-compat", proc.stdout)
+        self.assertIn("name-session", proc.stdout)
         self.assertIn("pause-manager", proc.stdout)
         self.assertIn("prune", proc.stdout)
         self.assertIn("promote", proc.stdout)
         self.assertIn("recover", proc.stdout)
         self.assertIn("reconcile", proc.stdout)
         self.assertIn("resume-manager", proc.stdout)
+        self.assertIn("self-promote", proc.stdout)
         self.assertIn("stop-task", proc.stdout)
         self.assertIn("close-stale", proc.stdout)
         self.assertIn("export-task", proc.stdout)
