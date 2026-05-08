@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from workerctl.core import WorkerError, age_seconds, ensure_tool, now_iso, run, sh_quote
+from workerctl.constants import PROJECT_ROOT
 from workerctl.db import active_manager
 from workerctl.db import attach_manager_to_binding
 from workerctl.db import bind_task_worker
@@ -65,6 +66,10 @@ def manager_record_name(task_name: str) -> str:
     return f"manager-{safe_slug(task_name)[:40]}-{uuid.uuid4().hex[:8]}"
 
 
+def cli_path_prefix() -> str:
+    return f"PATH={sh_quote(str(PROJECT_ROOT / 'bin'))}:$PATH"
+
+
 def manager_session_exists(session_name: str) -> bool:
     proc = run(["tmux", "has-session", "-t", session_name], check=False)
     return proc.returncode == 0
@@ -111,12 +116,12 @@ def build_manager_prompt(
             instructions,
             "",
             "Required control commands:",
-            f"- scripts/workerctl task-status {task_name} --json",
-            f"- scripts/workerctl task-capture {task_name} --lines 120 --json",
-            f"- scripts/workerctl task-idle-check {task_name}",
-            f"- scripts/workerctl task-nudge {task_name} \"<message>\"",
-            f"- scripts/workerctl task-interrupt {task_name}",
-            f"- scripts/workerctl audit {task_name} --json",
+            f"- workerctl task-status {task_name} --json",
+            f"- workerctl task-capture {task_name} --lines 120 --json",
+            f"- workerctl task-idle-check {task_name}",
+            f"- workerctl task-nudge {task_name} \"<message>\"",
+            f"- workerctl task-interrupt {task_name}",
+            f"- workerctl audit {task_name} --json",
             "",
             "Rules:",
             "- Use only task-scoped workerctl commands for worker communication.",
@@ -283,7 +288,7 @@ def command_promote(args: argparse.Namespace) -> int:
             initialize_database(conn)
             mark_command_attempted(conn, command_id=command_id)
             conn.commit()
-        shell_command = f"codex --no-alt-screen {' '.join(sh_quote(arg) for arg in codex_args)} \"$(cat {sh_quote(str(prompt_path))})\""
+        shell_command = f"{cli_path_prefix()} codex --no-alt-screen {' '.join(sh_quote(arg) for arg in codex_args)} \"$(cat {sh_quote(str(prompt_path))})\""
         run(["tmux", "new-session", "-d", "-s", manager_session, shell_command])
         manager_pane_id = identity.session_snapshot(manager_session)["pane_id"]
         worker_pane_id = identity.session_snapshot(config.get("tmux_session", tmux_session(args.worker)))["pane_id"]
@@ -502,7 +507,7 @@ def command_resume_manager(args: argparse.Namespace) -> int:
             initialize_database(conn)
             mark_command_attempted(conn, command_id=command_id)
             conn.commit()
-        shell_command = f"codex --no-alt-screen {' '.join(sh_quote(arg) for arg in codex_args)} \"$(cat {sh_quote(str(prompt_path))})\""
+        shell_command = f"{cli_path_prefix()} codex --no-alt-screen {' '.join(sh_quote(arg) for arg in codex_args)} \"$(cat {sh_quote(str(prompt_path))})\""
         run(["tmux", "new-session", "-d", "-s", manager_session, shell_command])
         manager_pane_id = identity.session_snapshot(manager_session)["pane_id"]
         result["manager_pane_id"] = manager_pane_id

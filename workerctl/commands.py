@@ -66,7 +66,11 @@ def attach_command(name: str) -> str:
 
 
 def stop_command(name: str) -> str:
-    return f"scripts/workerctl stop {name}"
+    return f"workerctl stop {name}"
+
+
+def cli_path_prefix() -> str:
+    return f"PATH={sh_quote(str(PROJECT_ROOT / 'bin'))}:$PATH"
 
 
 def print_worker_commands(name: str) -> None:
@@ -252,11 +256,11 @@ def command_create(args: argparse.Namespace) -> int:
     contract_path = write_worker_contract(name, args.task, identity_token)
     if args.initial_prompt:
         shell_command = (
-            f"codex --cd {sh_quote(str(directory))} --no-alt-screen "
+            f"{cli_path_prefix()} codex --cd {sh_quote(str(directory))} --no-alt-screen "
             f"\"$(cat {sh_quote(str(contract_path))})\""
         )
     else:
-        shell_command = f"codex --cd {sh_quote(str(directory))} --no-alt-screen"
+        shell_command = f"{cli_path_prefix()} codex --cd {sh_quote(str(directory))} --no-alt-screen"
     run(["tmux", "new-session", "-d", "-s", tmux_session(name), shell_command])
     tmux_pane_id = current_pane_id(tmux_session(name))
     config = load_json(config_path(name), {})
@@ -454,7 +458,7 @@ def command_name_session(args: argparse.Namespace) -> int:
 def command_start_test(args: argparse.Namespace) -> int:
     name = args.name
     task = args.task or (
-        f"Read README.md and run scripts/workerctl update-status {name} with a short summary. "
+        f"Read README.md and run workerctl update-status {name} with a short summary. "
         "Do not edit tracked files."
     )
     create_args = argparse.Namespace(

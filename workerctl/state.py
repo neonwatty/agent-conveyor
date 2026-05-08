@@ -163,7 +163,7 @@ Task:
 Report status whenever you start a new phase, become blocked, begin long-running
 verification, or finish. Use workerctl as the primary status path:
 
-scripts/workerctl update-status {name} \\
+workerctl update-status {name} \\
   --state planning \\
   --current-task "short description" \\
   --next-action "short description"
@@ -173,7 +173,7 @@ planning, editing, running_tests, blocked, waiting, done, unknown
 
 If you are blocked, include --blocker:
 
-scripts/workerctl update-status {name} \\
+workerctl update-status {name} \\
   --state blocked \\
   --current-task "short description" \\
   --next-action "wait for direction" \\

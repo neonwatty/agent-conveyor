@@ -38,7 +38,7 @@ The main event. Promote an existing tmux-backed worker into a supervised task
 and spawn a manager.
 
 ```bash
-scripts/workerctl promote auth-worker --task auth-refactor \
+workerctl promote auth-worker --task auth-refactor \
   --goal "Finish the auth refactor" \
   --summary "Replaced session middleware, tests passing except integration" \
   --manager-instructions "Nudge if stale. Stop if tests fail twice." \
@@ -62,8 +62,9 @@ What it does:
 SQLite records durable intent and durable observed results. It does not make
 tmux or Terminal.app side effects atomic.
 
-An optional future shorthand can infer the worker from the current tmux session,
-but the primary command should keep worker identity and task identity explicit.
+`self-promote` can infer the worker from the current named tmux session, while
+`promote` keeps worker identity and task identity explicit for operator-driven
+flows.
 
 Everything after `--` is passed as CLI args to the manager's Codex process
 (e.g., `--full-auto`, `--model`, `--sandbox`).
@@ -157,7 +158,7 @@ Let a worker update its status contract through `workerctl` instead of editing a
 JSON file directly.
 
 ```bash
-scripts/workerctl update-status auth-worker \
+workerctl update-status auth-worker \
   --state editing \
   --current-task "Replacing auth middleware" \
   --next-action "Run integration tests"
@@ -615,7 +616,7 @@ Workers should eventually update status through `workerctl`, not by editing a
 JSON file directly:
 
 ```bash
-scripts/workerctl update-status my-task-worker \
+workerctl update-status my-task-worker \
   --state editing \
   --current-task "Replacing auth middleware" \
   --next-action "Run integration tests"
@@ -661,13 +662,13 @@ Budget, Cadence, State Machine, or Rules.
 
 # Available Commands
 
-scripts/workerctl task-status my-task --json
-scripts/workerctl task-capture my-task --lines 120 --json
-scripts/workerctl task-idle-check my-task
-scripts/workerctl task-nudge my-task "briefly state your next action and update your status"
-scripts/workerctl task-nudge my-task "continue with the step you described"
-scripts/workerctl pause-manager my-task
-scripts/workerctl stop-manager my-task
+workerctl task-status my-task --json
+workerctl task-capture my-task --lines 120 --json
+workerctl task-idle-check my-task
+workerctl task-nudge my-task "briefly state your next action and update your status"
+workerctl task-nudge my-task "continue with the step you described"
+workerctl pause-manager my-task
+workerctl stop-manager my-task
 
 # Budget
 

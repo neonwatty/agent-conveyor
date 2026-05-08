@@ -511,7 +511,7 @@ class ContractTests(unittest.TestCase):
     def test_worker_contract_uses_update_status_command(self):
         contract = worker_contract("worker-a", "Do the task.")
 
-        self.assertIn("scripts/workerctl update-status worker-a", contract)
+        self.assertIn("workerctl update-status worker-a", contract)
         self.assertIn("--state planning", contract)
         self.assertIn("--blocker", contract)
         self.assertIn("compatibility file", contract)
