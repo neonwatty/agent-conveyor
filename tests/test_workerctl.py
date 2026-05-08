@@ -15,6 +15,7 @@ from pathlib import Path
 from workerctl import classify
 from workerctl import commands
 from workerctl import db as worker_db
+from workerctl import importer
 from workerctl import identity as worker_identity
 from workerctl import lifecycle
 from workerctl import tmux as worker_tmux
@@ -28,6 +29,7 @@ from workerctl.state import (
     transcript_path,
     worker_contract,
     worker_dir,
+    write_json,
 )
 
 
@@ -713,6 +715,121 @@ class CliTests(unittest.TestCase):
 
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertIn("--live", proc.stdout)
+
+    def test_import_compat_dry_run_does_not_mutate_database(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "workers"
+            worker_path = root / "worker-a"
+            worker_path.mkdir(parents=True)
+            write_json(
+                worker_path / "config.json",
+                {
+                    "created_at": "2026-05-08T10:00:00Z",
+                    "cwd": str(ROOT),
+                    "identity_token": "token-worker-a",
+                    "name": "worker-a",
+                    "tmux_session": "codex-worker-a",
+                },
+            )
+            write_json(
+                worker_path / "status.json",
+                {
+                    "blocker": None,
+                    "current_task": "legacy task",
+                    "last_update": "2026-05-08T10:01:00Z",
+                    "next_action": "continue",
+                    "state": "waiting",
+                },
+            )
+            db_path = Path(tmpdir) / "workerctl.db"
+
+            with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                result = importer.command_import_compat(
+                    argparse.Namespace(apply=False, path=str(db_path), root=str(root), worker=None)
+                )
+
+            payload = json.loads(stdout.getvalue())
+            self.assertEqual(result, 0)
+            self.assertFalse(payload["apply"])
+            self.assertEqual(payload["workers"][0]["action_count"], 2)
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                worker_count = conn.execute("select count(*) from workers").fetchone()[0]
+                migration_count = conn.execute("select count(*) from data_migrations").fetchone()[0]
+            self.assertEqual(worker_count, 0)
+            self.assertEqual(migration_count, 0)
+
+    def test_import_compat_apply_imports_worker_artifacts_once(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "workers"
+            worker_path = root / "worker-a"
+            worker_path.mkdir(parents=True)
+            write_json(
+                worker_path / "config.json",
+                {
+                    "created_at": "2026-05-08T10:00:00Z",
+                    "cwd": str(ROOT),
+                    "identity_token": "token-worker-a",
+                    "name": "worker-a",
+                    "tmux_pane_id": "%1",
+                    "tmux_session": "codex-worker-a",
+                },
+            )
+            write_json(
+                worker_path / "status.json",
+                {
+                    "blocker": None,
+                    "current_task": "legacy task",
+                    "last_update": "2026-05-08T10:01:00Z",
+                    "next_action": "continue",
+                    "state": "waiting",
+                },
+            )
+            write_json(
+                worker_path / "capture-meta.json",
+                {
+                    "captured_at": "2026-05-08T10:02:00Z",
+                    "changed_at": "2026-05-08T10:02:00Z",
+                    "history_lines": 50,
+                },
+            )
+            (worker_path / "transcript.txt").write_text("line one\nline two")
+            (worker_path / "events.jsonl").write_text(
+                json.dumps({"message": "hello", "time": "2026-05-08T10:03:00Z", "type": "nudge"}, sort_keys=True)
+                + "\n"
+            )
+            db_path = Path(tmpdir) / "workerctl.db"
+            args = argparse.Namespace(apply=True, path=str(db_path), root=str(root), worker=None)
+
+            with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                result = importer.command_import_compat(args)
+            with contextlib.redirect_stdout(io.StringIO()) as second_stdout:
+                second_result = importer.command_import_compat(args)
+
+            payload = json.loads(stdout.getvalue())
+            second_payload = json.loads(second_stdout.getvalue())
+            self.assertEqual(result, 0)
+            self.assertEqual(second_result, 0)
+            self.assertTrue(payload["apply"])
+            self.assertEqual(payload["workers"][0]["action_count"], 4)
+            self.assertEqual(second_payload["workers"][0]["action_count"], 0)
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                worker = conn.execute("select * from workers where name = 'worker-a'").fetchone()
+                statuses = conn.execute("select * from statuses where worker_id = 'worker-a'").fetchall()
+                captures = conn.execute("select * from transcript_captures where worker_id = 'worker-a'").fetchall()
+                events = conn.execute("select * from events where worker_id = 'worker-a' and type = 'compat_nudge'").fetchall()
+                migrations = conn.execute("select count(*) from data_migrations").fetchone()[0]
+            self.assertEqual(worker["state"], "candidate")
+            self.assertEqual(worker["tmux_pane_id"], "%1")
+            self.assertEqual(len(statuses), 1)
+            self.assertEqual(statuses[0]["current_task"], "legacy task")
+            self.assertEqual(len(captures), 1)
+            self.assertEqual(captures[0]["content"], "line one\nline two")
+            self.assertEqual(captures[0]["history_lines"], 50)
+            self.assertEqual(len(events), 1)
+            self.assertEqual(json.loads(events[0]["payload_json"])["message"], "hello")
+            self.assertEqual(migrations, 4)
 
     def test_tasks_create_and_list_json(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -2243,6 +2360,7 @@ class CliTests(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertIn("audit", proc.stdout)
         self.assertIn("commands", proc.stdout)
+        self.assertIn("import-compat", proc.stdout)
         self.assertIn("pause-manager", proc.stdout)
         self.assertIn("prune", proc.stdout)
         self.assertIn("promote", proc.stdout)

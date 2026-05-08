@@ -97,6 +97,15 @@ task `failed`, ends the active binding, marks missing worker/manager records,
 and writes explicit command/result and event audit rows. It never closes `done`
 tasks and has no force mode in the first implementation.
 
+### `workerctl import-compat [--worker <name>] [--apply]`
+
+Dry-run by default. Imports existing `.codex-workers/<worker>/config.json`,
+`status.json`, `events.jsonl`, `capture-meta.json`, and `transcript.txt`
+artifacts into SQLite. Each imported source is recorded in `data_migrations`
+with a content hash so repeated runs are idempotent and changed compatibility
+files can be imported as new observations. Existing SQLite worker state is
+preserved when a compatibility config is re-read.
+
 ### `workerctl audit <name>`
 
 Print a chronological audit view for a task, including lifecycle transitions,
@@ -806,12 +815,12 @@ Implemented in the current SQLite milestone:
 - Read-only live drift checks via `db-doctor --live`.
 - Conservative stale task closure via `close-stale`, dry-run by default and
   blocked by live managers or unfinished durable commands.
+- First-run compatibility import via `import-compat`, dry-run by default and
+  idempotent through `data_migrations`.
 - Focused unit coverage plus `scripts/live-smoke` for a real tmux lifecycle.
 
 Remaining work:
 
-- Add first-run import/backfill for existing JSON/JSONL workers and historical
-  compatibility artifacts.
 - Add manager liveness freshness checks using last-seen timestamps and capture
   hashes, not only session existence.
 - Decide whether old paused smoke/test tasks should be pruned, archived, or

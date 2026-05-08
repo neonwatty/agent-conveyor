@@ -158,6 +158,7 @@ scripts/workerctl commands --task auth-refactor --json
 scripts/workerctl commands --task auth-refactor --type task_nudge --state failed --json
 scripts/workerctl task-events auth-refactor --json
 scripts/workerctl db-doctor --live
+scripts/workerctl import-compat
 ```
 
 Pause, resume, reconcile, recover, export, and close the task:
@@ -191,6 +192,10 @@ Use `close-stale` to dry-run closure of tasks whose recorded worker is missing,
 not supervised by a live manager, and has no unfinished durable commands.
 `close-stale --apply` marks those tasks `failed`, ends their active bindings,
 marks the missing worker/manager records, and writes command/event audit rows.
+Use `import-compat` to dry-run import of existing `.codex-workers/<worker>/`
+JSON, JSONL, status, and transcript artifacts into SQLite. Add `--apply` after
+reviewing the plan; imports are tracked in `data_migrations` so reruns are
+idempotent.
 
 Transcript capture content can be pruned while retaining metadata:
 

@@ -48,6 +48,7 @@ from workerctl.commands import (
 )
 from workerctl.core import WorkerError
 from workerctl.export import command_export_task
+from workerctl.importer import command_import_compat
 from workerctl.lifecycle import (
     command_close_stale,
     command_pause_manager,
@@ -167,6 +168,16 @@ def build_parser() -> argparse.ArgumentParser:
     db_doctor.add_argument("--live", action="store_true", help="Also report read-only live tmux reconciliation drift.")
     db_doctor.add_argument("--path", help="Override the workerctl database path.")
     db_doctor.set_defaults(func=command_db_doctor)
+
+    import_compat = subparsers.add_parser(
+        "import-compat",
+        help="Dry-run or import existing JSON/JSONL worker artifacts into SQLite.",
+    )
+    import_compat.add_argument("--apply", action="store_true", help="Apply the import. Default is dry-run.")
+    import_compat.add_argument("--worker", help="Import only one compatibility worker directory.")
+    import_compat.add_argument("--root", help="Override the compatibility artifact root.")
+    import_compat.add_argument("--path", help="Override the workerctl database path.")
+    import_compat.set_defaults(func=command_import_compat)
 
     tasks = subparsers.add_parser("tasks", help="List or create SQLite task records.")
     tasks.add_argument("--json", action="store_true", help="Print tasks as JSON.")
