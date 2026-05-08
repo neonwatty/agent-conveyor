@@ -857,12 +857,14 @@ class CliTests(unittest.TestCase):
             renamed = []
             original_current_session_name = commands.current_session_name
             original_current_pane_id = commands.current_pane_id
+            original_session_exists = commands.session_exists
             original_run = commands.run
             original_ensure_tool = commands.ensure_tool
             try:
                 commands.ensure_tool = lambda tool: tool
                 commands.current_session_name = lambda: "raw-session"
                 commands.current_pane_id = lambda target: "%7"
+                commands.session_exists = lambda worker_name: False
 
                 def fake_run(argv, **kwargs):
                     if argv[:2] == ["tmux", "rename-session"]:
@@ -906,6 +908,7 @@ class CliTests(unittest.TestCase):
             finally:
                 commands.current_session_name = original_current_session_name
                 commands.current_pane_id = original_current_pane_id
+                commands.session_exists = original_session_exists
                 commands.run = original_run
                 commands.ensure_tool = original_ensure_tool
                 if worker_path.exists():
@@ -979,10 +982,12 @@ class CliTests(unittest.TestCase):
                 )
                 conn.commit()
             original_current_session_name = commands.current_session_name
+            original_session_exists = commands.session_exists
             original_ensure_tool = commands.ensure_tool
             try:
                 commands.ensure_tool = lambda tool: tool
                 commands.current_session_name = lambda: "raw-session"
+                commands.session_exists = lambda worker_name: False
                 args = argparse.Namespace(
                     cwd=str(ROOT),
                     force=False,
@@ -996,6 +1001,7 @@ class CliTests(unittest.TestCase):
                     commands.command_name_session(args)
             finally:
                 commands.current_session_name = original_current_session_name
+                commands.session_exists = original_session_exists
                 commands.ensure_tool = original_ensure_tool
                 if worker_path.exists():
                     shutil.rmtree(worker_path)
@@ -1019,12 +1025,14 @@ class CliTests(unittest.TestCase):
                 conn.commit()
             original_current_session_name = commands.current_session_name
             original_current_pane_id = commands.current_pane_id
+            original_session_exists = commands.session_exists
             original_run = commands.run
             original_ensure_tool = commands.ensure_tool
             try:
                 commands.ensure_tool = lambda tool: tool
                 commands.current_session_name = lambda: "raw-session"
                 commands.current_pane_id = lambda target: "%8"
+                commands.session_exists = lambda worker_name: False
                 commands.run = lambda argv, **kwargs: subprocess.CompletedProcess(argv, 0, "", "")
                 args = argparse.Namespace(
                     cwd=str(ROOT),
@@ -1056,6 +1064,7 @@ class CliTests(unittest.TestCase):
             finally:
                 commands.current_session_name = original_current_session_name
                 commands.current_pane_id = original_current_pane_id
+                commands.session_exists = original_session_exists
                 commands.run = original_run
                 commands.ensure_tool = original_ensure_tool
                 if worker_path.exists():
@@ -3100,6 +3109,7 @@ class CliTests(unittest.TestCase):
                 {
                     "cwd": str(ROOT),
                     "name": name,
+                    "tmux_pane_id": "%1",
                     "tmux_session": f"codex-{name}",
                 }
             )
