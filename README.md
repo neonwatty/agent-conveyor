@@ -128,6 +128,8 @@ workerctl stop worker-a
 control-plane store for tasks, workers, managers, bindings, status contracts,
 prompts, transcript captures, command intents/results, and audit events. The
 JSON files under `.codex-workers/<worker>/` remain compatibility artifacts.
+Worker names are human labels; SQLite worker IDs are opaque `worker-<uuid>`
+identities. `identity_token` remains a separate contract verification secret.
 
 Create a worker, then promote it into a managed task:
 
@@ -161,6 +163,12 @@ workerctl manage \
 
 `name-session` and `self-promote` remain available as lower-level commands when
 you intentionally want to separate registration from manager creation.
+
+Worker name claims are conservative. `manage` and `name-session` allow an
+idempotent claim by the same tmux session, but refuse a name already recorded
+for a different session unless `--force-name` / `--force` is explicitly used.
+Forced reclaims preserve the old worker row under a replaced name, create a new
+worker ID/token for the claimant, and write the replacement to the audit log.
 
 Inspect and operate the task through task-scoped commands:
 

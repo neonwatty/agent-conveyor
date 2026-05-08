@@ -66,6 +66,19 @@ tmux or Terminal.app side effects atomic.
 can register/name the current tmux session and spawn a manager. `promote` keeps
 worker identity and task identity explicit for operator-driven flows.
 
+Worker identity is split deliberately:
+
+- `workers.id` is an opaque durable identity (`worker-<uuid>`).
+- `workers.name` is a unique human label used in CLI commands.
+- `identity_token` is a separate contract verification secret.
+
+Worker name claims are conservative. `manage` and `name-session` are
+idempotent for the same tmux session, but deny a different session trying to
+claim an existing name unless an explicit force flag is used. Forced reclaims
+preserve the old worker row under a replaced name, create a new worker ID/token
+for the claimant, and write `worker_name_reclaimed` audit events with the
+previous worker/session details.
+
 Everything after `--` is passed as CLI args to the manager's Codex process
 (e.g., `--full-auto`, `--model`, `--sandbox`).
 
@@ -319,7 +332,7 @@ The exact schema can evolve, but these are the core entities:
 
 ```sql
 workers(
-  id text primary key,
+  id text primary key, -- opaque worker-<uuid>, not the worker name
   name text unique not null,
   tmux_session text unique not null,
   tmux_pane_id text,

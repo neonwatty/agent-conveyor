@@ -11,7 +11,7 @@ from workerctl.core import now_iso
 from workerctl.state import state_root
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 REQUIRED_TABLES = {
     "bindings",
     "budgets",
@@ -249,12 +249,90 @@ def migrate(conn: sqlite3.Connection, from_version: int) -> None:
         end;
         """
     )
+    if from_version < 2:
+        migrate_worker_name_ids(conn)
+    sync_worker_ids_to_config_files(conn)
     conn.execute(
         "insert or ignore into schema_migrations(version, applied_at) values (?, ?)",
         (SCHEMA_VERSION, now_iso()),
     )
     conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
     conn.commit()
+
+
+def migrate_worker_name_ids(conn: sqlite3.Connection) -> None:
+    legacy_rows = conn.execute("select id, name from workers where id = name").fetchall()
+    if not legacy_rows:
+        return
+    id_map = {str(row["id"]): f"worker-{uuid.uuid4()}" for row in legacy_rows}
+    now = now_iso()
+    conn.commit()
+    conn.execute("PRAGMA foreign_keys = OFF")
+    try:
+        conn.execute("begin")
+        conn.execute("drop trigger if exists events_no_update")
+        conn.execute("drop trigger if exists events_no_delete")
+        for old_id, new_id in id_map.items():
+            for table in ("bindings", "statuses", "transcript_captures", "commands", "events"):
+                conn.execute(f"update {table} set worker_id = ? where worker_id = ?", (new_id, old_id))
+            conn.execute("update workers set id = ?, updated_at = ? where id = ?", (new_id, now, old_id))
+            conn.execute(
+                """
+                insert into events(created_at, actor, type, worker_id, payload_json)
+                values (?, 'workerctl', 'worker_id_migrated', ?, ?)
+                """,
+                (
+                    now,
+                    new_id,
+                    json.dumps({"old_worker_id": old_id, "new_worker_id": new_id}, sort_keys=True),
+                ),
+            )
+        conn.execute(
+            """
+            create trigger events_no_update
+            before update on events
+            begin
+              select raise(abort, 'events are append-only');
+            end
+            """
+        )
+        conn.execute(
+            """
+            create trigger events_no_delete
+            before delete on events
+            begin
+              select raise(abort, 'events are append-only');
+            end
+            """
+        )
+        conn.execute(
+            "insert or ignore into schema_migrations(version, applied_at) values (?, ?)",
+            (2, now),
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.execute("PRAGMA foreign_keys = ON")
+
+
+def sync_worker_ids_to_config_files(conn: sqlite3.Connection) -> None:
+    database_path = conn.execute("PRAGMA database_list").fetchone()["file"]
+    if Path(database_path).resolve() != default_db_path().resolve():
+        return
+    for row in conn.execute("select id, name from workers"):
+        config_path = state_root() / str(row["name"]) / "config.json"
+        if not config_path.exists():
+            continue
+        try:
+            config = json.loads(config_path.read_text())
+        except (OSError, json.JSONDecodeError):
+            continue
+        if config.get("worker_id") == row["id"]:
+            continue
+        config["worker_id"] = row["id"]
+        config_path.write_text(json.dumps(config, indent=2, sort_keys=True) + "\n")
 
 
 def database_health(conn: sqlite3.Connection) -> dict[str, Any]:
@@ -429,7 +507,8 @@ def upsert_worker(
     tmux_pane_id: str | None = None,
     timestamp: str | None = None,
 ) -> str:
-    worker_id = name
+    existing = conn.execute("select id, identity_token from workers where name = ?", (name,)).fetchone()
+    worker_id = str(existing["id"]) if existing else f"worker-{uuid.uuid4()}"
     token = identity_token or f"workerctl-{uuid.uuid4()}"
     now = timestamp or now_iso()
     conn.execute(

@@ -207,6 +207,19 @@ def command_create(args: argparse.Namespace) -> int:
         raise WorkerError(f"Worker already exists: {name}. Use --reuse to reuse its state directory.")
     if session_exists(name):
         raise WorkerError(f"tmux session already exists: {tmux_target(name)}")
+    with connect_db() as conn:
+        initialize_database(conn)
+        existing_worker = conn.execute("select id, tmux_session from workers where name = ?", (name,)).fetchone()
+    if existing_worker and not args.reuse:
+        raise WorkerError(
+            f"Worker {name} already exists as worker id {existing_worker['id']} "
+            f"in tmux session {existing_worker['tmux_session']}. Use --reuse only if continuing that worker is intentional."
+        )
+    if existing_worker and existing_worker["tmux_session"] != tmux_session(name):
+        raise WorkerError(
+            f"Worker {name} already exists as worker id {existing_worker['id']} "
+            f"in tmux session {existing_worker['tmux_session']}; create would use {tmux_session(name)}."
+        )
 
     worker_dir(name).mkdir(parents=True, exist_ok=True)
     identity_token = f"workerctl-{uuid.uuid4()}"
@@ -252,6 +265,9 @@ def command_create(args: argparse.Namespace) -> int:
             },
         )
         conn.commit()
+    config = load_json(config_path(name), {})
+    config["worker_id"] = worker_id
+    write_json(config_path(name), config)
 
     contract_path = write_worker_contract(name, args.task, identity_token)
     if args.initial_prompt:
@@ -368,12 +384,21 @@ def command_name_session(args: argparse.Namespace) -> int:
     with connect_db(db_path) as conn:
         initialize_database(conn)
         existing_worker = conn.execute(
-            "select identity_token from workers where name = ?",
+            "select id, identity_token, tmux_session from workers where name = ?",
             (name,),
         ).fetchone()
-    identity_token = existing_config.get("identity_token") or (
+    if existing_worker and existing_worker["tmux_session"] != desired_session and not args.force:
+        raise WorkerError(
+            f"Worker {name} is already claimed by worker id {existing_worker['id']} "
+            f"in tmux session {existing_worker['tmux_session']}. Current session {source_session} "
+            "cannot claim it. Use --force or --force-name only if replacing that worker is intentional."
+        )
+    force_reclaim = bool(existing_worker and existing_worker["tmux_session"] != desired_session and args.force)
+    identity_token = (None if force_reclaim else existing_config.get("identity_token")) or (
         existing_worker["identity_token"] if existing_worker else f"workerctl-{uuid.uuid4()}"
     )
+    if force_reclaim:
+        identity_token = f"workerctl-{uuid.uuid4()}"
 
     if source_session != desired_session:
         if session_exists(name):
@@ -382,15 +407,16 @@ def command_name_session(args: argparse.Namespace) -> int:
 
     worker_dir(name).mkdir(parents=True, exist_ok=True)
     timestamp = now_iso()
-    status = load_json(status_path(name), None)
+    status = None if force_reclaim else load_json(status_path(name), None)
     if status is None:
         status = initial_status(name, args.task or "Named current tmux session as worker.")
         status["last_update"] = timestamp
         write_json(status_path(name), status)
     transcript_path(name).touch()
+    config_base = {} if force_reclaim else existing_config
     config = {
-        **existing_config,
-        "created_at": existing_config.get("created_at") or timestamp,
+        **config_base,
+        "created_at": config_base.get("created_at") or timestamp,
         "cwd": str(directory),
         "identity_token": identity_token,
         "name": name,
@@ -405,6 +431,12 @@ def command_name_session(args: argparse.Namespace) -> int:
 
     with connect_db(db_path) as conn:
         initialize_database(conn)
+        if force_reclaim:
+            replaced_name = f"{name}-replaced-{uuid.uuid4().hex[:8]}"
+            conn.execute(
+                "update workers set name = ?, state = 'missing', updated_at = ? where id = ?",
+                (replaced_name, timestamp, existing_worker["id"]),
+            )
         worker_id = upsert_worker(
             conn,
             name=name,
@@ -415,6 +447,23 @@ def command_name_session(args: argparse.Namespace) -> int:
             state="active",
             timestamp=timestamp,
         )
+        config["worker_id"] = worker_id
+        write_json(config_path(name), config)
+        if existing_worker and existing_worker["tmux_session"] != desired_session and args.force:
+            insert_db_event(
+                conn,
+                "worker_name_reclaimed",
+                actor="workerctl",
+                worker_id=worker_id,
+                payload={
+                    "current_session": source_session,
+                    "previous_name": name,
+                    "previous_tmux_session": existing_worker["tmux_session"],
+                    "previous_worker_id": existing_worker["id"],
+                    "replaced_name": replaced_name,
+                    "worker": name,
+                },
+            )
         insert_db_status(conn, worker_id=worker_id, status=status, timestamp=status.get("last_update"))
         insert_db_event(
             conn,
@@ -450,6 +499,7 @@ def command_name_session(args: argparse.Namespace) -> int:
         "state_dir": str(worker_dir(name)),
         "tmux_pane_id": config.get("tmux_pane_id"),
         "tmux_session": desired_session,
+        "worker_id": worker_id,
     }
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0

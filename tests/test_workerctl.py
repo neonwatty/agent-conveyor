@@ -310,6 +310,90 @@ class DatabaseTests(unittest.TestCase):
             event = conn.execute("select * from events where task_id = ?", ("task-auth",)).fetchone()
             self.assertEqual(event["type"], "task_created")
 
+    def test_upsert_worker_uses_opaque_id_separate_from_name(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            worker_id = worker_db.upsert_worker(
+                conn,
+                name="worker-a",
+                cwd=str(ROOT),
+                tmux_session="codex-worker-a",
+                state="active",
+            )
+            second_id = worker_db.upsert_worker(
+                conn,
+                name="worker-a",
+                cwd=str(ROOT),
+                tmux_session="codex-worker-a",
+                state="active",
+            )
+            row = conn.execute("select id, name from workers where name = 'worker-a'").fetchone()
+
+            self.assertEqual(worker_id, second_id)
+            self.assertEqual(row["id"], worker_id)
+            self.assertEqual(row["name"], "worker-a")
+            self.assertNotEqual(worker_id, "worker-a")
+            self.assertTrue(worker_id.startswith("worker-"))
+
+    def test_worker_id_migration_rewrites_legacy_foreign_keys(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            now = "2026-05-08T10:00:00Z"
+            conn.execute("drop trigger if exists events_no_update")
+            conn.execute("drop trigger if exists events_no_delete")
+            conn.execute("delete from events")
+            conn.execute("delete from commands")
+            conn.execute("delete from transcript_captures")
+            conn.execute("delete from statuses")
+            conn.execute("delete from bindings")
+            conn.execute("delete from workers")
+            conn.execute(
+                """
+                insert into workers(id, name, tmux_session, identity_token, cwd, state, created_at, updated_at)
+                values ('worker-a', 'worker-a', 'codex-worker-a', 'token-worker-a', ?, 'active', ?, ?)
+                """,
+                (str(ROOT), now, now),
+            )
+            task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.", timestamp=now)
+            conn.execute("insert into bindings(id, task_id, worker_id, state, created_at) values ('binding-1', ?, 'worker-a', 'active', ?)", (task_id, now))
+            conn.execute("insert into statuses(worker_id, state, created_at) values ('worker-a', 'planning', ?)", (now,))
+            conn.execute(
+                """
+                insert into transcript_captures(worker_id, sha256, captured_at, changed_at, history_lines, byte_count, line_count, capture_kind, retention_class)
+                values ('worker-a', 'digest', ?, ?, 10, 0, 0, 'latest', 'hot')
+                """,
+                (now, now),
+            )
+            conn.execute(
+                """
+                insert into commands(id, idempotency_key, created_at, updated_at, task_id, worker_id, type, state, payload_json)
+                values ('command-1', 'key-1', ?, ?, ?, 'worker-a', 'task_nudge', 'pending', '{}')
+                """,
+                (now, now, task_id),
+            )
+            conn.execute(
+                "insert into events(created_at, actor, task_id, worker_id, type, payload_json) values (?, 'workerctl', ?, 'worker-a', 'legacy_event', '{}')",
+                (now, task_id),
+            )
+            conn.commit()
+
+            worker_db.migrate_worker_name_ids(conn)
+
+            worker = conn.execute("select id, name from workers where name = 'worker-a'").fetchone()
+            worker_id = worker["id"]
+            refs = {
+                "bindings": conn.execute("select worker_id from bindings").fetchone()["worker_id"],
+                "statuses": conn.execute("select worker_id from statuses").fetchone()["worker_id"],
+                "transcript_captures": conn.execute("select worker_id from transcript_captures").fetchone()["worker_id"],
+                "commands": conn.execute("select worker_id from commands").fetchone()["worker_id"],
+            }
+            event_ids = [row["worker_id"] for row in conn.execute("select worker_id from events where worker_id is not null order by id")]
+
+            self.assertNotEqual(worker_id, "worker-a")
+            self.assertTrue(worker_id.startswith("worker-"))
+            self.assertEqual(set(refs.values()), {worker_id})
+            self.assertTrue(all(event_id == worker_id for event_id in event_ids))
+
     def test_bind_task_worker_enforces_active_worker_uniqueness(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             conn = self.open_db(tmpdir)
@@ -647,7 +731,7 @@ class CliTests(unittest.TestCase):
             db_path = Path(tmpdir) / "workerctl.db"
             with worker_db.connect(db_path) as conn:
                 worker_db.initialize_database(conn)
-                worker_db.upsert_worker(
+                worker_id = worker_db.upsert_worker(
                     conn,
                     name="worker-a",
                     cwd=str(ROOT),
@@ -715,7 +799,7 @@ class CliTests(unittest.TestCase):
             db_path = Path(tmpdir) / "workerctl.db"
             with worker_db.connect(db_path) as conn:
                 worker_db.initialize_database(conn)
-                worker_db.upsert_worker(
+                worker_id = worker_db.upsert_worker(
                     conn,
                     name="worker-a",
                     cwd=str(ROOT),
@@ -809,12 +893,108 @@ class CliTests(unittest.TestCase):
                 with worker_db.connect(db_path) as conn:
                     worker_db.initialize_database(conn)
                     worker = conn.execute("select * from workers where name = ?", (name,)).fetchone()
-                    event = conn.execute("select * from events where worker_id = ? and type = 'worker_session_named'", (name,)).fetchone()
-                    status = conn.execute("select * from statuses where worker_id = ?", (name,)).fetchone()
+                    event = conn.execute("select * from events where worker_id = ? and type = 'worker_session_named'", (worker["id"],)).fetchone()
+                    status = conn.execute("select * from statuses where worker_id = ?", (worker["id"],)).fetchone()
                 self.assertEqual(worker["state"], "active")
+                self.assertNotEqual(worker["id"], name)
+                self.assertEqual(worker["id"], config["worker_id"])
                 self.assertEqual(worker["tmux_session"], "codex-unit-self-worker")
                 self.assertEqual(event["type"], "worker_session_named")
                 self.assertEqual(status["current_task"], "Self-register for manager supervision.")
+            finally:
+                commands.current_session_name = original_current_session_name
+                commands.current_pane_id = original_current_pane_id
+                commands.run = original_run
+                if worker_path.exists():
+                    shutil.rmtree(worker_path)
+
+    def test_name_session_denies_existing_worker_name_from_different_session(self):
+        name = "unit-claimed-worker"
+        worker_path = worker_dir(name)
+        if worker_path.exists():
+            shutil.rmtree(worker_path)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                worker_id = worker_db.upsert_worker(
+                    conn,
+                    name=name,
+                    cwd=str(ROOT),
+                    tmux_session="codex-existing-worker",
+                    state="active",
+                )
+                conn.commit()
+            original_current_session_name = commands.current_session_name
+            try:
+                commands.current_session_name = lambda: "raw-session"
+                args = argparse.Namespace(
+                    cwd=str(ROOT),
+                    force=False,
+                    name=name,
+                    path=str(db_path),
+                    session=None,
+                    task="Attempt duplicate claim.",
+                )
+
+                with self.assertRaisesRegex(WorkerError, worker_id):
+                    commands.command_name_session(args)
+            finally:
+                commands.current_session_name = original_current_session_name
+                if worker_path.exists():
+                    shutil.rmtree(worker_path)
+
+    def test_name_session_force_records_reclaim_event(self):
+        name = "unit-reclaimed-worker"
+        worker_path = worker_dir(name)
+        if worker_path.exists():
+            shutil.rmtree(worker_path)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                previous_worker_id = worker_db.upsert_worker(
+                    conn,
+                    name=name,
+                    cwd=str(ROOT),
+                    tmux_session="codex-existing-worker",
+                    state="active",
+                )
+                conn.commit()
+            original_current_session_name = commands.current_session_name
+            original_current_pane_id = commands.current_pane_id
+            original_run = commands.run
+            try:
+                commands.current_session_name = lambda: "raw-session"
+                commands.current_pane_id = lambda target: "%8"
+                commands.run = lambda argv, **kwargs: subprocess.CompletedProcess(argv, 0, "", "")
+                args = argparse.Namespace(
+                    cwd=str(ROOT),
+                    force=True,
+                    name=name,
+                    path=str(db_path),
+                    session=None,
+                    task="Force duplicate claim.",
+                )
+
+                with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                    result = commands.command_name_session(args)
+
+                payload = json.loads(stdout.getvalue())
+                with worker_db.connect(db_path) as conn:
+                    worker_db.initialize_database(conn)
+                    worker = conn.execute("select * from workers where name = ?", (name,)).fetchone()
+                    previous_worker = conn.execute("select * from workers where id = ?", (previous_worker_id,)).fetchone()
+                    event = conn.execute("select * from events where worker_id = ? and type = 'worker_name_reclaimed'", (worker["id"],)).fetchone()
+                self.assertEqual(result, 0)
+                self.assertNotEqual(payload["worker_id"], previous_worker_id)
+                self.assertEqual(worker["tmux_session"], f"codex-{name}")
+                event_payload = json.loads(event["payload_json"])
+                self.assertEqual(event_payload["previous_tmux_session"], "codex-existing-worker")
+                self.assertEqual(event_payload["previous_worker_id"], previous_worker_id)
+                self.assertTrue(event_payload["replaced_name"].startswith(f"{name}-replaced-"))
+                self.assertEqual(previous_worker["name"], event_payload["replaced_name"])
+                self.assertEqual(previous_worker["state"], "missing")
             finally:
                 commands.current_session_name = original_current_session_name
                 commands.current_pane_id = original_current_pane_id
@@ -1047,11 +1227,12 @@ class CliTests(unittest.TestCase):
             with worker_db.connect(db_path) as conn:
                 worker_db.initialize_database(conn)
                 worker = conn.execute("select * from workers where name = 'worker-a'").fetchone()
-                statuses = conn.execute("select * from statuses where worker_id = 'worker-a'").fetchall()
-                captures = conn.execute("select * from transcript_captures where worker_id = 'worker-a'").fetchall()
-                events = conn.execute("select * from events where worker_id = 'worker-a' and type = 'compat_nudge'").fetchall()
+                statuses = conn.execute("select * from statuses where worker_id = ?", (worker["id"],)).fetchall()
+                captures = conn.execute("select * from transcript_captures where worker_id = ?", (worker["id"],)).fetchall()
+                events = conn.execute("select * from events where worker_id = ? and type = 'compat_nudge'", (worker["id"],)).fetchall()
                 migrations = conn.execute("select count(*) from data_migrations").fetchone()[0]
             self.assertEqual(worker["state"], "candidate")
+            self.assertNotEqual(worker["id"], "worker-a")
             self.assertEqual(worker["tmux_pane_id"], "%1")
             self.assertEqual(len(statuses), 1)
             self.assertEqual(statuses[0]["current_task"], "legacy task")
@@ -1330,7 +1511,7 @@ class CliTests(unittest.TestCase):
             db_path = Path(tmpdir) / "workerctl.db"
             with worker_db.connect(db_path) as conn:
                 worker_db.initialize_database(conn)
-                worker_db.upsert_worker(
+                worker_id = worker_db.upsert_worker(
                     conn,
                     name="worker-a",
                     cwd=str(ROOT),
@@ -1406,7 +1587,7 @@ class CliTests(unittest.TestCase):
             db_path = Path(tmpdir) / "workerctl.db"
             with worker_db.connect(db_path) as conn:
                 worker_db.initialize_database(conn)
-                worker_db.upsert_worker(
+                worker_id = worker_db.upsert_worker(
                     conn,
                     name="worker-a",
                     cwd=str(ROOT),
@@ -2019,7 +2200,7 @@ class CliTests(unittest.TestCase):
                     task = conn.execute("select state from tasks where id = ?", (task_id,)).fetchone()
                     binding = conn.execute("select state, ended_at from bindings where id = 'binding-1'").fetchone()
                     manager = conn.execute("select state from managers where id = ?", (manager_id,)).fetchone()
-                    worker = conn.execute("select state from workers where id = 'worker-a'").fetchone()
+                    worker = conn.execute("select state from workers where name = 'worker-a'").fetchone()
                     command = conn.execute("select state from commands where type = 'stop_task'").fetchone()
                 self.assertEqual(task["state"], "done")
                 self.assertEqual(binding["state"], "ended")
@@ -2130,7 +2311,7 @@ class CliTests(unittest.TestCase):
                 self.assertEqual(killed, [])
                 with worker_db.connect(db_path) as conn:
                     task = conn.execute("select state from tasks where id = ?", (task_id,)).fetchone()
-                    worker = conn.execute("select state from workers where id = 'worker-a'").fetchone()
+                    worker = conn.execute("select state from workers where name = 'worker-a'").fetchone()
                     command = conn.execute("select state from commands where type = 'stop_task'").fetchone()
                 self.assertEqual(task["state"], "managed")
                 self.assertEqual(worker["state"], "active")
@@ -2196,14 +2377,14 @@ class CliTests(unittest.TestCase):
             db_path = Path(tmpdir) / "workerctl.db"
             with worker_db.connect(db_path) as conn:
                 worker_db.initialize_database(conn)
-                worker_db.upsert_worker(
+                worker_id = worker_db.upsert_worker(
                     conn,
                     name="worker-a",
                     cwd=str(ROOT),
                     tmux_session="codex-worker-a",
                     state="active",
                 )
-                conn.execute("update workers set tmux_pane_id = '%1' where id = 'worker-a'")
+                conn.execute("update workers set tmux_pane_id = '%1' where id = ?", (worker_id,))
                 task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
                 worker_db.bind_task_worker(conn, task="task-a", worker="worker-a", binding_id="binding-1")
                 manager_id = worker_db.create_manager(
@@ -2243,7 +2424,7 @@ class CliTests(unittest.TestCase):
                 self.assertEqual(payload["results"][0]["manager"]["tmux_pane_id"], "%8")
                 with worker_db.connect(db_path) as conn:
                     task = conn.execute("select state from tasks where id = ?", (task_id,)).fetchone()
-                    worker = conn.execute("select state from workers where id = 'worker-a'").fetchone()
+                    worker = conn.execute("select state from workers where name = 'worker-a'").fetchone()
                     manager = conn.execute("select state from managers where id = ?", (manager_id,)).fetchone()
                     event_types = [row["type"] for row in conn.execute("select type from events order by id")]
                 self.assertEqual(task["state"], "managed")
@@ -2274,7 +2455,7 @@ class CliTests(unittest.TestCase):
             )
             with worker_db.connect(db_path) as conn:
                 worker_db.initialize_database(conn)
-                worker_db.upsert_worker(
+                worker_id = worker_db.upsert_worker(
                     conn,
                     name="worker-a",
                     cwd=str(ROOT),
@@ -2319,7 +2500,7 @@ class CliTests(unittest.TestCase):
                 self.assertIn("worker_pane_mismatch", payload["results"][0]["drift"])
                 self.assertIn("manager_pane_mismatch", payload["results"][0]["drift"])
                 with worker_db.connect(db_path) as conn:
-                    worker = conn.execute("select tmux_pane_id from workers where id = 'worker-a'").fetchone()
+                    worker = conn.execute("select tmux_pane_id from workers where name = 'worker-a'").fetchone()
                     manager = conn.execute("select tmux_pane_id from managers where id = ?", (manager_id,)).fetchone()
                     event_types = [row["type"] for row in conn.execute("select type from events order by id")]
                 config = json.loads(config_path("worker-a").read_text())
@@ -2388,7 +2569,7 @@ class CliTests(unittest.TestCase):
                 self.assertEqual(payload["candidates"][0]["planned_state"], "failed")
                 with worker_db.connect(db_path) as conn:
                     task = conn.execute("select state from tasks where id = ?", (task_id,)).fetchone()
-                    worker = conn.execute("select state from workers where id = 'worker-a'").fetchone()
+                    worker = conn.execute("select state from workers where name = 'worker-a'").fetchone()
                     binding = conn.execute("select state from bindings where id = 'binding-1'").fetchone()
                     commands_count = conn.execute("select count(*) from commands where type = 'close_stale'").fetchone()[0]
                 self.assertEqual(task["state"], "managed")
@@ -2429,7 +2610,7 @@ class CliTests(unittest.TestCase):
                 self.assertEqual(payload["closed"][0]["task"]["id"], task_id)
                 with worker_db.connect(db_path) as conn:
                     task = conn.execute("select state from tasks where id = ?", (task_id,)).fetchone()
-                    worker = conn.execute("select state from workers where id = 'worker-a'").fetchone()
+                    worker = conn.execute("select state from workers where name = 'worker-a'").fetchone()
                     binding = conn.execute("select state, ended_at from bindings where id = 'binding-1'").fetchone()
                     command = conn.execute("select state, result_json from commands where type = 'close_stale'").fetchone()
                     event = conn.execute("select type, payload_json from events where type = 'close_stale_task'").fetchone()
@@ -2449,7 +2630,7 @@ class CliTests(unittest.TestCase):
             db_path = Path(tmpdir) / "workerctl.db"
             with worker_db.connect(db_path) as conn:
                 worker_db.initialize_database(conn)
-                worker_db.upsert_worker(
+                worker_id = worker_db.upsert_worker(
                     conn,
                     name="worker-a",
                     cwd=str(ROOT),
@@ -2463,7 +2644,7 @@ class CliTests(unittest.TestCase):
                     command_type="task_nudge",
                     payload={"message": "status"},
                     task_id=task_id,
-                    worker_id="worker-a",
+                    worker_id=worker_id,
                 )
                 conn.commit()
 
@@ -2533,7 +2714,7 @@ class CliTests(unittest.TestCase):
                 self.assertEqual(payload["skipped"][0]["skip_reasons"], ["manager_live"])
                 with worker_db.connect(db_path) as conn:
                     task = conn.execute("select state from tasks where id = ?", (task_id,)).fetchone()
-                    worker = conn.execute("select state from workers where id = 'worker-a'").fetchone()
+                    worker = conn.execute("select state from workers where name = 'worker-a'").fetchone()
                     manager = conn.execute("select state from managers where id = ?", (manager_id,)).fetchone()
                 self.assertEqual(task["state"], "managed")
                 self.assertEqual(worker["state"], "active")
