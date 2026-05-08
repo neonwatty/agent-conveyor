@@ -761,6 +761,24 @@ def set_manager_pane_id(conn: sqlite3.Connection, *, manager_id: str, tmux_pane_
     )
 
 
+def mark_manager_seen(
+    conn: sqlite3.Connection,
+    *,
+    manager_id: str,
+    last_capture_sha256: str | None = None,
+    timestamp: str | None = None,
+) -> None:
+    conn.execute(
+        """
+        update managers
+        set last_seen_at = ?,
+            last_capture_sha256 = coalesce(?, last_capture_sha256)
+        where id = ?
+        """,
+        (timestamp or now_iso(), last_capture_sha256, manager_id),
+    )
+
+
 def latest_manager_prompt(conn: sqlite3.Connection, *, task_id: str) -> sqlite3.Row:
     row = conn.execute(
         """

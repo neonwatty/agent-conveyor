@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from workerctl.classify import classify_busy_wait, classify_startup_output
-from workerctl.constants import PROJECT_ROOT, VALID_STATES
+from workerctl.constants import DEFAULT_MANAGER_STALE_SECONDS, PROJECT_ROOT, VALID_STATES
 from workerctl.core import WorkerError, ensure_tool, now_iso, run, sh_quote
 from workerctl.db import active_task_worker
 from workerctl.db import bind_task_worker
@@ -47,7 +47,7 @@ from workerctl.state import (
     write_worker_contract,
 )
 from workerctl.supervise import command_idle_check, command_supervise, command_watch, idle_summary, supervise_once
-from workerctl.lifecycle import reconcile_rows
+from workerctl.lifecycle import manager_liveness_warnings, reconcile_rows
 from workerctl.tmux import (
     capture_output,
     current_pane_id,
@@ -572,8 +572,13 @@ def command_db_doctor(args: argparse.Namespace) -> int:
         live_results = reconcile_rows(db_path, task=None, recover=False)
         drift_count = sum(1 for row in live_results if row["drift"])
         unfinished_count = sum(len(row["unfinished_commands"]) for row in live_results)
+        manager_warnings = manager_liveness_warnings(
+            live_results,
+            stale_seconds=getattr(args, "manager_stale_seconds", DEFAULT_MANAGER_STALE_SECONDS),
+        )
         live_check = {
             "drift_count": drift_count,
+            "manager_liveness_warning_count": len(manager_warnings),
             "name": "live_reconcile",
             "ok": drift_count == 0 and unfinished_count == 0,
             "task_count": len(live_results),
@@ -581,6 +586,7 @@ def command_db_doctor(args: argparse.Namespace) -> int:
         }
         checks.append(live_check)
         result["live_reconcile"] = {
+            "manager_liveness_warnings": manager_warnings,
             "ok": live_check["ok"],
             "results": live_results,
         }

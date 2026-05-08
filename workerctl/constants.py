@@ -9,6 +9,7 @@ STATE_ROOT = ".codex-workers"
 DEFAULT_HISTORY_LINES = 200
 DEFAULT_STATUS_STALE_SECONDS = 120
 DEFAULT_TERMINAL_STALE_SECONDS = 120
+DEFAULT_MANAGER_STALE_SECONDS = 600
 DEFAULT_WAIT_READY_SECONDS = 30
 DEFAULT_SUPERVISE_COOLDOWN_SECONDS = 300
 DEFAULT_BUSY_WAIT_SECONDS = 60
@@ -21,4 +22,3 @@ DEFAULT_STATUS_NUDGE = (
     "current task, what changed, whether you are blocked, and your next action."
 )
 VALID_STATES = {"planning", "editing", "running_tests", "blocked", "waiting", "done", "unknown"}
-

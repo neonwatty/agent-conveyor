@@ -83,6 +83,14 @@ Reconcile SQLite state against live tmux sessions. Detect and report stale
 `starting` operations, missing managers, orphan tmux sessions, and active DB
 bindings whose worker or manager session no longer matches recorded identity.
 
+### `workerctl db-doctor --live [--manager-stale-seconds N]`
+
+Read-only SQLite and tmux health check. Reports hard reconciliation drift for
+missing sessions, pane mismatches, and unfinished durable commands. Also reports
+warning-grade manager heartbeat findings when a live manager has never been seen
+or has a stale `last_seen_at`. Heartbeat warnings do not fail the command and do
+not mutate task state; missing tmux sessions remain the hard recovery boundary.
+
 ### `workerctl reconcile [<name>]`
 
 Read-only version of `recover`. Prints drift between SQLite and tmux without
@@ -817,12 +825,15 @@ Implemented in the current SQLite milestone:
   blocked by live managers or unfinished durable commands.
 - First-run compatibility import via `import-compat`, dry-run by default and
   idempotent through `data_migrations`.
+- Warning-grade manager heartbeat checks in `db-doctor --live`, plus
+  `last_seen_at` updates on manager spawn/resume and verified manager lifecycle
+  operations.
 - Focused unit coverage plus `scripts/live-smoke` for a real tmux lifecycle.
 
 Remaining work:
 
-- Add manager liveness freshness checks using last-seen timestamps and capture
-  hashes, not only session existence.
+- Add manager terminal capture hash updates for `last_capture_sha256`, not only
+  `last_seen_at`.
 - Decide whether old paused smoke/test tasks should be pruned, archived, or
   marked failed/done by a maintenance command.
 - Add a `stop-manager` alias or final demotion command if needed beyond

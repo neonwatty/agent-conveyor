@@ -710,11 +710,58 @@ class CliTests(unittest.TestCase):
             self.assertEqual(live_check["unfinished_command_count"], 1)
             self.assertIn("unfinished_commands", payload["live_reconcile"]["results"][0]["drift"])
 
+    def test_db_doctor_live_reports_manager_liveness_warnings_without_failing(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                worker_db.upsert_worker(
+                    conn,
+                    name="worker-a",
+                    cwd=str(ROOT),
+                    tmux_session="codex-worker-a",
+                    state="active",
+                )
+                task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
+                worker_db.bind_task_worker(conn, task="task-a", worker="worker-a", binding_id="binding-1")
+                manager_id = worker_db.create_manager(
+                    conn,
+                    task_id=task_id,
+                    name="manager-a",
+                    tmux_session="codex-manager-task-a",
+                    codex_args=[],
+                    state="ready",
+                )
+                worker_db.attach_manager_to_binding(conn, task_id=task_id, manager_id=manager_id)
+                conn.execute("update managers set last_seen_at = '2000-01-01T00:00:00Z' where id = ?", (manager_id,))
+                conn.commit()
+
+            original_session_snapshot = worker_identity.session_snapshot
+            try:
+                worker_identity.session_snapshot = lambda session: {"live": True, "pane_id": None, "session": session}
+                args = argparse.Namespace(path=str(db_path), live=True, manager_stale_seconds=60)
+
+                with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                    result = commands.command_db_doctor(args)
+
+                payload = json.loads(stdout.getvalue())
+                self.assertEqual(result, 0)
+                self.assertTrue(payload["ok"])
+                live_check = next(check for check in payload["checks"] if check["name"] == "live_reconcile")
+                self.assertTrue(live_check["ok"])
+                self.assertEqual(live_check["manager_liveness_warning_count"], 1)
+                warning = payload["live_reconcile"]["manager_liveness_warnings"][0]
+                self.assertEqual(warning["reason"], "manager_seen_stale")
+                self.assertEqual(warning["manager"], "manager-a")
+            finally:
+                worker_identity.session_snapshot = original_session_snapshot
+
     def test_db_doctor_help_includes_live(self):
         proc = self.run_workerctl("db-doctor", "--help")
 
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertIn("--live", proc.stdout)
+        self.assertIn("--manager-stale-seconds", proc.stdout)
 
     def test_import_compat_dry_run_does_not_mutate_database(self):
         with tempfile.TemporaryDirectory() as tmpdir:

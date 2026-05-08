@@ -11,6 +11,7 @@ from workerctl.constants import (
     DEFAULT_BUSY_WAIT_SECONDS,
     DEFAULT_HISTORY_LINES,
     DEFAULT_INTERRUPT_FOLLOWUP,
+    DEFAULT_MANAGER_STALE_SECONDS,
     DEFAULT_STATUS_NUDGE,
     DEFAULT_STATUS_STALE_SECONDS,
     DEFAULT_SUPERVISE_COOLDOWN_SECONDS,
@@ -166,6 +167,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     db_doctor = subparsers.add_parser("db-doctor", help="Initialize and check the SQLite control-plane database.")
     db_doctor.add_argument("--live", action="store_true", help="Also report read-only live tmux reconciliation drift.")
+    db_doctor.add_argument(
+        "--manager-stale-seconds",
+        type=int,
+        default=DEFAULT_MANAGER_STALE_SECONDS,
+        help="Warn when a live manager heartbeat is older than this many seconds during --live.",
+    )
     db_doctor.add_argument("--path", help="Override the workerctl database path.")
     db_doctor.set_defaults(func=command_db_doctor)
 

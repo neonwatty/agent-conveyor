@@ -187,7 +187,9 @@ When a live session is intentionally reused and `reconcile` reports a pane
 mismatch, `recover --sync-pane-ids` records the repair and updates SQLite to the
 current live pane IDs.
 Use `db-doctor --live` for a read-only combined SQLite health and live tmux
-drift check.
+drift check. Live manager heartbeat warnings are reported without failing the
+doctor check unless there is actual reconciliation drift or an unfinished
+durable command; tune the warning threshold with `--manager-stale-seconds`.
 Use `close-stale` to dry-run closure of tasks whose recorded worker is missing,
 not supervised by a live manager, and has no unfinished durable commands.
 `close-stale --apply` marks those tasks `failed`, ends their active bindings,

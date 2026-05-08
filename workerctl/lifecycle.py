@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from workerctl.core import WorkerError, ensure_tool, now_iso, run, sh_quote
+from workerctl.core import WorkerError, age_seconds, ensure_tool, now_iso, run, sh_quote
 from workerctl.db import active_manager
 from workerctl.db import attach_manager_to_binding
 from workerctl.db import bind_task_worker
@@ -23,6 +23,7 @@ from workerctl.db import insert_event as insert_db_event
 from workerctl.db import insert_prompt as insert_db_prompt
 from workerctl.db import initialize_database
 from workerctl.db import latest_manager_prompt
+from workerctl.db import mark_manager_seen
 from workerctl.db import mark_command_attempted
 from workerctl.db import mark_worker_state, upsert_worker
 from workerctl.db import set_budget as set_db_budget
@@ -291,6 +292,7 @@ def command_promote(args: argparse.Namespace) -> int:
             initialize_database(conn)
             set_worker_pane_id(conn, worker_id=worker_id, tmux_pane_id=worker_pane_id)
             set_manager_pane_id(conn, manager_id=manager_id, tmux_pane_id=manager_pane_id)
+            mark_manager_seen(conn, manager_id=manager_id)
             set_manager_state(conn, manager_id=manager_id, state="ready")
             finish_db_command(conn, command_id=command_id, state="succeeded", result=result_payload)
             insert_db_event(
@@ -365,6 +367,8 @@ def command_pause_manager(args: argparse.Namespace) -> int:
         result["manager_identity"] = verification
         with connect_db(db_path) as conn:
             initialize_database(conn)
+            if verification["live"]:
+                mark_manager_seen(conn, manager_id=manager["id"])
             set_manager_state(conn, manager_id=manager["id"], state="stopping")
             insert_db_event(
                 conn,
@@ -479,6 +483,7 @@ def command_resume_manager(args: argparse.Namespace) -> int:
         with connect_db(db_path) as conn:
             initialize_database(conn)
             set_manager_pane_id(conn, manager_id=manager_id, tmux_pane_id=manager_pane_id)
+            mark_manager_seen(conn, manager_id=manager_id)
             set_manager_state(conn, manager_id=manager_id, state="ready")
             set_task_state(conn, task_id=snapshot["id"], state="managed")
             finish_db_command(conn, command_id=command_id, state="succeeded", result=result)
@@ -567,6 +572,8 @@ def command_stop_task(args: argparse.Namespace) -> int:
             result["manager_identity"] = manager_identity
             with connect_db(db_path) as conn:
                 initialize_database(conn)
+                if manager_identity["live"]:
+                    mark_manager_seen(conn, manager_id=manager["id"])
                 insert_db_event(
                     conn,
                     "manager_identity_verified",
@@ -664,7 +671,8 @@ def reconcile_rows(
                    workers.tmux_pane_id as worker_pane_id,
                    managers.id as manager_id, managers.name as manager_name,
                    managers.tmux_session as manager_session, managers.tmux_pane_id as manager_pane_id,
-                   managers.state as manager_state
+                   managers.state as manager_state, managers.last_seen_at as manager_last_seen_at,
+                   managers.last_capture_sha256 as manager_last_capture_sha256
             from tasks
             left join bindings on bindings.task_id = tasks.id and bindings.state in ('active', 'ending')
             left join workers on workers.id = bindings.worker_id
@@ -740,6 +748,9 @@ def reconcile_rows(
                 "recorded_pane_id": row["manager_pane_id"],
                 "session": row["manager_session"],
                 "state": row["manager_state"],
+                "last_capture_sha256": row["manager_last_capture_sha256"],
+                "last_seen_age_seconds": age_seconds(row["manager_last_seen_at"]),
+                "last_seen_at": row["manager_last_seen_at"],
                 "tmux_pane_id": manager_snapshot["pane_id"] if manager_snapshot else None,
             } if row["manager_id"] else None,
             "task": {"id": row["task_id"], "name": row["task_name"], "state": row["task_state"]},
@@ -869,6 +880,41 @@ def command_recover(args: argparse.Namespace) -> int:
     results = reconcile_rows(db_path, task=args.task, recover=True, sync_pane_ids=sync_pane_ids)
     print(json.dumps({"recover": True, "results": results, "sync_pane_ids": sync_pane_ids}, indent=2, sort_keys=True))
     return 0
+
+
+def manager_liveness_warnings(results: list[dict[str, Any]], *, stale_seconds: int) -> list[dict[str, Any]]:
+    warnings = []
+    for result in results:
+        manager = result["manager"]
+        if not manager or not manager["live"] or manager["state"] not in {"starting", "ready", "stopping"}:
+            continue
+        if manager["last_seen_at"] is None:
+            warnings.append(
+                {
+                    "manager": manager["name"],
+                    "manager_id": manager["id"],
+                    "reason": "manager_never_seen",
+                    "recommended_action": "observe manager or run a manager lifecycle command to refresh heartbeat",
+                    "task": result["task"]["name"],
+                    "task_id": result["task"]["id"],
+                }
+            )
+            continue
+        if manager["last_seen_age_seconds"] is not None and manager["last_seen_age_seconds"] > stale_seconds:
+            warnings.append(
+                {
+                    "age_seconds": manager["last_seen_age_seconds"],
+                    "last_seen_at": manager["last_seen_at"],
+                    "manager": manager["name"],
+                    "manager_id": manager["id"],
+                    "reason": "manager_seen_stale",
+                    "recommended_action": "inspect manager terminal; do not auto-recover unless tmux session is missing",
+                    "stale_seconds": stale_seconds,
+                    "task": result["task"]["name"],
+                    "task_id": result["task"]["id"],
+                }
+            )
+    return warnings
 
 
 def close_stale_plan(
