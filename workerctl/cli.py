@@ -35,6 +35,7 @@ from workerctl.commands import (
     command_nudge,
     command_open,
     command_prune,
+    command_start,
     command_start_test,
     command_status,
     command_stop,
@@ -126,6 +127,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     create.add_argument("--stop-after", action="store_true", help="Stop the worker after verification.")
     create.set_defaults(func=command_create, initial_prompt=True)
+
+    start = subparsers.add_parser("start", help="Start a normal Codex session inside tmux for later self-management.")
+    start.add_argument("session", help="Raw tmux session name to start, e.g. qa-raw.")
+    start.add_argument("--cwd", default=str(INVOCATION_CWD), help="Working directory for Codex.")
+    start.set_defaults(func=command_start)
 
     name_session = subparsers.add_parser(
         "name-session",
@@ -512,7 +518,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     parser = build_parser()
     args, unknown = parser.parse_known_args()
-    if unknown and args.command not in {"promote", "resume-manager", "self-promote", "manage"}:
+    if unknown and args.command not in {"start", "promote", "resume-manager", "self-promote", "manage"}:
         parser.error(f"unrecognized arguments: {' '.join(unknown)}")
     args.codex_args = unknown
     try:

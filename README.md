@@ -147,6 +147,17 @@ workerctl promote worker-a \
   -- --model gpt-5.4-mini
 ```
 
+To start a normal Codex session that can later declare itself as a managed
+worker, use `start`. This creates a raw tmux session and does not register a
+worker yet:
+
+```bash
+workerctl start qa-raw --cwd "$PWD"
+tmux attach -t qa-raw
+```
+
+From inside that Codex session, the agent can run `workerctl manage`.
+
 An agent already running inside a tmux session can turn itself into a managed
 worker with one command. If the current tmux session is not already named
 `codex-<worker>`, pass `--worker` and `manage` will register and rename it

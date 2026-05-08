@@ -128,6 +128,15 @@ with a content hash so repeated runs are idempotent and changed compatibility
 files can be imported as new observations. Existing SQLite worker state is
 preserved when a compatibility config is re-read.
 
+### `workerctl start <session-name>`
+
+Operator-facing convenience command for launching a normal Codex session inside
+tmux without registering it as a worker yet. It starts Codex with this repo's
+`bin/` on `PATH`, prints the tmux attach command, and leaves worker declaration
+to the agent through `workerctl manage`.
+
+Everything after `--` is passed as CLI args to the Codex process.
+
 ### `workerctl manage --worker <worker-name> --task <name> --goal <text>`
 
 Primary worker-facing command for an agent already running inside tmux. It

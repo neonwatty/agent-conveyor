@@ -908,6 +908,50 @@ class CliTests(unittest.TestCase):
                 if worker_path.exists():
                     shutil.rmtree(worker_path)
 
+    def test_start_launches_normal_codex_tmux_session(self):
+        launched = []
+        original_run = commands.run
+        try:
+            def fake_run(argv, **kwargs):
+                if argv[:3] == ["tmux", "has-session", "-t"]:
+                    return subprocess.CompletedProcess(argv, 1, "", "")
+                launched.append(argv)
+                return subprocess.CompletedProcess(argv, 0, "", "")
+
+            commands.run = fake_run
+            args = argparse.Namespace(
+                codex_args=["--model", "gpt-5.4-mini"],
+                cwd=str(ROOT),
+                session="qa-raw",
+            )
+
+            with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                result = commands.command_start(args)
+
+            payload = json.loads(stdout.getvalue())
+            self.assertEqual(result, 0)
+            self.assertEqual(payload["session"], "qa-raw")
+            self.assertEqual(payload["attach_command"], "tmux attach -t qa-raw")
+            self.assertEqual(payload["manage_command"], "workerctl manage --worker <name> --task <task> --goal <goal>")
+            self.assertEqual(launched[0][:5], ["tmux", "new-session", "-d", "-s", "qa-raw"])
+            self.assertIn("codex --cd", launched[0][5])
+            self.assertIn("--no-alt-screen", launched[0][5])
+            self.assertIn("'--model' 'gpt-5.4-mini'", launched[0][5])
+            self.assertIn("/bin':$PATH", launched[0][5])
+        finally:
+            commands.run = original_run
+
+    def test_start_refuses_existing_tmux_session(self):
+        original_run = commands.run
+        try:
+            commands.run = lambda argv, **kwargs: subprocess.CompletedProcess(argv, 0, "", "")
+            args = argparse.Namespace(codex_args=[], cwd=str(ROOT), session="qa-raw")
+
+            with self.assertRaisesRegex(WorkerError, "tmux session already exists"):
+                commands.command_start(args)
+        finally:
+            commands.run = original_run
+
     def test_name_session_denies_existing_worker_name_from_different_session(self):
         name = "unit-claimed-worker"
         worker_path = worker_dir(name)
@@ -2782,6 +2826,7 @@ class CliTests(unittest.TestCase):
         self.assertIn("reconcile", proc.stdout)
         self.assertIn("resume-manager", proc.stdout)
         self.assertIn("self-promote", proc.stdout)
+        self.assertIn("start", proc.stdout)
         self.assertIn("stop-task", proc.stdout)
         self.assertIn("close-stale", proc.stdout)
         self.assertIn("export-task", proc.stdout)

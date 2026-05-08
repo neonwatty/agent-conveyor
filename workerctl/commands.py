@@ -82,6 +82,10 @@ def print_worker_commands(name: str) -> None:
     print(f"  {stop_command(name)}")
 
 
+def attach_session_command(session_name: str) -> str:
+    return f"tmux attach -t {session_name}"
+
+
 def resolve_terminal(terminal: str) -> str:
     if terminal != "auto":
         return terminal
@@ -138,6 +142,32 @@ def open_worker_window(name: str, *, terminal: str, dry_run: bool, force: bool) 
     run(command)
     append_event(name, "open", {"forced": force, "terminal": selected_terminal})
     return result
+
+
+def command_start(args: argparse.Namespace) -> int:
+    ensure_tool("tmux")
+    ensure_tool("codex")
+    session_name = args.session
+    validate_name(session_name)
+    directory = Path(args.cwd).expanduser().resolve()
+    if not directory.exists() or not directory.is_dir():
+        raise WorkerError(f"Session cwd does not exist or is not a directory: {directory}")
+    if run(["tmux", "has-session", "-t", session_name], check=False).returncode == 0:
+        raise WorkerError(f"tmux session already exists: {session_name}")
+
+    codex_args = " ".join(sh_quote(arg) for arg in (args.codex_args or []))
+    shell_command = f"{cli_path_prefix()} codex --cd {sh_quote(str(directory))} --no-alt-screen"
+    if codex_args:
+        shell_command = f"{shell_command} {codex_args}"
+    run(["tmux", "new-session", "-d", "-s", session_name, shell_command])
+    result = {
+        "attach_command": attach_session_command(session_name),
+        "cwd": str(directory),
+        "manage_command": f"workerctl manage --worker <name> --task <task> --goal <goal>",
+        "session": session_name,
+    }
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0
 
 
 def wait_for_status_update(
