@@ -157,6 +157,7 @@ scripts/workerctl audit auth-refactor --json
 scripts/workerctl commands --task auth-refactor --json
 scripts/workerctl commands --task auth-refactor --type task_nudge --state failed --json
 scripts/workerctl task-events auth-refactor --json
+scripts/workerctl db-doctor --live
 ```
 
 Pause, resume, reconcile, recover, export, and close the task:
@@ -167,6 +168,8 @@ scripts/workerctl resume-manager auth-refactor -- --model gpt-5.4-mini
 scripts/workerctl reconcile auth-refactor
 scripts/workerctl recover auth-refactor
 scripts/workerctl recover auth-refactor --sync-pane-ids
+scripts/workerctl close-stale auth-refactor
+scripts/workerctl close-stale auth-refactor --apply
 scripts/workerctl export-task auth-refactor --zip
 scripts/workerctl stop-task auth-refactor --stop-worker
 ```
@@ -182,6 +185,12 @@ binding.
 When a live session is intentionally reused and `reconcile` reports a pane
 mismatch, `recover --sync-pane-ids` records the repair and updates SQLite to the
 current live pane IDs.
+Use `db-doctor --live` for a read-only combined SQLite health and live tmux
+drift check.
+Use `close-stale` to dry-run closure of tasks whose recorded worker is missing,
+not supervised by a live manager, and has no unfinished durable commands.
+`close-stale --apply` marks those tasks `failed`, ends their active bindings,
+marks the missing worker/manager records, and writes command/event audit rows.
 
 Transcript capture content can be pruned while retaining metadata:
 

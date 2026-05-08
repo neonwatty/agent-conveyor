@@ -47,6 +47,7 @@ from workerctl.state import (
     write_worker_contract,
 )
 from workerctl.supervise import command_idle_check, command_supervise, command_watch, idle_summary, supervise_once
+from workerctl.lifecycle import reconcile_rows
 from workerctl.tmux import (
     capture_output,
     current_pane_id,
@@ -561,10 +562,29 @@ def command_db_doctor(args: argparse.Namespace) -> int:
     with connect_db(db_path) as conn:
         initialize_database(conn)
         health = database_health(conn)
+    checks = list(health["checks"])
     result = {
         **health,
+        "checks": checks,
         "path": str(db_path),
     }
+    if getattr(args, "live", False):
+        live_results = reconcile_rows(db_path, task=None, recover=False)
+        drift_count = sum(1 for row in live_results if row["drift"])
+        unfinished_count = sum(len(row["unfinished_commands"]) for row in live_results)
+        live_check = {
+            "drift_count": drift_count,
+            "name": "live_reconcile",
+            "ok": drift_count == 0 and unfinished_count == 0,
+            "task_count": len(live_results),
+            "unfinished_command_count": unfinished_count,
+        }
+        checks.append(live_check)
+        result["live_reconcile"] = {
+            "ok": live_check["ok"],
+            "results": live_results,
+        }
+        result["ok"] = result["ok"] and live_check["ok"]
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0 if result["ok"] else 1
 

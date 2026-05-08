@@ -625,6 +625,95 @@ class CliTests(unittest.TestCase):
             self.assertEqual(data["schema_version"], worker_db.SCHEMA_VERSION)
             self.assertTrue(any(check["name"] == "required_tables" for check in data["checks"]))
 
+    def test_db_doctor_live_reports_ok_without_drift(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            args = argparse.Namespace(path=str(db_path), live=True)
+
+            with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                result = commands.command_db_doctor(args)
+
+            payload = json.loads(stdout.getvalue())
+            self.assertEqual(result, 0)
+            self.assertTrue(payload["ok"])
+            live_check = next(check for check in payload["checks"] if check["name"] == "live_reconcile")
+            self.assertTrue(live_check["ok"])
+            self.assertEqual(payload["live_reconcile"]["results"], [])
+
+    def test_db_doctor_live_reports_missing_sessions(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                worker_db.upsert_worker(
+                    conn,
+                    name="worker-a",
+                    cwd=str(ROOT),
+                    tmux_session="codex-worker-a",
+                    state="active",
+                )
+                task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
+                worker_db.bind_task_worker(conn, task="task-a", worker="worker-a", binding_id="binding-1")
+                manager_id = worker_db.create_manager(
+                    conn,
+                    task_id=task_id,
+                    name="manager-a",
+                    tmux_session="codex-manager-task-a",
+                    codex_args=[],
+                    state="ready",
+                )
+                worker_db.attach_manager_to_binding(conn, task_id=task_id, manager_id=manager_id)
+                conn.commit()
+
+            original_session_snapshot = worker_identity.session_snapshot
+            try:
+                worker_identity.session_snapshot = lambda session: {"live": False, "pane_id": None, "session": session}
+                args = argparse.Namespace(path=str(db_path), live=True)
+
+                with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                    result = commands.command_db_doctor(args)
+
+                payload = json.loads(stdout.getvalue())
+                self.assertEqual(result, 1)
+                self.assertFalse(payload["ok"])
+                live_check = next(check for check in payload["checks"] if check["name"] == "live_reconcile")
+                self.assertFalse(live_check["ok"])
+                self.assertEqual(live_check["drift_count"], 1)
+                self.assertEqual(payload["live_reconcile"]["results"][0]["drift"], ["worker_missing", "manager_missing"])
+            finally:
+                worker_identity.session_snapshot = original_session_snapshot
+
+    def test_db_doctor_live_reports_unfinished_commands(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
+                worker_db.create_command(
+                    conn,
+                    command_type="task_nudge",
+                    payload={"message": "status"},
+                    task_id=task_id,
+                )
+                conn.commit()
+
+            args = argparse.Namespace(path=str(db_path), live=True)
+
+            with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                result = commands.command_db_doctor(args)
+
+            payload = json.loads(stdout.getvalue())
+            self.assertEqual(result, 1)
+            live_check = next(check for check in payload["checks"] if check["name"] == "live_reconcile")
+            self.assertEqual(live_check["unfinished_command_count"], 1)
+            self.assertIn("unfinished_commands", payload["live_reconcile"]["results"][0]["drift"])
+
+    def test_db_doctor_help_includes_live(self):
+        proc = self.run_workerctl("db-doctor", "--help")
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("--live", proc.stdout)
+
     def test_tasks_create_and_list_json(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "workerctl.db"
@@ -1919,6 +2008,191 @@ class CliTests(unittest.TestCase):
             self.assertEqual(payload["results"][0]["unfinished_commands"][0]["type"], "task_nudge")
             self.assertIn("retry manually", payload["results"][0]["unfinished_commands"][0]["recommended_action"])
 
+    def test_close_stale_dry_run_reports_candidates_without_mutating(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                worker_db.upsert_worker(
+                    conn,
+                    name="worker-a",
+                    cwd=str(ROOT),
+                    tmux_session="codex-worker-a",
+                    state="active",
+                )
+                task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
+                worker_db.bind_task_worker(conn, task="task-a", worker="worker-a", binding_id="binding-1")
+                conn.commit()
+
+            original_session_snapshot = worker_identity.session_snapshot
+            try:
+                worker_identity.session_snapshot = lambda session: {"live": False, "pane_id": None, "session": session}
+
+                with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                    result = lifecycle.command_close_stale(
+                        argparse.Namespace(apply=False, path=str(db_path), task="task-a")
+                    )
+
+                payload = json.loads(stdout.getvalue())
+                self.assertEqual(result, 0)
+                self.assertFalse(payload["apply"])
+                self.assertEqual(payload["candidates"][0]["task"]["id"], task_id)
+                self.assertEqual(payload["candidates"][0]["planned_state"], "failed")
+                with worker_db.connect(db_path) as conn:
+                    task = conn.execute("select state from tasks where id = ?", (task_id,)).fetchone()
+                    worker = conn.execute("select state from workers where id = 'worker-a'").fetchone()
+                    binding = conn.execute("select state from bindings where id = 'binding-1'").fetchone()
+                    commands_count = conn.execute("select count(*) from commands where type = 'close_stale'").fetchone()[0]
+                self.assertEqual(task["state"], "managed")
+                self.assertEqual(worker["state"], "active")
+                self.assertEqual(binding["state"], "active")
+                self.assertEqual(commands_count, 0)
+            finally:
+                worker_identity.session_snapshot = original_session_snapshot
+
+    def test_close_stale_apply_marks_failed_and_audits_transition(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                worker_db.upsert_worker(
+                    conn,
+                    name="worker-a",
+                    cwd=str(ROOT),
+                    tmux_session="codex-worker-a",
+                    state="active",
+                )
+                task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
+                worker_db.bind_task_worker(conn, task="task-a", worker="worker-a", binding_id="binding-1")
+                conn.commit()
+
+            original_session_snapshot = worker_identity.session_snapshot
+            try:
+                worker_identity.session_snapshot = lambda session: {"live": False, "pane_id": None, "session": session}
+
+                with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                    result = lifecycle.command_close_stale(
+                        argparse.Namespace(apply=True, path=str(db_path), task="task-a")
+                    )
+
+                payload = json.loads(stdout.getvalue())
+                self.assertEqual(result, 0)
+                self.assertTrue(payload["apply"])
+                self.assertEqual(payload["closed"][0]["task"]["id"], task_id)
+                with worker_db.connect(db_path) as conn:
+                    task = conn.execute("select state from tasks where id = ?", (task_id,)).fetchone()
+                    worker = conn.execute("select state from workers where id = 'worker-a'").fetchone()
+                    binding = conn.execute("select state, ended_at from bindings where id = 'binding-1'").fetchone()
+                    command = conn.execute("select state, result_json from commands where type = 'close_stale'").fetchone()
+                    event = conn.execute("select type, payload_json from events where type = 'close_stale_task'").fetchone()
+                self.assertEqual(task["state"], "failed")
+                self.assertEqual(worker["state"], "missing")
+                self.assertEqual(binding["state"], "ended")
+                self.assertIsNotNone(binding["ended_at"])
+                self.assertEqual(command["state"], "succeeded")
+                self.assertEqual(json.loads(command["result_json"])["task_state"], "failed")
+                self.assertEqual(event["type"], "close_stale_task")
+                self.assertEqual(json.loads(event["payload_json"])["planned_state"], "failed")
+            finally:
+                worker_identity.session_snapshot = original_session_snapshot
+
+    def test_close_stale_skips_unfinished_commands(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                worker_db.upsert_worker(
+                    conn,
+                    name="worker-a",
+                    cwd=str(ROOT),
+                    tmux_session="codex-worker-a",
+                    state="active",
+                )
+                task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
+                worker_db.bind_task_worker(conn, task="task-a", worker="worker-a", binding_id="binding-1")
+                worker_db.create_command(
+                    conn,
+                    command_type="task_nudge",
+                    payload={"message": "status"},
+                    task_id=task_id,
+                    worker_id="worker-a",
+                )
+                conn.commit()
+
+            original_session_snapshot = worker_identity.session_snapshot
+            try:
+                worker_identity.session_snapshot = lambda session: {"live": False, "pane_id": None, "session": session}
+
+                with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                    result = lifecycle.command_close_stale(
+                        argparse.Namespace(apply=True, path=str(db_path), task="task-a")
+                    )
+
+                payload = json.loads(stdout.getvalue())
+                self.assertEqual(result, 0)
+                self.assertEqual(payload["closed"], [])
+                self.assertEqual(payload["skipped"][0]["skip_reasons"], ["unfinished_commands"])
+                with worker_db.connect(db_path) as conn:
+                    task = conn.execute("select state from tasks where id = ?", (task_id,)).fetchone()
+                    binding = conn.execute("select state from bindings where id = 'binding-1'").fetchone()
+                    close_count = conn.execute("select count(*) from commands where type = 'close_stale'").fetchone()[0]
+                self.assertEqual(task["state"], "managed")
+                self.assertEqual(binding["state"], "active")
+                self.assertEqual(close_count, 0)
+            finally:
+                worker_identity.session_snapshot = original_session_snapshot
+
+    def test_close_stale_skips_live_manager(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                worker_db.upsert_worker(
+                    conn,
+                    name="worker-a",
+                    cwd=str(ROOT),
+                    tmux_session="codex-worker-a",
+                    state="active",
+                )
+                task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
+                worker_db.bind_task_worker(conn, task="task-a", worker="worker-a", binding_id="binding-1")
+                manager_id = worker_db.create_manager(
+                    conn,
+                    task_id=task_id,
+                    name="manager-a",
+                    tmux_session="codex-manager-task-a",
+                    codex_args=[],
+                    state="ready",
+                )
+                worker_db.attach_manager_to_binding(conn, task_id=task_id, manager_id=manager_id)
+                conn.commit()
+
+            original_session_snapshot = worker_identity.session_snapshot
+            try:
+                def fake_session_snapshot(session):
+                    return {"live": session == "codex-manager-task-a", "pane_id": None, "session": session}
+
+                worker_identity.session_snapshot = fake_session_snapshot
+
+                with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                    result = lifecycle.command_close_stale(
+                        argparse.Namespace(apply=True, path=str(db_path), task="task-a")
+                    )
+
+                payload = json.loads(stdout.getvalue())
+                self.assertEqual(result, 0)
+                self.assertEqual(payload["closed"], [])
+                self.assertEqual(payload["skipped"][0]["skip_reasons"], ["manager_live"])
+                with worker_db.connect(db_path) as conn:
+                    task = conn.execute("select state from tasks where id = ?", (task_id,)).fetchone()
+                    worker = conn.execute("select state from workers where id = 'worker-a'").fetchone()
+                    manager = conn.execute("select state from managers where id = ?", (manager_id,)).fetchone()
+                self.assertEqual(task["state"], "managed")
+                self.assertEqual(worker["state"], "active")
+                self.assertEqual(manager["state"], "ready")
+            finally:
+                worker_identity.session_snapshot = original_session_snapshot
+
     def test_export_task_writes_bundle_and_zip(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "workerctl.db"
@@ -1976,6 +2250,7 @@ class CliTests(unittest.TestCase):
         self.assertIn("reconcile", proc.stdout)
         self.assertIn("resume-manager", proc.stdout)
         self.assertIn("stop-task", proc.stdout)
+        self.assertIn("close-stale", proc.stdout)
         self.assertIn("export-task", proc.stdout)
         self.assertIn("task-capture", proc.stdout)
         self.assertIn("task-events", proc.stdout)
@@ -1988,6 +2263,12 @@ class CliTests(unittest.TestCase):
 
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertIn("--sync-pane-ids", proc.stdout)
+
+    def test_close_stale_help_includes_apply(self):
+        proc = self.run_workerctl("close-stale", "--help")
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("--apply", proc.stdout)
 
     def test_start_test_is_listed_in_help(self):
         proc = self.run_workerctl("--help")

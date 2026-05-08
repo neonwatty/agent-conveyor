@@ -49,6 +49,7 @@ from workerctl.commands import (
 from workerctl.core import WorkerError
 from workerctl.export import command_export_task
 from workerctl.lifecycle import (
+    command_close_stale,
     command_pause_manager,
     command_promote,
     command_reconcile,
@@ -163,6 +164,7 @@ def build_parser() -> argparse.ArgumentParser:
     doctor.set_defaults(func=command_doctor)
 
     db_doctor = subparsers.add_parser("db-doctor", help="Initialize and check the SQLite control-plane database.")
+    db_doctor.add_argument("--live", action="store_true", help="Also report read-only live tmux reconciliation drift.")
     db_doctor.add_argument("--path", help="Override the workerctl database path.")
     db_doctor.set_defaults(func=command_db_doctor)
 
@@ -240,6 +242,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     recover.add_argument("--path", help="Override the workerctl database path.")
     recover.set_defaults(func=command_recover)
+
+    close_stale = subparsers.add_parser(
+        "close-stale",
+        help="Dry-run or close stale tasks whose recorded worker is missing and unsupervised.",
+    )
+    close_stale.add_argument("task", nargs="?", help="Optional task name or ID.")
+    close_stale.add_argument("--apply", action="store_true", help="Apply the close plan. Default is dry-run.")
+    close_stale.add_argument("--path", help="Override the workerctl database path.")
+    close_stale.set_defaults(func=command_close_stale)
 
     task_status = subparsers.add_parser("task-status", help="Print task-scoped status from SQLite.")
     task_status.add_argument("task", help="Task name or ID.")

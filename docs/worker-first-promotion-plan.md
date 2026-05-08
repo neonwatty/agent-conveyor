@@ -88,6 +88,15 @@ bindings whose worker or manager session no longer matches recorded identity.
 Read-only version of `recover`. Prints drift between SQLite and tmux without
 changing state.
 
+### `workerctl close-stale [<name>] [--apply]`
+
+Dry-run by default. Finds tasks in `managed` or `paused` state whose recorded
+worker session is missing, no live manager is supervising the task, and no
+unfinished durable commands are pending or attempted. With `--apply`, marks the
+task `failed`, ends the active binding, marks missing worker/manager records,
+and writes explicit command/result and event audit rows. It never closes `done`
+tasks and has no force mode in the first implementation.
+
 ### `workerctl audit <name>`
 
 Print a chronological audit view for a task, including lifecycle transitions,
@@ -785,7 +794,7 @@ Implemented in the current SQLite milestone:
   persistence, with compatibility JSON/status/transcript artifacts preserved.
 - Task-scoped status, capture, idle-check, nudge, interrupt, audit, events,
   command listing, prune, export, reconcile, recover, promote, pause, resume,
-  and stop-task commands.
+  close-stale, and stop-task commands.
 - Durable command intent/result rows for task-scoped mutations and lifecycle
   side effects.
 - Nudge budget reservation in SQLite before non-dry-run sends.
@@ -794,12 +803,13 @@ Implemented in the current SQLite milestone:
   tokens, tmux sessions, and pane IDs before text, interrupt, or kill side
   effects.
 - Explicit pane repair via `recover --sync-pane-ids`, with repair events.
+- Read-only live drift checks via `db-doctor --live`.
+- Conservative stale task closure via `close-stale`, dry-run by default and
+  blocked by live managers or unfinished durable commands.
 - Focused unit coverage plus `scripts/live-smoke` for a real tmux lifecycle.
 
 Remaining work:
 
-- Add `db-doctor --live` so database health can include tmux/session drift and
-  identity drift without requiring a separate `reconcile` command.
 - Add first-run import/backfill for existing JSON/JSONL workers and historical
   compatibility artifacts.
 - Add manager liveness freshness checks using last-seen timestamps and capture
