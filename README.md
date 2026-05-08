@@ -152,11 +152,13 @@ worker, use `start`. This creates a raw tmux session and does not register a
 worker yet:
 
 ```bash
-workerctl start qa-raw --cwd "$PWD"
+workerctl start qa-raw --cwd "$PWD" -- --sandbox danger-full-access --ask-for-approval never
 tmux attach -t qa-raw
 ```
 
-From inside that Codex session, the agent can run `workerctl manage`.
+From inside that Codex session, the agent can run the printed `workerctl manage
+--session ...` command. Full access is required if the agent itself needs to
+rename tmux sessions and spawn managers.
 
 An agent already running inside a tmux session can turn itself into a managed
 worker with one command. If the current tmux session is not already named

@@ -155,7 +155,10 @@ def command_start(args: argparse.Namespace) -> int:
     if run(["tmux", "has-session", "-t", session_name], check=False).returncode == 0:
         raise WorkerError(f"tmux session already exists: {session_name}")
 
-    codex_args = " ".join(sh_quote(arg) for arg in (args.codex_args or []))
+    raw_codex_args = list(args.codex_args or [])
+    if raw_codex_args[:1] == ["--"]:
+        raw_codex_args = raw_codex_args[1:]
+    codex_args = " ".join(sh_quote(arg) for arg in raw_codex_args)
     shell_command = f"{cli_path_prefix()} codex --cd {sh_quote(str(directory))} --no-alt-screen"
     if codex_args:
         shell_command = f"{shell_command} {codex_args}"
@@ -163,7 +166,7 @@ def command_start(args: argparse.Namespace) -> int:
     result = {
         "attach_command": attach_session_command(session_name),
         "cwd": str(directory),
-        "manage_command": f"workerctl manage --worker <name> --task <task> --goal <goal>",
+        "manage_command": f"workerctl manage --session {session_name} --worker <name> --task <task> --goal <goal>",
         "session": session_name,
     }
     print(json.dumps(result, indent=2, sort_keys=True))

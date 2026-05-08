@@ -920,7 +920,7 @@ class CliTests(unittest.TestCase):
 
             commands.run = fake_run
             args = argparse.Namespace(
-                codex_args=["--model", "gpt-5.4-mini"],
+                codex_args=["--", "--model", "gpt-5.4-mini"],
                 cwd=str(ROOT),
                 session="qa-raw",
             )
@@ -932,7 +932,7 @@ class CliTests(unittest.TestCase):
             self.assertEqual(result, 0)
             self.assertEqual(payload["session"], "qa-raw")
             self.assertEqual(payload["attach_command"], "tmux attach -t qa-raw")
-            self.assertEqual(payload["manage_command"], "workerctl manage --worker <name> --task <task> --goal <goal>")
+            self.assertEqual(payload["manage_command"], "workerctl manage --session qa-raw --worker <name> --task <task> --goal <goal>")
             self.assertEqual(launched[0][:5], ["tmux", "new-session", "-d", "-s", "qa-raw"])
             self.assertIn("codex --cd", launched[0][5])
             self.assertIn("--no-alt-screen", launched[0][5])
