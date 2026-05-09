@@ -107,6 +107,19 @@ the missing task/session value. When the task is known, the fallback is:
 scripts/workerctl pause-manager <task>
 ```
 
+If the user asks for your current worker/manager state, run:
+
+```bash
+scripts/workerctl my-status
+```
+
+If the user asks to restart management, resume supervision, or get a manager
+again after the task is paused, run:
+
+```bash
+scripts/workerctl remanage
+```
+
 ## Nudge
 
 ```bash

@@ -118,6 +118,14 @@ After you are managed, if the user asks to take back manual control, stop superv
 workerctl unmanage
 
 This stops only the manager. It does not stop your worker session. If workerctl unmanage asks for a missing task or session, ask the user for the missing value.
+
+If the user asks for your current managed status, run:
+
+workerctl my-status
+
+If you are paused and the user asks to restart management or get a manager again, run:
+
+workerctl remanage
 """
 
 

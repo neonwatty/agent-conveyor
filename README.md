@@ -226,6 +226,18 @@ leaves the worker session running for manual control. Natural-language requests
 such as "take back manual control", "pause my manager", or "stop managing me"
 should map to `workerctl unmanage`.
 
+Worker sessions can also inspect or restart their own management without knowing
+the task name:
+
+```bash
+workerctl my-status
+workerctl remanage -- --model gpt-5.4-mini
+```
+
+`my-status` prints the current worker, task, task state, manager state, and
+suggested next commands. `remanage` is the worker-facing counterpart to
+`resume-manager <task>` and restarts supervision for a paused task.
+
 `task-nudge` reserves SQLite budget before sending. Mutating task commands write
 durable command intent/result rows, and `audit` shows the resulting timeline.
 Use `commands` to inspect durable side-effect command rows directly, including
