@@ -32,6 +32,8 @@ from workerctl.commands import (
     command_events,
     command_interrupt,
     command_list,
+    command_manager_decision,
+    command_manager_observe,
     command_name_session,
     command_nudge,
     command_open,
@@ -435,6 +437,7 @@ def build_parser() -> argparse.ArgumentParser:
     task_health = subparsers.add_parser("task-health", help="Check task integrity, live bindings, and manager health.")
     task_health.add_argument("task", help="Task name or ID.")
     task_health.add_argument("--json", action="store_true", help="Print stable JSON output.")
+    task_health.add_argument("--record", action="store_true", help="Persist this health check as an audit observation.")
     task_health.add_argument(
         "--manager-stale-seconds",
         type=int,
@@ -447,9 +450,35 @@ def build_parser() -> argparse.ArgumentParser:
     task_capture = subparsers.add_parser("task-capture", help="Capture terminal output for a task's bound worker.")
     task_capture.add_argument("task", help="Task name or ID.")
     task_capture.add_argument("--lines", type=int, default=DEFAULT_HISTORY_LINES)
+    task_capture.add_argument("--role", choices=("worker", "manager"), default="worker", help="Task terminal role to capture.")
     task_capture.add_argument("--json", action="store_true", help="Print capture metadata and output as JSON.")
     task_capture.add_argument("--path", help="Override the workerctl database path.")
     task_capture.set_defaults(func=command_task_capture)
+
+    manager_observe = subparsers.add_parser("manager-observe", help="Record one manager observation cycle for a task.")
+    manager_observe.add_argument("task", help="Task name or ID.")
+    manager_observe.add_argument("--json", action="store_true", help="Print stable JSON output.")
+    manager_observe.add_argument("--lines", type=int, default=DEFAULT_HISTORY_LINES)
+    manager_observe.add_argument("--no-refresh", action="store_false", dest="refresh", help="Do not refresh worker terminal metadata during idle check.")
+    manager_observe.add_argument("--status-stale-seconds", type=int, default=DEFAULT_STATUS_STALE_SECONDS)
+    manager_observe.add_argument("--terminal-stale-seconds", type=int, default=DEFAULT_TERMINAL_STALE_SECONDS)
+    manager_observe.add_argument("--busy-wait-seconds", type=int, default=DEFAULT_BUSY_WAIT_SECONDS)
+    manager_observe.add_argument(
+        "--manager-stale-seconds",
+        type=int,
+        default=DEFAULT_MANAGER_STALE_SECONDS,
+        help="Warn when a live manager heartbeat is older than this many seconds.",
+    )
+    manager_observe.add_argument("--path", help="Override the workerctl database path.")
+    manager_observe.set_defaults(func=command_manager_observe, refresh=True)
+
+    manager_decision = subparsers.add_parser("manager-decision", help="Record a manager decision for a task.")
+    manager_decision.add_argument("task", help="Task name or ID.")
+    manager_decision.add_argument("--decision", required=True, choices=("wait", "nudge", "interrupt", "escalate", "stop", "inspect"))
+    manager_decision.add_argument("--reason", required=True, help="Reason for the decision.")
+    manager_decision.add_argument("--cycle-id", type=int, help="Manager observation cycle ID to link.")
+    manager_decision.add_argument("--path", help="Override the workerctl database path.")
+    manager_decision.set_defaults(func=command_manager_decision)
 
     task_idle_check = subparsers.add_parser("task-idle-check", help="Classify freshness for a task's bound worker.")
     task_idle_check.add_argument("task", help="Task name or ID.")

@@ -214,7 +214,10 @@ Inspect and operate the task through task-scoped commands:
 ```bash
 workerctl task-status auth-refactor --json
 workerctl task-health auth-refactor --json
+workerctl manager-observe auth-refactor
+workerctl manager-decision auth-refactor --decision inspect --reason "health OK; reading worker output"
 workerctl task-capture auth-refactor --lines 120 --json
+workerctl task-capture auth-refactor --role manager --lines 120 --json
 workerctl task-idle-check auth-refactor
 workerctl task-nudge auth-refactor "Please update status and state your next action."
 workerctl task-interrupt auth-refactor
@@ -272,6 +275,11 @@ for a task-scoped event stream when reconstructing what happened.
 Use `task-health <task> --json` when you want one task-scoped integrity view
 that combines SQLite state, live tmux drift, unfinished commands, and manager
 heartbeat warnings.
+Managers should start each supervision loop with `manager-observe`; it records
+task health, worker and manager terminal captures, and the current status into
+SQLite so visible Codex errors survive beyond tmux scrollback. Use
+`manager-decision` to record why a manager chose to wait, inspect, nudge,
+interrupt, escalate, or stop.
 Before task-scoped text, interrupt, or kill side effects, workerctl verifies the
 recorded worker/manager identity, tmux session, and pane ID for the active
 binding.

@@ -247,10 +247,25 @@ reconciliation drift, unfinished durable commands, and manager liveness warnings
 into one JSON payload with recommended next actions. This is the first command
 to run when a task looks managed but captures, nudges, or resume operations fail.
 
+### `workerctl manager-observe <name>`
+
+Manager-facing observation command. Records one supervision cycle in SQLite:
+task health, current status, worker terminal capture, manager terminal capture,
+idle classification, and a durable health observation. This is the preferred
+first command for each manager loop because it makes visible Codex output and
+manager-side failures auditable after the fact.
+
+### `workerctl manager-decision <name> --decision <kind> --reason <text>`
+
+Manager-facing decision command. Records why the manager chose to wait, inspect,
+nudge, interrupt, escalate, or stop. Mutating task commands remain separate, but
+the decision row links the manager's reasoning to the same task audit stream.
+
 ### `workerctl task-capture <name> [--lines N]`
 
 Capture recent worker output through the task binding. Stores capture metadata,
 content, and hashes in SQLite according to transcript retention policy.
+Use `--role manager` to capture the manager terminal instead.
 
 ### `workerctl task-idle-check <name>`
 
@@ -802,7 +817,7 @@ Only take the listed actions for your current state.
 ## States
 
 OBSERVE
-  Run: task-health --json, task-status --json, task-capture --json, task-idle-check
+  Run: manager-observe --json
   Classify the worker as: active | stale | blocked | done
   Transition:
     active  → WAIT
@@ -937,6 +952,8 @@ intent/result records, and recovery/audit views.
 - Export task bundles on demand for manual debugging:
   `workerctl export-task <name>`.
 - Add transcript retention and `workerctl prune`.
+- Add durable manager observations, manager decisions, and role-aware terminal
+  captures so manager-visible errors are available in audit/export data.
 
 ## Implementation Checkpoint
 
@@ -954,6 +971,8 @@ Implemented in the current SQLite milestone:
   side effects.
 - Task-scoped `task-health` diagnostic that combines SQLite integrity, live
   tmux drift, unfinished commands, and manager liveness warnings.
+- Role-aware terminal captures, manager observation cycles, and manager decision
+  records included in `audit` and `export-task`.
 - Nudge budget reservation in SQLite before non-dry-run sends.
 - Pane ID persistence for new worker and manager tmux sessions.
 - Centralized identity verification in `workerctl.identity` for worker/manager

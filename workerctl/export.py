@@ -64,9 +64,22 @@ def command_export_task(args: argparse.Namespace) -> int:
     write_json(export_root / "audit.json", audit)
     write_json(export_root / "prompts.json", prompts)
     write_json(export_root / "transcript-captures.json", captures)
+    write_json(export_root / "terminal-captures.json", audit.get("terminal_captures", []))
+    write_json(export_root / "agent-observations.json", audit.get("agent_observations", []))
+    write_json(export_root / "manager-cycles.json", audit.get("manager_cycles", []))
+    write_json(export_root / "manager-decisions.json", audit.get("manager_decisions", []))
     manifest = {
         "created_at": now_iso(),
-        "files": ["task-status.json", "audit.json", "prompts.json", "transcript-captures.json"],
+        "files": [
+            "task-status.json",
+            "audit.json",
+            "prompts.json",
+            "transcript-captures.json",
+            "terminal-captures.json",
+            "agent-observations.json",
+            "manager-cycles.json",
+            "manager-decisions.json",
+        ],
         "task": {"id": snapshot["id"], "name": snapshot["name"]},
     }
     write_json(export_root / "manifest.json", manifest)
@@ -79,5 +92,4 @@ def command_export_task(args: argparse.Namespace) -> int:
     result = {"archive": str(archive_path) if archive_path else None, "export_dir": str(export_root), "task": snapshot["name"]}
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0
-
 
