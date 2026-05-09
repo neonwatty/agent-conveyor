@@ -22,7 +22,9 @@ from workerctl.db import create_manager as create_db_manager
 from workerctl.db import end_active_binding
 from workerctl.db import ensure_task as ensure_db_task
 from workerctl.db import finish_command as finish_db_command
+from workerctl.db import insert_agent_observation
 from workerctl.db import insert_event as insert_db_event
+from workerctl.db import insert_manager_decision
 from workerctl.db import insert_prompt as insert_db_prompt
 from workerctl.db import initialize_database
 from workerctl.db import latest_manager_prompt
@@ -117,24 +119,35 @@ def build_manager_prompt(
             "Manager instructions:",
             instructions,
             "",
-            "Required control commands:",
-            f"- workerctl manager-observe {task_name} --json",
+            "Required loop commands:",
+            f"- workerctl manager-observe {task_name} --compact --json",
             f"- workerctl manager-decision {task_name} --decision <wait|nudge|interrupt|escalate|stop|inspect> --reason \"<reason>\"",
+            "",
+            "Read-only inspection commands:",
             f"- workerctl task-health {task_name} --json",
             f"- workerctl task-status {task_name} --json",
             f"- workerctl task-capture {task_name} --lines 120 --json",
             f"- workerctl task-capture {task_name} --role manager --lines 120 --json",
             f"- workerctl task-idle-check {task_name}",
+            f"- workerctl audit {task_name} --json",
+            "",
+            "Conditional mutating commands:",
             f"- workerctl task-nudge {task_name} \"<message>\"",
             f"- workerctl task-interrupt {task_name}",
-            f"- workerctl audit {task_name} --json",
+            f"- workerctl finish-task {task_name} --reason \"<reason>\"",
+            f"- workerctl pause-manager {task_name}",
+            f"- workerctl stop-task {task_name} --stop-worker",
             "",
             "Rules:",
             "- Use only task-scoped workerctl commands for worker communication.",
             "- Start each loop with manager-observe so health, status, and terminal captures are recorded.",
             "- Record decisions with manager-decision before mutating worker state.",
             "- Run task-health first when state is uncertain or any task-scoped command fails.",
-            "- Read task-status before nudging and respect the live nudge budget.",
+            "- Do not run mutating commands merely because they are listed.",
+            "- Use task-nudge only when the worker is stale, waiting for input, or explicitly needs direction; respect the live nudge budget.",
+            "- Use task-interrupt only when manager-observe or task-idle-check shows a clear busy_wait/interruptible state, or when the user explicitly asks.",
+            "- Use finish-task when the task is complete and should be closed while preserving audit history.",
+            "- Use pause-manager or stop-task only for completion, escalation, cleanup, or explicit user request.",
             "- Stop and report if the worker is blocked, the budget is exhausted, or state is uncertain.",
             "",
             f"Initial nudge budget: {budget['max_nudges']} until {budget['expires_at']}.",
@@ -893,8 +906,11 @@ def command_remanage(args: argparse.Namespace) -> int:
     )
 
 
-def command_stop_task(args: argparse.Namespace) -> int:
+def _stop_or_finish_task(args: argparse.Namespace, *, finish: bool) -> int:
     db_path = Path(args.path).expanduser().resolve() if args.path else None
+    command_type = "finish_task" if finish else "stop_task"
+    event_prefix = "finish_task" if finish else "stop_task"
+    final_reason = getattr(args, "reason", None) or "Task finished by operator."
     with connect_db(db_path) as conn:
         initialize_database(conn)
         snapshot = task_status_snapshot(conn, task=args.task)
@@ -904,27 +920,56 @@ def command_stop_task(args: argparse.Namespace) -> int:
         worker = snapshot["worker"]
         command_id = create_db_command(
             conn,
-            command_type="stop_task",
+            command_type=command_type,
             task_id=snapshot["id"],
             worker_id=worker["id"] if worker else None,
             manager_id=manager["id"] if manager else None,
             payload={
+                "finish": finish,
                 "message": args.message,
+                "reason": final_reason if finish else None,
                 "stop_worker": args.stop_worker,
                 "task": snapshot["name"],
                 "worker": worker["name"] if worker else None,
             },
         )
+        final_decision_id = None
+        final_observation_id = None
+        if finish:
+            final_decision_id = insert_manager_decision(
+                conn,
+                task_id=snapshot["id"],
+                manager_id=manager["id"] if manager else None,
+                decision="stop",
+                reason=final_reason,
+                payload={"source": "finish_task", "command_id": command_id},
+            )
+            final_observation_id = insert_agent_observation(
+                conn,
+                task_id=snapshot["id"],
+                manager_id=manager["id"] if manager else None,
+                worker_id=worker["id"] if worker else None,
+                role="manager",
+                observation_type="decision",
+                severity="info",
+                command_id=command_id,
+                message=final_reason,
+                payload={"decision": "stop", "decision_id": final_decision_id, "source": "finish_task"},
+            )
         insert_db_event(
             conn,
-            "stop_task_intent",
+            f"{event_prefix}_intent",
             actor="workerctl",
             command_id=command_id,
             task_id=snapshot["id"],
             worker_id=worker["id"] if worker else None,
             manager_id=manager["id"] if manager else None,
             payload={
+                "finish": finish,
+                "final_decision_id": final_decision_id,
+                "final_observation_id": final_observation_id,
                 "message": args.message,
+                "reason": final_reason if finish else None,
                 "stop_worker": args.stop_worker,
             },
         )
@@ -932,8 +977,12 @@ def command_stop_task(args: argparse.Namespace) -> int:
 
     result = {
         "command_id": command_id,
+        "final_decision_id": final_decision_id,
+        "final_observation_id": final_observation_id,
+        "finish": finish,
         "killed_manager": False,
         "killed_worker": False,
+        "reason": final_reason if finish else None,
         "stop_worker": args.stop_worker,
         "task": snapshot["name"],
         "worker": worker["name"] if worker else None,
@@ -980,10 +1029,10 @@ def command_stop_task(args: argparse.Namespace) -> int:
                 conn.commit()
             if args.message and worker_identity["live"]:
                 send_text(worker["name"], args.message)
-                append_event(worker["name"], "stop_task_message", {"command_id": command_id, "message": args.message})
+                append_event(worker["name"], f"{event_prefix}_message", {"command_id": command_id, "message": args.message})
             if worker_identity["live"]:
                 run(["tmux", "kill-session", "-t", tmux_target(worker["name"])])
-                append_event(worker["name"], "stop_task", {"command_id": command_id, "task": snapshot["name"]})
+                append_event(worker["name"], event_prefix, {"command_id": command_id, "task": snapshot["name"]})
                 result["killed_worker"] = True
         with connect_db(db_path) as conn:
             initialize_database(conn)
@@ -996,7 +1045,7 @@ def command_stop_task(args: argparse.Namespace) -> int:
             finish_db_command(conn, command_id=command_id, state="succeeded", result=result)
             insert_db_event(
                 conn,
-                "stop_task_succeeded",
+                f"{event_prefix}_succeeded",
                 actor="workerctl",
                 command_id=command_id,
                 task_id=snapshot["id"],
@@ -1011,7 +1060,7 @@ def command_stop_task(args: argparse.Namespace) -> int:
             finish_db_command(conn, command_id=command_id, state="failed", error=str(exc))
             insert_db_event(
                 conn,
-                "stop_task_failed",
+                f"{event_prefix}_failed",
                 actor="workerctl",
                 command_id=command_id,
                 task_id=snapshot["id"],
@@ -1023,6 +1072,14 @@ def command_stop_task(args: argparse.Namespace) -> int:
         raise
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0
+
+
+def command_stop_task(args: argparse.Namespace) -> int:
+    return _stop_or_finish_task(args, finish=False)
+
+
+def command_finish_task(args: argparse.Namespace) -> int:
+    return _stop_or_finish_task(args, finish=True)
 
 
 def reconcile_rows(

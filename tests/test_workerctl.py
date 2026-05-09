@@ -702,7 +702,11 @@ class CliTests(unittest.TestCase):
         )
 
         self.assertIn("workerctl task-health task-a --json", prompt)
+        self.assertIn("workerctl manager-observe task-a --compact --json", prompt)
         self.assertIn("Run task-health first", prompt)
+        self.assertIn("Do not run mutating commands merely because they are listed.", prompt)
+        self.assertIn("Use task-interrupt only when manager-observe or task-idle-check shows a clear busy_wait", prompt)
+        self.assertIn("workerctl finish-task task-a --reason", prompt)
 
     def test_doctor_outputs_expected_structure(self):
         proc = self.run_workerctl("doctor")
@@ -2054,6 +2058,92 @@ class CliTests(unittest.TestCase):
                 commands.run = original_run
                 commands.idle_summary = original_idle_summary
 
+    def test_manager_observe_compact_omits_output_but_persists_full_capture(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                worker_id = worker_db.upsert_worker(
+                    conn,
+                    name="worker-a",
+                    cwd=str(ROOT),
+                    tmux_session="codex-worker-a",
+                    identity_token="token-worker-a",
+                    tmux_pane_id="%1",
+                    state="active",
+                )
+                task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
+                worker_db.bind_task_worker(conn, task="task-a", worker="worker-a", binding_id="binding-1")
+                manager_id = worker_db.create_manager(
+                    conn,
+                    task_id=task_id,
+                    name="manager-a",
+                    tmux_session="codex-manager-task-a",
+                    tmux_pane_id="%2",
+                    codex_args=[],
+                    state="ready",
+                )
+                worker_db.attach_manager_to_binding(conn, task_id=task_id, manager_id=manager_id)
+                worker_db.mark_manager_seen(conn, manager_id=manager_id)
+                worker_db.insert_status(
+                    conn,
+                    worker_id=worker_id,
+                    status={"state": "waiting", "current_task": "Task A.", "next_action": "Wait.", "blocker": None},
+                )
+                conn.commit()
+
+            original_verify_worker = worker_identity.verify_worker_binding_identity
+            original_verify_manager = worker_identity.verify_manager_identity
+            original_session_snapshot = worker_identity.session_snapshot
+            original_capture_output = commands.capture_output
+            original_run = commands.run
+            original_idle_summary = commands.idle_summary
+            try:
+                worker_identity.verify_worker_binding_identity = lambda binding: {"live": True, "live_pane_id": "%1", "mismatches": []}
+                worker_identity.verify_manager_identity = lambda manager: {"live": True, "live_pane_id": "%2", "mismatches": []}
+                worker_identity.session_snapshot = lambda session: {
+                    "live": True,
+                    "pane_id": "%2" if session == "codex-manager-task-a" else "%1",
+                    "session": session,
+                }
+                commands.capture_output = lambda name, lines: "worker line 1\nworker line 2"
+                commands.run = lambda argv, **kwargs: subprocess.CompletedProcess(argv, 0, "manager line 1\nmanager line 2", "")
+                commands.idle_summary = lambda name, **kwargs: {"health": "active", "name": name}
+                args = argparse.Namespace(
+                    busy_wait_seconds=60,
+                    compact=True,
+                    lines=40,
+                    manager_stale_seconds=600,
+                    path=str(db_path),
+                    refresh=False,
+                    status_stale_seconds=300,
+                    task="task-a",
+                    terminal_stale_seconds=300,
+                )
+
+                with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                    result = commands.command_manager_observe(args)
+
+                payload = json.loads(stdout.getvalue())
+                self.assertEqual(result, 0)
+                self.assertTrue(payload["compact"])
+                self.assertNotIn("output", payload["worker_capture"]["capture"])
+                self.assertNotIn("output", payload["manager_capture"]["capture"])
+                self.assertEqual(payload["worker_capture"]["capture"]["excerpt"], "worker line 1\nworker line 2")
+                with worker_db.connect(db_path) as conn:
+                    captures = conn.execute("select role, content from terminal_captures order by id").fetchall()
+                self.assertEqual([(row["role"], row["content"]) for row in captures], [
+                    ("worker", "worker line 1\nworker line 2"),
+                    ("manager", "manager line 1\nmanager line 2"),
+                ])
+            finally:
+                worker_identity.verify_worker_binding_identity = original_verify_worker
+                worker_identity.verify_manager_identity = original_verify_manager
+                worker_identity.session_snapshot = original_session_snapshot
+                commands.capture_output = original_capture_output
+                commands.run = original_run
+                commands.idle_summary = original_idle_summary
+
     def test_task_idle_check_command_uses_bound_worker(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "workerctl.db"
@@ -3084,6 +3174,103 @@ class CliTests(unittest.TestCase):
                 if worker_path.exists():
                     shutil.rmtree(worker_path)
 
+    def test_finish_task_records_final_decision_and_marks_done(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            worker_path = worker_dir("worker-a")
+            if worker_path.exists():
+                shutil.rmtree(worker_path)
+            worker_path.mkdir(parents=True)
+            config_path("worker-a").write_text(
+                json.dumps(
+                    {
+                        "identity_token": "token-worker-a",
+                        "name": "worker-a",
+                        "tmux_pane_id": "%1",
+                        "tmux_session": "codex-worker-a",
+                    }
+                )
+                + "\n"
+            )
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                worker_db.upsert_worker(
+                    conn,
+                    name="worker-a",
+                    cwd=str(ROOT),
+                    tmux_session="codex-worker-a",
+                    identity_token="token-worker-a",
+                    tmux_pane_id="%1",
+                    state="active",
+                )
+                task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
+                worker_db.bind_task_worker(conn, task="task-a", worker="worker-a", binding_id="binding-1")
+                manager_id = worker_db.create_manager(
+                    conn,
+                    task_id=task_id,
+                    name="manager-a",
+                    tmux_session="codex-manager-task-a",
+                    tmux_pane_id="%2",
+                    codex_args=[],
+                    state="ready",
+                )
+                worker_db.attach_manager_to_binding(conn, task_id=task_id, manager_id=manager_id)
+                conn.commit()
+
+            original_manager_session_exists = lifecycle.manager_session_exists
+            original_session_exists = lifecycle.session_exists
+            original_run = lifecycle.run
+            original_session_snapshot = worker_identity.session_snapshot
+            try:
+                lifecycle.manager_session_exists = lambda session: session == "codex-manager-task-a"
+                lifecycle.session_exists = lambda worker: worker == "worker-a"
+                worker_identity.session_snapshot = lambda session: {
+                    "live": True,
+                    "pane_id": "%2" if session == "codex-manager-task-a" else "%1",
+                    "session": session,
+                }
+                lifecycle.run = lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, "", "")
+                args = argparse.Namespace(
+                    message=None,
+                    path=str(db_path),
+                    reason="work is complete",
+                    stop_worker=False,
+                    task="task-a",
+                )
+
+                with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                    result = lifecycle.command_finish_task(args)
+
+                payload = json.loads(stdout.getvalue())
+                self.assertEqual(result, 0)
+                self.assertTrue(payload["finish"])
+                self.assertFalse(payload["killed_worker"])
+                self.assertIsNotNone(payload["final_decision_id"])
+                with worker_db.connect(db_path) as conn:
+                    task = conn.execute("select state from tasks where id = ?", (task_id,)).fetchone()
+                    binding = conn.execute("select state, ended_at from bindings where id = 'binding-1'").fetchone()
+                    manager = conn.execute("select state from managers where id = ?", (manager_id,)).fetchone()
+                    worker = conn.execute("select state from workers where name = 'worker-a'").fetchone()
+                    command = conn.execute("select state from commands where type = 'finish_task'").fetchone()
+                    decision = conn.execute("select decision, reason from manager_decisions").fetchone()
+                    event = conn.execute("select type from events where type = 'finish_task_succeeded'").fetchone()
+                self.assertEqual(task["state"], "done")
+                self.assertEqual(binding["state"], "ended")
+                self.assertIsNotNone(binding["ended_at"])
+                self.assertEqual(manager["state"], "stopped")
+                self.assertEqual(worker["state"], "active")
+                self.assertEqual(command["state"], "succeeded")
+                self.assertEqual(decision["decision"], "stop")
+                self.assertEqual(decision["reason"], "work is complete")
+                self.assertEqual(event["type"], "finish_task_succeeded")
+            finally:
+                lifecycle.manager_session_exists = original_manager_session_exists
+                lifecycle.session_exists = original_session_exists
+                lifecycle.run = original_run
+                worker_identity.session_snapshot = original_session_snapshot
+                if worker_path.exists():
+                    shutil.rmtree(worker_path)
+
     def test_pause_manager_refuses_pane_mismatch_before_kill(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "workerctl.db"
@@ -3666,6 +3853,7 @@ class CliTests(unittest.TestCase):
         self.assertIn("stop-task", proc.stdout)
         self.assertIn("close-stale", proc.stdout)
         self.assertIn("export-task", proc.stdout)
+        self.assertIn("finish-task", proc.stdout)
         self.assertIn("task-capture", proc.stdout)
         self.assertIn("task-events", proc.stdout)
         self.assertIn("task-health", proc.stdout)

@@ -254,6 +254,10 @@ task health, current status, worker terminal capture, manager terminal capture,
 idle classification, and a durable health observation. This is the preferred
 first command for each manager loop because it makes visible Codex output and
 manager-side failures auditable after the fact.
+Use `--compact --json` for manager loops: workerctl still stores full captures
+and hashes in SQLite, but returns capture IDs, hashes, line counts, health
+summary, status, and short excerpts so the manager does not burn its main
+context on setup/scrollback.
 
 ### `workerctl manager-decision <name> --decision <kind> --reason <text>`
 
@@ -285,6 +289,13 @@ nudges count against budget unless retried explicitly by command ID.
 Interrupt the bound worker through the task binding. This checks task state,
 records the interrupt decision, sends the interrupt, and logs any follow-up
 message as a task-scoped audit event.
+
+### `workerctl finish-task <name> [--stop-worker] --reason <text>`
+
+Close a completed task intentionally. Records a final manager decision, stops
+the manager, marks the task `done`, ends the active binding, and optionally
+stops the worker session. Use this for normal completion so audit history stays
+distinct from emergency cleanup or operator stop commands.
 
 ### `workerctl task-events <name> [--type TYPE] [--limit N]`
 
@@ -817,7 +828,7 @@ Only take the listed actions for your current state.
 ## States
 
 OBSERVE
-  Run: manager-observe --json
+  Run: manager-observe --compact --json
   Classify the worker as: active | stale | blocked | done
   Transition:
     active  → WAIT
@@ -832,6 +843,7 @@ WAIT
 NUDGE
   Send one nudge asking the worker to state its next action or update status.
   Use task-nudge so workerctl records intent/result and reserves nudge budget.
+  Do not nudge only because task-nudge appears in the available command list.
   Transition:
     budget remaining → OBSERVE (after interval)
     budget exhausted → ESCALATE
@@ -841,8 +853,9 @@ ESCALATE
   Transition: → STOP
 
 STOP
-  Print a final summary. Run pause-manager for escalation/user intervention.
-  Run stop-manager only when worker is done and no further supervision is needed.
+  Print a final summary. Run finish-task when worker is done and the task should
+  close. Run pause-manager for escalation/user intervention. Use stop-task only
+  for cleanup or explicit operator request.
   Terminal state.
 
 ## Rules
@@ -940,7 +953,7 @@ intent/result records, and recovery/audit views.
 ### Phase 4: Manager Lifecycle
 
 - `pause-manager`, `unmanage`, `my-status`, `remanage`, `resume-manager`,
-  `stop-manager`, `stop-task`.
+  `stop-manager`, `finish-task`, `stop-task`.
 - `pause-manager` is the task-scoped operator command that stops the manager and
   marks the task paused. `unmanage` is the worker-facing command that infers the
   current worker/task from tmux and records worker-initiated audit metadata.
@@ -954,6 +967,8 @@ intent/result records, and recovery/audit views.
 - Add transcript retention and `workerctl prune`.
 - Add durable manager observations, manager decisions, and role-aware terminal
   captures so manager-visible errors are available in audit/export data.
+- Add compact `manager-observe --compact --json` for manager loops and
+  `finish-task` for normal audited completion.
 
 ## Implementation Checkpoint
 

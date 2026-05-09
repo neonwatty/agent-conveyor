@@ -1418,6 +1418,54 @@ def command_task_capture(args: argparse.Namespace) -> int:
     return 0
 
 
+def compact_capture_result(result: dict[str, Any] | None, *, excerpt_lines: int = 20) -> dict[str, Any] | None:
+    if result is None:
+        return None
+    capture = result["capture"]
+    output = capture.get("output") or ""
+    lines = output.splitlines()
+    excerpt = "\n".join(lines[-excerpt_lines:])
+    return {
+        "binding_id": result.get("binding_id"),
+        "capture": {
+            "classifier": capture.get("classifier"),
+            "content_sha256": capture.get("content_sha256"),
+            "excerpt": excerpt,
+            "history_lines": capture.get("history_lines"),
+            "id": capture.get("id"),
+            "line_count": capture.get("line_count"),
+            "source": capture.get("source"),
+        },
+        "observation_id": result.get("observation_id"),
+        "role": result.get("role"),
+        "task": result.get("task"),
+        result["role"]: result.get(result["role"]),
+    }
+
+
+def compact_status_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "budget": snapshot.get("budget"),
+        "id": snapshot.get("id"),
+        "integrity": snapshot.get("integrity"),
+        "manager": snapshot.get("manager"),
+        "name": snapshot.get("name"),
+        "state": snapshot.get("state"),
+        "worker": snapshot.get("worker"),
+        "worker_status": snapshot.get("worker_status"),
+    }
+
+
+def compact_health_result(health: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "issues": health.get("issues", []),
+        "manager_liveness_warnings": health.get("manager_liveness_warnings", []),
+        "ok": health.get("ok"),
+        "recommended_actions": health.get("recommended_actions", []),
+        "task": health.get("task"),
+    }
+
+
 def command_task_idle_check(args: argparse.Namespace) -> int:
     db_path = Path(args.path).expanduser().resolve() if args.path else None
     with connect_db(db_path) as conn:
@@ -1516,6 +1564,16 @@ def command_manager_observe(args: argparse.Namespace) -> int:
             "status": latest_snapshot,
             "worker_capture": worker_capture,
         }
+        if getattr(args, "compact", False):
+            result = {
+                "compact": True,
+                "cycle_id": cycle_id,
+                "health": compact_health_result(health),
+                "idle": idle,
+                "manager_capture": compact_capture_result(manager_capture),
+                "status": compact_status_snapshot(latest_snapshot),
+                "worker_capture": compact_capture_result(worker_capture),
+            }
         print(json.dumps(result, indent=2, sort_keys=True))
         return 0 if health["ok"] else 1
     except Exception as exc:

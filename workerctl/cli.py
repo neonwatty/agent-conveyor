@@ -61,6 +61,7 @@ from workerctl.importer import command_import_compat
 from workerctl.lifecycle import (
     command_become_managed,
     command_close_stale,
+    command_finish_task,
     command_manage,
     command_my_status,
     command_pause_manager,
@@ -404,6 +405,21 @@ def build_parser() -> argparse.ArgumentParser:
     stop_task.add_argument("--path", help="Override the workerctl database path.")
     stop_task.set_defaults(func=command_stop_task)
 
+    finish_task = subparsers.add_parser(
+        "finish-task",
+        help="Record a task as finished, stop its manager, optionally stop the worker, and preserve audit history.",
+    )
+    finish_task.add_argument("task", help="Task name or ID.")
+    finish_task.add_argument("--stop-worker", action="store_true", help="Also stop the bound worker tmux session.")
+    finish_task.add_argument("--message", help="Optional final message to send before stopping the worker.")
+    finish_task.add_argument(
+        "--reason",
+        default="Task finished by operator.",
+        help="Reason recorded as the final manager decision.",
+    )
+    finish_task.add_argument("--path", help="Override the workerctl database path.")
+    finish_task.set_defaults(func=command_finish_task)
+
     reconcile = subparsers.add_parser("reconcile", help="Report drift between SQLite and live tmux sessions.")
     reconcile.add_argument("task", nargs="?", help="Optional task name or ID.")
     reconcile.add_argument("--path", help="Override the workerctl database path.")
@@ -458,6 +474,7 @@ def build_parser() -> argparse.ArgumentParser:
     manager_observe = subparsers.add_parser("manager-observe", help="Record one manager observation cycle for a task.")
     manager_observe.add_argument("task", help="Task name or ID.")
     manager_observe.add_argument("--json", action="store_true", help="Print stable JSON output.")
+    manager_observe.add_argument("--compact", action="store_true", help="Return compact JSON while still recording full captures.")
     manager_observe.add_argument("--lines", type=int, default=DEFAULT_HISTORY_LINES)
     manager_observe.add_argument("--no-refresh", action="store_false", dest="refresh", help="Do not refresh worker terminal metadata during idle check.")
     manager_observe.add_argument("--status-stale-seconds", type=int, default=DEFAULT_STATUS_STALE_SECONDS)
