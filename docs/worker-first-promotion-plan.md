@@ -238,6 +238,13 @@ Print the task, worker, manager, latest worker status, budget, and lifecycle
 state from SQLite. Human-readable output is the default; managers should use
 `--json` for stable machine-readable output.
 
+### `workerctl task-health <name>`
+
+Read-only task integrity view. Combines `task-status` integrity, live tmux
+reconciliation drift, unfinished durable commands, and manager liveness warnings
+into one JSON payload with recommended next actions. This is the first command
+to run when a task looks managed but captures, nudges, or resume operations fail.
+
 ### `workerctl task-capture <name> [--lines N]`
 
 Capture recent worker output through the task binding. Stores capture metadata,
@@ -885,8 +892,8 @@ intent/result records, and recovery/audit views.
 ### Phase 2: Task Binding Commands
 
 - Add task lifecycle storage and binding validation.
-- Add `task-status`, `task-capture`, `task-idle-check`, `task-nudge`, and
-  `task-interrupt`.
+- Add `task-status`, `task-health`, `task-capture`, `task-idle-check`,
+  `task-nudge`, and `task-interrupt`.
 - Enforce one active task per worker and one active manager per task.
 - Make nudge budget reservation a SQLite transaction, not only a prompt rule.
 - Add durable `commands` rows for any tmux or Terminal.app side effect.
@@ -942,6 +949,8 @@ Implemented in the current SQLite milestone:
   close-stale, and stop-task commands.
 - Durable command intent/result rows for task-scoped mutations and lifecycle
   side effects.
+- Task-scoped `task-health` diagnostic that combines SQLite integrity, live
+  tmux drift, unfinished commands, and manager liveness warnings.
 - Nudge budget reservation in SQLite before non-dry-run sends.
 - Pane ID persistence for new worker and manager tmux sessions.
 - Centralized identity verification in `workerctl.identity` for worker/manager

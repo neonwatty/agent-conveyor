@@ -1177,6 +1177,75 @@ def command_task_status(args: argparse.Namespace) -> int:
     return 0
 
 
+def command_task_health(args: argparse.Namespace) -> int:
+    db_path = Path(args.path).expanduser().resolve() if args.path else None
+    with connect_db(db_path) as conn:
+        initialize_database(conn)
+        snapshot = task_status_snapshot(conn, task=args.task)
+    reconcile = reconcile_rows(db_path, task=snapshot["id"], recover=False)
+    reconcile_result = reconcile[0] if reconcile else None
+    liveness_warnings = manager_liveness_warnings(reconcile, stale_seconds=args.manager_stale_seconds)
+    issues: list[dict[str, Any]] = []
+    recommended_actions: list[str] = []
+    for issue in snapshot["integrity"]["issues"]:
+        issues.append({"code": issue, "source": "integrity"})
+    if reconcile_result:
+        for drift in reconcile_result["drift"]:
+            issues.append({"code": drift, "source": "live_reconcile"})
+        for command in reconcile_result["unfinished_commands"]:
+            issues.append(
+                {
+                    "code": "unfinished_command",
+                    "command_id": command["id"],
+                    "command_type": command["type"],
+                    "source": "commands",
+                    "state": command["state"],
+                }
+            )
+    for warning in liveness_warnings:
+        issues.append({"code": warning["reason"], "manager_id": warning["manager_id"], "source": "manager_liveness"})
+
+    issue_codes = {issue["code"] for issue in issues}
+    if "managed_without_active_worker_binding" in issue_codes:
+        recommended_actions.append("Do not resume or nudge this task; inspect task-events and close-stale or recreate the worker binding.")
+    if "managed_without_active_manager" in issue_codes or "manager_missing" in issue_codes:
+        recommended_actions.append("Run workerctl reconcile <task>; if confirmed missing, run workerctl recover <task> or remanage from the worker.")
+    if "worker_missing" in issue_codes:
+        recommended_actions.append("Confirm whether the worker tmux session was intentionally stopped before restarting management.")
+    if "worker_pane_mismatch" in issue_codes or "manager_pane_mismatch" in issue_codes:
+        recommended_actions.append("Inspect the terminal; if the live pane is correct, run workerctl recover <task> --sync-pane-ids.")
+    if "unfinished_commands" in issue_codes or "unfinished_command" in issue_codes:
+        recommended_actions.append("Inspect workerctl commands --task <task> and retry or resolve unfinished side effects manually.")
+    if any(issue["source"] == "manager_liveness" for issue in issues):
+        recommended_actions.append("Inspect the manager terminal before taking recovery action; heartbeat warnings are not hard drift.")
+    if not recommended_actions:
+        recommended_actions.append("No action required.")
+
+    result = {
+        "integrity": snapshot["integrity"],
+        "issues": issues,
+        "live_reconcile": reconcile_result,
+        "manager_liveness_warnings": liveness_warnings,
+        "ok": not issues,
+        "recommended_actions": recommended_actions,
+        "task": {
+            "id": snapshot["id"],
+            "name": snapshot["name"],
+            "state": snapshot["state"],
+        },
+    }
+    if args.json:
+        print(json.dumps(result, indent=2, sort_keys=True))
+        return 0 if result["ok"] else 1
+    status = "ok" if result["ok"] else "needs_attention"
+    print(f"{snapshot['name']}\t{snapshot['state']}\t{status}")
+    for issue in issues:
+        print(f"issue: {issue['source']}:{issue['code']}")
+    for action in recommended_actions:
+        print(f"next: {action}")
+    return 0 if result["ok"] else 1
+
+
 def command_task_capture(args: argparse.Namespace) -> int:
     db_path = Path(args.path).expanduser().resolve() if args.path else None
     with connect_db(db_path) as conn:
