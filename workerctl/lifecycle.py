@@ -729,6 +729,10 @@ def _resume_manager_task(
         snapshot = task_status_snapshot(conn, task=task)
         if snapshot["state"] != "paused":
             raise WorkerError(f"Task {snapshot['name']} is not paused; current state is {snapshot['state']}")
+        worker = snapshot["worker"]
+        if worker is None:
+            raise WorkerError(f"Task {snapshot['name']} cannot resume manager without an active worker binding")
+        worker_verification = identity.verify_worker_record_identity(db_path, worker)
         prompt = latest_manager_prompt(conn, task_id=snapshot["id"])
         prompt_path = Path(prompt["artifact_path"]) if prompt["artifact_path"] else task_artifact_dir(snapshot["id"]) / "manager-prompt.md"
         if not prompt_path.exists():
@@ -773,6 +777,7 @@ def _resume_manager_task(
         "prompt_path": str(prompt_path),
         "source": source_payload,
         "task": snapshot["name"],
+        "worker_identity": worker_verification,
     }
     try:
         with connect_db(db_path) as conn:
@@ -832,10 +837,15 @@ def _resume_manager_task(
 def command_resume_manager(args: argparse.Namespace) -> int:
     db_path = Path(args.path).expanduser().resolve() if args.path else None
     codex_args = passthrough_args(args.codex_args or [])
+    with connect_db(db_path) as conn:
+        initialize_database(conn)
+        snapshot = task_status_snapshot(conn, task=args.task)
+    worker_id = snapshot["worker"]["id"] if snapshot["worker"] else None
     return _resume_manager_task(
         db_path=db_path,
         task=args.task,
         codex_args=codex_args,
+        worker_id=worker_id,
         open_manager=getattr(args, "open_manager", False),
         terminal=getattr(args, "terminal", "auto"),
     )
