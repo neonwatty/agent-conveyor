@@ -180,11 +180,20 @@ workerctl doctor-self
 
 `workerctl doctor-self` is a mandatory preflight gate for plain Codex sessions:
 the agent should never run `workerctl become-managed` until
-`can_promote_in_place` is true. If `can_promote_in_place` is true, it can run the reported
-`workerctl become-managed --session ...` command after asking for any missing
-worker name, task name, or goal. If the current Codex process is not inside
-tmux, it cannot be promoted in-place as a tmux-backed worker; start a tmux-backed
-session with `workerctl start ...` instead.
+`can_promote_in_place` is true. If `can_promote_in_place` is true, it should
+prefer the reported `become_managed_recommended_command_template`, which appends
+manager Codex args after `--`, after asking for any missing worker name, task
+name, or goal. If the current Codex process is not inside tmux, it cannot be
+promoted in-place as a tmux-backed worker; start a tmux-backed session with
+`workerctl start ...` instead.
+When no manager Codex args are supplied, `become-managed` still runs but records
+a `manager_started_without_codex_args` warning in the promotion audit. For
+dogfooding, use:
+
+```bash
+workerctl become-managed ... -- --sandbox danger-full-access --ask-for-approval never
+```
+
 Use `workerctl explain-managed-flow --json` when an agent needs compact command
 mappings for phrases like "manage yourself", "stop supervising me", "resume
 supervision", or "finish this managed task". Use

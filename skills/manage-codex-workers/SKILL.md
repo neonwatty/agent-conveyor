@@ -127,10 +127,20 @@ Never run `workerctl become-managed` before `workerctl doctor-self` reports
 Codex sessions because in-place promotion requires a live tmux session.
 
 If `doctor-self` reports `can_promote_in_place: true`, use its
-`become_managed_command_template`. Ask for missing worker name, task name, or
-goal values before running it unless the user explicitly supplied them or asked
-you to choose names. `become-managed` opens the manager terminal by default; use
-`--no-open-manager` only if the user does not want a visible manager.
+`become_managed_recommended_command_template` when present. That template adds
+the recommended manager Codex args after `--`:
+
+```bash
+--sandbox danger-full-access --ask-for-approval never
+```
+
+Ask for missing worker name, task name, or goal values before running it unless
+the user explicitly supplied them or asked you to choose names. If you instead
+use `become_managed_command_template` without passthrough args, explain that the
+manager may start with different sandbox/tool access and workerctl will audit a
+`manager_started_without_codex_args` warning. `become-managed` opens the manager
+terminal by default; use `--no-open-manager` only if the user does not want a
+visible manager.
 
 If the flow is unclear or you need compact command mappings, run:
 
@@ -142,7 +152,8 @@ Natural-language command mapping:
 
 - "become managed", "manage yourself", "create a manager", "launch a manager":
   run `workerctl doctor-self`; only run `workerctl become-managed` if
-  `can_promote_in_place: true` and required values are known.
+  `can_promote_in_place: true` and required values are known. Prefer the
+  recommended command template with manager Codex args after `--`.
 - "stop supervising me", "stop managing me", "take back manual control",
   "unmanage this worker": run `workerctl unmanage`.
 - "resume supervision", "restart management", "get a manager again": run

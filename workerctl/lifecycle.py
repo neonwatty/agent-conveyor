@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from workerctl.constants import PROJECT_ROOT
+from workerctl.constants import PROJECT_ROOT, RECOMMENDED_MANAGER_CODEX_ARGS
 from workerctl.core import WorkerError, age_seconds, ensure_tool, now_iso, run, sh_quote
 from workerctl.db import active_manager
 from workerctl.db import assess_manager_decision
@@ -89,6 +89,16 @@ def passthrough_args(values: list[str]) -> list[str]:
     if values and values[0] == "--":
         return values[1:]
     return values
+
+
+def manager_codex_args_warning(codex_args: list[str]) -> dict[str, Any] | None:
+    if codex_args:
+        return None
+    return {
+        "code": "manager_started_without_codex_args",
+        "message": "Manager Codex process was started without explicit passthrough args; it may not have the same sandbox, approval, or tool-access assumptions as the worker.",
+        "recommended_codex_args": RECOMMENDED_MANAGER_CODEX_ARGS,
+    }
 
 
 def task_artifact_dir(task_id: str) -> Path:
@@ -195,6 +205,7 @@ def command_promote(args: argparse.Namespace) -> int:
 
     db_path = Path(args.path).expanduser().resolve() if args.path else None
     codex_args = passthrough_args(args.codex_args or [])
+    manager_args_warning = manager_codex_args_warning(codex_args)
     expires_at = args.budget_expires_at or default_budget_expires_at(args.budget_hours)
     manager_id = None
     command_id = None
@@ -277,6 +288,7 @@ def command_promote(args: argparse.Namespace) -> int:
             payload={
                 "binding_id": binding_id,
                 "codex_args": codex_args,
+                "warnings": [manager_args_warning] if manager_args_warning else [],
                 "manager_session": manager_session,
                 "prompt_path": str(prompt_path),
                 "task": args.task,
@@ -295,6 +307,7 @@ def command_promote(args: argparse.Namespace) -> int:
                 "binding_id": binding_id,
                 "manager_session": manager_session,
                 "prompt_path": str(prompt_path),
+                "warnings": [manager_args_warning] if manager_args_warning else [],
             },
         )
         conn.commit()
@@ -304,7 +317,9 @@ def command_promote(args: argparse.Namespace) -> int:
         "manager_id": manager_id,
         "manager_session": manager_session,
         "prompt_path": str(prompt_path),
+        "recommended_manager_codex_args": RECOMMENDED_MANAGER_CODEX_ARGS,
         "task": args.task,
+        "warnings": [manager_args_warning] if manager_args_warning else [],
         "worker": args.worker,
     }
     try:
@@ -773,6 +788,7 @@ def _resume_manager_task(
     ensure_tool("tmux")
     ensure_tool("codex")
     source_payload = source or {}
+    manager_args_warning = manager_codex_args_warning(codex_args)
     with connect_db(db_path) as conn:
         initialize_database(conn)
         snapshot = task_status_snapshot(conn, task=task)
@@ -806,7 +822,13 @@ def _resume_manager_task(
             task_id=snapshot["id"],
             worker_id=worker_id,
             manager_id=manager_id,
-            payload={"codex_args": codex_args, "manager_session": manager_session, "prompt_path": str(prompt_path), "source": source_payload},
+            payload={
+                "codex_args": codex_args,
+                "manager_session": manager_session,
+                "prompt_path": str(prompt_path),
+                "source": source_payload,
+                "warnings": [manager_args_warning] if manager_args_warning else [],
+            },
         )
         insert_db_event(
             conn,
@@ -816,7 +838,12 @@ def _resume_manager_task(
             task_id=snapshot["id"],
             worker_id=worker_id,
             manager_id=manager_id,
-            payload={"manager_session": manager_session, "prompt_path": str(prompt_path), "source": source_payload},
+            payload={
+                "manager_session": manager_session,
+                "prompt_path": str(prompt_path),
+                "source": source_payload,
+                "warnings": [manager_args_warning] if manager_args_warning else [],
+            },
         )
         conn.commit()
     result = {
@@ -824,8 +851,10 @@ def _resume_manager_task(
         "manager_id": manager_id,
         "manager_session": manager_session,
         "prompt_path": str(prompt_path),
+        "recommended_manager_codex_args": RECOMMENDED_MANAGER_CODEX_ARGS,
         "source": source_payload,
         "task": snapshot["name"],
+        "warnings": [manager_args_warning] if manager_args_warning else [],
         "worker_identity": worker_verification,
     }
     try:
