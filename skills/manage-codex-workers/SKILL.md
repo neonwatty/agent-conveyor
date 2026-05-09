@@ -64,6 +64,12 @@ scripts/workerctl start-test live-worker \
   --open
 ```
 
+For a repeatable managed-worker QA checklist:
+
+```bash
+scripts/workerctl qa-plan self-management
+```
+
 ## Inspect And Supervise
 
 Use these from the manager session:
@@ -113,9 +119,31 @@ workerctl doctor-self
 
 If `doctor-self` reports `can_promote_in_place: true`, use its
 `become_managed_command_template`. Ask for missing worker name, task name, or
-goal values before running it. `become-managed` opens the manager terminal by
-default; use `--no-open-manager` only if the user does not want a visible
-manager.
+goal values before running it unless the user explicitly supplied them or asked
+you to choose names. `become-managed` opens the manager terminal by default; use
+`--no-open-manager` only if the user does not want a visible manager.
+
+If the flow is unclear or you need compact command mappings, run:
+
+```bash
+workerctl explain-managed-flow --json
+```
+
+Natural-language command mapping:
+
+- "become managed", "manage yourself", "create a manager", "launch a manager":
+  run `workerctl doctor-self`, then `workerctl become-managed` when promotion
+  is possible and required values are known.
+- "stop supervising me", "stop managing me", "take back manual control",
+  "unmanage this worker": run `workerctl unmanage`.
+- "resume supervision", "restart management", "get a manager again": run
+  `workerctl remanage --open-manager`.
+- "finish this managed task", "close this task", "mark this task done": run
+  `workerctl finish-task <task> --reason "<reason>"`.
+- "show me the manager" or "open the manager terminal": run
+  `workerctl open-manager <task>`.
+- "show me the worker" or "open the worker terminal": run
+  `workerctl open-worker <task>`.
 
 If `doctor-self` reports `can_promote_in_place: false`, explain that this
 Codex process is not running inside a tmux session and cannot be promoted

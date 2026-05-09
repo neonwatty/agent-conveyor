@@ -175,12 +175,29 @@ Worker-facing preflight for plain Codex sessions. It checks whether `workerctl`,
 `tmux`, and `codex` are on `PATH`, whether the current process is inside a live
 tmux session, and whether the `manage-codex-workers` skill is installed under
 `$CODEX_HOME/skills` or `~/.codex/skills`. If in-place promotion is possible, it
-prints the exact `workerctl become-managed --session ...` template. If
-not, the agent should explain that the current non-tmux Codex process cannot be
-promoted in-place as a tmux-backed worker and offer `workerctl start ...`
-instead.
+prints the exact `workerctl become-managed --session ...` template plus
+`required_values`, `why_or_why_not`, `recommended_command`,
+`example_natural_language_prompt`, and phrase mappings. If not, the agent
+should explain that the current non-tmux Codex process cannot be promoted
+in-place as a tmux-backed worker and offer `workerctl start ...` instead.
 
 Everything after `--` is passed as CLI args to the manager's Codex process.
+
+### `workerctl explain-managed-flow`
+
+Agent-facing command reference for the self-management flow. It maps natural
+language such as "manage yourself", "stop supervising me", "resume supervision",
+"show me the manager", and "finish this managed task" to workerctl commands. It
+also states the deterministic question rule: ask for worker name, task name, and
+goal before `become-managed` unless the user supplied them or explicitly asked
+the agent to choose names.
+
+### `workerctl qa-plan self-management`
+
+Print a repeatable manual QA checklist for the plain Codex session to managed
+worker flow, including expected observations for visible manager spawn, compact
+observe, decision-before-mutation, audited finish, and final live database
+health.
 
 ### `workerctl name-session <worker-name>`
 
