@@ -3,19 +3,24 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BIN_DIR="$ROOT/bin"
+SKILL_SRC="$ROOT/skills/manage-codex-workers"
 PROFILE="${WORKERCTL_INSTALL_PROFILE:-$HOME/.zshrc}"
+CODEX_HOME_DIR="${CODEX_HOME:-$HOME/.codex}"
 PATH_LINE="export PATH=\"$BIN_DIR:\$PATH\""
+INSTALL_SKILL=true
 
 usage() {
   cat <<EOF
-Usage: scripts/install-local [--write] [--profile PATH]
+Usage: scripts/install-local [--write] [--profile PATH] [--codex-home PATH] [--no-skill]
 
-Print or install the local workerctl PATH setup.
+Print or install the local workerctl PATH setup and Codex worker skill.
 
 Options:
-  --write         Append the PATH line to the shell profile if missing.
-  --profile PATH  Shell profile to update. Defaults to ~/.zshrc.
-  -h, --help      Show this help.
+  --write           Append the PATH line and install the skill.
+  --profile PATH    Shell profile to update. Defaults to ~/.zshrc.
+  --codex-home PATH Codex home directory. Defaults to \$CODEX_HOME or ~/.codex.
+  --no-skill        Skip installing the manage-codex-workers skill.
+  -h, --help        Show this help.
 EOF
 }
 
@@ -35,6 +40,18 @@ while [[ $# -gt 0 ]]; do
       PROFILE="$2"
       shift 2
       ;;
+    --codex-home)
+      if [[ $# -lt 2 ]]; then
+        echo "install-local: --codex-home requires a path" >&2
+        exit 1
+      fi
+      CODEX_HOME_DIR="$2"
+      shift 2
+      ;;
+    --no-skill)
+      INSTALL_SKILL=false
+      shift
+      ;;
     -h|--help)
       usage
       exit 0
@@ -52,9 +69,19 @@ if [[ ! -x "$BIN_DIR/workerctl" ]]; then
   exit 1
 fi
 
+if [[ "$INSTALL_SKILL" == true && ! -f "$SKILL_SRC/SKILL.md" ]]; then
+  echo "install-local: expected skill not found: $SKILL_SRC/SKILL.md" >&2
+  exit 1
+fi
+
 if [[ "$write" == false ]]; then
   echo "$PATH_LINE"
   echo
+  if [[ "$INSTALL_SKILL" == true ]]; then
+    echo "Skill install target:"
+    echo "  $CODEX_HOME_DIR/skills/manage-codex-workers"
+    echo
+  fi
   echo "To install for zsh:"
   echo "  scripts/install-local --write"
   echo
@@ -82,5 +109,16 @@ PATH="$BIN_DIR:$PATH" workerctl classify --text "workerctl install check" >/dev/
   exit 1
 }
 
+if [[ "$INSTALL_SKILL" == true ]]; then
+  SKILL_DEST="$CODEX_HOME_DIR/skills/manage-codex-workers"
+  mkdir -p "$(dirname "$SKILL_DEST")"
+  rm -rf "$SKILL_DEST"
+  cp -R "$SKILL_SRC" "$SKILL_DEST"
+  echo "installed manage-codex-workers skill in $SKILL_DEST"
+fi
+
 echo "workerctl is available after opening a new shell, or immediately with:"
 echo "  $PATH_LINE"
+if [[ "$INSTALL_SKILL" == true ]]; then
+  echo "Plain Codex sessions can use the installed manage-codex-workers skill after starting a new session."
+fi

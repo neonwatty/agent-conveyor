@@ -28,6 +28,7 @@ from workerctl.commands import (
     command_create,
     command_db_doctor,
     command_doctor,
+    command_doctor_self,
     command_events,
     command_interrupt,
     command_list,
@@ -196,6 +197,11 @@ def build_parser() -> argparse.ArgumentParser:
     doctor = subparsers.add_parser("doctor", help="Check local dependencies and worker state.")
     doctor.add_argument("--cwd", default=str(INVOCATION_CWD), help="Target worker cwd to check.")
     doctor.set_defaults(func=command_doctor)
+
+    doctor_self = subparsers.add_parser("doctor-self", help="Check whether the current Codex session can self-manage in place.")
+    doctor_self.add_argument("--session", help="Explicit tmux session; defaults to the current tmux session.")
+    doctor_self.add_argument("--json", action="store_true", help="Print stable JSON output.")
+    doctor_self.set_defaults(func=command_doctor_self)
 
     db_doctor = subparsers.add_parser("db-doctor", help="Initialize and check the SQLite control-plane database.")
     db_doctor.add_argument("--live", action="store_true", help="Also report read-only live tmux reconciliation drift.")

@@ -699,6 +699,52 @@ class CliTests(unittest.TestCase):
         self.assertTrue(any(check["name"] == "tmux" for check in data["checks"]))
         self.assertTrue(any(check["name"] == "codex" for check in data["checks"]))
 
+    def test_doctor_self_reports_manage_template_inside_tmux(self):
+        original_current_session_name = commands.current_session_name
+        original_which = commands.shutil.which
+        original_run = commands.run
+        original_env = os.environ.copy()
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                skill_dir = Path(tmpdir) / "skills" / "manage-codex-workers"
+                skill_dir.mkdir(parents=True)
+                (skill_dir / "SKILL.md").write_text("skill")
+                os.environ["CODEX_HOME"] = tmpdir
+                commands.current_session_name = lambda: "plain-codex"
+                commands.shutil.which = lambda name: f"/usr/bin/{name}"
+                commands.run = lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, '{"ok": true}\n', "")
+                args = argparse.Namespace(json=True, session=None)
+
+                with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                    result = commands.command_doctor_self(args)
+
+                payload = json.loads(stdout.getvalue())
+                self.assertEqual(result, 0)
+                self.assertTrue(payload["can_promote_in_place"])
+                self.assertIn("workerctl manage --session plain-codex", payload["manage_command_template"])
+                self.assertIn("--open-manager", payload["manage_command_template"])
+        finally:
+            commands.current_session_name = original_current_session_name
+            commands.shutil.which = original_which
+            commands.run = original_run
+            os.environ.clear()
+            os.environ.update(original_env)
+
+    def test_doctor_self_fails_closed_outside_tmux(self):
+        original_current_session_name = commands.current_session_name
+        try:
+            commands.current_session_name = lambda: None
+            with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                result = commands.command_doctor_self(argparse.Namespace(json=True, session=None))
+
+            payload = json.loads(stdout.getvalue())
+            self.assertEqual(result, 1)
+            self.assertFalse(payload["can_promote_in_place"])
+            self.assertEqual(payload["recommended_action"], "cannot_promote_in_place")
+            self.assertIsNone(payload["manage_command_template"])
+        finally:
+            commands.current_session_name = original_current_session_name
+
     def test_db_doctor_outputs_expected_structure(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "workerctl.db"
@@ -3133,6 +3179,7 @@ class CliTests(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertIn("audit", proc.stdout)
         self.assertIn("commands", proc.stdout)
+        self.assertIn("doctor-self", proc.stdout)
         self.assertIn("import-compat", proc.stdout)
         self.assertIn("manage", proc.stdout)
         self.assertIn("my-status", proc.stdout)
@@ -3250,12 +3297,14 @@ class CliTests(unittest.TestCase):
 
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertIn(str(ROOT / "bin"), proc.stdout)
+        self.assertIn("manage-codex-workers", proc.stdout)
 
     def test_install_local_write_is_idempotent(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             profile = Path(tmpdir) / ".zshrc"
             env = os.environ.copy()
             env["WORKERCTL_INSTALL_PROFILE"] = str(profile)
+            env["CODEX_HOME"] = str(Path(tmpdir) / "codex-home")
             for _ in range(2):
                 proc = subprocess.run(
                     [str(INSTALL_LOCAL_PATH), "--write"],
@@ -3271,6 +3320,8 @@ class CliTests(unittest.TestCase):
             profile_text = profile.read_text()
             path_line = f'export PATH="{ROOT / "bin"}:$PATH"'
             self.assertEqual(profile_text.count(path_line), 1)
+            skill_path = Path(env["CODEX_HOME"]) / "skills" / "manage-codex-workers" / "SKILL.md"
+            self.assertTrue(skill_path.exists())
 
     def test_create_dual_writes_worker_and_initial_status_to_sqlite(self):
         name = "db-create-dual-write"

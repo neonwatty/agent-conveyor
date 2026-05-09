@@ -1,6 +1,6 @@
 ---
 name: manage-codex-workers
-description: Start, supervise, nudge, inspect, interrupt, and stop tmux-backed Codex worker sessions using the codex-terminal-manager workerctl tool. Use when the user asks to create or manage another Codex terminal/session, watch or supervise a worker, send a nudge, attach to a worker terminal, inspect worker status/capture/events, interrupt busy-wait states, or clean up worker sessions.
+description: Start, supervise, nudge, inspect, interrupt, and stop tmux-backed Codex worker sessions using the codex-terminal-manager workerctl tool. Use when the user asks to create or manage another Codex terminal/session, make the current Codex session managed, launch a manager for the current session, watch or supervise a worker, send a nudge, attach to a worker terminal, inspect worker status/capture/events, interrupt busy-wait states, or clean up worker sessions.
 ---
 
 # Manage Codex Workers
@@ -89,9 +89,26 @@ Interpret worker health as follows:
 Use these when you are running inside the worker session itself.
 
 If the user asks you to become managed, launch a manager with the command
-template from your startup prompt. Ask for missing worker name, task name, or
-goal values before running it. Prefer `--open-manager` when the user expects to
-see the manager terminal.
+template from your startup prompt. In a plain Codex session without a startup
+prompt, first run:
+
+```bash
+workerctl doctor-self
+```
+
+If `doctor-self` reports `can_promote_in_place: true`, use its
+`manage_command_template`. Ask for missing worker name, task name, or goal
+values before running it. Prefer `--open-manager` when the user expects to see
+the manager terminal.
+
+If `doctor-self` reports `can_promote_in_place: false`, explain that this
+Codex process is not running inside a tmux session and cannot be promoted
+in-place as a tmux-backed worker. Offer to start a managed-capable tmux Codex
+session with:
+
+```bash
+workerctl start <session-name> --cwd "$PWD" -- --sandbox danger-full-access --ask-for-approval never
+```
 
 If the user asks to take back manual control, stop supervising me, pause my
 manager, stop managing me, or unmanage this worker, run:
