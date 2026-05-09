@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import os
 import json
 import shutil
@@ -13,16 +14,22 @@ from typing import Any
 from workerctl.classify import classify_busy_wait, classify_startup_output
 from workerctl.constants import DEFAULT_MANAGER_STALE_SECONDS, PROJECT_ROOT, VALID_STATES
 from workerctl.core import WorkerError, ensure_tool, now_iso, run, sh_quote
-from workerctl.db import active_task_worker
+from workerctl.db import active_manager, active_task_worker
 from workerctl.db import bind_task_worker
 from workerctl.db import connect as connect_db
 from workerctl.db import create_command as create_db_command
+from workerctl.db import create_manager_cycle
 from workerctl.db import create_task as create_db_task
 from workerctl.db import database_health, default_db_path, initialize_database
 from workerctl.db import finish_command as finish_db_command
+from workerctl.db import finish_manager_cycle
+from workerctl.db import insert_agent_observation
 from workerctl.db import insert_event as insert_db_event
+from workerctl.db import insert_manager_decision
 from workerctl.db import insert_status as insert_db_status
+from workerctl.db import insert_terminal_capture
 from workerctl.db import list_tasks as list_db_tasks
+from workerctl.db import mark_manager_seen
 from workerctl.db import mark_command_attempted
 from workerctl.db import mark_worker_state, upsert_worker
 from workerctl.db import reserve_nudge_budget
@@ -1190,12 +1197,53 @@ def command_task_status(args: argparse.Namespace) -> int:
 
 def command_task_health(args: argparse.Namespace) -> int:
     db_path = Path(args.path).expanduser().resolve() if args.path else None
+    result = task_health_result(db_path, args.task, manager_stale_seconds=args.manager_stale_seconds)
+    if getattr(args, "record", False):
+        severity = "info" if result["ok"] else "error"
+        message = "task health ok" if result["ok"] else "task health needs attention"
+        with connect_db(db_path) as conn:
+            initialize_database(conn)
+            observation_id = insert_agent_observation(
+                conn,
+                task_id=result["task"]["id"],
+                role="workerctl",
+                observation_type="health",
+                severity=severity,
+                message=message,
+                payload=result,
+                manager_id=result["live_reconcile"]["manager"]["id"] if result.get("live_reconcile") and result["live_reconcile"].get("manager") else None,
+                worker_id=result["live_reconcile"]["worker"]["id"] if result.get("live_reconcile") and result["live_reconcile"].get("worker") else None,
+            )
+            insert_db_event(
+                conn,
+                "task_health_checked",
+                actor="workerctl",
+                task_id=result["task"]["id"],
+                manager_id=result["live_reconcile"]["manager"]["id"] if result.get("live_reconcile") and result["live_reconcile"].get("manager") else None,
+                worker_id=result["live_reconcile"]["worker"]["id"] if result.get("live_reconcile") and result["live_reconcile"].get("worker") else None,
+                payload={"observation_id": observation_id, "ok": result["ok"], "issues": result["issues"]},
+            )
+            conn.commit()
+        result["observation_id"] = observation_id
+    if args.json:
+        print(json.dumps(result, indent=2, sort_keys=True))
+        return 0 if result["ok"] else 1
+    status = "ok" if result["ok"] else "needs_attention"
+    print(f"{result['task']['name']}\t{result['task']['state']}\t{status}")
+    for issue in result["issues"]:
+        print(f"issue: {issue['source']}:{issue['code']}")
+    for action in result["recommended_actions"]:
+        print(f"next: {action}")
+    return 0 if result["ok"] else 1
+
+
+def task_health_result(db_path: Path | None, task: str, *, manager_stale_seconds: int) -> dict[str, Any]:
     with connect_db(db_path) as conn:
         initialize_database(conn)
-        snapshot = task_status_snapshot(conn, task=args.task)
+        snapshot = task_status_snapshot(conn, task=task)
     reconcile = reconcile_rows(db_path, task=snapshot["id"], recover=False)
     reconcile_result = reconcile[0] if reconcile else None
-    liveness_warnings = manager_liveness_warnings(reconcile, stale_seconds=args.manager_stale_seconds)
+    liveness_warnings = manager_liveness_warnings(reconcile, stale_seconds=manager_stale_seconds)
     issues: list[dict[str, Any]] = []
     recommended_actions: list[str] = []
     for issue in snapshot["integrity"]["issues"]:
@@ -1245,47 +1293,126 @@ def command_task_health(args: argparse.Namespace) -> int:
             "state": snapshot["state"],
         },
     }
-    if args.json:
-        print(json.dumps(result, indent=2, sort_keys=True))
-        return 0 if result["ok"] else 1
-    status = "ok" if result["ok"] else "needs_attention"
-    print(f"{snapshot['name']}\t{snapshot['state']}\t{status}")
-    for issue in issues:
-        print(f"issue: {issue['source']}:{issue['code']}")
-    for action in recommended_actions:
-        print(f"next: {action}")
-    return 0 if result["ok"] else 1
+    return result
+
+
+def capture_task_terminal(
+    db_path: Path | None,
+    *,
+    task: str,
+    role: str,
+    lines: int,
+    source: str,
+    command_id: str | None = None,
+) -> dict[str, Any]:
+    with connect_db(db_path) as conn:
+        initialize_database(conn)
+        snapshot = task_status_snapshot(conn, task=task)
+        binding = active_task_worker(conn, task=task) if snapshot["worker"] else None
+        manager = active_manager(conn, task=snapshot["id"])
+
+    if role == "worker":
+        if binding is None:
+            raise WorkerError(f"Task {snapshot['name']} has no active worker")
+        verification = identity.verify_worker_binding_identity(binding)
+        output = capture_output(binding["worker_name"], lines)
+        worker_id = binding["worker_id"]
+        manager_id = None
+        tmux_session_value = binding["worker_tmux_session"]
+        tmux_pane_id = verification.get("live_pane_id") or binding.get("worker_tmux_pane_id")
+    elif role == "manager":
+        if manager is None:
+            raise WorkerError(f"Task {snapshot['name']} has no active manager")
+        verification = identity.verify_manager_identity(manager)
+        proc = run(["tmux", "capture-pane", "-p", "-t", manager["tmux_session"], "-S", f"-{lines}"])
+        output = proc.stdout
+        worker_id = None
+        manager_id = manager["id"]
+        tmux_session_value = manager["tmux_session"]
+        tmux_pane_id = verification.get("live_pane_id") or manager.get("tmux_pane_id")
+    else:
+        raise WorkerError(f"Unsupported capture role: {role}")
+
+    content_sha256 = hashlib.sha256(output.encode()).hexdigest()
+    classifier = {
+        "busy_wait": classify_busy_wait(output, status_age=10**9, busy_wait_seconds=0),
+        "startup": classify_startup_output(output),
+    }
+    with connect_db(db_path) as conn:
+        initialize_database(conn)
+        capture_id = insert_terminal_capture(
+            conn,
+            task_id=snapshot["id"],
+            worker_id=worker_id,
+            manager_id=manager_id,
+            role=role,
+            tmux_session=tmux_session_value,
+            tmux_pane_id=tmux_pane_id,
+            command_id=command_id,
+            history_lines=lines,
+            content_sha256=content_sha256,
+            content=output,
+            classifier=classifier,
+            source=source,
+        )
+        if role == "manager" and manager_id:
+            mark_manager_seen(conn, manager_id=manager_id, last_capture_sha256=content_sha256)
+        insert_db_event(
+            conn,
+            f"{role}_terminal_captured",
+            actor="workerctl",
+            command_id=command_id,
+            task_id=snapshot["id"],
+            worker_id=worker_id,
+            manager_id=manager_id,
+            payload={"capture_id": capture_id, "content_sha256": content_sha256, "history_lines": lines, "source": source},
+        )
+        observation_id = insert_agent_observation(
+            conn,
+            task_id=snapshot["id"],
+            worker_id=worker_id,
+            manager_id=manager_id,
+            role=role,
+            observation_type="capture",
+            severity="info",
+            source_capture_id=capture_id,
+            command_id=command_id,
+            message=f"{role} terminal captured",
+            payload={"content_sha256": content_sha256, "history_lines": lines, "source": source},
+        )
+        conn.commit()
+    return {
+        "binding_id": binding["binding_id"] if binding else None,
+        "capture": {
+            "classifier": classifier,
+            "content_sha256": content_sha256,
+            "history_lines": lines,
+            "id": capture_id,
+            "line_count": len(output.splitlines()),
+            "output": output,
+            "source": source,
+        },
+        "observation_id": observation_id,
+        "role": role,
+        "task": {"id": snapshot["id"], "name": snapshot["name"], "state": snapshot["state"]},
+        role: {
+            "id": worker_id or manager_id,
+            "name": binding["worker_name"] if role == "worker" and binding else manager["name"] if role == "manager" and manager else None,
+            "state": binding["worker_state"] if role == "worker" and binding else manager["state"] if role == "manager" and manager else None,
+            "tmux_pane_id": tmux_pane_id,
+            "tmux_session": tmux_session_value,
+        },
+    }
 
 
 def command_task_capture(args: argparse.Namespace) -> int:
     db_path = Path(args.path).expanduser().resolve() if args.path else None
-    with connect_db(db_path) as conn:
-        initialize_database(conn)
-        binding = active_task_worker(conn, task=args.task)
-    output = capture_output(binding["worker_name"], args.lines)
+    role = getattr(args, "role", "worker")
+    result = capture_task_terminal(db_path, task=args.task, role=role, lines=args.lines, source="task_capture")
     if args.json:
-        capture_meta = load_json(capture_meta_path(binding["worker_name"]), {})
-        result = {
-            "binding_id": binding["binding_id"],
-            "capture": {
-                "history_lines": args.lines,
-                "output": output,
-                **capture_meta,
-            },
-            "task": {
-                "id": binding["task_id"],
-                "name": binding["task_name"],
-                "state": binding["task_state"],
-            },
-            "worker": {
-                "id": binding["worker_id"],
-                "name": binding["worker_name"],
-                "state": binding["worker_state"],
-                "tmux_session": binding["worker_tmux_session"],
-            },
-        }
         print(json.dumps(result, indent=2, sort_keys=True))
         return 0
+    output = result["capture"]["output"]
     if output:
         print(output)
     return 0
@@ -1308,6 +1435,144 @@ def command_task_idle_check(args: argparse.Namespace) -> int:
     summary["task_id"] = binding["task_id"]
     summary["task_name"] = binding["task_name"]
     print(json.dumps(summary, indent=2, sort_keys=True))
+    return 0
+
+
+def command_manager_observe(args: argparse.Namespace) -> int:
+    db_path = Path(args.path).expanduser().resolve() if args.path else None
+    with connect_db(db_path) as conn:
+        initialize_database(conn)
+        snapshot = task_status_snapshot(conn, task=args.task)
+        manager = active_manager(conn, task=snapshot["id"])
+        manager_id = manager["id"] if manager else None
+        cycle_id = create_manager_cycle(conn, task_id=snapshot["id"], manager_id=manager_id)
+        conn.commit()
+    try:
+        worker_capture = capture_task_terminal(db_path, task=snapshot["id"], role="worker", lines=args.lines, source="manager_observe")
+        manager_capture = None
+        if manager:
+            manager_capture = capture_task_terminal(db_path, task=snapshot["id"], role="manager", lines=args.lines, source="manager_observe")
+        health = task_health_result(db_path, snapshot["id"], manager_stale_seconds=args.manager_stale_seconds)
+        severity = "info" if health["ok"] else "error"
+        with connect_db(db_path) as conn:
+            initialize_database(conn)
+            health_observation_id = insert_agent_observation(
+                conn,
+                task_id=snapshot["id"],
+                manager_id=manager_id,
+                worker_id=snapshot["worker"]["id"] if snapshot["worker"] else None,
+                role="manager",
+                observation_type="health",
+                severity=severity,
+                message="manager observed task health",
+                payload=health,
+            )
+            insert_db_event(
+                conn,
+                "manager_health_observed",
+                actor="manager",
+                task_id=snapshot["id"],
+                manager_id=manager_id,
+                worker_id=snapshot["worker"]["id"] if snapshot["worker"] else None,
+                payload={"cycle_id": cycle_id, "observation_id": health_observation_id, "ok": health["ok"], "issues": health["issues"]},
+            )
+            conn.commit()
+        idle = idle_summary(
+            snapshot["worker"]["name"],
+            status_stale_seconds=args.status_stale_seconds,
+            terminal_stale_seconds=args.terminal_stale_seconds,
+            busy_wait_seconds=args.busy_wait_seconds,
+            refresh=args.refresh,
+            lines=args.lines,
+        ) if snapshot["worker"] else None
+        with connect_db(db_path) as conn:
+            initialize_database(conn)
+            latest_snapshot = task_status_snapshot(conn, task=snapshot["id"])
+            finish_manager_cycle(
+                conn,
+                cycle_id=cycle_id,
+                state="succeeded",
+                health_observation_id=health_observation_id,
+                manager_capture_id=manager_capture["capture"]["id"] if manager_capture else None,
+                worker_capture_id=worker_capture["capture"]["id"],
+                status=latest_snapshot,
+                health=health,
+            )
+            insert_db_event(
+                conn,
+                "manager_observe_succeeded",
+                actor="manager",
+                task_id=snapshot["id"],
+                manager_id=manager_id,
+                worker_id=snapshot["worker"]["id"] if snapshot["worker"] else None,
+                payload={"cycle_id": cycle_id, "health_ok": health["ok"]},
+            )
+            conn.commit()
+        result = {
+            "cycle_id": cycle_id,
+            "health": health,
+            "idle": idle,
+            "manager_capture": manager_capture,
+            "status": latest_snapshot,
+            "worker_capture": worker_capture,
+        }
+        print(json.dumps(result, indent=2, sort_keys=True))
+        return 0 if health["ok"] else 1
+    except Exception as exc:
+        with connect_db(db_path) as conn:
+            initialize_database(conn)
+            finish_manager_cycle(conn, cycle_id=cycle_id, state="failed", error=str(exc))
+            insert_db_event(
+                conn,
+                "manager_observe_failed",
+                actor="manager",
+                task_id=snapshot["id"],
+                manager_id=manager_id,
+                worker_id=snapshot["worker"]["id"] if snapshot["worker"] else None,
+                payload={"cycle_id": cycle_id, "error": str(exc)},
+            )
+            conn.commit()
+        raise
+
+
+def command_manager_decision(args: argparse.Namespace) -> int:
+    db_path = Path(args.path).expanduser().resolve() if args.path else None
+    with connect_db(db_path) as conn:
+        initialize_database(conn)
+        snapshot = task_status_snapshot(conn, task=args.task)
+        manager = active_manager(conn, task=snapshot["id"])
+        decision_id = insert_manager_decision(
+            conn,
+            task_id=snapshot["id"],
+            manager_id=manager["id"] if manager else None,
+            manager_cycle_id=args.cycle_id,
+            decision=args.decision,
+            reason=args.reason,
+            payload={"source": "manager_decision"},
+        )
+        observation_id = insert_agent_observation(
+            conn,
+            task_id=snapshot["id"],
+            manager_id=manager["id"] if manager else None,
+            worker_id=snapshot["worker"]["id"] if snapshot["worker"] else None,
+            role="manager",
+            observation_type="decision",
+            severity="info" if args.decision in {"wait", "inspect", "nudge"} else "warning",
+            message=args.reason,
+            payload={"decision": args.decision, "decision_id": decision_id, "manager_cycle_id": args.cycle_id},
+        )
+        insert_db_event(
+            conn,
+            "manager_decision_recorded",
+            actor="manager",
+            task_id=snapshot["id"],
+            manager_id=manager["id"] if manager else None,
+            worker_id=snapshot["worker"]["id"] if snapshot["worker"] else None,
+            payload={"decision": args.decision, "decision_id": decision_id, "observation_id": observation_id, "reason": args.reason},
+        )
+        conn.commit()
+    result = {"decision": args.decision, "decision_id": decision_id, "observation_id": observation_id, "task": snapshot["name"]}
+    print(json.dumps(result, indent=2, sort_keys=True))
     return 0
 
 

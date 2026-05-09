@@ -11,18 +11,22 @@ from workerctl.core import now_iso
 from workerctl.state import state_root
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 REQUIRED_TABLES = {
+    "agent_observations",
     "bindings",
     "budgets",
     "commands",
     "data_migrations",
     "events",
+    "manager_cycles",
+    "manager_decisions",
     "managers",
     "prompts",
     "schema_migrations",
     "statuses",
     "tasks",
+    "terminal_captures",
     "transcript_captures",
     "workers",
 }
@@ -32,7 +36,9 @@ REQUIRED_INDEXES = {
     "one_active_binding_per_task",
     "one_active_binding_per_worker",
     "one_active_manager_per_task",
+    "agent_observations_task_id",
     "statuses_worker_id",
+    "terminal_captures_task_role",
     "transcript_captures_worker_id",
 }
 REQUIRED_TRIGGERS = {
@@ -176,6 +182,68 @@ def migrate(conn: sqlite3.Connection, from_version: int) -> None:
           retention_class text not null check (retention_class in ('hot','warm','archive'))
         );
 
+        create table if not exists terminal_captures(
+          id integer primary key autoincrement,
+          task_id text not null references tasks(id),
+          worker_id text references workers(id),
+          manager_id text references managers(id),
+          role text not null check (role in ('worker','manager')),
+          tmux_session text not null,
+          tmux_pane_id text,
+          command_id text references commands(id),
+          captured_at text not null,
+          history_lines integer not null,
+          content_sha256 text not null,
+          content text,
+          content_path text,
+          byte_count integer not null,
+          line_count integer not null,
+          classifier_json text not null check (json_valid(classifier_json)),
+          source text not null
+        );
+
+        create table if not exists agent_observations(
+          id integer primary key autoincrement,
+          task_id text not null references tasks(id),
+          worker_id text references workers(id),
+          manager_id text references managers(id),
+          role text not null check (role in ('worker','manager','workerctl')),
+          observation_type text not null check (observation_type in ('status','error','decision','blocker','summary','command_output','health','capture')),
+          severity text not null check (severity in ('info','warning','error')),
+          source_capture_id integer references terminal_captures(id),
+          command_id text references commands(id),
+          created_at text not null,
+          message text not null,
+          payload_json text not null check (json_valid(payload_json))
+        );
+
+        create table if not exists manager_cycles(
+          id integer primary key autoincrement,
+          task_id text not null references tasks(id),
+          manager_id text references managers(id),
+          started_at text not null,
+          completed_at text,
+          state text not null check (state in ('started','succeeded','failed')),
+          health_observation_id integer references agent_observations(id),
+          manager_capture_id integer references terminal_captures(id),
+          worker_capture_id integer references terminal_captures(id),
+          status_json text check (status_json is null or json_valid(status_json)),
+          health_json text check (health_json is null or json_valid(health_json)),
+          decision text,
+          error text
+        );
+
+        create table if not exists manager_decisions(
+          id integer primary key autoincrement,
+          task_id text not null references tasks(id),
+          manager_id text references managers(id),
+          manager_cycle_id integer references manager_cycles(id),
+          decision text not null check (decision in ('wait','nudge','interrupt','escalate','stop','inspect')),
+          reason text not null,
+          created_at text not null,
+          payload_json text not null check (json_valid(payload_json))
+        );
+
         create table if not exists budgets(
           task_id text primary key references tasks(id),
           max_nudges integer not null check (max_nudges >= 0),
@@ -232,6 +300,12 @@ def migrate(conn: sqlite3.Connection, from_version: int) -> None:
 
         create index if not exists statuses_worker_id
         on statuses(worker_id, id);
+
+        create index if not exists terminal_captures_task_role
+        on terminal_captures(task_id, role, id);
+
+        create index if not exists agent_observations_task_id
+        on agent_observations(task_id, id);
 
         create index if not exists transcript_captures_worker_id
         on transcript_captures(worker_id, id);
@@ -595,6 +669,180 @@ def insert_transcript_capture(
             len(content.splitlines()),
             "changed" if changed else "metadata_only",
             "hot",
+        ),
+    )
+    return int(cursor.lastrowid)
+
+
+def insert_terminal_capture(
+    conn: sqlite3.Connection,
+    *,
+    task_id: str,
+    role: str,
+    tmux_session: str,
+    content_sha256: str,
+    content: str,
+    history_lines: int,
+    source: str,
+    worker_id: str | None = None,
+    manager_id: str | None = None,
+    tmux_pane_id: str | None = None,
+    command_id: str | None = None,
+    classifier: dict[str, Any] | None = None,
+    content_path: str | None = None,
+    timestamp: str | None = None,
+) -> int:
+    cursor = conn.execute(
+        """
+        insert into terminal_captures(
+          task_id, worker_id, manager_id, role, tmux_session, tmux_pane_id,
+          command_id, captured_at, history_lines, content_sha256, content,
+          content_path, byte_count, line_count, classifier_json, source
+        )
+        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            task_id,
+            worker_id,
+            manager_id,
+            role,
+            tmux_session,
+            tmux_pane_id,
+            command_id,
+            timestamp or now_iso(),
+            history_lines,
+            content_sha256,
+            content,
+            content_path,
+            len(content.encode()),
+            len(content.splitlines()),
+            json.dumps(classifier or {}, sort_keys=True),
+            source,
+        ),
+    )
+    return int(cursor.lastrowid)
+
+
+def insert_agent_observation(
+    conn: sqlite3.Connection,
+    *,
+    task_id: str,
+    role: str,
+    observation_type: str,
+    severity: str,
+    message: str,
+    payload: dict[str, Any] | None = None,
+    worker_id: str | None = None,
+    manager_id: str | None = None,
+    source_capture_id: int | None = None,
+    command_id: str | None = None,
+    timestamp: str | None = None,
+) -> int:
+    cursor = conn.execute(
+        """
+        insert into agent_observations(
+          task_id, worker_id, manager_id, role, observation_type, severity,
+          source_capture_id, command_id, created_at, message, payload_json
+        )
+        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            task_id,
+            worker_id,
+            manager_id,
+            role,
+            observation_type,
+            severity,
+            source_capture_id,
+            command_id,
+            timestamp or now_iso(),
+            message,
+            json.dumps(payload or {}, sort_keys=True),
+        ),
+    )
+    return int(cursor.lastrowid)
+
+
+def create_manager_cycle(
+    conn: sqlite3.Connection,
+    *,
+    task_id: str,
+    manager_id: str | None,
+    timestamp: str | None = None,
+) -> int:
+    cursor = conn.execute(
+        """
+        insert into manager_cycles(task_id, manager_id, started_at, state)
+        values (?, ?, ?, 'started')
+        """,
+        (task_id, manager_id, timestamp or now_iso()),
+    )
+    return int(cursor.lastrowid)
+
+
+def finish_manager_cycle(
+    conn: sqlite3.Connection,
+    *,
+    cycle_id: int,
+    state: str,
+    health_observation_id: int | None = None,
+    manager_capture_id: int | None = None,
+    worker_capture_id: int | None = None,
+    status: dict[str, Any] | None = None,
+    health: dict[str, Any] | None = None,
+    decision: str | None = None,
+    error: str | None = None,
+    timestamp: str | None = None,
+) -> None:
+    conn.execute(
+        """
+        update manager_cycles
+        set completed_at = ?, state = ?, health_observation_id = ?,
+            manager_capture_id = ?, worker_capture_id = ?, status_json = ?,
+            health_json = ?, decision = ?, error = ?
+        where id = ?
+        """,
+        (
+            timestamp or now_iso(),
+            state,
+            health_observation_id,
+            manager_capture_id,
+            worker_capture_id,
+            json.dumps(status, sort_keys=True) if status is not None else None,
+            json.dumps(health, sort_keys=True) if health is not None else None,
+            decision,
+            error,
+            cycle_id,
+        ),
+    )
+
+
+def insert_manager_decision(
+    conn: sqlite3.Connection,
+    *,
+    task_id: str,
+    manager_id: str | None,
+    decision: str,
+    reason: str,
+    manager_cycle_id: int | None = None,
+    payload: dict[str, Any] | None = None,
+    timestamp: str | None = None,
+) -> int:
+    cursor = conn.execute(
+        """
+        insert into manager_decisions(
+          task_id, manager_id, manager_cycle_id, decision, reason, created_at, payload_json
+        )
+        values (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            task_id,
+            manager_id,
+            manager_cycle_id,
+            decision,
+            reason,
+            timestamp or now_iso(),
+            json.dumps(payload or {}, sort_keys=True),
         ),
     )
     return int(cursor.lastrowid)
@@ -1121,6 +1369,50 @@ def task_audit(conn: sqlite3.Connection, *, task: str) -> dict[str, Any]:
         """,
         (task_row["id"],),
     ).fetchall()
+    capture_rows = conn.execute(
+        """
+        select id, task_id, worker_id, manager_id, role, tmux_session,
+               tmux_pane_id, command_id, captured_at, history_lines,
+               content_sha256, content, content_path, byte_count, line_count,
+               classifier_json, source
+        from terminal_captures
+        where task_id = ?
+        order by id
+        """,
+        (task_row["id"],),
+    ).fetchall()
+    observation_rows = conn.execute(
+        """
+        select id, task_id, worker_id, manager_id, role, observation_type,
+               severity, source_capture_id, command_id, created_at, message,
+               payload_json
+        from agent_observations
+        where task_id = ?
+        order by id
+        """,
+        (task_row["id"],),
+    ).fetchall()
+    cycle_rows = conn.execute(
+        """
+        select id, task_id, manager_id, started_at, completed_at, state,
+               health_observation_id, manager_capture_id, worker_capture_id,
+               status_json, health_json, decision, error
+        from manager_cycles
+        where task_id = ?
+        order by id
+        """,
+        (task_row["id"],),
+    ).fetchall()
+    decision_rows = conn.execute(
+        """
+        select id, task_id, manager_id, manager_cycle_id, decision, reason,
+               created_at, payload_json
+        from manager_decisions
+        where task_id = ?
+        order by id
+        """,
+        (task_row["id"],),
+    ).fetchall()
     return {
         "commands": [
             {
@@ -1139,6 +1431,23 @@ def task_audit(conn: sqlite3.Connection, *, task: str) -> dict[str, Any]:
             }
             for row in command_rows
         ],
+        "agent_observations": [
+            {
+                "command_id": row["command_id"],
+                "created_at": row["created_at"],
+                "id": row["id"],
+                "manager_id": row["manager_id"],
+                "message": row["message"],
+                "observation_type": row["observation_type"],
+                "payload": json.loads(row["payload_json"]),
+                "role": row["role"],
+                "severity": row["severity"],
+                "source_capture_id": row["source_capture_id"],
+                "task_id": row["task_id"],
+                "worker_id": row["worker_id"],
+            }
+            for row in observation_rows
+        ],
         "events": [
             {
                 "actor": row["actor"],
@@ -1154,6 +1463,37 @@ def task_audit(conn: sqlite3.Connection, *, task: str) -> dict[str, Any]:
             }
             for row in event_rows
         ],
+        "manager_cycles": [
+            {
+                "completed_at": row["completed_at"],
+                "decision": row["decision"],
+                "error": row["error"],
+                "health": json.loads(row["health_json"]) if row["health_json"] else None,
+                "health_observation_id": row["health_observation_id"],
+                "id": row["id"],
+                "manager_capture_id": row["manager_capture_id"],
+                "manager_id": row["manager_id"],
+                "started_at": row["started_at"],
+                "state": row["state"],
+                "status": json.loads(row["status_json"]) if row["status_json"] else None,
+                "task_id": row["task_id"],
+                "worker_capture_id": row["worker_capture_id"],
+            }
+            for row in cycle_rows
+        ],
+        "manager_decisions": [
+            {
+                "created_at": row["created_at"],
+                "decision": row["decision"],
+                "id": row["id"],
+                "manager_cycle_id": row["manager_cycle_id"],
+                "manager_id": row["manager_id"],
+                "payload": json.loads(row["payload_json"]),
+                "reason": row["reason"],
+                "task_id": row["task_id"],
+            }
+            for row in decision_rows
+        ],
         "task": {
             "created_at": task_row["created_at"],
             "goal": task_row["goal"],
@@ -1163,6 +1503,28 @@ def task_audit(conn: sqlite3.Connection, *, task: str) -> dict[str, Any]:
             "summary": task_row["summary"],
             "updated_at": task_row["updated_at"],
         },
+        "terminal_captures": [
+            {
+                "byte_count": row["byte_count"],
+                "captured_at": row["captured_at"],
+                "classifier": json.loads(row["classifier_json"]),
+                "command_id": row["command_id"],
+                "content": row["content"],
+                "content_path": row["content_path"],
+                "content_sha256": row["content_sha256"],
+                "history_lines": row["history_lines"],
+                "id": row["id"],
+                "line_count": row["line_count"],
+                "manager_id": row["manager_id"],
+                "role": row["role"],
+                "source": row["source"],
+                "task_id": row["task_id"],
+                "tmux_pane_id": row["tmux_pane_id"],
+                "tmux_session": row["tmux_session"],
+                "worker_id": row["worker_id"],
+            }
+            for row in capture_rows
+        ],
     }
 
 

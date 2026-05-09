@@ -1871,9 +1871,11 @@ class CliTests(unittest.TestCase):
 
             captured = []
             original_capture_output = commands.capture_output
+            original_verify_worker = worker_identity.verify_worker_binding_identity
             try:
                 commands.capture_output = lambda name, lines: captured.append((name, lines)) or "terminal output"
-                args = argparse.Namespace(task="task-a", lines=120, json=True, path=str(db_path))
+                worker_identity.verify_worker_binding_identity = lambda binding: {"live": True, "live_pane_id": "%1", "mismatches": []}
+                args = argparse.Namespace(task="task-a", role="worker", lines=120, json=True, path=str(db_path))
 
                 with contextlib.redirect_stdout(io.StringIO()) as stdout:
                     result = commands.command_task_capture(args)
@@ -1884,8 +1886,173 @@ class CliTests(unittest.TestCase):
                 self.assertEqual(payload["binding_id"], "binding-1")
                 self.assertEqual(payload["capture"]["output"], "terminal output")
                 self.assertEqual(payload["worker"]["name"], "worker-a")
+                with worker_db.connect(db_path) as conn:
+                    captures = conn.execute("select role, content_sha256, content from terminal_captures").fetchall()
+                self.assertEqual(captures[0]["role"], "worker")
+                self.assertEqual(captures[0]["content"], "terminal output")
             finally:
                 commands.capture_output = original_capture_output
+                worker_identity.verify_worker_binding_identity = original_verify_worker
+
+    def test_task_capture_can_record_manager_terminal(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                worker_db.upsert_worker(conn, name="worker-a", cwd=str(ROOT), tmux_session="codex-worker-a", state="active")
+                task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
+                worker_db.bind_task_worker(conn, task="task-a", worker="worker-a", binding_id="binding-1")
+                manager_id = worker_db.create_manager(
+                    conn,
+                    task_id=task_id,
+                    name="manager-a",
+                    tmux_session="codex-manager-task-a",
+                    tmux_pane_id="%2",
+                    codex_args=[],
+                    state="ready",
+                )
+                worker_db.attach_manager_to_binding(conn, task_id=task_id, manager_id=manager_id)
+                conn.commit()
+
+            original_verify_manager = worker_identity.verify_manager_identity
+            original_run = commands.run
+            try:
+                worker_identity.verify_manager_identity = lambda manager: {"live": True, "live_pane_id": "%2", "mismatches": []}
+                commands.run = lambda argv, **kwargs: subprocess.CompletedProcess(argv, 0, "manager output", "")
+                args = argparse.Namespace(task="task-a", role="manager", lines=80, json=True, path=str(db_path))
+
+                with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                    result = commands.command_task_capture(args)
+
+                payload = json.loads(stdout.getvalue())
+                self.assertEqual(result, 0)
+                self.assertEqual(payload["manager"]["id"], manager_id)
+                self.assertEqual(payload["capture"]["output"], "manager output")
+                with worker_db.connect(db_path) as conn:
+                    capture = conn.execute("select role, manager_id, content from terminal_captures").fetchone()
+                    manager = conn.execute("select last_capture_sha256 from managers where id = ?", (manager_id,)).fetchone()
+                self.assertEqual(capture["role"], "manager")
+                self.assertEqual(capture["manager_id"], manager_id)
+                self.assertEqual(capture["content"], "manager output")
+                self.assertEqual(manager["last_capture_sha256"], payload["capture"]["content_sha256"])
+            finally:
+                worker_identity.verify_manager_identity = original_verify_manager
+                commands.run = original_run
+
+    def test_manager_decision_records_observation_and_event(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                worker_db.upsert_worker(conn, name="worker-a", cwd=str(ROOT), tmux_session="codex-worker-a", state="active")
+                task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
+                worker_db.bind_task_worker(conn, task="task-a", worker="worker-a", binding_id="binding-1")
+                manager_id = worker_db.create_manager(conn, task_id=task_id, name="manager-a", tmux_session="codex-manager-task-a", codex_args=[], state="ready")
+                worker_db.attach_manager_to_binding(conn, task_id=task_id, manager_id=manager_id)
+                conn.commit()
+
+            args = argparse.Namespace(cycle_id=None, decision="nudge", path=str(db_path), reason="worker is stale", task="task-a")
+            with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                result = commands.command_manager_decision(args)
+
+            payload = json.loads(stdout.getvalue())
+            self.assertEqual(result, 0)
+            self.assertEqual(payload["decision"], "nudge")
+            with worker_db.connect(db_path) as conn:
+                decision = conn.execute("select decision, reason from manager_decisions").fetchone()
+                observation = conn.execute("select observation_type, message from agent_observations").fetchone()
+                event = conn.execute("select type from events where type = 'manager_decision_recorded'").fetchone()
+            self.assertEqual(decision["decision"], "nudge")
+            self.assertEqual(decision["reason"], "worker is stale")
+            self.assertEqual(observation["observation_type"], "decision")
+            self.assertEqual(event["type"], "manager_decision_recorded")
+
+    def test_manager_observe_records_cycle_and_captures(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                worker_id = worker_db.upsert_worker(
+                    conn,
+                    name="worker-a",
+                    cwd=str(ROOT),
+                    tmux_session="codex-worker-a",
+                    identity_token="token-worker-a",
+                    tmux_pane_id="%1",
+                    state="active",
+                )
+                task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
+                worker_db.bind_task_worker(conn, task="task-a", worker="worker-a", binding_id="binding-1")
+                manager_id = worker_db.create_manager(
+                    conn,
+                    task_id=task_id,
+                    name="manager-a",
+                    tmux_session="codex-manager-task-a",
+                    tmux_pane_id="%2",
+                    codex_args=[],
+                    state="ready",
+                )
+                worker_db.attach_manager_to_binding(conn, task_id=task_id, manager_id=manager_id)
+                worker_db.mark_manager_seen(conn, manager_id=manager_id)
+                worker_db.insert_status(
+                    conn,
+                    worker_id=worker_id,
+                    status={"state": "waiting", "current_task": "Task A.", "next_action": "Wait.", "blocker": None},
+                )
+                conn.commit()
+
+            original_verify_worker = worker_identity.verify_worker_binding_identity
+            original_verify_manager = worker_identity.verify_manager_identity
+            original_session_snapshot = worker_identity.session_snapshot
+            original_capture_output = commands.capture_output
+            original_run = commands.run
+            original_idle_summary = commands.idle_summary
+            try:
+                worker_identity.verify_worker_binding_identity = lambda binding: {"live": True, "live_pane_id": "%1", "mismatches": []}
+                worker_identity.verify_manager_identity = lambda manager: {"live": True, "live_pane_id": "%2", "mismatches": []}
+                worker_identity.session_snapshot = lambda session: {
+                    "live": True,
+                    "pane_id": "%2" if session == "codex-manager-task-a" else "%1",
+                    "session": session,
+                }
+                commands.capture_output = lambda name, lines: "worker output"
+                commands.run = lambda argv, **kwargs: subprocess.CompletedProcess(argv, 0, "manager output", "")
+                commands.idle_summary = lambda name, **kwargs: {"health": "active", "name": name}
+                args = argparse.Namespace(
+                    busy_wait_seconds=60,
+                    lines=40,
+                    manager_stale_seconds=600,
+                    path=str(db_path),
+                    refresh=False,
+                    status_stale_seconds=300,
+                    task="task-a",
+                    terminal_stale_seconds=300,
+                )
+
+                with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                    result = commands.command_manager_observe(args)
+
+                payload = json.loads(stdout.getvalue())
+                self.assertEqual(result, 0)
+                self.assertTrue(payload["health"]["ok"])
+                self.assertEqual(payload["worker_capture"]["capture"]["output"], "worker output")
+                self.assertEqual(payload["manager_capture"]["capture"]["output"], "manager output")
+                with worker_db.connect(db_path) as conn:
+                    cycle = conn.execute("select state, worker_capture_id, manager_capture_id from manager_cycles").fetchone()
+                    captures = conn.execute("select role from terminal_captures order by id").fetchall()
+                    observation = conn.execute("select observation_type from agent_observations where observation_type = 'health'").fetchone()
+                self.assertEqual(cycle["state"], "succeeded")
+                self.assertIsNotNone(cycle["worker_capture_id"])
+                self.assertIsNotNone(cycle["manager_capture_id"])
+                self.assertEqual([row["role"] for row in captures], ["worker", "manager"])
+                self.assertEqual(observation["observation_type"], "health")
+            finally:
+                worker_identity.verify_worker_binding_identity = original_verify_worker
+                worker_identity.verify_manager_identity = original_verify_manager
+                worker_identity.session_snapshot = original_session_snapshot
+                commands.capture_output = original_capture_output
+                commands.run = original_run
+                commands.idle_summary = original_idle_summary
 
     def test_task_idle_check_command_uses_bound_worker(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -3465,6 +3632,10 @@ class CliTests(unittest.TestCase):
             self.assertEqual(payload["export_dir"], str(output.resolve()))
             self.assertTrue((output / "manifest.json").exists())
             self.assertTrue((output / "task-status.json").exists())
+            self.assertTrue((output / "terminal-captures.json").exists())
+            self.assertTrue((output / "agent-observations.json").exists())
+            self.assertTrue((output / "manager-cycles.json").exists())
+            self.assertTrue((output / "manager-decisions.json").exists())
             self.assertTrue(output.with_suffix(".zip").exists())
 
     def test_task_scoped_read_commands_are_listed_in_help(self):
@@ -3476,6 +3647,8 @@ class CliTests(unittest.TestCase):
         self.assertIn("commands", proc.stdout)
         self.assertIn("doctor-self", proc.stdout)
         self.assertIn("import-compat", proc.stdout)
+        self.assertIn("manager-decision", proc.stdout)
+        self.assertIn("manager-observe", proc.stdout)
         self.assertIn("manage", proc.stdout)
         self.assertIn("my-status", proc.stdout)
         self.assertIn("name-session", proc.stdout)
