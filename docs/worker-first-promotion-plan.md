@@ -282,8 +282,8 @@ Manager-facing decision command. Records why the manager chose to wait, inspect,
 nudge, interrupt, escalate, or stop. Mutating task commands remain separate, but
 the decision row links the manager's reasoning to the same task audit stream.
 Managers should pass the returned `decision_id` to subsequent mutating commands
-with `--decision-id`. Missing, stale, wrong-task, or incompatible decision links
-are warning-only during the current rollout and are reported by
+with `--decision-id --strict-decisions`. Without strict mode, missing, stale,
+wrong-task, or incompatible decision links are warning-only and are reported by
 `mutation-audit`.
 
 ### `workerctl task-capture <name> [--lines N]`
@@ -297,7 +297,7 @@ Use `--role manager` to capture the manager terminal instead.
 Run the existing worker idle classifier through the task binding. The result is
 stored as an audit event.
 
-### `workerctl task-nudge <name> "message" [--decision-id ID]`
+### `workerctl task-nudge <name> "message" [--decision-id ID] [--strict-decisions]`
 
 Send a manager nudge through the task binding. This is the command managers
 should use instead of raw `workerctl nudge`. It checks that the task is managed,
@@ -305,13 +305,13 @@ checks the active worker binding, reserves a nudge budget slot, records nudge
 intent, sends the message, and records success or failure. Failed reserved
 nudges count against budget unless retried explicitly by command ID.
 
-### `workerctl task-interrupt <name> [--decision-id ID]`
+### `workerctl task-interrupt <name> [--decision-id ID] [--strict-decisions]`
 
 Interrupt the bound worker through the task binding. This checks task state,
 records the interrupt decision, sends the interrupt, and logs any follow-up
 message as a task-scoped audit event.
 
-### `workerctl finish-task <name> [--stop-worker] --reason <text> [--decision-id ID]`
+### `workerctl finish-task <name> [--stop-worker] --reason <text> [--decision-id ID] [--strict-decisions]`
 
 Close a completed task intentionally. Records a final manager decision, stops
 the manager, marks the task `done`, ends the active binding, and optionally
@@ -324,6 +324,8 @@ Read-only rationale audit for mutating task commands. It lists each task nudge,
 interrupt, pause, finish, and stop command, the linked manager decision when one
 was supplied, the nearest previous decision, and warnings such as
 `missing_decision_id`, `decision_mismatch`, or `decision_stale`.
+`task-health <name> --audit-decisions` includes the same linkage warnings in the
+task health result, and `export-task` writes `mutation-audit.json`.
 
 ### `workerctl task-events <name> [--type TYPE] [--limit N]`
 
@@ -337,7 +339,7 @@ List durable side-effect command intents and results. Filtering by task, type,
 state, worker ID, and manager ID is required so multiple active
 worker-manager pairs can be audited independently.
 
-### `workerctl pause-manager <name> [--decision-id ID]`
+### `workerctl pause-manager <name> [--decision-id ID] [--strict-decisions]`
 
 Stop the manager session and mark the task `paused`. Worker keeps running.
 Task-scoped manager commands must reject mutations while the task is paused, so
@@ -375,7 +377,7 @@ new manager terminal.
 
 Kill the manager session. Worker keeps running.
 
-### `workerctl stop-task <name> [--stop-worker] [--decision-id ID]`
+### `workerctl stop-task <name> [--stop-worker] [--decision-id ID] [--strict-decisions]`
 
 Stop the manager. Optionally stop the worker too.
 
@@ -1013,9 +1015,10 @@ Implemented in the current SQLite milestone:
 - Durable command intent/result rows for task-scoped mutations and lifecycle
   side effects.
 - Task-scoped `task-health` diagnostic that combines SQLite integrity, live
-  tmux drift, unfinished commands, and manager liveness warnings.
-- Role-aware terminal captures, manager observation cycles, and manager decision
-  records included in `audit` and `export-task`.
+  tmux drift, unfinished commands, optional manager decision linkage warnings,
+  and manager liveness warnings.
+- Role-aware terminal captures, manager observation cycles, manager decision
+  records, and mutation audit results included in `audit`/`export-task`.
 - Nudge budget reservation in SQLite before non-dry-run sends.
 - Pane ID persistence for new worker and manager tmux sessions.
 - Centralized identity verification in `workerctl.identity` for worker/manager

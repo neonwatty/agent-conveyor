@@ -32,6 +32,7 @@ from workerctl.db import latest_manager_prompt
 from workerctl.db import mark_manager_seen
 from workerctl.db import mark_command_attempted
 from workerctl.db import mark_worker_state, upsert_worker
+from workerctl.db import require_manager_decision_ok
 from workerctl.db import set_budget as set_db_budget
 from workerctl.db import set_manager_pane_id
 from workerctl.db import set_manager_state
@@ -133,16 +134,16 @@ def build_manager_prompt(
             f"- workerctl audit {task_name} --json",
             "",
             "Conditional mutating commands:",
-            f"- workerctl task-nudge {task_name} \"<message>\" --decision-id <decision_id>",
-            f"- workerctl task-interrupt {task_name} --decision-id <decision_id>",
-            f"- workerctl finish-task {task_name} --reason \"<reason>\" --decision-id <decision_id>",
-            f"- workerctl pause-manager {task_name} --decision-id <decision_id>",
-            f"- workerctl stop-task {task_name} --stop-worker --decision-id <decision_id>",
+            f"- workerctl task-nudge {task_name} \"<message>\" --decision-id <decision_id> --strict-decisions",
+            f"- workerctl task-interrupt {task_name} --decision-id <decision_id> --strict-decisions",
+            f"- workerctl finish-task {task_name} --reason \"<reason>\" --decision-id <decision_id> --strict-decisions",
+            f"- workerctl pause-manager {task_name} --decision-id <decision_id> --strict-decisions",
+            f"- workerctl stop-task {task_name} --stop-worker --decision-id <decision_id> --strict-decisions",
             "",
             "Rules:",
             "- Use only task-scoped workerctl commands for worker communication.",
             "- Start each loop with manager-observe so health, status, and terminal captures are recorded.",
-            "- Record decisions with manager-decision before mutating worker state, then pass the returned decision_id to the mutation with --decision-id.",
+            "- Record decisions with manager-decision before mutating worker state, then pass the returned decision_id to the mutation with --decision-id --strict-decisions.",
             "- Run task-health first when state is uncertain or any task-scoped command fails.",
             "- Do not run mutating commands merely because they are listed.",
             "- Use task-nudge only when the worker is stale, waiting for input, or explicitly needs direction; respect the live nudge budget.",
@@ -550,6 +551,7 @@ def _pause_manager_task(
     worker_id: str | None = None,
     dry_run: bool = False,
     decision_id: int | None = None,
+    strict_decisions: bool = False,
 ) -> int:
     with connect_db(db_path) as conn:
         initialize_database(conn)
@@ -564,6 +566,11 @@ def _pause_manager_task(
                 task_id=manager["task_id"],
                 decision_id=decision_id,
                 allowed_decisions={"escalate", "stop"},
+            )
+            require_manager_decision_ok(
+                command_type=command_type,
+                decision_check=decision_check,
+                strict=strict_decisions,
             )
         if dry_run:
             result = {
@@ -669,7 +676,12 @@ def _pause_manager_task(
 
 def command_pause_manager(args: argparse.Namespace) -> int:
     db_path = Path(args.path).expanduser().resolve() if args.path else None
-    return _pause_manager_task(db_path=db_path, task=args.task, decision_id=getattr(args, "decision_id", None))
+    return _pause_manager_task(
+        db_path=db_path,
+        task=args.task,
+        decision_id=getattr(args, "decision_id", None),
+        strict_decisions=getattr(args, "strict_decisions", False),
+    )
 
 
 def command_unmanage(args: argparse.Namespace) -> int:
@@ -935,6 +947,11 @@ def _stop_or_finish_task(args: argparse.Namespace, *, finish: bool) -> int:
             task_id=snapshot["id"],
             decision_id=getattr(args, "decision_id", None),
             allowed_decisions={"stop"},
+        )
+        require_manager_decision_ok(
+            command_type=command_type,
+            decision_check=decision_check,
+            strict=getattr(args, "strict_decisions", False),
         )
         command_id = create_db_command(
             conn,
