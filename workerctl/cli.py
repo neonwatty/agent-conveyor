@@ -35,6 +35,7 @@ from workerctl.commands import (
     command_list,
     command_manager_decision,
     command_manager_observe,
+    command_mutation_audit,
     command_name_session,
     command_nudge,
     command_open,
@@ -370,6 +371,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     pause_manager = subparsers.add_parser("pause-manager", help="Stop a task manager while leaving the worker running.")
     pause_manager.add_argument("task", help="Task name or ID.")
+    pause_manager.add_argument("--decision-id", type=int, help="Manager escalate/stop decision ID that justifies this pause.")
     pause_manager.add_argument("--path", help="Override the workerctl database path.")
     pause_manager.set_defaults(func=command_pause_manager)
 
@@ -417,6 +419,7 @@ def build_parser() -> argparse.ArgumentParser:
     stop_task.add_argument("task", help="Task name or ID.")
     stop_task.add_argument("--stop-worker", action="store_true", help="Also stop the bound worker tmux session.")
     stop_task.add_argument("--message", help="Optional final message to send before stopping the worker.")
+    stop_task.add_argument("--decision-id", type=int, help="Manager decision ID that justifies this stop.")
     stop_task.add_argument("--path", help="Override the workerctl database path.")
     stop_task.set_defaults(func=command_stop_task)
 
@@ -427,6 +430,7 @@ def build_parser() -> argparse.ArgumentParser:
     finish_task.add_argument("task", help="Task name or ID.")
     finish_task.add_argument("--stop-worker", action="store_true", help="Also stop the bound worker tmux session.")
     finish_task.add_argument("--message", help="Optional final message to send before stopping the worker.")
+    finish_task.add_argument("--decision-id", type=int, help="Manager decision ID that justifies this finish.")
     finish_task.add_argument(
         "--reason",
         default="Task finished by operator.",
@@ -525,6 +529,7 @@ def build_parser() -> argparse.ArgumentParser:
     task_nudge = subparsers.add_parser("task-nudge", help="Send a durable task-scoped nudge to the bound worker.")
     task_nudge.add_argument("task", help="Task name or ID.")
     task_nudge.add_argument("message", help="Message to send to the bound worker.")
+    task_nudge.add_argument("--decision-id", type=int, help="Manager nudge decision ID that justifies this mutation.")
     task_nudge.add_argument("--dry-run", action="store_true", help="Record the command without sending the message.")
     task_nudge.add_argument("--path", help="Override the workerctl database path.")
     task_nudge.set_defaults(func=command_task_nudge)
@@ -534,6 +539,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Send a durable task-scoped interrupt to the bound worker.",
     )
     task_interrupt.add_argument("task", help="Task name or ID.")
+    task_interrupt.add_argument("--decision-id", type=int, help="Manager interrupt decision ID that justifies this mutation.")
     task_interrupt.add_argument("--key", default="C-c", help="tmux key to send to the bound worker.")
     task_interrupt.add_argument("--followup", default=DEFAULT_INTERRUPT_FOLLOWUP, help="Message to send after interrupt.")
     task_interrupt.add_argument("--no-followup", action="store_true", help="Do not send a follow-up message.")
@@ -554,6 +560,12 @@ def build_parser() -> argparse.ArgumentParser:
     audit.add_argument("--json", action="store_true", help="Print audit records as JSON.")
     audit.add_argument("--path", help="Override the workerctl database path.")
     audit.set_defaults(func=command_audit)
+
+    mutation_audit = subparsers.add_parser("mutation-audit", help="Show manager decisions linked to task mutations.")
+    mutation_audit.add_argument("task", help="Task name or ID.")
+    mutation_audit.add_argument("--json", action="store_true", help="Print mutation audit records as JSON.")
+    mutation_audit.add_argument("--path", help="Override the workerctl database path.")
+    mutation_audit.set_defaults(func=command_mutation_audit)
 
     export_task = subparsers.add_parser("export-task", help="Export task status, audit, prompts, and transcript metadata.")
     export_task.add_argument("task", help="Task name or ID.")

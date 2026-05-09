@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -846,6 +847,81 @@ def insert_manager_decision(
         ),
     )
     return int(cursor.lastrowid)
+
+
+def _parse_iso(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def assess_manager_decision(
+    conn: sqlite3.Connection,
+    *,
+    task_id: str,
+    decision_id: int | None,
+    allowed_decisions: set[str],
+    max_age_seconds: int = 900,
+) -> dict[str, Any]:
+    if decision_id is None:
+        return {
+            "allowed_decisions": sorted(allowed_decisions),
+            "decision": None,
+            "decision_id": None,
+            "ok": False,
+            "warnings": ["missing_decision_id"],
+        }
+    row = conn.execute(
+        """
+        select id, task_id, manager_id, manager_cycle_id, decision, reason,
+               created_at, payload_json
+        from manager_decisions
+        where id = ?
+        """,
+        (decision_id,),
+    ).fetchone()
+    if row is None:
+        return {
+            "allowed_decisions": sorted(allowed_decisions),
+            "decision": None,
+            "decision_id": decision_id,
+            "ok": False,
+            "warnings": ["decision_not_found"],
+        }
+    decision = {
+        "created_at": row["created_at"],
+        "decision": row["decision"],
+        "id": row["id"],
+        "manager_cycle_id": row["manager_cycle_id"],
+        "manager_id": row["manager_id"],
+        "reason": row["reason"],
+        "task_id": row["task_id"],
+    }
+    warnings: list[str] = []
+    if row["task_id"] != task_id:
+        warnings.append("decision_task_mismatch")
+    if row["decision"] not in allowed_decisions:
+        warnings.append("decision_mismatch")
+    created_at = _parse_iso(row["created_at"])
+    age_seconds = None
+    if created_at is None:
+        warnings.append("decision_timestamp_invalid")
+    else:
+        age_seconds = int((datetime.now(timezone.utc) - created_at).total_seconds())
+        if age_seconds > max_age_seconds:
+            warnings.append("decision_stale")
+    return {
+        "age_seconds": age_seconds,
+        "allowed_decisions": sorted(allowed_decisions),
+        "decision": decision,
+        "decision_id": decision_id,
+        "max_age_seconds": max_age_seconds,
+        "ok": not warnings,
+        "warnings": warnings,
+    }
 
 
 def task_row(conn: sqlite3.Connection, *, task: str) -> sqlite3.Row:

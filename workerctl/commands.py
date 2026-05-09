@@ -15,6 +15,7 @@ from workerctl.classify import classify_busy_wait, classify_startup_output
 from workerctl.constants import DEFAULT_MANAGER_STALE_SECONDS, PROJECT_ROOT, VALID_STATES
 from workerctl.core import WorkerError, ensure_tool, now_iso, run, sh_quote
 from workerctl.db import active_manager, active_task_worker
+from workerctl.db import assess_manager_decision
 from workerctl.db import bind_task_worker
 from workerctl.db import connect as connect_db
 from workerctl.db import create_command as create_db_command
@@ -1819,6 +1820,12 @@ def command_task_nudge(args: argparse.Namespace) -> int:
         if binding["task_state"] != "managed":
             raise WorkerError(f"Task {binding['task_name']} is not managed; current state is {binding['task_state']}")
         budget = None
+        decision_check = assess_manager_decision(
+            conn,
+            task_id=binding["task_id"],
+            decision_id=getattr(args, "decision_id", None),
+            allowed_decisions={"nudge"},
+        )
         command_id = create_db_command(
             conn,
             command_type="task_nudge",
@@ -1828,6 +1835,7 @@ def command_task_nudge(args: argparse.Namespace) -> int:
                 "binding_id": binding["binding_id"],
                 "dry_run": args.dry_run,
                 "message": args.message,
+                "manager_decision": decision_check,
                 "task": binding["task_name"],
                 "worker": binding["worker_name"],
                 "budget": budget,
@@ -1844,6 +1852,7 @@ def command_task_nudge(args: argparse.Namespace) -> int:
                 "binding_id": binding["binding_id"],
                 "dry_run": args.dry_run,
                 "message": args.message,
+                "manager_decision": decision_check,
                 "budget": budget,
             },
         )
@@ -1854,6 +1863,7 @@ def command_task_nudge(args: argparse.Namespace) -> int:
         "command_id": command_id,
         "dry_run": args.dry_run,
         "message": args.message,
+        "manager_decision": decision_check,
         "task": binding["task_name"],
         "worker": binding["worker_name"],
         "budget": budget,
@@ -1934,6 +1944,12 @@ def command_task_interrupt(args: argparse.Namespace) -> int:
         binding = active_task_worker(conn, task=args.task)
         if binding["task_state"] != "managed":
             raise WorkerError(f"Task {binding['task_name']} is not managed; current state is {binding['task_state']}")
+        decision_check = assess_manager_decision(
+            conn,
+            task_id=binding["task_id"],
+            decision_id=getattr(args, "decision_id", None),
+            allowed_decisions={"interrupt"},
+        )
         command_id = create_db_command(
             conn,
             command_type="task_interrupt",
@@ -1944,6 +1960,7 @@ def command_task_interrupt(args: argparse.Namespace) -> int:
                 "dry_run": args.dry_run,
                 "followup": followup,
                 "key": args.key,
+                "manager_decision": decision_check,
                 "task": binding["task_name"],
                 "worker": binding["worker_name"],
             },
@@ -1960,6 +1977,7 @@ def command_task_interrupt(args: argparse.Namespace) -> int:
                 "dry_run": args.dry_run,
                 "followup": followup,
                 "key": args.key,
+                "manager_decision": decision_check,
             },
         )
         conn.commit()
@@ -1970,6 +1988,7 @@ def command_task_interrupt(args: argparse.Namespace) -> int:
         "dry_run": args.dry_run,
         "followup": followup,
         "key": args.key,
+        "manager_decision": decision_check,
         "task": binding["task_name"],
         "worker": binding["worker_name"],
     }
@@ -2049,6 +2068,88 @@ def command_audit(args: argparse.Namespace) -> int:
         command = f"\tcommand={event['command_id']}" if event["command_id"] else ""
         print(f"{event['created_at']}\t{event['type']}\tactor={event['actor']}{command}")
     return 0
+
+
+MUTATING_COMMAND_DECISIONS = {
+    "finish_task": {"stop"},
+    "pause_manager": {"escalate", "stop"},
+    "stop_task": {"stop"},
+    "task_interrupt": {"interrupt"},
+    "task_nudge": {"nudge"},
+}
+
+
+def _nearest_prior_decision(command: dict[str, Any], decisions: list[dict[str, Any]]) -> dict[str, Any] | None:
+    prior = [
+        decision
+        for decision in decisions
+        if decision["created_at"] <= command["created_at"]
+    ]
+    return prior[-1] if prior else None
+
+
+def mutation_audit_result(audit: dict[str, Any]) -> dict[str, Any]:
+    decisions = audit["manager_decisions"]
+    records = []
+    for command in audit["commands"]:
+        allowed = MUTATING_COMMAND_DECISIONS.get(command["type"])
+        if allowed is None:
+            continue
+        payload = command.get("payload") or {}
+        result = command.get("result") or {}
+        decision_check = result.get("manager_decision") or payload.get("manager_decision")
+        nearest = _nearest_prior_decision(command, decisions)
+        linked = decision_check.get("decision") if isinstance(decision_check, dict) else None
+        warnings = []
+        if isinstance(decision_check, dict):
+            warnings.extend(decision_check.get("warnings", []))
+        else:
+            warnings.append("missing_decision_metadata")
+        if nearest and not linked:
+            warnings.append("nearest_decision_unlinked")
+        if linked and linked.get("decision") not in allowed:
+            warnings.append("linked_decision_incompatible")
+        records.append(
+            {
+                "allowed_decisions": sorted(allowed),
+                "command": {
+                    "created_at": command["created_at"],
+                    "id": command["id"],
+                    "state": command["state"],
+                    "type": command["type"],
+                },
+                "linked_decision": linked,
+                "nearest_prior_decision": nearest,
+                "ok": not warnings,
+                "warnings": warnings,
+            }
+        )
+    return {
+        "ok": all(record["ok"] for record in records),
+        "records": records,
+        "summary": {
+            "mutations": len(records),
+            "with_warnings": sum(1 for record in records if record["warnings"]),
+        },
+        "task": audit["task"],
+    }
+
+
+def command_mutation_audit(args: argparse.Namespace) -> int:
+    db_path = Path(args.path).expanduser().resolve() if args.path else None
+    with connect_db(db_path) as conn:
+        initialize_database(conn)
+        audit = task_audit(conn, task=args.task)
+    result = mutation_audit_result(audit)
+    if args.json:
+        print(json.dumps(result, indent=2, sort_keys=True))
+        return 0 if result["ok"] else 1
+    print(f"{result['task']['name']}\tmutations={result['summary']['mutations']}\twarnings={result['summary']['with_warnings']}")
+    for record in result["records"]:
+        warning_text = ",".join(record["warnings"]) if record["warnings"] else "ok"
+        linked = record["linked_decision"]["id"] if record["linked_decision"] else "-"
+        print(f"{record['command']['created_at']}\t{record['command']['type']}\tdecision={linked}\t{warning_text}")
+    return 0 if result["ok"] else 1
 
 
 def command_events(args: argparse.Namespace) -> int:
