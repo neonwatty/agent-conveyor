@@ -142,6 +142,7 @@ scripts/workerctl remanage --open-manager
 To show task-bound terminals without raw tmux commands:
 
 ```bash
+scripts/workerctl task-health <task> --json
 scripts/workerctl open-manager <task>
 scripts/workerctl open-worker <task>
 ```
