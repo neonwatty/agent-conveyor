@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+WORKERCTL="${ROOT}/scripts/workerctl"
+MODEL="${WORKERCTL_SMOKE_MODEL:-gpt-5.4-mini}"
+SMOKE_ID="smoke-$(date +%Y%m%d%H%M%S)"
+WORKER="codex-smoke-worker-${SMOKE_ID}"
+TASK="codex-smoke-task-${SMOKE_ID}"
+MANAGER_SESSION=""
+
+require_tool() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    echo "missing required tool: $1" >&2
+    exit 1
+  fi
+}
+
+cleanup() {
+  tmux kill-session -t "codex-${WORKER}" 2>/dev/null || true
+  if [ -n "${MANAGER_SESSION}" ]; then
+    tmux kill-session -t "${MANAGER_SESSION}" 2>/dev/null || true
+  fi
+  tmux list-sessions -F '#S' 2>/dev/null | rg "^codex-manager-${TASK}" | xargs -r -n1 tmux kill-session -t 2>/dev/null || true
+}
+
+trap cleanup EXIT
+
+require_tool tmux
+require_tool codex
+require_tool rg
+
+cd "${ROOT}"
+
+echo "smoke worker: ${WORKER}"
+echo "smoke task: ${TASK}"
+
+python3 "${WORKERCTL}" create "${WORKER}" \
+  --cwd "${ROOT}" \
+  --task "Smoke test worker. Do not edit files." \
+  --no-initial-prompt
+
+python3 "${WORKERCTL}" promote "${WORKER}" \
+  --task "${TASK}" \
+  --goal "Smoke test worker-manager lifecycle" \
+  --summary "Live smoke test" \
+  --max-nudges 1 \
+  -- --model "${MODEL}" > /tmp/workerctl-live-smoke-promote.json
+
+python3 "${WORKERCTL}" task-status "${TASK}" --json > /tmp/workerctl-live-smoke-status.json
+python3 "${WORKERCTL}" task-nudge "${TASK}" "dry-run status request" --dry-run > /tmp/workerctl-live-smoke-nudge.json
+python3 "${WORKERCTL}" pause-manager "${TASK}" > /tmp/workerctl-live-smoke-pause.json
+python3 "${WORKERCTL}" resume-manager "${TASK}" -- --model "${MODEL}" > /tmp/workerctl-live-smoke-resume.json
+
+MANAGER_SESSION="$(python3 - <<'PY'
+import json
+print(json.load(open('/tmp/workerctl-live-smoke-resume.json'))['manager_session'])
+PY
+)"
+
+tmux kill-session -t "${MANAGER_SESSION}"
+python3 "${WORKERCTL}" recover "${TASK}" > /tmp/workerctl-live-smoke-recover.json
+python3 "${WORKERCTL}" export-task "${TASK}" --zip > /tmp/workerctl-live-smoke-export.json
+python3 "${WORKERCTL}" stop-task "${TASK}" --stop-worker > /tmp/workerctl-live-smoke-stop-task.json
+
+cat /tmp/workerctl-live-smoke-promote.json
+cat /tmp/workerctl-live-smoke-status.json
+cat /tmp/workerctl-live-smoke-nudge.json
+cat /tmp/workerctl-live-smoke-pause.json
+cat /tmp/workerctl-live-smoke-resume.json
+cat /tmp/workerctl-live-smoke-recover.json
+cat /tmp/workerctl-live-smoke-export.json
+cat /tmp/workerctl-live-smoke-stop-task.json
+
+echo "live smoke passed"

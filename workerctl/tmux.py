@@ -7,6 +7,8 @@ from typing import Any
 from workerctl.classify import classify_startup_output
 from workerctl.constants import DEFAULT_HISTORY_LINES
 from workerctl.core import WorkerError, now_iso, run
+from workerctl.db import connect as connect_db
+from workerctl.db import initialize_database, insert_transcript_capture, upsert_worker
 from workerctl.state import (
     append_event,
     capture_meta_path,
@@ -34,13 +36,32 @@ def session_exists(name: str) -> bool:
     return proc.returncode == 0
 
 
+def current_pane_id(target: str) -> str | None:
+    proc = run(["tmux", "list-panes", "-t", target, "-F", "#{pane_id}"], check=False)
+    if proc.returncode != 0:
+        return None
+    for line in proc.stdout.splitlines():
+        pane_id = line.strip()
+        if pane_id:
+            return pane_id
+    return None
+
+
+def current_session_name() -> str | None:
+    proc = run(["tmux", "display-message", "-p", "#S"], check=False)
+    if proc.returncode != 0:
+        return None
+    session = proc.stdout.strip()
+    return session or None
+
+
 def capture_tmux_target(target: str, history_lines: int = DEFAULT_HISTORY_LINES) -> str:
     proc = run(["tmux", "capture-pane", "-p", "-S", f"-{history_lines}", "-t", target])
     return proc.stdout.rstrip("\n")
 
 
 def capture_output(name: str, history_lines: int = DEFAULT_HISTORY_LINES) -> str:
-    require_worker(name)
+    config = require_worker(name)
     if not session_exists(name):
         raise WorkerError(f"tmux session is not running for worker {name}: {tmux_target(name)}")
     output = capture_tmux_target(tmux_target(name), history_lines)
@@ -48,17 +69,42 @@ def capture_output(name: str, history_lines: int = DEFAULT_HISTORY_LINES) -> str
     meta = load_json(capture_meta_path(name), {})
     previous_digest = meta.get("sha256")
     previous_changed_at = meta.get("changed_at")
-    changed_at = now_iso() if digest != previous_digest else previous_changed_at
+    captured_at = now_iso()
+    changed = digest != previous_digest
+    changed_at = captured_at if changed else previous_changed_at
     write_json(
         capture_meta_path(name),
         {
-            "captured_at": now_iso(),
-            "changed_at": changed_at or now_iso(),
+            "captured_at": captured_at,
+            "changed_at": changed_at or captured_at,
             "sha256": digest,
             "history_lines": history_lines,
         },
     )
     transcript_path(name).write_text(output + ("\n" if output else ""))
+    with connect_db() as conn:
+        initialize_database(conn)
+        worker_id = upsert_worker(
+            conn,
+            name=name,
+            cwd=config.get("cwd", ""),
+            tmux_session=config.get("tmux_session", tmux_session(name)),
+            identity_token=config.get("identity_token"),
+            tmux_pane_id=config.get("tmux_pane_id") or current_pane_id(config.get("tmux_session", tmux_session(name))),
+            state="active",
+            timestamp=captured_at,
+        )
+        insert_transcript_capture(
+            conn,
+            worker_id=worker_id,
+            sha256=digest,
+            content=output,
+            captured_at=captured_at,
+            changed_at=changed_at or captured_at,
+            history_lines=history_lines,
+            changed=changed,
+        )
+        conn.commit()
     return output
 
 

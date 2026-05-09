@@ -104,30 +104,162 @@ waiting -> planning -> editing/running_tests -> done
 From the repo root:
 
 ```bash
-scripts/workerctl doctor
-scripts/workerctl start-test live-test --cwd "$PWD" --accept-trust --open
+workerctl doctor
+workerctl start-test live-test --cwd "$PWD" --accept-trust --open
 tmux attach -t codex-live-test
-scripts/workerctl create worker-a --cwd /path/to/repo --task "Inspect the failing test and report the blocker."
-scripts/workerctl create worker-b --cwd "$PWD" --task "Read README.md and update status.json." --wait-ready --accept-trust --verify --open
-scripts/workerctl list
-scripts/workerctl list --json
-scripts/workerctl status worker-a
-scripts/workerctl idle-check worker-a
-scripts/workerctl supervise worker-a
-scripts/workerctl watch worker-a --interval 60
-scripts/workerctl events worker-a --limit 20
-scripts/workerctl interrupt worker-a
-scripts/workerctl capture worker-a
-scripts/workerctl nudge worker-a "Please summarize current progress and next action."
-scripts/workerctl stop worker-a
+workerctl create worker-a --cwd /path/to/repo --task "Inspect the failing test and report the blocker."
+workerctl create worker-b --cwd "$PWD" --task "Read README.md and update status.json." --wait-ready --accept-trust --verify --open
+workerctl list
+workerctl list --json
+workerctl status worker-a
+workerctl idle-check worker-a
+workerctl supervise worker-a
+workerctl watch worker-a --interval 60
+workerctl events worker-a --limit 20
+workerctl interrupt worker-a
+workerctl capture worker-a
+workerctl nudge worker-a "Please summarize current progress and next action."
+workerctl stop worker-a
 ```
+
+## SQLite Worker-Manager Lifecycle
+
+`workerctl` now uses `.codex-workers/workerctl.db` as the authoritative
+control-plane store for tasks, workers, managers, bindings, status contracts,
+prompts, transcript captures, command intents/results, and audit events. The
+JSON files under `.codex-workers/<worker>/` remain compatibility artifacts.
+Worker names are human labels; SQLite worker IDs are opaque `worker-<uuid>`
+identities. `identity_token` remains a separate contract verification secret.
+
+Create a worker, then promote it into a managed task:
+
+```bash
+workerctl create worker-a \
+  --cwd "$PWD" \
+  --task "Work on the assigned task and report status with workerctl." \
+  --no-initial-prompt
+
+workerctl promote worker-a \
+  --task auth-refactor \
+  --goal "Finish the auth refactor" \
+  --summary "Worker is ready for supervision" \
+  --max-nudges 3 \
+  -- --model gpt-5.4-mini
+```
+
+To start a normal Codex session that can later declare itself as a managed
+worker, use `start`. This creates a raw tmux session and does not register a
+worker yet:
+
+```bash
+workerctl start qa-raw --cwd "$PWD" -- --sandbox danger-full-access --ask-for-approval never
+tmux attach -t qa-raw
+```
+
+From inside that Codex session, the agent can run the printed `workerctl manage
+--session ...` command. Full access is required if the agent itself needs to
+rename tmux sessions and spawn managers.
+
+An agent already running inside a tmux session can turn itself into a managed
+worker with one command. If the current tmux session is not already named
+`codex-<worker>`, pass `--worker` and `manage` will register and rename it
+before spawning the manager session:
+
+```bash
+workerctl manage \
+  --worker worker-a \
+  --task auth-refactor \
+  --goal "Finish the auth refactor" \
+  --summary "Worker is ready for manager supervision" \
+  -- --model gpt-5.4-mini
+```
+
+`name-session` and `self-promote` remain available as lower-level commands when
+you intentionally want to separate registration from manager creation.
+
+Worker name claims are conservative. `manage` and `name-session` allow an
+idempotent claim by the same tmux session, but refuse a name already recorded
+for a different session unless `--force-name` / `--force` is explicitly used.
+Forced reclaims preserve the old worker row under a replaced name, create a new
+worker ID/token for the claimant, and write the replacement to the audit log.
+
+Inspect and operate the task through task-scoped commands:
+
+```bash
+workerctl task-status auth-refactor --json
+workerctl task-capture auth-refactor --lines 120 --json
+workerctl task-idle-check auth-refactor
+workerctl task-nudge auth-refactor "Please update status and state your next action."
+workerctl task-interrupt auth-refactor
+workerctl audit auth-refactor --json
+workerctl commands --task auth-refactor --json
+workerctl commands --task auth-refactor --type task_nudge --state failed --json
+workerctl task-events auth-refactor --json
+workerctl db-doctor --live
+workerctl import-compat
+```
+
+Pause, resume, reconcile, recover, export, and close the task:
+
+```bash
+workerctl pause-manager auth-refactor
+workerctl resume-manager auth-refactor -- --model gpt-5.4-mini
+workerctl reconcile auth-refactor
+workerctl recover auth-refactor
+workerctl recover auth-refactor --sync-pane-ids
+workerctl close-stale auth-refactor
+workerctl close-stale auth-refactor --apply
+workerctl export-task auth-refactor --zip
+workerctl stop-task auth-refactor --stop-worker
+```
+
+`task-nudge` reserves SQLite budget before sending. Mutating task commands write
+durable command intent/result rows, and `audit` shows the resulting timeline.
+Use `commands` to inspect durable side-effect command rows directly, including
+filtered views by task, type, state, worker ID, or manager ID. Use `task-events`
+for a task-scoped event stream when reconstructing what happened.
+Before task-scoped text, interrupt, or kill side effects, workerctl verifies the
+recorded worker/manager identity, tmux session, and pane ID for the active
+binding.
+When a live session is intentionally reused and `reconcile` reports a pane
+mismatch, `recover --sync-pane-ids` records the repair and updates SQLite to the
+current live pane IDs.
+Use `db-doctor --live` for a read-only combined SQLite health and live tmux
+drift check. Live manager heartbeat warnings are reported without failing the
+doctor check unless there is actual reconciliation drift or an unfinished
+durable command; tune the warning threshold with `--manager-stale-seconds`.
+Use `close-stale` to dry-run closure of tasks whose recorded worker is missing,
+not supervised by a live manager, and has no unfinished durable commands.
+`close-stale --apply` marks those tasks `failed`, ends their active bindings,
+marks the missing worker/manager records, and writes command/event audit rows.
+Use `import-compat` to dry-run import of existing `.codex-workers/<worker>/`
+JSON, JSONL, status, and transcript artifacts into SQLite. Add `--apply` after
+reviewing the plan; imports are tracked in `data_migrations` so reruns are
+idempotent.
+
+Transcript capture content can be pruned while retaining metadata:
+
+```bash
+workerctl prune --keep-latest 20 --dry-run
+workerctl prune --keep-latest 20
+```
+
+Run the optional live lifecycle smoke test when `tmux`, `codex`, and `rg` are
+available:
+
+```bash
+scripts/live-smoke
+```
+
+The smoke script creates unique `codex-smoke-*` sessions and cleans them up on
+exit.
 
 `start-test` is the easiest manual startup check. It creates a low-risk worker,
 asks it to update only its ignored `.codex-workers/<name>/status.json`, waits for
 that status update, and leaves the tmux session running so you can attach:
 
 ```bash
-scripts/workerctl start-test live-test --cwd "$PWD" --accept-trust --open
+workerctl start-test live-test --cwd "$PWD" --accept-trust --open
 tmux attach -t codex-live-test
 ```
 
@@ -136,8 +268,8 @@ session, preferring Ghostty when installed and falling back to Terminal.app. You
 can also open an already-running worker:
 
 ```bash
-scripts/workerctl open live-test
-scripts/workerctl open live-test --terminal terminal
+workerctl open live-test
+workerctl open live-test --terminal terminal
 ```
 
 `workerctl` records every terminal launch attempt before opening the app. A
@@ -145,8 +277,8 @@ second open for the same worker is refused by default to prevent accidental
 terminal-window floods, even if the first app launch did not visibly work:
 
 ```bash
-scripts/workerctl open live-test --force
-scripts/workerctl create worker-b --cwd "$PWD" --task "..." --wait-ready --verify --open --force-open
+workerctl open live-test --force
+workerctl create worker-b --cwd "$PWD" --task "..." --wait-ready --verify --open --force-open
 ```
 
 Use `--stop-after` only when you want a disposable smoke test that cleans up the
@@ -155,11 +287,11 @@ tmux session automatically.
 For a lifecycle smoke test without sending the worker prompt into Codex:
 
 ```bash
-scripts/workerctl create smoke --cwd "$PWD" --task "Smoke test only." --no-send-contract
-scripts/workerctl status smoke
-scripts/workerctl idle-check smoke
-scripts/workerctl supervise smoke --dry-run
-scripts/workerctl stop smoke
+workerctl create smoke --cwd "$PWD" --task "Smoke test only." --no-send-contract
+workerctl status smoke
+workerctl idle-check smoke
+workerctl supervise smoke --dry-run
+workerctl stop smoke
 ```
 
 Worker runtime files are stored under `.codex-workers/` and are intentionally ignored by git.
@@ -189,7 +321,7 @@ workerctl watch worker-a
 `watch` runs `supervise` repeatedly and prints one JSON line per cycle. Use `--max-cycles` for bounded trials:
 
 ```bash
-scripts/workerctl watch worker-a --interval 60 --max-cycles 3 --dry-run
+workerctl watch worker-a --interval 60 --max-cycles 3 --dry-run
 ```
 
 `idle-check`, `supervise`, and `watch` also detect known interactive or busy-wait terminal states, such as Codex MCP startup, trust prompts, plan prompts, and rate-limit prompts. These are reported as `health: "busy_wait"` with an inspect-oriented recommendation.
@@ -197,14 +329,14 @@ scripts/workerctl watch worker-a --interval 60 --max-cycles 3 --dry-run
 Busy-wait interruption is explicit by default:
 
 ```bash
-scripts/workerctl interrupt worker-a
-scripts/workerctl supervise worker-a --interrupt-busy-wait --dry-run
+workerctl interrupt worker-a
+workerctl supervise worker-a --interrupt-busy-wait --dry-run
 ```
 
 For debugging classifier behavior directly:
 
 ```bash
-scripts/workerctl classify --text "Starting MCP servers (2/3)"
+workerctl classify --text "Starting MCP servers (2/3)"
 ```
 
 ## Tests
@@ -220,7 +352,7 @@ GitHub Actions runs the same test suite and a `py_compile` check on every push a
 To have `create` classify the initial Codex screen, use `--wait-ready`:
 
 ```bash
-scripts/workerctl create worker-a \
+workerctl create worker-a \
   --cwd /path/to/repo \
   --task "Inspect the failing test and report the blocker." \
   --wait-ready
@@ -229,7 +361,7 @@ scripts/workerctl create worker-a \
 If the target directory is one you intentionally trust, `--accept-trust` lets the startup watcher accept Codex's workspace trust prompt:
 
 ```bash
-scripts/workerctl create worker-a \
+workerctl create worker-a \
   --cwd /path/to/repo \
   --task "Inspect the failing test and report the blocker." \
   --wait-ready \

@@ -97,6 +97,41 @@ def require_worker(name: str) -> dict[str, Any]:
     return config
 
 
+def latest_status(name: str) -> dict[str, Any]:
+    fallback = load_json(status_path(name), {})
+    try:
+        from workerctl.db import connect as connect_db
+        from workerctl.db import default_db_path, initialize_database
+
+        if not default_db_path().exists():
+            return fallback
+        with connect_db() as conn:
+            initialize_database(conn)
+            row = conn.execute(
+                """
+                select statuses.state, statuses.current_task, statuses.next_action,
+                       statuses.blocker, statuses.created_at
+                from statuses
+                join workers on workers.id = statuses.worker_id
+                where workers.name = ?
+                order by statuses.id desc
+                limit 1
+                """,
+                (name,),
+            ).fetchone()
+        if row is None:
+            return fallback
+        return {
+            "blocker": row["blocker"],
+            "current_task": row["current_task"],
+            "last_update": row["created_at"],
+            "next_action": row["next_action"],
+            "state": row["state"],
+        }
+    except Exception:
+        return fallback
+
+
 def initial_status(name: str, task: str | None) -> dict[str, Any]:
     return {
         "blocker": None,
@@ -107,18 +142,47 @@ def initial_status(name: str, task: str | None) -> dict[str, Any]:
     }
 
 
-def worker_contract(name: str, task: str | None) -> str:
+def worker_contract(name: str, task: str | None, identity_token: str | None = None) -> str:
     status_file = status_path(name)
     task_text = task or "Wait for a task from the manager."
+    identity_section = ""
+    if identity_token:
+        identity_section = f"""
+Worker identity token:
+{identity_token}
+
+Keep this token unchanged. It lets workerctl verify that task-scoped manager
+commands are targeting the intended worker session.
+"""
     return f"""You are a worker Codex session supervised by a manager Codex session.
 
 Task:
 {task_text}
+{identity_section}
 
-Keep this file updated whenever you start a new phase, become blocked, begin long-running verification, or finish:
+Report status whenever you start a new phase, become blocked, begin long-running
+verification, or finish. Use workerctl as the primary status path:
+
+workerctl update-status {name} \\
+  --state planning \\
+  --current-task "short description" \\
+  --next-action "short description"
+
+Allowed state values:
+planning, editing, running_tests, blocked, waiting, done, unknown
+
+If you are blocked, include --blocker:
+
+workerctl update-status {name} \\
+  --state blocked \\
+  --current-task "short description" \\
+  --next-action "wait for direction" \\
+  --blocker "what is blocking progress"
+
+workerctl also exports this compatibility file for existing tooling:
 {status_file}
 
-Use this JSON shape:
+Compatibility JSON shape:
 {{
   "state": "planning | editing | running_tests | blocked | waiting | done",
   "current_task": "short description",
@@ -132,8 +196,7 @@ If you are blocked or need direction, set state to blocked and explain the block
 """
 
 
-def write_worker_contract(name: str, task: str | None) -> Path:
+def write_worker_contract(name: str, task: str | None, identity_token: str | None = None) -> Path:
     contract_path = worker_dir(name) / "contract.txt"
-    contract_path.write_text(worker_contract(name, task))
+    contract_path.write_text(worker_contract(name, task, identity_token))
     return contract_path
-

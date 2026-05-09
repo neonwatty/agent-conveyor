@@ -11,9 +11,9 @@ from workerctl.state import (
     append_event,
     capture_meta_path,
     last_event_age_seconds,
+    latest_status,
     load_json,
     require_worker,
-    status_path,
     transcript_path,
 )
 from workerctl.tmux import capture_output, capture_tmux_target, interrupt_worker, send_text, session_exists, tmux_target
@@ -29,7 +29,7 @@ def idle_summary(
 ) -> dict[str, Any]:
     config = require_worker(name)
     running = session_exists(name)
-    status = load_json(status_path(name), {})
+    status = latest_status(name)
     capture_meta = load_json(capture_meta_path(name), {})
     capture_error = None
 
@@ -260,5 +260,4 @@ def command_watch(args: argparse.Namespace) -> int:
     except KeyboardInterrupt:
         print(json.dumps({"event": "watch_interrupted", "name": args.name, "time": now_iso()}), flush=True)
     return 0
-
 
