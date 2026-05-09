@@ -56,6 +56,7 @@ from workerctl.core import WorkerError
 from workerctl.export import command_export_task
 from workerctl.importer import command_import_compat
 from workerctl.lifecycle import (
+    command_become_managed,
     command_close_stale,
     command_manage,
     command_my_status,
@@ -254,6 +255,37 @@ def build_parser() -> argparse.ArgumentParser:
     bind_task.add_argument("--worker", required=True, help="Worker name or ID.")
     bind_task.add_argument("--path", help="Override the workerctl database path.")
     bind_task.set_defaults(func=command_bind_task)
+
+    become_managed = subparsers.add_parser(
+        "become-managed",
+        help="Agent-facing command to register this session as a worker and open a manager.",
+    )
+    become_managed.add_argument("--worker", help="Worker name to assign to the current tmux session when needed.")
+    become_managed.add_argument("--task", required=True, help="Task name to create or resume.")
+    become_managed.add_argument("--goal", required=True, help="Task goal.")
+    become_managed.add_argument("--summary", help="Optional current task summary.")
+    become_managed.add_argument("--manager-instructions", help="Additional manager instructions.")
+    become_managed.add_argument("--max-nudges", type=int, default=3, help="Nudge budget for the manager.")
+    become_managed.add_argument("--budget-hours", type=int, default=24, help="Hours until the default nudge budget expires.")
+    become_managed.add_argument("--budget-expires-at", help="Explicit ISO timestamp for nudge budget expiry.")
+    become_managed.add_argument("--cwd", default=str(INVOCATION_CWD), help="Working directory for the worker record.")
+    become_managed.add_argument("--worker-task", help="Task text for the worker status contract when registering this session.")
+    become_managed.add_argument("--session", help="Explicit tmux session to manage; defaults to the current tmux session.")
+    become_managed.add_argument("--force-name", action="store_true", help="Replace an existing worker config when registering this session.")
+    become_managed.add_argument(
+        "--no-open-manager",
+        action="store_false",
+        dest="open_manager",
+        help="Do not open a visible terminal window for the spawned manager.",
+    )
+    become_managed.add_argument(
+        "--terminal",
+        choices=("auto", "ghostty", "terminal"),
+        default="auto",
+        help="Terminal app to use for the manager window.",
+    )
+    become_managed.add_argument("--path", help="Override the workerctl database path.")
+    become_managed.set_defaults(func=command_become_managed, open_manager=True)
 
     manage = subparsers.add_parser("manage", help="From inside a worker session, register it if needed and spawn a manager.")
     manage.add_argument("--worker", help="Worker name to assign to the current tmux session when needed.")
@@ -615,7 +647,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     parser = build_parser()
     args, unknown = parser.parse_known_args()
-    if unknown and args.command not in {"start", "promote", "resume-manager", "remanage", "self-promote", "manage"}:
+    if unknown and args.command not in {"start", "promote", "resume-manager", "remanage", "self-promote", "manage", "become-managed"}:
         parser.error(f"unrecognized arguments: {' '.join(unknown)}")
     args.codex_args = unknown
     try:

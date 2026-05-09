@@ -137,17 +137,25 @@ bootstrap prompt under `.codex-workers/artifacts/start-prompts/`, and sends
 that prompt to the raw worker agent. The prompt tells the worker its session
 name, the exact `workerctl manage --session <session-name> ...` command shape,
 and that it must ask for missing worker/task/goal values rather than guessing.
-The default bootstrap command includes `--open-manager` so natural-language
-self-management opens a visible manager terminal.
+The default bootstrap command uses `become-managed`, which opens a visible
+manager terminal unless `--no-open-manager` is passed.
 Agents that need to self-manage must be launched with Codex permissions that
 allow tmux socket access, such as `-- --sandbox danger-full-access
 --ask-for-approval never`.
 
 Everything after `--` is passed as CLI args to the Codex process.
 
+### `workerctl become-managed --worker <worker-name> --task <name> --goal <text>`
+
+Primary agent-facing command for a worker session to make itself managed. It
+uses the same durable flow as `manage`, but is named for natural-language agent
+mapping and opens the manager terminal by default. It should be the command
+shown in bootstrap prompts and `doctor-self` output. Use `--no-open-manager`
+only when a visible manager terminal is not wanted.
+
 ### `workerctl manage --worker <worker-name> --task <name> --goal <text>`
 
-Primary worker-facing command for an agent already running inside tmux. It
+Lower-level worker-facing command for an agent already running inside tmux. It
 infers the current tmux session, registers and renames it to the canonical
 `codex-<worker-name>` form when needed, then starts the durable promotion flow:
 task creation, worker binding, manager prompt generation, manager tmux session
@@ -165,7 +173,7 @@ Worker-facing preflight for plain Codex sessions. It checks whether `workerctl`,
 `tmux`, and `codex` are on `PATH`, whether the current process is inside a live
 tmux session, and whether the `manage-codex-workers` skill is installed under
 `$CODEX_HOME/skills` or `~/.codex/skills`. If in-place promotion is possible, it
-prints the exact `workerctl manage --session ... --open-manager` template. If
+prints the exact `workerctl become-managed --session ...` template. If
 not, the agent should explain that the current non-tmux Codex process cannot be
 promoted in-place as a tmux-backed worker and offer `workerctl start ...`
 instead.
@@ -890,9 +898,12 @@ intent/result records, and recovery/audit views.
 ### Phase 3: Promote Flow
 
 - `start-work`: create tmux Codex session, register as candidate.
+- `become-managed --worker <worker-name> --task <task-name>`: from inside a
+  worker session, register/name the current tmux session if needed and then
+  spawn the manager with a visible terminal by default.
 - `manage --worker <worker-name> --task <task-name>`: from inside a worker
   session, register/name the current tmux session if needed and then spawn the
-  manager.
+  manager as the lower-level explicit command.
 - `promote <worker-name> --task <task-name>`: bind worker, generate manager
   prompt with state machine, request manager spawn, create manager tmux session,
   open terminal, and record every phase as intent/result.
@@ -944,6 +955,9 @@ Implemented in the current SQLite milestone:
   idempotent through `data_migrations`.
 - Worker-facing `manage` command to register an already-running tmux session as
   a worker and spawn a manager in one step.
+- Agent-facing `become-managed` command that wraps `manage`, defaults to a
+  visible manager terminal, and is advertised by bootstrap prompts and
+  `doctor-self`.
 - Lower-level `name-session` command to register an already-running tmux session
   as a managed worker.
 - Worker-facing `self-promote` command so an agent can start manager supervision
@@ -968,9 +982,9 @@ Remaining work:
 
 ## Decisions Made
 
-- Worker-facing bootstrap prompts include `--open-manager` so fresh natural
-  language self-management opens the manager visibly. Operator commands can also
-  pass `--open-manager` explicitly.
+- Worker-facing bootstrap prompts use `become-managed` so fresh natural
+  language self-management opens the manager visibly. Operator commands can
+  still pass `--open-manager` explicitly to lower-level lifecycle commands.
 - Default nudge budget: 3.
 - Default runtime: 30 minutes.
 - Default capture for summary: last 300 lines of worker output.
