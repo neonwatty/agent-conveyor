@@ -86,6 +86,35 @@ def attach_session_command(session_name: str) -> str:
     return f"tmux attach -t {session_name}"
 
 
+def start_prompt_path(session_name: str) -> Path:
+    validate_name(session_name)
+    return state_root() / "artifacts" / "start-prompts" / f"{session_name}.md"
+
+
+def raw_worker_start_prompt(session_name: str, cwd: Path) -> str:
+    manage_template = f"workerctl manage --session {session_name} --worker <worker-name> --task <task-name> --goal \"<goal>\" --summary \"<summary>\""
+    return f"""You are a raw worker candidate running inside workerctl tmux session {session_name}.
+
+Current working directory: {cwd}
+
+You are not registered as a worker yet.
+
+If the user asks you to become managed, launch your manager by running:
+
+{manage_template}
+
+Required fields:
+- worker name
+- task name
+- goal
+
+If any required field is missing, ask the user for it before running workerctl manage.
+Do not invent worker name, task name, or goal values unless the user explicitly asks you to choose them.
+
+After workerctl manage succeeds, your current tmux session will be renamed to codex-<worker-name>, and a manager tmux session will be spawned to supervise you.
+"""
+
+
 def resolve_terminal(terminal: str) -> str:
     if terminal != "auto":
         return terminal
@@ -159,15 +188,23 @@ def command_start(args: argparse.Namespace) -> int:
     if raw_codex_args[:1] == ["--"]:
         raw_codex_args = raw_codex_args[1:]
     codex_args = " ".join(sh_quote(arg) for arg in raw_codex_args)
+    prompt_path = None
     shell_command = f"{cli_path_prefix()} codex --cd {sh_quote(str(directory))} --no-alt-screen"
     if codex_args:
         shell_command = f"{shell_command} {codex_args}"
+    if args.start_prompt:
+        prompt_path = start_prompt_path(session_name)
+        prompt_path.parent.mkdir(parents=True, exist_ok=True)
+        prompt_path.write_text(raw_worker_start_prompt(session_name, directory))
+        shell_command = f"{shell_command} \"$(cat {sh_quote(str(prompt_path))})\""
     run(["tmux", "new-session", "-d", "-s", session_name, shell_command])
     result = {
         "attach_command": attach_session_command(session_name),
         "cwd": str(directory),
-        "manage_command": f"workerctl manage --session {session_name} --worker <name> --task <task> --goal <goal>",
+        "manage_command_template": f"workerctl manage --session {session_name} --worker <worker-name> --task <task-name> --goal \"<goal>\" --summary \"<summary>\"",
         "session": session_name,
+        "start_prompt_path": str(prompt_path) if prompt_path else None,
+        "start_prompt_sent": bool(prompt_path),
     }
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0
