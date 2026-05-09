@@ -769,6 +769,7 @@ Budget, Cadence, State Machine, or Rules.
 # Available Commands
 
 workerctl task-status my-task --json
+workerctl task-health my-task --json
 workerctl task-capture my-task --lines 120 --json
 workerctl task-idle-check my-task
 workerctl task-nudge my-task "briefly state your next action and update your status"
@@ -799,7 +800,7 @@ Only take the listed actions for your current state.
 ## States
 
 OBSERVE
-  Run: task-status --json, task-capture --json, task-idle-check
+  Run: task-health --json, task-status --json, task-capture --json, task-idle-check
   Classify the worker as: active | stale | blocked | done
   Transition:
     active  → WAIT
