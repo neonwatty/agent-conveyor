@@ -69,7 +69,7 @@ scripts/workerctl start-test live-worker \
 Use these from the manager session:
 
 ```bash
-scripts/workerctl manager-observe <task> --json
+scripts/workerctl manager-observe <task> --compact --json
 scripts/workerctl manager-decision <task> --decision inspect --reason "<why>"
 scripts/workerctl status <name>
 scripts/workerctl capture <name> --lines 120
@@ -81,8 +81,15 @@ scripts/workerctl idle-check <name> --busy-wait-seconds 10
 Prefer `manager-observe` at the start of each managed-task loop. It persists
 task health, worker capture, manager capture, and status into SQLite so
 manager-visible errors are auditable after the terminal scrollback changes.
+Use `--compact --json` for normal loops; full captures are still stored in
+SQLite, but the returned payload is smaller.
 Record non-trivial choices with `manager-decision` before nudging,
 interrupting, escalating, or stopping.
+Do not run mutating commands merely because they are available. Use
+`task-nudge` only when the worker is stale, waiting for input, or explicitly
+needs direction. Use `task-interrupt` only for a clear busy-wait/interruptible
+state or an explicit user request. Use `finish-task` when work is complete and
+the task should close with an audit record.
 
 Interpret worker health as follows:
 
@@ -152,6 +159,7 @@ To show task-bound terminals without raw tmux commands:
 ```bash
 scripts/workerctl task-health <task> --json
 scripts/workerctl task-capture <task> --role manager --json
+scripts/workerctl finish-task <task> --reason "<reason>"
 scripts/workerctl open-manager <task>
 scripts/workerctl open-worker <task>
 ```
