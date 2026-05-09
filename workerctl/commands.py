@@ -112,6 +112,12 @@ If any required field is missing, ask the user for it before running workerctl m
 Do not invent worker name, task name, or goal values unless the user explicitly asks you to choose them.
 
 After workerctl manage succeeds, your current tmux session will be renamed to codex-<worker-name>, and a manager tmux session will be spawned to supervise you.
+
+After you are managed, if the user asks to take back manual control, stop supervising you, pause your manager, or unmanage this worker, run:
+
+workerctl unmanage
+
+This stops only the manager. It does not stop your worker session. If workerctl unmanage asks for a missing task or session, ask the user for the missing value.
 """
 
 

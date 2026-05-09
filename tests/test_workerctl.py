@@ -950,6 +950,7 @@ class CliTests(unittest.TestCase):
                 prompt = Path(payload["start_prompt_path"]).read_text()
                 self.assertIn("workerctl tmux session qa-raw", prompt)
                 self.assertIn("workerctl manage --session qa-raw", prompt)
+                self.assertIn("workerctl unmanage", prompt)
                 self.assertIn("If any required field is missing, ask the user", prompt)
                 self.assertIn("Do not invent worker name, task name, or goal values", prompt)
                 self.assertEqual(launched[0][:5], ["tmux", "new-session", "-d", "-s", "qa-raw"])
@@ -2238,6 +2239,105 @@ class CliTests(unittest.TestCase):
                 lifecycle.manager_session_exists = original_manager_session_exists
                 lifecycle.run = original_run
                 worker_identity.session_snapshot = original_session_snapshot
+
+    def test_unmanage_resolves_current_worker_and_pauses_manager(self):
+        worker_path = worker_dir("worker-a")
+        if worker_path.exists():
+            shutil.rmtree(worker_path)
+        worker_path.mkdir(parents=True)
+        config_path("worker-a").write_text(
+            json.dumps(
+                {
+                    "identity_token": "token-worker-a",
+                    "name": "worker-a",
+                    "tmux_pane_id": "%1",
+                    "tmux_session": "codex-worker-a",
+                }
+            )
+            + "\n"
+        )
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                db_path = Path(tmpdir) / "workerctl.db"
+                with worker_db.connect(db_path) as conn:
+                    worker_db.initialize_database(conn)
+                    worker_id = worker_db.upsert_worker(
+                        conn,
+                        name="worker-a",
+                        cwd=str(ROOT),
+                        tmux_session="codex-worker-a",
+                        identity_token="token-worker-a",
+                        tmux_pane_id="%1",
+                        state="active",
+                    )
+                    task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
+                    worker_db.bind_task_worker(conn, task="task-a", worker="worker-a", binding_id="binding-1")
+                    manager_id = worker_db.create_manager(
+                        conn,
+                        task_id=task_id,
+                        name="manager-a",
+                        tmux_session="codex-manager-task-a",
+                        tmux_pane_id="%2",
+                        codex_args=[],
+                        state="ready",
+                    )
+                    worker_db.attach_manager_to_binding(conn, task_id=task_id, manager_id=manager_id)
+                    conn.commit()
+
+                original_current_session_name = lifecycle.current_session_name
+                original_run = lifecycle.run
+                original_session_snapshot = worker_identity.session_snapshot
+                try:
+                    lifecycle.current_session_name = lambda: "codex-worker-a"
+                    lifecycle.run = lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, "", "")
+                    worker_identity.session_snapshot = lambda session: {
+                        "live": True,
+                        "pane_id": "%2" if session == "codex-manager-task-a" else "%1",
+                        "session": session,
+                    }
+                    args = argparse.Namespace(dry_run=False, json=True, path=str(db_path), session=None, task=None)
+
+                    with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                        result = lifecycle.command_unmanage(args)
+
+                    payload = json.loads(stdout.getvalue())
+                    self.assertEqual(result, 0)
+                    self.assertEqual(payload["task"], "task-a")
+                    self.assertEqual(payload["source"]["initiator"], "worker")
+                    self.assertEqual(payload["source"]["source_command"], "unmanage")
+                    self.assertTrue(payload["killed_session"])
+                    with worker_db.connect(db_path) as conn:
+                        task = conn.execute("select state from tasks where id = ?", (task_id,)).fetchone()
+                        worker = conn.execute("select state from workers where name = 'worker-a'").fetchone()
+                        manager = conn.execute("select state from managers where id = ?", (manager_id,)).fetchone()
+                        command = conn.execute("select type, worker_id, state from commands").fetchone()
+                        events = conn.execute("select actor, type, worker_id from events order by id").fetchall()
+                    self.assertEqual(task["state"], "paused")
+                    self.assertEqual(worker["state"], "active")
+                    self.assertEqual(manager["state"], "stopped")
+                    self.assertEqual(command["type"], "unmanage")
+                    self.assertEqual(command["worker_id"], worker_id)
+                    self.assertEqual(command["state"], "succeeded")
+                    self.assertIn(("worker", "unmanage_intent", worker_id), [(row["actor"], row["type"], row["worker_id"]) for row in events])
+                    self.assertIn(("worker", "unmanage_succeeded", worker_id), [(row["actor"], row["type"], row["worker_id"]) for row in events])
+                finally:
+                    lifecycle.current_session_name = original_current_session_name
+                    lifecycle.run = original_run
+                    worker_identity.session_snapshot = original_session_snapshot
+        finally:
+            if worker_path.exists():
+                shutil.rmtree(worker_path)
+
+    def test_unmanage_fails_without_session_or_task(self):
+        original_current_session_name = lifecycle.current_session_name
+        try:
+            lifecycle.current_session_name = lambda: None
+            with tempfile.TemporaryDirectory() as tmpdir:
+                args = argparse.Namespace(dry_run=False, json=True, path=str(Path(tmpdir) / "workerctl.db"), session=None, task=None)
+                with self.assertRaisesRegex(WorkerError, "Cannot infer current tmux session"):
+                    lifecycle.command_unmanage(args)
+        finally:
+            lifecycle.current_session_name = original_current_session_name
 
     def test_stop_task_marks_done_and_ends_binding(self):
         with tempfile.TemporaryDirectory() as tmpdir:

@@ -400,35 +400,126 @@ def command_manage(args: argparse.Namespace) -> int:
     return command_promote(promote_args)
 
 
-def command_pause_manager(args: argparse.Namespace) -> int:
-    db_path = Path(args.path).expanduser().resolve() if args.path else None
+def _resolve_unmanage_task(
+    conn,
+    *,
+    session: str | None,
+    task: str | None,
+) -> dict[str, Any]:
+    if task:
+        binding = conn.execute(
+            """
+            select tasks.id as task_id, tasks.name as task_name, tasks.state as task_state,
+                   bindings.id as binding_id, bindings.state as binding_state,
+                   workers.id as worker_id, workers.name as worker_name,
+                   workers.tmux_session as worker_tmux_session,
+                   workers.tmux_pane_id as worker_tmux_pane_id,
+                   workers.identity_token as worker_identity_token
+            from tasks
+            join bindings on bindings.task_id = tasks.id and bindings.state in ('active', 'ending')
+            join workers on workers.id = bindings.worker_id
+            where tasks.id = ? or tasks.name = ?
+            order by bindings.created_at desc
+            limit 1
+            """,
+            (task, task),
+        ).fetchone()
+        if binding is None:
+            raise WorkerError(f"Task {task} has no active worker binding")
+        if session and binding["worker_tmux_session"] != session:
+            raise WorkerError(
+                f"Task {binding['task_name']} is bound to {binding['worker_tmux_session']}, not current session {session}"
+            )
+    else:
+        if not session:
+            raise WorkerError("Cannot infer current tmux session. Run inside tmux or pass --session or --task.")
+        rows = conn.execute(
+            """
+            select tasks.id as task_id, tasks.name as task_name, tasks.state as task_state,
+                   bindings.id as binding_id, bindings.state as binding_state,
+                   workers.id as worker_id, workers.name as worker_name,
+                   workers.tmux_session as worker_tmux_session,
+                   workers.tmux_pane_id as worker_tmux_pane_id,
+                   workers.identity_token as worker_identity_token
+            from workers
+            join bindings on bindings.worker_id = workers.id and bindings.state in ('active', 'ending')
+            join tasks on tasks.id = bindings.task_id
+            where workers.tmux_session = ? and tasks.state in ('managed', 'paused')
+            order by bindings.created_at desc
+            """,
+            (session,),
+        ).fetchall()
+        if not rows:
+            raise WorkerError(f"No managed task is bound to tmux session {session}")
+        if len(rows) > 1:
+            names = ", ".join(row["task_name"] for row in rows)
+            raise WorkerError(f"Multiple managed tasks are bound to {session}; pass --task. Candidates: {names}")
+        binding = rows[0]
+    return {
+        "binding_id": binding["binding_id"],
+        "binding_state": binding["binding_state"],
+        "task_id": binding["task_id"],
+        "task_name": binding["task_name"],
+        "task_state": binding["task_state"],
+        "worker_id": binding["worker_id"],
+        "worker_identity_token": binding["worker_identity_token"],
+        "worker_name": binding["worker_name"],
+        "worker_tmux_pane_id": binding["worker_tmux_pane_id"],
+        "worker_tmux_session": binding["worker_tmux_session"],
+    }
+
+
+def _pause_manager_task(
+    *,
+    db_path: Path | None,
+    task: str,
+    command_type: str = "pause_manager",
+    event_prefix: str = "pause_manager",
+    source: dict[str, Any] | None = None,
+    worker_id: str | None = None,
+    dry_run: bool = False,
+) -> int:
     with connect_db(db_path) as conn:
         initialize_database(conn)
-        manager = active_manager(conn, task=args.task)
+        manager = active_manager(conn, task=task)
         if manager is None:
-            raise WorkerError(f"Task {args.task} has no active manager")
+            raise WorkerError(f"Task {task} has no active manager")
+        source_payload = source or {}
+        if dry_run:
+            result = {
+                "dry_run": True,
+                "manager": manager["name"],
+                "manager_session": manager["tmux_session"],
+                "source": source_payload,
+                "task": task,
+            }
+            print(json.dumps(result, indent=2, sort_keys=True))
+            return 0
         command_id = create_db_command(
             conn,
-            command_type="pause_manager",
+            command_type=command_type,
             task_id=manager["task_id"],
+            worker_id=worker_id,
             manager_id=manager["id"],
-            payload={"manager_session": manager["tmux_session"], "task": args.task},
+            payload={"manager_session": manager["tmux_session"], "source": source_payload, "task": task},
         )
         insert_db_event(
             conn,
-            "pause_manager_intent",
-            actor="workerctl",
+            f"{event_prefix}_intent",
+            actor=source_payload.get("initiator", "workerctl"),
             command_id=command_id,
             task_id=manager["task_id"],
+            worker_id=worker_id,
             manager_id=manager["id"],
-            payload={"manager_session": manager["tmux_session"]},
+            payload={"manager_session": manager["tmux_session"], "source": source_payload},
         )
         conn.commit()
     result = {
         "command_id": command_id,
         "manager": manager["name"],
         "manager_session": manager["tmux_session"],
-        "task": args.task,
+        "source": source_payload,
+        "task": task,
     }
     try:
         with connect_db(db_path) as conn:
@@ -445,9 +536,10 @@ def command_pause_manager(args: argparse.Namespace) -> int:
             insert_db_event(
                 conn,
                 "manager_identity_verified",
-                actor="workerctl",
+                actor=source_payload.get("initiator", "workerctl"),
                 command_id=command_id,
                 task_id=manager["task_id"],
+                worker_id=worker_id,
                 manager_id=manager["id"],
                 payload=verification,
             )
@@ -464,10 +556,11 @@ def command_pause_manager(args: argparse.Namespace) -> int:
             finish_db_command(conn, command_id=command_id, state="succeeded", result=result)
             insert_db_event(
                 conn,
-                "pause_manager_succeeded",
-                actor="workerctl",
+                f"{event_prefix}_succeeded",
+                actor=source_payload.get("initiator", "workerctl"),
                 command_id=command_id,
                 task_id=manager["task_id"],
+                worker_id=worker_id,
                 manager_id=manager["id"],
                 payload=result,
             )
@@ -478,10 +571,11 @@ def command_pause_manager(args: argparse.Namespace) -> int:
             finish_db_command(conn, command_id=command_id, state="failed", error=str(exc))
             insert_db_event(
                 conn,
-                "pause_manager_failed",
-                actor="workerctl",
+                f"{event_prefix}_failed",
+                actor=source_payload.get("initiator", "workerctl"),
                 command_id=command_id,
                 task_id=manager["task_id"],
+                worker_id=worker_id,
                 manager_id=manager["id"],
                 payload={**result, "error": str(exc)},
             )
@@ -489,6 +583,39 @@ def command_pause_manager(args: argparse.Namespace) -> int:
         raise
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0
+
+
+def command_pause_manager(args: argparse.Namespace) -> int:
+    db_path = Path(args.path).expanduser().resolve() if args.path else None
+    return _pause_manager_task(db_path=db_path, task=args.task)
+
+
+def command_unmanage(args: argparse.Namespace) -> int:
+    db_path = Path(args.path).expanduser().resolve() if args.path else None
+    session = getattr(args, "session", None) or current_session_name()
+    with connect_db(db_path) as conn:
+        initialize_database(conn)
+        binding = _resolve_unmanage_task(conn, session=session, task=getattr(args, "task", None))
+        if binding["task_state"] != "managed":
+            raise WorkerError(f"Task {binding['task_name']} is not managed; current state is {binding['task_state']}")
+    verification = identity.verify_worker_binding_identity(binding)
+    source = {
+        "initiator": "worker",
+        "resolved_from": "task" if getattr(args, "task", None) else "tmux_session",
+        "source_command": "unmanage",
+        "tmux_session": binding["worker_tmux_session"],
+        "worker": binding["worker_name"],
+        "worker_identity": verification,
+    }
+    return _pause_manager_task(
+        db_path=db_path,
+        task=binding["task_name"],
+        command_type="unmanage",
+        event_prefix="unmanage",
+        source=source,
+        worker_id=binding["worker_id"],
+        dry_run=getattr(args, "dry_run", False),
+    )
 
 
 def command_resume_manager(args: argparse.Namespace) -> int:
