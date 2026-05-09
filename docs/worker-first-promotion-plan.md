@@ -180,6 +180,9 @@ prints the exact `workerctl become-managed --session ...` template plus
 `example_natural_language_prompt`, and phrase mappings. If not, the agent
 should explain that the current non-tmux Codex process cannot be promoted
 in-place as a tmux-backed worker and offer `workerctl start ...` instead.
+For plain Codex sessions, this is a mandatory preflight gate: agents must not
+run `workerctl become-managed` until `doctor-self` reports
+`can_promote_in_place: true`.
 
 Everything after `--` is passed as CLI args to the manager's Codex process.
 
