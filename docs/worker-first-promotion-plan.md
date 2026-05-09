@@ -281,6 +281,10 @@ context on setup/scrollback.
 Manager-facing decision command. Records why the manager chose to wait, inspect,
 nudge, interrupt, escalate, or stop. Mutating task commands remain separate, but
 the decision row links the manager's reasoning to the same task audit stream.
+Managers should pass the returned `decision_id` to subsequent mutating commands
+with `--decision-id`. Missing, stale, wrong-task, or incompatible decision links
+are warning-only during the current rollout and are reported by
+`mutation-audit`.
 
 ### `workerctl task-capture <name> [--lines N]`
 
@@ -293,7 +297,7 @@ Use `--role manager` to capture the manager terminal instead.
 Run the existing worker idle classifier through the task binding. The result is
 stored as an audit event.
 
-### `workerctl task-nudge <name> "message"`
+### `workerctl task-nudge <name> "message" [--decision-id ID]`
 
 Send a manager nudge through the task binding. This is the command managers
 should use instead of raw `workerctl nudge`. It checks that the task is managed,
@@ -301,18 +305,25 @@ checks the active worker binding, reserves a nudge budget slot, records nudge
 intent, sends the message, and records success or failure. Failed reserved
 nudges count against budget unless retried explicitly by command ID.
 
-### `workerctl task-interrupt <name>`
+### `workerctl task-interrupt <name> [--decision-id ID]`
 
 Interrupt the bound worker through the task binding. This checks task state,
 records the interrupt decision, sends the interrupt, and logs any follow-up
 message as a task-scoped audit event.
 
-### `workerctl finish-task <name> [--stop-worker] --reason <text>`
+### `workerctl finish-task <name> [--stop-worker] --reason <text> [--decision-id ID]`
 
 Close a completed task intentionally. Records a final manager decision, stops
 the manager, marks the task `done`, ends the active binding, and optionally
 stops the worker session. Use this for normal completion so audit history stays
 distinct from emergency cleanup or operator stop commands.
+
+### `workerctl mutation-audit <name>`
+
+Read-only rationale audit for mutating task commands. It lists each task nudge,
+interrupt, pause, finish, and stop command, the linked manager decision when one
+was supplied, the nearest previous decision, and warnings such as
+`missing_decision_id`, `decision_mismatch`, or `decision_stale`.
 
 ### `workerctl task-events <name> [--type TYPE] [--limit N]`
 
@@ -326,7 +337,7 @@ List durable side-effect command intents and results. Filtering by task, type,
 state, worker ID, and manager ID is required so multiple active
 worker-manager pairs can be audited independently.
 
-### `workerctl pause-manager <name>`
+### `workerctl pause-manager <name> [--decision-id ID]`
 
 Stop the manager session and mark the task `paused`. Worker keeps running.
 Task-scoped manager commands must reject mutations while the task is paused, so
@@ -364,7 +375,7 @@ new manager terminal.
 
 Kill the manager session. Worker keeps running.
 
-### `workerctl stop-task <name> [--stop-worker]`
+### `workerctl stop-task <name> [--stop-worker] [--decision-id ID]`
 
 Stop the manager. Optionally stop the worker too.
 

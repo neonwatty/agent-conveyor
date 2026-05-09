@@ -224,9 +224,10 @@ workerctl manager-decision auth-refactor --decision inspect --reason "health OK;
 workerctl task-capture auth-refactor --lines 120 --json
 workerctl task-capture auth-refactor --role manager --lines 120 --json
 workerctl task-idle-check auth-refactor
-workerctl task-nudge auth-refactor "Please update status and state your next action."
-workerctl task-interrupt auth-refactor
+workerctl task-nudge auth-refactor "Please update status and state your next action." --decision-id 123
+workerctl task-interrupt auth-refactor --decision-id 124
 workerctl audit auth-refactor --json
+workerctl mutation-audit auth-refactor --json
 workerctl commands --task auth-refactor --json
 workerctl commands --task auth-refactor --type task_nudge --state failed --json
 workerctl task-events auth-refactor --json
@@ -239,7 +240,7 @@ workerctl import-compat
 Pause, resume, reconcile, recover, export, and close the task:
 
 ```bash
-workerctl pause-manager auth-refactor
+workerctl pause-manager auth-refactor --decision-id 125
 workerctl unmanage
 workerctl resume-manager auth-refactor -- --model gpt-5.4-mini
 workerctl reconcile auth-refactor
@@ -248,8 +249,8 @@ workerctl recover auth-refactor --sync-pane-ids
 workerctl close-stale auth-refactor
 workerctl close-stale auth-refactor --apply
 workerctl export-task auth-refactor --zip
-workerctl finish-task auth-refactor --reason "work is complete"
-workerctl stop-task auth-refactor --stop-worker
+workerctl finish-task auth-refactor --reason "work is complete" --decision-id 126
+workerctl stop-task auth-refactor --stop-worker --decision-id 127
 ```
 
 `pause-manager <task>` is the explicit task-scoped operator command. From inside
@@ -275,6 +276,9 @@ without spelling raw tmux session names.
 
 `task-nudge` reserves SQLite budget before sending. Mutating task commands write
 durable command intent/result rows, and `audit` shows the resulting timeline.
+Managers should pass the `decision_id` returned by `manager-decision` to
+mutating task commands with `--decision-id`. Missing, stale, or incompatible
+decision links are warning-only today and are visible in `mutation-audit`.
 Use `commands` to inspect durable side-effect command rows directly, including
 filtered views by task, type, state, worker ID, or manager ID. Use `task-events`
 for a task-scoped event stream when reconstructing what happened.

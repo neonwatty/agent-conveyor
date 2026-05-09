@@ -91,6 +91,10 @@ Use `--compact --json` for normal loops; full captures are still stored in
 SQLite, but the returned payload is smaller.
 Record non-trivial choices with `manager-decision` before nudging,
 interrupting, escalating, or stopping.
+When you run a mutating task command from manager context, pass the returned
+`decision_id` with `--decision-id`. If you forget, workerctl still runs the
+command but records a warning that `workerctl mutation-audit <task> --json` can
+surface later.
 Do not run mutating commands merely because they are available. Use
 `task-nudge` only when the worker is stale, waiting for input, or explicitly
 needs direction. Use `task-interrupt` only for a clear busy-wait/interruptible

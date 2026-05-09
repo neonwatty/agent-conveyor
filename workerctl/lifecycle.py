@@ -14,6 +14,7 @@ from typing import Any
 from workerctl.constants import PROJECT_ROOT
 from workerctl.core import WorkerError, age_seconds, ensure_tool, now_iso, run, sh_quote
 from workerctl.db import active_manager
+from workerctl.db import assess_manager_decision
 from workerctl.db import attach_manager_to_binding
 from workerctl.db import bind_task_worker
 from workerctl.db import connect as connect_db
@@ -132,16 +133,16 @@ def build_manager_prompt(
             f"- workerctl audit {task_name} --json",
             "",
             "Conditional mutating commands:",
-            f"- workerctl task-nudge {task_name} \"<message>\"",
-            f"- workerctl task-interrupt {task_name}",
-            f"- workerctl finish-task {task_name} --reason \"<reason>\"",
-            f"- workerctl pause-manager {task_name}",
-            f"- workerctl stop-task {task_name} --stop-worker",
+            f"- workerctl task-nudge {task_name} \"<message>\" --decision-id <decision_id>",
+            f"- workerctl task-interrupt {task_name} --decision-id <decision_id>",
+            f"- workerctl finish-task {task_name} --reason \"<reason>\" --decision-id <decision_id>",
+            f"- workerctl pause-manager {task_name} --decision-id <decision_id>",
+            f"- workerctl stop-task {task_name} --stop-worker --decision-id <decision_id>",
             "",
             "Rules:",
             "- Use only task-scoped workerctl commands for worker communication.",
             "- Start each loop with manager-observe so health, status, and terminal captures are recorded.",
-            "- Record decisions with manager-decision before mutating worker state.",
+            "- Record decisions with manager-decision before mutating worker state, then pass the returned decision_id to the mutation with --decision-id.",
             "- Run task-health first when state is uncertain or any task-scoped command fails.",
             "- Do not run mutating commands merely because they are listed.",
             "- Use task-nudge only when the worker is stale, waiting for input, or explicitly needs direction; respect the live nudge budget.",
@@ -548,6 +549,7 @@ def _pause_manager_task(
     source: dict[str, Any] | None = None,
     worker_id: str | None = None,
     dry_run: bool = False,
+    decision_id: int | None = None,
 ) -> int:
     with connect_db(db_path) as conn:
         initialize_database(conn)
@@ -555,8 +557,17 @@ def _pause_manager_task(
         if manager is None:
             raise WorkerError(f"Task {task} has no active manager")
         source_payload = source or {}
+        decision_check = None
+        if source_payload.get("initiator") != "worker":
+            decision_check = assess_manager_decision(
+                conn,
+                task_id=manager["task_id"],
+                decision_id=decision_id,
+                allowed_decisions={"escalate", "stop"},
+            )
         if dry_run:
             result = {
+                "manager_decision": decision_check,
                 "dry_run": True,
                 "manager": manager["name"],
                 "manager_session": manager["tmux_session"],
@@ -571,7 +582,7 @@ def _pause_manager_task(
             task_id=manager["task_id"],
             worker_id=worker_id,
             manager_id=manager["id"],
-            payload={"manager_session": manager["tmux_session"], "source": source_payload, "task": task},
+            payload={"manager_decision": decision_check, "manager_session": manager["tmux_session"], "source": source_payload, "task": task},
         )
         insert_db_event(
             conn,
@@ -581,11 +592,12 @@ def _pause_manager_task(
             task_id=manager["task_id"],
             worker_id=worker_id,
             manager_id=manager["id"],
-            payload={"manager_session": manager["tmux_session"], "source": source_payload},
+            payload={"manager_decision": decision_check, "manager_session": manager["tmux_session"], "source": source_payload},
         )
         conn.commit()
     result = {
         "command_id": command_id,
+        "manager_decision": decision_check,
         "manager": manager["name"],
         "manager_session": manager["tmux_session"],
         "source": source_payload,
@@ -657,7 +669,7 @@ def _pause_manager_task(
 
 def command_pause_manager(args: argparse.Namespace) -> int:
     db_path = Path(args.path).expanduser().resolve() if args.path else None
-    return _pause_manager_task(db_path=db_path, task=args.task)
+    return _pause_manager_task(db_path=db_path, task=args.task, decision_id=getattr(args, "decision_id", None))
 
 
 def command_unmanage(args: argparse.Namespace) -> int:
@@ -918,6 +930,12 @@ def _stop_or_finish_task(args: argparse.Namespace, *, finish: bool) -> int:
             raise WorkerError(f"Task {snapshot['name']} is already {snapshot['state']}")
         manager = active_manager(conn, task=snapshot["id"])
         worker = snapshot["worker"]
+        decision_check = assess_manager_decision(
+            conn,
+            task_id=snapshot["id"],
+            decision_id=getattr(args, "decision_id", None),
+            allowed_decisions={"stop"},
+        )
         command_id = create_db_command(
             conn,
             command_type=command_type,
@@ -927,6 +945,7 @@ def _stop_or_finish_task(args: argparse.Namespace, *, finish: bool) -> int:
             payload={
                 "finish": finish,
                 "message": args.message,
+                "manager_decision": decision_check,
                 "reason": final_reason if finish else None,
                 "stop_worker": args.stop_worker,
                 "task": snapshot["name"],
@@ -968,6 +987,7 @@ def _stop_or_finish_task(args: argparse.Namespace, *, finish: bool) -> int:
                 "finish": finish,
                 "final_decision_id": final_decision_id,
                 "final_observation_id": final_observation_id,
+                "manager_decision": decision_check,
                 "message": args.message,
                 "reason": final_reason if finish else None,
                 "stop_worker": args.stop_worker,
@@ -980,6 +1000,7 @@ def _stop_or_finish_task(args: argparse.Namespace, *, finish: bool) -> int:
         "final_decision_id": final_decision_id,
         "final_observation_id": final_observation_id,
         "finish": finish,
+        "manager_decision": decision_check,
         "killed_manager": False,
         "killed_worker": False,
         "reason": final_reason if finish else None,

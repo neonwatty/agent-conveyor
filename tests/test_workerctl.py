@@ -2256,6 +2256,91 @@ class CliTests(unittest.TestCase):
             self.assertIn("task_nudge_intent", event_types)
             self.assertIn("task_nudge_succeeded", event_types)
 
+    def test_task_nudge_links_manager_decision(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                worker_db.upsert_worker(conn, name="worker-a", cwd=str(ROOT), tmux_session="codex-worker-a", state="active")
+                task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
+                worker_db.bind_task_worker(conn, task="task-a", worker="worker-a", binding_id="binding-1")
+                decision_id = worker_db.insert_manager_decision(
+                    conn,
+                    task_id=task_id,
+                    manager_id=None,
+                    decision="nudge",
+                    reason="worker is waiting",
+                )
+                conn.commit()
+
+            args = argparse.Namespace(task="task-a", message="status please", decision_id=decision_id, dry_run=True, path=str(db_path))
+
+            with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                result = commands.command_task_nudge(args)
+
+            payload = json.loads(stdout.getvalue())
+            self.assertEqual(result, 0)
+            self.assertTrue(payload["manager_decision"]["ok"])
+            self.assertEqual(payload["manager_decision"]["decision"]["id"], decision_id)
+            with worker_db.connect(db_path) as conn:
+                command_row = conn.execute("select payload_json from commands where id = ?", (payload["command_id"],)).fetchone()
+            command_payload = json.loads(command_row["payload_json"])
+            self.assertTrue(command_payload["manager_decision"]["ok"])
+
+    def test_task_nudge_records_missing_decision_warning(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                worker_db.upsert_worker(conn, name="worker-a", cwd=str(ROOT), tmux_session="codex-worker-a", state="active")
+                worker_db.create_task(conn, name="task-a", goal="Do task A.")
+                worker_db.bind_task_worker(conn, task="task-a", worker="worker-a", binding_id="binding-1")
+                conn.commit()
+
+            args = argparse.Namespace(task="task-a", message="status please", decision_id=None, dry_run=True, path=str(db_path))
+
+            with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                result = commands.command_task_nudge(args)
+
+            payload = json.loads(stdout.getvalue())
+            self.assertEqual(result, 0)
+            self.assertFalse(payload["manager_decision"]["ok"])
+            self.assertEqual(payload["manager_decision"]["warnings"], ["missing_decision_id"])
+
+    def test_mutation_audit_flags_missing_and_accepts_linked_decisions(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                worker_db.upsert_worker(conn, name="worker-a", cwd=str(ROOT), tmux_session="codex-worker-a", state="active")
+                task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
+                worker_db.bind_task_worker(conn, task="task-a", worker="worker-a", binding_id="binding-1")
+                decision_id = worker_db.insert_manager_decision(
+                    conn,
+                    task_id=task_id,
+                    manager_id=None,
+                    decision="nudge",
+                    reason="worker is waiting",
+                )
+                conn.commit()
+
+            linked_args = argparse.Namespace(task="task-a", message="status please", decision_id=decision_id, dry_run=True, path=str(db_path))
+            missing_args = argparse.Namespace(task="task-a", message="second status please", decision_id=None, dry_run=True, path=str(db_path))
+            with contextlib.redirect_stdout(io.StringIO()):
+                commands.command_task_nudge(linked_args)
+            with contextlib.redirect_stdout(io.StringIO()):
+                commands.command_task_nudge(missing_args)
+
+            proc = self.run_workerctl("mutation-audit", "task-a", "--json", "--path", str(db_path))
+
+            self.assertEqual(proc.returncode, 1, proc.stdout)
+            payload = json.loads(proc.stdout)
+            self.assertFalse(payload["ok"])
+            self.assertEqual(payload["summary"]["mutations"], 2)
+            self.assertEqual(payload["summary"]["with_warnings"], 1)
+            self.assertEqual(sum(1 for record in payload["records"] if record["ok"]), 1)
+            self.assertTrue(any("missing_decision_id" in record["warnings"] for record in payload["records"]))
+
     def test_task_nudge_records_failure_when_send_fails(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "workerctl.db"
@@ -3869,6 +3954,7 @@ class CliTests(unittest.TestCase):
         self.assertIn("manager-decision", proc.stdout)
         self.assertIn("manager-observe", proc.stdout)
         self.assertIn("manage", proc.stdout)
+        self.assertIn("mutation-audit", proc.stdout)
         self.assertIn("my-status", proc.stdout)
         self.assertIn("name-session", proc.stdout)
         self.assertIn("open-manager", proc.stdout)
