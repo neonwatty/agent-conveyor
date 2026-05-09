@@ -92,8 +92,18 @@ def start_prompt_path(session_name: str) -> Path:
     return state_root() / "artifacts" / "start-prompts" / f"{session_name}.md"
 
 
-def raw_worker_start_prompt(session_name: str, cwd: Path) -> str:
-    become_managed_template = f"workerctl become-managed --session {session_name} --worker <worker-name> --task <task-name> --goal \"<goal>\" --summary \"<summary>\""
+def codex_arg_suffix(codex_args: list[str]) -> str:
+    if not codex_args:
+        return ""
+    return " -- " + " ".join(sh_quote(arg) for arg in codex_args)
+
+
+def raw_worker_start_prompt(session_name: str, cwd: Path, manager_codex_args: list[str] | None = None) -> str:
+    manager_suffix = codex_arg_suffix(manager_codex_args or [])
+    become_managed_template = (
+        f"workerctl become-managed --session {session_name} --worker <worker-name> "
+        f"--task <task-name> --goal \"<goal>\" --summary \"<summary>\"{manager_suffix}"
+    )
     return f"""You are a raw worker candidate running inside workerctl tmux session {session_name}.
 
 Current working directory: {cwd}
@@ -112,7 +122,7 @@ Required fields:
 If any required field is missing, ask the user for it before running workerctl become-managed.
 Do not invent worker name, task name, or goal values unless the user explicitly asks you to choose them.
 
-After workerctl become-managed succeeds, your current tmux session will be renamed to codex-<worker-name>, and a manager tmux session will be spawned to supervise you.
+After workerctl become-managed succeeds, your current tmux session will be renamed to codex-<worker-name>, and a manager tmux session will be spawned to supervise you. Preserve any arguments after `--` in the template when launching the manager.
 
 After you are managed, if the user asks to take back manual control, stop supervising you, pause your manager, or unmanage this worker, run:
 
@@ -246,14 +256,15 @@ def command_start(args: argparse.Namespace) -> int:
     if args.start_prompt:
         prompt_path = start_prompt_path(session_name)
         prompt_path.parent.mkdir(parents=True, exist_ok=True)
-        prompt_path.write_text(raw_worker_start_prompt(session_name, directory))
+        prompt_path.write_text(raw_worker_start_prompt(session_name, directory, manager_codex_args=raw_codex_args))
         shell_command = f"{shell_command} \"$(cat {sh_quote(str(prompt_path))})\""
     run(["tmux", "new-session", "-d", "-s", session_name, shell_command])
+    manager_suffix = codex_arg_suffix(raw_codex_args)
     result = {
         "attach_command": attach_session_command(session_name),
-        "become_managed_command_template": f"workerctl become-managed --session {session_name} --worker <worker-name> --task <task-name> --goal \"<goal>\" --summary \"<summary>\"",
+        "become_managed_command_template": f"workerctl become-managed --session {session_name} --worker <worker-name> --task <task-name> --goal \"<goal>\" --summary \"<summary>\"{manager_suffix}",
         "cwd": str(directory),
-        "manage_command_template": f"workerctl manage --session {session_name} --worker <worker-name> --task <task-name> --goal \"<goal>\" --summary \"<summary>\" --open-manager",
+        "manage_command_template": f"workerctl manage --session {session_name} --worker <worker-name> --task <task-name> --goal \"<goal>\" --summary \"<summary>\" --open-manager{manager_suffix}",
         "session": session_name,
         "start_prompt_path": str(prompt_path) if prompt_path else None,
         "start_prompt_sent": bool(prompt_path),
