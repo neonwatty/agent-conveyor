@@ -1065,7 +1065,12 @@ def active_task_worker(conn: sqlite3.Connection, *, task: str) -> dict[str, Any]
     if row is None:
         raise WorkerError(f"Unknown task: {task}")
     if row["worker_id"] is None:
-        raise WorkerError(f"Task {row['task_name']} has no active worker binding")
+        manager = active_manager(conn, task=row["task_id"])
+        manager_state = manager["state"] if manager else None
+        raise WorkerError(
+            f"Task {row['task_name']} has no active worker binding "
+            f"(task_state={row['task_state']}, manager_state={manager_state})"
+        )
     return {
         "binding_id": row["binding_id"],
         "binding_state": row["binding_state"],
@@ -1235,6 +1240,13 @@ def task_status_snapshot(conn: sqlite3.Connection, *, task: str) -> dict[str, An
         }
 
     manager = active_manager(conn, task=task_row["id"])
+    integrity_issues = []
+    if task_row["state"] == "managed" and worker is None:
+        integrity_issues.append("managed_without_active_worker_binding")
+    if task_row["state"] == "managed" and manager is None:
+        integrity_issues.append("managed_without_active_manager")
+    if task_row["state"] in {"done", "failed"} and manager is not None:
+        integrity_issues.append("closed_task_has_active_manager")
 
     return {
         "budget": budget,
@@ -1245,6 +1257,10 @@ def task_status_snapshot(conn: sqlite3.Connection, *, task: str) -> dict[str, An
         "state": task_row["state"],
         "summary": task_row["summary"],
         "updated_at": task_row["updated_at"],
+        "integrity": {
+            "issues": integrity_issues,
+            "ok": not integrity_issues,
+        },
         "manager": manager,
         "worker": worker,
         "worker_status": latest_status,

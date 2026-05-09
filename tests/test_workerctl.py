@@ -2217,6 +2217,21 @@ class CliTests(unittest.TestCase):
             db_path = Path(tmpdir) / "workerctl.db"
             prompt_path = Path(tmpdir) / "manager-prompt.md"
             prompt_path.write_text("manager prompt")
+            worker_path = worker_dir("worker-a")
+            if worker_path.exists():
+                shutil.rmtree(worker_path)
+            worker_path.mkdir(parents=True)
+            config_path("worker-a").write_text(
+                json.dumps(
+                    {
+                        "identity_token": "token-worker-a",
+                        "name": "worker-a",
+                        "tmux_pane_id": "%1",
+                        "tmux_session": "codex-worker-a",
+                    }
+                )
+                + "\n"
+            )
             with worker_db.connect(db_path) as conn:
                 worker_db.initialize_database(conn)
                 worker_db.upsert_worker(
@@ -2224,6 +2239,8 @@ class CliTests(unittest.TestCase):
                     name="worker-a",
                     cwd=str(ROOT),
                     tmux_session="codex-worker-a",
+                    identity_token="token-worker-a",
+                    tmux_pane_id="%1",
                     state="active",
                 )
                 task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
@@ -2260,7 +2277,11 @@ class CliTests(unittest.TestCase):
                 live_sessions = {"codex-manager-task-a": True}
                 lifecycle.manager_session_exists = lambda session: live_sessions.get(session, False)
                 lifecycle.run = lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, "", "")
-                worker_identity.session_snapshot = lambda session: {"live": True, "pane_id": "%3", "session": session}
+                worker_identity.session_snapshot = lambda session: {
+                    "live": True,
+                    "pane_id": "%3" if session.startswith("codex-manager-") else "%1",
+                    "session": session,
+                }
 
                 pause_args = argparse.Namespace(path=str(db_path), task="task-a")
                 with contextlib.redirect_stdout(io.StringIO()):
@@ -2288,6 +2309,8 @@ class CliTests(unittest.TestCase):
                 lifecycle.manager_session_exists = original_manager_session_exists
                 lifecycle.run = original_run
                 worker_identity.session_snapshot = original_session_snapshot
+                if worker_path.exists():
+                    shutil.rmtree(worker_path)
 
     def test_unmanage_resolves_current_worker_and_pauses_manager(self):
         worker_path = worker_dir("worker-a")
@@ -2387,6 +2410,167 @@ class CliTests(unittest.TestCase):
                     lifecycle.command_unmanage(args)
         finally:
             lifecycle.current_session_name = original_current_session_name
+
+    def test_resume_manager_rejects_paused_task_without_active_worker_binding(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            prompt_path = Path(tmpdir) / "manager-prompt.md"
+            prompt_path.write_text("manager prompt")
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                worker_db.upsert_worker(
+                    conn,
+                    name="worker-a",
+                    cwd=str(ROOT),
+                    tmux_session="codex-worker-a",
+                    state="stopped",
+                )
+                task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
+                worker_db.bind_task_worker(conn, task="task-a", worker="worker-a", binding_id="binding-1")
+                manager_id = worker_db.create_manager(
+                    conn,
+                    task_id=task_id,
+                    name="manager-a",
+                    tmux_session="codex-manager-task-a",
+                    codex_args=[],
+                    state="stopped",
+                )
+                worker_db.attach_manager_to_binding(conn, task_id=task_id, manager_id=manager_id)
+                worker_db.insert_prompt(
+                    conn,
+                    task_id=task_id,
+                    manager_id=manager_id,
+                    kind="manager",
+                    content="manager prompt",
+                    content_sha256="hash",
+                    generator_version="test",
+                    source_snapshot={},
+                    policy={},
+                    artifact_path=str(prompt_path),
+                )
+                worker_db.end_active_binding(conn, task_id=task_id)
+                worker_db.set_task_state(conn, task_id=task_id, state="paused")
+                conn.commit()
+
+            original_ensure_tool = lifecycle.ensure_tool
+            try:
+                lifecycle.ensure_tool = lambda tool: tool
+                args = argparse.Namespace(codex_args=[], open_manager=False, path=str(db_path), task="task-a", terminal="auto")
+                with self.assertRaisesRegex(WorkerError, "cannot resume manager without an active worker binding"):
+                    lifecycle.command_resume_manager(args)
+                with worker_db.connect(db_path) as conn:
+                    managers = conn.execute("select count(*) as count from managers where task_id = ?", (task_id,)).fetchone()
+                    task = conn.execute("select state from tasks where id = ?", (task_id,)).fetchone()
+                self.assertEqual(managers["count"], 1)
+                self.assertEqual(task["state"], "paused")
+            finally:
+                lifecycle.ensure_tool = original_ensure_tool
+
+    def test_resume_manager_rejects_missing_live_worker_session(self):
+        worker_path = worker_dir("worker-a")
+        if worker_path.exists():
+            shutil.rmtree(worker_path)
+        worker_path.mkdir(parents=True)
+        config_path("worker-a").write_text(
+            json.dumps(
+                {
+                    "identity_token": "token-worker-a",
+                    "name": "worker-a",
+                    "tmux_pane_id": "%1",
+                    "tmux_session": "codex-worker-a",
+                }
+            )
+            + "\n"
+        )
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                db_path = Path(tmpdir) / "workerctl.db"
+                prompt_path = Path(tmpdir) / "manager-prompt.md"
+                prompt_path.write_text("manager prompt")
+                with worker_db.connect(db_path) as conn:
+                    worker_db.initialize_database(conn)
+                    worker_db.upsert_worker(
+                        conn,
+                        name="worker-a",
+                        cwd=str(ROOT),
+                        tmux_session="codex-worker-a",
+                        identity_token="token-worker-a",
+                        tmux_pane_id="%1",
+                        state="active",
+                    )
+                    task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
+                    worker_db.bind_task_worker(conn, task="task-a", worker="worker-a", binding_id="binding-1")
+                    manager_id = worker_db.create_manager(
+                        conn,
+                        task_id=task_id,
+                        name="manager-a",
+                        tmux_session="codex-manager-task-a",
+                        codex_args=[],
+                        state="stopped",
+                    )
+                    worker_db.attach_manager_to_binding(conn, task_id=task_id, manager_id=manager_id)
+                    worker_db.insert_prompt(
+                        conn,
+                        task_id=task_id,
+                        manager_id=manager_id,
+                        kind="manager",
+                        content="manager prompt",
+                        content_sha256="hash",
+                        generator_version="test",
+                        source_snapshot={},
+                        policy={},
+                        artifact_path=str(prompt_path),
+                    )
+                    worker_db.set_task_state(conn, task_id=task_id, state="paused")
+                    conn.commit()
+
+                original_ensure_tool = lifecycle.ensure_tool
+                original_session_snapshot = worker_identity.session_snapshot
+                try:
+                    lifecycle.ensure_tool = lambda tool: tool
+                    worker_identity.session_snapshot = lambda session: {
+                        "live": False,
+                        "pane_id": None,
+                        "session": session,
+                    }
+                    args = argparse.Namespace(codex_args=[], open_manager=False, path=str(db_path), task="task-a", terminal="auto")
+
+                    with self.assertRaisesRegex(WorkerError, "Worker identity verification failed"):
+                        lifecycle.command_resume_manager(args)
+
+                    with worker_db.connect(db_path) as conn:
+                        managers = conn.execute("select count(*) as count from managers where task_id = ?", (task_id,)).fetchone()
+                        task = conn.execute("select state from tasks where id = ?", (task_id,)).fetchone()
+                    self.assertEqual(managers["count"], 1)
+                    self.assertEqual(task["state"], "paused")
+                finally:
+                    lifecycle.ensure_tool = original_ensure_tool
+                    worker_identity.session_snapshot = original_session_snapshot
+        finally:
+            if worker_path.exists():
+                shutil.rmtree(worker_path)
+
+    def test_task_status_flags_managed_without_active_worker_binding(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
+                worker_db.set_task_state(conn, task_id=task_id, state="managed")
+                worker_db.create_manager(
+                    conn,
+                    task_id=task_id,
+                    name="manager-a",
+                    tmux_session="codex-manager-task-a",
+                    codex_args=[],
+                    state="ready",
+                )
+                conn.commit()
+
+            with worker_db.connect(db_path) as conn:
+                snapshot = worker_db.task_status_snapshot(conn, task="task-a")
+            self.assertFalse(snapshot["integrity"]["ok"])
+            self.assertIn("managed_without_active_worker_binding", snapshot["integrity"]["issues"])
 
     def test_my_status_resolves_current_worker_task(self):
         with tempfile.TemporaryDirectory() as tmpdir:
