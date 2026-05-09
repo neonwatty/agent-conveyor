@@ -743,6 +743,13 @@ class CliTests(unittest.TestCase):
                 self.assertIn("workerctl become-managed --session plain-codex", payload["become_managed_command_template"])
                 self.assertIn("workerctl manage --session plain-codex", payload["manage_command_template"])
                 self.assertIn("--open-manager", payload["manage_command_template"])
+                self.assertIn("worker_name", [value["name"] for value in payload["required_values"]])
+                self.assertIn("task_name", [value["name"] for value in payload["required_values"]])
+                self.assertIn("goal", [value["name"] for value in payload["required_values"]])
+                self.assertIn("Please become managed", payload["example_natural_language_prompt"])
+                self.assertIn("workerctl become-managed --session plain-codex", payload["recommended_command"])
+                self.assertIn("live tmux session", payload["why_or_why_not"])
+                self.assertTrue(any("manage yourself" in mapping["phrases"] for mapping in payload["phrase_mappings"]))
         finally:
             commands.current_session_name = original_current_session_name
             commands.shutil.which = original_which
@@ -763,8 +770,32 @@ class CliTests(unittest.TestCase):
             self.assertEqual(payload["recommended_action"], "cannot_promote_in_place")
             self.assertIsNone(payload["become_managed_command_template"])
             self.assertIsNone(payload["manage_command_template"])
+            self.assertIn("workerctl start", payload["recommended_command"])
+            self.assertIn("cannot be promoted in place", payload["why_or_why_not"])
         finally:
             commands.current_session_name = original_current_session_name
+
+    def test_explain_managed_flow_outputs_agent_command_mappings(self):
+        proc = self.run_workerctl("explain-managed-flow", "--session", "plain-codex", "--json")
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        payload = json.loads(proc.stdout)
+        self.assertIn("workerctl doctor-self", payload["commands"]["preflight"])
+        self.assertIn("workerctl become-managed --session plain-codex", payload["commands"]["become_managed_template"])
+        self.assertIn("worker_name", [value["name"] for value in payload["required_values"]])
+        self.assertTrue(any("stop supervising me" in mapping["phrases"] and "workerctl unmanage" in mapping["command"] for mapping in payload["phrase_mappings"]))
+        self.assertTrue(any("finish this managed task" in mapping["phrases"] and "finish-task" in mapping["command"] for mapping in payload["phrase_mappings"]))
+        self.assertIn("Ask for worker_name, task_name, and goal", payload["ask_questions_rule"])
+
+    def test_qa_plan_self_management_outputs_repeatable_steps(self):
+        proc = self.run_workerctl("qa-plan", "self-management", "--json")
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        payload = json.loads(proc.stdout)
+        self.assertEqual(payload["scenario"], "self-management")
+        self.assertTrue(any("workerctl start" in step for step in payload["steps"]))
+        self.assertTrue(any("finish-task" in step for step in payload["steps"]))
+        self.assertTrue(any("manager-observe <task> --compact --json" in observation for observation in payload["expected_observations"]))
 
     def test_db_doctor_outputs_expected_structure(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -3833,6 +3864,7 @@ class CliTests(unittest.TestCase):
         self.assertIn("become-managed", proc.stdout)
         self.assertIn("commands", proc.stdout)
         self.assertIn("doctor-self", proc.stdout)
+        self.assertIn("explain-managed-flow", proc.stdout)
         self.assertIn("import-compat", proc.stdout)
         self.assertIn("manager-decision", proc.stdout)
         self.assertIn("manager-observe", proc.stdout)
@@ -3843,6 +3875,7 @@ class CliTests(unittest.TestCase):
         self.assertIn("open-worker", proc.stdout)
         self.assertIn("pause-manager", proc.stdout)
         self.assertIn("prune", proc.stdout)
+        self.assertIn("qa-plan", proc.stdout)
         self.assertIn("promote", proc.stdout)
         self.assertIn("recover", proc.stdout)
         self.assertIn("reconcile", proc.stdout)

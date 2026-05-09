@@ -893,6 +893,113 @@ def _codex_home() -> Path:
     return Path(os.environ.get("CODEX_HOME", Path.home() / ".codex")).expanduser()
 
 
+MANAGED_FLOW_REQUIRED_VALUES = [
+    {
+        "name": "worker_name",
+        "description": "Stable worker name to claim for the current Codex session.",
+        "ask_when_missing": True,
+    },
+    {
+        "name": "task_name",
+        "description": "Stable task name for the worker-manager relationship.",
+        "ask_when_missing": True,
+    },
+    {
+        "name": "goal",
+        "description": "Concrete goal the manager should supervise.",
+        "ask_when_missing": True,
+    },
+    {
+        "name": "summary",
+        "description": "Short current-state summary; use a concise default only if the user supplied enough context.",
+        "ask_when_missing": False,
+    },
+]
+
+
+MANAGED_FLOW_PHRASE_MAPPINGS = [
+    {
+        "phrases": ["become managed", "manage yourself", "create a manager", "launch a manager"],
+        "command": "workerctl doctor-self, then workerctl become-managed when can_promote_in_place is true",
+        "ask_for": ["worker_name", "task_name", "goal"],
+    },
+    {
+        "phrases": ["stop supervising me", "stop managing me", "take back manual control", "unmanage this worker"],
+        "command": "workerctl unmanage",
+        "ask_for": ["task_name or session only if workerctl cannot infer it"],
+    },
+    {
+        "phrases": ["resume supervision", "restart management", "get a manager again"],
+        "command": "workerctl remanage --open-manager",
+        "ask_for": ["task_name or session only if workerctl cannot infer it"],
+    },
+    {
+        "phrases": ["finish this managed task", "close this task", "mark this task done"],
+        "command": "workerctl finish-task <task-name> --reason \"<reason>\"",
+        "ask_for": ["task_name", "reason"],
+    },
+    {
+        "phrases": ["show me the manager", "open the manager terminal"],
+        "command": "workerctl open-manager <task-name>",
+        "ask_for": ["task_name"],
+    },
+    {
+        "phrases": ["show me the worker", "open the worker terminal"],
+        "command": "workerctl open-worker <task-name>",
+        "ask_for": ["task_name"],
+    },
+]
+
+
+def managed_flow_payload(*, session: str | None = None) -> dict[str, Any]:
+    session_value = session or "<session-name>"
+    return {
+        "ask_questions_rule": "Ask for worker_name, task_name, and goal before become-managed unless the user explicitly supplied them or explicitly asked you to choose names.",
+        "commands": {
+            "preflight": "workerctl doctor-self",
+            "become_managed_template": (
+                f"workerctl become-managed --session {session_value} --worker <worker-name> "
+                '--task <task-name> --goal "<goal>" --summary "<summary>"'
+            ),
+            "cannot_promote_in_place": 'workerctl start <session-name> --cwd "$PWD" -- --sandbox danger-full-access --ask-for-approval never',
+            "unmanage": "workerctl unmanage",
+            "remanage": "workerctl remanage --open-manager",
+            "finish": 'workerctl finish-task <task-name> --reason "<reason>"',
+            "observe": "workerctl manager-observe <task-name> --compact --json",
+        },
+        "flow": [
+            "Run workerctl doctor-self when asked to make this plain Codex session managed.",
+            "If can_promote_in_place is false, explain that non-tmux Codex cannot be promoted in place and offer workerctl start.",
+            "If can_promote_in_place is true, fill the become-managed template only after required values are known.",
+            "After become-managed succeeds, the current tmux session is renamed to codex-<worker-name> and a visible Codex manager is spawned.",
+            "Use workerctl unmanage to stop only the manager and return manual control.",
+            "Use workerctl remanage --open-manager to restart supervision for a paused managed worker.",
+            "Use finish-task when work is complete and should close with an audit record.",
+        ],
+        "phrase_mappings": MANAGED_FLOW_PHRASE_MAPPINGS,
+        "required_values": MANAGED_FLOW_REQUIRED_VALUES,
+    }
+
+
+def print_managed_flow_text(payload: dict[str, Any]) -> None:
+    print("Managed worker flow")
+    print("")
+    print(f"Preflight: {payload['commands']['preflight']}")
+    print(f"Become managed: {payload['commands']['become_managed_template']}")
+    print(f"Fallback: {payload['commands']['cannot_promote_in_place']}")
+    print("")
+    print("Required values before become-managed:")
+    for value in payload["required_values"]:
+        marker = "ask" if value["ask_when_missing"] else "optional"
+        print(f"- {value['name']} ({marker}): {value['description']}")
+    print("")
+    print(f"Rule: {payload['ask_questions_rule']}")
+    print("")
+    print("Natural-language mappings:")
+    for mapping in payload["phrase_mappings"]:
+        print(f"- {', '.join(mapping['phrases'])}: {mapping['command']}")
+
+
 def command_doctor_self(args: argparse.Namespace) -> int:
     session = getattr(args, "session", None) or current_session_name()
     tmux_path = shutil.which("tmux")
@@ -920,6 +1027,7 @@ def command_doctor_self(args: argparse.Namespace) -> int:
     )
     if can_promote_in_place:
         recommended_action = "run_become_managed"
+        why_or_why_not = "Current Codex process is inside a live tmux session and workerctl can promote it in place."
         become_managed_template = (
             f"workerctl become-managed --session {session} --worker <worker-name> --task <task-name> "
             '--goal "<goal>" --summary "<summary>"'
@@ -930,23 +1038,92 @@ def command_doctor_self(args: argparse.Namespace) -> int:
         )
     else:
         recommended_action = "cannot_promote_in_place"
+        failed = [check["name"] for check in checks if not check["ok"]]
+        why_or_why_not = (
+            "This Codex process cannot be promoted in place as a tmux-backed worker. "
+            f"Failed checks: {', '.join(failed) if failed else 'unknown'}."
+        )
         become_managed_template = None
         manage_template = None
+    flow = managed_flow_payload(session=session)
+    recommended_command = become_managed_template or flow["commands"]["cannot_promote_in_place"]
     result = {
         "become_managed_command_template": become_managed_template,
         "can_promote_in_place": can_promote_in_place,
         "checks": checks,
         "current_session": session,
+        "example_natural_language_prompt": (
+            "Please become managed. Use worker name <worker-name>, task name <task-name>, "
+            "goal '<goal>', and summary '<summary>'."
+        ),
+        "flow": flow["flow"],
         "manage_command_template": manage_template,
         "ok": can_promote_in_place,
+        "phrase_mappings": flow["phrase_mappings"],
         "recommended_action": recommended_action,
+        "recommended_command": recommended_command,
+        "required_values": flow["required_values"],
         "skill_path": str(skill_path),
+        "why_or_why_not": why_or_why_not,
     }
     if args.json:
         print(json.dumps(result, indent=2, sort_keys=True))
     else:
         print(json.dumps(result, indent=2, sort_keys=True))
     return 0 if can_promote_in_place else 1
+
+
+def command_explain_managed_flow(args: argparse.Namespace) -> int:
+    payload = managed_flow_payload(session=getattr(args, "session", None))
+    if args.json:
+        print(json.dumps(payload, indent=2, sort_keys=True))
+    else:
+        print_managed_flow_text(payload)
+    return 0
+
+
+def command_qa_plan(args: argparse.Namespace) -> int:
+    scenario = getattr(args, "scenario", "self-management")
+    if scenario != "self-management":
+        raise WorkerError(f"Unsupported QA scenario: {scenario}")
+    payload = {
+        "expected_observations": [
+            "raw Codex session starts inside tmux",
+            "natural-language prompt causes the worker to run become-managed or ask for missing required values",
+            "worker session is renamed to codex-<worker-name>",
+            "visible Codex manager session is spawned",
+            "manager starts with manager-observe <task> --compact --json",
+            "manager records manager-decision before any nudge, interrupt, finish, pause, or stop",
+            "manager does not interrupt unless busy-wait/interruptible state is clear or user explicitly asks",
+            "finish-task marks the task done and records a final stop decision",
+            "db-doctor --live reports no drift or unfinished commands after cleanup",
+        ],
+        "scenario": scenario,
+        "steps": [
+            'Run workerctl start <raw-session> --cwd "$PWD" -- --sandbox danger-full-access --ask-for-approval never.',
+            "Open or attach to the raw session if visual confirmation is needed.",
+            "Ask the raw worker in natural language to become managed, providing worker name, task name, goal, and summary.",
+            "Run workerctl task-status <task> --json and confirm state is managed with active worker and manager.",
+            "Inspect the manager terminal or audit and confirm the first loop used manager-observe --compact --json.",
+            "Confirm manager-decision precedes any task-nudge/task-interrupt/finish-task mutation.",
+            "Run workerctl audit <task> --json and confirm captures, observations, cycles, and decisions are present.",
+            'Run workerctl finish-task <task> --stop-worker --reason "manual QA complete".',
+            "Run workerctl task-status <task> --json and confirm state is done with no active worker or manager.",
+            "Run workerctl db-doctor --live and confirm ok is true.",
+        ],
+    }
+    if args.json:
+        print(json.dumps(payload, indent=2, sort_keys=True))
+    else:
+        print(f"QA plan: {scenario}")
+        print("")
+        for index, step in enumerate(payload["steps"], start=1):
+            print(f"{index}. {step}")
+        print("")
+        print("Expected observations:")
+        for observation in payload["expected_observations"]:
+            print(f"- {observation}")
+    return 0
 
 
 def command_db_doctor(args: argparse.Namespace) -> int:

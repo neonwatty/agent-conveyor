@@ -183,6 +183,11 @@ If `can_promote_in_place` is true, it can run the reported
 worker name, task name, or goal. If the current Codex process is not inside
 tmux, it cannot be promoted in-place as a tmux-backed worker; start a tmux-backed
 session with `workerctl start ...` instead.
+Use `workerctl explain-managed-flow --json` when an agent needs compact command
+mappings for phrases like "manage yourself", "stop supervising me", "resume
+supervision", or "finish this managed task". Use
+`workerctl qa-plan self-management` for the repeatable manual QA checklist for
+the plain-worker-to-managed-worker path.
 
 An agent already running inside a tmux session can turn itself into a managed
 worker with one command. `become-managed` opens the manager terminal by default.

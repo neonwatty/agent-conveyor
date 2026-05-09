@@ -30,6 +30,7 @@ from workerctl.commands import (
     command_doctor,
     command_doctor_self,
     command_events,
+    command_explain_managed_flow,
     command_interrupt,
     command_list,
     command_manager_decision,
@@ -40,6 +41,7 @@ from workerctl.commands import (
     command_open_manager,
     command_open_worker,
     command_prune,
+    command_qa_plan,
     command_start,
     command_start_test,
     command_status,
@@ -207,6 +209,19 @@ def build_parser() -> argparse.ArgumentParser:
     doctor_self.add_argument("--session", help="Explicit tmux session; defaults to the current tmux session.")
     doctor_self.add_argument("--json", action="store_true", help="Print stable JSON output.")
     doctor_self.set_defaults(func=command_doctor_self)
+
+    explain_managed_flow = subparsers.add_parser(
+        "explain-managed-flow",
+        help="Explain the agent-facing flow for becoming, pausing, resuming, and finishing managed work.",
+    )
+    explain_managed_flow.add_argument("--session", help="Optional tmux session to include in command templates.")
+    explain_managed_flow.add_argument("--json", action="store_true", help="Print stable JSON output.")
+    explain_managed_flow.set_defaults(func=command_explain_managed_flow)
+
+    qa_plan = subparsers.add_parser("qa-plan", help="Print a repeatable manual QA checklist.")
+    qa_plan.add_argument("scenario", nargs="?", default="self-management", choices=("self-management",))
+    qa_plan.add_argument("--json", action="store_true", help="Print stable JSON output.")
+    qa_plan.set_defaults(func=command_qa_plan)
 
     db_doctor = subparsers.add_parser("db-doctor", help="Initialize and check the SQLite control-plane database.")
     db_doctor.add_argument("--live", action="store_true", help="Also report read-only live tmux reconciliation drift.")
