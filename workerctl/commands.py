@@ -14,6 +14,7 @@ from typing import Any
 from workerctl.classify import classify_busy_wait, classify_startup_output
 from workerctl.audit import mutation_audit_result
 from workerctl.constants import DEFAULT_MANAGER_STALE_SECONDS, PROJECT_ROOT, VALID_STATES
+from workerctl.constants import RECOMMENDED_MANAGER_CODEX_ARGS
 from workerctl.core import WorkerError, ensure_tool, now_iso, run, sh_quote
 from workerctl.db import active_manager, active_task_worker
 from workerctl.db import assess_manager_decision
@@ -106,6 +107,10 @@ def codex_arg_suffix(codex_args: list[str]) -> str:
     if not codex_args:
         return ""
     return " -- " + " ".join(sh_quote(arg) for arg in codex_args)
+
+
+def recommended_manager_codex_args_suffix() -> str:
+    return codex_arg_suffix(RECOMMENDED_MANAGER_CODEX_ARGS)
 
 
 def raw_worker_start_prompt(session_name: str, cwd: Path, manager_codex_args: list[str] | None = None) -> str:
@@ -923,7 +928,7 @@ MANAGED_FLOW_REQUIRED_VALUES = [
 MANAGED_FLOW_PHRASE_MAPPINGS = [
     {
         "phrases": ["become managed", "manage yourself", "create a manager", "launch a manager"],
-        "command": "workerctl doctor-self, then workerctl become-managed when can_promote_in_place is true",
+        "command": "workerctl doctor-self, then the recommended workerctl become-managed template when can_promote_in_place is true",
         "ask_for": ["worker_name", "task_name", "goal"],
     },
     {
@@ -964,6 +969,11 @@ def managed_flow_payload(*, session: str | None = None) -> dict[str, Any]:
                 f"workerctl become-managed --session {session_value} --worker <worker-name> "
                 '--task <task-name> --goal "<goal>" --summary "<summary>"'
             ),
+            "become_managed_recommended_template": (
+                f"workerctl become-managed --session {session_value} --worker <worker-name> "
+                '--task <task-name> --goal "<goal>" --summary "<summary>"'
+                f"{recommended_manager_codex_args_suffix()}"
+            ),
             "cannot_promote_in_place": 'workerctl start <session-name> --cwd "$PWD" -- --sandbox danger-full-access --ask-for-approval never',
             "unmanage": "workerctl unmanage",
             "remanage": "workerctl remanage --open-manager",
@@ -973,7 +983,8 @@ def managed_flow_payload(*, session: str | None = None) -> dict[str, Any]:
         "flow": [
             "Run workerctl doctor-self when asked to make this plain Codex session managed.",
             "If can_promote_in_place is false, explain that non-tmux Codex cannot be promoted in place and offer workerctl start.",
-            "If can_promote_in_place is true, fill the become-managed template only after required values are known.",
+            "If can_promote_in_place is true, fill the recommended become-managed template only after required values are known.",
+            "Preserve or add manager Codex args after -- so the manager has the intended sandbox and approval behavior.",
             "After become-managed succeeds, the current tmux session is renamed to codex-<worker-name> and a visible Codex manager is spawned.",
             "Use workerctl unmanage to stop only the manager and return manual control.",
             "Use workerctl remanage --open-manager to restart supervision for a paused managed worker.",
@@ -989,6 +1000,7 @@ def print_managed_flow_text(payload: dict[str, Any]) -> None:
     print("")
     print(f"Preflight: {payload['commands']['preflight']}")
     print(f"Become managed: {payload['commands']['become_managed_template']}")
+    print(f"Recommended: {payload['commands']['become_managed_recommended_template']}")
     print(f"Fallback: {payload['commands']['cannot_promote_in_place']}")
     print("")
     print("Required values before become-managed:")
@@ -1035,10 +1047,12 @@ def command_doctor_self(args: argparse.Namespace) -> int:
             f"workerctl become-managed --session {session} --worker <worker-name> --task <task-name> "
             '--goal "<goal>" --summary "<summary>"'
         )
+        become_managed_recommended_template = become_managed_template + recommended_manager_codex_args_suffix()
         manage_template = (
             f"workerctl manage --session {session} --worker <worker-name> --task <task-name> "
             '--goal "<goal>" --summary "<summary>" --open-manager'
         )
+        manage_recommended_template = manage_template + recommended_manager_codex_args_suffix()
     else:
         recommended_action = "cannot_promote_in_place"
         failed = [check["name"] for check in checks if not check["ok"]]
@@ -1047,11 +1061,17 @@ def command_doctor_self(args: argparse.Namespace) -> int:
             f"Failed checks: {', '.join(failed) if failed else 'unknown'}."
         )
         become_managed_template = None
+        become_managed_recommended_template = None
         manage_template = None
+        manage_recommended_template = None
     flow = managed_flow_payload(session=session)
-    recommended_command = become_managed_template or flow["commands"]["cannot_promote_in_place"]
+    recommended_command = become_managed_recommended_template or flow["commands"]["cannot_promote_in_place"]
+    warnings = []
+    if can_promote_in_place:
+        warnings.append("manager_codex_args_not_inferred")
     result = {
         "become_managed_command_template": become_managed_template,
+        "become_managed_recommended_command_template": become_managed_recommended_template,
         "can_promote_in_place": can_promote_in_place,
         "checks": checks,
         "current_session": session,
@@ -1061,12 +1081,16 @@ def command_doctor_self(args: argparse.Namespace) -> int:
         ),
         "flow": flow["flow"],
         "manage_command_template": manage_template,
+        "manage_recommended_command_template": manage_recommended_template,
+        "manager_codex_args_recommendation": " ".join(RECOMMENDED_MANAGER_CODEX_ARGS),
+        "manager_codex_args_required": can_promote_in_place,
         "ok": can_promote_in_place,
         "phrase_mappings": flow["phrase_mappings"],
         "recommended_action": recommended_action,
         "recommended_command": recommended_command,
         "required_values": flow["required_values"],
         "skill_path": str(skill_path),
+        "warnings": warnings,
         "why_or_why_not": why_or_why_not,
     }
     if args.json:

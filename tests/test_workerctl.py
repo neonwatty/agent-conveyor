@@ -741,8 +741,13 @@ class CliTests(unittest.TestCase):
                 self.assertTrue(payload["can_promote_in_place"])
                 self.assertEqual(payload["recommended_action"], "run_become_managed")
                 self.assertIn("workerctl become-managed --session plain-codex", payload["become_managed_command_template"])
+                self.assertIn("'--sandbox' 'danger-full-access'", payload["become_managed_recommended_command_template"])
                 self.assertIn("workerctl manage --session plain-codex", payload["manage_command_template"])
+                self.assertIn("'--ask-for-approval' 'never'", payload["manage_recommended_command_template"])
                 self.assertIn("--open-manager", payload["manage_command_template"])
+                self.assertTrue(payload["manager_codex_args_required"])
+                self.assertEqual(payload["manager_codex_args_recommendation"], "--sandbox danger-full-access --ask-for-approval never")
+                self.assertIn("manager_codex_args_not_inferred", payload["warnings"])
                 self.assertIn("worker_name", [value["name"] for value in payload["required_values"]])
                 self.assertIn("task_name", [value["name"] for value in payload["required_values"]])
                 self.assertIn("goal", [value["name"] for value in payload["required_values"]])
@@ -769,7 +774,11 @@ class CliTests(unittest.TestCase):
             self.assertFalse(payload["can_promote_in_place"])
             self.assertEqual(payload["recommended_action"], "cannot_promote_in_place")
             self.assertIsNone(payload["become_managed_command_template"])
+            self.assertIsNone(payload["become_managed_recommended_command_template"])
             self.assertIsNone(payload["manage_command_template"])
+            self.assertIsNone(payload["manage_recommended_command_template"])
+            self.assertFalse(payload["manager_codex_args_required"])
+            self.assertEqual(payload["warnings"], [])
             self.assertIn("workerctl start", payload["recommended_command"])
             self.assertIn("cannot be promoted in place", payload["why_or_why_not"])
         finally:
@@ -782,7 +791,9 @@ class CliTests(unittest.TestCase):
         payload = json.loads(proc.stdout)
         self.assertIn("workerctl doctor-self", payload["commands"]["preflight"])
         self.assertIn("workerctl become-managed --session plain-codex", payload["commands"]["become_managed_template"])
+        self.assertIn("'--sandbox' 'danger-full-access'", payload["commands"]["become_managed_recommended_template"])
         self.assertIn("worker_name", [value["name"] for value in payload["required_values"]])
+        self.assertTrue(any("manage yourself" in mapping["phrases"] and "recommended workerctl become-managed" in mapping["command"] for mapping in payload["phrase_mappings"]))
         self.assertTrue(any("stop supervising me" in mapping["phrases"] and "workerctl unmanage" in mapping["command"] for mapping in payload["phrase_mappings"]))
         self.assertTrue(any("finish this managed task" in mapping["phrases"] and "finish-task" in mapping["command"] for mapping in payload["phrase_mappings"]))
         self.assertIn("Ask for worker_name, task_name, and goal", payload["ask_questions_rule"])
@@ -2769,6 +2780,7 @@ class CliTests(unittest.TestCase):
                 self.assertEqual(manager["state"], "ready")
                 self.assertEqual(manager["tmux_pane_id"], "%2")
                 self.assertEqual(json.loads(manager["codex_args_json"]), ["--model", "test"])
+                self.assertEqual(payload["warnings"], [])
                 self.assertEqual(budget["max_nudges"], 2)
                 self.assertEqual(command["state"], "succeeded")
                 source_snapshot = json.loads(prompt["source_snapshot_json"])
@@ -2777,6 +2789,81 @@ class CliTests(unittest.TestCase):
                 self.assertIn("status", source_snapshot)
                 self.assertIn("Source snapshot:", prompt["content"])
                 self.assertTrue(Path(payload["prompt_path"]).exists())
+        finally:
+            lifecycle.ensure_tool = original_ensure_tool
+            lifecycle.session_exists = original_session_exists
+            lifecycle.manager_session_exists = original_manager_session_exists
+            lifecycle.run = original_run
+            worker_identity.session_snapshot = original_session_snapshot
+            lifecycle.state_root = original_state_root
+            if worker_path.exists():
+                shutil.rmtree(worker_path)
+
+    def test_promote_warns_when_manager_codex_args_are_empty(self):
+        name = "promote-noargs-worker"
+        worker_path = worker_dir(name)
+        if worker_path.exists():
+            shutil.rmtree(worker_path)
+        worker_path.mkdir(parents=True)
+        config_path(name).write_text(
+            json.dumps(
+                {
+                    "cwd": str(ROOT),
+                    "identity_token": "token-worker",
+                    "name": name,
+                    "tmux_session": f"codex-{name}",
+                }
+            )
+            + "\n"
+        )
+        original_ensure_tool = lifecycle.ensure_tool
+        original_session_exists = lifecycle.session_exists
+        original_manager_session_exists = lifecycle.manager_session_exists
+        original_run = lifecycle.run
+        original_session_snapshot = worker_identity.session_snapshot
+        original_state_root = lifecycle.state_root
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                db_path = Path(tmpdir) / "workerctl.db"
+                artifact_root = Path(tmpdir) / "state"
+                lifecycle.ensure_tool = lambda tool: tool
+                lifecycle.session_exists = lambda worker: worker == name
+                lifecycle.manager_session_exists = lambda session: False
+                lifecycle.run = lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, "", "")
+                worker_identity.session_snapshot = lambda session: {
+                    "live": True,
+                    "pane_id": "%2" if session.startswith("codex-manager-") else "%1",
+                    "session": session,
+                }
+                lifecycle.state_root = lambda: artifact_root
+                args = argparse.Namespace(
+                    budget_expires_at=None,
+                    budget_hours=24,
+                    codex_args=[],
+                    goal="Do the task.",
+                    manager_instructions=None,
+                    max_nudges=3,
+                    path=str(db_path),
+                    summary="Started.",
+                    task="task-a",
+                    worker=name,
+                )
+
+                with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                    result = lifecycle.command_promote(args)
+
+                payload = json.loads(stdout.getvalue())
+                self.assertEqual(result, 0)
+                self.assertEqual(payload["warnings"][0]["code"], "manager_started_without_codex_args")
+                self.assertEqual(payload["recommended_manager_codex_args"], ["--sandbox", "danger-full-access", "--ask-for-approval", "never"])
+                with worker_db.connect(db_path) as conn:
+                    command = conn.execute("select payload_json, result_json from commands where type = 'promote'").fetchone()
+                    manager = conn.execute("select codex_args_json from managers").fetchone()
+                command_payload = json.loads(command["payload_json"])
+                command_result = json.loads(command["result_json"])
+                self.assertEqual(json.loads(manager["codex_args_json"]), [])
+                self.assertEqual(command_payload["warnings"][0]["code"], "manager_started_without_codex_args")
+                self.assertEqual(command_result["warnings"][0]["code"], "manager_started_without_codex_args")
         finally:
             lifecycle.ensure_tool = original_ensure_tool
             lifecycle.session_exists = original_session_exists

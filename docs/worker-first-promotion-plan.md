@@ -176,15 +176,21 @@ Worker-facing preflight for plain Codex sessions. It checks whether `workerctl`,
 tmux session, and whether the `manage-codex-workers` skill is installed under
 `$CODEX_HOME/skills` or `~/.codex/skills`. If in-place promotion is possible, it
 prints the exact `workerctl become-managed --session ...` template plus
-`required_values`, `why_or_why_not`, `recommended_command`,
-`example_natural_language_prompt`, and phrase mappings. If not, the agent
-should explain that the current non-tmux Codex process cannot be promoted
-in-place as a tmux-backed worker and offer `workerctl start ...` instead.
+`become_managed_recommended_command_template`, `manager_codex_args_recommendation`,
+`warnings`, `required_values`, `why_or_why_not`, `recommended_command`,
+`example_natural_language_prompt`, and phrase mappings. The recommended template
+appends manager Codex args after `--`, for example
+`--sandbox danger-full-access --ask-for-approval never`. If not, the agent should
+explain that the current non-tmux Codex process cannot be promoted in-place as a
+tmux-backed worker and offer `workerctl start ...` instead.
 For plain Codex sessions, this is a mandatory preflight gate: agents must not
 run `workerctl become-managed` until `doctor-self` reports
 `can_promote_in_place: true`.
 
 Everything after `--` is passed as CLI args to the manager's Codex process.
+When `become-managed`, `promote`, `remanage`, or `resume-manager` starts a
+manager without passthrough args, workerctl records
+`manager_started_without_codex_args` in command/event audit payloads.
 
 ### `workerctl explain-managed-flow`
 
