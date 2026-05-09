@@ -93,7 +93,7 @@ def start_prompt_path(session_name: str) -> Path:
 
 
 def raw_worker_start_prompt(session_name: str, cwd: Path) -> str:
-    manage_template = f"workerctl manage --session {session_name} --worker <worker-name> --task <task-name> --goal \"<goal>\" --summary \"<summary>\" --open-manager"
+    become_managed_template = f"workerctl become-managed --session {session_name} --worker <worker-name> --task <task-name> --goal \"<goal>\" --summary \"<summary>\""
     return f"""You are a raw worker candidate running inside workerctl tmux session {session_name}.
 
 Current working directory: {cwd}
@@ -102,17 +102,17 @@ You are not registered as a worker yet.
 
 If the user asks you to become managed, launch your manager by running:
 
-{manage_template}
+{become_managed_template}
 
 Required fields:
 - worker name
 - task name
 - goal
 
-If any required field is missing, ask the user for it before running workerctl manage.
+If any required field is missing, ask the user for it before running workerctl become-managed.
 Do not invent worker name, task name, or goal values unless the user explicitly asks you to choose them.
 
-After workerctl manage succeeds, your current tmux session will be renamed to codex-<worker-name>, and a manager tmux session will be spawned to supervise you.
+After workerctl become-managed succeeds, your current tmux session will be renamed to codex-<worker-name>, and a manager tmux session will be spawned to supervise you.
 
 After you are managed, if the user asks to take back manual control, stop supervising you, pause your manager, or unmanage this worker, run:
 
@@ -251,6 +251,7 @@ def command_start(args: argparse.Namespace) -> int:
     run(["tmux", "new-session", "-d", "-s", session_name, shell_command])
     result = {
         "attach_command": attach_session_command(session_name),
+        "become_managed_command_template": f"workerctl become-managed --session {session_name} --worker <worker-name> --task <task-name> --goal \"<goal>\" --summary \"<summary>\"",
         "cwd": str(directory),
         "manage_command_template": f"workerctl manage --session {session_name} --worker <worker-name> --task <task-name> --goal \"<goal>\" --summary \"<summary>\" --open-manager",
         "session": session_name,
@@ -900,15 +901,21 @@ def command_doctor_self(args: argparse.Namespace) -> int:
         if check["name"] in {"workerctl_on_path", "tmux_on_path", "inside_tmux", "current_tmux_session_live"}
     )
     if can_promote_in_place:
-        recommended_action = "run_manage"
+        recommended_action = "run_become_managed"
+        become_managed_template = (
+            f"workerctl become-managed --session {session} --worker <worker-name> --task <task-name> "
+            '--goal "<goal>" --summary "<summary>"'
+        )
         manage_template = (
             f"workerctl manage --session {session} --worker <worker-name> --task <task-name> "
             '--goal "<goal>" --summary "<summary>" --open-manager'
         )
     else:
         recommended_action = "cannot_promote_in_place"
+        become_managed_template = None
         manage_template = None
     result = {
+        "become_managed_command_template": become_managed_template,
         "can_promote_in_place": can_promote_in_place,
         "checks": checks,
         "current_session": session,

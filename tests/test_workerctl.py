@@ -721,6 +721,8 @@ class CliTests(unittest.TestCase):
                 payload = json.loads(stdout.getvalue())
                 self.assertEqual(result, 0)
                 self.assertTrue(payload["can_promote_in_place"])
+                self.assertEqual(payload["recommended_action"], "run_become_managed")
+                self.assertIn("workerctl become-managed --session plain-codex", payload["become_managed_command_template"])
                 self.assertIn("workerctl manage --session plain-codex", payload["manage_command_template"])
                 self.assertIn("--open-manager", payload["manage_command_template"])
         finally:
@@ -741,6 +743,7 @@ class CliTests(unittest.TestCase):
             self.assertEqual(result, 1)
             self.assertFalse(payload["can_promote_in_place"])
             self.assertEqual(payload["recommended_action"], "cannot_promote_in_place")
+            self.assertIsNone(payload["become_managed_command_template"])
             self.assertIsNone(payload["manage_command_template"])
         finally:
             commands.current_session_name = original_current_session_name
@@ -990,12 +993,13 @@ class CliTests(unittest.TestCase):
                 self.assertEqual(result, 0)
                 self.assertEqual(payload["session"], "qa-raw")
                 self.assertEqual(payload["attach_command"], "tmux attach -t qa-raw")
+                self.assertEqual(payload["become_managed_command_template"], 'workerctl become-managed --session qa-raw --worker <worker-name> --task <task-name> --goal "<goal>" --summary "<summary>"')
                 self.assertEqual(payload["manage_command_template"], 'workerctl manage --session qa-raw --worker <worker-name> --task <task-name> --goal "<goal>" --summary "<summary>" --open-manager')
                 self.assertTrue(payload["start_prompt_sent"])
                 self.assertTrue(Path(payload["start_prompt_path"]).exists())
                 prompt = Path(payload["start_prompt_path"]).read_text()
                 self.assertIn("workerctl tmux session qa-raw", prompt)
-                self.assertIn("workerctl manage --session qa-raw", prompt)
+                self.assertIn("workerctl become-managed --session qa-raw", prompt)
                 self.assertIn("workerctl unmanage", prompt)
                 self.assertIn("workerctl my-status", prompt)
                 self.assertIn("workerctl remanage --open-manager", prompt)
@@ -1284,6 +1288,21 @@ class CliTests(unittest.TestCase):
             lifecycle.current_session_name = original_current_session_name
             commands.command_name_session = original_command_name_session
             lifecycle.command_promote = original_command_promote
+
+    def test_become_managed_delegates_to_manage_with_visible_manager_default(self):
+        original_command_manage = lifecycle.command_manage
+        managed = []
+        try:
+            lifecycle.command_manage = lambda args: managed.append(args) or 0
+            args = argparse.Namespace(open_manager=True, task="task-a")
+
+            result = lifecycle.command_become_managed(args)
+
+            self.assertEqual(result, 0)
+            self.assertEqual(managed[0].task, "task-a")
+            self.assertTrue(managed[0].open_manager)
+        finally:
+            lifecycle.command_manage = original_command_manage
 
     def test_import_compat_dry_run_does_not_mutate_database(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -3362,6 +3381,7 @@ class CliTests(unittest.TestCase):
 
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertIn("audit", proc.stdout)
+        self.assertIn("become-managed", proc.stdout)
         self.assertIn("commands", proc.stdout)
         self.assertIn("doctor-self", proc.stdout)
         self.assertIn("import-compat", proc.stdout)

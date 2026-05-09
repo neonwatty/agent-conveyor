@@ -162,10 +162,10 @@ tmux attach -t qa-raw
 ```
 
 From inside that Codex session, natural language like "make yourself managed"
-should cause the agent to either run the printed `workerctl manage --session
-...` command or ask for missing required values. Full access is required if the
-agent itself needs to rename tmux sessions and spawn managers. Use
-`--no-start-prompt` only when you intentionally want a plain Codex session.
+should cause the agent to either run the printed `workerctl become-managed
+--session ...` command or ask for missing required values. Full access is
+required if the agent itself needs to rename tmux sessions and spawn managers.
+Use `--no-start-prompt` only when you intentionally want a plain Codex session.
 
 Plain Codex sessions can also self-manage if they have the installed skill and
 are already running inside tmux. Ask the agent to make itself managed; it should
@@ -176,28 +176,29 @@ workerctl doctor-self
 ```
 
 If `can_promote_in_place` is true, it can run the reported
-`workerctl manage --session ... --open-manager` command after asking for any
-missing worker name, task name, or goal. If the current Codex process is not
-inside tmux, it cannot be promoted in-place as a tmux-backed worker; start a
-tmux-backed session with `workerctl start ...` instead.
+`workerctl become-managed --session ...` command after asking for any missing
+worker name, task name, or goal. If the current Codex process is not inside
+tmux, it cannot be promoted in-place as a tmux-backed worker; start a tmux-backed
+session with `workerctl start ...` instead.
 
 An agent already running inside a tmux session can turn itself into a managed
-worker with one command. If the current tmux session is not already named
-`codex-<worker>`, pass `--worker` and `manage` will register and rename it
-before spawning the manager session:
+worker with one command. `become-managed` opens the manager terminal by default.
+If the current tmux session is not already named `codex-<worker>`, pass
+`--worker` and it will register and rename the session before spawning the
+manager:
 
 ```bash
-workerctl manage \
+workerctl become-managed \
   --worker worker-a \
   --task auth-refactor \
   --goal "Finish the auth refactor" \
   --summary "Worker is ready for manager supervision" \
-  --open-manager \
   -- --model gpt-5.4-mini
 ```
 
-`name-session` and `self-promote` remain available as lower-level commands when
-you intentionally want to separate registration from manager creation.
+`manage`, `name-session`, and `self-promote` remain available as lower-level
+commands when you intentionally want to separate registration from manager
+creation or suppress the visible manager window.
 
 Worker name claims are conservative. `manage` and `name-session` allow an
 idempotent claim by the same tmux session, but refuse a name already recorded

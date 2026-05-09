@@ -415,6 +415,11 @@ def command_manage(args: argparse.Namespace) -> int:
     return command_promote(promote_args)
 
 
+def command_become_managed(args: argparse.Namespace) -> int:
+    args.open_manager = getattr(args, "open_manager", True)
+    return command_manage(args)
+
+
 def _resolve_unmanage_task(
     conn,
     *,

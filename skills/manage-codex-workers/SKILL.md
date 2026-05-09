@@ -97,9 +97,10 @@ workerctl doctor-self
 ```
 
 If `doctor-self` reports `can_promote_in_place: true`, use its
-`manage_command_template`. Ask for missing worker name, task name, or goal
-values before running it. Prefer `--open-manager` when the user expects to see
-the manager terminal.
+`become_managed_command_template`. Ask for missing worker name, task name, or
+goal values before running it. `become-managed` opens the manager terminal by
+default; use `--no-open-manager` only if the user does not want a visible
+manager.
 
 If `doctor-self` reports `can_promote_in_place: false`, explain that this
 Codex process is not running inside a tmux session and cannot be promoted
