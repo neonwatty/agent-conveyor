@@ -122,6 +122,10 @@ prompt, first run:
 workerctl doctor-self
 ```
 
+Never run `workerctl become-managed` before `workerctl doctor-self` reports
+`can_promote_in_place: true`. This is the mandatory preflight gate for plain
+Codex sessions because in-place promotion requires a live tmux session.
+
 If `doctor-self` reports `can_promote_in_place: true`, use its
 `become_managed_command_template`. Ask for missing worker name, task name, or
 goal values before running it unless the user explicitly supplied them or asked
@@ -137,8 +141,8 @@ workerctl explain-managed-flow --json
 Natural-language command mapping:
 
 - "become managed", "manage yourself", "create a manager", "launch a manager":
-  run `workerctl doctor-self`, then `workerctl become-managed` when promotion
-  is possible and required values are known.
+  run `workerctl doctor-self`; only run `workerctl become-managed` if
+  `can_promote_in_place: true` and required values are known.
 - "stop supervising me", "stop managing me", "take back manual control",
   "unmanage this worker": run `workerctl unmanage`.
 - "resume supervision", "restart management", "get a manager again": run

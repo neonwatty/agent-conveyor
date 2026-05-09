@@ -178,7 +178,9 @@ run:
 workerctl doctor-self
 ```
 
-If `can_promote_in_place` is true, it can run the reported
+`workerctl doctor-self` is a mandatory preflight gate for plain Codex sessions:
+the agent should never run `workerctl become-managed` until
+`can_promote_in_place` is true. If `can_promote_in_place` is true, it can run the reported
 `workerctl become-managed --session ...` command after asking for any missing
 worker name, task name, or goal. If the current Codex process is not inside
 tmux, it cannot be promoted in-place as a tmux-backed worker; start a tmux-backed
