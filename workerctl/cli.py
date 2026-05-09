@@ -62,6 +62,7 @@ from workerctl.lifecycle import (
     command_resume_manager,
     command_self_promote,
     command_stop_task,
+    command_unmanage,
 )
 from workerctl.supervise import command_idle_check, command_supervise, command_watch
 
@@ -289,6 +290,14 @@ def build_parser() -> argparse.ArgumentParser:
     pause_manager.add_argument("task", help="Task name or ID.")
     pause_manager.add_argument("--path", help="Override the workerctl database path.")
     pause_manager.set_defaults(func=command_pause_manager)
+
+    unmanage = subparsers.add_parser("unmanage", help="Stop this worker's manager while leaving the worker running.")
+    unmanage.add_argument("--task", help="Explicit task name or ID; defaults to the task bound to the current session.")
+    unmanage.add_argument("--session", help="Explicit tmux session; defaults to the current tmux session.")
+    unmanage.add_argument("--dry-run", action="store_true", help="Resolve the task and manager without stopping anything.")
+    unmanage.add_argument("--json", action="store_true", help="Print stable JSON output.")
+    unmanage.add_argument("--path", help="Override the workerctl database path.")
+    unmanage.set_defaults(func=command_unmanage)
 
     resume_manager = subparsers.add_parser("resume-manager", help="Restart a paused task manager.")
     resume_manager.add_argument("task", help="Task name or ID.")

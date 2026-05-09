@@ -208,6 +208,7 @@ Pause, resume, reconcile, recover, export, and close the task:
 
 ```bash
 workerctl pause-manager auth-refactor
+workerctl unmanage
 workerctl resume-manager auth-refactor -- --model gpt-5.4-mini
 workerctl reconcile auth-refactor
 workerctl recover auth-refactor
@@ -217,6 +218,13 @@ workerctl close-stale auth-refactor --apply
 workerctl export-task auth-refactor --zip
 workerctl stop-task auth-refactor --stop-worker
 ```
+
+`pause-manager <task>` is the explicit task-scoped operator command. From inside
+the managed worker session, `workerctl unmanage` resolves the current tmux
+session to its active task, stops only the manager, marks the task `paused`, and
+leaves the worker session running for manual control. Natural-language requests
+such as "take back manual control", "pause my manager", or "stop managing me"
+should map to `workerctl unmanage`.
 
 `task-nudge` reserves SQLite budget before sending. Mutating task commands write
 durable command intent/result rows, and `audit` shows the resulting timeline.

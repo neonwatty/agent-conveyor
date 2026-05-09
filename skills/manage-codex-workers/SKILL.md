@@ -84,6 +84,29 @@ Interpret worker health as follows:
 - `stale`: use `supervise` or send a status nudge.
 - `busy_wait`: inspect capture; interrupt only when appropriate.
 
+## Worker Self-Management
+
+Use these when you are running inside the worker session itself.
+
+If the user asks you to become managed, launch a manager with the command
+template from your startup prompt. Ask for missing worker name, task name, or
+goal values before running it.
+
+If the user asks to take back manual control, stop supervising me, pause my
+manager, stop managing me, or unmanage this worker, run:
+
+```bash
+scripts/workerctl unmanage
+```
+
+This stops only the manager session and leaves the worker session running. If
+`unmanage` cannot infer the task from the current tmux session, ask the user for
+the missing task/session value. When the task is known, the fallback is:
+
+```bash
+scripts/workerctl pause-manager <task>
+```
+
 ## Nudge
 
 ```bash
