@@ -332,6 +332,17 @@ def command_promote(args: argparse.Namespace) -> int:
             )
             conn.commit()
         raise
+    if getattr(args, "open_manager", False):
+        from workerctl.commands import open_tmux_session_window
+
+        try:
+            result_payload["open_manager"] = open_tmux_session_window(
+                manager_session,
+                terminal=getattr(args, "terminal", "auto"),
+                dry_run=False,
+            )
+        except Exception as exc:
+            result_payload["open_manager_error"] = str(exc)
     print(json.dumps(result_payload, indent=2, sort_keys=True))
     return 0
 
@@ -353,9 +364,11 @@ def command_self_promote(args: argparse.Namespace) -> int:
         goal=args.goal,
         manager_instructions=args.manager_instructions,
         max_nudges=args.max_nudges,
+        open_manager=getattr(args, "open_manager", False),
         path=args.path,
         summary=args.summary,
         task=args.task,
+        terminal=getattr(args, "terminal", "auto"),
         worker=worker,
     )
     return command_promote(promote_args)
@@ -392,9 +405,11 @@ def command_manage(args: argparse.Namespace) -> int:
         goal=args.goal,
         manager_instructions=args.manager_instructions,
         max_nudges=args.max_nudges,
+        open_manager=getattr(args, "open_manager", False),
         path=args.path,
         summary=args.summary,
         task=args.task,
+        terminal=getattr(args, "terminal", "auto"),
         worker=worker,
     )
     return command_promote(promote_args)
@@ -703,6 +718,8 @@ def _resume_manager_task(
     event_prefix: str = "resume_manager",
     source: dict[str, Any] | None = None,
     worker_id: str | None = None,
+    open_manager: bool = False,
+    terminal: str = "auto",
 ) -> int:
     ensure_tool("tmux")
     ensure_tool("codex")
@@ -801,6 +818,13 @@ def _resume_manager_task(
             )
             conn.commit()
         raise
+    if open_manager:
+        from workerctl.commands import open_tmux_session_window
+
+        try:
+            result["open_manager"] = open_tmux_session_window(manager_session, terminal=terminal, dry_run=False)
+        except Exception as exc:
+            result["open_manager_error"] = str(exc)
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0
 
@@ -808,7 +832,13 @@ def _resume_manager_task(
 def command_resume_manager(args: argparse.Namespace) -> int:
     db_path = Path(args.path).expanduser().resolve() if args.path else None
     codex_args = passthrough_args(args.codex_args or [])
-    return _resume_manager_task(db_path=db_path, task=args.task, codex_args=codex_args)
+    return _resume_manager_task(
+        db_path=db_path,
+        task=args.task,
+        codex_args=codex_args,
+        open_manager=getattr(args, "open_manager", False),
+        terminal=getattr(args, "terminal", "auto"),
+    )
 
 
 def command_remanage(args: argparse.Namespace) -> int:
@@ -836,6 +866,8 @@ def command_remanage(args: argparse.Namespace) -> int:
         event_prefix="remanage",
         source=source,
         worker_id=binding["worker_id"],
+        open_manager=getattr(args, "open_manager", False),
+        terminal=getattr(args, "terminal", "auto"),
     )
 
 

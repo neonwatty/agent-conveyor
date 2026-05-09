@@ -92,7 +92,7 @@ def start_prompt_path(session_name: str) -> Path:
 
 
 def raw_worker_start_prompt(session_name: str, cwd: Path) -> str:
-    manage_template = f"workerctl manage --session {session_name} --worker <worker-name> --task <task-name> --goal \"<goal>\" --summary \"<summary>\""
+    manage_template = f"workerctl manage --session {session_name} --worker <worker-name> --task <task-name> --goal \"<goal>\" --summary \"<summary>\" --open-manager"
     return f"""You are a raw worker candidate running inside workerctl tmux session {session_name}.
 
 Current working directory: {cwd}
@@ -125,7 +125,12 @@ workerctl my-status
 
 If you are paused and the user asks to restart management or get a manager again, run:
 
-workerctl remanage
+workerctl remanage --open-manager
+
+If the user asks to see the manager or worker terminal for your task, run:
+
+workerctl open-manager <task-name>
+workerctl open-worker <task-name>
 """
 
 
@@ -187,6 +192,37 @@ def open_worker_window(name: str, *, terminal: str, dry_run: bool, force: bool) 
     return result
 
 
+def open_tmux_session_window(session_name: str, *, terminal: str, dry_run: bool) -> dict[str, Any]:
+    if sys.platform != "darwin":
+        raise WorkerError("workerctl terminal opening commands are currently implemented for macOS only.")
+    proc = run(["tmux", "has-session", "-t", session_name], check=False)
+    if proc.returncode != 0:
+        raise WorkerError(f"tmux session is not running: {session_name}")
+
+    selected_terminal = resolve_terminal(terminal)
+    attach = ["tmux", "attach", "-t", session_name]
+    attach_text = attach_session_command(session_name)
+    if selected_terminal == "ghostty":
+        command = ["open", "-na", "Ghostty.app", "--args", "-e", *attach]
+    elif selected_terminal == "terminal":
+        script = f'tell application "Terminal" to do script "{attach_text}"'
+        command = ["osascript", "-e", 'tell application "Terminal" to activate', "-e", script]
+    else:
+        raise WorkerError(f"Unsupported terminal: {terminal}")
+
+    result = {
+        "attach_command": attach_text,
+        "dry_run": dry_run,
+        "terminal": selected_terminal,
+        "tmux_session": session_name,
+    }
+    if dry_run:
+        result["command"] = command
+        return result
+    run(command)
+    return result
+
+
 def command_start(args: argparse.Namespace) -> int:
     ensure_tool("tmux")
     ensure_tool("codex")
@@ -215,7 +251,7 @@ def command_start(args: argparse.Namespace) -> int:
     result = {
         "attach_command": attach_session_command(session_name),
         "cwd": str(directory),
-        "manage_command_template": f"workerctl manage --session {session_name} --worker <worker-name> --task <task-name> --goal \"<goal>\" --summary \"<summary>\"",
+        "manage_command_template": f"workerctl manage --session {session_name} --worker <worker-name> --task <task-name> --goal \"<goal>\" --summary \"<summary>\" --open-manager",
         "session": session_name,
         "start_prompt_path": str(prompt_path) if prompt_path else None,
         "start_prompt_sent": bool(prompt_path),
@@ -616,6 +652,36 @@ def command_start_test(args: argparse.Namespace) -> int:
 
 def command_open(args: argparse.Namespace) -> int:
     result = open_worker_window(args.name, terminal=args.terminal, dry_run=args.dry_run, force=args.force)
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0
+
+
+def command_open_worker(args: argparse.Namespace) -> int:
+    db_path = Path(args.path).expanduser().resolve() if args.path else None
+    with connect_db(db_path) as conn:
+        initialize_database(conn)
+        snapshot = task_status_snapshot(conn, task=args.task)
+    worker = snapshot["worker"]
+    if worker is None:
+        raise WorkerError(f"Task {snapshot['name']} has no active worker")
+    result = open_tmux_session_window(worker["tmux_session"], terminal=args.terminal, dry_run=args.dry_run)
+    result["task"] = snapshot["name"]
+    result["worker"] = worker["name"]
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0
+
+
+def command_open_manager(args: argparse.Namespace) -> int:
+    db_path = Path(args.path).expanduser().resolve() if args.path else None
+    with connect_db(db_path) as conn:
+        initialize_database(conn)
+        snapshot = task_status_snapshot(conn, task=args.task)
+    manager = snapshot["manager"]
+    if manager is None:
+        raise WorkerError(f"Task {snapshot['name']} has no active manager")
+    result = open_tmux_session_window(manager["tmux_session"], terminal=args.terminal, dry_run=args.dry_run)
+    result["manager"] = manager["name"]
+    result["task"] = snapshot["name"]
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0
 

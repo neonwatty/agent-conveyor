@@ -944,7 +944,7 @@ class CliTests(unittest.TestCase):
                 self.assertEqual(result, 0)
                 self.assertEqual(payload["session"], "qa-raw")
                 self.assertEqual(payload["attach_command"], "tmux attach -t qa-raw")
-                self.assertEqual(payload["manage_command_template"], 'workerctl manage --session qa-raw --worker <worker-name> --task <task-name> --goal "<goal>" --summary "<summary>"')
+                self.assertEqual(payload["manage_command_template"], 'workerctl manage --session qa-raw --worker <worker-name> --task <task-name> --goal "<goal>" --summary "<summary>" --open-manager')
                 self.assertTrue(payload["start_prompt_sent"])
                 self.assertTrue(Path(payload["start_prompt_path"]).exists())
                 prompt = Path(payload["start_prompt_path"]).read_text()
@@ -952,7 +952,8 @@ class CliTests(unittest.TestCase):
                 self.assertIn("workerctl manage --session qa-raw", prompt)
                 self.assertIn("workerctl unmanage", prompt)
                 self.assertIn("workerctl my-status", prompt)
-                self.assertIn("workerctl remanage", prompt)
+                self.assertIn("workerctl remanage --open-manager", prompt)
+                self.assertIn("workerctl open-manager <task-name>", prompt)
                 self.assertIn("If any required field is missing, ask the user", prompt)
                 self.assertIn("Do not invent worker name, task name, or goal values", prompt)
                 self.assertEqual(launched[0][:5], ["tmux", "new-session", "-d", "-s", "qa-raw"])
@@ -3136,6 +3137,8 @@ class CliTests(unittest.TestCase):
         self.assertIn("manage", proc.stdout)
         self.assertIn("my-status", proc.stdout)
         self.assertIn("name-session", proc.stdout)
+        self.assertIn("open-manager", proc.stdout)
+        self.assertIn("open-worker", proc.stdout)
         self.assertIn("pause-manager", proc.stdout)
         self.assertIn("prune", proc.stdout)
         self.assertIn("promote", proc.stdout)
@@ -3526,6 +3529,47 @@ class TmuxTests(unittest.TestCase):
             subprocess.run(["tmux", "kill-session", "-t", session], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             if worker_path.exists():
                 shutil.rmtree(worker_path)
+
+    def test_open_manager_dry_run_resolves_task_manager(self):
+        original_run = commands.run
+        try:
+            commands.run = lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, "", "")
+            with tempfile.TemporaryDirectory() as tmpdir:
+                db_path = Path(tmpdir) / "workerctl.db"
+                with worker_db.connect(db_path) as conn:
+                    worker_db.initialize_database(conn)
+                    worker_db.upsert_worker(
+                        conn,
+                        name="worker-a",
+                        cwd=str(ROOT),
+                        tmux_session="codex-worker-a",
+                        state="active",
+                    )
+                    task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
+                    worker_db.bind_task_worker(conn, task="task-a", worker="worker-a", binding_id="binding-1")
+                    manager_id = worker_db.create_manager(
+                        conn,
+                        task_id=task_id,
+                        name="manager-a",
+                        tmux_session="codex-manager-task-a",
+                        codex_args=[],
+                        state="ready",
+                    )
+                    worker_db.attach_manager_to_binding(conn, task_id=task_id, manager_id=manager_id)
+                    conn.commit()
+
+                args = argparse.Namespace(dry_run=True, path=str(db_path), task="task-a", terminal="terminal")
+                with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                    result = commands.command_open_manager(args)
+
+                payload = json.loads(stdout.getvalue())
+                self.assertEqual(result, 0)
+                self.assertTrue(payload["dry_run"])
+                self.assertEqual(payload["task"], "task-a")
+                self.assertEqual(payload["manager"], "manager-a")
+                self.assertEqual(payload["attach_command"], "tmux attach -t codex-manager-task-a")
+        finally:
+            commands.run = original_run
 
 
 if __name__ == "__main__":
