@@ -149,16 +149,21 @@ workerctl promote worker-a \
 
 To start a normal Codex session that can later declare itself as a managed
 worker, use `start`. This creates a raw tmux session and does not register a
-worker yet:
+worker yet. By default, `start` gives the raw worker agent a bootstrap prompt
+with its session name, the exact `workerctl manage --session ...` command
+template, and instructions to ask for missing worker/task/goal values rather
+than guessing:
 
 ```bash
 workerctl start qa-raw --cwd "$PWD" -- --sandbox danger-full-access --ask-for-approval never
 tmux attach -t qa-raw
 ```
 
-From inside that Codex session, the agent can run the printed `workerctl manage
---session ...` command. Full access is required if the agent itself needs to
-rename tmux sessions and spawn managers.
+From inside that Codex session, natural language like "make yourself managed"
+should cause the agent to either run the printed `workerctl manage --session
+...` command or ask for missing required values. Full access is required if the
+agent itself needs to rename tmux sessions and spawn managers. Use
+`--no-start-prompt` only when you intentionally want a plain Codex session.
 
 An agent already running inside a tmux session can turn itself into a managed
 worker with one command. If the current tmux session is not already named

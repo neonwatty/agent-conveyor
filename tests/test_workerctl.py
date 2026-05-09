@@ -918,6 +918,7 @@ class CliTests(unittest.TestCase):
         launched = []
         original_run = commands.run
         original_ensure_tool = commands.ensure_tool
+        original_state_root = commands.state_root
         try:
             commands.ensure_tool = lambda tool: tool
             def fake_run(argv, **kwargs):
@@ -927,25 +928,64 @@ class CliTests(unittest.TestCase):
                 return subprocess.CompletedProcess(argv, 0, "", "")
 
             commands.run = fake_run
-            args = argparse.Namespace(
-                codex_args=["--", "--model", "gpt-5.4-mini"],
-                cwd=str(ROOT),
-                session="qa-raw",
-            )
+            with tempfile.TemporaryDirectory() as tmpdir:
+                commands.state_root = lambda: Path(tmpdir)
+                args = argparse.Namespace(
+                    codex_args=["--", "--model", "gpt-5.4-mini"],
+                    cwd=str(ROOT),
+                    session="qa-raw",
+                    start_prompt=True,
+                )
+
+                with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                    result = commands.command_start(args)
+
+                payload = json.loads(stdout.getvalue())
+                self.assertEqual(result, 0)
+                self.assertEqual(payload["session"], "qa-raw")
+                self.assertEqual(payload["attach_command"], "tmux attach -t qa-raw")
+                self.assertEqual(payload["manage_command_template"], 'workerctl manage --session qa-raw --worker <worker-name> --task <task-name> --goal "<goal>" --summary "<summary>"')
+                self.assertTrue(payload["start_prompt_sent"])
+                self.assertTrue(Path(payload["start_prompt_path"]).exists())
+                prompt = Path(payload["start_prompt_path"]).read_text()
+                self.assertIn("workerctl tmux session qa-raw", prompt)
+                self.assertIn("workerctl manage --session qa-raw", prompt)
+                self.assertIn("If any required field is missing, ask the user", prompt)
+                self.assertIn("Do not invent worker name, task name, or goal values", prompt)
+                self.assertEqual(launched[0][:5], ["tmux", "new-session", "-d", "-s", "qa-raw"])
+                self.assertIn("codex --cd", launched[0][5])
+                self.assertIn("--no-alt-screen", launched[0][5])
+                self.assertIn("'--model' 'gpt-5.4-mini'", launched[0][5])
+                self.assertIn("/bin':$PATH", launched[0][5])
+                self.assertIn("$(cat", launched[0][5])
+        finally:
+            commands.run = original_run
+            commands.ensure_tool = original_ensure_tool
+            commands.state_root = original_state_root
+
+    def test_start_can_skip_bootstrap_prompt(self):
+        launched = []
+        original_run = commands.run
+        original_ensure_tool = commands.ensure_tool
+        try:
+            commands.ensure_tool = lambda tool: tool
+            def fake_run(argv, **kwargs):
+                if argv[:3] == ["tmux", "has-session", "-t"]:
+                    return subprocess.CompletedProcess(argv, 1, "", "")
+                launched.append(argv)
+                return subprocess.CompletedProcess(argv, 0, "", "")
+
+            commands.run = fake_run
+            args = argparse.Namespace(codex_args=[], cwd=str(ROOT), session="qa-raw", start_prompt=False)
 
             with contextlib.redirect_stdout(io.StringIO()) as stdout:
                 result = commands.command_start(args)
 
             payload = json.loads(stdout.getvalue())
             self.assertEqual(result, 0)
-            self.assertEqual(payload["session"], "qa-raw")
-            self.assertEqual(payload["attach_command"], "tmux attach -t qa-raw")
-            self.assertEqual(payload["manage_command"], "workerctl manage --session qa-raw --worker <name> --task <task> --goal <goal>")
-            self.assertEqual(launched[0][:5], ["tmux", "new-session", "-d", "-s", "qa-raw"])
-            self.assertIn("codex --cd", launched[0][5])
-            self.assertIn("--no-alt-screen", launched[0][5])
-            self.assertIn("'--model' 'gpt-5.4-mini'", launched[0][5])
-            self.assertIn("/bin':$PATH", launched[0][5])
+            self.assertFalse(payload["start_prompt_sent"])
+            self.assertIsNone(payload["start_prompt_path"])
+            self.assertNotIn("$(cat", launched[0][5])
         finally:
             commands.run = original_run
             commands.ensure_tool = original_ensure_tool
@@ -956,7 +996,7 @@ class CliTests(unittest.TestCase):
         try:
             commands.ensure_tool = lambda tool: tool
             commands.run = lambda argv, **kwargs: subprocess.CompletedProcess(argv, 0, "", "")
-            args = argparse.Namespace(codex_args=[], cwd=str(ROOT), session="qa-raw")
+            args = argparse.Namespace(codex_args=[], cwd=str(ROOT), session="qa-raw", start_prompt=True)
 
             with self.assertRaisesRegex(WorkerError, "tmux session already exists"):
                 commands.command_start(args)

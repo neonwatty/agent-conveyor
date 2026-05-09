@@ -132,11 +132,14 @@ preserved when a compatibility config is re-read.
 
 Operator-facing convenience command for launching a normal Codex session inside
 tmux without registering it as a worker yet. It starts Codex with this repo's
-`bin/` on `PATH`, prints the tmux attach command, and leaves worker declaration
-to the agent through `workerctl manage --session <session-name> ...`. Agents
-that need to self-manage must be launched with Codex permissions that allow
-tmux socket access, such as `-- --sandbox danger-full-access --ask-for-approval
-never`.
+`bin/` on `PATH`, prints the tmux attach command, persists an auditable
+bootstrap prompt under `.codex-workers/artifacts/start-prompts/`, and sends
+that prompt to the raw worker agent. The prompt tells the worker its session
+name, the exact `workerctl manage --session <session-name> ...` command shape,
+and that it must ask for missing worker/task/goal values rather than guessing.
+Agents that need to self-manage must be launched with Codex permissions that
+allow tmux socket access, such as `-- --sandbox danger-full-access
+--ask-for-approval never`.
 
 Everything after `--` is passed as CLI args to the Codex process.
 

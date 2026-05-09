@@ -131,7 +131,13 @@ def build_parser() -> argparse.ArgumentParser:
     start = subparsers.add_parser("start", help="Start a normal Codex session inside tmux for later self-management.")
     start.add_argument("session", help="Raw tmux session name to start, e.g. qa-raw.")
     start.add_argument("--cwd", default=str(INVOCATION_CWD), help="Working directory for Codex.")
-    start.set_defaults(func=command_start)
+    start.add_argument(
+        "--no-start-prompt",
+        action="store_false",
+        dest="start_prompt",
+        help="Start Codex without the worker self-management bootstrap prompt.",
+    )
+    start.set_defaults(func=command_start, start_prompt=True)
 
     name_session = subparsers.add_parser(
         "name-session",
