@@ -45,6 +45,7 @@ from workerctl.commands import (
     command_tail,
     command_task_capture,
     command_task_events,
+    command_task_health,
     command_task_idle_check,
     command_task_interrupt,
     command_task_nudge,
@@ -430,6 +431,18 @@ def build_parser() -> argparse.ArgumentParser:
     task_status.add_argument("--json", action="store_true", help="Print stable JSON output.")
     task_status.add_argument("--path", help="Override the workerctl database path.")
     task_status.set_defaults(func=command_task_status)
+
+    task_health = subparsers.add_parser("task-health", help="Check task integrity, live bindings, and manager health.")
+    task_health.add_argument("task", help="Task name or ID.")
+    task_health.add_argument("--json", action="store_true", help="Print stable JSON output.")
+    task_health.add_argument(
+        "--manager-stale-seconds",
+        type=int,
+        default=DEFAULT_MANAGER_STALE_SECONDS,
+        help="Warn when a live manager heartbeat is older than this many seconds.",
+    )
+    task_health.add_argument("--path", help="Override the workerctl database path.")
+    task_health.set_defaults(func=command_task_health)
 
     task_capture = subparsers.add_parser("task-capture", help="Capture terminal output for a task's bound worker.")
     task_capture.add_argument("task", help="Task name or ID.")

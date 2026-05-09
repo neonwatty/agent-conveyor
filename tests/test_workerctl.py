@@ -1759,6 +1759,81 @@ class CliTests(unittest.TestCase):
             self.assertEqual(snapshot["worker"]["tmux_pane_id"], "%1")
             self.assertEqual(snapshot["worker_status"]["state"], "planning")
 
+    def test_task_health_reports_ok_task(self):
+        original_session_snapshot = worker_identity.session_snapshot
+        try:
+            worker_identity.session_snapshot = lambda session: {
+                "live": True,
+                "pane_id": "%2" if session == "codex-manager-task-a" else "%1",
+                "session": session,
+            }
+            with tempfile.TemporaryDirectory() as tmpdir:
+                db_path = Path(tmpdir) / "workerctl.db"
+                with worker_db.connect(db_path) as conn:
+                    worker_db.initialize_database(conn)
+                    worker_id = worker_db.upsert_worker(
+                        conn,
+                        name="worker-a",
+                        cwd=str(ROOT),
+                        tmux_session="codex-worker-a",
+                        tmux_pane_id="%1",
+                        state="active",
+                    )
+                    task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
+                    worker_db.bind_task_worker(conn, task="task-a", worker="worker-a")
+                    manager_id = worker_db.create_manager(
+                        conn,
+                        task_id=task_id,
+                        name="manager-a",
+                        tmux_session="codex-manager-task-a",
+                        tmux_pane_id="%2",
+                        codex_args=[],
+                        state="ready",
+                    )
+                    worker_db.attach_manager_to_binding(conn, task_id=task_id, manager_id=manager_id)
+                    worker_db.set_task_state(conn, task_id=task_id, state="managed")
+                    worker_db.mark_manager_seen(conn, manager_id=manager_id)
+                    conn.commit()
+
+                args = argparse.Namespace(json=True, manager_stale_seconds=60, path=str(db_path), task="task-a")
+                with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                    result = commands.command_task_health(args)
+
+                self.assertEqual(result, 0)
+                payload = json.loads(stdout.getvalue())
+                self.assertTrue(payload["ok"])
+                self.assertEqual(payload["issues"], [])
+                self.assertEqual(payload["task"]["id"], task_id)
+                self.assertEqual(payload["live_reconcile"]["worker"]["id"], worker_id)
+        finally:
+            worker_identity.session_snapshot = original_session_snapshot
+
+    def test_task_health_reports_integrity_and_reconcile_issues(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
+                worker_db.set_task_state(conn, task_id=task_id, state="managed")
+                worker_db.create_manager(
+                    conn,
+                    task_id=task_id,
+                    name="manager-a",
+                    tmux_session="codex-manager-task-a",
+                    codex_args=[],
+                    state="ready",
+                )
+                conn.commit()
+
+            proc = self.run_workerctl("task-health", "task-a", "--json", "--path", str(db_path))
+
+            self.assertEqual(proc.returncode, 1, proc.stderr)
+            payload = json.loads(proc.stdout)
+            codes = {issue["code"] for issue in payload["issues"]}
+            self.assertFalse(payload["ok"])
+            self.assertIn("managed_without_active_worker_binding", codes)
+            self.assertTrue(any("close-stale" in action for action in payload["recommended_actions"]))
+
     def test_task_capture_command_uses_bound_worker(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "workerctl.db"
@@ -3404,6 +3479,7 @@ class CliTests(unittest.TestCase):
         self.assertIn("export-task", proc.stdout)
         self.assertIn("task-capture", proc.stdout)
         self.assertIn("task-events", proc.stdout)
+        self.assertIn("task-health", proc.stdout)
         self.assertIn("task-idle-check", proc.stdout)
         self.assertIn("task-interrupt", proc.stdout)
         self.assertIn("task-nudge", proc.stdout)
