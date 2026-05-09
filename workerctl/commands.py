@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import json
 import shutil
 import sys
@@ -867,6 +868,60 @@ def command_doctor(args: argparse.Namespace) -> int:
     }
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0 if ok else 1
+
+
+def _codex_home() -> Path:
+    return Path(os.environ.get("CODEX_HOME", Path.home() / ".codex")).expanduser()
+
+
+def command_doctor_self(args: argparse.Namespace) -> int:
+    session = getattr(args, "session", None) or current_session_name()
+    tmux_path = shutil.which("tmux")
+    codex_path = shutil.which("codex")
+    workerctl_path = shutil.which("workerctl")
+    skill_path = _codex_home() / "skills" / "manage-codex-workers" / "SKILL.md"
+    checks = [
+        {"name": "workerctl_on_path", "ok": bool(workerctl_path), "path": workerctl_path},
+        {"name": "tmux_on_path", "ok": bool(tmux_path), "path": tmux_path},
+        {"name": "codex_on_path", "ok": bool(codex_path), "path": codex_path},
+        {"name": "inside_tmux", "ok": bool(session), "session": session},
+        {"name": "manage_skill_installed", "ok": skill_path.exists(), "path": str(skill_path)},
+    ]
+    if session and tmux_path:
+        proc = run(["tmux", "has-session", "-t", session], check=False)
+        checks.append({"name": "current_tmux_session_live", "ok": proc.returncode == 0, "session": session})
+    if workerctl_path:
+        proc = run(["workerctl", "classify", "--text", "workerctl self doctor"], check=False)
+        checks.append({"name": "workerctl_executable", "ok": proc.returncode == 0, "path": workerctl_path})
+
+    can_promote_in_place = all(
+        check["ok"]
+        for check in checks
+        if check["name"] in {"workerctl_on_path", "tmux_on_path", "inside_tmux", "current_tmux_session_live"}
+    )
+    if can_promote_in_place:
+        recommended_action = "run_manage"
+        manage_template = (
+            f"workerctl manage --session {session} --worker <worker-name> --task <task-name> "
+            '--goal "<goal>" --summary "<summary>" --open-manager'
+        )
+    else:
+        recommended_action = "cannot_promote_in_place"
+        manage_template = None
+    result = {
+        "can_promote_in_place": can_promote_in_place,
+        "checks": checks,
+        "current_session": session,
+        "manage_command_template": manage_template,
+        "ok": can_promote_in_place,
+        "recommended_action": recommended_action,
+        "skill_path": str(skill_path),
+    }
+    if args.json:
+        print(json.dumps(result, indent=2, sort_keys=True))
+    else:
+        print(json.dumps(result, indent=2, sort_keys=True))
+    return 0 if can_promote_in_place else 1
 
 
 def command_db_doctor(args: argparse.Namespace) -> int:

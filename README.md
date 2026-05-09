@@ -61,7 +61,9 @@ export PATH="/Users/neonwatty/Desktop/codex-terminal-manager/bin:$PATH"
 workerctl doctor
 ```
 
-`scripts/install-local --write` updates future shells. The `export` line makes `workerctl` available in the current shell.
+`scripts/install-local --write` updates future shells and installs the
+`manage-codex-workers` skill into `$CODEX_HOME/skills` or `~/.codex/skills`.
+The `export` line makes `workerctl` available in the current shell.
 
 Start a low-risk worker that only updates its ignored runtime status file:
 
@@ -164,6 +166,20 @@ should cause the agent to either run the printed `workerctl manage --session
 ...` command or ask for missing required values. Full access is required if the
 agent itself needs to rename tmux sessions and spawn managers. Use
 `--no-start-prompt` only when you intentionally want a plain Codex session.
+
+Plain Codex sessions can also self-manage if they have the installed skill and
+are already running inside tmux. Ask the agent to make itself managed; it should
+run:
+
+```bash
+workerctl doctor-self
+```
+
+If `can_promote_in_place` is true, it can run the reported
+`workerctl manage --session ... --open-manager` command after asking for any
+missing worker name, task name, or goal. If the current Codex process is not
+inside tmux, it cannot be promoted in-place as a tmux-backed worker; start a
+tmux-backed session with `workerctl start ...` instead.
 
 An agent already running inside a tmux session can turn itself into a managed
 worker with one command. If the current tmux session is not already named
@@ -332,7 +348,7 @@ To run `workerctl` from anywhere, add the local `bin` directory to your shell pa
 export PATH="/Users/neonwatty/Desktop/codex-terminal-manager/bin:$PATH"
 ```
 
-Or install that PATH line into `~/.zshrc`:
+Or install that PATH line and the Codex skill into `~/.zshrc` / `~/.codex`:
 
 ```bash
 scripts/install-local --write

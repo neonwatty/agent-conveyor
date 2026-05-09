@@ -159,6 +159,17 @@ omitted and `manage` will infer the worker name.
 Use `--open-manager` to open a visible terminal attached to the spawned manager
 without manually typing a tmux attach command.
 
+### `workerctl doctor-self`
+
+Worker-facing preflight for plain Codex sessions. It checks whether `workerctl`,
+`tmux`, and `codex` are on `PATH`, whether the current process is inside a live
+tmux session, and whether the `manage-codex-workers` skill is installed under
+`$CODEX_HOME/skills` or `~/.codex/skills`. If in-place promotion is possible, it
+prints the exact `workerctl manage --session ... --open-manager` template. If
+not, the agent should explain that the current non-tmux Codex process cannot be
+promoted in-place as a tmux-backed worker and offer `workerctl start ...`
+instead.
+
 Everything after `--` is passed as CLI args to the manager's Codex process.
 
 ### `workerctl name-session <worker-name>`
