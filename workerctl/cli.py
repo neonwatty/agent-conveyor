@@ -34,6 +34,8 @@ from workerctl.commands import (
     command_name_session,
     command_nudge,
     command_open,
+    command_open_manager,
+    command_open_worker,
     command_prune,
     command_start,
     command_start_test,
@@ -260,6 +262,13 @@ def build_parser() -> argparse.ArgumentParser:
     manage.add_argument("--worker-task", help="Task text for the worker status contract when registering this session.")
     manage.add_argument("--session", help="Explicit tmux session to manage; defaults to the current tmux session.")
     manage.add_argument("--force-name", action="store_true", help="Replace an existing worker config when registering this session.")
+    manage.add_argument("--open-manager", action="store_true", help="Open a terminal window attached to the spawned manager.")
+    manage.add_argument(
+        "--terminal",
+        choices=("auto", "ghostty", "terminal"),
+        default="auto",
+        help="Terminal app to use with --open-manager.",
+    )
     manage.add_argument("--path", help="Override the workerctl database path.")
     manage.set_defaults(func=command_manage)
 
@@ -272,6 +281,13 @@ def build_parser() -> argparse.ArgumentParser:
     promote.add_argument("--max-nudges", type=int, default=3, help="Nudge budget for the manager.")
     promote.add_argument("--budget-hours", type=int, default=24, help="Hours until the default nudge budget expires.")
     promote.add_argument("--budget-expires-at", help="Explicit ISO timestamp for nudge budget expiry.")
+    promote.add_argument("--open-manager", action="store_true", help="Open a terminal window attached to the spawned manager.")
+    promote.add_argument(
+        "--terminal",
+        choices=("auto", "ghostty", "terminal"),
+        default="auto",
+        help="Terminal app to use with --open-manager.",
+    )
     promote.add_argument("--path", help="Override the workerctl database path.")
     promote.set_defaults(func=command_promote)
 
@@ -285,6 +301,13 @@ def build_parser() -> argparse.ArgumentParser:
     self_promote.add_argument("--budget-expires-at", help="Explicit ISO timestamp for nudge budget expiry.")
     self_promote.add_argument("--worker", help="Override current-session worker inference.")
     self_promote.add_argument("--session", help="Explicit tmux session to infer worker name from.")
+    self_promote.add_argument("--open-manager", action="store_true", help="Open a terminal window attached to the spawned manager.")
+    self_promote.add_argument(
+        "--terminal",
+        choices=("auto", "ghostty", "terminal"),
+        default="auto",
+        help="Terminal app to use with --open-manager.",
+    )
     self_promote.add_argument("--path", help="Override the workerctl database path.")
     self_promote.set_defaults(func=command_self_promote)
 
@@ -311,11 +334,25 @@ def build_parser() -> argparse.ArgumentParser:
     remanage = subparsers.add_parser("remanage", help="Restart this worker's paused manager.")
     remanage.add_argument("--task", help="Explicit task name or ID; defaults to the task bound to the current session.")
     remanage.add_argument("--session", help="Explicit tmux session; defaults to the current tmux session.")
+    remanage.add_argument("--open-manager", action="store_true", help="Open a terminal window attached to the spawned manager.")
+    remanage.add_argument(
+        "--terminal",
+        choices=("auto", "ghostty", "terminal"),
+        default="auto",
+        help="Terminal app to use with --open-manager.",
+    )
     remanage.add_argument("--path", help="Override the workerctl database path.")
     remanage.set_defaults(func=command_remanage)
 
     resume_manager = subparsers.add_parser("resume-manager", help="Restart a paused task manager.")
     resume_manager.add_argument("task", help="Task name or ID.")
+    resume_manager.add_argument("--open-manager", action="store_true", help="Open a terminal window attached to the spawned manager.")
+    resume_manager.add_argument(
+        "--terminal",
+        choices=("auto", "ghostty", "terminal"),
+        default="auto",
+        help="Terminal app to use with --open-manager.",
+    )
     resume_manager.add_argument("--path", help="Override the workerctl database path.")
     resume_manager.set_defaults(func=command_resume_manager)
 
@@ -536,6 +573,30 @@ def build_parser() -> argparse.ArgumentParser:
         help="Allow opening another terminal window when this worker already has an open event.",
     )
     open_cmd.set_defaults(func=command_open)
+
+    open_worker = subparsers.add_parser("open-worker", help="Open a terminal window attached to a task's worker.")
+    open_worker.add_argument("task", help="Task name or ID.")
+    open_worker.add_argument(
+        "--terminal",
+        choices=("auto", "ghostty", "terminal"),
+        default="auto",
+        help="Terminal app to use.",
+    )
+    open_worker.add_argument("--dry-run", action="store_true", help="Print the launch command without opening a window.")
+    open_worker.add_argument("--path", help="Override the workerctl database path.")
+    open_worker.set_defaults(func=command_open_worker)
+
+    open_manager = subparsers.add_parser("open-manager", help="Open a terminal window attached to a task's manager.")
+    open_manager.add_argument("task", help="Task name or ID.")
+    open_manager.add_argument(
+        "--terminal",
+        choices=("auto", "ghostty", "terminal"),
+        default="auto",
+        help="Terminal app to use.",
+    )
+    open_manager.add_argument("--dry-run", action="store_true", help="Print the launch command without opening a window.")
+    open_manager.add_argument("--path", help="Override the workerctl database path.")
+    open_manager.set_defaults(func=command_open_manager)
 
     stop = subparsers.add_parser("stop", help="Stop a worker tmux session.")
     stop.add_argument("name")

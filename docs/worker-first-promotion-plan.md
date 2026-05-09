@@ -88,8 +88,8 @@ capture and git state.
 ### `workerctl resume-manager <name>`
 
 Start a fresh manager for a paused task from the latest SQLite task state,
-status, prompt policy, and audit history. This is the only path from `paused`
-back to `managed`.
+status, prompt policy, and audit history. Use `--open-manager` when the manager
+terminal should be opened visibly after spawn.
 
 ### `workerctl recover [<name>]`
 
@@ -137,6 +137,8 @@ bootstrap prompt under `.codex-workers/artifacts/start-prompts/`, and sends
 that prompt to the raw worker agent. The prompt tells the worker its session
 name, the exact `workerctl manage --session <session-name> ...` command shape,
 and that it must ask for missing worker/task/goal values rather than guessing.
+The default bootstrap command includes `--open-manager` so natural-language
+self-management opens a visible manager terminal.
 Agents that need to self-manage must be launched with Codex permissions that
 allow tmux socket access, such as `-- --sandbox danger-full-access
 --ask-for-approval never`.
@@ -153,6 +155,9 @@ spawn, and command/event audit rows.
 
 If the current session is already named `codex-<worker-name>`, `--worker` can be
 omitted and `manage` will infer the worker name.
+
+Use `--open-manager` to open a visible terminal attached to the spawned manager
+without manually typing a tmux attach command.
 
 Everything after `--` is passed as CLI args to the manager's Codex process.
 
@@ -274,14 +279,15 @@ or paused, or what command should be run next. It resolves the active task
 binding from tmux and prints the worker name/ID, task name/ID/state, manager
 state, latest status contract, and suggested next commands.
 
-### `workerctl remanage [--task NAME] [--session SESSION] [-- CODEX_ARGS...]`
+### `workerctl remanage [--task NAME] [--session SESSION] [--open-manager] [-- CODEX_ARGS...]`
 
 Worker-facing resume command. Run this from inside a paused worker session when
 the user asks to restart supervision, resume management, or get a manager again.
 It resolves the current task from tmux, verifies worker identity, starts a fresh
 manager from the latest manager prompt, marks the task `managed`, and records
 worker-initiated audit metadata. It is the worker-facing counterpart to
-`resume-manager <name>`.
+`resume-manager <name>`. Use `--open-manager` when the user expects to see the
+new manager terminal.
 
 ### `workerctl stop-manager <name>`
 
@@ -293,7 +299,9 @@ Stop the manager. Optionally stop the worker too.
 
 ### `workerctl open-worker <name>` / `workerctl open-manager <name>`
 
-Open a terminal window attached to the bound worker or manager session.
+Open a terminal window attached to the bound worker or manager session. These
+commands are task-scoped, so users do not have to know or type raw tmux session
+names.
 
 ## Task State
 
@@ -949,7 +957,9 @@ Remaining work:
 
 ## Decisions Made
 
-- Promote opens the manager terminal by default. No `--open-manager` flag needed.
+- Worker-facing bootstrap prompts include `--open-manager` so fresh natural
+  language self-management opens the manager visibly. Operator commands can also
+  pass `--open-manager` explicitly.
 - Default nudge budget: 3.
 - Default runtime: 30 minutes.
 - Default capture for summary: last 300 lines of worker output.

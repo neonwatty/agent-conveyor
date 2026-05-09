@@ -90,7 +90,8 @@ Use these when you are running inside the worker session itself.
 
 If the user asks you to become managed, launch a manager with the command
 template from your startup prompt. Ask for missing worker name, task name, or
-goal values before running it.
+goal values before running it. Prefer `--open-manager` when the user expects to
+see the manager terminal.
 
 If the user asks to take back manual control, stop supervising me, pause my
 manager, stop managing me, or unmanage this worker, run:
@@ -117,7 +118,14 @@ If the user asks to restart management, resume supervision, or get a manager
 again after the task is paused, run:
 
 ```bash
-scripts/workerctl remanage
+scripts/workerctl remanage --open-manager
+```
+
+To show task-bound terminals without raw tmux commands:
+
+```bash
+scripts/workerctl open-manager <task>
+scripts/workerctl open-worker <task>
 ```
 
 ## Nudge

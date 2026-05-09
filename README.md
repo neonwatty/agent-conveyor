@@ -176,6 +176,7 @@ workerctl manage \
   --task auth-refactor \
   --goal "Finish the auth refactor" \
   --summary "Worker is ready for manager supervision" \
+  --open-manager \
   -- --model gpt-5.4-mini
 ```
 
@@ -200,6 +201,8 @@ workerctl audit auth-refactor --json
 workerctl commands --task auth-refactor --json
 workerctl commands --task auth-refactor --type task_nudge --state failed --json
 workerctl task-events auth-refactor --json
+workerctl open-worker auth-refactor
+workerctl open-manager auth-refactor
 workerctl db-doctor --live
 workerctl import-compat
 ```
@@ -231,12 +234,14 @@ the task name:
 
 ```bash
 workerctl my-status
-workerctl remanage -- --model gpt-5.4-mini
+workerctl remanage --open-manager -- --model gpt-5.4-mini
 ```
 
 `my-status` prints the current worker, task, task state, manager state, and
 suggested next commands. `remanage` is the worker-facing counterpart to
-`resume-manager <task>` and restarts supervision for a paused task.
+`resume-manager <task>` and restarts supervision for a paused task. Use
+`open-manager <task>` or `open-worker <task>` to open task-bound terminals
+without spelling raw tmux session names.
 
 `task-nudge` reserves SQLite budget before sending. Mutating task commands write
 durable command intent/result rows, and `audit` shows the resulting timeline.
