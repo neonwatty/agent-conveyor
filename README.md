@@ -165,6 +165,9 @@ From inside that Codex session, natural language like "make yourself managed"
 should cause the agent to either run the printed `workerctl become-managed
 --session ...` command or ask for missing required values. Full access is
 required if the agent itself needs to rename tmux sessions and spawn managers.
+When `start` is given Codex args after `--`, the bootstrap prompt carries those
+args into the `become-managed` template so the manager gets the same tmux-capable
+permissions.
 Use `--no-start-prompt` only when you intentionally want a plain Codex session.
 
 Plain Codex sessions can also self-manage if they have the installed skill and

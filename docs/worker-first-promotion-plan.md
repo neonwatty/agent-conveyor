@@ -141,7 +141,9 @@ The default bootstrap command uses `become-managed`, which opens a visible
 manager terminal unless `--no-open-manager` is passed.
 Agents that need to self-manage must be launched with Codex permissions that
 allow tmux socket access, such as `-- --sandbox danger-full-access
---ask-for-approval never`.
+--ask-for-approval never`. `start` preserves Codex args passed after `--` in
+the bootstrap `become-managed` template, so the spawned manager gets the same
+tmux-capable permissions as the worker.
 
 Everything after `--` is passed as CLI args to the Codex process.
 
