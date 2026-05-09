@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from workerctl.classify import classify_busy_wait, classify_startup_output
+from workerctl.audit import mutation_audit_result
 from workerctl.constants import DEFAULT_MANAGER_STALE_SECONDS, PROJECT_ROOT, VALID_STATES
 from workerctl.core import WorkerError, ensure_tool, now_iso, run, sh_quote
 from workerctl.db import active_manager, active_task_worker
@@ -34,6 +35,7 @@ from workerctl.db import mark_manager_seen
 from workerctl.db import mark_command_attempted
 from workerctl.db import mark_worker_state, upsert_worker
 from workerctl.db import reserve_nudge_budget
+from workerctl.db import require_manager_decision_ok
 from workerctl.db import set_worker_pane_id
 from workerctl.db import task_audit
 from workerctl.db import task_status_snapshot
@@ -1375,7 +1377,12 @@ def command_task_status(args: argparse.Namespace) -> int:
 
 def command_task_health(args: argparse.Namespace) -> int:
     db_path = Path(args.path).expanduser().resolve() if args.path else None
-    result = task_health_result(db_path, args.task, manager_stale_seconds=args.manager_stale_seconds)
+    result = task_health_result(
+        db_path,
+        args.task,
+        audit_decisions=getattr(args, "audit_decisions", False),
+        manager_stale_seconds=args.manager_stale_seconds,
+    )
     if getattr(args, "record", False):
         severity = "info" if result["ok"] else "error"
         message = "task health ok" if result["ok"] else "task health needs attention"
@@ -1415,13 +1422,21 @@ def command_task_health(args: argparse.Namespace) -> int:
     return 0 if result["ok"] else 1
 
 
-def task_health_result(db_path: Path | None, task: str, *, manager_stale_seconds: int) -> dict[str, Any]:
+def task_health_result(
+    db_path: Path | None,
+    task: str,
+    *,
+    audit_decisions: bool = False,
+    manager_stale_seconds: int,
+) -> dict[str, Any]:
     with connect_db(db_path) as conn:
         initialize_database(conn)
         snapshot = task_status_snapshot(conn, task=task)
+        audit = task_audit(conn, task=task) if audit_decisions else None
     reconcile = reconcile_rows(db_path, task=snapshot["id"], recover=False)
     reconcile_result = reconcile[0] if reconcile else None
     liveness_warnings = manager_liveness_warnings(reconcile, stale_seconds=manager_stale_seconds)
+    decision_audit = mutation_audit_result(audit) if audit_decisions and audit else None
     issues: list[dict[str, Any]] = []
     recommended_actions: list[str] = []
     for issue in snapshot["integrity"]["issues"]:
@@ -1441,6 +1456,18 @@ def task_health_result(db_path: Path | None, task: str, *, manager_stale_seconds
             )
     for warning in liveness_warnings:
         issues.append({"code": warning["reason"], "manager_id": warning["manager_id"], "source": "manager_liveness"})
+    if decision_audit:
+        for record in decision_audit["records"]:
+            if record["warnings"]:
+                issues.append(
+                    {
+                        "code": "manager_decision_audit_warning",
+                        "command_id": record["command"]["id"],
+                        "command_type": record["command"]["type"],
+                        "source": "manager_decision_audit",
+                        "warnings": record["warnings"],
+                    }
+                )
 
     issue_codes = {issue["code"] for issue in issues}
     if "managed_without_active_worker_binding" in issue_codes:
@@ -1455,10 +1482,13 @@ def task_health_result(db_path: Path | None, task: str, *, manager_stale_seconds
         recommended_actions.append("Inspect workerctl commands --task <task> and retry or resolve unfinished side effects manually.")
     if any(issue["source"] == "manager_liveness" for issue in issues):
         recommended_actions.append("Inspect the manager terminal before taking recovery action; heartbeat warnings are not hard drift.")
+    if any(issue["source"] == "manager_decision_audit" for issue in issues):
+        recommended_actions.append("Run workerctl mutation-audit <task> --json; future manager mutations should record manager-decision first and pass --decision-id.")
     if not recommended_actions:
         recommended_actions.append("No action required.")
 
     result = {
+        "decision_audit": decision_audit,
         "integrity": snapshot["integrity"],
         "issues": issues,
         "live_reconcile": reconcile_result,
@@ -1826,6 +1856,11 @@ def command_task_nudge(args: argparse.Namespace) -> int:
             decision_id=getattr(args, "decision_id", None),
             allowed_decisions={"nudge"},
         )
+        require_manager_decision_ok(
+            command_type="task_nudge",
+            decision_check=decision_check,
+            strict=getattr(args, "strict_decisions", False),
+        )
         command_id = create_db_command(
             conn,
             command_type="task_nudge",
@@ -1950,6 +1985,11 @@ def command_task_interrupt(args: argparse.Namespace) -> int:
             decision_id=getattr(args, "decision_id", None),
             allowed_decisions={"interrupt"},
         )
+        require_manager_decision_ok(
+            command_type="task_interrupt",
+            decision_check=decision_check,
+            strict=getattr(args, "strict_decisions", False),
+        )
         command_id = create_db_command(
             conn,
             command_type="task_interrupt",
@@ -2068,71 +2108,6 @@ def command_audit(args: argparse.Namespace) -> int:
         command = f"\tcommand={event['command_id']}" if event["command_id"] else ""
         print(f"{event['created_at']}\t{event['type']}\tactor={event['actor']}{command}")
     return 0
-
-
-MUTATING_COMMAND_DECISIONS = {
-    "finish_task": {"stop"},
-    "pause_manager": {"escalate", "stop"},
-    "stop_task": {"stop"},
-    "task_interrupt": {"interrupt"},
-    "task_nudge": {"nudge"},
-}
-
-
-def _nearest_prior_decision(command: dict[str, Any], decisions: list[dict[str, Any]]) -> dict[str, Any] | None:
-    prior = [
-        decision
-        for decision in decisions
-        if decision["created_at"] <= command["created_at"]
-    ]
-    return prior[-1] if prior else None
-
-
-def mutation_audit_result(audit: dict[str, Any]) -> dict[str, Any]:
-    decisions = audit["manager_decisions"]
-    records = []
-    for command in audit["commands"]:
-        allowed = MUTATING_COMMAND_DECISIONS.get(command["type"])
-        if allowed is None:
-            continue
-        payload = command.get("payload") or {}
-        result = command.get("result") or {}
-        decision_check = result.get("manager_decision") or payload.get("manager_decision")
-        nearest = _nearest_prior_decision(command, decisions)
-        linked = decision_check.get("decision") if isinstance(decision_check, dict) else None
-        warnings = []
-        if isinstance(decision_check, dict):
-            warnings.extend(decision_check.get("warnings", []))
-        else:
-            warnings.append("missing_decision_metadata")
-        if nearest and not linked:
-            warnings.append("nearest_decision_unlinked")
-        if linked and linked.get("decision") not in allowed:
-            warnings.append("linked_decision_incompatible")
-        records.append(
-            {
-                "allowed_decisions": sorted(allowed),
-                "command": {
-                    "created_at": command["created_at"],
-                    "id": command["id"],
-                    "state": command["state"],
-                    "type": command["type"],
-                },
-                "linked_decision": linked,
-                "nearest_prior_decision": nearest,
-                "ok": not warnings,
-                "warnings": warnings,
-            }
-        )
-    return {
-        "ok": all(record["ok"] for record in records),
-        "records": records,
-        "summary": {
-            "mutations": len(records),
-            "with_warnings": sum(1 for record in records if record["warnings"]),
-        },
-        "task": audit["task"],
-    }
 
 
 def command_mutation_audit(args: argparse.Namespace) -> int:

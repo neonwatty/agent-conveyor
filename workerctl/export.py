@@ -5,6 +5,7 @@ import json
 import zipfile
 from pathlib import Path
 
+from workerctl.audit import mutation_audit_result
 from workerctl.core import now_iso
 from workerctl.db import connect as connect_db
 from workerctl.db import initialize_database
@@ -23,6 +24,7 @@ def command_export_task(args: argparse.Namespace) -> int:
         initialize_database(conn)
         snapshot = task_status_snapshot(conn, task=args.task)
         audit = task_audit(conn, task=args.task)
+        mutation_audit = mutation_audit_result(audit)
         prompt_rows = conn.execute(
             """
             select id, kind, content, content_sha256, generator_version,
@@ -68,6 +70,7 @@ def command_export_task(args: argparse.Namespace) -> int:
     write_json(export_root / "agent-observations.json", audit.get("agent_observations", []))
     write_json(export_root / "manager-cycles.json", audit.get("manager_cycles", []))
     write_json(export_root / "manager-decisions.json", audit.get("manager_decisions", []))
+    write_json(export_root / "mutation-audit.json", mutation_audit)
     manifest = {
         "created_at": now_iso(),
         "files": [
@@ -79,6 +82,7 @@ def command_export_task(args: argparse.Namespace) -> int:
             "agent-observations.json",
             "manager-cycles.json",
             "manager-decisions.json",
+            "mutation-audit.json",
         ],
         "task": {"id": snapshot["id"], "name": snapshot["name"]},
     }
@@ -92,4 +96,3 @@ def command_export_task(args: argparse.Namespace) -> int:
     result = {"archive": str(archive_path) if archive_path else None, "export_dir": str(export_root), "task": snapshot["name"]}
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0
-

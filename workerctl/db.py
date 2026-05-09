@@ -924,6 +924,24 @@ def assess_manager_decision(
     }
 
 
+def require_manager_decision_ok(
+    *,
+    command_type: str,
+    decision_check: dict[str, Any] | None,
+    strict: bool,
+) -> None:
+    if not strict:
+        return
+    if decision_check and decision_check.get("ok"):
+        return
+    details = {
+        "command_type": command_type,
+        "error": "manager_decision_validation_failed",
+        "manager_decision": decision_check,
+    }
+    raise WorkerError(f"strict manager decision validation failed: {json.dumps(details, sort_keys=True)}")
+
+
 def task_row(conn: sqlite3.Connection, *, task: str) -> sqlite3.Row:
     row = conn.execute(
         """
