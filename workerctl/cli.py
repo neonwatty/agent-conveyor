@@ -55,10 +55,12 @@ from workerctl.importer import command_import_compat
 from workerctl.lifecycle import (
     command_close_stale,
     command_manage,
+    command_my_status,
     command_pause_manager,
     command_promote,
     command_reconcile,
     command_recover,
+    command_remanage,
     command_resume_manager,
     command_self_promote,
     command_stop_task,
@@ -299,6 +301,19 @@ def build_parser() -> argparse.ArgumentParser:
     unmanage.add_argument("--path", help="Override the workerctl database path.")
     unmanage.set_defaults(func=command_unmanage)
 
+    my_status = subparsers.add_parser("my-status", help="Show this worker's current managed task and manager state.")
+    my_status.add_argument("--task", help="Explicit task name or ID; defaults to the task bound to the current session.")
+    my_status.add_argument("--session", help="Explicit tmux session; defaults to the current tmux session.")
+    my_status.add_argument("--json", action="store_true", help="Print stable JSON output.")
+    my_status.add_argument("--path", help="Override the workerctl database path.")
+    my_status.set_defaults(func=command_my_status)
+
+    remanage = subparsers.add_parser("remanage", help="Restart this worker's paused manager.")
+    remanage.add_argument("--task", help="Explicit task name or ID; defaults to the task bound to the current session.")
+    remanage.add_argument("--session", help="Explicit tmux session; defaults to the current tmux session.")
+    remanage.add_argument("--path", help="Override the workerctl database path.")
+    remanage.set_defaults(func=command_remanage)
+
     resume_manager = subparsers.add_parser("resume-manager", help="Restart a paused task manager.")
     resume_manager.add_argument("task", help="Task name or ID.")
     resume_manager.add_argument("--path", help="Override the workerctl database path.")
@@ -533,7 +548,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     parser = build_parser()
     args, unknown = parser.parse_known_args()
-    if unknown and args.command not in {"start", "promote", "resume-manager", "self-promote", "manage"}:
+    if unknown and args.command not in {"start", "promote", "resume-manager", "remanage", "self-promote", "manage"}:
         parser.error(f"unrecognized arguments: {' '.join(unknown)}")
     args.codex_args = unknown
     try:

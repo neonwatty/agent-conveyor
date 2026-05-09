@@ -266,6 +266,23 @@ and leaves the worker session running. `--task` and `--session` are escape
 hatches when the command cannot infer the binding from the current tmux session.
 Audit rows must show the worker as the initiator.
 
+### `workerctl my-status [--task NAME] [--session SESSION]`
+
+Worker-facing status command. Run this from inside the worker session when the
+user asks what the worker is, which task it is bound to, whether it is managed
+or paused, or what command should be run next. It resolves the active task
+binding from tmux and prints the worker name/ID, task name/ID/state, manager
+state, latest status contract, and suggested next commands.
+
+### `workerctl remanage [--task NAME] [--session SESSION] [-- CODEX_ARGS...]`
+
+Worker-facing resume command. Run this from inside a paused worker session when
+the user asks to restart supervision, resume management, or get a manager again.
+It resolves the current task from tmux, verifies worker identity, starts a fresh
+manager from the latest manager prompt, marks the task `managed`, and records
+worker-initiated audit metadata. It is the worker-facing counterpart to
+`resume-manager <name>`.
+
 ### `workerctl stop-manager <name>`
 
 Kill the manager session. Worker keeps running.
@@ -296,7 +313,8 @@ candidate → managed → paused → managed (resume)
   attention.
 
 `workerctl unmanage` performs the worker-facing `managed -> paused` transition.
-`workerctl resume-manager <name>` performs the `paused -> managed` transition.
+`workerctl remanage` performs the worker-facing `paused -> managed` transition.
+`workerctl resume-manager <name>` is the task-scoped operator equivalent.
 
 User-facing task state stays simple. Internal records carry the operational
 detail needed for recovery:
@@ -866,11 +884,14 @@ intent/result records, and recovery/audit views.
 
 ### Phase 4: Manager Lifecycle
 
-- `pause-manager`, `unmanage`, `resume-manager`, `stop-manager`, `stop-task`.
+- `pause-manager`, `unmanage`, `my-status`, `remanage`, `resume-manager`,
+  `stop-manager`, `stop-task`.
 - `pause-manager` is the task-scoped operator command that stops the manager and
   marks the task paused. `unmanage` is the worker-facing command that infers the
   current worker/task from tmux and records worker-initiated audit metadata.
-  `resume-manager` starts a fresh manager from latest SQLite state.
+  `my-status` gives the worker a self-view of the active binding. `remanage`
+  restarts supervision from the worker session. `resume-manager` starts a fresh
+  manager from latest SQLite state by explicit task name.
 - Budget counters: reserve nudges_used on task-nudge, check expires_at.
 - Log all manager actions to SQLite `events`.
 - Export task bundles on demand for manual debugging:
@@ -913,6 +934,8 @@ Implemented in the current SQLite milestone:
   operations.
 - Worker-facing `unmanage` command for reclaiming manual control from inside
   the managed worker session.
+- Worker-facing `my-status` and `remanage` commands for self-inspection and
+  restarting supervision without a task name.
 - Focused unit coverage plus `scripts/live-smoke` for a real tmux lifecycle.
 
 Remaining work:

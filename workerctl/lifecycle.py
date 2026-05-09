@@ -469,6 +469,36 @@ def _resolve_unmanage_task(
     }
 
 
+def _current_task_status(
+    *,
+    db_path: Path | None,
+    session: str | None,
+    task: str | None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    with connect_db(db_path) as conn:
+        initialize_database(conn)
+        binding = _resolve_unmanage_task(conn, session=session, task=task)
+        snapshot = task_status_snapshot(conn, task=binding["task_name"])
+    return binding, snapshot
+
+
+def _worker_source(
+    *,
+    command: str,
+    binding: dict[str, Any],
+    resolved_from: str,
+    verification: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "initiator": "worker",
+        "resolved_from": resolved_from,
+        "source_command": command,
+        "tmux_session": binding["worker_tmux_session"],
+        "worker": binding["worker_name"],
+        "worker_identity": verification,
+    }
+
+
 def _pause_manager_task(
     *,
     db_path: Path | None,
@@ -593,20 +623,19 @@ def command_pause_manager(args: argparse.Namespace) -> int:
 def command_unmanage(args: argparse.Namespace) -> int:
     db_path = Path(args.path).expanduser().resolve() if args.path else None
     session = getattr(args, "session", None) or current_session_name()
+    task = getattr(args, "task", None)
     with connect_db(db_path) as conn:
         initialize_database(conn)
-        binding = _resolve_unmanage_task(conn, session=session, task=getattr(args, "task", None))
+        binding = _resolve_unmanage_task(conn, session=session, task=task)
         if binding["task_state"] != "managed":
             raise WorkerError(f"Task {binding['task_name']} is not managed; current state is {binding['task_state']}")
     verification = identity.verify_worker_binding_identity(binding)
-    source = {
-        "initiator": "worker",
-        "resolved_from": "task" if getattr(args, "task", None) else "tmux_session",
-        "source_command": "unmanage",
-        "tmux_session": binding["worker_tmux_session"],
-        "worker": binding["worker_name"],
-        "worker_identity": verification,
-    }
+    source = _worker_source(
+        command="unmanage",
+        binding=binding,
+        resolved_from="task" if task else "tmux_session",
+        verification=verification,
+    )
     return _pause_manager_task(
         db_path=db_path,
         task=binding["task_name"],
@@ -618,14 +647,69 @@ def command_unmanage(args: argparse.Namespace) -> int:
     )
 
 
-def command_resume_manager(args: argparse.Namespace) -> int:
+def command_my_status(args: argparse.Namespace) -> int:
+    db_path = Path(args.path).expanduser().resolve() if args.path else None
+    session = getattr(args, "session", None) or current_session_name()
+    task = getattr(args, "task", None)
+    binding, snapshot = _current_task_status(db_path=db_path, session=session, task=task)
+    result = {
+        "manager": snapshot["manager"],
+        "suggested_next_commands": [],
+        "task": {
+            "id": snapshot["id"],
+            "name": snapshot["name"],
+            "state": snapshot["state"],
+            "summary": snapshot["summary"],
+        },
+        "worker": snapshot["worker"],
+        "worker_status": snapshot["worker_status"],
+    }
+    if snapshot["state"] == "managed":
+        result["suggested_next_commands"] = [
+            "workerctl unmanage",
+            f"workerctl task-status {snapshot['name']} --json",
+        ]
+    elif snapshot["state"] == "paused":
+        result["suggested_next_commands"] = [
+            "workerctl remanage",
+            f"workerctl stop-task {snapshot['name']}",
+        ]
+    if args.json:
+        print(json.dumps(result, indent=2, sort_keys=True))
+        return 0
+    manager_state = result["manager"]["state"] if result["manager"] else "-"
+    print(
+        "\t".join(
+            [
+                binding["worker_name"],
+                binding["worker_tmux_session"],
+                snapshot["name"],
+                snapshot["state"],
+                manager_state,
+            ]
+        )
+    )
+    for command in result["suggested_next_commands"]:
+        print(f"next: {command}")
+    return 0
+
+
+def _resume_manager_task(
+    *,
+    db_path: Path | None,
+    task: str,
+    codex_args: list[str],
+    command_type: str = "resume_manager",
+    event_prefix: str = "resume_manager",
+    source: dict[str, Any] | None = None,
+    worker_id: str | None = None,
+) -> int:
     ensure_tool("tmux")
     ensure_tool("codex")
-    db_path = Path(args.path).expanduser().resolve() if args.path else None
-    codex_args = passthrough_args(args.codex_args or [])
+    source_payload = source or {}
     with connect_db(db_path) as conn:
         initialize_database(conn)
-        snapshot = task_status_snapshot(conn, task=args.task)
+        snapshot = task_status_snapshot(conn, task=task)
         if snapshot["state"] != "paused":
             raise WorkerError(f"Task {snapshot['name']} is not paused; current state is {snapshot['state']}")
         prompt = latest_manager_prompt(conn, task_id=snapshot["id"])
@@ -648,19 +732,21 @@ def command_resume_manager(args: argparse.Namespace) -> int:
         attach_manager_to_binding(conn, task_id=snapshot["id"], manager_id=manager_id)
         command_id = create_db_command(
             conn,
-            command_type="resume_manager",
+            command_type=command_type,
             task_id=snapshot["id"],
+            worker_id=worker_id,
             manager_id=manager_id,
-            payload={"codex_args": codex_args, "manager_session": manager_session, "prompt_path": str(prompt_path)},
+            payload={"codex_args": codex_args, "manager_session": manager_session, "prompt_path": str(prompt_path), "source": source_payload},
         )
         insert_db_event(
             conn,
-            "resume_manager_intent",
-            actor="workerctl",
+            f"{event_prefix}_intent",
+            actor=source_payload.get("initiator", "workerctl"),
             command_id=command_id,
             task_id=snapshot["id"],
+            worker_id=worker_id,
             manager_id=manager_id,
-            payload={"manager_session": manager_session, "prompt_path": str(prompt_path)},
+            payload={"manager_session": manager_session, "prompt_path": str(prompt_path), "source": source_payload},
         )
         conn.commit()
     result = {
@@ -668,6 +754,7 @@ def command_resume_manager(args: argparse.Namespace) -> int:
         "manager_id": manager_id,
         "manager_session": manager_session,
         "prompt_path": str(prompt_path),
+        "source": source_payload,
         "task": snapshot["name"],
     }
     try:
@@ -688,10 +775,11 @@ def command_resume_manager(args: argparse.Namespace) -> int:
             finish_db_command(conn, command_id=command_id, state="succeeded", result=result)
             insert_db_event(
                 conn,
-                "resume_manager_succeeded",
-                actor="workerctl",
+                f"{event_prefix}_succeeded",
+                actor=source_payload.get("initiator", "workerctl"),
                 command_id=command_id,
                 task_id=snapshot["id"],
+                worker_id=worker_id,
                 manager_id=manager_id,
                 payload=result,
             )
@@ -703,10 +791,11 @@ def command_resume_manager(args: argparse.Namespace) -> int:
             finish_db_command(conn, command_id=command_id, state="failed", error=str(exc))
             insert_db_event(
                 conn,
-                "resume_manager_failed",
-                actor="workerctl",
+                f"{event_prefix}_failed",
+                actor=source_payload.get("initiator", "workerctl"),
                 command_id=command_id,
                 task_id=snapshot["id"],
+                worker_id=worker_id,
                 manager_id=manager_id,
                 payload={**result, "error": str(exc)},
             )
@@ -714,6 +803,40 @@ def command_resume_manager(args: argparse.Namespace) -> int:
         raise
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0
+
+
+def command_resume_manager(args: argparse.Namespace) -> int:
+    db_path = Path(args.path).expanduser().resolve() if args.path else None
+    codex_args = passthrough_args(args.codex_args or [])
+    return _resume_manager_task(db_path=db_path, task=args.task, codex_args=codex_args)
+
+
+def command_remanage(args: argparse.Namespace) -> int:
+    db_path = Path(args.path).expanduser().resolve() if args.path else None
+    session = getattr(args, "session", None) or current_session_name()
+    task = getattr(args, "task", None)
+    with connect_db(db_path) as conn:
+        initialize_database(conn)
+        binding = _resolve_unmanage_task(conn, session=session, task=task)
+        if binding["task_state"] != "paused":
+            raise WorkerError(f"Task {binding['task_name']} is not paused; current state is {binding['task_state']}")
+    verification = identity.verify_worker_binding_identity(binding)
+    source = _worker_source(
+        command="remanage",
+        binding=binding,
+        resolved_from="task" if task else "tmux_session",
+        verification=verification,
+    )
+    codex_args = passthrough_args(args.codex_args or [])
+    return _resume_manager_task(
+        db_path=db_path,
+        task=binding["task_name"],
+        codex_args=codex_args,
+        command_type="remanage",
+        event_prefix="remanage",
+        source=source,
+        worker_id=binding["worker_id"],
+    )
 
 
 def command_stop_task(args: argparse.Namespace) -> int:
