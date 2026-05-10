@@ -805,8 +805,10 @@ class CliTests(unittest.TestCase):
         payload = json.loads(proc.stdout)
         self.assertEqual(payload["scenario"], "self-management")
         self.assertTrue(any("workerctl start" in step for step in payload["steps"]))
+        self.assertTrue(any("extend-nudge-budget" in step for step in payload["steps"]))
         self.assertTrue(any("finish-task" in step for step in payload["steps"]))
         self.assertTrue(any("manager-observe <task> --compact --json" in observation for observation in payload["expected_observations"]))
+        self.assertTrue(any("nudge_budget_exhausted" in observation for observation in payload["expected_observations"]))
 
     def test_db_doctor_outputs_expected_structure(self):
         with tempfile.TemporaryDirectory() as tmpdir:
