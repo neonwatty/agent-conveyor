@@ -291,6 +291,14 @@ Managers should pass the `decision_id` returned by `manager-decision` to
 mutating task commands with `--decision-id --strict-decisions`. Without strict
 mode, missing, stale, or incompatible decision links are warning-only and are
 visible in `mutation-audit`.
+If an active task exhausts its nudge budget, `task-health` reports a budget
+warning. Record an `escalate` decision before extending the budget:
+
+```bash
+decision_id=$(workerctl manager-decision auth-refactor --decision escalate --reason "nudge budget exhausted but supervised work should continue" | python3 -c 'import json,sys; print(json.load(sys.stdin)["decision_id"])')
+workerctl extend-nudge-budget auth-refactor --add-nudges 3 --decision-id "$decision_id" --strict-decisions
+```
+
 Use `commands` to inspect durable side-effect command rows directly, including
 filtered views by task, type, state, worker ID, or manager ID. Use `task-events`
 for a task-scoped event stream when reconstructing what happened.

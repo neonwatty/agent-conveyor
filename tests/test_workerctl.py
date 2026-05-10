@@ -2544,6 +2544,180 @@ class CliTests(unittest.TestCase):
                 worker_identity.require_worker = original_require_worker
                 worker_identity.session_snapshot = original_session_snapshot
 
+    def test_extend_nudge_budget_allows_next_strict_nudge_after_exhaustion(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                worker_db.upsert_worker(
+                    conn,
+                    name="worker-a",
+                    cwd=str(ROOT),
+                    tmux_session="codex-worker-a",
+                    identity_token="token-worker-a",
+                    tmux_pane_id="%1",
+                    state="active",
+                    timestamp="2026-05-08T10:00:00Z",
+                )
+                task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
+                worker_db.bind_task_worker(conn, task="task-a", worker="worker-a", binding_id="binding-1")
+                worker_db.set_budget(conn, task_id=task_id, max_nudges=3, expires_at="9999-01-01T00:00:00Z")
+                conn.execute("update budgets set nudges_used = 3 where task_id = ?", (task_id,))
+                nudge_decision_id = worker_db.insert_manager_decision(
+                    conn,
+                    task_id=task_id,
+                    manager_id=None,
+                    decision="nudge",
+                    reason="worker is waiting",
+                )
+                escalate_decision_id = worker_db.insert_manager_decision(
+                    conn,
+                    task_id=task_id,
+                    manager_id=None,
+                    decision="escalate",
+                    reason="budget exhausted but more supervised work is required",
+                )
+                conn.commit()
+
+            sent = []
+            original_send_text = commands.send_text
+            original_require_worker = worker_identity.require_worker
+            original_session_snapshot = worker_identity.session_snapshot
+            try:
+                worker_identity.require_worker = lambda name: {
+                    "identity_token": "token-worker-a",
+                    "tmux_pane_id": "%1",
+                    "tmux_session": "codex-worker-a",
+                }
+                worker_identity.session_snapshot = lambda target: {"live": True, "pane_id": "%1", "session": target}
+                commands.send_text = lambda name, message: sent.append((name, message))
+                exhausted_args = argparse.Namespace(
+                    task="task-a",
+                    message="status please",
+                    decision_id=nudge_decision_id,
+                    strict_decisions=True,
+                    dry_run=False,
+                    path=str(db_path),
+                )
+
+                with self.assertRaisesRegex(WorkerError, "Nudge budget exhausted"):
+                    commands.command_task_nudge(exhausted_args)
+                self.assertEqual(sent, [])
+
+                extend_args = argparse.Namespace(
+                    add_nudges=2,
+                    budget_expires_at="9999-01-02T00:00:00Z",
+                    budget_hours=24,
+                    decision_id=escalate_decision_id,
+                    path=str(db_path),
+                    strict_decisions=True,
+                    task="task-a",
+                )
+                with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                    result = commands.command_extend_nudge_budget(extend_args)
+
+                payload = json.loads(stdout.getvalue())
+                self.assertEqual(result, 0)
+                self.assertEqual(payload["budget"]["max_nudges"], 5)
+                self.assertEqual(payload["budget"]["nudges_used"], 3)
+                self.assertEqual(payload["budget"]["nudges_remaining"], 2)
+                self.assertTrue(payload["manager_decision"]["ok"])
+
+                next_decision_id = None
+                with worker_db.connect(db_path) as conn:
+                    next_decision_id = worker_db.insert_manager_decision(
+                        conn,
+                        task_id=task_id,
+                        manager_id=None,
+                        decision="nudge",
+                        reason="budget was extended and worker is waiting",
+                    )
+                    conn.commit()
+
+                allowed_args = argparse.Namespace(
+                    task="task-a",
+                    message="continue please",
+                    decision_id=next_decision_id,
+                    strict_decisions=True,
+                    dry_run=False,
+                    path=str(db_path),
+                )
+                with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                    result = commands.command_task_nudge(allowed_args)
+
+                payload = json.loads(stdout.getvalue())
+                self.assertEqual(result, 0)
+                self.assertEqual(sent, [("worker-a", "continue please")])
+                self.assertEqual(payload["budget"]["nudges_used"], 4)
+                self.assertEqual(payload["budget"]["nudges_remaining"], 1)
+
+                proc = self.run_workerctl("mutation-audit", "task-a", "--json", "--path", str(db_path))
+                audit = json.loads(proc.stdout)
+                self.assertEqual(proc.returncode, 0, proc.stdout)
+                self.assertEqual(audit["summary"]["with_warnings"], 0)
+                self.assertIn("extend_nudge_budget", [record["command"]["type"] for record in audit["records"]])
+            finally:
+                commands.send_text = original_send_text
+                worker_identity.require_worker = original_require_worker
+                worker_identity.session_snapshot = original_session_snapshot
+
+    def test_task_health_warns_when_managed_task_budget_is_exhausted(self):
+        original_session_snapshot = worker_identity.session_snapshot
+        try:
+            worker_identity.session_snapshot = lambda session: {
+                "live": True,
+                "pane_id": "%2" if session == "codex-manager-task-a" else "%1",
+                "session": session,
+            }
+            with tempfile.TemporaryDirectory() as tmpdir:
+                db_path = Path(tmpdir) / "workerctl.db"
+                with worker_db.connect(db_path) as conn:
+                    worker_db.initialize_database(conn)
+                    worker_db.upsert_worker(
+                        conn,
+                        name="worker-a",
+                        cwd=str(ROOT),
+                        tmux_session="codex-worker-a",
+                        tmux_pane_id="%1",
+                        state="active",
+                    )
+                    task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
+                    worker_db.bind_task_worker(conn, task="task-a", worker="worker-a", binding_id="binding-1")
+                    manager_id = worker_db.create_manager(
+                        conn,
+                        task_id=task_id,
+                        name="manager-a",
+                        tmux_session="codex-manager-task-a",
+                        tmux_pane_id="%2",
+                        codex_args=[],
+                        state="ready",
+                    )
+                    worker_db.attach_manager_to_binding(conn, task_id=task_id, manager_id=manager_id)
+                    worker_db.set_task_state(conn, task_id=task_id, state="managed")
+                    worker_db.mark_manager_seen(conn, manager_id=manager_id)
+                    worker_db.set_budget(conn, task_id=task_id, max_nudges=3, expires_at="9999-01-01T00:00:00Z")
+                    conn.execute("update budgets set nudges_used = 3 where task_id = ?", (task_id,))
+                    conn.commit()
+
+                health_args = argparse.Namespace(
+                    audit_decisions=True,
+                    json=True,
+                    manager_stale_seconds=60,
+                    path=str(db_path),
+                    record=False,
+                    task="task-a",
+                )
+                with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                    result = commands.command_task_health(health_args)
+
+                payload = json.loads(stdout.getvalue())
+                self.assertEqual(result, 1)
+                self.assertFalse(payload["ok"])
+                self.assertTrue(any(issue["code"] == "nudge_budget_exhausted" for issue in payload["issues"]))
+                self.assertTrue(any("extend-nudge-budget" in action for action in payload["recommended_actions"]))
+        finally:
+            worker_identity.session_snapshot = original_session_snapshot
+
     def test_task_nudge_refuses_identity_mismatch_before_send(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "workerctl.db"

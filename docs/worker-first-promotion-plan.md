@@ -314,6 +314,15 @@ checks the active worker binding, reserves a nudge budget slot, records nudge
 intent, sends the message, and records success or failure. Failed reserved
 nudges count against budget unless retried explicitly by command ID.
 
+### `workerctl extend-nudge-budget <name> --add-nudges N [--decision-id ID] [--strict-decisions]`
+
+Extend a task's nudge budget without resetting `nudges_used`. This is the
+audited escalation path when longer-running work legitimately needs more
+manager-directed nudges after the initial budget is exhausted. Managers should
+record `manager-decision --decision escalate` first, then pass that decision ID
+with `--strict-decisions`. `task-health` surfaces exhausted or expired budgets
+as actionable budget issues while the task is still managed.
+
 ### `workerctl task-interrupt <name> [--decision-id ID] [--strict-decisions]`
 
 Interrupt the bound worker through the task binding. This checks task state,

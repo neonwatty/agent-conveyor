@@ -31,6 +31,7 @@ from workerctl.commands import (
     command_doctor_self,
     command_events,
     command_explain_managed_flow,
+    command_extend_nudge_budget,
     command_interrupt,
     command_list,
     command_manager_decision,
@@ -538,6 +539,16 @@ def build_parser() -> argparse.ArgumentParser:
     task_nudge.add_argument("--dry-run", action="store_true", help="Record the command without sending the message.")
     task_nudge.add_argument("--path", help="Override the workerctl database path.")
     task_nudge.set_defaults(func=command_task_nudge)
+
+    extend_nudge_budget = subparsers.add_parser("extend-nudge-budget", help="Extend a task's manager nudge budget.")
+    extend_nudge_budget.add_argument("task", help="Task name or ID.")
+    extend_nudge_budget.add_argument("--add-nudges", type=int, required=True, help="Number of additional nudges to allow.")
+    extend_nudge_budget.add_argument("--budget-hours", type=int, default=24, help="Hours until the extended nudge budget expires.")
+    extend_nudge_budget.add_argument("--budget-expires-at", help="Explicit ISO timestamp for nudge budget expiry.")
+    extend_nudge_budget.add_argument("--decision-id", type=int, help="Manager escalate decision ID that justifies this mutation.")
+    extend_nudge_budget.add_argument("--strict-decisions", action="store_true", help="Reject the extension unless --decision-id is valid.")
+    extend_nudge_budget.add_argument("--path", help="Override the workerctl database path.")
+    extend_nudge_budget.set_defaults(func=command_extend_nudge_budget)
 
     task_interrupt = subparsers.add_parser(
         "task-interrupt",

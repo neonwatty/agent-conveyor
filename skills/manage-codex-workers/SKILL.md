@@ -96,6 +96,9 @@ When you run a mutating task command from manager context, pass the returned
 workerctl still runs the command but records a warning that
 `workerctl mutation-audit <task> --json` or
 `workerctl task-health <task> --audit-decisions --json` can surface later.
+If the nudge budget is exhausted, stop nudging. Record an `escalate` decision,
+then either ask the user what to do or extend the budget explicitly:
+`workerctl extend-nudge-budget <task> --add-nudges <n> --decision-id <decision_id> --strict-decisions`.
 Do not run mutating commands merely because they are available. Use
 `task-nudge` only when the worker is stale, waiting for input, or explicitly
 needs direction. Use `task-interrupt` only for a clear busy-wait/interruptible

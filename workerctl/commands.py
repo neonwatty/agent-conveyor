@@ -24,6 +24,7 @@ from workerctl.db import create_command as create_db_command
 from workerctl.db import create_manager_cycle
 from workerctl.db import create_task as create_db_task
 from workerctl.db import database_health, default_db_path, initialize_database
+from workerctl.db import extend_nudge_budget
 from workerctl.db import finish_command as finish_db_command
 from workerctl.db import finish_manager_cycle
 from workerctl.db import insert_agent_observation
@@ -1480,6 +1481,12 @@ def task_health_result(
             )
     for warning in liveness_warnings:
         issues.append({"code": warning["reason"], "manager_id": warning["manager_id"], "source": "manager_liveness"})
+    budget = snapshot.get("budget")
+    if snapshot["state"] == "managed" and budget:
+        if budget["expires_at"] < now_iso():
+            issues.append({"code": "nudge_budget_expired", "expires_at": budget["expires_at"], "source": "budget"})
+        elif budget["nudges_remaining"] <= 0:
+            issues.append({"code": "nudge_budget_exhausted", "source": "budget"})
     if decision_audit:
         for record in decision_audit["records"]:
             if record["warnings"]:
@@ -1508,6 +1515,8 @@ def task_health_result(
         recommended_actions.append("Inspect the manager terminal before taking recovery action; heartbeat warnings are not hard drift.")
     if any(issue["source"] == "manager_decision_audit" for issue in issues):
         recommended_actions.append("Run workerctl mutation-audit <task> --json; future manager mutations should record manager-decision first and pass --decision-id.")
+    if any(issue["source"] == "budget" for issue in issues):
+        recommended_actions.append("Record an escalate decision, then run workerctl extend-nudge-budget <task> --add-nudges <n> --decision-id <id> --strict-decisions, or stop and escalate to the user.")
     if not recommended_actions:
         recommended_actions.append("No action required.")
 
@@ -1526,6 +1535,85 @@ def task_health_result(
         },
     }
     return result
+
+
+def command_extend_nudge_budget(args: argparse.Namespace) -> int:
+    db_path = Path(args.path).expanduser().resolve() if args.path else None
+    if args.add_nudges <= 0:
+        raise WorkerError("--add-nudges must be > 0")
+    expires_at = args.budget_expires_at
+    if not expires_at:
+        hours = getattr(args, "budget_hours", 24)
+        expires_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() + (hours * 3600)))
+    with connect_db(db_path) as conn:
+        initialize_database(conn)
+        snapshot = task_status_snapshot(conn, task=args.task)
+        if snapshot["state"] in {"done", "failed"}:
+            raise WorkerError(f"Task {snapshot['name']} is closed; current state is {snapshot['state']}")
+        manager = active_manager(conn, task=snapshot["id"])
+        decision_check = assess_manager_decision(
+            conn,
+            task_id=snapshot["id"],
+            decision_id=getattr(args, "decision_id", None),
+            allowed_decisions={"escalate"},
+        )
+        require_manager_decision_ok(
+            command_type="extend_nudge_budget",
+            decision_check=decision_check,
+            strict=getattr(args, "strict_decisions", False),
+        )
+        command_id = create_db_command(
+            conn,
+            command_type="extend_nudge_budget",
+            task_id=snapshot["id"],
+            manager_id=manager["id"] if manager else None,
+            payload={
+                "add_nudges": args.add_nudges,
+                "budget_expires_at": expires_at,
+                "manager_decision": decision_check,
+                "task": snapshot["name"],
+            },
+        )
+        insert_db_event(
+            conn,
+            "extend_nudge_budget_intent",
+            actor="workerctl",
+            command_id=command_id,
+            task_id=snapshot["id"],
+            manager_id=manager["id"] if manager else None,
+            payload={
+                "add_nudges": args.add_nudges,
+                "budget_expires_at": expires_at,
+                "manager_decision": decision_check,
+            },
+        )
+        mark_command_attempted(conn, command_id=command_id)
+        budget = extend_nudge_budget(
+            conn,
+            task_id=snapshot["id"],
+            add_nudges=args.add_nudges,
+            expires_at=expires_at,
+        )
+        result_payload = {
+            "add_nudges": args.add_nudges,
+            "budget": budget,
+            "command_id": command_id,
+            "manager_decision": decision_check,
+            "task": snapshot["name"],
+        }
+        finish_db_command(conn, command_id=command_id, state="succeeded", result=result_payload)
+        insert_db_event(
+            conn,
+            "extend_nudge_budget_succeeded",
+            actor="workerctl",
+            command_id=command_id,
+            task_id=snapshot["id"],
+            manager_id=manager["id"] if manager else None,
+            payload=result_payload,
+        )
+        conn.commit()
+    print(json.dumps(result_payload, indent=2, sort_keys=True))
+    return 0
 
 
 def capture_task_terminal(
