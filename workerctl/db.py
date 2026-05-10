@@ -1046,6 +1046,37 @@ def set_budget(
     )
 
 
+def extend_nudge_budget(
+    conn: sqlite3.Connection,
+    *,
+    task_id: str,
+    add_nudges: int,
+    expires_at: str,
+) -> dict[str, Any]:
+    if add_nudges <= 0:
+        raise WorkerError("--add-nudges must be > 0")
+    conn.execute(
+        """
+        insert into budgets(task_id, max_nudges, nudges_used, expires_at)
+        values (?, ?, 0, ?)
+        on conflict(task_id) do update set
+          max_nudges = budgets.max_nudges + excluded.max_nudges,
+          expires_at = excluded.expires_at
+        """,
+        (task_id, add_nudges, expires_at),
+    )
+    row = conn.execute(
+        "select max_nudges, nudges_used, expires_at from budgets where task_id = ?",
+        (task_id,),
+    ).fetchone()
+    return {
+        "expires_at": row["expires_at"],
+        "max_nudges": row["max_nudges"],
+        "nudges_remaining": row["max_nudges"] - row["nudges_used"],
+        "nudges_used": row["nudges_used"],
+    }
+
+
 def reserve_nudge_budget(conn: sqlite3.Connection, *, task_id: str, timestamp: str | None = None) -> dict[str, Any] | None:
     row = conn.execute(
         "select max_nudges, nudges_used, expires_at from budgets where task_id = ?",
