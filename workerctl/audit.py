@@ -4,7 +4,6 @@ from typing import Any
 
 
 MUTATING_COMMAND_DECISIONS = {
-    "close_manager": {"stop"},
     "extend_nudge_budget": {"escalate"},
     "finish_task": {"stop"},
     "pause_manager": {"escalate", "stop"},
@@ -25,6 +24,7 @@ def nearest_prior_decision(command: dict[str, Any], decisions: list[dict[str, An
 
 def mutation_audit_result(audit: dict[str, Any]) -> dict[str, Any]:
     decisions = audit["manager_decisions"]
+    decisions_by_id = {decision["id"]: decision for decision in decisions}
     records = []
     for command in audit["commands"]:
         allowed = MUTATING_COMMAND_DECISIONS.get(command["type"])
@@ -33,6 +33,12 @@ def mutation_audit_result(audit: dict[str, Any]) -> dict[str, Any]:
         payload = command.get("payload") or {}
         result = command.get("result") or {}
         decision_check = result.get("manager_decision") or payload.get("manager_decision")
+        if (
+            command["type"] == "finish_task"
+            and isinstance(result.get("final_decision_id"), int)
+            and result["final_decision_id"] in decisions_by_id
+        ):
+            decision_check = {"decision": decisions_by_id[result["final_decision_id"]], "warnings": []}
         nearest = nearest_prior_decision(command, decisions)
         linked = decision_check.get("decision") if isinstance(decision_check, dict) else None
         warnings = []

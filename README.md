@@ -242,6 +242,9 @@ workerctl task-nudge auth-refactor "Please update status and state your next act
 workerctl task-interrupt auth-refactor --decision-id 124 --strict-decisions
 workerctl audit auth-refactor --json
 workerctl mutation-audit auth-refactor --json
+workerctl replay auth-refactor
+workerctl replay auth-refactor --format compact
+workerctl replay auth-refactor --format transcript --limit 20
 workerctl commands --task auth-refactor --json
 workerctl commands --task auth-refactor --type task_nudge --state failed --json
 workerctl task-events auth-refactor --json
@@ -308,6 +311,10 @@ workerctl extend-nudge-budget auth-refactor --add-nudges 3 --decision-id "$decis
 Use `commands` to inspect durable side-effect command rows directly, including
 filtered views by task, type, state, worker ID, or manager ID. Use `task-events`
 for a task-scoped event stream when reconstructing what happened.
+Use `replay <task>` for a chronological, human-readable reconstruction of the
+worker-manager relationship. `--format compact` shows decisions and side
+effects only; `--format transcript` includes deduplicated terminal-capture
+excerpts; `--json` returns stable machine-readable entries.
 Use `task-health <task> --audit-decisions --json` when you want one task-scoped
 integrity view that combines SQLite state, live tmux drift, unfinished commands,
 manager decision linkage, and manager

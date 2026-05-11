@@ -79,6 +79,7 @@ from workerctl.lifecycle import (
     command_stop_task,
     command_unmanage,
 )
+from workerctl.replay import command_replay
 from workerctl.supervise import command_idle_check, command_supervise, command_watch
 
 
@@ -605,6 +606,15 @@ def build_parser() -> argparse.ArgumentParser:
     mutation_audit.add_argument("--json", action="store_true", help="Print mutation audit records as JSON.")
     mutation_audit.add_argument("--path", help="Override the workerctl database path.")
     mutation_audit.set_defaults(func=command_mutation_audit)
+
+    replay = subparsers.add_parser("replay", help="Replay a task's worker-manager timeline.")
+    replay.add_argument("task", help="Task name or ID.")
+    replay.add_argument("--json", action="store_true", help="Print stable JSON output.")
+    replay.add_argument("--format", choices=("compact", "timeline", "transcript"), default="timeline")
+    replay.add_argument("--role", choices=("all", "worker", "manager"), default="all")
+    replay.add_argument("--limit", type=int, help="Print only the last N replay entries.")
+    replay.add_argument("--path", help="Override the workerctl database path.")
+    replay.set_defaults(func=command_replay)
 
     export_task = subparsers.add_parser("export-task", help="Export task status, audit, prompts, and transcript metadata.")
     export_task.add_argument("task", help="Task name or ID.")
