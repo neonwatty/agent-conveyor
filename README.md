@@ -332,7 +332,10 @@ manager terminal open for review. Add `--stop-manager` only when the manager
 terminal should be closed, and add `--stop-worker` only when the worker session
 should be stopped too. If you finish first and review the manager terminal
 later, run `close-manager <task> --reason "<reason>"` to close that review
-manager and update SQLite.
+manager and update SQLite. After `finish-task` succeeds, managers should stop
+their supervision loop and report the final outcome once. `manager-decision`
+rejects decisions on `done` or `failed` tasks unless `--allow-post-terminal` is
+supplied for an explicit review-only annotation.
 Before task-scoped text, interrupt, or kill side effects, workerctl verifies the
 recorded worker/manager identity, tmux session, and pane ID for the active
 binding.

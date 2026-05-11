@@ -1477,6 +1477,22 @@ def task_health_result(
     reconcile = reconcile_rows(db_path, task=snapshot["id"], recover=False)
     reconcile_result = reconcile[0] if reconcile else None
     liveness_warnings = manager_liveness_warnings(reconcile, stale_seconds=manager_stale_seconds)
+    latest_manager_capture_classifier = None
+    if snapshot.get("manager"):
+        with connect_db(db_path) as conn:
+            initialize_database(conn)
+            row = conn.execute(
+                """
+                select classifier_json
+                from terminal_captures
+                where task_id = ? and role = 'manager'
+                order by id desc
+                limit 1
+                """,
+                (snapshot["id"],),
+            ).fetchone()
+            if row:
+                latest_manager_capture_classifier = json.loads(row["classifier_json"])
     decision_audit = mutation_audit_result(audit) if audit_decisions and audit else None
     issues: list[dict[str, Any]] = []
     recommended_actions: list[str] = []
@@ -1495,8 +1511,23 @@ def task_health_result(
                     "state": command["state"],
                 }
             )
+    manager_prompt_wait = None
+    if latest_manager_capture_classifier:
+        busy_wait = latest_manager_capture_classifier.get("busy_wait")
+        if isinstance(busy_wait, dict) and busy_wait.get("pattern") == "rate_limit_prompt":
+            manager_prompt_wait = busy_wait
     for warning in liveness_warnings:
-        issues.append({"code": warning["reason"], "manager_id": warning["manager_id"], "source": "manager_liveness"})
+        if manager_prompt_wait:
+            issues.append(
+                {
+                    "code": "manager_waiting_for_user_choice",
+                    "manager_id": warning["manager_id"],
+                    "pattern": manager_prompt_wait.get("pattern"),
+                    "source": "manager_terminal",
+                }
+            )
+        else:
+            issues.append({"code": warning["reason"], "manager_id": warning["manager_id"], "source": "manager_liveness"})
     budget = snapshot.get("budget")
     if snapshot["state"] == "managed" and budget:
         if budget["expires_at"] < now_iso():
@@ -1529,6 +1560,8 @@ def task_health_result(
         recommended_actions.append("Inspect workerctl commands --task <task> and retry or resolve unfinished side effects manually.")
     if any(issue["source"] == "manager_liveness" for issue in issues):
         recommended_actions.append("Inspect the manager terminal before taking recovery action; heartbeat warnings are not hard drift.")
+    if "manager_waiting_for_user_choice" in issue_codes:
+        recommended_actions.append("Choose the pending Codex prompt in the manager terminal, or run workerctl close-manager <task> after review.")
     if any(issue["source"] == "manager_decision_audit" for issue in issues):
         recommended_actions.append("Run workerctl mutation-audit <task> --json; future manager mutations should record manager-decision first and pass --decision-id.")
     if any(issue["source"] == "budget" for issue in issues):
@@ -1934,6 +1967,12 @@ def command_manager_decision(args: argparse.Namespace) -> int:
     with connect_db(db_path) as conn:
         initialize_database(conn)
         snapshot = task_status_snapshot(conn, task=args.task)
+        terminal_states = {"done", "failed", "cancelled"}
+        if snapshot["state"] in terminal_states and not getattr(args, "allow_post_terminal", False):
+            raise WorkerError(
+                f"Task {snapshot['name']} is {snapshot['state']}; refusing post-terminal manager decision. "
+                "Use --allow-post-terminal only for explicit review annotations."
+            )
         manager = active_manager(conn, task=snapshot["id"])
         decision_id = insert_manager_decision(
             conn,
@@ -1942,7 +1981,10 @@ def command_manager_decision(args: argparse.Namespace) -> int:
             manager_cycle_id=args.cycle_id,
             decision=args.decision,
             reason=args.reason,
-            payload={"source": "manager_decision"},
+            payload={
+                "post_terminal": snapshot["state"] in terminal_states,
+                "source": "manager_decision",
+            },
         )
         observation_id = insert_agent_observation(
             conn,

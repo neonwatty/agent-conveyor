@@ -23,7 +23,11 @@ def _capture_summary(capture: dict[str, Any]) -> str:
     startup = classifier.get("startup")
     parts = []
     if isinstance(busy_wait, dict) and busy_wait.get("pattern"):
-        parts.append(f"busy_wait={busy_wait['pattern']}")
+        pattern = busy_wait["pattern"]
+        if pattern == "rate_limit_prompt":
+            parts.append("waiting_for_model_choice")
+        elif pattern != "approval_prompt":
+            parts.append(f"busy_wait={pattern}")
     if isinstance(startup, list) and startup:
         parts.append(f"startup={startup[0]}")
     if not parts:
@@ -75,7 +79,7 @@ def _command_summary(command: dict[str, Any]) -> tuple[str, str, str]:
 
 def replay_entries(audit: dict[str, Any], *, role: str = "all", mode: str = "timeline") -> list[dict[str, Any]]:
     entries: list[dict[str, Any]] = []
-    seen_capture_hash_by_role: dict[str, str] = {}
+    seen_capture_hashes_by_role: dict[str, set[str]] = {}
     include_captures = mode == "transcript"
     include_observes = mode != "compact"
 
@@ -150,10 +154,10 @@ def replay_entries(audit: dict[str, Any], *, role: str = "all", mode: str = "tim
             capture_role = capture["role"]
             if role != "all" and role != capture_role:
                 continue
-            previous_hash = seen_capture_hash_by_role.get(capture_role)
-            seen_capture_hash_by_role[capture_role] = capture["content_sha256"]
-            if previous_hash == capture["content_sha256"]:
+            seen_hashes = seen_capture_hashes_by_role.setdefault(capture_role, set())
+            if capture["content_sha256"] in seen_hashes:
                 continue
+            seen_hashes.add(capture["content_sha256"])
             excerpt = _capture_excerpt(capture)
             summary = f"{capture_role} terminal capture: {_capture_summary(capture)}"
             if excerpt:
@@ -204,6 +208,18 @@ def render_replay_text(result: dict[str, Any]) -> str:
         f"Mode: {result['mode']}",
         "",
     ]
+    finish_entries = [entry for entry in result["entries"] if entry["kind"] == "finish"]
+    if task["state"] in {"done", "failed"} and finish_entries:
+        final = finish_entries[-1]
+        lines.extend(
+            [
+                "Finished:",
+                f"- {final['summary']}",
+                "- Review: workerctl replay <task> --format compact",
+                "- Audit: workerctl mutation-audit <task> --json",
+                "",
+            ]
+        )
     for entry in result["entries"]:
         hhmmss = entry["timestamp"].split("T", 1)[-1].replace("Z", "")
         lines.append(f"{hhmmss}  {entry['actor']:<16} {entry['summary']}")

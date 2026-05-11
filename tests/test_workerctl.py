@@ -718,6 +718,8 @@ class CliTests(unittest.TestCase):
         self.assertIn("Do not run mutating commands merely because they are listed.", prompt)
         self.assertIn("Use task-interrupt only when manager-observe or task-idle-check shows a clear busy_wait", prompt)
         self.assertIn("workerctl finish-task task-a --reason", prompt)
+        self.assertIn("After finish-task succeeds, stop all supervision loops.", prompt)
+        self.assertIn("replay command", prompt)
 
     def test_doctor_outputs_expected_structure(self):
         proc = self.run_workerctl("doctor")
@@ -1924,6 +1926,51 @@ class CliTests(unittest.TestCase):
             self.assertIn("managed_without_active_worker_binding", codes)
             self.assertTrue(any("close-stale" in action for action in payload["recommended_actions"]))
 
+    def test_task_health_reports_manager_rate_limit_prompt_explicitly(self):
+        original_session_snapshot = worker_identity.session_snapshot
+        try:
+            worker_identity.session_snapshot = lambda session: {"live": True, "pane_id": "%2", "session": session}
+            with tempfile.TemporaryDirectory() as tmpdir:
+                db_path = Path(tmpdir) / "workerctl.db"
+                with worker_db.connect(db_path) as conn:
+                    worker_db.initialize_database(conn)
+                    task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
+                    manager_id = worker_db.create_manager(
+                        conn,
+                        task_id=task_id,
+                        name="manager-a",
+                        tmux_session="codex-manager-task-a",
+                        tmux_pane_id="%2",
+                        codex_args=[],
+                        state="ready",
+                    )
+                    conn.execute("update tasks set state = 'done' where id = ?", (task_id,))
+                    conn.execute("update managers set last_seen_at = '2000-01-01T00:00:00Z' where id = ?", (manager_id,))
+                    worker_db.insert_terminal_capture(
+                        conn,
+                        task_id=task_id,
+                        manager_id=manager_id,
+                        role="manager",
+                        tmux_session="codex-manager-task-a",
+                        tmux_pane_id="%2",
+                        content_sha256="sha-rate",
+                        content="Approaching rate limits\nSwitch to gpt-5.4-mini?\nPress enter to confirm",
+                        history_lines=20,
+                        source="test",
+                        classifier={"busy_wait": {"pattern": "rate_limit_prompt"}},
+                    )
+                    conn.commit()
+
+                result = commands.task_health_result(db_path, "task-a", manager_stale_seconds=60)
+
+                codes = {issue["code"] for issue in result["issues"]}
+                self.assertFalse(result["ok"])
+                self.assertIn("manager_waiting_for_user_choice", codes)
+                self.assertNotIn("manager_seen_stale", codes)
+                self.assertTrue(any("close-manager" in action for action in result["recommended_actions"]))
+        finally:
+            worker_identity.session_snapshot = original_session_snapshot
+
     def test_task_capture_command_uses_bound_worker(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "workerctl.db"
@@ -2040,6 +2087,39 @@ class CliTests(unittest.TestCase):
             self.assertEqual(decision["reason"], "worker is stale")
             self.assertEqual(observation["observation_type"], "decision")
             self.assertEqual(event["type"], "manager_decision_recorded")
+
+    def test_manager_decision_rejects_done_task_without_review_override(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
+                worker_db.create_manager(conn, task_id=task_id, name="manager-a", tmux_session="codex-manager-task-a", codex_args=[], state="ready")
+                conn.execute("update tasks set state = 'done' where id = ?", (task_id,))
+                conn.commit()
+
+            args = argparse.Namespace(
+                allow_post_terminal=False,
+                cycle_id=None,
+                decision="stop",
+                path=str(db_path),
+                reason="late stop",
+                task="task-a",
+            )
+
+            with self.assertRaisesRegex(WorkerError, "refusing post-terminal manager decision"):
+                commands.command_manager_decision(args)
+
+            args.allow_post_terminal = True
+            with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                result = commands.command_manager_decision(args)
+
+            self.assertEqual(result, 0)
+            payload = json.loads(stdout.getvalue())
+            self.assertEqual(payload["decision"], "stop")
+            with worker_db.connect(db_path) as conn:
+                decision = conn.execute("select payload_json from manager_decisions").fetchone()
+            self.assertTrue(json.loads(decision["payload_json"])["post_terminal"])
 
     def test_manager_observe_records_cycle_and_captures(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -2550,7 +2630,7 @@ class CliTests(unittest.TestCase):
                     content="line one\n• Worker edited app\n",
                     history_lines=20,
                     source="test",
-                    classifier={"startup": ["ready"]},
+                    classifier={"busy_wait": {"pattern": "approval_prompt"}, "startup": ["ready"]},
                     timestamp="2026-05-11T10:00:00Z",
                 )
                 worker_db.insert_terminal_capture(
@@ -2574,6 +2654,7 @@ class CliTests(unittest.TestCase):
             self.assertNotIn("Worker edited app", compact.stdout)
             self.assertEqual(transcript.returncode, 0, transcript.stderr)
             self.assertEqual(transcript.stdout.count("Worker edited app"), 1)
+            self.assertNotIn("approval_prompt", transcript.stdout)
 
     def test_task_health_audit_decisions_reports_mutation_warnings(self):
         original_session_snapshot = worker_identity.session_snapshot
