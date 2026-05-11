@@ -487,7 +487,7 @@ def migrate_to_v5_sessions(conn: sqlite3.Connection) -> None:
             values (?, ?, 'manager', ?, ?, ?, ?, ?, 'active')
             """,
             (
-                row["id"], row["name"], f"manager-token-{row['id']}",
+                row["id"], row["name"], f"legacy-manager-token-{uuid.uuid4()}",
                 row["tmux_session"], row["tmux_pane_id"],
                 "",  # historical managers don't track cwd separately; empty is acceptable
                 row["started_at"] or now,
