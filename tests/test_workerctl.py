@@ -6159,6 +6159,60 @@ class BindCommandTests(unittest.TestCase):
             self.assertEqual(row["state"], "ended")
             self.assertIsNotNone(row["ended_at"])
 
+    def test_bind_sessions_rejects_already_bound_worker(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self.setup_pair(conn)
+            now = "2026-05-11T00:00:00Z"
+            conn.execute(
+                "insert into tasks(id, name, goal, state, created_at, updated_at) "
+                "values ('task-2', 'second-task', 'g', 'candidate', ?, ?)",
+                (now, now),
+            )
+            worker_db.register_session(
+                conn, name="m2", role="manager", codex_session_path="/c",
+                codex_session_id="cuid-m2", pid=3, cwd="/repo",
+            )
+            worker_db.bind_sessions(
+                conn, task_name="auth-refactor",
+                worker_session_name="w1", manager_session_name="m1",
+            )
+            with self.assertRaises(WorkerError) as ctx:
+                worker_db.bind_sessions(
+                    conn, task_name="second-task",
+                    worker_session_name="w1",  # already bound to auth-refactor
+                    manager_session_name="m2",
+                )
+            self.assertIn("worker session", str(ctx.exception))
+            self.assertIn("w1", str(ctx.exception))
+
+    def test_bind_sessions_rejects_already_bound_manager(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self.setup_pair(conn)
+            now = "2026-05-11T00:00:00Z"
+            conn.execute(
+                "insert into tasks(id, name, goal, state, created_at, updated_at) "
+                "values ('task-2', 'second-task', 'g', 'candidate', ?, ?)",
+                (now, now),
+            )
+            worker_db.register_session(
+                conn, name="w2", role="worker", codex_session_path="/c",
+                codex_session_id="cuid-w2", pid=3, cwd="/repo",
+            )
+            worker_db.bind_sessions(
+                conn, task_name="auth-refactor",
+                worker_session_name="w1", manager_session_name="m1",
+            )
+            with self.assertRaises(WorkerError) as ctx:
+                worker_db.bind_sessions(
+                    conn, task_name="second-task",
+                    worker_session_name="w2",
+                    manager_session_name="m1",  # already bound to auth-refactor
+                )
+            self.assertIn("manager session", str(ctx.exception))
+            self.assertIn("m1", str(ctx.exception))
+
 
 if __name__ == "__main__":
     unittest.main()

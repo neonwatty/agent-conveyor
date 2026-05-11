@@ -1791,6 +1791,22 @@ def bind_sessions(
             f"task {task_name!r} already has an active binding {existing['id']!r}"
         )
 
+    for label, session_record in (("worker", worker_sess), ("manager", manager_sess)):
+        already_bound = conn.execute(
+            """
+            select id, task_id from bindings
+            where state in ('active','ending')
+              and (worker_session_id = ? or manager_session_id = ?)
+            limit 1
+            """,
+            (session_record["id"], session_record["id"]),
+        ).fetchone()
+        if already_bound is not None:
+            raise WorkerError(
+                f"{label} session {session_record['name']!r} is already bound to task "
+                f"{already_bound['task_id']!r} (binding {already_bound['id']!r})"
+            )
+
     binding_id = f"binding-{uuid.uuid4()}"
     conn.execute(
         """
