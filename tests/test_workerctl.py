@@ -5954,5 +5954,76 @@ class SessionsSchemaTests(unittest.TestCase):
             self.assertIn("one_active_binding_per_manager_session", indexes)
 
 
+class RegisterCommandsTests(unittest.TestCase):
+    def open_db(self, tmpdir):
+        path = Path(tmpdir) / "workerctl.db"
+        conn = worker_db.connect(path)
+        worker_db.initialize_database(conn)
+        self.addCleanup(conn.close)
+        return conn
+
+    def test_register_session_inserts_new_worker(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            session_id = worker_db.register_session(
+                conn,
+                name="auth-worker",
+                role="worker",
+                codex_session_path="/path/to/rollout.jsonl",
+                codex_session_id="codex-uuid-1",
+                pid=12345,
+                cwd="/repo",
+                tmux_session="codex-auth-worker",
+                tmux_pane_id="%5",
+            )
+            self.assertTrue(session_id.startswith("session-"))
+            row = conn.execute(
+                "select * from sessions where id = ?", (session_id,)
+            ).fetchone()
+            self.assertEqual(row["name"], "auth-worker")
+            self.assertEqual(row["role"], "worker")
+            self.assertEqual(row["pid"], 12345)
+            self.assertEqual(row["state"], "active")
+
+    def test_register_session_idempotent_on_name(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            id1 = worker_db.register_session(
+                conn, name="w", role="worker", codex_session_path="/a",
+                codex_session_id="u1", pid=1, cwd="/repo",
+            )
+            id2 = worker_db.register_session(
+                conn, name="w", role="worker", codex_session_path="/a",
+                codex_session_id="u1", pid=2, cwd="/repo",
+            )
+            self.assertEqual(id1, id2)
+            row = conn.execute("select pid from sessions where id = ?", (id1,)).fetchone()
+            self.assertEqual(row["pid"], 2)  # pid updated on re-register
+
+    def test_register_session_rejects_role_change(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            worker_db.register_session(
+                conn, name="x", role="worker", codex_session_path="/a",
+                codex_session_id="u1", pid=1, cwd="/repo",
+            )
+            with self.assertRaises(WorkerError):
+                worker_db.register_session(
+                    conn, name="x", role="manager", codex_session_path="/a",
+                    codex_session_id="u1", pid=2, cwd="/repo",
+                )
+
+    def test_register_session_creates_manager_without_tmux(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            session_id = worker_db.register_session(
+                conn, name="m1", role="manager", codex_session_path="/a",
+                codex_session_id="u-m", pid=99, cwd="/repo",
+            )
+            row = conn.execute("select tmux_session, role from sessions where id = ?", (session_id,)).fetchone()
+            self.assertIsNone(row["tmux_session"])
+            self.assertEqual(row["role"], "manager")
+
+
 if __name__ == "__main__":
     unittest.main()

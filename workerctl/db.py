@@ -779,6 +779,98 @@ def set_worker_pane_id(conn: sqlite3.Connection, *, worker_id: str, tmux_pane_id
     )
 
 
+def register_session(
+    conn: sqlite3.Connection,
+    *,
+    name: str,
+    role: str,
+    codex_session_path: str,
+    codex_session_id: str,
+    pid: int,
+    cwd: str,
+    tmux_session: str | None = None,
+    tmux_pane_id: str | None = None,
+    identity_token: str | None = None,
+    timestamp: str | None = None,
+) -> str:
+    """Idempotent upsert into `sessions`. Returns the session id.
+
+    On conflict by name: updates pid, codex_session_path, codex_session_id, tmux fields,
+    and state='active'. Raises WorkerError if a row exists with the same name but a
+    different role.
+    """
+    if role not in ("worker", "manager"):
+        raise WorkerError(f"invalid session role: {role}")
+    now = timestamp or now_iso()
+    existing = conn.execute(
+        "select id, role, identity_token from sessions where name = ?", (name,)
+    ).fetchone()
+    if existing is not None and existing["role"] != role:
+        raise WorkerError(
+            f"session name {name!r} already exists with role {existing['role']!r}; "
+            f"refusing to re-register as {role!r}"
+        )
+    session_id = str(existing["id"]) if existing else f"session-{uuid.uuid4()}"
+    token = (existing["identity_token"] if existing else None) or identity_token or f"session-token-{uuid.uuid4()}"
+    conn.execute(
+        """
+        insert into sessions(
+          id, name, role, identity_token,
+          tmux_session, tmux_pane_id,
+          codex_session_path, codex_session_id, pid,
+          cwd, registered_at, last_heartbeat_at, state
+        )
+        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')
+        on conflict(name) do update set
+          tmux_session = excluded.tmux_session,
+          tmux_pane_id = coalesce(excluded.tmux_pane_id, sessions.tmux_pane_id),
+          codex_session_path = excluded.codex_session_path,
+          codex_session_id = excluded.codex_session_id,
+          pid = excluded.pid,
+          cwd = excluded.cwd,
+          last_heartbeat_at = excluded.last_heartbeat_at,
+          state = 'active'
+        """,
+        (
+            session_id, name, role, token,
+            tmux_session, tmux_pane_id,
+            codex_session_path, codex_session_id, pid,
+            cwd, now, now,
+        ),
+    )
+    return session_id
+
+
+def session_row(conn: sqlite3.Connection, *, name: str, role: str | None = None) -> sqlite3.Row:
+    """Look up a session by name. Optionally verify role. Raises WorkerError if missing or role mismatch."""
+    row = conn.execute("select * from sessions where name = ?", (name,)).fetchone()
+    if row is None:
+        raise WorkerError(f"no session registered with name {name!r}")
+    if role is not None and row["role"] != role:
+        raise WorkerError(f"session {name!r} has role {row['role']!r}, expected {role!r}")
+    return row
+
+
+def list_sessions(conn: sqlite3.Connection, *, role: str | None = None) -> list[dict[str, Any]]:
+    query = "select * from sessions"
+    params: tuple = ()
+    if role is not None:
+        query += " where role = ?"
+        params = (role,)
+    query += " order by registered_at"
+    return [dict(row) for row in conn.execute(query, params)]
+
+
+def deregister_session(conn: sqlite3.Connection, *, name: str, timestamp: str | None = None) -> None:
+    now = timestamp or now_iso()
+    cursor = conn.execute(
+        "update sessions set state='gone', last_heartbeat_at=? where name=?",
+        (now, name),
+    )
+    if cursor.rowcount == 0:
+        raise WorkerError(f"no session registered with name {name!r}")
+
+
 def insert_status(
     conn: sqlite3.Connection,
     *,
