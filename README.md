@@ -124,6 +124,47 @@ workerctl nudge worker-a "Please summarize current progress and next action."
 workerctl stop worker-a
 ```
 
+## Manual-Assignment Primitives (Phase 1)
+
+The new path lets you register an already-running Codex session as a worker or manager
+and bind them to a task explicitly. These commands coexist with `promote`/`manage`;
+existing supervision still uses the older path until Phase 2 lands the JSON ingester.
+
+```bash
+# Register a worker (auto-discovers rollout via lsof on pid)
+workerctl register-worker --name auth-worker --pid $WORKER_PID --cwd "$PWD"
+
+# Register a manager — tmux NOT required
+workerctl register-manager --name auth-mgr --pid $MGR_PID --cwd "$PWD"
+
+# Create a task (existing command — note the --create flag form)
+workerctl tasks --create auth-refactor --goal "Finish the auth refactor"
+
+# Bind them
+workerctl bind --task auth-refactor --worker auth-worker --manager auth-mgr
+
+# Observe
+workerctl sessions
+workerctl sessions --role worker
+
+# Clean up
+workerctl unbind --task auth-refactor
+workerctl deregister auth-mgr
+workerctl deregister auth-worker
+```
+
+If `lsof` discovery fails (e.g. the codex session was started with `--ephemeral`), supply
+the rollout path explicitly:
+
+```bash
+workerctl register-worker --name w --pid $PID \
+  --codex-session ~/.codex/sessions/2026/05/11/rollout-...-<uuid>.jsonl
+```
+
+**Phase 1 scope:** these primitives create durable DB records only. Supervision still
+runs through `promote`/`manage`/`supervise` against the legacy worker/manager records.
+The JSON ingester and the manual-binding supervision loop come in Phase 2.
+
 ## SQLite Worker-Manager Lifecycle
 
 `workerctl` now uses `.codex-workers/workerctl.db` as the authoritative
