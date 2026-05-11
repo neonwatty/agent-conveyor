@@ -2760,8 +2760,10 @@ def command_bind(args: argparse.Namespace) -> int:
             worker_session_name=args.worker,
             manager_session_name=args.manager,
         )
+        task_id = worker_db.task_row(conn, task=args.task)["id"]
         worker_db.insert_event(
             conn, "binding_created", actor="workerctl",
+            task_id=task_id,
             payload={
                 "binding_id": binding_id, "task": args.task,
                 "worker": args.worker, "manager": args.manager,
@@ -2784,8 +2786,10 @@ def command_unbind(args: argparse.Namespace) -> int:
     worker_db.initialize_database(conn)
     try:
         worker_db.unbind_task(conn, task_name=args.task)
+        task_id = worker_db.task_row(conn, task=args.task)["id"]
         worker_db.insert_event(
             conn, "binding_ended", actor="workerctl",
+            task_id=task_id,
             payload={"task": args.task},
         )
         conn.commit()

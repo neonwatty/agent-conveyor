@@ -6186,6 +6186,23 @@ class RegisterCommandsTests(unittest.TestCase):
             row = conn.execute("select state from sessions where name='w'").fetchone()
             self.assertEqual(row["state"], "gone")
 
+    def test_cli_register_worker_bad_rollout_path_returns_clean_error(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_dir = Path(tmpdir) / "state"
+            state_dir.mkdir()
+            bogus = Path(tmpdir) / "does-not-exist.jsonl"
+
+            proc = self.run_cli(
+                "register-worker",
+                "--name", "x",
+                "--codex-session", str(bogus),
+                "--pid", "1",
+                env_extra={"WORKERCTL_STATE_ROOT": str(state_dir)},
+            )
+            self.assertEqual(proc.returncode, 1)
+            self.assertNotIn("Traceback", proc.stderr)
+            self.assertIn("workerctl:", proc.stderr)
+
 
 class BindCommandTests(unittest.TestCase):
     def open_db(self, tmpdir):
@@ -6397,6 +6414,30 @@ class BindCommandTests(unittest.TestCase):
                 "select state from bindings where task_id=(select id from tasks where name='myTask')"
             ).fetchone()
             self.assertEqual(row["state"], "ended")
+
+    def test_cli_bind_event_is_linked_to_task(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            rollout, state_dir, env = self._setup_state_dir(tmpdir)
+
+            self.run_cli("register-worker", "--name", "w", "--codex-session", str(rollout),
+                         "--pid", "1", "--cwd", str(ROOT), env_extra=env)
+            self.run_cli("register-manager", "--name", "m", "--codex-session", str(rollout),
+                         "--pid", "2", "--cwd", str(ROOT), env_extra=env)
+            self.run_cli("tasks", "--create", "evtTask", "--goal", "g", env_extra=env)
+            self.run_cli("bind", "--task", "evtTask", "--worker", "w", "--manager", "m", env_extra=env)
+            self.run_cli("unbind", "--task", "evtTask", env_extra=env)
+
+            conn = worker_db.connect(state_dir / "workerctl.db")
+            self.addCleanup(conn.close)
+            task_id = conn.execute("select id from tasks where name='evtTask'").fetchone()["id"]
+            event_types = [
+                r["type"]
+                for r in conn.execute(
+                    "select type from events where task_id = ? order by id", (task_id,)
+                )
+            ]
+            self.assertIn("binding_created", event_types)
+            self.assertIn("binding_ended", event_types)
 
 
 if __name__ == "__main__":

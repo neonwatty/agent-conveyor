@@ -13,8 +13,11 @@ class CodexSessionError(Exception):
 
 def read_session_meta(path: Path) -> dict[str, Any]:
     """Return the parsed payload of the first `session_meta` record in a rollout file."""
-    with open(path, "r") as fh:
-        first_line = fh.readline()
+    try:
+        with open(path, "r") as fh:
+            first_line = fh.readline()
+    except FileNotFoundError:
+        raise CodexSessionError(f"rollout file not found: {path}")
     if not first_line:
         raise CodexSessionError(f"rollout file is empty: {path}")
     try:

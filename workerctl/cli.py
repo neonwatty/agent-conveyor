@@ -69,6 +69,7 @@ from workerctl.commands import (
     command_update_status,
 )
 from workerctl.core import WorkerError
+from workerctl.codex_session import CodexSessionError
 from workerctl.export import command_export_task
 from workerctl.importer import command_import_compat
 from workerctl.lifecycle import (
@@ -881,7 +882,7 @@ def main() -> int:
     args.codex_args = unknown
     try:
         return args.func(args)
-    except WorkerError as exc:
+    except (WorkerError, CodexSessionError) as exc:
         print(f"workerctl: {exc}", file=sys.stderr)
         return 1
 
