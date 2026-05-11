@@ -332,12 +332,14 @@ Interrupt the bound worker through the task binding. This checks task state,
 records the interrupt decision, sends the interrupt, and logs any follow-up
 message as a task-scoped audit event.
 
-### `workerctl finish-task <name> [--stop-worker] --reason <text> [--decision-id ID] [--strict-decisions]`
+### `workerctl finish-task <name> [--stop-manager] [--stop-worker] --reason <text> [--decision-id ID] [--strict-decisions]`
 
-Close a completed task intentionally. Records a final manager decision, stops
-the manager, marks the task `done`, ends the active binding, and optionally
-stops the worker session. Use this for normal completion so audit history stays
-distinct from emergency cleanup or operator stop commands.
+Close a completed task intentionally. Records a final manager decision, marks
+the task `done`, ends the active binding, and leaves the manager terminal open
+by default for review. Add `--stop-manager` only when the manager terminal
+should be closed after recording completion. Add `--stop-worker` only when the
+worker session should be stopped too. Use this for normal completion so audit
+history stays distinct from emergency cleanup or operator stop commands.
 
 ### `workerctl mutation-audit <name>`
 
@@ -421,7 +423,8 @@ candidate → managed → paused → managed (resume)
 - `candidate`: started via `start-work`, not yet promoted.
 - `managed`: worker is supervised by an active manager.
 - `paused`: manager paused, worker still alive.
-- `done`: manager stopped, task complete or abandoned.
+- `done`: task complete or abandoned; the manager may remain open for review
+  unless explicitly stopped.
 - `failed`: promotion, recovery, or lifecycle transition failed and needs human
   attention.
 
@@ -905,7 +908,8 @@ ESCALATE
 
 STOP
   Print a final summary. Run finish-task when worker is done and the task should
-  close. Run pause-manager for escalation/user intervention. Use stop-task only
+  close; leave the manager open by default unless the user explicitly wants it
+  closed. Run pause-manager for escalation/user intervention. Use stop-task only
   for cleanup or explicit operator request.
   Terminal state.
 

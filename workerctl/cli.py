@@ -442,9 +442,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     finish_task = subparsers.add_parser(
         "finish-task",
-        help="Record a task as finished, stop its manager, optionally stop the worker, and preserve audit history.",
+        help="Record a task as finished, leave its manager open by default, optionally stop sessions, and preserve audit history.",
     )
     finish_task.add_argument("task", help="Task name or ID.")
+    finish_task.add_argument("--stop-manager", action="store_true", help="Also stop the manager tmux session after recording completion.")
     finish_task.add_argument("--stop-worker", action="store_true", help="Also stop the bound worker tmux session.")
     finish_task.add_argument("--message", help="Optional final message to send before stopping the worker.")
     finish_task.add_argument("--decision-id", type=int, help="Manager decision ID that justifies this finish.")
