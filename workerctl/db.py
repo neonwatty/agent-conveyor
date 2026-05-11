@@ -12,7 +12,7 @@ from workerctl.core import now_iso
 from workerctl.state import state_root
 
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 REQUIRED_TABLES = {
     "agent_observations",
     "bindings",
@@ -29,6 +29,7 @@ REQUIRED_TABLES = {
     "tasks",
     "terminal_captures",
     "transcript_captures",
+    "transcript_segments",
     "workers",
 }
 REQUIRED_INDEXES = {
@@ -41,6 +42,7 @@ REQUIRED_INDEXES = {
     "statuses_worker_id",
     "terminal_captures_task_role",
     "transcript_captures_worker_id",
+    "transcript_segments_task_role",
 }
 REQUIRED_TRIGGERS = {
     "events_no_delete",
@@ -203,6 +205,25 @@ def migrate(conn: sqlite3.Connection, from_version: int) -> None:
           source text not null
         );
 
+        create table if not exists transcript_segments(
+          id integer primary key autoincrement,
+          task_id text not null references tasks(id),
+          role text not null check (role in ('worker','manager')),
+          source_capture_id integer not null references terminal_captures(id),
+          previous_capture_id integer references terminal_captures(id),
+          captured_at text not null,
+          content_sha256 text not null,
+          segment_text text,
+          segment_start_line integer,
+          segment_end_line integer,
+          byte_count integer not null,
+          line_count integer not null,
+          retention_class text not null check (retention_class in ('hot','warm','cold','redacted')),
+          segment_kind text not null check (segment_kind in ('metadata','excerpt','snapshot','segment','reset')),
+          redacted integer not null default 0 check (redacted in (0, 1)),
+          created_at text not null
+        );
+
         create table if not exists agent_observations(
           id integer primary key autoincrement,
           task_id text not null references tasks(id),
@@ -310,6 +331,9 @@ def migrate(conn: sqlite3.Connection, from_version: int) -> None:
 
         create index if not exists transcript_captures_worker_id
         on transcript_captures(worker_id, id);
+
+        create index if not exists transcript_segments_task_role
+        on transcript_segments(task_id, role, id);
 
         create trigger if not exists events_no_update
         before update on events
@@ -719,6 +743,76 @@ def insert_terminal_capture(
             len(content.splitlines()),
             json.dumps(classifier or {}, sort_keys=True),
             source,
+        ),
+    )
+    return int(cursor.lastrowid)
+
+
+def latest_terminal_capture_for_role(
+    conn: sqlite3.Connection,
+    *,
+    task_id: str,
+    role: str,
+    before_id: int | None = None,
+) -> dict[str, Any] | None:
+    where = "task_id = ? and role = ?"
+    params: list[Any] = [task_id, role]
+    if before_id is not None:
+        where += " and id < ?"
+        params.append(before_id)
+    row = conn.execute(
+        f"""
+        select id, captured_at, content_sha256, content, line_count
+        from terminal_captures
+        where {where}
+        order by id desc
+        limit 1
+        """,
+        params,
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def insert_transcript_segment(
+    conn: sqlite3.Connection,
+    *,
+    task_id: str,
+    role: str,
+    source_capture_id: int,
+    previous_capture_id: int | None,
+    content_sha256: str,
+    segment_text: str | None,
+    segment_start_line: int | None,
+    segment_end_line: int | None,
+    segment_kind: str,
+    retention_class: str = "hot",
+    timestamp: str | None = None,
+) -> int:
+    row_timestamp = timestamp or now_iso()
+    cursor = conn.execute(
+        """
+        insert into transcript_segments(
+          task_id, role, source_capture_id, previous_capture_id, captured_at,
+          content_sha256, segment_text, segment_start_line, segment_end_line,
+          byte_count, line_count, retention_class, segment_kind, created_at
+        )
+        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            task_id,
+            role,
+            source_capture_id,
+            previous_capture_id,
+            row_timestamp,
+            content_sha256,
+            segment_text,
+            segment_start_line,
+            segment_end_line,
+            len((segment_text or "").encode()),
+            len((segment_text or "").splitlines()),
+            retention_class,
+            segment_kind,
+            row_timestamp,
         ),
     )
     return int(cursor.lastrowid)
@@ -1510,6 +1604,18 @@ def task_audit(conn: sqlite3.Connection, *, task: str) -> dict[str, Any]:
         """,
         (task_row["id"],),
     ).fetchall()
+    segment_rows = conn.execute(
+        """
+        select id, task_id, role, source_capture_id, previous_capture_id,
+               captured_at, content_sha256, segment_text, segment_start_line,
+               segment_end_line, byte_count, line_count, retention_class,
+               segment_kind, redacted, created_at
+        from transcript_segments
+        where task_id = ?
+        order by id
+        """,
+        (task_row["id"],),
+    ).fetchall()
     observation_rows = conn.execute(
         """
         select id, task_id, worker_id, manager_id, role, observation_type,
@@ -1653,6 +1759,27 @@ def task_audit(conn: sqlite3.Connection, *, task: str) -> dict[str, Any]:
                 "worker_id": row["worker_id"],
             }
             for row in capture_rows
+        ],
+        "transcript_segments": [
+            {
+                "byte_count": row["byte_count"],
+                "captured_at": row["captured_at"],
+                "content_sha256": row["content_sha256"],
+                "created_at": row["created_at"],
+                "id": row["id"],
+                "line_count": row["line_count"],
+                "previous_capture_id": row["previous_capture_id"],
+                "redacted": bool(row["redacted"]),
+                "retention_class": row["retention_class"],
+                "role": row["role"],
+                "segment_end_line": row["segment_end_line"],
+                "segment_kind": row["segment_kind"],
+                "segment_start_line": row["segment_start_line"],
+                "segment_text": row["segment_text"],
+                "source_capture_id": row["source_capture_id"],
+                "task_id": row["task_id"],
+            }
+            for row in segment_rows
         ],
     }
 

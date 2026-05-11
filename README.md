@@ -245,6 +245,9 @@ workerctl mutation-audit auth-refactor --json
 workerctl replay auth-refactor
 workerctl replay auth-refactor --format compact
 workerctl replay auth-refactor --format transcript --limit 20
+workerctl replay auth-refactor --format full-transcript --limit 40
+workerctl transcript-capture auth-refactor --role all --mode segment
+workerctl transcript-show auth-refactor --role worker
 workerctl commands --task auth-refactor --json
 workerctl commands --task auth-refactor --type task_nudge --state failed --json
 workerctl task-events auth-refactor --json
@@ -314,7 +317,10 @@ for a task-scoped event stream when reconstructing what happened.
 Use `replay <task>` for a chronological, human-readable reconstruction of the
 worker-manager relationship. `--format compact` shows decisions and side
 effects only; `--format transcript` includes deduplicated terminal-capture
-excerpts; `--json` returns stable machine-readable entries.
+excerpts; `--format full-transcript` interleaves operational events with
+deduplicated raw transcript segments. `--json` returns stable machine-readable
+entries. Use `transcript-capture` and `transcript-show` for explicit full
+transcript debugging when the operational replay is not enough.
 Use `task-health <task> --audit-decisions --json` when you want one task-scoped
 integrity view that combines SQLite state, live tmux drift, unfinished commands,
 manager decision linkage, and manager
