@@ -331,14 +331,6 @@ def migrate(conn: sqlite3.Connection, from_version: int) -> None:
         on bindings(task_id)
         where state in ('active', 'ending');
 
-        create unique index if not exists one_active_binding_per_worker_session
-        on bindings(worker_session_id)
-        where state in ('active', 'ending');
-
-        create unique index if not exists one_active_binding_per_manager_session
-        on bindings(manager_session_id)
-        where state in ('active', 'ending');
-
         create unique index if not exists one_active_manager_per_task
         on managers(task_id)
         where state in ('starting', 'ready', 'stopping');
@@ -548,6 +540,19 @@ def migrate_to_v5_sessions(conn: sqlite3.Connection) -> None:
                 row["started_at"] or now,
             ),
         )
+
+    # Ensure the two session-id partial unique indexes exist regardless of whether
+    # the rebuild branch ran. On fresh DBs the executescript above created the new
+    # bindings columns but did not create these indexes; on upgraded DBs the rebuild
+    # branch already created them and these statements no-op due to `if not exists`.
+    conn.executescript(
+        """
+        create unique index if not exists one_active_binding_per_worker_session
+        on bindings(worker_session_id) where state in ('active', 'ending');
+        create unique index if not exists one_active_binding_per_manager_session
+        on bindings(manager_session_id) where state in ('active', 'ending');
+        """
+    )
 
 
 def sync_worker_ids_to_config_files(conn: sqlite3.Connection) -> None:

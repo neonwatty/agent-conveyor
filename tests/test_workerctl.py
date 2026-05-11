@@ -5860,6 +5860,99 @@ class SessionsSchemaTests(unittest.TestCase):
             self.assertIsNone(row["worker_id"])
             self.assertEqual(row["worker_session_id"], "s-w")
 
+    def test_v4_to_v5_rebuild_preserves_binding_row(self):
+        """Simulate a true v4 database (old bindings shape, no sessions table, no
+        session-id indexes) and verify the v5 migration succeeds end-to-end."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            # Build a v5 db, then reshape it back to v4 in-place.
+            conn = worker_db.connect(db_path)
+            worker_db.initialize_database(conn)
+            now = "2026-05-11T00:00:00Z"
+            # Seed: a task, a worker, and a binding referencing them via legacy worker_id.
+            conn.execute(
+                "insert into tasks(id, name, goal, state, created_at, updated_at) "
+                "values ('task-x', 'tx', 'g', 'managed', ?, ?)",
+                (now, now),
+            )
+            conn.execute(
+                """
+                insert into workers(
+                  id, name, tmux_session, identity_token, cwd, state, created_at, updated_at
+                )
+                values ('worker-x', 'wx', 'codex-wx', 'tok-x', '/repo', 'active', ?, ?)
+                """,
+                (now, now),
+            )
+            conn.execute(
+                """
+                insert into bindings(id, task_id, worker_id, state, created_at)
+                values ('binding-x', 'task-x', 'worker-x', 'active', ?)
+                """,
+                (now,),
+            )
+            conn.commit()
+
+            # Reshape to v4: drop the session-id columns from bindings via rebuild,
+            # drop the new indexes, drop sessions, set user_version=4.
+            conn.executescript(
+                """
+                drop index if exists one_active_binding_per_worker_session;
+                drop index if exists one_active_binding_per_manager_session;
+                alter table bindings rename to bindings_pre_v4_shape;
+                create table bindings(
+                  id text primary key,
+                  task_id text not null references tasks(id),
+                  worker_id text not null references workers(id),
+                  manager_id text references managers(id),
+                  state text not null check (state in ('active','ending','ended','invalid')),
+                  created_at text not null,
+                  ended_at text
+                );
+                insert into bindings(id, task_id, worker_id, manager_id, state, created_at, ended_at)
+                select id, task_id, worker_id, manager_id, state, created_at, ended_at
+                from bindings_pre_v4_shape;
+                drop table bindings_pre_v4_shape;
+                create unique index if not exists one_active_binding_per_worker
+                  on bindings(worker_id) where state in ('active', 'ending');
+                create unique index if not exists one_active_binding_per_task
+                  on bindings(task_id) where state in ('active', 'ending');
+                drop table sessions;
+                """
+            )
+            conn.execute("PRAGMA user_version = 4")
+            conn.commit()
+            conn.close()
+
+            # Reopen and re-init: this is the actual v4→v5 migration path.
+            conn = worker_db.connect(db_path)
+            worker_db.initialize_database(conn)
+            self.addCleanup(conn.close)
+
+            # The binding row must still exist with the same data and NULL for new cols.
+            row = conn.execute(
+                "select task_id, worker_id, worker_session_id, manager_session_id, state "
+                "from bindings where id = 'binding-x'"
+            ).fetchone()
+            self.assertIsNotNone(row)
+            self.assertEqual(row["task_id"], "task-x")
+            self.assertEqual(row["worker_id"], "worker-x")
+            self.assertIsNone(row["worker_session_id"])
+            self.assertIsNone(row["manager_session_id"])
+            self.assertEqual(row["state"], "active")
+
+            # All four bindings indexes must exist.
+            indexes = {
+                r["name"]
+                for r in conn.execute(
+                    "select name from sqlite_master where type='index' and tbl_name='bindings'"
+                )
+            }
+            self.assertIn("one_active_binding_per_worker", indexes)
+            self.assertIn("one_active_binding_per_task", indexes)
+            self.assertIn("one_active_binding_per_worker_session", indexes)
+            self.assertIn("one_active_binding_per_manager_session", indexes)
+
 
 if __name__ == "__main__":
     unittest.main()
