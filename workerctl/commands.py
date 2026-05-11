@@ -1496,6 +1496,7 @@ def task_health_result(
     decision_audit = mutation_audit_result(audit) if audit_decisions and audit else None
     issues: list[dict[str, Any]] = []
     recommended_actions: list[str] = []
+    review_manager_idle: list[dict[str, Any]] = []
     for issue in snapshot["integrity"]["issues"]:
         issues.append({"code": issue, "source": "integrity"})
     if reconcile_result:
@@ -1517,7 +1518,19 @@ def task_health_result(
         if isinstance(busy_wait, dict) and busy_wait.get("pattern") == "rate_limit_prompt":
             manager_prompt_wait = busy_wait
     for warning in liveness_warnings:
-        if manager_prompt_wait:
+        if snapshot["state"] in {"done", "failed", "cancelled"} and warning["reason"] == "manager_seen_stale":
+            review_manager_idle.append(
+                {
+                    "code": "review_manager_idle",
+                    "manager_id": warning["manager_id"],
+                    "manager": warning["manager"],
+                    "last_seen_at": warning.get("last_seen_at"),
+                    "age_seconds": warning.get("age_seconds"),
+                    "prompt_pattern": manager_prompt_wait.get("pattern") if manager_prompt_wait else None,
+                    "source": "manager_liveness",
+                }
+            )
+        elif manager_prompt_wait:
             issues.append(
                 {
                     "code": "manager_waiting_for_user_choice",
@@ -1577,6 +1590,7 @@ def task_health_result(
         "manager_liveness_warnings": liveness_warnings,
         "ok": not issues,
         "recommended_actions": recommended_actions,
+        "review_manager_idle": review_manager_idle,
         "task": {
             "id": snapshot["id"],
             "name": snapshot["name"],
@@ -1831,6 +1845,7 @@ def compact_health_result(health: dict[str, Any]) -> dict[str, Any]:
         "manager_liveness_warnings": health.get("manager_liveness_warnings", []),
         "ok": health.get("ok"),
         "recommended_actions": health.get("recommended_actions", []),
+        "review_manager_idle": health.get("review_manager_idle", []),
         "task": health.get("task"),
     }
 

@@ -346,6 +346,9 @@ Use `db-doctor --live` for a read-only combined SQLite health and live tmux
 drift check. Live manager heartbeat warnings are reported without failing the
 doctor check unless there is actual reconciliation drift or an unfinished
 durable command; tune the warning threshold with `--manager-stale-seconds`.
+For a finished task, `task-health` treats a stale but still-live review manager
+as `review_manager_idle` metadata instead of a health issue; close it with
+`close-manager` when review is complete.
 Use `close-stale` to dry-run closure of tasks whose recorded worker is missing,
 not supervised by a live manager, and has no unfinished durable commands.
 `close-stale --apply` marks those tasks `failed`, ends their active bindings,
