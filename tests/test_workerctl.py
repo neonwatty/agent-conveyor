@@ -6024,6 +6024,51 @@ class RegisterCommandsTests(unittest.TestCase):
             self.assertIsNone(row["tmux_session"])
             self.assertEqual(row["role"], "manager")
 
+    def test_deregister_session_rejects_when_active_binding_exists(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            now = "2026-05-11T00:00:00Z"
+            conn.execute(
+                "insert into tasks(id, name, goal, state, created_at, updated_at) "
+                "values ('task-1', 'tt', 'g', 'managed', ?, ?)",
+                (now, now),
+            )
+            worker_sid = worker_db.register_session(
+                conn, name="w", role="worker", codex_session_path="/a",
+                codex_session_id="u-w", pid=1, cwd="/repo",
+            )
+            manager_sid = worker_db.register_session(
+                conn, name="m", role="manager", codex_session_path="/b",
+                codex_session_id="u-m", pid=2, cwd="/repo",
+            )
+            conn.execute(
+                """
+                insert into bindings(
+                  id, task_id, worker_session_id, manager_session_id, state, created_at
+                )
+                values ('b-1', 'task-1', ?, ?, 'active', ?)
+                """,
+                (worker_sid, manager_sid, now),
+            )
+            with self.assertRaises(WorkerError):
+                worker_db.deregister_session(conn, name="w")
+            with self.assertRaises(WorkerError):
+                worker_db.deregister_session(conn, name="m")
+            # Session state must remain active.
+            row = conn.execute("select state from sessions where name='w'").fetchone()
+            self.assertEqual(row["state"], "active")
+
+    def test_deregister_session_succeeds_when_no_active_binding(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            worker_db.register_session(
+                conn, name="w", role="worker", codex_session_path="/a",
+                codex_session_id="u-w", pid=1, cwd="/repo",
+            )
+            worker_db.deregister_session(conn, name="w")
+            row = conn.execute("select state from sessions where name='w'").fetchone()
+            self.assertEqual(row["state"], "gone")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -863,12 +863,29 @@ def list_sessions(conn: sqlite3.Connection, *, role: str | None = None) -> list[
 
 def deregister_session(conn: sqlite3.Connection, *, name: str, timestamp: str | None = None) -> None:
     now = timestamp or now_iso()
-    cursor = conn.execute(
+    existing = conn.execute("select id from sessions where name = ?", (name,)).fetchone()
+    if existing is None:
+        raise WorkerError(f"no session registered with name {name!r}")
+    session_id = existing["id"]
+    active_binding = conn.execute(
+        """
+        select id, task_id from bindings
+        where state in ('active', 'ending')
+          and (worker_session_id = ? or manager_session_id = ?)
+        limit 1
+        """,
+        (session_id, session_id),
+    ).fetchone()
+    if active_binding is not None:
+        raise WorkerError(
+            f"cannot deregister session {name!r}: it is still bound to task "
+            f"{active_binding['task_id']!r} (binding {active_binding['id']!r}). "
+            f"Unbind the task first."
+        )
+    conn.execute(
         "update sessions set state='gone', last_heartbeat_at=? where name=?",
         (now, name),
     )
-    if cursor.rowcount == 0:
-        raise WorkerError(f"no session registered with name {name!r}")
 
 
 def insert_status(
