@@ -1929,12 +1929,25 @@ class CliTests(unittest.TestCase):
     def test_task_health_reports_manager_rate_limit_prompt_explicitly(self):
         original_session_snapshot = worker_identity.session_snapshot
         try:
-            worker_identity.session_snapshot = lambda session: {"live": True, "pane_id": "%2", "session": session}
+            worker_identity.session_snapshot = lambda session: {
+                "live": True,
+                "pane_id": "%2" if session == "codex-manager-task-a" else "%1",
+                "session": session,
+            }
             with tempfile.TemporaryDirectory() as tmpdir:
                 db_path = Path(tmpdir) / "workerctl.db"
                 with worker_db.connect(db_path) as conn:
                     worker_db.initialize_database(conn)
+                    worker_db.upsert_worker(
+                        conn,
+                        name="worker-a",
+                        cwd=str(ROOT),
+                        tmux_session="codex-worker-a",
+                        tmux_pane_id="%1",
+                        state="active",
+                    )
                     task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
+                    worker_db.bind_task_worker(conn, task="task-a", worker="worker-a")
                     manager_id = worker_db.create_manager(
                         conn,
                         task_id=task_id,
@@ -1944,7 +1957,8 @@ class CliTests(unittest.TestCase):
                         codex_args=[],
                         state="ready",
                     )
-                    conn.execute("update tasks set state = 'done' where id = ?", (task_id,))
+                    worker_db.attach_manager_to_binding(conn, task_id=task_id, manager_id=manager_id)
+                    worker_db.set_task_state(conn, task_id=task_id, state="managed")
                     conn.execute("update managers set last_seen_at = '2000-01-01T00:00:00Z' where id = ?", (manager_id,))
                     worker_db.insert_terminal_capture(
                         conn,
@@ -1968,6 +1982,38 @@ class CliTests(unittest.TestCase):
                 self.assertIn("manager_waiting_for_user_choice", codes)
                 self.assertNotIn("manager_seen_stale", codes)
                 self.assertTrue(any("close-manager" in action for action in result["recommended_actions"]))
+        finally:
+            worker_identity.session_snapshot = original_session_snapshot
+
+    def test_task_health_treats_done_review_manager_stale_as_idle_metadata(self):
+        original_session_snapshot = worker_identity.session_snapshot
+        try:
+            worker_identity.session_snapshot = lambda session: {"live": True, "pane_id": "%2", "session": session}
+            with tempfile.TemporaryDirectory() as tmpdir:
+                db_path = Path(tmpdir) / "workerctl.db"
+                with worker_db.connect(db_path) as conn:
+                    worker_db.initialize_database(conn)
+                    task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
+                    manager_id = worker_db.create_manager(
+                        conn,
+                        task_id=task_id,
+                        name="manager-a",
+                        tmux_session="codex-manager-task-a",
+                        tmux_pane_id="%2",
+                        codex_args=[],
+                        state="ready",
+                    )
+                    conn.execute("update tasks set state = 'done' where id = ?", (task_id,))
+                    conn.execute("update managers set last_seen_at = '2000-01-01T00:00:00Z' where id = ?", (manager_id,))
+                    conn.commit()
+
+                result = commands.task_health_result(db_path, "task-a", manager_stale_seconds=60)
+
+                self.assertTrue(result["ok"])
+                self.assertEqual(result["issues"], [])
+                self.assertEqual(result["recommended_actions"], ["No action required."])
+                self.assertEqual(result["review_manager_idle"][0]["code"], "review_manager_idle")
+                self.assertEqual(result["review_manager_idle"][0]["manager"], "manager-a")
         finally:
             worker_identity.session_snapshot = original_session_snapshot
 

@@ -354,6 +354,11 @@ was supplied, the nearest previous decision, and warnings such as
 `task-health <name> --audit-decisions` includes the same linkage warnings in the
 task health result, and `export-task` writes `mutation-audit.json`.
 
+For terminal tasks, `task-health` does not treat an intentionally open stale
+review manager as unhealthy. It reports that state as `review_manager_idle`
+metadata so completed tasks can remain green while the manager terminal is
+available for review.
+
 ### `workerctl replay <name> [--format compact|timeline|transcript] [--role all|worker|manager] [--json]`
 
 Read-only worker-manager replay. It normalizes commands, manager decisions,
