@@ -89,7 +89,7 @@ def find_rollout_path_for_pid(pid: int, *, _run_lsof=_run_lsof_default) -> Path:
         if len(parts) < 2:
             continue
         path = parts[-1]
-        if "/rollout-" in path and path.endswith(".jsonl"):
+        if "/sessions/" in path and "/rollout-" in path and path.endswith(".jsonl"):
             return Path(path)
     raise CodexSessionError(f"no rollout-*.jsonl file open for pid {pid}")
 

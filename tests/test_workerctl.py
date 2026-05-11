@@ -5627,7 +5627,10 @@ class CodexSessionDiscoveryTests(unittest.TestCase):
         from workerctl import codex_session
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            rollout = Path(tmpdir) / "rollout-2026-05-11T07-32-08-xyz.jsonl"
+            # Create rollout file in a path with /sessions/ directory
+            sessions_dir = Path(tmpdir) / "sessions" / "2026" / "05" / "11"
+            sessions_dir.mkdir(parents=True)
+            rollout = sessions_dir / "rollout-2026-05-11T07-32-08-xyz.jsonl"
             rollout.write_text(json.dumps({
                 "type": "session_meta",
                 "payload": {
@@ -5652,6 +5655,18 @@ class CodexSessionDiscoveryTests(unittest.TestCase):
             self.assertEqual(result["codex_session_path"], str(rollout))
             self.assertEqual(result["cwd"], "/repo")
             self.assertEqual(result["originator"], "codex-tui")
+
+    def test_find_rollout_path_for_pid_ignores_rollout_outside_sessions_dir(self):
+        from workerctl import codex_session
+
+        def fake_run_lsof(pid):
+            return (
+                "codex 31507 user 25w REG 1,17 128 9999 "
+                "/tmp/rollout-stray.jsonl\n"
+            )
+
+        with self.assertRaises(codex_session.CodexSessionError):
+            codex_session.find_rollout_path_for_pid(31507, _run_lsof=fake_run_lsof)
 
 
 if __name__ == "__main__":
