@@ -5545,5 +5545,114 @@ class TmuxTests(unittest.TestCase):
             commands.run = original_run
 
 
+class CodexSessionDiscoveryTests(unittest.TestCase):
+    def test_read_session_meta_parses_first_line(self):
+        from workerctl import codex_session
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "rollout-2026-05-11T07-32-08-abc.jsonl"
+            meta_line = json.dumps({
+                "timestamp": "2026-05-11T14:32:11.791Z",
+                "type": "session_meta",
+                "payload": {
+                    "id": "019e1773-d973-7122-a8d6-f25331ebc8b7",
+                    "cwd": "/repo",
+                    "originator": "codex-tui",
+                    "cli_version": "0.130.0",
+                },
+            })
+            path.write_text(meta_line + "\n" + '{"type":"event_msg"}\n')
+            meta = codex_session.read_session_meta(path)
+
+            self.assertEqual(meta["id"], "019e1773-d973-7122-a8d6-f25331ebc8b7")
+            self.assertEqual(meta["cwd"], "/repo")
+            self.assertEqual(meta["originator"], "codex-tui")
+
+    def test_read_session_meta_raises_on_wrong_type(self):
+        from workerctl import codex_session
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "bad.jsonl"
+            path.write_text('{"type":"event_msg","payload":{}}\n')
+            with self.assertRaises(codex_session.CodexSessionError):
+                codex_session.read_session_meta(path)
+
+    def test_find_native_codex_pid_returns_self_when_already_native(self):
+        from workerctl import codex_session
+        # When the input pid is already a native codex binary, return it unchanged.
+        # We stub the helper to make this deterministic.
+        result = codex_session.find_native_codex_pid(99999, _ps_children=lambda _: [])
+        self.assertEqual(result, 99999)
+
+    def test_find_native_codex_pid_walks_to_child_when_node_wrapper(self):
+        from workerctl import codex_session
+        # node parent with one native codex child
+        children_by_pid = {1000: [2000]}
+
+        def fake_ps_children(pid):
+            return children_by_pid.get(pid, [])
+
+        result = codex_session.find_native_codex_pid(1000, _ps_children=fake_ps_children)
+        self.assertEqual(result, 2000)
+
+    def test_find_rollout_path_for_pid_returns_rollout_handle(self):
+        from workerctl import codex_session
+
+        fake_lsof_output = (
+            "codex   31507 user   25w  REG  1,17  277502  41320170 "
+            "/Users/u/.codex/sessions/2026/05/11/rollout-2026-05-11T10-54-17-abc.jsonl\n"
+            "codex   31507 user   26r  REG  1,17     128  12345678 "
+            "/Users/u/.codex/config.toml\n"
+        )
+
+        def fake_run_lsof(pid):
+            return fake_lsof_output
+
+        path = codex_session.find_rollout_path_for_pid(31507, _run_lsof=fake_run_lsof)
+        self.assertEqual(
+            str(path),
+            "/Users/u/.codex/sessions/2026/05/11/rollout-2026-05-11T10-54-17-abc.jsonl",
+        )
+
+    def test_find_rollout_path_for_pid_raises_when_no_rollout_open(self):
+        from workerctl import codex_session
+
+        def fake_run_lsof(pid):
+            return "codex 31507 user 25w REG 1,17 128 9999 /Users/u/.codex/config.toml\n"
+
+        with self.assertRaises(codex_session.CodexSessionError):
+            codex_session.find_rollout_path_for_pid(31507, _run_lsof=fake_run_lsof)
+
+    def test_discover_session_combines_lsof_and_meta(self):
+        from workerctl import codex_session
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            rollout = Path(tmpdir) / "rollout-2026-05-11T07-32-08-xyz.jsonl"
+            rollout.write_text(json.dumps({
+                "type": "session_meta",
+                "payload": {
+                    "id": "session-uuid-xyz",
+                    "cwd": "/repo",
+                    "originator": "codex-tui",
+                    "cli_version": "0.130.0",
+                },
+            }) + "\n")
+
+            fake_lsof = (
+                f"codex 9999 user 25w REG 1,17 100 1 {rollout}\n"
+            )
+
+            result = codex_session.discover_session(
+                pid=9999,
+                _ps_children=lambda _: [],
+                _run_lsof=lambda _: fake_lsof,
+            )
+            self.assertEqual(result["pid"], 9999)
+            self.assertEqual(result["codex_session_id"], "session-uuid-xyz")
+            self.assertEqual(result["codex_session_path"], str(rollout))
+            self.assertEqual(result["cwd"], "/repo")
+            self.assertEqual(result["originator"], "codex-tui")
+
+
 if __name__ == "__main__":
     unittest.main()
