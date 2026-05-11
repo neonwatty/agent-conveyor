@@ -5818,6 +5818,48 @@ class SessionsSchemaTests(unittest.TestCase):
             self.assertEqual(row["name"], "legacy-m")
             self.assertEqual(row["role"], "manager")
 
+    def test_bindings_has_session_id_columns(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            cols = {row["name"] for row in conn.execute("pragma table_info(bindings)")}
+            self.assertIn("worker_session_id", cols)
+            self.assertIn("manager_session_id", cols)
+
+    def test_bindings_worker_id_now_nullable(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            now = "2026-05-11T00:00:00Z"
+            conn.execute(
+                "insert into tasks(id, name, goal, state, created_at, updated_at) "
+                "values ('task-1', 't', 'g', 'managed', ?, ?)",
+                (now, now),
+            )
+            conn.execute(
+                "insert into sessions(id, name, role, identity_token, cwd, registered_at, state) "
+                "values ('s-w', 'w', 'worker', 'tok-w', '/tmp', ?, 'active')",
+                (now,),
+            )
+            conn.execute(
+                "insert into sessions(id, name, role, identity_token, cwd, registered_at, state) "
+                "values ('s-m', 'm', 'manager', 'tok-m', '/tmp', ?, 'active')",
+                (now,),
+            )
+            # Insert binding without legacy worker_id / manager_id — should succeed.
+            conn.execute(
+                """
+                insert into bindings(
+                  id, task_id, worker_session_id, manager_session_id, state, created_at
+                )
+                values ('b-1', 'task-1', 's-w', 's-m', 'active', ?)
+                """,
+                (now,),
+            )
+            row = conn.execute(
+                "select worker_id, worker_session_id from bindings where id='b-1'"
+            ).fetchone()
+            self.assertIsNone(row["worker_id"])
+            self.assertEqual(row["worker_session_id"], "s-w")
+
 
 if __name__ == "__main__":
     unittest.main()

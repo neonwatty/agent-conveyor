@@ -37,6 +37,8 @@ REQUIRED_INDEXES = {
     "commands_task_state_created",
     "events_task_id",
     "one_active_binding_per_task",
+    "one_active_binding_per_manager_session",
+    "one_active_binding_per_worker_session",
     "one_active_binding_per_worker",
     "one_active_manager_per_task",
     "agent_observations_task_id",
@@ -141,8 +143,10 @@ def migrate(conn: sqlite3.Connection, from_version: int) -> None:
         create table if not exists bindings(
           id text primary key,
           task_id text not null references tasks(id),
-          worker_id text not null references workers(id),
+          worker_id text references workers(id),
           manager_id text references managers(id),
+          worker_session_id text references sessions(id),
+          manager_session_id text references sessions(id),
           state text not null check (state in ('active','ending','ended','invalid')),
           created_at text not null,
           ended_at text
@@ -327,6 +331,14 @@ def migrate(conn: sqlite3.Connection, from_version: int) -> None:
         on bindings(task_id)
         where state in ('active', 'ending');
 
+        create unique index if not exists one_active_binding_per_worker_session
+        on bindings(worker_session_id)
+        where state in ('active', 'ending');
+
+        create unique index if not exists one_active_binding_per_manager_session
+        on bindings(manager_session_id)
+        where state in ('active', 'ending');
+
         create unique index if not exists one_active_manager_per_task
         on managers(task_id)
         where state in ('starting', 'ready', 'stopping');
@@ -445,6 +457,49 @@ def migrate_to_v5_sessions(conn: sqlite3.Connection) -> None:
     Codex-session fields (path, id, pid) are left null; they only populate for sessions
     registered via the new `register-*` commands.
     """
+    existing_cols = {row["name"] for row in conn.execute("pragma table_info(bindings)")}
+    if "worker_session_id" not in existing_cols:
+        # SQLite has no DROP NOT NULL; we rebuild the table to make worker_id nullable
+        # and to add the new columns. The parent `migrate()` runs in autocommit mode
+        # for the executescript above; we don't need an explicit transaction here.
+        conn.executescript(
+            """
+            alter table bindings rename to bindings_v4;
+            create table bindings(
+              id text primary key,
+              task_id text not null references tasks(id),
+              worker_id text references workers(id),
+              manager_id text references managers(id),
+              worker_session_id text references sessions(id),
+              manager_session_id text references sessions(id),
+              state text not null check (state in ('active','ending','ended','invalid')),
+              created_at text not null,
+              ended_at text
+            );
+            insert into bindings(
+              id, task_id, worker_id, manager_id,
+              worker_session_id, manager_session_id,
+              state, created_at, ended_at
+            )
+            select id, task_id, worker_id, manager_id, null, null, state, created_at, ended_at
+            from bindings_v4;
+            drop table bindings_v4;
+            """
+        )
+        # Re-create the existing unique indexes which were dropped with the table.
+        conn.executescript(
+            """
+            create unique index if not exists one_active_binding_per_worker
+              on bindings(worker_id) where state in ('active', 'ending');
+            create unique index if not exists one_active_binding_per_task
+              on bindings(task_id) where state in ('active', 'ending');
+            create unique index if not exists one_active_binding_per_worker_session
+              on bindings(worker_session_id) where state in ('active', 'ending');
+            create unique index if not exists one_active_binding_per_manager_session
+              on bindings(manager_session_id) where state in ('active', 'ending');
+            """
+        )
+
     now = now_iso()
     worker_rows = conn.execute(
         """
