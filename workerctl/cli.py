@@ -44,6 +44,10 @@ from workerctl.commands import (
     command_open_worker,
     command_prune,
     command_qa_plan,
+    command_register_worker,
+    command_register_manager,
+    command_deregister,
+    command_sessions,
     command_start,
     command_start_test,
     command_status,
@@ -267,6 +271,42 @@ def build_parser() -> argparse.ArgumentParser:
     tasks.add_argument("--summary", help="Optional summary text when creating a task.")
     tasks.add_argument("--path", help="Override the workerctl database path.")
     tasks.set_defaults(func=command_tasks)
+
+    register_worker = subparsers.add_parser(
+        "register-worker",
+        help="Register an existing Codex session as a worker.",
+    )
+    register_worker.add_argument("--name", required=True, help="Logical name for the session.")
+    register_worker.add_argument("--pid", type=int, help="Pid of the running codex process.")
+    register_worker.add_argument("--codex-session", help="Path to the rollout-*.jsonl file (skips lsof discovery).")
+    register_worker.add_argument("--cwd", help="Working directory; defaults to value in session_meta.")
+    register_worker.add_argument("--tmux-session", help="Optional tmux session name if the worker is in tmux.")
+    register_worker.set_defaults(func=command_register_worker)
+
+    register_manager = subparsers.add_parser(
+        "register-manager",
+        help="Register an existing Codex session as a manager (tmux not required).",
+    )
+    register_manager.add_argument("--name", required=True)
+    register_manager.add_argument("--pid", type=int)
+    register_manager.add_argument("--codex-session")
+    register_manager.add_argument("--cwd")
+    register_manager.add_argument("--tmux-session")
+    register_manager.set_defaults(func=command_register_manager)
+
+    deregister = subparsers.add_parser(
+        "deregister",
+        help="Mark a registered session as gone. Does not stop any process.",
+    )
+    deregister.add_argument("name", help="Session name to deregister.")
+    deregister.set_defaults(func=command_deregister)
+
+    sessions = subparsers.add_parser(
+        "sessions",
+        help="List registered sessions (workers and managers).",
+    )
+    sessions.add_argument("--role", choices=("worker", "manager"), default=None)
+    sessions.set_defaults(func=command_sessions)
 
     commands = subparsers.add_parser("commands", help="List durable side-effect commands from SQLite.")
     commands.add_argument("--task", help="Filter by task name or ID.")

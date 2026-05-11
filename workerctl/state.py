@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -9,6 +10,9 @@ from workerctl.core import WorkerError, age_seconds, now_iso
 
 
 def state_root() -> Path:
+    override = os.environ.get("WORKERCTL_STATE_ROOT")
+    if override:
+        return Path(override)
     return PROJECT_ROOT / STATE_ROOT
 
 

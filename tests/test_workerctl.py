@@ -6069,6 +6069,123 @@ class RegisterCommandsTests(unittest.TestCase):
             row = conn.execute("select state from sessions where name='w'").fetchone()
             self.assertEqual(row["state"], "gone")
 
+    def run_cli(self, *args, env_extra=None):
+        # Use the workerctl script directly to exercise the full argparse path.
+        env = os.environ.copy()
+        if env_extra:
+            env.update(env_extra)
+        proc = subprocess.run(
+            [sys.executable, "-m", "workerctl", *args],
+            capture_output=True,
+            text=True,
+            env=env,
+            cwd=str(ROOT),
+        )
+        return proc
+
+    def test_cli_register_worker_with_explicit_session_path(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            rollout = Path(tmpdir) / "rollout-2026-05-11-fake.jsonl"
+            rollout.write_text(json.dumps({
+                "type": "session_meta",
+                "payload": {"id": "fake-uuid", "cwd": str(ROOT), "originator": "codex-tui"},
+            }) + "\n")
+
+            state_dir = Path(tmpdir) / "state"
+            state_dir.mkdir()
+
+            proc = self.run_cli(
+                "register-worker",
+                "--name", "test-w",
+                "--codex-session", str(rollout),
+                "--pid", "12345",
+                "--cwd", str(ROOT),
+                env_extra={"WORKERCTL_STATE_ROOT": str(state_dir)},
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+
+            conn = worker_db.connect(state_dir / "workerctl.db")
+            self.addCleanup(conn.close)
+            row = conn.execute(
+                "select role, pid, codex_session_id from sessions where name='test-w'"
+            ).fetchone()
+            self.assertIsNotNone(row)
+            self.assertEqual(row["role"], "worker")
+            self.assertEqual(row["pid"], 12345)
+            self.assertEqual(row["codex_session_id"], "fake-uuid")
+
+    def test_cli_register_manager_without_tmux(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            rollout = Path(tmpdir) / "rollout-fake-mgr.jsonl"
+            rollout.write_text(json.dumps({
+                "type": "session_meta",
+                "payload": {"id": "mgr-uuid", "cwd": str(ROOT), "originator": "codex-tui"},
+            }) + "\n")
+            state_dir = Path(tmpdir) / "state"
+            state_dir.mkdir()
+
+            proc = self.run_cli(
+                "register-manager",
+                "--name", "test-m",
+                "--codex-session", str(rollout),
+                "--pid", "99999",
+                "--cwd", str(ROOT),
+                env_extra={"WORKERCTL_STATE_ROOT": str(state_dir)},
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+
+            conn = worker_db.connect(state_dir / "workerctl.db")
+            self.addCleanup(conn.close)
+            row = conn.execute(
+                "select role, tmux_session, codex_session_id from sessions where name='test-m'"
+            ).fetchone()
+            self.assertEqual(row["role"], "manager")
+            self.assertIsNone(row["tmux_session"])
+            self.assertEqual(row["codex_session_id"], "mgr-uuid")
+
+    def test_cli_sessions_lists_registered(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            rollout = Path(tmpdir) / "r.jsonl"
+            rollout.write_text(json.dumps({
+                "type": "session_meta",
+                "payload": {"id": "u1", "cwd": str(ROOT), "originator": "codex-tui"},
+            }) + "\n")
+            state_dir = Path(tmpdir) / "state"
+            state_dir.mkdir()
+            env = {"WORKERCTL_STATE_ROOT": str(state_dir)}
+
+            self.run_cli("register-worker", "--name", "w", "--codex-session", str(rollout),
+                         "--pid", "1", "--cwd", str(ROOT), env_extra=env)
+            self.run_cli("register-manager", "--name", "m", "--codex-session", str(rollout),
+                         "--pid", "2", "--cwd", str(ROOT), env_extra=env)
+
+            proc = self.run_cli("sessions", env_extra=env)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            rows = json.loads(proc.stdout)
+            names = {r["name"] for r in rows}
+            self.assertEqual(names, {"w", "m"})
+
+    def test_cli_deregister_marks_gone(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            rollout = Path(tmpdir) / "r.jsonl"
+            rollout.write_text(json.dumps({
+                "type": "session_meta",
+                "payload": {"id": "u1", "cwd": str(ROOT), "originator": "codex-tui"},
+            }) + "\n")
+            state_dir = Path(tmpdir) / "state"
+            state_dir.mkdir()
+            env = {"WORKERCTL_STATE_ROOT": str(state_dir)}
+
+            self.run_cli("register-worker", "--name", "w", "--codex-session", str(rollout),
+                         "--pid", "1", "--cwd", str(ROOT), env_extra=env)
+            proc = self.run_cli("deregister", "w", env_extra=env)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+
+            conn = worker_db.connect(state_dir / "workerctl.db")
+            self.addCleanup(conn.close)
+            row = conn.execute("select state from sessions where name='w'").fetchone()
+            self.assertEqual(row["state"], "gone")
+
 
 class BindCommandTests(unittest.TestCase):
     def open_db(self, tmpdir):

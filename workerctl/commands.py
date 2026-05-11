@@ -2649,3 +2649,101 @@ def command_stop(args: argparse.Namespace) -> int:
         append_event(args.name, "stop", {"killed_session": False})
         print(f"{args.name} was not running")
     return 0
+
+
+def _register_session_from_args(args: argparse.Namespace, *, role: str) -> dict:
+    from workerctl import codex_session as cs
+    from workerctl import db as worker_db
+
+    if args.codex_session:
+        rollout_path = Path(args.codex_session)
+        meta = cs.read_session_meta(rollout_path)
+        codex_session_path = str(rollout_path)
+        codex_session_id = meta["id"]
+        cwd = args.cwd or meta.get("cwd", "")
+        pid = args.pid
+        if pid is None:
+            raise WorkerError("--pid is required when --codex-session is supplied")
+    elif args.pid is not None:
+        info = cs.discover_session(pid=args.pid)
+        codex_session_path = info["codex_session_path"]
+        codex_session_id = info["codex_session_id"]
+        cwd = args.cwd or info["cwd"]
+        pid = args.pid
+    else:
+        raise WorkerError("must supply --pid or --codex-session")
+
+    conn = worker_db.connect()
+    worker_db.initialize_database(conn)
+    try:
+        session_id = worker_db.register_session(
+            conn,
+            name=args.name,
+            role=role,
+            codex_session_path=codex_session_path,
+            codex_session_id=codex_session_id,
+            pid=pid,
+            cwd=cwd,
+            tmux_session=getattr(args, "tmux_session", None),
+        )
+        conn.commit()
+        worker_db.insert_event(
+            conn,
+            "session_registered",
+            actor="workerctl",
+            payload={
+                "name": args.name, "role": role, "session_id": session_id,
+                "pid": pid, "codex_session_id": codex_session_id,
+            },
+        )
+        conn.commit()
+        return {
+            "session_id": session_id, "name": args.name, "role": role,
+            "pid": pid, "codex_session_id": codex_session_id,
+            "codex_session_path": codex_session_path, "cwd": cwd,
+        }
+    finally:
+        conn.close()
+
+
+def command_register_worker(args: argparse.Namespace) -> int:
+    result = _register_session_from_args(args, role="worker")
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0
+
+
+def command_register_manager(args: argparse.Namespace) -> int:
+    result = _register_session_from_args(args, role="manager")
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0
+
+
+def command_deregister(args: argparse.Namespace) -> int:
+    from workerctl import db as worker_db
+
+    conn = worker_db.connect()
+    worker_db.initialize_database(conn)
+    try:
+        worker_db.deregister_session(conn, name=args.name)
+        worker_db.insert_event(
+            conn, "session_deregistered", actor="workerctl",
+            payload={"name": args.name},
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    print(json.dumps({"name": args.name, "state": "gone"}))
+    return 0
+
+
+def command_sessions(args: argparse.Namespace) -> int:
+    from workerctl import db as worker_db
+
+    conn = worker_db.connect()
+    worker_db.initialize_database(conn)
+    try:
+        rows = worker_db.list_sessions(conn, role=args.role)
+    finally:
+        conn.close()
+    print(json.dumps(rows, indent=2, sort_keys=True, default=str))
+    return 0
