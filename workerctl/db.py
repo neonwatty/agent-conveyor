@@ -1764,6 +1764,64 @@ def bind_task_worker(
     return new_binding_id
 
 
+def bind_sessions(
+    conn: sqlite3.Connection,
+    *,
+    task_name: str,
+    worker_session_name: str,
+    manager_session_name: str,
+    timestamp: str | None = None,
+) -> str:
+    """Create an active binding between a task and a (worker, manager) session pair.
+
+    Uses the new `worker_session_id` / `manager_session_id` columns. Raises WorkerError
+    on missing task/session, role mismatch, or pre-existing active binding for the task.
+    """
+    now = timestamp or now_iso()
+    task = task_row(conn, task=task_name)
+    worker_sess = session_row(conn, name=worker_session_name, role="worker")
+    manager_sess = session_row(conn, name=manager_session_name, role="manager")
+
+    existing = conn.execute(
+        "select id from bindings where task_id = ? and state in ('active','ending')",
+        (task["id"],),
+    ).fetchone()
+    if existing is not None:
+        raise WorkerError(
+            f"task {task_name!r} already has an active binding {existing['id']!r}"
+        )
+
+    binding_id = f"binding-{uuid.uuid4()}"
+    conn.execute(
+        """
+        insert into bindings(
+          id, task_id, worker_session_id, manager_session_id, state, created_at
+        )
+        values (?, ?, ?, ?, 'active', ?)
+        """,
+        (binding_id, task["id"], worker_sess["id"], manager_sess["id"], now),
+    )
+    return binding_id
+
+
+def unbind_task(
+    conn: sqlite3.Connection,
+    *,
+    task_name: str,
+    timestamp: str | None = None,
+) -> None:
+    """End the active binding for `task_name`. Raises WorkerError if no active binding."""
+    now = timestamp or now_iso()
+    task = task_row(conn, task=task_name)
+    cursor = conn.execute(
+        "update bindings set state='ended', ended_at=? "
+        "where task_id=? and state in ('active','ending')",
+        (now, task["id"]),
+    )
+    if cursor.rowcount == 0:
+        raise WorkerError(f"no active binding for task {task_name!r}")
+
+
 def active_task_worker(conn: sqlite3.Connection, *, task: str) -> dict[str, Any]:
     row = conn.execute(
         """

@@ -6070,5 +6070,95 @@ class RegisterCommandsTests(unittest.TestCase):
             self.assertEqual(row["state"], "gone")
 
 
+class BindCommandTests(unittest.TestCase):
+    def open_db(self, tmpdir):
+        path = Path(tmpdir) / "workerctl.db"
+        conn = worker_db.connect(path)
+        worker_db.initialize_database(conn)
+        self.addCleanup(conn.close)
+        return conn
+
+    def setup_pair(self, conn):
+        now = "2026-05-11T00:00:00Z"
+        conn.execute(
+            "insert into tasks(id, name, goal, state, created_at, updated_at) "
+            "values ('task-1', 'auth-refactor', 'g', 'candidate', ?, ?)",
+            (now, now),
+        )
+        worker_db.register_session(
+            conn, name="w1", role="worker", codex_session_path="/a",
+            codex_session_id="cuid-w", pid=1, cwd="/repo",
+        )
+        worker_db.register_session(
+            conn, name="m1", role="manager", codex_session_path="/b",
+            codex_session_id="cuid-m", pid=2, cwd="/repo",
+        )
+
+    def test_bind_sessions_creates_active_binding(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self.setup_pair(conn)
+            binding_id = worker_db.bind_sessions(
+                conn,
+                task_name="auth-refactor",
+                worker_session_name="w1",
+                manager_session_name="m1",
+            )
+            self.assertTrue(binding_id.startswith("binding-"))
+            row = conn.execute(
+                "select * from bindings where id = ?", (binding_id,)
+            ).fetchone()
+            self.assertEqual(row["state"], "active")
+            self.assertEqual(row["task_id"], "task-1")
+            self.assertIsNotNone(row["worker_session_id"])
+            self.assertIsNotNone(row["manager_session_id"])
+            self.assertIsNone(row["worker_id"])
+            self.assertIsNone(row["manager_id"])
+
+    def test_bind_sessions_rejects_double_bind_same_task(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self.setup_pair(conn)
+            worker_db.bind_sessions(
+                conn, task_name="auth-refactor",
+                worker_session_name="w1", manager_session_name="m1",
+            )
+            worker_db.register_session(
+                conn, name="m2", role="manager", codex_session_path="/c",
+                codex_session_id="cuid-m2", pid=3, cwd="/repo",
+            )
+            with self.assertRaises(WorkerError):
+                worker_db.bind_sessions(
+                    conn, task_name="auth-refactor",
+                    worker_session_name="w1", manager_session_name="m2",
+                )
+
+    def test_bind_sessions_rejects_role_mismatch(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self.setup_pair(conn)
+            with self.assertRaises(WorkerError):
+                worker_db.bind_sessions(
+                    conn, task_name="auth-refactor",
+                    worker_session_name="m1",  # wrong role
+                    manager_session_name="w1",
+                )
+
+    def test_unbind_task_ends_active_binding(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self.setup_pair(conn)
+            binding_id = worker_db.bind_sessions(
+                conn, task_name="auth-refactor",
+                worker_session_name="w1", manager_session_name="m1",
+            )
+            worker_db.unbind_task(conn, task_name="auth-refactor")
+            row = conn.execute(
+                "select state, ended_at from bindings where id = ?", (binding_id,)
+            ).fetchone()
+            self.assertEqual(row["state"], "ended")
+            self.assertIsNotNone(row["ended_at"])
+
+
 if __name__ == "__main__":
     unittest.main()
