@@ -368,6 +368,13 @@ Stop the manager session and mark the task `paused`. Worker keeps running.
 Task-scoped manager commands must reject mutations while the task is paused, so
 a stale still-running manager cannot keep nudging.
 
+### `workerctl close-manager <name> [--reason <text>]`
+
+Close the latest active manager session for a task without changing task state
+or worker state. This is the post-finish review cleanup command: after
+`finish-task` leaves the manager terminal open by default, use `close-manager`
+when review is complete so SQLite records the manager as stopped.
+
 ### `workerctl unmanage [--task NAME] [--session SESSION]`
 
 Worker-facing demotion command. Run this from inside the managed worker session
@@ -1008,13 +1015,14 @@ intent/result records, and recovery/audit views.
 ### Phase 4: Manager Lifecycle
 
 - `pause-manager`, `unmanage`, `my-status`, `remanage`, `resume-manager`,
-  `stop-manager`, `finish-task`, `stop-task`.
+  `stop-manager`, `finish-task`, `close-manager`, `stop-task`.
 - `pause-manager` is the task-scoped operator command that stops the manager and
   marks the task paused. `unmanage` is the worker-facing command that infers the
   current worker/task from tmux and records worker-initiated audit metadata.
   `my-status` gives the worker a self-view of the active binding. `remanage`
   restarts supervision from the worker session. `resume-manager` starts a fresh
-  manager from latest SQLite state by explicit task name.
+  manager from latest SQLite state by explicit task name. `close-manager` closes
+  a post-finish review manager without changing task state.
 - Budget counters: reserve nudges_used on task-nudge, check expires_at.
 - Log all manager actions to SQLite `events`.
 - Export task bundles on demand for manual debugging:

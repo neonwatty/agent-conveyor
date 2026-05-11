@@ -167,6 +167,8 @@ Natural-language command mapping:
 - "finish this managed task", "close this task", "mark this task done": run
   `workerctl finish-task <task> --reason "<reason>"`. Add `--stop-manager`
   only when the user asks to close the manager terminal too.
+- "close the manager terminal", "review is complete", "clean up the manager":
+  run `workerctl close-manager <task> --reason "<reason>"`.
 - "show me the manager" or "open the manager terminal": run
   `workerctl open-manager <task>`.
 - "show me the worker" or "open the worker terminal": run
@@ -216,6 +218,7 @@ scripts/workerctl task-health <task> --json
 scripts/workerctl task-capture <task> --role manager --json
 scripts/workerctl finish-task <task> --reason "<reason>"
 scripts/workerctl finish-task <task> --reason "<reason>" --stop-manager
+scripts/workerctl close-manager <task> --reason "<reason>"
 scripts/workerctl open-manager <task>
 scripts/workerctl open-worker <task>
 ```

@@ -714,6 +714,119 @@ def command_pause_manager(args: argparse.Namespace) -> int:
     )
 
 
+def command_close_manager(args: argparse.Namespace) -> int:
+    db_path = Path(args.path).expanduser().resolve() if args.path else None
+    reason = getattr(args, "reason", None) or "Manager closed by operator."
+    with connect_db(db_path) as conn:
+        initialize_database(conn)
+        snapshot = task_status_snapshot(conn, task=args.task)
+        manager = active_manager(conn, task=snapshot["id"])
+        if manager is None:
+            raise WorkerError(f"Task {snapshot['name']} has no active manager")
+        command_id = create_db_command(
+            conn,
+            command_type="close_manager",
+            task_id=snapshot["id"],
+            manager_id=manager["id"],
+            payload={
+                "manager": manager["name"],
+                "manager_session": manager["tmux_session"],
+                "reason": reason,
+                "task": snapshot["name"],
+                "task_state": snapshot["state"],
+            },
+        )
+        insert_db_event(
+            conn,
+            "close_manager_intent",
+            actor="workerctl",
+            command_id=command_id,
+            task_id=snapshot["id"],
+            manager_id=manager["id"],
+            payload={"manager": manager["name"], "manager_session": manager["tmux_session"], "reason": reason},
+        )
+        conn.commit()
+    result = {
+        "command_id": command_id,
+        "killed_manager": False,
+        "manager": manager["name"],
+        "manager_session": manager["tmux_session"],
+        "reason": reason,
+        "task": snapshot["name"],
+        "task_state": snapshot["state"],
+    }
+    try:
+        with connect_db(db_path) as conn:
+            initialize_database(conn)
+            mark_command_attempted(conn, command_id=command_id)
+            conn.commit()
+        live = identity.session_snapshot(manager["tmux_session"])
+        verification = {
+            "db_pane_id": manager.get("tmux_pane_id"),
+            "db_session": manager["tmux_session"],
+            "live": live["live"],
+            "live_pane_id": live["pane_id"],
+            "manager": manager["name"],
+            "mismatches": [],
+        }
+        if manager.get("tmux_pane_id") and live["pane_id"] and live["pane_id"] != manager["tmux_pane_id"]:
+            verification["mismatches"].append("manager_pane_mismatch")
+        if verification["mismatches"]:
+            raise WorkerError(
+                f"Manager identity verification failed for {manager['name']}: {', '.join(verification['mismatches'])}"
+            )
+        result["manager_identity"] = verification
+        with connect_db(db_path) as conn:
+            initialize_database(conn)
+            if verification["live"]:
+                mark_manager_seen(conn, manager_id=manager["id"])
+                set_manager_state(conn, manager_id=manager["id"], state="stopping")
+            insert_db_event(
+                conn,
+                "manager_identity_verified",
+                actor="workerctl",
+                command_id=command_id,
+                task_id=snapshot["id"],
+                manager_id=manager["id"],
+                payload=verification,
+            )
+            conn.commit()
+        if verification["live"]:
+            run(["tmux", "kill-session", "-t", manager["tmux_session"]])
+            result["killed_manager"] = True
+        with connect_db(db_path) as conn:
+            initialize_database(conn)
+            set_manager_state(conn, manager_id=manager["id"], state="stopped", exit_reason=reason)
+            finish_db_command(conn, command_id=command_id, state="succeeded", result=result)
+            insert_db_event(
+                conn,
+                "close_manager_succeeded",
+                actor="workerctl",
+                command_id=command_id,
+                task_id=snapshot["id"],
+                manager_id=manager["id"],
+                payload=result,
+            )
+            conn.commit()
+    except Exception as exc:
+        with connect_db(db_path) as conn:
+            initialize_database(conn)
+            finish_db_command(conn, command_id=command_id, state="failed", error=str(exc))
+            insert_db_event(
+                conn,
+                "close_manager_failed",
+                actor="workerctl",
+                command_id=command_id,
+                task_id=snapshot["id"],
+                manager_id=manager["id"],
+                payload={**result, "error": str(exc)},
+            )
+            conn.commit()
+        raise
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0
+
+
 def command_unmanage(args: argparse.Namespace) -> int:
     db_path = Path(args.path).expanduser().resolve() if args.path else None
     session = getattr(args, "session", None) or current_session_name()
@@ -1195,7 +1308,14 @@ def reconcile_rows(
             from tasks
             left join bindings on bindings.task_id = tasks.id and bindings.state in ('active', 'ending')
             left join workers on workers.id = bindings.worker_id
-            left join managers on managers.id = bindings.manager_id
+            left join managers on managers.task_id = tasks.id
+              and managers.state in ('starting', 'ready', 'stopping')
+              and managers.started_at = (
+                select max(active_managers.started_at)
+                from managers active_managers
+                where active_managers.task_id = tasks.id
+                  and active_managers.state in ('starting', 'ready', 'stopping')
+              )
             {where}
             order by tasks.created_at, tasks.id
             """,
@@ -1307,7 +1427,8 @@ def reconcile_rows(
                         state="missing",
                         exit_reason="tmux session missing during recover",
                     )
-                    set_task_state(conn, task_id=result["task"]["id"], state="paused")
+                    if result["task"]["state"] == "managed":
+                        set_task_state(conn, task_id=result["task"]["id"], state="paused")
                     insert_db_event(
                         conn,
                         "recover_manager_missing",

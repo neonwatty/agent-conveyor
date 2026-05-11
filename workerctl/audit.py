@@ -4,6 +4,7 @@ from typing import Any
 
 
 MUTATING_COMMAND_DECISIONS = {
+    "close_manager": {"stop"},
     "extend_nudge_budget": {"escalate"},
     "finish_task": {"stop"},
     "pause_manager": {"escalate", "stop"},
