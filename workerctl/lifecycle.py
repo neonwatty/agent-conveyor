@@ -91,6 +91,15 @@ def passthrough_args(values: list[str]) -> list[str]:
     return values
 
 
+def manager_codex_args_from_args(args: argparse.Namespace) -> list[str]:
+    explicit_args = passthrough_args(getattr(args, "codex_args", None) or [])
+    if explicit_args:
+        return explicit_args
+    if getattr(args, "no_manager_codex_args", False):
+        return []
+    return list(RECOMMENDED_MANAGER_CODEX_ARGS)
+
+
 def manager_codex_args_warning(codex_args: list[str]) -> dict[str, Any] | None:
     if codex_args:
         return None
@@ -206,7 +215,7 @@ def command_promote(args: argparse.Namespace) -> int:
         raise WorkerError(f"Worker tmux session is not running: {tmux_target(args.worker)}")
 
     db_path = Path(args.path).expanduser().resolve() if args.path else None
-    codex_args = passthrough_args(args.codex_args or [])
+    codex_args = manager_codex_args_from_args(args)
     manager_args_warning = manager_codex_args_warning(codex_args)
     expires_at = args.budget_expires_at or default_budget_expires_at(args.budget_hours)
     manager_id = None
@@ -403,6 +412,7 @@ def command_self_promote(args: argparse.Namespace) -> int:
         goal=args.goal,
         manager_instructions=args.manager_instructions,
         max_nudges=args.max_nudges,
+        no_manager_codex_args=getattr(args, "no_manager_codex_args", False),
         open_manager=getattr(args, "open_manager", False),
         path=args.path,
         summary=args.summary,
@@ -444,6 +454,7 @@ def command_manage(args: argparse.Namespace) -> int:
         goal=args.goal,
         manager_instructions=args.manager_instructions,
         max_nudges=args.max_nudges,
+        no_manager_codex_args=getattr(args, "no_manager_codex_args", False),
         open_manager=getattr(args, "open_manager", False),
         path=args.path,
         summary=args.summary,
@@ -916,7 +927,7 @@ def _resume_manager_task(
 
 def command_resume_manager(args: argparse.Namespace) -> int:
     db_path = Path(args.path).expanduser().resolve() if args.path else None
-    codex_args = passthrough_args(args.codex_args or [])
+    codex_args = manager_codex_args_from_args(args)
     with connect_db(db_path) as conn:
         initialize_database(conn)
         snapshot = task_status_snapshot(conn, task=args.task)
@@ -947,7 +958,7 @@ def command_remanage(args: argparse.Namespace) -> int:
         resolved_from="task" if task else "tmux_session",
         verification=verification,
     )
-    codex_args = passthrough_args(args.codex_args or [])
+    codex_args = manager_codex_args_from_args(args)
     return _resume_manager_task(
         db_path=db_path,
         task=binding["task_name"],

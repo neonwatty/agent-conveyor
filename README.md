@@ -181,18 +181,21 @@ workerctl doctor-self
 `workerctl doctor-self` is a mandatory preflight gate for plain Codex sessions:
 the agent should never run `workerctl become-managed` until
 `can_promote_in_place` is true. If `can_promote_in_place` is true, it should
-prefer the reported `become_managed_recommended_command_template`, which appends
-manager Codex args after `--`, after asking for any missing worker name, task
-name, or goal. If the current Codex process is not inside tmux, it cannot be
-promoted in-place as a tmux-backed worker; start a tmux-backed session with
-`workerctl start ...` instead.
-When no manager Codex args are supplied, `become-managed` still runs but records
-a `manager_started_without_codex_args` warning in the promotion audit. For
-dogfooding, use:
+prefer the reported `become_managed_recommended_command_template` after asking
+for any missing worker name, task name, or goal. Manager launch commands default
+to the recommended manager Codex args:
 
 ```bash
-workerctl become-managed ... -- --sandbox danger-full-access --ask-for-approval never
+--sandbox danger-full-access --ask-for-approval never
 ```
+
+If the current Codex process is not inside tmux, it cannot be
+promoted in-place as a tmux-backed worker; start a tmux-backed session with
+`workerctl start ...` instead.
+Pass explicit manager Codex args after `--` only when intentionally overriding
+that default. Use `--no-manager-codex-args` only when you intentionally want a
+manager without those defaults; workerctl records
+`manager_started_without_codex_args` in that case.
 
 Use `workerctl explain-managed-flow --json` when an agent needs compact command
 mappings for phrases like "manage yourself", "stop supervising me", "resume

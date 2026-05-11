@@ -81,6 +81,14 @@ from workerctl.lifecycle import (
 from workerctl.supervise import command_idle_check, command_supervise, command_watch
 
 
+def add_manager_codex_arg_options(command: argparse.ArgumentParser) -> None:
+    command.add_argument(
+        "--no-manager-codex-args",
+        action="store_true",
+        help="Start the manager without the default recommended Codex args. Use only when intentionally overriding manager sandbox/approval behavior.",
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="workerctl",
@@ -306,6 +314,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Terminal app to use for the manager window.",
     )
     become_managed.add_argument("--path", help="Override the workerctl database path.")
+    add_manager_codex_arg_options(become_managed)
     become_managed.set_defaults(func=command_become_managed, open_manager=True)
 
     manage = subparsers.add_parser("manage", help="From inside a worker session, register it if needed and spawn a manager.")
@@ -329,6 +338,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Terminal app to use with --open-manager.",
     )
     manage.add_argument("--path", help="Override the workerctl database path.")
+    add_manager_codex_arg_options(manage)
     manage.set_defaults(func=command_manage)
 
     promote = subparsers.add_parser("promote", help="Promote an existing worker into a managed task.")
@@ -348,6 +358,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Terminal app to use with --open-manager.",
     )
     promote.add_argument("--path", help="Override the workerctl database path.")
+    add_manager_codex_arg_options(promote)
     promote.set_defaults(func=command_promote)
 
     self_promote = subparsers.add_parser("self-promote", help="Promote the current named worker session into a managed task.")
@@ -368,6 +379,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Terminal app to use with --open-manager.",
     )
     self_promote.add_argument("--path", help="Override the workerctl database path.")
+    add_manager_codex_arg_options(self_promote)
     self_promote.set_defaults(func=command_self_promote)
 
     pause_manager = subparsers.add_parser("pause-manager", help="Stop a task manager while leaving the worker running.")
@@ -403,6 +415,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Terminal app to use with --open-manager.",
     )
     remanage.add_argument("--path", help="Override the workerctl database path.")
+    add_manager_codex_arg_options(remanage)
     remanage.set_defaults(func=command_remanage)
 
     resume_manager = subparsers.add_parser("resume-manager", help="Restart a paused task manager.")
@@ -415,6 +428,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Terminal app to use with --open-manager.",
     )
     resume_manager.add_argument("--path", help="Override the workerctl database path.")
+    add_manager_codex_arg_options(resume_manager)
     resume_manager.set_defaults(func=command_resume_manager)
 
     stop_task = subparsers.add_parser("stop-task", help="Stop a task manager, optionally stop the worker, and mark the task done.")

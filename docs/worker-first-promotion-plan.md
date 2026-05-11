@@ -179,7 +179,7 @@ prints the exact `workerctl become-managed --session ...` template plus
 `become_managed_recommended_command_template`, `manager_codex_args_recommendation`,
 `warnings`, `required_values`, `why_or_why_not`, `recommended_command`,
 `example_natural_language_prompt`, and phrase mappings. The recommended template
-appends manager Codex args after `--`, for example
+uses the default recommended manager Codex args:
 `--sandbox danger-full-access --ask-for-approval never`. If not, the agent should
 explain that the current non-tmux Codex process cannot be promoted in-place as a
 tmux-backed worker and offer `workerctl start ...` instead.
@@ -187,10 +187,13 @@ For plain Codex sessions, this is a mandatory preflight gate: agents must not
 run `workerctl become-managed` until `doctor-self` reports
 `can_promote_in_place: true`.
 
-Everything after `--` is passed as CLI args to the manager's Codex process.
-When `become-managed`, `promote`, `remanage`, or `resume-manager` starts a
-manager without passthrough args, workerctl records
-`manager_started_without_codex_args` in command/event audit payloads.
+Everything after `--` is passed as CLI args to the manager's Codex process and
+overrides the default manager args. `become-managed`, `manage`, `promote`,
+`self-promote`, `remanage`, and `resume-manager` default to the recommended
+manager Codex args. Use `--no-manager-codex-args` only when intentionally
+starting a manager without those defaults; workerctl records
+`manager_started_without_codex_args` in command/event audit payloads in that
+case.
 
 ### `workerctl explain-managed-flow`
 
