@@ -948,6 +948,11 @@ MANAGED_FLOW_PHRASE_MAPPINGS = [
         "ask_for": ["task_name", "reason", "whether to stop the manager only if the user asked to close its terminal"],
     },
     {
+        "phrases": ["close the manager terminal", "review is complete", "clean up the manager"],
+        "command": "workerctl close-manager <task-name> --reason \"<reason>\"",
+        "ask_for": ["task_name", "reason"],
+    },
+    {
         "phrases": ["show me the manager", "open the manager terminal"],
         "command": "workerctl open-manager <task-name>",
         "ask_for": ["task_name"],
@@ -979,6 +984,7 @@ def managed_flow_payload(*, session: str | None = None) -> dict[str, Any]:
             "remanage": "workerctl remanage --open-manager",
             "finish": 'workerctl finish-task <task-name> --reason "<reason>"',
             "finish_and_stop_manager": 'workerctl finish-task <task-name> --reason "<reason>" --stop-manager',
+            "close_manager": 'workerctl close-manager <task-name> --reason "<reason>"',
             "observe": "workerctl manager-observe <task-name> --compact --json",
         },
         "flow": [
@@ -991,6 +997,7 @@ def managed_flow_payload(*, session: str | None = None) -> dict[str, Any]:
             "Use workerctl remanage --open-manager to restart supervision for a paused managed worker.",
             "Use finish-task when work is complete; it records completion and leaves the manager terminal open by default.",
             "Add --stop-manager only when the user explicitly wants the manager terminal closed after completion.",
+            "Use close-manager after post-finish review to close the manager terminal without changing task or worker state.",
         ],
         "phrase_mappings": MANAGED_FLOW_PHRASE_MAPPINGS,
         "required_values": MANAGED_FLOW_REQUIRED_VALUES,

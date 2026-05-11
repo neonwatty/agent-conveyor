@@ -64,6 +64,7 @@ from workerctl.export import command_export_task
 from workerctl.importer import command_import_compat
 from workerctl.lifecycle import (
     command_become_managed,
+    command_close_manager,
     command_close_stale,
     command_finish_task,
     command_manage,
@@ -388,6 +389,12 @@ def build_parser() -> argparse.ArgumentParser:
     pause_manager.add_argument("--strict-decisions", action="store_true", help="Reject the pause unless --decision-id is valid.")
     pause_manager.add_argument("--path", help="Override the workerctl database path.")
     pause_manager.set_defaults(func=command_pause_manager)
+
+    close_manager = subparsers.add_parser("close-manager", help="Close a task manager session without changing task or worker state.")
+    close_manager.add_argument("task", help="Task name or ID.")
+    close_manager.add_argument("--reason", default="Manager closed by operator.", help="Reason recorded in the audit trail.")
+    close_manager.add_argument("--path", help="Override the workerctl database path.")
+    close_manager.set_defaults(func=command_close_manager)
 
     unmanage = subparsers.add_parser("unmanage", help="Stop this worker's manager while leaving the worker running.")
     unmanage.add_argument("--task", help="Explicit task name or ID; defaults to the task bound to the current session.")

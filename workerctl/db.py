@@ -1173,6 +1173,23 @@ def create_manager(
     return new_manager_id
 
 
+def manager_from_row(row: sqlite3.Row, *, task_id: str) -> dict[str, Any]:
+    return {
+        "codex_args": json.loads(row["codex_args_json"]),
+        "exit_detected_at": row["exit_detected_at"],
+        "exit_reason": row["exit_reason"],
+        "id": row["id"],
+        "last_seen_at": row["last_seen_at"],
+        "name": row["name"],
+        "started_at": row["started_at"],
+        "state": row["state"],
+        "stopped_at": row["stopped_at"],
+        "task_id": task_id,
+        "tmux_pane_id": row["tmux_pane_id"],
+        "tmux_session": row["tmux_session"],
+    }
+
+
 def active_manager(conn: sqlite3.Connection, *, task: str) -> dict[str, Any] | None:
     task = task_row(conn, task=task)
     row = conn.execute(
@@ -1188,20 +1205,7 @@ def active_manager(conn: sqlite3.Connection, *, task: str) -> dict[str, Any] | N
     ).fetchone()
     if row is None:
         return None
-    return {
-        "codex_args": json.loads(row["codex_args_json"]),
-        "exit_detected_at": row["exit_detected_at"],
-        "exit_reason": row["exit_reason"],
-        "id": row["id"],
-        "last_seen_at": row["last_seen_at"],
-        "name": row["name"],
-        "started_at": row["started_at"],
-        "state": row["state"],
-        "stopped_at": row["stopped_at"],
-        "task_id": task["id"],
-        "tmux_pane_id": row["tmux_pane_id"],
-        "tmux_session": row["tmux_session"],
-    }
+    return manager_from_row(row, task_id=task["id"])
 
 
 def set_manager_pane_id(conn: sqlite3.Connection, *, manager_id: str, tmux_pane_id: str | None) -> None:

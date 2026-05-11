@@ -247,6 +247,7 @@ workerctl commands --task auth-refactor --type task_nudge --state failed --json
 workerctl task-events auth-refactor --json
 workerctl open-worker auth-refactor
 workerctl open-manager auth-refactor
+workerctl close-manager auth-refactor --reason "review complete"
 workerctl db-doctor --live
 workerctl import-compat
 ```
@@ -264,6 +265,7 @@ workerctl close-stale auth-refactor
 workerctl close-stale auth-refactor --apply
 workerctl export-task auth-refactor --zip
 workerctl finish-task auth-refactor --reason "work is complete" --decision-id 126 --strict-decisions
+workerctl close-manager auth-refactor --reason "post-finish review complete"
 workerctl finish-task auth-refactor --reason "work is complete" --stop-manager --decision-id 126 --strict-decisions
 workerctl stop-task auth-refactor --stop-worker --decision-id 127 --strict-decisions
 ```
@@ -321,7 +323,9 @@ Use `finish-task <task> --reason "<reason>"` when the task is complete and
 should be closed while preserving the audit trail. By default it leaves the
 manager terminal open for review. Add `--stop-manager` only when the manager
 terminal should be closed, and add `--stop-worker` only when the worker session
-should be stopped too.
+should be stopped too. If you finish first and review the manager terminal
+later, run `close-manager <task> --reason "<reason>"` to close that review
+manager and update SQLite.
 Before task-scoped text, interrupt, or kill side effects, workerctl verifies the
 recorded worker/manager identity, tmux session, and pane ID for the active
 binding.

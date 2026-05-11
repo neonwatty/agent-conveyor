@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -10,6 +11,8 @@ from workerctl.state import require_worker
 
 
 def session_snapshot(session_name: str) -> dict[str, Any]:
+    if shutil.which("tmux") is None:
+        return {"live": False, "pane_id": None, "session": session_name}
     proc = run(["tmux", "has-session", "-t", session_name], check=False)
     if proc.returncode != 0:
         return {"live": False, "pane_id": None, "session": session_name}

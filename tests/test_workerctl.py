@@ -683,6 +683,17 @@ class CliTests(unittest.TestCase):
         data = json.loads(proc.stdout)
         self.assertEqual(data["busy_wait"]["pattern"], "mcp_startup")
 
+    def test_session_snapshot_reports_missing_when_tmux_unavailable(self):
+        original_which = worker_identity.shutil.which
+        try:
+            worker_identity.shutil.which = lambda name: None if name == "tmux" else original_which(name)
+
+            snapshot = worker_identity.session_snapshot("missing-tmux-session")
+
+            self.assertEqual(snapshot, {"live": False, "pane_id": None, "session": "missing-tmux-session"})
+        finally:
+            worker_identity.shutil.which = original_which
+
     def test_list_json_outputs_json_array(self):
         proc = self.run_workerctl("list", "--json")
 
@@ -3928,6 +3939,164 @@ class CliTests(unittest.TestCase):
                 worker_identity.session_snapshot = original_session_snapshot
                 if worker_path.exists():
                     shutil.rmtree(worker_path)
+
+    def test_close_manager_closes_finished_task_review_manager(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                worker_db.upsert_worker(
+                    conn,
+                    name="worker-a",
+                    cwd=str(ROOT),
+                    tmux_session="codex-worker-a",
+                    identity_token="token-worker-a",
+                    tmux_pane_id="%1",
+                    state="active",
+                )
+                task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
+                worker_db.bind_task_worker(conn, task="task-a", worker="worker-a", binding_id="binding-1")
+                manager_id = worker_db.create_manager(
+                    conn,
+                    task_id=task_id,
+                    name="manager-a",
+                    tmux_session="codex-manager-task-a",
+                    tmux_pane_id="%2",
+                    codex_args=[],
+                    state="ready",
+                )
+                worker_db.attach_manager_to_binding(conn, task_id=task_id, manager_id=manager_id)
+                worker_db.end_active_binding(conn, task_id=task_id)
+                worker_db.set_task_state(conn, task_id=task_id, state="done")
+                conn.commit()
+
+            original_session_snapshot = worker_identity.session_snapshot
+            original_run = lifecycle.run
+            try:
+                worker_identity.session_snapshot = lambda session: {
+                    "live": True,
+                    "pane_id": "%2",
+                    "session": session,
+                }
+                run_calls = []
+                lifecycle.run = lambda *args, **kwargs: (
+                    run_calls.append(args[0]) or subprocess.CompletedProcess(args[0], 0, "", "")
+                )
+                args = argparse.Namespace(path=str(db_path), reason="review complete", task="task-a")
+
+                with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                    result = lifecycle.command_close_manager(args)
+
+                payload = json.loads(stdout.getvalue())
+                self.assertEqual(result, 0)
+                self.assertTrue(payload["killed_manager"])
+                self.assertEqual(payload["task_state"], "done")
+                with worker_db.connect(db_path) as conn:
+                    snapshot = worker_db.task_status_snapshot(conn, task="task-a")
+                    manager = conn.execute("select state, exit_reason from managers where id = ?", (manager_id,)).fetchone()
+                    command = conn.execute("select state from commands where type = 'close_manager'").fetchone()
+                    event = conn.execute("select type from events where type = 'close_manager_succeeded'").fetchone()
+                self.assertIsNone(snapshot["manager"])
+                self.assertEqual(snapshot["state"], "done")
+                self.assertEqual(manager["state"], "stopped")
+                self.assertEqual(manager["exit_reason"], "review complete")
+                self.assertEqual(command["state"], "succeeded")
+                self.assertEqual(event["type"], "close_manager_succeeded")
+                self.assertEqual(run_calls, [["tmux", "kill-session", "-t", "codex-manager-task-a"]])
+            finally:
+                worker_identity.session_snapshot = original_session_snapshot
+                lifecycle.run = original_run
+
+    def test_recover_marks_missing_finished_review_manager_without_pausing_task(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
+                manager_id = worker_db.create_manager(
+                    conn,
+                    task_id=task_id,
+                    name="manager-a",
+                    tmux_session="codex-manager-task-a",
+                    tmux_pane_id="%2",
+                    codex_args=[],
+                    state="ready",
+                )
+                worker_db.set_task_state(conn, task_id=task_id, state="done")
+                conn.commit()
+
+            original_session_snapshot = worker_identity.session_snapshot
+            try:
+                worker_identity.session_snapshot = lambda session: {
+                    "live": False,
+                    "pane_id": None,
+                    "session": session,
+                }
+                args = argparse.Namespace(path=str(db_path), recover=True, sync_pane_ids=False, task="task-a")
+
+                with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                    result = lifecycle.command_recover(args)
+
+                payload = json.loads(stdout.getvalue())
+                self.assertEqual(result, 0)
+                self.assertIn("manager_missing", payload["results"][0]["drift"])
+                with worker_db.connect(db_path) as conn:
+                    task = conn.execute("select state from tasks where id = ?", (task_id,)).fetchone()
+                    manager = conn.execute("select state from managers where id = ?", (manager_id,)).fetchone()
+                self.assertEqual(task["state"], "done")
+                self.assertEqual(manager["state"], "missing")
+            finally:
+                worker_identity.session_snapshot = original_session_snapshot
+
+    def test_close_manager_marks_already_missing_review_manager_stopped(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
+                manager_id = worker_db.create_manager(
+                    conn,
+                    task_id=task_id,
+                    name="manager-a",
+                    tmux_session="codex-manager-task-a",
+                    tmux_pane_id="%2",
+                    codex_args=[],
+                    state="ready",
+                )
+                worker_db.set_task_state(conn, task_id=task_id, state="done")
+                conn.commit()
+
+            original_session_snapshot = worker_identity.session_snapshot
+            original_run = lifecycle.run
+            try:
+                worker_identity.session_snapshot = lambda session: {
+                    "live": False,
+                    "pane_id": None,
+                    "session": session,
+                }
+                run_calls = []
+                lifecycle.run = lambda *args, **kwargs: (
+                    run_calls.append(args[0]) or subprocess.CompletedProcess(args[0], 0, "", "")
+                )
+                args = argparse.Namespace(path=str(db_path), reason="already closed", task="task-a")
+
+                with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                    result = lifecycle.command_close_manager(args)
+
+                payload = json.loads(stdout.getvalue())
+                self.assertEqual(result, 0)
+                self.assertFalse(payload["killed_manager"])
+                self.assertFalse(payload["manager_identity"]["live"])
+                with worker_db.connect(db_path) as conn:
+                    task = conn.execute("select state from tasks where id = ?", (task_id,)).fetchone()
+                    manager = conn.execute("select state, exit_reason from managers where id = ?", (manager_id,)).fetchone()
+                self.assertEqual(task["state"], "done")
+                self.assertEqual(manager["state"], "stopped")
+                self.assertEqual(manager["exit_reason"], "already closed")
+                self.assertEqual(run_calls, [])
+            finally:
+                worker_identity.session_snapshot = original_session_snapshot
+                lifecycle.run = original_run
 
     def test_pause_manager_refuses_pane_mismatch_before_kill(self):
         with tempfile.TemporaryDirectory() as tmpdir:
