@@ -5669,5 +5669,155 @@ class CodexSessionDiscoveryTests(unittest.TestCase):
             codex_session.find_rollout_path_for_pid(31507, _run_lsof=fake_run_lsof)
 
 
+class SessionsSchemaTests(unittest.TestCase):
+    def open_db(self, tmpdir):
+        path = Path(tmpdir) / "workerctl.db"
+        conn = worker_db.connect(path)
+        worker_db.initialize_database(conn)
+        self.addCleanup(conn.close)
+        return conn
+
+    def test_sessions_table_exists_after_init(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            tables = {
+                row["name"]
+                for row in conn.execute(
+                    "select name from sqlite_master where type='table'"
+                )
+            }
+            self.assertIn("sessions", tables)
+
+    def test_sessions_table_has_expected_columns(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            cols = {row["name"] for row in conn.execute("pragma table_info(sessions)")}
+            expected = {
+                "id", "name", "role", "identity_token",
+                "tmux_session", "tmux_pane_id",
+                "codex_session_path", "codex_session_id",
+                "pid", "cwd",
+                "registered_at", "last_heartbeat_at",
+                "state",
+            }
+            self.assertTrue(expected <= cols, f"missing: {expected - cols}")
+
+    def test_sessions_role_check_constraint(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            with self.assertRaises(sqlite3.IntegrityError):
+                conn.execute(
+                    """
+                    insert into sessions(
+                      id, name, role, identity_token, cwd, registered_at, state
+                    )
+                    values ('s-1', 'x', 'bogus', 't', '/tmp', '2026-05-11T00:00:00Z', 'active')
+                    """
+                )
+
+    def test_sessions_name_unique(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            now = "2026-05-11T00:00:00Z"
+            conn.execute(
+                """
+                insert into sessions(
+                  id, name, role, identity_token, cwd, registered_at, state
+                )
+                values ('s-1', 'dup', 'worker', 't1', '/tmp', ?, 'active')
+                """,
+                (now,),
+            )
+            with self.assertRaises(sqlite3.IntegrityError):
+                conn.execute(
+                    """
+                    insert into sessions(
+                      id, name, role, identity_token, cwd, registered_at, state
+                    )
+                    values ('s-2', 'dup', 'manager', 't2', '/tmp', ?, 'active')
+                    """,
+                    (now,),
+                )
+
+    def test_backfill_copies_existing_workers_to_sessions(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            # Manually open a v4-style DB, insert a worker row, then run init to migrate.
+            conn = worker_db.connect(db_path)
+            worker_db.initialize_database(conn)
+            now = "2026-05-11T00:00:00Z"
+            conn.execute(
+                """
+                insert into workers(
+                  id, name, tmux_session, identity_token, cwd, state, created_at, updated_at
+                )
+                values ('worker-99', 'legacy-w', 'codex-legacy-w', 'tok-99', '/repo', 'active', ?, ?)
+                """,
+                (now, now),
+            )
+            conn.commit()
+            conn.close()
+
+            # Drop sessions table to simulate pre-v5, force re-init to backfill.
+            conn = worker_db.connect(db_path)
+            conn.execute("drop table sessions")
+            conn.execute("PRAGMA user_version = 4")
+            conn.commit()
+            conn.close()
+
+            conn = worker_db.connect(db_path)
+            worker_db.initialize_database(conn)
+            self.addCleanup(conn.close)
+
+            row = conn.execute(
+                "select id, name, role, cwd from sessions where id = 'worker-99'"
+            ).fetchone()
+            self.assertIsNotNone(row)
+            self.assertEqual(row["name"], "legacy-w")
+            self.assertEqual(row["role"], "worker")
+            self.assertEqual(row["cwd"], "/repo")
+
+    def test_backfill_copies_existing_managers_to_sessions(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            conn = worker_db.connect(db_path)
+            worker_db.initialize_database(conn)
+            now = "2026-05-11T00:00:00Z"
+            # Need a task first for the FK
+            conn.execute(
+                "insert into tasks(id, name, goal, state, created_at, updated_at) "
+                "values ('task-1', 't', 'g', 'managed', ?, ?)",
+                (now, now),
+            )
+            conn.execute(
+                """
+                insert into managers(
+                  id, name, task_id, tmux_session, state, codex_args_json, started_at
+                )
+                values ('manager-77', 'legacy-m', 'task-1', 'codex-legacy-m', 'ready', '[]', ?)
+                """,
+                (now,),
+            )
+            conn.commit()
+            conn.close()
+
+            conn = worker_db.connect(db_path)
+            conn.execute("drop table sessions")
+            conn.execute("PRAGMA user_version = 4")
+            conn.commit()
+            conn.close()
+
+            conn = worker_db.connect(db_path)
+            worker_db.initialize_database(conn)
+            self.addCleanup(conn.close)
+
+            row = conn.execute(
+                "select id, name, role from sessions where id = 'manager-77'"
+            ).fetchone()
+            self.assertIsNotNone(row)
+            self.assertEqual(row["name"], "legacy-m")
+            self.assertEqual(row["role"], "manager")
+
+
 if __name__ == "__main__":
     unittest.main()

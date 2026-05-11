@@ -12,7 +12,7 @@ from workerctl.core import now_iso
 from workerctl.state import state_root
 
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 REQUIRED_TABLES = {
     "agent_observations",
     "bindings",
@@ -25,6 +25,7 @@ REQUIRED_TABLES = {
     "managers",
     "prompts",
     "schema_migrations",
+    "sessions",
     "statuses",
     "tasks",
     "terminal_captures",
@@ -302,6 +303,22 @@ def migrate(conn: sqlite3.Connection, from_version: int) -> None:
           payload_json text not null check (json_valid(payload_json))
         );
 
+        create table if not exists sessions(
+          id text primary key,
+          name text unique not null,
+          role text not null check (role in ('worker','manager')),
+          identity_token text unique not null,
+          tmux_session text,
+          tmux_pane_id text,
+          codex_session_path text,
+          codex_session_id text,
+          pid integer,
+          cwd text not null,
+          registered_at text not null,
+          last_heartbeat_at text,
+          state text not null check (state in ('active','gone'))
+        );
+
         create unique index if not exists one_active_binding_per_worker
         on bindings(worker_id)
         where state in ('active', 'ending');
@@ -350,6 +367,8 @@ def migrate(conn: sqlite3.Connection, from_version: int) -> None:
     )
     if from_version < 2:
         migrate_worker_name_ids(conn)
+    if from_version < 5:
+        migrate_to_v5_sessions(conn)
     sync_worker_ids_to_config_files(conn)
     conn.execute(
         "insert or ignore into schema_migrations(version, applied_at) values (?, ?)",
@@ -414,6 +433,66 @@ def migrate_worker_name_ids(conn: sqlite3.Connection) -> None:
         raise
     finally:
         conn.execute("PRAGMA foreign_keys = ON")
+
+
+def migrate_to_v5_sessions(conn: sqlite3.Connection) -> None:
+    """Backfill `sessions` from existing `workers` and `managers` rows.
+
+    Idempotent: uses `insert or ignore` so re-running does not duplicate. Maps:
+    - workers -> sessions with role='worker', state='active' (regardless of legacy state).
+    - managers -> sessions with role='manager', state='active'.
+
+    Codex-session fields (path, id, pid) are left null; they only populate for sessions
+    registered via the new `register-*` commands.
+    """
+    now = now_iso()
+    worker_rows = conn.execute(
+        """
+        select id, name, tmux_session, tmux_pane_id, identity_token, cwd, created_at
+        from workers
+        """
+    ).fetchall()
+    for row in worker_rows:
+        conn.execute(
+            """
+            insert or ignore into sessions(
+              id, name, role, identity_token,
+              tmux_session, tmux_pane_id,
+              cwd, registered_at, state
+            )
+            values (?, ?, 'worker', ?, ?, ?, ?, ?, 'active')
+            """,
+            (
+                row["id"], row["name"], row["identity_token"],
+                row["tmux_session"], row["tmux_pane_id"],
+                row["cwd"], row["created_at"] or now,
+            ),
+        )
+
+    manager_rows = conn.execute(
+        """
+        select m.id, m.name, m.tmux_session, m.tmux_pane_id, m.started_at, t.id as task_id
+        from managers m
+        left join tasks t on t.id = m.task_id
+        """
+    ).fetchall()
+    for row in manager_rows:
+        conn.execute(
+            """
+            insert or ignore into sessions(
+              id, name, role, identity_token,
+              tmux_session, tmux_pane_id,
+              cwd, registered_at, state
+            )
+            values (?, ?, 'manager', ?, ?, ?, ?, ?, 'active')
+            """,
+            (
+                row["id"], row["name"], f"manager-token-{row['id']}",
+                row["tmux_session"], row["tmux_pane_id"],
+                "",  # historical managers don't track cwd separately; empty is acceptable
+                row["started_at"] or now,
+            ),
+        )
 
 
 def sync_worker_ids_to_config_files(conn: sqlite3.Connection) -> None:
