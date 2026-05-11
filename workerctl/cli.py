@@ -48,6 +48,8 @@ from workerctl.commands import (
     command_register_manager,
     command_deregister,
     command_sessions,
+    command_bind,
+    command_unbind,
     command_start,
     command_start_test,
     command_status,
@@ -307,6 +309,22 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sessions.add_argument("--role", choices=("worker", "manager"), default=None)
     sessions.set_defaults(func=command_sessions)
+
+    bind = subparsers.add_parser(
+        "bind",
+        help="Bind a worker and manager session pair to a task.",
+    )
+    bind.add_argument("--task", required=True, help="Task name.")
+    bind.add_argument("--worker", required=True, help="Worker session name.")
+    bind.add_argument("--manager", required=True, help="Manager session name.")
+    bind.set_defaults(func=command_bind)
+
+    unbind = subparsers.add_parser(
+        "unbind",
+        help="End the active binding for a task.",
+    )
+    unbind.add_argument("--task", required=True, help="Task name.")
+    unbind.set_defaults(func=command_unbind)
 
     commands = subparsers.add_parser("commands", help="List durable side-effect commands from SQLite.")
     commands.add_argument("--task", help="Filter by task name or ID.")

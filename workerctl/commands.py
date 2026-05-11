@@ -2686,7 +2686,6 @@ def _register_session_from_args(args: argparse.Namespace, *, role: str) -> dict:
             cwd=cwd,
             tmux_session=getattr(args, "tmux_session", None),
         )
-        conn.commit()
         worker_db.insert_event(
             conn,
             "session_registered",
@@ -2746,4 +2745,51 @@ def command_sessions(args: argparse.Namespace) -> int:
     finally:
         conn.close()
     print(json.dumps(rows, indent=2, sort_keys=True, default=str))
+    return 0
+
+
+def command_bind(args: argparse.Namespace) -> int:
+    from workerctl import db as worker_db
+
+    conn = worker_db.connect()
+    worker_db.initialize_database(conn)
+    try:
+        binding_id = worker_db.bind_sessions(
+            conn,
+            task_name=args.task,
+            worker_session_name=args.worker,
+            manager_session_name=args.manager,
+        )
+        worker_db.insert_event(
+            conn, "binding_created", actor="workerctl",
+            payload={
+                "binding_id": binding_id, "task": args.task,
+                "worker": args.worker, "manager": args.manager,
+            },
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    print(json.dumps({
+        "binding_id": binding_id, "task": args.task,
+        "worker": args.worker, "manager": args.manager,
+    }, indent=2, sort_keys=True))
+    return 0
+
+
+def command_unbind(args: argparse.Namespace) -> int:
+    from workerctl import db as worker_db
+
+    conn = worker_db.connect()
+    worker_db.initialize_database(conn)
+    try:
+        worker_db.unbind_task(conn, task_name=args.task)
+        worker_db.insert_event(
+            conn, "binding_ended", actor="workerctl",
+            payload={"task": args.task},
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    print(json.dumps({"task": args.task, "state": "ended"}))
     return 0

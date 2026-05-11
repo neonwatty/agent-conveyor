@@ -6330,6 +6330,74 @@ class BindCommandTests(unittest.TestCase):
             self.assertIn("manager session", str(ctx.exception))
             self.assertIn("m1", str(ctx.exception))
 
+    def run_cli(self, *args, env_extra=None):
+        env = os.environ.copy()
+        if env_extra:
+            env.update(env_extra)
+        return subprocess.run(
+            [sys.executable, "-m", "workerctl", *args],
+            capture_output=True, text=True, env=env, cwd=str(ROOT),
+        )
+
+    def _setup_state_dir(self, tmpdir):
+        rollout = Path(tmpdir) / "r.jsonl"
+        rollout.write_text(json.dumps({
+            "type": "session_meta",
+            "payload": {"id": "u1", "cwd": str(ROOT), "originator": "codex-tui"},
+        }) + "\n")
+        state_dir = Path(tmpdir) / "state"
+        state_dir.mkdir()
+        env = {"WORKERCTL_STATE_ROOT": str(state_dir)}
+        return rollout, state_dir, env
+
+    def test_cli_bind_creates_binding(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            rollout, state_dir, env = self._setup_state_dir(tmpdir)
+
+            self.run_cli("register-worker", "--name", "w", "--codex-session", str(rollout),
+                         "--pid", "1", "--cwd", str(ROOT), env_extra=env)
+            self.run_cli("register-manager", "--name", "m", "--codex-session", str(rollout),
+                         "--pid", "2", "--cwd", str(ROOT), env_extra=env)
+            self.run_cli("tasks", "--create", "myTask", "--goal", "do the thing", env_extra=env)
+
+            proc = self.run_cli(
+                "bind", "--task", "myTask", "--worker", "w", "--manager", "m",
+                env_extra=env,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            payload = json.loads(proc.stdout)
+            self.assertTrue(payload["binding_id"].startswith("binding-"))
+
+            conn = worker_db.connect(state_dir / "workerctl.db")
+            self.addCleanup(conn.close)
+            row = conn.execute(
+                "select state, worker_session_id, manager_session_id from bindings "
+                "where id = ?", (payload["binding_id"],),
+            ).fetchone()
+            self.assertEqual(row["state"], "active")
+            self.assertIsNotNone(row["worker_session_id"])
+            self.assertIsNotNone(row["manager_session_id"])
+
+    def test_cli_unbind_ends_binding(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            rollout, state_dir, env = self._setup_state_dir(tmpdir)
+
+            self.run_cli("register-worker", "--name", "w", "--codex-session", str(rollout),
+                         "--pid", "1", "--cwd", str(ROOT), env_extra=env)
+            self.run_cli("register-manager", "--name", "m", "--codex-session", str(rollout),
+                         "--pid", "2", "--cwd", str(ROOT), env_extra=env)
+            self.run_cli("tasks", "--create", "myTask", "--goal", "do it", env_extra=env)
+            self.run_cli("bind", "--task", "myTask", "--worker", "w", "--manager", "m", env_extra=env)
+
+            proc = self.run_cli("unbind", "--task", "myTask", env_extra=env)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            conn = worker_db.connect(state_dir / "workerctl.db")
+            self.addCleanup(conn.close)
+            row = conn.execute(
+                "select state from bindings where task_id=(select id from tasks where name='myTask')"
+            ).fetchone()
+            self.assertEqual(row["state"], "ended")
+
 
 if __name__ == "__main__":
     unittest.main()
