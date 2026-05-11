@@ -973,7 +973,6 @@ def managed_flow_payload(*, session: str | None = None) -> dict[str, Any]:
             "become_managed_recommended_template": (
                 f"workerctl become-managed --session {session_value} --worker <worker-name> "
                 '--task <task-name> --goal "<goal>" --summary "<summary>"'
-                f"{recommended_manager_codex_args_suffix()}"
             ),
             "cannot_promote_in_place": 'workerctl start <session-name> --cwd "$PWD" -- --sandbox danger-full-access --ask-for-approval never',
             "unmanage": "workerctl unmanage",
@@ -985,7 +984,7 @@ def managed_flow_payload(*, session: str | None = None) -> dict[str, Any]:
             "Run workerctl doctor-self when asked to make this plain Codex session managed.",
             "If can_promote_in_place is false, explain that non-tmux Codex cannot be promoted in place and offer workerctl start.",
             "If can_promote_in_place is true, fill the recommended become-managed template only after required values are known.",
-            "Preserve or add manager Codex args after -- so the manager has the intended sandbox and approval behavior.",
+            "By default workerctl starts the manager with the recommended Codex args; pass explicit args after -- only when overriding that behavior.",
             "After become-managed succeeds, the current tmux session is renamed to codex-<worker-name> and a visible Codex manager is spawned.",
             "Use workerctl unmanage to stop only the manager and return manual control.",
             "Use workerctl remanage --open-manager to restart supervision for a paused managed worker.",
@@ -1048,12 +1047,12 @@ def command_doctor_self(args: argparse.Namespace) -> int:
             f"workerctl become-managed --session {session} --worker <worker-name> --task <task-name> "
             '--goal "<goal>" --summary "<summary>"'
         )
-        become_managed_recommended_template = become_managed_template + recommended_manager_codex_args_suffix()
+        become_managed_recommended_template = become_managed_template
         manage_template = (
             f"workerctl manage --session {session} --worker <worker-name> --task <task-name> "
             '--goal "<goal>" --summary "<summary>" --open-manager'
         )
-        manage_recommended_template = manage_template + recommended_manager_codex_args_suffix()
+        manage_recommended_template = manage_template
     else:
         recommended_action = "cannot_promote_in_place"
         failed = [check["name"] for check in checks if not check["ok"]]
@@ -1068,8 +1067,6 @@ def command_doctor_self(args: argparse.Namespace) -> int:
     flow = managed_flow_payload(session=session)
     recommended_command = become_managed_recommended_template or flow["commands"]["cannot_promote_in_place"]
     warnings = []
-    if can_promote_in_place:
-        warnings.append("manager_codex_args_not_inferred")
     result = {
         "become_managed_command_template": become_managed_template,
         "become_managed_recommended_command_template": become_managed_recommended_template,
@@ -1083,8 +1080,9 @@ def command_doctor_self(args: argparse.Namespace) -> int:
         "flow": flow["flow"],
         "manage_command_template": manage_template,
         "manage_recommended_command_template": manage_recommended_template,
+        "manager_codex_args_default": RECOMMENDED_MANAGER_CODEX_ARGS,
         "manager_codex_args_recommendation": " ".join(RECOMMENDED_MANAGER_CODEX_ARGS),
-        "manager_codex_args_required": can_promote_in_place,
+        "manager_codex_args_required": False,
         "ok": can_promote_in_place,
         "phrase_mappings": flow["phrase_mappings"],
         "recommended_action": recommended_action,
