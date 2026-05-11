@@ -350,6 +350,15 @@ was supplied, the nearest previous decision, and warnings such as
 `task-health <name> --audit-decisions` includes the same linkage warnings in the
 task health result, and `export-task` writes `mutation-audit.json`.
 
+### `workerctl replay <name> [--format compact|timeline|transcript] [--role all|worker|manager] [--json]`
+
+Read-only worker-manager replay. It normalizes commands, manager decisions,
+manager observation cycles, and deduplicated terminal captures into a single
+chronological view. The default `timeline` format is human-readable. `compact`
+shows only decisions and side effects. `transcript` adds role-tagged terminal
+capture excerpts without dumping repeated full scrollback. `--json` returns the
+same replay entries as stable structured data for tests and future UI.
+
 ### `workerctl task-events <name> [--type TYPE] [--limit N]`
 
 Print a task-scoped SQLite event stream. This is the narrow audit view for
@@ -1042,16 +1051,17 @@ Implemented in the current SQLite milestone:
   indexes.
 - Worker/task/manager/binding/budget/prompt/status/transcript/command/event
   persistence, with compatibility JSON/status/transcript artifacts preserved.
-- Task-scoped status, capture, idle-check, nudge, interrupt, audit, events,
-  command listing, prune, export, reconcile, recover, promote, pause, resume,
-  close-stale, and stop-task commands.
+- Task-scoped status, capture, idle-check, nudge, interrupt, audit, replay,
+  events, command listing, prune, export, reconcile, recover, promote, pause,
+  resume, close-stale, and stop-task commands.
 - Durable command intent/result rows for task-scoped mutations and lifecycle
   side effects.
 - Task-scoped `task-health` diagnostic that combines SQLite integrity, live
   tmux drift, unfinished commands, optional manager decision linkage warnings,
   and manager liveness warnings.
 - Role-aware terminal captures, manager observation cycles, manager decision
-  records, and mutation audit results included in `audit`/`export-task`.
+  records, replay timelines, and mutation audit results included in
+  `audit`/`export-task`.
 - Nudge budget reservation in SQLite before non-dry-run sends.
 - Pane ID persistence for new worker and manager tmux sessions.
 - Centralized identity verification in `workerctl.identity` for worker/manager

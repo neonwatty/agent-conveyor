@@ -11,6 +11,7 @@ from workerctl.db import connect as connect_db
 from workerctl.db import initialize_database
 from workerctl.db import task_audit
 from workerctl.db import task_status_snapshot
+from workerctl.replay import replay_entries
 from workerctl.state import state_root, write_json
 
 
@@ -25,6 +26,12 @@ def command_export_task(args: argparse.Namespace) -> int:
         snapshot = task_status_snapshot(conn, task=args.task)
         audit = task_audit(conn, task=args.task)
         mutation_audit = mutation_audit_result(audit)
+        replay = {
+            "entries": replay_entries(audit, role="all", mode="timeline"),
+            "mode": "timeline",
+            "role": "all",
+            "task": audit["task"],
+        }
         prompt_rows = conn.execute(
             """
             select id, kind, content, content_sha256, generator_version,
@@ -71,6 +78,7 @@ def command_export_task(args: argparse.Namespace) -> int:
     write_json(export_root / "manager-cycles.json", audit.get("manager_cycles", []))
     write_json(export_root / "manager-decisions.json", audit.get("manager_decisions", []))
     write_json(export_root / "mutation-audit.json", mutation_audit)
+    write_json(export_root / "replay.json", replay)
     manifest = {
         "created_at": now_iso(),
         "files": [
@@ -83,6 +91,7 @@ def command_export_task(args: argparse.Namespace) -> int:
             "manager-cycles.json",
             "manager-decisions.json",
             "mutation-audit.json",
+            "replay.json",
         ],
         "task": {"id": snapshot["id"], "name": snapshot["name"]},
     }

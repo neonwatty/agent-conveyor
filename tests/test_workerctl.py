@@ -2406,6 +2406,175 @@ class CliTests(unittest.TestCase):
             self.assertEqual(sum(1 for record in payload["records"] if record["ok"]), 1)
             self.assertTrue(any("missing_decision_id" in record["warnings"] for record in payload["records"]))
 
+    def test_mutation_audit_accepts_finish_task_final_decision(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
+                command_id = worker_db.create_command(
+                    conn,
+                    command_type="finish_task",
+                    task_id=task_id,
+                    payload={"manager_decision": {"decision": None, "warnings": ["missing_decision_id"]}},
+                    timestamp="2026-05-11T10:00:00Z",
+                )
+                decision_id = worker_db.insert_manager_decision(
+                    conn,
+                    task_id=task_id,
+                    manager_id=None,
+                    decision="stop",
+                    reason="work complete",
+                    payload={"source": "finish_task", "command_id": command_id},
+                    timestamp="2026-05-11T10:00:00Z",
+                )
+                worker_db.finish_command(
+                    conn,
+                    command_id=command_id,
+                    state="succeeded",
+                    result={"final_decision_id": decision_id, "manager_decision": {"decision": None, "warnings": ["missing_decision_id"]}},
+                    timestamp="2026-05-11T10:00:01Z",
+                )
+                conn.commit()
+
+            proc = self.run_workerctl("mutation-audit", "task-a", "--json", "--path", str(db_path))
+
+            self.assertEqual(proc.returncode, 0, proc.stdout)
+            payload = json.loads(proc.stdout)
+            self.assertTrue(payload["ok"])
+            self.assertEqual(payload["summary"]["mutations"], 1)
+            self.assertEqual(payload["records"][0]["linked_decision"]["id"], decision_id)
+
+    def test_replay_outputs_chronological_text(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.", timestamp="2026-05-11T10:00:00Z")
+                worker_id = worker_db.upsert_worker(
+                    conn,
+                    name="worker-a",
+                    cwd=str(ROOT),
+                    tmux_session="codex-worker-a",
+                    identity_token="token-worker-a",
+                    state="active",
+                )
+                manager_id = worker_db.create_manager(
+                    conn,
+                    task_id=task_id,
+                    name="manager-a",
+                    tmux_session="codex-manager-task-a",
+                    codex_args=[],
+                    state="ready",
+                    timestamp="2026-05-11T10:00:01Z",
+                )
+                promote_id = worker_db.create_command(
+                    conn,
+                    command_type="promote",
+                    task_id=task_id,
+                    worker_id=worker_id,
+                    manager_id=manager_id,
+                    payload={"worker": "worker-a", "manager_session": "codex-manager-task-a"},
+                    timestamp="2026-05-11T10:00:02Z",
+                )
+                worker_db.finish_command(
+                    conn,
+                    command_id=promote_id,
+                    state="succeeded",
+                    result={"worker": "worker-a", "manager_session": "codex-manager-task-a"},
+                    timestamp="2026-05-11T10:00:03Z",
+                )
+                worker_db.insert_manager_decision(
+                    conn,
+                    task_id=task_id,
+                    manager_id=manager_id,
+                    decision="nudge",
+                    reason="worker is idle",
+                    timestamp="2026-05-11T10:00:04Z",
+                )
+                nudge_id = worker_db.create_command(
+                    conn,
+                    command_type="task_nudge",
+                    task_id=task_id,
+                    worker_id=worker_id,
+                    manager_id=manager_id,
+                    payload={"message": "please continue"},
+                    timestamp="2026-05-11T10:00:05Z",
+                )
+                worker_db.finish_command(
+                    conn,
+                    command_id=nudge_id,
+                    state="succeeded",
+                    result={"message": "please continue"},
+                    timestamp="2026-05-11T10:00:06Z",
+                )
+                conn.commit()
+
+            proc = self.run_workerctl("replay", "task-a", "--path", str(db_path))
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("Task: task-a", proc.stdout)
+            self.assertLess(proc.stdout.index("promoted worker worker-a"), proc.stdout.index("decision nudge"))
+            self.assertLess(proc.stdout.index("decision nudge"), proc.stdout.index("sent nudge"))
+
+    def test_replay_json_outputs_stable_entries(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
+                worker_db.insert_manager_decision(conn, task_id=task_id, manager_id=None, decision="wait", reason="fresh status")
+                conn.commit()
+
+            proc = self.run_workerctl("replay", "task-a", "--json", "--path", str(db_path))
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            payload = json.loads(proc.stdout)
+            self.assertEqual(payload["task"]["name"], "task-a")
+            self.assertEqual(payload["entries"][0]["actor"], "manager")
+            self.assertEqual(payload["entries"][0]["kind"], "decision")
+            self.assertIn("timestamp", payload["entries"][0])
+
+    def test_replay_compact_omits_capture_noise_and_transcript_includes_excerpts(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
+                worker_db.insert_terminal_capture(
+                    conn,
+                    task_id=task_id,
+                    role="worker",
+                    tmux_session="codex-worker-a",
+                    content_sha256="sha-1",
+                    content="line one\n• Worker edited app\n",
+                    history_lines=20,
+                    source="test",
+                    classifier={"startup": ["ready"]},
+                    timestamp="2026-05-11T10:00:00Z",
+                )
+                worker_db.insert_terminal_capture(
+                    conn,
+                    task_id=task_id,
+                    role="worker",
+                    tmux_session="codex-worker-a",
+                    content_sha256="sha-1",
+                    content="line one\n• Worker edited app\n",
+                    history_lines=20,
+                    source="test",
+                    classifier={"startup": ["ready"]},
+                    timestamp="2026-05-11T10:00:01Z",
+                )
+                conn.commit()
+
+            compact = self.run_workerctl("replay", "task-a", "--format", "compact", "--path", str(db_path))
+            transcript = self.run_workerctl("replay", "task-a", "--format", "transcript", "--path", str(db_path))
+
+            self.assertEqual(compact.returncode, 0, compact.stderr)
+            self.assertNotIn("Worker edited app", compact.stdout)
+            self.assertEqual(transcript.returncode, 0, transcript.stderr)
+            self.assertEqual(transcript.stdout.count("Worker edited app"), 1)
+
     def test_task_health_audit_decisions_reports_mutation_warnings(self):
         original_session_snapshot = worker_identity.session_snapshot
         try:
@@ -4651,10 +4820,13 @@ class CliTests(unittest.TestCase):
             self.assertTrue((output / "manager-cycles.json").exists())
             self.assertTrue((output / "manager-decisions.json").exists())
             self.assertTrue((output / "mutation-audit.json").exists())
+            self.assertTrue((output / "replay.json").exists())
             self.assertTrue(output.with_suffix(".zip").exists())
             mutation_audit = json.loads((output / "mutation-audit.json").read_text())
             self.assertTrue(mutation_audit["ok"])
             self.assertEqual(mutation_audit["summary"]["mutations"], 0)
+            replay = json.loads((output / "replay.json").read_text())
+            self.assertEqual(replay["task"]["name"], "task-a")
 
     def test_task_scoped_read_commands_are_listed_in_help(self):
         proc = self.run_workerctl("--help")
@@ -4680,6 +4852,7 @@ class CliTests(unittest.TestCase):
         self.assertIn("promote", proc.stdout)
         self.assertIn("recover", proc.stdout)
         self.assertIn("reconcile", proc.stdout)
+        self.assertIn("replay", proc.stdout)
         self.assertIn("remanage", proc.stdout)
         self.assertIn("resume-manager", proc.stdout)
         self.assertIn("self-promote", proc.stdout)
