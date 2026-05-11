@@ -157,6 +157,7 @@ def build_manager_prompt(
             f"- workerctl extend-nudge-budget {task_name} --add-nudges <n> --decision-id <decision_id> --strict-decisions",
             f"- workerctl task-interrupt {task_name} --decision-id <decision_id> --strict-decisions",
             f"- workerctl finish-task {task_name} --reason \"<reason>\" --decision-id <decision_id> --strict-decisions",
+            f"- workerctl finish-task {task_name} --reason \"<reason>\" --stop-manager --decision-id <decision_id> --strict-decisions",
             f"- workerctl pause-manager {task_name} --decision-id <decision_id> --strict-decisions",
             f"- workerctl stop-task {task_name} --stop-worker --decision-id <decision_id> --strict-decisions",
             "",
@@ -169,8 +170,9 @@ def build_manager_prompt(
             "- Use task-nudge only when the worker is stale, waiting for input, or explicitly needs direction; respect the live nudge budget.",
             "- If the nudge budget is exhausted and more nudges are genuinely needed, record an escalate decision, extend the nudge budget with strict decision linkage, then observe again before nudging.",
             "- Use task-interrupt only when manager-observe or task-idle-check shows a clear busy_wait/interruptible state, or when the user explicitly asks.",
-            "- Use finish-task when the task is complete and should be closed while preserving audit history.",
-            "- Use pause-manager or stop-task only for completion, escalation, cleanup, or explicit user request.",
+            "- Use finish-task when the task is complete and should be closed while preserving audit history; by default it leaves this manager session open for review.",
+            "- Add --stop-manager to finish-task only when the user explicitly wants the manager session closed after completion.",
+            "- Use pause-manager or stop-task only for escalation, cleanup, or explicit user request.",
             "- Stop and report if the worker is blocked, the budget is exhausted without an explicit escalation, or state is uncertain.",
             "",
             f"Initial nudge budget: {budget['max_nudges']} until {budget['expires_at']}.",
@@ -977,6 +979,7 @@ def _stop_or_finish_task(args: argparse.Namespace, *, finish: bool) -> int:
     command_type = "finish_task" if finish else "stop_task"
     event_prefix = "finish_task" if finish else "stop_task"
     final_reason = getattr(args, "reason", None) or "Task finished by operator."
+    stop_manager = (not finish) or bool(getattr(args, "stop_manager", False))
     with connect_db(db_path) as conn:
         initialize_database(conn)
         snapshot = task_status_snapshot(conn, task=args.task)
@@ -1006,6 +1009,7 @@ def _stop_or_finish_task(args: argparse.Namespace, *, finish: bool) -> int:
                 "message": args.message,
                 "manager_decision": decision_check,
                 "reason": final_reason if finish else None,
+                "stop_manager": stop_manager,
                 "stop_worker": args.stop_worker,
                 "task": snapshot["name"],
                 "worker": worker["name"] if worker else None,
@@ -1049,6 +1053,7 @@ def _stop_or_finish_task(args: argparse.Namespace, *, finish: bool) -> int:
                 "manager_decision": decision_check,
                 "message": args.message,
                 "reason": final_reason if finish else None,
+                "stop_manager": stop_manager,
                 "stop_worker": args.stop_worker,
             },
         )
@@ -1063,6 +1068,7 @@ def _stop_or_finish_task(args: argparse.Namespace, *, finish: bool) -> int:
         "killed_manager": False,
         "killed_worker": False,
         "reason": final_reason if finish else None,
+        "stop_manager": stop_manager,
         "stop_worker": args.stop_worker,
         "task": snapshot["name"],
         "worker": worker["name"] if worker else None,
@@ -1089,7 +1095,7 @@ def _stop_or_finish_task(args: argparse.Namespace, *, finish: bool) -> int:
                     payload=manager_identity,
                 )
                 conn.commit()
-        if manager and result["manager_identity"]["live"]:
+        if stop_manager and manager and result["manager_identity"]["live"]:
             run(["tmux", "kill-session", "-t", manager["tmux_session"]])
             result["killed_manager"] = True
         if args.stop_worker and worker:
@@ -1116,7 +1122,7 @@ def _stop_or_finish_task(args: argparse.Namespace, *, finish: bool) -> int:
                 result["killed_worker"] = True
         with connect_db(db_path) as conn:
             initialize_database(conn)
-            if manager:
+            if manager and stop_manager:
                 set_manager_state(conn, manager_id=manager["id"], state="stopped")
             if worker and args.stop_worker:
                 mark_worker_state(conn, name=worker["name"], state="stopped")

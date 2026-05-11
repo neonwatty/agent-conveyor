@@ -103,7 +103,9 @@ Do not run mutating commands merely because they are available. Use
 `task-nudge` only when the worker is stale, waiting for input, or explicitly
 needs direction. Use `task-interrupt` only for a clear busy-wait/interruptible
 state or an explicit user request. Use `finish-task` when work is complete and
-the task should close with an audit record.
+the task should close with an audit record; it leaves the manager terminal open
+by default for review. Add `--stop-manager` only when the user explicitly wants
+the manager terminal closed.
 
 Interpret worker health as follows:
 
@@ -163,7 +165,8 @@ Natural-language command mapping:
 - "resume supervision", "restart management", "get a manager again": run
   `workerctl remanage --open-manager`.
 - "finish this managed task", "close this task", "mark this task done": run
-  `workerctl finish-task <task> --reason "<reason>"`.
+  `workerctl finish-task <task> --reason "<reason>"`. Add `--stop-manager`
+  only when the user asks to close the manager terminal too.
 - "show me the manager" or "open the manager terminal": run
   `workerctl open-manager <task>`.
 - "show me the worker" or "open the worker terminal": run
@@ -212,6 +215,7 @@ To show task-bound terminals without raw tmux commands:
 scripts/workerctl task-health <task> --json
 scripts/workerctl task-capture <task> --role manager --json
 scripts/workerctl finish-task <task> --reason "<reason>"
+scripts/workerctl finish-task <task> --reason "<reason>" --stop-manager
 scripts/workerctl open-manager <task>
 scripts/workerctl open-worker <task>
 ```

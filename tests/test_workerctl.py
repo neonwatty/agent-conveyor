@@ -3787,11 +3787,15 @@ class CliTests(unittest.TestCase):
                     "pane_id": "%2" if session == "codex-manager-task-a" else "%1",
                     "session": session,
                 }
-                lifecycle.run = lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, "", "")
+                run_calls = []
+                lifecycle.run = lambda *args, **kwargs: (
+                    run_calls.append(args[0]) or subprocess.CompletedProcess(args[0], 0, "", "")
+                )
                 args = argparse.Namespace(
                     message=None,
                     path=str(db_path),
                     reason="work is complete",
+                    stop_manager=False,
                     stop_worker=False,
                     task="task-a",
                 )
@@ -3802,7 +3806,9 @@ class CliTests(unittest.TestCase):
                 payload = json.loads(stdout.getvalue())
                 self.assertEqual(result, 0)
                 self.assertTrue(payload["finish"])
+                self.assertFalse(payload["killed_manager"])
                 self.assertFalse(payload["killed_worker"])
+                self.assertFalse(payload["stop_manager"])
                 self.assertIsNotNone(payload["final_decision_id"])
                 with worker_db.connect(db_path) as conn:
                     task = conn.execute("select state from tasks where id = ?", (task_id,)).fetchone()
@@ -3815,12 +3821,106 @@ class CliTests(unittest.TestCase):
                 self.assertEqual(task["state"], "done")
                 self.assertEqual(binding["state"], "ended")
                 self.assertIsNotNone(binding["ended_at"])
-                self.assertEqual(manager["state"], "stopped")
+                self.assertEqual(manager["state"], "ready")
                 self.assertEqual(worker["state"], "active")
                 self.assertEqual(command["state"], "succeeded")
                 self.assertEqual(decision["decision"], "stop")
                 self.assertEqual(decision["reason"], "work is complete")
                 self.assertEqual(event["type"], "finish_task_succeeded")
+                self.assertEqual(run_calls, [])
+            finally:
+                lifecycle.manager_session_exists = original_manager_session_exists
+                lifecycle.session_exists = original_session_exists
+                lifecycle.run = original_run
+                worker_identity.session_snapshot = original_session_snapshot
+                if worker_path.exists():
+                    shutil.rmtree(worker_path)
+
+    def test_finish_task_stop_manager_flag_closes_manager(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            worker_path = worker_dir("worker-a")
+            if worker_path.exists():
+                shutil.rmtree(worker_path)
+            worker_path.mkdir(parents=True)
+            config_path("worker-a").write_text(
+                json.dumps(
+                    {
+                        "identity_token": "token-worker-a",
+                        "name": "worker-a",
+                        "tmux_pane_id": "%1",
+                        "tmux_session": "codex-worker-a",
+                    }
+                )
+                + "\n"
+            )
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                worker_db.upsert_worker(
+                    conn,
+                    name="worker-a",
+                    cwd=str(ROOT),
+                    tmux_session="codex-worker-a",
+                    identity_token="token-worker-a",
+                    tmux_pane_id="%1",
+                    state="active",
+                )
+                task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
+                worker_db.bind_task_worker(conn, task="task-a", worker="worker-a", binding_id="binding-1")
+                manager_id = worker_db.create_manager(
+                    conn,
+                    task_id=task_id,
+                    name="manager-a",
+                    tmux_session="codex-manager-task-a",
+                    tmux_pane_id="%2",
+                    codex_args=[],
+                    state="ready",
+                )
+                worker_db.attach_manager_to_binding(conn, task_id=task_id, manager_id=manager_id)
+                conn.commit()
+
+            original_manager_session_exists = lifecycle.manager_session_exists
+            original_session_exists = lifecycle.session_exists
+            original_run = lifecycle.run
+            original_session_snapshot = worker_identity.session_snapshot
+            try:
+                lifecycle.manager_session_exists = lambda session: session == "codex-manager-task-a"
+                lifecycle.session_exists = lambda worker: worker == "worker-a"
+                worker_identity.session_snapshot = lambda session: {
+                    "live": True,
+                    "pane_id": "%2" if session == "codex-manager-task-a" else "%1",
+                    "session": session,
+                }
+                run_calls = []
+                lifecycle.run = lambda *args, **kwargs: (
+                    run_calls.append(args[0]) or subprocess.CompletedProcess(args[0], 0, "", "")
+                )
+                args = argparse.Namespace(
+                    message=None,
+                    path=str(db_path),
+                    reason="work is complete",
+                    stop_manager=True,
+                    stop_worker=False,
+                    task="task-a",
+                )
+
+                with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                    result = lifecycle.command_finish_task(args)
+
+                payload = json.loads(stdout.getvalue())
+                self.assertEqual(result, 0)
+                self.assertTrue(payload["finish"])
+                self.assertTrue(payload["killed_manager"])
+                self.assertTrue(payload["stop_manager"])
+                with worker_db.connect(db_path) as conn:
+                    task = conn.execute("select state from tasks where id = ?", (task_id,)).fetchone()
+                    binding = conn.execute("select state, ended_at from bindings where id = 'binding-1'").fetchone()
+                    manager = conn.execute("select state from managers where id = ?", (manager_id,)).fetchone()
+                self.assertEqual(task["state"], "done")
+                self.assertEqual(binding["state"], "ended")
+                self.assertIsNotNone(binding["ended_at"])
+                self.assertEqual(manager["state"], "stopped")
+                self.assertEqual(run_calls, [["tmux", "kill-session", "-t", "codex-manager-task-a"]])
             finally:
                 lifecycle.manager_session_exists = original_manager_session_exists
                 lifecycle.session_exists = original_session_exists

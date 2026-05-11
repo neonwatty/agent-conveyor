@@ -1732,7 +1732,7 @@ def task_status_snapshot(conn: sqlite3.Connection, *, task: str) -> dict[str, An
         integrity_issues.append("managed_without_active_worker_binding")
     if task_row["state"] == "managed" and manager is None:
         integrity_issues.append("managed_without_active_manager")
-    if task_row["state"] in {"done", "failed"} and manager is not None:
+    if task_row["state"] == "failed" and manager is not None:
         integrity_issues.append("closed_task_has_active_manager")
 
     return {

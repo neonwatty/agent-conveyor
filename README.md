@@ -264,6 +264,7 @@ workerctl close-stale auth-refactor
 workerctl close-stale auth-refactor --apply
 workerctl export-task auth-refactor --zip
 workerctl finish-task auth-refactor --reason "work is complete" --decision-id 126 --strict-decisions
+workerctl finish-task auth-refactor --reason "work is complete" --stop-manager --decision-id 126 --strict-decisions
 workerctl stop-task auth-refactor --stop-worker --decision-id 127 --strict-decisions
 ```
 
@@ -317,8 +318,10 @@ inspect, nudge, interrupt, escalate, or stop. Mutating commands such as
 `task-nudge`, `task-interrupt`, `finish-task`, and `stop-task` are conditional
 tools, not checklist items.
 Use `finish-task <task> --reason "<reason>"` when the task is complete and
-should be closed while preserving the audit trail. Add `--stop-worker` only
-when the worker session should be stopped too.
+should be closed while preserving the audit trail. By default it leaves the
+manager terminal open for review. Add `--stop-manager` only when the manager
+terminal should be closed, and add `--stop-worker` only when the worker session
+should be stopped too.
 Before task-scoped text, interrupt, or kill side effects, workerctl verifies the
 recorded worker/manager identity, tmux session, and pane ID for the active
 binding.
