@@ -32,6 +32,12 @@ def command_export_task(args: argparse.Namespace) -> int:
             "role": "all",
             "task": audit["task"],
         }
+        full_replay = {
+            "entries": replay_entries(audit, role="all", mode="full-transcript"),
+            "mode": "full-transcript",
+            "role": "all",
+            "task": audit["task"],
+        } if getattr(args, "include_full_transcripts", False) else None
         prompt_rows = conn.execute(
             """
             select id, kind, content, content_sha256, generator_version,
@@ -74,6 +80,20 @@ def command_export_task(args: argparse.Namespace) -> int:
     write_json(export_root / "prompts.json", prompts)
     write_json(export_root / "transcript-captures.json", captures)
     write_json(export_root / "terminal-captures.json", audit.get("terminal_captures", []))
+    if getattr(args, "include_transcripts", False) or getattr(args, "include_full_transcripts", False):
+        write_json(export_root / "transcript-segments.json", audit.get("transcript_segments", []))
+    if getattr(args, "include_full_transcripts", False):
+        transcripts_dir = export_root / "transcripts"
+        transcripts_dir.mkdir(exist_ok=True)
+        for role in ("worker", "manager"):
+            lines = []
+            for segment in audit.get("transcript_segments", []):
+                if segment["role"] != role:
+                    continue
+                lines.append(f"--- {role} segment {segment['id']} {segment['captured_at']} ({segment['segment_kind']}) ---")
+                lines.append(segment.get("segment_text") or "[metadata only]")
+            (transcripts_dir / f"{role}.txt").write_text("\n".join(lines) + ("\n" if lines else ""))
+        write_json(export_root / "replay-full-transcript.json", full_replay)
     write_json(export_root / "agent-observations.json", audit.get("agent_observations", []))
     write_json(export_root / "manager-cycles.json", audit.get("manager_cycles", []))
     write_json(export_root / "manager-decisions.json", audit.get("manager_decisions", []))
@@ -95,6 +115,10 @@ def command_export_task(args: argparse.Namespace) -> int:
         ],
         "task": {"id": snapshot["id"], "name": snapshot["name"]},
     }
+    if getattr(args, "include_transcripts", False) or getattr(args, "include_full_transcripts", False):
+        manifest["files"].append("transcript-segments.json")
+    if getattr(args, "include_full_transcripts", False):
+        manifest["files"].extend(["replay-full-transcript.json", "transcripts/worker.txt", "transcripts/manager.txt"])
     write_json(export_root / "manifest.json", manifest)
     archive_path = None
     if args.zip:

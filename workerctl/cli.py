@@ -57,6 +57,9 @@ from workerctl.commands import (
     command_task_nudge,
     command_task_status,
     command_tasks,
+    command_transcript_capture,
+    command_transcript_prune,
+    command_transcript_show,
     command_update_status,
 )
 from workerctl.core import WorkerError
@@ -515,6 +518,7 @@ def build_parser() -> argparse.ArgumentParser:
     task_capture.add_argument("--lines", type=int, default=DEFAULT_HISTORY_LINES)
     task_capture.add_argument("--role", choices=("worker", "manager"), default="worker", help="Task terminal role to capture.")
     task_capture.add_argument("--json", action="store_true", help="Print capture metadata and output as JSON.")
+    task_capture.add_argument("--transcript-mode", choices=("none", "metadata", "excerpt", "snapshot", "segment", "full"), default="none")
     task_capture.add_argument("--path", help="Override the workerctl database path.")
     task_capture.set_defaults(func=command_task_capture)
 
@@ -527,6 +531,7 @@ def build_parser() -> argparse.ArgumentParser:
     manager_observe.add_argument("--status-stale-seconds", type=int, default=DEFAULT_STATUS_STALE_SECONDS)
     manager_observe.add_argument("--terminal-stale-seconds", type=int, default=DEFAULT_TERMINAL_STALE_SECONDS)
     manager_observe.add_argument("--busy-wait-seconds", type=int, default=DEFAULT_BUSY_WAIT_SECONDS)
+    manager_observe.add_argument("--transcript-mode", choices=("metadata", "excerpt", "snapshot", "segment", "full"), default="segment")
     manager_observe.add_argument(
         "--manager-stale-seconds",
         type=int,
@@ -600,6 +605,30 @@ def build_parser() -> argparse.ArgumentParser:
     task_events.add_argument("--path", help="Override the workerctl database path.")
     task_events.set_defaults(func=command_task_events)
 
+    transcript_capture = subparsers.add_parser("transcript-capture", help="Capture deduplicated full transcript segments for a task.")
+    transcript_capture.add_argument("task", help="Task name or ID.")
+    transcript_capture.add_argument("--role", choices=("all", "worker", "manager"), default="all")
+    transcript_capture.add_argument("--mode", choices=("metadata", "excerpt", "snapshot", "segment", "full"), default="segment")
+    transcript_capture.add_argument("--lines", type=int, default=DEFAULT_HISTORY_LINES)
+    transcript_capture.add_argument("--json", action="store_true")
+    transcript_capture.add_argument("--path", help="Override the workerctl database path.")
+    transcript_capture.set_defaults(func=command_transcript_capture)
+
+    transcript_show = subparsers.add_parser("transcript-show", help="Show stored transcript segments for a task.")
+    transcript_show.add_argument("task", help="Task name or ID.")
+    transcript_show.add_argument("--role", choices=("all", "worker", "manager"), default="all")
+    transcript_show.add_argument("--limit", type=int)
+    transcript_show.add_argument("--json", action="store_true")
+    transcript_show.add_argument("--path", help="Override the workerctl database path.")
+    transcript_show.set_defaults(func=command_transcript_show)
+
+    transcript_prune = subparsers.add_parser("transcript-prune", help="Prune stored transcript segment text to metadata.")
+    transcript_prune.add_argument("task", help="Task name or ID.")
+    transcript_prune.add_argument("--keep-latest", type=int, default=20)
+    transcript_prune.add_argument("--dry-run", action="store_true")
+    transcript_prune.add_argument("--path", help="Override the workerctl database path.")
+    transcript_prune.set_defaults(func=command_transcript_prune)
+
     audit = subparsers.add_parser("audit", help="Print SQLite audit history for a task.")
     audit.add_argument("task", help="Task name or ID.")
     audit.add_argument("--json", action="store_true", help="Print audit records as JSON.")
@@ -615,7 +644,7 @@ def build_parser() -> argparse.ArgumentParser:
     replay = subparsers.add_parser("replay", help="Replay a task's worker-manager timeline.")
     replay.add_argument("task", help="Task name or ID.")
     replay.add_argument("--json", action="store_true", help="Print stable JSON output.")
-    replay.add_argument("--format", choices=("compact", "timeline", "transcript"), default="timeline")
+    replay.add_argument("--format", choices=("compact", "timeline", "transcript", "full-transcript"), default="timeline")
     replay.add_argument("--role", choices=("all", "worker", "manager"), default="all")
     replay.add_argument("--limit", type=int, help="Print only the last N replay entries.")
     replay.add_argument("--path", help="Override the workerctl database path.")
@@ -625,6 +654,8 @@ def build_parser() -> argparse.ArgumentParser:
     export_task.add_argument("task", help="Task name or ID.")
     export_task.add_argument("--output", help="Directory to write the export bundle.")
     export_task.add_argument("--zip", action="store_true", help="Also write a zip archive next to the export directory.")
+    export_task.add_argument("--include-transcripts", action="store_true", help="Include deduplicated transcript segment metadata/content.")
+    export_task.add_argument("--include-full-transcripts", action="store_true", help="Include role-tagged full transcript text files and full-transcript replay.")
     export_task.add_argument("--path", help="Override the workerctl database path.")
     export_task.set_defaults(func=command_export_task)
 

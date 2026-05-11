@@ -81,6 +81,7 @@ def replay_entries(audit: dict[str, Any], *, role: str = "all", mode: str = "tim
     entries: list[dict[str, Any]] = []
     seen_capture_hashes_by_role: dict[str, set[str]] = {}
     include_captures = mode == "transcript"
+    include_segments = mode == "full-transcript"
     include_observes = mode != "compact"
 
     for command in audit.get("commands", []):
@@ -180,6 +181,36 @@ def replay_entries(audit: dict[str, Any], *, role: str = "all", mode: str = "tim
                 }
             )
 
+    if include_segments:
+        for segment in audit.get("transcript_segments", []):
+            segment_role = segment["role"]
+            if role != "all" and role != segment_role:
+                continue
+            text = segment.get("segment_text")
+            if text:
+                summary = f"{segment_role} transcript segment ({segment['line_count']} lines)"
+            else:
+                summary = f"{segment_role} transcript metadata ({segment['segment_kind']})"
+            entries.append(
+                {
+                    "actor": segment_role,
+                    "content": text,
+                    "details": {
+                        "content_sha256": segment["content_sha256"],
+                        "line_count": segment["line_count"],
+                        "previous_capture_id": segment.get("previous_capture_id"),
+                        "retention_class": segment["retention_class"],
+                        "segment_kind": segment["segment_kind"],
+                        "source_capture_id": segment["source_capture_id"],
+                    },
+                    "kind": "transcript_segment",
+                    "source": "transcript_segments",
+                    "source_id": segment["id"],
+                    "summary": summary,
+                    "timestamp": segment["captured_at"],
+                }
+            )
+
     entries.sort(key=lambda entry: (entry["timestamp"], str(entry["source"]), str(entry["source_id"])))
     return entries
 
@@ -223,6 +254,12 @@ def render_replay_text(result: dict[str, Any]) -> str:
     for entry in result["entries"]:
         hhmmss = entry["timestamp"].split("T", 1)[-1].replace("Z", "")
         lines.append(f"{hhmmss}  {entry['actor']:<16} {entry['summary']}")
+        if result["mode"] == "full-transcript" and entry["kind"] == "transcript_segment":
+            content = entry.get("content")
+            if content:
+                lines.append(content)
+            else:
+                lines.append("[metadata only]")
     return "\n".join(lines)
 
 

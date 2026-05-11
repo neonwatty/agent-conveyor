@@ -2106,6 +2106,103 @@ class CliTests(unittest.TestCase):
                 worker_identity.verify_manager_identity = original_verify_manager
                 commands.run = original_run
 
+    def test_transcript_capture_records_deduped_segments_and_show_prune(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                worker_db.upsert_worker(
+                    conn,
+                    name="worker-a",
+                    cwd=str(ROOT),
+                    tmux_session="codex-worker-a",
+                    identity_token="token-worker-a",
+                    tmux_pane_id="%1",
+                    state="active",
+                )
+                worker_db.create_task(conn, name="task-a", goal="Do task A.")
+                worker_db.bind_task_worker(conn, task="task-a", worker="worker-a", binding_id="binding-1")
+                conn.commit()
+
+            outputs = iter(["line one\nline two", "line one\nline two", "line one\nline two\nline three"])
+            original_capture_output = commands.capture_output
+            original_verify_worker = worker_identity.verify_worker_binding_identity
+            try:
+                commands.capture_output = lambda name, lines: next(outputs)
+                worker_identity.verify_worker_binding_identity = lambda binding: {"live": True, "live_pane_id": "%1", "mismatches": []}
+                args = argparse.Namespace(json=True, lines=80, mode="segment", path=str(db_path), role="worker", task="task-a")
+
+                with contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(commands.command_transcript_capture(args), 0)
+                with contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(commands.command_transcript_capture(args), 0)
+                with contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(commands.command_transcript_capture(args), 0)
+
+                with worker_db.connect(db_path) as conn:
+                    segments = conn.execute("select segment_kind, segment_text from transcript_segments order by id").fetchall()
+                self.assertEqual(len(segments), 2)
+                self.assertEqual(segments[0]["segment_kind"], "reset")
+                self.assertEqual(segments[0]["segment_text"], "line one\nline two")
+                self.assertEqual(segments[1]["segment_kind"], "segment")
+                self.assertEqual(segments[1]["segment_text"], "line three")
+
+                show_args = argparse.Namespace(json=False, limit=None, path=str(db_path), role="worker", task="task-a")
+                with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                    self.assertEqual(commands.command_transcript_show(show_args), 0)
+                self.assertIn("line three", stdout.getvalue())
+
+                prune_args = argparse.Namespace(dry_run=False, keep_latest=1, path=str(db_path), task="task-a")
+                with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                    self.assertEqual(commands.command_transcript_prune(prune_args), 0)
+                self.assertEqual(json.loads(stdout.getvalue())["pruned_count"], 1)
+                with worker_db.connect(db_path) as conn:
+                    pruned = conn.execute("select segment_text, retention_class from transcript_segments order by id").fetchone()
+                self.assertIsNone(pruned["segment_text"])
+                self.assertEqual(pruned["retention_class"], "cold")
+            finally:
+                commands.capture_output = original_capture_output
+                worker_identity.verify_worker_binding_identity = original_verify_worker
+
+    def test_replay_full_transcript_includes_segments(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
+                capture_id = worker_db.insert_terminal_capture(
+                    conn,
+                    task_id=task_id,
+                    role="worker",
+                    tmux_session="codex-worker-a",
+                    content_sha256="sha-1",
+                    content="worker transcript line",
+                    history_lines=20,
+                    source="test",
+                    classifier={},
+                    timestamp="2026-05-11T10:00:00Z",
+                )
+                worker_db.insert_transcript_segment(
+                    conn,
+                    task_id=task_id,
+                    role="worker",
+                    source_capture_id=capture_id,
+                    previous_capture_id=None,
+                    content_sha256="sha-1",
+                    segment_text="worker transcript line",
+                    segment_start_line=1,
+                    segment_end_line=1,
+                    segment_kind="reset",
+                    timestamp="2026-05-11T10:00:00Z",
+                )
+                conn.commit()
+
+            proc = self.run_workerctl("replay", "task-a", "--format", "full-transcript", "--path", str(db_path))
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("worker transcript segment", proc.stdout)
+            self.assertIn("worker transcript line", proc.stdout)
+
     def test_manager_decision_records_observation_and_event(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "workerctl.db"
@@ -2240,11 +2337,14 @@ class CliTests(unittest.TestCase):
                 with worker_db.connect(db_path) as conn:
                     cycle = conn.execute("select state, worker_capture_id, manager_capture_id from manager_cycles").fetchone()
                     captures = conn.execute("select role from terminal_captures order by id").fetchall()
+                    segments = conn.execute("select role, segment_text from transcript_segments order by id").fetchall()
                     observation = conn.execute("select observation_type from agent_observations where observation_type = 'health'").fetchone()
                 self.assertEqual(cycle["state"], "succeeded")
                 self.assertIsNotNone(cycle["worker_capture_id"])
                 self.assertIsNotNone(cycle["manager_capture_id"])
                 self.assertEqual([row["role"] for row in captures], ["worker", "manager"])
+                self.assertEqual([row["role"] for row in segments], ["worker", "manager"])
+                self.assertEqual([row["segment_text"] for row in segments], ["worker output", "manager output"])
                 self.assertEqual(observation["observation_type"], "health")
             finally:
                 worker_identity.verify_worker_binding_identity = original_verify_worker
@@ -4915,6 +5015,29 @@ class CliTests(unittest.TestCase):
                 )
                 task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
                 worker_db.bind_task_worker(conn, task="task-a", worker="worker-a", binding_id="binding-1")
+                capture_id = worker_db.insert_terminal_capture(
+                    conn,
+                    task_id=task_id,
+                    role="worker",
+                    tmux_session="codex-worker-a",
+                    content_sha256="sha-1",
+                    content="worker transcript",
+                    history_lines=20,
+                    source="test",
+                    classifier={},
+                )
+                worker_db.insert_transcript_segment(
+                    conn,
+                    task_id=task_id,
+                    role="worker",
+                    source_capture_id=capture_id,
+                    previous_capture_id=None,
+                    content_sha256="sha-1",
+                    segment_text="worker transcript",
+                    segment_start_line=1,
+                    segment_end_line=1,
+                    segment_kind="reset",
+                )
                 worker_db.insert_prompt(
                     conn,
                     task_id=task_id,
@@ -4933,6 +5056,7 @@ class CliTests(unittest.TestCase):
                 "--output",
                 str(output),
                 "--zip",
+                "--include-full-transcripts",
                 "--path",
                 str(db_path),
             )
@@ -4948,12 +5072,16 @@ class CliTests(unittest.TestCase):
             self.assertTrue((output / "manager-decisions.json").exists())
             self.assertTrue((output / "mutation-audit.json").exists())
             self.assertTrue((output / "replay.json").exists())
+            self.assertTrue((output / "transcript-segments.json").exists())
+            self.assertTrue((output / "replay-full-transcript.json").exists())
+            self.assertTrue((output / "transcripts" / "worker.txt").exists())
             self.assertTrue(output.with_suffix(".zip").exists())
             mutation_audit = json.loads((output / "mutation-audit.json").read_text())
             self.assertTrue(mutation_audit["ok"])
             self.assertEqual(mutation_audit["summary"]["mutations"], 0)
             replay = json.loads((output / "replay.json").read_text())
             self.assertEqual(replay["task"]["name"], "task-a")
+            self.assertIn("worker transcript", (output / "transcripts" / "worker.txt").read_text())
 
     def test_task_scoped_read_commands_are_listed_in_help(self):
         proc = self.run_workerctl("--help")
@@ -4994,6 +5122,9 @@ class CliTests(unittest.TestCase):
         self.assertIn("task-idle-check", proc.stdout)
         self.assertIn("task-interrupt", proc.stdout)
         self.assertIn("task-nudge", proc.stdout)
+        self.assertIn("transcript-capture", proc.stdout)
+        self.assertIn("transcript-prune", proc.stdout)
+        self.assertIn("transcript-show", proc.stdout)
 
     def test_recover_help_includes_sync_pane_ids(self):
         proc = self.run_workerctl("recover", "--help")

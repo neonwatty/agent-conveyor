@@ -32,6 +32,8 @@ from workerctl.db import insert_event as insert_db_event
 from workerctl.db import insert_manager_decision
 from workerctl.db import insert_status as insert_db_status
 from workerctl.db import insert_terminal_capture
+from workerctl.db import insert_transcript_segment
+from workerctl.db import latest_terminal_capture_for_role
 from workerctl.db import list_tasks as list_db_tasks
 from workerctl.db import mark_manager_seen
 from workerctl.db import mark_command_attempted
@@ -1687,6 +1689,7 @@ def capture_task_terminal(
     lines: int,
     source: str,
     command_id: str | None = None,
+    transcript_mode: str = "none",
 ) -> dict[str, Any]:
     with connect_db(db_path) as conn:
         initialize_database(conn)
@@ -1723,6 +1726,7 @@ def capture_task_terminal(
     }
     with connect_db(db_path) as conn:
         initialize_database(conn)
+        previous_capture = latest_terminal_capture_for_role(conn, task_id=snapshot["id"], role=role)
         capture_id = insert_terminal_capture(
             conn,
             task_id=snapshot["id"],
@@ -1738,6 +1742,18 @@ def capture_task_terminal(
             classifier=classifier,
             source=source,
         )
+        transcript_segment = None
+        if transcript_mode != "none":
+            transcript_segment = record_transcript_segment(
+                conn,
+                task_id=snapshot["id"],
+                role=role,
+                source_capture_id=capture_id,
+                previous_capture=previous_capture,
+                content_sha256=content_sha256,
+                content=output,
+                mode=transcript_mode,
+            )
         if role == "manager" and manager_id:
             mark_manager_seen(conn, manager_id=manager_id, last_capture_sha256=content_sha256)
         insert_db_event(
@@ -1761,7 +1777,12 @@ def capture_task_terminal(
             source_capture_id=capture_id,
             command_id=command_id,
             message=f"{role} terminal captured",
-            payload={"content_sha256": content_sha256, "history_lines": lines, "source": source},
+            payload={
+                "content_sha256": content_sha256,
+                "history_lines": lines,
+                "source": source,
+                "transcript_segment_id": transcript_segment["id"] if transcript_segment else None,
+            },
         )
         conn.commit()
     return {
@@ -1778,6 +1799,7 @@ def capture_task_terminal(
         "observation_id": observation_id,
         "role": role,
         "task": {"id": snapshot["id"], "name": snapshot["name"], "state": snapshot["state"]},
+        "transcript_segment": transcript_segment,
         role: {
             "id": worker_id or manager_id,
             "name": binding["worker_name"] if role == "worker" and binding else manager["name"] if role == "manager" and manager else None,
@@ -1788,16 +1810,256 @@ def capture_task_terminal(
     }
 
 
+def segment_text_delta(previous: str | None, current: str) -> tuple[str | None, int | None, int | None, str]:
+    current_lines = current.splitlines()
+    if previous is None:
+        if not current_lines:
+            return ("", 1, 0, "reset")
+        return (current, 1, len(current_lines), "reset")
+    previous_lines = previous.splitlines()
+    if previous_lines == current_lines:
+        return (None, None, None, "metadata")
+    max_overlap = min(len(previous_lines), len(current_lines))
+    overlap = 0
+    for size in range(max_overlap, 0, -1):
+        if previous_lines[-size:] == current_lines[:size]:
+            overlap = size
+            break
+    if overlap:
+        new_lines = current_lines[overlap:]
+        if not new_lines:
+            return (None, None, None, "metadata")
+        return ("\n".join(new_lines), overlap + 1, len(current_lines), "segment")
+    return (current, 1, len(current_lines), "reset")
+
+
+def record_transcript_segment(
+    conn,
+    *,
+    task_id: str,
+    role: str,
+    source_capture_id: int,
+    previous_capture: dict[str, Any] | None,
+    content_sha256: str,
+    content: str,
+    mode: str,
+) -> dict[str, Any] | None:
+    previous_id = previous_capture["id"] if previous_capture else None
+    previous_content = previous_capture.get("content") if previous_capture else None
+    if previous_capture and previous_capture.get("content_sha256") == content_sha256 and mode not in {"metadata"}:
+        return None
+    segment_text, start_line, end_line, segment_kind = segment_text_delta(previous_content, content)
+    if segment_text is None and mode != "metadata":
+        return None
+    if mode == "metadata":
+        segment_text = None
+        start_line = None
+        end_line = None
+        segment_kind = "metadata"
+    elif mode == "excerpt":
+        source_lines = (segment_text or content).splitlines()
+        excerpt_lines = source_lines[-40:]
+        segment_text = "\n".join(excerpt_lines)
+        end_line = end_line if end_line is not None else len(content.splitlines())
+        start_line = max(1, (end_line or 0) - len(excerpt_lines) + 1)
+        segment_kind = "excerpt"
+    elif mode == "snapshot":
+        segment_text = content
+        start_line = 1
+        end_line = len(content.splitlines())
+        segment_kind = "snapshot"
+    elif mode == "full":
+        segment_kind = "segment" if segment_kind != "reset" else "reset"
+    elif mode != "segment":
+        raise WorkerError(f"Unsupported transcript mode: {mode}")
+    segment_id = insert_transcript_segment(
+        conn,
+        task_id=task_id,
+        role=role,
+        source_capture_id=source_capture_id,
+        previous_capture_id=previous_id,
+        content_sha256=content_sha256,
+        segment_text=segment_text,
+        segment_start_line=start_line,
+        segment_end_line=end_line,
+        segment_kind=segment_kind,
+    )
+    return {
+        "id": segment_id,
+        "line_count": len((segment_text or "").splitlines()),
+        "mode": mode,
+        "previous_capture_id": previous_id,
+        "segment_kind": segment_kind,
+        "source_capture_id": source_capture_id,
+    }
+
+
 def command_task_capture(args: argparse.Namespace) -> int:
     db_path = Path(args.path).expanduser().resolve() if args.path else None
     role = getattr(args, "role", "worker")
-    result = capture_task_terminal(db_path, task=args.task, role=role, lines=args.lines, source="task_capture")
+    result = capture_task_terminal(
+        db_path,
+        task=args.task,
+        role=role,
+        lines=args.lines,
+        source="task_capture",
+        transcript_mode=getattr(args, "transcript_mode", "none"),
+    )
     if args.json:
         print(json.dumps(result, indent=2, sort_keys=True))
         return 0
     output = result["capture"]["output"]
     if output:
         print(output)
+    return 0
+
+
+def task_transcript_segments(db_path: Path | None, *, task: str, role: str = "all", limit: int | None = None) -> dict[str, Any]:
+    with connect_db(db_path) as conn:
+        initialize_database(conn)
+        snapshot = task_status_snapshot(conn, task=task)
+        where = "task_id = ?"
+        params: list[Any] = [snapshot["id"]]
+        if role != "all":
+            where += " and role = ?"
+            params.append(role)
+        limit_clause = "limit ?" if limit else ""
+        if limit:
+            params.append(limit)
+        rows = conn.execute(
+            f"""
+            select *
+            from (
+                select id, task_id, role, source_capture_id, previous_capture_id,
+                       captured_at, content_sha256, segment_text, segment_start_line,
+                       segment_end_line, byte_count, line_count, retention_class,
+                       segment_kind, redacted, created_at
+                from transcript_segments
+                where {where}
+                order by id desc
+                {limit_clause}
+            )
+            order by id
+            """,
+            params,
+        ).fetchall()
+    return {
+        "segments": [
+            {
+                "byte_count": row["byte_count"],
+                "captured_at": row["captured_at"],
+                "content_sha256": row["content_sha256"],
+                "created_at": row["created_at"],
+                "id": row["id"],
+                "line_count": row["line_count"],
+                "previous_capture_id": row["previous_capture_id"],
+                "redacted": bool(row["redacted"]),
+                "retention_class": row["retention_class"],
+                "role": row["role"],
+                "segment_end_line": row["segment_end_line"],
+                "segment_kind": row["segment_kind"],
+                "segment_start_line": row["segment_start_line"],
+                "segment_text": row["segment_text"],
+                "source_capture_id": row["source_capture_id"],
+                "task_id": row["task_id"],
+            }
+            for row in rows
+        ],
+        "task": {"id": snapshot["id"], "name": snapshot["name"], "state": snapshot["state"]},
+    }
+
+
+def command_transcript_capture(args: argparse.Namespace) -> int:
+    db_path = Path(args.path).expanduser().resolve() if args.path else None
+    roles = ("worker", "manager") if args.role == "all" else (args.role,)
+    captures = []
+    for role in roles:
+        try:
+            captures.append(
+                capture_task_terminal(
+                    db_path,
+                    task=args.task,
+                    role=role,
+                    lines=args.lines,
+                    source="transcript_capture",
+                    transcript_mode=args.mode,
+                )
+            )
+        except WorkerError as exc:
+            if args.role != "all":
+                raise
+            captures.append({"error": str(exc), "role": role})
+    result = {"captures": captures, "mode": args.mode, "role": args.role, "task": args.task}
+    if args.json:
+        print(json.dumps(result, indent=2, sort_keys=True))
+    else:
+        for capture in captures:
+            if capture.get("error"):
+                print(f"{capture['role']}: {capture['error']}")
+                continue
+            segment = capture.get("transcript_segment")
+            segment_text = "no new transcript segment" if segment is None else f"segment {segment['id']} ({segment['segment_kind']}, {segment['line_count']} lines)"
+            print(f"{capture['role']}: capture {capture['capture']['id']} {segment_text}")
+    return 0
+
+
+def command_transcript_show(args: argparse.Namespace) -> int:
+    db_path = Path(args.path).expanduser().resolve() if args.path else None
+    result = task_transcript_segments(db_path, task=args.task, role=args.role, limit=args.limit)
+    if args.json:
+        print(json.dumps(result, indent=2, sort_keys=True))
+        return 0
+    for segment in result["segments"]:
+        timestamp = segment["captured_at"].split("T", 1)[-1].replace("Z", "")
+        print(f"--- {segment['role']} transcript segment {segment['id']} {timestamp} ({segment['segment_kind']}) ---")
+        text = segment.get("segment_text")
+        if text:
+            print(text)
+        else:
+            print("[metadata only]")
+    return 0
+
+
+def command_transcript_prune(args: argparse.Namespace) -> int:
+    db_path = Path(args.path).expanduser().resolve() if args.path else None
+    with connect_db(db_path) as conn:
+        initialize_database(conn)
+        snapshot = task_status_snapshot(conn, task=args.task)
+        rows = conn.execute(
+            """
+            select id, role
+            from transcript_segments
+            where task_id = ? and segment_text is not null
+            order by role, id desc
+            """,
+            (snapshot["id"],),
+        ).fetchall()
+        seen: dict[str, int] = {}
+        prune_ids = []
+        for row in rows:
+            role = row["role"]
+            seen[role] = seen.get(role, 0) + 1
+            if seen[role] > args.keep_latest:
+                prune_ids.append(row["id"])
+        if prune_ids and not args.dry_run:
+            conn.executemany(
+                """
+                update transcript_segments
+                set segment_text = null, retention_class = 'cold', segment_kind = 'metadata'
+                where id = ?
+                """,
+                [(segment_id,) for segment_id in prune_ids],
+            )
+            insert_db_event(
+                conn,
+                "transcript_segments_pruned",
+                actor="workerctl",
+                task_id=snapshot["id"],
+                payload={"keep_latest": args.keep_latest, "segment_ids": prune_ids},
+            )
+            conn.commit()
+    result = {"dry_run": args.dry_run, "keep_latest": args.keep_latest, "pruned_count": 0 if args.dry_run else len(prune_ids), "would_prune_count": len(prune_ids)}
+    print(json.dumps(result, indent=2, sort_keys=True))
     return 0
 
 
@@ -1880,10 +2142,25 @@ def command_manager_observe(args: argparse.Namespace) -> int:
         cycle_id = create_manager_cycle(conn, task_id=snapshot["id"], manager_id=manager_id)
         conn.commit()
     try:
-        worker_capture = capture_task_terminal(db_path, task=snapshot["id"], role="worker", lines=args.lines, source="manager_observe")
+        transcript_mode = getattr(args, "transcript_mode", "segment")
+        worker_capture = capture_task_terminal(
+            db_path,
+            task=snapshot["id"],
+            role="worker",
+            lines=args.lines,
+            source="manager_observe",
+            transcript_mode=transcript_mode,
+        )
         manager_capture = None
         if manager:
-            manager_capture = capture_task_terminal(db_path, task=snapshot["id"], role="manager", lines=args.lines, source="manager_observe")
+            manager_capture = capture_task_terminal(
+                db_path,
+                task=snapshot["id"],
+                role="manager",
+                lines=args.lines,
+                source="manager_observe",
+                transcript_mode=transcript_mode,
+            )
         health = task_health_result(db_path, snapshot["id"], manager_stale_seconds=args.manager_stale_seconds)
         severity = "info" if health["ok"] else "error"
         with connect_db(db_path) as conn:

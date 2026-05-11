@@ -78,6 +78,7 @@ Use these from the manager session:
 scripts/workerctl manager-observe <task> --compact --json
 scripts/workerctl manager-decision <task> --decision inspect --reason "<why>"
 scripts/workerctl replay <task>
+scripts/workerctl replay <task> --format full-transcript --limit 40
 scripts/workerctl status <name>
 scripts/workerctl capture <name> --lines 120
 scripts/workerctl events <name> --limit 20
@@ -99,7 +100,9 @@ workerctl still runs the command but records a warning that
 `workerctl task-health <task> --audit-decisions --json` can surface later.
 Use `workerctl replay <task>` when the user asks what happened between a worker
 and manager. Use `--format compact` for decisions and side effects only, or
-`--format transcript` for deduplicated terminal-capture excerpts.
+`--format transcript` for deduplicated terminal-capture excerpts. Use
+`--format full-transcript` only for debugging, because it includes raw
+role-tagged transcript segments and can be large.
 If the nudge budget is exhausted, stop nudging. Record an `escalate` decision,
 then either ask the user what to do or extend the budget explicitly:
 `workerctl extend-nudge-budget <task> --add-nudges <n> --decision-id <decision_id> --strict-decisions`.

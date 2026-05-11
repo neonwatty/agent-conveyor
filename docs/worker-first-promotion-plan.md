@@ -359,14 +359,25 @@ review manager as unhealthy. It reports that state as `review_manager_idle`
 metadata so completed tasks can remain green while the manager terminal is
 available for review.
 
-### `workerctl replay <name> [--format compact|timeline|transcript] [--role all|worker|manager] [--json]`
+### `workerctl replay <name> [--format compact|timeline|transcript|full-transcript] [--role all|worker|manager] [--json]`
 
 Read-only worker-manager replay. It normalizes commands, manager decisions,
 manager observation cycles, and deduplicated terminal captures into a single
 chronological view. The default `timeline` format is human-readable. `compact`
 shows only decisions and side effects. `transcript` adds role-tagged terminal
-capture excerpts without dumping repeated full scrollback. `--json` returns the
-same replay entries as stable structured data for tests and future UI.
+capture excerpts without dumping repeated full scrollback. `full-transcript`
+interleaves operational events with deduplicated transcript segments for deep
+debugging. `--json` returns the same replay entries as stable structured data
+for tests and future UI.
+
+### `workerctl transcript-capture|transcript-show|transcript-prune <name>`
+
+Full transcript debugging commands. `transcript-capture` stores deduplicated
+new transcript segments per task role while preserving the existing terminal
+capture snapshot for hashing and classifier context. `transcript-show` prints
+stored role-tagged segments. `transcript-prune` converts older segment text to
+metadata-only rows. Full transcripts are for debugging operational replay
+quality and should not be loaded into manager context unless explicitly needed.
 
 ### `workerctl task-events <name> [--type TYPE] [--limit N]`
 
