@@ -298,6 +298,10 @@ with `--decision-id --strict-decisions`. Without strict mode, missing, stale,
 wrong-task, or incompatible decision links are warning-only and are reported by
 `mutation-audit`.
 
+`manager-decision` rejects decisions on terminal tasks (`done`, `failed`, or
+`cancelled`) by default. Use `--allow-post-terminal` only for an explicit
+review-only annotation after the task is already closed.
+
 ### `workerctl task-capture <name> [--lines N]`
 
 Capture recent worker output through the task binding. Stores capture metadata,

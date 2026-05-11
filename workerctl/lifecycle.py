@@ -172,6 +172,8 @@ def build_manager_prompt(
             "- Use task-interrupt only when manager-observe or task-idle-check shows a clear busy_wait/interruptible state, or when the user explicitly asks.",
             "- Use finish-task when the task is complete and should be closed while preserving audit history; by default it leaves this manager session open for review.",
             "- Add --stop-manager to finish-task only when the user explicitly wants the manager session closed after completion.",
+            "- After finish-task succeeds, stop all supervision loops. Do not run manager-observe, manager-decision, task-health, task-nudge, task-interrupt, or finish-task again unless the user explicitly asks for review.",
+            "- After finish-task, report the final outcome once: task state, whether the manager was left open, replay command, mutation-audit command, and that no further manager action is planned.",
             "- Use pause-manager or stop-task only for escalation, cleanup, or explicit user request.",
             "- Stop and report if the worker is blocked, the budget is exhausted without an explicit escalation, or state is uncertain.",
             "",

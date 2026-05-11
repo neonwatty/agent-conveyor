@@ -110,6 +110,11 @@ state or an explicit user request. Use `finish-task` when work is complete and
 the task should close with an audit record; it leaves the manager terminal open
 by default for review. Add `--stop-manager` only when the user explicitly wants
 the manager terminal closed.
+After `finish-task` succeeds, stop the supervision loop. Report the final
+outcome once, include replay and mutation-audit commands, and take no further
+manager action unless the user explicitly asks for review. `manager-decision`
+rejects post-terminal decisions by default; use `--allow-post-terminal` only
+for an explicit review-only annotation.
 
 Interpret worker health as follows:
 

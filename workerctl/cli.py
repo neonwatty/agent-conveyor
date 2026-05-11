@@ -541,6 +541,11 @@ def build_parser() -> argparse.ArgumentParser:
     manager_decision.add_argument("--decision", required=True, choices=("wait", "nudge", "interrupt", "escalate", "stop", "inspect"))
     manager_decision.add_argument("--reason", required=True, help="Reason for the decision.")
     manager_decision.add_argument("--cycle-id", type=int, help="Manager observation cycle ID to link.")
+    manager_decision.add_argument(
+        "--allow-post-terminal",
+        action="store_true",
+        help="Allow a review-only decision after the task is done or failed.",
+    )
     manager_decision.add_argument("--path", help="Override the workerctl database path.")
     manager_decision.set_defaults(func=command_manager_decision)
 
