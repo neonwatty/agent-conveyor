@@ -7100,6 +7100,7 @@ class IngestCliTests(unittest.TestCase):
             self.assertEqual(proc.returncode, 0, proc.stderr)
             result = json.loads(proc.stdout)
             self.assertEqual(result["new_events"], 2)
+            self.assertEqual(result["session"], "w")
 
             conn = worker_db.connect(state_dir / "workerctl.db")
             self.addCleanup(conn.close)

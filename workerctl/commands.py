@@ -2751,11 +2751,23 @@ def command_ingest(args: argparse.Namespace) -> int:
         result = worker_ingest.ingest_session(conn, session_name=args.name)
     finally:
         conn.close()
-    print(json.dumps(result, indent=2, sort_keys=True))
+    print(json.dumps({"session": args.name, **result}, indent=2, sort_keys=True))
     return 0
 
 
 def command_tail(args: argparse.Namespace) -> int:
+    """Print the most recent codex_events for a session as JSON, newest first.
+
+    Output is a JSON list of dicts with stable keys:
+      - `id`: int, autoincrement event id
+      - `timestamp`: str, ISO timestamp from the codex rollout (or ingest time fallback)
+      - `type`: str, top-level record type (session_meta, event_msg, response_item, ...)
+      - `subtype`: str | None, inner payload type for event_msg, else null
+      - `byte_offset`: int, absolute byte offset of this record in the rollout file
+      - `payload`: dict, the raw payload object from the rollout
+
+    Phase 3 supervision consumes this shape; do not break the keys without coordination.
+    """
     from workerctl import db as worker_db
 
     conn = worker_db.connect()
