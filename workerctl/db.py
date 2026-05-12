@@ -371,8 +371,12 @@ def migrate(conn: sqlite3.Connection, from_version: int) -> None:
     )
     if from_version < 2:
         migrate_worker_name_ids(conn)
-    if from_version < 5:
-        migrate_to_v5_sessions(conn)
+    # Always run v5 invariant repair. Internals are idempotent: bindings rebuild is
+    # guarded by column-presence check, backfills use `insert or ignore`, and index
+    # creates use `if not exists`. This protects against partial-migration states
+    # like the one observed when sessions table was added under a separate commit
+    # before the bindings rebuild logic existed.
+    migrate_to_v5_sessions(conn)
     sync_worker_ids_to_config_files(conn)
     conn.execute(
         "insert or ignore into schema_migrations(version, applied_at) values (?, ?)",

@@ -5953,6 +5953,96 @@ class SessionsSchemaTests(unittest.TestCase):
             self.assertIn("one_active_binding_per_worker_session", indexes)
             self.assertIn("one_active_binding_per_manager_session", indexes)
 
+    def test_migrate_self_heals_partial_v5_state(self):
+        """Simulate the real-world bug: sessions table present, user_version=5, but
+        bindings still v4-shaped (no session_id columns, no new indexes). The next
+        initialize_database call must self-heal."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            conn = worker_db.connect(db_path)
+            worker_db.initialize_database(conn)
+            # Seed a binding so we can verify it survives.
+            now = "2026-05-11T00:00:00Z"
+            conn.execute(
+                "insert into tasks(id, name, goal, state, created_at, updated_at) "
+                "values ('task-x', 'tx', 'g', 'managed', ?, ?)",
+                (now, now),
+            )
+            conn.execute(
+                """
+                insert into workers(
+                  id, name, tmux_session, identity_token, cwd, state, created_at, updated_at
+                )
+                values ('worker-x', 'wx', 'codex-wx', 'tok-x', '/repo', 'active', ?, ?)
+                """,
+                (now, now),
+            )
+            conn.execute(
+                """
+                insert into bindings(id, task_id, worker_id, state, created_at)
+                values ('binding-x', 'task-x', 'worker-x', 'active', ?)
+                """,
+                (now,),
+            )
+            conn.commit()
+
+            # Surgically degrade to the broken state: drop session-id columns and
+            # the two new indexes from bindings, but LEAVE user_version=5 and the
+            # sessions table intact (this is the real-world divergence).
+            conn.executescript(
+                """
+                drop index if exists one_active_binding_per_worker_session;
+                drop index if exists one_active_binding_per_manager_session;
+                alter table bindings rename to bindings_partial;
+                create table bindings(
+                  id text primary key,
+                  task_id text not null references tasks(id),
+                  worker_id text not null references workers(id),
+                  manager_id text references managers(id),
+                  state text not null check (state in ('active','ending','ended','invalid')),
+                  created_at text not null,
+                  ended_at text
+                );
+                insert into bindings(id, task_id, worker_id, manager_id, state, created_at, ended_at)
+                select id, task_id, worker_id, manager_id, state, created_at, ended_at
+                from bindings_partial;
+                drop table bindings_partial;
+                create unique index if not exists one_active_binding_per_worker
+                  on bindings(worker_id) where state in ('active', 'ending');
+                create unique index if not exists one_active_binding_per_task
+                  on bindings(task_id) where state in ('active', 'ending');
+                """
+            )
+            # IMPORTANT: keep user_version=5; do NOT reset it. That's the bug shape.
+            self.assertEqual(conn.execute("PRAGMA user_version").fetchone()[0], 5)
+            conn.commit()
+            conn.close()
+
+            # Reopen and re-init — must self-heal.
+            conn = worker_db.connect(db_path)
+            worker_db.initialize_database(conn)
+            self.addCleanup(conn.close)
+
+            cols = {row["name"] for row in conn.execute("pragma table_info(bindings)")}
+            self.assertIn("worker_session_id", cols)
+            self.assertIn("manager_session_id", cols)
+
+            indexes = {
+                r["name"]
+                for r in conn.execute(
+                    "select name from sqlite_master where type='index' and tbl_name='bindings'"
+                )
+            }
+            self.assertIn("one_active_binding_per_worker_session", indexes)
+            self.assertIn("one_active_binding_per_manager_session", indexes)
+
+            # Existing binding row must still be there.
+            row = conn.execute(
+                "select worker_id, worker_session_id from bindings where id = 'binding-x'"
+            ).fetchone()
+            self.assertEqual(row["worker_id"], "worker-x")
+            self.assertIsNone(row["worker_session_id"])
+
 
 class RegisterCommandsTests(unittest.TestCase):
     def open_db(self, tmpdir):
