@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -190,3 +191,54 @@ def ingest_session(
     conn.commit()
 
     return {"new_events": new_events, "new_offset": new_offset}
+
+
+def last_state_event_timestamp(conn: sqlite3.Connection, *, session_id: str) -> str | None:
+    """Return the ISO timestamp of the most recent state-bearing event for `session_id`,
+    or None if no state-bearing event has been ingested.
+
+    State-bearing means type='event_msg' and subtype in {task_started, user_message,
+    task_complete}. Mirrors `current_state`'s filter so the timestamp and the inferred
+    state always refer to the same row.
+    """
+    placeholders = ",".join("?" * len(_STATE_BEARING_SUBTYPES))
+    row = conn.execute(
+        f"""
+        select timestamp from codex_events
+        where session_id = ?
+          and type = 'event_msg'
+          and subtype in ({placeholders})
+        order by id desc
+        limit 1
+        """,
+        (session_id, *_STATE_BEARING_SUBTYPES),
+    ).fetchone()
+    if row is None:
+        return None
+    return row["timestamp"]
+
+
+def _parse_iso_z(value: str) -> datetime:
+    """Parse an ISO-8601 string with a trailing 'Z' or numeric offset into an aware datetime."""
+    if value.endswith("Z"):
+        value = value[:-1] + "+00:00"
+    return datetime.fromisoformat(value).astimezone(timezone.utc)
+
+
+def session_staleness_seconds(
+    conn: sqlite3.Connection,
+    *,
+    session_id: str,
+    now: str | None = None,
+) -> float | None:
+    """Return seconds since the most recent state-bearing event for `session_id`.
+
+    Returns None if no state-bearing event has been ingested. `now` defaults to the
+    current UTC time; it accepts an ISO string for deterministic tests.
+    """
+    last = last_state_event_timestamp(conn, session_id=session_id)
+    if last is None:
+        return None
+    now_dt = _parse_iso_z(now) if now else datetime.now(timezone.utc)
+    last_dt = _parse_iso_z(last)
+    return (now_dt - last_dt).total_seconds()

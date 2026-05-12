@@ -7245,5 +7245,104 @@ class IngestCliTests(unittest.TestCase):
             self.assertIn("workerctl:", proc.stderr)
 
 
+class StalenessTests(unittest.TestCase):
+    def open_db(self, tmpdir):
+        path = Path(tmpdir) / "workerctl.db"
+        conn = worker_db.connect(path)
+        worker_db.initialize_database(conn)
+        self.addCleanup(conn.close)
+        return conn
+
+    def _register(self, conn):
+        return worker_db.register_session(
+            conn, name="w", role="worker", codex_session_path="/a",
+            codex_session_id="cuid-w", pid=1, cwd="/repo",
+        )
+
+    def test_last_state_event_timestamp_none_when_no_events(self):
+        from workerctl import ingest
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            sid = self._register(conn)
+            self.assertIsNone(
+                ingest.last_state_event_timestamp(conn, session_id=sid),
+            )
+
+    def test_last_state_event_timestamp_skips_non_state_bearing(self):
+        from workerctl import ingest
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            sid = self._register(conn)
+            # Only non-state-bearing events present.
+            worker_db.insert_codex_event(
+                conn, session_id=sid,
+                timestamp="2026-05-11T14:32:11Z",
+                event_type="event_msg", subtype="agent_message",
+                payload={}, byte_offset=0,
+            )
+            worker_db.insert_codex_event(
+                conn, session_id=sid,
+                timestamp="2026-05-11T14:32:12Z",
+                event_type="event_msg", subtype="token_count",
+                payload={}, byte_offset=100,
+            )
+            self.assertIsNone(
+                ingest.last_state_event_timestamp(conn, session_id=sid),
+            )
+
+    def test_last_state_event_timestamp_returns_most_recent(self):
+        from workerctl import ingest
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            sid = self._register(conn)
+            for subtype, ts, offset in [
+                ("task_started", "2026-05-11T14:32:10Z", 0),
+                ("agent_message", "2026-05-11T14:32:11Z", 100),
+                ("task_complete", "2026-05-11T14:32:12Z", 200),
+                ("agent_message", "2026-05-11T14:32:13Z", 300),
+            ]:
+                worker_db.insert_codex_event(
+                    conn, session_id=sid,
+                    timestamp=ts, event_type="event_msg",
+                    subtype=subtype, payload={}, byte_offset=offset,
+                )
+            self.assertEqual(
+                ingest.last_state_event_timestamp(conn, session_id=sid),
+                "2026-05-11T14:32:12Z",
+            )
+
+    def test_session_staleness_seconds_none_when_no_state_events(self):
+        from workerctl import ingest
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            sid = self._register(conn)
+            self.assertIsNone(
+                ingest.session_staleness_seconds(
+                    conn, session_id=sid, now="2026-05-11T14:33:00Z",
+                ),
+            )
+
+    def test_session_staleness_seconds_computes_against_now(self):
+        from workerctl import ingest
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            sid = self._register(conn)
+            worker_db.insert_codex_event(
+                conn, session_id=sid,
+                timestamp="2026-05-11T14:30:00Z",
+                event_type="event_msg", subtype="task_complete",
+                payload={}, byte_offset=0,
+            )
+            staleness = ingest.session_staleness_seconds(
+                conn, session_id=sid, now="2026-05-11T14:35:00Z",
+            )
+            self.assertEqual(staleness, 300)
+
+
 if __name__ == "__main__":
     unittest.main()
