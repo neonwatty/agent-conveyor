@@ -112,10 +112,6 @@ def codex_arg_suffix(codex_args: list[str]) -> str:
     return " -- " + " ".join(sh_quote(arg) for arg in codex_args)
 
 
-def recommended_manager_codex_args_suffix() -> str:
-    return codex_arg_suffix(RECOMMENDED_MANAGER_CODEX_ARGS)
-
-
 def raw_worker_start_prompt(session_name: str, cwd: Path, manager_codex_args: list[str] | None = None) -> str:
     manager_suffix = codex_arg_suffix(manager_codex_args or [])
     become_managed_template = (
@@ -968,26 +964,6 @@ def managed_flow_payload(*, session: str | None = None) -> dict[str, Any]:
     }
 
 
-def print_managed_flow_text(payload: dict[str, Any]) -> None:
-    print("Managed worker flow")
-    print("")
-    print(f"Preflight: {payload['commands']['preflight']}")
-    print(f"Become managed: {payload['commands']['become_managed_template']}")
-    print(f"Recommended: {payload['commands']['become_managed_recommended_template']}")
-    print(f"Fallback: {payload['commands']['cannot_promote_in_place']}")
-    print("")
-    print("Required values before become-managed:")
-    for value in payload["required_values"]:
-        marker = "ask" if value["ask_when_missing"] else "optional"
-        print(f"- {value['name']} ({marker}): {value['description']}")
-    print("")
-    print(f"Rule: {payload['ask_questions_rule']}")
-    print("")
-    print("Natural-language mappings:")
-    for mapping in payload["phrase_mappings"]:
-        print(f"- {', '.join(mapping['phrases'])}: {mapping['command']}")
-
-
 def command_doctor_self(args: argparse.Namespace) -> int:
     session = getattr(args, "session", None) or current_session_name()
     tmux_path = shutil.which("tmux")
@@ -1788,56 +1764,6 @@ def command_transcript_prune(args: argparse.Namespace) -> int:
     result = {"dry_run": args.dry_run, "keep_latest": args.keep_latest, "pruned_count": 0 if args.dry_run else len(prune_ids), "would_prune_count": len(prune_ids)}
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0
-
-
-def compact_capture_result(result: dict[str, Any] | None, *, excerpt_lines: int = 20) -> dict[str, Any] | None:
-    if result is None:
-        return None
-    capture = result["capture"]
-    output = capture.get("output") or ""
-    lines = output.splitlines()
-    excerpt = "\n".join(lines[-excerpt_lines:])
-    return {
-        "binding_id": result.get("binding_id"),
-        "capture": {
-            "classifier": capture.get("classifier"),
-            "content_sha256": capture.get("content_sha256"),
-            "excerpt": excerpt,
-            "history_lines": capture.get("history_lines"),
-            "id": capture.get("id"),
-            "line_count": capture.get("line_count"),
-            "source": capture.get("source"),
-        },
-        "observation_id": result.get("observation_id"),
-        "role": result.get("role"),
-        "task": result.get("task"),
-        result["role"]: result.get(result["role"]),
-    }
-
-
-def compact_status_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "budget": snapshot.get("budget"),
-        "id": snapshot.get("id"),
-        "integrity": snapshot.get("integrity"),
-        "manager": snapshot.get("manager"),
-        "name": snapshot.get("name"),
-        "state": snapshot.get("state"),
-        "worker": snapshot.get("worker"),
-        "worker_status": snapshot.get("worker_status"),
-    }
-
-
-def compact_health_result(health: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "issues": health.get("issues", []),
-        "manager_liveness_warnings": health.get("manager_liveness_warnings", []),
-        "ok": health.get("ok"),
-        "recommended_actions": health.get("recommended_actions", []),
-        "review_manager_idle": health.get("review_manager_idle", []),
-        "task": health.get("task"),
-    }
-
 
 
 def command_audit(args: argparse.Namespace) -> int:

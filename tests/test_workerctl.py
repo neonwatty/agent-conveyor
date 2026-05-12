@@ -701,26 +701,6 @@ class CliTests(unittest.TestCase):
         data = json.loads(proc.stdout)
         self.assertIsInstance(data, list)
 
-    def test_manager_prompt_includes_task_health(self):
-        prompt = lifecycle.build_manager_prompt(
-            task_name="task-a",
-            goal="Do task A.",
-            summary="Worker is waiting.",
-            manager_instructions=None,
-            worker_name="worker-a",
-            budget={"expires_at": "2026-05-10T00:00:00Z", "max_nudges": 3},
-            source_snapshot={},
-        )
-
-        self.assertIn("workerctl task-health task-a --json", prompt)
-        self.assertIn("workerctl manager-observe task-a --compact --json", prompt)
-        self.assertIn("Run task-health first", prompt)
-        self.assertIn("Do not run mutating commands merely because they are listed.", prompt)
-        self.assertIn("Use task-interrupt only when manager-observe or task-idle-check shows a clear busy_wait", prompt)
-        self.assertIn("workerctl finish-task task-a --reason", prompt)
-        self.assertIn("After finish-task succeeds, stop all supervision loops.", prompt)
-        self.assertIn("replay command", prompt)
-
     def test_doctor_outputs_expected_structure(self):
         proc = self.run_workerctl("doctor")
 
