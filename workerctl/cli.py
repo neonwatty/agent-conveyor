@@ -12,16 +12,13 @@ from workerctl.constants import (
     DEFAULT_HISTORY_LINES,
     DEFAULT_INTERRUPT_FOLLOWUP,
     DEFAULT_MANAGER_STALE_SECONDS,
-    DEFAULT_STATUS_NUDGE,
     DEFAULT_STATUS_STALE_SECONDS,
-    DEFAULT_SUPERVISE_COOLDOWN_SECONDS,
     DEFAULT_TERMINAL_STALE_SECONDS,
     DEFAULT_WAIT_READY_SECONDS,
     INVOCATION_CWD,
 )
 from workerctl.commands import (
     command_audit,
-    command_bind_task,
     command_capture,
     command_classify,
     command_commands,
@@ -32,20 +29,17 @@ from workerctl.commands import (
     command_doctor,
     command_doctor_self,
     command_events,
-    command_explain_managed_flow,
-    command_extend_nudge_budget,
+    command_idle_check,
     command_interrupt,
     command_list,
-    command_manager_decision,
-    command_manager_observe,
     command_mutation_audit,
-    command_name_session,
     command_nudge,
     command_open,
     command_open_manager,
     command_open_worker,
     command_prune,
     command_qa_plan,
+    command_reconcile,
     command_register_worker,
     command_register_manager,
     command_deregister,
@@ -60,13 +54,6 @@ from workerctl.commands import (
     command_status,
     command_stop,
     command_tail,
-    command_task_capture,
-    command_task_events,
-    command_task_health,
-    command_task_idle_check,
-    command_task_interrupt,
-    command_task_nudge,
-    command_task_status,
     command_tasks,
     command_transcript_capture,
     command_transcript_prune,
@@ -79,24 +66,10 @@ from workerctl.ingest import IngestError
 from workerctl.export import command_export_task
 from workerctl.importer import command_import_compat
 from workerctl.lifecycle import (
-    command_become_managed,
-    command_close_manager,
-    command_close_stale,
     command_finish_task,
-    command_manage,
-    command_my_status,
-    command_pause_manager,
-    command_promote,
-    command_reconcile,
-    command_recover,
-    command_remanage,
-    command_resume_manager,
-    command_self_promote,
     command_stop_task,
-    command_unmanage,
 )
 from workerctl.replay import command_replay
-from workerctl.supervise import command_idle_check, command_supervise, command_watch
 
 
 def add_manager_codex_arg_options(command: argparse.ArgumentParser) -> None:
@@ -180,18 +153,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     start.set_defaults(func=command_start, start_prompt=True)
 
-    name_session = subparsers.add_parser(
-        "name-session",
-        help="Name the current tmux session as a worker and register it in SQLite.",
-    )
-    name_session.add_argument("name", help="Worker name to assign to the current tmux session.")
-    name_session.add_argument("--cwd", default=str(INVOCATION_CWD), help="Working directory for the worker.")
-    name_session.add_argument("--task", help="Optional task text for the generated worker contract/status.")
-    name_session.add_argument("--session", help="Explicit tmux session to name; defaults to the current tmux session.")
-    name_session.add_argument("--force", action="store_true", help="Replace an existing worker config for this name.")
-    name_session.add_argument("--path", help="Override the workerctl database path.")
-    name_session.set_defaults(func=command_name_session)
-
     start_test = subparsers.add_parser("start-test", help="Create a low-risk worker, verify it, and leave it running.")
     start_test.add_argument("name", nargs="?", default="live-test", help="Worker name.")
     start_test.add_argument("--cwd", default=str(INVOCATION_CWD), help="Working directory for the worker.")
@@ -238,20 +199,16 @@ def build_parser() -> argparse.ArgumentParser:
     doctor_self.add_argument("--json", action="store_true", help="Print stable JSON output.")
     doctor_self.set_defaults(func=command_doctor_self)
 
-    explain_managed_flow = subparsers.add_parser(
-        "explain-managed-flow",
-        help="Explain the agent-facing flow for becoming, pausing, resuming, and finishing managed work.",
-    )
-    explain_managed_flow.add_argument("--session", help="Optional tmux session to include in command templates.")
-    explain_managed_flow.add_argument("--json", action="store_true", help="Print stable JSON output.")
-    explain_managed_flow.set_defaults(func=command_explain_managed_flow)
-
     qa_plan = subparsers.add_parser("qa-plan", help="Print a repeatable manual QA checklist.")
     qa_plan.add_argument("scenario", nargs="?", default="self-management", choices=("self-management",))
     qa_plan.add_argument("--json", action="store_true", help="Print stable JSON output.")
     qa_plan.set_defaults(func=command_qa_plan)
 
-    db_doctor = subparsers.add_parser("db-doctor", help="Initialize and check the SQLite control-plane database.")
+    db_doctor = subparsers.add_parser(
+        "db-doctor",
+        help="Schema health check; legacy-table reconciliation. For session-based "
+             "runtime drift use `workerctl reconcile`.",
+    )
     db_doctor.add_argument("--live", action="store_true", help="Also report read-only live tmux reconciliation drift.")
     db_doctor.add_argument(
         "--manager-stale-seconds",
@@ -399,164 +356,6 @@ def build_parser() -> argparse.ArgumentParser:
     prune.add_argument("--path", help="Override the workerctl database path.")
     prune.set_defaults(func=command_prune)
 
-    bind_task = subparsers.add_parser("bind-task", help="Bind a SQLite task record to a worker.")
-    bind_task.add_argument("task", help="Task name or ID.")
-    bind_task.add_argument("--worker", required=True, help="Worker name or ID.")
-    bind_task.add_argument("--path", help="Override the workerctl database path.")
-    bind_task.set_defaults(func=command_bind_task)
-
-    become_managed = subparsers.add_parser(
-        "become-managed",
-        help="Agent-facing command to register this session as a worker and open a manager.",
-    )
-    become_managed.add_argument("--worker", help="Worker name to assign to the current tmux session when needed.")
-    become_managed.add_argument("--task", required=True, help="Task name to create or resume.")
-    become_managed.add_argument("--goal", required=True, help="Task goal.")
-    become_managed.add_argument("--summary", help="Optional current task summary.")
-    become_managed.add_argument("--manager-instructions", help="Additional manager instructions.")
-    become_managed.add_argument("--max-nudges", type=int, default=3, help="Nudge budget for the manager.")
-    become_managed.add_argument("--budget-hours", type=int, default=24, help="Hours until the default nudge budget expires.")
-    become_managed.add_argument("--budget-expires-at", help="Explicit ISO timestamp for nudge budget expiry.")
-    become_managed.add_argument("--cwd", default=str(INVOCATION_CWD), help="Working directory for the worker record.")
-    become_managed.add_argument("--worker-task", help="Task text for the worker status contract when registering this session.")
-    become_managed.add_argument("--session", help="Explicit tmux session to manage; defaults to the current tmux session.")
-    become_managed.add_argument("--force-name", action="store_true", help="Replace an existing worker config when registering this session.")
-    become_managed.add_argument(
-        "--no-open-manager",
-        action="store_false",
-        dest="open_manager",
-        help="Do not open a visible terminal window for the spawned manager.",
-    )
-    become_managed.add_argument(
-        "--terminal",
-        choices=("auto", "ghostty", "terminal"),
-        default="auto",
-        help="Terminal app to use for the manager window.",
-    )
-    become_managed.add_argument("--path", help="Override the workerctl database path.")
-    add_manager_codex_arg_options(become_managed)
-    become_managed.set_defaults(func=command_become_managed, open_manager=True)
-
-    manage = subparsers.add_parser("manage", help="From inside a worker session, register it if needed and spawn a manager.")
-    manage.add_argument("--worker", help="Worker name to assign to the current tmux session when needed.")
-    manage.add_argument("--task", required=True, help="Task name to create or resume.")
-    manage.add_argument("--goal", required=True, help="Task goal.")
-    manage.add_argument("--summary", help="Optional current task summary.")
-    manage.add_argument("--manager-instructions", help="Additional manager instructions.")
-    manage.add_argument("--max-nudges", type=int, default=3, help="Nudge budget for the manager.")
-    manage.add_argument("--budget-hours", type=int, default=24, help="Hours until the default nudge budget expires.")
-    manage.add_argument("--budget-expires-at", help="Explicit ISO timestamp for nudge budget expiry.")
-    manage.add_argument("--cwd", default=str(INVOCATION_CWD), help="Working directory for the worker record.")
-    manage.add_argument("--worker-task", help="Task text for the worker status contract when registering this session.")
-    manage.add_argument("--session", help="Explicit tmux session to manage; defaults to the current tmux session.")
-    manage.add_argument("--force-name", action="store_true", help="Replace an existing worker config when registering this session.")
-    manage.add_argument("--open-manager", action="store_true", help="Open a terminal window attached to the spawned manager.")
-    manage.add_argument(
-        "--terminal",
-        choices=("auto", "ghostty", "terminal"),
-        default="auto",
-        help="Terminal app to use with --open-manager.",
-    )
-    manage.add_argument("--path", help="Override the workerctl database path.")
-    add_manager_codex_arg_options(manage)
-    manage.set_defaults(func=command_manage)
-
-    promote = subparsers.add_parser("promote", help="Promote an existing worker into a managed task.")
-    promote.add_argument("worker", help="Existing worker name.")
-    promote.add_argument("--task", required=True, help="Task name to create or resume.")
-    promote.add_argument("--goal", required=True, help="Task goal.")
-    promote.add_argument("--summary", help="Optional current task summary.")
-    promote.add_argument("--manager-instructions", help="Additional manager instructions.")
-    promote.add_argument("--max-nudges", type=int, default=3, help="Nudge budget for the manager.")
-    promote.add_argument("--budget-hours", type=int, default=24, help="Hours until the default nudge budget expires.")
-    promote.add_argument("--budget-expires-at", help="Explicit ISO timestamp for nudge budget expiry.")
-    promote.add_argument("--open-manager", action="store_true", help="Open a terminal window attached to the spawned manager.")
-    promote.add_argument(
-        "--terminal",
-        choices=("auto", "ghostty", "terminal"),
-        default="auto",
-        help="Terminal app to use with --open-manager.",
-    )
-    promote.add_argument("--path", help="Override the workerctl database path.")
-    add_manager_codex_arg_options(promote)
-    promote.set_defaults(func=command_promote)
-
-    self_promote = subparsers.add_parser("self-promote", help="Promote the current named worker session into a managed task.")
-    self_promote.add_argument("--task", required=True, help="Task name to create or resume.")
-    self_promote.add_argument("--goal", required=True, help="Task goal.")
-    self_promote.add_argument("--summary", help="Optional current task summary.")
-    self_promote.add_argument("--manager-instructions", help="Additional manager instructions.")
-    self_promote.add_argument("--max-nudges", type=int, default=3, help="Nudge budget for the manager.")
-    self_promote.add_argument("--budget-hours", type=int, default=24, help="Hours until the default nudge budget expires.")
-    self_promote.add_argument("--budget-expires-at", help="Explicit ISO timestamp for nudge budget expiry.")
-    self_promote.add_argument("--worker", help="Override current-session worker inference.")
-    self_promote.add_argument("--session", help="Explicit tmux session to infer worker name from.")
-    self_promote.add_argument("--open-manager", action="store_true", help="Open a terminal window attached to the spawned manager.")
-    self_promote.add_argument(
-        "--terminal",
-        choices=("auto", "ghostty", "terminal"),
-        default="auto",
-        help="Terminal app to use with --open-manager.",
-    )
-    self_promote.add_argument("--path", help="Override the workerctl database path.")
-    add_manager_codex_arg_options(self_promote)
-    self_promote.set_defaults(func=command_self_promote)
-
-    pause_manager = subparsers.add_parser("pause-manager", help="Stop a task manager while leaving the worker running.")
-    pause_manager.add_argument("task", help="Task name or ID.")
-    pause_manager.add_argument("--decision-id", type=int, help="Manager escalate/stop decision ID that justifies this pause.")
-    pause_manager.add_argument("--strict-decisions", action="store_true", help="Reject the pause unless --decision-id is valid.")
-    pause_manager.add_argument("--path", help="Override the workerctl database path.")
-    pause_manager.set_defaults(func=command_pause_manager)
-
-    close_manager = subparsers.add_parser("close-manager", help="Close a task manager session without changing task or worker state.")
-    close_manager.add_argument("task", help="Task name or ID.")
-    close_manager.add_argument("--reason", default="Manager closed by operator.", help="Reason recorded in the audit trail.")
-    close_manager.add_argument("--path", help="Override the workerctl database path.")
-    close_manager.set_defaults(func=command_close_manager)
-
-    unmanage = subparsers.add_parser("unmanage", help="Stop this worker's manager while leaving the worker running.")
-    unmanage.add_argument("--task", help="Explicit task name or ID; defaults to the task bound to the current session.")
-    unmanage.add_argument("--session", help="Explicit tmux session; defaults to the current tmux session.")
-    unmanage.add_argument("--dry-run", action="store_true", help="Resolve the task and manager without stopping anything.")
-    unmanage.add_argument("--json", action="store_true", help="Print stable JSON output.")
-    unmanage.add_argument("--path", help="Override the workerctl database path.")
-    unmanage.set_defaults(func=command_unmanage)
-
-    my_status = subparsers.add_parser("my-status", help="Show this worker's current managed task and manager state.")
-    my_status.add_argument("--task", help="Explicit task name or ID; defaults to the task bound to the current session.")
-    my_status.add_argument("--session", help="Explicit tmux session; defaults to the current tmux session.")
-    my_status.add_argument("--json", action="store_true", help="Print stable JSON output.")
-    my_status.add_argument("--path", help="Override the workerctl database path.")
-    my_status.set_defaults(func=command_my_status)
-
-    remanage = subparsers.add_parser("remanage", help="Restart this worker's paused manager.")
-    remanage.add_argument("--task", help="Explicit task name or ID; defaults to the task bound to the current session.")
-    remanage.add_argument("--session", help="Explicit tmux session; defaults to the current tmux session.")
-    remanage.add_argument("--open-manager", action="store_true", help="Open a terminal window attached to the spawned manager.")
-    remanage.add_argument(
-        "--terminal",
-        choices=("auto", "ghostty", "terminal"),
-        default="auto",
-        help="Terminal app to use with --open-manager.",
-    )
-    remanage.add_argument("--path", help="Override the workerctl database path.")
-    add_manager_codex_arg_options(remanage)
-    remanage.set_defaults(func=command_remanage)
-
-    resume_manager = subparsers.add_parser("resume-manager", help="Restart a paused task manager.")
-    resume_manager.add_argument("task", help="Task name or ID.")
-    resume_manager.add_argument("--open-manager", action="store_true", help="Open a terminal window attached to the spawned manager.")
-    resume_manager.add_argument(
-        "--terminal",
-        choices=("auto", "ghostty", "terminal"),
-        default="auto",
-        help="Terminal app to use with --open-manager.",
-    )
-    resume_manager.add_argument("--path", help="Override the workerctl database path.")
-    add_manager_codex_arg_options(resume_manager)
-    resume_manager.set_defaults(func=command_resume_manager)
-
     stop_task = subparsers.add_parser("stop-task", help="Stop a task manager, optionally stop the worker, and mark the task done.")
     stop_task.add_argument("task", help="Task name or ID.")
     stop_task.add_argument("--stop-worker", action="store_true", help="Also stop the bound worker tmux session.")
@@ -584,141 +383,15 @@ def build_parser() -> argparse.ArgumentParser:
     finish_task.add_argument("--path", help="Override the workerctl database path.")
     finish_task.set_defaults(func=command_finish_task)
 
-    reconcile = subparsers.add_parser("reconcile", help="Report drift between SQLite and live tmux sessions.")
-    reconcile.add_argument("task", nargs="?", help="Optional task name or ID.")
-    reconcile.add_argument("--path", help="Override the workerctl database path.")
+    reconcile = subparsers.add_parser(
+        "reconcile",
+        help="Report (and optionally apply) reconciliation actions on session-based "
+             "bindings: dead-pid sessions, dangling bindings, stuck tasks. "
+             "For legacy worker_id-based drift use `workerctl db-doctor --live`.",
+    )
+    reconcile.add_argument("--apply", action="store_true",
+                          help="Mark dead-pid sessions gone and dangling bindings invalid.")
     reconcile.set_defaults(func=command_reconcile)
-
-    recover = subparsers.add_parser("recover", help="Mark missing sessions discovered by reconciliation.")
-    recover.add_argument("task", nargs="?", help="Optional task name or ID.")
-    recover.add_argument(
-        "--sync-pane-ids",
-        action="store_true",
-        help="For live pane mismatches, update recorded pane IDs to the current tmux pane IDs.",
-    )
-    recover.add_argument("--path", help="Override the workerctl database path.")
-    recover.set_defaults(func=command_recover)
-
-    close_stale = subparsers.add_parser(
-        "close-stale",
-        help="Dry-run or close stale tasks whose recorded worker is missing and unsupervised.",
-    )
-    close_stale.add_argument("task", nargs="?", help="Optional task name or ID.")
-    close_stale.add_argument("--apply", action="store_true", help="Apply the close plan. Default is dry-run.")
-    close_stale.add_argument("--path", help="Override the workerctl database path.")
-    close_stale.set_defaults(func=command_close_stale)
-
-    task_status = subparsers.add_parser("task-status", help="Print task-scoped status from SQLite.")
-    task_status.add_argument("task", help="Task name or ID.")
-    task_status.add_argument("--json", action="store_true", help="Print stable JSON output.")
-    task_status.add_argument("--path", help="Override the workerctl database path.")
-    task_status.set_defaults(func=command_task_status)
-
-    task_health = subparsers.add_parser("task-health", help="Check task integrity, live bindings, and manager health.")
-    task_health.add_argument("task", help="Task name or ID.")
-    task_health.add_argument("--json", action="store_true", help="Print stable JSON output.")
-    task_health.add_argument("--record", action="store_true", help="Persist this health check as an audit observation.")
-    task_health.add_argument("--audit-decisions", action="store_true", help="Include mutation decision linkage warnings in health.")
-    task_health.add_argument(
-        "--manager-stale-seconds",
-        type=int,
-        default=DEFAULT_MANAGER_STALE_SECONDS,
-        help="Warn when a live manager heartbeat is older than this many seconds.",
-    )
-    task_health.add_argument("--path", help="Override the workerctl database path.")
-    task_health.set_defaults(func=command_task_health)
-
-    task_capture = subparsers.add_parser("task-capture", help="Capture terminal output for a task's bound worker.")
-    task_capture.add_argument("task", help="Task name or ID.")
-    task_capture.add_argument("--lines", type=int, default=DEFAULT_HISTORY_LINES)
-    task_capture.add_argument("--role", choices=("worker", "manager"), default="worker", help="Task terminal role to capture.")
-    task_capture.add_argument("--json", action="store_true", help="Print capture metadata and output as JSON.")
-    task_capture.add_argument("--transcript-mode", choices=("none", "metadata", "excerpt", "snapshot", "segment", "full"), default="none")
-    task_capture.add_argument("--path", help="Override the workerctl database path.")
-    task_capture.set_defaults(func=command_task_capture)
-
-    manager_observe = subparsers.add_parser("manager-observe", help="Record one manager observation cycle for a task.")
-    manager_observe.add_argument("task", help="Task name or ID.")
-    manager_observe.add_argument("--json", action="store_true", help="Print stable JSON output.")
-    manager_observe.add_argument("--compact", action="store_true", help="Return compact JSON while still recording full captures.")
-    manager_observe.add_argument("--lines", type=int, default=DEFAULT_HISTORY_LINES)
-    manager_observe.add_argument("--no-refresh", action="store_false", dest="refresh", help="Do not refresh worker terminal metadata during idle check.")
-    manager_observe.add_argument("--status-stale-seconds", type=int, default=DEFAULT_STATUS_STALE_SECONDS)
-    manager_observe.add_argument("--terminal-stale-seconds", type=int, default=DEFAULT_TERMINAL_STALE_SECONDS)
-    manager_observe.add_argument("--busy-wait-seconds", type=int, default=DEFAULT_BUSY_WAIT_SECONDS)
-    manager_observe.add_argument("--transcript-mode", choices=("metadata", "excerpt", "snapshot", "segment", "full"), default="segment")
-    manager_observe.add_argument(
-        "--manager-stale-seconds",
-        type=int,
-        default=DEFAULT_MANAGER_STALE_SECONDS,
-        help="Warn when a live manager heartbeat is older than this many seconds.",
-    )
-    manager_observe.add_argument("--path", help="Override the workerctl database path.")
-    manager_observe.set_defaults(func=command_manager_observe, refresh=True)
-
-    manager_decision = subparsers.add_parser("manager-decision", help="Record a manager decision for a task.")
-    manager_decision.add_argument("task", help="Task name or ID.")
-    manager_decision.add_argument("--decision", required=True, choices=("wait", "nudge", "interrupt", "escalate", "stop", "inspect"))
-    manager_decision.add_argument("--reason", required=True, help="Reason for the decision.")
-    manager_decision.add_argument("--cycle-id", type=int, help="Manager observation cycle ID to link.")
-    manager_decision.add_argument(
-        "--allow-post-terminal",
-        action="store_true",
-        help="Allow a review-only decision after the task is done or failed.",
-    )
-    manager_decision.add_argument("--path", help="Override the workerctl database path.")
-    manager_decision.set_defaults(func=command_manager_decision)
-
-    task_idle_check = subparsers.add_parser("task-idle-check", help="Classify freshness for a task's bound worker.")
-    task_idle_check.add_argument("task", help="Task name or ID.")
-    task_idle_check.add_argument("--no-refresh", action="store_false", dest="refresh", help="Do not refresh terminal capture.")
-    task_idle_check.add_argument("--lines", type=int, default=DEFAULT_HISTORY_LINES)
-    task_idle_check.add_argument("--status-stale-seconds", type=int, default=DEFAULT_STATUS_STALE_SECONDS)
-    task_idle_check.add_argument("--terminal-stale-seconds", type=int, default=DEFAULT_TERMINAL_STALE_SECONDS)
-    task_idle_check.add_argument("--busy-wait-seconds", type=int, default=DEFAULT_BUSY_WAIT_SECONDS)
-    task_idle_check.add_argument("--path", help="Override the workerctl database path.")
-    task_idle_check.set_defaults(func=command_task_idle_check, refresh=True)
-
-    task_nudge = subparsers.add_parser("task-nudge", help="Send a durable task-scoped nudge to the bound worker.")
-    task_nudge.add_argument("task", help="Task name or ID.")
-    task_nudge.add_argument("message", help="Message to send to the bound worker.")
-    task_nudge.add_argument("--decision-id", type=int, help="Manager nudge decision ID that justifies this mutation.")
-    task_nudge.add_argument("--strict-decisions", action="store_true", help="Reject the nudge unless --decision-id is valid.")
-    task_nudge.add_argument("--dry-run", action="store_true", help="Record the command without sending the message.")
-    task_nudge.add_argument("--path", help="Override the workerctl database path.")
-    task_nudge.set_defaults(func=command_task_nudge)
-
-    extend_nudge_budget = subparsers.add_parser("extend-nudge-budget", help="Extend a task's manager nudge budget.")
-    extend_nudge_budget.add_argument("task", help="Task name or ID.")
-    extend_nudge_budget.add_argument("--add-nudges", type=int, required=True, help="Number of additional nudges to allow.")
-    extend_nudge_budget.add_argument("--budget-hours", type=int, default=24, help="Hours until the extended nudge budget expires.")
-    extend_nudge_budget.add_argument("--budget-expires-at", help="Explicit ISO timestamp for nudge budget expiry.")
-    extend_nudge_budget.add_argument("--decision-id", type=int, help="Manager escalate decision ID that justifies this mutation.")
-    extend_nudge_budget.add_argument("--strict-decisions", action="store_true", help="Reject the extension unless --decision-id is valid.")
-    extend_nudge_budget.add_argument("--path", help="Override the workerctl database path.")
-    extend_nudge_budget.set_defaults(func=command_extend_nudge_budget)
-
-    task_interrupt = subparsers.add_parser(
-        "task-interrupt",
-        help="Send a durable task-scoped interrupt to the bound worker.",
-    )
-    task_interrupt.add_argument("task", help="Task name or ID.")
-    task_interrupt.add_argument("--decision-id", type=int, help="Manager interrupt decision ID that justifies this mutation.")
-    task_interrupt.add_argument("--strict-decisions", action="store_true", help="Reject the interrupt unless --decision-id is valid.")
-    task_interrupt.add_argument("--key", default="C-c", help="tmux key to send to the bound worker.")
-    task_interrupt.add_argument("--followup", default=DEFAULT_INTERRUPT_FOLLOWUP, help="Message to send after interrupt.")
-    task_interrupt.add_argument("--no-followup", action="store_true", help="Do not send a follow-up message.")
-    task_interrupt.add_argument("--dry-run", action="store_true", help="Record the command without interrupting.")
-    task_interrupt.add_argument("--path", help="Override the workerctl database path.")
-    task_interrupt.set_defaults(func=command_task_interrupt)
-
-    task_events = subparsers.add_parser("task-events", help="Print task-scoped SQLite events.")
-    task_events.add_argument("task", help="Task name or ID.")
-    task_events.add_argument("--type", help="Filter by event type.")
-    task_events.add_argument("--limit", type=int, help="Print only the last N events.")
-    task_events.add_argument("--json", action="store_true", help="Print task events as JSON.")
-    task_events.add_argument("--path", help="Override the workerctl database path.")
-    task_events.set_defaults(func=command_task_events)
 
     transcript_capture = subparsers.add_parser("transcript-capture", help="Capture deduplicated full transcript segments for a task.")
     transcript_capture.add_argument("task", help="Task name or ID.")
@@ -810,46 +483,6 @@ def build_parser() -> argparse.ArgumentParser:
     idle_check.add_argument("--terminal-stale-seconds", type=int, default=DEFAULT_TERMINAL_STALE_SECONDS)
     idle_check.add_argument("--busy-wait-seconds", type=int, default=DEFAULT_BUSY_WAIT_SECONDS)
     idle_check.set_defaults(func=command_idle_check, refresh=True)
-
-    supervise = subparsers.add_parser("supervise", help="Run one manager supervision cycle for a worker.")
-    supervise.add_argument("name")
-    supervise.add_argument("--no-refresh", action="store_false", dest="refresh", help="Do not refresh terminal capture.")
-    supervise.add_argument("--lines", type=int, default=DEFAULT_HISTORY_LINES)
-    supervise.add_argument("--status-stale-seconds", type=int, default=DEFAULT_STATUS_STALE_SECONDS)
-    supervise.add_argument("--terminal-stale-seconds", type=int, default=DEFAULT_TERMINAL_STALE_SECONDS)
-    supervise.add_argument("--busy-wait-seconds", type=int, default=DEFAULT_BUSY_WAIT_SECONDS)
-    supervise.add_argument("--cooldown-seconds", type=int, default=DEFAULT_SUPERVISE_COOLDOWN_SECONDS)
-    supervise.add_argument("--message", default=DEFAULT_STATUS_NUDGE, help="Status request sent when the worker is stale.")
-    supervise.add_argument("--dry-run", action="store_true", help="Report the supervision action without sending nudges.")
-    supervise.add_argument("--interrupt-busy-wait", action="store_true", help="Interrupt busy-wait states instead of only reporting them.")
-    supervise.add_argument("--interrupt-key", default="C-c", help="tmux key to send when interrupting a busy-wait state.")
-    supervise.add_argument(
-        "--interrupt-followup",
-        default=DEFAULT_INTERRUPT_FOLLOWUP,
-        help="Message to send after an interrupt. Use an empty string to skip.",
-    )
-    supervise.set_defaults(func=command_supervise, refresh=True)
-
-    watch = subparsers.add_parser("watch", help="Run supervise repeatedly until interrupted.")
-    watch.add_argument("name")
-    watch.add_argument("--interval", type=int, default=60, help="Seconds between supervision cycles.")
-    watch.add_argument("--max-cycles", type=int, help="Stop after this many cycles.")
-    watch.add_argument("--no-refresh", action="store_false", dest="refresh", help="Do not refresh terminal capture.")
-    watch.add_argument("--lines", type=int, default=DEFAULT_HISTORY_LINES)
-    watch.add_argument("--status-stale-seconds", type=int, default=DEFAULT_STATUS_STALE_SECONDS)
-    watch.add_argument("--terminal-stale-seconds", type=int, default=DEFAULT_TERMINAL_STALE_SECONDS)
-    watch.add_argument("--busy-wait-seconds", type=int, default=DEFAULT_BUSY_WAIT_SECONDS)
-    watch.add_argument("--cooldown-seconds", type=int, default=DEFAULT_SUPERVISE_COOLDOWN_SECONDS)
-    watch.add_argument("--message", default=DEFAULT_STATUS_NUDGE, help="Status request sent when the worker is stale.")
-    watch.add_argument("--dry-run", action="store_true", help="Report supervision actions without sending nudges.")
-    watch.add_argument("--interrupt-busy-wait", action="store_true", help="Interrupt busy-wait states instead of only reporting them.")
-    watch.add_argument("--interrupt-key", default="C-c", help="tmux key to send when interrupting a busy-wait state.")
-    watch.add_argument(
-        "--interrupt-followup",
-        default=DEFAULT_INTERRUPT_FOLLOWUP,
-        help="Message to send after an interrupt. Use an empty string to skip.",
-    )
-    watch.set_defaults(func=command_watch, refresh=True)
 
     events = subparsers.add_parser("events", help="Print worker event log as JSON lines.")
     events.add_argument("name")

@@ -701,26 +701,6 @@ class CliTests(unittest.TestCase):
         data = json.loads(proc.stdout)
         self.assertIsInstance(data, list)
 
-    def test_manager_prompt_includes_task_health(self):
-        prompt = lifecycle.build_manager_prompt(
-            task_name="task-a",
-            goal="Do task A.",
-            summary="Worker is waiting.",
-            manager_instructions=None,
-            worker_name="worker-a",
-            budget={"expires_at": "2026-05-10T00:00:00Z", "max_nudges": 3},
-            source_snapshot={},
-        )
-
-        self.assertIn("workerctl task-health task-a --json", prompt)
-        self.assertIn("workerctl manager-observe task-a --compact --json", prompt)
-        self.assertIn("Run task-health first", prompt)
-        self.assertIn("Do not run mutating commands merely because they are listed.", prompt)
-        self.assertIn("Use task-interrupt only when manager-observe or task-idle-check shows a clear busy_wait", prompt)
-        self.assertIn("workerctl finish-task task-a --reason", prompt)
-        self.assertIn("After finish-task succeeds, stop all supervision loops.", prompt)
-        self.assertIn("replay command", prompt)
-
     def test_doctor_outputs_expected_structure(self):
         proc = self.run_workerctl("doctor")
 
@@ -730,7 +710,7 @@ class CliTests(unittest.TestCase):
         self.assertTrue(any(check["name"] == "tmux" for check in data["checks"]))
         self.assertTrue(any(check["name"] == "codex" for check in data["checks"]))
 
-    def test_doctor_self_reports_manage_template_inside_tmux(self):
+    def test_doctor_self_reports_new_path_template_inside_tmux(self):
         original_current_session_name = commands.current_session_name
         original_which = commands.shutil.which
         original_run = commands.run
@@ -751,24 +731,22 @@ class CliTests(unittest.TestCase):
 
                 payload = json.loads(stdout.getvalue())
                 self.assertEqual(result, 0)
-                self.assertTrue(payload["can_promote_in_place"])
-                self.assertEqual(payload["recommended_action"], "run_become_managed")
-                self.assertIn("workerctl become-managed --session plain-codex", payload["become_managed_command_template"])
-                self.assertEqual(payload["become_managed_command_template"], payload["become_managed_recommended_command_template"])
-                self.assertIn("workerctl manage --session plain-codex", payload["manage_command_template"])
-                self.assertEqual(payload["manage_command_template"], payload["manage_recommended_command_template"])
-                self.assertIn("--open-manager", payload["manage_command_template"])
-                self.assertFalse(payload["manager_codex_args_required"])
-                self.assertEqual(payload["manager_codex_args_recommendation"], "--sandbox danger-full-access --ask-for-approval never")
-                self.assertEqual(payload["manager_codex_args_default"], ["--sandbox", "danger-full-access", "--ask-for-approval", "never"])
-                self.assertEqual(payload["warnings"], [])
-                self.assertIn("worker_name", [value["name"] for value in payload["required_values"]])
-                self.assertIn("task_name", [value["name"] for value in payload["required_values"]])
-                self.assertIn("goal", [value["name"] for value in payload["required_values"]])
-                self.assertIn("Please become managed", payload["example_natural_language_prompt"])
-                self.assertIn("workerctl become-managed --session plain-codex", payload["recommended_command"])
+                self.assertTrue(payload["supported"])
+                self.assertTrue(payload["ok"])
+                self.assertIn("workerctl register-worker", payload["command_template"])
+                self.assertIn("--name <NAME>", payload["command_template"])
+                self.assertIn("--pid <PID>", payload["command_template"])
+                self.assertIn("--cwd <CWD>", payload["command_template"])
+                self.assertIn("--tmux-session <SESSION>", payload["command_template"])
+                self.assertTrue(any("register-manager" in step for step in payload["follow_up"]))
+                self.assertTrue(any("workerctl bind" in step for step in payload["follow_up"]))
+                self.assertTrue(any("workerctl cycle" in step for step in payload["follow_up"]))
                 self.assertIn("live tmux session", payload["why_or_why_not"])
-                self.assertTrue(any("manage yourself" in mapping["phrases"] for mapping in payload["phrase_mappings"]))
+                serialized = json.dumps(payload)
+                for retired in ("become-managed", "manager-observe", "manager-decision", "close-manager", "unmanage", "remanage", "task-status", "task-health"):
+                    self.assertNotIn(retired, serialized)
+                # The standalone command `workerctl manage --session ...` must not appear.
+                self.assertNotIn("manage --session", serialized)
         finally:
             commands.current_session_name = original_current_session_name
             commands.shutil.which = original_which
@@ -785,32 +763,15 @@ class CliTests(unittest.TestCase):
 
             payload = json.loads(stdout.getvalue())
             self.assertEqual(result, 1)
-            self.assertFalse(payload["can_promote_in_place"])
-            self.assertEqual(payload["recommended_action"], "cannot_promote_in_place")
-            self.assertIsNone(payload["become_managed_command_template"])
-            self.assertIsNone(payload["become_managed_recommended_command_template"])
-            self.assertIsNone(payload["manage_command_template"])
-            self.assertIsNone(payload["manage_recommended_command_template"])
-            self.assertFalse(payload["manager_codex_args_required"])
-            self.assertEqual(payload["warnings"], [])
-            self.assertIn("workerctl start", payload["recommended_command"])
-            self.assertIn("cannot be promoted in place", payload["why_or_why_not"])
+            self.assertFalse(payload["supported"])
+            self.assertFalse(payload["ok"])
+            self.assertIn("cannot register itself", payload["why_or_why_not"])
+            self.assertIn("register-manager", payload["why_or_why_not"])
+            serialized = json.dumps(payload)
+            for retired in ("become-managed", "manage --session", "manager-observe", "close-manager"):
+                self.assertNotIn(retired, serialized)
         finally:
             commands.current_session_name = original_current_session_name
-
-    def test_explain_managed_flow_outputs_agent_command_mappings(self):
-        proc = self.run_workerctl("explain-managed-flow", "--session", "plain-codex", "--json")
-
-        self.assertEqual(proc.returncode, 0, proc.stderr)
-        payload = json.loads(proc.stdout)
-        self.assertIn("workerctl doctor-self", payload["commands"]["preflight"])
-        self.assertIn("workerctl become-managed --session plain-codex", payload["commands"]["become_managed_template"])
-        self.assertEqual(payload["commands"]["become_managed_template"], payload["commands"]["become_managed_recommended_template"])
-        self.assertIn("worker_name", [value["name"] for value in payload["required_values"]])
-        self.assertTrue(any("manage yourself" in mapping["phrases"] and "recommended workerctl become-managed" in mapping["command"] for mapping in payload["phrase_mappings"]))
-        self.assertTrue(any("stop supervising me" in mapping["phrases"] and "workerctl unmanage" in mapping["command"] for mapping in payload["phrase_mappings"]))
-        self.assertTrue(any("finish this managed task" in mapping["phrases"] and "finish-task" in mapping["command"] for mapping in payload["phrase_mappings"]))
-        self.assertIn("Ask for worker_name, task_name, and goal", payload["ask_questions_rule"])
 
     def test_qa_plan_self_management_outputs_repeatable_steps(self):
         proc = self.run_workerctl("qa-plan", "self-management", "--json")
@@ -818,11 +779,16 @@ class CliTests(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stderr)
         payload = json.loads(proc.stdout)
         self.assertEqual(payload["scenario"], "self-management")
-        self.assertTrue(any("workerctl start" in step for step in payload["steps"]))
-        self.assertTrue(any("extend-nudge-budget" in step for step in payload["steps"]))
-        self.assertTrue(any("finish-task" in step for step in payload["steps"]))
-        self.assertTrue(any("manager-observe <task> --compact --json" in observation for observation in payload["expected_observations"]))
-        self.assertTrue(any("nudge_budget_exhausted" in observation for observation in payload["expected_observations"]))
+        self.assertTrue(any("register-worker" in step for step in payload["steps"]))
+        self.assertTrue(any("register-manager" in step for step in payload["steps"]))
+        self.assertTrue(any("workerctl bind" in step for step in payload["steps"]))
+        self.assertTrue(any("workerctl cycle" in step for step in payload["steps"]))
+        self.assertTrue(any("session-nudge" in step for step in payload["steps"]))
+        self.assertTrue(any("workerctl reconcile" in step for step in payload["steps"]))
+        self.assertTrue(any("kind, state, pane_signal" in observation for observation in payload["expected_observations"]))
+        joined = " ".join(payload["steps"] + payload["expected_observations"])
+        for retired in ("become-managed", "manager-observe", "manager-decision", "task-status", "task-health", "extend-nudge-budget", "task-nudge", "task-interrupt", "mutation-audit", "close-manager"):
+            self.assertNotIn(retired, joined)
 
     def test_db_doctor_outputs_expected_structure(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -972,73 +938,6 @@ class CliTests(unittest.TestCase):
         self.assertIn("--live", proc.stdout)
         self.assertIn("--manager-stale-seconds", proc.stdout)
 
-    def test_name_session_registers_current_tmux_session_as_worker(self):
-        name = "unit-self-worker"
-        worker_path = worker_dir(name)
-        if worker_path.exists():
-            shutil.rmtree(worker_path)
-        with tempfile.TemporaryDirectory() as tmpdir:
-            db_path = Path(tmpdir) / "workerctl.db"
-            renamed = []
-            original_current_session_name = commands.current_session_name
-            original_current_pane_id = commands.current_pane_id
-            original_session_exists = commands.session_exists
-            original_run = commands.run
-            original_ensure_tool = commands.ensure_tool
-            try:
-                commands.ensure_tool = lambda tool: tool
-                commands.current_session_name = lambda: "raw-session"
-                commands.current_pane_id = lambda target: "%7"
-                commands.session_exists = lambda worker_name: False
-
-                def fake_run(argv, **kwargs):
-                    if argv[:2] == ["tmux", "rename-session"]:
-                        renamed.append(argv)
-                    return subprocess.CompletedProcess(argv, 0, "", "")
-
-                commands.run = fake_run
-                args = argparse.Namespace(
-                    cwd=str(ROOT),
-                    force=False,
-                    name=name,
-                    path=str(db_path),
-                    session=None,
-                    task="Self-register for manager supervision.",
-                )
-
-                with contextlib.redirect_stdout(io.StringIO()) as stdout:
-                    result = commands.command_name_session(args)
-
-                payload = json.loads(stdout.getvalue())
-                self.assertEqual(result, 0)
-                self.assertEqual(payload["name"], name)
-                self.assertTrue(payload["renamed"])
-                self.assertEqual(payload["tmux_session"], "codex-unit-self-worker")
-                self.assertEqual(renamed, [["tmux", "rename-session", "-t", "raw-session", "codex-unit-self-worker"]])
-                config = json.loads(config_path(name).read_text())
-                self.assertEqual(config["tmux_session"], "codex-unit-self-worker")
-                self.assertEqual(config["tmux_pane_id"], "%7")
-                self.assertIn(config["identity_token"], (worker_path / "contract.txt").read_text())
-                with worker_db.connect(db_path) as conn:
-                    worker_db.initialize_database(conn)
-                    worker = conn.execute("select * from workers where name = ?", (name,)).fetchone()
-                    event = conn.execute("select * from events where worker_id = ? and type = 'worker_session_named'", (worker["id"],)).fetchone()
-                    status = conn.execute("select * from statuses where worker_id = ?", (worker["id"],)).fetchone()
-                self.assertEqual(worker["state"], "active")
-                self.assertNotEqual(worker["id"], name)
-                self.assertEqual(worker["id"], config["worker_id"])
-                self.assertEqual(worker["tmux_session"], "codex-unit-self-worker")
-                self.assertEqual(event["type"], "worker_session_named")
-                self.assertEqual(status["current_task"], "Self-register for manager supervision.")
-            finally:
-                commands.current_session_name = original_current_session_name
-                commands.current_pane_id = original_current_pane_id
-                commands.session_exists = original_session_exists
-                commands.run = original_run
-                commands.ensure_tool = original_ensure_tool
-                if worker_path.exists():
-                    shutil.rmtree(worker_path)
-
     def test_start_launches_normal_codex_tmux_session(self):
         launched = []
         original_run = commands.run
@@ -1136,237 +1035,6 @@ class CliTests(unittest.TestCase):
             commands.run = original_run
             commands.ensure_tool = original_ensure_tool
 
-    def test_name_session_denies_existing_worker_name_from_different_session(self):
-        name = "unit-claimed-worker"
-        worker_path = worker_dir(name)
-        if worker_path.exists():
-            shutil.rmtree(worker_path)
-        with tempfile.TemporaryDirectory() as tmpdir:
-            db_path = Path(tmpdir) / "workerctl.db"
-            with worker_db.connect(db_path) as conn:
-                worker_db.initialize_database(conn)
-                worker_id = worker_db.upsert_worker(
-                    conn,
-                    name=name,
-                    cwd=str(ROOT),
-                    tmux_session="codex-existing-worker",
-                    state="active",
-                )
-                conn.commit()
-            original_current_session_name = commands.current_session_name
-            original_session_exists = commands.session_exists
-            original_ensure_tool = commands.ensure_tool
-            try:
-                commands.ensure_tool = lambda tool: tool
-                commands.current_session_name = lambda: "raw-session"
-                commands.session_exists = lambda worker_name: False
-                args = argparse.Namespace(
-                    cwd=str(ROOT),
-                    force=False,
-                    name=name,
-                    path=str(db_path),
-                    session=None,
-                    task="Attempt duplicate claim.",
-                )
-
-                with self.assertRaisesRegex(WorkerError, worker_id):
-                    commands.command_name_session(args)
-            finally:
-                commands.current_session_name = original_current_session_name
-                commands.session_exists = original_session_exists
-                commands.ensure_tool = original_ensure_tool
-                if worker_path.exists():
-                    shutil.rmtree(worker_path)
-
-    def test_name_session_force_records_reclaim_event(self):
-        name = "unit-reclaimed-worker"
-        worker_path = worker_dir(name)
-        if worker_path.exists():
-            shutil.rmtree(worker_path)
-        with tempfile.TemporaryDirectory() as tmpdir:
-            db_path = Path(tmpdir) / "workerctl.db"
-            with worker_db.connect(db_path) as conn:
-                worker_db.initialize_database(conn)
-                previous_worker_id = worker_db.upsert_worker(
-                    conn,
-                    name=name,
-                    cwd=str(ROOT),
-                    tmux_session="codex-existing-worker",
-                    state="active",
-                )
-                conn.commit()
-            original_current_session_name = commands.current_session_name
-            original_current_pane_id = commands.current_pane_id
-            original_session_exists = commands.session_exists
-            original_run = commands.run
-            original_ensure_tool = commands.ensure_tool
-            try:
-                commands.ensure_tool = lambda tool: tool
-                commands.current_session_name = lambda: "raw-session"
-                commands.current_pane_id = lambda target: "%8"
-                commands.session_exists = lambda worker_name: False
-                commands.run = lambda argv, **kwargs: subprocess.CompletedProcess(argv, 0, "", "")
-                args = argparse.Namespace(
-                    cwd=str(ROOT),
-                    force=True,
-                    name=name,
-                    path=str(db_path),
-                    session=None,
-                    task="Force duplicate claim.",
-                )
-
-                with contextlib.redirect_stdout(io.StringIO()) as stdout:
-                    result = commands.command_name_session(args)
-
-                payload = json.loads(stdout.getvalue())
-                with worker_db.connect(db_path) as conn:
-                    worker_db.initialize_database(conn)
-                    worker = conn.execute("select * from workers where name = ?", (name,)).fetchone()
-                    previous_worker = conn.execute("select * from workers where id = ?", (previous_worker_id,)).fetchone()
-                    event = conn.execute("select * from events where worker_id = ? and type = 'worker_name_reclaimed'", (worker["id"],)).fetchone()
-                self.assertEqual(result, 0)
-                self.assertNotEqual(payload["worker_id"], previous_worker_id)
-                self.assertEqual(worker["tmux_session"], f"codex-{name}")
-                event_payload = json.loads(event["payload_json"])
-                self.assertEqual(event_payload["previous_tmux_session"], "codex-existing-worker")
-                self.assertEqual(event_payload["previous_worker_id"], previous_worker_id)
-                self.assertTrue(event_payload["replaced_name"].startswith(f"{name}-replaced-"))
-                self.assertEqual(previous_worker["name"], event_payload["replaced_name"])
-                self.assertEqual(previous_worker["state"], "missing")
-            finally:
-                commands.current_session_name = original_current_session_name
-                commands.current_pane_id = original_current_pane_id
-                commands.session_exists = original_session_exists
-                commands.run = original_run
-                commands.ensure_tool = original_ensure_tool
-                if worker_path.exists():
-                    shutil.rmtree(worker_path)
-
-    def test_self_promote_infers_worker_from_current_named_session(self):
-        original_current_session_name = lifecycle.current_session_name
-        original_command_promote = lifecycle.command_promote
-        captured = []
-        try:
-            lifecycle.current_session_name = lambda: "codex-unit-self-worker"
-
-            def fake_promote(args):
-                captured.append(args)
-                return 0
-
-            lifecycle.command_promote = fake_promote
-            args = argparse.Namespace(
-                budget_expires_at=None,
-                budget_hours=24,
-                codex_args=["--model", "gpt-5.4-mini"],
-                goal="Let a worker create its own manager.",
-                manager_instructions=None,
-                max_nudges=2,
-                path=None,
-                session=None,
-                summary="Self promotion test",
-                task="unit-self-task",
-                worker=None,
-            )
-
-            result = lifecycle.command_self_promote(args)
-
-            self.assertEqual(result, 0)
-            self.assertEqual(captured[0].worker, "unit-self-worker")
-            self.assertEqual(captured[0].task, "unit-self-task")
-            self.assertEqual(captured[0].codex_args, ["--model", "gpt-5.4-mini"])
-        finally:
-            lifecycle.current_session_name = original_current_session_name
-            lifecycle.command_promote = original_command_promote
-
-    def test_manage_names_current_session_then_promotes(self):
-        original_current_session_name = lifecycle.current_session_name
-        original_command_name_session = commands.command_name_session
-        original_command_promote = lifecycle.command_promote
-        named = []
-        promoted = []
-        try:
-            lifecycle.current_session_name = lambda: "raw-worker-session"
-
-            def fake_name_session(args):
-                named.append(args)
-                return 0
-
-            def fake_promote(args):
-                promoted.append(args)
-                return 0
-
-            commands.command_name_session = fake_name_session
-            lifecycle.command_promote = fake_promote
-            args = argparse.Namespace(
-                budget_expires_at=None,
-                budget_hours=24,
-                codex_args=["--model", "gpt-5.4-mini"],
-                cwd=str(ROOT),
-                force_name=False,
-                goal="Spawn a manager from inside the worker.",
-                manager_instructions="Audit before nudging.",
-                max_nudges=2,
-                path=None,
-                session=None,
-                summary="Worker is ready.",
-                task="unit-managed-task",
-                worker="unit-managed-worker",
-                worker_task=None,
-            )
-
-            result = lifecycle.command_manage(args)
-
-            self.assertEqual(result, 0)
-            self.assertEqual(named[0].name, "unit-managed-worker")
-            self.assertEqual(named[0].session, "raw-worker-session")
-            self.assertEqual(named[0].task, "Worker is ready.")
-            self.assertEqual(promoted[0].worker, "unit-managed-worker")
-            self.assertEqual(promoted[0].task, "unit-managed-task")
-            self.assertEqual(promoted[0].codex_args, ["--model", "gpt-5.4-mini"])
-        finally:
-            lifecycle.current_session_name = original_current_session_name
-            commands.command_name_session = original_command_name_session
-            lifecycle.command_promote = original_command_promote
-
-    def test_manage_infers_worker_from_named_current_session(self):
-        original_current_session_name = lifecycle.current_session_name
-        original_command_name_session = commands.command_name_session
-        original_command_promote = lifecycle.command_promote
-        named = []
-        promoted = []
-        try:
-            lifecycle.current_session_name = lambda: "codex-unit-managed-worker"
-            commands.command_name_session = lambda args: named.append(args) or 0
-            lifecycle.command_promote = lambda args: promoted.append(args) or 0
-            args = argparse.Namespace(
-                budget_expires_at=None,
-                budget_hours=24,
-                codex_args=[],
-                cwd=str(ROOT),
-                force_name=False,
-                goal="Spawn a manager from inside the worker.",
-                manager_instructions=None,
-                max_nudges=3,
-                path=None,
-                session=None,
-                summary=None,
-                task="unit-managed-task",
-                worker=None,
-                worker_task="Continue managed work.",
-            )
-
-            result = lifecycle.command_manage(args)
-
-            self.assertEqual(result, 0)
-            self.assertEqual(named[0].name, "unit-managed-worker")
-            self.assertEqual(named[0].session, "codex-unit-managed-worker")
-            self.assertEqual(named[0].task, "Continue managed work.")
-            self.assertEqual(promoted[0].worker, "unit-managed-worker")
-        finally:
-            lifecycle.current_session_name = original_current_session_name
-            commands.command_name_session = original_command_name_session
-            lifecycle.command_promote = original_command_promote
-
     def test_manager_codex_args_default_and_opt_out(self):
         self.assertEqual(
             lifecycle.manager_codex_args_from_args(argparse.Namespace(codex_args=[], no_manager_codex_args=False)),
@@ -1380,21 +1048,6 @@ class CliTests(unittest.TestCase):
             lifecycle.manager_codex_args_from_args(argparse.Namespace(codex_args=[], no_manager_codex_args=True)),
             [],
         )
-
-    def test_become_managed_delegates_to_manage_with_visible_manager_default(self):
-        original_command_manage = lifecycle.command_manage
-        managed = []
-        try:
-            lifecycle.command_manage = lambda args: managed.append(args) or 0
-            args = argparse.Namespace(open_manager=True, task="task-a")
-
-            result = lifecycle.command_become_managed(args)
-
-            self.assertEqual(result, 0)
-            self.assertEqual(managed[0].task, "task-a")
-            self.assertTrue(managed[0].open_manager)
-        finally:
-            lifecycle.command_manage = original_command_manage
 
     def test_import_compat_dry_run_does_not_mutate_database(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1658,55 +1311,6 @@ class CliTests(unittest.TestCase):
             records = json.loads(proc.stdout)
             self.assertEqual([record["id"] for record in records], [keep_id])
 
-    def test_task_events_cli_filters_events(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            db_path = Path(tmpdir) / "workerctl.db"
-            with worker_db.connect(db_path) as conn:
-                worker_db.initialize_database(conn)
-                task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
-                command_id = worker_db.create_command(
-                    conn,
-                    command_type="task_nudge",
-                    payload={"message": "status"},
-                    task_id=task_id,
-                )
-                worker_db.insert_event(
-                    conn,
-                    "task_nudge_intent",
-                    actor="test",
-                    command_id=command_id,
-                    task_id=task_id,
-                    payload={"message": "status"},
-                )
-                worker_db.insert_event(
-                    conn,
-                    "task_nudge_intent",
-                    actor="test",
-                    command_id=command_id,
-                    task_id=task_id,
-                    payload={"message": "continue"},
-                )
-                conn.commit()
-
-            proc = self.run_workerctl(
-                "task-events",
-                "task-a",
-                "--type",
-                "task_nudge_intent",
-                "--limit",
-                "1",
-                "--json",
-                "--path",
-                str(db_path),
-            )
-
-            self.assertEqual(proc.returncode, 0, proc.stderr)
-            events = json.loads(proc.stdout)
-            self.assertEqual(len(events), 1)
-            self.assertEqual(events[0]["type"], "task_nudge_intent")
-            self.assertEqual(events[0]["command_id"], command_id)
-            self.assertEqual(events[0]["payload"], {"message": "continue"})
-
     def test_prune_drops_old_transcript_content(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "workerctl.db"
@@ -1758,353 +1362,6 @@ class CliTests(unittest.TestCase):
         )
 
         self.assertEqual(proc.returncode, 0, proc.stderr)
-
-    def test_promote_parses_worker_options_and_codex_passthrough(self):
-        proc = self.run_workerctl(
-            "promote",
-            "missing-worker",
-            "--task",
-            "task-a",
-            "--goal",
-            "Do task A.",
-            "--",
-            "--model",
-            "test",
-        )
-
-        self.assertNotEqual(proc.returncode, 0)
-        self.assertIn("Unknown worker: missing-worker", proc.stderr)
-
-    def test_bind_task_cli(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            db_path = Path(tmpdir) / "workerctl.db"
-            with worker_db.connect(db_path) as conn:
-                worker_db.initialize_database(conn)
-                worker_id = worker_db.upsert_worker(
-                    conn,
-                    name="worker-a",
-                    cwd=str(ROOT),
-                    tmux_session="codex-worker-a",
-                    identity_token="token-worker-a",
-                    tmux_pane_id="%1",
-                    state="active",
-                    timestamp="2026-05-08T10:00:00Z",
-                )
-                worker_db.create_task(
-                    conn,
-                    name="task-a",
-                    goal="Do task A.",
-                    task_id="task-a-id",
-                    timestamp="2026-05-08T10:00:00Z",
-                )
-                conn.commit()
-
-            proc = self.run_workerctl("bind-task", "task-a", "--worker", "worker-a", "--path", str(db_path))
-
-            self.assertEqual(proc.returncode, 0, proc.stderr)
-            result = json.loads(proc.stdout)
-            self.assertEqual(result["task"], "task-a")
-            self.assertEqual(result["worker"], "worker-a")
-            self.assertTrue(result["binding_id"].startswith("binding-"))
-
-    def test_task_status_cli_json(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            db_path = Path(tmpdir) / "workerctl.db"
-            with worker_db.connect(db_path) as conn:
-                worker_db.initialize_database(conn)
-                worker_id = worker_db.upsert_worker(
-                    conn,
-                    name="worker-a",
-                    cwd=str(ROOT),
-                    tmux_session="codex-worker-a",
-                    tmux_pane_id="%1",
-                    state="active",
-                    timestamp="2026-05-08T10:00:00Z",
-                )
-                worker_db.create_task(
-                    conn,
-                    name="task-a",
-                    goal="Do task A.",
-                    task_id="task-a-id",
-                    timestamp="2026-05-08T10:00:00Z",
-                )
-                worker_db.bind_task_worker(conn, task="task-a", worker="worker-a")
-                worker_db.insert_status(
-                    conn,
-                    worker_id=worker_id,
-                    status={
-                        "blocker": None,
-                        "current_task": "Task A.",
-                        "next_action": "Continue.",
-                        "state": "planning",
-                    },
-                    timestamp="2026-05-08T10:01:00Z",
-                )
-                conn.commit()
-
-            proc = self.run_workerctl("task-status", "task-a", "--json", "--path", str(db_path))
-
-            self.assertEqual(proc.returncode, 0, proc.stderr)
-            snapshot = json.loads(proc.stdout)
-            self.assertEqual(snapshot["name"], "task-a")
-            self.assertEqual(snapshot["worker"]["name"], "worker-a")
-            self.assertEqual(snapshot["worker"]["tmux_pane_id"], "%1")
-            self.assertEqual(snapshot["worker_status"]["state"], "planning")
-
-    def test_task_health_reports_ok_task(self):
-        original_session_snapshot = worker_identity.session_snapshot
-        try:
-            worker_identity.session_snapshot = lambda session: {
-                "live": True,
-                "pane_id": "%2" if session == "codex-manager-task-a" else "%1",
-                "session": session,
-            }
-            with tempfile.TemporaryDirectory() as tmpdir:
-                db_path = Path(tmpdir) / "workerctl.db"
-                with worker_db.connect(db_path) as conn:
-                    worker_db.initialize_database(conn)
-                    worker_id = worker_db.upsert_worker(
-                        conn,
-                        name="worker-a",
-                        cwd=str(ROOT),
-                        tmux_session="codex-worker-a",
-                        tmux_pane_id="%1",
-                        state="active",
-                    )
-                    task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
-                    worker_db.bind_task_worker(conn, task="task-a", worker="worker-a")
-                    manager_id = worker_db.create_manager(
-                        conn,
-                        task_id=task_id,
-                        name="manager-a",
-                        tmux_session="codex-manager-task-a",
-                        tmux_pane_id="%2",
-                        codex_args=[],
-                        state="ready",
-                    )
-                    worker_db.attach_manager_to_binding(conn, task_id=task_id, manager_id=manager_id)
-                    worker_db.set_task_state(conn, task_id=task_id, state="managed")
-                    worker_db.mark_manager_seen(conn, manager_id=manager_id)
-                    conn.commit()
-
-                args = argparse.Namespace(json=True, manager_stale_seconds=60, path=str(db_path), task="task-a")
-                with contextlib.redirect_stdout(io.StringIO()) as stdout:
-                    result = commands.command_task_health(args)
-
-                self.assertEqual(result, 0)
-                payload = json.loads(stdout.getvalue())
-                self.assertTrue(payload["ok"])
-                self.assertEqual(payload["issues"], [])
-                self.assertEqual(payload["task"]["id"], task_id)
-                self.assertEqual(payload["live_reconcile"]["worker"]["id"], worker_id)
-        finally:
-            worker_identity.session_snapshot = original_session_snapshot
-
-    def test_task_health_reports_integrity_and_reconcile_issues(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            db_path = Path(tmpdir) / "workerctl.db"
-            with worker_db.connect(db_path) as conn:
-                worker_db.initialize_database(conn)
-                task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
-                worker_db.set_task_state(conn, task_id=task_id, state="managed")
-                worker_db.create_manager(
-                    conn,
-                    task_id=task_id,
-                    name="manager-a",
-                    tmux_session="codex-manager-task-a",
-                    codex_args=[],
-                    state="ready",
-                )
-                conn.commit()
-
-            proc = self.run_workerctl("task-health", "task-a", "--json", "--path", str(db_path))
-
-            self.assertEqual(proc.returncode, 1, proc.stderr)
-            payload = json.loads(proc.stdout)
-            codes = {issue["code"] for issue in payload["issues"]}
-            self.assertFalse(payload["ok"])
-            self.assertIn("managed_without_active_worker_binding", codes)
-            self.assertTrue(any("close-stale" in action for action in payload["recommended_actions"]))
-
-    def test_task_health_reports_manager_rate_limit_prompt_explicitly(self):
-        original_session_snapshot = worker_identity.session_snapshot
-        try:
-            worker_identity.session_snapshot = lambda session: {
-                "live": True,
-                "pane_id": "%2" if session == "codex-manager-task-a" else "%1",
-                "session": session,
-            }
-            with tempfile.TemporaryDirectory() as tmpdir:
-                db_path = Path(tmpdir) / "workerctl.db"
-                with worker_db.connect(db_path) as conn:
-                    worker_db.initialize_database(conn)
-                    worker_db.upsert_worker(
-                        conn,
-                        name="worker-a",
-                        cwd=str(ROOT),
-                        tmux_session="codex-worker-a",
-                        tmux_pane_id="%1",
-                        state="active",
-                    )
-                    task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
-                    worker_db.bind_task_worker(conn, task="task-a", worker="worker-a")
-                    manager_id = worker_db.create_manager(
-                        conn,
-                        task_id=task_id,
-                        name="manager-a",
-                        tmux_session="codex-manager-task-a",
-                        tmux_pane_id="%2",
-                        codex_args=[],
-                        state="ready",
-                    )
-                    worker_db.attach_manager_to_binding(conn, task_id=task_id, manager_id=manager_id)
-                    worker_db.set_task_state(conn, task_id=task_id, state="managed")
-                    conn.execute("update managers set last_seen_at = '2000-01-01T00:00:00Z' where id = ?", (manager_id,))
-                    worker_db.insert_terminal_capture(
-                        conn,
-                        task_id=task_id,
-                        manager_id=manager_id,
-                        role="manager",
-                        tmux_session="codex-manager-task-a",
-                        tmux_pane_id="%2",
-                        content_sha256="sha-rate",
-                        content="Approaching rate limits\nSwitch to gpt-5.4-mini?\nPress enter to confirm",
-                        history_lines=20,
-                        source="test",
-                        classifier={"busy_wait": {"pattern": "rate_limit_prompt"}},
-                    )
-                    conn.commit()
-
-                result = commands.task_health_result(db_path, "task-a", manager_stale_seconds=60)
-
-                codes = {issue["code"] for issue in result["issues"]}
-                self.assertFalse(result["ok"])
-                self.assertIn("manager_waiting_for_user_choice", codes)
-                self.assertNotIn("manager_seen_stale", codes)
-                self.assertTrue(any("close-manager" in action for action in result["recommended_actions"]))
-        finally:
-            worker_identity.session_snapshot = original_session_snapshot
-
-    def test_task_health_treats_done_review_manager_stale_as_idle_metadata(self):
-        original_session_snapshot = worker_identity.session_snapshot
-        try:
-            worker_identity.session_snapshot = lambda session: {"live": True, "pane_id": "%2", "session": session}
-            with tempfile.TemporaryDirectory() as tmpdir:
-                db_path = Path(tmpdir) / "workerctl.db"
-                with worker_db.connect(db_path) as conn:
-                    worker_db.initialize_database(conn)
-                    task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
-                    manager_id = worker_db.create_manager(
-                        conn,
-                        task_id=task_id,
-                        name="manager-a",
-                        tmux_session="codex-manager-task-a",
-                        tmux_pane_id="%2",
-                        codex_args=[],
-                        state="ready",
-                    )
-                    conn.execute("update tasks set state = 'done' where id = ?", (task_id,))
-                    conn.execute("update managers set last_seen_at = '2000-01-01T00:00:00Z' where id = ?", (manager_id,))
-                    conn.commit()
-
-                result = commands.task_health_result(db_path, "task-a", manager_stale_seconds=60)
-
-                self.assertTrue(result["ok"])
-                self.assertEqual(result["issues"], [])
-                self.assertEqual(result["recommended_actions"], ["No action required."])
-                self.assertEqual(result["review_manager_idle"][0]["code"], "review_manager_idle")
-                self.assertEqual(result["review_manager_idle"][0]["manager"], "manager-a")
-        finally:
-            worker_identity.session_snapshot = original_session_snapshot
-
-    def test_task_capture_command_uses_bound_worker(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            db_path = Path(tmpdir) / "workerctl.db"
-            with worker_db.connect(db_path) as conn:
-                worker_db.initialize_database(conn)
-                worker_id = worker_db.upsert_worker(
-                    conn,
-                    name="worker-a",
-                    cwd=str(ROOT),
-                    tmux_session="codex-worker-a",
-                    identity_token="token-worker-a",
-                    tmux_pane_id="%1",
-                    state="active",
-                    timestamp="2026-05-08T10:00:00Z",
-                )
-                worker_db.create_task(conn, name="task-a", goal="Do task A.")
-                worker_db.bind_task_worker(conn, task="task-a", worker="worker-a", binding_id="binding-1")
-                conn.commit()
-
-            captured = []
-            original_capture_output = commands.capture_output
-            original_verify_worker = worker_identity.verify_worker_binding_identity
-            try:
-                commands.capture_output = lambda name, lines: captured.append((name, lines)) or "terminal output"
-                worker_identity.verify_worker_binding_identity = lambda binding: {"live": True, "live_pane_id": "%1", "mismatches": []}
-                args = argparse.Namespace(task="task-a", role="worker", lines=120, json=True, path=str(db_path))
-
-                with contextlib.redirect_stdout(io.StringIO()) as stdout:
-                    result = commands.command_task_capture(args)
-
-                payload = json.loads(stdout.getvalue())
-                self.assertEqual(result, 0)
-                self.assertEqual(captured, [("worker-a", 120)])
-                self.assertEqual(payload["binding_id"], "binding-1")
-                self.assertEqual(payload["capture"]["output"], "terminal output")
-                self.assertEqual(payload["worker"]["name"], "worker-a")
-                with worker_db.connect(db_path) as conn:
-                    captures = conn.execute("select role, content_sha256, content from terminal_captures").fetchall()
-                self.assertEqual(captures[0]["role"], "worker")
-                self.assertEqual(captures[0]["content"], "terminal output")
-            finally:
-                commands.capture_output = original_capture_output
-                worker_identity.verify_worker_binding_identity = original_verify_worker
-
-    def test_task_capture_can_record_manager_terminal(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            db_path = Path(tmpdir) / "workerctl.db"
-            with worker_db.connect(db_path) as conn:
-                worker_db.initialize_database(conn)
-                worker_db.upsert_worker(conn, name="worker-a", cwd=str(ROOT), tmux_session="codex-worker-a", state="active")
-                task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
-                worker_db.bind_task_worker(conn, task="task-a", worker="worker-a", binding_id="binding-1")
-                manager_id = worker_db.create_manager(
-                    conn,
-                    task_id=task_id,
-                    name="manager-a",
-                    tmux_session="codex-manager-task-a",
-                    tmux_pane_id="%2",
-                    codex_args=[],
-                    state="ready",
-                )
-                worker_db.attach_manager_to_binding(conn, task_id=task_id, manager_id=manager_id)
-                conn.commit()
-
-            original_verify_manager = worker_identity.verify_manager_identity
-            original_run = commands.run
-            try:
-                worker_identity.verify_manager_identity = lambda manager: {"live": True, "live_pane_id": "%2", "mismatches": []}
-                commands.run = lambda argv, **kwargs: subprocess.CompletedProcess(argv, 0, "manager output", "")
-                args = argparse.Namespace(task="task-a", role="manager", lines=80, json=True, path=str(db_path))
-
-                with contextlib.redirect_stdout(io.StringIO()) as stdout:
-                    result = commands.command_task_capture(args)
-
-                payload = json.loads(stdout.getvalue())
-                self.assertEqual(result, 0)
-                self.assertEqual(payload["manager"]["id"], manager_id)
-                self.assertEqual(payload["capture"]["output"], "manager output")
-                with worker_db.connect(db_path) as conn:
-                    capture = conn.execute("select role, manager_id, content from terminal_captures").fetchone()
-                    manager = conn.execute("select last_capture_sha256 from managers where id = ?", (manager_id,)).fetchone()
-                self.assertEqual(capture["role"], "manager")
-                self.assertEqual(capture["manager_id"], manager_id)
-                self.assertEqual(capture["content"], "manager output")
-                self.assertEqual(manager["last_capture_sha256"], payload["capture"]["content_sha256"])
-            finally:
-                worker_identity.verify_manager_identity = original_verify_manager
-                commands.run = original_run
 
     def test_transcript_capture_records_deduped_segments_and_show_prune(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -2202,435 +1459,6 @@ class CliTests(unittest.TestCase):
             self.assertEqual(proc.returncode, 0, proc.stderr)
             self.assertIn("worker transcript segment", proc.stdout)
             self.assertIn("worker transcript line", proc.stdout)
-
-    def test_manager_decision_records_observation_and_event(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            db_path = Path(tmpdir) / "workerctl.db"
-            with worker_db.connect(db_path) as conn:
-                worker_db.initialize_database(conn)
-                worker_db.upsert_worker(conn, name="worker-a", cwd=str(ROOT), tmux_session="codex-worker-a", state="active")
-                task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
-                worker_db.bind_task_worker(conn, task="task-a", worker="worker-a", binding_id="binding-1")
-                manager_id = worker_db.create_manager(conn, task_id=task_id, name="manager-a", tmux_session="codex-manager-task-a", codex_args=[], state="ready")
-                worker_db.attach_manager_to_binding(conn, task_id=task_id, manager_id=manager_id)
-                conn.commit()
-
-            args = argparse.Namespace(cycle_id=None, decision="nudge", path=str(db_path), reason="worker is stale", task="task-a")
-            with contextlib.redirect_stdout(io.StringIO()) as stdout:
-                result = commands.command_manager_decision(args)
-
-            payload = json.loads(stdout.getvalue())
-            self.assertEqual(result, 0)
-            self.assertEqual(payload["decision"], "nudge")
-            with worker_db.connect(db_path) as conn:
-                decision = conn.execute("select decision, reason from manager_decisions").fetchone()
-                observation = conn.execute("select observation_type, message from agent_observations").fetchone()
-                event = conn.execute("select type from events where type = 'manager_decision_recorded'").fetchone()
-            self.assertEqual(decision["decision"], "nudge")
-            self.assertEqual(decision["reason"], "worker is stale")
-            self.assertEqual(observation["observation_type"], "decision")
-            self.assertEqual(event["type"], "manager_decision_recorded")
-
-    def test_manager_decision_rejects_done_task_without_review_override(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            db_path = Path(tmpdir) / "workerctl.db"
-            with worker_db.connect(db_path) as conn:
-                worker_db.initialize_database(conn)
-                task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
-                worker_db.create_manager(conn, task_id=task_id, name="manager-a", tmux_session="codex-manager-task-a", codex_args=[], state="ready")
-                conn.execute("update tasks set state = 'done' where id = ?", (task_id,))
-                conn.commit()
-
-            args = argparse.Namespace(
-                allow_post_terminal=False,
-                cycle_id=None,
-                decision="stop",
-                path=str(db_path),
-                reason="late stop",
-                task="task-a",
-            )
-
-            with self.assertRaisesRegex(WorkerError, "refusing post-terminal manager decision"):
-                commands.command_manager_decision(args)
-
-            args.allow_post_terminal = True
-            with contextlib.redirect_stdout(io.StringIO()) as stdout:
-                result = commands.command_manager_decision(args)
-
-            self.assertEqual(result, 0)
-            payload = json.loads(stdout.getvalue())
-            self.assertEqual(payload["decision"], "stop")
-            with worker_db.connect(db_path) as conn:
-                decision = conn.execute("select payload_json from manager_decisions").fetchone()
-            self.assertTrue(json.loads(decision["payload_json"])["post_terminal"])
-
-    def test_manager_observe_records_cycle_and_captures(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            db_path = Path(tmpdir) / "workerctl.db"
-            with worker_db.connect(db_path) as conn:
-                worker_db.initialize_database(conn)
-                worker_id = worker_db.upsert_worker(
-                    conn,
-                    name="worker-a",
-                    cwd=str(ROOT),
-                    tmux_session="codex-worker-a",
-                    identity_token="token-worker-a",
-                    tmux_pane_id="%1",
-                    state="active",
-                )
-                task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
-                worker_db.bind_task_worker(conn, task="task-a", worker="worker-a", binding_id="binding-1")
-                manager_id = worker_db.create_manager(
-                    conn,
-                    task_id=task_id,
-                    name="manager-a",
-                    tmux_session="codex-manager-task-a",
-                    tmux_pane_id="%2",
-                    codex_args=[],
-                    state="ready",
-                )
-                worker_db.attach_manager_to_binding(conn, task_id=task_id, manager_id=manager_id)
-                worker_db.mark_manager_seen(conn, manager_id=manager_id)
-                worker_db.insert_status(
-                    conn,
-                    worker_id=worker_id,
-                    status={"state": "waiting", "current_task": "Task A.", "next_action": "Wait.", "blocker": None},
-                )
-                conn.commit()
-
-            original_verify_worker = worker_identity.verify_worker_binding_identity
-            original_verify_manager = worker_identity.verify_manager_identity
-            original_session_snapshot = worker_identity.session_snapshot
-            original_capture_output = commands.capture_output
-            original_run = commands.run
-            original_idle_summary = commands.idle_summary
-            try:
-                worker_identity.verify_worker_binding_identity = lambda binding: {"live": True, "live_pane_id": "%1", "mismatches": []}
-                worker_identity.verify_manager_identity = lambda manager: {"live": True, "live_pane_id": "%2", "mismatches": []}
-                worker_identity.session_snapshot = lambda session: {
-                    "live": True,
-                    "pane_id": "%2" if session == "codex-manager-task-a" else "%1",
-                    "session": session,
-                }
-                commands.capture_output = lambda name, lines: "worker output"
-                commands.run = lambda argv, **kwargs: subprocess.CompletedProcess(argv, 0, "manager output", "")
-                commands.idle_summary = lambda name, **kwargs: {"health": "active", "name": name}
-                args = argparse.Namespace(
-                    busy_wait_seconds=60,
-                    lines=40,
-                    manager_stale_seconds=600,
-                    path=str(db_path),
-                    refresh=False,
-                    status_stale_seconds=300,
-                    task="task-a",
-                    terminal_stale_seconds=300,
-                )
-
-                with contextlib.redirect_stdout(io.StringIO()) as stdout:
-                    result = commands.command_manager_observe(args)
-
-                payload = json.loads(stdout.getvalue())
-                self.assertEqual(result, 0)
-                self.assertTrue(payload["health"]["ok"])
-                self.assertEqual(payload["worker_capture"]["capture"]["output"], "worker output")
-                self.assertEqual(payload["manager_capture"]["capture"]["output"], "manager output")
-                with worker_db.connect(db_path) as conn:
-                    cycle = conn.execute("select state, worker_capture_id, manager_capture_id from manager_cycles").fetchone()
-                    captures = conn.execute("select role from terminal_captures order by id").fetchall()
-                    segments = conn.execute("select role, segment_text from transcript_segments order by id").fetchall()
-                    observation = conn.execute("select observation_type from agent_observations where observation_type = 'health'").fetchone()
-                self.assertEqual(cycle["state"], "succeeded")
-                self.assertIsNotNone(cycle["worker_capture_id"])
-                self.assertIsNotNone(cycle["manager_capture_id"])
-                self.assertEqual([row["role"] for row in captures], ["worker", "manager"])
-                self.assertEqual([row["role"] for row in segments], ["worker", "manager"])
-                self.assertEqual([row["segment_text"] for row in segments], ["worker output", "manager output"])
-                self.assertEqual(observation["observation_type"], "health")
-            finally:
-                worker_identity.verify_worker_binding_identity = original_verify_worker
-                worker_identity.verify_manager_identity = original_verify_manager
-                worker_identity.session_snapshot = original_session_snapshot
-                commands.capture_output = original_capture_output
-                commands.run = original_run
-                commands.idle_summary = original_idle_summary
-
-    def test_manager_observe_compact_omits_output_but_persists_full_capture(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            db_path = Path(tmpdir) / "workerctl.db"
-            with worker_db.connect(db_path) as conn:
-                worker_db.initialize_database(conn)
-                worker_id = worker_db.upsert_worker(
-                    conn,
-                    name="worker-a",
-                    cwd=str(ROOT),
-                    tmux_session="codex-worker-a",
-                    identity_token="token-worker-a",
-                    tmux_pane_id="%1",
-                    state="active",
-                )
-                task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
-                worker_db.bind_task_worker(conn, task="task-a", worker="worker-a", binding_id="binding-1")
-                manager_id = worker_db.create_manager(
-                    conn,
-                    task_id=task_id,
-                    name="manager-a",
-                    tmux_session="codex-manager-task-a",
-                    tmux_pane_id="%2",
-                    codex_args=[],
-                    state="ready",
-                )
-                worker_db.attach_manager_to_binding(conn, task_id=task_id, manager_id=manager_id)
-                worker_db.mark_manager_seen(conn, manager_id=manager_id)
-                worker_db.insert_status(
-                    conn,
-                    worker_id=worker_id,
-                    status={"state": "waiting", "current_task": "Task A.", "next_action": "Wait.", "blocker": None},
-                )
-                conn.commit()
-
-            original_verify_worker = worker_identity.verify_worker_binding_identity
-            original_verify_manager = worker_identity.verify_manager_identity
-            original_session_snapshot = worker_identity.session_snapshot
-            original_capture_output = commands.capture_output
-            original_run = commands.run
-            original_idle_summary = commands.idle_summary
-            try:
-                worker_identity.verify_worker_binding_identity = lambda binding: {"live": True, "live_pane_id": "%1", "mismatches": []}
-                worker_identity.verify_manager_identity = lambda manager: {"live": True, "live_pane_id": "%2", "mismatches": []}
-                worker_identity.session_snapshot = lambda session: {
-                    "live": True,
-                    "pane_id": "%2" if session == "codex-manager-task-a" else "%1",
-                    "session": session,
-                }
-                commands.capture_output = lambda name, lines: "worker line 1\nworker line 2"
-                commands.run = lambda argv, **kwargs: subprocess.CompletedProcess(argv, 0, "manager line 1\nmanager line 2", "")
-                commands.idle_summary = lambda name, **kwargs: {"health": "active", "name": name}
-                args = argparse.Namespace(
-                    busy_wait_seconds=60,
-                    compact=True,
-                    lines=40,
-                    manager_stale_seconds=600,
-                    path=str(db_path),
-                    refresh=False,
-                    status_stale_seconds=300,
-                    task="task-a",
-                    terminal_stale_seconds=300,
-                )
-
-                with contextlib.redirect_stdout(io.StringIO()) as stdout:
-                    result = commands.command_manager_observe(args)
-
-                payload = json.loads(stdout.getvalue())
-                self.assertEqual(result, 0)
-                self.assertTrue(payload["compact"])
-                self.assertNotIn("output", payload["worker_capture"]["capture"])
-                self.assertNotIn("output", payload["manager_capture"]["capture"])
-                self.assertEqual(payload["worker_capture"]["capture"]["excerpt"], "worker line 1\nworker line 2")
-                with worker_db.connect(db_path) as conn:
-                    captures = conn.execute("select role, content from terminal_captures order by id").fetchall()
-                self.assertEqual([(row["role"], row["content"]) for row in captures], [
-                    ("worker", "worker line 1\nworker line 2"),
-                    ("manager", "manager line 1\nmanager line 2"),
-                ])
-            finally:
-                worker_identity.verify_worker_binding_identity = original_verify_worker
-                worker_identity.verify_manager_identity = original_verify_manager
-                worker_identity.session_snapshot = original_session_snapshot
-                commands.capture_output = original_capture_output
-                commands.run = original_run
-                commands.idle_summary = original_idle_summary
-
-    def test_task_idle_check_command_uses_bound_worker(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            db_path = Path(tmpdir) / "workerctl.db"
-            with worker_db.connect(db_path) as conn:
-                worker_db.initialize_database(conn)
-                worker_db.upsert_worker(
-                    conn,
-                    name="worker-a",
-                    cwd=str(ROOT),
-                    tmux_session="codex-worker-a",
-                    state="active",
-                    timestamp="2026-05-08T10:00:00Z",
-                )
-                worker_db.create_task(conn, name="task-a", goal="Do task A.")
-                worker_db.bind_task_worker(conn, task="task-a", worker="worker-a", binding_id="binding-1")
-                conn.commit()
-
-            checked = []
-            original_idle_summary = commands.idle_summary
-            try:
-                def fake_idle_summary(name, **kwargs):
-                    checked.append((name, kwargs))
-                    return {"health": "active", "name": name}
-
-                commands.idle_summary = fake_idle_summary
-                args = argparse.Namespace(
-                    busy_wait_seconds=60,
-                    lines=80,
-                    path=str(db_path),
-                    refresh=False,
-                    status_stale_seconds=300,
-                    task="task-a",
-                    terminal_stale_seconds=300,
-                )
-
-                with contextlib.redirect_stdout(io.StringIO()) as stdout:
-                    result = commands.command_task_idle_check(args)
-
-                payload = json.loads(stdout.getvalue())
-                self.assertEqual(result, 0)
-                self.assertEqual(checked[0][0], "worker-a")
-                self.assertFalse(checked[0][1]["refresh"])
-                self.assertEqual(payload["binding_id"], "binding-1")
-                self.assertEqual(payload["task_name"], "task-a")
-            finally:
-                commands.idle_summary = original_idle_summary
-
-    def test_task_nudge_dry_run_records_durable_command(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            db_path = Path(tmpdir) / "workerctl.db"
-            with worker_db.connect(db_path) as conn:
-                worker_db.initialize_database(conn)
-                worker_db.upsert_worker(
-                    conn,
-                    name="worker-a",
-                    cwd=str(ROOT),
-                    tmux_session="codex-worker-a",
-                    state="active",
-                    timestamp="2026-05-08T10:00:00Z",
-                )
-                worker_db.create_task(conn, name="task-a", goal="Do task A.")
-                worker_db.bind_task_worker(conn, task="task-a", worker="worker-a", binding_id="binding-1")
-                conn.commit()
-
-            args = argparse.Namespace(task="task-a", message="status please", dry_run=True, path=str(db_path))
-
-            with contextlib.redirect_stdout(io.StringIO()) as stdout:
-                result = commands.command_task_nudge(args)
-
-            payload = json.loads(stdout.getvalue())
-            self.assertEqual(result, 0)
-            self.assertEqual(payload["worker"], "worker-a")
-            self.assertTrue(payload["dry_run"])
-            with worker_db.connect(db_path) as conn:
-                command_row = conn.execute("select * from commands where id = ?", (payload["command_id"],)).fetchone()
-                event_types = [row["type"] for row in conn.execute("select type from events order by id")]
-            self.assertEqual(command_row["state"], "succeeded")
-            self.assertEqual(json.loads(command_row["payload_json"])["message"], "status please")
-            self.assertIn("task_nudge_intent", event_types)
-            self.assertIn("task_nudge_succeeded", event_types)
-
-    def test_task_nudge_links_manager_decision(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            db_path = Path(tmpdir) / "workerctl.db"
-            with worker_db.connect(db_path) as conn:
-                worker_db.initialize_database(conn)
-                worker_db.upsert_worker(conn, name="worker-a", cwd=str(ROOT), tmux_session="codex-worker-a", state="active")
-                task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
-                worker_db.bind_task_worker(conn, task="task-a", worker="worker-a", binding_id="binding-1")
-                decision_id = worker_db.insert_manager_decision(
-                    conn,
-                    task_id=task_id,
-                    manager_id=None,
-                    decision="nudge",
-                    reason="worker is waiting",
-                )
-                conn.commit()
-
-            args = argparse.Namespace(task="task-a", message="status please", decision_id=decision_id, dry_run=True, path=str(db_path))
-
-            with contextlib.redirect_stdout(io.StringIO()) as stdout:
-                result = commands.command_task_nudge(args)
-
-            payload = json.loads(stdout.getvalue())
-            self.assertEqual(result, 0)
-            self.assertTrue(payload["manager_decision"]["ok"])
-            self.assertEqual(payload["manager_decision"]["decision"]["id"], decision_id)
-            with worker_db.connect(db_path) as conn:
-                command_row = conn.execute("select payload_json from commands where id = ?", (payload["command_id"],)).fetchone()
-            command_payload = json.loads(command_row["payload_json"])
-            self.assertTrue(command_payload["manager_decision"]["ok"])
-
-    def test_task_nudge_records_missing_decision_warning(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            db_path = Path(tmpdir) / "workerctl.db"
-            with worker_db.connect(db_path) as conn:
-                worker_db.initialize_database(conn)
-                worker_db.upsert_worker(conn, name="worker-a", cwd=str(ROOT), tmux_session="codex-worker-a", state="active")
-                worker_db.create_task(conn, name="task-a", goal="Do task A.")
-                worker_db.bind_task_worker(conn, task="task-a", worker="worker-a", binding_id="binding-1")
-                conn.commit()
-
-            args = argparse.Namespace(task="task-a", message="status please", decision_id=None, dry_run=True, path=str(db_path))
-
-            with contextlib.redirect_stdout(io.StringIO()) as stdout:
-                result = commands.command_task_nudge(args)
-
-            payload = json.loads(stdout.getvalue())
-            self.assertEqual(result, 0)
-            self.assertFalse(payload["manager_decision"]["ok"])
-            self.assertEqual(payload["manager_decision"]["warnings"], ["missing_decision_id"])
-
-    def test_task_nudge_strict_decisions_rejects_missing_decision(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            db_path = Path(tmpdir) / "workerctl.db"
-            with worker_db.connect(db_path) as conn:
-                worker_db.initialize_database(conn)
-                worker_db.upsert_worker(conn, name="worker-a", cwd=str(ROOT), tmux_session="codex-worker-a", state="active")
-                worker_db.create_task(conn, name="task-a", goal="Do task A.")
-                worker_db.bind_task_worker(conn, task="task-a", worker="worker-a", binding_id="binding-1")
-                conn.commit()
-
-            args = argparse.Namespace(
-                task="task-a",
-                message="status please",
-                decision_id=None,
-                strict_decisions=True,
-                dry_run=True,
-                path=str(db_path),
-            )
-
-            with self.assertRaisesRegex(WorkerError, "manager_decision_validation_failed"):
-                commands.command_task_nudge(args)
-
-            with worker_db.connect(db_path) as conn:
-                command_count = conn.execute("select count(*) as count from commands").fetchone()["count"]
-            self.assertEqual(command_count, 0)
-
-    def test_mutation_audit_flags_missing_and_accepts_linked_decisions(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            db_path = Path(tmpdir) / "workerctl.db"
-            with worker_db.connect(db_path) as conn:
-                worker_db.initialize_database(conn)
-                worker_db.upsert_worker(conn, name="worker-a", cwd=str(ROOT), tmux_session="codex-worker-a", state="active")
-                task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
-                worker_db.bind_task_worker(conn, task="task-a", worker="worker-a", binding_id="binding-1")
-                decision_id = worker_db.insert_manager_decision(
-                    conn,
-                    task_id=task_id,
-                    manager_id=None,
-                    decision="nudge",
-                    reason="worker is waiting",
-                )
-                conn.commit()
-
-            linked_args = argparse.Namespace(task="task-a", message="status please", decision_id=decision_id, dry_run=True, path=str(db_path))
-            missing_args = argparse.Namespace(task="task-a", message="second status please", decision_id=None, dry_run=True, path=str(db_path))
-            with contextlib.redirect_stdout(io.StringIO()):
-                commands.command_task_nudge(linked_args)
-            with contextlib.redirect_stdout(io.StringIO()):
-                commands.command_task_nudge(missing_args)
-
-            proc = self.run_workerctl("mutation-audit", "task-a", "--json", "--path", str(db_path))
-
-            self.assertEqual(proc.returncode, 1, proc.stdout)
-            payload = json.loads(proc.stdout)
-            self.assertFalse(payload["ok"])
-            self.assertEqual(payload["summary"]["mutations"], 2)
-            self.assertEqual(payload["summary"]["with_warnings"], 1)
-            self.assertEqual(sum(1 for record in payload["records"] if record["ok"]), 1)
-            self.assertTrue(any("missing_decision_id" in record["warnings"] for record in payload["records"]))
 
     def test_mutation_audit_accepts_finish_task_final_decision(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -2802,488 +1630,6 @@ class CliTests(unittest.TestCase):
             self.assertEqual(transcript.stdout.count("Worker edited app"), 1)
             self.assertNotIn("approval_prompt", transcript.stdout)
 
-    def test_task_health_audit_decisions_reports_mutation_warnings(self):
-        original_session_snapshot = worker_identity.session_snapshot
-        try:
-            worker_identity.session_snapshot = lambda session: {
-                "live": True,
-                "pane_id": "%2" if session == "codex-manager-task-a" else "%1",
-                "session": session,
-            }
-            with tempfile.TemporaryDirectory() as tmpdir:
-                db_path = Path(tmpdir) / "workerctl.db"
-                with worker_db.connect(db_path) as conn:
-                    worker_db.initialize_database(conn)
-                    worker_db.upsert_worker(
-                        conn,
-                        name="worker-a",
-                        cwd=str(ROOT),
-                        tmux_session="codex-worker-a",
-                        tmux_pane_id="%1",
-                        state="active",
-                    )
-                    task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
-                    worker_db.bind_task_worker(conn, task="task-a", worker="worker-a", binding_id="binding-1")
-                    manager_id = worker_db.create_manager(
-                        conn,
-                        task_id=task_id,
-                        name="manager-a",
-                        tmux_session="codex-manager-task-a",
-                        tmux_pane_id="%2",
-                        codex_args=[],
-                        state="ready",
-                    )
-                    worker_db.attach_manager_to_binding(conn, task_id=task_id, manager_id=manager_id)
-                    worker_db.set_task_state(conn, task_id=task_id, state="managed")
-                    worker_db.mark_manager_seen(conn, manager_id=manager_id)
-                    conn.commit()
-
-                nudge_args = argparse.Namespace(
-                    task="task-a",
-                    message="status please",
-                    decision_id=None,
-                    strict_decisions=False,
-                    dry_run=True,
-                    path=str(db_path),
-                )
-                with contextlib.redirect_stdout(io.StringIO()):
-                    commands.command_task_nudge(nudge_args)
-
-                health_args = argparse.Namespace(
-                    audit_decisions=True,
-                    json=True,
-                    manager_stale_seconds=60,
-                    path=str(db_path),
-                    record=False,
-                    task="task-a",
-                )
-                with contextlib.redirect_stdout(io.StringIO()) as stdout:
-                    result = commands.command_task_health(health_args)
-
-                self.assertEqual(result, 1)
-                payload = json.loads(stdout.getvalue())
-                self.assertFalse(payload["ok"])
-                self.assertFalse(payload["decision_audit"]["ok"])
-                self.assertTrue(any(issue["source"] == "manager_decision_audit" for issue in payload["issues"]))
-        finally:
-            worker_identity.session_snapshot = original_session_snapshot
-
-    def test_task_nudge_records_failure_when_send_fails(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            db_path = Path(tmpdir) / "workerctl.db"
-            with worker_db.connect(db_path) as conn:
-                worker_db.initialize_database(conn)
-                worker_db.upsert_worker(
-                    conn,
-                    name="worker-a",
-                    cwd=str(ROOT),
-                    tmux_session="codex-worker-a",
-                    identity_token="token-worker-a",
-                    tmux_pane_id="%1",
-                    state="active",
-                    timestamp="2026-05-08T10:00:00Z",
-                )
-                worker_db.create_task(conn, name="task-a", goal="Do task A.")
-                worker_db.bind_task_worker(conn, task="task-a", worker="worker-a", binding_id="binding-1")
-                conn.commit()
-
-            original_send_text = commands.send_text
-            original_require_worker = worker_identity.require_worker
-            original_session_snapshot = worker_identity.session_snapshot
-            try:
-                worker_identity.require_worker = lambda name: {
-                    "identity_token": "token-worker-a",
-                    "tmux_pane_id": "%1",
-                    "tmux_session": "codex-worker-a",
-                }
-                worker_identity.session_snapshot = lambda target: {"live": True, "pane_id": "%1", "session": target}
-                commands.send_text = lambda name, message: (_ for _ in ()).throw(WorkerError("tmux missing"))
-                args = argparse.Namespace(task="task-a", message="status please", dry_run=False, path=str(db_path))
-
-                with self.assertRaises(WorkerError):
-                    commands.command_task_nudge(args)
-
-                with worker_db.connect(db_path) as conn:
-                    command_row = conn.execute("select * from commands order by created_at desc limit 1").fetchone()
-                    event_types = [row["type"] for row in conn.execute("select type from events order by id")]
-                self.assertEqual(command_row["state"], "failed")
-                self.assertEqual(command_row["error"], "tmux missing")
-                self.assertIn("task_nudge_failed", event_types)
-            finally:
-                commands.send_text = original_send_text
-                worker_identity.require_worker = original_require_worker
-                worker_identity.session_snapshot = original_session_snapshot
-
-    def test_task_nudge_reserves_budget_before_send(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            db_path = Path(tmpdir) / "workerctl.db"
-            with worker_db.connect(db_path) as conn:
-                worker_db.initialize_database(conn)
-                worker_db.upsert_worker(
-                    conn,
-                    name="worker-a",
-                    cwd=str(ROOT),
-                    tmux_session="codex-worker-a",
-                    identity_token="token-worker-a",
-                    tmux_pane_id="%1",
-                    state="active",
-                    timestamp="2026-05-08T10:00:00Z",
-                )
-                task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
-                worker_db.bind_task_worker(conn, task="task-a", worker="worker-a", binding_id="binding-1")
-                worker_db.set_budget(conn, task_id=task_id, max_nudges=1, expires_at="9999-01-01T00:00:00Z")
-                conn.commit()
-
-            sent = []
-            original_send_text = commands.send_text
-            original_require_worker = worker_identity.require_worker
-            original_session_snapshot = worker_identity.session_snapshot
-            try:
-                worker_identity.require_worker = lambda name: {
-                    "identity_token": "token-worker-a",
-                    "tmux_pane_id": "%1",
-                    "tmux_session": "codex-worker-a",
-                }
-                worker_identity.session_snapshot = lambda target: {"live": True, "pane_id": "%1", "session": target}
-                commands.send_text = lambda name, message: sent.append((name, message))
-                args = argparse.Namespace(task="task-a", message="status please", dry_run=False, path=str(db_path))
-
-                with contextlib.redirect_stdout(io.StringIO()) as stdout:
-                    result = commands.command_task_nudge(args)
-
-                payload = json.loads(stdout.getvalue())
-                self.assertEqual(result, 0)
-                self.assertEqual(sent, [("worker-a", "status please")])
-                self.assertEqual(payload["budget"]["nudges_used"], 1)
-                self.assertEqual(payload["budget"]["nudges_remaining"], 0)
-                with worker_db.connect(db_path) as conn:
-                    budget = conn.execute("select nudges_used from budgets where task_id = ?", (task_id,)).fetchone()
-                self.assertEqual(budget["nudges_used"], 1)
-
-                with self.assertRaises(WorkerError):
-                    commands.command_task_nudge(args)
-                self.assertEqual(sent, [("worker-a", "status please")])
-            finally:
-                commands.send_text = original_send_text
-                worker_identity.require_worker = original_require_worker
-                worker_identity.session_snapshot = original_session_snapshot
-
-    def test_extend_nudge_budget_allows_next_strict_nudge_after_exhaustion(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            db_path = Path(tmpdir) / "workerctl.db"
-            with worker_db.connect(db_path) as conn:
-                worker_db.initialize_database(conn)
-                worker_db.upsert_worker(
-                    conn,
-                    name="worker-a",
-                    cwd=str(ROOT),
-                    tmux_session="codex-worker-a",
-                    identity_token="token-worker-a",
-                    tmux_pane_id="%1",
-                    state="active",
-                    timestamp="2026-05-08T10:00:00Z",
-                )
-                task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
-                worker_db.bind_task_worker(conn, task="task-a", worker="worker-a", binding_id="binding-1")
-                worker_db.set_budget(conn, task_id=task_id, max_nudges=3, expires_at="9999-01-01T00:00:00Z")
-                conn.execute("update budgets set nudges_used = 3 where task_id = ?", (task_id,))
-                nudge_decision_id = worker_db.insert_manager_decision(
-                    conn,
-                    task_id=task_id,
-                    manager_id=None,
-                    decision="nudge",
-                    reason="worker is waiting",
-                )
-                escalate_decision_id = worker_db.insert_manager_decision(
-                    conn,
-                    task_id=task_id,
-                    manager_id=None,
-                    decision="escalate",
-                    reason="budget exhausted but more supervised work is required",
-                )
-                conn.commit()
-
-            sent = []
-            original_send_text = commands.send_text
-            original_require_worker = worker_identity.require_worker
-            original_session_snapshot = worker_identity.session_snapshot
-            try:
-                worker_identity.require_worker = lambda name: {
-                    "identity_token": "token-worker-a",
-                    "tmux_pane_id": "%1",
-                    "tmux_session": "codex-worker-a",
-                }
-                worker_identity.session_snapshot = lambda target: {"live": True, "pane_id": "%1", "session": target}
-                commands.send_text = lambda name, message: sent.append((name, message))
-                exhausted_args = argparse.Namespace(
-                    task="task-a",
-                    message="status please",
-                    decision_id=nudge_decision_id,
-                    strict_decisions=True,
-                    dry_run=False,
-                    path=str(db_path),
-                )
-
-                with self.assertRaisesRegex(WorkerError, "Nudge budget exhausted"):
-                    commands.command_task_nudge(exhausted_args)
-                self.assertEqual(sent, [])
-
-                extend_args = argparse.Namespace(
-                    add_nudges=2,
-                    budget_expires_at="9999-01-02T00:00:00Z",
-                    budget_hours=24,
-                    decision_id=escalate_decision_id,
-                    path=str(db_path),
-                    strict_decisions=True,
-                    task="task-a",
-                )
-                with contextlib.redirect_stdout(io.StringIO()) as stdout:
-                    result = commands.command_extend_nudge_budget(extend_args)
-
-                payload = json.loads(stdout.getvalue())
-                self.assertEqual(result, 0)
-                self.assertEqual(payload["budget"]["max_nudges"], 5)
-                self.assertEqual(payload["budget"]["nudges_used"], 3)
-                self.assertEqual(payload["budget"]["nudges_remaining"], 2)
-                self.assertTrue(payload["manager_decision"]["ok"])
-
-                next_decision_id = None
-                with worker_db.connect(db_path) as conn:
-                    next_decision_id = worker_db.insert_manager_decision(
-                        conn,
-                        task_id=task_id,
-                        manager_id=None,
-                        decision="nudge",
-                        reason="budget was extended and worker is waiting",
-                    )
-                    conn.commit()
-
-                allowed_args = argparse.Namespace(
-                    task="task-a",
-                    message="continue please",
-                    decision_id=next_decision_id,
-                    strict_decisions=True,
-                    dry_run=False,
-                    path=str(db_path),
-                )
-                with contextlib.redirect_stdout(io.StringIO()) as stdout:
-                    result = commands.command_task_nudge(allowed_args)
-
-                payload = json.loads(stdout.getvalue())
-                self.assertEqual(result, 0)
-                self.assertEqual(sent, [("worker-a", "continue please")])
-                self.assertEqual(payload["budget"]["nudges_used"], 4)
-                self.assertEqual(payload["budget"]["nudges_remaining"], 1)
-
-                proc = self.run_workerctl("mutation-audit", "task-a", "--json", "--path", str(db_path))
-                audit = json.loads(proc.stdout)
-                self.assertEqual(proc.returncode, 0, proc.stdout)
-                self.assertEqual(audit["summary"]["with_warnings"], 0)
-                self.assertIn("extend_nudge_budget", [record["command"]["type"] for record in audit["records"]])
-            finally:
-                commands.send_text = original_send_text
-                worker_identity.require_worker = original_require_worker
-                worker_identity.session_snapshot = original_session_snapshot
-
-    def test_task_health_warns_when_managed_task_budget_is_exhausted(self):
-        original_session_snapshot = worker_identity.session_snapshot
-        try:
-            worker_identity.session_snapshot = lambda session: {
-                "live": True,
-                "pane_id": "%2" if session == "codex-manager-task-a" else "%1",
-                "session": session,
-            }
-            with tempfile.TemporaryDirectory() as tmpdir:
-                db_path = Path(tmpdir) / "workerctl.db"
-                with worker_db.connect(db_path) as conn:
-                    worker_db.initialize_database(conn)
-                    worker_db.upsert_worker(
-                        conn,
-                        name="worker-a",
-                        cwd=str(ROOT),
-                        tmux_session="codex-worker-a",
-                        tmux_pane_id="%1",
-                        state="active",
-                    )
-                    task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
-                    worker_db.bind_task_worker(conn, task="task-a", worker="worker-a", binding_id="binding-1")
-                    manager_id = worker_db.create_manager(
-                        conn,
-                        task_id=task_id,
-                        name="manager-a",
-                        tmux_session="codex-manager-task-a",
-                        tmux_pane_id="%2",
-                        codex_args=[],
-                        state="ready",
-                    )
-                    worker_db.attach_manager_to_binding(conn, task_id=task_id, manager_id=manager_id)
-                    worker_db.set_task_state(conn, task_id=task_id, state="managed")
-                    worker_db.mark_manager_seen(conn, manager_id=manager_id)
-                    worker_db.set_budget(conn, task_id=task_id, max_nudges=3, expires_at="9999-01-01T00:00:00Z")
-                    conn.execute("update budgets set nudges_used = 3 where task_id = ?", (task_id,))
-                    conn.commit()
-
-                health_args = argparse.Namespace(
-                    audit_decisions=True,
-                    json=True,
-                    manager_stale_seconds=60,
-                    path=str(db_path),
-                    record=False,
-                    task="task-a",
-                )
-                with contextlib.redirect_stdout(io.StringIO()) as stdout:
-                    result = commands.command_task_health(health_args)
-
-                payload = json.loads(stdout.getvalue())
-                self.assertEqual(result, 1)
-                self.assertFalse(payload["ok"])
-                self.assertTrue(any(issue["code"] == "nudge_budget_exhausted" for issue in payload["issues"]))
-                self.assertTrue(any("extend-nudge-budget" in action for action in payload["recommended_actions"]))
-        finally:
-            worker_identity.session_snapshot = original_session_snapshot
-
-    def test_task_nudge_refuses_identity_mismatch_before_send(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            db_path = Path(tmpdir) / "workerctl.db"
-            with worker_db.connect(db_path) as conn:
-                worker_db.initialize_database(conn)
-                worker_db.upsert_worker(
-                    conn,
-                    name="worker-a",
-                    cwd=str(ROOT),
-                    tmux_session="codex-worker-a",
-                    identity_token="token-worker-a",
-                    tmux_pane_id="%1",
-                    state="active",
-                    timestamp="2026-05-08T10:00:00Z",
-                )
-                task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
-                worker_db.bind_task_worker(conn, task="task-a", worker="worker-a", binding_id="binding-1")
-                worker_db.set_budget(conn, task_id=task_id, max_nudges=1, expires_at="9999-01-01T00:00:00Z")
-                conn.commit()
-
-            sent = []
-            original_send_text = commands.send_text
-            original_require_worker = worker_identity.require_worker
-            original_session_snapshot = worker_identity.session_snapshot
-            try:
-                worker_identity.require_worker = lambda name: {
-                    "identity_token": "wrong-token",
-                    "tmux_pane_id": "%1",
-                    "tmux_session": "codex-worker-a",
-                }
-                worker_identity.session_snapshot = lambda target: {"live": True, "pane_id": "%1", "session": target}
-                commands.send_text = lambda name, message: sent.append((name, message))
-                args = argparse.Namespace(task="task-a", message="status please", dry_run=False, path=str(db_path))
-
-                with self.assertRaisesRegex(WorkerError, "identity_token_mismatch"):
-                    commands.command_task_nudge(args)
-
-                self.assertEqual(sent, [])
-                with worker_db.connect(db_path) as conn:
-                    command_row = conn.execute("select * from commands order by created_at desc limit 1").fetchone()
-                    budget = conn.execute("select nudges_used from budgets where task_id = ?", (task_id,)).fetchone()
-                self.assertEqual(command_row["state"], "failed")
-                self.assertEqual(budget["nudges_used"], 0)
-            finally:
-                commands.send_text = original_send_text
-                worker_identity.require_worker = original_require_worker
-                worker_identity.session_snapshot = original_session_snapshot
-
-    def test_task_interrupt_dry_run_records_durable_command(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            db_path = Path(tmpdir) / "workerctl.db"
-            with worker_db.connect(db_path) as conn:
-                worker_db.initialize_database(conn)
-                worker_db.upsert_worker(
-                    conn,
-                    name="worker-a",
-                    cwd=str(ROOT),
-                    tmux_session="codex-worker-a",
-                    state="active",
-                    timestamp="2026-05-08T10:00:00Z",
-                )
-                worker_db.create_task(conn, name="task-a", goal="Do task A.")
-                worker_db.bind_task_worker(conn, task="task-a", worker="worker-a", binding_id="binding-1")
-                conn.commit()
-
-            args = argparse.Namespace(
-                dry_run=True,
-                followup="report status",
-                key="C-c",
-                no_followup=False,
-                path=str(db_path),
-                task="task-a",
-            )
-
-            with contextlib.redirect_stdout(io.StringIO()) as stdout:
-                result = commands.command_task_interrupt(args)
-
-            payload = json.loads(stdout.getvalue())
-            self.assertEqual(result, 0)
-            self.assertEqual(payload["worker"], "worker-a")
-            self.assertEqual(payload["key"], "C-c")
-            self.assertEqual(payload["followup"], "report status")
-            with worker_db.connect(db_path) as conn:
-                command_row = conn.execute("select * from commands where id = ?", (payload["command_id"],)).fetchone()
-                event_types = [row["type"] for row in conn.execute("select type from events order by id")]
-            self.assertEqual(command_row["state"], "succeeded")
-            self.assertEqual(json.loads(command_row["payload_json"])["key"], "C-c")
-            self.assertIn("task_interrupt_intent", event_types)
-            self.assertIn("task_interrupt_succeeded", event_types)
-
-    def test_task_interrupt_refuses_pane_mismatch_before_send(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            db_path = Path(tmpdir) / "workerctl.db"
-            with worker_db.connect(db_path) as conn:
-                worker_db.initialize_database(conn)
-                worker_db.upsert_worker(
-                    conn,
-                    name="worker-a",
-                    cwd=str(ROOT),
-                    tmux_session="codex-worker-a",
-                    identity_token="token-worker-a",
-                    tmux_pane_id="%1",
-                    state="active",
-                    timestamp="2026-05-08T10:00:00Z",
-                )
-                worker_db.create_task(conn, name="task-a", goal="Do task A.")
-                worker_db.bind_task_worker(conn, task="task-a", worker="worker-a", binding_id="binding-1")
-                conn.commit()
-
-            interrupted = []
-            original_interrupt_worker = commands.interrupt_worker
-            original_require_worker = worker_identity.require_worker
-            original_session_snapshot = worker_identity.session_snapshot
-            try:
-                worker_identity.require_worker = lambda name: {
-                    "identity_token": "token-worker-a",
-                    "tmux_pane_id": "%1",
-                    "tmux_session": "codex-worker-a",
-                }
-                worker_identity.session_snapshot = lambda target: {"live": True, "pane_id": "%9", "session": target}
-                commands.interrupt_worker = lambda *args, **kwargs: interrupted.append((args, kwargs))
-                args = argparse.Namespace(
-                    dry_run=False,
-                    followup="report status",
-                    key="C-c",
-                    no_followup=False,
-                    path=str(db_path),
-                    task="task-a",
-                )
-
-                with self.assertRaisesRegex(WorkerError, "tmux_pane_mismatch"):
-                    commands.command_task_interrupt(args)
-
-                self.assertEqual(interrupted, [])
-                with worker_db.connect(db_path) as conn:
-                    command_row = conn.execute("select * from commands order by created_at desc limit 1").fetchone()
-                self.assertEqual(command_row["state"], "failed")
-            finally:
-                commands.interrupt_worker = original_interrupt_worker
-                worker_identity.require_worker = original_require_worker
-                worker_identity.session_snapshot = original_session_snapshot
-
     def test_audit_cli_json_outputs_task_history(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "workerctl.db"
@@ -3315,573 +1661,6 @@ class CliTests(unittest.TestCase):
             self.assertIn("task_created", [event["type"] for event in audit["events"]])
             self.assertIn("task_nudge_intent", [event["type"] for event in audit["events"]])
 
-    def test_promote_creates_manager_and_budget(self):
-        name = "promote-worker"
-        worker_path = worker_dir(name)
-        if worker_path.exists():
-            shutil.rmtree(worker_path)
-        worker_path.mkdir(parents=True)
-        write_config = {
-            "cwd": str(ROOT),
-            "name": name,
-            "tmux_session": f"codex-{name}",
-        }
-        config_path(name).write_text(json.dumps(write_config) + "\n")
-        original_ensure_tool = lifecycle.ensure_tool
-        original_session_exists = lifecycle.session_exists
-        original_manager_session_exists = lifecycle.manager_session_exists
-        original_run = lifecycle.run
-        original_session_snapshot = worker_identity.session_snapshot
-        original_state_root = lifecycle.state_root
-        try:
-            with tempfile.TemporaryDirectory() as tmpdir:
-                db_path = Path(tmpdir) / "workerctl.db"
-                artifact_root = Path(tmpdir) / "state"
-                lifecycle.ensure_tool = lambda tool: tool
-                lifecycle.session_exists = lambda worker: worker == name
-                lifecycle.manager_session_exists = lambda session: False
-                lifecycle.run = lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, "", "")
-                worker_identity.session_snapshot = lambda session: {
-                    "live": True,
-                    "pane_id": "%2" if session.startswith("codex-manager-") else "%1",
-                    "session": session,
-                }
-                lifecycle.state_root = lambda: artifact_root
-                args = argparse.Namespace(
-                    budget_expires_at="2026-05-09T10:00:00Z",
-                    budget_hours=24,
-                    codex_args=["--", "--model", "test"],
-                    goal="Do the task.",
-                    manager_instructions="Watch carefully.",
-                    max_nudges=2,
-                    path=str(db_path),
-                    summary="Started.",
-                    task="task-a",
-                    worker=name,
-                )
-
-                with contextlib.redirect_stdout(io.StringIO()) as stdout:
-                    result = lifecycle.command_promote(args)
-
-                payload = json.loads(stdout.getvalue())
-                self.assertEqual(result, 0)
-                self.assertEqual(payload["task"], "task-a")
-                with worker_db.connect(db_path) as conn:
-                    task = conn.execute("select * from tasks where name = 'task-a'").fetchone()
-                    worker = conn.execute("select * from workers where name = ?", (name,)).fetchone()
-                    manager = conn.execute("select * from managers where task_id = ?", (task["id"],)).fetchone()
-                    budget = conn.execute("select * from budgets where task_id = ?", (task["id"],)).fetchone()
-                    command = conn.execute("select * from commands where type = 'promote'").fetchone()
-                    prompt = conn.execute("select * from prompts where task_id = ?", (task["id"],)).fetchone()
-                self.assertEqual(task["state"], "managed")
-                self.assertEqual(worker["tmux_pane_id"], "%1")
-                self.assertEqual(manager["state"], "ready")
-                self.assertEqual(manager["tmux_pane_id"], "%2")
-                self.assertEqual(json.loads(manager["codex_args_json"]), ["--model", "test"])
-                self.assertEqual(payload["warnings"], [])
-                self.assertEqual(budget["max_nudges"], 2)
-                self.assertEqual(command["state"], "succeeded")
-                source_snapshot = json.loads(prompt["source_snapshot_json"])
-                self.assertEqual(source_snapshot["worker"], name)
-                self.assertIn("git", source_snapshot)
-                self.assertIn("status", source_snapshot)
-                self.assertIn("Source snapshot:", prompt["content"])
-                self.assertTrue(Path(payload["prompt_path"]).exists())
-        finally:
-            lifecycle.ensure_tool = original_ensure_tool
-            lifecycle.session_exists = original_session_exists
-            lifecycle.manager_session_exists = original_manager_session_exists
-            lifecycle.run = original_run
-            worker_identity.session_snapshot = original_session_snapshot
-            lifecycle.state_root = original_state_root
-            if worker_path.exists():
-                shutil.rmtree(worker_path)
-
-    def test_promote_defaults_to_recommended_manager_codex_args(self):
-        name = "promote-noargs-worker"
-        worker_path = worker_dir(name)
-        if worker_path.exists():
-            shutil.rmtree(worker_path)
-        worker_path.mkdir(parents=True)
-        config_path(name).write_text(
-            json.dumps(
-                {
-                    "cwd": str(ROOT),
-                    "identity_token": "token-worker",
-                    "name": name,
-                    "tmux_session": f"codex-{name}",
-                }
-            )
-            + "\n"
-        )
-        original_ensure_tool = lifecycle.ensure_tool
-        original_session_exists = lifecycle.session_exists
-        original_manager_session_exists = lifecycle.manager_session_exists
-        original_run = lifecycle.run
-        original_session_snapshot = worker_identity.session_snapshot
-        original_state_root = lifecycle.state_root
-        try:
-            with tempfile.TemporaryDirectory() as tmpdir:
-                db_path = Path(tmpdir) / "workerctl.db"
-                artifact_root = Path(tmpdir) / "state"
-                lifecycle.ensure_tool = lambda tool: tool
-                lifecycle.session_exists = lambda worker: worker == name
-                lifecycle.manager_session_exists = lambda session: False
-                lifecycle.run = lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, "", "")
-                worker_identity.session_snapshot = lambda session: {
-                    "live": True,
-                    "pane_id": "%2" if session.startswith("codex-manager-") else "%1",
-                    "session": session,
-                }
-                lifecycle.state_root = lambda: artifact_root
-                args = argparse.Namespace(
-                    budget_expires_at=None,
-                    budget_hours=24,
-                    codex_args=[],
-                    goal="Do the task.",
-                    manager_instructions=None,
-                    max_nudges=3,
-                    path=str(db_path),
-                    summary="Started.",
-                    task="task-a",
-                    worker=name,
-                )
-
-                with contextlib.redirect_stdout(io.StringIO()) as stdout:
-                    result = lifecycle.command_promote(args)
-
-                payload = json.loads(stdout.getvalue())
-                self.assertEqual(result, 0)
-                self.assertEqual(payload["warnings"], [])
-                self.assertEqual(payload["recommended_manager_codex_args"], ["--sandbox", "danger-full-access", "--ask-for-approval", "never"])
-                with worker_db.connect(db_path) as conn:
-                    command = conn.execute("select payload_json, result_json from commands where type = 'promote'").fetchone()
-                    manager = conn.execute("select codex_args_json from managers").fetchone()
-                command_payload = json.loads(command["payload_json"])
-                command_result = json.loads(command["result_json"])
-                self.assertEqual(json.loads(manager["codex_args_json"]), ["--sandbox", "danger-full-access", "--ask-for-approval", "never"])
-                self.assertEqual(command_payload["warnings"], [])
-                self.assertEqual(command_result["warnings"], [])
-        finally:
-            lifecycle.ensure_tool = original_ensure_tool
-            lifecycle.session_exists = original_session_exists
-            lifecycle.manager_session_exists = original_manager_session_exists
-            lifecycle.run = original_run
-            worker_identity.session_snapshot = original_session_snapshot
-            lifecycle.state_root = original_state_root
-            if worker_path.exists():
-                shutil.rmtree(worker_path)
-
-    def test_promote_warns_when_manager_codex_args_are_explicitly_disabled(self):
-        name = "promote-disabled-args-worker"
-        worker_path = worker_dir(name)
-        if worker_path.exists():
-            shutil.rmtree(worker_path)
-        worker_path.mkdir(parents=True)
-        config_path(name).write_text(
-            json.dumps(
-                {
-                    "cwd": str(ROOT),
-                    "identity_token": "token-worker",
-                    "name": name,
-                    "tmux_session": f"codex-{name}",
-                }
-            )
-            + "\n"
-        )
-        original_ensure_tool = lifecycle.ensure_tool
-        original_session_exists = lifecycle.session_exists
-        original_manager_session_exists = lifecycle.manager_session_exists
-        original_run = lifecycle.run
-        original_session_snapshot = worker_identity.session_snapshot
-        original_state_root = lifecycle.state_root
-        try:
-            with tempfile.TemporaryDirectory() as tmpdir:
-                db_path = Path(tmpdir) / "workerctl.db"
-                artifact_root = Path(tmpdir) / "state"
-                lifecycle.ensure_tool = lambda tool: tool
-                lifecycle.session_exists = lambda worker: worker == name
-                lifecycle.manager_session_exists = lambda session: False
-                lifecycle.run = lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, "", "")
-                worker_identity.session_snapshot = lambda session: {
-                    "live": True,
-                    "pane_id": "%2" if session.startswith("codex-manager-") else "%1",
-                    "session": session,
-                }
-                lifecycle.state_root = lambda: artifact_root
-                args = argparse.Namespace(
-                    budget_expires_at=None,
-                    budget_hours=24,
-                    codex_args=[],
-                    goal="Do the task.",
-                    manager_instructions=None,
-                    max_nudges=3,
-                    no_manager_codex_args=True,
-                    open_manager=False,
-                    path=str(db_path),
-                    summary="Started.",
-                    task="task-a",
-                    terminal="auto",
-                    worker=name,
-                )
-
-                with contextlib.redirect_stdout(io.StringIO()) as stdout:
-                    result = lifecycle.command_promote(args)
-
-                payload = json.loads(stdout.getvalue())
-                self.assertEqual(result, 0)
-                self.assertEqual(payload["warnings"][0]["code"], "manager_started_without_codex_args")
-                with worker_db.connect(db_path) as conn:
-                    manager = conn.execute("select codex_args_json from managers").fetchone()
-                self.assertEqual(json.loads(manager["codex_args_json"]), [])
-        finally:
-            lifecycle.ensure_tool = original_ensure_tool
-            lifecycle.session_exists = original_session_exists
-            lifecycle.manager_session_exists = original_manager_session_exists
-            lifecycle.run = original_run
-            worker_identity.session_snapshot = original_session_snapshot
-            lifecycle.state_root = original_state_root
-            if worker_path.exists():
-                shutil.rmtree(worker_path)
-
-    def test_pause_and_resume_manager_lifecycle(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            db_path = Path(tmpdir) / "workerctl.db"
-            prompt_path = Path(tmpdir) / "manager-prompt.md"
-            prompt_path.write_text("manager prompt")
-            worker_path = worker_dir("worker-a")
-            if worker_path.exists():
-                shutil.rmtree(worker_path)
-            worker_path.mkdir(parents=True)
-            config_path("worker-a").write_text(
-                json.dumps(
-                    {
-                        "identity_token": "token-worker-a",
-                        "name": "worker-a",
-                        "tmux_pane_id": "%1",
-                        "tmux_session": "codex-worker-a",
-                    }
-                )
-                + "\n"
-            )
-            with worker_db.connect(db_path) as conn:
-                worker_db.initialize_database(conn)
-                worker_db.upsert_worker(
-                    conn,
-                    name="worker-a",
-                    cwd=str(ROOT),
-                    tmux_session="codex-worker-a",
-                    identity_token="token-worker-a",
-                    tmux_pane_id="%1",
-                    state="active",
-                )
-                task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
-                worker_db.bind_task_worker(conn, task="task-a", worker="worker-a", binding_id="binding-1")
-                manager_id = worker_db.create_manager(
-                    conn,
-                    task_id=task_id,
-                    name="manager-a",
-                    tmux_session="codex-manager-task-a",
-                    codex_args=[],
-                    state="ready",
-                )
-                worker_db.attach_manager_to_binding(conn, task_id=task_id, manager_id=manager_id)
-                worker_db.insert_prompt(
-                    conn,
-                    task_id=task_id,
-                    manager_id=manager_id,
-                    kind="manager",
-                    content="manager prompt",
-                    content_sha256="hash",
-                    generator_version="test",
-                    source_snapshot={},
-                    policy={},
-                    artifact_path=str(prompt_path),
-                )
-                conn.commit()
-
-            original_ensure_tool = commands.ensure_tool
-            original_manager_session_exists = lifecycle.manager_session_exists
-            original_run = lifecycle.run
-            original_session_snapshot = worker_identity.session_snapshot
-            try:
-                lifecycle.ensure_tool = lambda tool: tool
-                live_sessions = {"codex-manager-task-a": True}
-                lifecycle.manager_session_exists = lambda session: live_sessions.get(session, False)
-                lifecycle.run = lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, "", "")
-                worker_identity.session_snapshot = lambda session: {
-                    "live": True,
-                    "pane_id": "%3" if session.startswith("codex-manager-") else "%1",
-                    "session": session,
-                }
-
-                pause_args = argparse.Namespace(path=str(db_path), task="task-a")
-                with contextlib.redirect_stdout(io.StringIO()):
-                    lifecycle.command_pause_manager(pause_args)
-
-                with worker_db.connect(db_path) as conn:
-                    task = conn.execute("select state from tasks where id = ?", (task_id,)).fetchone()
-                    old_manager = conn.execute("select state from managers where id = ?", (manager_id,)).fetchone()
-                self.assertEqual(task["state"], "paused")
-                self.assertEqual(old_manager["state"], "stopped")
-
-                live_sessions["codex-manager-task-a"] = False
-                resume_args = argparse.Namespace(codex_args=[], path=str(db_path), task="task-a")
-                with contextlib.redirect_stdout(io.StringIO()):
-                    lifecycle.command_resume_manager(resume_args)
-
-                with worker_db.connect(db_path) as conn:
-                    task = conn.execute("select state from tasks where id = ?", (task_id,)).fetchone()
-                    managers = conn.execute("select state, tmux_pane_id from managers where task_id = ? order by started_at", (task_id,)).fetchall()
-                self.assertEqual(task["state"], "managed")
-                self.assertEqual([row["state"] for row in managers], ["stopped", "ready"])
-                self.assertEqual(managers[-1]["tmux_pane_id"], "%3")
-            finally:
-                lifecycle.ensure_tool = original_ensure_tool
-                lifecycle.manager_session_exists = original_manager_session_exists
-                lifecycle.run = original_run
-                worker_identity.session_snapshot = original_session_snapshot
-                if worker_path.exists():
-                    shutil.rmtree(worker_path)
-
-    def test_unmanage_resolves_current_worker_and_pauses_manager(self):
-        worker_path = worker_dir("worker-a")
-        if worker_path.exists():
-            shutil.rmtree(worker_path)
-        worker_path.mkdir(parents=True)
-        config_path("worker-a").write_text(
-            json.dumps(
-                {
-                    "identity_token": "token-worker-a",
-                    "name": "worker-a",
-                    "tmux_pane_id": "%1",
-                    "tmux_session": "codex-worker-a",
-                }
-            )
-            + "\n"
-        )
-        try:
-            with tempfile.TemporaryDirectory() as tmpdir:
-                db_path = Path(tmpdir) / "workerctl.db"
-                with worker_db.connect(db_path) as conn:
-                    worker_db.initialize_database(conn)
-                    worker_id = worker_db.upsert_worker(
-                        conn,
-                        name="worker-a",
-                        cwd=str(ROOT),
-                        tmux_session="codex-worker-a",
-                        identity_token="token-worker-a",
-                        tmux_pane_id="%1",
-                        state="active",
-                    )
-                    task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
-                    worker_db.bind_task_worker(conn, task="task-a", worker="worker-a", binding_id="binding-1")
-                    manager_id = worker_db.create_manager(
-                        conn,
-                        task_id=task_id,
-                        name="manager-a",
-                        tmux_session="codex-manager-task-a",
-                        tmux_pane_id="%2",
-                        codex_args=[],
-                        state="ready",
-                    )
-                    worker_db.attach_manager_to_binding(conn, task_id=task_id, manager_id=manager_id)
-                    conn.commit()
-
-                original_current_session_name = lifecycle.current_session_name
-                original_run = lifecycle.run
-                original_session_snapshot = worker_identity.session_snapshot
-                try:
-                    lifecycle.current_session_name = lambda: "codex-worker-a"
-                    lifecycle.run = lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, "", "")
-                    worker_identity.session_snapshot = lambda session: {
-                        "live": True,
-                        "pane_id": "%2" if session == "codex-manager-task-a" else "%1",
-                        "session": session,
-                    }
-                    args = argparse.Namespace(dry_run=False, json=True, path=str(db_path), session=None, task=None)
-
-                    with contextlib.redirect_stdout(io.StringIO()) as stdout:
-                        result = lifecycle.command_unmanage(args)
-
-                    payload = json.loads(stdout.getvalue())
-                    self.assertEqual(result, 0)
-                    self.assertEqual(payload["task"], "task-a")
-                    self.assertEqual(payload["source"]["initiator"], "worker")
-                    self.assertEqual(payload["source"]["source_command"], "unmanage")
-                    self.assertTrue(payload["killed_session"])
-                    with worker_db.connect(db_path) as conn:
-                        task = conn.execute("select state from tasks where id = ?", (task_id,)).fetchone()
-                        worker = conn.execute("select state from workers where name = 'worker-a'").fetchone()
-                        manager = conn.execute("select state from managers where id = ?", (manager_id,)).fetchone()
-                        command = conn.execute("select type, worker_id, state from commands").fetchone()
-                        events = conn.execute("select actor, type, worker_id from events order by id").fetchall()
-                    self.assertEqual(task["state"], "paused")
-                    self.assertEqual(worker["state"], "active")
-                    self.assertEqual(manager["state"], "stopped")
-                    self.assertEqual(command["type"], "unmanage")
-                    self.assertEqual(command["worker_id"], worker_id)
-                    self.assertEqual(command["state"], "succeeded")
-                    self.assertIn(("worker", "unmanage_intent", worker_id), [(row["actor"], row["type"], row["worker_id"]) for row in events])
-                    self.assertIn(("worker", "unmanage_succeeded", worker_id), [(row["actor"], row["type"], row["worker_id"]) for row in events])
-                finally:
-                    lifecycle.current_session_name = original_current_session_name
-                    lifecycle.run = original_run
-                    worker_identity.session_snapshot = original_session_snapshot
-        finally:
-            if worker_path.exists():
-                shutil.rmtree(worker_path)
-
-    def test_unmanage_fails_without_session_or_task(self):
-        original_current_session_name = lifecycle.current_session_name
-        try:
-            lifecycle.current_session_name = lambda: None
-            with tempfile.TemporaryDirectory() as tmpdir:
-                args = argparse.Namespace(dry_run=False, json=True, path=str(Path(tmpdir) / "workerctl.db"), session=None, task=None)
-                with self.assertRaisesRegex(WorkerError, "Cannot infer current tmux session"):
-                    lifecycle.command_unmanage(args)
-        finally:
-            lifecycle.current_session_name = original_current_session_name
-
-    def test_resume_manager_rejects_paused_task_without_active_worker_binding(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            db_path = Path(tmpdir) / "workerctl.db"
-            prompt_path = Path(tmpdir) / "manager-prompt.md"
-            prompt_path.write_text("manager prompt")
-            with worker_db.connect(db_path) as conn:
-                worker_db.initialize_database(conn)
-                worker_db.upsert_worker(
-                    conn,
-                    name="worker-a",
-                    cwd=str(ROOT),
-                    tmux_session="codex-worker-a",
-                    state="stopped",
-                )
-                task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
-                worker_db.bind_task_worker(conn, task="task-a", worker="worker-a", binding_id="binding-1")
-                manager_id = worker_db.create_manager(
-                    conn,
-                    task_id=task_id,
-                    name="manager-a",
-                    tmux_session="codex-manager-task-a",
-                    codex_args=[],
-                    state="stopped",
-                )
-                worker_db.attach_manager_to_binding(conn, task_id=task_id, manager_id=manager_id)
-                worker_db.insert_prompt(
-                    conn,
-                    task_id=task_id,
-                    manager_id=manager_id,
-                    kind="manager",
-                    content="manager prompt",
-                    content_sha256="hash",
-                    generator_version="test",
-                    source_snapshot={},
-                    policy={},
-                    artifact_path=str(prompt_path),
-                )
-                worker_db.end_active_binding(conn, task_id=task_id)
-                worker_db.set_task_state(conn, task_id=task_id, state="paused")
-                conn.commit()
-
-            original_ensure_tool = lifecycle.ensure_tool
-            try:
-                lifecycle.ensure_tool = lambda tool: tool
-                args = argparse.Namespace(codex_args=[], open_manager=False, path=str(db_path), task="task-a", terminal="auto")
-                with self.assertRaisesRegex(WorkerError, "cannot resume manager without an active worker binding"):
-                    lifecycle.command_resume_manager(args)
-                with worker_db.connect(db_path) as conn:
-                    managers = conn.execute("select count(*) as count from managers where task_id = ?", (task_id,)).fetchone()
-                    task = conn.execute("select state from tasks where id = ?", (task_id,)).fetchone()
-                self.assertEqual(managers["count"], 1)
-                self.assertEqual(task["state"], "paused")
-            finally:
-                lifecycle.ensure_tool = original_ensure_tool
-
-    def test_resume_manager_rejects_missing_live_worker_session(self):
-        worker_path = worker_dir("worker-a")
-        if worker_path.exists():
-            shutil.rmtree(worker_path)
-        worker_path.mkdir(parents=True)
-        config_path("worker-a").write_text(
-            json.dumps(
-                {
-                    "identity_token": "token-worker-a",
-                    "name": "worker-a",
-                    "tmux_pane_id": "%1",
-                    "tmux_session": "codex-worker-a",
-                }
-            )
-            + "\n"
-        )
-        try:
-            with tempfile.TemporaryDirectory() as tmpdir:
-                db_path = Path(tmpdir) / "workerctl.db"
-                prompt_path = Path(tmpdir) / "manager-prompt.md"
-                prompt_path.write_text("manager prompt")
-                with worker_db.connect(db_path) as conn:
-                    worker_db.initialize_database(conn)
-                    worker_db.upsert_worker(
-                        conn,
-                        name="worker-a",
-                        cwd=str(ROOT),
-                        tmux_session="codex-worker-a",
-                        identity_token="token-worker-a",
-                        tmux_pane_id="%1",
-                        state="active",
-                    )
-                    task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
-                    worker_db.bind_task_worker(conn, task="task-a", worker="worker-a", binding_id="binding-1")
-                    manager_id = worker_db.create_manager(
-                        conn,
-                        task_id=task_id,
-                        name="manager-a",
-                        tmux_session="codex-manager-task-a",
-                        codex_args=[],
-                        state="stopped",
-                    )
-                    worker_db.attach_manager_to_binding(conn, task_id=task_id, manager_id=manager_id)
-                    worker_db.insert_prompt(
-                        conn,
-                        task_id=task_id,
-                        manager_id=manager_id,
-                        kind="manager",
-                        content="manager prompt",
-                        content_sha256="hash",
-                        generator_version="test",
-                        source_snapshot={},
-                        policy={},
-                        artifact_path=str(prompt_path),
-                    )
-                    worker_db.set_task_state(conn, task_id=task_id, state="paused")
-                    conn.commit()
-
-                original_ensure_tool = lifecycle.ensure_tool
-                original_session_snapshot = worker_identity.session_snapshot
-                try:
-                    lifecycle.ensure_tool = lambda tool: tool
-                    worker_identity.session_snapshot = lambda session: {
-                        "live": False,
-                        "pane_id": None,
-                        "session": session,
-                    }
-                    args = argparse.Namespace(codex_args=[], open_manager=False, path=str(db_path), task="task-a", terminal="auto")
-
-                    with self.assertRaisesRegex(WorkerError, "Worker identity verification failed"):
-                        lifecycle.command_resume_manager(args)
-
-                    with worker_db.connect(db_path) as conn:
-                        managers = conn.execute("select count(*) as count from managers where task_id = ?", (task_id,)).fetchone()
-                        task = conn.execute("select state from tasks where id = ?", (task_id,)).fetchone()
-                    self.assertEqual(managers["count"], 1)
-                    self.assertEqual(task["state"], "paused")
-                finally:
-                    lifecycle.ensure_tool = original_ensure_tool
-                    worker_identity.session_snapshot = original_session_snapshot
-        finally:
-            if worker_path.exists():
-                shutil.rmtree(worker_path)
-
     def test_task_status_flags_managed_without_active_worker_binding(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "workerctl.db"
@@ -3903,156 +1682,6 @@ class CliTests(unittest.TestCase):
                 snapshot = worker_db.task_status_snapshot(conn, task="task-a")
             self.assertFalse(snapshot["integrity"]["ok"])
             self.assertIn("managed_without_active_worker_binding", snapshot["integrity"]["issues"])
-
-    def test_my_status_resolves_current_worker_task(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            db_path = Path(tmpdir) / "workerctl.db"
-            with worker_db.connect(db_path) as conn:
-                worker_db.initialize_database(conn)
-                worker_db.upsert_worker(
-                    conn,
-                    name="worker-a",
-                    cwd=str(ROOT),
-                    tmux_session="codex-worker-a",
-                    state="active",
-                )
-                task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.", summary="In progress.")
-                worker_db.bind_task_worker(conn, task="task-a", worker="worker-a", binding_id="binding-1")
-                manager_id = worker_db.create_manager(
-                    conn,
-                    task_id=task_id,
-                    name="manager-a",
-                    tmux_session="codex-manager-task-a",
-                    codex_args=[],
-                    state="ready",
-                )
-                worker_db.attach_manager_to_binding(conn, task_id=task_id, manager_id=manager_id)
-                conn.commit()
-
-            original_current_session_name = lifecycle.current_session_name
-            try:
-                lifecycle.current_session_name = lambda: "codex-worker-a"
-                args = argparse.Namespace(json=True, path=str(db_path), session=None, task=None)
-                with contextlib.redirect_stdout(io.StringIO()) as stdout:
-                    result = lifecycle.command_my_status(args)
-
-                payload = json.loads(stdout.getvalue())
-                self.assertEqual(result, 0)
-                self.assertEqual(payload["worker"]["name"], "worker-a")
-                self.assertEqual(payload["task"]["name"], "task-a")
-                self.assertEqual(payload["task"]["state"], "managed")
-                self.assertEqual(payload["manager"]["name"], "manager-a")
-                self.assertIn("workerctl unmanage", payload["suggested_next_commands"])
-            finally:
-                lifecycle.current_session_name = original_current_session_name
-
-    def test_remanage_resolves_current_worker_and_restarts_manager(self):
-        worker_path = worker_dir("worker-a")
-        if worker_path.exists():
-            shutil.rmtree(worker_path)
-        worker_path.mkdir(parents=True)
-        config_path("worker-a").write_text(
-            json.dumps(
-                {
-                    "identity_token": "token-worker-a",
-                    "name": "worker-a",
-                    "tmux_pane_id": "%1",
-                    "tmux_session": "codex-worker-a",
-                }
-            )
-            + "\n"
-        )
-        try:
-            with tempfile.TemporaryDirectory() as tmpdir:
-                db_path = Path(tmpdir) / "workerctl.db"
-                prompt_path = Path(tmpdir) / "manager-prompt.md"
-                prompt_path.write_text("manager prompt")
-                with worker_db.connect(db_path) as conn:
-                    worker_db.initialize_database(conn)
-                    worker_id = worker_db.upsert_worker(
-                        conn,
-                        name="worker-a",
-                        cwd=str(ROOT),
-                        tmux_session="codex-worker-a",
-                        identity_token="token-worker-a",
-                        tmux_pane_id="%1",
-                        state="active",
-                    )
-                    task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
-                    worker_db.bind_task_worker(conn, task="task-a", worker="worker-a", binding_id="binding-1")
-                    old_manager_id = worker_db.create_manager(
-                        conn,
-                        task_id=task_id,
-                        name="manager-old",
-                        tmux_session="codex-manager-task-a",
-                        tmux_pane_id="%2",
-                        codex_args=[],
-                        state="stopped",
-                    )
-                    worker_db.attach_manager_to_binding(conn, task_id=task_id, manager_id=old_manager_id)
-                    worker_db.set_task_state(conn, task_id=task_id, state="paused")
-                    worker_db.insert_prompt(
-                        conn,
-                        task_id=task_id,
-                        manager_id=old_manager_id,
-                        kind="manager",
-                        content="manager prompt",
-                        content_sha256="hash",
-                        generator_version="test",
-                        source_snapshot={},
-                        policy={},
-                        artifact_path=str(prompt_path),
-                    )
-                    conn.commit()
-
-                original_current_session_name = lifecycle.current_session_name
-                original_ensure_tool = lifecycle.ensure_tool
-                original_manager_session_exists = lifecycle.manager_session_exists
-                original_run = lifecycle.run
-                original_session_snapshot = worker_identity.session_snapshot
-                try:
-                    lifecycle.current_session_name = lambda: "codex-worker-a"
-                    lifecycle.ensure_tool = lambda tool: tool
-                    lifecycle.manager_session_exists = lambda session: False
-                    lifecycle.run = lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, "", "")
-                    worker_identity.session_snapshot = lambda session: {
-                        "live": True,
-                        "pane_id": "%3" if session.startswith("codex-manager-") else "%1",
-                        "session": session,
-                    }
-                    args = argparse.Namespace(codex_args=["--", "--model", "test"], path=str(db_path), session=None, task=None)
-
-                    with contextlib.redirect_stdout(io.StringIO()) as stdout:
-                        result = lifecycle.command_remanage(args)
-
-                    payload = json.loads(stdout.getvalue())
-                    self.assertEqual(result, 0)
-                    self.assertEqual(payload["task"], "task-a")
-                    self.assertEqual(payload["source"]["initiator"], "worker")
-                    self.assertEqual(payload["source"]["source_command"], "remanage")
-                    with worker_db.connect(db_path) as conn:
-                        task = conn.execute("select state from tasks where id = ?", (task_id,)).fetchone()
-                        managers = conn.execute("select state, tmux_pane_id, codex_args_json from managers where task_id = ? order by started_at", (task_id,)).fetchall()
-                        command = conn.execute("select type, worker_id, state from commands").fetchone()
-                        events = conn.execute("select actor, type, worker_id from events order by id").fetchall()
-                    self.assertEqual(task["state"], "managed")
-                    self.assertEqual([row["state"] for row in managers], ["stopped", "ready"])
-                    self.assertEqual(managers[-1]["tmux_pane_id"], "%3")
-                    self.assertEqual(json.loads(managers[-1]["codex_args_json"]), ["--model", "test"])
-                    self.assertEqual(command["type"], "remanage")
-                    self.assertEqual(command["worker_id"], worker_id)
-                    self.assertEqual(command["state"], "succeeded")
-                    self.assertIn(("worker", "remanage_intent", worker_id), [(row["actor"], row["type"], row["worker_id"]) for row in events])
-                    self.assertIn(("worker", "remanage_succeeded", worker_id), [(row["actor"], row["type"], row["worker_id"]) for row in events])
-                finally:
-                    lifecycle.current_session_name = original_current_session_name
-                    lifecycle.ensure_tool = original_ensure_tool
-                    lifecycle.manager_session_exists = original_manager_session_exists
-                    lifecycle.run = original_run
-                    worker_identity.session_snapshot = original_session_snapshot
-        finally:
-            if worker_path.exists():
-                shutil.rmtree(worker_path)
 
     def test_stop_task_marks_done_and_ends_binding(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -4336,207 +1965,6 @@ class CliTests(unittest.TestCase):
                 if worker_path.exists():
                     shutil.rmtree(worker_path)
 
-    def test_close_manager_closes_finished_task_review_manager(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            db_path = Path(tmpdir) / "workerctl.db"
-            with worker_db.connect(db_path) as conn:
-                worker_db.initialize_database(conn)
-                worker_db.upsert_worker(
-                    conn,
-                    name="worker-a",
-                    cwd=str(ROOT),
-                    tmux_session="codex-worker-a",
-                    identity_token="token-worker-a",
-                    tmux_pane_id="%1",
-                    state="active",
-                )
-                task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
-                worker_db.bind_task_worker(conn, task="task-a", worker="worker-a", binding_id="binding-1")
-                manager_id = worker_db.create_manager(
-                    conn,
-                    task_id=task_id,
-                    name="manager-a",
-                    tmux_session="codex-manager-task-a",
-                    tmux_pane_id="%2",
-                    codex_args=[],
-                    state="ready",
-                )
-                worker_db.attach_manager_to_binding(conn, task_id=task_id, manager_id=manager_id)
-                worker_db.end_active_binding(conn, task_id=task_id)
-                worker_db.set_task_state(conn, task_id=task_id, state="done")
-                conn.commit()
-
-            original_session_snapshot = worker_identity.session_snapshot
-            original_run = lifecycle.run
-            try:
-                worker_identity.session_snapshot = lambda session: {
-                    "live": True,
-                    "pane_id": "%2",
-                    "session": session,
-                }
-                run_calls = []
-                lifecycle.run = lambda *args, **kwargs: (
-                    run_calls.append(args[0]) or subprocess.CompletedProcess(args[0], 0, "", "")
-                )
-                args = argparse.Namespace(path=str(db_path), reason="review complete", task="task-a")
-
-                with contextlib.redirect_stdout(io.StringIO()) as stdout:
-                    result = lifecycle.command_close_manager(args)
-
-                payload = json.loads(stdout.getvalue())
-                self.assertEqual(result, 0)
-                self.assertTrue(payload["killed_manager"])
-                self.assertEqual(payload["task_state"], "done")
-                with worker_db.connect(db_path) as conn:
-                    snapshot = worker_db.task_status_snapshot(conn, task="task-a")
-                    manager = conn.execute("select state, exit_reason from managers where id = ?", (manager_id,)).fetchone()
-                    command = conn.execute("select state from commands where type = 'close_manager'").fetchone()
-                    event = conn.execute("select type from events where type = 'close_manager_succeeded'").fetchone()
-                self.assertIsNone(snapshot["manager"])
-                self.assertEqual(snapshot["state"], "done")
-                self.assertEqual(manager["state"], "stopped")
-                self.assertEqual(manager["exit_reason"], "review complete")
-                self.assertEqual(command["state"], "succeeded")
-                self.assertEqual(event["type"], "close_manager_succeeded")
-                self.assertEqual(run_calls, [["tmux", "kill-session", "-t", "codex-manager-task-a"]])
-            finally:
-                worker_identity.session_snapshot = original_session_snapshot
-                lifecycle.run = original_run
-
-    def test_recover_marks_missing_finished_review_manager_without_pausing_task(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            db_path = Path(tmpdir) / "workerctl.db"
-            with worker_db.connect(db_path) as conn:
-                worker_db.initialize_database(conn)
-                task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
-                manager_id = worker_db.create_manager(
-                    conn,
-                    task_id=task_id,
-                    name="manager-a",
-                    tmux_session="codex-manager-task-a",
-                    tmux_pane_id="%2",
-                    codex_args=[],
-                    state="ready",
-                )
-                worker_db.set_task_state(conn, task_id=task_id, state="done")
-                conn.commit()
-
-            original_session_snapshot = worker_identity.session_snapshot
-            try:
-                worker_identity.session_snapshot = lambda session: {
-                    "live": False,
-                    "pane_id": None,
-                    "session": session,
-                }
-                args = argparse.Namespace(path=str(db_path), recover=True, sync_pane_ids=False, task="task-a")
-
-                with contextlib.redirect_stdout(io.StringIO()) as stdout:
-                    result = lifecycle.command_recover(args)
-
-                payload = json.loads(stdout.getvalue())
-                self.assertEqual(result, 0)
-                self.assertIn("manager_missing", payload["results"][0]["drift"])
-                with worker_db.connect(db_path) as conn:
-                    task = conn.execute("select state from tasks where id = ?", (task_id,)).fetchone()
-                    manager = conn.execute("select state from managers where id = ?", (manager_id,)).fetchone()
-                self.assertEqual(task["state"], "done")
-                self.assertEqual(manager["state"], "missing")
-            finally:
-                worker_identity.session_snapshot = original_session_snapshot
-
-    def test_close_manager_marks_already_missing_review_manager_stopped(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            db_path = Path(tmpdir) / "workerctl.db"
-            with worker_db.connect(db_path) as conn:
-                worker_db.initialize_database(conn)
-                task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
-                manager_id = worker_db.create_manager(
-                    conn,
-                    task_id=task_id,
-                    name="manager-a",
-                    tmux_session="codex-manager-task-a",
-                    tmux_pane_id="%2",
-                    codex_args=[],
-                    state="ready",
-                )
-                worker_db.set_task_state(conn, task_id=task_id, state="done")
-                conn.commit()
-
-            original_session_snapshot = worker_identity.session_snapshot
-            original_run = lifecycle.run
-            try:
-                worker_identity.session_snapshot = lambda session: {
-                    "live": False,
-                    "pane_id": None,
-                    "session": session,
-                }
-                run_calls = []
-                lifecycle.run = lambda *args, **kwargs: (
-                    run_calls.append(args[0]) or subprocess.CompletedProcess(args[0], 0, "", "")
-                )
-                args = argparse.Namespace(path=str(db_path), reason="already closed", task="task-a")
-
-                with contextlib.redirect_stdout(io.StringIO()) as stdout:
-                    result = lifecycle.command_close_manager(args)
-
-                payload = json.loads(stdout.getvalue())
-                self.assertEqual(result, 0)
-                self.assertFalse(payload["killed_manager"])
-                self.assertFalse(payload["manager_identity"]["live"])
-                with worker_db.connect(db_path) as conn:
-                    task = conn.execute("select state from tasks where id = ?", (task_id,)).fetchone()
-                    manager = conn.execute("select state, exit_reason from managers where id = ?", (manager_id,)).fetchone()
-                self.assertEqual(task["state"], "done")
-                self.assertEqual(manager["state"], "stopped")
-                self.assertEqual(manager["exit_reason"], "already closed")
-                self.assertEqual(run_calls, [])
-            finally:
-                worker_identity.session_snapshot = original_session_snapshot
-                lifecycle.run = original_run
-
-    def test_pause_manager_refuses_pane_mismatch_before_kill(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            db_path = Path(tmpdir) / "workerctl.db"
-            with worker_db.connect(db_path) as conn:
-                worker_db.initialize_database(conn)
-                task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
-                manager_id = worker_db.create_manager(
-                    conn,
-                    task_id=task_id,
-                    name="manager-a",
-                    tmux_session="codex-manager-task-a",
-                    tmux_pane_id="%2",
-                    codex_args=[],
-                    state="ready",
-                )
-                conn.commit()
-
-            killed = []
-            original_run = lifecycle.run
-            original_session_snapshot = worker_identity.session_snapshot
-            try:
-                def fake_run(argv, **kwargs):
-                    if argv[:2] == ["tmux", "kill-session"]:
-                        killed.append(argv)
-                    return subprocess.CompletedProcess(argv, 0, "", "")
-
-                lifecycle.run = fake_run
-                worker_identity.session_snapshot = lambda session: {"live": True, "pane_id": "%9", "session": session}
-                args = argparse.Namespace(path=str(db_path), task="task-a")
-
-                with self.assertRaisesRegex(WorkerError, "manager_pane_mismatch"):
-                    lifecycle.command_pause_manager(args)
-
-                self.assertEqual(killed, [])
-                with worker_db.connect(db_path) as conn:
-                    manager = conn.execute("select state from managers where id = ?", (manager_id,)).fetchone()
-                    command = conn.execute("select state from commands where type = 'pause_manager'").fetchone()
-                self.assertEqual(manager["state"], "ready")
-                self.assertEqual(command["state"], "failed")
-            finally:
-                lifecycle.run = original_run
-                worker_identity.session_snapshot = original_session_snapshot
-
     def test_stop_task_refuses_worker_pane_mismatch_before_kill(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "workerctl.db"
@@ -4599,406 +2027,6 @@ class CliTests(unittest.TestCase):
                 worker_identity.session_snapshot = original_session_snapshot
                 if worker_path.exists():
                     shutil.rmtree(worker_path)
-
-    def test_recover_marks_missing_manager_and_pauses_task(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            db_path = Path(tmpdir) / "workerctl.db"
-            with worker_db.connect(db_path) as conn:
-                worker_db.initialize_database(conn)
-                worker_db.upsert_worker(
-                    conn,
-                    name="worker-a",
-                    cwd=str(ROOT),
-                    tmux_session="codex-worker-a",
-                    state="active",
-                )
-                task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
-                worker_db.bind_task_worker(conn, task="task-a", worker="worker-a", binding_id="binding-1")
-                manager_id = worker_db.create_manager(
-                    conn,
-                    task_id=task_id,
-                    name="manager-a",
-                    tmux_session="codex-manager-task-a",
-                    codex_args=[],
-                    state="ready",
-                )
-                worker_db.attach_manager_to_binding(conn, task_id=task_id, manager_id=manager_id)
-                conn.commit()
-
-            original_session_snapshot = worker_identity.session_snapshot
-            try:
-                def fake_session_snapshot(session):
-                    return {
-                        "live": session == "codex-worker-a",
-                        "pane_id": "%1" if session == "codex-worker-a" else None,
-                        "session": session,
-                    }
-
-                worker_identity.session_snapshot = fake_session_snapshot
-
-                with contextlib.redirect_stdout(io.StringIO()) as stdout:
-                    result = lifecycle.command_recover(argparse.Namespace(path=str(db_path), task="task-a"))
-
-                payload = json.loads(stdout.getvalue())
-                self.assertEqual(result, 0)
-                self.assertEqual(payload["results"][0]["drift"], ["manager_missing"])
-                with worker_db.connect(db_path) as conn:
-                    task = conn.execute("select state from tasks where id = ?", (task_id,)).fetchone()
-                    manager = conn.execute("select state from managers where id = ?", (manager_id,)).fetchone()
-                self.assertEqual(task["state"], "paused")
-                self.assertEqual(manager["state"], "missing")
-            finally:
-                worker_identity.session_snapshot = original_session_snapshot
-
-    def test_reconcile_reports_pane_mismatches_without_marking_missing(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            db_path = Path(tmpdir) / "workerctl.db"
-            with worker_db.connect(db_path) as conn:
-                worker_db.initialize_database(conn)
-                worker_id = worker_db.upsert_worker(
-                    conn,
-                    name="worker-a",
-                    cwd=str(ROOT),
-                    tmux_session="codex-worker-a",
-                    state="active",
-                )
-                conn.execute("update workers set tmux_pane_id = '%1' where id = ?", (worker_id,))
-                task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
-                worker_db.bind_task_worker(conn, task="task-a", worker="worker-a", binding_id="binding-1")
-                manager_id = worker_db.create_manager(
-                    conn,
-                    task_id=task_id,
-                    name="manager-a",
-                    tmux_session="codex-manager-task-a",
-                    codex_args=[],
-                    state="ready",
-                )
-                conn.execute("update managers set tmux_pane_id = '%2' where id = ?", (manager_id,))
-                worker_db.attach_manager_to_binding(conn, task_id=task_id, manager_id=manager_id)
-                conn.commit()
-
-            original_session_snapshot = worker_identity.session_snapshot
-            try:
-                def fake_session_snapshot(session):
-                    pane_ids = {
-                        "codex-worker-a": "%9",
-                        "codex-manager-task-a": "%8",
-                    }
-                    return {"live": True, "pane_id": pane_ids[session], "session": session}
-
-                worker_identity.session_snapshot = fake_session_snapshot
-
-                with contextlib.redirect_stdout(io.StringIO()) as stdout:
-                    result = lifecycle.command_recover(argparse.Namespace(path=str(db_path), task="task-a"))
-
-                payload = json.loads(stdout.getvalue())
-                self.assertEqual(result, 0)
-                drift = payload["results"][0]["drift"]
-                self.assertIn("worker_pane_mismatch", drift)
-                self.assertIn("manager_pane_mismatch", drift)
-                self.assertEqual(payload["results"][0]["worker"]["recorded_pane_id"], "%1")
-                self.assertEqual(payload["results"][0]["worker"]["tmux_pane_id"], "%9")
-                self.assertEqual(payload["results"][0]["manager"]["recorded_pane_id"], "%2")
-                self.assertEqual(payload["results"][0]["manager"]["tmux_pane_id"], "%8")
-                with worker_db.connect(db_path) as conn:
-                    task = conn.execute("select state from tasks where id = ?", (task_id,)).fetchone()
-                    worker = conn.execute("select state from workers where name = 'worker-a'").fetchone()
-                    manager = conn.execute("select state from managers where id = ?", (manager_id,)).fetchone()
-                    event_types = [row["type"] for row in conn.execute("select type from events order by id")]
-                self.assertEqual(task["state"], "managed")
-                self.assertEqual(worker["state"], "active")
-                self.assertEqual(manager["state"], "ready")
-                self.assertIn("recover_worker_pane_mismatch", event_types)
-                self.assertIn("recover_manager_pane_mismatch", event_types)
-            finally:
-                worker_identity.session_snapshot = original_session_snapshot
-
-    def test_recover_syncs_live_pane_ids_when_requested(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            db_path = Path(tmpdir) / "workerctl.db"
-            worker_path = worker_dir("worker-a")
-            if worker_path.exists():
-                shutil.rmtree(worker_path)
-            worker_path.mkdir(parents=True)
-            config_path("worker-a").write_text(
-                json.dumps(
-                    {
-                        "identity_token": "token-worker-a",
-                        "name": "worker-a",
-                        "tmux_pane_id": "%1",
-                        "tmux_session": "codex-worker-a",
-                    }
-                )
-                + "\n"
-            )
-            with worker_db.connect(db_path) as conn:
-                worker_db.initialize_database(conn)
-                worker_id = worker_db.upsert_worker(
-                    conn,
-                    name="worker-a",
-                    cwd=str(ROOT),
-                    tmux_session="codex-worker-a",
-                    identity_token="token-worker-a",
-                    tmux_pane_id="%1",
-                    state="active",
-                )
-                task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
-                worker_db.bind_task_worker(conn, task="task-a", worker="worker-a", binding_id="binding-1")
-                manager_id = worker_db.create_manager(
-                    conn,
-                    task_id=task_id,
-                    name="manager-a",
-                    tmux_session="codex-manager-task-a",
-                    tmux_pane_id="%2",
-                    codex_args=[],
-                    state="ready",
-                )
-                worker_db.attach_manager_to_binding(conn, task_id=task_id, manager_id=manager_id)
-                conn.commit()
-
-            original_session_snapshot = worker_identity.session_snapshot
-            try:
-                def fake_session_snapshot(session):
-                    pane_ids = {
-                        "codex-worker-a": "%9",
-                        "codex-manager-task-a": "%8",
-                    }
-                    return {"live": True, "pane_id": pane_ids[session], "session": session}
-
-                worker_identity.session_snapshot = fake_session_snapshot
-
-                with contextlib.redirect_stdout(io.StringIO()) as stdout:
-                    result = lifecycle.command_recover(
-                        argparse.Namespace(path=str(db_path), sync_pane_ids=True, task="task-a")
-                    )
-
-                payload = json.loads(stdout.getvalue())
-                self.assertEqual(result, 0)
-                self.assertTrue(payload["sync_pane_ids"])
-                self.assertIn("worker_pane_mismatch", payload["results"][0]["drift"])
-                self.assertIn("manager_pane_mismatch", payload["results"][0]["drift"])
-                with worker_db.connect(db_path) as conn:
-                    worker = conn.execute("select tmux_pane_id from workers where name = 'worker-a'").fetchone()
-                    manager = conn.execute("select tmux_pane_id from managers where id = ?", (manager_id,)).fetchone()
-                    event_types = [row["type"] for row in conn.execute("select type from events order by id")]
-                config = json.loads(config_path("worker-a").read_text())
-                self.assertEqual(worker["tmux_pane_id"], "%9")
-                self.assertEqual(config["tmux_pane_id"], "%9")
-                self.assertEqual(manager["tmux_pane_id"], "%8")
-                self.assertIn("recover_worker_pane_synced", event_types)
-                self.assertIn("recover_manager_pane_synced", event_types)
-            finally:
-                worker_identity.session_snapshot = original_session_snapshot
-                if worker_path.exists():
-                    shutil.rmtree(worker_path)
-
-    def test_reconcile_reports_unfinished_commands_with_guidance(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            db_path = Path(tmpdir) / "workerctl.db"
-            with worker_db.connect(db_path) as conn:
-                worker_db.initialize_database(conn)
-                task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
-                worker_db.create_command(
-                    conn,
-                    command_type="task_nudge",
-                    payload={"message": "status"},
-                    task_id=task_id,
-                )
-                conn.commit()
-
-            with contextlib.redirect_stdout(io.StringIO()) as stdout:
-                result = lifecycle.command_reconcile(argparse.Namespace(path=str(db_path), task="task-a"))
-
-            payload = json.loads(stdout.getvalue())
-            self.assertEqual(result, 1)
-            self.assertIn("unfinished_commands", payload["results"][0]["drift"])
-            self.assertEqual(payload["results"][0]["unfinished_commands"][0]["type"], "task_nudge")
-            self.assertIn("retry manually", payload["results"][0]["unfinished_commands"][0]["recommended_action"])
-
-    def test_close_stale_dry_run_reports_candidates_without_mutating(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            db_path = Path(tmpdir) / "workerctl.db"
-            with worker_db.connect(db_path) as conn:
-                worker_db.initialize_database(conn)
-                worker_db.upsert_worker(
-                    conn,
-                    name="worker-a",
-                    cwd=str(ROOT),
-                    tmux_session="codex-worker-a",
-                    state="active",
-                )
-                task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
-                worker_db.bind_task_worker(conn, task="task-a", worker="worker-a", binding_id="binding-1")
-                conn.commit()
-
-            original_session_snapshot = worker_identity.session_snapshot
-            try:
-                worker_identity.session_snapshot = lambda session: {"live": False, "pane_id": None, "session": session}
-
-                with contextlib.redirect_stdout(io.StringIO()) as stdout:
-                    result = lifecycle.command_close_stale(
-                        argparse.Namespace(apply=False, path=str(db_path), task="task-a")
-                    )
-
-                payload = json.loads(stdout.getvalue())
-                self.assertEqual(result, 0)
-                self.assertFalse(payload["apply"])
-                self.assertEqual(payload["candidates"][0]["task"]["id"], task_id)
-                self.assertEqual(payload["candidates"][0]["planned_state"], "failed")
-                with worker_db.connect(db_path) as conn:
-                    task = conn.execute("select state from tasks where id = ?", (task_id,)).fetchone()
-                    worker = conn.execute("select state from workers where name = 'worker-a'").fetchone()
-                    binding = conn.execute("select state from bindings where id = 'binding-1'").fetchone()
-                    commands_count = conn.execute("select count(*) from commands where type = 'close_stale'").fetchone()[0]
-                self.assertEqual(task["state"], "managed")
-                self.assertEqual(worker["state"], "active")
-                self.assertEqual(binding["state"], "active")
-                self.assertEqual(commands_count, 0)
-            finally:
-                worker_identity.session_snapshot = original_session_snapshot
-
-    def test_close_stale_apply_marks_failed_and_audits_transition(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            db_path = Path(tmpdir) / "workerctl.db"
-            with worker_db.connect(db_path) as conn:
-                worker_db.initialize_database(conn)
-                worker_db.upsert_worker(
-                    conn,
-                    name="worker-a",
-                    cwd=str(ROOT),
-                    tmux_session="codex-worker-a",
-                    state="active",
-                )
-                task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
-                worker_db.bind_task_worker(conn, task="task-a", worker="worker-a", binding_id="binding-1")
-                conn.commit()
-
-            original_session_snapshot = worker_identity.session_snapshot
-            try:
-                worker_identity.session_snapshot = lambda session: {"live": False, "pane_id": None, "session": session}
-
-                with contextlib.redirect_stdout(io.StringIO()) as stdout:
-                    result = lifecycle.command_close_stale(
-                        argparse.Namespace(apply=True, path=str(db_path), task="task-a")
-                    )
-
-                payload = json.loads(stdout.getvalue())
-                self.assertEqual(result, 0)
-                self.assertTrue(payload["apply"])
-                self.assertEqual(payload["closed"][0]["task"]["id"], task_id)
-                with worker_db.connect(db_path) as conn:
-                    task = conn.execute("select state from tasks where id = ?", (task_id,)).fetchone()
-                    worker = conn.execute("select state from workers where name = 'worker-a'").fetchone()
-                    binding = conn.execute("select state, ended_at from bindings where id = 'binding-1'").fetchone()
-                    command = conn.execute("select state, result_json from commands where type = 'close_stale'").fetchone()
-                    event = conn.execute("select type, payload_json from events where type = 'close_stale_task'").fetchone()
-                self.assertEqual(task["state"], "failed")
-                self.assertEqual(worker["state"], "missing")
-                self.assertEqual(binding["state"], "ended")
-                self.assertIsNotNone(binding["ended_at"])
-                self.assertEqual(command["state"], "succeeded")
-                self.assertEqual(json.loads(command["result_json"])["task_state"], "failed")
-                self.assertEqual(event["type"], "close_stale_task")
-                self.assertEqual(json.loads(event["payload_json"])["planned_state"], "failed")
-            finally:
-                worker_identity.session_snapshot = original_session_snapshot
-
-    def test_close_stale_skips_unfinished_commands(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            db_path = Path(tmpdir) / "workerctl.db"
-            with worker_db.connect(db_path) as conn:
-                worker_db.initialize_database(conn)
-                worker_id = worker_db.upsert_worker(
-                    conn,
-                    name="worker-a",
-                    cwd=str(ROOT),
-                    tmux_session="codex-worker-a",
-                    state="active",
-                )
-                task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
-                worker_db.bind_task_worker(conn, task="task-a", worker="worker-a", binding_id="binding-1")
-                worker_db.create_command(
-                    conn,
-                    command_type="task_nudge",
-                    payload={"message": "status"},
-                    task_id=task_id,
-                    worker_id=worker_id,
-                )
-                conn.commit()
-
-            original_session_snapshot = worker_identity.session_snapshot
-            try:
-                worker_identity.session_snapshot = lambda session: {"live": False, "pane_id": None, "session": session}
-
-                with contextlib.redirect_stdout(io.StringIO()) as stdout:
-                    result = lifecycle.command_close_stale(
-                        argparse.Namespace(apply=True, path=str(db_path), task="task-a")
-                    )
-
-                payload = json.loads(stdout.getvalue())
-                self.assertEqual(result, 0)
-                self.assertEqual(payload["closed"], [])
-                self.assertEqual(payload["skipped"][0]["skip_reasons"], ["unfinished_commands"])
-                with worker_db.connect(db_path) as conn:
-                    task = conn.execute("select state from tasks where id = ?", (task_id,)).fetchone()
-                    binding = conn.execute("select state from bindings where id = 'binding-1'").fetchone()
-                    close_count = conn.execute("select count(*) from commands where type = 'close_stale'").fetchone()[0]
-                self.assertEqual(task["state"], "managed")
-                self.assertEqual(binding["state"], "active")
-                self.assertEqual(close_count, 0)
-            finally:
-                worker_identity.session_snapshot = original_session_snapshot
-
-    def test_close_stale_skips_live_manager(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            db_path = Path(tmpdir) / "workerctl.db"
-            with worker_db.connect(db_path) as conn:
-                worker_db.initialize_database(conn)
-                worker_db.upsert_worker(
-                    conn,
-                    name="worker-a",
-                    cwd=str(ROOT),
-                    tmux_session="codex-worker-a",
-                    state="active",
-                )
-                task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
-                worker_db.bind_task_worker(conn, task="task-a", worker="worker-a", binding_id="binding-1")
-                manager_id = worker_db.create_manager(
-                    conn,
-                    task_id=task_id,
-                    name="manager-a",
-                    tmux_session="codex-manager-task-a",
-                    codex_args=[],
-                    state="ready",
-                )
-                worker_db.attach_manager_to_binding(conn, task_id=task_id, manager_id=manager_id)
-                conn.commit()
-
-            original_session_snapshot = worker_identity.session_snapshot
-            try:
-                def fake_session_snapshot(session):
-                    return {"live": session == "codex-manager-task-a", "pane_id": None, "session": session}
-
-                worker_identity.session_snapshot = fake_session_snapshot
-
-                with contextlib.redirect_stdout(io.StringIO()) as stdout:
-                    result = lifecycle.command_close_stale(
-                        argparse.Namespace(apply=True, path=str(db_path), task="task-a")
-                    )
-
-                payload = json.loads(stdout.getvalue())
-                self.assertEqual(result, 0)
-                self.assertEqual(payload["closed"], [])
-                self.assertEqual(payload["skipped"][0]["skip_reasons"], ["manager_live"])
-                with worker_db.connect(db_path) as conn:
-                    task = conn.execute("select state from tasks where id = ?", (task_id,)).fetchone()
-                    worker = conn.execute("select state from workers where name = 'worker-a'").fetchone()
-                    manager = conn.execute("select state from managers where id = ?", (manager_id,)).fetchone()
-                self.assertEqual(task["state"], "managed")
-                self.assertEqual(worker["state"], "active")
-                self.assertEqual(manager["state"], "ready")
-            finally:
-                worker_identity.session_snapshot = original_session_snapshot
 
     def test_export_task_writes_bundle_and_zip(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -5088,55 +2116,23 @@ class CliTests(unittest.TestCase):
 
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertIn("audit", proc.stdout)
-        self.assertIn("become-managed", proc.stdout)
         self.assertIn("commands", proc.stdout)
         self.assertIn("doctor-self", proc.stdout)
-        self.assertIn("explain-managed-flow", proc.stdout)
         self.assertIn("import-compat", proc.stdout)
-        self.assertIn("manager-decision", proc.stdout)
-        self.assertIn("manager-observe", proc.stdout)
-        self.assertIn("manage", proc.stdout)
         self.assertIn("mutation-audit", proc.stdout)
-        self.assertIn("my-status", proc.stdout)
-        self.assertIn("name-session", proc.stdout)
         self.assertIn("open-manager", proc.stdout)
         self.assertIn("open-worker", proc.stdout)
-        self.assertIn("pause-manager", proc.stdout)
         self.assertIn("prune", proc.stdout)
         self.assertIn("qa-plan", proc.stdout)
-        self.assertIn("promote", proc.stdout)
-        self.assertIn("recover", proc.stdout)
         self.assertIn("reconcile", proc.stdout)
         self.assertIn("replay", proc.stdout)
-        self.assertIn("remanage", proc.stdout)
-        self.assertIn("resume-manager", proc.stdout)
-        self.assertIn("self-promote", proc.stdout)
         self.assertIn("start", proc.stdout)
         self.assertIn("stop-task", proc.stdout)
-        self.assertIn("close-stale", proc.stdout)
         self.assertIn("export-task", proc.stdout)
         self.assertIn("finish-task", proc.stdout)
-        self.assertIn("task-capture", proc.stdout)
-        self.assertIn("task-events", proc.stdout)
-        self.assertIn("task-health", proc.stdout)
-        self.assertIn("task-idle-check", proc.stdout)
-        self.assertIn("task-interrupt", proc.stdout)
-        self.assertIn("task-nudge", proc.stdout)
         self.assertIn("transcript-capture", proc.stdout)
         self.assertIn("transcript-prune", proc.stdout)
         self.assertIn("transcript-show", proc.stdout)
-
-    def test_recover_help_includes_sync_pane_ids(self):
-        proc = self.run_workerctl("recover", "--help")
-
-        self.assertEqual(proc.returncode, 0, proc.stderr)
-        self.assertIn("--sync-pane-ids", proc.stdout)
-
-    def test_close_stale_help_includes_apply(self):
-        proc = self.run_workerctl("close-stale", "--help")
-
-        self.assertEqual(proc.returncode, 0, proc.stderr)
-        self.assertIn("--apply", proc.stdout)
 
     def test_start_test_is_listed_in_help(self):
         proc = self.run_workerctl("--help")
@@ -8850,6 +5846,188 @@ class DivergencesCliTests(unittest.TestCase):
             proc = self.run_cli("divergences", "mytask", env_extra=env)
             self.assertEqual(proc.returncode, 0, proc.stderr)
             self.assertEqual(json.loads(proc.stdout), [])
+
+
+class ReconcileTests(unittest.TestCase):
+    def open_db(self, tmpdir):
+        path = Path(tmpdir) / "workerctl.db"
+        conn = worker_db.connect(path)
+        worker_db.initialize_database(conn)
+        self.addCleanup(conn.close)
+        return conn
+
+    def test_reconcile_reports_dead_pid_session(self):
+        from workerctl import commands as worker_commands
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            worker_db.register_session(
+                conn, name="dead", role="worker",
+                codex_session_path="/a", codex_session_id="u",
+                pid=2147483646, cwd="/repo",
+                tmux_session="codex-dead",
+            )
+            conn.commit()
+
+            report = worker_commands.collect_reconcile_report(conn)
+            dead_pid_sessions = [
+                s for s in report["dead_pid_sessions"]
+                if s["name"] == "dead"
+            ]
+            self.assertEqual(len(dead_pid_sessions), 1)
+            self.assertEqual(dead_pid_sessions[0]["pid"], 2147483646)
+
+    def test_reconcile_reports_dangling_binding(self):
+        from workerctl import commands as worker_commands
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            now = "2026-05-12T00:00:00Z"
+            conn.execute(
+                "insert into tasks(id, name, goal, state, created_at, updated_at) "
+                "values ('task-1', 't', 'g', 'managed', ?, ?)",
+                (now, now),
+            )
+            worker_db.register_session(
+                conn, name="w", role="worker",
+                codex_session_path="/a", codex_session_id="u-w", pid=1, cwd="/r",
+            )
+            worker_db.register_session(
+                conn, name="m", role="manager",
+                codex_session_path="/b", codex_session_id="u-m", pid=2, cwd="/r",
+            )
+            worker_db.bind_sessions(
+                conn, task_name="t", worker_session_name="w", manager_session_name="m",
+            )
+            # Mark the worker session gone manually - the binding now dangles.
+            conn.execute("update sessions set state='gone' where name='w'")
+            conn.commit()
+
+            report = worker_commands.collect_reconcile_report(conn)
+            dangling = [b for b in report["dangling_bindings"] if b["task_name"] == "t"]
+            self.assertEqual(len(dangling), 1)
+            self.assertEqual(dangling[0]["gone_role"], "worker")
+
+    def test_reconcile_apply_marks_gone_pid_session_gone(self):
+        from workerctl import commands as worker_commands
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            worker_db.register_session(
+                conn, name="dead", role="worker",
+                codex_session_path="/a", codex_session_id="u",
+                pid=2147483646, cwd="/repo",
+            )
+            conn.commit()
+
+            worker_commands.apply_reconcile(conn)
+
+            row = conn.execute("select state from sessions where name='dead'").fetchone()
+            self.assertEqual(row["state"], "gone")
+
+    def test_reconcile_apply_marks_dangling_binding_invalid(self):
+        from workerctl import commands as worker_commands
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            now = "2026-05-12T00:00:00Z"
+            conn.execute(
+                "insert into tasks(id, name, goal, state, created_at, updated_at) "
+                "values ('task-1', 't', 'g', 'managed', ?, ?)",
+                (now, now),
+            )
+            worker_db.register_session(
+                conn, name="w", role="worker",
+                codex_session_path="/a", codex_session_id="u-w", pid=1, cwd="/r",
+            )
+            worker_db.register_session(
+                conn, name="m", role="manager",
+                codex_session_path="/b", codex_session_id="u-m", pid=2, cwd="/r",
+            )
+            binding_id = worker_db.bind_sessions(
+                conn, task_name="t", worker_session_name="w", manager_session_name="m",
+            )
+            conn.execute("update sessions set state='gone' where name='w'")
+            conn.commit()
+
+            worker_commands.apply_reconcile(conn)
+
+            row = conn.execute(
+                "select state from bindings where id = ?", (binding_id,)
+            ).fetchone()
+            self.assertEqual(row["state"], "invalid")
+
+    def test_reconcile_cli_dry_run_does_not_mutate(self):
+        """End-to-end CLI smoke test: dry-run prints JSON and leaves state alone."""
+        env = os.environ.copy()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_dir = Path(tmpdir) / "state"
+            state_dir.mkdir()
+            env["WORKERCTL_STATE_ROOT"] = str(state_dir)
+
+            # Build a fixture rollout so register-worker accepts the dead-pid session.
+            rollout = Path(tmpdir) / "rollout.jsonl"
+            rollout.write_text(
+                json.dumps({
+                    "type": "session_meta",
+                    "payload": {"id": "u", "cwd": str(ROOT), "originator": "codex-tui"},
+                }) + "\n"
+            )
+            subprocess.run(
+                [sys.executable, "-m", "workerctl", "register-worker",
+                 "--name", "dead", "--pid", "2147483646",
+                 "--codex-session", str(rollout),
+                 "--cwd", str(ROOT)],
+                env=env, capture_output=True, text=True, cwd=str(ROOT),
+            )
+
+            proc = subprocess.run(
+                [sys.executable, "-m", "workerctl", "reconcile"],
+                env=env, capture_output=True, text=True, cwd=str(ROOT),
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            report = json.loads(proc.stdout)
+            self.assertIn("dead_pid_sessions", report)
+            self.assertTrue(any(s["name"] == "dead" for s in report["dead_pid_sessions"]))
+
+            # Dry-run must NOT have mutated the session.
+            db_path = state_dir / "workerctl.db"
+            conn = worker_db.connect(db_path)
+            self.addCleanup(conn.close)
+            row = conn.execute("select state from sessions where name='dead'").fetchone()
+            self.assertEqual(row["state"], "active")
+
+    def test_apply_reconcile_event_appears_in_task_audit(self):
+        from workerctl import commands as worker_commands
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            now = "2026-05-12T00:00:00Z"
+            conn.execute(
+                "insert into tasks(id, name, goal, state, created_at, updated_at) "
+                "values ('task-1', 'audit-task', 'g', 'managed', ?, ?)",
+                (now, now),
+            )
+            worker_db.register_session(
+                conn, name="w", role="worker",
+                codex_session_path="/a", codex_session_id="u-w", pid=1, cwd="/r",
+            )
+            worker_db.register_session(
+                conn, name="m", role="manager",
+                codex_session_path="/b", codex_session_id="u-m", pid=2, cwd="/r",
+            )
+            worker_db.bind_sessions(
+                conn, task_name="audit-task",
+                worker_session_name="w", manager_session_name="m",
+            )
+            conn.execute("update sessions set state='gone' where name='w'")
+            conn.commit()
+
+            worker_commands.apply_reconcile(conn)
+
+            audit = worker_db.task_audit(conn, task="audit-task")
+            types = [e["type"] for e in audit["events"]]
+            self.assertIn("binding_marked_invalid_by_reconcile", types)
 
 
 if __name__ == "__main__":
