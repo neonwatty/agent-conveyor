@@ -6812,6 +6812,120 @@ class IngestModuleTests(unittest.TestCase):
         self.assertEqual(events[1]["subtype"], "task_complete")
         self.assertEqual(events[1]["new_offset"], len(content))
 
+    def test_infer_state_returns_busy_for_task_started(self):
+        from workerctl import ingest
+        self.assertEqual(
+            ingest.infer_state({"type": "event_msg", "subtype": "task_started", "payload": {}}),
+            "busy",
+        )
+
+    def test_infer_state_returns_busy_for_user_message(self):
+        from workerctl import ingest
+        self.assertEqual(
+            ingest.infer_state({"type": "event_msg", "subtype": "user_message", "payload": {}}),
+            "busy",
+        )
+
+    def test_infer_state_returns_idle_for_task_complete(self):
+        from workerctl import ingest
+        self.assertEqual(
+            ingest.infer_state({"type": "event_msg", "subtype": "task_complete", "payload": {}}),
+            "idle",
+        )
+
+    def test_infer_state_returns_none_for_agent_message(self):
+        from workerctl import ingest
+        # agent_message indicates progress but doesn't change state
+        self.assertIsNone(
+            ingest.infer_state({"type": "event_msg", "subtype": "agent_message", "payload": {}}),
+        )
+
+    def test_infer_state_returns_none_for_token_count(self):
+        from workerctl import ingest
+        self.assertIsNone(
+            ingest.infer_state({"type": "event_msg", "subtype": "token_count", "payload": {}}),
+        )
+
+    def test_infer_state_returns_none_for_non_event_msg(self):
+        from workerctl import ingest
+        self.assertIsNone(
+            ingest.infer_state({"type": "response_item", "subtype": None, "payload": {}}),
+        )
+        self.assertIsNone(
+            ingest.infer_state({"type": "session_meta", "subtype": None, "payload": {}}),
+        )
+
+    def test_current_state_returns_unknown_when_no_events(self):
+        from workerctl import ingest
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "workerctl.db"
+            conn = worker_db.connect(path)
+            self.addCleanup(conn.close)
+            worker_db.initialize_database(conn)
+            session_id = worker_db.register_session(
+                conn, name="w", role="worker", codex_session_path="/a",
+                codex_session_id="u", pid=1, cwd="/repo",
+            )
+            self.assertEqual(ingest.current_state(conn, session_id=session_id), "unknown")
+
+    def test_current_state_walks_back_to_most_recent_state_event(self):
+        from workerctl import ingest
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "workerctl.db"
+            conn = worker_db.connect(path)
+            self.addCleanup(conn.close)
+            worker_db.initialize_database(conn)
+            session_id = worker_db.register_session(
+                conn, name="w", role="worker", codex_session_path="/a",
+                codex_session_id="u", pid=1, cwd="/repo",
+            )
+            # Sequence: task_started -> agent_message (no change) -> task_complete -> agent_message
+            for subtype, offset in [
+                ("task_started", 100),
+                ("agent_message", 200),
+                ("task_complete", 300),
+                ("agent_message", 400),  # newest but no state change
+            ]:
+                worker_db.insert_codex_event(
+                    conn, session_id=session_id,
+                    timestamp="2026-05-11T00:00:00Z",
+                    event_type="event_msg",
+                    subtype=subtype,
+                    payload={},
+                    byte_offset=offset,
+                )
+            # Latest state-bearing event was task_complete -> idle
+            self.assertEqual(ingest.current_state(conn, session_id=session_id), "idle")
+
+    def test_current_state_picks_most_recent_busy_signal(self):
+        from workerctl import ingest
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "workerctl.db"
+            conn = worker_db.connect(path)
+            self.addCleanup(conn.close)
+            worker_db.initialize_database(conn)
+            session_id = worker_db.register_session(
+                conn, name="w", role="worker", codex_session_path="/a",
+                codex_session_id="u", pid=1, cwd="/repo",
+            )
+            for subtype, offset in [
+                ("task_complete", 100),
+                ("user_message", 200),
+                ("task_started", 300),
+            ]:
+                worker_db.insert_codex_event(
+                    conn, session_id=session_id,
+                    timestamp="2026-05-11T00:00:00Z",
+                    event_type="event_msg",
+                    subtype=subtype,
+                    payload={},
+                    byte_offset=offset,
+                )
+            self.assertEqual(ingest.current_state(conn, session_id=session_id), "busy")
+
 
 if __name__ == "__main__":
     unittest.main()

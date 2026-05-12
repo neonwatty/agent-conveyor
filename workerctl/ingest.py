@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from typing import Any, Iterator
 
 
@@ -56,3 +57,52 @@ def parse_jsonl_events(content: bytes, *, start_offset: int) -> Iterator[dict[st
             "byte_offset": absolute_line_start,
             "new_offset": absolute_after_line,
         }
+
+
+# Mapping from event_msg subtype -> high-level session state.
+# None means "this event does not change state."
+_STATE_MAP: dict[str, str] = {
+    "task_started": "busy",
+    "user_message": "busy",
+    "task_complete": "idle",
+}
+
+
+def infer_state(event: dict[str, Any]) -> str | None:
+    """Return the high-level state implied by `event`, or None if no change.
+
+    `event` is one of the dicts yielded by `parse_jsonl_events` or the equivalent
+    shape from a `codex_events` row. Only `event_msg` records influence state.
+    """
+    if event.get("type") != "event_msg":
+        return None
+    subtype = event.get("subtype")
+    if not isinstance(subtype, str):
+        return None
+    return _STATE_MAP.get(subtype)
+
+
+_STATE_BEARING_SUBTYPES = tuple(_STATE_MAP.keys())
+
+
+def current_state(conn: sqlite3.Connection, *, session_id: str) -> str:
+    """Return the latest high-level state for `session_id`, or 'unknown' if none.
+
+    Walks the most recent state-bearing codex_events for the session. State-bearing
+    means `type='event_msg'` and `subtype` in {task_started, user_message, task_complete}.
+    """
+    placeholders = ",".join("?" * len(_STATE_BEARING_SUBTYPES))
+    row = conn.execute(
+        f"""
+        select subtype from codex_events
+        where session_id = ?
+          and type = 'event_msg'
+          and subtype in ({placeholders})
+        order by id desc
+        limit 1
+        """,
+        (session_id, *_STATE_BEARING_SUBTYPES),
+    ).fetchone()
+    if row is None:
+        return "unknown"
+    return _STATE_MAP[row["subtype"]]
