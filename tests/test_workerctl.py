@@ -6563,6 +6563,40 @@ class BindCommandTests(unittest.TestCase):
             self.assertIn("binding_created", event_types)
             self.assertIn("binding_ended", event_types)
 
+    def test_active_binding_for_task_returns_resolved_dict(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self.setup_pair(conn)
+            binding_id = worker_db.bind_sessions(
+                conn, task_name="auth-refactor",
+                worker_session_name="w1", manager_session_name="m1",
+            )
+            row = worker_db.active_binding_for_task(conn, task_name="auth-refactor")
+            self.assertEqual(row["binding_id"], binding_id)
+            self.assertEqual(row["worker_session_name"], "w1")
+            self.assertEqual(row["manager_session_name"], "m1")
+            self.assertIsNotNone(row["worker_session_id"])
+            self.assertIsNotNone(row["manager_session_id"])
+
+    def test_active_binding_for_task_raises_when_no_active_binding(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self.setup_pair(conn)
+            with self.assertRaises(WorkerError):
+                worker_db.active_binding_for_task(conn, task_name="auth-refactor")
+
+    def test_active_binding_for_task_only_returns_active_or_ending(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self.setup_pair(conn)
+            worker_db.bind_sessions(
+                conn, task_name="auth-refactor",
+                worker_session_name="w1", manager_session_name="m1",
+            )
+            worker_db.unbind_task(conn, task_name="auth-refactor")
+            with self.assertRaises(WorkerError):
+                worker_db.active_binding_for_task(conn, task_name="auth-refactor")
+
 
 class CodexEventsSchemaTests(unittest.TestCase):
     def open_db(self, tmpdir):

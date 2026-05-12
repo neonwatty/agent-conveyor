@@ -1937,6 +1937,54 @@ def unbind_task(
         raise WorkerError(f"no active binding for task {task_name!r}")
 
 
+def active_binding_for_task(
+    conn: sqlite3.Connection,
+    *,
+    task_name: str,
+) -> dict[str, Any]:
+    """Return the active (or ending) binding for `task_name` with session names resolved.
+
+    Returns a dict with keys:
+      - `binding_id`: str
+      - `task_id`: str
+      - `worker_session_id`: str
+      - `manager_session_id`: str
+      - `worker_session_name`: str
+      - `manager_session_name`: str
+      - `state`: str ('active' | 'ending')
+      - `created_at`: str
+
+    Raises WorkerError if the task is unknown or has no active binding. Only resolves
+    session-id-based bindings (Phase 1+); legacy worker_id/manager_id bindings are
+    NOT returned here (they remain accessible via active_task_worker).
+    """
+    task = task_row(conn, task=task_name)
+    row = conn.execute(
+        """
+        select
+          b.id as binding_id,
+          b.task_id as task_id,
+          b.worker_session_id as worker_session_id,
+          b.manager_session_id as manager_session_id,
+          ws.name as worker_session_name,
+          ms.name as manager_session_name,
+          b.state as state,
+          b.created_at as created_at
+        from bindings b
+        join sessions ws on ws.id = b.worker_session_id
+        join sessions ms on ms.id = b.manager_session_id
+        where b.task_id = ?
+          and b.state in ('active', 'ending')
+        order by b.created_at desc
+        limit 1
+        """,
+        (task["id"],),
+    ).fetchone()
+    if row is None:
+        raise WorkerError(f"no active session-based binding for task {task_name!r}")
+    return dict(row)
+
+
 def active_task_worker(conn: sqlite3.Connection, *, task: str) -> dict[str, Any]:
     row = conn.execute(
         """
