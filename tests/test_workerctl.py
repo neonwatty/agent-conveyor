@@ -7631,5 +7631,128 @@ class SessionActionCliTests(unittest.TestCase):
             self.assertNotIn("followup", event_payload)  # content not stored
 
 
+class SuperviseCycleTests(unittest.TestCase):
+    def open_db(self, tmpdir):
+        path = Path(tmpdir) / "workerctl.db"
+        conn = worker_db.connect(path)
+        worker_db.initialize_database(conn)
+        self.addCleanup(conn.close)
+        return conn
+
+    def _setup_bound_task(self, conn, tmpdir, rollout_events):
+        rollout = Path(tmpdir) / "rollout.jsonl"
+        rollout.write_text("".join(json.dumps(e) + "\n" for e in rollout_events))
+        now = "2026-05-11T00:00:00Z"
+        conn.execute(
+            "insert into tasks(id, name, goal, state, created_at, updated_at) "
+            "values ('task-1', 't', 'g', 'candidate', ?, ?)",
+            (now, now),
+        )
+        worker_db.register_session(
+            conn, name="w", role="worker",
+            codex_session_path=str(rollout),
+            codex_session_id="u-w", pid=1, cwd="/r",
+        )
+        worker_db.register_session(
+            conn, name="m", role="manager",
+            codex_session_path=str(rollout),  # reuses fixture; not under test
+            codex_session_id="u-m", pid=2, cwd="/r",
+        )
+        worker_db.bind_sessions(
+            conn, task_name="t",
+            worker_session_name="w", manager_session_name="m",
+        )
+        conn.commit()
+        return rollout
+
+    def test_run_cycle_ingests_and_returns_state(self):
+        from workerctl import supervise_cycle
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self._setup_bound_task(conn, tmpdir, [
+                {"type": "session_meta", "payload": {"id": "u-w", "cwd": "/r"}},
+                {"timestamp": "2026-05-11T14:32:11Z",
+                 "type": "event_msg",
+                 "payload": {"type": "task_started", "turn_id": "t1"}},
+            ])
+
+            result = supervise_cycle.run_cycle(
+                conn, task_name="t", now="2026-05-11T14:32:15Z",
+            )
+            self.assertEqual(result["task"], "t")
+            self.assertEqual(result["worker_session"], "w")
+            self.assertEqual(result["manager_session"], "m")
+            self.assertEqual(result["ingest"]["new_events"], 2)
+            self.assertEqual(result["state"], "busy")
+            self.assertEqual(result["last_state_event_at"], "2026-05-11T14:32:11Z")
+            self.assertAlmostEqual(result["staleness_seconds"], 4.0, places=0)
+            self.assertIn("cycle_id", result)
+
+    def test_run_cycle_records_manager_cycle_row(self):
+        from workerctl import supervise_cycle
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self._setup_bound_task(conn, tmpdir, [
+                {"type": "session_meta", "payload": {"id": "u-w", "cwd": "/r"}},
+                {"timestamp": "2026-05-11T14:32:11Z",
+                 "type": "event_msg",
+                 "payload": {"type": "task_complete"}},
+            ])
+
+            result = supervise_cycle.run_cycle(
+                conn, task_name="t", now="2026-05-11T14:33:00Z",
+            )
+            row = conn.execute(
+                "select state, status_json from manager_cycles where id = ?",
+                (result["cycle_id"],),
+            ).fetchone()
+            self.assertIsNotNone(row)
+            self.assertEqual(row["state"], "succeeded")
+            status = json.loads(row["status_json"])
+            self.assertEqual(status["state"], "idle")
+            self.assertEqual(status["worker_session"], "w")
+
+    def test_run_cycle_unknown_task_raises(self):
+        from workerctl import supervise_cycle
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            with self.assertRaises(WorkerError):
+                supervise_cycle.run_cycle(conn, task_name="does-not-exist")
+
+    def test_run_cycle_no_active_binding_raises(self):
+        from workerctl import supervise_cycle
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            now = "2026-05-11T00:00:00Z"
+            conn.execute(
+                "insert into tasks(id, name, goal, state, created_at, updated_at) "
+                "values ('task-1', 't', 'g', 'candidate', ?, ?)",
+                (now, now),
+            )
+            conn.commit()
+            with self.assertRaises(WorkerError):
+                supervise_cycle.run_cycle(conn, task_name="t")
+
+    def test_run_cycle_handles_session_without_state_events(self):
+        from workerctl import supervise_cycle
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self._setup_bound_task(conn, tmpdir, [
+                {"type": "session_meta", "payload": {"id": "u-w", "cwd": "/r"}},
+            ])
+
+            result = supervise_cycle.run_cycle(
+                conn, task_name="t", now="2026-05-11T14:32:15Z",
+            )
+            self.assertEqual(result["state"], "unknown")
+            self.assertIsNone(result["last_state_event_at"])
+            self.assertIsNone(result["staleness_seconds"])
+
+
 if __name__ == "__main__":
     unittest.main()
