@@ -7568,6 +7568,34 @@ class SessionActionCliTests(unittest.TestCase):
             self.assertEqual(payload["key"], "C-c")
             self.assertEqual(payload["dry_run"], True)
 
+    def test_cli_session_interrupt_dry_run_with_followup(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            _, state_dir, env = self._setup_with_worker(tmpdir)
+            proc = self.run_cli(
+                "session-interrupt", "w",
+                "--followup", "retry please",
+                "--dry-run",
+                env_extra=env,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            payload = json.loads(proc.stdout)
+            self.assertEqual(payload["session"], "w")
+            self.assertEqual(payload["key"], "C-c")
+            self.assertEqual(payload["followup"], "retry please")
+            self.assertEqual(payload["dry_run"], True)
+
+            # Confirm the event payload carries followup_length, not the content.
+            conn = worker_db.connect(state_dir / "workerctl.db")
+            self.addCleanup(conn.close)
+            row = conn.execute(
+                "select payload_json from events where type = 'session_interrupted' "
+                "order by id desc limit 1"
+            ).fetchone()
+            self.assertIsNotNone(row)
+            event_payload = json.loads(row["payload_json"])
+            self.assertEqual(event_payload["followup_length"], len("retry please"))
+            self.assertNotIn("followup", event_payload)  # content not stored
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -2879,7 +2879,12 @@ def command_session_interrupt(args: argparse.Namespace) -> int:
         )
         worker_db.insert_event(
             conn, "session_interrupted", actor="workerctl",
-            payload={"session": args.name, "key": args.key, "dry_run": args.dry_run},
+            payload={
+                "session": args.name,
+                "key": args.key,
+                "dry_run": args.dry_run,
+                "followup_length": len(args.followup) if args.followup else 0,
+            },
         )
         conn.commit()
     finally:
