@@ -12,7 +12,7 @@ from workerctl.core import now_iso
 from workerctl.state import state_root
 
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 REQUIRED_TABLES = {
     "agent_observations",
     "bindings",
@@ -25,6 +25,7 @@ REQUIRED_TABLES = {
     "managers",
     "prompts",
     "schema_migrations",
+    "sessions",
     "statuses",
     "tasks",
     "terminal_captures",
@@ -36,6 +37,8 @@ REQUIRED_INDEXES = {
     "commands_task_state_created",
     "events_task_id",
     "one_active_binding_per_task",
+    "one_active_binding_per_manager_session",
+    "one_active_binding_per_worker_session",
     "one_active_binding_per_worker",
     "one_active_manager_per_task",
     "agent_observations_task_id",
@@ -140,8 +143,10 @@ def migrate(conn: sqlite3.Connection, from_version: int) -> None:
         create table if not exists bindings(
           id text primary key,
           task_id text not null references tasks(id),
-          worker_id text not null references workers(id),
+          worker_id text references workers(id),
           manager_id text references managers(id),
+          worker_session_id text references sessions(id),
+          manager_session_id text references sessions(id),
           state text not null check (state in ('active','ending','ended','invalid')),
           created_at text not null,
           ended_at text
@@ -302,6 +307,22 @@ def migrate(conn: sqlite3.Connection, from_version: int) -> None:
           payload_json text not null check (json_valid(payload_json))
         );
 
+        create table if not exists sessions(
+          id text primary key,
+          name text unique not null,
+          role text not null check (role in ('worker','manager')),
+          identity_token text unique not null,
+          tmux_session text,
+          tmux_pane_id text,
+          codex_session_path text,
+          codex_session_id text,
+          pid integer,
+          cwd text not null,
+          registered_at text not null,
+          last_heartbeat_at text,
+          state text not null check (state in ('active','gone'))
+        );
+
         create unique index if not exists one_active_binding_per_worker
         on bindings(worker_id)
         where state in ('active', 'ending');
@@ -350,6 +371,12 @@ def migrate(conn: sqlite3.Connection, from_version: int) -> None:
     )
     if from_version < 2:
         migrate_worker_name_ids(conn)
+    # Always run v5 invariant repair. Internals are idempotent: bindings rebuild is
+    # guarded by column-presence check, backfills use `insert or ignore`, and index
+    # creates use `if not exists`. This protects against partial-migration states
+    # like the one observed when sessions table was added under a separate commit
+    # before the bindings rebuild logic existed.
+    migrate_to_v5_sessions(conn)
     sync_worker_ids_to_config_files(conn)
     conn.execute(
         "insert or ignore into schema_migrations(version, applied_at) values (?, ?)",
@@ -414,6 +441,122 @@ def migrate_worker_name_ids(conn: sqlite3.Connection) -> None:
         raise
     finally:
         conn.execute("PRAGMA foreign_keys = ON")
+
+
+def migrate_to_v5_sessions(conn: sqlite3.Connection) -> None:
+    """Backfill `sessions` from existing `workers` and `managers` rows.
+
+    Idempotent: uses `insert or ignore` so re-running does not duplicate. Maps:
+    - workers -> sessions with role='worker', state='active' (regardless of legacy state).
+    - managers -> sessions with role='manager', state='active'.
+
+    Codex-session fields (path, id, pid) are left null; they only populate for sessions
+    registered via the new `register-*` commands.
+    """
+    existing_cols = {row["name"] for row in conn.execute("pragma table_info(bindings)")}
+    if "worker_session_id" not in existing_cols:
+        # SQLite has no DROP NOT NULL; we rebuild the table to make worker_id nullable
+        # and to add the new columns. The parent `migrate()` runs in autocommit mode
+        # for the executescript above; we don't need an explicit transaction here.
+        conn.executescript(
+            """
+            alter table bindings rename to bindings_v4;
+            create table bindings(
+              id text primary key,
+              task_id text not null references tasks(id),
+              worker_id text references workers(id),
+              manager_id text references managers(id),
+              worker_session_id text references sessions(id),
+              manager_session_id text references sessions(id),
+              state text not null check (state in ('active','ending','ended','invalid')),
+              created_at text not null,
+              ended_at text
+            );
+            insert into bindings(
+              id, task_id, worker_id, manager_id,
+              worker_session_id, manager_session_id,
+              state, created_at, ended_at
+            )
+            select id, task_id, worker_id, manager_id, null, null, state, created_at, ended_at
+            from bindings_v4;
+            drop table bindings_v4;
+            """
+        )
+        # Re-create the existing unique indexes which were dropped with the table.
+        conn.executescript(
+            """
+            create unique index if not exists one_active_binding_per_worker
+              on bindings(worker_id) where state in ('active', 'ending');
+            create unique index if not exists one_active_binding_per_task
+              on bindings(task_id) where state in ('active', 'ending');
+            create unique index if not exists one_active_binding_per_worker_session
+              on bindings(worker_session_id) where state in ('active', 'ending');
+            create unique index if not exists one_active_binding_per_manager_session
+              on bindings(manager_session_id) where state in ('active', 'ending');
+            """
+        )
+
+    now = now_iso()
+    worker_rows = conn.execute(
+        """
+        select id, name, tmux_session, tmux_pane_id, identity_token, cwd, created_at
+        from workers
+        """
+    ).fetchall()
+    for row in worker_rows:
+        conn.execute(
+            """
+            insert or ignore into sessions(
+              id, name, role, identity_token,
+              tmux_session, tmux_pane_id,
+              cwd, registered_at, state
+            )
+            values (?, ?, 'worker', ?, ?, ?, ?, ?, 'active')
+            """,
+            (
+                row["id"], row["name"], row["identity_token"],
+                row["tmux_session"], row["tmux_pane_id"],
+                row["cwd"], row["created_at"] or now,
+            ),
+        )
+
+    manager_rows = conn.execute(
+        """
+        select m.id, m.name, m.tmux_session, m.tmux_pane_id, m.started_at, t.id as task_id
+        from managers m
+        left join tasks t on t.id = m.task_id
+        """
+    ).fetchall()
+    for row in manager_rows:
+        conn.execute(
+            """
+            insert or ignore into sessions(
+              id, name, role, identity_token,
+              tmux_session, tmux_pane_id,
+              cwd, registered_at, state
+            )
+            values (?, ?, 'manager', ?, ?, ?, ?, ?, 'active')
+            """,
+            (
+                row["id"], row["name"], f"legacy-manager-token-{uuid.uuid4()}",
+                row["tmux_session"], row["tmux_pane_id"],
+                "",  # historical managers don't track cwd separately; empty is acceptable
+                row["started_at"] or now,
+            ),
+        )
+
+    # Ensure the two session-id partial unique indexes exist regardless of whether
+    # the rebuild branch ran. On fresh DBs the executescript above created the new
+    # bindings columns but did not create these indexes; on upgraded DBs the rebuild
+    # branch already created them and these statements no-op due to `if not exists`.
+    conn.executescript(
+        """
+        create unique index if not exists one_active_binding_per_worker_session
+        on bindings(worker_session_id) where state in ('active', 'ending');
+        create unique index if not exists one_active_binding_per_manager_session
+        on bindings(manager_session_id) where state in ('active', 'ending');
+        """
+    )
 
 
 def sync_worker_ids_to_config_files(conn: sqlite3.Connection) -> None:
@@ -637,6 +780,115 @@ def set_worker_pane_id(conn: sqlite3.Connection, *, worker_id: str, tmux_pane_id
     conn.execute(
         "update workers set tmux_pane_id = ?, updated_at = ? where id = ?",
         (tmux_pane_id, now_iso(), worker_id),
+    )
+
+
+def register_session(
+    conn: sqlite3.Connection,
+    *,
+    name: str,
+    role: str,
+    codex_session_path: str,
+    codex_session_id: str,
+    pid: int,
+    cwd: str,
+    tmux_session: str | None = None,
+    tmux_pane_id: str | None = None,
+    identity_token: str | None = None,
+    timestamp: str | None = None,
+) -> str:
+    """Idempotent upsert into `sessions`. Returns the session id.
+
+    On conflict by name: updates pid, codex_session_path, codex_session_id, tmux fields,
+    and state='active'. Raises WorkerError if a row exists with the same name but a
+    different role.
+    """
+    if role not in ("worker", "manager"):
+        raise WorkerError(f"invalid session role: {role}")
+    now = timestamp or now_iso()
+    existing = conn.execute(
+        "select id, role, identity_token from sessions where name = ?", (name,)
+    ).fetchone()
+    if existing is not None and existing["role"] != role:
+        raise WorkerError(
+            f"session name {name!r} already exists with role {existing['role']!r}; "
+            f"refusing to re-register as {role!r}"
+        )
+    session_id = str(existing["id"]) if existing else f"session-{uuid.uuid4()}"
+    token = (existing["identity_token"] if existing else None) or identity_token or f"session-token-{uuid.uuid4()}"
+    conn.execute(
+        """
+        insert into sessions(
+          id, name, role, identity_token,
+          tmux_session, tmux_pane_id,
+          codex_session_path, codex_session_id, pid,
+          cwd, registered_at, last_heartbeat_at, state
+        )
+        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')
+        on conflict(name) do update set
+          tmux_session = excluded.tmux_session,
+          tmux_pane_id = coalesce(excluded.tmux_pane_id, sessions.tmux_pane_id),
+          codex_session_path = excluded.codex_session_path,
+          codex_session_id = excluded.codex_session_id,
+          pid = excluded.pid,
+          cwd = excluded.cwd,
+          last_heartbeat_at = excluded.last_heartbeat_at,
+          state = 'active'
+        """,
+        (
+            session_id, name, role, token,
+            tmux_session, tmux_pane_id,
+            codex_session_path, codex_session_id, pid,
+            cwd, now, now,
+        ),
+    )
+    return session_id
+
+
+def session_row(conn: sqlite3.Connection, *, name: str, role: str | None = None) -> sqlite3.Row:
+    """Look up a session by name. Optionally verify role. Raises WorkerError if missing or role mismatch."""
+    row = conn.execute("select * from sessions where name = ?", (name,)).fetchone()
+    if row is None:
+        raise WorkerError(f"no session registered with name {name!r}")
+    if role is not None and row["role"] != role:
+        raise WorkerError(f"session {name!r} has role {row['role']!r}, expected {role!r}")
+    return row
+
+
+def list_sessions(conn: sqlite3.Connection, *, role: str | None = None) -> list[dict[str, Any]]:
+    query = "select * from sessions"
+    params: tuple = ()
+    if role is not None:
+        query += " where role = ?"
+        params = (role,)
+    query += " order by registered_at"
+    return [dict(row) for row in conn.execute(query, params)]
+
+
+def deregister_session(conn: sqlite3.Connection, *, name: str, timestamp: str | None = None) -> None:
+    now = timestamp or now_iso()
+    existing = conn.execute("select id from sessions where name = ?", (name,)).fetchone()
+    if existing is None:
+        raise WorkerError(f"no session registered with name {name!r}")
+    session_id = existing["id"]
+    active_binding = conn.execute(
+        """
+        select id, task_id from bindings
+        where state in ('active', 'ending')
+          and (worker_session_id = ? or manager_session_id = ?)
+        limit 1
+        """,
+        (session_id, session_id),
+    ).fetchone()
+    if active_binding is not None:
+        raise WorkerError(
+            f"cannot deregister session {name!r}: it is still bound to task "
+            f"{active_binding['task_id']!r} (binding {active_binding['id']!r}). "
+            f"Unbind the task first."
+        )
+    conn.execute(
+        "update sessions set state='gone', last_heartbeat_at=? where name=?",
+        (now, name),
     )
 
 
@@ -1514,6 +1766,80 @@ def bind_task_worker(
         },
     )
     return new_binding_id
+
+
+def bind_sessions(
+    conn: sqlite3.Connection,
+    *,
+    task_name: str,
+    worker_session_name: str,
+    manager_session_name: str,
+    timestamp: str | None = None,
+) -> str:
+    """Create an active binding between a task and a (worker, manager) session pair.
+
+    Uses the new `worker_session_id` / `manager_session_id` columns. Raises WorkerError
+    on missing task/session, role mismatch, or pre-existing active binding for the task.
+    """
+    now = timestamp or now_iso()
+    task = task_row(conn, task=task_name)
+    worker_sess = session_row(conn, name=worker_session_name, role="worker")
+    manager_sess = session_row(conn, name=manager_session_name, role="manager")
+
+    existing = conn.execute(
+        "select id from bindings where task_id = ? and state in ('active','ending')",
+        (task["id"],),
+    ).fetchone()
+    if existing is not None:
+        raise WorkerError(
+            f"task {task_name!r} already has an active binding {existing['id']!r}"
+        )
+
+    for label, session_record in (("worker", worker_sess), ("manager", manager_sess)):
+        already_bound = conn.execute(
+            """
+            select id, task_id from bindings
+            where state in ('active','ending')
+              and (worker_session_id = ? or manager_session_id = ?)
+            limit 1
+            """,
+            (session_record["id"], session_record["id"]),
+        ).fetchone()
+        if already_bound is not None:
+            raise WorkerError(
+                f"{label} session {session_record['name']!r} is already bound to task "
+                f"{already_bound['task_id']!r} (binding {already_bound['id']!r})"
+            )
+
+    binding_id = f"binding-{uuid.uuid4()}"
+    conn.execute(
+        """
+        insert into bindings(
+          id, task_id, worker_session_id, manager_session_id, state, created_at
+        )
+        values (?, ?, ?, ?, 'active', ?)
+        """,
+        (binding_id, task["id"], worker_sess["id"], manager_sess["id"], now),
+    )
+    return binding_id
+
+
+def unbind_task(
+    conn: sqlite3.Connection,
+    *,
+    task_name: str,
+    timestamp: str | None = None,
+) -> None:
+    """End the active binding for `task_name`. Raises WorkerError if no active binding."""
+    now = timestamp or now_iso()
+    task = task_row(conn, task=task_name)
+    cursor = conn.execute(
+        "update bindings set state='ended', ended_at=? "
+        "where task_id=? and state in ('active','ending')",
+        (now, task["id"]),
+    )
+    if cursor.rowcount == 0:
+        raise WorkerError(f"no active binding for task {task_name!r}")
 
 
 def active_task_worker(conn: sqlite3.Connection, *, task: str) -> dict[str, Any]:

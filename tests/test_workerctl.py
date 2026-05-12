@@ -5545,5 +5545,990 @@ class TmuxTests(unittest.TestCase):
             commands.run = original_run
 
 
+class CodexSessionDiscoveryTests(unittest.TestCase):
+    def test_read_session_meta_parses_first_line(self):
+        from workerctl import codex_session
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "rollout-2026-05-11T07-32-08-abc.jsonl"
+            meta_line = json.dumps({
+                "timestamp": "2026-05-11T14:32:11.791Z",
+                "type": "session_meta",
+                "payload": {
+                    "id": "019e1773-d973-7122-a8d6-f25331ebc8b7",
+                    "cwd": "/repo",
+                    "originator": "codex-tui",
+                    "cli_version": "0.130.0",
+                },
+            })
+            path.write_text(meta_line + "\n" + '{"type":"event_msg"}\n')
+            meta = codex_session.read_session_meta(path)
+
+            self.assertEqual(meta["id"], "019e1773-d973-7122-a8d6-f25331ebc8b7")
+            self.assertEqual(meta["cwd"], "/repo")
+            self.assertEqual(meta["originator"], "codex-tui")
+
+    def test_read_session_meta_raises_on_wrong_type(self):
+        from workerctl import codex_session
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "bad.jsonl"
+            path.write_text('{"type":"event_msg","payload":{}}\n')
+            with self.assertRaises(codex_session.CodexSessionError):
+                codex_session.read_session_meta(path)
+
+    def test_find_native_codex_pid_returns_self_when_already_native(self):
+        from workerctl import codex_session
+        # When the input pid is already a native codex binary, return it unchanged.
+        # We stub the helper to make this deterministic.
+        result = codex_session.find_native_codex_pid(99999, _ps_children=lambda _: [])
+        self.assertEqual(result, 99999)
+
+    def test_find_native_codex_pid_walks_to_child_when_node_wrapper(self):
+        from workerctl import codex_session
+        # node parent with one native codex child
+        children_by_pid = {1000: [2000]}
+
+        def fake_ps_children(pid):
+            return children_by_pid.get(pid, [])
+
+        result = codex_session.find_native_codex_pid(1000, _ps_children=fake_ps_children)
+        self.assertEqual(result, 2000)
+
+    def test_find_rollout_path_for_pid_returns_rollout_handle(self):
+        from workerctl import codex_session
+
+        fake_lsof_output = (
+            "codex   31507 user   25w  REG  1,17  277502  41320170 "
+            "/Users/u/.codex/sessions/2026/05/11/rollout-2026-05-11T10-54-17-abc.jsonl\n"
+            "codex   31507 user   26r  REG  1,17     128  12345678 "
+            "/Users/u/.codex/config.toml\n"
+        )
+
+        def fake_run_lsof(pid):
+            return fake_lsof_output
+
+        path = codex_session.find_rollout_path_for_pid(31507, _run_lsof=fake_run_lsof)
+        self.assertEqual(
+            str(path),
+            "/Users/u/.codex/sessions/2026/05/11/rollout-2026-05-11T10-54-17-abc.jsonl",
+        )
+
+    def test_find_rollout_path_for_pid_raises_when_no_rollout_open(self):
+        from workerctl import codex_session
+
+        def fake_run_lsof(pid):
+            return "codex 31507 user 25w REG 1,17 128 9999 /Users/u/.codex/config.toml\n"
+
+        with self.assertRaises(codex_session.CodexSessionError):
+            codex_session.find_rollout_path_for_pid(31507, _run_lsof=fake_run_lsof)
+
+    def test_discover_session_combines_lsof_and_meta(self):
+        from workerctl import codex_session
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Create rollout file in a path with /sessions/ directory
+            sessions_dir = Path(tmpdir) / "sessions" / "2026" / "05" / "11"
+            sessions_dir.mkdir(parents=True)
+            rollout = sessions_dir / "rollout-2026-05-11T07-32-08-xyz.jsonl"
+            rollout.write_text(json.dumps({
+                "type": "session_meta",
+                "payload": {
+                    "id": "session-uuid-xyz",
+                    "cwd": "/repo",
+                    "originator": "codex-tui",
+                    "cli_version": "0.130.0",
+                },
+            }) + "\n")
+
+            fake_lsof = (
+                f"codex 9999 user 25w REG 1,17 100 1 {rollout}\n"
+            )
+
+            result = codex_session.discover_session(
+                pid=9999,
+                _ps_children=lambda _: [],
+                _run_lsof=lambda _: fake_lsof,
+            )
+            self.assertEqual(result["pid"], 9999)
+            self.assertEqual(result["codex_session_id"], "session-uuid-xyz")
+            self.assertEqual(result["codex_session_path"], str(rollout))
+            self.assertEqual(result["cwd"], "/repo")
+            self.assertEqual(result["originator"], "codex-tui")
+
+    def test_find_rollout_path_for_pid_ignores_rollout_outside_sessions_dir(self):
+        from workerctl import codex_session
+
+        def fake_run_lsof(pid):
+            return (
+                "codex 31507 user 25w REG 1,17 128 9999 "
+                "/tmp/rollout-stray.jsonl\n"
+            )
+
+        with self.assertRaises(codex_session.CodexSessionError):
+            codex_session.find_rollout_path_for_pid(31507, _run_lsof=fake_run_lsof)
+
+
+class SessionsSchemaTests(unittest.TestCase):
+    def open_db(self, tmpdir):
+        path = Path(tmpdir) / "workerctl.db"
+        conn = worker_db.connect(path)
+        worker_db.initialize_database(conn)
+        self.addCleanup(conn.close)
+        return conn
+
+    def test_sessions_table_exists_after_init(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            tables = {
+                row["name"]
+                for row in conn.execute(
+                    "select name from sqlite_master where type='table'"
+                )
+            }
+            self.assertIn("sessions", tables)
+
+    def test_sessions_table_has_expected_columns(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            cols = {row["name"] for row in conn.execute("pragma table_info(sessions)")}
+            expected = {
+                "id", "name", "role", "identity_token",
+                "tmux_session", "tmux_pane_id",
+                "codex_session_path", "codex_session_id",
+                "pid", "cwd",
+                "registered_at", "last_heartbeat_at",
+                "state",
+            }
+            self.assertTrue(expected <= cols, f"missing: {expected - cols}")
+
+    def test_sessions_role_check_constraint(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            with self.assertRaises(sqlite3.IntegrityError):
+                conn.execute(
+                    """
+                    insert into sessions(
+                      id, name, role, identity_token, cwd, registered_at, state
+                    )
+                    values ('s-1', 'x', 'bogus', 't', '/tmp', '2026-05-11T00:00:00Z', 'active')
+                    """
+                )
+
+    def test_sessions_name_unique(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            now = "2026-05-11T00:00:00Z"
+            conn.execute(
+                """
+                insert into sessions(
+                  id, name, role, identity_token, cwd, registered_at, state
+                )
+                values ('s-1', 'dup', 'worker', 't1', '/tmp', ?, 'active')
+                """,
+                (now,),
+            )
+            with self.assertRaises(sqlite3.IntegrityError):
+                conn.execute(
+                    """
+                    insert into sessions(
+                      id, name, role, identity_token, cwd, registered_at, state
+                    )
+                    values ('s-2', 'dup', 'manager', 't2', '/tmp', ?, 'active')
+                    """,
+                    (now,),
+                )
+
+    def test_backfill_copies_existing_workers_to_sessions(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            # Manually open a v4-style DB, insert a worker row, then run init to migrate.
+            conn = worker_db.connect(db_path)
+            worker_db.initialize_database(conn)
+            now = "2026-05-11T00:00:00Z"
+            conn.execute(
+                """
+                insert into workers(
+                  id, name, tmux_session, identity_token, cwd, state, created_at, updated_at
+                )
+                values ('worker-99', 'legacy-w', 'codex-legacy-w', 'tok-99', '/repo', 'active', ?, ?)
+                """,
+                (now, now),
+            )
+            conn.commit()
+            conn.close()
+
+            # Drop sessions table to simulate pre-v5, force re-init to backfill.
+            conn = worker_db.connect(db_path)
+            conn.execute("drop table sessions")
+            conn.execute("PRAGMA user_version = 4")
+            conn.commit()
+            conn.close()
+
+            conn = worker_db.connect(db_path)
+            worker_db.initialize_database(conn)
+            self.addCleanup(conn.close)
+
+            row = conn.execute(
+                "select id, name, role, cwd from sessions where id = 'worker-99'"
+            ).fetchone()
+            self.assertIsNotNone(row)
+            self.assertEqual(row["name"], "legacy-w")
+            self.assertEqual(row["role"], "worker")
+            self.assertEqual(row["cwd"], "/repo")
+
+    def test_backfill_copies_existing_managers_to_sessions(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            conn = worker_db.connect(db_path)
+            worker_db.initialize_database(conn)
+            now = "2026-05-11T00:00:00Z"
+            # Need a task first for the FK
+            conn.execute(
+                "insert into tasks(id, name, goal, state, created_at, updated_at) "
+                "values ('task-1', 't', 'g', 'managed', ?, ?)",
+                (now, now),
+            )
+            conn.execute(
+                """
+                insert into managers(
+                  id, name, task_id, tmux_session, state, codex_args_json, started_at
+                )
+                values ('manager-77', 'legacy-m', 'task-1', 'codex-legacy-m', 'ready', '[]', ?)
+                """,
+                (now,),
+            )
+            conn.commit()
+            conn.close()
+
+            conn = worker_db.connect(db_path)
+            conn.execute("drop table sessions")
+            conn.execute("PRAGMA user_version = 4")
+            conn.commit()
+            conn.close()
+
+            conn = worker_db.connect(db_path)
+            worker_db.initialize_database(conn)
+            self.addCleanup(conn.close)
+
+            row = conn.execute(
+                "select id, name, role from sessions where id = 'manager-77'"
+            ).fetchone()
+            self.assertIsNotNone(row)
+            self.assertEqual(row["name"], "legacy-m")
+            self.assertEqual(row["role"], "manager")
+
+    def test_bindings_has_session_id_columns(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            cols = {row["name"] for row in conn.execute("pragma table_info(bindings)")}
+            self.assertIn("worker_session_id", cols)
+            self.assertIn("manager_session_id", cols)
+
+    def test_bindings_worker_id_now_nullable(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            now = "2026-05-11T00:00:00Z"
+            conn.execute(
+                "insert into tasks(id, name, goal, state, created_at, updated_at) "
+                "values ('task-1', 't', 'g', 'managed', ?, ?)",
+                (now, now),
+            )
+            conn.execute(
+                "insert into sessions(id, name, role, identity_token, cwd, registered_at, state) "
+                "values ('s-w', 'w', 'worker', 'tok-w', '/tmp', ?, 'active')",
+                (now,),
+            )
+            conn.execute(
+                "insert into sessions(id, name, role, identity_token, cwd, registered_at, state) "
+                "values ('s-m', 'm', 'manager', 'tok-m', '/tmp', ?, 'active')",
+                (now,),
+            )
+            # Insert binding without legacy worker_id / manager_id — should succeed.
+            conn.execute(
+                """
+                insert into bindings(
+                  id, task_id, worker_session_id, manager_session_id, state, created_at
+                )
+                values ('b-1', 'task-1', 's-w', 's-m', 'active', ?)
+                """,
+                (now,),
+            )
+            row = conn.execute(
+                "select worker_id, worker_session_id from bindings where id='b-1'"
+            ).fetchone()
+            self.assertIsNone(row["worker_id"])
+            self.assertEqual(row["worker_session_id"], "s-w")
+
+    def test_v4_to_v5_rebuild_preserves_binding_row(self):
+        """Simulate a true v4 database (old bindings shape, no sessions table, no
+        session-id indexes) and verify the v5 migration succeeds end-to-end."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            # Build a v5 db, then reshape it back to v4 in-place.
+            conn = worker_db.connect(db_path)
+            worker_db.initialize_database(conn)
+            now = "2026-05-11T00:00:00Z"
+            # Seed: a task, a worker, and a binding referencing them via legacy worker_id.
+            conn.execute(
+                "insert into tasks(id, name, goal, state, created_at, updated_at) "
+                "values ('task-x', 'tx', 'g', 'managed', ?, ?)",
+                (now, now),
+            )
+            conn.execute(
+                """
+                insert into workers(
+                  id, name, tmux_session, identity_token, cwd, state, created_at, updated_at
+                )
+                values ('worker-x', 'wx', 'codex-wx', 'tok-x', '/repo', 'active', ?, ?)
+                """,
+                (now, now),
+            )
+            conn.execute(
+                """
+                insert into bindings(id, task_id, worker_id, state, created_at)
+                values ('binding-x', 'task-x', 'worker-x', 'active', ?)
+                """,
+                (now,),
+            )
+            conn.commit()
+
+            # Reshape to v4: drop the session-id columns from bindings via rebuild,
+            # drop the new indexes, drop sessions, set user_version=4.
+            conn.executescript(
+                """
+                drop index if exists one_active_binding_per_worker_session;
+                drop index if exists one_active_binding_per_manager_session;
+                alter table bindings rename to bindings_pre_v4_shape;
+                create table bindings(
+                  id text primary key,
+                  task_id text not null references tasks(id),
+                  worker_id text not null references workers(id),
+                  manager_id text references managers(id),
+                  state text not null check (state in ('active','ending','ended','invalid')),
+                  created_at text not null,
+                  ended_at text
+                );
+                insert into bindings(id, task_id, worker_id, manager_id, state, created_at, ended_at)
+                select id, task_id, worker_id, manager_id, state, created_at, ended_at
+                from bindings_pre_v4_shape;
+                drop table bindings_pre_v4_shape;
+                create unique index if not exists one_active_binding_per_worker
+                  on bindings(worker_id) where state in ('active', 'ending');
+                create unique index if not exists one_active_binding_per_task
+                  on bindings(task_id) where state in ('active', 'ending');
+                drop table sessions;
+                """
+            )
+            conn.execute("PRAGMA user_version = 4")
+            conn.commit()
+            conn.close()
+
+            # Reopen and re-init: this is the actual v4→v5 migration path.
+            conn = worker_db.connect(db_path)
+            worker_db.initialize_database(conn)
+            self.addCleanup(conn.close)
+
+            # The binding row must still exist with the same data and NULL for new cols.
+            row = conn.execute(
+                "select task_id, worker_id, worker_session_id, manager_session_id, state "
+                "from bindings where id = 'binding-x'"
+            ).fetchone()
+            self.assertIsNotNone(row)
+            self.assertEqual(row["task_id"], "task-x")
+            self.assertEqual(row["worker_id"], "worker-x")
+            self.assertIsNone(row["worker_session_id"])
+            self.assertIsNone(row["manager_session_id"])
+            self.assertEqual(row["state"], "active")
+
+            # All four bindings indexes must exist.
+            indexes = {
+                r["name"]
+                for r in conn.execute(
+                    "select name from sqlite_master where type='index' and tbl_name='bindings'"
+                )
+            }
+            self.assertIn("one_active_binding_per_worker", indexes)
+            self.assertIn("one_active_binding_per_task", indexes)
+            self.assertIn("one_active_binding_per_worker_session", indexes)
+            self.assertIn("one_active_binding_per_manager_session", indexes)
+
+    def test_migrate_self_heals_partial_v5_state(self):
+        """Simulate the real-world bug: sessions table present, user_version=5, but
+        bindings still v4-shaped (no session_id columns, no new indexes). The next
+        initialize_database call must self-heal."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            conn = worker_db.connect(db_path)
+            worker_db.initialize_database(conn)
+            # Seed a binding so we can verify it survives.
+            now = "2026-05-11T00:00:00Z"
+            conn.execute(
+                "insert into tasks(id, name, goal, state, created_at, updated_at) "
+                "values ('task-x', 'tx', 'g', 'managed', ?, ?)",
+                (now, now),
+            )
+            conn.execute(
+                """
+                insert into workers(
+                  id, name, tmux_session, identity_token, cwd, state, created_at, updated_at
+                )
+                values ('worker-x', 'wx', 'codex-wx', 'tok-x', '/repo', 'active', ?, ?)
+                """,
+                (now, now),
+            )
+            conn.execute(
+                """
+                insert into bindings(id, task_id, worker_id, state, created_at)
+                values ('binding-x', 'task-x', 'worker-x', 'active', ?)
+                """,
+                (now,),
+            )
+            conn.commit()
+
+            # Surgically degrade to the broken state: drop session-id columns and
+            # the two new indexes from bindings, but LEAVE user_version=5 and the
+            # sessions table intact (this is the real-world divergence).
+            conn.executescript(
+                """
+                drop index if exists one_active_binding_per_worker_session;
+                drop index if exists one_active_binding_per_manager_session;
+                alter table bindings rename to bindings_partial;
+                create table bindings(
+                  id text primary key,
+                  task_id text not null references tasks(id),
+                  worker_id text not null references workers(id),
+                  manager_id text references managers(id),
+                  state text not null check (state in ('active','ending','ended','invalid')),
+                  created_at text not null,
+                  ended_at text
+                );
+                insert into bindings(id, task_id, worker_id, manager_id, state, created_at, ended_at)
+                select id, task_id, worker_id, manager_id, state, created_at, ended_at
+                from bindings_partial;
+                drop table bindings_partial;
+                create unique index if not exists one_active_binding_per_worker
+                  on bindings(worker_id) where state in ('active', 'ending');
+                create unique index if not exists one_active_binding_per_task
+                  on bindings(task_id) where state in ('active', 'ending');
+                """
+            )
+            # IMPORTANT: keep user_version=5; do NOT reset it. That's the bug shape.
+            self.assertEqual(conn.execute("PRAGMA user_version").fetchone()[0], 5)
+            conn.commit()
+            conn.close()
+
+            # Reopen and re-init — must self-heal.
+            conn = worker_db.connect(db_path)
+            worker_db.initialize_database(conn)
+            self.addCleanup(conn.close)
+
+            cols = {row["name"] for row in conn.execute("pragma table_info(bindings)")}
+            self.assertIn("worker_session_id", cols)
+            self.assertIn("manager_session_id", cols)
+
+            indexes = {
+                r["name"]
+                for r in conn.execute(
+                    "select name from sqlite_master where type='index' and tbl_name='bindings'"
+                )
+            }
+            self.assertIn("one_active_binding_per_worker_session", indexes)
+            self.assertIn("one_active_binding_per_manager_session", indexes)
+
+            # Existing binding row must still be there.
+            row = conn.execute(
+                "select worker_id, worker_session_id from bindings where id = 'binding-x'"
+            ).fetchone()
+            self.assertEqual(row["worker_id"], "worker-x")
+            self.assertIsNone(row["worker_session_id"])
+
+
+class RegisterCommandsTests(unittest.TestCase):
+    def open_db(self, tmpdir):
+        path = Path(tmpdir) / "workerctl.db"
+        conn = worker_db.connect(path)
+        worker_db.initialize_database(conn)
+        self.addCleanup(conn.close)
+        return conn
+
+    def test_register_session_inserts_new_worker(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            session_id = worker_db.register_session(
+                conn,
+                name="auth-worker",
+                role="worker",
+                codex_session_path="/path/to/rollout.jsonl",
+                codex_session_id="codex-uuid-1",
+                pid=12345,
+                cwd="/repo",
+                tmux_session="codex-auth-worker",
+                tmux_pane_id="%5",
+            )
+            self.assertTrue(session_id.startswith("session-"))
+            row = conn.execute(
+                "select * from sessions where id = ?", (session_id,)
+            ).fetchone()
+            self.assertEqual(row["name"], "auth-worker")
+            self.assertEqual(row["role"], "worker")
+            self.assertEqual(row["pid"], 12345)
+            self.assertEqual(row["state"], "active")
+
+    def test_register_session_idempotent_on_name(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            id1 = worker_db.register_session(
+                conn, name="w", role="worker", codex_session_path="/a",
+                codex_session_id="u1", pid=1, cwd="/repo",
+            )
+            id2 = worker_db.register_session(
+                conn, name="w", role="worker", codex_session_path="/a",
+                codex_session_id="u1", pid=2, cwd="/repo",
+            )
+            self.assertEqual(id1, id2)
+            row = conn.execute("select pid from sessions where id = ?", (id1,)).fetchone()
+            self.assertEqual(row["pid"], 2)  # pid updated on re-register
+
+    def test_register_session_rejects_role_change(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            worker_db.register_session(
+                conn, name="x", role="worker", codex_session_path="/a",
+                codex_session_id="u1", pid=1, cwd="/repo",
+            )
+            with self.assertRaises(WorkerError):
+                worker_db.register_session(
+                    conn, name="x", role="manager", codex_session_path="/a",
+                    codex_session_id="u1", pid=2, cwd="/repo",
+                )
+
+    def test_register_session_creates_manager_without_tmux(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            session_id = worker_db.register_session(
+                conn, name="m1", role="manager", codex_session_path="/a",
+                codex_session_id="u-m", pid=99, cwd="/repo",
+            )
+            row = conn.execute("select tmux_session, role from sessions where id = ?", (session_id,)).fetchone()
+            self.assertIsNone(row["tmux_session"])
+            self.assertEqual(row["role"], "manager")
+
+    def test_deregister_session_rejects_when_active_binding_exists(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            now = "2026-05-11T00:00:00Z"
+            conn.execute(
+                "insert into tasks(id, name, goal, state, created_at, updated_at) "
+                "values ('task-1', 'tt', 'g', 'managed', ?, ?)",
+                (now, now),
+            )
+            worker_sid = worker_db.register_session(
+                conn, name="w", role="worker", codex_session_path="/a",
+                codex_session_id="u-w", pid=1, cwd="/repo",
+            )
+            manager_sid = worker_db.register_session(
+                conn, name="m", role="manager", codex_session_path="/b",
+                codex_session_id="u-m", pid=2, cwd="/repo",
+            )
+            conn.execute(
+                """
+                insert into bindings(
+                  id, task_id, worker_session_id, manager_session_id, state, created_at
+                )
+                values ('b-1', 'task-1', ?, ?, 'active', ?)
+                """,
+                (worker_sid, manager_sid, now),
+            )
+            with self.assertRaises(WorkerError):
+                worker_db.deregister_session(conn, name="w")
+            with self.assertRaises(WorkerError):
+                worker_db.deregister_session(conn, name="m")
+            # Session state must remain active.
+            row = conn.execute("select state from sessions where name='w'").fetchone()
+            self.assertEqual(row["state"], "active")
+
+    def test_deregister_session_succeeds_when_no_active_binding(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            worker_db.register_session(
+                conn, name="w", role="worker", codex_session_path="/a",
+                codex_session_id="u-w", pid=1, cwd="/repo",
+            )
+            worker_db.deregister_session(conn, name="w")
+            row = conn.execute("select state from sessions where name='w'").fetchone()
+            self.assertEqual(row["state"], "gone")
+
+    def run_cli(self, *args, env_extra=None):
+        # Use the workerctl script directly to exercise the full argparse path.
+        env = os.environ.copy()
+        if env_extra:
+            env.update(env_extra)
+        proc = subprocess.run(
+            [sys.executable, "-m", "workerctl", *args],
+            capture_output=True,
+            text=True,
+            env=env,
+            cwd=str(ROOT),
+        )
+        return proc
+
+    def test_cli_register_worker_with_explicit_session_path(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            rollout = Path(tmpdir) / "rollout-2026-05-11-fake.jsonl"
+            rollout.write_text(json.dumps({
+                "type": "session_meta",
+                "payload": {"id": "fake-uuid", "cwd": str(ROOT), "originator": "codex-tui"},
+            }) + "\n")
+
+            state_dir = Path(tmpdir) / "state"
+            state_dir.mkdir()
+
+            proc = self.run_cli(
+                "register-worker",
+                "--name", "test-w",
+                "--codex-session", str(rollout),
+                "--pid", "12345",
+                "--cwd", str(ROOT),
+                env_extra={"WORKERCTL_STATE_ROOT": str(state_dir)},
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+
+            conn = worker_db.connect(state_dir / "workerctl.db")
+            self.addCleanup(conn.close)
+            row = conn.execute(
+                "select role, pid, codex_session_id from sessions where name='test-w'"
+            ).fetchone()
+            self.assertIsNotNone(row)
+            self.assertEqual(row["role"], "worker")
+            self.assertEqual(row["pid"], 12345)
+            self.assertEqual(row["codex_session_id"], "fake-uuid")
+
+    def test_cli_register_manager_without_tmux(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            rollout = Path(tmpdir) / "rollout-fake-mgr.jsonl"
+            rollout.write_text(json.dumps({
+                "type": "session_meta",
+                "payload": {"id": "mgr-uuid", "cwd": str(ROOT), "originator": "codex-tui"},
+            }) + "\n")
+            state_dir = Path(tmpdir) / "state"
+            state_dir.mkdir()
+
+            proc = self.run_cli(
+                "register-manager",
+                "--name", "test-m",
+                "--codex-session", str(rollout),
+                "--pid", "99999",
+                "--cwd", str(ROOT),
+                env_extra={"WORKERCTL_STATE_ROOT": str(state_dir)},
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+
+            conn = worker_db.connect(state_dir / "workerctl.db")
+            self.addCleanup(conn.close)
+            row = conn.execute(
+                "select role, tmux_session, codex_session_id from sessions where name='test-m'"
+            ).fetchone()
+            self.assertEqual(row["role"], "manager")
+            self.assertIsNone(row["tmux_session"])
+            self.assertEqual(row["codex_session_id"], "mgr-uuid")
+
+    def test_cli_sessions_lists_registered(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            rollout = Path(tmpdir) / "r.jsonl"
+            rollout.write_text(json.dumps({
+                "type": "session_meta",
+                "payload": {"id": "u1", "cwd": str(ROOT), "originator": "codex-tui"},
+            }) + "\n")
+            state_dir = Path(tmpdir) / "state"
+            state_dir.mkdir()
+            env = {"WORKERCTL_STATE_ROOT": str(state_dir)}
+
+            self.run_cli("register-worker", "--name", "w", "--codex-session", str(rollout),
+                         "--pid", "1", "--cwd", str(ROOT), env_extra=env)
+            self.run_cli("register-manager", "--name", "m", "--codex-session", str(rollout),
+                         "--pid", "2", "--cwd", str(ROOT), env_extra=env)
+
+            proc = self.run_cli("sessions", env_extra=env)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            rows = json.loads(proc.stdout)
+            names = {r["name"] for r in rows}
+            self.assertEqual(names, {"w", "m"})
+
+    def test_cli_deregister_marks_gone(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            rollout = Path(tmpdir) / "r.jsonl"
+            rollout.write_text(json.dumps({
+                "type": "session_meta",
+                "payload": {"id": "u1", "cwd": str(ROOT), "originator": "codex-tui"},
+            }) + "\n")
+            state_dir = Path(tmpdir) / "state"
+            state_dir.mkdir()
+            env = {"WORKERCTL_STATE_ROOT": str(state_dir)}
+
+            self.run_cli("register-worker", "--name", "w", "--codex-session", str(rollout),
+                         "--pid", "1", "--cwd", str(ROOT), env_extra=env)
+            proc = self.run_cli("deregister", "w", env_extra=env)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+
+            conn = worker_db.connect(state_dir / "workerctl.db")
+            self.addCleanup(conn.close)
+            row = conn.execute("select state from sessions where name='w'").fetchone()
+            self.assertEqual(row["state"], "gone")
+
+    def test_cli_register_worker_bad_rollout_path_returns_clean_error(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_dir = Path(tmpdir) / "state"
+            state_dir.mkdir()
+            bogus = Path(tmpdir) / "does-not-exist.jsonl"
+
+            proc = self.run_cli(
+                "register-worker",
+                "--name", "x",
+                "--codex-session", str(bogus),
+                "--pid", "1",
+                env_extra={"WORKERCTL_STATE_ROOT": str(state_dir)},
+            )
+            self.assertEqual(proc.returncode, 1)
+            self.assertNotIn("Traceback", proc.stderr)
+            self.assertIn("workerctl:", proc.stderr)
+
+
+class BindCommandTests(unittest.TestCase):
+    def open_db(self, tmpdir):
+        path = Path(tmpdir) / "workerctl.db"
+        conn = worker_db.connect(path)
+        worker_db.initialize_database(conn)
+        self.addCleanup(conn.close)
+        return conn
+
+    def setup_pair(self, conn):
+        now = "2026-05-11T00:00:00Z"
+        conn.execute(
+            "insert into tasks(id, name, goal, state, created_at, updated_at) "
+            "values ('task-1', 'auth-refactor', 'g', 'candidate', ?, ?)",
+            (now, now),
+        )
+        worker_db.register_session(
+            conn, name="w1", role="worker", codex_session_path="/a",
+            codex_session_id="cuid-w", pid=1, cwd="/repo",
+        )
+        worker_db.register_session(
+            conn, name="m1", role="manager", codex_session_path="/b",
+            codex_session_id="cuid-m", pid=2, cwd="/repo",
+        )
+
+    def test_bind_sessions_creates_active_binding(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self.setup_pair(conn)
+            binding_id = worker_db.bind_sessions(
+                conn,
+                task_name="auth-refactor",
+                worker_session_name="w1",
+                manager_session_name="m1",
+            )
+            self.assertTrue(binding_id.startswith("binding-"))
+            row = conn.execute(
+                "select * from bindings where id = ?", (binding_id,)
+            ).fetchone()
+            self.assertEqual(row["state"], "active")
+            self.assertEqual(row["task_id"], "task-1")
+            self.assertIsNotNone(row["worker_session_id"])
+            self.assertIsNotNone(row["manager_session_id"])
+            self.assertIsNone(row["worker_id"])
+            self.assertIsNone(row["manager_id"])
+
+    def test_bind_sessions_rejects_double_bind_same_task(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self.setup_pair(conn)
+            worker_db.bind_sessions(
+                conn, task_name="auth-refactor",
+                worker_session_name="w1", manager_session_name="m1",
+            )
+            worker_db.register_session(
+                conn, name="m2", role="manager", codex_session_path="/c",
+                codex_session_id="cuid-m2", pid=3, cwd="/repo",
+            )
+            with self.assertRaises(WorkerError):
+                worker_db.bind_sessions(
+                    conn, task_name="auth-refactor",
+                    worker_session_name="w1", manager_session_name="m2",
+                )
+
+    def test_bind_sessions_rejects_role_mismatch(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self.setup_pair(conn)
+            with self.assertRaises(WorkerError):
+                worker_db.bind_sessions(
+                    conn, task_name="auth-refactor",
+                    worker_session_name="m1",  # wrong role
+                    manager_session_name="w1",
+                )
+
+    def test_unbind_task_ends_active_binding(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self.setup_pair(conn)
+            binding_id = worker_db.bind_sessions(
+                conn, task_name="auth-refactor",
+                worker_session_name="w1", manager_session_name="m1",
+            )
+            worker_db.unbind_task(conn, task_name="auth-refactor")
+            row = conn.execute(
+                "select state, ended_at from bindings where id = ?", (binding_id,)
+            ).fetchone()
+            self.assertEqual(row["state"], "ended")
+            self.assertIsNotNone(row["ended_at"])
+
+    def test_bind_sessions_rejects_already_bound_worker(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self.setup_pair(conn)
+            now = "2026-05-11T00:00:00Z"
+            conn.execute(
+                "insert into tasks(id, name, goal, state, created_at, updated_at) "
+                "values ('task-2', 'second-task', 'g', 'candidate', ?, ?)",
+                (now, now),
+            )
+            worker_db.register_session(
+                conn, name="m2", role="manager", codex_session_path="/c",
+                codex_session_id="cuid-m2", pid=3, cwd="/repo",
+            )
+            worker_db.bind_sessions(
+                conn, task_name="auth-refactor",
+                worker_session_name="w1", manager_session_name="m1",
+            )
+            with self.assertRaises(WorkerError) as ctx:
+                worker_db.bind_sessions(
+                    conn, task_name="second-task",
+                    worker_session_name="w1",  # already bound to auth-refactor
+                    manager_session_name="m2",
+                )
+            self.assertIn("worker session", str(ctx.exception))
+            self.assertIn("w1", str(ctx.exception))
+
+    def test_bind_sessions_rejects_already_bound_manager(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self.setup_pair(conn)
+            now = "2026-05-11T00:00:00Z"
+            conn.execute(
+                "insert into tasks(id, name, goal, state, created_at, updated_at) "
+                "values ('task-2', 'second-task', 'g', 'candidate', ?, ?)",
+                (now, now),
+            )
+            worker_db.register_session(
+                conn, name="w2", role="worker", codex_session_path="/c",
+                codex_session_id="cuid-w2", pid=3, cwd="/repo",
+            )
+            worker_db.bind_sessions(
+                conn, task_name="auth-refactor",
+                worker_session_name="w1", manager_session_name="m1",
+            )
+            with self.assertRaises(WorkerError) as ctx:
+                worker_db.bind_sessions(
+                    conn, task_name="second-task",
+                    worker_session_name="w2",
+                    manager_session_name="m1",  # already bound to auth-refactor
+                )
+            self.assertIn("manager session", str(ctx.exception))
+            self.assertIn("m1", str(ctx.exception))
+
+    def run_cli(self, *args, env_extra=None):
+        env = os.environ.copy()
+        if env_extra:
+            env.update(env_extra)
+        return subprocess.run(
+            [sys.executable, "-m", "workerctl", *args],
+            capture_output=True, text=True, env=env, cwd=str(ROOT),
+        )
+
+    def _setup_state_dir(self, tmpdir):
+        rollout = Path(tmpdir) / "r.jsonl"
+        rollout.write_text(json.dumps({
+            "type": "session_meta",
+            "payload": {"id": "u1", "cwd": str(ROOT), "originator": "codex-tui"},
+        }) + "\n")
+        state_dir = Path(tmpdir) / "state"
+        state_dir.mkdir()
+        env = {"WORKERCTL_STATE_ROOT": str(state_dir)}
+        return rollout, state_dir, env
+
+    def test_cli_bind_creates_binding(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            rollout, state_dir, env = self._setup_state_dir(tmpdir)
+
+            self.run_cli("register-worker", "--name", "w", "--codex-session", str(rollout),
+                         "--pid", "1", "--cwd", str(ROOT), env_extra=env)
+            self.run_cli("register-manager", "--name", "m", "--codex-session", str(rollout),
+                         "--pid", "2", "--cwd", str(ROOT), env_extra=env)
+            self.run_cli("tasks", "--create", "myTask", "--goal", "do the thing", env_extra=env)
+
+            proc = self.run_cli(
+                "bind", "--task", "myTask", "--worker", "w", "--manager", "m",
+                env_extra=env,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            payload = json.loads(proc.stdout)
+            self.assertTrue(payload["binding_id"].startswith("binding-"))
+
+            conn = worker_db.connect(state_dir / "workerctl.db")
+            self.addCleanup(conn.close)
+            row = conn.execute(
+                "select state, worker_session_id, manager_session_id from bindings "
+                "where id = ?", (payload["binding_id"],),
+            ).fetchone()
+            self.assertEqual(row["state"], "active")
+            self.assertIsNotNone(row["worker_session_id"])
+            self.assertIsNotNone(row["manager_session_id"])
+
+    def test_cli_unbind_ends_binding(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            rollout, state_dir, env = self._setup_state_dir(tmpdir)
+
+            self.run_cli("register-worker", "--name", "w", "--codex-session", str(rollout),
+                         "--pid", "1", "--cwd", str(ROOT), env_extra=env)
+            self.run_cli("register-manager", "--name", "m", "--codex-session", str(rollout),
+                         "--pid", "2", "--cwd", str(ROOT), env_extra=env)
+            self.run_cli("tasks", "--create", "myTask", "--goal", "do it", env_extra=env)
+            self.run_cli("bind", "--task", "myTask", "--worker", "w", "--manager", "m", env_extra=env)
+
+            proc = self.run_cli("unbind", "--task", "myTask", env_extra=env)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            conn = worker_db.connect(state_dir / "workerctl.db")
+            self.addCleanup(conn.close)
+            row = conn.execute(
+                "select state from bindings where task_id=(select id from tasks where name='myTask')"
+            ).fetchone()
+            self.assertEqual(row["state"], "ended")
+
+    def test_cli_bind_event_is_linked_to_task(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            rollout, state_dir, env = self._setup_state_dir(tmpdir)
+
+            self.run_cli("register-worker", "--name", "w", "--codex-session", str(rollout),
+                         "--pid", "1", "--cwd", str(ROOT), env_extra=env)
+            self.run_cli("register-manager", "--name", "m", "--codex-session", str(rollout),
+                         "--pid", "2", "--cwd", str(ROOT), env_extra=env)
+            self.run_cli("tasks", "--create", "evtTask", "--goal", "g", env_extra=env)
+            self.run_cli("bind", "--task", "evtTask", "--worker", "w", "--manager", "m", env_extra=env)
+            self.run_cli("unbind", "--task", "evtTask", env_extra=env)
+
+            conn = worker_db.connect(state_dir / "workerctl.db")
+            self.addCleanup(conn.close)
+            task_id = conn.execute("select id from tasks where name='evtTask'").fetchone()["id"]
+            event_types = [
+                r["type"]
+                for r in conn.execute(
+                    "select type from events where task_id = ? order by id", (task_id,)
+                )
+            ]
+            self.assertIn("binding_created", event_types)
+            self.assertIn("binding_ended", event_types)
+
+
 if __name__ == "__main__":
     unittest.main()
