@@ -8061,6 +8061,124 @@ class SuperviseCycleTests(unittest.TestCase):
             self.assertNotIn("state unknown", joined,
                              f"replay used generic fallback: {cycle_summaries!r}")
 
+    def test_run_cycle_includes_pane_signal_when_tmux_attached(self):
+        from workerctl import supervise_cycle
+        from workerctl import tmux as worker_tmux
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            # Register worker with tmux_session populated so pane signal can resolve.
+            rollout = Path(tmpdir) / "rollout.jsonl"
+            rollout.write_text("".join(json.dumps(e) + "\n" for e in [
+                {"type": "session_meta", "payload": {"id": "u-w", "cwd": "/r"}},
+                {"timestamp": "2026-05-11T14:32:11Z",
+                 "type": "event_msg",
+                 "payload": {"type": "task_started"}},
+            ]))
+            now = "2026-05-11T00:00:00Z"
+            conn.execute(
+                "insert into tasks(id, name, goal, state, created_at, updated_at) "
+                "values ('task-1', 't', 'g', 'candidate', ?, ?)",
+                (now, now),
+            )
+            worker_db.register_session(
+                conn, name="w", role="worker",
+                codex_session_path=str(rollout),
+                codex_session_id="u-w", pid=1, cwd="/r",
+                tmux_session="codex-w", tmux_pane_id="%5",
+            )
+            worker_db.register_session(
+                conn, name="m", role="manager",
+                codex_session_path=str(rollout),
+                codex_session_id="u-m", pid=2, cwd="/r",
+            )
+            worker_db.bind_sessions(
+                conn, task_name="t",
+                worker_session_name="w", manager_session_name="m",
+            )
+            conn.commit()
+
+            # Stub the pane capture to return a trust-prompt-bearing string.
+            original = worker_tmux.capture_tmux_target
+            worker_tmux.capture_tmux_target = (
+                lambda target, lines=100:
+                "$ codex\nDo you trust the contents of this directory? (y/n)\n"
+            )
+            try:
+                result = supervise_cycle.run_cycle(
+                    conn, task_name="t", now="2026-05-11T14:33:50Z",
+                )
+            finally:
+                worker_tmux.capture_tmux_target = original
+
+            self.assertEqual(result["state"], "busy")
+            self.assertEqual(result["notable_pane_pattern"], "trust_prompt")
+            self.assertIsNotNone(result["pane_signal"])
+            self.assertEqual(result["pane_signal"]["captured"], True)
+            self.assertEqual(result["pane_signal"]["notable_pattern"], "trust_prompt")
+
+    def test_run_cycle_pane_signal_none_when_session_has_no_tmux(self):
+        """Manager-style sessions registered without --tmux-session should yield
+        a non-captured pane_signal but the cycle still succeeds with JSON state."""
+        from workerctl import supervise_cycle
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self._setup_bound_task(conn, tmpdir, [
+                {"type": "session_meta", "payload": {"id": "u-w", "cwd": "/r"}},
+                {"timestamp": "2026-05-11T14:32:11Z",
+                 "type": "event_msg",
+                 "payload": {"type": "task_complete"}},
+            ])
+            # _setup_bound_task registers worker WITHOUT tmux_session.
+            result = supervise_cycle.run_cycle(
+                conn, task_name="t", now="2026-05-11T14:33:00Z",
+            )
+            self.assertEqual(result["state"], "idle")
+            self.assertIsNone(result["notable_pane_pattern"])
+            self.assertIsNotNone(result["pane_signal"])
+            self.assertEqual(result["pane_signal"]["captured"], False)
+            self.assertEqual(result["pane_signal"]["reason"], "no tmux session attached")
+
+    def test_run_cycle_pane_signal_swallows_capture_errors(self):
+        """A tmux capture exception must not abort the cycle."""
+        from workerctl import supervise_cycle
+        from workerctl import tmux as worker_tmux
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            # Re-use _setup_bound_task but then patch the worker session row to
+            # add a tmux_session, so pane_signal tries to capture.
+            self._setup_bound_task(conn, tmpdir, [
+                {"type": "session_meta", "payload": {"id": "u-w", "cwd": "/r"}},
+                {"timestamp": "2026-05-11T14:32:11Z",
+                 "type": "event_msg",
+                 "payload": {"type": "task_complete"}},
+            ])
+            conn.execute(
+                "update sessions set tmux_session = 'codex-w', tmux_pane_id = '%5' "
+                "where name = 'w'"
+            )
+            conn.commit()
+
+            original = worker_tmux.capture_tmux_target
+
+            def boom(target, lines=100):
+                raise RuntimeError("tmux server went away")
+
+            worker_tmux.capture_tmux_target = boom
+            try:
+                result = supervise_cycle.run_cycle(
+                    conn, task_name="t", now="2026-05-11T14:33:00Z",
+                )
+            finally:
+                worker_tmux.capture_tmux_target = original
+
+            self.assertEqual(result["state"], "idle")
+            self.assertEqual(result["pane_signal"]["captured"], False)
+            self.assertIn("tmux server went away", result["pane_signal"]["reason"])
+            self.assertIsNone(result["notable_pane_pattern"])
+
 
 class CycleCliTests(unittest.TestCase):
     def run_cli(self, *args, env_extra=None):

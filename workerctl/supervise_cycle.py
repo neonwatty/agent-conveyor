@@ -6,6 +6,7 @@ from typing import Any
 
 from workerctl import db as worker_db
 from workerctl import ingest as worker_ingest
+from workerctl import shadow_state as worker_shadow
 from workerctl.core import now_iso
 
 
@@ -27,9 +28,13 @@ def run_cycle(
     The returned dict has stable keys: `kind` (always "session_cycle", a shape
     discriminator that `replay.py` branches on), `task`, `binding_id`,
     `worker_session`, `manager_session`, `ingest` ({new_events, new_offset}),
-    `state`, `last_state_event_at`, `staleness_seconds`, `cycle_id`,
-    `cycle_started_at`, `cycle_completed_at`. Phase 3 supervision consumers
-    depend on these names.
+    `state`, `last_state_event_at`, `staleness_seconds`, `pane_signal`,
+    `notable_pane_pattern`, `cycle_id`, `cycle_started_at`, `cycle_completed_at`.
+    Phase 3 supervision consumers depend on these names. `pane_signal` is a
+    best-effort shadow signal from `classify_busy_wait` against the worker's
+    tmux pane (None-shaped when no tmux session is attached or capture failed).
+    `notable_pane_pattern` is a top-level shortcut to `pane_signal['notable_pattern']`
+    for easy filtering and replay-summary rendering.
 
     On any exception during ingest / state inference / cycle-row write, the
     function rolls back uncommitted writes, records a `state='failed'` row in
@@ -60,6 +65,25 @@ def run_cycle(
         staleness = worker_ingest.session_staleness_seconds(
             conn, session_id=binding["worker_session_id"], now=started_at,
         )
+
+        # Phase 4 shadow signal — best-effort pane-pattern detection alongside the
+        # JSON state. Wrapped in try/except so any classifier or capture failure does
+        # not abort the cycle (the pane signal is supplementary, not load-bearing).
+        try:
+            pane_signal = worker_shadow.pane_signal_for_session(
+                conn,
+                session_id=binding["worker_session_id"],
+                now=started_at,
+            )
+        except Exception as exc:  # pragma: no cover — defensive belt-and-suspenders
+            pane_signal = {
+                "captured": False,
+                "classifier": None,
+                "notable_pattern": None,
+                "status_age_seconds": None,
+                "reason": f"pane_signal_for_session raised: {exc}",
+            }
+        notable_pane_pattern = pane_signal.get("notable_pattern")
     except Exception as exc:
         # Discard any partial inserts (e.g. codex_events from a half-finished
         # ingest_session call) before committing the audit row, so re-running
@@ -111,6 +135,8 @@ def run_cycle(
         "state": state,
         "last_state_event_at": last_state_event_at,
         "staleness_seconds": staleness,
+        "pane_signal": pane_signal,
+        "notable_pane_pattern": notable_pane_pattern,
     }
     cursor = conn.execute(
         """
