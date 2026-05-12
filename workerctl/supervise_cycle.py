@@ -6,7 +6,7 @@ from typing import Any
 
 from workerctl import db as worker_db
 from workerctl import ingest as worker_ingest
-from workerctl.core import WorkerError, now_iso
+from workerctl.core import now_iso
 
 
 def run_cycle(
@@ -36,11 +36,40 @@ def run_cycle(
     started_at = now or now_iso()
     binding = worker_db.active_binding_for_task(conn, task_name=task_name)
 
-    ingest_result = worker_ingest.ingest_session(
-        conn,
-        session_name=binding["worker_session_name"],
-        now=started_at,
-    )
+    try:
+        ingest_result = worker_ingest.ingest_session(
+            conn,
+            session_name=binding["worker_session_name"],
+            now=started_at,
+        )
+    except worker_ingest.IngestError as exc:
+        # Record the failed attempt so the audit trail is preserved before propagating.
+        completed_at = now_iso()
+        failure_status = {
+            "kind": "session_cycle",
+            "task": task_name,
+            "binding_id": binding["binding_id"],
+            "worker_session": binding["worker_session_name"],
+            "manager_session": binding["manager_session_name"],
+        }
+        conn.execute(
+            """
+            insert into manager_cycles(
+              task_id, started_at, completed_at, state, status_json, error
+            )
+            values (?, ?, ?, 'failed', ?, ?)
+            """,
+            (
+                binding["task_id"],
+                started_at,
+                completed_at,
+                json.dumps(failure_status, sort_keys=True, default=str),
+                str(exc),
+            ),
+        )
+        conn.commit()
+        raise
+
     state = worker_ingest.current_state(
         conn, session_id=binding["worker_session_id"],
     )
@@ -53,6 +82,7 @@ def run_cycle(
 
     completed_at = now_iso()
     status_payload = {
+        "kind": "session_cycle",
         "task": task_name,
         "binding_id": binding["binding_id"],
         "worker_session": binding["worker_session_name"],

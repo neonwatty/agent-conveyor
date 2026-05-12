@@ -7753,6 +7753,74 @@ class SuperviseCycleTests(unittest.TestCase):
             self.assertIsNone(result["last_state_event_at"])
             self.assertIsNone(result["staleness_seconds"])
 
+    def test_run_cycle_records_failed_row_on_ingest_error(self):
+        from workerctl import supervise_cycle
+        from workerctl.ingest import IngestError
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            # Build binding pointing at a rollout that does NOT exist on disk.
+            now = "2026-05-11T00:00:00Z"
+            conn.execute(
+                "insert into tasks(id, name, goal, state, created_at, updated_at) "
+                "values ('task-1', 't', 'g', 'candidate', ?, ?)",
+                (now, now),
+            )
+            worker_db.register_session(
+                conn, name="w", role="worker",
+                codex_session_path=str(Path(tmpdir) / "does-not-exist.jsonl"),
+                codex_session_id="u-w", pid=1, cwd="/r",
+            )
+            worker_db.register_session(
+                conn, name="m", role="manager",
+                codex_session_path="/m",
+                codex_session_id="u-m", pid=2, cwd="/r",
+            )
+            worker_db.bind_sessions(
+                conn, task_name="t",
+                worker_session_name="w", manager_session_name="m",
+            )
+            conn.commit()
+
+            with self.assertRaises(IngestError):
+                supervise_cycle.run_cycle(
+                    conn, task_name="t", now="2026-05-11T14:32:15Z",
+                )
+
+            # Failed row must be present for audit.
+            row = conn.execute(
+                "select state, status_json, error from manager_cycles "
+                "where task_id = 'task-1' order by id desc limit 1"
+            ).fetchone()
+            self.assertIsNotNone(row)
+            self.assertEqual(row["state"], "failed")
+            self.assertIsNotNone(row["error"])
+            status = json.loads(row["status_json"])
+            self.assertEqual(status["kind"], "session_cycle")
+            self.assertEqual(status["worker_session"], "w")
+
+    def test_run_cycle_succeeded_row_has_kind_discriminator(self):
+        from workerctl import supervise_cycle
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self._setup_bound_task(conn, tmpdir, [
+                {"type": "session_meta", "payload": {"id": "u-w", "cwd": "/r"}},
+                {"timestamp": "2026-05-11T14:32:11Z",
+                 "type": "event_msg",
+                 "payload": {"type": "task_complete"}},
+            ])
+            result = supervise_cycle.run_cycle(
+                conn, task_name="t", now="2026-05-11T14:33:00Z",
+            )
+            self.assertEqual(result["kind"], "session_cycle")
+            row = conn.execute(
+                "select status_json from manager_cycles where id = ?",
+                (result["cycle_id"],),
+            ).fetchone()
+            status = json.loads(row["status_json"])
+            self.assertEqual(status["kind"], "session_cycle")
+
 
 if __name__ == "__main__":
     unittest.main()
