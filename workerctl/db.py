@@ -12,11 +12,12 @@ from workerctl.core import now_iso
 from workerctl.state import state_root
 
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 REQUIRED_TABLES = {
     "agent_observations",
     "bindings",
     "budgets",
+    "codex_events",
     "commands",
     "data_migrations",
     "events",
@@ -34,6 +35,7 @@ REQUIRED_TABLES = {
     "workers",
 }
 REQUIRED_INDEXES = {
+    "codex_events_session_id",
     "commands_task_state_created",
     "events_task_id",
     "one_active_binding_per_task",
@@ -307,6 +309,17 @@ def migrate(conn: sqlite3.Connection, from_version: int) -> None:
           payload_json text not null check (json_valid(payload_json))
         );
 
+        create table if not exists codex_events(
+          id integer primary key autoincrement,
+          session_id text not null references sessions(id),
+          timestamp text not null,
+          type text not null,
+          subtype text,
+          payload_json text not null check (json_valid(payload_json)),
+          byte_offset integer not null,
+          ingested_at text not null
+        );
+
         create table if not exists sessions(
           id text primary key,
           name text unique not null,
@@ -337,6 +350,9 @@ def migrate(conn: sqlite3.Connection, from_version: int) -> None:
 
         create index if not exists events_task_id
         on events(task_id, id);
+
+        create index if not exists codex_events_session_id
+        on codex_events(session_id, id);
 
         create index if not exists commands_task_state_created
         on commands(task_id, state, created_at);
@@ -377,6 +393,8 @@ def migrate(conn: sqlite3.Connection, from_version: int) -> None:
     # like the one observed when sessions table was added under a separate commit
     # before the bindings rebuild logic existed.
     migrate_to_v5_sessions(conn)
+    # Phase 2 invariant repair. Always runs; the inner check makes it idempotent.
+    migrate_to_v6_codex_events(conn)
     sync_worker_ids_to_config_files(conn)
     conn.execute(
         "insert or ignore into schema_migrations(version, applied_at) values (?, ?)",
@@ -557,6 +575,13 @@ def migrate_to_v5_sessions(conn: sqlite3.Connection) -> None:
         on bindings(manager_session_id) where state in ('active', 'ending');
         """
     )
+
+
+def migrate_to_v6_codex_events(conn: sqlite3.Connection) -> None:
+    """Add `last_ingest_offset` column to `sessions` if missing. Idempotent."""
+    existing_cols = {row["name"] for row in conn.execute("pragma table_info(sessions)")}
+    if "last_ingest_offset" not in existing_cols:
+        conn.execute("alter table sessions add column last_ingest_offset integer")
 
 
 def sync_worker_ids_to_config_files(conn: sqlite3.Connection) -> None:

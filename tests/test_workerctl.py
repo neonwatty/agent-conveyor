@@ -6013,8 +6013,13 @@ class SessionsSchemaTests(unittest.TestCase):
                   on bindings(task_id) where state in ('active', 'ending');
                 """
             )
-            # IMPORTANT: keep user_version=5; do NOT reset it. That's the bug shape.
-            self.assertEqual(conn.execute("PRAGMA user_version").fetchone()[0], 5)
+            # IMPORTANT: keep user_version at SCHEMA_VERSION; do NOT reset it.
+            # That's the bug shape — version pragma claims fully migrated but bindings
+            # are still v4-shaped.
+            self.assertEqual(
+                conn.execute("PRAGMA user_version").fetchone()[0],
+                worker_db.SCHEMA_VERSION,
+            )
             conn.commit()
             conn.close()
 
@@ -6528,6 +6533,125 @@ class BindCommandTests(unittest.TestCase):
             ]
             self.assertIn("binding_created", event_types)
             self.assertIn("binding_ended", event_types)
+
+
+class CodexEventsSchemaTests(unittest.TestCase):
+    def open_db(self, tmpdir):
+        path = Path(tmpdir) / "workerctl.db"
+        conn = worker_db.connect(path)
+        worker_db.initialize_database(conn)
+        self.addCleanup(conn.close)
+        return conn
+
+    def test_codex_events_table_exists(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            tables = {
+                row["name"]
+                for row in conn.execute("select name from sqlite_master where type='table'")
+            }
+            self.assertIn("codex_events", tables)
+
+    def test_codex_events_columns(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            cols = {row["name"] for row in conn.execute("pragma table_info(codex_events)")}
+            expected = {"id", "session_id", "timestamp", "type", "subtype",
+                        "payload_json", "byte_offset", "ingested_at"}
+            self.assertTrue(expected <= cols, f"missing: {expected - cols}")
+
+    def test_codex_events_fk_to_sessions_enforced(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            with self.assertRaises(sqlite3.IntegrityError):
+                conn.execute(
+                    """
+                    insert into codex_events(
+                      session_id, timestamp, type, payload_json, byte_offset, ingested_at
+                    )
+                    values ('does-not-exist', '2026-05-11T00:00:00Z', 'event_msg',
+                            '{}', 0, '2026-05-11T00:00:00Z')
+                    """
+                )
+
+    def test_sessions_has_last_ingest_offset_column(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            cols = {row["name"] for row in conn.execute("pragma table_info(sessions)")}
+            self.assertIn("last_ingest_offset", cols)
+
+    def test_codex_events_session_id_index_exists(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            indexes = {
+                r["name"] for r in conn.execute(
+                    "select name from sqlite_master where type='index' and tbl_name='codex_events'"
+                )
+            }
+            self.assertIn("codex_events_session_id", indexes)
+
+    def test_migrate_to_v6_adds_last_ingest_offset_to_existing_sessions(self):
+        """Simulate a v5 DB without `last_ingest_offset` column; verify the v6 migration
+        adds the column without losing existing session rows."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            conn = worker_db.connect(db_path)
+            worker_db.initialize_database(conn)
+            now = "2026-05-11T00:00:00Z"
+            worker_db.register_session(
+                conn, name="w", role="worker", codex_session_path="/a",
+                codex_session_id="cuid-w", pid=1, cwd="/repo",
+            )
+            conn.commit()
+
+            # Degrade to v5 shape: drop last_ingest_offset column via rebuild.
+            conn.executescript(
+                """
+                alter table sessions rename to sessions_v5;
+                create table sessions(
+                  id text primary key,
+                  name text unique not null,
+                  role text not null check (role in ('worker','manager')),
+                  identity_token text unique not null,
+                  tmux_session text,
+                  tmux_pane_id text,
+                  codex_session_path text,
+                  codex_session_id text,
+                  pid integer,
+                  cwd text not null,
+                  registered_at text not null,
+                  last_heartbeat_at text,
+                  state text not null check (state in ('active','gone'))
+                );
+                insert into sessions(
+                  id, name, role, identity_token,
+                  tmux_session, tmux_pane_id,
+                  codex_session_path, codex_session_id, pid,
+                  cwd, registered_at, last_heartbeat_at, state
+                )
+                select id, name, role, identity_token,
+                       tmux_session, tmux_pane_id,
+                       codex_session_path, codex_session_id, pid,
+                       cwd, registered_at, last_heartbeat_at, state
+                from sessions_v5;
+                drop table sessions_v5;
+                """
+            )
+            conn.execute("PRAGMA user_version = 5")
+            conn.commit()
+            conn.close()
+
+            # Reopen — must self-heal.
+            conn = worker_db.connect(db_path)
+            worker_db.initialize_database(conn)
+            self.addCleanup(conn.close)
+
+            cols = {row["name"] for row in conn.execute("pragma table_info(sessions)")}
+            self.assertIn("last_ingest_offset", cols)
+
+            row = conn.execute("select id, last_ingest_offset from sessions where name='w'").fetchone()
+            self.assertIsNotNone(row)
+            self.assertIsNone(row["last_ingest_offset"])  # NULL means "not yet ingested"
 
 
 if __name__ == "__main__":
