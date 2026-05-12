@@ -755,13 +755,6 @@ def command_capture(args: argparse.Namespace) -> int:
     return 0
 
 
-def command_tail(args: argparse.Namespace) -> int:
-    output = capture_output(args.name, args.lines)
-    lines = output.splitlines()
-    print("\n".join(lines[-args.lines :]))
-    return 0
-
-
 def command_status(args: argparse.Namespace) -> int:
     config = require_worker(args.name)
     running = session_exists(args.name)
@@ -2745,6 +2738,59 @@ def command_sessions(args: argparse.Namespace) -> int:
     finally:
         conn.close()
     print(json.dumps(rows, indent=2, sort_keys=True, default=str))
+    return 0
+
+
+def command_ingest(args: argparse.Namespace) -> int:
+    from workerctl import db as worker_db
+    from workerctl import ingest as worker_ingest
+
+    conn = worker_db.connect()
+    worker_db.initialize_database(conn)
+    try:
+        result = worker_ingest.ingest_session(conn, session_name=args.name)
+    finally:
+        conn.close()
+    print(json.dumps({"session": args.name, **result}, indent=2, sort_keys=True))
+    return 0
+
+
+def command_tail(args: argparse.Namespace) -> int:
+    """Print the most recent codex_events for a session as JSON, newest first.
+
+    Output is a JSON list of dicts with stable keys:
+      - `id`: int, autoincrement event id
+      - `timestamp`: str, ISO timestamp from the codex rollout (or ingest time fallback)
+      - `type`: str, top-level record type (session_meta, event_msg, response_item, ...)
+      - `subtype`: str | None, inner payload type for event_msg, else null
+      - `byte_offset`: int, absolute byte offset of this record in the rollout file
+      - `payload`: dict, the raw payload object from the rollout
+
+    Phase 3 supervision consumes this shape; do not break the keys without coordination.
+    """
+    from workerctl import db as worker_db
+
+    conn = worker_db.connect()
+    worker_db.initialize_database(conn)
+    try:
+        session = worker_db.session_row(conn, name=args.name)
+        rows = worker_db.latest_codex_events_for_session(
+            conn, session_id=session["id"], limit=args.limit, subtype=args.subtype,
+        )
+    finally:
+        conn.close()
+    events = [
+        {
+            "id": r["id"],
+            "timestamp": r["timestamp"],
+            "type": r["type"],
+            "subtype": r["subtype"],
+            "byte_offset": r["byte_offset"],
+            "payload": json.loads(r["payload_json"]),
+        }
+        for r in rows
+    ]
+    print(json.dumps(events, indent=2, sort_keys=True, default=str))
     return 0
 
 

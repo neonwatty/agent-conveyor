@@ -12,11 +12,12 @@ from workerctl.core import now_iso
 from workerctl.state import state_root
 
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 REQUIRED_TABLES = {
     "agent_observations",
     "bindings",
     "budgets",
+    "codex_events",
     "commands",
     "data_migrations",
     "events",
@@ -34,6 +35,7 @@ REQUIRED_TABLES = {
     "workers",
 }
 REQUIRED_INDEXES = {
+    "codex_events_session_id",
     "commands_task_state_created",
     "events_task_id",
     "one_active_binding_per_task",
@@ -307,6 +309,17 @@ def migrate(conn: sqlite3.Connection, from_version: int) -> None:
           payload_json text not null check (json_valid(payload_json))
         );
 
+        create table if not exists codex_events(
+          id integer primary key autoincrement,
+          session_id text not null references sessions(id),
+          timestamp text not null,
+          type text not null,
+          subtype text,
+          payload_json text not null check (json_valid(payload_json)),
+          byte_offset integer not null,
+          ingested_at text not null
+        );
+
         create table if not exists sessions(
           id text primary key,
           name text unique not null,
@@ -337,6 +350,9 @@ def migrate(conn: sqlite3.Connection, from_version: int) -> None:
 
         create index if not exists events_task_id
         on events(task_id, id);
+
+        create index if not exists codex_events_session_id
+        on codex_events(session_id, id);
 
         create index if not exists commands_task_state_created
         on commands(task_id, state, created_at);
@@ -377,6 +393,8 @@ def migrate(conn: sqlite3.Connection, from_version: int) -> None:
     # like the one observed when sessions table was added under a separate commit
     # before the bindings rebuild logic existed.
     migrate_to_v5_sessions(conn)
+    # Phase 2 invariant repair. Always runs; the inner check makes it idempotent.
+    migrate_to_v6_codex_events(conn)
     sync_worker_ids_to_config_files(conn)
     conn.execute(
         "insert or ignore into schema_migrations(version, applied_at) values (?, ?)",
@@ -557,6 +575,13 @@ def migrate_to_v5_sessions(conn: sqlite3.Connection) -> None:
         on bindings(manager_session_id) where state in ('active', 'ending');
         """
     )
+
+
+def migrate_to_v6_codex_events(conn: sqlite3.Connection) -> None:
+    """Add `last_ingest_offset` column to `sessions` if missing. Idempotent."""
+    existing_cols = {row["name"] for row in conn.execute("pragma table_info(sessions)")}
+    if "last_ingest_offset" not in existing_cols:
+        conn.execute("alter table sessions add column last_ingest_offset integer")
 
 
 def sync_worker_ids_to_config_files(conn: sqlite3.Connection) -> None:
@@ -833,6 +858,7 @@ def register_session(
           pid = excluded.pid,
           cwd = excluded.cwd,
           last_heartbeat_at = excluded.last_heartbeat_at,
+          last_ingest_offset = null,
           state = 'active'
         """,
         (
@@ -889,6 +915,75 @@ def deregister_session(conn: sqlite3.Connection, *, name: str, timestamp: str | 
     conn.execute(
         "update sessions set state='gone', last_heartbeat_at=? where name=?",
         (now, name),
+    )
+
+
+def insert_codex_event(
+    conn: sqlite3.Connection,
+    *,
+    session_id: str,
+    timestamp: str,
+    event_type: str,
+    subtype: str | None,
+    payload: dict[str, Any],
+    byte_offset: int,
+    ingested_at: str | None = None,
+) -> int:
+    """Insert one codex event row. Returns the autoincrement id."""
+    now = ingested_at or now_iso()
+    cursor = conn.execute(
+        """
+        insert into codex_events(
+          session_id, timestamp, type, subtype, payload_json, byte_offset, ingested_at
+        )
+        values (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (session_id, timestamp, event_type, subtype,
+         json.dumps(payload, sort_keys=True), byte_offset, now),
+    )
+    return int(cursor.lastrowid)
+
+
+def latest_codex_events_for_session(
+    conn: sqlite3.Connection,
+    *,
+    session_id: str,
+    limit: int = 50,
+    subtype: str | None = None,
+) -> list[sqlite3.Row]:
+    """Return up to `limit` most recent codex events for `session_id`, newest first."""
+    query = "select * from codex_events where session_id = ?"
+    params: list[Any] = [session_id]
+    if subtype is not None:
+        query += " and subtype = ?"
+        params.append(subtype)
+    query += " order by id desc limit ?"
+    params.append(limit)
+    return list(conn.execute(query, tuple(params)))
+
+
+def set_session_ingest_offset(
+    conn: sqlite3.Connection,
+    *,
+    session_id: str,
+    offset: int,
+) -> None:
+    conn.execute(
+        "update sessions set last_ingest_offset = ? where id = ?",
+        (offset, session_id),
+    )
+
+
+def bump_session_heartbeat(
+    conn: sqlite3.Connection,
+    *,
+    session_id: str,
+    timestamp: str | None = None,
+) -> None:
+    now = timestamp or now_iso()
+    conn.execute(
+        "update sessions set last_heartbeat_at = ? where id = ?",
+        (now, session_id),
     )
 
 

@@ -49,6 +49,7 @@ from workerctl.commands import (
     command_deregister,
     command_sessions,
     command_bind,
+    command_ingest,
     command_unbind,
     command_start,
     command_start_test,
@@ -70,6 +71,7 @@ from workerctl.commands import (
 )
 from workerctl.core import WorkerError
 from workerctl.codex_session import CodexSessionError
+from workerctl.ingest import IngestError
 from workerctl.export import command_export_task
 from workerctl.importer import command_import_compat
 from workerctl.lifecycle import (
@@ -326,6 +328,22 @@ def build_parser() -> argparse.ArgumentParser:
     )
     unbind.add_argument("--task", required=True, help="Task name.")
     unbind.set_defaults(func=command_unbind)
+
+    ingest = subparsers.add_parser(
+        "ingest",
+        help="Read new events from a session's rollout JSONL and persist them.",
+    )
+    ingest.add_argument("name", help="Session name.")
+    ingest.set_defaults(func=command_ingest)
+
+    tail = subparsers.add_parser(
+        "tail",
+        help="Print the most recent codex_events for a session (newest first).",
+    )
+    tail.add_argument("name", help="Session name.")
+    tail.add_argument("--limit", type=int, default=50, help="Max events to print.")
+    tail.add_argument("--subtype", default=None, help="Filter by event_msg subtype.")
+    tail.set_defaults(func=command_tail)
 
     commands = subparsers.add_parser("commands", help="List durable side-effect commands from SQLite.")
     commands.add_argument("--task", help="Filter by task name or ID.")
@@ -727,11 +745,6 @@ def build_parser() -> argparse.ArgumentParser:
     capture.add_argument("--lines", type=int, default=DEFAULT_HISTORY_LINES)
     capture.set_defaults(func=command_capture)
 
-    tail = subparsers.add_parser("tail", help="Capture and print the last N lines.")
-    tail.add_argument("name")
-    tail.add_argument("--lines", type=int, default=40)
-    tail.set_defaults(func=command_tail)
-
     status = subparsers.add_parser("status", help="Print worker status as JSON.")
     status.add_argument("name")
     status.add_argument("--no-refresh", action="store_false", dest="refresh", help="Do not refresh terminal capture.")
@@ -882,7 +895,7 @@ def main() -> int:
     args.codex_args = unknown
     try:
         return args.func(args)
-    except (WorkerError, CodexSessionError) as exc:
+    except (WorkerError, CodexSessionError, IngestError) as exc:
         print(f"workerctl: {exc}", file=sys.stderr)
         return 1
 

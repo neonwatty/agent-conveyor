@@ -165,6 +165,39 @@ workerctl register-worker --name w --pid $PID \
 runs through `promote`/`manage`/`supervise` against the legacy worker/manager records.
 The JSON ingester and the manual-binding supervision loop come in Phase 2.
 
+### Phase 2: Ingest + Tail
+
+Once a session is registered, its rollout JSONL can be ingested and queried.
+Ingestion is idempotent and tracks a byte offset so subsequent runs only pick up
+new events.
+
+```bash
+# Run one ingest cycle for a registered session
+workerctl ingest auth-worker
+# Output: {"session": "auth-worker", "new_events": 42, "new_offset": 12345}
+
+# View the most recent codex events for a session (newest first)
+workerctl tail auth-worker --limit 20
+
+# Filter by event_msg subtype
+workerctl tail auth-worker --subtype task_started --limit 5
+```
+
+The `ingest` command can be called repeatedly (e.g. on a polling interval). Each
+run reads from the recorded `last_ingest_offset`, persists new events into the
+`codex_events` table keyed by session id, advances the offset, and bumps
+`last_heartbeat_at` on the session row. A long-running session ingester / new
+supervision loop lands in Phase 3.
+
+**State inference:** `task_started` and `user_message` set the session to `busy`;
+`task_complete` sets it to `idle`. Other event subtypes (`agent_message`,
+`token_count`, `response_item`) are recorded but do not change the inferred state.
+
+> **Note:** `workerctl tail <name>` previously dumped pane output (`--lines N`)
+> from tmux capture. As of Phase 2 it returns structured codex events from the
+> DB (`--limit N`, `--subtype T`). Use `workerctl capture <name>` if you need
+> the legacy pane-output behavior.
+
 ## SQLite Worker-Manager Lifecycle
 
 `workerctl` now uses `.codex-workers/workerctl.db` as the authoritative
