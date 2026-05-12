@@ -21,7 +21,6 @@ from workerctl.constants import (
 )
 from workerctl.commands import (
     command_audit,
-    command_bind_task,
     command_capture,
     command_classify,
     command_commands,
@@ -32,14 +31,12 @@ from workerctl.commands import (
     command_doctor,
     command_doctor_self,
     command_events,
-    command_explain_managed_flow,
     command_extend_nudge_budget,
     command_interrupt,
     command_list,
     command_manager_decision,
     command_manager_observe,
     command_mutation_audit,
-    command_name_session,
     command_nudge,
     command_open,
     command_open_manager,
@@ -79,21 +76,11 @@ from workerctl.ingest import IngestError
 from workerctl.export import command_export_task
 from workerctl.importer import command_import_compat
 from workerctl.lifecycle import (
-    command_become_managed,
-    command_close_manager,
     command_close_stale,
     command_finish_task,
-    command_manage,
-    command_my_status,
-    command_pause_manager,
-    command_promote,
     command_reconcile,
     command_recover,
-    command_remanage,
-    command_resume_manager,
-    command_self_promote,
     command_stop_task,
-    command_unmanage,
 )
 from workerctl.replay import command_replay
 from workerctl.supervise import command_idle_check, command_supervise, command_watch
@@ -180,18 +167,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     start.set_defaults(func=command_start, start_prompt=True)
 
-    name_session = subparsers.add_parser(
-        "name-session",
-        help="Name the current tmux session as a worker and register it in SQLite.",
-    )
-    name_session.add_argument("name", help="Worker name to assign to the current tmux session.")
-    name_session.add_argument("--cwd", default=str(INVOCATION_CWD), help="Working directory for the worker.")
-    name_session.add_argument("--task", help="Optional task text for the generated worker contract/status.")
-    name_session.add_argument("--session", help="Explicit tmux session to name; defaults to the current tmux session.")
-    name_session.add_argument("--force", action="store_true", help="Replace an existing worker config for this name.")
-    name_session.add_argument("--path", help="Override the workerctl database path.")
-    name_session.set_defaults(func=command_name_session)
-
     start_test = subparsers.add_parser("start-test", help="Create a low-risk worker, verify it, and leave it running.")
     start_test.add_argument("name", nargs="?", default="live-test", help="Worker name.")
     start_test.add_argument("--cwd", default=str(INVOCATION_CWD), help="Working directory for the worker.")
@@ -237,14 +212,6 @@ def build_parser() -> argparse.ArgumentParser:
     doctor_self.add_argument("--session", help="Explicit tmux session; defaults to the current tmux session.")
     doctor_self.add_argument("--json", action="store_true", help="Print stable JSON output.")
     doctor_self.set_defaults(func=command_doctor_self)
-
-    explain_managed_flow = subparsers.add_parser(
-        "explain-managed-flow",
-        help="Explain the agent-facing flow for becoming, pausing, resuming, and finishing managed work.",
-    )
-    explain_managed_flow.add_argument("--session", help="Optional tmux session to include in command templates.")
-    explain_managed_flow.add_argument("--json", action="store_true", help="Print stable JSON output.")
-    explain_managed_flow.set_defaults(func=command_explain_managed_flow)
 
     qa_plan = subparsers.add_parser("qa-plan", help="Print a repeatable manual QA checklist.")
     qa_plan.add_argument("scenario", nargs="?", default="self-management", choices=("self-management",))
@@ -398,164 +365,6 @@ def build_parser() -> argparse.ArgumentParser:
     prune.add_argument("--dry-run", action="store_true", help="Report how many captures would be pruned.")
     prune.add_argument("--path", help="Override the workerctl database path.")
     prune.set_defaults(func=command_prune)
-
-    bind_task = subparsers.add_parser("bind-task", help="Bind a SQLite task record to a worker.")
-    bind_task.add_argument("task", help="Task name or ID.")
-    bind_task.add_argument("--worker", required=True, help="Worker name or ID.")
-    bind_task.add_argument("--path", help="Override the workerctl database path.")
-    bind_task.set_defaults(func=command_bind_task)
-
-    become_managed = subparsers.add_parser(
-        "become-managed",
-        help="Agent-facing command to register this session as a worker and open a manager.",
-    )
-    become_managed.add_argument("--worker", help="Worker name to assign to the current tmux session when needed.")
-    become_managed.add_argument("--task", required=True, help="Task name to create or resume.")
-    become_managed.add_argument("--goal", required=True, help="Task goal.")
-    become_managed.add_argument("--summary", help="Optional current task summary.")
-    become_managed.add_argument("--manager-instructions", help="Additional manager instructions.")
-    become_managed.add_argument("--max-nudges", type=int, default=3, help="Nudge budget for the manager.")
-    become_managed.add_argument("--budget-hours", type=int, default=24, help="Hours until the default nudge budget expires.")
-    become_managed.add_argument("--budget-expires-at", help="Explicit ISO timestamp for nudge budget expiry.")
-    become_managed.add_argument("--cwd", default=str(INVOCATION_CWD), help="Working directory for the worker record.")
-    become_managed.add_argument("--worker-task", help="Task text for the worker status contract when registering this session.")
-    become_managed.add_argument("--session", help="Explicit tmux session to manage; defaults to the current tmux session.")
-    become_managed.add_argument("--force-name", action="store_true", help="Replace an existing worker config when registering this session.")
-    become_managed.add_argument(
-        "--no-open-manager",
-        action="store_false",
-        dest="open_manager",
-        help="Do not open a visible terminal window for the spawned manager.",
-    )
-    become_managed.add_argument(
-        "--terminal",
-        choices=("auto", "ghostty", "terminal"),
-        default="auto",
-        help="Terminal app to use for the manager window.",
-    )
-    become_managed.add_argument("--path", help="Override the workerctl database path.")
-    add_manager_codex_arg_options(become_managed)
-    become_managed.set_defaults(func=command_become_managed, open_manager=True)
-
-    manage = subparsers.add_parser("manage", help="From inside a worker session, register it if needed and spawn a manager.")
-    manage.add_argument("--worker", help="Worker name to assign to the current tmux session when needed.")
-    manage.add_argument("--task", required=True, help="Task name to create or resume.")
-    manage.add_argument("--goal", required=True, help="Task goal.")
-    manage.add_argument("--summary", help="Optional current task summary.")
-    manage.add_argument("--manager-instructions", help="Additional manager instructions.")
-    manage.add_argument("--max-nudges", type=int, default=3, help="Nudge budget for the manager.")
-    manage.add_argument("--budget-hours", type=int, default=24, help="Hours until the default nudge budget expires.")
-    manage.add_argument("--budget-expires-at", help="Explicit ISO timestamp for nudge budget expiry.")
-    manage.add_argument("--cwd", default=str(INVOCATION_CWD), help="Working directory for the worker record.")
-    manage.add_argument("--worker-task", help="Task text for the worker status contract when registering this session.")
-    manage.add_argument("--session", help="Explicit tmux session to manage; defaults to the current tmux session.")
-    manage.add_argument("--force-name", action="store_true", help="Replace an existing worker config when registering this session.")
-    manage.add_argument("--open-manager", action="store_true", help="Open a terminal window attached to the spawned manager.")
-    manage.add_argument(
-        "--terminal",
-        choices=("auto", "ghostty", "terminal"),
-        default="auto",
-        help="Terminal app to use with --open-manager.",
-    )
-    manage.add_argument("--path", help="Override the workerctl database path.")
-    add_manager_codex_arg_options(manage)
-    manage.set_defaults(func=command_manage)
-
-    promote = subparsers.add_parser("promote", help="Promote an existing worker into a managed task.")
-    promote.add_argument("worker", help="Existing worker name.")
-    promote.add_argument("--task", required=True, help="Task name to create or resume.")
-    promote.add_argument("--goal", required=True, help="Task goal.")
-    promote.add_argument("--summary", help="Optional current task summary.")
-    promote.add_argument("--manager-instructions", help="Additional manager instructions.")
-    promote.add_argument("--max-nudges", type=int, default=3, help="Nudge budget for the manager.")
-    promote.add_argument("--budget-hours", type=int, default=24, help="Hours until the default nudge budget expires.")
-    promote.add_argument("--budget-expires-at", help="Explicit ISO timestamp for nudge budget expiry.")
-    promote.add_argument("--open-manager", action="store_true", help="Open a terminal window attached to the spawned manager.")
-    promote.add_argument(
-        "--terminal",
-        choices=("auto", "ghostty", "terminal"),
-        default="auto",
-        help="Terminal app to use with --open-manager.",
-    )
-    promote.add_argument("--path", help="Override the workerctl database path.")
-    add_manager_codex_arg_options(promote)
-    promote.set_defaults(func=command_promote)
-
-    self_promote = subparsers.add_parser("self-promote", help="Promote the current named worker session into a managed task.")
-    self_promote.add_argument("--task", required=True, help="Task name to create or resume.")
-    self_promote.add_argument("--goal", required=True, help="Task goal.")
-    self_promote.add_argument("--summary", help="Optional current task summary.")
-    self_promote.add_argument("--manager-instructions", help="Additional manager instructions.")
-    self_promote.add_argument("--max-nudges", type=int, default=3, help="Nudge budget for the manager.")
-    self_promote.add_argument("--budget-hours", type=int, default=24, help="Hours until the default nudge budget expires.")
-    self_promote.add_argument("--budget-expires-at", help="Explicit ISO timestamp for nudge budget expiry.")
-    self_promote.add_argument("--worker", help="Override current-session worker inference.")
-    self_promote.add_argument("--session", help="Explicit tmux session to infer worker name from.")
-    self_promote.add_argument("--open-manager", action="store_true", help="Open a terminal window attached to the spawned manager.")
-    self_promote.add_argument(
-        "--terminal",
-        choices=("auto", "ghostty", "terminal"),
-        default="auto",
-        help="Terminal app to use with --open-manager.",
-    )
-    self_promote.add_argument("--path", help="Override the workerctl database path.")
-    add_manager_codex_arg_options(self_promote)
-    self_promote.set_defaults(func=command_self_promote)
-
-    pause_manager = subparsers.add_parser("pause-manager", help="Stop a task manager while leaving the worker running.")
-    pause_manager.add_argument("task", help="Task name or ID.")
-    pause_manager.add_argument("--decision-id", type=int, help="Manager escalate/stop decision ID that justifies this pause.")
-    pause_manager.add_argument("--strict-decisions", action="store_true", help="Reject the pause unless --decision-id is valid.")
-    pause_manager.add_argument("--path", help="Override the workerctl database path.")
-    pause_manager.set_defaults(func=command_pause_manager)
-
-    close_manager = subparsers.add_parser("close-manager", help="Close a task manager session without changing task or worker state.")
-    close_manager.add_argument("task", help="Task name or ID.")
-    close_manager.add_argument("--reason", default="Manager closed by operator.", help="Reason recorded in the audit trail.")
-    close_manager.add_argument("--path", help="Override the workerctl database path.")
-    close_manager.set_defaults(func=command_close_manager)
-
-    unmanage = subparsers.add_parser("unmanage", help="Stop this worker's manager while leaving the worker running.")
-    unmanage.add_argument("--task", help="Explicit task name or ID; defaults to the task bound to the current session.")
-    unmanage.add_argument("--session", help="Explicit tmux session; defaults to the current tmux session.")
-    unmanage.add_argument("--dry-run", action="store_true", help="Resolve the task and manager without stopping anything.")
-    unmanage.add_argument("--json", action="store_true", help="Print stable JSON output.")
-    unmanage.add_argument("--path", help="Override the workerctl database path.")
-    unmanage.set_defaults(func=command_unmanage)
-
-    my_status = subparsers.add_parser("my-status", help="Show this worker's current managed task and manager state.")
-    my_status.add_argument("--task", help="Explicit task name or ID; defaults to the task bound to the current session.")
-    my_status.add_argument("--session", help="Explicit tmux session; defaults to the current tmux session.")
-    my_status.add_argument("--json", action="store_true", help="Print stable JSON output.")
-    my_status.add_argument("--path", help="Override the workerctl database path.")
-    my_status.set_defaults(func=command_my_status)
-
-    remanage = subparsers.add_parser("remanage", help="Restart this worker's paused manager.")
-    remanage.add_argument("--task", help="Explicit task name or ID; defaults to the task bound to the current session.")
-    remanage.add_argument("--session", help="Explicit tmux session; defaults to the current tmux session.")
-    remanage.add_argument("--open-manager", action="store_true", help="Open a terminal window attached to the spawned manager.")
-    remanage.add_argument(
-        "--terminal",
-        choices=("auto", "ghostty", "terminal"),
-        default="auto",
-        help="Terminal app to use with --open-manager.",
-    )
-    remanage.add_argument("--path", help="Override the workerctl database path.")
-    add_manager_codex_arg_options(remanage)
-    remanage.set_defaults(func=command_remanage)
-
-    resume_manager = subparsers.add_parser("resume-manager", help="Restart a paused task manager.")
-    resume_manager.add_argument("task", help="Task name or ID.")
-    resume_manager.add_argument("--open-manager", action="store_true", help="Open a terminal window attached to the spawned manager.")
-    resume_manager.add_argument(
-        "--terminal",
-        choices=("auto", "ghostty", "terminal"),
-        default="auto",
-        help="Terminal app to use with --open-manager.",
-    )
-    resume_manager.add_argument("--path", help="Override the workerctl database path.")
-    add_manager_codex_arg_options(resume_manager)
-    resume_manager.set_defaults(func=command_resume_manager)
 
     stop_task = subparsers.add_parser("stop-task", help="Stop a task manager, optionally stop the worker, and mark the task done.")
     stop_task.add_argument("task", help="Task name or ID.")
