@@ -6563,6 +6563,58 @@ class BindCommandTests(unittest.TestCase):
             self.assertIn("binding_created", event_types)
             self.assertIn("binding_ended", event_types)
 
+    def test_active_binding_for_task_returns_resolved_dict(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self.setup_pair(conn)
+            binding_id = worker_db.bind_sessions(
+                conn, task_name="auth-refactor",
+                worker_session_name="w1", manager_session_name="m1",
+            )
+            row = worker_db.active_binding_for_task(conn, task_name="auth-refactor")
+            self.assertEqual(row["binding_id"], binding_id)
+            self.assertEqual(row["worker_session_name"], "w1")
+            self.assertEqual(row["manager_session_name"], "m1")
+            self.assertIsNotNone(row["worker_session_id"])
+            self.assertIsNotNone(row["manager_session_id"])
+
+    def test_active_binding_for_task_raises_when_no_active_binding(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self.setup_pair(conn)
+            with self.assertRaises(WorkerError):
+                worker_db.active_binding_for_task(conn, task_name="auth-refactor")
+
+    def test_active_binding_for_task_only_returns_active_or_ending(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self.setup_pair(conn)
+            worker_db.bind_sessions(
+                conn, task_name="auth-refactor",
+                worker_session_name="w1", manager_session_name="m1",
+            )
+            worker_db.unbind_task(conn, task_name="auth-refactor")
+            with self.assertRaises(WorkerError):
+                worker_db.active_binding_for_task(conn, task_name="auth-refactor")
+
+    def test_active_binding_for_task_returns_ending_state(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self.setup_pair(conn)
+            binding_id = worker_db.bind_sessions(
+                conn, task_name="auth-refactor",
+                worker_session_name="w1", manager_session_name="m1",
+            )
+            # Manually transition to 'ending' (simulates finish-task handoff).
+            conn.execute(
+                "update bindings set state = 'ending' where id = ?",
+                (binding_id,),
+            )
+            conn.commit()
+            row = worker_db.active_binding_for_task(conn, task_name="auth-refactor")
+            self.assertEqual(row["binding_id"], binding_id)
+            self.assertEqual(row["state"], "ending")
+
 
 class CodexEventsSchemaTests(unittest.TestCase):
     def open_db(self, tmpdir):
@@ -7238,6 +7290,848 @@ class IngestCliTests(unittest.TestCase):
             state_dir.mkdir()
             proc = self.run_cli(
                 "ingest", "missing",
+                env_extra={"WORKERCTL_STATE_ROOT": str(state_dir)},
+            )
+            self.assertEqual(proc.returncode, 1)
+            self.assertNotIn("Traceback", proc.stderr)
+            self.assertIn("workerctl:", proc.stderr)
+
+
+class StalenessTests(unittest.TestCase):
+    def open_db(self, tmpdir):
+        path = Path(tmpdir) / "workerctl.db"
+        conn = worker_db.connect(path)
+        worker_db.initialize_database(conn)
+        self.addCleanup(conn.close)
+        return conn
+
+    def _register(self, conn):
+        return worker_db.register_session(
+            conn, name="w", role="worker", codex_session_path="/a",
+            codex_session_id="cuid-w", pid=1, cwd="/repo",
+        )
+
+    def test_last_state_event_timestamp_none_when_no_events(self):
+        from workerctl import ingest
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            sid = self._register(conn)
+            self.assertIsNone(
+                ingest.last_state_event_timestamp(conn, session_id=sid),
+            )
+
+    def test_last_state_event_timestamp_skips_non_state_bearing(self):
+        from workerctl import ingest
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            sid = self._register(conn)
+            # Only non-state-bearing events present.
+            worker_db.insert_codex_event(
+                conn, session_id=sid,
+                timestamp="2026-05-11T14:32:11Z",
+                event_type="event_msg", subtype="agent_message",
+                payload={}, byte_offset=0,
+            )
+            worker_db.insert_codex_event(
+                conn, session_id=sid,
+                timestamp="2026-05-11T14:32:12Z",
+                event_type="event_msg", subtype="token_count",
+                payload={}, byte_offset=100,
+            )
+            self.assertIsNone(
+                ingest.last_state_event_timestamp(conn, session_id=sid),
+            )
+
+    def test_last_state_event_timestamp_returns_most_recent(self):
+        from workerctl import ingest
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            sid = self._register(conn)
+            for subtype, ts, offset in [
+                ("task_started", "2026-05-11T14:32:10Z", 0),
+                ("agent_message", "2026-05-11T14:32:11Z", 100),
+                ("task_complete", "2026-05-11T14:32:12Z", 200),
+                ("agent_message", "2026-05-11T14:32:13Z", 300),
+            ]:
+                worker_db.insert_codex_event(
+                    conn, session_id=sid,
+                    timestamp=ts, event_type="event_msg",
+                    subtype=subtype, payload={}, byte_offset=offset,
+                )
+            self.assertEqual(
+                ingest.last_state_event_timestamp(conn, session_id=sid),
+                "2026-05-11T14:32:12Z",
+            )
+
+    def test_session_staleness_seconds_none_when_no_state_events(self):
+        from workerctl import ingest
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            sid = self._register(conn)
+            self.assertIsNone(
+                ingest.session_staleness_seconds(
+                    conn, session_id=sid, now="2026-05-11T14:33:00Z",
+                ),
+            )
+
+    def test_session_staleness_seconds_computes_against_now(self):
+        from workerctl import ingest
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            sid = self._register(conn)
+            worker_db.insert_codex_event(
+                conn, session_id=sid,
+                timestamp="2026-05-11T14:30:00Z",
+                event_type="event_msg", subtype="task_complete",
+                payload={}, byte_offset=0,
+            )
+            staleness = ingest.session_staleness_seconds(
+                conn, session_id=sid, now="2026-05-11T14:35:00Z",
+            )
+            self.assertEqual(staleness, 300)
+
+
+class SessionTmuxTests(unittest.TestCase):
+    def open_db(self, tmpdir):
+        path = Path(tmpdir) / "workerctl.db"
+        conn = worker_db.connect(path)
+        worker_db.initialize_database(conn)
+        self.addCleanup(conn.close)
+        return conn
+
+    def _register_with_tmux(self, conn, **overrides):
+        kwargs = {
+            "name": "w", "role": "worker",
+            "codex_session_path": "/a", "codex_session_id": "u", "pid": 1, "cwd": "/repo",
+            "tmux_session": "codex-w", "tmux_pane_id": "%5",
+        }
+        kwargs.update(overrides)
+        return worker_db.register_session(conn, **kwargs)
+
+    def test_session_tmux_target_uses_session_and_pane(self):
+        from workerctl import tmux as worker_tmux
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self._register_with_tmux(conn)
+            row = worker_db.session_row(conn, name="w")
+            target = worker_tmux.session_tmux_target(row)
+            self.assertEqual(target, "codex-w:%5")
+
+    def test_session_tmux_target_falls_back_to_session_when_no_pane(self):
+        from workerctl import tmux as worker_tmux
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self._register_with_tmux(conn, tmux_pane_id=None)
+            row = worker_db.session_row(conn, name="w")
+            self.assertEqual(worker_tmux.session_tmux_target(row), "codex-w")
+
+    def test_send_text_to_session_raises_when_no_tmux_session(self):
+        from workerctl import tmux as worker_tmux
+        from workerctl.core import WorkerError
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            worker_db.register_session(
+                conn, name="m", role="manager",
+                codex_session_path="/a", codex_session_id="u", pid=1, cwd="/repo",
+            )
+            with self.assertRaises(WorkerError):
+                worker_tmux.send_text_to_session(conn, session_name="m", text="hi")
+
+    def test_send_text_to_session_dry_run_does_not_invoke_tmux(self):
+        from workerctl import tmux as worker_tmux
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self._register_with_tmux(conn)
+            captured_calls = []
+
+            def fake_run(cmd, check=True):
+                captured_calls.append(list(cmd))
+                class Result:
+                    returncode = 0
+                    stdout = ""
+                    stderr = ""
+                return Result()
+
+            original_run = worker_tmux.run
+            worker_tmux.run = fake_run
+            try:
+                result = worker_tmux.send_text_to_session(
+                    conn, session_name="w", text="hello", dry_run=True,
+                )
+            finally:
+                worker_tmux.run = original_run
+
+            self.assertEqual(captured_calls, [])
+            self.assertEqual(result["dry_run"], True)
+            self.assertEqual(result["target"], "codex-w:%5")
+            self.assertEqual(result["text"], "hello")
+
+    def test_send_text_to_session_invokes_set_paste_send_keys(self):
+        from workerctl import tmux as worker_tmux
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self._register_with_tmux(conn)
+            calls = []
+
+            def fake_run(cmd, check=True):
+                calls.append(list(cmd))
+                class Result:
+                    returncode = 0
+                    stdout = ""
+                    stderr = ""
+                return Result()
+
+            original_run = worker_tmux.run
+            worker_tmux.run = fake_run
+            try:
+                worker_tmux.send_text_to_session(
+                    conn, session_name="w", text="payload",
+                )
+            finally:
+                worker_tmux.run = original_run
+
+            verbs = [c[1] for c in calls if len(c) > 1]
+            self.assertIn("set-buffer", verbs)
+            self.assertIn("paste-buffer", verbs)
+            self.assertIn("send-keys", verbs)
+            self.assertIn("delete-buffer", verbs)
+            paste_calls = [c for c in calls if len(c) > 1 and c[1] == "paste-buffer"]
+            send_calls = [c for c in calls if len(c) > 1 and c[1] == "send-keys"]
+            self.assertTrue(all("codex-w:%5" in c for c in paste_calls))
+            self.assertTrue(all("codex-w:%5" in c for c in send_calls))
+
+    def test_interrupt_session_dry_run(self):
+        from workerctl import tmux as worker_tmux
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self._register_with_tmux(conn)
+            captured_calls = []
+
+            def fake_run(cmd, check=True):
+                captured_calls.append(list(cmd))
+                class Result:
+                    returncode = 0
+                    stdout = ""
+                    stderr = ""
+                return Result()
+
+            original_run = worker_tmux.run
+            worker_tmux.run = fake_run
+            try:
+                result = worker_tmux.interrupt_session(
+                    conn, session_name="w", dry_run=True,
+                )
+            finally:
+                worker_tmux.run = original_run
+
+            self.assertEqual(captured_calls, [])
+            self.assertEqual(result["dry_run"], True)
+            self.assertEqual(result["key"], "C-c")
+
+    def test_interrupt_session_sends_key_then_followup_to_target(self):
+        from workerctl import tmux as worker_tmux
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self._register_with_tmux(conn)
+            calls = []
+
+            def fake_run(cmd, check=True):
+                calls.append(list(cmd))
+                class Result:
+                    returncode = 0
+                    stdout = ""
+                    stderr = ""
+                return Result()
+
+            original_run = worker_tmux.run
+            worker_tmux.run = fake_run
+            try:
+                worker_tmux.interrupt_session(
+                    conn, session_name="w",
+                    key="C-c", followup="retry please",
+                )
+            finally:
+                worker_tmux.run = original_run
+
+            # Must include: has-session liveness check, send-keys C-c, then the
+            # send_text_to_session follow-up (set-buffer / paste-buffer / send-keys / delete-buffer).
+            verbs = [c[1] if len(c) > 1 else c[0] for c in calls]
+            self.assertIn("has-session", verbs)
+            send_key_calls = [c for c in calls if len(c) > 1 and c[1] == "send-keys"]
+            # First send-keys should be the interrupt key against our target.
+            self.assertEqual(send_key_calls[0], ["tmux", "send-keys", "-t", "codex-w:%5", "C-c"])
+            # Followup payload must reach set-buffer.
+            set_buffer_calls = [c for c in calls if len(c) > 1 and c[1] == "set-buffer"]
+            self.assertTrue(any("retry please" in c for c in set_buffer_calls))
+            # All targets must point at our resolved pane.
+            paste_calls = [c for c in calls if len(c) > 1 and c[1] == "paste-buffer"]
+            self.assertTrue(all("codex-w:%5" in c for c in paste_calls))
+
+    def test_interrupt_session_no_followup_does_not_send_text(self):
+        from workerctl import tmux as worker_tmux
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self._register_with_tmux(conn)
+            calls = []
+
+            def fake_run(cmd, check=True):
+                calls.append(list(cmd))
+                class Result:
+                    returncode = 0
+                    stdout = ""
+                    stderr = ""
+                return Result()
+
+            original_run = worker_tmux.run
+            worker_tmux.run = fake_run
+            try:
+                worker_tmux.interrupt_session(
+                    conn, session_name="w", key="C-c", followup=None,
+                )
+            finally:
+                worker_tmux.run = original_run
+
+            # No followup -> no set-buffer/paste-buffer at all.
+            verbs = [c[1] if len(c) > 1 else c[0] for c in calls]
+            self.assertNotIn("set-buffer", verbs)
+            self.assertNotIn("paste-buffer", verbs)
+
+    def test_send_text_to_session_carries_text_in_correct_order(self):
+        from workerctl import tmux as worker_tmux
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self._register_with_tmux(conn)
+            calls = []
+
+            def fake_run(cmd, check=True):
+                calls.append(list(cmd))
+                class Result:
+                    returncode = 0
+                    stdout = ""
+                    stderr = ""
+                return Result()
+
+            original_run = worker_tmux.run
+            worker_tmux.run = fake_run
+            try:
+                worker_tmux.send_text_to_session(
+                    conn, session_name="w", text="payload-with-unique-marker",
+                )
+            finally:
+                worker_tmux.run = original_run
+
+            # Find the set-buffer / paste-buffer / send-keys / delete-buffer indexes.
+            verbs = [c[1] if len(c) > 1 else c[0] for c in calls]
+            set_idx = verbs.index("set-buffer")
+            paste_idx = verbs.index("paste-buffer")
+            send_keys_idxs = [i for i, v in enumerate(verbs) if v == "send-keys"]
+            self.assertTrue(send_keys_idxs, "expected at least one send-keys call")
+            send_idx = send_keys_idxs[0]
+            delete_idx = verbs.index("delete-buffer")
+            # Ordering: set-buffer < paste-buffer < send-keys < delete-buffer.
+            self.assertLess(set_idx, paste_idx)
+            self.assertLess(paste_idx, send_idx)
+            self.assertLess(send_idx, delete_idx)
+            # Text payload must reach set-buffer.
+            self.assertIn("payload-with-unique-marker", calls[set_idx])
+
+
+class SessionActionCliTests(unittest.TestCase):
+    def run_cli(self, *args, env_extra=None):
+        env = os.environ.copy()
+        if env_extra:
+            env.update(env_extra)
+        return subprocess.run(
+            [sys.executable, "-m", "workerctl", *args],
+            capture_output=True, text=True, env=env, cwd=str(ROOT),
+        )
+
+    def _setup_with_worker(self, tmpdir):
+        rollout = Path(tmpdir) / "rollout.jsonl"
+        rollout.write_text(json.dumps({
+            "type": "session_meta",
+            "payload": {"id": "u", "cwd": str(ROOT), "originator": "codex-tui"},
+        }) + "\n")
+        state_dir = Path(tmpdir) / "state"
+        state_dir.mkdir()
+        env = {"WORKERCTL_STATE_ROOT": str(state_dir)}
+        self.run_cli(
+            "register-worker", "--name", "w",
+            "--codex-session", str(rollout),
+            "--pid", "1", "--cwd", str(ROOT),
+            "--tmux-session", "codex-w",
+            env_extra=env,
+        )
+        return rollout, state_dir, env
+
+    def test_cli_session_nudge_dry_run(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            _, state_dir, env = self._setup_with_worker(tmpdir)
+            proc = self.run_cli(
+                "session-nudge", "w", "hello there", "--dry-run",
+                env_extra=env,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            payload = json.loads(proc.stdout)
+            self.assertEqual(payload["session"], "w")
+            self.assertEqual(payload["text"], "hello there")
+            self.assertEqual(payload["dry_run"], True)
+            self.assertIn("codex-w", payload["target"])
+
+    def test_cli_session_nudge_rejects_session_without_tmux(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            rollout = Path(tmpdir) / "rollout.jsonl"
+            rollout.write_text(json.dumps({
+                "type": "session_meta",
+                "payload": {"id": "u", "cwd": str(ROOT), "originator": "codex-tui"},
+            }) + "\n")
+            state_dir = Path(tmpdir) / "state"
+            state_dir.mkdir()
+            env = {"WORKERCTL_STATE_ROOT": str(state_dir)}
+            # Register a manager WITHOUT --tmux-session — clean error path.
+            self.run_cli(
+                "register-manager", "--name", "m",
+                "--codex-session", str(rollout),
+                "--pid", "2", "--cwd", str(ROOT),
+                env_extra=env,
+            )
+            proc = self.run_cli(
+                "session-nudge", "m", "shouldn't work", "--dry-run",
+                env_extra=env,
+            )
+            self.assertEqual(proc.returncode, 1)
+            self.assertNotIn("Traceback", proc.stderr)
+            self.assertIn("workerctl:", proc.stderr)
+
+    def test_cli_session_interrupt_dry_run(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            _, state_dir, env = self._setup_with_worker(tmpdir)
+            proc = self.run_cli(
+                "session-interrupt", "w", "--dry-run",
+                env_extra=env,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            payload = json.loads(proc.stdout)
+            self.assertEqual(payload["session"], "w")
+            self.assertEqual(payload["key"], "C-c")
+            self.assertEqual(payload["dry_run"], True)
+
+    def test_cli_session_interrupt_dry_run_with_followup(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            _, state_dir, env = self._setup_with_worker(tmpdir)
+            proc = self.run_cli(
+                "session-interrupt", "w",
+                "--followup", "retry please",
+                "--dry-run",
+                env_extra=env,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            payload = json.loads(proc.stdout)
+            self.assertEqual(payload["session"], "w")
+            self.assertEqual(payload["key"], "C-c")
+            self.assertEqual(payload["followup"], "retry please")
+            self.assertEqual(payload["dry_run"], True)
+
+            # Confirm the event payload carries followup_length, not the content.
+            conn = worker_db.connect(state_dir / "workerctl.db")
+            self.addCleanup(conn.close)
+            row = conn.execute(
+                "select payload_json from events where type = 'session_interrupted' "
+                "order by id desc limit 1"
+            ).fetchone()
+            self.assertIsNotNone(row)
+            event_payload = json.loads(row["payload_json"])
+            self.assertEqual(event_payload["followup_length"], len("retry please"))
+            self.assertNotIn("followup", event_payload)  # content not stored
+
+    def test_session_nudge_records_failure_event_when_tmux_fails(self):
+        """When tmux send fails, the audit event must still be recorded with
+        success=False so operators can debug from the events table."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            _, state_dir, env = self._setup_with_worker(tmpdir)
+            # Use a name registered with a tmux_session that will NOT have a live
+            # tmux session — the new session_exists check will raise WorkerError.
+            # (The fixture's "codex-w" is registered as the tmux_session string,
+            # but no tmux server has that session, so has-session will fail.)
+            proc = self.run_cli(
+                "session-nudge", "w", "will-fail-no-tmux",
+                env_extra=env,
+            )
+            # Should exit non-zero with a clean error.
+            self.assertNotEqual(proc.returncode, 0)
+            self.assertNotIn("Traceback", proc.stderr)
+            self.assertIn("workerctl:", proc.stderr)
+
+            # And the audit event must be present with success=False.
+            conn = worker_db.connect(state_dir / "workerctl.db")
+            self.addCleanup(conn.close)
+            row = conn.execute(
+                "select payload_json from events where type='session_nudged' "
+                "order by id desc limit 1"
+            ).fetchone()
+            self.assertIsNotNone(row, "session_nudged event must be recorded on failure")
+            payload = json.loads(row["payload_json"])
+            self.assertEqual(payload["success"], False)
+            self.assertIn("error", payload)
+
+
+class SuperviseCycleTests(unittest.TestCase):
+    def open_db(self, tmpdir):
+        path = Path(tmpdir) / "workerctl.db"
+        conn = worker_db.connect(path)
+        worker_db.initialize_database(conn)
+        self.addCleanup(conn.close)
+        return conn
+
+    def _setup_bound_task(self, conn, tmpdir, rollout_events):
+        rollout = Path(tmpdir) / "rollout.jsonl"
+        rollout.write_text("".join(json.dumps(e) + "\n" for e in rollout_events))
+        now = "2026-05-11T00:00:00Z"
+        conn.execute(
+            "insert into tasks(id, name, goal, state, created_at, updated_at) "
+            "values ('task-1', 't', 'g', 'candidate', ?, ?)",
+            (now, now),
+        )
+        worker_db.register_session(
+            conn, name="w", role="worker",
+            codex_session_path=str(rollout),
+            codex_session_id="u-w", pid=1, cwd="/r",
+        )
+        worker_db.register_session(
+            conn, name="m", role="manager",
+            codex_session_path=str(rollout),  # reuses fixture; not under test
+            codex_session_id="u-m", pid=2, cwd="/r",
+        )
+        worker_db.bind_sessions(
+            conn, task_name="t",
+            worker_session_name="w", manager_session_name="m",
+        )
+        conn.commit()
+        return rollout
+
+    def test_run_cycle_ingests_and_returns_state(self):
+        from workerctl import supervise_cycle
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self._setup_bound_task(conn, tmpdir, [
+                {"type": "session_meta", "payload": {"id": "u-w", "cwd": "/r"}},
+                {"timestamp": "2026-05-11T14:32:11Z",
+                 "type": "event_msg",
+                 "payload": {"type": "task_started", "turn_id": "t1"}},
+            ])
+
+            result = supervise_cycle.run_cycle(
+                conn, task_name="t", now="2026-05-11T14:32:15Z",
+            )
+            self.assertEqual(result["task"], "t")
+            self.assertEqual(result["worker_session"], "w")
+            self.assertEqual(result["manager_session"], "m")
+            self.assertEqual(result["ingest"]["new_events"], 2)
+            self.assertEqual(result["state"], "busy")
+            self.assertEqual(result["last_state_event_at"], "2026-05-11T14:32:11Z")
+            self.assertAlmostEqual(result["staleness_seconds"], 4.0, places=0)
+            self.assertIn("cycle_id", result)
+
+    def test_run_cycle_records_manager_cycle_row(self):
+        from workerctl import supervise_cycle
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self._setup_bound_task(conn, tmpdir, [
+                {"type": "session_meta", "payload": {"id": "u-w", "cwd": "/r"}},
+                {"timestamp": "2026-05-11T14:32:11Z",
+                 "type": "event_msg",
+                 "payload": {"type": "task_complete"}},
+            ])
+
+            result = supervise_cycle.run_cycle(
+                conn, task_name="t", now="2026-05-11T14:33:00Z",
+            )
+            row = conn.execute(
+                "select state, status_json from manager_cycles where id = ?",
+                (result["cycle_id"],),
+            ).fetchone()
+            self.assertIsNotNone(row)
+            self.assertEqual(row["state"], "succeeded")
+            status = json.loads(row["status_json"])
+            self.assertEqual(status["state"], "idle")
+            self.assertEqual(status["worker_session"], "w")
+
+    def test_run_cycle_unknown_task_raises(self):
+        from workerctl import supervise_cycle
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            with self.assertRaises(WorkerError):
+                supervise_cycle.run_cycle(conn, task_name="does-not-exist")
+
+    def test_run_cycle_no_active_binding_raises(self):
+        from workerctl import supervise_cycle
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            now = "2026-05-11T00:00:00Z"
+            conn.execute(
+                "insert into tasks(id, name, goal, state, created_at, updated_at) "
+                "values ('task-1', 't', 'g', 'candidate', ?, ?)",
+                (now, now),
+            )
+            conn.commit()
+            with self.assertRaises(WorkerError):
+                supervise_cycle.run_cycle(conn, task_name="t")
+
+    def test_run_cycle_handles_session_without_state_events(self):
+        from workerctl import supervise_cycle
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self._setup_bound_task(conn, tmpdir, [
+                {"type": "session_meta", "payload": {"id": "u-w", "cwd": "/r"}},
+            ])
+
+            result = supervise_cycle.run_cycle(
+                conn, task_name="t", now="2026-05-11T14:32:15Z",
+            )
+            self.assertEqual(result["state"], "unknown")
+            self.assertIsNone(result["last_state_event_at"])
+            self.assertIsNone(result["staleness_seconds"])
+
+    def test_run_cycle_records_failed_row_on_ingest_error(self):
+        from workerctl import supervise_cycle
+        from workerctl.ingest import IngestError
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            # Build binding pointing at a rollout that does NOT exist on disk.
+            now = "2026-05-11T00:00:00Z"
+            conn.execute(
+                "insert into tasks(id, name, goal, state, created_at, updated_at) "
+                "values ('task-1', 't', 'g', 'candidate', ?, ?)",
+                (now, now),
+            )
+            worker_db.register_session(
+                conn, name="w", role="worker",
+                codex_session_path=str(Path(tmpdir) / "does-not-exist.jsonl"),
+                codex_session_id="u-w", pid=1, cwd="/r",
+            )
+            worker_db.register_session(
+                conn, name="m", role="manager",
+                codex_session_path="/m",
+                codex_session_id="u-m", pid=2, cwd="/r",
+            )
+            worker_db.bind_sessions(
+                conn, task_name="t",
+                worker_session_name="w", manager_session_name="m",
+            )
+            conn.commit()
+
+            with self.assertRaises(IngestError):
+                supervise_cycle.run_cycle(
+                    conn, task_name="t", now="2026-05-11T14:32:15Z",
+                )
+
+            # Failed row must be present for audit.
+            row = conn.execute(
+                "select state, status_json, error from manager_cycles "
+                "where task_id = 'task-1' order by id desc limit 1"
+            ).fetchone()
+            self.assertIsNotNone(row)
+            self.assertEqual(row["state"], "failed")
+            self.assertIsNotNone(row["error"])
+            status = json.loads(row["status_json"])
+            self.assertEqual(status["kind"], "session_cycle")
+            self.assertEqual(status["worker_session"], "w")
+
+    def test_run_cycle_succeeded_row_has_kind_discriminator(self):
+        from workerctl import supervise_cycle
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self._setup_bound_task(conn, tmpdir, [
+                {"type": "session_meta", "payload": {"id": "u-w", "cwd": "/r"}},
+                {"timestamp": "2026-05-11T14:32:11Z",
+                 "type": "event_msg",
+                 "payload": {"type": "task_complete"}},
+            ])
+            result = supervise_cycle.run_cycle(
+                conn, task_name="t", now="2026-05-11T14:33:00Z",
+            )
+            self.assertEqual(result["kind"], "session_cycle")
+            row = conn.execute(
+                "select status_json from manager_cycles where id = ?",
+                (result["cycle_id"],),
+            ).fetchone()
+            status = json.loads(row["status_json"])
+            self.assertEqual(status["kind"], "session_cycle")
+
+    def test_run_cycle_row_is_legible_via_replay(self):
+        """Phase 3 manager_cycles rows should render a useful summary via the
+        replay module, not the generic 'observed task' fallback."""
+        from workerctl import supervise_cycle
+        from workerctl import replay as worker_replay
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self._setup_bound_task(conn, tmpdir, [
+                {"type": "session_meta", "payload": {"id": "u-w", "cwd": "/r"}},
+                {"timestamp": "2026-05-11T14:32:11Z",
+                 "type": "event_msg",
+                 "payload": {"type": "task_started", "turn_id": "t1"}},
+            ])
+            supervise_cycle.run_cycle(
+                conn, task_name="t", now="2026-05-11T14:32:15Z",
+            )
+
+            # Build the replay timeline and confirm the session cycle row was
+            # rendered with the new-shape summary, not the generic fallback.
+            audit = worker_db.task_audit(conn, task="t")
+            entries = worker_replay.replay_entries(audit, role="all", mode="timeline")
+            summary_lines = [
+                entry["summary"]
+                for entry in entries
+                if entry.get("kind") == "observe"
+            ]
+            self.assertTrue(summary_lines, "expected at least one observe entry")
+            joined = " | ".join(summary_lines)
+            self.assertNotIn("observed task", joined,
+                             f"replay produced generic fallback summary: {joined!r}")
+            self.assertIn("busy", joined.lower())
+            self.assertIn("w", joined)  # worker session name
+
+    def test_replay_renders_failed_session_cycle_with_error(self):
+        """Failed cycle rows must surface their error in replay output, not
+        render as a generic 'state unknown' summary."""
+        from workerctl import supervise_cycle
+        from workerctl import replay as worker_replay
+        from workerctl.ingest import IngestError
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            # Build binding pointing at a rollout that does NOT exist on disk.
+            now = "2026-05-11T00:00:00Z"
+            conn.execute(
+                "insert into tasks(id, name, goal, state, created_at, updated_at) "
+                "values ('task-1', 't', 'g', 'candidate', ?, ?)",
+                (now, now),
+            )
+            worker_db.register_session(
+                conn, name="w", role="worker",
+                codex_session_path=str(Path(tmpdir) / "does-not-exist.jsonl"),
+                codex_session_id="u-w", pid=1, cwd="/r",
+            )
+            worker_db.register_session(
+                conn, name="m", role="manager",
+                codex_session_path="/m",
+                codex_session_id="u-m", pid=2, cwd="/r",
+            )
+            worker_db.bind_sessions(
+                conn, task_name="t",
+                worker_session_name="w", manager_session_name="m",
+            )
+            conn.commit()
+
+            with self.assertRaises(IngestError):
+                supervise_cycle.run_cycle(conn, task_name="t")
+
+            audit = worker_db.task_audit(conn, task="t")
+            entries = worker_replay.replay_entries(audit, role="all", mode="timeline")
+            cycle_summaries = [
+                e.get("summary", "")
+                for e in entries
+                if e.get("kind") == "observe"
+            ]
+            joined = " | ".join(cycle_summaries).lower()
+            self.assertIn("observe failed", joined,
+                          f"replay did not surface failure text: {cycle_summaries!r}")
+            self.assertNotIn("state unknown", joined,
+                             f"replay used generic fallback: {cycle_summaries!r}")
+
+
+class CycleCliTests(unittest.TestCase):
+    def run_cli(self, *args, env_extra=None):
+        env = os.environ.copy()
+        if env_extra:
+            env.update(env_extra)
+        return subprocess.run(
+            [sys.executable, "-m", "workerctl", *args],
+            capture_output=True, text=True, env=env, cwd=str(ROOT),
+        )
+
+    def _setup_bound_task_via_cli(self, tmpdir, events):
+        rollout = Path(tmpdir) / "rollout.jsonl"
+        full_events = ([{"type": "session_meta",
+                          "payload": {"id": "u", "cwd": str(ROOT), "originator": "codex-tui"}}]
+                       + events)
+        rollout.write_text("".join(json.dumps(e) + "\n" for e in full_events))
+        state_dir = Path(tmpdir) / "state"
+        state_dir.mkdir()
+        env = {"WORKERCTL_STATE_ROOT": str(state_dir)}
+        self.run_cli("register-worker", "--name", "w",
+                     "--codex-session", str(rollout),
+                     "--pid", "1", "--cwd", str(ROOT),
+                     "--tmux-session", "codex-w",
+                     env_extra=env)
+        self.run_cli("register-manager", "--name", "m",
+                     "--codex-session", str(rollout),
+                     "--pid", "2", "--cwd", str(ROOT),
+                     env_extra=env)
+        self.run_cli("tasks", "--create", "myTask", "--goal", "g", env_extra=env)
+        self.run_cli("bind", "--task", "myTask", "--worker", "w", "--manager", "m",
+                     env_extra=env)
+        return rollout, state_dir, env
+
+    def test_cli_cycle_returns_structured_payload(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            _, state_dir, env = self._setup_bound_task_via_cli(tmpdir, events=[
+                {"timestamp": "2026-05-11T14:32:11Z",
+                 "type": "event_msg",
+                 "payload": {"type": "task_started", "turn_id": "t1"}},
+            ])
+            proc = self.run_cli("cycle", "myTask", env_extra=env)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            result = json.loads(proc.stdout)
+            self.assertEqual(result["task"], "myTask")
+            self.assertEqual(result["worker_session"], "w")
+            self.assertEqual(result["manager_session"], "m")
+            self.assertEqual(result["state"], "busy")
+            self.assertEqual(result["ingest"]["new_events"], 2)
+            self.assertIn("cycle_id", result)
+
+    def test_cli_cycle_idempotent_on_unchanged_rollout(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            _, state_dir, env = self._setup_bound_task_via_cli(tmpdir, events=[
+                {"timestamp": "2026-05-11T14:32:11Z",
+                 "type": "event_msg",
+                 "payload": {"type": "task_complete"}},
+            ])
+            self.run_cli("cycle", "myTask", env_extra=env)
+            proc = self.run_cli("cycle", "myTask", env_extra=env)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            result = json.loads(proc.stdout)
+            self.assertEqual(result["ingest"]["new_events"], 0)
+            self.assertEqual(result["state"], "idle")
+
+    def test_cli_cycle_unknown_task_clean_error(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_dir = Path(tmpdir) / "state"
+            state_dir.mkdir()
+            proc = self.run_cli(
+                "cycle", "no-such-task",
                 env_extra={"WORKERCTL_STATE_ROOT": str(state_dir)},
             )
             self.assertEqual(proc.returncode, 1)

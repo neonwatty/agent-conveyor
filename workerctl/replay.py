@@ -125,14 +125,38 @@ def replay_entries(audit: dict[str, Any], *, role: str = "all", mode: str = "tim
             if role not in {"all", "manager"}:
                 continue
             status = cycle.get("status") or {}
-            worker_status = status.get("worker_status") or {}
             summary = "observed task"
-            if worker_status:
-                state = worker_status.get("state") or "unknown"
-                current = worker_status.get("current_task") or ""
-                summary = f"observed worker status {state}: {_shorten(current)}"
-            elif cycle.get("error"):
-                summary = f"observe failed: {_shorten(cycle['error'])}"
+
+            # Detect Phase 3 session_cycle rows
+            kind = status.get("kind") if isinstance(status, dict) else None
+            if kind == "session_cycle":
+                worker_session = status.get("worker_session") or "<unknown>"
+                if cycle.get("error") or cycle.get("state") == "failed":
+                    error_text = cycle.get("error") or "unknown error"
+                    summary = (
+                        f"observe failed for session {worker_session}: "
+                        f"{_shorten(error_text)}"
+                    )
+                else:
+                    state = status.get("state") or "unknown"
+                    staleness = status.get("staleness_seconds")
+                    if staleness is not None:
+                        summary = (
+                            f"observed session {worker_session} state {state} "
+                            f"(staleness {staleness:.1f}s)"
+                        )
+                    else:
+                        summary = f"observed session {worker_session} state {state}"
+            else:
+                # Legacy logic for older status shapes
+                worker_status = status.get("worker_status") or {}
+                if worker_status:
+                    state = worker_status.get("state") or "unknown"
+                    current = worker_status.get("current_task") or ""
+                    summary = f"observed worker status {state}: {_shorten(current)}"
+                elif cycle.get("error"):
+                    summary = f"observe failed: {_shorten(cycle['error'])}"
+
             entries.append(
                 {
                     "actor": "manager",

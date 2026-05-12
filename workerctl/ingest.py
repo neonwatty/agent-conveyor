@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -190,3 +191,68 @@ def ingest_session(
     conn.commit()
 
     return {"new_events": new_events, "new_offset": new_offset}
+
+
+def last_state_event_timestamp(conn: sqlite3.Connection, *, session_id: str) -> str | None:
+    """Return the ISO timestamp of the most recent state-bearing event for `session_id`,
+    or None if no state-bearing event has been ingested.
+
+    State-bearing means type='event_msg' and subtype in {task_started, user_message,
+    task_complete}. Mirrors `current_state`'s filter so the timestamp and the inferred
+    state always refer to the same row.
+    """
+    placeholders = ",".join("?" * len(_STATE_BEARING_SUBTYPES))
+    row = conn.execute(
+        f"""
+        select timestamp from codex_events
+        where session_id = ?
+          and type = 'event_msg'
+          and subtype in ({placeholders})
+        order by id desc
+        limit 1
+        """,
+        (session_id, *_STATE_BEARING_SUBTYPES),
+    ).fetchone()
+    if row is None:
+        return None
+    return row["timestamp"]
+
+
+def _parse_iso_z(value: str) -> datetime:
+    """Parse an ISO-8601 string with a trailing 'Z' or numeric offset into an aware datetime."""
+    if value.endswith("Z"):
+        value = value[:-1] + "+00:00"
+    return datetime.fromisoformat(value).astimezone(timezone.utc)
+
+
+def session_staleness_seconds(
+    conn: sqlite3.Connection,
+    *,
+    session_id: str,
+    now: str | None = None,
+) -> float | None:
+    """Return seconds since the most recent state-bearing event for `session_id`.
+
+    Returns None if no state-bearing event has been ingested. `now` defaults to the
+    current UTC time; it accepts an ISO string for deterministic tests. Negative
+    values (e.g. from clock skew with `now` predating the latest event) are clamped
+    to 0.0 — supervision callers want "how stale, at minimum" not "in the future."
+
+    Raises IngestError if either the stored event timestamp or the caller-supplied
+    `now` cannot be parsed; surfaces cleanly through the CLI exception handler.
+    """
+    last = last_state_event_timestamp(conn, session_id=session_id)
+    if last is None:
+        return None
+    try:
+        now_dt = _parse_iso_z(now) if now else datetime.now(timezone.utc)
+    except ValueError as exc:
+        raise IngestError(f"invalid `now` timestamp: {now!r}") from exc
+    try:
+        last_dt = _parse_iso_z(last)
+    except ValueError as exc:
+        raise IngestError(
+            f"invalid timestamp in codex_events for session {session_id!r}: {last!r}"
+        ) from exc
+    delta = (now_dt - last_dt).total_seconds()
+    return max(0.0, delta)

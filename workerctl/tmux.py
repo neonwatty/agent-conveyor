@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import sqlite3
 import time
 from typing import Any
 
@@ -179,4 +180,125 @@ def interrupt_worker(name: str, *, key: str, followup: str | None, dry_run: bool
             time.sleep(0.5)
             send_text(name, followup)
         append_event(name, "interrupt", result)
+    return result
+
+
+def session_tmux_target(row: sqlite3.Row) -> str:
+    """Build a `tmux send-keys -t TARGET` string from a `sessions` row.
+
+    If the row has a `tmux_pane_id` (e.g. `%5`), the target is `<session>:<pane_id>`
+    so we hit a specific pane. Otherwise the target is the session name and tmux
+    routes to the active pane in window 0.
+
+    Raises WorkerError if the row has no tmux_session (e.g. a manager registered
+    outside tmux).
+    """
+    session_name = row["tmux_session"]
+    if not session_name:
+        raise WorkerError(
+            "session has no tmux_session; cannot build tmux target "
+            "(session likely registered outside tmux)"
+        )
+    pane_id = row["tmux_pane_id"]
+    if pane_id:
+        return f"{session_name}:{pane_id}"
+    return session_name
+
+
+def _tmux_session_running(tmux_session: str) -> bool:
+    """Return True if a tmux server has a session named `tmux_session`.
+
+    Unlike `session_exists`, this takes the raw tmux session name (not a worker
+    name), making it safe to call for session-keyed lookups where the legacy
+    `codex-{name}` convention does not apply.
+    """
+    try:
+        proc = run(["tmux", "has-session", "-t", tmux_session], check=False)
+    except FileNotFoundError as exc:
+        # tmux binary missing on this host (common in CI). Surface a clean error
+        # that the CLI's top-level handler will format, instead of a raw traceback.
+        raise WorkerError(
+            f"tmux is not installed on this host; cannot reach session {tmux_session!r}"
+        ) from exc
+    return proc.returncode == 0
+
+
+def send_text_to_session(
+    conn: sqlite3.Connection,
+    *,
+    session_name: str,
+    text: str,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    """Send `text` (followed by Enter) to the session's tmux pane.
+
+    Resolves the session via `db.session_row` and rejects sessions without a tmux
+    session attached (e.g. managers running outside tmux). Mirrors `send_text` but
+    keyed by session_id instead of worker name.
+    """
+    from workerctl import db as worker_db
+
+    row = worker_db.session_row(conn, name=session_name)
+    target = session_tmux_target(row)
+    result = {
+        "dry_run": dry_run,
+        "session": session_name,
+        "target": target,
+        "text": text,
+        "time": now_iso(),
+    }
+    if dry_run:
+        return result
+    if not _tmux_session_running(row["tmux_session"]):
+        raise WorkerError(
+            f"tmux session is not running for session {session_name!r}: "
+            f"{row['tmux_session']}"
+        )
+    buffer_name = f"workerctl-session-{session_name}"
+    try:
+        run(["tmux", "set-buffer", "-b", buffer_name, text])
+        run(["tmux", "paste-buffer", "-b", buffer_name, "-t", target])
+        time.sleep(PASTE_SUBMIT_DELAY_SECONDS)
+        run(["tmux", "send-keys", "-t", target, SUBMIT_KEY])
+    finally:
+        run(["tmux", "delete-buffer", "-b", buffer_name], check=False)
+    return result
+
+
+def interrupt_session(
+    conn: sqlite3.Connection,
+    *,
+    session_name: str,
+    key: str = "C-c",
+    followup: str | None = None,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    """Send an interrupt key (default Ctrl-C) to the session's tmux pane.
+
+    Optional `followup` text is paste-buffered after a short delay. Mirrors
+    `interrupt_worker` but keyed by session_id.
+    """
+    from workerctl import db as worker_db
+
+    row = worker_db.session_row(conn, name=session_name)
+    target = session_tmux_target(row)
+    result = {
+        "dry_run": dry_run,
+        "followup": followup,
+        "key": key,
+        "session": session_name,
+        "target": target,
+        "time": now_iso(),
+    }
+    if dry_run:
+        return result
+    if not _tmux_session_running(row["tmux_session"]):
+        raise WorkerError(
+            f"tmux session is not running for session {session_name!r}: "
+            f"{row['tmux_session']}"
+        )
+    run(["tmux", "send-keys", "-t", target, key])
+    if followup:
+        time.sleep(0.5)
+        send_text_to_session(conn, session_name=session_name, text=followup)
     return result
