@@ -212,7 +212,14 @@ def _tmux_session_running(tmux_session: str) -> bool:
     name), making it safe to call for session-keyed lookups where the legacy
     `codex-{name}` convention does not apply.
     """
-    proc = run(["tmux", "has-session", "-t", tmux_session], check=False)
+    try:
+        proc = run(["tmux", "has-session", "-t", tmux_session], check=False)
+    except FileNotFoundError as exc:
+        # tmux binary missing on this host (common in CI). Surface a clean error
+        # that the CLI's top-level handler will format, instead of a raw traceback.
+        raise WorkerError(
+            f"tmux is not installed on this host; cannot reach session {tmux_session!r}"
+        ) from exc
     return proc.returncode == 0
 
 
