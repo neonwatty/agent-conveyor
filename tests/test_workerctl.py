@@ -8139,5 +8139,154 @@ class CycleCliTests(unittest.TestCase):
             self.assertIn("workerctl:", proc.stderr)
 
 
+class ShadowStateTests(unittest.TestCase):
+    def open_db(self, tmpdir):
+        path = Path(tmpdir) / "workerctl.db"
+        conn = worker_db.connect(path)
+        worker_db.initialize_database(conn)
+        self.addCleanup(conn.close)
+        return conn
+
+    def _register_with_tmux(self, conn, **overrides):
+        kwargs = {
+            "name": "w", "role": "worker",
+            "codex_session_path": "/a", "codex_session_id": "u", "pid": 1, "cwd": "/repo",
+            "tmux_session": "codex-w", "tmux_pane_id": "%5",
+        }
+        kwargs.update(overrides)
+        return worker_db.register_session(conn, **kwargs)
+
+    def test_pane_signal_for_session_returns_no_tmux_when_unattached(self):
+        from workerctl import shadow_state
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            session_id = worker_db.register_session(
+                conn, name="m", role="manager",
+                codex_session_path="/a", codex_session_id="u", pid=1, cwd="/repo",
+            )
+            result = shadow_state.pane_signal_for_session(
+                conn, session_id=session_id,
+            )
+            self.assertEqual(result["captured"], False)
+            self.assertIsNone(result["classifier"])
+            self.assertIsNone(result["notable_pattern"])
+            self.assertEqual(result["reason"], "no tmux session attached")
+
+    def test_pane_signal_for_session_captures_and_runs_classifier(self):
+        from workerctl import shadow_state
+        from workerctl import tmux as worker_tmux
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            session_id = self._register_with_tmux(conn)
+
+            # Stub the capture to return text matching the trust-prompt pattern.
+            original = worker_tmux.capture_tmux_target
+            worker_tmux.capture_tmux_target = (
+                lambda target, lines=100:
+                "$ codex\nDo you trust the contents of this directory? (y/n)\n"
+            )
+            try:
+                result = shadow_state.pane_signal_for_session(
+                    conn, session_id=session_id,
+                )
+            finally:
+                worker_tmux.capture_tmux_target = original
+
+            self.assertEqual(result["captured"], True)
+            self.assertIsNotNone(result["classifier"])
+            self.assertEqual(result["notable_pattern"], "trust_prompt")
+            self.assertIn("trust", result["classifier"]["reason"].lower())
+
+    def test_pane_signal_for_session_no_pattern_returns_classifier_none(self):
+        from workerctl import shadow_state
+        from workerctl import tmux as worker_tmux
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            session_id = self._register_with_tmux(conn)
+
+            original = worker_tmux.capture_tmux_target
+            worker_tmux.capture_tmux_target = (
+                lambda target, lines=100: "$ codex\nready and typing...\n"
+            )
+            try:
+                result = shadow_state.pane_signal_for_session(
+                    conn, session_id=session_id,
+                )
+            finally:
+                worker_tmux.capture_tmux_target = original
+
+            self.assertEqual(result["captured"], True)
+            self.assertIsNone(result["classifier"])
+            self.assertIsNone(result["notable_pattern"])
+
+    def test_pane_signal_for_session_swallows_tmux_capture_error(self):
+        from workerctl import shadow_state
+        from workerctl import tmux as worker_tmux
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self._register_with_tmux(conn)
+            session_id = worker_db.session_row(conn, name="w")["id"]
+
+            original = worker_tmux.capture_tmux_target
+
+            def boom(target, lines=100):
+                raise RuntimeError("tmux died")
+
+            worker_tmux.capture_tmux_target = boom
+            try:
+                result = shadow_state.pane_signal_for_session(
+                    conn, session_id=session_id,
+                )
+            finally:
+                worker_tmux.capture_tmux_target = original
+
+            # Best-effort: a capture failure should NOT raise; it should be reported
+            # in the result so callers (run_cycle) can surface it without aborting.
+            self.assertEqual(result["captured"], False)
+            self.assertIsNone(result["classifier"])
+            self.assertIsNone(result["notable_pattern"])
+            self.assertIn("tmux died", result["reason"])
+
+    def test_pane_signal_for_session_uses_staleness_as_status_age(self):
+        from workerctl import shadow_state
+        from workerctl import tmux as worker_tmux
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            session_id = self._register_with_tmux(conn)
+            # Insert a state-bearing event 200 seconds before `now`.
+            worker_db.insert_codex_event(
+                conn, session_id=session_id,
+                timestamp="2026-05-11T14:30:00Z",
+                event_type="event_msg", subtype="task_started",
+                payload={}, byte_offset=0,
+            )
+
+            original = worker_tmux.capture_tmux_target
+            # Pane shows "esc to interrupt" — only fires the `long_running_interruptible`
+            # pattern when status_age >= busy_wait_seconds. With staleness=200s and
+            # threshold=90s, the pattern should fire.
+            worker_tmux.capture_tmux_target = (
+                lambda target, lines=100: "running tests... esc to interrupt\n"
+            )
+            try:
+                result = shadow_state.pane_signal_for_session(
+                    conn,
+                    session_id=session_id,
+                    busy_wait_seconds=90,
+                    now="2026-05-11T14:33:20Z",  # 200s after the event
+                )
+            finally:
+                worker_tmux.capture_tmux_target = original
+
+            self.assertEqual(result["captured"], True)
+            self.assertEqual(result["notable_pattern"], "long_running_interruptible")
+            self.assertEqual(result["status_age_seconds"], 200)
+
+
 if __name__ == "__main__":
     unittest.main()
