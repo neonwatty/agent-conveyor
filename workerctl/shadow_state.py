@@ -4,6 +4,7 @@ import sqlite3
 from typing import Any
 
 from workerctl import classify as worker_classify
+from workerctl import db as worker_db
 from workerctl import ingest as worker_ingest
 from workerctl import tmux as worker_tmux
 
@@ -36,9 +37,7 @@ def pane_signal_for_session(
     should be able to enrich a cycle with a pane signal without aborting on a
     transient tmux failure.
     """
-    row = conn.execute(
-        "select * from sessions where id = ?", (session_id,)
-    ).fetchone()
+    row = worker_db.session_by_id(conn, session_id=session_id)
     if row is None:
         return {
             "captured": False,
@@ -66,9 +65,23 @@ def pane_signal_for_session(
             "status_age_seconds": None,
             "reason": f"tmux capture failed: {exc}",
         }
-    staleness = worker_ingest.session_staleness_seconds(
-        conn, session_id=session_id, now=now,
-    )
+    try:
+        staleness = worker_ingest.session_staleness_seconds(
+            conn, session_id=session_id, now=now,
+        )
+    except worker_ingest.IngestError as exc:
+        # Best-effort: a malformed timestamp in codex_events shouldn't kill the
+        # pane signal. Surface it in `reason` and proceed without a status age.
+        classifier = worker_classify.classify_busy_wait(
+            output, None, busy_wait_seconds,
+        )
+        return {
+            "captured": True,
+            "classifier": classifier,
+            "notable_pattern": classifier["pattern"] if classifier else None,
+            "status_age_seconds": None,
+            "reason": f"staleness unavailable: {exc}",
+        }
     status_age_seconds = int(staleness) if staleness is not None else None
     classifier = worker_classify.classify_busy_wait(
         output, status_age_seconds, busy_wait_seconds,

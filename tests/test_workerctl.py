@@ -8287,6 +8287,49 @@ class ShadowStateTests(unittest.TestCase):
             self.assertEqual(result["notable_pattern"], "long_running_interruptible")
             self.assertEqual(result["status_age_seconds"], 200)
 
+    def test_pane_signal_for_session_degrades_on_ingest_error(self):
+        """If session_staleness_seconds raises IngestError (e.g. malformed event
+        timestamp), the pane signal stays best-effort: captured=True, classifier
+        still runs without age, and the reason field flags the degradation."""
+        from workerctl import shadow_state
+        from workerctl import ingest as worker_ingest
+        from workerctl import tmux as worker_tmux
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            session_id = self._register_with_tmux(conn)
+            # Insert a state-bearing event with a deliberately malformed timestamp.
+            conn.execute(
+                """
+                insert into codex_events(
+                  session_id, timestamp, type, subtype, payload_json, byte_offset, ingested_at
+                )
+                values (?, 'not-a-valid-iso', 'event_msg', 'task_started', '{}', 0, '2026-05-11T00:00:00Z')
+                """,
+                (session_id,),
+            )
+            conn.commit()
+
+            original = worker_tmux.capture_tmux_target
+            worker_tmux.capture_tmux_target = (
+                lambda target, lines=100:
+                "$ codex\nDo you trust the contents of this directory? (y/n)\n"
+            )
+            try:
+                result = shadow_state.pane_signal_for_session(
+                    conn, session_id=session_id,
+                )
+            finally:
+                worker_tmux.capture_tmux_target = original
+
+            self.assertEqual(result["captured"], True)
+            # Classifier still ran against the captured text.
+            self.assertEqual(result["notable_pattern"], "trust_prompt")
+            # Status age unavailable because staleness raised IngestError.
+            self.assertIsNone(result["status_age_seconds"])
+            # Reason field carries a hint about the degradation.
+            self.assertIn("staleness unavailable", result["reason"])
+
 
 if __name__ == "__main__":
     unittest.main()

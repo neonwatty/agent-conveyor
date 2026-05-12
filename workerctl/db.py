@@ -881,6 +881,18 @@ def session_row(conn: sqlite3.Connection, *, name: str, role: str | None = None)
     return row
 
 
+def session_by_id(conn: sqlite3.Connection, *, session_id: str) -> sqlite3.Row | None:
+    """Look up a session by id. Returns the row or None if not found.
+
+    Mirrors `session_row` (which looks up by name) but for id-keyed access.
+    Callers that need a present-row contract should check the return value
+    explicitly — this helper does not raise on missing.
+    """
+    return conn.execute(
+        "select * from sessions where id = ?", (session_id,)
+    ).fetchone()
+
+
 def list_sessions(conn: sqlite3.Connection, *, role: str | None = None) -> list[dict[str, Any]]:
     query = "select * from sessions"
     params: tuple = ()
