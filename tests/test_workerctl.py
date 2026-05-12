@@ -6298,6 +6298,35 @@ class RegisterCommandsTests(unittest.TestCase):
             self.assertNotIn("Traceback", proc.stderr)
             self.assertIn("workerctl:", proc.stderr)
 
+    def test_register_session_re_register_resets_ingest_offset(self):
+        """Re-registering a session (e.g. pointing at a new rollout file) must
+        clear last_ingest_offset so the new rollout is ingested from byte 0."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            session_id = worker_db.register_session(
+                conn, name="w", role="worker",
+                codex_session_path="/path/a", codex_session_id="cuid-a",
+                pid=1, cwd="/repo",
+            )
+            worker_db.set_session_ingest_offset(conn, session_id=session_id, offset=12345)
+            row = conn.execute(
+                "select last_ingest_offset from sessions where id = ?", (session_id,)
+            ).fetchone()
+            self.assertEqual(row["last_ingest_offset"], 12345)
+
+            # Re-register with a different rollout path.
+            worker_db.register_session(
+                conn, name="w", role="worker",
+                codex_session_path="/path/b", codex_session_id="cuid-b",
+                pid=2, cwd="/repo",
+            )
+            row = conn.execute(
+                "select last_ingest_offset, codex_session_path from sessions where id = ?",
+                (session_id,),
+            ).fetchone()
+            self.assertIsNone(row["last_ingest_offset"])
+            self.assertEqual(row["codex_session_path"], "/path/b")
+
 
 class BindCommandTests(unittest.TestCase):
     def open_db(self, tmpdir):
@@ -7058,6 +7087,62 @@ class IngestModuleTests(unittest.TestCase):
             from workerctl.ingest import IngestError
             with self.assertRaises(IngestError):
                 ingest.ingest_session(conn, session_name="w")
+
+    def test_ingest_session_raises_on_rollout_file_shrink(self):
+        """If the rollout file was rotated to a shorter file (or truncated), the
+        cached last_ingest_offset is now past EOF. Surface this as IngestError so
+        the operator can decide whether to reset."""
+        from workerctl import ingest
+        from workerctl.ingest import IngestError
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            rollout = Path(tmpdir) / "rollout.jsonl"
+            conn = worker_db.connect(db_path)
+            self.addCleanup(conn.close)
+            worker_db.initialize_database(conn)
+
+            # Initial ingest reads two events.
+            line1 = json.dumps({"type": "event_msg", "payload": {"type": "task_started"}}) + "\n"
+            line2 = json.dumps({"type": "event_msg", "payload": {"type": "task_complete"}}) + "\n"
+            rollout.write_text(line1 + line2)
+            worker_db.register_session(
+                conn, name="w", role="worker",
+                codex_session_path=str(rollout),
+                codex_session_id="u", pid=1, cwd="/r",
+            )
+            conn.commit()
+            ingest.ingest_session(conn, session_name="w")
+
+            # Now truncate (simulate rotation): rewrite with only one (different) event.
+            rollout.write_text(json.dumps({"type": "event_msg", "payload": {"type": "task_started"}}) + "\n")
+
+            with self.assertRaises(IngestError) as ctx:
+                ingest.ingest_session(conn, session_name="w")
+            self.assertIn("rollout file shrank", str(ctx.exception))
+
+    def test_ingest_session_refuses_gone_session(self):
+        from workerctl import ingest
+        from workerctl.ingest import IngestError
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            rollout = Path(tmpdir) / "rollout.jsonl"
+            rollout.write_text(json.dumps({"type": "event_msg", "payload": {"type": "task_started"}}) + "\n")
+            conn = worker_db.connect(db_path)
+            self.addCleanup(conn.close)
+            worker_db.initialize_database(conn)
+            worker_db.register_session(
+                conn, name="w", role="worker",
+                codex_session_path=str(rollout),
+                codex_session_id="u", pid=1, cwd="/r",
+            )
+            worker_db.deregister_session(conn, name="w")
+            conn.commit()
+
+            with self.assertRaises(IngestError) as ctx:
+                ingest.ingest_session(conn, session_name="w")
+            self.assertIn("gone", str(ctx.exception))
 
 
 class IngestCliTests(unittest.TestCase):

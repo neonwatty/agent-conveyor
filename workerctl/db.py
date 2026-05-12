@@ -858,6 +858,7 @@ def register_session(
           pid = excluded.pid,
           cwd = excluded.cwd,
           last_heartbeat_at = excluded.last_heartbeat_at,
+          last_ingest_offset = null,
           state = 'active'
         """,
         (

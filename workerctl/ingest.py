@@ -135,6 +135,11 @@ def ingest_session(
       - IngestError if the rollout path is missing or unreadable.
     """
     row = worker_db.session_row(conn, name=session_name)
+    if row["state"] != "active":
+        raise IngestError(
+            f"session {session_name!r} is in state {row['state']!r}; "
+            f"re-register it before ingesting"
+        )
     session_id = row["id"]
     rollout_path_str = row["codex_session_path"]
     if not rollout_path_str:
@@ -144,7 +149,17 @@ def ingest_session(
     if not rollout_path.exists():
         raise IngestError(f"rollout file does not exist: {rollout_path}")
 
-    start_offset = row["last_ingest_offset"] or 0
+    start_offset = row["last_ingest_offset"] if row["last_ingest_offset"] is not None else 0
+    try:
+        file_size = rollout_path.stat().st_size
+    except OSError as exc:
+        raise IngestError(f"failed to stat rollout file: {exc}") from exc
+    if start_offset > file_size:
+        raise IngestError(
+            f"rollout file shrank: cached offset {start_offset} > current size {file_size}. "
+            f"The rollout was likely rotated or truncated. Reset the session's last_ingest_offset "
+            f"(e.g. via re-register) before retrying."
+        )
     try:
         with open(rollout_path, "rb") as fh:
             fh.seek(start_offset)
