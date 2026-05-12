@@ -2956,3 +2956,24 @@ def command_cycle(args: argparse.Namespace) -> int:
         conn.close()
     print(json.dumps(result, indent=2, sort_keys=True, default=str))
     return 0
+
+
+def command_divergences(args: argparse.Namespace) -> int:
+    """List Phase 4 cycle observations where the shadow pane signal flagged a pattern.
+
+    Output is a JSON list. Each entry has stable keys: `id`, `task_id`,
+    `started_at`, `completed_at`, `state`, `notable_pane_pattern`, `status` (the
+    parsed cycle status). Newest first, capped by `--limit` (default 50).
+    """
+    from workerctl import db as worker_db
+
+    conn = worker_db.connect()
+    worker_db.initialize_database(conn)
+    try:
+        rows = worker_db.divergent_cycles_for_task(
+            conn, task_name=args.task, limit=args.limit,
+        )
+    finally:
+        conn.close()
+    print(json.dumps(rows, indent=2, sort_keys=True, default=str))
+    return 0

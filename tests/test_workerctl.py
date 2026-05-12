@@ -8594,5 +8594,104 @@ class DivergencesTests(unittest.TestCase):
             self.assertEqual(len(rows), 2)
 
 
+class DivergencesCliTests(unittest.TestCase):
+    def run_cli(self, *args, env_extra=None):
+        env = os.environ.copy()
+        if env_extra:
+            env.update(env_extra)
+        return subprocess.run(
+            [sys.executable, "-m", "workerctl", *args],
+            capture_output=True, text=True, env=env, cwd=str(ROOT),
+        )
+
+    def test_cli_divergences_returns_cycles_with_pane_patterns(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_dir = Path(tmpdir) / "state"
+            state_dir.mkdir()
+            env = {"WORKERCTL_STATE_ROOT": str(state_dir)}
+            db_path = state_dir / "workerctl.db"
+
+            # Build the DB by running workerctl through the CLI so initialize_database
+            # runs and we use real DB plumbing.
+            self.run_cli("sessions", env_extra=env)  # touches initialize_database
+
+            # Inject a task and two cycles directly: one with a pane pattern, one without.
+            conn = worker_db.connect(db_path)
+            self.addCleanup(conn.close)
+            now = "2026-05-11T00:00:00Z"
+            conn.execute(
+                "insert into tasks(id, name, goal, state, created_at, updated_at) "
+                "values ('task-1', 'mytask', 'g', 'candidate', ?, ?)",
+                (now, now),
+            )
+            for pattern in [None, "trust_prompt"]:
+                conn.execute(
+                    """
+                    insert into manager_cycles(
+                      task_id, started_at, completed_at, state, status_json
+                    )
+                    values ('task-1', ?, ?, 'succeeded', ?)
+                    """,
+                    (now, now, json.dumps({
+                        "kind": "session_cycle",
+                        "task": "mytask",
+                        "notable_pane_pattern": pattern,
+                    }, sort_keys=True)),
+                )
+            conn.commit()
+
+            proc = self.run_cli("divergences", "mytask", env_extra=env)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            rows = json.loads(proc.stdout)
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["notable_pane_pattern"], "trust_prompt")
+
+    def test_cli_divergences_unknown_task_clean_error(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_dir = Path(tmpdir) / "state"
+            state_dir.mkdir()
+            proc = self.run_cli(
+                "divergences", "no-such-task",
+                env_extra={"WORKERCTL_STATE_ROOT": str(state_dir)},
+            )
+            self.assertEqual(proc.returncode, 1)
+            self.assertNotIn("Traceback", proc.stderr)
+            self.assertIn("workerctl:", proc.stderr)
+
+    def test_cli_divergences_empty_when_no_pane_patterns(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_dir = Path(tmpdir) / "state"
+            state_dir.mkdir()
+            env = {"WORKERCTL_STATE_ROOT": str(state_dir)}
+            self.run_cli("sessions", env_extra=env)
+            db_path = state_dir / "workerctl.db"
+            conn = worker_db.connect(db_path)
+            self.addCleanup(conn.close)
+            now = "2026-05-11T00:00:00Z"
+            conn.execute(
+                "insert into tasks(id, name, goal, state, created_at, updated_at) "
+                "values ('task-1', 'mytask', 'g', 'candidate', ?, ?)",
+                (now, now),
+            )
+            conn.execute(
+                """
+                insert into manager_cycles(
+                  task_id, started_at, completed_at, state, status_json
+                )
+                values ('task-1', ?, ?, 'succeeded', ?)
+                """,
+                (now, now, json.dumps({
+                    "kind": "session_cycle",
+                    "task": "mytask",
+                    "notable_pane_pattern": None,
+                }, sort_keys=True)),
+            )
+            conn.commit()
+
+            proc = self.run_cli("divergences", "mytask", env_extra=env)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertEqual(json.loads(proc.stdout), [])
+
+
 if __name__ == "__main__":
     unittest.main()
