@@ -8179,6 +8179,51 @@ class SuperviseCycleTests(unittest.TestCase):
             self.assertIn("tmux server went away", result["pane_signal"]["reason"])
             self.assertIsNone(result["notable_pane_pattern"])
 
+    def test_replay_renders_session_cycle_with_pane_pattern(self):
+        """When a successful cycle has a notable_pane_pattern, the replay summary
+        should mention it for operator visibility during the shadow period."""
+        from workerctl import supervise_cycle
+        from workerctl import replay as worker_replay
+        from workerctl import tmux as worker_tmux
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self._setup_bound_task(conn, tmpdir, [
+                {"type": "session_meta", "payload": {"id": "u-w", "cwd": "/r"}},
+                {"timestamp": "2026-05-11T14:32:11Z",
+                 "type": "event_msg",
+                 "payload": {"type": "task_started"}},
+            ])
+            conn.execute(
+                "update sessions set tmux_session = 'codex-w', tmux_pane_id = '%5' "
+                "where name = 'w'"
+            )
+            conn.commit()
+
+            original = worker_tmux.capture_tmux_target
+            worker_tmux.capture_tmux_target = (
+                lambda target, lines=100:
+                "$ codex\nDo you trust the contents of this directory? (y/n)\n"
+            )
+            try:
+                supervise_cycle.run_cycle(
+                    conn, task_name="t", now="2026-05-11T14:33:50Z",
+                )
+            finally:
+                worker_tmux.capture_tmux_target = original
+
+            audit = worker_db.task_audit(conn, task="t")
+            entries = list(worker_replay.replay_entries(audit))
+            cycle_summaries = [
+                e.get("summary", "")
+                for e in entries
+                if e.get("kind") == "observe"
+            ]
+            joined = " | ".join(cycle_summaries)
+            self.assertIn("trust_prompt", joined,
+                          f"replay did not surface pane pattern: {cycle_summaries!r}")
+            self.assertIn("busy", joined.lower())
+
 
 class CycleCliTests(unittest.TestCase):
     def run_cli(self, *args, env_extra=None):
