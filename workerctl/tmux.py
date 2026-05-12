@@ -195,7 +195,6 @@ def session_tmux_target(row: sqlite3.Row) -> str:
     """
     session_name = row["tmux_session"]
     if not session_name:
-        from workerctl.core import WorkerError
         raise WorkerError(
             "session has no tmux_session; cannot build tmux target "
             "(session likely registered outside tmux)"
@@ -204,6 +203,17 @@ def session_tmux_target(row: sqlite3.Row) -> str:
     if pane_id:
         return f"{session_name}:{pane_id}"
     return session_name
+
+
+def _tmux_session_running(tmux_session: str) -> bool:
+    """Return True if a tmux server has a session named `tmux_session`.
+
+    Unlike `session_exists`, this takes the raw tmux session name (not a worker
+    name), making it safe to call for session-keyed lookups where the legacy
+    `codex-{name}` convention does not apply.
+    """
+    proc = run(["tmux", "has-session", "-t", tmux_session], check=False)
+    return proc.returncode == 0
 
 
 def send_text_to_session(
@@ -232,9 +242,14 @@ def send_text_to_session(
     }
     if dry_run:
         return result
+    if not _tmux_session_running(row["tmux_session"]):
+        raise WorkerError(
+            f"tmux session is not running for session {session_name!r}: "
+            f"{row['tmux_session']}"
+        )
     buffer_name = f"workerctl-session-{session_name}"
-    run(["tmux", "set-buffer", "-b", buffer_name, text])
     try:
+        run(["tmux", "set-buffer", "-b", buffer_name, text])
         run(["tmux", "paste-buffer", "-b", buffer_name, "-t", target])
         time.sleep(PASTE_SUBMIT_DELAY_SECONDS)
         run(["tmux", "send-keys", "-t", target, SUBMIT_KEY])
@@ -270,6 +285,11 @@ def interrupt_session(
     }
     if dry_run:
         return result
+    if not _tmux_session_running(row["tmux_session"]):
+        raise WorkerError(
+            f"tmux session is not running for session {session_name!r}: "
+            f"{row['tmux_session']}"
+        )
     run(["tmux", "send-keys", "-t", target, key])
     if followup:
         time.sleep(0.5)

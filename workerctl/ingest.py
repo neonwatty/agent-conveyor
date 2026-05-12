@@ -234,11 +234,25 @@ def session_staleness_seconds(
     """Return seconds since the most recent state-bearing event for `session_id`.
 
     Returns None if no state-bearing event has been ingested. `now` defaults to the
-    current UTC time; it accepts an ISO string for deterministic tests.
+    current UTC time; it accepts an ISO string for deterministic tests. Negative
+    values (e.g. from clock skew with `now` predating the latest event) are clamped
+    to 0.0 — supervision callers want "how stale, at minimum" not "in the future."
+
+    Raises IngestError if either the stored event timestamp or the caller-supplied
+    `now` cannot be parsed; surfaces cleanly through the CLI exception handler.
     """
     last = last_state_event_timestamp(conn, session_id=session_id)
     if last is None:
         return None
-    now_dt = _parse_iso_z(now) if now else datetime.now(timezone.utc)
-    last_dt = _parse_iso_z(last)
-    return (now_dt - last_dt).total_seconds()
+    try:
+        now_dt = _parse_iso_z(now) if now else datetime.now(timezone.utc)
+    except ValueError as exc:
+        raise IngestError(f"invalid `now` timestamp: {now!r}") from exc
+    try:
+        last_dt = _parse_iso_z(last)
+    except ValueError as exc:
+        raise IngestError(
+            f"invalid timestamp in codex_events for session {session_id!r}: {last!r}"
+        ) from exc
+    delta = (now_dt - last_dt).total_seconds()
+    return max(0.0, delta)

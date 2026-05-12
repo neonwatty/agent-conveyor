@@ -6597,6 +6597,24 @@ class BindCommandTests(unittest.TestCase):
             with self.assertRaises(WorkerError):
                 worker_db.active_binding_for_task(conn, task_name="auth-refactor")
 
+    def test_active_binding_for_task_returns_ending_state(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self.setup_pair(conn)
+            binding_id = worker_db.bind_sessions(
+                conn, task_name="auth-refactor",
+                worker_session_name="w1", manager_session_name="m1",
+            )
+            # Manually transition to 'ending' (simulates finish-task handoff).
+            conn.execute(
+                "update bindings set state = 'ending' where id = ?",
+                (binding_id,),
+            )
+            conn.commit()
+            row = worker_db.active_binding_for_task(conn, task_name="auth-refactor")
+            self.assertEqual(row["binding_id"], binding_id)
+            self.assertEqual(row["state"], "ending")
+
 
 class CodexEventsSchemaTests(unittest.TestCase):
     def open_db(self, tmpdir):
@@ -7521,6 +7539,116 @@ class SessionTmuxTests(unittest.TestCase):
             self.assertEqual(result["dry_run"], True)
             self.assertEqual(result["key"], "C-c")
 
+    def test_interrupt_session_sends_key_then_followup_to_target(self):
+        from workerctl import tmux as worker_tmux
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self._register_with_tmux(conn)
+            calls = []
+
+            def fake_run(cmd, check=True):
+                calls.append(list(cmd))
+                class Result:
+                    returncode = 0
+                    stdout = ""
+                    stderr = ""
+                return Result()
+
+            original_run = worker_tmux.run
+            worker_tmux.run = fake_run
+            try:
+                worker_tmux.interrupt_session(
+                    conn, session_name="w",
+                    key="C-c", followup="retry please",
+                )
+            finally:
+                worker_tmux.run = original_run
+
+            # Must include: has-session liveness check, send-keys C-c, then the
+            # send_text_to_session follow-up (set-buffer / paste-buffer / send-keys / delete-buffer).
+            verbs = [c[1] if len(c) > 1 else c[0] for c in calls]
+            self.assertIn("has-session", verbs)
+            send_key_calls = [c for c in calls if len(c) > 1 and c[1] == "send-keys"]
+            # First send-keys should be the interrupt key against our target.
+            self.assertEqual(send_key_calls[0], ["tmux", "send-keys", "-t", "codex-w:%5", "C-c"])
+            # Followup payload must reach set-buffer.
+            set_buffer_calls = [c for c in calls if len(c) > 1 and c[1] == "set-buffer"]
+            self.assertTrue(any("retry please" in c for c in set_buffer_calls))
+            # All targets must point at our resolved pane.
+            paste_calls = [c for c in calls if len(c) > 1 and c[1] == "paste-buffer"]
+            self.assertTrue(all("codex-w:%5" in c for c in paste_calls))
+
+    def test_interrupt_session_no_followup_does_not_send_text(self):
+        from workerctl import tmux as worker_tmux
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self._register_with_tmux(conn)
+            calls = []
+
+            def fake_run(cmd, check=True):
+                calls.append(list(cmd))
+                class Result:
+                    returncode = 0
+                    stdout = ""
+                    stderr = ""
+                return Result()
+
+            original_run = worker_tmux.run
+            worker_tmux.run = fake_run
+            try:
+                worker_tmux.interrupt_session(
+                    conn, session_name="w", key="C-c", followup=None,
+                )
+            finally:
+                worker_tmux.run = original_run
+
+            # No followup -> no set-buffer/paste-buffer at all.
+            verbs = [c[1] if len(c) > 1 else c[0] for c in calls]
+            self.assertNotIn("set-buffer", verbs)
+            self.assertNotIn("paste-buffer", verbs)
+
+    def test_send_text_to_session_carries_text_in_correct_order(self):
+        from workerctl import tmux as worker_tmux
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self._register_with_tmux(conn)
+            calls = []
+
+            def fake_run(cmd, check=True):
+                calls.append(list(cmd))
+                class Result:
+                    returncode = 0
+                    stdout = ""
+                    stderr = ""
+                return Result()
+
+            original_run = worker_tmux.run
+            worker_tmux.run = fake_run
+            try:
+                worker_tmux.send_text_to_session(
+                    conn, session_name="w", text="payload-with-unique-marker",
+                )
+            finally:
+                worker_tmux.run = original_run
+
+            # Find the set-buffer / paste-buffer / send-keys / delete-buffer indexes.
+            verbs = [c[1] if len(c) > 1 else c[0] for c in calls]
+            set_idx = verbs.index("set-buffer")
+            paste_idx = verbs.index("paste-buffer")
+            send_keys_idxs = [i for i, v in enumerate(verbs) if v == "send-keys"]
+            self.assertTrue(send_keys_idxs, "expected at least one send-keys call")
+            send_idx = send_keys_idxs[0]
+            delete_idx = verbs.index("delete-buffer")
+            # Ordering: set-buffer < paste-buffer < send-keys < delete-buffer.
+            self.assertLess(set_idx, paste_idx)
+            self.assertLess(paste_idx, send_idx)
+            self.assertLess(send_idx, delete_idx)
+            # Text payload must reach set-buffer.
+            self.assertIn("payload-with-unique-marker", calls[set_idx])
+
 
 class SessionActionCliTests(unittest.TestCase):
     def run_cli(self, *args, env_extra=None):
@@ -7629,6 +7757,36 @@ class SessionActionCliTests(unittest.TestCase):
             event_payload = json.loads(row["payload_json"])
             self.assertEqual(event_payload["followup_length"], len("retry please"))
             self.assertNotIn("followup", event_payload)  # content not stored
+
+    def test_session_nudge_records_failure_event_when_tmux_fails(self):
+        """When tmux send fails, the audit event must still be recorded with
+        success=False so operators can debug from the events table."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            _, state_dir, env = self._setup_with_worker(tmpdir)
+            # Use a name registered with a tmux_session that will NOT have a live
+            # tmux session — the new session_exists check will raise WorkerError.
+            # (The fixture's "codex-w" is registered as the tmux_session string,
+            # but no tmux server has that session, so has-session will fail.)
+            proc = self.run_cli(
+                "session-nudge", "w", "will-fail-no-tmux",
+                env_extra=env,
+            )
+            # Should exit non-zero with a clean error.
+            self.assertNotEqual(proc.returncode, 0)
+            self.assertNotIn("Traceback", proc.stderr)
+            self.assertIn("workerctl:", proc.stderr)
+
+            # And the audit event must be present with success=False.
+            conn = worker_db.connect(state_dir / "workerctl.db")
+            self.addCleanup(conn.close)
+            row = conn.execute(
+                "select payload_json from events where type='session_nudged' "
+                "order by id desc limit 1"
+            ).fetchone()
+            self.assertIsNotNone(row, "session_nudged event must be recorded on failure")
+            payload = json.loads(row["payload_json"])
+            self.assertEqual(payload["success"], False)
+            self.assertIn("error", payload)
 
 
 class SuperviseCycleTests(unittest.TestCase):
@@ -7854,6 +8012,54 @@ class SuperviseCycleTests(unittest.TestCase):
                              f"replay produced generic fallback summary: {joined!r}")
             self.assertIn("busy", joined.lower())
             self.assertIn("w", joined)  # worker session name
+
+    def test_replay_renders_failed_session_cycle_with_error(self):
+        """Failed cycle rows must surface their error in replay output, not
+        render as a generic 'state unknown' summary."""
+        from workerctl import supervise_cycle
+        from workerctl import replay as worker_replay
+        from workerctl.ingest import IngestError
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            # Build binding pointing at a rollout that does NOT exist on disk.
+            now = "2026-05-11T00:00:00Z"
+            conn.execute(
+                "insert into tasks(id, name, goal, state, created_at, updated_at) "
+                "values ('task-1', 't', 'g', 'candidate', ?, ?)",
+                (now, now),
+            )
+            worker_db.register_session(
+                conn, name="w", role="worker",
+                codex_session_path=str(Path(tmpdir) / "does-not-exist.jsonl"),
+                codex_session_id="u-w", pid=1, cwd="/r",
+            )
+            worker_db.register_session(
+                conn, name="m", role="manager",
+                codex_session_path="/m",
+                codex_session_id="u-m", pid=2, cwd="/r",
+            )
+            worker_db.bind_sessions(
+                conn, task_name="t",
+                worker_session_name="w", manager_session_name="m",
+            )
+            conn.commit()
+
+            with self.assertRaises(IngestError):
+                supervise_cycle.run_cycle(conn, task_name="t")
+
+            audit = worker_db.task_audit(conn, task="t")
+            entries = worker_replay.replay_entries(audit, role="all", mode="timeline")
+            cycle_summaries = [
+                e.get("summary", "")
+                for e in entries
+                if e.get("kind") == "observe"
+            ]
+            joined = " | ".join(cycle_summaries).lower()
+            self.assertIn("observe failed", joined,
+                          f"replay did not surface failure text: {cycle_summaries!r}")
+            self.assertNotIn("state unknown", joined,
+                             f"replay used generic fallback: {cycle_summaries!r}")
 
 
 class CycleCliTests(unittest.TestCase):

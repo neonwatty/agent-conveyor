@@ -2852,14 +2852,38 @@ def command_session_nudge(args: argparse.Namespace) -> int:
     conn = worker_db.connect()
     worker_db.initialize_database(conn)
     try:
-        result = worker_tmux.send_text_to_session(
-            conn, session_name=args.name, text=args.text, dry_run=args.dry_run,
-        )
-        worker_db.insert_event(
-            conn, "session_nudged", actor="workerctl",
-            payload={"session": args.name, "dry_run": args.dry_run, "text_length": len(args.text)},
-        )
-        conn.commit()
+        try:
+            result = worker_tmux.send_text_to_session(
+                conn, session_name=args.name, text=args.text, dry_run=args.dry_run,
+            )
+            worker_db.insert_event(
+                conn, "session_nudged", actor="workerctl",
+                payload={
+                    "session": args.name,
+                    "dry_run": args.dry_run,
+                    "text_length": len(args.text),
+                    "success": True,
+                },
+            )
+            conn.commit()
+        except Exception as exc:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            worker_db.insert_event(
+                conn, "session_nudged", actor="workerctl",
+                payload={
+                    "session": args.name,
+                    "dry_run": args.dry_run,
+                    "text_length": len(args.text),
+                    "success": False,
+                    "error": str(exc),
+                    "error_type": type(exc).__name__,
+                },
+            )
+            conn.commit()
+            raise
     finally:
         conn.close()
     print(json.dumps(result, indent=2, sort_keys=True))
@@ -2873,20 +2897,41 @@ def command_session_interrupt(args: argparse.Namespace) -> int:
     conn = worker_db.connect()
     worker_db.initialize_database(conn)
     try:
-        result = worker_tmux.interrupt_session(
-            conn, session_name=args.name, key=args.key,
-            followup=args.followup, dry_run=args.dry_run,
-        )
-        worker_db.insert_event(
-            conn, "session_interrupted", actor="workerctl",
-            payload={
-                "session": args.name,
-                "key": args.key,
-                "dry_run": args.dry_run,
-                "followup_length": len(args.followup) if args.followup else 0,
-            },
-        )
-        conn.commit()
+        try:
+            result = worker_tmux.interrupt_session(
+                conn, session_name=args.name, key=args.key,
+                followup=args.followup, dry_run=args.dry_run,
+            )
+            worker_db.insert_event(
+                conn, "session_interrupted", actor="workerctl",
+                payload={
+                    "session": args.name,
+                    "key": args.key,
+                    "dry_run": args.dry_run,
+                    "followup_length": len(args.followup) if args.followup else 0,
+                    "success": True,
+                },
+            )
+            conn.commit()
+        except Exception as exc:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            worker_db.insert_event(
+                conn, "session_interrupted", actor="workerctl",
+                payload={
+                    "session": args.name,
+                    "key": args.key,
+                    "dry_run": args.dry_run,
+                    "followup_length": len(args.followup) if args.followup else 0,
+                    "success": False,
+                    "error": str(exc),
+                    "error_type": type(exc).__name__,
+                },
+            )
+            conn.commit()
+            raise
     finally:
         conn.close()
     print(json.dumps(result, indent=2, sort_keys=True))

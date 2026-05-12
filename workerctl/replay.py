@@ -130,16 +130,23 @@ def replay_entries(audit: dict[str, Any], *, role: str = "all", mode: str = "tim
             # Detect Phase 3 session_cycle rows
             kind = status.get("kind") if isinstance(status, dict) else None
             if kind == "session_cycle":
-                state = status.get("state") or "unknown"
-                worker_session = status.get("worker_session") or ""
-                staleness = status.get("staleness_seconds")
-                if staleness is not None:
+                worker_session = status.get("worker_session") or "<unknown>"
+                if cycle.get("error") or cycle.get("state") == "failed":
+                    error_text = cycle.get("error") or "unknown error"
                     summary = (
-                        f"observed session {worker_session} state {state} "
-                        f"(staleness {staleness:.1f}s)"
+                        f"observe failed for session {worker_session}: "
+                        f"{_shorten(error_text)}"
                     )
                 else:
-                    summary = f"observed session {worker_session} state {state}"
+                    state = status.get("state") or "unknown"
+                    staleness = status.get("staleness_seconds")
+                    if staleness is not None:
+                        summary = (
+                            f"observed session {worker_session} state {state} "
+                            f"(staleness {staleness:.1f}s)"
+                        )
+                    else:
+                        summary = f"observed session {worker_session} state {state}"
             else:
                 # Legacy logic for older status shapes
                 worker_status = status.get("worker_status") or {}

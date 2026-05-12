@@ -24,14 +24,23 @@ def run_cycle(
       4. Write a `manager_cycles` row with the structured status.
       5. Return a JSON-serializable dict for the manager Codex (or operator) to act on.
 
-    The returned dict has stable keys: `task`, `binding_id`, `worker_session`,
-    `manager_session`, `ingest` ({new_events, new_offset}), `state`,
-    `last_state_event_at`, `staleness_seconds`, `cycle_id`, `cycle_started_at`,
-    `cycle_completed_at`. Phase 3 supervision consumers depend on these names.
+    The returned dict has stable keys: `kind` (always "session_cycle", a shape
+    discriminator that `replay.py` branches on), `task`, `binding_id`,
+    `worker_session`, `manager_session`, `ingest` ({new_events, new_offset}),
+    `state`, `last_state_event_at`, `staleness_seconds`, `cycle_id`,
+    `cycle_started_at`, `cycle_completed_at`. Phase 3 supervision consumers
+    depend on these names.
+
+    On any exception during ingest / state inference / cycle-row write, the
+    function rolls back uncommitted writes, records a `state='failed'` row in
+    `manager_cycles` with `error` populated, then re-raises. The audit trail
+    captures both successful and unsuccessful cycle attempts.
 
     Raises:
-      - WorkerError: task or active binding missing.
-      - IngestError: rollout file missing or unreadable.
+      - WorkerError: task or active binding missing (no failure row written —
+        these errors occur before any state could be observed).
+      - IngestError: rollout file missing, rotated, or unreadable.
+      - Other exceptions: re-raised after recording a failure row.
     """
     started_at = now or now_iso()
     binding = worker_db.active_binding_for_task(conn, task_name=task_name)
@@ -42,8 +51,23 @@ def run_cycle(
             session_name=binding["worker_session_name"],
             now=started_at,
         )
-    except worker_ingest.IngestError as exc:
-        # Record the failed attempt so the audit trail is preserved before propagating.
+        state = worker_ingest.current_state(
+            conn, session_id=binding["worker_session_id"],
+        )
+        last_state_event_at = worker_ingest.last_state_event_timestamp(
+            conn, session_id=binding["worker_session_id"],
+        )
+        staleness = worker_ingest.session_staleness_seconds(
+            conn, session_id=binding["worker_session_id"], now=started_at,
+        )
+    except Exception as exc:
+        # Discard any partial inserts (e.g. codex_events from a half-finished
+        # ingest_session call) before committing the audit row, so re-running
+        # the cycle picks the same events up again rather than skipping them.
+        try:
+            conn.rollback()
+        except sqlite3.Error:
+            pass
         completed_at = now_iso()
         failure_status = {
             "kind": "session_cycle",
@@ -51,34 +75,30 @@ def run_cycle(
             "binding_id": binding["binding_id"],
             "worker_session": binding["worker_session_name"],
             "manager_session": binding["manager_session_name"],
+            "error_type": type(exc).__name__,
         }
-        conn.execute(
-            """
-            insert into manager_cycles(
-              task_id, started_at, completed_at, state, status_json, error
+        try:
+            conn.execute(
+                """
+                insert into manager_cycles(
+                  task_id, started_at, completed_at, state, status_json, error
+                )
+                values (?, ?, ?, 'failed', ?, ?)
+                """,
+                (
+                    binding["task_id"],
+                    started_at,
+                    completed_at,
+                    json.dumps(failure_status, sort_keys=True, default=str),
+                    str(exc),
+                ),
             )
-            values (?, ?, ?, 'failed', ?, ?)
-            """,
-            (
-                binding["task_id"],
-                started_at,
-                completed_at,
-                json.dumps(failure_status, sort_keys=True, default=str),
-                str(exc),
-            ),
-        )
-        conn.commit()
+            conn.commit()
+        except sqlite3.Error:
+            # If even the audit-row write fails, swallow the secondary error so
+            # the caller sees the original exception, not a misleading DB error.
+            pass
         raise
-
-    state = worker_ingest.current_state(
-        conn, session_id=binding["worker_session_id"],
-    )
-    last_state_event_at = worker_ingest.last_state_event_timestamp(
-        conn, session_id=binding["worker_session_id"],
-    )
-    staleness = worker_ingest.session_staleness_seconds(
-        conn, session_id=binding["worker_session_id"], now=started_at,
-    )
 
     completed_at = now_iso()
     status_payload = {
