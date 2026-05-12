@@ -6745,5 +6745,73 @@ class CodexEventsSchemaTests(unittest.TestCase):
             self.assertEqual(row["last_heartbeat_at"], "2026-05-11T15:00:00Z")
 
 
+class IngestModuleTests(unittest.TestCase):
+    def test_parse_jsonl_events_empty_content_yields_nothing(self):
+        from workerctl import ingest
+
+        events = list(ingest.parse_jsonl_events(b"", start_offset=0))
+        self.assertEqual(events, [])
+
+    def test_parse_jsonl_events_yields_parsed_records_with_offsets(self):
+        from workerctl import ingest
+
+        line1 = '{"type":"session_meta","payload":{"id":"u1","cwd":"/r"}}\n'
+        line2 = '{"timestamp":"2026-05-11T14:32:11Z","type":"event_msg","payload":{"type":"task_started","turn_id":"t1"}}\n'
+        content = (line1 + line2).encode("utf-8")
+        events = list(ingest.parse_jsonl_events(content, start_offset=0))
+        self.assertEqual(len(events), 2)
+
+        self.assertEqual(events[0]["type"], "session_meta")
+        self.assertEqual(events[0]["payload"]["id"], "u1")
+        self.assertEqual(events[0]["byte_offset"], 0)
+        self.assertEqual(events[0]["new_offset"], len(line1.encode("utf-8")))
+
+        self.assertEqual(events[1]["type"], "event_msg")
+        self.assertEqual(events[1]["subtype"], "task_started")
+        self.assertEqual(events[1]["byte_offset"], len(line1.encode("utf-8")))
+        self.assertEqual(events[1]["new_offset"], len(content))
+        self.assertEqual(events[1]["timestamp"], "2026-05-11T14:32:11Z")
+
+    def test_parse_jsonl_events_ignores_partial_trailing_line(self):
+        """If the file ends without a newline, the trailing partial line is skipped
+        and the offset advances only to the last complete line."""
+        from workerctl import ingest
+
+        complete = '{"type":"event_msg","payload":{"type":"agent_message"}}\n'
+        partial = '{"type":"event_'  # truncated mid-write
+        content = (complete + partial).encode("utf-8")
+        events = list(ingest.parse_jsonl_events(content, start_offset=0))
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["new_offset"], len(complete.encode("utf-8")))
+
+    def test_parse_jsonl_events_respects_start_offset(self):
+        from workerctl import ingest
+
+        line1 = '{"type":"event_msg","payload":{"type":"agent_message"}}\n'
+        line2 = '{"type":"event_msg","payload":{"type":"task_complete","duration_ms":100}}\n'
+        content = (line1 + line2).encode("utf-8")
+        start = len(line1.encode("utf-8"))
+        # Caller has already read line1. Pass only the unread portion.
+        events = list(ingest.parse_jsonl_events(content[start:], start_offset=start))
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["subtype"], "task_complete")
+        self.assertEqual(events[0]["byte_offset"], start)
+        self.assertEqual(events[0]["new_offset"], len(content))
+
+    def test_parse_jsonl_events_skips_malformed_line(self):
+        from workerctl import ingest
+
+        good = '{"type":"event_msg","payload":{"type":"agent_message"}}\n'
+        bad = '{this is not json}\n'
+        good2 = '{"type":"event_msg","payload":{"type":"task_complete"}}\n'
+        content = (good + bad + good2).encode("utf-8")
+        events = list(ingest.parse_jsonl_events(content, start_offset=0))
+        # Malformed line is skipped; offsets still advance past it.
+        self.assertEqual(len(events), 2)
+        self.assertEqual(events[0]["subtype"], "agent_message")
+        self.assertEqual(events[1]["subtype"], "task_complete")
+        self.assertEqual(events[1]["new_offset"], len(content))
+
+
 if __name__ == "__main__":
     unittest.main()
