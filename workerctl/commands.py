@@ -2267,3 +2267,193 @@ def command_divergences(args: argparse.Namespace) -> int:
         conn.close()
     print(json.dumps(rows, indent=2, sort_keys=True, default=str))
     return 0
+
+
+def _pid_is_alive(pid: int) -> bool:
+    """Return True if `pid` corresponds to a running process.
+
+    Uses os.kill(pid, 0) - does not actually signal. ProcessLookupError means
+    "no such process" -> False. PermissionError means "process exists but is owned
+    by another user" -> True (not our problem to reconcile).
+    """
+    import os
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def collect_reconcile_report(conn: "sqlite3.Connection") -> dict:
+    """Build a read-only reconciliation report.
+
+    Returns a dict with keys:
+      - `schema_health`: dict from `db.database_health`
+      - `dead_pid_sessions`: [{name, role, pid, last_heartbeat_at}, ...] - active
+        sessions whose `pid` is no longer alive.
+      - `dangling_bindings`: [{binding_id, task_name, gone_role, gone_session_name}, ...]
+        - active or ending bindings whose worker_session_id or manager_session_id
+        points at a session with `state='gone'`.
+      - `stuck_tasks`: [{task_name, binding_id, last_cycle_at, age_seconds}, ...]
+        - active-bound tasks whose newest manager_cycles row is older than 1 hour.
+        Tasks with no cycles yet are skipped (they may be freshly bound).
+    """
+    from workerctl import db as worker_db
+
+    schema = worker_db.database_health(conn)
+
+    dead_pid_sessions = []
+    for row in conn.execute(
+        "select name, role, pid, last_heartbeat_at from sessions "
+        "where state = 'active' and pid is not null"
+    ):
+        if not _pid_is_alive(int(row["pid"])):
+            dead_pid_sessions.append({
+                "name": row["name"],
+                "role": row["role"],
+                "pid": int(row["pid"]),
+                "last_heartbeat_at": row["last_heartbeat_at"],
+            })
+
+    dangling_bindings = []
+    for row in conn.execute(
+        """
+        select
+          b.id as binding_id, t.name as task_name,
+          ws.state as worker_state, ws.name as worker_name,
+          ms.state as manager_state, ms.name as manager_name
+        from bindings b
+        join tasks t on t.id = b.task_id
+        left join sessions ws on ws.id = b.worker_session_id
+        left join sessions ms on ms.id = b.manager_session_id
+        where b.state in ('active', 'ending')
+          and b.worker_session_id is not null
+        """
+    ):
+        if row["worker_state"] == "gone":
+            dangling_bindings.append({
+                "binding_id": row["binding_id"],
+                "task_name": row["task_name"],
+                "gone_role": "worker",
+                "gone_session_name": row["worker_name"],
+            })
+        if row["manager_state"] == "gone":
+            dangling_bindings.append({
+                "binding_id": row["binding_id"],
+                "task_name": row["task_name"],
+                "gone_role": "manager",
+                "gone_session_name": row["manager_name"],
+            })
+
+    stuck_tasks = []
+    from datetime import datetime, timezone
+    now_dt = datetime.now(timezone.utc)
+    for row in conn.execute(
+        """
+        select t.name as task_name, b.id as binding_id,
+               max(mc.completed_at) as last_cycle_at
+        from bindings b
+        join tasks t on t.id = b.task_id
+        left join manager_cycles mc on mc.task_id = b.task_id
+        where b.state in ('active', 'ending')
+        group by b.id
+        having last_cycle_at is not null
+        """
+    ):
+        ts = row["last_cycle_at"]
+        if ts.endswith("Z"):
+            ts = ts[:-1] + "+00:00"
+        last_dt = datetime.fromisoformat(ts).astimezone(timezone.utc)
+        age = (now_dt - last_dt).total_seconds()
+        if age > 3600:
+            stuck_tasks.append({
+                "task_name": row["task_name"],
+                "binding_id": row["binding_id"],
+                "last_cycle_at": row["last_cycle_at"],
+                "age_seconds": age,
+            })
+
+    return {
+        "schema_health": schema,
+        "dead_pid_sessions": dead_pid_sessions,
+        "dangling_bindings": dangling_bindings,
+        "stuck_tasks": stuck_tasks,
+    }
+
+
+def apply_reconcile(conn: "sqlite3.Connection") -> dict:
+    """Apply the reconcile changes and return the report with an `applied` key.
+
+    Mutations:
+      - Mark every dead-pid session `state='gone'` with `last_heartbeat_at=now()`.
+      - After that, mark every binding that becomes dangling `state='invalid'` and
+        set `ended_at=now()`.
+      - Stuck tasks are reported but NEVER auto-closed (operators decide).
+
+    Writes `session_marked_gone_by_reconcile` and `binding_marked_invalid_by_reconcile`
+    events for audit.
+    """
+    from workerctl import db as worker_db
+    from workerctl.core import now_iso
+
+    report = collect_reconcile_report(conn)
+    now = now_iso()
+    applied = {"sessions_marked_gone": [], "bindings_marked_invalid": []}
+
+    for s in report["dead_pid_sessions"]:
+        conn.execute(
+            "update sessions set state='gone', last_heartbeat_at=? where name=?",
+            (now, s["name"]),
+        )
+        applied["sessions_marked_gone"].append(s["name"])
+        worker_db.insert_event(
+            conn, "session_marked_gone_by_reconcile", actor="workerctl",
+            payload={"name": s["name"], "pid": s["pid"], "reason": "pid not alive"},
+        )
+
+    # Re-collect dangling after session updates so newly-dangling rows are included.
+    report_post = collect_reconcile_report(conn)
+    for b in report_post["dangling_bindings"]:
+        conn.execute(
+            "update bindings set state='invalid', ended_at=? where id=?",
+            (now, b["binding_id"]),
+        )
+        applied["bindings_marked_invalid"].append(b["binding_id"])
+        worker_db.insert_event(
+            conn, "binding_marked_invalid_by_reconcile", actor="workerctl",
+            payload={
+                "binding_id": b["binding_id"],
+                "task_name": b["task_name"],
+                "gone_role": b["gone_role"],
+                "gone_session_name": b["gone_session_name"],
+            },
+        )
+
+    conn.commit()
+    report["applied"] = applied
+    return report
+
+
+def command_reconcile(args: argparse.Namespace) -> int:
+    """Reconcile DB state with reality.
+
+    Without `--apply`: print a JSON report of dead-pid sessions, dangling bindings,
+    and stuck tasks. With `--apply`: mark dead-pid sessions `state='gone'` and
+    mark dangling bindings `state='invalid'`, writing audit events for each
+    mutation. Stuck tasks are reported but never auto-closed.
+    """
+    from workerctl import db as worker_db
+
+    conn = worker_db.connect()
+    worker_db.initialize_database(conn)
+    try:
+        if args.apply:
+            report = apply_reconcile(conn)
+        else:
+            report = collect_reconcile_report(conn)
+    finally:
+        conn.close()
+    print(json.dumps(report, indent=2, sort_keys=True, default=str))
+    return 0

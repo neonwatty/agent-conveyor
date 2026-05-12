@@ -39,6 +39,7 @@ from workerctl.commands import (
     command_open_worker,
     command_prune,
     command_qa_plan,
+    command_reconcile,
     command_register_worker,
     command_register_manager,
     command_deregister,
@@ -65,10 +66,7 @@ from workerctl.ingest import IngestError
 from workerctl.export import command_export_task
 from workerctl.importer import command_import_compat
 from workerctl.lifecycle import (
-    command_close_stale,
     command_finish_task,
-    command_reconcile,
-    command_recover,
     command_stop_task,
 )
 from workerctl.replay import command_replay
@@ -381,29 +379,14 @@ def build_parser() -> argparse.ArgumentParser:
     finish_task.add_argument("--path", help="Override the workerctl database path.")
     finish_task.set_defaults(func=command_finish_task)
 
-    reconcile = subparsers.add_parser("reconcile", help="Report drift between SQLite and live tmux sessions.")
-    reconcile.add_argument("task", nargs="?", help="Optional task name or ID.")
-    reconcile.add_argument("--path", help="Override the workerctl database path.")
+    reconcile = subparsers.add_parser(
+        "reconcile",
+        help="Report (and optionally apply) reconciliation actions: dead-pid "
+             "sessions, dangling bindings, stuck tasks. JSON output.",
+    )
+    reconcile.add_argument("--apply", action="store_true",
+                          help="Mark dead-pid sessions gone and dangling bindings invalid.")
     reconcile.set_defaults(func=command_reconcile)
-
-    recover = subparsers.add_parser("recover", help="Mark missing sessions discovered by reconciliation.")
-    recover.add_argument("task", nargs="?", help="Optional task name or ID.")
-    recover.add_argument(
-        "--sync-pane-ids",
-        action="store_true",
-        help="For live pane mismatches, update recorded pane IDs to the current tmux pane IDs.",
-    )
-    recover.add_argument("--path", help="Override the workerctl database path.")
-    recover.set_defaults(func=command_recover)
-
-    close_stale = subparsers.add_parser(
-        "close-stale",
-        help="Dry-run or close stale tasks whose recorded worker is missing and unsupervised.",
-    )
-    close_stale.add_argument("task", nargs="?", help="Optional task name or ID.")
-    close_stale.add_argument("--apply", action="store_true", help="Apply the close plan. Default is dry-run.")
-    close_stale.add_argument("--path", help="Override the workerctl database path.")
-    close_stale.set_defaults(func=command_close_stale)
 
     transcript_capture = subparsers.add_parser("transcript-capture", help="Capture deduplicated full transcript segments for a task.")
     transcript_capture.add_argument("task", help="Task name or ID.")

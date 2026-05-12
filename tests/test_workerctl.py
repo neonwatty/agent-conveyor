@@ -2076,47 +2076,6 @@ class CliTests(unittest.TestCase):
                 if worker_path.exists():
                     shutil.rmtree(worker_path)
 
-    def test_recover_marks_missing_finished_review_manager_without_pausing_task(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            db_path = Path(tmpdir) / "workerctl.db"
-            with worker_db.connect(db_path) as conn:
-                worker_db.initialize_database(conn)
-                task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
-                manager_id = worker_db.create_manager(
-                    conn,
-                    task_id=task_id,
-                    name="manager-a",
-                    tmux_session="codex-manager-task-a",
-                    tmux_pane_id="%2",
-                    codex_args=[],
-                    state="ready",
-                )
-                worker_db.set_task_state(conn, task_id=task_id, state="done")
-                conn.commit()
-
-            original_session_snapshot = worker_identity.session_snapshot
-            try:
-                worker_identity.session_snapshot = lambda session: {
-                    "live": False,
-                    "pane_id": None,
-                    "session": session,
-                }
-                args = argparse.Namespace(path=str(db_path), recover=True, sync_pane_ids=False, task="task-a")
-
-                with contextlib.redirect_stdout(io.StringIO()) as stdout:
-                    result = lifecycle.command_recover(args)
-
-                payload = json.loads(stdout.getvalue())
-                self.assertEqual(result, 0)
-                self.assertIn("manager_missing", payload["results"][0]["drift"])
-                with worker_db.connect(db_path) as conn:
-                    task = conn.execute("select state from tasks where id = ?", (task_id,)).fetchone()
-                    manager = conn.execute("select state from managers where id = ?", (manager_id,)).fetchone()
-                self.assertEqual(task["state"], "done")
-                self.assertEqual(manager["state"], "missing")
-            finally:
-                worker_identity.session_snapshot = original_session_snapshot
-
     def test_stop_task_refuses_worker_pane_mismatch_before_kill(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "workerctl.db"
@@ -2179,406 +2138,6 @@ class CliTests(unittest.TestCase):
                 worker_identity.session_snapshot = original_session_snapshot
                 if worker_path.exists():
                     shutil.rmtree(worker_path)
-
-    def test_recover_marks_missing_manager_and_pauses_task(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            db_path = Path(tmpdir) / "workerctl.db"
-            with worker_db.connect(db_path) as conn:
-                worker_db.initialize_database(conn)
-                worker_db.upsert_worker(
-                    conn,
-                    name="worker-a",
-                    cwd=str(ROOT),
-                    tmux_session="codex-worker-a",
-                    state="active",
-                )
-                task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
-                worker_db.bind_task_worker(conn, task="task-a", worker="worker-a", binding_id="binding-1")
-                manager_id = worker_db.create_manager(
-                    conn,
-                    task_id=task_id,
-                    name="manager-a",
-                    tmux_session="codex-manager-task-a",
-                    codex_args=[],
-                    state="ready",
-                )
-                worker_db.attach_manager_to_binding(conn, task_id=task_id, manager_id=manager_id)
-                conn.commit()
-
-            original_session_snapshot = worker_identity.session_snapshot
-            try:
-                def fake_session_snapshot(session):
-                    return {
-                        "live": session == "codex-worker-a",
-                        "pane_id": "%1" if session == "codex-worker-a" else None,
-                        "session": session,
-                    }
-
-                worker_identity.session_snapshot = fake_session_snapshot
-
-                with contextlib.redirect_stdout(io.StringIO()) as stdout:
-                    result = lifecycle.command_recover(argparse.Namespace(path=str(db_path), task="task-a"))
-
-                payload = json.loads(stdout.getvalue())
-                self.assertEqual(result, 0)
-                self.assertEqual(payload["results"][0]["drift"], ["manager_missing"])
-                with worker_db.connect(db_path) as conn:
-                    task = conn.execute("select state from tasks where id = ?", (task_id,)).fetchone()
-                    manager = conn.execute("select state from managers where id = ?", (manager_id,)).fetchone()
-                self.assertEqual(task["state"], "paused")
-                self.assertEqual(manager["state"], "missing")
-            finally:
-                worker_identity.session_snapshot = original_session_snapshot
-
-    def test_reconcile_reports_pane_mismatches_without_marking_missing(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            db_path = Path(tmpdir) / "workerctl.db"
-            with worker_db.connect(db_path) as conn:
-                worker_db.initialize_database(conn)
-                worker_id = worker_db.upsert_worker(
-                    conn,
-                    name="worker-a",
-                    cwd=str(ROOT),
-                    tmux_session="codex-worker-a",
-                    state="active",
-                )
-                conn.execute("update workers set tmux_pane_id = '%1' where id = ?", (worker_id,))
-                task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
-                worker_db.bind_task_worker(conn, task="task-a", worker="worker-a", binding_id="binding-1")
-                manager_id = worker_db.create_manager(
-                    conn,
-                    task_id=task_id,
-                    name="manager-a",
-                    tmux_session="codex-manager-task-a",
-                    codex_args=[],
-                    state="ready",
-                )
-                conn.execute("update managers set tmux_pane_id = '%2' where id = ?", (manager_id,))
-                worker_db.attach_manager_to_binding(conn, task_id=task_id, manager_id=manager_id)
-                conn.commit()
-
-            original_session_snapshot = worker_identity.session_snapshot
-            try:
-                def fake_session_snapshot(session):
-                    pane_ids = {
-                        "codex-worker-a": "%9",
-                        "codex-manager-task-a": "%8",
-                    }
-                    return {"live": True, "pane_id": pane_ids[session], "session": session}
-
-                worker_identity.session_snapshot = fake_session_snapshot
-
-                with contextlib.redirect_stdout(io.StringIO()) as stdout:
-                    result = lifecycle.command_recover(argparse.Namespace(path=str(db_path), task="task-a"))
-
-                payload = json.loads(stdout.getvalue())
-                self.assertEqual(result, 0)
-                drift = payload["results"][0]["drift"]
-                self.assertIn("worker_pane_mismatch", drift)
-                self.assertIn("manager_pane_mismatch", drift)
-                self.assertEqual(payload["results"][0]["worker"]["recorded_pane_id"], "%1")
-                self.assertEqual(payload["results"][0]["worker"]["tmux_pane_id"], "%9")
-                self.assertEqual(payload["results"][0]["manager"]["recorded_pane_id"], "%2")
-                self.assertEqual(payload["results"][0]["manager"]["tmux_pane_id"], "%8")
-                with worker_db.connect(db_path) as conn:
-                    task = conn.execute("select state from tasks where id = ?", (task_id,)).fetchone()
-                    worker = conn.execute("select state from workers where name = 'worker-a'").fetchone()
-                    manager = conn.execute("select state from managers where id = ?", (manager_id,)).fetchone()
-                    event_types = [row["type"] for row in conn.execute("select type from events order by id")]
-                self.assertEqual(task["state"], "managed")
-                self.assertEqual(worker["state"], "active")
-                self.assertEqual(manager["state"], "ready")
-                self.assertIn("recover_worker_pane_mismatch", event_types)
-                self.assertIn("recover_manager_pane_mismatch", event_types)
-            finally:
-                worker_identity.session_snapshot = original_session_snapshot
-
-    def test_recover_syncs_live_pane_ids_when_requested(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            db_path = Path(tmpdir) / "workerctl.db"
-            worker_path = worker_dir("worker-a")
-            if worker_path.exists():
-                shutil.rmtree(worker_path)
-            worker_path.mkdir(parents=True)
-            config_path("worker-a").write_text(
-                json.dumps(
-                    {
-                        "identity_token": "token-worker-a",
-                        "name": "worker-a",
-                        "tmux_pane_id": "%1",
-                        "tmux_session": "codex-worker-a",
-                    }
-                )
-                + "\n"
-            )
-            with worker_db.connect(db_path) as conn:
-                worker_db.initialize_database(conn)
-                worker_id = worker_db.upsert_worker(
-                    conn,
-                    name="worker-a",
-                    cwd=str(ROOT),
-                    tmux_session="codex-worker-a",
-                    identity_token="token-worker-a",
-                    tmux_pane_id="%1",
-                    state="active",
-                )
-                task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
-                worker_db.bind_task_worker(conn, task="task-a", worker="worker-a", binding_id="binding-1")
-                manager_id = worker_db.create_manager(
-                    conn,
-                    task_id=task_id,
-                    name="manager-a",
-                    tmux_session="codex-manager-task-a",
-                    tmux_pane_id="%2",
-                    codex_args=[],
-                    state="ready",
-                )
-                worker_db.attach_manager_to_binding(conn, task_id=task_id, manager_id=manager_id)
-                conn.commit()
-
-            original_session_snapshot = worker_identity.session_snapshot
-            try:
-                def fake_session_snapshot(session):
-                    pane_ids = {
-                        "codex-worker-a": "%9",
-                        "codex-manager-task-a": "%8",
-                    }
-                    return {"live": True, "pane_id": pane_ids[session], "session": session}
-
-                worker_identity.session_snapshot = fake_session_snapshot
-
-                with contextlib.redirect_stdout(io.StringIO()) as stdout:
-                    result = lifecycle.command_recover(
-                        argparse.Namespace(path=str(db_path), sync_pane_ids=True, task="task-a")
-                    )
-
-                payload = json.loads(stdout.getvalue())
-                self.assertEqual(result, 0)
-                self.assertTrue(payload["sync_pane_ids"])
-                self.assertIn("worker_pane_mismatch", payload["results"][0]["drift"])
-                self.assertIn("manager_pane_mismatch", payload["results"][0]["drift"])
-                with worker_db.connect(db_path) as conn:
-                    worker = conn.execute("select tmux_pane_id from workers where name = 'worker-a'").fetchone()
-                    manager = conn.execute("select tmux_pane_id from managers where id = ?", (manager_id,)).fetchone()
-                    event_types = [row["type"] for row in conn.execute("select type from events order by id")]
-                config = json.loads(config_path("worker-a").read_text())
-                self.assertEqual(worker["tmux_pane_id"], "%9")
-                self.assertEqual(config["tmux_pane_id"], "%9")
-                self.assertEqual(manager["tmux_pane_id"], "%8")
-                self.assertIn("recover_worker_pane_synced", event_types)
-                self.assertIn("recover_manager_pane_synced", event_types)
-            finally:
-                worker_identity.session_snapshot = original_session_snapshot
-                if worker_path.exists():
-                    shutil.rmtree(worker_path)
-
-    def test_reconcile_reports_unfinished_commands_with_guidance(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            db_path = Path(tmpdir) / "workerctl.db"
-            with worker_db.connect(db_path) as conn:
-                worker_db.initialize_database(conn)
-                task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
-                worker_db.create_command(
-                    conn,
-                    command_type="task_nudge",
-                    payload={"message": "status"},
-                    task_id=task_id,
-                )
-                conn.commit()
-
-            with contextlib.redirect_stdout(io.StringIO()) as stdout:
-                result = lifecycle.command_reconcile(argparse.Namespace(path=str(db_path), task="task-a"))
-
-            payload = json.loads(stdout.getvalue())
-            self.assertEqual(result, 1)
-            self.assertIn("unfinished_commands", payload["results"][0]["drift"])
-            self.assertEqual(payload["results"][0]["unfinished_commands"][0]["type"], "task_nudge")
-            self.assertIn("retry manually", payload["results"][0]["unfinished_commands"][0]["recommended_action"])
-
-    def test_close_stale_dry_run_reports_candidates_without_mutating(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            db_path = Path(tmpdir) / "workerctl.db"
-            with worker_db.connect(db_path) as conn:
-                worker_db.initialize_database(conn)
-                worker_db.upsert_worker(
-                    conn,
-                    name="worker-a",
-                    cwd=str(ROOT),
-                    tmux_session="codex-worker-a",
-                    state="active",
-                )
-                task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
-                worker_db.bind_task_worker(conn, task="task-a", worker="worker-a", binding_id="binding-1")
-                conn.commit()
-
-            original_session_snapshot = worker_identity.session_snapshot
-            try:
-                worker_identity.session_snapshot = lambda session: {"live": False, "pane_id": None, "session": session}
-
-                with contextlib.redirect_stdout(io.StringIO()) as stdout:
-                    result = lifecycle.command_close_stale(
-                        argparse.Namespace(apply=False, path=str(db_path), task="task-a")
-                    )
-
-                payload = json.loads(stdout.getvalue())
-                self.assertEqual(result, 0)
-                self.assertFalse(payload["apply"])
-                self.assertEqual(payload["candidates"][0]["task"]["id"], task_id)
-                self.assertEqual(payload["candidates"][0]["planned_state"], "failed")
-                with worker_db.connect(db_path) as conn:
-                    task = conn.execute("select state from tasks where id = ?", (task_id,)).fetchone()
-                    worker = conn.execute("select state from workers where name = 'worker-a'").fetchone()
-                    binding = conn.execute("select state from bindings where id = 'binding-1'").fetchone()
-                    commands_count = conn.execute("select count(*) from commands where type = 'close_stale'").fetchone()[0]
-                self.assertEqual(task["state"], "managed")
-                self.assertEqual(worker["state"], "active")
-                self.assertEqual(binding["state"], "active")
-                self.assertEqual(commands_count, 0)
-            finally:
-                worker_identity.session_snapshot = original_session_snapshot
-
-    def test_close_stale_apply_marks_failed_and_audits_transition(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            db_path = Path(tmpdir) / "workerctl.db"
-            with worker_db.connect(db_path) as conn:
-                worker_db.initialize_database(conn)
-                worker_db.upsert_worker(
-                    conn,
-                    name="worker-a",
-                    cwd=str(ROOT),
-                    tmux_session="codex-worker-a",
-                    state="active",
-                )
-                task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
-                worker_db.bind_task_worker(conn, task="task-a", worker="worker-a", binding_id="binding-1")
-                conn.commit()
-
-            original_session_snapshot = worker_identity.session_snapshot
-            try:
-                worker_identity.session_snapshot = lambda session: {"live": False, "pane_id": None, "session": session}
-
-                with contextlib.redirect_stdout(io.StringIO()) as stdout:
-                    result = lifecycle.command_close_stale(
-                        argparse.Namespace(apply=True, path=str(db_path), task="task-a")
-                    )
-
-                payload = json.loads(stdout.getvalue())
-                self.assertEqual(result, 0)
-                self.assertTrue(payload["apply"])
-                self.assertEqual(payload["closed"][0]["task"]["id"], task_id)
-                with worker_db.connect(db_path) as conn:
-                    task = conn.execute("select state from tasks where id = ?", (task_id,)).fetchone()
-                    worker = conn.execute("select state from workers where name = 'worker-a'").fetchone()
-                    binding = conn.execute("select state, ended_at from bindings where id = 'binding-1'").fetchone()
-                    command = conn.execute("select state, result_json from commands where type = 'close_stale'").fetchone()
-                    event = conn.execute("select type, payload_json from events where type = 'close_stale_task'").fetchone()
-                self.assertEqual(task["state"], "failed")
-                self.assertEqual(worker["state"], "missing")
-                self.assertEqual(binding["state"], "ended")
-                self.assertIsNotNone(binding["ended_at"])
-                self.assertEqual(command["state"], "succeeded")
-                self.assertEqual(json.loads(command["result_json"])["task_state"], "failed")
-                self.assertEqual(event["type"], "close_stale_task")
-                self.assertEqual(json.loads(event["payload_json"])["planned_state"], "failed")
-            finally:
-                worker_identity.session_snapshot = original_session_snapshot
-
-    def test_close_stale_skips_unfinished_commands(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            db_path = Path(tmpdir) / "workerctl.db"
-            with worker_db.connect(db_path) as conn:
-                worker_db.initialize_database(conn)
-                worker_id = worker_db.upsert_worker(
-                    conn,
-                    name="worker-a",
-                    cwd=str(ROOT),
-                    tmux_session="codex-worker-a",
-                    state="active",
-                )
-                task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
-                worker_db.bind_task_worker(conn, task="task-a", worker="worker-a", binding_id="binding-1")
-                worker_db.create_command(
-                    conn,
-                    command_type="task_nudge",
-                    payload={"message": "status"},
-                    task_id=task_id,
-                    worker_id=worker_id,
-                )
-                conn.commit()
-
-            original_session_snapshot = worker_identity.session_snapshot
-            try:
-                worker_identity.session_snapshot = lambda session: {"live": False, "pane_id": None, "session": session}
-
-                with contextlib.redirect_stdout(io.StringIO()) as stdout:
-                    result = lifecycle.command_close_stale(
-                        argparse.Namespace(apply=True, path=str(db_path), task="task-a")
-                    )
-
-                payload = json.loads(stdout.getvalue())
-                self.assertEqual(result, 0)
-                self.assertEqual(payload["closed"], [])
-                self.assertEqual(payload["skipped"][0]["skip_reasons"], ["unfinished_commands"])
-                with worker_db.connect(db_path) as conn:
-                    task = conn.execute("select state from tasks where id = ?", (task_id,)).fetchone()
-                    binding = conn.execute("select state from bindings where id = 'binding-1'").fetchone()
-                    close_count = conn.execute("select count(*) from commands where type = 'close_stale'").fetchone()[0]
-                self.assertEqual(task["state"], "managed")
-                self.assertEqual(binding["state"], "active")
-                self.assertEqual(close_count, 0)
-            finally:
-                worker_identity.session_snapshot = original_session_snapshot
-
-    def test_close_stale_skips_live_manager(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            db_path = Path(tmpdir) / "workerctl.db"
-            with worker_db.connect(db_path) as conn:
-                worker_db.initialize_database(conn)
-                worker_db.upsert_worker(
-                    conn,
-                    name="worker-a",
-                    cwd=str(ROOT),
-                    tmux_session="codex-worker-a",
-                    state="active",
-                )
-                task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
-                worker_db.bind_task_worker(conn, task="task-a", worker="worker-a", binding_id="binding-1")
-                manager_id = worker_db.create_manager(
-                    conn,
-                    task_id=task_id,
-                    name="manager-a",
-                    tmux_session="codex-manager-task-a",
-                    codex_args=[],
-                    state="ready",
-                )
-                worker_db.attach_manager_to_binding(conn, task_id=task_id, manager_id=manager_id)
-                conn.commit()
-
-            original_session_snapshot = worker_identity.session_snapshot
-            try:
-                def fake_session_snapshot(session):
-                    return {"live": session == "codex-manager-task-a", "pane_id": None, "session": session}
-
-                worker_identity.session_snapshot = fake_session_snapshot
-
-                with contextlib.redirect_stdout(io.StringIO()) as stdout:
-                    result = lifecycle.command_close_stale(
-                        argparse.Namespace(apply=True, path=str(db_path), task="task-a")
-                    )
-
-                payload = json.loads(stdout.getvalue())
-                self.assertEqual(result, 0)
-                self.assertEqual(payload["closed"], [])
-                self.assertEqual(payload["skipped"][0]["skip_reasons"], ["manager_live"])
-                with worker_db.connect(db_path) as conn:
-                    task = conn.execute("select state from tasks where id = ?", (task_id,)).fetchone()
-                    worker = conn.execute("select state from workers where name = 'worker-a'").fetchone()
-                    manager = conn.execute("select state from managers where id = ?", (manager_id,)).fetchone()
-                self.assertEqual(task["state"], "managed")
-                self.assertEqual(worker["state"], "active")
-                self.assertEqual(manager["state"], "ready")
-            finally:
-                worker_identity.session_snapshot = original_session_snapshot
 
     def test_export_task_writes_bundle_and_zip(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -2676,29 +2235,15 @@ class CliTests(unittest.TestCase):
         self.assertIn("open-worker", proc.stdout)
         self.assertIn("prune", proc.stdout)
         self.assertIn("qa-plan", proc.stdout)
-        self.assertIn("recover", proc.stdout)
         self.assertIn("reconcile", proc.stdout)
         self.assertIn("replay", proc.stdout)
         self.assertIn("start", proc.stdout)
         self.assertIn("stop-task", proc.stdout)
-        self.assertIn("close-stale", proc.stdout)
         self.assertIn("export-task", proc.stdout)
         self.assertIn("finish-task", proc.stdout)
         self.assertIn("transcript-capture", proc.stdout)
         self.assertIn("transcript-prune", proc.stdout)
         self.assertIn("transcript-show", proc.stdout)
-
-    def test_recover_help_includes_sync_pane_ids(self):
-        proc = self.run_workerctl("recover", "--help")
-
-        self.assertEqual(proc.returncode, 0, proc.stderr)
-        self.assertIn("--sync-pane-ids", proc.stdout)
-
-    def test_close_stale_help_includes_apply(self):
-        proc = self.run_workerctl("close-stale", "--help")
-
-        self.assertEqual(proc.returncode, 0, proc.stderr)
-        self.assertIn("--apply", proc.stdout)
 
     def test_start_test_is_listed_in_help(self):
         proc = self.run_workerctl("--help")
@@ -6412,6 +5957,156 @@ class DivergencesCliTests(unittest.TestCase):
             proc = self.run_cli("divergences", "mytask", env_extra=env)
             self.assertEqual(proc.returncode, 0, proc.stderr)
             self.assertEqual(json.loads(proc.stdout), [])
+
+
+class ReconcileTests(unittest.TestCase):
+    def open_db(self, tmpdir):
+        path = Path(tmpdir) / "workerctl.db"
+        conn = worker_db.connect(path)
+        worker_db.initialize_database(conn)
+        self.addCleanup(conn.close)
+        return conn
+
+    def test_reconcile_reports_dead_pid_session(self):
+        from workerctl import commands as worker_commands
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            worker_db.register_session(
+                conn, name="dead", role="worker",
+                codex_session_path="/a", codex_session_id="u",
+                pid=2147483646, cwd="/repo",
+                tmux_session="codex-dead",
+            )
+            conn.commit()
+
+            report = worker_commands.collect_reconcile_report(conn)
+            dead_pid_sessions = [
+                s for s in report["dead_pid_sessions"]
+                if s["name"] == "dead"
+            ]
+            self.assertEqual(len(dead_pid_sessions), 1)
+            self.assertEqual(dead_pid_sessions[0]["pid"], 2147483646)
+
+    def test_reconcile_reports_dangling_binding(self):
+        from workerctl import commands as worker_commands
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            now = "2026-05-12T00:00:00Z"
+            conn.execute(
+                "insert into tasks(id, name, goal, state, created_at, updated_at) "
+                "values ('task-1', 't', 'g', 'managed', ?, ?)",
+                (now, now),
+            )
+            worker_db.register_session(
+                conn, name="w", role="worker",
+                codex_session_path="/a", codex_session_id="u-w", pid=1, cwd="/r",
+            )
+            worker_db.register_session(
+                conn, name="m", role="manager",
+                codex_session_path="/b", codex_session_id="u-m", pid=2, cwd="/r",
+            )
+            worker_db.bind_sessions(
+                conn, task_name="t", worker_session_name="w", manager_session_name="m",
+            )
+            # Mark the worker session gone manually - the binding now dangles.
+            conn.execute("update sessions set state='gone' where name='w'")
+            conn.commit()
+
+            report = worker_commands.collect_reconcile_report(conn)
+            dangling = [b for b in report["dangling_bindings"] if b["task_name"] == "t"]
+            self.assertEqual(len(dangling), 1)
+            self.assertEqual(dangling[0]["gone_role"], "worker")
+
+    def test_reconcile_apply_marks_gone_pid_session_gone(self):
+        from workerctl import commands as worker_commands
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            worker_db.register_session(
+                conn, name="dead", role="worker",
+                codex_session_path="/a", codex_session_id="u",
+                pid=2147483646, cwd="/repo",
+            )
+            conn.commit()
+
+            worker_commands.apply_reconcile(conn)
+
+            row = conn.execute("select state from sessions where name='dead'").fetchone()
+            self.assertEqual(row["state"], "gone")
+
+    def test_reconcile_apply_marks_dangling_binding_invalid(self):
+        from workerctl import commands as worker_commands
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            now = "2026-05-12T00:00:00Z"
+            conn.execute(
+                "insert into tasks(id, name, goal, state, created_at, updated_at) "
+                "values ('task-1', 't', 'g', 'managed', ?, ?)",
+                (now, now),
+            )
+            worker_db.register_session(
+                conn, name="w", role="worker",
+                codex_session_path="/a", codex_session_id="u-w", pid=1, cwd="/r",
+            )
+            worker_db.register_session(
+                conn, name="m", role="manager",
+                codex_session_path="/b", codex_session_id="u-m", pid=2, cwd="/r",
+            )
+            binding_id = worker_db.bind_sessions(
+                conn, task_name="t", worker_session_name="w", manager_session_name="m",
+            )
+            conn.execute("update sessions set state='gone' where name='w'")
+            conn.commit()
+
+            worker_commands.apply_reconcile(conn)
+
+            row = conn.execute(
+                "select state from bindings where id = ?", (binding_id,)
+            ).fetchone()
+            self.assertEqual(row["state"], "invalid")
+
+    def test_reconcile_cli_dry_run_does_not_mutate(self):
+        """End-to-end CLI smoke test: dry-run prints JSON and leaves state alone."""
+        env = os.environ.copy()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_dir = Path(tmpdir) / "state"
+            state_dir.mkdir()
+            env["WORKERCTL_STATE_ROOT"] = str(state_dir)
+
+            # Build a fixture rollout so register-worker accepts the dead-pid session.
+            rollout = Path(tmpdir) / "rollout.jsonl"
+            rollout.write_text(
+                json.dumps({
+                    "type": "session_meta",
+                    "payload": {"id": "u", "cwd": str(ROOT), "originator": "codex-tui"},
+                }) + "\n"
+            )
+            subprocess.run(
+                [sys.executable, "-m", "workerctl", "register-worker",
+                 "--name", "dead", "--pid", "2147483646",
+                 "--codex-session", str(rollout),
+                 "--cwd", str(ROOT)],
+                env=env, capture_output=True, text=True, cwd=str(ROOT),
+            )
+
+            proc = subprocess.run(
+                [sys.executable, "-m", "workerctl", "reconcile"],
+                env=env, capture_output=True, text=True, cwd=str(ROOT),
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            report = json.loads(proc.stdout)
+            self.assertIn("dead_pid_sessions", report)
+            self.assertTrue(any(s["name"] == "dead" for s in report["dead_pid_sessions"]))
+
+            # Dry-run must NOT have mutated the session.
+            db_path = state_dir / "workerctl.db"
+            conn = worker_db.connect(db_path)
+            self.addCleanup(conn.close)
+            row = conn.execute("select state from sessions where name='dead'").fetchone()
+            self.assertEqual(row["state"], "active")
 
 
 if __name__ == "__main__":
