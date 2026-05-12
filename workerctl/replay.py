@@ -147,6 +147,9 @@ def replay_entries(audit: dict[str, Any], *, role: str = "all", mode: str = "tim
                         )
                     else:
                         summary = f"observed session {worker_session} state {state}"
+                    notable = status.get("notable_pane_pattern")
+                    if notable:
+                        summary += f" [pane pattern: {notable}]"
             else:
                 # Legacy logic for older status shapes
                 worker_status = status.get("worker_status") or {}

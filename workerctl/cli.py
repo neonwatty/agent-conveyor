@@ -28,6 +28,7 @@ from workerctl.commands import (
     command_create,
     command_cycle,
     command_db_doctor,
+    command_divergences,
     command_doctor,
     command_doctor_self,
     command_events,
@@ -373,6 +374,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     cycle.add_argument("task", help="Task name.")
     cycle.set_defaults(func=command_cycle)
+
+    divergences = subparsers.add_parser(
+        "divergences",
+        help="List cycle observations where the shadow pane signal flagged a notable pattern.",
+    )
+    divergences.add_argument("task", help="Task name.")
+    divergences.add_argument("--limit", type=int, default=50, help="Max rows to return.")
+    divergences.set_defaults(func=command_divergences)
 
     commands = subparsers.add_parser("commands", help="List durable side-effect commands from SQLite.")
     commands.add_argument("--task", help="Filter by task name or ID.")

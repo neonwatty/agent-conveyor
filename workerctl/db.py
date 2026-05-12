@@ -881,6 +881,18 @@ def session_row(conn: sqlite3.Connection, *, name: str, role: str | None = None)
     return row
 
 
+def session_by_id(conn: sqlite3.Connection, *, session_id: str) -> sqlite3.Row | None:
+    """Look up a session by id. Returns the row or None if not found.
+
+    Mirrors `session_row` (which looks up by name) but for id-keyed access.
+    Callers that need a present-row contract should check the return value
+    explicitly — this helper does not raise on missing.
+    """
+    return conn.execute(
+        "select * from sessions where id = ?", (session_id,)
+    ).fetchone()
+
+
 def list_sessions(conn: sqlite3.Connection, *, role: str | None = None) -> list[dict[str, Any]]:
     query = "select * from sessions"
     params: tuple = ()
@@ -1983,6 +1995,56 @@ def active_binding_for_task(
     if row is None:
         raise WorkerError(f"no active session-based binding for task {task_name!r}")
     return dict(row)
+
+
+def divergent_cycles_for_task(
+    conn: sqlite3.Connection,
+    *,
+    task_name: str,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    """Return successful Phase 3 cycle rows where the shadow pane signal flagged
+    a notable pattern (`notable_pane_pattern` is non-null in `status_json`).
+
+    Returns a list of dicts with keys: `id`, `task_id`, `started_at`,
+    `completed_at`, `state`, `notable_pane_pattern`, `status` (parsed status_json).
+    Ordered newest-first, capped at `limit`.
+
+    Raises WorkerError if `task_name` is unknown. Failed cycles are excluded
+    (they don't carry a notable_pane_pattern field — see supervise_cycle.run_cycle).
+
+    The SQL filter `state = 'succeeded'` is a redundant guardrail in case a
+    future failure-payload shape adds `notable_pane_pattern` — the data-flow
+    guarantee (failure_status omits the key) is the primary mechanism; this is
+    belt-and-suspenders.
+    """
+    task = task_row(conn, task=task_name)
+    rows = conn.execute(
+        """
+        select
+          id, task_id, started_at, completed_at, state, status_json,
+          json_extract(status_json, '$.notable_pane_pattern') as notable_pane_pattern
+        from manager_cycles
+        where task_id = ?
+          and state = 'succeeded'
+          and json_extract(status_json, '$.notable_pane_pattern') is not null
+        order by id desc
+        limit ?
+        """,
+        (task["id"], limit),
+    ).fetchall()
+    return [
+        {
+            "id": r["id"],
+            "task_id": r["task_id"],
+            "started_at": r["started_at"],
+            "completed_at": r["completed_at"],
+            "state": r["state"],
+            "notable_pane_pattern": r["notable_pane_pattern"],
+            "status": json.loads(r["status_json"]),
+        }
+        for r in rows
+    ]
 
 
 def active_task_worker(conn: sqlite3.Connection, *, task: str) -> dict[str, Any]:

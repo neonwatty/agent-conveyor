@@ -262,6 +262,65 @@ add an `events` row when the command already records itself in a dedicated table
 `task_complete` → `idle`; everything else does not change state. `unknown` means
 no state-bearing event has been ingested yet.
 
+### Phase 4: Shadow Pane Signal + Divergences
+
+Every `cycle` invocation now also captures the worker's tmux pane (if attached)
+and runs the legacy `classify_busy_wait` pattern detector. The results are
+included in the cycle output as `pane_signal` and (for easy filtering)
+`notable_pane_pattern`. The JSON state remains the primary signal; the pane
+signal is supplementary — it surfaces stuck-prompt conditions (trust prompt,
+rate-limit prompt, approval prompt, etc.) that the JSON event stream cannot see.
+
+```bash
+# A cycle with a notable pane pattern looks like:
+workerctl cycle auth-refactor
+# {
+#   "kind": "session_cycle",
+#   "task": "auth-refactor",
+#   "state": "busy",
+#   "notable_pane_pattern": "trust_prompt",
+#   "pane_signal": {
+#     "captured": true,
+#     "classifier": {
+#       "pattern": "trust_prompt",
+#       "reason": "terminal is waiting for workspace trust confirmation",
+#       "recommended_action": "inspect_or_accept_trust"
+#     },
+#     "notable_pattern": "trust_prompt",
+#     "status_age_seconds": 4,
+#     "reason": null
+#   },
+#   ...
+# }
+
+# A session without a tmux pane (e.g. a manager outside tmux) yields a clean
+# non-captured signal — the cycle still succeeds with the JSON state:
+# "pane_signal": { "captured": false, "reason": "no tmux session attached", ... }
+
+# Audit divergences during the shadow period:
+workerctl divergences auth-refactor
+workerctl divergences auth-refactor --limit 5
+```
+
+**What counts as a "divergence"?** Currently: any cycle whose pane signal flagged
+a pattern at all (`notable_pane_pattern` is non-null). This catches stuck-prompt
+states the JSON stream cannot detect. The `divergences` command returns those
+cycles newest-first along with their full `status_json` payload, so an operator
+can decide whether the pane signal was right and the worker needed intervention.
+
+**Operational shape.** A manager Codex driving supervision continues to consume
+`workerctl cycle` as its primary observation. It can now also branch on
+`notable_pane_pattern` — e.g., if the pattern is `trust_prompt`, the manager
+might send a confirmation via `session-nudge` rather than waiting on
+`staleness_seconds`. The shadow signal is best-effort: tmux capture failures are
+caught and reported in `pane_signal.reason` rather than aborting the cycle.
+
+**Replay parity.** `workerctl replay <task>` surfaces `[pane pattern: <pattern_id>]`
+in the rendered cycle summary (timeline / transcript / full-transcript modes)
+when a pattern was detected. `workerctl audit <task> --json` exposes the raw
+`notable_pane_pattern` field on each `manager_cycles` entry. The plain-text
+`workerctl audit <task>` lists `events`-table rows only, not cycle observations.
+
 ## SQLite Worker-Manager Lifecycle
 
 `workerctl` now uses `.codex-workers/workerctl.db` as the authoritative
