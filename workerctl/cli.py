@@ -26,6 +26,7 @@ from workerctl.commands import (
     command_classify,
     command_commands,
     command_create,
+    command_cycle,
     command_db_doctor,
     command_doctor,
     command_doctor_self,
@@ -365,6 +366,13 @@ def build_parser() -> argparse.ArgumentParser:
     session_interrupt.add_argument("--followup", default=None, help="Optional text to send after the interrupt.")
     session_interrupt.add_argument("--dry-run", action="store_true", help="Resolve target without sending.")
     session_interrupt.set_defaults(func=command_session_interrupt)
+
+    cycle = subparsers.add_parser(
+        "cycle",
+        help="Run one observation cycle for a session-bound task. Returns JSON.",
+    )
+    cycle.add_argument("task", help="Task name.")
+    cycle.set_defaults(func=command_cycle)
 
     commands = subparsers.add_parser("commands", help="List durable side-effect commands from SQLite.")
     commands.add_argument("--task", help="Filter by task name or ID.")

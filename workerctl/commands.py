@@ -2891,3 +2891,23 @@ def command_session_interrupt(args: argparse.Namespace) -> int:
         conn.close()
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0
+
+
+def command_cycle(args: argparse.Namespace) -> int:
+    """Run one observation cycle for a bound task. Output is structured JSON.
+
+    The manager Codex (or an operator) is expected to read the output and decide
+    whether to call `session-nudge`, `session-interrupt`, `finish-task`, or wait.
+    The cycle command does NOT decide on the manager's behalf — it observes only.
+    """
+    from workerctl import db as worker_db
+    from workerctl import supervise_cycle
+
+    conn = worker_db.connect()
+    worker_db.initialize_database(conn)
+    try:
+        result = supervise_cycle.run_cycle(conn, task_name=args.task)
+    finally:
+        conn.close()
+    print(json.dumps(result, indent=2, sort_keys=True, default=str))
+    return 0

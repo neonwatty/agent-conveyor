@@ -7822,5 +7822,82 @@ class SuperviseCycleTests(unittest.TestCase):
             self.assertEqual(status["kind"], "session_cycle")
 
 
+class CycleCliTests(unittest.TestCase):
+    def run_cli(self, *args, env_extra=None):
+        env = os.environ.copy()
+        if env_extra:
+            env.update(env_extra)
+        return subprocess.run(
+            [sys.executable, "-m", "workerctl", *args],
+            capture_output=True, text=True, env=env, cwd=str(ROOT),
+        )
+
+    def _setup_bound_task_via_cli(self, tmpdir, events):
+        rollout = Path(tmpdir) / "rollout.jsonl"
+        full_events = ([{"type": "session_meta",
+                          "payload": {"id": "u", "cwd": str(ROOT), "originator": "codex-tui"}}]
+                       + events)
+        rollout.write_text("".join(json.dumps(e) + "\n" for e in full_events))
+        state_dir = Path(tmpdir) / "state"
+        state_dir.mkdir()
+        env = {"WORKERCTL_STATE_ROOT": str(state_dir)}
+        self.run_cli("register-worker", "--name", "w",
+                     "--codex-session", str(rollout),
+                     "--pid", "1", "--cwd", str(ROOT),
+                     "--tmux-session", "codex-w",
+                     env_extra=env)
+        self.run_cli("register-manager", "--name", "m",
+                     "--codex-session", str(rollout),
+                     "--pid", "2", "--cwd", str(ROOT),
+                     env_extra=env)
+        self.run_cli("tasks", "--create", "myTask", "--goal", "g", env_extra=env)
+        self.run_cli("bind", "--task", "myTask", "--worker", "w", "--manager", "m",
+                     env_extra=env)
+        return rollout, state_dir, env
+
+    def test_cli_cycle_returns_structured_payload(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            _, state_dir, env = self._setup_bound_task_via_cli(tmpdir, events=[
+                {"timestamp": "2026-05-11T14:32:11Z",
+                 "type": "event_msg",
+                 "payload": {"type": "task_started", "turn_id": "t1"}},
+            ])
+            proc = self.run_cli("cycle", "myTask", env_extra=env)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            result = json.loads(proc.stdout)
+            self.assertEqual(result["task"], "myTask")
+            self.assertEqual(result["worker_session"], "w")
+            self.assertEqual(result["manager_session"], "m")
+            self.assertEqual(result["state"], "busy")
+            self.assertEqual(result["ingest"]["new_events"], 2)
+            self.assertIn("cycle_id", result)
+
+    def test_cli_cycle_idempotent_on_unchanged_rollout(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            _, state_dir, env = self._setup_bound_task_via_cli(tmpdir, events=[
+                {"timestamp": "2026-05-11T14:32:11Z",
+                 "type": "event_msg",
+                 "payload": {"type": "task_complete"}},
+            ])
+            self.run_cli("cycle", "myTask", env_extra=env)
+            proc = self.run_cli("cycle", "myTask", env_extra=env)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            result = json.loads(proc.stdout)
+            self.assertEqual(result["ingest"]["new_events"], 0)
+            self.assertEqual(result["state"], "idle")
+
+    def test_cli_cycle_unknown_task_clean_error(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_dir = Path(tmpdir) / "state"
+            state_dir.mkdir()
+            proc = self.run_cli(
+                "cycle", "no-such-task",
+                env_extra={"WORKERCTL_STATE_ROOT": str(state_dir)},
+            )
+            self.assertEqual(proc.returncode, 1)
+            self.assertNotIn("Traceback", proc.stderr)
+            self.assertIn("workerctl:", proc.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()
