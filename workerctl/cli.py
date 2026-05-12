@@ -51,6 +51,8 @@ from workerctl.commands import (
     command_bind,
     command_ingest,
     command_unbind,
+    command_session_nudge,
+    command_session_interrupt,
     command_start,
     command_start_test,
     command_status,
@@ -344,6 +346,25 @@ def build_parser() -> argparse.ArgumentParser:
     tail.add_argument("--limit", type=int, default=50, help="Max events to print.")
     tail.add_argument("--subtype", default=None, help="Filter by event_msg subtype.")
     tail.set_defaults(func=command_tail)
+
+    session_nudge = subparsers.add_parser(
+        "session-nudge",
+        help="Send text (followed by Enter) to a registered session's tmux pane.",
+    )
+    session_nudge.add_argument("name", help="Session name.")
+    session_nudge.add_argument("text", help="Text to send.")
+    session_nudge.add_argument("--dry-run", action="store_true", help="Resolve target without sending.")
+    session_nudge.set_defaults(func=command_session_nudge)
+
+    session_interrupt = subparsers.add_parser(
+        "session-interrupt",
+        help="Send an interrupt key (default Ctrl-C) to a registered session's tmux pane.",
+    )
+    session_interrupt.add_argument("name", help="Session name.")
+    session_interrupt.add_argument("--key", default="C-c", help="Key chord (tmux format).")
+    session_interrupt.add_argument("--followup", default=None, help="Optional text to send after the interrupt.")
+    session_interrupt.add_argument("--dry-run", action="store_true", help="Resolve target without sending.")
+    session_interrupt.set_defaults(func=command_session_interrupt)
 
     commands = subparsers.add_parser("commands", help="List durable side-effect commands from SQLite.")
     commands.add_argument("--task", help="Filter by task name or ID.")

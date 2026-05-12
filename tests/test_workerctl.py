@@ -7488,5 +7488,86 @@ class SessionTmuxTests(unittest.TestCase):
             self.assertEqual(result["key"], "C-c")
 
 
+class SessionActionCliTests(unittest.TestCase):
+    def run_cli(self, *args, env_extra=None):
+        env = os.environ.copy()
+        if env_extra:
+            env.update(env_extra)
+        return subprocess.run(
+            [sys.executable, "-m", "workerctl", *args],
+            capture_output=True, text=True, env=env, cwd=str(ROOT),
+        )
+
+    def _setup_with_worker(self, tmpdir):
+        rollout = Path(tmpdir) / "rollout.jsonl"
+        rollout.write_text(json.dumps({
+            "type": "session_meta",
+            "payload": {"id": "u", "cwd": str(ROOT), "originator": "codex-tui"},
+        }) + "\n")
+        state_dir = Path(tmpdir) / "state"
+        state_dir.mkdir()
+        env = {"WORKERCTL_STATE_ROOT": str(state_dir)}
+        self.run_cli(
+            "register-worker", "--name", "w",
+            "--codex-session", str(rollout),
+            "--pid", "1", "--cwd", str(ROOT),
+            "--tmux-session", "codex-w",
+            env_extra=env,
+        )
+        return rollout, state_dir, env
+
+    def test_cli_session_nudge_dry_run(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            _, state_dir, env = self._setup_with_worker(tmpdir)
+            proc = self.run_cli(
+                "session-nudge", "w", "hello there", "--dry-run",
+                env_extra=env,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            payload = json.loads(proc.stdout)
+            self.assertEqual(payload["session"], "w")
+            self.assertEqual(payload["text"], "hello there")
+            self.assertEqual(payload["dry_run"], True)
+            self.assertIn("codex-w", payload["target"])
+
+    def test_cli_session_nudge_rejects_session_without_tmux(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            rollout = Path(tmpdir) / "rollout.jsonl"
+            rollout.write_text(json.dumps({
+                "type": "session_meta",
+                "payload": {"id": "u", "cwd": str(ROOT), "originator": "codex-tui"},
+            }) + "\n")
+            state_dir = Path(tmpdir) / "state"
+            state_dir.mkdir()
+            env = {"WORKERCTL_STATE_ROOT": str(state_dir)}
+            # Register a manager WITHOUT --tmux-session — clean error path.
+            self.run_cli(
+                "register-manager", "--name", "m",
+                "--codex-session", str(rollout),
+                "--pid", "2", "--cwd", str(ROOT),
+                env_extra=env,
+            )
+            proc = self.run_cli(
+                "session-nudge", "m", "shouldn't work", "--dry-run",
+                env_extra=env,
+            )
+            self.assertEqual(proc.returncode, 1)
+            self.assertNotIn("Traceback", proc.stderr)
+            self.assertIn("workerctl:", proc.stderr)
+
+    def test_cli_session_interrupt_dry_run(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            _, state_dir, env = self._setup_with_worker(tmpdir)
+            proc = self.run_cli(
+                "session-interrupt", "w", "--dry-run",
+                env_extra=env,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            payload = json.loads(proc.stdout)
+            self.assertEqual(payload["session"], "w")
+            self.assertEqual(payload["key"], "C-c")
+            self.assertEqual(payload["dry_run"], True)
+
+
 if __name__ == "__main__":
     unittest.main()
