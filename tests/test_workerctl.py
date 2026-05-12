@@ -7821,6 +7821,40 @@ class SuperviseCycleTests(unittest.TestCase):
             status = json.loads(row["status_json"])
             self.assertEqual(status["kind"], "session_cycle")
 
+    def test_run_cycle_row_is_legible_via_replay(self):
+        """Phase 3 manager_cycles rows should render a useful summary via the
+        replay module, not the generic 'observed task' fallback."""
+        from workerctl import supervise_cycle
+        from workerctl import replay as worker_replay
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self._setup_bound_task(conn, tmpdir, [
+                {"type": "session_meta", "payload": {"id": "u-w", "cwd": "/r"}},
+                {"timestamp": "2026-05-11T14:32:11Z",
+                 "type": "event_msg",
+                 "payload": {"type": "task_started", "turn_id": "t1"}},
+            ])
+            supervise_cycle.run_cycle(
+                conn, task_name="t", now="2026-05-11T14:32:15Z",
+            )
+
+            # Build the replay timeline and confirm the session cycle row was
+            # rendered with the new-shape summary, not the generic fallback.
+            audit = worker_db.task_audit(conn, task="t")
+            entries = worker_replay.replay_entries(audit, role="all", mode="timeline")
+            summary_lines = [
+                entry["summary"]
+                for entry in entries
+                if entry.get("kind") == "observe"
+            ]
+            self.assertTrue(summary_lines, "expected at least one observe entry")
+            joined = " | ".join(summary_lines)
+            self.assertNotIn("observed task", joined,
+                             f"replay produced generic fallback summary: {joined!r}")
+            self.assertIn("busy", joined.lower())
+            self.assertIn("w", joined)  # worker session name
+
 
 class CycleCliTests(unittest.TestCase):
     def run_cli(self, *args, env_extra=None):
