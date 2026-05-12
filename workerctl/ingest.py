@@ -2,7 +2,15 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from pathlib import Path
 from typing import Any, Iterator
+
+from workerctl import db as worker_db
+from workerctl.core import WorkerError, now_iso
+
+
+class IngestError(Exception):
+    """Raised when ingestion can't proceed for a structural reason (missing rollout, etc)."""
 
 
 def parse_jsonl_events(content: bytes, *, start_offset: int) -> Iterator[dict[str, Any]]:
@@ -106,3 +114,64 @@ def current_state(conn: sqlite3.Connection, *, session_id: str) -> str:
     if row is None:
         return "unknown"
     return _STATE_MAP[row["subtype"]]
+
+
+def ingest_session(
+    conn: sqlite3.Connection,
+    *,
+    session_name: str,
+    now: str | None = None,
+) -> dict[str, Any]:
+    """Run one ingest cycle for the named session.
+
+    Reads new bytes from the session's rollout file starting at the recorded offset,
+    parses JSONL records, persists each to `codex_events`, advances the session's
+    `last_ingest_offset`, and bumps `last_heartbeat_at`.
+
+    Returns a dict with `new_events` (int) and `new_offset` (int).
+
+    Raises:
+      - WorkerError if the session is unknown.
+      - IngestError if the rollout path is missing or unreadable.
+    """
+    row = worker_db.session_row(conn, name=session_name)
+    session_id = row["id"]
+    rollout_path_str = row["codex_session_path"]
+    if not rollout_path_str:
+        raise IngestError(f"session {session_name!r} has no codex_session_path")
+
+    rollout_path = Path(rollout_path_str)
+    if not rollout_path.exists():
+        raise IngestError(f"rollout file does not exist: {rollout_path}")
+
+    start_offset = row["last_ingest_offset"] or 0
+    try:
+        with open(rollout_path, "rb") as fh:
+            fh.seek(start_offset)
+            content = fh.read()
+    except OSError as exc:
+        raise IngestError(f"failed to read rollout file: {exc}") from exc
+
+    timestamp = now or now_iso()
+    new_events = 0
+    new_offset = start_offset
+    for event in parse_jsonl_events(content, start_offset=start_offset):
+        worker_db.insert_codex_event(
+            conn,
+            session_id=session_id,
+            timestamp=event["timestamp"] or timestamp,
+            event_type=event["type"],
+            subtype=event["subtype"],
+            payload=event["payload"],
+            byte_offset=event["byte_offset"],
+            ingested_at=timestamp,
+        )
+        new_offset = event["new_offset"]
+        new_events += 1
+
+    if new_offset != start_offset:
+        worker_db.set_session_ingest_offset(conn, session_id=session_id, offset=new_offset)
+    worker_db.bump_session_heartbeat(conn, session_id=session_id, timestamp=timestamp)
+    conn.commit()
+
+    return {"new_events": new_events, "new_offset": new_offset}

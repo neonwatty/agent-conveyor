@@ -6926,6 +6926,139 @@ class IngestModuleTests(unittest.TestCase):
                 )
             self.assertEqual(ingest.current_state(conn, session_id=session_id), "busy")
 
+    def test_ingest_session_persists_new_events_and_advances_offset(self):
+        from workerctl import ingest
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            rollout = Path(tmpdir) / "rollout.jsonl"
+            conn = worker_db.connect(db_path)
+            self.addCleanup(conn.close)
+            worker_db.initialize_database(conn)
+
+            # Create a rollout file with two events.
+            line1 = json.dumps({"type": "session_meta", "payload": {"id": "u", "cwd": "/r"}}) + "\n"
+            line2 = json.dumps({
+                "timestamp": "2026-05-11T14:32:11Z",
+                "type": "event_msg",
+                "payload": {"type": "task_started", "turn_id": "t1"},
+            }) + "\n"
+            rollout.write_text(line1 + line2)
+
+            worker_db.register_session(
+                conn, name="w", role="worker",
+                codex_session_path=str(rollout),
+                codex_session_id="u", pid=1, cwd="/r",
+            )
+            conn.commit()
+
+            result = ingest.ingest_session(conn, session_name="w")
+            self.assertEqual(result["new_events"], 2)
+            self.assertEqual(result["new_offset"], len((line1 + line2).encode("utf-8")))
+
+            rows = conn.execute(
+                "select type, subtype, byte_offset from codex_events "
+                "where session_id = (select id from sessions where name='w') "
+                "order by id"
+            ).fetchall()
+            self.assertEqual(len(rows), 2)
+            self.assertEqual(rows[0]["type"], "session_meta")
+            self.assertEqual(rows[1]["type"], "event_msg")
+            self.assertEqual(rows[1]["subtype"], "task_started")
+
+            offset_row = conn.execute(
+                "select last_ingest_offset, last_heartbeat_at from sessions where name='w'"
+            ).fetchone()
+            self.assertEqual(offset_row["last_ingest_offset"], result["new_offset"])
+            self.assertIsNotNone(offset_row["last_heartbeat_at"])
+
+    def test_ingest_session_is_idempotent_on_unchanged_file(self):
+        from workerctl import ingest
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            rollout = Path(tmpdir) / "rollout.jsonl"
+            conn = worker_db.connect(db_path)
+            self.addCleanup(conn.close)
+            worker_db.initialize_database(conn)
+
+            rollout.write_text(json.dumps({
+                "type": "event_msg",
+                "payload": {"type": "task_started"},
+            }) + "\n")
+            worker_db.register_session(
+                conn, name="w", role="worker",
+                codex_session_path=str(rollout),
+                codex_session_id="u", pid=1, cwd="/r",
+            )
+            conn.commit()
+
+            r1 = ingest.ingest_session(conn, session_name="w")
+            r2 = ingest.ingest_session(conn, session_name="w")
+            self.assertEqual(r1["new_events"], 1)
+            self.assertEqual(r2["new_events"], 0)
+
+            count = conn.execute("select count(*) from codex_events").fetchone()[0]
+            self.assertEqual(count, 1)
+
+    def test_ingest_session_picks_up_appended_events(self):
+        from workerctl import ingest
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            rollout = Path(tmpdir) / "rollout.jsonl"
+            conn = worker_db.connect(db_path)
+            self.addCleanup(conn.close)
+            worker_db.initialize_database(conn)
+
+            initial = json.dumps({"type": "event_msg", "payload": {"type": "task_started"}}) + "\n"
+            rollout.write_text(initial)
+            worker_db.register_session(
+                conn, name="w", role="worker",
+                codex_session_path=str(rollout),
+                codex_session_id="u", pid=1, cwd="/r",
+            )
+            conn.commit()
+            ingest.ingest_session(conn, session_name="w")
+
+            # Append a second event
+            with open(rollout, "a") as fh:
+                fh.write(json.dumps({"type": "event_msg", "payload": {"type": "task_complete"}}) + "\n")
+
+            result = ingest.ingest_session(conn, session_name="w")
+            self.assertEqual(result["new_events"], 1)
+            rows = conn.execute("select subtype from codex_events order by id").fetchall()
+            self.assertEqual([r["subtype"] for r in rows], ["task_started", "task_complete"])
+
+    def test_ingest_session_raises_on_missing_session(self):
+        from workerctl import ingest
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            conn = worker_db.connect(db_path)
+            self.addCleanup(conn.close)
+            worker_db.initialize_database(conn)
+            with self.assertRaises(WorkerError):
+                ingest.ingest_session(conn, session_name="does-not-exist")
+
+    def test_ingest_session_raises_when_rollout_path_missing(self):
+        from workerctl import ingest
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            conn = worker_db.connect(db_path)
+            self.addCleanup(conn.close)
+            worker_db.initialize_database(conn)
+            worker_db.register_session(
+                conn, name="w", role="worker",
+                codex_session_path=str(Path(tmpdir) / "does-not-exist.jsonl"),
+                codex_session_id="u", pid=1, cwd="/r",
+            )
+            conn.commit()
+            from workerctl.ingest import IngestError
+            with self.assertRaises(IngestError):
+                ingest.ingest_session(conn, session_name="w")
+
 
 if __name__ == "__main__":
     unittest.main()
