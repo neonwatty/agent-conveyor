@@ -7060,5 +7060,104 @@ class IngestModuleTests(unittest.TestCase):
                 ingest.ingest_session(conn, session_name="w")
 
 
+class IngestCliTests(unittest.TestCase):
+    def run_cli(self, *args, env_extra=None):
+        env = os.environ.copy()
+        if env_extra:
+            env.update(env_extra)
+        return subprocess.run(
+            [sys.executable, "-m", "workerctl", *args],
+            capture_output=True, text=True, env=env, cwd=str(ROOT),
+        )
+
+    def _setup_with_rollout(self, tmpdir, events):
+        rollout = Path(tmpdir) / "rollout.jsonl"
+        # register-worker requires the rollout to begin with session_meta.
+        prepared = list(events)
+        if not prepared or prepared[0].get("type") != "session_meta":
+            prepared.insert(0, {"type": "session_meta", "payload": {"id": "u1", "cwd": "/r"}})
+        rollout.write_text("".join(json.dumps(e) + "\n" for e in prepared))
+        state_dir = Path(tmpdir) / "state"
+        state_dir.mkdir()
+        env = {"WORKERCTL_STATE_ROOT": str(state_dir)}
+        self.run_cli(
+            "register-worker", "--name", "w",
+            "--codex-session", str(rollout),
+            "--pid", "1", "--cwd", str(ROOT),
+            env_extra=env,
+        )
+        return rollout, state_dir, env
+
+    def test_cli_ingest_persists_events(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            rollout, state_dir, env = self._setup_with_rollout(tmpdir, events=[
+                {"type": "session_meta", "payload": {"id": "u1", "cwd": "/r"}},
+                {"timestamp": "2026-05-11T14:32:11Z",
+                 "type": "event_msg",
+                 "payload": {"type": "task_started", "turn_id": "t1"}},
+            ])
+            proc = self.run_cli("ingest", "w", env_extra=env)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            result = json.loads(proc.stdout)
+            self.assertEqual(result["new_events"], 2)
+
+            conn = worker_db.connect(state_dir / "workerctl.db")
+            self.addCleanup(conn.close)
+            count = conn.execute(
+                "select count(*) from codex_events where session_id = "
+                "(select id from sessions where name='w')"
+            ).fetchone()[0]
+            self.assertEqual(count, 2)
+
+    def test_cli_tail_prints_events(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            rollout, state_dir, env = self._setup_with_rollout(tmpdir, events=[
+                {"timestamp": "2026-05-11T14:32:11Z",
+                 "type": "event_msg",
+                 "payload": {"type": "task_started", "turn_id": "t1"}},
+                {"timestamp": "2026-05-11T14:32:12Z",
+                 "type": "event_msg",
+                 "payload": {"type": "task_complete", "duration_ms": 1000}},
+            ])
+            self.run_cli("ingest", "w", env_extra=env)
+
+            proc = self.run_cli("tail", "w", env_extra=env)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            events = json.loads(proc.stdout)
+            # Newest first; event_msg entries appear before the prepended session_meta.
+            event_msgs = [e for e in events if e["type"] == "event_msg"]
+            self.assertEqual(len(event_msgs), 2)
+            self.assertEqual(event_msgs[0]["subtype"], "task_complete")
+            self.assertEqual(event_msgs[1]["subtype"], "task_started")
+
+    def test_cli_tail_respects_limit(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            events_list = [
+                {"timestamp": f"2026-05-11T14:32:{10+i:02d}Z",
+                 "type": "event_msg",
+                 "payload": {"type": "agent_message", "message": f"chunk {i}"}}
+                for i in range(5)
+            ]
+            rollout, state_dir, env = self._setup_with_rollout(tmpdir, events=events_list)
+            self.run_cli("ingest", "w", env_extra=env)
+
+            proc = self.run_cli("tail", "w", "--limit", "2", env_extra=env)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            events = json.loads(proc.stdout)
+            self.assertEqual(len(events), 2)
+
+    def test_cli_ingest_unknown_session_clean_error(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_dir = Path(tmpdir) / "state"
+            state_dir.mkdir()
+            proc = self.run_cli(
+                "ingest", "missing",
+                env_extra={"WORKERCTL_STATE_ROOT": str(state_dir)},
+            )
+            self.assertEqual(proc.returncode, 1)
+            self.assertNotIn("Traceback", proc.stderr)
+            self.assertIn("workerctl:", proc.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()
