@@ -710,7 +710,7 @@ class CliTests(unittest.TestCase):
         self.assertTrue(any(check["name"] == "tmux" for check in data["checks"]))
         self.assertTrue(any(check["name"] == "codex" for check in data["checks"]))
 
-    def test_doctor_self_reports_manage_template_inside_tmux(self):
+    def test_doctor_self_reports_new_path_template_inside_tmux(self):
         original_current_session_name = commands.current_session_name
         original_which = commands.shutil.which
         original_run = commands.run
@@ -731,24 +731,22 @@ class CliTests(unittest.TestCase):
 
                 payload = json.loads(stdout.getvalue())
                 self.assertEqual(result, 0)
-                self.assertTrue(payload["can_promote_in_place"])
-                self.assertEqual(payload["recommended_action"], "run_become_managed")
-                self.assertIn("workerctl become-managed --session plain-codex", payload["become_managed_command_template"])
-                self.assertEqual(payload["become_managed_command_template"], payload["become_managed_recommended_command_template"])
-                self.assertIn("workerctl manage --session plain-codex", payload["manage_command_template"])
-                self.assertEqual(payload["manage_command_template"], payload["manage_recommended_command_template"])
-                self.assertIn("--open-manager", payload["manage_command_template"])
-                self.assertFalse(payload["manager_codex_args_required"])
-                self.assertEqual(payload["manager_codex_args_recommendation"], "--sandbox danger-full-access --ask-for-approval never")
-                self.assertEqual(payload["manager_codex_args_default"], ["--sandbox", "danger-full-access", "--ask-for-approval", "never"])
-                self.assertEqual(payload["warnings"], [])
-                self.assertIn("worker_name", [value["name"] for value in payload["required_values"]])
-                self.assertIn("task_name", [value["name"] for value in payload["required_values"]])
-                self.assertIn("goal", [value["name"] for value in payload["required_values"]])
-                self.assertIn("Please become managed", payload["example_natural_language_prompt"])
-                self.assertIn("workerctl become-managed --session plain-codex", payload["recommended_command"])
+                self.assertTrue(payload["supported"])
+                self.assertTrue(payload["ok"])
+                self.assertIn("workerctl register-worker", payload["command_template"])
+                self.assertIn("--name <NAME>", payload["command_template"])
+                self.assertIn("--pid <PID>", payload["command_template"])
+                self.assertIn("--cwd <CWD>", payload["command_template"])
+                self.assertIn("--tmux-session <SESSION>", payload["command_template"])
+                self.assertTrue(any("register-manager" in step for step in payload["follow_up"]))
+                self.assertTrue(any("workerctl bind" in step for step in payload["follow_up"]))
+                self.assertTrue(any("workerctl cycle" in step for step in payload["follow_up"]))
                 self.assertIn("live tmux session", payload["why_or_why_not"])
-                self.assertTrue(any("manage yourself" in mapping["phrases"] for mapping in payload["phrase_mappings"]))
+                serialized = json.dumps(payload)
+                for retired in ("become-managed", "manager-observe", "manager-decision", "close-manager", "unmanage", "remanage", "task-status", "task-health"):
+                    self.assertNotIn(retired, serialized)
+                # The standalone command `workerctl manage --session ...` must not appear.
+                self.assertNotIn("manage --session", serialized)
         finally:
             commands.current_session_name = original_current_session_name
             commands.shutil.which = original_which
@@ -765,16 +763,13 @@ class CliTests(unittest.TestCase):
 
             payload = json.loads(stdout.getvalue())
             self.assertEqual(result, 1)
-            self.assertFalse(payload["can_promote_in_place"])
-            self.assertEqual(payload["recommended_action"], "cannot_promote_in_place")
-            self.assertIsNone(payload["become_managed_command_template"])
-            self.assertIsNone(payload["become_managed_recommended_command_template"])
-            self.assertIsNone(payload["manage_command_template"])
-            self.assertIsNone(payload["manage_recommended_command_template"])
-            self.assertFalse(payload["manager_codex_args_required"])
-            self.assertEqual(payload["warnings"], [])
-            self.assertIn("workerctl start", payload["recommended_command"])
-            self.assertIn("cannot be promoted in place", payload["why_or_why_not"])
+            self.assertFalse(payload["supported"])
+            self.assertFalse(payload["ok"])
+            self.assertIn("cannot register itself", payload["why_or_why_not"])
+            self.assertIn("register-manager", payload["why_or_why_not"])
+            serialized = json.dumps(payload)
+            for retired in ("become-managed", "manage --session", "manager-observe", "close-manager"):
+                self.assertNotIn(retired, serialized)
         finally:
             commands.current_session_name = original_current_session_name
 
@@ -784,11 +779,16 @@ class CliTests(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stderr)
         payload = json.loads(proc.stdout)
         self.assertEqual(payload["scenario"], "self-management")
-        self.assertTrue(any("workerctl start" in step for step in payload["steps"]))
-        self.assertTrue(any("extend-nudge-budget" in step for step in payload["steps"]))
-        self.assertTrue(any("finish-task" in step for step in payload["steps"]))
-        self.assertTrue(any("manager-observe <task> --compact --json" in observation for observation in payload["expected_observations"]))
-        self.assertTrue(any("nudge_budget_exhausted" in observation for observation in payload["expected_observations"]))
+        self.assertTrue(any("register-worker" in step for step in payload["steps"]))
+        self.assertTrue(any("register-manager" in step for step in payload["steps"]))
+        self.assertTrue(any("workerctl bind" in step for step in payload["steps"]))
+        self.assertTrue(any("workerctl cycle" in step for step in payload["steps"]))
+        self.assertTrue(any("session-nudge" in step for step in payload["steps"]))
+        self.assertTrue(any("workerctl reconcile" in step for step in payload["steps"]))
+        self.assertTrue(any("kind, state, pane_signal" in observation for observation in payload["expected_observations"]))
+        joined = " ".join(payload["steps"] + payload["expected_observations"])
+        for retired in ("become-managed", "manager-observe", "manager-decision", "task-status", "task-health", "extend-nudge-budget", "task-nudge", "task-interrupt", "mutation-audit", "close-manager"):
+            self.assertNotIn(retired, joined)
 
     def test_db_doctor_outputs_expected_structure(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1362,97 +1362,6 @@ class CliTests(unittest.TestCase):
         )
 
         self.assertEqual(proc.returncode, 0, proc.stderr)
-
-    def test_task_health_reports_manager_rate_limit_prompt_explicitly(self):
-        original_session_snapshot = worker_identity.session_snapshot
-        try:
-            worker_identity.session_snapshot = lambda session: {
-                "live": True,
-                "pane_id": "%2" if session == "codex-manager-task-a" else "%1",
-                "session": session,
-            }
-            with tempfile.TemporaryDirectory() as tmpdir:
-                db_path = Path(tmpdir) / "workerctl.db"
-                with worker_db.connect(db_path) as conn:
-                    worker_db.initialize_database(conn)
-                    worker_db.upsert_worker(
-                        conn,
-                        name="worker-a",
-                        cwd=str(ROOT),
-                        tmux_session="codex-worker-a",
-                        tmux_pane_id="%1",
-                        state="active",
-                    )
-                    task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
-                    worker_db.bind_task_worker(conn, task="task-a", worker="worker-a")
-                    manager_id = worker_db.create_manager(
-                        conn,
-                        task_id=task_id,
-                        name="manager-a",
-                        tmux_session="codex-manager-task-a",
-                        tmux_pane_id="%2",
-                        codex_args=[],
-                        state="ready",
-                    )
-                    worker_db.attach_manager_to_binding(conn, task_id=task_id, manager_id=manager_id)
-                    worker_db.set_task_state(conn, task_id=task_id, state="managed")
-                    conn.execute("update managers set last_seen_at = '2000-01-01T00:00:00Z' where id = ?", (manager_id,))
-                    worker_db.insert_terminal_capture(
-                        conn,
-                        task_id=task_id,
-                        manager_id=manager_id,
-                        role="manager",
-                        tmux_session="codex-manager-task-a",
-                        tmux_pane_id="%2",
-                        content_sha256="sha-rate",
-                        content="Approaching rate limits\nSwitch to gpt-5.4-mini?\nPress enter to confirm",
-                        history_lines=20,
-                        source="test",
-                        classifier={"busy_wait": {"pattern": "rate_limit_prompt"}},
-                    )
-                    conn.commit()
-
-                result = commands.task_health_result(db_path, "task-a", manager_stale_seconds=60)
-
-                codes = {issue["code"] for issue in result["issues"]}
-                self.assertFalse(result["ok"])
-                self.assertIn("manager_waiting_for_user_choice", codes)
-                self.assertNotIn("manager_seen_stale", codes)
-                self.assertTrue(any("close-manager" in action for action in result["recommended_actions"]))
-        finally:
-            worker_identity.session_snapshot = original_session_snapshot
-
-    def test_task_health_treats_done_review_manager_stale_as_idle_metadata(self):
-        original_session_snapshot = worker_identity.session_snapshot
-        try:
-            worker_identity.session_snapshot = lambda session: {"live": True, "pane_id": "%2", "session": session}
-            with tempfile.TemporaryDirectory() as tmpdir:
-                db_path = Path(tmpdir) / "workerctl.db"
-                with worker_db.connect(db_path) as conn:
-                    worker_db.initialize_database(conn)
-                    task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
-                    manager_id = worker_db.create_manager(
-                        conn,
-                        task_id=task_id,
-                        name="manager-a",
-                        tmux_session="codex-manager-task-a",
-                        tmux_pane_id="%2",
-                        codex_args=[],
-                        state="ready",
-                    )
-                    conn.execute("update tasks set state = 'done' where id = ?", (task_id,))
-                    conn.execute("update managers set last_seen_at = '2000-01-01T00:00:00Z' where id = ?", (manager_id,))
-                    conn.commit()
-
-                result = commands.task_health_result(db_path, "task-a", manager_stale_seconds=60)
-
-                self.assertTrue(result["ok"])
-                self.assertEqual(result["issues"], [])
-                self.assertEqual(result["recommended_actions"], ["No action required."])
-                self.assertEqual(result["review_manager_idle"][0]["code"], "review_manager_idle")
-                self.assertEqual(result["review_manager_idle"][0]["manager"], "manager-a")
-        finally:
-            worker_identity.session_snapshot = original_session_snapshot
 
     def test_transcript_capture_records_deduped_segments_and_show_prune(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -6087,6 +5996,38 @@ class ReconcileTests(unittest.TestCase):
             self.addCleanup(conn.close)
             row = conn.execute("select state from sessions where name='dead'").fetchone()
             self.assertEqual(row["state"], "active")
+
+    def test_apply_reconcile_event_appears_in_task_audit(self):
+        from workerctl import commands as worker_commands
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            now = "2026-05-12T00:00:00Z"
+            conn.execute(
+                "insert into tasks(id, name, goal, state, created_at, updated_at) "
+                "values ('task-1', 'audit-task', 'g', 'managed', ?, ?)",
+                (now, now),
+            )
+            worker_db.register_session(
+                conn, name="w", role="worker",
+                codex_session_path="/a", codex_session_id="u-w", pid=1, cwd="/r",
+            )
+            worker_db.register_session(
+                conn, name="m", role="manager",
+                codex_session_path="/b", codex_session_id="u-m", pid=2, cwd="/r",
+            )
+            worker_db.bind_sessions(
+                conn, task_name="audit-task",
+                worker_session_name="w", manager_session_name="m",
+            )
+            conn.execute("update sessions set state='gone' where name='w'")
+            conn.commit()
+
+            worker_commands.apply_reconcile(conn)
+
+            audit = worker_db.task_audit(conn, task="audit-task")
+            types = [e["type"] for e in audit["events"]]
+            self.assertIn("binding_marked_invalid_by_reconcile", types)
 
 
 if __name__ == "__main__":

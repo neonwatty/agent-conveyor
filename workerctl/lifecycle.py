@@ -1,39 +1,27 @@
 from __future__ import annotations
 
 import argparse
-import contextlib
-import hashlib
-import io
 import json
 import re
-import uuid
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
 from workerctl.constants import PROJECT_ROOT, RECOMMENDED_MANAGER_CODEX_ARGS
-from workerctl.core import WorkerError, age_seconds, ensure_tool, now_iso, run, sh_quote
+from workerctl.core import WorkerError, age_seconds, run, sh_quote
 from workerctl.db import active_manager
 from workerctl.db import assess_manager_decision
-from workerctl.db import attach_manager_to_binding
-from workerctl.db import bind_task_worker
 from workerctl.db import connect as connect_db
 from workerctl.db import create_command as create_db_command
-from workerctl.db import create_manager as create_db_manager
 from workerctl.db import end_active_binding
-from workerctl.db import ensure_task as ensure_db_task
 from workerctl.db import finish_command as finish_db_command
 from workerctl.db import insert_agent_observation
 from workerctl.db import insert_event as insert_db_event
 from workerctl.db import insert_manager_decision
-from workerctl.db import insert_prompt as insert_db_prompt
 from workerctl.db import initialize_database
-from workerctl.db import latest_manager_prompt
 from workerctl.db import mark_manager_seen
 from workerctl.db import mark_command_attempted
-from workerctl.db import mark_worker_state, upsert_worker
+from workerctl.db import mark_worker_state
 from workerctl.db import require_manager_decision_ok
-from workerctl.db import set_budget as set_db_budget
 from workerctl.db import set_manager_pane_id
 from workerctl.db import set_manager_state
 from workerctl.db import set_task_state
@@ -41,17 +29,12 @@ from workerctl.db import set_worker_pane_id
 from workerctl.db import task_status_snapshot
 from workerctl import identity
 from workerctl.state import append_event
-from workerctl.state import capture_meta_path
 from workerctl.state import config_path
-from workerctl.state import latest_status
 from workerctl.state import load_json
-from workerctl.state import require_worker
 from workerctl.state import state_root
-from workerctl.state import transcript_path
 from workerctl.state import write_json
 from workerctl.tmux import send_text
 from workerctl.tmux import session_exists
-from workerctl.tmux import current_session_name
 from workerctl.tmux import tmux_session
 from workerctl.tmux import tmux_target
 

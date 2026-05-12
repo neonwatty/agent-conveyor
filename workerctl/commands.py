@@ -14,32 +14,20 @@ from typing import Any
 from workerctl.classify import classify_busy_wait, classify_startup_output
 from workerctl.audit import mutation_audit_result
 from workerctl.constants import DEFAULT_MANAGER_STALE_SECONDS, PROJECT_ROOT, VALID_STATES
-from workerctl.constants import RECOMMENDED_MANAGER_CODEX_ARGS
 from workerctl.core import WorkerError, age_seconds, ensure_tool, now_iso, run, sh_quote
 from workerctl.db import active_manager, active_task_worker
-from workerctl.db import assess_manager_decision
-from workerctl.db import bind_task_worker
 from workerctl.db import connect as connect_db
-from workerctl.db import create_command as create_db_command
-from workerctl.db import create_manager_cycle
 from workerctl.db import create_task as create_db_task
 from workerctl.db import database_health, default_db_path, initialize_database
-from workerctl.db import extend_nudge_budget
-from workerctl.db import finish_command as finish_db_command
-from workerctl.db import finish_manager_cycle
 from workerctl.db import insert_agent_observation
 from workerctl.db import insert_event as insert_db_event
-from workerctl.db import insert_manager_decision
 from workerctl.db import insert_status as insert_db_status
 from workerctl.db import insert_terminal_capture
 from workerctl.db import insert_transcript_segment
 from workerctl.db import latest_terminal_capture_for_role
 from workerctl.db import list_tasks as list_db_tasks
 from workerctl.db import mark_manager_seen
-from workerctl.db import mark_command_attempted
 from workerctl.db import mark_worker_state, upsert_worker
-from workerctl.db import reserve_nudge_budget
-from workerctl.db import require_manager_decision_ok
 from workerctl.db import set_worker_pane_id
 from workerctl.db import task_audit
 from workerctl.db import task_status_snapshot
@@ -862,109 +850,33 @@ def _codex_home() -> Path:
     return Path(os.environ.get("CODEX_HOME", Path.home() / ".codex")).expanduser()
 
 
-MANAGED_FLOW_REQUIRED_VALUES = [
-    {
-        "name": "worker_name",
-        "description": "Stable worker name to claim for the current Codex session.",
-        "ask_when_missing": True,
-    },
-    {
-        "name": "task_name",
-        "description": "Stable task name for the worker-manager relationship.",
-        "ask_when_missing": True,
-    },
-    {
-        "name": "goal",
-        "description": "Concrete goal the manager should supervise.",
-        "ask_when_missing": True,
-    },
-    {
-        "name": "summary",
-        "description": "Short current-state summary; use a concise default only if the user supplied enough context.",
-        "ask_when_missing": False,
-    },
-]
+def new_path_payload(*, session: str | None = None) -> dict[str, Any]:
+    """Describe how the current Codex session can register itself under the new path.
 
-
-MANAGED_FLOW_PHRASE_MAPPINGS = [
-    {
-        "phrases": ["become managed", "manage yourself", "create a manager", "launch a manager"],
-        "command": "workerctl doctor-self, then the recommended workerctl become-managed template when can_promote_in_place is true",
-        "ask_for": ["worker_name", "task_name", "goal"],
-    },
-    {
-        "phrases": ["stop supervising me", "stop managing me", "take back manual control", "unmanage this worker"],
-        "command": "workerctl unmanage",
-        "ask_for": ["task_name or session only if workerctl cannot infer it"],
-    },
-    {
-        "phrases": ["resume supervision", "restart management", "get a manager again"],
-        "command": "workerctl remanage --open-manager",
-        "ask_for": ["task_name or session only if workerctl cannot infer it"],
-    },
-    {
-        "phrases": ["finish this managed task", "close this task", "mark this task done"],
-        "command": "workerctl finish-task <task-name> --reason \"<reason>\"",
-        "ask_for": ["task_name", "reason", "whether to stop the manager only if the user asked to close its terminal"],
-    },
-    {
-        "phrases": ["close the manager terminal", "review is complete", "clean up the manager"],
-        "command": "workerctl close-manager <task-name> --reason \"<reason>\"",
-        "ask_for": ["task_name", "reason"],
-    },
-    {
-        "phrases": ["show me the manager", "open the manager terminal"],
-        "command": "workerctl open-manager <task-name>",
-        "ask_for": ["task_name"],
-    },
-    {
-        "phrases": ["show me the worker", "open the worker terminal"],
-        "command": "workerctl open-worker <task-name>",
-        "ask_for": ["task_name"],
-    },
-]
-
-
-def managed_flow_payload(*, session: str | None = None) -> dict[str, Any]:
-    session_value = session or "<session-name>"
+    The new path is: register an already-running Codex session as a worker (or
+    manager), create a task, bind the pair, and let the manager Codex drive
+    `workerctl cycle <task>` to observe progress.
+    """
     return {
-        "ask_questions_rule": "Ask for worker_name, task_name, and goal before become-managed unless the user explicitly supplied them or explicitly asked you to choose names.",
-        "commands": {
-            "preflight": "workerctl doctor-self",
-            "become_managed_template": (
-                f"workerctl become-managed --session {session_value} --worker <worker-name> "
-                '--task <task-name> --goal "<goal>" --summary "<summary>"'
-            ),
-            "become_managed_recommended_template": (
-                f"workerctl become-managed --session {session_value} --worker <worker-name> "
-                '--task <task-name> --goal "<goal>" --summary "<summary>"'
-            ),
-            "cannot_promote_in_place": 'workerctl start <session-name> --cwd "$PWD" -- --sandbox danger-full-access --ask-for-approval never',
-            "unmanage": "workerctl unmanage",
-            "remanage": "workerctl remanage --open-manager",
-            "finish": 'workerctl finish-task <task-name> --reason "<reason>"',
-            "finish_and_stop_manager": 'workerctl finish-task <task-name> --reason "<reason>" --stop-manager',
-            "close_manager": 'workerctl close-manager <task-name> --reason "<reason>"',
-            "observe": "workerctl manager-observe <task-name> --compact --json",
-        },
-        "flow": [
-            "Run workerctl doctor-self when asked to make this plain Codex session managed.",
-            "If can_promote_in_place is false, explain that non-tmux Codex cannot be promoted in place and offer workerctl start.",
-            "If can_promote_in_place is true, fill the recommended become-managed template only after required values are known.",
-            "By default workerctl starts the manager with the recommended Codex args; pass explicit args after -- only when overriding that behavior.",
-            "After become-managed succeeds, the current tmux session is renamed to codex-<worker-name> and a visible Codex manager is spawned.",
-            "Use workerctl unmanage to stop only the manager and return manual control.",
-            "Use workerctl remanage --open-manager to restart supervision for a paused managed worker.",
-            "Use finish-task when work is complete; it records completion and leaves the manager terminal open by default.",
-            "Add --stop-manager only when the user explicitly wants the manager terminal closed after completion.",
-            "Use close-manager after post-finish review to close the manager terminal without changing task or worker state.",
+        "command_template": (
+            "workerctl register-worker --name <NAME> --pid <PID> "
+            "--cwd <CWD> --tmux-session <SESSION>"
+        ),
+        "follow_up": [
+            "Have a manager Codex session register itself via `workerctl register-manager --name <MGR_NAME> --pid <MGR_PID> --cwd <CWD>`.",
+            "Create a task and bind the pair: `workerctl tasks --create <TASK> --goal \"<goal>\"` then `workerctl bind --task <TASK> --worker <NAME> --manager <MGR_NAME>`.",
+            "The manager Codex drives the supervision loop by calling `workerctl cycle <TASK>` repeatedly and reading the returned JSON.",
         ],
-        "phrase_mappings": MANAGED_FLOW_PHRASE_MAPPINGS,
-        "required_values": MANAGED_FLOW_REQUIRED_VALUES,
     }
 
 
 def command_doctor_self(args: argparse.Namespace) -> int:
+    """Verify the current Codex session can register itself as a worker.
+
+    The new path does not require an in-place promotion: it simply needs a
+    workerctl binary on PATH and, if the session is to be nudged via tmux, a
+    live tmux session. Managers do not require tmux at all.
+    """
     session = getattr(args, "session", None) or current_session_name()
     tmux_path = shutil.which("tmux")
     codex_path = shutil.which("codex")
@@ -984,68 +896,42 @@ def command_doctor_self(args: argparse.Namespace) -> int:
         proc = run(["workerctl", "classify", "--text", "workerctl self doctor"], check=False)
         checks.append({"name": "workerctl_executable", "ok": proc.returncode == 0, "path": workerctl_path})
 
-    can_promote_in_place = all(
+    # A session can register itself as a worker if workerctl is on PATH, tmux is
+    # available, and the current process is inside a live tmux session that the
+    # manager can later nudge through. Managers do not strictly need tmux, but
+    # for this preflight we require the same minimums.
+    supported = all(
         check["ok"]
         for check in checks
         if check["name"] in {"workerctl_on_path", "tmux_on_path", "inside_tmux", "current_tmux_session_live"}
     )
-    if can_promote_in_place:
-        recommended_action = "run_become_managed"
-        why_or_why_not = "Current Codex process is inside a live tmux session and workerctl can promote it in place."
-        become_managed_template = (
-            f"workerctl become-managed --session {session} --worker <worker-name> --task <task-name> "
-            '--goal "<goal>" --summary "<summary>"'
+    payload = new_path_payload(session=session)
+    payload["supported"] = supported
+    if supported:
+        why_or_why_not = (
+            "This Codex session is inside a live tmux session and workerctl is on PATH; "
+            "it can register itself as a worker via `workerctl register-worker`."
         )
-        become_managed_recommended_template = become_managed_template
-        manage_template = (
-            f"workerctl manage --session {session} --worker <worker-name> --task <task-name> "
-            '--goal "<goal>" --summary "<summary>" --open-manager'
-        )
-        manage_recommended_template = manage_template
     else:
-        recommended_action = "cannot_promote_in_place"
         failed = [check["name"] for check in checks if not check["ok"]]
         why_or_why_not = (
-            "This Codex process cannot be promoted in place as a tmux-backed worker. "
-            f"Failed checks: {', '.join(failed) if failed else 'unknown'}."
+            "This Codex session cannot register itself as a tmux-backed worker. "
+            f"Failed checks: {', '.join(failed) if failed else 'unknown'}. "
+            "A Codex session running outside tmux can still register itself as a "
+            "manager via `workerctl register-manager`."
         )
-        become_managed_template = None
-        become_managed_recommended_template = None
-        manage_template = None
-        manage_recommended_template = None
-    flow = managed_flow_payload(session=session)
-    recommended_command = become_managed_recommended_template or flow["commands"]["cannot_promote_in_place"]
-    warnings = []
     result = {
-        "become_managed_command_template": become_managed_template,
-        "become_managed_recommended_command_template": become_managed_recommended_template,
-        "can_promote_in_place": can_promote_in_place,
         "checks": checks,
+        "command_template": payload["command_template"],
         "current_session": session,
-        "example_natural_language_prompt": (
-            "Please become managed. Use worker name <worker-name>, task name <task-name>, "
-            "goal '<goal>', and summary '<summary>'."
-        ),
-        "flow": flow["flow"],
-        "manage_command_template": manage_template,
-        "manage_recommended_command_template": manage_recommended_template,
-        "manager_codex_args_default": RECOMMENDED_MANAGER_CODEX_ARGS,
-        "manager_codex_args_recommendation": " ".join(RECOMMENDED_MANAGER_CODEX_ARGS),
-        "manager_codex_args_required": False,
-        "ok": can_promote_in_place,
-        "phrase_mappings": flow["phrase_mappings"],
-        "recommended_action": recommended_action,
-        "recommended_command": recommended_command,
-        "required_values": flow["required_values"],
+        "follow_up": payload["follow_up"],
+        "ok": supported,
         "skill_path": str(skill_path),
-        "warnings": warnings,
+        "supported": supported,
         "why_or_why_not": why_or_why_not,
     }
-    if args.json:
-        print(json.dumps(result, indent=2, sort_keys=True))
-    else:
-        print(json.dumps(result, indent=2, sort_keys=True))
-    return 0 if can_promote_in_place else 1
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0 if supported else 1
 
 
 def command_qa_plan(args: argparse.Namespace) -> int:
@@ -1054,37 +940,33 @@ def command_qa_plan(args: argparse.Namespace) -> int:
         raise WorkerError(f"Unsupported QA scenario: {scenario}")
     payload = {
         "expected_observations": [
-            "raw Codex session starts inside tmux",
-            "natural-language prompt causes the worker to run become-managed or ask for missing required values",
-            "worker session is renamed to codex-<worker-name>",
-            "visible Codex manager session is spawned",
-            "manager starts with manager-observe <task> --compact --json",
-            "manager records manager-decision before any nudge, interrupt, finish, pause, or stop",
-            "manager does not interrupt unless busy-wait/interruptible state is clear or user explicitly asks",
-            "task-health reports nudge_budget_exhausted when the live budget reaches zero",
-            "extend-nudge-budget requires an escalate decision and preserves nudges_used while increasing max_nudges",
-            "a strict task-nudge succeeds after the audited budget extension",
-            "finish-task marks the task done, records a final stop decision, and leaves the manager terminal open unless --stop-manager is used",
-            "db-doctor --live reports no drift or unfinished commands after cleanup",
+            "tmux session hosts a live Codex worker process",
+            "register-worker resolves the rollout JSONL via lsof (or accepts --codex-session) and records the session as a worker",
+            "register-manager records the manager session without requiring tmux",
+            "tasks --create returns a task row; bind links it to the worker and manager sessions",
+            "workerctl cycle <task> returns JSON with keys kind, state, pane_signal, notable_pane_pattern, ingest, cycle_id",
+            "session-nudge delivers text to the worker tmux pane and is observable in subsequent captures",
+            "a follow-up cycle ingests new events (ingest.new_events > 0) when the worker responds",
+            "a divergence (e.g., trust_prompt) surfaces in workerctl divergences <task>",
+            "unbind, deregister leave the SQLite control plane clean",
+            "workerctl reconcile reports no dead-pid sessions, dangling bindings, or stuck tasks after cleanup",
         ],
         "scenario": scenario,
         "steps": [
-            'Run workerctl start <raw-session> --cwd "$PWD" -- --sandbox danger-full-access --ask-for-approval never.',
-            "Open or attach to the raw session if visual confirmation is needed.",
-            "Ask the raw worker in natural language to become managed, providing worker name, task name, goal, and summary.",
-            "Run workerctl task-status <task> --json and confirm state is managed with active worker and manager.",
-            "Inspect the manager terminal or audit and confirm the first loop used manager-observe --compact --json.",
-            "Confirm manager-decision precedes any task-nudge/task-interrupt/finish-task mutation.",
-            "Use strict decision-linked task-nudge calls until nudges_remaining is 0.",
-            "Run workerctl task-health <task> --audit-decisions --json and confirm it reports nudge_budget_exhausted with an extend-nudge-budget recommendation.",
-            "Record workerctl manager-decision <task> --decision escalate --reason \"nudge budget exhausted; extending for QA\".",
-            "Run workerctl extend-nudge-budget <task> --add-nudges 2 --decision-id <escalate-decision-id> --strict-decisions.",
-            "Send one more strict decision-linked task-nudge and confirm it succeeds.",
-            "Run workerctl mutation-audit <task> --json and confirm the task_nudge and extend_nudge_budget mutations have zero warnings.",
-            "Run workerctl audit <task> --json and confirm captures, observations, cycles, and decisions are present.",
-            'Run workerctl finish-task <task> --stop-manager --stop-worker --reason "manual QA complete".',
-            "Run workerctl task-status <task> --json and confirm state is done with no active worker or manager.",
-            "Run workerctl db-doctor --live and confirm ok is true.",
+            'Start a Codex worker inside tmux: tmux new-session -d -s codex-foo && tmux send-keys -t codex-foo "codex" Enter.',
+            "Capture the worker pid (e.g., pgrep -f 'codex.*--sandbox' | head -1) and confirm the rollout JSONL exists under ~/.codex/sessions/.",
+            'Register the worker: workerctl register-worker --name foo --pid <WORKER_PID> --cwd "$PWD" --tmux-session codex-foo.',
+            'Register the manager (its own Codex session pid): workerctl register-manager --name foo-mgr --pid <MGR_PID> --cwd "$PWD".',
+            'Create the task: workerctl tasks --create my-task --goal "QA: cycle and nudge flow".',
+            "Bind the pair: workerctl bind --task my-task --worker foo --manager foo-mgr.",
+            "Run one observation cycle: workerctl cycle my-task. Verify JSON output includes kind, state, pane_signal, notable_pane_pattern, ingest, and cycle_id.",
+            'Send a nudge: workerctl session-nudge foo "Status?". Verify the worker tmux pane shows the text.',
+            "Run another cycle: workerctl cycle my-task. Verify ingest.new_events > 0 if the worker responded.",
+            "Trigger a divergence: leave the worker at a trust prompt or rate-limit prompt, run workerctl cycle my-task, and run workerctl divergences my-task to confirm the row appears.",
+            'Clean up the binding: workerctl unbind --task my-task. (Optionally: workerctl finish-task my-task --reason "QA complete".)',
+            "Deregister both sessions: workerctl deregister foo && workerctl deregister foo-mgr.",
+            "Run workerctl reconcile and confirm dead_pid_sessions, dangling_bindings, and stuck_tasks are all empty for this task. Add --apply if anything drifted.",
+            "Run workerctl audit my-task and workerctl replay my-task to confirm the observation and actuation history is present.",
         ],
     }
     if args.json:
@@ -1265,143 +1147,6 @@ def command_prune(args: argparse.Namespace) -> int:
     }
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0
-
-
-def task_health_result(
-    db_path: Path | None,
-    task: str,
-    *,
-    audit_decisions: bool = False,
-    manager_stale_seconds: int,
-) -> dict[str, Any]:
-    with connect_db(db_path) as conn:
-        initialize_database(conn)
-        snapshot = task_status_snapshot(conn, task=task)
-        audit = task_audit(conn, task=task) if audit_decisions else None
-    reconcile = reconcile_rows(db_path, task=snapshot["id"], recover=False)
-    reconcile_result = reconcile[0] if reconcile else None
-    liveness_warnings = manager_liveness_warnings(reconcile, stale_seconds=manager_stale_seconds)
-    latest_manager_capture_classifier = None
-    if snapshot.get("manager"):
-        with connect_db(db_path) as conn:
-            initialize_database(conn)
-            row = conn.execute(
-                """
-                select classifier_json
-                from terminal_captures
-                where task_id = ? and role = 'manager'
-                order by id desc
-                limit 1
-                """,
-                (snapshot["id"],),
-            ).fetchone()
-            if row:
-                latest_manager_capture_classifier = json.loads(row["classifier_json"])
-    decision_audit = mutation_audit_result(audit) if audit_decisions and audit else None
-    issues: list[dict[str, Any]] = []
-    recommended_actions: list[str] = []
-    review_manager_idle: list[dict[str, Any]] = []
-    for issue in snapshot["integrity"]["issues"]:
-        issues.append({"code": issue, "source": "integrity"})
-    if reconcile_result:
-        for drift in reconcile_result["drift"]:
-            issues.append({"code": drift, "source": "live_reconcile"})
-        for command in reconcile_result["unfinished_commands"]:
-            issues.append(
-                {
-                    "code": "unfinished_command",
-                    "command_id": command["id"],
-                    "command_type": command["type"],
-                    "source": "commands",
-                    "state": command["state"],
-                }
-            )
-    manager_prompt_wait = None
-    if latest_manager_capture_classifier:
-        busy_wait = latest_manager_capture_classifier.get("busy_wait")
-        if isinstance(busy_wait, dict) and busy_wait.get("pattern") == "rate_limit_prompt":
-            manager_prompt_wait = busy_wait
-    for warning in liveness_warnings:
-        if snapshot["state"] in {"done", "failed", "cancelled"} and warning["reason"] == "manager_seen_stale":
-            review_manager_idle.append(
-                {
-                    "code": "review_manager_idle",
-                    "manager_id": warning["manager_id"],
-                    "manager": warning["manager"],
-                    "last_seen_at": warning.get("last_seen_at"),
-                    "age_seconds": warning.get("age_seconds"),
-                    "prompt_pattern": manager_prompt_wait.get("pattern") if manager_prompt_wait else None,
-                    "source": "manager_liveness",
-                }
-            )
-        elif manager_prompt_wait:
-            issues.append(
-                {
-                    "code": "manager_waiting_for_user_choice",
-                    "manager_id": warning["manager_id"],
-                    "pattern": manager_prompt_wait.get("pattern"),
-                    "source": "manager_terminal",
-                }
-            )
-        else:
-            issues.append({"code": warning["reason"], "manager_id": warning["manager_id"], "source": "manager_liveness"})
-    budget = snapshot.get("budget")
-    if snapshot["state"] == "managed" and budget:
-        if budget["expires_at"] < now_iso():
-            issues.append({"code": "nudge_budget_expired", "expires_at": budget["expires_at"], "source": "budget"})
-        elif budget["nudges_remaining"] <= 0:
-            issues.append({"code": "nudge_budget_exhausted", "source": "budget"})
-    if decision_audit:
-        for record in decision_audit["records"]:
-            if record["warnings"]:
-                issues.append(
-                    {
-                        "code": "manager_decision_audit_warning",
-                        "command_id": record["command"]["id"],
-                        "command_type": record["command"]["type"],
-                        "source": "manager_decision_audit",
-                        "warnings": record["warnings"],
-                    }
-                )
-
-    issue_codes = {issue["code"] for issue in issues}
-    if "managed_without_active_worker_binding" in issue_codes:
-        recommended_actions.append("Do not resume or nudge this task; inspect task-events and close-stale or recreate the worker binding.")
-    if "managed_without_active_manager" in issue_codes or "manager_missing" in issue_codes:
-        recommended_actions.append("Run workerctl reconcile <task>; if confirmed missing, run workerctl recover <task> or remanage from the worker.")
-    if "worker_missing" in issue_codes:
-        recommended_actions.append("Confirm whether the worker tmux session was intentionally stopped before restarting management.")
-    if "worker_pane_mismatch" in issue_codes or "manager_pane_mismatch" in issue_codes:
-        recommended_actions.append("Inspect the terminal; if the live pane is correct, run workerctl recover <task> --sync-pane-ids.")
-    if "unfinished_commands" in issue_codes or "unfinished_command" in issue_codes:
-        recommended_actions.append("Inspect workerctl commands --task <task> and retry or resolve unfinished side effects manually.")
-    if any(issue["source"] == "manager_liveness" for issue in issues):
-        recommended_actions.append("Inspect the manager terminal before taking recovery action; heartbeat warnings are not hard drift.")
-    if "manager_waiting_for_user_choice" in issue_codes:
-        recommended_actions.append("Choose the pending Codex prompt in the manager terminal, or run workerctl close-manager <task> after review.")
-    if any(issue["source"] == "manager_decision_audit" for issue in issues):
-        recommended_actions.append("Run workerctl mutation-audit <task> --json; future manager mutations should record manager-decision first and pass --decision-id.")
-    if any(issue["source"] == "budget" for issue in issues):
-        recommended_actions.append("Record an escalate decision, then run workerctl extend-nudge-budget <task> --add-nudges <n> --decision-id <id> --strict-decisions, or stop and escalate to the user.")
-    if not recommended_actions:
-        recommended_actions.append("No action required.")
-
-    result = {
-        "decision_audit": decision_audit,
-        "integrity": snapshot["integrity"],
-        "issues": issues,
-        "live_reconcile": reconcile_result,
-        "manager_liveness_warnings": liveness_warnings,
-        "ok": not issues,
-        "recommended_actions": recommended_actions,
-        "review_manager_idle": review_manager_idle,
-        "task": {
-            "id": snapshot["id"],
-            "name": snapshot["name"],
-            "state": snapshot["state"],
-        },
-    }
-    return result
 
 
 def capture_task_terminal(
@@ -2247,7 +1992,7 @@ def collect_reconcile_report(conn: "sqlite3.Connection") -> dict:
     for row in conn.execute(
         """
         select
-          b.id as binding_id, t.name as task_name,
+          b.id as binding_id, t.id as task_id, t.name as task_name,
           ws.state as worker_state, ws.name as worker_name,
           ms.state as manager_state, ms.name as manager_name
         from bindings b
@@ -2261,6 +2006,7 @@ def collect_reconcile_report(conn: "sqlite3.Connection") -> dict:
         if row["worker_state"] == "gone":
             dangling_bindings.append({
                 "binding_id": row["binding_id"],
+                "task_id": row["task_id"],
                 "task_name": row["task_name"],
                 "gone_role": "worker",
                 "gone_session_name": row["worker_name"],
@@ -2268,6 +2014,7 @@ def collect_reconcile_report(conn: "sqlite3.Connection") -> dict:
         if row["manager_state"] == "gone":
             dangling_bindings.append({
                 "binding_id": row["binding_id"],
+                "task_id": row["task_id"],
                 "task_name": row["task_name"],
                 "gone_role": "manager",
                 "gone_session_name": row["manager_name"],
@@ -2349,6 +2096,7 @@ def apply_reconcile(conn: "sqlite3.Connection") -> dict:
         applied["bindings_marked_invalid"].append(b["binding_id"])
         worker_db.insert_event(
             conn, "binding_marked_invalid_by_reconcile", actor="workerctl",
+            task_id=b["task_id"],
             payload={
                 "binding_id": b["binding_id"],
                 "task_name": b["task_name"],

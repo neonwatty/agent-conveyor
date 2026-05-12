@@ -204,7 +204,11 @@ def build_parser() -> argparse.ArgumentParser:
     qa_plan.add_argument("--json", action="store_true", help="Print stable JSON output.")
     qa_plan.set_defaults(func=command_qa_plan)
 
-    db_doctor = subparsers.add_parser("db-doctor", help="Initialize and check the SQLite control-plane database.")
+    db_doctor = subparsers.add_parser(
+        "db-doctor",
+        help="Schema health check; legacy-table reconciliation. For session-based "
+             "runtime drift use `workerctl reconcile`.",
+    )
     db_doctor.add_argument("--live", action="store_true", help="Also report read-only live tmux reconciliation drift.")
     db_doctor.add_argument(
         "--manager-stale-seconds",
@@ -381,8 +385,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     reconcile = subparsers.add_parser(
         "reconcile",
-        help="Report (and optionally apply) reconciliation actions: dead-pid "
-             "sessions, dangling bindings, stuck tasks. JSON output.",
+        help="Report (and optionally apply) reconciliation actions on session-based "
+             "bindings: dead-pid sessions, dangling bindings, stuck tasks. "
+             "For legacy worker_id-based drift use `workerctl db-doctor --live`.",
     )
     reconcile.add_argument("--apply", action="store_true",
                           help="Mark dead-pid sessions gone and dangling bindings invalid.")

@@ -1,11 +1,34 @@
 ---
 name: manage-codex-workers
-description: Start, supervise, nudge, inspect, interrupt, and stop tmux-backed Codex worker sessions using the codex-terminal-manager workerctl tool. Use when the user asks to create or manage another Codex terminal/session, make the current Codex session managed, launch a manager for the current session, watch or supervise a worker, send a nudge, attach to a worker terminal, inspect worker status/capture/events, interrupt busy-wait states, or clean up worker sessions.
+description: Supervise a tmux-backed Codex worker session from a manager Codex session using the codex-terminal-manager workerctl tool. Use when the user asks to register an existing Codex session as a worker or manager, create a supervised task, bind the pair, run observation cycles, send nudges, interrupt busy-waits, finish a task, or audit/replay supervision history.
 ---
 
 # Manage Codex Workers
 
-Use `/Users/neonwatty/Desktop/codex-terminal-manager` as the control repo unless the user specifies another checkout.
+Use `/Users/neonwatty/Desktop/codex-terminal-manager` as the control repo unless
+the user specifies another checkout. Prefer the repo script path
+(`scripts/workerctl ...`); after `scripts/install-local --write` the plain
+`workerctl` command works too.
+
+## Supervision Model
+
+Supervision is built on three primitives: **sessions**, **tasks**, and
+**bindings**.
+
+- A **worker session** is a Codex session running inside a named tmux session.
+  Its rollout JSONL on disk (`~/.codex/sessions/.../rollout-*.jsonl`) is the
+  source of truth for ingest.
+- A **manager session** is a Codex session that can run anywhere — Ghostty,
+  iTerm2, Terminal.app, a web terminal. The manager does not need tmux. Its
+  job is to call `workerctl` commands, read their JSON output, and decide what
+  to do next.
+- A **task** is a unit of supervised work with a goal.
+- A **binding** ties one worker session and one manager session to one task.
+
+The manager Codex drives the supervision loop by calling
+`workerctl cycle <task>` repeatedly. Each cycle ingests new rollout events,
+captures the worker's tmux pane as a shadow signal, persists a `manager_cycles`
+row, and returns structured JSON. The manager reads that JSON and decides.
 
 ## Preflight
 
@@ -13,299 +36,218 @@ Use `/Users/neonwatty/Desktop/codex-terminal-manager` as the control repo unless
    ```bash
    cd /Users/neonwatty/Desktop/codex-terminal-manager
    ```
-2. Prefer the repo script path, which does not depend on shell profile setup:
+2. Verify dependencies:
    ```bash
    scripts/workerctl doctor
    ```
-3. Check for existing workers before choosing a name:
+3. Verify the SQLite control plane is healthy:
    ```bash
-   scripts/workerctl list
-   tmux list-sessions 2>/dev/null | rg '^codex-' || true
+   scripts/workerctl db-doctor
    ```
+4. From the current Codex session, check whether it can register itself:
+   ```bash
+   workerctl doctor-self
+   ```
+   `supported: true` means the session is inside a live tmux session and can
+   be registered as a worker. A non-tmux session can still be registered as a
+   manager.
 
-## Start A Worker
+## Register Sessions
 
-Use a fresh worker name unless the user explicitly wants to reuse prior state.
-
-For a manual startup check, prefer `start-test`. It verifies that the worker can
-update its ignored status file and leaves the tmux session running for attach:
-
-```bash
-scripts/workerctl start-test <name> \
-  --cwd <target-repo> \
-  --accept-trust \
-  --open
-```
-
-The command prints the attach and stop commands. Do not stop a manual test worker
-unless the user asks or you pass `--stop-after`.
-
-Guardrail: `workerctl` refuses to open a second terminal window for the same
-worker after one terminal launch attempt, even if the first app launch did not
-visibly work. Do not use `--force` or `--force-open` unless the user explicitly
-re-prompts and asks for another terminal window.
+Register an already-running Codex worker (rollout JSONL is auto-discovered
+from the pid via `lsof`):
 
 ```bash
-scripts/workerctl create <name> \
-  --cwd <target-repo> \
-  --task "<specific task and constraints>" \
-  --wait-ready \
-  --accept-trust \
-  --verify \
-  --open
+scripts/workerctl register-worker --name foo --pid <WORKER_PID> \
+  --cwd "$PWD" --tmux-session codex-foo
 ```
 
-For low-risk tests, constrain the worker to an ignored status file:
+If `lsof` discovery fails, pass the rollout path explicitly:
 
 ```bash
-scripts/workerctl start-test live-worker \
-  --cwd "$PWD" \
-  --accept-trust \
-  --open
+scripts/workerctl register-worker --name foo --pid <WORKER_PID> \
+  --cwd "$PWD" --tmux-session codex-foo \
+  --codex-session ~/.codex/sessions/.../rollout-...-<uuid>.jsonl
 ```
 
-For a repeatable managed-worker QA checklist:
+Register a manager (tmux not required):
+
+```bash
+scripts/workerctl register-manager --name foo-mgr --pid <MGR_PID> --cwd "$PWD"
+```
+
+List registered sessions:
+
+```bash
+scripts/workerctl sessions
+scripts/workerctl sessions --role worker
+scripts/workerctl sessions --role manager
+```
+
+## Create A Task And Bind
+
+```bash
+scripts/workerctl tasks --create my-task --goal "Refactor auth"
+scripts/workerctl bind --task my-task --worker foo --manager foo-mgr
+```
+
+`tasks` lists or creates rows. `bind` ties the worker and manager sessions to
+the task. The task is now active.
+
+## Manager Loop Pattern
+
+The manager Codex drives supervision by calling `workerctl cycle <task>` in a
+loop. Each cycle is idempotent: it ingests only new bytes from the rollout
+JSONL, computes worker state from the JSON event stream, captures the worker
+tmux pane, and returns a JSON dict.
+
+```bash
+scripts/workerctl cycle my-task
+# {
+#   "kind": "session_cycle",
+#   "task": "my-task",
+#   "state": "busy" | "idle" | "unknown",
+#   "staleness_seconds": 4.2,
+#   "notable_pane_pattern": "trust_prompt" | null,
+#   "pane_signal": { "captured": true, "classifier": {...} },
+#   "ingest": { "new_events": 3, "new_offset": 12345 },
+#   "cycle_id": 17,
+#   ...
+# }
+```
+
+Loop pseudo-pattern:
+
+```
+while task is active:
+  result = workerctl cycle <task>           # observe
+  interpret result.state, result.staleness_seconds, result.notable_pane_pattern
+  decide:
+    - "wait"      -> sleep, then loop
+    - "nudge"     -> workerctl session-nudge <worker> "<text>"
+    - "interrupt" -> workerctl session-interrupt <worker>
+    - "escalate"  -> workerctl finish-task <task> --reason "<why>"
+```
+
+Interpretation guidance:
+
+- `state: "busy"` and recent activity: wait.
+- `state: "idle"` and the worker is at a prompt: send a `session-nudge` with
+  the next instruction.
+- `notable_pane_pattern` is non-null: branch on it directly. For example, a
+  `trust_prompt` or `enter_to_confirm` may want a single Enter sent via
+  `session-nudge "" ` (Enter is always appended).
+- Long `staleness_seconds` with no notable pattern: send a status nudge before
+  interrupting.
+- Clear busy-wait pattern or explicit user request: `session-interrupt`.
+
+## Actuation
+
+Nudge the worker (sends text plus Enter to the worker's tmux pane). Only
+worker sessions can be nudged this way; managers running outside tmux cannot:
+
+```bash
+scripts/workerctl session-nudge foo "Please update status and continue."
+scripts/workerctl session-nudge foo "Status?" --dry-run
+```
+
+Send an interrupt key (default `C-c`):
+
+```bash
+scripts/workerctl session-interrupt foo
+scripts/workerctl session-interrupt foo --key C-c --followup "continue with the smaller refactor"
+```
+
+## Inspect, Replay, Audit
+
+```bash
+scripts/workerctl tail foo --limit 30
+scripts/workerctl tail foo --subtype agent_message
+scripts/workerctl divergences my-task --limit 20
+scripts/workerctl audit my-task
+scripts/workerctl replay my-task
+scripts/workerctl replay my-task --format transcript --limit 40
+scripts/workerctl replay my-task --format full-transcript --limit 40
+```
+
+- `tail` prints recent ingested rollout events for a session.
+- `divergences` lists cycles where the shadow pane signal flagged a notable
+  pattern (trust prompt, rate-limit prompt, approval prompt, ...).
+- `audit` lists `events` rows for the task; cycle observations show up via
+  `replay` and the `manager_cycles` table.
+- `replay` reconstructs the task chronologically. Use `--format compact` for
+  decisions and side effects, `--format transcript` for deduplicated terminal
+  excerpts, `--format full-transcript` only for debugging.
+
+## Finish, Unbind, Deregister
+
+When the task is complete:
+
+```bash
+scripts/workerctl finish-task my-task --reason "auth refactor merged"
+scripts/workerctl finish-task my-task --reason "..." --stop-manager
+scripts/workerctl finish-task my-task --reason "..." --stop-worker
+```
+
+`finish-task` marks the task done and leaves both sessions running by default.
+Add `--stop-manager` / `--stop-worker` only when the user explicitly wants the
+tmux session torn down.
+
+Clean up the binding and session registrations:
+
+```bash
+scripts/workerctl unbind --task my-task
+scripts/workerctl deregister foo
+scripts/workerctl deregister foo-mgr
+```
+
+`deregister` refuses if a session is still bound to an active task; run
+`unbind` first.
+
+## Reconcile Runtime Drift
+
+If something looks wrong — a worker process exited, a manager left a session
+behind, a task has stopped getting cycle rows — run reconcile:
+
+```bash
+scripts/workerctl reconcile
+scripts/workerctl reconcile --apply
+```
+
+Without `--apply` it prints a JSON report of dead-pid sessions, dangling
+bindings, and stuck tasks. With `--apply` it marks dead-pid sessions
+`state='gone'` and dangling bindings `state='invalid'`, writing audit events
+for each mutation. Stuck tasks are reported but never auto-closed.
+
+For schema-level checks (legacy `workers`/`managers` tables, missing tables,
+etc.) run `scripts/workerctl db-doctor --live`.
+
+## Natural-Language Command Mapping
+
+- "register this Codex session as a worker": `workerctl doctor-self` then
+  `workerctl register-worker --name <NAME> --pid <PID> --cwd <CWD> --tmux-session <SESSION>`.
+- "register a manager": `workerctl register-manager --name <NAME> --pid <PID> --cwd <CWD>`.
+- "create a task and bind these sessions":
+  `workerctl tasks --create <TASK> --goal "<goal>"` then
+  `workerctl bind --task <TASK> --worker <W> --manager <M>`.
+- "watch the worker", "supervise this task", "run a cycle":
+  `workerctl cycle <TASK>` (in a loop).
+- "send a nudge", "ask the worker something":
+  `workerctl session-nudge <WORKER> "<text>"`.
+- "interrupt the worker": `workerctl session-interrupt <WORKER>`.
+- "what happened in this task", "show the replay":
+  `workerctl replay <TASK>` (optionally with `--format`).
+- "finish this task": `workerctl finish-task <TASK> --reason "<why>"`.
+- "unbind", "deregister this session": `workerctl unbind --task <TASK>`
+  followed by `workerctl deregister <NAME>` per session.
+- "reconcile drift", "something looks stale":
+  `workerctl reconcile` (add `--apply` if the dry-run report looks correct).
+
+## QA Plan
+
+For a repeatable end-to-end checklist:
 
 ```bash
 scripts/workerctl qa-plan self-management
+scripts/workerctl qa-plan self-management --json
 ```
-
-## Inspect And Supervise
-
-Use these from the manager session:
-
-```bash
-scripts/workerctl manager-observe <task> --compact --json
-scripts/workerctl manager-decision <task> --decision inspect --reason "<why>"
-scripts/workerctl replay <task>
-scripts/workerctl replay <task> --format full-transcript --limit 40
-scripts/workerctl status <name>
-scripts/workerctl capture <name> --lines 120
-scripts/workerctl events <name> --limit 20
-scripts/workerctl watch <name> --interval 10 --max-cycles 3 --dry-run
-scripts/workerctl idle-check <name> --busy-wait-seconds 10
-```
-
-Prefer `manager-observe` at the start of each managed-task loop. It persists
-task health, worker capture, manager capture, and status into SQLite so
-manager-visible errors are auditable after the terminal scrollback changes.
-Use `--compact --json` for normal loops; full captures are still stored in
-SQLite, but the returned payload is smaller.
-Record non-trivial choices with `manager-decision` before nudging,
-interrupting, escalating, or stopping.
-When you run a mutating task command from manager context, pass the returned
-`decision_id` with `--decision-id --strict-decisions`. Without strict mode,
-workerctl still runs the command but records a warning that
-`workerctl mutation-audit <task> --json` or
-`workerctl task-health <task> --audit-decisions --json` can surface later.
-Use `workerctl replay <task>` when the user asks what happened between a worker
-and manager. Use `--format compact` for decisions and side effects only, or
-`--format transcript` for deduplicated terminal-capture excerpts. Use
-`--format full-transcript` only for debugging, because it includes raw
-role-tagged transcript segments and can be large.
-If the nudge budget is exhausted, stop nudging. Record an `escalate` decision,
-then either ask the user what to do or extend the budget explicitly:
-`workerctl extend-nudge-budget <task> --add-nudges <n> --decision-id <decision_id> --strict-decisions`.
-Do not run mutating commands merely because they are available. Use
-`task-nudge` only when the worker is stale, waiting for input, or explicitly
-needs direction. Use `task-interrupt` only for a clear busy-wait/interruptible
-state or an explicit user request. Use `finish-task` when work is complete and
-the task should close with an audit record; it leaves the manager terminal open
-by default for review. Add `--stop-manager` only when the user explicitly wants
-the manager terminal closed.
-After `finish-task` succeeds, stop the supervision loop. Report the final
-outcome once, include replay and mutation-audit commands, and take no further
-manager action unless the user explicitly asks for review. `manager-decision`
-rejects post-terminal decisions by default; use `--allow-post-terminal` only
-for an explicit review-only annotation.
-
-Interpret worker health as follows:
-
-- `active`: wait, watch, or inspect recent capture.
-- `done`: review status, capture, and events.
-- `blocked`: read the blocker before deciding the next action.
-- `stale`: use `supervise` or send a status nudge.
-- `busy_wait`: inspect capture; interrupt only when appropriate.
-
-## Worker Self-Management
-
-Use these when you are running inside the worker session itself.
-
-If the user asks you to become managed, launch a manager with the command
-template from your startup prompt. In a plain Codex session without a startup
-prompt, first run:
-
-```bash
-workerctl doctor-self
-```
-
-Never run `workerctl become-managed` before `workerctl doctor-self` reports
-`can_promote_in_place: true`. This is the mandatory preflight gate for plain
-Codex sessions because in-place promotion requires a live tmux session.
-
-If `doctor-self` reports `can_promote_in_place: true`, use its
-`become_managed_recommended_command_template` when present. Manager launch
-commands default to the recommended manager Codex args:
-
-```bash
---sandbox danger-full-access --ask-for-approval never
-```
-
-Ask for missing worker name, task name, or goal values before running it unless
-the user explicitly supplied them or asked you to choose names. Pass explicit
-manager Codex args after `--` only when intentionally overriding the default.
-Use `--no-manager-codex-args` only when you intentionally want a manager without
-those defaults; workerctl will audit a `manager_started_without_codex_args`
-warning. `become-managed` opens the manager terminal by default; use
-`--no-open-manager` only if the user does not want a visible manager.
-
-If the flow is unclear or you need compact command mappings, run:
-
-```bash
-workerctl explain-managed-flow --json
-```
-
-Natural-language command mapping:
-
-- "become managed", "manage yourself", "create a manager", "launch a manager":
-  run `workerctl doctor-self`; only run `workerctl become-managed` if
-  `can_promote_in_place: true` and required values are known. Prefer the
-  recommended command template; manager Codex args default to the recommended
-  sandbox and approval behavior.
-- "stop supervising me", "stop managing me", "take back manual control",
-  "unmanage this worker": run `workerctl unmanage`.
-- "resume supervision", "restart management", "get a manager again": run
-  `workerctl remanage --open-manager`.
-- "finish this managed task", "close this task", "mark this task done": run
-  `workerctl finish-task <task> --reason "<reason>"`. Add `--stop-manager`
-  only when the user asks to close the manager terminal too.
-- "close the manager terminal", "review is complete", "clean up the manager":
-  run `workerctl close-manager <task> --reason "<reason>"`.
-- "show me the manager" or "open the manager terminal": run
-  `workerctl open-manager <task>`.
-- "show me the worker" or "open the worker terminal": run
-  `workerctl open-worker <task>`.
-
-If `doctor-self` reports `can_promote_in_place: false`, explain that this
-Codex process is not running inside a tmux session and cannot be promoted
-in-place as a tmux-backed worker. Offer to start a managed-capable tmux Codex
-session with:
-
-```bash
-workerctl start <session-name> --cwd "$PWD" -- --sandbox danger-full-access --ask-for-approval never
-```
-
-If the user asks to take back manual control, stop supervising me, pause my
-manager, stop managing me, or unmanage this worker, run:
-
-```bash
-scripts/workerctl unmanage
-```
-
-This stops only the manager session and leaves the worker session running. If
-`unmanage` cannot infer the task from the current tmux session, ask the user for
-the missing task/session value. When the task is known, the fallback is:
-
-```bash
-scripts/workerctl pause-manager <task>
-```
-
-If the user asks for your current worker/manager state, run:
-
-```bash
-scripts/workerctl my-status
-```
-
-If the user asks to restart management, resume supervision, or get a manager
-again after the task is paused, run:
-
-```bash
-scripts/workerctl remanage --open-manager
-```
-
-To show task-bound terminals without raw tmux commands:
-
-```bash
-scripts/workerctl task-health <task> --json
-scripts/workerctl task-capture <task> --role manager --json
-scripts/workerctl replay <task>
-scripts/workerctl finish-task <task> --reason "<reason>"
-scripts/workerctl finish-task <task> --reason "<reason>" --stop-manager
-scripts/workerctl close-manager <task> --reason "<reason>"
-scripts/workerctl open-manager <task>
-scripts/workerctl open-worker <task>
-```
-
-## Nudge
-
-```bash
-scripts/workerctl nudge <name> "Please update status.json with your current state, blocker if any, and next action."
-```
-
-`workerctl` submits the nudge automatically. If a future manual test shows text pasted but not submitted, run:
-
-```bash
-tmux send-keys -t codex-<name> C-m
-```
-
-Then inspect `workerctl/tmux.py`, because `send_text` should submit with `C-m`.
-
-## Interrupt Busy Waits
-
-Prefer an explicit manager decision before interrupting:
-
-```bash
-scripts/workerctl interrupt <name> --dry-run
-scripts/workerctl interrupt <name>
-```
-
-Opt-in supervise interruption:
-
-```bash
-scripts/workerctl supervise <name> --interrupt-busy-wait --dry-run
-scripts/workerctl supervise <name> --interrupt-busy-wait
-```
-
-## Attach And Detach
-
-Attach from any directory:
-
-```bash
-tmux attach -t codex-<name>
-```
-
-On macOS, open a new terminal window attached to a running worker:
-
-```bash
-scripts/workerctl open <name>
-scripts/workerctl open <name> --terminal ghostty
-scripts/workerctl open <name> --terminal terminal
-```
-
-If the first open did not work and the user explicitly asks to try again:
-
-```bash
-scripts/workerctl open <name> --force
-```
-
-Detach without stopping:
-
-```text
-Ctrl-b then d
-```
-
-## Stop And Verify Cleanup
-
-For disposable smoke tests, pass `--stop-after` or stop the worker explicitly:
-
-```bash
-scripts/workerctl stop <name>
-tmux list-sessions 2>/dev/null | rg '^codex-<name>' || true
-git status --short
-```
-
-Expected cleanup:
-
-- no matching tmux session remains
-- tracked git status is clean for status-only tests
-- worker runtime remains under ignored `.codex-workers/<name>/`
