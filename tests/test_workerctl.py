@@ -7344,5 +7344,149 @@ class StalenessTests(unittest.TestCase):
             self.assertEqual(staleness, 300)
 
 
+class SessionTmuxTests(unittest.TestCase):
+    def open_db(self, tmpdir):
+        path = Path(tmpdir) / "workerctl.db"
+        conn = worker_db.connect(path)
+        worker_db.initialize_database(conn)
+        self.addCleanup(conn.close)
+        return conn
+
+    def _register_with_tmux(self, conn, **overrides):
+        kwargs = {
+            "name": "w", "role": "worker",
+            "codex_session_path": "/a", "codex_session_id": "u", "pid": 1, "cwd": "/repo",
+            "tmux_session": "codex-w", "tmux_pane_id": "%5",
+        }
+        kwargs.update(overrides)
+        return worker_db.register_session(conn, **kwargs)
+
+    def test_session_tmux_target_uses_session_and_pane(self):
+        from workerctl import tmux as worker_tmux
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self._register_with_tmux(conn)
+            row = worker_db.session_row(conn, name="w")
+            target = worker_tmux.session_tmux_target(row)
+            self.assertEqual(target, "codex-w:%5")
+
+    def test_session_tmux_target_falls_back_to_session_when_no_pane(self):
+        from workerctl import tmux as worker_tmux
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self._register_with_tmux(conn, tmux_pane_id=None)
+            row = worker_db.session_row(conn, name="w")
+            self.assertEqual(worker_tmux.session_tmux_target(row), "codex-w")
+
+    def test_send_text_to_session_raises_when_no_tmux_session(self):
+        from workerctl import tmux as worker_tmux
+        from workerctl.core import WorkerError
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            worker_db.register_session(
+                conn, name="m", role="manager",
+                codex_session_path="/a", codex_session_id="u", pid=1, cwd="/repo",
+            )
+            with self.assertRaises(WorkerError):
+                worker_tmux.send_text_to_session(conn, session_name="m", text="hi")
+
+    def test_send_text_to_session_dry_run_does_not_invoke_tmux(self):
+        from workerctl import tmux as worker_tmux
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self._register_with_tmux(conn)
+            captured_calls = []
+
+            def fake_run(cmd, check=True):
+                captured_calls.append(list(cmd))
+                class Result:
+                    returncode = 0
+                    stdout = ""
+                    stderr = ""
+                return Result()
+
+            original_run = worker_tmux.run
+            worker_tmux.run = fake_run
+            try:
+                result = worker_tmux.send_text_to_session(
+                    conn, session_name="w", text="hello", dry_run=True,
+                )
+            finally:
+                worker_tmux.run = original_run
+
+            self.assertEqual(captured_calls, [])
+            self.assertEqual(result["dry_run"], True)
+            self.assertEqual(result["target"], "codex-w:%5")
+            self.assertEqual(result["text"], "hello")
+
+    def test_send_text_to_session_invokes_set_paste_send_keys(self):
+        from workerctl import tmux as worker_tmux
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self._register_with_tmux(conn)
+            calls = []
+
+            def fake_run(cmd, check=True):
+                calls.append(list(cmd))
+                class Result:
+                    returncode = 0
+                    stdout = ""
+                    stderr = ""
+                return Result()
+
+            original_run = worker_tmux.run
+            worker_tmux.run = fake_run
+            try:
+                worker_tmux.send_text_to_session(
+                    conn, session_name="w", text="payload",
+                )
+            finally:
+                worker_tmux.run = original_run
+
+            verbs = [c[1] for c in calls if len(c) > 1]
+            self.assertIn("set-buffer", verbs)
+            self.assertIn("paste-buffer", verbs)
+            self.assertIn("send-keys", verbs)
+            self.assertIn("delete-buffer", verbs)
+            paste_calls = [c for c in calls if len(c) > 1 and c[1] == "paste-buffer"]
+            send_calls = [c for c in calls if len(c) > 1 and c[1] == "send-keys"]
+            self.assertTrue(all("codex-w:%5" in c for c in paste_calls))
+            self.assertTrue(all("codex-w:%5" in c for c in send_calls))
+
+    def test_interrupt_session_dry_run(self):
+        from workerctl import tmux as worker_tmux
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self._register_with_tmux(conn)
+            captured_calls = []
+
+            def fake_run(cmd, check=True):
+                captured_calls.append(list(cmd))
+                class Result:
+                    returncode = 0
+                    stdout = ""
+                    stderr = ""
+                return Result()
+
+            original_run = worker_tmux.run
+            worker_tmux.run = fake_run
+            try:
+                result = worker_tmux.interrupt_session(
+                    conn, session_name="w", dry_run=True,
+                )
+            finally:
+                worker_tmux.run = original_run
+
+            self.assertEqual(captured_calls, [])
+            self.assertEqual(result["dry_run"], True)
+            self.assertEqual(result["key"], "C-c")
+
+
 if __name__ == "__main__":
     unittest.main()
