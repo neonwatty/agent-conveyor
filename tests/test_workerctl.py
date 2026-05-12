@@ -8144,6 +8144,7 @@ class SuperviseCycleTests(unittest.TestCase):
         """A tmux capture exception must not abort the cycle."""
         from workerctl import supervise_cycle
         from workerctl import tmux as worker_tmux
+        from workerctl.core import WorkerError as CoreWorkerError
 
         with tempfile.TemporaryDirectory() as tmpdir:
             conn = self.open_db(tmpdir)
@@ -8164,7 +8165,10 @@ class SuperviseCycleTests(unittest.TestCase):
             original = worker_tmux.capture_tmux_target
 
             def boom(target, lines=100):
-                raise RuntimeError("tmux server went away")
+                # WorkerError is what capture_tmux_target actually raises via
+                # run() in real life — the narrowed except in shadow_state
+                # treats this as a benign capture failure.
+                raise CoreWorkerError("tmux server went away")
 
             worker_tmux.capture_tmux_target = boom
             try:
@@ -8223,6 +8227,56 @@ class SuperviseCycleTests(unittest.TestCase):
             self.assertIn("trust_prompt", joined,
                           f"replay did not surface pane pattern: {cycle_summaries!r}")
             self.assertIn("busy", joined.lower())
+
+    def test_e2e_run_cycle_writes_row_visible_in_divergent_cycles_for_task(self):
+        """End-to-end: a successful run_cycle with a detected pane pattern must
+        write a manager_cycles row that divergent_cycles_for_task picks up.
+
+        This catches writer/reader key-name mismatches (e.g. run_cycle writing
+        `notable_pattern` instead of `notable_pane_pattern` at the top level)
+        that would slip past both the unit tests in isolation."""
+        from workerctl import supervise_cycle
+        from workerctl import tmux as worker_tmux
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self._setup_bound_task(conn, tmpdir, [
+                {"type": "session_meta", "payload": {"id": "u-w", "cwd": "/r"}},
+                {"timestamp": "2026-05-11T14:32:11Z",
+                 "type": "event_msg",
+                 "payload": {"type": "task_started"}},
+            ])
+            conn.execute(
+                "update sessions set tmux_session = 'codex-w', tmux_pane_id = '%5' "
+                "where name = 'w'"
+            )
+            conn.commit()
+
+            original = worker_tmux.capture_tmux_target
+            worker_tmux.capture_tmux_target = (
+                lambda target, lines=100:
+                "$ codex\nDo you trust the contents of this directory? (y/n)\n"
+            )
+            try:
+                # `now` is chosen so staleness > busy_wait_seconds (90s),
+                # which lets classify_busy_wait actually return a pattern.
+                result = supervise_cycle.run_cycle(
+                    conn, task_name="t", now="2026-05-11T14:33:50Z",
+                )
+            finally:
+                worker_tmux.capture_tmux_target = original
+
+            rows = worker_db.divergent_cycles_for_task(conn, task_name="t")
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["id"], result["cycle_id"])
+            self.assertEqual(rows[0]["notable_pane_pattern"], "trust_prompt")
+            self.assertEqual(rows[0]["status"]["kind"], "session_cycle")
+            self.assertTrue(rows[0]["status"]["pane_signal"]["captured"])
+            # The duplicated top-level key must match the nested one.
+            self.assertEqual(
+                rows[0]["status"]["notable_pane_pattern"],
+                rows[0]["status"]["pane_signal"]["notable_pattern"],
+            )
 
 
 class CycleCliTests(unittest.TestCase):
@@ -8388,6 +8442,7 @@ class ShadowStateTests(unittest.TestCase):
     def test_pane_signal_for_session_swallows_tmux_capture_error(self):
         from workerctl import shadow_state
         from workerctl import tmux as worker_tmux
+        from workerctl.core import WorkerError as CoreWorkerError
 
         with tempfile.TemporaryDirectory() as tmpdir:
             conn = self.open_db(tmpdir)
@@ -8397,7 +8452,10 @@ class ShadowStateTests(unittest.TestCase):
             original = worker_tmux.capture_tmux_target
 
             def boom(target, lines=100):
-                raise RuntimeError("tmux died")
+                # WorkerError is what capture_tmux_target actually raises via
+                # run() in real life — the narrowed except in shadow_state must
+                # still treat it as a benign capture failure.
+                raise CoreWorkerError("tmux died")
 
             worker_tmux.capture_tmux_target = boom
             try:
@@ -8492,6 +8550,86 @@ class ShadowStateTests(unittest.TestCase):
             self.assertIsNone(result["status_age_seconds"])
             # Reason field carries a hint about the degradation.
             self.assertIn("staleness unavailable", result["reason"])
+
+    def test_pane_signal_for_session_unknown_session_id(self):
+        """Passing a non-existent session id returns a clean non-captured signal
+        rather than raising. Documents the None-on-miss contract of session_by_id."""
+        from workerctl import shadow_state
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            result = shadow_state.pane_signal_for_session(
+                conn, session_id="does-not-exist",
+            )
+            self.assertFalse(result["captured"])
+            self.assertIsNone(result["classifier"])
+            self.assertIsNone(result["notable_pattern"])
+            self.assertIn("unknown session id", result["reason"])
+            self.assertFalse(result["degraded"])
+
+    def test_pane_signal_for_session_degraded_field_set_on_ingest_error(self):
+        """The IngestError-degradation path must set degraded=True so operators
+        can distinguish clean captures from those where classification ran with
+        reduced inputs (e.g. status_age unavailable)."""
+        from workerctl import shadow_state
+        from workerctl import tmux as worker_tmux
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            session_id = self._register_with_tmux(conn)
+            # Insert a state-bearing event with a malformed timestamp.
+            conn.execute(
+                """
+                insert into codex_events(
+                  session_id, timestamp, type, subtype, payload_json, byte_offset, ingested_at
+                )
+                values (?, 'not-a-valid-iso', 'event_msg', 'task_started', '{}', 0, '2026-05-11T00:00:00Z')
+                """,
+                (session_id,),
+            )
+            conn.commit()
+
+            original = worker_tmux.capture_tmux_target
+            worker_tmux.capture_tmux_target = (
+                lambda target, lines=100: "$ codex\nDo you trust the contents of this directory? (y/n)\n"
+            )
+            try:
+                result = shadow_state.pane_signal_for_session(
+                    conn, session_id=session_id,
+                )
+            finally:
+                worker_tmux.capture_tmux_target = original
+
+            self.assertTrue(result["captured"])
+            self.assertTrue(result["degraded"])  # the new field
+            self.assertEqual(result["notable_pattern"], "trust_prompt")
+            self.assertIn("staleness unavailable", result["reason"])
+
+    def test_pane_signal_for_session_degraded_false_on_normal_paths(self):
+        """`degraded` defaults to False on the unknown-session, no-tmux, and
+        successful-classify paths."""
+        from workerctl import shadow_state
+        from workerctl import tmux as worker_tmux
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            # No-tmux session.
+            session_id = worker_db.register_session(
+                conn, name="m", role="manager",
+                codex_session_path="/a", codex_session_id="u", pid=1, cwd="/repo",
+            )
+            result = shadow_state.pane_signal_for_session(conn, session_id=session_id)
+            self.assertFalse(result["degraded"])
+
+            # Successful capture.
+            session_id_w = self._register_with_tmux(conn, name="w2", codex_session_id="u-w2")
+            original = worker_tmux.capture_tmux_target
+            worker_tmux.capture_tmux_target = lambda t, lines=100: "$ codex\nready\n"
+            try:
+                result = shadow_state.pane_signal_for_session(conn, session_id=session_id_w)
+            finally:
+                worker_tmux.capture_tmux_target = original
+            self.assertFalse(result["degraded"])
 
 
 class DivergencesTests(unittest.TestCase):
@@ -8592,6 +8730,27 @@ class DivergencesTests(unittest.TestCase):
             conn.commit()
             rows = worker_db.divergent_cycles_for_task(conn, task_name="t", limit=2)
             self.assertEqual(len(rows), 2)
+
+    def test_divergent_cycles_for_task_excludes_failed_with_pane_pattern(self):
+        """Even if a future code path writes notable_pane_pattern on a failure
+        payload, the `state = 'succeeded'` SQL filter must exclude it. This
+        documents and locks in the belt-and-suspenders guardrail."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            task_id = self._insert_task(conn)
+            # Insert a failed row that DOES carry notable_pane_pattern.
+            self._insert_cycle(
+                conn, task_id=task_id,
+                status_payload={
+                    "kind": "session_cycle",
+                    "task": "t",
+                    "notable_pane_pattern": "trust_prompt",
+                },
+                state="failed", error="boom",
+            )
+            conn.commit()
+            rows = worker_db.divergent_cycles_for_task(conn, task_name="t")
+            self.assertEqual(rows, [])
 
 
 class DivergencesCliTests(unittest.TestCase):

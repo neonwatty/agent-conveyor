@@ -7,7 +7,7 @@ from typing import Any
 from workerctl import db as worker_db
 from workerctl import ingest as worker_ingest
 from workerctl import shadow_state as worker_shadow
-from workerctl.core import now_iso
+from workerctl.core import WorkerError, now_iso
 
 
 def run_cycle(
@@ -25,16 +25,24 @@ def run_cycle(
       4. Write a `manager_cycles` row with the structured status.
       5. Return a JSON-serializable dict for the manager Codex (or operator) to act on.
 
-    The returned dict has stable keys: `kind` (always "session_cycle", a shape
-    discriminator that `replay.py` branches on), `task`, `binding_id`,
-    `worker_session`, `manager_session`, `ingest` ({new_events, new_offset}),
-    `state`, `last_state_event_at`, `staleness_seconds`, `pane_signal`,
-    `notable_pane_pattern`, `cycle_id`, `cycle_started_at`, `cycle_completed_at`.
-    Phase 3 supervision consumers depend on these names. `pane_signal` is a
-    best-effort shadow signal from `classify_busy_wait` against the worker's
-    tmux pane (None-shaped when no tmux session is attached or capture failed).
-    `notable_pane_pattern` is a top-level shortcut to `pane_signal['notable_pattern']`
-    for easy filtering and replay-summary rendering.
+    The returned dict has two groups of keys.
+
+    Persisted in `manager_cycles.status_json` (and therefore present on this
+    return AND on replay/`divergent_cycles_for_task` reads):
+      - `kind` (always "session_cycle", a shape discriminator that `replay.py`
+        branches on)
+      - `task`, `binding_id`, `worker_session`, `manager_session`
+      - `ingest` ({new_events, new_offset})
+      - `state`, `last_state_event_at`, `staleness_seconds`
+      - `pane_signal` — always a dict (see shadow_state.PaneSignal). Callers
+        must check `pane_signal["captured"]`; pane_signal is NEVER None.
+      - `notable_pane_pattern` — top-level shortcut to
+        `pane_signal["notable_pattern"]`, for cheap `json_extract` filtering.
+
+    Return-only (NOT persisted; computed at return time):
+      - `cycle_id`, `cycle_started_at`, `cycle_completed_at`.
+
+    Phase 3 supervision consumers depend on these names.
 
     On any exception during ingest / state inference / cycle-row write, the
     function rolls back uncommitted writes, records a `state='failed'` row in
@@ -47,6 +55,8 @@ def run_cycle(
       - IngestError: rollout file missing, rotated, or unreadable.
       - Other exceptions: re-raised after recording a failure row.
     """
+    # TODO(phase-5): promote run_cycle return to a TypedDict (SessionCycleResult)
+    # once the nested `ingest` and `pane_signal` shapes stabilize.
     started_at = now or now_iso()
     binding = worker_db.active_binding_for_task(conn, task_name=task_name)
 
@@ -67,21 +77,24 @@ def run_cycle(
         )
 
         # Phase 4 shadow signal — best-effort pane-pattern detection alongside the
-        # JSON state. Wrapped in try/except so any classifier or capture failure does
-        # not abort the cycle (the pane signal is supplementary, not load-bearing).
+        # JSON state. Wrapped in a narrow try/except so transient sqlite/Worker
+        # failures don't abort the cycle; genuine programmer bugs (KeyError,
+        # AttributeError, etc.) in shadow_state.py / classify.py / ingest.py
+        # propagate to the outer cycle handler and get recorded as a `failed` row.
         try:
             pane_signal = worker_shadow.pane_signal_for_session(
                 conn,
                 session_id=binding["worker_session_id"],
                 now=started_at,
             )
-        except Exception as exc:  # pragma: no cover — defensive belt-and-suspenders
+        except (sqlite3.Error, WorkerError) as exc:  # pragma: no cover — defensive belt-and-suspenders
             pane_signal = {
                 "captured": False,
                 "classifier": None,
                 "notable_pattern": None,
                 "status_age_seconds": None,
                 "reason": f"pane_signal_for_session raised: {exc}",
+                "degraded": False,
             }
         notable_pane_pattern = pane_signal.get("notable_pattern")
     except Exception as exc:

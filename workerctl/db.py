@@ -2012,6 +2012,11 @@ def divergent_cycles_for_task(
 
     Raises WorkerError if `task_name` is unknown. Failed cycles are excluded
     (they don't carry a notable_pane_pattern field — see supervise_cycle.run_cycle).
+
+    The SQL filter `state = 'succeeded'` is a redundant guardrail in case a
+    future failure-payload shape adds `notable_pane_pattern` — the data-flow
+    guarantee (failure_status omits the key) is the primary mechanism; this is
+    belt-and-suspenders.
     """
     task = task_row(conn, task=task_name)
     rows = conn.execute(

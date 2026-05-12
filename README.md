@@ -315,10 +315,11 @@ might send a confirmation via `session-nudge` rather than waiting on
 `staleness_seconds`. The shadow signal is best-effort: tmux capture failures are
 caught and reported in `pane_signal.reason` rather than aborting the cycle.
 
-**Replay parity.** `workerctl replay <task>` and `workerctl audit <task>` both
-surface `[pane pattern: <pattern_id>]` in the rendered cycle summary when a
-pattern was detected — so historical pattern occurrences are easy to scan
-through the same audit surfaces used in Phase 2-3.
+**Replay parity.** `workerctl replay <task>` surfaces `[pane pattern: <pattern_id>]`
+in the rendered cycle summary (timeline / transcript / full-transcript modes)
+when a pattern was detected. `workerctl audit <task> --json` exposes the raw
+`notable_pane_pattern` field on each `manager_cycles` entry. The plain-text
+`workerctl audit <task>` lists `events`-table rows only, not cycle observations.
 
 ## SQLite Worker-Manager Lifecycle
 
