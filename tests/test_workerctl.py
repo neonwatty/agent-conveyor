@@ -6653,6 +6653,97 @@ class CodexEventsSchemaTests(unittest.TestCase):
             self.assertIsNotNone(row)
             self.assertIsNone(row["last_ingest_offset"])  # NULL means "not yet ingested"
 
+    def test_insert_codex_event_persists_row(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            session_id = worker_db.register_session(
+                conn, name="w", role="worker", codex_session_path="/a",
+                codex_session_id="cuid-w", pid=1, cwd="/repo",
+            )
+            event_id = worker_db.insert_codex_event(
+                conn,
+                session_id=session_id,
+                timestamp="2026-05-11T14:32:11.791Z",
+                event_type="event_msg",
+                subtype="task_started",
+                payload={"turn_id": "t1", "started_at": "2026-05-11T14:32:11Z"},
+                byte_offset=128,
+            )
+            self.assertIsInstance(event_id, int)
+            row = conn.execute(
+                "select session_id, type, subtype, byte_offset from codex_events where id = ?",
+                (event_id,),
+            ).fetchone()
+            self.assertEqual(row["session_id"], session_id)
+            self.assertEqual(row["type"], "event_msg")
+            self.assertEqual(row["subtype"], "task_started")
+            self.assertEqual(row["byte_offset"], 128)
+
+    def test_latest_codex_events_for_session_orders_and_limits(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            session_id = worker_db.register_session(
+                conn, name="w", role="worker", codex_session_path="/a",
+                codex_session_id="cuid-w", pid=1, cwd="/repo",
+            )
+            for i in range(5):
+                worker_db.insert_codex_event(
+                    conn, session_id=session_id,
+                    timestamp=f"2026-05-11T14:32:{10+i:02d}Z",
+                    event_type="event_msg",
+                    subtype="agent_message",
+                    payload={"i": i},
+                    byte_offset=i * 100,
+                )
+            rows = worker_db.latest_codex_events_for_session(
+                conn, session_id=session_id, limit=3,
+            )
+            self.assertEqual(len(rows), 3)
+            # Newest first
+            offsets = [r["byte_offset"] for r in rows]
+            self.assertEqual(offsets, [400, 300, 200])
+
+    def test_set_session_ingest_offset_updates_column(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            session_id = worker_db.register_session(
+                conn, name="w", role="worker", codex_session_path="/a",
+                codex_session_id="cuid-w", pid=1, cwd="/repo",
+            )
+            # NULL semantics: freshly registered session has no offset.
+            initial = conn.execute(
+                "select last_ingest_offset from sessions where id = ?", (session_id,)
+            ).fetchone()
+            self.assertIsNone(initial["last_ingest_offset"])
+
+            worker_db.set_session_ingest_offset(conn, session_id=session_id, offset=42)
+            row = conn.execute(
+                "select last_ingest_offset from sessions where id = ?", (session_id,)
+            ).fetchone()
+            self.assertEqual(row["last_ingest_offset"], 42)
+
+            # Also verify offset 0 is distinguishable from NULL — round-trip 0.
+            worker_db.set_session_ingest_offset(conn, session_id=session_id, offset=0)
+            row = conn.execute(
+                "select last_ingest_offset from sessions where id = ?", (session_id,)
+            ).fetchone()
+            self.assertEqual(row["last_ingest_offset"], 0)
+
+    def test_bump_session_heartbeat_sets_timestamp(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            session_id = worker_db.register_session(
+                conn, name="w", role="worker", codex_session_path="/a",
+                codex_session_id="cuid-w", pid=1, cwd="/repo",
+            )
+            worker_db.bump_session_heartbeat(
+                conn, session_id=session_id, timestamp="2026-05-11T15:00:00Z",
+            )
+            row = conn.execute(
+                "select last_heartbeat_at from sessions where id = ?", (session_id,)
+            ).fetchone()
+            self.assertEqual(row["last_heartbeat_at"], "2026-05-11T15:00:00Z")
+
 
 if __name__ == "__main__":
     unittest.main()

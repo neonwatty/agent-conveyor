@@ -917,6 +917,75 @@ def deregister_session(conn: sqlite3.Connection, *, name: str, timestamp: str | 
     )
 
 
+def insert_codex_event(
+    conn: sqlite3.Connection,
+    *,
+    session_id: str,
+    timestamp: str,
+    event_type: str,
+    subtype: str | None,
+    payload: dict[str, Any],
+    byte_offset: int,
+    ingested_at: str | None = None,
+) -> int:
+    """Insert one codex event row. Returns the autoincrement id."""
+    now = ingested_at or now_iso()
+    cursor = conn.execute(
+        """
+        insert into codex_events(
+          session_id, timestamp, type, subtype, payload_json, byte_offset, ingested_at
+        )
+        values (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (session_id, timestamp, event_type, subtype,
+         json.dumps(payload, sort_keys=True), byte_offset, now),
+    )
+    return int(cursor.lastrowid)
+
+
+def latest_codex_events_for_session(
+    conn: sqlite3.Connection,
+    *,
+    session_id: str,
+    limit: int = 50,
+    subtype: str | None = None,
+) -> list[sqlite3.Row]:
+    """Return up to `limit` most recent codex events for `session_id`, newest first."""
+    query = "select * from codex_events where session_id = ?"
+    params: list[Any] = [session_id]
+    if subtype is not None:
+        query += " and subtype = ?"
+        params.append(subtype)
+    query += " order by id desc limit ?"
+    params.append(limit)
+    return list(conn.execute(query, tuple(params)))
+
+
+def set_session_ingest_offset(
+    conn: sqlite3.Connection,
+    *,
+    session_id: str,
+    offset: int,
+) -> None:
+    conn.execute(
+        "update sessions set last_ingest_offset = ? where id = ?",
+        (offset, session_id),
+    )
+
+
+def bump_session_heartbeat(
+    conn: sqlite3.Connection,
+    *,
+    session_id: str,
+    timestamp: str | None = None,
+) -> None:
+    now = timestamp or now_iso()
+    conn.execute(
+        "update sessions set last_heartbeat_at = ? where id = ?",
+        (now, session_id),
+    )
+
+
 def insert_status(
     conn: sqlite3.Connection,
     *,
