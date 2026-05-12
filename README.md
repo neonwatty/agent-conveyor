@@ -198,6 +198,70 @@ supervision loop lands in Phase 3.
 > DB (`--limit N`, `--subtype T`). Use `workerctl capture <name>` if you need
 > the legacy pane-output behavior.
 
+### Phase 3: Observation Cycles + Session Actions
+
+Once a task has an active binding, the manager Codex can drive supervision by
+calling `workerctl cycle <task>` to observe the worker, then deciding whether
+to nudge, interrupt, finish, or wait. The cycle command is one-shot and stateless;
+the manager Codex performs the loop.
+
+```bash
+# Observe one cycle (idempotent — runs ingest first, then summarizes state).
+workerctl cycle auth-refactor
+# Output:
+# {
+#   "kind": "session_cycle",
+#   "task": "auth-refactor",
+#   "binding_id": "binding-...",
+#   "worker_session": "auth-worker",
+#   "manager_session": "auth-mgr",
+#   "ingest": { "new_events": 3, "new_offset": 12345 },
+#   "state": "busy",
+#   "last_state_event_at": "2026-05-11T14:32:11Z",
+#   "staleness_seconds": 4.2,
+#   "cycle_id": 17,
+#   "cycle_started_at": "2026-05-11T14:32:15Z",
+#   "cycle_completed_at": "2026-05-11T14:32:15Z"
+# }
+
+# Nudge the worker (text + Enter via the worker's tmux pane).
+workerctl session-nudge auth-worker "Status update please"
+workerctl session-nudge auth-worker "Status update please" --dry-run
+
+# Interrupt the worker (Ctrl-C by default; --followup to send text after).
+workerctl session-interrupt auth-worker
+workerctl session-interrupt auth-worker --followup "Stop and report progress"
+```
+
+**Worker tmux requirement.** `session-nudge` and `session-interrupt` require the
+target session to have been registered with `--tmux-session` (workers running in
+tmux). They reject sessions without a tmux pane — e.g. managers running in plain
+Codex outside tmux. This is intentional: managers don't receive nudges; only
+workers do.
+
+**Manager loop pattern.** A manager Codex running outside tmux supervises by:
+1. Calling `workerctl cycle <task>` and parsing the JSON output.
+2. Deciding based on `state` and `staleness_seconds` whether to act.
+3. Optionally calling `workerctl session-nudge`/`session-interrupt` to act.
+4. Sleeping or yielding control, then looping.
+
+Each `cycle` invocation writes a `manager_cycles` row with `status_json` so the
+full observation history is replayable via the existing `workerctl audit <task>`.
+On `IngestError` (rollout file missing or rotated), `cycle` records a
+`state='failed'` row with the error message before re-raising, so the audit trail
+captures unsuccessful attempts too.
+
+**Audit convention.** Phase 3 commands split audit-trail writes by category:
+`session-nudge` and `session-interrupt` actuate the worker (mutate external state
+via tmux) and therefore write `session_nudged` / `session_interrupted` rows to
+the `events` table. `cycle` and `ingest` write to their own dedicated tables
+(`manager_cycles` and `codex_events`) — those tables ARE the audit trail. Don't
+add an `events` row when the command already records itself in a dedicated table.
+
+**State inference (recap from Phase 2):** `task_started`/`user_message` → `busy`;
+`task_complete` → `idle`; everything else does not change state. `unknown` means
+no state-bearing event has been ingested yet.
+
 ## SQLite Worker-Manager Lifecycle
 
 `workerctl` now uses `.codex-workers/workerctl.db` as the authoritative
