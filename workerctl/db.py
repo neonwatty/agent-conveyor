@@ -1997,6 +1997,51 @@ def active_binding_for_task(
     return dict(row)
 
 
+def divergent_cycles_for_task(
+    conn: sqlite3.Connection,
+    *,
+    task_name: str,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    """Return successful Phase 3 cycle rows where the shadow pane signal flagged
+    a notable pattern (`notable_pane_pattern` is non-null in `status_json`).
+
+    Returns a list of dicts with keys: `id`, `task_id`, `started_at`,
+    `completed_at`, `state`, `notable_pane_pattern`, `status` (parsed status_json).
+    Ordered newest-first, capped at `limit`.
+
+    Raises WorkerError if `task_name` is unknown. Failed cycles are excluded
+    (they don't carry a notable_pane_pattern field — see supervise_cycle.run_cycle).
+    """
+    task = task_row(conn, task=task_name)
+    rows = conn.execute(
+        """
+        select
+          id, task_id, started_at, completed_at, state, status_json,
+          json_extract(status_json, '$.notable_pane_pattern') as notable_pane_pattern
+        from manager_cycles
+        where task_id = ?
+          and state = 'succeeded'
+          and json_extract(status_json, '$.notable_pane_pattern') is not null
+        order by id desc
+        limit ?
+        """,
+        (task["id"], limit),
+    ).fetchall()
+    return [
+        {
+            "id": r["id"],
+            "task_id": r["task_id"],
+            "started_at": r["started_at"],
+            "completed_at": r["completed_at"],
+            "state": r["state"],
+            "notable_pane_pattern": r["notable_pane_pattern"],
+            "status": json.loads(r["status_json"]),
+        }
+        for r in rows
+    ]
+
+
 def active_task_worker(conn: sqlite3.Connection, *, task: str) -> dict[str, Any]:
     row = conn.execute(
         """

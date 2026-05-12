@@ -8494,5 +8494,105 @@ class ShadowStateTests(unittest.TestCase):
             self.assertIn("staleness unavailable", result["reason"])
 
 
+class DivergencesTests(unittest.TestCase):
+    def open_db(self, tmpdir):
+        path = Path(tmpdir) / "workerctl.db"
+        conn = worker_db.connect(path)
+        worker_db.initialize_database(conn)
+        self.addCleanup(conn.close)
+        return conn
+
+    def _insert_task(self, conn, task_id="task-1", task_name="t"):
+        now = "2026-05-11T00:00:00Z"
+        conn.execute(
+            "insert into tasks(id, name, goal, state, created_at, updated_at) "
+            "values (?, ?, 'g', 'candidate', ?, ?)",
+            (task_id, task_name, now, now),
+        )
+        return task_id
+
+    def _insert_cycle(self, conn, *, task_id, status_payload, state="succeeded", error=None):
+        now = "2026-05-11T00:00:00Z"
+        cursor = conn.execute(
+            """
+            insert into manager_cycles(
+              task_id, started_at, completed_at, state, status_json, error
+            )
+            values (?, ?, ?, ?, ?, ?)
+            """,
+            (task_id, now, now, state,
+             json.dumps(status_payload, sort_keys=True, default=str), error),
+        )
+        return int(cursor.lastrowid)
+
+    def test_divergent_cycles_for_task_returns_only_cycles_with_pane_pattern(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            task_id = self._insert_task(conn)
+            # Cycle 1: no pane pattern → should NOT appear.
+            self._insert_cycle(conn, task_id=task_id, status_payload={
+                "kind": "session_cycle",
+                "task": "t",
+                "state": "busy",
+                "notable_pane_pattern": None,
+            })
+            # Cycle 2: pane pattern present → SHOULD appear.
+            cycle_id_2 = self._insert_cycle(conn, task_id=task_id, status_payload={
+                "kind": "session_cycle",
+                "task": "t",
+                "state": "busy",
+                "notable_pane_pattern": "trust_prompt",
+            })
+            # Cycle 3: failed cycle (no pane pattern field at all) → should NOT appear.
+            self._insert_cycle(
+                conn, task_id=task_id,
+                status_payload={"kind": "session_cycle", "task": "t"},
+                state="failed", error="boom",
+            )
+            conn.commit()
+
+            rows = worker_db.divergent_cycles_for_task(conn, task_name="t")
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["id"], cycle_id_2)
+            self.assertEqual(rows[0]["notable_pane_pattern"], "trust_prompt")
+
+    def test_divergent_cycles_for_task_orders_newest_first(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            task_id = self._insert_task(conn)
+            ids = []
+            for pattern in ["enter_to_confirm", "trust_prompt", "rate_limit_prompt"]:
+                ids.append(self._insert_cycle(conn, task_id=task_id, status_payload={
+                    "kind": "session_cycle",
+                    "task": "t",
+                    "notable_pane_pattern": pattern,
+                }))
+            conn.commit()
+
+            rows = worker_db.divergent_cycles_for_task(conn, task_name="t")
+            row_ids = [r["id"] for r in rows]
+            self.assertEqual(row_ids, list(reversed(ids)))
+
+    def test_divergent_cycles_for_task_raises_on_unknown_task(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            with self.assertRaises(WorkerError):
+                worker_db.divergent_cycles_for_task(conn, task_name="missing")
+
+    def test_divergent_cycles_for_task_respects_limit(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            task_id = self._insert_task(conn)
+            for i in range(5):
+                self._insert_cycle(conn, task_id=task_id, status_payload={
+                    "kind": "session_cycle",
+                    "task": "t",
+                    "notable_pane_pattern": "trust_prompt",
+                })
+            conn.commit()
+            rows = worker_db.divergent_cycles_for_task(conn, task_name="t", limit=2)
+            self.assertEqual(len(rows), 2)
+
+
 if __name__ == "__main__":
     unittest.main()
