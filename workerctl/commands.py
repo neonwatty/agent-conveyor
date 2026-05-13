@@ -13,7 +13,7 @@ from typing import Any
 
 from workerctl.classify import classify_busy_wait, classify_startup_output
 from workerctl.audit import mutation_audit_result
-from workerctl.constants import DEFAULT_MANAGER_STALE_SECONDS, PROJECT_ROOT, VALID_STATES
+from workerctl.constants import DEFAULT_HISTORY_LINES, DEFAULT_MANAGER_STALE_SECONDS, PROJECT_ROOT, VALID_STATES
 from workerctl.core import WorkerError, age_seconds, ensure_tool, now_iso, run, sh_quote
 from workerctl.db import active_manager, active_task_worker
 from workerctl.db import connect as connect_db
@@ -23,6 +23,7 @@ from workerctl.db import insert_agent_observation
 from workerctl.db import insert_event as insert_db_event
 from workerctl.db import insert_status as insert_db_status
 from workerctl.db import insert_terminal_capture
+from workerctl.db import insert_transcript_capture
 from workerctl.db import insert_transcript_segment
 from workerctl.db import latest_terminal_capture_for_role
 from workerctl.db import list_tasks as list_db_tasks
@@ -235,6 +236,102 @@ def open_tmux_session_window(session_name: str, *, terminal: str, dry_run: bool)
         return result
     run(command)
     return result
+
+
+def _worker_config_or_session(name: str) -> dict[str, Any]:
+    try:
+        config = dict(require_worker(name))
+        config["_workerctl_lookup_source"] = "legacy"
+        return config
+    except WorkerError as exc:
+        original_error = exc
+
+    from workerctl import db as worker_db
+
+    conn = worker_db.connect()
+    worker_db.initialize_database(conn)
+    try:
+        try:
+            session = worker_db.session_row(conn, name=name)
+        except WorkerError:
+            raise original_error
+        config = dict(session)
+        config["_workerctl_lookup_source"] = "session"
+        return config
+    finally:
+        conn.close()
+
+
+def _tmux_target_for_config(name: str, config: dict[str, Any]) -> str:
+    target = config.get("tmux_session")
+    if not target:
+        raise WorkerError(f"tmux session is not registered for worker {name}")
+    return str(target)
+
+
+def _session_exists_for_config(name: str, config: dict[str, Any]) -> bool:
+    target = config.get("tmux_session")
+    if not target:
+        return False
+    target = str(target)
+    if target == tmux_target(name):
+        return session_exists(name)
+    proc = run(["tmux", "has-session", "-t", target], check=False)
+    return proc.returncode == 0
+
+
+def _capture_output_for_config(
+    name: str,
+    config: dict[str, Any],
+    history_lines: int = DEFAULT_HISTORY_LINES,
+) -> str:
+    if config.get("_workerctl_lookup_source") == "legacy":
+        return capture_output(name, history_lines)
+    target = _tmux_target_for_config(name, config)
+    if not _session_exists_for_config(name, config):
+        raise WorkerError(f"tmux session is not running for worker {name}: {target}")
+    output = capture_tmux_target(target, history_lines)
+    digest = hashlib.sha256(output.encode()).hexdigest()
+    meta = load_json(capture_meta_path(name), {})
+    previous_digest = meta.get("sha256")
+    previous_changed_at = meta.get("changed_at")
+    captured_at = now_iso()
+    changed = digest != previous_digest
+    changed_at = captured_at if changed else previous_changed_at
+    write_json(
+        capture_meta_path(name),
+        {
+            "captured_at": captured_at,
+            "changed_at": changed_at or captured_at,
+            "sha256": digest,
+            "history_lines": history_lines,
+        },
+    )
+    transcript_path(name).write_text(output + ("\n" if output else ""))
+    with connect_db() as conn:
+        initialize_database(conn)
+        worker_id = upsert_worker(
+            conn,
+            name=name,
+            cwd=config.get("cwd", ""),
+            tmux_session=target,
+            identity_token=config.get("identity_token"),
+            tmux_pane_id=config.get("tmux_pane_id") or current_pane_id(target),
+            state="active",
+            timestamp=captured_at,
+        )
+        insert_transcript_capture(
+            conn,
+            worker_id=worker_id,
+            sha256=digest,
+            content=output,
+            captured_at=captured_at,
+            changed_at=changed_at or captured_at,
+            history_lines=history_lines,
+            changed=changed,
+        )
+        conn.commit()
+    return output
 
 
 def command_start(args: argparse.Namespace) -> int:
@@ -600,21 +697,22 @@ def command_list(args: argparse.Namespace) -> int:
 
 
 def command_capture(args: argparse.Namespace) -> int:
-    output = capture_output(args.name, args.lines)
+    config = _worker_config_or_session(args.name)
+    output = _capture_output_for_config(args.name, config, args.lines)
     if output:
         print(output)
     return 0
 
 
 def command_status(args: argparse.Namespace) -> int:
-    config = require_worker(args.name)
-    running = session_exists(args.name)
+    config = _worker_config_or_session(args.name)
+    running = _session_exists_for_config(args.name, config)
     status = latest_status(args.name)
     capture_meta = load_json(capture_meta_path(args.name), {})
     terminal_capture_error: str | None = None
     if running and args.refresh:
         try:
-            capture_output(args.name, args.lines)
+            _capture_output_for_config(args.name, config, args.lines)
             capture_meta = load_json(capture_meta_path(args.name), {})
         except WorkerError as exc:
             terminal_capture_error = str(exc)
@@ -655,15 +753,15 @@ def idle_summary(
     refresh: bool,
     lines: int,
 ) -> dict[str, Any]:
-    config = require_worker(name)
-    running = session_exists(name)
+    config = _worker_config_or_session(name)
+    running = _session_exists_for_config(name, config)
     status = latest_status(name)
     capture_meta = load_json(capture_meta_path(name), {})
     capture_error = None
 
     if running and refresh:
         try:
-            capture_output(name, lines)
+            _capture_output_for_config(name, config, lines)
             capture_meta = load_json(capture_meta_path(name), {})
         except WorkerError as exc:
             capture_error = str(exc)
@@ -680,7 +778,7 @@ def idle_summary(
     terminal_fresh = True
     if running:
         try:
-            terminal_output = capture_tmux_target(tmux_target(name), lines)
+            terminal_output = capture_tmux_target(_tmux_target_for_config(name, config), lines)
         except WorkerError as exc:
             terminal_fresh = False
             if capture_error is None:
@@ -1565,7 +1663,7 @@ def command_mutation_audit(args: argparse.Namespace) -> int:
 
 
 def command_events(args: argparse.Namespace) -> int:
-    require_worker(args.name)
+    _worker_config_or_session(args.name)
     events, skipped = read_events_with_stats(args.name)
     if skipped:
         print(

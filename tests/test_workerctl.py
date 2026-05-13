@@ -6949,6 +6949,121 @@ class StartWorkerTests(unittest.TestCase):
                 os.environ.pop("WORKERCTL_STATE_ROOT", None)
 
 
+class SessionLookupFallbackTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.old_state_root = os.environ.get("WORKERCTL_STATE_ROOT")
+        self.state_dir = Path(self.tmp.name) / "state"
+        self.state_dir.mkdir()
+        os.environ["WORKERCTL_STATE_ROOT"] = str(self.state_dir)
+        self.addCleanup(self._restore_state_root)
+
+        conn = worker_db.connect()
+        worker_db.initialize_database(conn)
+        worker_db.register_session(
+            conn,
+            name="session-worker",
+            role="worker",
+            codex_session_path="/tmp/rollout.jsonl",
+            codex_session_id="codex-session-id",
+            pid=12345,
+            cwd=str(ROOT),
+            tmux_session="custom-tmux",
+            tmux_pane_id="%7",
+        )
+        conn.commit()
+        conn.close()
+
+    def _restore_state_root(self):
+        if self.old_state_root is None:
+            os.environ.pop("WORKERCTL_STATE_ROOT", None)
+        else:
+            os.environ["WORKERCTL_STATE_ROOT"] = self.old_state_root
+
+    def _patch_tmux(self, output="terminal output"):
+        calls = {"has_session_targets": [], "capture_targets": []}
+        original_run = commands.run
+        original_capture_tmux_target = commands.capture_tmux_target
+
+        def fake_run(cmd, *args, **kwargs):
+            if cmd[:2] == ["tmux", "has-session"]:
+                calls["has_session_targets"].append(cmd[-1])
+                return subprocess.CompletedProcess(cmd, 0, "", "")
+            raise AssertionError(f"unexpected command: {cmd!r}")
+
+        def fake_capture_tmux_target(target, history_lines):
+            calls["capture_targets"].append((target, history_lines))
+            return output
+
+        commands.run = fake_run
+        commands.capture_tmux_target = fake_capture_tmux_target
+        self.addCleanup(setattr, commands, "run", original_run)
+        self.addCleanup(setattr, commands, "capture_tmux_target", original_capture_tmux_target)
+        return calls
+
+    def test_capture_uses_sessions_table_tmux_session_when_legacy_worker_missing(self):
+        calls = self._patch_tmux("session fallback output")
+        args = argparse.Namespace(name="session-worker", lines=42)
+
+        with contextlib.redirect_stdout(io.StringIO()) as stdout:
+            result = commands.command_capture(args)
+
+        self.assertEqual(result, 0)
+        self.assertEqual(stdout.getvalue().strip(), "session fallback output")
+        self.assertEqual(calls["has_session_targets"], ["custom-tmux"])
+        self.assertEqual(calls["capture_targets"], [("custom-tmux", 42)])
+        self.assertEqual(transcript_path("session-worker").read_text(), "session fallback output\n")
+
+    def test_status_resolves_sessions_table_tmux_session(self):
+        calls = self._patch_tmux()
+        args = argparse.Namespace(name="session-worker", refresh=False, lines=80)
+
+        with contextlib.redirect_stdout(io.StringIO()) as stdout:
+            result = commands.command_status(args)
+
+        self.assertEqual(result, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["name"], "session-worker")
+        self.assertEqual(payload["tmux_session"], "custom-tmux")
+        self.assertTrue(payload["running"])
+        self.assertEqual(calls["has_session_targets"], ["custom-tmux"])
+
+    def test_idle_check_resolves_sessions_table_tmux_session(self):
+        calls = self._patch_tmux("idle terminal output")
+        args = argparse.Namespace(
+            name="session-worker",
+            status_stale_seconds=300,
+            terminal_stale_seconds=300,
+            busy_wait_seconds=90,
+            refresh=False,
+            lines=33,
+        )
+
+        with contextlib.redirect_stdout(io.StringIO()) as stdout:
+            result = commands.command_idle_check(args)
+
+        self.assertEqual(result, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["name"], "session-worker")
+        self.assertEqual(payload["tmux_session"], "custom-tmux")
+        self.assertTrue(payload["running"])
+        self.assertEqual(calls["capture_targets"], [("custom-tmux", 33)])
+
+    def test_events_accepts_sessions_table_name_when_legacy_worker_missing(self):
+        append_event("session-worker", "note", {"message": "from sessions fallback"})
+        args = argparse.Namespace(name="session-worker", type=None, limit=None)
+
+        with contextlib.redirect_stdout(io.StringIO()) as stdout:
+            result = commands.command_events(args)
+
+        self.assertEqual(result, 0)
+        events = [json.loads(line) for line in stdout.getvalue().splitlines()]
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["type"], "note")
+        self.assertEqual(events[0]["message"], "from sessions fallback")
+
+
 class SessionsLegacyFilterTests(unittest.TestCase):
     def open_db(self, tmpdir):
         path = Path(tmpdir) / "workerctl.db"
