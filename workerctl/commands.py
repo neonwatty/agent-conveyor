@@ -1848,10 +1848,11 @@ def command_session_nudge(args: argparse.Namespace) -> int:
             )
             conn.commit()
         except Exception as exc:
+            rollback_error = None
             try:
                 conn.rollback()
-            except Exception:
-                pass
+            except Exception as rollback_exc:
+                rollback_error = f"{type(rollback_exc).__name__}: {rollback_exc}"
             worker_db.insert_event(
                 conn, "session_nudged", actor="workerctl",
                 payload={
@@ -1861,6 +1862,7 @@ def command_session_nudge(args: argparse.Namespace) -> int:
                     "success": False,
                     "error": str(exc),
                     "error_type": type(exc).__name__,
+                    "rollback_error": rollback_error,
                 },
             )
             conn.commit()
@@ -1895,10 +1897,11 @@ def command_session_interrupt(args: argparse.Namespace) -> int:
             )
             conn.commit()
         except Exception as exc:
+            rollback_error = None
             try:
                 conn.rollback()
-            except Exception:
-                pass
+            except Exception as rollback_exc:
+                rollback_error = f"{type(rollback_exc).__name__}: {rollback_exc}"
             worker_db.insert_event(
                 conn, "session_interrupted", actor="workerctl",
                 payload={
@@ -1909,6 +1912,7 @@ def command_session_interrupt(args: argparse.Namespace) -> int:
                     "success": False,
                     "error": str(exc),
                     "error_type": type(exc).__name__,
+                    "rollback_error": rollback_error,
                 },
             )
             conn.commit()

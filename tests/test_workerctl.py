@@ -4784,6 +4784,138 @@ class SessionActionCliTests(unittest.TestCase):
             self.assertEqual(payload["success"], False)
             self.assertIn("error", payload)
 
+    def test_session_nudge_attaches_rollback_error_when_rollback_fails(self):
+        """When the inner conn.rollback() also fails, the audit event must
+        record both the original tmux error AND the rollback error."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_dir = Path(tmpdir) / "state"
+            state_dir.mkdir()
+            os.environ["WORKERCTL_STATE_ROOT"] = str(state_dir)
+            try:
+                # Register a session via the CLI.
+                rollout = Path(tmpdir) / "rollout.jsonl"
+                rollout.write_text(json.dumps({
+                    "type": "session_meta",
+                    "payload": {"id": "u", "cwd": str(ROOT), "originator": "codex-tui"},
+                }) + "\n")
+                self.run_cli(
+                    "register-worker", "--name", "w",
+                    "--codex-session", str(rollout),
+                    "--pid", "1", "--cwd", str(ROOT),
+                    "--tmux-session", "codex-w",
+                )
+
+                # Monkey-patch: tmux raises, rollback raises.
+                orig_send = worker_tmux.send_text_to_session
+                orig_connect = worker_db.connect
+
+                def boom_send(*a, **kw):
+                    raise WorkerError("tmux exploded")
+
+                class WrappedConn:
+                    def __init__(self, conn):
+                        self._conn = conn
+                    def __getattr__(self, name):
+                        return getattr(self._conn, name)
+                    def rollback(self):
+                        raise RuntimeError("rollback exploded")
+
+                def wrapped_connect(*a, **kw):
+                    return WrappedConn(orig_connect(*a, **kw))
+
+                worker_tmux.send_text_to_session = boom_send
+                worker_db.connect = wrapped_connect
+                try:
+                    args = argparse.Namespace(name="w", text="hi", dry_run=False)
+                    with self.assertRaises(WorkerError):
+                        commands.command_session_nudge(args)
+                finally:
+                    worker_tmux.send_text_to_session = orig_send
+                    worker_db.connect = orig_connect
+
+                # Check the audit event has BOTH errors.
+                conn = worker_db.connect()
+                self.addCleanup(conn.close)
+                row = conn.execute(
+                    "select payload_json from events where type='session_nudged' "
+                    "order by id desc limit 1"
+                ).fetchone()
+                self.assertIsNotNone(row)
+                payload = json.loads(row["payload_json"])
+                self.assertEqual(payload["success"], False)
+                self.assertIn("tmux exploded", payload["error"])
+                self.assertIsNotNone(payload.get("rollback_error"))
+                self.assertIn("rollback exploded", payload["rollback_error"])
+            finally:
+                os.environ.pop("WORKERCTL_STATE_ROOT", None)
+
+    def test_session_interrupt_attaches_rollback_error_when_rollback_fails(self):
+        """When the inner conn.rollback() also fails, the audit event must
+        record both the original interrupt error AND the rollback error."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_dir = Path(tmpdir) / "state"
+            state_dir.mkdir()
+            os.environ["WORKERCTL_STATE_ROOT"] = str(state_dir)
+            try:
+                # Register a session via the CLI.
+                rollout = Path(tmpdir) / "rollout.jsonl"
+                rollout.write_text(json.dumps({
+                    "type": "session_meta",
+                    "payload": {"id": "u", "cwd": str(ROOT), "originator": "codex-tui"},
+                }) + "\n")
+                self.run_cli(
+                    "register-worker", "--name", "w",
+                    "--codex-session", str(rollout),
+                    "--pid", "1", "--cwd", str(ROOT),
+                    "--tmux-session", "codex-w",
+                )
+
+                # Monkey-patch: interrupt raises, rollback raises.
+                orig_interrupt = worker_tmux.interrupt_session
+                orig_connect = worker_db.connect
+
+                def boom_interrupt(*a, **kw):
+                    raise WorkerError("interrupt exploded")
+
+                class WrappedConn:
+                    def __init__(self, conn):
+                        self._conn = conn
+                    def __getattr__(self, name):
+                        return getattr(self._conn, name)
+                    def rollback(self):
+                        raise RuntimeError("rollback exploded")
+
+                def wrapped_connect(*a, **kw):
+                    return WrappedConn(orig_connect(*a, **kw))
+
+                worker_tmux.interrupt_session = boom_interrupt
+                worker_db.connect = wrapped_connect
+                try:
+                    args = argparse.Namespace(
+                        name="w", key="C-c", followup=None, dry_run=False
+                    )
+                    with self.assertRaises(WorkerError):
+                        commands.command_session_interrupt(args)
+                finally:
+                    worker_tmux.interrupt_session = orig_interrupt
+                    worker_db.connect = orig_connect
+
+                # Check the audit event has BOTH errors.
+                conn = worker_db.connect()
+                self.addCleanup(conn.close)
+                row = conn.execute(
+                    "select payload_json from events where type='session_interrupted' "
+                    "order by id desc limit 1"
+                ).fetchone()
+                self.assertIsNotNone(row)
+                payload = json.loads(row["payload_json"])
+                self.assertEqual(payload["success"], False)
+                self.assertIn("interrupt exploded", payload["error"])
+                self.assertIsNotNone(payload.get("rollback_error"))
+                self.assertIn("rollback exploded", payload["rollback_error"])
+            finally:
+                os.environ.pop("WORKERCTL_STATE_ROOT", None)
+
 
 class SuperviseCycleTests(unittest.TestCase):
     def open_db(self, tmpdir):
