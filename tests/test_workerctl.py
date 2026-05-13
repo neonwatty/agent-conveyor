@@ -5552,6 +5552,130 @@ class SuperviseCycleTests(unittest.TestCase):
             self.assertIn("disk full", stderr_text)
             self.assertIn("audit", stderr_text.lower())
 
+    @staticmethod
+    def _find_unused_pid() -> int:
+        candidate = 999983
+        while candidate > 1:
+            try:
+                os.kill(candidate, 0)
+            except ProcessLookupError:
+                return candidate
+            except PermissionError:
+                candidate -= 1
+                continue
+            candidate -= 1
+        raise RuntimeError("no free pid found")
+
+    def _make_codex_session(self, tmpdir, session_id):
+        rollout = Path(tmpdir) / f"rollout-{session_id}.jsonl"
+        rollout.write_text(json.dumps({"type": "session_meta", "payload": {"id": session_id, "cwd": tmpdir}}) + "\n")
+        return rollout
+
+    def test_cycle_includes_worker_and_manager_alive_true_for_live_pids(self):
+        from workerctl import supervise_cycle
+        # Use the current Python interpreter's own PID — guaranteed alive.
+        live_pid = os.getpid()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            worker_db.register_session(
+                conn, name="w-live", role="worker",
+                codex_session_path=str(self._make_codex_session(tmpdir, "u-w")),
+                codex_session_id="u-w", pid=live_pid, cwd=tmpdir,
+            )
+            worker_db.register_session(
+                conn, name="m-live", role="manager",
+                codex_session_path=str(self._make_codex_session(tmpdir, "u-m")),
+                codex_session_id="u-m", pid=live_pid, cwd=tmpdir,
+            )
+            worker_db.create_task(
+                conn, name="t1", goal="test goal",
+            )
+            worker_db.bind_sessions(
+                conn,
+                task_name="t1",
+                worker_session_name="w-live",
+                manager_session_name="m-live",
+            )
+            conn.commit()
+
+            result = supervise_cycle.run_cycle(
+                conn, task_name="t1", now="2026-05-11T14:32:15Z",
+            )
+            self.assertTrue(result["worker_alive"])
+            self.assertTrue(result["manager_alive"])
+
+    def test_cycle_includes_worker_alive_false_for_dead_pid(self):
+        from workerctl import supervise_cycle
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            # Pid 1 is init/launchd — always alive. Use a (likely) free pid.
+            dead_pid = self._find_unused_pid()
+            worker_db.register_session(
+                conn, name="w-dead", role="worker",
+                codex_session_path=str(self._make_codex_session(tmpdir, "u-w")),
+                codex_session_id="u-w", pid=dead_pid, cwd=tmpdir,
+            )
+            worker_db.register_session(
+                conn, name="m-live", role="manager",
+                codex_session_path=str(self._make_codex_session(tmpdir, "u-m")),
+                codex_session_id="u-m", pid=os.getpid(), cwd=tmpdir,
+            )
+            worker_db.create_task(
+                conn, name="t1", goal="test goal",
+            )
+            worker_db.bind_sessions(
+                conn,
+                task_name="t1",
+                worker_session_name="w-dead",
+                manager_session_name="m-live",
+            )
+            conn.commit()
+
+            result = supervise_cycle.run_cycle(
+                conn, task_name="t1", now="2026-05-11T14:32:15Z",
+            )
+            self.assertFalse(result["worker_alive"])
+            self.assertTrue(result["manager_alive"])
+
+    def test_cycle_alive_false_when_pid_is_null(self):
+        from workerctl import supervise_cycle
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            now = "2026-05-13T00:00:00Z"
+            # Worker registered legacy-style with NULL pid.
+            rollout_path = self._make_codex_session(tmpdir, "u-w")
+            conn.execute(
+                """
+                insert into sessions(id, name, role, identity_token, cwd,
+                                     registered_at, state, pid, codex_session_path,
+                                     codex_session_id)
+                values ('s-w-null', 'w-null', 'worker', 'tok-w', ?,
+                        ?, 'active', NULL, ?, ?)
+                """,
+                (tmpdir, now, str(rollout_path), "u-w"),
+            )
+            worker_db.register_session(
+                conn, name="m-live", role="manager",
+                codex_session_path=str(self._make_codex_session(tmpdir, "u-m")),
+                codex_session_id="u-m", pid=os.getpid(), cwd=tmpdir,
+            )
+            worker_db.create_task(
+                conn, name="t1", goal="test goal",
+            )
+            worker_db.bind_sessions(
+                conn,
+                task_name="t1",
+                worker_session_name="w-null",
+                manager_session_name="m-live",
+            )
+            conn.commit()
+
+            result = supervise_cycle.run_cycle(
+                conn, task_name="t1", now="2026-05-11T14:32:15Z",
+            )
+            self.assertFalse(result["worker_alive"])
+            self.assertTrue(result["manager_alive"])
+
 
 class ReadEventsStatsTests(unittest.TestCase):
     def test_read_events_with_stats_counts_malformed_lines(self):
