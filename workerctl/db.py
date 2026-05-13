@@ -893,14 +893,29 @@ def session_by_id(conn: sqlite3.Connection, *, session_id: str) -> sqlite3.Row |
     ).fetchone()
 
 
-def list_sessions(conn: sqlite3.Connection, *, role: str | None = None) -> list[dict[str, Any]]:
+def list_sessions(
+    conn: sqlite3.Connection,
+    *,
+    role: str | None = None,
+    include_legacy: bool = False,
+) -> list[dict[str, Any]]:
+    """List sessions, optionally filtering by role.
+
+    By default, excludes legacy sessions (pid IS NULL) from Phase 1 backfill.
+    Use include_legacy=True to opt-in to legacy rows.
+    """
     query = "select * from sessions"
-    params: tuple = ()
+    clauses: list[str] = []
+    params: list = []
     if role is not None:
-        query += " where role = ?"
-        params = (role,)
+        clauses.append("role = ?")
+        params.append(role)
+    if not include_legacy:
+        clauses.append("pid is not null")
+    if clauses:
+        query += " where " + " and ".join(clauses)
     query += " order by registered_at"
-    return [dict(row) for row in conn.execute(query, params)]
+    return [dict(row) for row in conn.execute(query, tuple(params))]
 
 
 def deregister_session(conn: sqlite3.Connection, *, name: str, timestamp: str | None = None) -> None:

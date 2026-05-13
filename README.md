@@ -146,7 +146,12 @@ tmux attach -t codex-live-test
 - `register-manager --name N ...` — Same arguments; tmux is not required.
 - `deregister <name>` — Mark a session gone. Refuses if the session is bound
   to an active task.
-- `sessions [--role worker|manager]` — List registered sessions.
+- `sessions [--role worker|manager] [--include-legacy]` — List registered sessions.
+  By default, `sessions` hides Phase 1 backfill rows (legacy pre-redesign workers/managers, identified by `pid IS NULL`). Pass `--include-legacy` to show them too:
+  ```bash
+  workerctl sessions                    # current registered sessions only
+  workerctl sessions --include-legacy   # plus the Phase 1 backfill rows
+  ```
 - `tasks [--create NAME --goal G --summary S]` — List or create tasks.
 - `bind --task T --worker W --manager M` — Create the task binding.
 - `unbind --task T` — End the active binding for a task.
@@ -157,10 +162,16 @@ tmux attach -t codex-live-test
 
 ### Observation
 
-- `cycle <task>` — One observation cycle. Idempotent. Runs `ingest`, computes
+- `cycle <task> [--busy-wait-seconds N]` — One observation cycle. Idempotent. Runs `ingest`, computes
   worker state from the JSON event stream, captures the tmux pane as a shadow
   signal, writes a `manager_cycles` row, and returns a JSON dict the manager
-  Codex consumes.
+  Codex consumes. The `status_payload` now includes `worker_alive` and `manager_alive` booleans, computed by probing the registered session pids (`os.kill(pid, 0)`). These are `false` when the session's pid is `NULL` (legacy backfill) or the process has exited — useful for detecting silently-dead workers between cycles.
+  
+  The `cycle` subcommand accepts `--busy-wait-seconds N` (default: 90) to tune the pane-signal classifier's stuck-busy threshold. Lower values flag stalls faster but increase false positives on long-running real work:
+  ```bash
+  workerctl cycle my-task                          # default 90s threshold
+  workerctl cycle my-task --busy-wait-seconds 30   # tighter detection
+  ```
 - `ingest <session>` — Pull new events from a session's rollout JSONL into
   the `codex_events` table. Tracks a byte offset, so subsequent runs only
   pick up new events.
@@ -315,6 +326,14 @@ Recent additions to streamline worker setup and observability:
   status/idle JSON; `rollback_error` in nudge/interrupt audit payloads;
   `skipped_lines` in `cycle` output's `ingest` field; stderr warnings on
   malformed event lines and audit-insert failures.
+
+## Phase 7 polish (2026-05-11)
+
+Three quality-of-life additions following Phase 6 dogfood:
+
+- **`sessions --include-legacy`** — by default, `workerctl sessions` now hides Phase 1 backfill rows (`pid IS NULL`). On a long-running deployment with 100+ legacy rows, this restored signal-to-noise without losing the ability to inspect old entries.
+- **`worker_alive` / `manager_alive` in cycle output** — every `workerctl cycle` JSON now includes these booleans, computed by `os.kill(pid, 0)` against the registered session pids. Surfaces silently-dead workers between cycles.
+- **`cycle --busy-wait-seconds N`** — exposes the pane-signal classifier's stuck-busy threshold (previously hard-coded at 90s) as a per-cycle flag.
 
 ## Schema
 

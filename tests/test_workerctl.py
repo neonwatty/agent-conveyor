@@ -5552,6 +5552,210 @@ class SuperviseCycleTests(unittest.TestCase):
             self.assertIn("disk full", stderr_text)
             self.assertIn("audit", stderr_text.lower())
 
+    @staticmethod
+    def _find_unused_pid() -> int:
+        candidate = 999983
+        while candidate > 1:
+            try:
+                os.kill(candidate, 0)
+            except ProcessLookupError:
+                return candidate
+            except PermissionError:
+                candidate -= 1
+                continue
+            candidate -= 1
+        raise RuntimeError("no free pid found")
+
+    def _make_codex_session(self, tmpdir, session_id):
+        rollout = Path(tmpdir) / f"rollout-{session_id}.jsonl"
+        rollout.write_text(json.dumps({"type": "session_meta", "payload": {"id": session_id, "cwd": tmpdir}}) + "\n")
+        return rollout
+
+    def test_cycle_includes_worker_and_manager_alive_true_for_live_pids(self):
+        from workerctl import supervise_cycle
+        # Use the current Python interpreter's own PID — guaranteed alive.
+        live_pid = os.getpid()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            worker_db.register_session(
+                conn, name="w-live", role="worker",
+                codex_session_path=str(self._make_codex_session(tmpdir, "u-w")),
+                codex_session_id="u-w", pid=live_pid, cwd=tmpdir,
+            )
+            worker_db.register_session(
+                conn, name="m-live", role="manager",
+                codex_session_path=str(self._make_codex_session(tmpdir, "u-m")),
+                codex_session_id="u-m", pid=live_pid, cwd=tmpdir,
+            )
+            worker_db.create_task(
+                conn, name="t1", goal="test goal",
+            )
+            worker_db.bind_sessions(
+                conn,
+                task_name="t1",
+                worker_session_name="w-live",
+                manager_session_name="m-live",
+            )
+            conn.commit()
+
+            result = supervise_cycle.run_cycle(
+                conn, task_name="t1", now="2026-05-11T14:32:15Z",
+            )
+            self.assertTrue(result["worker_alive"])
+            self.assertTrue(result["manager_alive"])
+
+    def test_cycle_includes_worker_alive_false_for_dead_pid(self):
+        from workerctl import supervise_cycle
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            # Pid 1 is init/launchd — always alive. Use a (likely) free pid.
+            dead_pid = self._find_unused_pid()
+            worker_db.register_session(
+                conn, name="w-dead", role="worker",
+                codex_session_path=str(self._make_codex_session(tmpdir, "u-w")),
+                codex_session_id="u-w", pid=dead_pid, cwd=tmpdir,
+            )
+            worker_db.register_session(
+                conn, name="m-live", role="manager",
+                codex_session_path=str(self._make_codex_session(tmpdir, "u-m")),
+                codex_session_id="u-m", pid=os.getpid(), cwd=tmpdir,
+            )
+            worker_db.create_task(
+                conn, name="t1", goal="test goal",
+            )
+            worker_db.bind_sessions(
+                conn,
+                task_name="t1",
+                worker_session_name="w-dead",
+                manager_session_name="m-live",
+            )
+            conn.commit()
+
+            result = supervise_cycle.run_cycle(
+                conn, task_name="t1", now="2026-05-11T14:32:15Z",
+            )
+            self.assertFalse(result["worker_alive"])
+            self.assertTrue(result["manager_alive"])
+
+    def test_cycle_alive_false_when_pid_is_null(self):
+        from workerctl import supervise_cycle
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            now = "2026-05-13T00:00:00Z"
+            # Worker registered legacy-style with NULL pid.
+            rollout_path = self._make_codex_session(tmpdir, "u-w")
+            conn.execute(
+                """
+                insert into sessions(id, name, role, identity_token, cwd,
+                                     registered_at, state, pid, codex_session_path,
+                                     codex_session_id)
+                values ('s-w-null', 'w-null', 'worker', 'tok-w', ?,
+                        ?, 'active', NULL, ?, ?)
+                """,
+                (tmpdir, now, str(rollout_path), "u-w"),
+            )
+            worker_db.register_session(
+                conn, name="m-live", role="manager",
+                codex_session_path=str(self._make_codex_session(tmpdir, "u-m")),
+                codex_session_id="u-m", pid=os.getpid(), cwd=tmpdir,
+            )
+            worker_db.create_task(
+                conn, name="t1", goal="test goal",
+            )
+            worker_db.bind_sessions(
+                conn,
+                task_name="t1",
+                worker_session_name="w-null",
+                manager_session_name="m-live",
+            )
+            conn.commit()
+
+            result = supervise_cycle.run_cycle(
+                conn, task_name="t1", now="2026-05-11T14:32:15Z",
+            )
+            self.assertFalse(result["worker_alive"])
+            self.assertTrue(result["manager_alive"])
+
+    def test_cycle_busy_wait_seconds_default_is_propagated(self):
+        """Test: when no busy-wait-seconds is passed, default (from classifier) is used."""
+        from workerctl import supervise_cycle
+        from workerctl import shadow_state
+
+        captured = {}
+
+        def fake_pane_signal(conn, *, session_id, busy_wait_seconds=None, now=None):
+            if busy_wait_seconds is None:
+                busy_wait_seconds = shadow_state.DEFAULT_BUSY_WAIT_SECONDS
+            captured["busy_wait_seconds"] = busy_wait_seconds
+            return {
+                "captured": False,
+                "classifier": None,
+                "notable_pattern": None,
+                "status_age_seconds": None,
+                "reason": "test",
+                "degraded": False,
+            }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self._setup_bound_task(conn, tmpdir, [
+                {"type": "session_meta", "payload": {"id": "u-w", "cwd": "/r"}},
+                {"timestamp": "2026-05-11T14:32:11Z",
+                 "type": "event_msg",
+                 "payload": {"type": "task_complete"}},
+            ])
+            # Patch pane_signal_for_session to capture busy_wait_seconds
+            original = shadow_state.pane_signal_for_session
+            shadow_state.pane_signal_for_session = fake_pane_signal
+            try:
+                supervise_cycle.run_cycle(
+                    conn, task_name="t", now="2026-05-11T14:33:00Z",
+                )
+            finally:
+                shadow_state.pane_signal_for_session = original
+
+        self.assertEqual(captured["busy_wait_seconds"], shadow_state.DEFAULT_BUSY_WAIT_SECONDS)
+
+    def test_cycle_busy_wait_seconds_override(self):
+        """Test: busy_wait_seconds parameter overrides the default."""
+        from workerctl import supervise_cycle
+        from workerctl import shadow_state
+
+        captured = {}
+
+        def fake_pane_signal(conn, *, session_id, busy_wait_seconds=None, now=None):
+            if busy_wait_seconds is None:
+                busy_wait_seconds = shadow_state.DEFAULT_BUSY_WAIT_SECONDS
+            captured["busy_wait_seconds"] = busy_wait_seconds
+            return {
+                "captured": False,
+                "classifier": None,
+                "notable_pattern": None,
+                "status_age_seconds": None,
+                "reason": "test",
+                "degraded": False,
+            }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self._setup_bound_task(conn, tmpdir, [
+                {"type": "session_meta", "payload": {"id": "u-w", "cwd": "/r"}},
+                {"timestamp": "2026-05-11T14:32:11Z",
+                 "type": "event_msg",
+                 "payload": {"type": "task_complete"}},
+            ])
+            # Patch pane_signal_for_session to capture busy_wait_seconds
+            original = shadow_state.pane_signal_for_session
+            shadow_state.pane_signal_for_session = fake_pane_signal
+            try:
+                supervise_cycle.run_cycle(
+                    conn, task_name="t", busy_wait_seconds=37, now="2026-05-11T14:33:00Z",
+                )
+            finally:
+                shadow_state.pane_signal_for_session = original
+
+        self.assertEqual(captured["busy_wait_seconds"], 37)
+
 
 class ReadEventsStatsTests(unittest.TestCase):
     def test_read_events_with_stats_counts_malformed_lines(self):
@@ -6743,6 +6947,98 @@ class StartWorkerTests(unittest.TestCase):
                     worker_commands._discover_codex_session_in_tmux = orig_discover
             finally:
                 os.environ.pop("WORKERCTL_STATE_ROOT", None)
+
+
+class SessionsLegacyFilterTests(unittest.TestCase):
+    def open_db(self, tmpdir):
+        path = Path(tmpdir) / "workerctl.db"
+        conn = worker_db.connect(path)
+        worker_db.initialize_database(conn)
+        self.addCleanup(conn.close)
+        return conn
+
+    def _seed_real_and_legacy(self, conn):
+        worker_db.register_session(
+            conn, name="real", role="worker",
+            codex_session_path="/a", codex_session_id="u-r",
+            pid=12345, cwd="/r",
+        )
+        now = "2026-05-12T00:00:00Z"
+        conn.execute(
+            """
+            insert into sessions(id, name, role, identity_token, cwd,
+                                 registered_at, state, pid)
+            values ('legacy-s', 'legacy', 'worker', 'tok-legacy', '/r',
+                    ?, 'active', NULL)
+            """,
+            (now,),
+        )
+        conn.commit()
+
+    def test_list_sessions_excludes_legacy_pid_null_by_default(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self._seed_real_and_legacy(conn)
+            sessions = worker_db.list_sessions(conn)
+            names = {s["name"] for s in sessions}
+            self.assertIn("real", names)
+            self.assertNotIn("legacy", names)
+
+    def test_list_sessions_include_legacy_returns_both(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self._seed_real_and_legacy(conn)
+            sessions = worker_db.list_sessions(conn, include_legacy=True)
+            names = {s["name"] for s in sessions}
+            self.assertIn("real", names)
+            self.assertIn("legacy", names)
+
+    def test_list_sessions_role_filter_combined_with_legacy_filter(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self._seed_real_and_legacy(conn)
+            # Add a manager too.
+            worker_db.register_session(
+                conn, name="real-mgr", role="manager",
+                codex_session_path="/a", codex_session_id="u-m",
+                pid=23456, cwd="/r",
+            )
+            conn.commit()
+            workers = worker_db.list_sessions(conn, role="worker")
+            self.assertEqual({s["name"] for s in workers}, {"real"})
+
+    def test_cli_sessions_default_excludes_legacy(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_dir = Path(tmpdir) / "state"
+            state_dir.mkdir()
+            env = os.environ.copy()
+            env["WORKERCTL_STATE_ROOT"] = str(state_dir)
+            db_path = state_dir / "workerctl.db"
+            # Seed via direct DB.
+            conn = worker_db.connect(db_path)
+            worker_db.initialize_database(conn)
+            self._seed_real_and_legacy(conn)
+            conn.close()
+
+            proc = subprocess.run(
+                [sys.executable, "-m", "workerctl", "sessions"],
+                env=env, capture_output=True, text=True, cwd=str(ROOT),
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            rows = json.loads(proc.stdout)
+            names = {r["name"] for r in rows}
+            self.assertIn("real", names)
+            self.assertNotIn("legacy", names)
+
+            proc = subprocess.run(
+                [sys.executable, "-m", "workerctl", "sessions", "--include-legacy"],
+                env=env, capture_output=True, text=True, cwd=str(ROOT),
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            rows = json.loads(proc.stdout)
+            names = {r["name"] for r in rows}
+            self.assertIn("real", names)
+            self.assertIn("legacy", names)
 
 
 if __name__ == "__main__":

@@ -9,12 +9,17 @@ from workerctl import db as worker_db
 from workerctl import ingest as worker_ingest
 from workerctl import shadow_state as worker_shadow
 from workerctl.core import WorkerError, now_iso
+from workerctl.commands import _pid_is_alive
+
+
+DEFAULT_BUSY_WAIT_SECONDS = 90
 
 
 def run_cycle(
     conn: sqlite3.Connection,
     *,
     task_name: str,
+    busy_wait_seconds: int = DEFAULT_BUSY_WAIT_SECONDS,
     now: str | None = None,
 ) -> dict[str, Any]:
     """Perform one observation cycle for a session-bound task.
@@ -39,6 +44,8 @@ def run_cycle(
         must check `pane_signal["captured"]`; pane_signal is NEVER None.
       - `notable_pane_pattern` — top-level shortcut to
         `pane_signal["notable_pattern"]`, for cheap `json_extract` filtering.
+      - `worker_alive`, `manager_alive` — boolean pid probes for registered
+        sessions; always present (False for None/dead pids).
 
     Return-only (NOT persisted; computed at return time):
       - `cycle_id`, `cycle_started_at`, `cycle_completed_at`.
@@ -86,6 +93,7 @@ def run_cycle(
             pane_signal = worker_shadow.pane_signal_for_session(
                 conn,
                 session_id=binding["worker_session_id"],
+                busy_wait_seconds=busy_wait_seconds,
                 now=started_at,
             )
         except (sqlite3.Error, WorkerError) as exc:  # pragma: no cover — defensive belt-and-suspenders
@@ -141,6 +149,19 @@ def run_cycle(
         raise
 
     completed_at = now_iso()
+
+    # Probe worker and manager session pids for liveness.
+    worker_row = worker_db.session_by_id(conn, session_id=binding["worker_session_id"])
+    manager_row = worker_db.session_by_id(conn, session_id=binding["manager_session_id"])
+
+    def _alive(row) -> bool:
+        if row is None or row["pid"] is None:
+            return False
+        try:
+            return _pid_is_alive(int(row["pid"]))
+        except (TypeError, ValueError):
+            return False
+
     status_payload = {
         "kind": "session_cycle",
         "task": task_name,
@@ -153,6 +174,8 @@ def run_cycle(
         "staleness_seconds": staleness,
         "pane_signal": pane_signal,
         "notable_pane_pattern": notable_pane_pattern,
+        "worker_alive": _alive(worker_row),
+        "manager_alive": _alive(manager_row),
     }
     cursor = conn.execute(
         """
