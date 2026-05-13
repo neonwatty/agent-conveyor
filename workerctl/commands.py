@@ -40,6 +40,7 @@ from workerctl.state import (
     latest_status,
     load_json,
     read_events,
+    read_events_with_stats,
     require_worker,
     state_root,
     status_path,
@@ -308,8 +309,15 @@ def wait_for_status_update(
         if session_exists(name):
             try:
                 capture_output(name, 80)
-            except WorkerError:
-                pass
+            except WorkerError as exc:
+                append_event(
+                    name,
+                    "capture_failed",
+                    {
+                        "error": str(exc),
+                        "phase": "wait_for_status_update",
+                    },
+                )
         time.sleep(1)
 
     append_event(
@@ -603,12 +611,16 @@ def command_status(args: argparse.Namespace) -> int:
     running = session_exists(args.name)
     status = latest_status(args.name)
     capture_meta = load_json(capture_meta_path(args.name), {})
+    terminal_capture_error: str | None = None
     if running and args.refresh:
         try:
             capture_output(args.name, args.lines)
             capture_meta = load_json(capture_meta_path(args.name), {})
         except WorkerError as exc:
-            capture_meta = {"error": str(exc)}
+            terminal_capture_error = str(exc)
+            capture_meta = {"error": terminal_capture_error}
+    elif capture_meta.get("error"):
+        terminal_capture_error = capture_meta.get("error")
 
     state = status.get("state", "unknown")
     if state not in VALID_STATES:
@@ -628,6 +640,7 @@ def command_status(args: argparse.Namespace) -> int:
         "status_last_update": status.get("last_update"),
         "terminal_captured_at": capture_meta.get("captured_at"),
         "terminal_changed_at": capture_meta.get("changed_at"),
+        "terminal_capture_error": terminal_capture_error,
     }
     print(json.dumps(summary, indent=2, sort_keys=True))
     return 0
@@ -664,11 +677,17 @@ def idle_summary(
     status_is_stale = status_age is None or status_age >= status_stale_seconds
     terminal_is_stale = terminal_age is None or terminal_age >= terminal_stale_seconds
     terminal_output = ""
+    terminal_fresh = True
     if running:
         try:
             terminal_output = capture_tmux_target(tmux_target(name), lines)
-        except WorkerError:
+        except WorkerError as exc:
+            terminal_fresh = False
+            if capture_error is None:
+                capture_error = str(exc)
             terminal_output = transcript_path(name).read_text() if transcript_path(name).exists() else ""
+    if capture_error is not None:
+        terminal_fresh = False
     busy_wait = classify_busy_wait(terminal_output, status_age, busy_wait_seconds)
 
     if not running:
@@ -710,6 +729,7 @@ def idle_summary(
 
     return {
         "blocker": status.get("blocker"),
+        "capture_error": capture_error,
         "current_task": status.get("current_task"),
         "health": health,
         "name": name,
@@ -723,6 +743,7 @@ def idle_summary(
         "status_stale_seconds": status_stale_seconds,
         "terminal_age_seconds": terminal_age,
         "terminal_changed_at": capture_meta.get("changed_at"),
+        "terminal_fresh": terminal_fresh,
         "terminal_stale_seconds": terminal_stale_seconds,
         "busy_wait_pattern": busy_wait.get("pattern") if busy_wait else None,
         "busy_wait_seconds": busy_wait_seconds,
@@ -1545,7 +1566,12 @@ def command_mutation_audit(args: argparse.Namespace) -> int:
 
 def command_events(args: argparse.Namespace) -> int:
     require_worker(args.name)
-    events = read_events(args.name)
+    events, skipped = read_events_with_stats(args.name)
+    if skipped:
+        print(
+            f"workerctl: {skipped} malformed event line(s) skipped",
+            file=sys.stderr,
+        )
     if args.type:
         events = [event for event in events if event.get("type") == args.type]
     if args.limit:
@@ -1667,6 +1693,194 @@ def command_register_worker(args: argparse.Namespace) -> int:
 
 def command_register_manager(args: argparse.Namespace) -> int:
     result = _register_session_from_args(args, role="manager")
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0
+
+
+def _discover_codex_session_in_tmux(
+    tmux_session: str,
+    *,
+    timeout_seconds: int = 15,
+    poll_interval: float = 0.5,
+) -> dict:
+    """Poll until we find the native codex pid + open rollout in a tmux session's
+    process tree. Raises WorkerError on timeout.
+
+    The tmux pane runs the user's shell which forks the `codex` wrapper, which in
+    turn spawns the native binary that holds the rollout file open. We walk the
+    pane's process tree breadth-first and probe each pid via lsof, returning the
+    first one whose open files include a `rollout-*.jsonl` path.
+
+    Returns dict: {native_pid, codex_session_path, codex_session_id, cwd, originator, cli_version}.
+    """
+    import time
+
+    from workerctl import codex_session as cs
+    from workerctl import tmux as worker_tmux
+
+    deadline = time.monotonic() + timeout_seconds
+    last_error: str | None = None
+    while time.monotonic() < deadline:
+        try:
+            proc = worker_tmux.run(
+                ["tmux", "list-panes", "-t", tmux_session, "-F", "#{pane_pid}"],
+                check=False,
+            )
+            if proc.returncode != 0:
+                last_error = (
+                    f"tmux list-panes failed: {proc.stderr.strip() or proc.stdout.strip()}"
+                )
+                time.sleep(poll_interval)
+                continue
+            shell_pid_str = ""
+            for line in proc.stdout.splitlines():
+                stripped = line.strip()
+                if stripped:
+                    shell_pid_str = stripped
+                    break
+            if not shell_pid_str:
+                last_error = "tmux pane has no pid yet"
+                time.sleep(poll_interval)
+                continue
+            try:
+                shell_pid = int(shell_pid_str)
+            except ValueError:
+                last_error = f"tmux pane pid is not an integer: {shell_pid_str!r}"
+                time.sleep(poll_interval)
+                continue
+
+            # Walk pid children breadth-first looking for one that holds a rollout open.
+            queue: list[int] = [shell_pid]
+            visited: set[int] = set()
+            while queue:
+                pid = queue.pop(0)
+                if pid in visited:
+                    continue
+                visited.add(pid)
+                try:
+                    rollout_path = cs.find_rollout_path_for_pid(pid)
+                except cs.CodexSessionError:
+                    queue.extend(cs._ps_children_default(pid))
+                    continue
+                meta = cs.read_session_meta(rollout_path)
+                return {
+                    "native_pid": pid,
+                    "codex_session_path": str(rollout_path),
+                    "codex_session_id": meta["id"],
+                    "cwd": meta.get("cwd", ""),
+                    "originator": meta.get("originator", ""),
+                    "cli_version": meta.get("cli_version", ""),
+                }
+            last_error = "no codex rollout open in tmux pane process tree yet"
+        except Exception as exc:  # noqa: BLE001 - want to surface as polling error
+            last_error = str(exc)
+        time.sleep(poll_interval)
+
+    raise WorkerError(
+        f"codex did not write session_meta within {timeout_seconds}s "
+        f"in tmux session {tmux_session!r}: {last_error}"
+    )
+
+
+def command_start_worker(args: argparse.Namespace) -> int:
+    """Spawn codex in a fresh tmux session and register it as a worker in one call.
+
+    Equivalent to: `tmux new-session -d -s codex-<name>` running `codex <flags>`,
+    followed by `workerctl register-worker --pid <discovered>`. Polls for codex's
+    open rollout file to confirm the session is up before registering.
+
+    Refuses if either the tmux session `codex-<name>` already exists or the DB
+    already has a session named `<name>`.
+    """
+    import shlex
+
+    from workerctl import db as worker_db
+    from workerctl import tmux as worker_tmux
+
+    name = args.name
+    tmux_session_name = f"codex-{name}"
+    cwd = args.cwd
+    task = args.task
+
+    # Pre-flight: refuse if name is taken in DB.
+    conn = worker_db.connect()
+    worker_db.initialize_database(conn)
+    try:
+        existing = conn.execute(
+            "select id from sessions where name = ?", (name,)
+        ).fetchone()
+        if existing is not None:
+            raise WorkerError(
+                f"a session named {name!r} is already registered; "
+                f"choose a different name or `workerctl deregister {name}` first"
+            )
+    finally:
+        conn.close()
+
+    # Pre-flight: refuse if tmux session already exists.
+    if worker_tmux.session_exists(name):
+        raise WorkerError(
+            f"tmux session {tmux_session_name!r} already exists; "
+            f"choose a different name or `tmux kill-session -t {tmux_session_name}` first"
+        )
+
+    # Build the codex command. Task argument is appended as a literal prompt.
+    codex_args: list[str] = ["codex"]
+    if args.sandbox:
+        codex_args += ["--sandbox", args.sandbox]
+    if args.ask_for_approval:
+        codex_args += ["--ask-for-approval", args.ask_for_approval]
+    if task:
+        codex_args.append(task)
+    codex_cmd = " ".join(shlex.quote(a) for a in codex_args)
+
+    # Spawn tmux + codex.
+    worker_tmux.run([
+        "tmux", "new-session", "-d", "-s", tmux_session_name, "-c", cwd, codex_cmd,
+    ])
+
+    # Discover codex pid + rollout.
+    discovery = _discover_codex_session_in_tmux(
+        tmux_session_name, timeout_seconds=args.timeout_seconds,
+    )
+
+    # Register the session.
+    conn = worker_db.connect()
+    worker_db.initialize_database(conn)
+    try:
+        session_id = worker_db.register_session(
+            conn,
+            name=name,
+            role="worker",
+            codex_session_path=discovery["codex_session_path"],
+            codex_session_id=discovery["codex_session_id"],
+            pid=discovery["native_pid"],
+            cwd=cwd,
+            tmux_session=tmux_session_name,
+        )
+        worker_db.insert_event(
+            conn, "session_registered", actor="workerctl",
+            payload={
+                "name": name, "role": "worker", "session_id": session_id,
+                "pid": discovery["native_pid"],
+                "codex_session_id": discovery["codex_session_id"],
+                "via": "start-worker",
+            },
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    result = {
+        "session_id": session_id,
+        "name": name,
+        "role": "worker",
+        "pid": discovery["native_pid"],
+        "codex_session_id": discovery["codex_session_id"],
+        "codex_session_path": discovery["codex_session_path"],
+        "cwd": cwd,
+        "tmux_session": tmux_session_name,
+    }
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0
 
@@ -1828,10 +2042,11 @@ def command_session_nudge(args: argparse.Namespace) -> int:
             )
             conn.commit()
         except Exception as exc:
+            rollback_error = None
             try:
                 conn.rollback()
-            except Exception:
-                pass
+            except Exception as rollback_exc:
+                rollback_error = f"{type(rollback_exc).__name__}: {rollback_exc}"
             worker_db.insert_event(
                 conn, "session_nudged", actor="workerctl",
                 payload={
@@ -1841,6 +2056,7 @@ def command_session_nudge(args: argparse.Namespace) -> int:
                     "success": False,
                     "error": str(exc),
                     "error_type": type(exc).__name__,
+                    "rollback_error": rollback_error,
                 },
             )
             conn.commit()
@@ -1875,10 +2091,11 @@ def command_session_interrupt(args: argparse.Namespace) -> int:
             )
             conn.commit()
         except Exception as exc:
+            rollback_error = None
             try:
                 conn.rollback()
-            except Exception:
-                pass
+            except Exception as rollback_exc:
+                rollback_error = f"{type(rollback_exc).__name__}: {rollback_exc}"
             worker_db.insert_event(
                 conn, "session_interrupted", actor="workerctl",
                 payload={
@@ -1889,6 +2106,7 @@ def command_session_interrupt(args: argparse.Namespace) -> int:
                     "success": False,
                     "error": str(exc),
                     "error_type": type(exc).__name__,
+                    "rollback_error": rollback_error,
                 },
             )
             conn.commit()
@@ -1957,7 +2175,7 @@ def _pid_is_alive(pid: int) -> bool:
     return True
 
 
-def collect_reconcile_report(conn: "sqlite3.Connection") -> dict:
+def collect_reconcile_report(conn: "sqlite3.Connection", stale_cycles_seconds: float = 3600.0) -> dict:
     """Build a read-only reconciliation report.
 
     Returns a dict with keys:
@@ -1968,8 +2186,9 @@ def collect_reconcile_report(conn: "sqlite3.Connection") -> dict:
         - active or ending bindings whose worker_session_id or manager_session_id
         points at a session with `state='gone'`.
       - `stuck_tasks`: [{task_name, binding_id, last_cycle_at, age_seconds}, ...]
-        - active-bound tasks whose newest manager_cycles row is older than 1 hour.
-        Tasks with no cycles yet are skipped (they may be freshly bound).
+        - active-bound tasks whose newest manager_cycles row is older than
+        stale_cycles_seconds (default 3600). Tasks with no cycles yet are skipped
+        (they may be freshly bound).
     """
     from workerctl import db as worker_db
 
@@ -2040,7 +2259,7 @@ def collect_reconcile_report(conn: "sqlite3.Connection") -> dict:
             ts = ts[:-1] + "+00:00"
         last_dt = datetime.fromisoformat(ts).astimezone(timezone.utc)
         age = (now_dt - last_dt).total_seconds()
-        if age > 3600:
+        if age > stale_cycles_seconds:
             stuck_tasks.append({
                 "task_name": row["task_name"],
                 "binding_id": row["binding_id"],
@@ -2056,7 +2275,7 @@ def collect_reconcile_report(conn: "sqlite3.Connection") -> dict:
     }
 
 
-def apply_reconcile(conn: "sqlite3.Connection") -> dict:
+def apply_reconcile(conn: "sqlite3.Connection", stale_cycles_seconds: float = 3600.0) -> dict:
     """Apply the reconcile changes and return the report with an `applied` key.
 
     Mutations:
@@ -2071,7 +2290,7 @@ def apply_reconcile(conn: "sqlite3.Connection") -> dict:
     from workerctl import db as worker_db
     from workerctl.core import now_iso
 
-    report = collect_reconcile_report(conn)
+    report = collect_reconcile_report(conn, stale_cycles_seconds=stale_cycles_seconds)
     now = now_iso()
     applied = {"sessions_marked_gone": [], "bindings_marked_invalid": []}
 
@@ -2087,7 +2306,7 @@ def apply_reconcile(conn: "sqlite3.Connection") -> dict:
         )
 
     # Re-collect dangling after session updates so newly-dangling rows are included.
-    report_post = collect_reconcile_report(conn)
+    report_post = collect_reconcile_report(conn, stale_cycles_seconds=stale_cycles_seconds)
     for b in report_post["dangling_bindings"]:
         conn.execute(
             "update bindings set state='invalid', ended_at=? where id=?",
@@ -2124,9 +2343,9 @@ def command_reconcile(args: argparse.Namespace) -> int:
     worker_db.initialize_database(conn)
     try:
         if args.apply:
-            report = apply_reconcile(conn)
+            report = apply_reconcile(conn, stale_cycles_seconds=args.stale_cycles_seconds)
         else:
-            report = collect_reconcile_report(conn)
+            report = collect_reconcile_report(conn, stale_cycles_seconds=args.stale_cycles_seconds)
     finally:
         conn.close()
     print(json.dumps(report, indent=2, sort_keys=True, default=str))

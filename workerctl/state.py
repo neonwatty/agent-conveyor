@@ -73,18 +73,32 @@ def append_event(name: str, event_type: str, payload: dict[str, Any] | None = No
 
 
 def read_events(name: str) -> list[dict[str, Any]]:
+    events, _ = read_events_with_stats(name)
+    return events
+
+
+def read_events_with_stats(name: str) -> tuple[list[dict[str, Any]], int]:
+    """Read worker events for `name`, returning `(events, skipped_line_count)`.
+
+    Mirrors `read_events` but also reports how many malformed lines were silently
+    skipped — useful for operator visibility into corrupted/truncated event logs.
+    Blank lines do not count toward the skipped total; only lines that failed
+    JSON decoding do.
+    """
     path = events_path(name)
     if not path.exists():
-        return []
-    events = []
+        return [], 0
+    events: list[dict[str, Any]] = []
+    skipped = 0
     for line in path.read_text().splitlines():
         if not line.strip():
             continue
         try:
             events.append(json.loads(line))
         except json.JSONDecodeError:
+            skipped += 1
             continue
-    return events
+    return events, skipped
 
 
 def last_event_age_seconds(name: str, event_type: str) -> int | None:

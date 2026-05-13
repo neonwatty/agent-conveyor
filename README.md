@@ -78,19 +78,11 @@ database.
 
 ## Quickstart
 
-A full worked example: bring up a worker, register it, register a manager,
-create a task, bind, then run one observation cycle.
+The fastest way to start a worker and register it is a single command:
 
 ```bash
-# Start a Codex worker inside a fresh tmux session.
-tmux new-session -d -s codex-foo
-tmux send-keys -t codex-foo "codex" Enter
-# (Wait a moment for codex to come up.)
-WORKER_PID=$(pgrep -f "codex.*--sandbox" | head -1)
-
-# Register the worker. lsof auto-discovers the rollout JSONL from the pid.
-workerctl register-worker --name foo --pid $WORKER_PID \
-  --cwd "$PWD" --tmux-session codex-foo
+# One command: spawn codex in tmux, wait for it to come up, register as worker
+workerctl start-worker --name foo --cwd "$PWD" --task "Refactor auth"
 
 # Register a manager. Managers do not need to run inside tmux.
 MGR_PID=$$   # if your current shell is the manager; otherwise find its pid
@@ -113,6 +105,20 @@ workerctl deregister foo
 workerctl deregister foo-mgr
 ```
 
+For manual registration of a pre-existing Codex session:
+
+```bash
+# Start a Codex worker inside a fresh tmux session.
+tmux new-session -d -s codex-foo
+tmux send-keys -t codex-foo "codex" Enter
+# (Wait a moment for codex to come up.)
+WORKER_PID=$(pgrep -f "codex.*--sandbox" | head -1)
+
+# Register the worker. lsof auto-discovers the rollout JSONL from the pid.
+workerctl register-worker --name foo --pid $WORKER_PID \
+  --cwd "$PWD" --tmux-session codex-foo
+```
+
 If `lsof` discovery fails (e.g. the codex session was started ephemerally),
 pass the rollout path explicitly with `--codex-session
 ~/.codex/sessions/.../rollout-...-<uuid>.jsonl`.
@@ -130,6 +136,10 @@ tmux attach -t codex-live-test
 
 ### Sessions and binding
 
+- `start-worker --name N [--cwd D] [--task "..."] [--sandbox SANDBOX] [--ask-for-approval ASK_FOR_APPROVAL] [--timeout-seconds N]` —
+  Spawn Codex in a fresh tmux session and register it as a worker in one call.
+  The fastest way to start a supervised worker. Internally: `tmux new-session`
+  + `codex` + poll for rollout + `register-worker`.
 - `register-worker --name N [--pid P | --codex-session PATH] [--cwd D] [--tmux-session S]` —
   Register an already-running Codex session as a worker. Rollout JSONL is
   auto-discovered from the pid via `lsof` unless `--codex-session` is given.
@@ -189,8 +199,11 @@ tmux attach -t codex-live-test
 - `doctor` — Local dependency and tmux health check.
 - `doctor-self` — Verify the current Codex session can self-register.
 - `db-doctor` — SQLite schema health check.
-- `reconcile [--apply]` — Report (and optionally fix) dead-pid sessions,
-  dangling bindings, and stuck tasks. JSON output.
+- `reconcile [--apply] [--stale-cycles-seconds N]` — Report (and optionally
+  fix) dead-pid sessions, dangling bindings, and stuck tasks. Default
+  stale-cycle threshold is 3600 seconds (1h); override with
+  `--stale-cycles-seconds N` to catch tasks where the manager has been silent
+  for shorter intervals. JSON output.
 - `prune [--keep-latest N] [--dry-run]` — Drop old transcript content while
   preserving metadata.
 - `transcript-prune <task> [--keep-latest N]` — Same, scoped to a task.
@@ -291,6 +304,17 @@ dedicated-table commands (`cycle`, `ingest`) write to their own tables
 plain-text `workerctl audit <task>` lists `events` rows only; cycle
 observations show up via `workerctl replay <task>` and the `manager_cycles`
 table.
+
+## Phase 6 Polish
+
+Recent additions to streamline worker setup and observability:
+
+- `start-worker` convenience command for spawn-and-register in one call.
+- `reconcile --stale-cycles-seconds N` to customize the stale-cycle threshold.
+- Observability: `terminal_capture_error` / `terminal_fresh` fields in
+  status/idle JSON; `rollback_error` in nudge/interrupt audit payloads;
+  `skipped_lines` in `cycle` output's `ingest` field; stderr warnings on
+  malformed event lines and audit-insert failures.
 
 ## Schema
 

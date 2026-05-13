@@ -4192,6 +4192,49 @@ class IngestModuleTests(unittest.TestCase):
                 ingest.ingest_session(conn, session_name="w")
             self.assertIn("gone", str(ctx.exception))
 
+    def test_parse_jsonl_events_with_stats_counts_skipped_lines(self):
+        from workerctl import ingest
+
+        content = (
+            b'{"type":"event_msg","payload":{"type":"task_started"}}\n'
+            b'not-json-at-all\n'
+            b'{"type":"event_msg","payload":{"type":"agent_message"}}\n'
+            b'{"not_a_record": "missing type field"}\n'
+            b'42\n'  # non-dict top-level
+            b'{"type":"event_msg","payload":{"type":"task_complete"}}\n'
+        )
+        events, skipped = ingest.parse_jsonl_events_with_stats(
+            content, start_offset=0,
+        )
+        self.assertEqual(len(events), 3)
+        self.assertEqual(skipped, 3)
+
+    def test_ingest_session_reports_skipped_lines(self):
+        from workerctl import ingest
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            rollout = Path(tmpdir) / "rollout.jsonl"
+            conn = worker_db.connect(db_path)
+            self.addCleanup(conn.close)
+            worker_db.initialize_database(conn)
+
+            rollout.write_text(
+                json.dumps({"type": "event_msg", "payload": {"type": "task_started"}}) + "\n"
+                + "garbage-line-no-json\n"
+                + json.dumps({"type": "event_msg", "payload": {"type": "task_complete"}}) + "\n"
+            )
+            worker_db.register_session(
+                conn, name="w", role="worker",
+                codex_session_path=str(rollout),
+                codex_session_id="u", pid=1, cwd="/r",
+            )
+            conn.commit()
+
+            result = ingest.ingest_session(conn, session_name="w")
+            self.assertEqual(result["new_events"], 2)
+            self.assertEqual(result["skipped_lines"], 1)
+
 
 class IngestCliTests(unittest.TestCase):
     def run_cli(self, *args, env_extra=None):
@@ -4784,6 +4827,138 @@ class SessionActionCliTests(unittest.TestCase):
             self.assertEqual(payload["success"], False)
             self.assertIn("error", payload)
 
+    def test_session_nudge_attaches_rollback_error_when_rollback_fails(self):
+        """When the inner conn.rollback() also fails, the audit event must
+        record both the original tmux error AND the rollback error."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_dir = Path(tmpdir) / "state"
+            state_dir.mkdir()
+            os.environ["WORKERCTL_STATE_ROOT"] = str(state_dir)
+            try:
+                # Register a session via the CLI.
+                rollout = Path(tmpdir) / "rollout.jsonl"
+                rollout.write_text(json.dumps({
+                    "type": "session_meta",
+                    "payload": {"id": "u", "cwd": str(ROOT), "originator": "codex-tui"},
+                }) + "\n")
+                self.run_cli(
+                    "register-worker", "--name", "w",
+                    "--codex-session", str(rollout),
+                    "--pid", "1", "--cwd", str(ROOT),
+                    "--tmux-session", "codex-w",
+                )
+
+                # Monkey-patch: tmux raises, rollback raises.
+                orig_send = worker_tmux.send_text_to_session
+                orig_connect = worker_db.connect
+
+                def boom_send(*a, **kw):
+                    raise WorkerError("tmux exploded")
+
+                class WrappedConn:
+                    def __init__(self, conn):
+                        self._conn = conn
+                    def __getattr__(self, name):
+                        return getattr(self._conn, name)
+                    def rollback(self):
+                        raise RuntimeError("rollback exploded")
+
+                def wrapped_connect(*a, **kw):
+                    return WrappedConn(orig_connect(*a, **kw))
+
+                worker_tmux.send_text_to_session = boom_send
+                worker_db.connect = wrapped_connect
+                try:
+                    args = argparse.Namespace(name="w", text="hi", dry_run=False)
+                    with self.assertRaises(WorkerError):
+                        commands.command_session_nudge(args)
+                finally:
+                    worker_tmux.send_text_to_session = orig_send
+                    worker_db.connect = orig_connect
+
+                # Check the audit event has BOTH errors.
+                conn = worker_db.connect()
+                self.addCleanup(conn.close)
+                row = conn.execute(
+                    "select payload_json from events where type='session_nudged' "
+                    "order by id desc limit 1"
+                ).fetchone()
+                self.assertIsNotNone(row)
+                payload = json.loads(row["payload_json"])
+                self.assertEqual(payload["success"], False)
+                self.assertIn("tmux exploded", payload["error"])
+                self.assertIsNotNone(payload.get("rollback_error"))
+                self.assertIn("rollback exploded", payload["rollback_error"])
+            finally:
+                os.environ.pop("WORKERCTL_STATE_ROOT", None)
+
+    def test_session_interrupt_attaches_rollback_error_when_rollback_fails(self):
+        """When the inner conn.rollback() also fails, the audit event must
+        record both the original interrupt error AND the rollback error."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_dir = Path(tmpdir) / "state"
+            state_dir.mkdir()
+            os.environ["WORKERCTL_STATE_ROOT"] = str(state_dir)
+            try:
+                # Register a session via the CLI.
+                rollout = Path(tmpdir) / "rollout.jsonl"
+                rollout.write_text(json.dumps({
+                    "type": "session_meta",
+                    "payload": {"id": "u", "cwd": str(ROOT), "originator": "codex-tui"},
+                }) + "\n")
+                self.run_cli(
+                    "register-worker", "--name", "w",
+                    "--codex-session", str(rollout),
+                    "--pid", "1", "--cwd", str(ROOT),
+                    "--tmux-session", "codex-w",
+                )
+
+                # Monkey-patch: interrupt raises, rollback raises.
+                orig_interrupt = worker_tmux.interrupt_session
+                orig_connect = worker_db.connect
+
+                def boom_interrupt(*a, **kw):
+                    raise WorkerError("interrupt exploded")
+
+                class WrappedConn:
+                    def __init__(self, conn):
+                        self._conn = conn
+                    def __getattr__(self, name):
+                        return getattr(self._conn, name)
+                    def rollback(self):
+                        raise RuntimeError("rollback exploded")
+
+                def wrapped_connect(*a, **kw):
+                    return WrappedConn(orig_connect(*a, **kw))
+
+                worker_tmux.interrupt_session = boom_interrupt
+                worker_db.connect = wrapped_connect
+                try:
+                    args = argparse.Namespace(
+                        name="w", key="C-c", followup=None, dry_run=False
+                    )
+                    with self.assertRaises(WorkerError):
+                        commands.command_session_interrupt(args)
+                finally:
+                    worker_tmux.interrupt_session = orig_interrupt
+                    worker_db.connect = orig_connect
+
+                # Check the audit event has BOTH errors.
+                conn = worker_db.connect()
+                self.addCleanup(conn.close)
+                row = conn.execute(
+                    "select payload_json from events where type='session_interrupted' "
+                    "order by id desc limit 1"
+                ).fetchone()
+                self.assertIsNotNone(row)
+                payload = json.loads(row["payload_json"])
+                self.assertEqual(payload["success"], False)
+                self.assertIn("interrupt exploded", payload["error"])
+                self.assertIsNotNone(payload.get("rollback_error"))
+                self.assertIn("rollback exploded", payload["rollback_error"])
+            finally:
+                os.environ.pop("WORKERCTL_STATE_ROOT", None)
+
 
 class SuperviseCycleTests(unittest.TestCase):
     def open_db(self, tmpdir):
@@ -5273,6 +5448,129 @@ class SuperviseCycleTests(unittest.TestCase):
                 rows[0]["status"]["notable_pane_pattern"],
                 rows[0]["status"]["pane_signal"]["notable_pattern"],
             )
+
+    def test_run_cycle_propagates_skipped_lines_in_ingest_field(self):
+        from workerctl import supervise_cycle
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            # Build a rollout with one malformed line.
+            rollout = Path(tmpdir) / "rollout.jsonl"
+            rollout.write_text(
+                json.dumps({"type": "session_meta", "payload": {"id": "u-w", "cwd": "/r"}}) + "\n"
+                + "garbage\n"
+                + json.dumps({"timestamp": "2026-05-11T14:32:11Z",
+                              "type": "event_msg",
+                              "payload": {"type": "task_complete"}}) + "\n"
+            )
+            now = "2026-05-11T00:00:00Z"
+            conn.execute(
+                "insert into tasks(id, name, goal, state, created_at, updated_at) "
+                "values ('task-1', 't', 'g', 'candidate', ?, ?)",
+                (now, now),
+            )
+            worker_db.register_session(
+                conn, name="w", role="worker",
+                codex_session_path=str(rollout),
+                codex_session_id="u-w", pid=1, cwd="/r",
+            )
+            worker_db.register_session(
+                conn, name="m", role="manager",
+                codex_session_path=str(rollout),
+                codex_session_id="u-m", pid=2, cwd="/r",
+            )
+            worker_db.bind_sessions(
+                conn, task_name="t",
+                worker_session_name="w", manager_session_name="m",
+            )
+            conn.commit()
+            result = supervise_cycle.run_cycle(
+                conn, task_name="t", now="2026-05-11T14:33:00Z",
+            )
+            self.assertEqual(result["ingest"]["new_events"], 2)
+            self.assertEqual(result["ingest"]["skipped_lines"], 1)
+
+    def test_run_cycle_logs_audit_write_failure_to_stderr(self):
+        """When the failed-cycle audit insert ALSO fails, the secondary failure
+        must land on stderr rather than being silently swallowed."""
+        import io
+        import contextlib
+        from workerctl import supervise_cycle
+        from workerctl.ingest import IngestError
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            now = "2026-05-12T00:00:00Z"
+            conn.execute(
+                "insert into tasks(id, name, goal, state, created_at, updated_at) "
+                "values ('task-1', 't', 'g', 'managed', ?, ?)",
+                (now, now),
+            )
+            worker_db.register_session(
+                conn, name="w", role="worker",
+                # Bad rollout path → ingest_session raises IngestError.
+                codex_session_path=str(Path(tmpdir) / "does-not-exist.jsonl"),
+                codex_session_id="u-w", pid=1, cwd="/r",
+            )
+            worker_db.register_session(
+                conn, name="m", role="manager",
+                codex_session_path="/m",
+                codex_session_id="u-m", pid=2, cwd="/r",
+            )
+            worker_db.bind_sessions(
+                conn, task_name="t",
+                worker_session_name="w", manager_session_name="m",
+            )
+            conn.commit()
+
+            # Wrap conn so that execute() fails on the failure-row insert.
+            original_execute = conn.execute
+
+            class WrappedConn:
+                def __init__(self, conn):
+                    self._conn = conn
+                def __getattr__(self, name):
+                    return getattr(self._conn, name)
+                def execute(self, sql, params=()):
+                    # Only the failure-row insert mentions 'failed' as a constant in the SQL.
+                    if "'failed'" in sql or "failed" in str(params):
+                        raise sqlite3.OperationalError("disk full")
+                    return original_execute(sql, params)
+                def commit(self):
+                    return original_execute("commit")
+
+            wrapped_conn = WrappedConn(conn)
+            stderr_buf = io.StringIO()
+            try:
+                with self.assertRaises(IngestError):
+                    with contextlib.redirect_stderr(stderr_buf):
+                        supervise_cycle.run_cycle(wrapped_conn, task_name="t")
+            finally:
+                pass
+
+            stderr_text = stderr_buf.getvalue()
+            self.assertIn("disk full", stderr_text)
+            self.assertIn("audit", stderr_text.lower())
+
+
+class ReadEventsStatsTests(unittest.TestCase):
+    def test_read_events_with_stats_counts_malformed_lines(self):
+        from workerctl import state
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            os.environ["WORKERCTL_STATE_ROOT"] = tmpdir
+            self.addCleanup(os.environ.pop, "WORKERCTL_STATE_ROOT", None)
+            name = "w-stats"
+            state.worker_dir(name).mkdir(parents=True, exist_ok=True)
+            events_path = state.events_path(name)
+            events_path.write_text(
+                '{"type":"x","ts":"2026-05-12T00:00:00Z"}\n'
+                'not-json\n'
+                '{"type":"y","ts":"2026-05-12T00:00:01Z"}\n'
+            )
+            events, skipped = state.read_events_with_stats(name)
+            self.assertEqual(len(events), 2)
+            self.assertEqual(skipped, 1)
 
 
 class CycleCliTests(unittest.TestCase):
@@ -6028,6 +6326,423 @@ class ReconcileTests(unittest.TestCase):
             audit = worker_db.task_audit(conn, task="audit-task")
             types = [e["type"] for e in audit["events"]]
             self.assertIn("binding_marked_invalid_by_reconcile", types)
+
+    def test_reconcile_respects_stale_cycles_seconds_override(self):
+        """Threshold should be configurable: a 100-second-old cycle is NOT stuck
+        at the default (3600) but IS stuck at a 50-second threshold."""
+        from workerctl import commands as worker_commands
+        from datetime import datetime, timezone, timedelta
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            now_dt = datetime.now(timezone.utc)
+            old_ts = (now_dt - timedelta(seconds=100)).strftime("%Y-%m-%dT%H:%M:%SZ")
+            recent_ts = now_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+            # Set up a task with an active binding + manager_cycles row 100 seconds old.
+            conn.execute(
+                "insert into tasks(id, name, goal, state, created_at, updated_at) "
+                "values ('task-1', 'aging-task', 'g', 'managed', ?, ?)",
+                (recent_ts, recent_ts),
+            )
+            worker_db.register_session(
+                conn, name="w", role="worker",
+                codex_session_path="/a", codex_session_id="u-w", pid=1, cwd="/r",
+            )
+            worker_db.register_session(
+                conn, name="m", role="manager",
+                codex_session_path="/b", codex_session_id="u-m", pid=2, cwd="/r",
+            )
+            worker_db.bind_sessions(
+                conn, task_name="aging-task",
+                worker_session_name="w", manager_session_name="m",
+            )
+            conn.execute(
+                """
+                insert into manager_cycles(
+                  task_id, started_at, completed_at, state, status_json
+                )
+                values ('task-1', ?, ?, 'succeeded', ?)
+                """,
+                (old_ts, old_ts, json.dumps({"kind": "session_cycle", "task": "aging-task"})),
+            )
+            conn.commit()
+
+            # Default threshold (3600): NOT stuck.
+            report = worker_commands.collect_reconcile_report(conn)
+            stuck_names = [s["task_name"] for s in report["stuck_tasks"]]
+            self.assertNotIn("aging-task", stuck_names)
+
+            # 50s threshold: IS stuck.
+            report = worker_commands.collect_reconcile_report(
+                conn, stale_cycles_seconds=50,
+            )
+            stuck_names = [s["task_name"] for s in report["stuck_tasks"]]
+            self.assertIn("aging-task", stuck_names)
+
+    def test_cli_reconcile_threshold_flag(self):
+        """The --stale-cycles-seconds CLI flag should be plumbed through."""
+        env = os.environ.copy()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_dir = Path(tmpdir) / "state"
+            state_dir.mkdir()
+            env["WORKERCTL_STATE_ROOT"] = str(state_dir)
+
+            # Seed a task with old cycle (same setup as above, via direct DB).
+            db_path = state_dir / "workerctl.db"
+            conn = worker_db.connect(db_path)
+            worker_db.initialize_database(conn)
+            from datetime import datetime, timezone, timedelta
+            now_dt = datetime.now(timezone.utc)
+            old_ts = (now_dt - timedelta(seconds=100)).strftime("%Y-%m-%dT%H:%M:%SZ")
+            recent_ts = now_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+            conn.execute(
+                "insert into tasks(id, name, goal, state, created_at, updated_at) "
+                "values ('task-1', 'aging-task', 'g', 'managed', ?, ?)",
+                (recent_ts, recent_ts),
+            )
+            worker_db.register_session(
+                conn, name="w", role="worker",
+                codex_session_path="/a", codex_session_id="u-w", pid=1, cwd="/r",
+            )
+            worker_db.register_session(
+                conn, name="m", role="manager",
+                codex_session_path="/b", codex_session_id="u-m", pid=2, cwd="/r",
+            )
+            worker_db.bind_sessions(
+                conn, task_name="aging-task",
+                worker_session_name="w", manager_session_name="m",
+            )
+            conn.execute(
+                """
+                insert into manager_cycles(
+                  task_id, started_at, completed_at, state, status_json
+                )
+                values ('task-1', ?, ?, 'succeeded', ?)
+                """,
+                (old_ts, old_ts, json.dumps({"kind": "session_cycle", "task": "aging-task"})),
+            )
+            conn.commit()
+            conn.close()
+
+            # CLI with --stale-cycles-seconds 50 — should flag the 100s-old cycle.
+            proc = subprocess.run(
+                [sys.executable, "-m", "workerctl", "reconcile", "--stale-cycles-seconds", "50"],
+                env=env, capture_output=True, text=True, cwd=str(ROOT),
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            report = json.loads(proc.stdout)
+            stuck_names = [s["task_name"] for s in report["stuck_tasks"]]
+            self.assertIn("aging-task", stuck_names)
+
+
+class CaptureErrorVisibilityTests(unittest.TestCase):
+    def _setup_legacy_worker(self, name):
+        worker_path = worker_dir(name)
+        if worker_path.exists():
+            shutil.rmtree(worker_path)
+        worker_path.mkdir(parents=True)
+        config_path(name).write_text(
+            json.dumps(
+                {
+                    "cwd": str(ROOT),
+                    "name": name,
+                    "tmux_pane_id": "%1",
+                    "tmux_session": f"codex-{name}",
+                }
+            )
+            + "\n"
+        )
+        status_path(name).write_text(
+            json.dumps(
+                {
+                    "blocker": None,
+                    "current_task": "Investigating capture errors.",
+                    "last_update": "2026-05-11T10:00:00Z",
+                    "next_action": "Run tests.",
+                    "state": "waiting",
+                }
+            )
+            + "\n"
+        )
+        write_json(
+            capture_meta_path(name),
+            {
+                "captured_at": "2026-05-11T10:00:00Z",
+                "changed_at": "2026-05-11T10:00:00Z",
+                "history_lines": 80,
+            },
+        )
+        transcript_path(name).write_text("stale\ntranscript\n")
+        self.addCleanup(self._cleanup_worker, name)
+
+    def _cleanup_worker(self, name):
+        path = worker_dir(name)
+        if path.exists():
+            shutil.rmtree(path)
+
+    def test_command_status_includes_terminal_capture_error_when_capture_fails(self):
+        name = "capture-error-status"
+        self._setup_legacy_worker(name)
+
+        original_session_exists = commands.session_exists
+        original_capture_output = commands.capture_output
+        commands.session_exists = lambda worker_name: True
+        commands.capture_output = lambda worker_name, lines: (_ for _ in ()).throw(
+            WorkerError("tmux capture-pane failed: exit 1")
+        )
+        args = argparse.Namespace(name=name, refresh=True, lines=80)
+        try:
+            with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                result = commands.command_status(args)
+            self.assertEqual(result, 0)
+            payload = json.loads(stdout.getvalue())
+            self.assertIn("terminal_capture_error", payload)
+            self.assertIsNotNone(payload["terminal_capture_error"])
+            self.assertIn("tmux capture-pane failed", payload["terminal_capture_error"])
+        finally:
+            commands.session_exists = original_session_exists
+            commands.capture_output = original_capture_output
+
+    def test_idle_summary_marks_terminal_freshness_when_capture_fails(self):
+        name = "capture-error-idle"
+        self._setup_legacy_worker(name)
+
+        original_session_exists = commands.session_exists
+        original_capture_output = commands.capture_output
+        original_capture_tmux_target = commands.capture_tmux_target
+        commands.session_exists = lambda worker_name: True
+        commands.capture_output = lambda worker_name, lines: (_ for _ in ()).throw(
+            WorkerError("tmux refresh failed: exit 2")
+        )
+        commands.capture_tmux_target = lambda target, lines: (_ for _ in ()).throw(
+            WorkerError("tmux live capture failed: exit 2")
+        )
+        try:
+            summary = commands.idle_summary(
+                name,
+                status_stale_seconds=120,
+                terminal_stale_seconds=120,
+                busy_wait_seconds=120,
+                refresh=True,
+                lines=80,
+            )
+            self.assertIn("capture_error", summary)
+            self.assertIsNotNone(summary["capture_error"])
+            self.assertIn("tmux", summary["capture_error"])
+            self.assertIn("terminal_fresh", summary)
+            self.assertFalse(summary["terminal_fresh"])
+        finally:
+            commands.session_exists = original_session_exists
+            commands.capture_output = original_capture_output
+            commands.capture_tmux_target = original_capture_tmux_target
+
+    def test_wait_for_status_update_writes_capture_failed_event_on_capture_error(self):
+        name = "capture-error-wait"
+        self._setup_legacy_worker(name)
+
+        original_session_exists = commands.session_exists
+        original_capture_output = commands.capture_output
+        original_sleep = commands.time.sleep
+        commands.session_exists = lambda worker_name: True
+        commands.capture_output = lambda worker_name, lines: (_ for _ in ()).throw(
+            WorkerError("tmux capture-pane failed during verify")
+        )
+        commands.time.sleep = lambda seconds: None
+        try:
+            result = commands.wait_for_status_update(
+                name,
+                initial_last_update="2026-05-11T10:00:00Z",
+                initial_current_task="Investigating capture errors.",
+                timeout_seconds=1,
+            )
+            self.assertFalse(result["ok"])
+            events = [
+                json.loads(line)
+                for line in (worker_dir(name) / "events.jsonl").read_text().splitlines()
+                if line.strip()
+            ]
+            capture_failed_events = [e for e in events if e.get("type") == "capture_failed"]
+            self.assertTrue(
+                capture_failed_events,
+                f"expected at least one capture_failed event; got {[e.get('type') for e in events]}",
+            )
+            self.assertIn("error", capture_failed_events[0])
+            self.assertIn("tmux capture-pane failed", capture_failed_events[0]["error"])
+        finally:
+            commands.session_exists = original_session_exists
+            commands.capture_output = original_capture_output
+            commands.time.sleep = original_sleep
+
+
+class StartWorkerTests(unittest.TestCase):
+    """Tests for `workerctl start-worker` — the spawn-and-register convenience."""
+
+    def _build_fake_rollout(self, tmpdir, name="rollout"):
+        rollout = Path(tmpdir) / f"{name}.jsonl"
+        rollout.write_text(
+            json.dumps({
+                "type": "session_meta",
+                "payload": {
+                    "id": f"cuid-{name}",
+                    "cwd": "/repo",
+                    "originator": "codex-tui",
+                },
+            }) + "\n"
+        )
+        return rollout
+
+    def test_start_worker_spawns_tmux_and_registers(self):
+        """Happy path: tmux spawn succeeds, pid + rollout are discovered,
+        a session row is created."""
+        from workerctl import commands as worker_commands
+        from workerctl import tmux as worker_tmux
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_dir = Path(tmpdir) / "state"
+            state_dir.mkdir()
+            os.environ["WORKERCTL_STATE_ROOT"] = str(state_dir)
+            try:
+                rollout = self._build_fake_rollout(tmpdir, "fake")
+
+                spawned: list[list[str]] = []
+
+                def fake_run(cmd, check=True, input_text=None):
+                    spawned.append(list(cmd))
+                    class R:
+                        returncode = 0
+                        stdout = ""
+                        stderr = ""
+                    return R()
+
+                def fake_session_exists(name):
+                    return False
+
+                def fake_discover(tmux_session, *, timeout_seconds=15, poll_interval=0.5):
+                    return {
+                        "native_pid": 99999,
+                        "codex_session_path": str(rollout),
+                        "codex_session_id": "cuid-fake",
+                        "cwd": "/repo",
+                        "originator": "codex-tui",
+                        "cli_version": "",
+                    }
+
+                orig_run = worker_tmux.run
+                orig_session_exists = worker_tmux.session_exists
+                orig_discover = worker_commands._discover_codex_session_in_tmux
+                worker_tmux.run = fake_run
+                worker_tmux.session_exists = fake_session_exists
+                worker_commands._discover_codex_session_in_tmux = fake_discover
+                try:
+                    args = argparse.Namespace(
+                        name="auto-foo", cwd="/repo", task=None,
+                        sandbox="danger-full-access", ask_for_approval="never",
+                        timeout_seconds=15,
+                    )
+                    captured_stdout = io.StringIO()
+                    with contextlib.redirect_stdout(captured_stdout):
+                        exit_code = worker_commands.command_start_worker(args)
+                    self.assertEqual(exit_code, 0)
+
+                    # Confirm tmux was spawned.
+                    tmux_cmds = [c for c in spawned if len(c) > 1 and c[1] == "new-session"]
+                    self.assertEqual(len(tmux_cmds), 1)
+                    self.assertIn("codex-auto-foo", tmux_cmds[0])
+
+                    # Confirm a session was registered.
+                    conn = worker_db.connect(state_dir / "workerctl.db")
+                    self.addCleanup(conn.close)
+                    row = conn.execute(
+                        "select * from sessions where name='auto-foo'"
+                    ).fetchone()
+                    self.assertIsNotNone(row)
+                    self.assertEqual(row["role"], "worker")
+                    self.assertEqual(row["pid"], 99999)
+                    self.assertEqual(row["codex_session_id"], "cuid-fake")
+                    self.assertEqual(row["tmux_session"], "codex-auto-foo")
+                finally:
+                    worker_tmux.run = orig_run
+                    worker_tmux.session_exists = orig_session_exists
+                    worker_commands._discover_codex_session_in_tmux = orig_discover
+            finally:
+                os.environ.pop("WORKERCTL_STATE_ROOT", None)
+
+    def test_start_worker_refuses_if_session_name_already_registered(self):
+        """If a session with the given name already exists in the DB, refuse cleanly."""
+        from workerctl import commands as worker_commands
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_dir = Path(tmpdir) / "state"
+            state_dir.mkdir()
+            os.environ["WORKERCTL_STATE_ROOT"] = str(state_dir)
+            try:
+                conn = worker_db.connect()
+                worker_db.initialize_database(conn)
+                worker_db.register_session(
+                    conn, name="taken", role="worker",
+                    codex_session_path="/a", codex_session_id="u",
+                    pid=1, cwd="/repo",
+                )
+                conn.commit()
+                conn.close()
+
+                args = argparse.Namespace(
+                    name="taken", cwd="/repo", task=None,
+                    sandbox="danger-full-access", ask_for_approval="never",
+                    timeout_seconds=15,
+                )
+                with self.assertRaises(WorkerError):
+                    worker_commands.command_start_worker(args)
+            finally:
+                os.environ.pop("WORKERCTL_STATE_ROOT", None)
+
+    def test_start_worker_timeout_when_codex_doesnt_write_session_meta(self):
+        """If the codex never writes a rollout (e.g. spawn failed), the discovery
+        loop raises a WorkerError."""
+        from workerctl import commands as worker_commands
+        from workerctl import tmux as worker_tmux
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_dir = Path(tmpdir) / "state"
+            state_dir.mkdir()
+            os.environ["WORKERCTL_STATE_ROOT"] = str(state_dir)
+            try:
+                def fake_run(cmd, check=True, input_text=None):
+                    class R:
+                        returncode = 0
+                        stdout = ""
+                        stderr = ""
+                    return R()
+
+                def fake_session_exists(name):
+                    return False
+
+                def timeout_discover(tmux_session, *, timeout_seconds=15, poll_interval=0.5):
+                    raise WorkerError(
+                        f"codex did not write session_meta within {timeout_seconds}s"
+                    )
+
+                orig_run = worker_tmux.run
+                orig_session_exists = worker_tmux.session_exists
+                orig_discover = worker_commands._discover_codex_session_in_tmux
+                worker_tmux.run = fake_run
+                worker_tmux.session_exists = fake_session_exists
+                worker_commands._discover_codex_session_in_tmux = timeout_discover
+                try:
+                    args = argparse.Namespace(
+                        name="timeout-test", cwd="/repo", task=None,
+                        sandbox="danger-full-access", ask_for_approval="never",
+                        timeout_seconds=1,
+                    )
+                    with self.assertRaises(WorkerError):
+                        worker_commands.command_start_worker(args)
+                finally:
+                    worker_tmux.run = orig_run
+                    worker_tmux.session_exists = orig_session_exists
+                    worker_commands._discover_codex_session_in_tmux = orig_discover
+            finally:
+                os.environ.pop("WORKERCTL_STATE_ROOT", None)
 
 
 if __name__ == "__main__":

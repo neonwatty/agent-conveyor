@@ -42,6 +42,7 @@ from workerctl.commands import (
     command_reconcile,
     command_register_worker,
     command_register_manager,
+    command_start_worker,
     command_deregister,
     command_sessions,
     command_bind,
@@ -249,6 +250,39 @@ def build_parser() -> argparse.ArgumentParser:
     register_worker.add_argument("--tmux-session", help="Optional tmux session name if the worker is in tmux.")
     register_worker.set_defaults(func=command_register_worker)
 
+    start_worker = subparsers.add_parser(
+        "start-worker",
+        help="Spawn codex in a new tmux session and register it as a worker in one call.",
+    )
+    start_worker.add_argument("--name", required=True)
+    start_worker.add_argument(
+        "--cwd",
+        default=str(INVOCATION_CWD),
+        help="Working directory for codex (default: cwd).",
+    )
+    start_worker.add_argument(
+        "--task",
+        default=None,
+        help="Initial task prompt to pass to codex.",
+    )
+    start_worker.add_argument(
+        "--sandbox",
+        default="danger-full-access",
+        help="Codex --sandbox mode.",
+    )
+    start_worker.add_argument(
+        "--ask-for-approval",
+        default="never",
+        help="Codex --ask-for-approval mode.",
+    )
+    start_worker.add_argument(
+        "--timeout-seconds",
+        type=int,
+        default=15,
+        help="Max seconds to wait for codex to write session_meta.",
+    )
+    start_worker.set_defaults(func=command_start_worker)
+
     register_manager = subparsers.add_parser(
         "register-manager",
         help="Register an existing Codex session as a manager (tmux not required).",
@@ -391,6 +425,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     reconcile.add_argument("--apply", action="store_true",
                           help="Mark dead-pid sessions gone and dangling bindings invalid.")
+    reconcile.add_argument(
+        "--stale-cycles-seconds", type=float, default=3600.0,
+        help="Seconds without a new manager_cycles row before a task is reported stuck (default 3600).",
+    )
     reconcile.set_defaults(func=command_reconcile)
 
     transcript_capture = subparsers.add_parser("transcript-capture", help="Capture deduplicated full transcript segments for a task.")
