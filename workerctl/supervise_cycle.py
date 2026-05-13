@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import sys
 from typing import Any
 
 from workerctl import db as worker_db
@@ -131,10 +132,12 @@ def run_cycle(
                 ),
             )
             conn.commit()
-        except sqlite3.Error:
-            # If even the audit-row write fails, swallow the secondary error so
-            # the caller sees the original exception, not a misleading DB error.
-            pass
+        except sqlite3.Error as audit_exc:
+            print(
+                f"workerctl: failed to record cycle audit row for task "
+                f"{task_name!r}: {type(audit_exc).__name__}: {audit_exc}",
+                file=sys.stderr,
+            )
         raise
 
     completed_at = now_iso()

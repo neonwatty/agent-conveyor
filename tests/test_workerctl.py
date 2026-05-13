@@ -5490,6 +5490,68 @@ class SuperviseCycleTests(unittest.TestCase):
             self.assertEqual(result["ingest"]["new_events"], 2)
             self.assertEqual(result["ingest"]["skipped_lines"], 1)
 
+    def test_run_cycle_logs_audit_write_failure_to_stderr(self):
+        """When the failed-cycle audit insert ALSO fails, the secondary failure
+        must land on stderr rather than being silently swallowed."""
+        import io
+        import contextlib
+        from workerctl import supervise_cycle
+        from workerctl.ingest import IngestError
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            now = "2026-05-12T00:00:00Z"
+            conn.execute(
+                "insert into tasks(id, name, goal, state, created_at, updated_at) "
+                "values ('task-1', 't', 'g', 'managed', ?, ?)",
+                (now, now),
+            )
+            worker_db.register_session(
+                conn, name="w", role="worker",
+                # Bad rollout path → ingest_session raises IngestError.
+                codex_session_path=str(Path(tmpdir) / "does-not-exist.jsonl"),
+                codex_session_id="u-w", pid=1, cwd="/r",
+            )
+            worker_db.register_session(
+                conn, name="m", role="manager",
+                codex_session_path="/m",
+                codex_session_id="u-m", pid=2, cwd="/r",
+            )
+            worker_db.bind_sessions(
+                conn, task_name="t",
+                worker_session_name="w", manager_session_name="m",
+            )
+            conn.commit()
+
+            # Wrap conn so that execute() fails on the failure-row insert.
+            original_execute = conn.execute
+
+            class WrappedConn:
+                def __init__(self, conn):
+                    self._conn = conn
+                def __getattr__(self, name):
+                    return getattr(self._conn, name)
+                def execute(self, sql, params=()):
+                    # Only the failure-row insert mentions 'failed' as a constant in the SQL.
+                    if "'failed'" in sql or "failed" in str(params):
+                        raise sqlite3.OperationalError("disk full")
+                    return original_execute(sql, params)
+                def commit(self):
+                    return original_execute("commit")
+
+            wrapped_conn = WrappedConn(conn)
+            stderr_buf = io.StringIO()
+            try:
+                with self.assertRaises(IngestError):
+                    with contextlib.redirect_stderr(stderr_buf):
+                        supervise_cycle.run_cycle(wrapped_conn, task_name="t")
+            finally:
+                pass
+
+            stderr_text = stderr_buf.getvalue()
+            self.assertIn("disk full", stderr_text)
+            self.assertIn("audit", stderr_text.lower())
+
 
 class ReadEventsStatsTests(unittest.TestCase):
     def test_read_events_with_stats_counts_malformed_lines(self):
