@@ -140,6 +140,9 @@ tmux attach -t codex-live-test
   Spawn Codex in a fresh tmux session and register it as a worker in one call.
   The fastest way to start a supervised worker. Internally: `tmux new-session`
   + `codex` + poll for rollout + `register-worker`.
+- `start-manager --name N [--cwd D] [--sandbox SANDBOX] [--ask-for-approval ASK_FOR_APPROVAL] [--timeout-seconds N]` —
+  Spawn Codex in a fresh tmux session and register it as a manager in one call.
+  Mirrors `start-worker` (omits `--task` since managers supervise rather than execute).
 - `register-worker --name N [--pid P | --codex-session PATH] [--cwd D] [--tmux-session S]` —
   Register an already-running Codex session as a worker. Rollout JSONL is
   auto-discovered from the pid via `lsof` unless `--codex-session` is given.

@@ -1880,25 +1880,32 @@ def _discover_codex_session_in_tmux(
     )
 
 
-def command_start_worker(args: argparse.Namespace) -> int:
-    """Spawn codex in a fresh tmux session and register it as a worker in one call.
+def _spawn_codex_and_register(
+    *,
+    name: str,
+    role: str,
+    cwd: str | None = None,
+    task: str | None = None,
+    sandbox: str | None = None,
+    ask_for_approval: str | None = None,
+    timeout_seconds: int = 30,
+) -> dict:
+    """Spawn codex in a fresh tmux session and register it in one call.
 
-    Equivalent to: `tmux new-session -d -s codex-<name>` running `codex <flags>`,
-    followed by `workerctl register-worker --pid <discovered>`. Polls for codex's
-    open rollout file to confirm the session is up before registering.
+    Common logic for start-worker and start-manager. Spawns tmux + codex,
+    discovers the pid + rollout, and registers the session in the DB.
 
     Refuses if either the tmux session `codex-<name>` already exists or the DB
     already has a session named `<name>`.
+
+    Returns dict: {session_id, name, role, pid, codex_session_id, codex_session_path, cwd, tmux_session}.
     """
     import shlex
 
     from workerctl import db as worker_db
     from workerctl import tmux as worker_tmux
 
-    name = args.name
     tmux_session_name = f"codex-{name}"
-    cwd = args.cwd
-    task = args.task
 
     # Pre-flight: refuse if name is taken in DB.
     conn = worker_db.connect()
@@ -1924,10 +1931,10 @@ def command_start_worker(args: argparse.Namespace) -> int:
 
     # Build the codex command. Task argument is appended as a literal prompt.
     codex_args: list[str] = ["codex"]
-    if args.sandbox:
-        codex_args += ["--sandbox", args.sandbox]
-    if args.ask_for_approval:
-        codex_args += ["--ask-for-approval", args.ask_for_approval]
+    if sandbox:
+        codex_args += ["--sandbox", sandbox]
+    if ask_for_approval:
+        codex_args += ["--ask-for-approval", ask_for_approval]
     if task:
         codex_args.append(task)
     codex_cmd = " ".join(shlex.quote(a) for a in codex_args)
@@ -1939,7 +1946,7 @@ def command_start_worker(args: argparse.Namespace) -> int:
 
     # Discover codex pid + rollout.
     discovery = _discover_codex_session_in_tmux(
-        tmux_session_name, timeout_seconds=args.timeout_seconds,
+        tmux_session_name, timeout_seconds=timeout_seconds,
     )
 
     # Register the session.
@@ -1949,7 +1956,7 @@ def command_start_worker(args: argparse.Namespace) -> int:
         session_id = worker_db.register_session(
             conn,
             name=name,
-            role="worker",
+            role=role,
             codex_session_path=discovery["codex_session_path"],
             codex_session_id=discovery["codex_session_id"],
             pid=discovery["native_pid"],
@@ -1959,26 +1966,69 @@ def command_start_worker(args: argparse.Namespace) -> int:
         worker_db.insert_event(
             conn, "session_registered", actor="workerctl",
             payload={
-                "name": name, "role": "worker", "session_id": session_id,
+                "name": name, "role": role, "session_id": session_id,
                 "pid": discovery["native_pid"],
                 "codex_session_id": discovery["codex_session_id"],
-                "via": "start-worker",
+                "via": f"start-{role}",
             },
         )
         conn.commit()
     finally:
         conn.close()
 
-    result = {
+    return {
         "session_id": session_id,
         "name": name,
-        "role": "worker",
+        "role": role,
         "pid": discovery["native_pid"],
         "codex_session_id": discovery["codex_session_id"],
         "codex_session_path": discovery["codex_session_path"],
         "cwd": cwd,
         "tmux_session": tmux_session_name,
     }
+
+
+def command_start_worker(args: argparse.Namespace) -> int:
+    """Spawn codex in a fresh tmux session and register it as a worker in one call.
+
+    Equivalent to: `tmux new-session -d -s codex-<name>` running `codex <flags>`,
+    followed by `workerctl register-worker --pid <discovered>`. Polls for codex's
+    open rollout file to confirm the session is up before registering.
+
+    Refuses if either the tmux session `codex-<name>` already exists or the DB
+    already has a session named `<name>`.
+    """
+    result = _spawn_codex_and_register(
+        name=args.name,
+        role="worker",
+        cwd=args.cwd,
+        task=args.task,
+        sandbox=args.sandbox,
+        ask_for_approval=args.ask_for_approval,
+        timeout_seconds=args.timeout_seconds,
+    )
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0
+
+
+def command_start_manager(args: argparse.Namespace) -> int:
+    """Spawn codex in a fresh tmux session and register it as a manager in one call.
+
+    Mirrors command_start_worker but with role="manager" and no task prompt.
+    Managers supervise rather than execute, so they don't take an initial prompt.
+
+    Refuses if either the tmux session `codex-<name>` already exists or the DB
+    already has a session named `<name>`.
+    """
+    result = _spawn_codex_and_register(
+        name=args.name,
+        role="manager",
+        cwd=args.cwd,
+        task=None,
+        sandbox=args.sandbox,
+        ask_for_approval=args.ask_for_approval,
+        timeout_seconds=args.timeout_seconds,
+    )
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0
 

@@ -7009,6 +7009,140 @@ class StartWorkerTests(unittest.TestCase):
                 os.environ.pop("WORKERCTL_STATE_ROOT", None)
 
 
+class StartManagerTests(unittest.TestCase):
+    """Tests for `workerctl start-manager` — the spawn-and-register convenience for managers."""
+
+    def _build_fake_rollout(self, tmpdir, name="rollout"):
+        rollout = Path(tmpdir) / f"{name}.jsonl"
+        rollout.write_text(
+            json.dumps({
+                "type": "session_meta",
+                "payload": {
+                    "id": f"cuid-{name}",
+                    "cwd": "/repo",
+                    "originator": "codex-tui",
+                },
+            }) + "\n"
+        )
+        return rollout
+
+    def test_start_manager_spawns_tmux_and_registers(self):
+        """Happy path: tmux spawn succeeds, pid + rollout are discovered,
+        a session row is created with role="manager"."""
+        from workerctl import commands as worker_commands
+        from workerctl import tmux as worker_tmux
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_dir = Path(tmpdir) / "state"
+            state_dir.mkdir()
+            os.environ["WORKERCTL_STATE_ROOT"] = str(state_dir)
+            try:
+                rollout = self._build_fake_rollout(tmpdir, "fake")
+
+                spawned: list[list[str]] = []
+
+                def fake_run(cmd, check=True, input_text=None):
+                    spawned.append(list(cmd))
+                    class R:
+                        returncode = 0
+                        stdout = ""
+                        stderr = ""
+                    return R()
+
+                def fake_session_exists(name):
+                    return False
+
+                def fake_discover(tmux_session, *, timeout_seconds=15, poll_interval=0.5):
+                    return {
+                        "native_pid": 88888,
+                        "codex_session_path": str(rollout),
+                        "codex_session_id": "cuid-fake",
+                        "cwd": "/repo",
+                        "originator": "codex-tui",
+                        "cli_version": "",
+                    }
+
+                orig_run = worker_tmux.run
+                orig_session_exists = worker_tmux.session_exists
+                orig_discover = worker_commands._discover_codex_session_in_tmux
+                worker_tmux.run = fake_run
+                worker_tmux.session_exists = fake_session_exists
+                worker_commands._discover_codex_session_in_tmux = fake_discover
+                try:
+                    args = argparse.Namespace(
+                        name="auto-mgr", cwd="/repo",
+                        sandbox="danger-full-access", ask_for_approval="never",
+                        timeout_seconds=15,
+                    )
+                    captured_stdout = io.StringIO()
+                    with contextlib.redirect_stdout(captured_stdout):
+                        exit_code = worker_commands.command_start_manager(args)
+                    self.assertEqual(exit_code, 0)
+
+                    # Confirm tmux was spawned.
+                    tmux_cmds = [c for c in spawned if len(c) > 1 and c[1] == "new-session"]
+                    self.assertEqual(len(tmux_cmds), 1)
+                    self.assertIn("codex-auto-mgr", tmux_cmds[0])
+
+                    # Confirm a session was registered with role="manager".
+                    conn = worker_db.connect(state_dir / "workerctl.db")
+                    self.addCleanup(conn.close)
+                    row = conn.execute(
+                        "select * from sessions where name='auto-mgr'"
+                    ).fetchone()
+                    self.assertIsNotNone(row)
+                    self.assertEqual(row["role"], "manager")
+                    self.assertEqual(row["pid"], 88888)
+                    self.assertEqual(row["codex_session_id"], "cuid-fake")
+                    self.assertEqual(row["tmux_session"], "codex-auto-mgr")
+                finally:
+                    worker_tmux.run = orig_run
+                    worker_tmux.session_exists = orig_session_exists
+                    worker_commands._discover_codex_session_in_tmux = orig_discover
+            finally:
+                os.environ.pop("WORKERCTL_STATE_ROOT", None)
+
+    def test_start_manager_refuses_if_session_name_already_registered(self):
+        """If a session with the given name already exists in the DB, refuse cleanly."""
+        from workerctl import commands as worker_commands
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_dir = Path(tmpdir) / "state"
+            state_dir.mkdir()
+            os.environ["WORKERCTL_STATE_ROOT"] = str(state_dir)
+            try:
+                conn = worker_db.connect()
+                worker_db.initialize_database(conn)
+                worker_db.register_session(
+                    conn, name="taken", role="manager",
+                    codex_session_path="/a", codex_session_id="u",
+                    pid=1, cwd="/repo",
+                )
+                conn.commit()
+                conn.close()
+
+                args = argparse.Namespace(
+                    name="taken", cwd="/repo",
+                    sandbox="danger-full-access", ask_for_approval="never",
+                    timeout_seconds=15,
+                )
+                with self.assertRaises(WorkerError):
+                    worker_commands.command_start_manager(args)
+            finally:
+                os.environ.pop("WORKERCTL_STATE_ROOT", None)
+
+    def test_start_manager_subparser_exists(self):
+        """Verify the start-manager subparser exists and has the right flags."""
+        import subprocess
+        proc = subprocess.run(
+            [sys.executable, "-m", "workerctl", "start-manager", "--help"],
+            capture_output=True, text=True, cwd=str(ROOT),
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("--name", proc.stdout)
+        self.assertNotIn("--task", proc.stdout)  # managers don't take a task prompt
+
+
 class SessionLookupFallbackTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
