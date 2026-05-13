@@ -1910,7 +1910,10 @@ def command_sessions(args: argparse.Namespace) -> int:
     worker_db.initialize_database(conn)
     try:
         rows = worker_db.list_sessions(
-            conn, role=args.role, include_legacy=args.include_legacy,
+            conn,
+            role=args.role,
+            include_legacy=args.include_legacy,
+            state=args.state,
         )
     finally:
         conn.close()

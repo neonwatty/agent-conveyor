@@ -6973,9 +6973,18 @@ class SessionsLegacyFilterTests(unittest.TestCase):
             """,
             (now,),
         )
+        conn.execute(
+            """
+            insert into sessions(id, name, role, identity_token, cwd,
+                                 registered_at, state, pid)
+            values ('gone-s', 'gone', 'worker', 'tok-gone', '/r',
+                    ?, 'gone', 34567)
+            """,
+            (now,),
+        )
         conn.commit()
 
-    def test_list_sessions_excludes_legacy_pid_null_by_default(self):
+    def test_list_sessions_excludes_legacy_and_gone_by_default(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             conn = self.open_db(tmpdir)
             self._seed_real_and_legacy(conn)
@@ -6983,8 +6992,9 @@ class SessionsLegacyFilterTests(unittest.TestCase):
             names = {s["name"] for s in sessions}
             self.assertIn("real", names)
             self.assertNotIn("legacy", names)
+            self.assertNotIn("gone", names)
 
-    def test_list_sessions_include_legacy_returns_both(self):
+    def test_list_sessions_include_legacy_still_excludes_gone(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             conn = self.open_db(tmpdir)
             self._seed_real_and_legacy(conn)
@@ -6992,6 +7002,32 @@ class SessionsLegacyFilterTests(unittest.TestCase):
             names = {s["name"] for s in sessions}
             self.assertIn("real", names)
             self.assertIn("legacy", names)
+            self.assertNotIn("gone", names)
+
+    def test_list_sessions_state_active_matches_default(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self._seed_real_and_legacy(conn)
+            default_sessions = worker_db.list_sessions(conn)
+            active_sessions = worker_db.list_sessions(conn, state="active")
+            self.assertEqual(
+                [s["name"] for s in active_sessions],
+                [s["name"] for s in default_sessions],
+            )
+
+    def test_list_sessions_state_gone_returns_only_gone(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self._seed_real_and_legacy(conn)
+            sessions = worker_db.list_sessions(conn, state="gone")
+            self.assertEqual({s["name"] for s in sessions}, {"gone"})
+
+    def test_list_sessions_state_all_bypasses_default_filters(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self._seed_real_and_legacy(conn)
+            sessions = worker_db.list_sessions(conn, state="all")
+            self.assertEqual({s["name"] for s in sessions}, {"real", "legacy", "gone"})
 
     def test_list_sessions_role_filter_combined_with_legacy_filter(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -7007,7 +7043,7 @@ class SessionsLegacyFilterTests(unittest.TestCase):
             workers = worker_db.list_sessions(conn, role="worker")
             self.assertEqual({s["name"] for s in workers}, {"real"})
 
-    def test_cli_sessions_default_excludes_legacy(self):
+    def test_cli_sessions_default_excludes_legacy_and_gone(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             state_dir = Path(tmpdir) / "state"
             state_dir.mkdir()
@@ -7029,6 +7065,7 @@ class SessionsLegacyFilterTests(unittest.TestCase):
             names = {r["name"] for r in rows}
             self.assertIn("real", names)
             self.assertNotIn("legacy", names)
+            self.assertNotIn("gone", names)
 
             proc = subprocess.run(
                 [sys.executable, "-m", "workerctl", "sessions", "--include-legacy"],
@@ -7039,6 +7076,31 @@ class SessionsLegacyFilterTests(unittest.TestCase):
             names = {r["name"] for r in rows}
             self.assertIn("real", names)
             self.assertIn("legacy", names)
+            self.assertNotIn("gone", names)
+
+            proc = subprocess.run(
+                [sys.executable, "-m", "workerctl", "sessions", "--state", "active"],
+                env=env, capture_output=True, text=True, cwd=str(ROOT),
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            rows = json.loads(proc.stdout)
+            self.assertEqual({r["name"] for r in rows}, {"real"})
+
+            proc = subprocess.run(
+                [sys.executable, "-m", "workerctl", "sessions", "--state", "gone"],
+                env=env, capture_output=True, text=True, cwd=str(ROOT),
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            rows = json.loads(proc.stdout)
+            self.assertEqual({r["name"] for r in rows}, {"gone"})
+
+            proc = subprocess.run(
+                [sys.executable, "-m", "workerctl", "sessions", "--state", "all"],
+                env=env, capture_output=True, text=True, cwd=str(ROOT),
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            rows = json.loads(proc.stdout)
+            self.assertEqual({r["name"] for r in rows}, {"real", "legacy", "gone"})
 
 
 if __name__ == "__main__":
