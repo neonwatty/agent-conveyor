@@ -5676,6 +5676,86 @@ class SuperviseCycleTests(unittest.TestCase):
             self.assertFalse(result["worker_alive"])
             self.assertTrue(result["manager_alive"])
 
+    def test_cycle_busy_wait_seconds_default_is_propagated(self):
+        """Test: when no busy-wait-seconds is passed, default (from classifier) is used."""
+        from workerctl import supervise_cycle
+        from workerctl import shadow_state
+
+        captured = {}
+
+        def fake_pane_signal(conn, *, session_id, busy_wait_seconds=None, now=None):
+            if busy_wait_seconds is None:
+                busy_wait_seconds = shadow_state.DEFAULT_BUSY_WAIT_SECONDS
+            captured["busy_wait_seconds"] = busy_wait_seconds
+            return {
+                "captured": False,
+                "classifier": None,
+                "notable_pattern": None,
+                "status_age_seconds": None,
+                "reason": "test",
+                "degraded": False,
+            }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self._setup_bound_task(conn, tmpdir, [
+                {"type": "session_meta", "payload": {"id": "u-w", "cwd": "/r"}},
+                {"timestamp": "2026-05-11T14:32:11Z",
+                 "type": "event_msg",
+                 "payload": {"type": "task_complete"}},
+            ])
+            # Patch pane_signal_for_session to capture busy_wait_seconds
+            original = shadow_state.pane_signal_for_session
+            shadow_state.pane_signal_for_session = fake_pane_signal
+            try:
+                supervise_cycle.run_cycle(
+                    conn, task_name="t", now="2026-05-11T14:33:00Z",
+                )
+            finally:
+                shadow_state.pane_signal_for_session = original
+
+        self.assertEqual(captured["busy_wait_seconds"], shadow_state.DEFAULT_BUSY_WAIT_SECONDS)
+
+    def test_cycle_busy_wait_seconds_override(self):
+        """Test: busy_wait_seconds parameter overrides the default."""
+        from workerctl import supervise_cycle
+        from workerctl import shadow_state
+
+        captured = {}
+
+        def fake_pane_signal(conn, *, session_id, busy_wait_seconds=None, now=None):
+            if busy_wait_seconds is None:
+                busy_wait_seconds = shadow_state.DEFAULT_BUSY_WAIT_SECONDS
+            captured["busy_wait_seconds"] = busy_wait_seconds
+            return {
+                "captured": False,
+                "classifier": None,
+                "notable_pattern": None,
+                "status_age_seconds": None,
+                "reason": "test",
+                "degraded": False,
+            }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self._setup_bound_task(conn, tmpdir, [
+                {"type": "session_meta", "payload": {"id": "u-w", "cwd": "/r"}},
+                {"timestamp": "2026-05-11T14:32:11Z",
+                 "type": "event_msg",
+                 "payload": {"type": "task_complete"}},
+            ])
+            # Patch pane_signal_for_session to capture busy_wait_seconds
+            original = shadow_state.pane_signal_for_session
+            shadow_state.pane_signal_for_session = fake_pane_signal
+            try:
+                supervise_cycle.run_cycle(
+                    conn, task_name="t", busy_wait_seconds=37, now="2026-05-11T14:33:00Z",
+                )
+            finally:
+                shadow_state.pane_signal_for_session = original
+
+        self.assertEqual(captured["busy_wait_seconds"], 37)
+
 
 class ReadEventsStatsTests(unittest.TestCase):
     def test_read_events_with_stats_counts_malformed_lines(self):

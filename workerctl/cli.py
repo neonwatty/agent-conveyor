@@ -8,7 +8,6 @@ import sys
 from textwrap import dedent
 
 from workerctl.constants import (
-    DEFAULT_BUSY_WAIT_SECONDS,
     DEFAULT_HISTORY_LINES,
     DEFAULT_INTERRUPT_FOLLOWUP,
     DEFAULT_MANAGER_STALE_SECONDS,
@@ -17,6 +16,7 @@ from workerctl.constants import (
     DEFAULT_WAIT_READY_SECONDS,
     INVOCATION_CWD,
 )
+from workerctl.shadow_state import DEFAULT_BUSY_WAIT_SECONDS
 from workerctl.commands import (
     command_audit,
     command_capture,
@@ -368,6 +368,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="Run one observation cycle for a session-bound task. Returns JSON.",
     )
     cycle.add_argument("task", help="Task name.")
+    cycle.add_argument(
+        "--busy-wait-seconds", type=int, default=DEFAULT_BUSY_WAIT_SECONDS,
+        help="Seconds the pane signal classifier waits before flagging a stuck-busy pane (default: %(default)s).",
+    )
     cycle.set_defaults(func=command_cycle)
 
     divergences = subparsers.add_parser(

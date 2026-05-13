@@ -2132,7 +2132,9 @@ def command_cycle(args: argparse.Namespace) -> int:
     conn = worker_db.connect()
     worker_db.initialize_database(conn)
     try:
-        result = supervise_cycle.run_cycle(conn, task_name=args.task)
+        result = supervise_cycle.run_cycle(
+            conn, task_name=args.task, busy_wait_seconds=args.busy_wait_seconds
+        )
     finally:
         conn.close()
     print(json.dumps(result, indent=2, sort_keys=True, default=str))

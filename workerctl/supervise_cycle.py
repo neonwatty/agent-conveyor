@@ -12,10 +12,14 @@ from workerctl.core import WorkerError, now_iso
 from workerctl.commands import _pid_is_alive
 
 
+DEFAULT_BUSY_WAIT_SECONDS = 90
+
+
 def run_cycle(
     conn: sqlite3.Connection,
     *,
     task_name: str,
+    busy_wait_seconds: int = DEFAULT_BUSY_WAIT_SECONDS,
     now: str | None = None,
 ) -> dict[str, Any]:
     """Perform one observation cycle for a session-bound task.
@@ -89,6 +93,7 @@ def run_cycle(
             pane_signal = worker_shadow.pane_signal_for_session(
                 conn,
                 session_id=binding["worker_session_id"],
+                busy_wait_seconds=busy_wait_seconds,
                 now=started_at,
             )
         except (sqlite3.Error, WorkerError) as exc:  # pragma: no cover — defensive belt-and-suspenders
