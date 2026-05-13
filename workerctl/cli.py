@@ -37,6 +37,7 @@ from workerctl.commands import (
     command_open,
     command_open_manager,
     command_open_worker,
+    command_pair,
     command_prune,
     command_qa_plan,
     command_reconcile,
@@ -311,6 +312,55 @@ def build_parser() -> argparse.ArgumentParser:
         help="Max seconds to wait for codex to write session_meta.",
     )
     start_manager.set_defaults(func=command_start_manager)
+
+    pair = subparsers.add_parser(
+        "pair",
+        help="Spawn worker + manager and bind to a task in one shot.",
+    )
+    pair.add_argument("--task", required=True, help="Task name (slug).")
+    pair.add_argument("--worker-name", required=True, help="Worker session name.")
+    pair.add_argument("--manager-name", required=True, help="Manager session name.")
+    pair.add_argument(
+        "--cwd",
+        default=str(INVOCATION_CWD),
+        help="Shared working directory for both codex spawns.",
+    )
+    pair.add_argument(
+        "--task-prompt",
+        default=None,
+        help="Initial task prompt for the worker codex.",
+    )
+    pair.add_argument(
+        "--task-goal",
+        default=None,
+        help="Goal text. Required if task does not exist.",
+    )
+    pair.add_argument(
+        "--task-summary",
+        default=None,
+        help="Optional task summary (when creating).",
+    )
+    pair.add_argument(
+        "--sandbox",
+        default="danger-full-access",
+        help="Codex --sandbox mode.",
+    )
+    pair.add_argument(
+        "--ask-for-approval",
+        default="never",
+        help="Codex --ask-for-approval mode.",
+    )
+    pair.add_argument(
+        "--timeout-seconds",
+        type=int,
+        default=15,
+        help="Max seconds to wait for codex to write session_meta.",
+    )
+    pair.add_argument(
+        "--path",
+        help="Override the workerctl database path.",
+    )
+    pair.set_defaults(func=command_pair)
 
     register_manager = subparsers.add_parser(
         "register-manager",

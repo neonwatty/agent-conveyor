@@ -161,6 +161,14 @@ tmux attach -t codex-live-test
 - `start-manager --name N [--cwd D] [--sandbox SANDBOX] [--ask-for-approval ASK_FOR_APPROVAL] [--timeout-seconds N]` —
   Spawn Codex in a fresh tmux session and register it as a manager in one call.
   Mirrors `start-worker` (omits `--task` since managers supervise rather than execute).
+- `pair --task T --worker-name W --manager-name M [--cwd D] [--task-prompt PROMPT] [--task-goal GOAL] [--task-summary S] [--sandbox SANDBOX] [--ask-for-approval ASK_FOR_APPROVAL] [--timeout-seconds N]` —
+  One-shot: spawn worker + manager and bind to a task in a single command. Combines
+  `start-worker` + `start-manager` + `bind`. The task is looked up or created (if
+  `--task-goal` is provided); if the task does not exist and no goal is given, an
+  error is raised with a hint. The worker receives the optional `--task-prompt` as
+  its initial Codex prompt; the manager does not. If the manager or bind fails after
+  the worker is spawned, the worker remains registered and can be cleaned up with
+  `workerctl deregister`.
 - `register-worker --name N [--pid P | --codex-session PATH] [--cwd D] [--tmux-session S]` —
   Register an already-running Codex session as a worker. Rollout JSONL is
   auto-discovered from the pid via `lsof` unless `--codex-session` is given.

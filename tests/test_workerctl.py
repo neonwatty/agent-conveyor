@@ -7570,5 +7570,238 @@ class RegisterManagerLsofTests(unittest.TestCase):
             self.assertEqual(result["codex_session_path"], str(rollout))
 
 
+class PairCommandTests(unittest.TestCase):
+    def _setup_db(self, tmpdir):
+        db_path = Path(tmpdir) / "workerctl.db"
+        conn = worker_db.connect(db_path)
+        worker_db.initialize_database(conn)
+        conn.close()
+        return db_path
+
+    def test_pair_creates_task_when_goal_provided_and_task_missing(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = self._setup_db(tmpdir)
+            args = argparse.Namespace(
+                task="new-pair-task",
+                worker_name="w1",
+                manager_name="m1",
+                cwd=tmpdir,
+                task_prompt=None,
+                task_goal="Build a thing",
+                task_summary=None,
+                sandbox="danger-full-access",
+                ask_for_approval="never",
+                timeout_seconds=30,
+                path=str(db_path),
+            )
+
+            def fake_spawn(*, name, role, **kwargs):
+                # Register the session in the DB so bind_sessions can find it later
+                conn = worker_db.connect(db_path)
+                worker_db.initialize_database(conn)
+                try:
+                    session_id = worker_db.register_session(
+                        conn,
+                        name=name,
+                        role=role,
+                        codex_session_path=f"/tmp/{name}.jsonl",
+                        codex_session_id=f"codex-id-{name}",
+                        pid=10000 + hash(name) % 1000,
+                        cwd=kwargs.get("cwd", "/tmp"),
+                        tmux_session=f"codex-{name}",
+                    )
+                    conn.commit()
+                finally:
+                    conn.close()
+
+                return {
+                    "name": name,
+                    "role": role,
+                    "session_id": session_id,
+                    "pid": 10000 + hash(name) % 1000,
+                    "tmux_session": f"codex-{name}",
+                    "codex_session_path": f"/tmp/{name}.jsonl",
+                    "codex_session_id": f"codex-id-{name}",
+                    "cwd": kwargs.get("cwd", "/tmp"),
+                }
+
+            with mock.patch.object(
+                commands,
+                "_spawn_codex_and_register",
+                side_effect=fake_spawn,
+            ):
+                stdout_capture = io.StringIO()
+                with contextlib.redirect_stdout(stdout_capture):
+                    result = commands.command_pair(args)
+            self.assertEqual(result, 0)
+
+            # Verify task was created
+            conn = worker_db.connect(db_path)
+            try:
+                task_row = worker_db.task_row(conn, task="new-pair-task")
+                self.assertEqual(task_row["name"], "new-pair-task")
+                self.assertEqual(task_row["goal"], "Build a thing")
+            finally:
+                conn.close()
+
+    def test_pair_uses_existing_task(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = self._setup_db(tmpdir)
+            conn = worker_db.connect(db_path)
+            task_id = worker_db.create_task(
+                conn, name="existing-task", goal="Do x", summary=None
+            )
+            conn.commit()
+            conn.close()
+
+            args = argparse.Namespace(
+                task="existing-task",
+                worker_name="w1",
+                manager_name="m1",
+                cwd=tmpdir,
+                task_prompt=None,
+                task_goal=None,
+                task_summary=None,
+                sandbox="danger-full-access",
+                ask_for_approval="never",
+                timeout_seconds=30,
+                path=str(db_path),
+            )
+
+            def fake_spawn(*, name, role, **kwargs):
+                conn = worker_db.connect(db_path)
+                worker_db.initialize_database(conn)
+                try:
+                    session_id = worker_db.register_session(
+                        conn,
+                        name=name,
+                        role=role,
+                        codex_session_path=f"/tmp/{name}.jsonl",
+                        codex_session_id=f"codex-id-{name}",
+                        pid=10000 + hash(name) % 1000,
+                        cwd=kwargs.get("cwd", "/tmp"),
+                        tmux_session=f"codex-{name}",
+                    )
+                    conn.commit()
+                finally:
+                    conn.close()
+
+                return {
+                    "name": name,
+                    "role": role,
+                    "session_id": session_id,
+                    "pid": 10000 + hash(name) % 1000,
+                    "tmux_session": f"codex-{name}",
+                    "codex_session_path": f"/tmp/{name}.jsonl",
+                    "codex_session_id": f"codex-id-{name}",
+                    "cwd": kwargs.get("cwd", "/tmp"),
+                }
+
+            with mock.patch.object(
+                commands,
+                "_spawn_codex_and_register",
+                side_effect=fake_spawn,
+            ):
+                stdout_capture = io.StringIO()
+                with contextlib.redirect_stdout(stdout_capture):
+                    result = commands.command_pair(args)
+            self.assertEqual(result, 0)
+
+    def test_pair_fails_when_task_missing_and_no_goal_provided(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = self._setup_db(tmpdir)
+            args = argparse.Namespace(
+                task="missing-task",
+                worker_name="w1",
+                manager_name="m1",
+                cwd=tmpdir,
+                task_prompt=None,
+                task_goal=None,
+                task_summary=None,
+                sandbox="danger-full-access",
+                ask_for_approval="never",
+                timeout_seconds=30,
+                path=str(db_path),
+            )
+            with self.assertRaises(WorkerError) as ctx:
+                commands.command_pair(args)
+            self.assertIn("--task-goal", str(ctx.exception))
+
+    def test_pair_passes_task_prompt_to_worker_only(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = self._setup_db(tmpdir)
+            recorded = []
+
+            def recorder(*, name, role, task=None, **kwargs):
+                recorded.append({"name": name, "role": role, "task": task})
+                # Still need to register the session
+                conn = worker_db.connect(db_path)
+                worker_db.initialize_database(conn)
+                try:
+                    session_id = worker_db.register_session(
+                        conn,
+                        name=name,
+                        role=role,
+                        codex_session_path=f"/tmp/{name}.jsonl",
+                        codex_session_id=f"codex-id-{name}",
+                        pid=10000 + hash(name) % 1000,
+                        cwd=kwargs.get("cwd", "/tmp"),
+                        tmux_session=f"codex-{name}",
+                    )
+                    conn.commit()
+                finally:
+                    conn.close()
+
+                return {
+                    "name": name,
+                    "role": role,
+                    "session_id": session_id,
+                    "pid": 10000 + hash(name) % 1000,
+                    "tmux_session": f"codex-{name}",
+                    "codex_session_path": f"/tmp/{name}.jsonl",
+                    "codex_session_id": f"codex-id-{name}",
+                    "cwd": kwargs.get("cwd", "/tmp"),
+                }
+
+            args = argparse.Namespace(
+                task="prompt-task",
+                worker_name="w1",
+                manager_name="m1",
+                cwd=tmpdir,
+                task_prompt="Do the thing",
+                task_goal="Build a thing",
+                task_summary=None,
+                sandbox="danger-full-access",
+                ask_for_approval="never",
+                timeout_seconds=30,
+                path=str(db_path),
+            )
+            with mock.patch.object(commands, "_spawn_codex_and_register", side_effect=recorder):
+                stdout_capture = io.StringIO()
+                with contextlib.redirect_stdout(stdout_capture):
+                    commands.command_pair(args)
+            worker_spawn = next(r for r in recorded if r["role"] == "worker")
+            manager_spawn = next(r for r in recorded if r["role"] == "manager")
+            self.assertEqual(worker_spawn["task"], "Do the thing")
+            self.assertIsNone(manager_spawn["task"])
+
+    def test_pair_subparser_exists(self):
+        proc = subprocess.run(
+            [sys.executable, "-m", "workerctl", "pair", "--help"],
+            capture_output=True,
+            text=True,
+            cwd=str(ROOT),
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        for flag in (
+            "--task",
+            "--worker-name",
+            "--manager-name",
+            "--task-prompt",
+            "--task-goal",
+        ):
+            self.assertIn(flag, proc.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()
