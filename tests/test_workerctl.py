@@ -6030,5 +6030,144 @@ class ReconcileTests(unittest.TestCase):
             self.assertIn("binding_marked_invalid_by_reconcile", types)
 
 
+class CaptureErrorVisibilityTests(unittest.TestCase):
+    def _setup_legacy_worker(self, name):
+        worker_path = worker_dir(name)
+        if worker_path.exists():
+            shutil.rmtree(worker_path)
+        worker_path.mkdir(parents=True)
+        config_path(name).write_text(
+            json.dumps(
+                {
+                    "cwd": str(ROOT),
+                    "name": name,
+                    "tmux_pane_id": "%1",
+                    "tmux_session": f"codex-{name}",
+                }
+            )
+            + "\n"
+        )
+        status_path(name).write_text(
+            json.dumps(
+                {
+                    "blocker": None,
+                    "current_task": "Investigating capture errors.",
+                    "last_update": "2026-05-11T10:00:00Z",
+                    "next_action": "Run tests.",
+                    "state": "waiting",
+                }
+            )
+            + "\n"
+        )
+        write_json(
+            capture_meta_path(name),
+            {
+                "captured_at": "2026-05-11T10:00:00Z",
+                "changed_at": "2026-05-11T10:00:00Z",
+                "history_lines": 80,
+            },
+        )
+        transcript_path(name).write_text("stale\ntranscript\n")
+        self.addCleanup(self._cleanup_worker, name)
+
+    def _cleanup_worker(self, name):
+        path = worker_dir(name)
+        if path.exists():
+            shutil.rmtree(path)
+
+    def test_command_status_includes_terminal_capture_error_when_capture_fails(self):
+        name = "capture-error-status"
+        self._setup_legacy_worker(name)
+
+        original_session_exists = commands.session_exists
+        original_capture_output = commands.capture_output
+        commands.session_exists = lambda worker_name: True
+        commands.capture_output = lambda worker_name, lines: (_ for _ in ()).throw(
+            WorkerError("tmux capture-pane failed: exit 1")
+        )
+        args = argparse.Namespace(name=name, refresh=True, lines=80)
+        try:
+            with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                result = commands.command_status(args)
+            self.assertEqual(result, 0)
+            payload = json.loads(stdout.getvalue())
+            self.assertIn("terminal_capture_error", payload)
+            self.assertIsNotNone(payload["terminal_capture_error"])
+            self.assertIn("tmux capture-pane failed", payload["terminal_capture_error"])
+        finally:
+            commands.session_exists = original_session_exists
+            commands.capture_output = original_capture_output
+
+    def test_idle_summary_marks_terminal_freshness_when_capture_fails(self):
+        name = "capture-error-idle"
+        self._setup_legacy_worker(name)
+
+        original_session_exists = commands.session_exists
+        original_capture_output = commands.capture_output
+        original_capture_tmux_target = commands.capture_tmux_target
+        commands.session_exists = lambda worker_name: True
+        commands.capture_output = lambda worker_name, lines: (_ for _ in ()).throw(
+            WorkerError("tmux refresh failed: exit 2")
+        )
+        commands.capture_tmux_target = lambda target, lines: (_ for _ in ()).throw(
+            WorkerError("tmux live capture failed: exit 2")
+        )
+        try:
+            summary = commands.idle_summary(
+                name,
+                status_stale_seconds=120,
+                terminal_stale_seconds=120,
+                busy_wait_seconds=120,
+                refresh=True,
+                lines=80,
+            )
+            self.assertIn("capture_error", summary)
+            self.assertIsNotNone(summary["capture_error"])
+            self.assertIn("tmux", summary["capture_error"])
+            self.assertIn("terminal_fresh", summary)
+            self.assertFalse(summary["terminal_fresh"])
+        finally:
+            commands.session_exists = original_session_exists
+            commands.capture_output = original_capture_output
+            commands.capture_tmux_target = original_capture_tmux_target
+
+    def test_wait_for_status_update_writes_capture_failed_event_on_capture_error(self):
+        name = "capture-error-wait"
+        self._setup_legacy_worker(name)
+
+        original_session_exists = commands.session_exists
+        original_capture_output = commands.capture_output
+        original_sleep = commands.time.sleep
+        commands.session_exists = lambda worker_name: True
+        commands.capture_output = lambda worker_name, lines: (_ for _ in ()).throw(
+            WorkerError("tmux capture-pane failed during verify")
+        )
+        commands.time.sleep = lambda seconds: None
+        try:
+            result = commands.wait_for_status_update(
+                name,
+                initial_last_update="2026-05-11T10:00:00Z",
+                initial_current_task="Investigating capture errors.",
+                timeout_seconds=1,
+            )
+            self.assertFalse(result["ok"])
+            events = [
+                json.loads(line)
+                for line in (worker_dir(name) / "events.jsonl").read_text().splitlines()
+                if line.strip()
+            ]
+            capture_failed_events = [e for e in events if e.get("type") == "capture_failed"]
+            self.assertTrue(
+                capture_failed_events,
+                f"expected at least one capture_failed event; got {[e.get('type') for e in events]}",
+            )
+            self.assertIn("error", capture_failed_events[0])
+            self.assertIn("tmux capture-pane failed", capture_failed_events[0]["error"])
+        finally:
+            commands.session_exists = original_session_exists
+            commands.capture_output = original_capture_output
+            commands.time.sleep = original_sleep
+
+
 if __name__ == "__main__":
     unittest.main()

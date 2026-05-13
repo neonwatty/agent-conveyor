@@ -308,8 +308,15 @@ def wait_for_status_update(
         if session_exists(name):
             try:
                 capture_output(name, 80)
-            except WorkerError:
-                pass
+            except WorkerError as exc:
+                append_event(
+                    name,
+                    "capture_failed",
+                    {
+                        "error": str(exc),
+                        "phase": "wait_for_status_update",
+                    },
+                )
         time.sleep(1)
 
     append_event(
@@ -603,12 +610,16 @@ def command_status(args: argparse.Namespace) -> int:
     running = session_exists(args.name)
     status = latest_status(args.name)
     capture_meta = load_json(capture_meta_path(args.name), {})
+    terminal_capture_error: str | None = None
     if running and args.refresh:
         try:
             capture_output(args.name, args.lines)
             capture_meta = load_json(capture_meta_path(args.name), {})
         except WorkerError as exc:
-            capture_meta = {"error": str(exc)}
+            terminal_capture_error = str(exc)
+            capture_meta = {"error": terminal_capture_error}
+    elif capture_meta.get("error"):
+        terminal_capture_error = capture_meta.get("error")
 
     state = status.get("state", "unknown")
     if state not in VALID_STATES:
@@ -628,6 +639,7 @@ def command_status(args: argparse.Namespace) -> int:
         "status_last_update": status.get("last_update"),
         "terminal_captured_at": capture_meta.get("captured_at"),
         "terminal_changed_at": capture_meta.get("changed_at"),
+        "terminal_capture_error": terminal_capture_error,
     }
     print(json.dumps(summary, indent=2, sort_keys=True))
     return 0
@@ -664,11 +676,17 @@ def idle_summary(
     status_is_stale = status_age is None or status_age >= status_stale_seconds
     terminal_is_stale = terminal_age is None or terminal_age >= terminal_stale_seconds
     terminal_output = ""
+    terminal_fresh = True
     if running:
         try:
             terminal_output = capture_tmux_target(tmux_target(name), lines)
-        except WorkerError:
+        except WorkerError as exc:
+            terminal_fresh = False
+            if capture_error is None:
+                capture_error = str(exc)
             terminal_output = transcript_path(name).read_text() if transcript_path(name).exists() else ""
+    if capture_error is not None:
+        terminal_fresh = False
     busy_wait = classify_busy_wait(terminal_output, status_age, busy_wait_seconds)
 
     if not running:
@@ -710,6 +728,7 @@ def idle_summary(
 
     return {
         "blocker": status.get("blocker"),
+        "capture_error": capture_error,
         "current_task": status.get("current_task"),
         "health": health,
         "name": name,
@@ -723,6 +742,7 @@ def idle_summary(
         "status_stale_seconds": status_stale_seconds,
         "terminal_age_seconds": terminal_age,
         "terminal_changed_at": capture_meta.get("changed_at"),
+        "terminal_fresh": terminal_fresh,
         "terminal_stale_seconds": terminal_stale_seconds,
         "busy_wait_pattern": busy_wait.get("pattern") if busy_wait else None,
         "busy_wait_seconds": busy_wait_seconds,
