@@ -6467,5 +6467,175 @@ class CaptureErrorVisibilityTests(unittest.TestCase):
             commands.time.sleep = original_sleep
 
 
+class StartWorkerTests(unittest.TestCase):
+    """Tests for `workerctl start-worker` — the spawn-and-register convenience."""
+
+    def _build_fake_rollout(self, tmpdir, name="rollout"):
+        rollout = Path(tmpdir) / f"{name}.jsonl"
+        rollout.write_text(
+            json.dumps({
+                "type": "session_meta",
+                "payload": {
+                    "id": f"cuid-{name}",
+                    "cwd": "/repo",
+                    "originator": "codex-tui",
+                },
+            }) + "\n"
+        )
+        return rollout
+
+    def test_start_worker_spawns_tmux_and_registers(self):
+        """Happy path: tmux spawn succeeds, pid + rollout are discovered,
+        a session row is created."""
+        from workerctl import commands as worker_commands
+        from workerctl import tmux as worker_tmux
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_dir = Path(tmpdir) / "state"
+            state_dir.mkdir()
+            os.environ["WORKERCTL_STATE_ROOT"] = str(state_dir)
+            try:
+                rollout = self._build_fake_rollout(tmpdir, "fake")
+
+                spawned: list[list[str]] = []
+
+                def fake_run(cmd, check=True, input_text=None):
+                    spawned.append(list(cmd))
+                    class R:
+                        returncode = 0
+                        stdout = ""
+                        stderr = ""
+                    return R()
+
+                def fake_session_exists(name):
+                    return False
+
+                def fake_discover(tmux_session, *, timeout_seconds=15, poll_interval=0.5):
+                    return {
+                        "native_pid": 99999,
+                        "codex_session_path": str(rollout),
+                        "codex_session_id": "cuid-fake",
+                        "cwd": "/repo",
+                        "originator": "codex-tui",
+                        "cli_version": "",
+                    }
+
+                orig_run = worker_tmux.run
+                orig_session_exists = worker_tmux.session_exists
+                orig_discover = worker_commands._discover_codex_session_in_tmux
+                worker_tmux.run = fake_run
+                worker_tmux.session_exists = fake_session_exists
+                worker_commands._discover_codex_session_in_tmux = fake_discover
+                try:
+                    args = argparse.Namespace(
+                        name="auto-foo", cwd="/repo", task=None,
+                        sandbox="danger-full-access", ask_for_approval="never",
+                        timeout_seconds=15,
+                    )
+                    captured_stdout = io.StringIO()
+                    with contextlib.redirect_stdout(captured_stdout):
+                        exit_code = worker_commands.command_start_worker(args)
+                    self.assertEqual(exit_code, 0)
+
+                    # Confirm tmux was spawned.
+                    tmux_cmds = [c for c in spawned if len(c) > 1 and c[1] == "new-session"]
+                    self.assertEqual(len(tmux_cmds), 1)
+                    self.assertIn("codex-auto-foo", tmux_cmds[0])
+
+                    # Confirm a session was registered.
+                    conn = worker_db.connect(state_dir / "workerctl.db")
+                    self.addCleanup(conn.close)
+                    row = conn.execute(
+                        "select * from sessions where name='auto-foo'"
+                    ).fetchone()
+                    self.assertIsNotNone(row)
+                    self.assertEqual(row["role"], "worker")
+                    self.assertEqual(row["pid"], 99999)
+                    self.assertEqual(row["codex_session_id"], "cuid-fake")
+                    self.assertEqual(row["tmux_session"], "codex-auto-foo")
+                finally:
+                    worker_tmux.run = orig_run
+                    worker_tmux.session_exists = orig_session_exists
+                    worker_commands._discover_codex_session_in_tmux = orig_discover
+            finally:
+                os.environ.pop("WORKERCTL_STATE_ROOT", None)
+
+    def test_start_worker_refuses_if_session_name_already_registered(self):
+        """If a session with the given name already exists in the DB, refuse cleanly."""
+        from workerctl import commands as worker_commands
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_dir = Path(tmpdir) / "state"
+            state_dir.mkdir()
+            os.environ["WORKERCTL_STATE_ROOT"] = str(state_dir)
+            try:
+                conn = worker_db.connect()
+                worker_db.initialize_database(conn)
+                worker_db.register_session(
+                    conn, name="taken", role="worker",
+                    codex_session_path="/a", codex_session_id="u",
+                    pid=1, cwd="/repo",
+                )
+                conn.commit()
+                conn.close()
+
+                args = argparse.Namespace(
+                    name="taken", cwd="/repo", task=None,
+                    sandbox="danger-full-access", ask_for_approval="never",
+                    timeout_seconds=15,
+                )
+                with self.assertRaises(WorkerError):
+                    worker_commands.command_start_worker(args)
+            finally:
+                os.environ.pop("WORKERCTL_STATE_ROOT", None)
+
+    def test_start_worker_timeout_when_codex_doesnt_write_session_meta(self):
+        """If the codex never writes a rollout (e.g. spawn failed), the discovery
+        loop raises a WorkerError."""
+        from workerctl import commands as worker_commands
+        from workerctl import tmux as worker_tmux
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_dir = Path(tmpdir) / "state"
+            state_dir.mkdir()
+            os.environ["WORKERCTL_STATE_ROOT"] = str(state_dir)
+            try:
+                def fake_run(cmd, check=True, input_text=None):
+                    class R:
+                        returncode = 0
+                        stdout = ""
+                        stderr = ""
+                    return R()
+
+                def fake_session_exists(name):
+                    return False
+
+                def timeout_discover(tmux_session, *, timeout_seconds=15, poll_interval=0.5):
+                    raise WorkerError(
+                        f"codex did not write session_meta within {timeout_seconds}s"
+                    )
+
+                orig_run = worker_tmux.run
+                orig_session_exists = worker_tmux.session_exists
+                orig_discover = worker_commands._discover_codex_session_in_tmux
+                worker_tmux.run = fake_run
+                worker_tmux.session_exists = fake_session_exists
+                worker_commands._discover_codex_session_in_tmux = timeout_discover
+                try:
+                    args = argparse.Namespace(
+                        name="timeout-test", cwd="/repo", task=None,
+                        sandbox="danger-full-access", ask_for_approval="never",
+                        timeout_seconds=1,
+                    )
+                    with self.assertRaises(WorkerError):
+                        worker_commands.command_start_worker(args)
+                finally:
+                    worker_tmux.run = orig_run
+                    worker_tmux.session_exists = orig_session_exists
+                    worker_commands._discover_codex_session_in_tmux = orig_discover
+            finally:
+                os.environ.pop("WORKERCTL_STATE_ROOT", None)
+
+
 if __name__ == "__main__":
     unittest.main()

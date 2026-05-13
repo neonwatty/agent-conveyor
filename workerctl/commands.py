@@ -1697,6 +1697,194 @@ def command_register_manager(args: argparse.Namespace) -> int:
     return 0
 
 
+def _discover_codex_session_in_tmux(
+    tmux_session: str,
+    *,
+    timeout_seconds: int = 15,
+    poll_interval: float = 0.5,
+) -> dict:
+    """Poll until we find the native codex pid + open rollout in a tmux session's
+    process tree. Raises WorkerError on timeout.
+
+    The tmux pane runs the user's shell which forks the `codex` wrapper, which in
+    turn spawns the native binary that holds the rollout file open. We walk the
+    pane's process tree breadth-first and probe each pid via lsof, returning the
+    first one whose open files include a `rollout-*.jsonl` path.
+
+    Returns dict: {native_pid, codex_session_path, codex_session_id, cwd, originator, cli_version}.
+    """
+    import time
+
+    from workerctl import codex_session as cs
+    from workerctl import tmux as worker_tmux
+
+    deadline = time.monotonic() + timeout_seconds
+    last_error: str | None = None
+    while time.monotonic() < deadline:
+        try:
+            proc = worker_tmux.run(
+                ["tmux", "list-panes", "-t", tmux_session, "-F", "#{pane_pid}"],
+                check=False,
+            )
+            if proc.returncode != 0:
+                last_error = (
+                    f"tmux list-panes failed: {proc.stderr.strip() or proc.stdout.strip()}"
+                )
+                time.sleep(poll_interval)
+                continue
+            shell_pid_str = ""
+            for line in proc.stdout.splitlines():
+                stripped = line.strip()
+                if stripped:
+                    shell_pid_str = stripped
+                    break
+            if not shell_pid_str:
+                last_error = "tmux pane has no pid yet"
+                time.sleep(poll_interval)
+                continue
+            try:
+                shell_pid = int(shell_pid_str)
+            except ValueError:
+                last_error = f"tmux pane pid is not an integer: {shell_pid_str!r}"
+                time.sleep(poll_interval)
+                continue
+
+            # Walk pid children breadth-first looking for one that holds a rollout open.
+            queue: list[int] = [shell_pid]
+            visited: set[int] = set()
+            while queue:
+                pid = queue.pop(0)
+                if pid in visited:
+                    continue
+                visited.add(pid)
+                try:
+                    rollout_path = cs.find_rollout_path_for_pid(pid)
+                except cs.CodexSessionError:
+                    queue.extend(cs._ps_children_default(pid))
+                    continue
+                meta = cs.read_session_meta(rollout_path)
+                return {
+                    "native_pid": pid,
+                    "codex_session_path": str(rollout_path),
+                    "codex_session_id": meta["id"],
+                    "cwd": meta.get("cwd", ""),
+                    "originator": meta.get("originator", ""),
+                    "cli_version": meta.get("cli_version", ""),
+                }
+            last_error = "no codex rollout open in tmux pane process tree yet"
+        except Exception as exc:  # noqa: BLE001 - want to surface as polling error
+            last_error = str(exc)
+        time.sleep(poll_interval)
+
+    raise WorkerError(
+        f"codex did not write session_meta within {timeout_seconds}s "
+        f"in tmux session {tmux_session!r}: {last_error}"
+    )
+
+
+def command_start_worker(args: argparse.Namespace) -> int:
+    """Spawn codex in a fresh tmux session and register it as a worker in one call.
+
+    Equivalent to: `tmux new-session -d -s codex-<name>` running `codex <flags>`,
+    followed by `workerctl register-worker --pid <discovered>`. Polls for codex's
+    open rollout file to confirm the session is up before registering.
+
+    Refuses if either the tmux session `codex-<name>` already exists or the DB
+    already has a session named `<name>`.
+    """
+    import shlex
+
+    from workerctl import db as worker_db
+    from workerctl import tmux as worker_tmux
+
+    name = args.name
+    tmux_session_name = f"codex-{name}"
+    cwd = args.cwd
+    task = args.task
+
+    # Pre-flight: refuse if name is taken in DB.
+    conn = worker_db.connect()
+    worker_db.initialize_database(conn)
+    try:
+        existing = conn.execute(
+            "select id from sessions where name = ?", (name,)
+        ).fetchone()
+        if existing is not None:
+            raise WorkerError(
+                f"a session named {name!r} is already registered; "
+                f"choose a different name or `workerctl deregister {name}` first"
+            )
+    finally:
+        conn.close()
+
+    # Pre-flight: refuse if tmux session already exists.
+    if worker_tmux.session_exists(name):
+        raise WorkerError(
+            f"tmux session {tmux_session_name!r} already exists; "
+            f"choose a different name or `tmux kill-session -t {tmux_session_name}` first"
+        )
+
+    # Build the codex command. Task argument is appended as a literal prompt.
+    codex_args: list[str] = ["codex"]
+    if args.sandbox:
+        codex_args += ["--sandbox", args.sandbox]
+    if args.ask_for_approval:
+        codex_args += ["--ask-for-approval", args.ask_for_approval]
+    if task:
+        codex_args.append(task)
+    codex_cmd = " ".join(shlex.quote(a) for a in codex_args)
+
+    # Spawn tmux + codex.
+    worker_tmux.run([
+        "tmux", "new-session", "-d", "-s", tmux_session_name, "-c", cwd, codex_cmd,
+    ])
+
+    # Discover codex pid + rollout.
+    discovery = _discover_codex_session_in_tmux(
+        tmux_session_name, timeout_seconds=args.timeout_seconds,
+    )
+
+    # Register the session.
+    conn = worker_db.connect()
+    worker_db.initialize_database(conn)
+    try:
+        session_id = worker_db.register_session(
+            conn,
+            name=name,
+            role="worker",
+            codex_session_path=discovery["codex_session_path"],
+            codex_session_id=discovery["codex_session_id"],
+            pid=discovery["native_pid"],
+            cwd=cwd,
+            tmux_session=tmux_session_name,
+        )
+        worker_db.insert_event(
+            conn, "session_registered", actor="workerctl",
+            payload={
+                "name": name, "role": "worker", "session_id": session_id,
+                "pid": discovery["native_pid"],
+                "codex_session_id": discovery["codex_session_id"],
+                "via": "start-worker",
+            },
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    result = {
+        "session_id": session_id,
+        "name": name,
+        "role": "worker",
+        "pid": discovery["native_pid"],
+        "codex_session_id": discovery["codex_session_id"],
+        "codex_session_path": discovery["codex_session_path"],
+        "cwd": cwd,
+        "tmux_session": tmux_session_name,
+    }
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0
+
+
 def command_deregister(args: argparse.Namespace) -> int:
     from workerctl import db as worker_db
 
