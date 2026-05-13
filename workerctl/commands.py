@@ -40,6 +40,7 @@ from workerctl.state import (
     latest_status,
     load_json,
     read_events,
+    read_events_with_stats,
     require_worker,
     state_root,
     status_path,
@@ -1565,7 +1566,12 @@ def command_mutation_audit(args: argparse.Namespace) -> int:
 
 def command_events(args: argparse.Namespace) -> int:
     require_worker(args.name)
-    events = read_events(args.name)
+    events, skipped = read_events_with_stats(args.name)
+    if skipped:
+        print(
+            f"workerctl: {skipped} malformed event line(s) skipped",
+            file=sys.stderr,
+        )
     if args.type:
         events = [event for event in events if event.get("type") == args.type]
     if args.limit:

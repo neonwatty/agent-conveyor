@@ -30,13 +30,34 @@ def parse_jsonl_events(content: bytes, *, start_offset: int) -> Iterator[dict[st
 
     Lines without a trailing newline are NOT yielded (assumed to be a partial write).
     Malformed lines (invalid JSON) are silently skipped, but the offset still advances
-    past them so they aren't reprocessed.
+    past them so they aren't reprocessed. Callers needing visibility into how many
+    lines were skipped should use `parse_jsonl_events_with_stats` instead.
     """
+    events, _ = parse_jsonl_events_with_stats(content, start_offset=start_offset)
+    yield from events
+
+
+def parse_jsonl_events_with_stats(
+    content: bytes, *, start_offset: int,
+) -> tuple[list[dict[str, Any]], int]:
+    """Same as `parse_jsonl_events`, but also returns a count of malformed/skipped lines.
+
+    `parse_jsonl_events` silently skips malformed JSON, non-dict records, and
+    non-string `type` fields. This sibling counts each skip so callers (e.g.
+    `ingest_session`) can surface "we dropped N records" rather than masking
+    corrupt rollouts.
+
+    Returns `(events, skipped)` where `events` has the same shape as
+    `parse_jsonl_events` yields, and `skipped` is the number of lines that were
+    advanced past without producing an event.
+    """
+    events: list[dict[str, Any]] = []
+    skipped = 0
     cursor = 0
     while True:
         newline = content.find(b"\n", cursor)
         if newline == -1:
-            return
+            break
         line_bytes = content[cursor:newline]
         next_cursor = newline + 1
         absolute_line_start = start_offset + cursor
@@ -46,11 +67,14 @@ def parse_jsonl_events(content: bytes, *, start_offset: int) -> Iterator[dict[st
         try:
             record = json.loads(line_bytes.decode("utf-8"))
         except (json.JSONDecodeError, UnicodeDecodeError):
+            skipped += 1
             continue
         if not isinstance(record, dict):
+            skipped += 1
             continue
         record_type = record.get("type")
         if not isinstance(record_type, str):
+            skipped += 1
             continue
         payload = record.get("payload") or {}
         if not isinstance(payload, dict):
@@ -58,14 +82,15 @@ def parse_jsonl_events(content: bytes, *, start_offset: int) -> Iterator[dict[st
         subtype = payload.get("type") if record_type == "event_msg" else None
         if subtype is not None and not isinstance(subtype, str):
             subtype = None
-        yield {
+        events.append({
             "type": record_type,
             "subtype": subtype,
             "timestamp": record.get("timestamp"),
             "payload": payload,
             "byte_offset": absolute_line_start,
             "new_offset": absolute_after_line,
-        }
+        })
+    return events, skipped
 
 
 # Mapping from event_msg subtype -> high-level session state.
@@ -171,7 +196,10 @@ def ingest_session(
     timestamp = now or now_iso()
     new_events = 0
     new_offset = start_offset
-    for event in parse_jsonl_events(content, start_offset=start_offset):
+    parsed_events, skipped_lines = parse_jsonl_events_with_stats(
+        content, start_offset=start_offset,
+    )
+    for event in parsed_events:
         worker_db.insert_codex_event(
             conn,
             session_id=session_id,
@@ -190,7 +218,11 @@ def ingest_session(
     worker_db.bump_session_heartbeat(conn, session_id=session_id, timestamp=timestamp)
     conn.commit()
 
-    return {"new_events": new_events, "new_offset": new_offset}
+    return {
+        "new_events": new_events,
+        "new_offset": new_offset,
+        "skipped_lines": skipped_lines,
+    }
 
 
 def last_state_event_timestamp(conn: sqlite3.Connection, *, session_id: str) -> str | None:

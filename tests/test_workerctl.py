@@ -4192,6 +4192,49 @@ class IngestModuleTests(unittest.TestCase):
                 ingest.ingest_session(conn, session_name="w")
             self.assertIn("gone", str(ctx.exception))
 
+    def test_parse_jsonl_events_with_stats_counts_skipped_lines(self):
+        from workerctl import ingest
+
+        content = (
+            b'{"type":"event_msg","payload":{"type":"task_started"}}\n'
+            b'not-json-at-all\n'
+            b'{"type":"event_msg","payload":{"type":"agent_message"}}\n'
+            b'{"not_a_record": "missing type field"}\n'
+            b'42\n'  # non-dict top-level
+            b'{"type":"event_msg","payload":{"type":"task_complete"}}\n'
+        )
+        events, skipped = ingest.parse_jsonl_events_with_stats(
+            content, start_offset=0,
+        )
+        self.assertEqual(len(events), 3)
+        self.assertEqual(skipped, 3)
+
+    def test_ingest_session_reports_skipped_lines(self):
+        from workerctl import ingest
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            rollout = Path(tmpdir) / "rollout.jsonl"
+            conn = worker_db.connect(db_path)
+            self.addCleanup(conn.close)
+            worker_db.initialize_database(conn)
+
+            rollout.write_text(
+                json.dumps({"type": "event_msg", "payload": {"type": "task_started"}}) + "\n"
+                + "garbage-line-no-json\n"
+                + json.dumps({"type": "event_msg", "payload": {"type": "task_complete"}}) + "\n"
+            )
+            worker_db.register_session(
+                conn, name="w", role="worker",
+                codex_session_path=str(rollout),
+                codex_session_id="u", pid=1, cwd="/r",
+            )
+            conn.commit()
+
+            result = ingest.ingest_session(conn, session_name="w")
+            self.assertEqual(result["new_events"], 2)
+            self.assertEqual(result["skipped_lines"], 1)
+
 
 class IngestCliTests(unittest.TestCase):
     def run_cli(self, *args, env_extra=None):
@@ -5405,6 +5448,67 @@ class SuperviseCycleTests(unittest.TestCase):
                 rows[0]["status"]["notable_pane_pattern"],
                 rows[0]["status"]["pane_signal"]["notable_pattern"],
             )
+
+    def test_run_cycle_propagates_skipped_lines_in_ingest_field(self):
+        from workerctl import supervise_cycle
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            # Build a rollout with one malformed line.
+            rollout = Path(tmpdir) / "rollout.jsonl"
+            rollout.write_text(
+                json.dumps({"type": "session_meta", "payload": {"id": "u-w", "cwd": "/r"}}) + "\n"
+                + "garbage\n"
+                + json.dumps({"timestamp": "2026-05-11T14:32:11Z",
+                              "type": "event_msg",
+                              "payload": {"type": "task_complete"}}) + "\n"
+            )
+            now = "2026-05-11T00:00:00Z"
+            conn.execute(
+                "insert into tasks(id, name, goal, state, created_at, updated_at) "
+                "values ('task-1', 't', 'g', 'candidate', ?, ?)",
+                (now, now),
+            )
+            worker_db.register_session(
+                conn, name="w", role="worker",
+                codex_session_path=str(rollout),
+                codex_session_id="u-w", pid=1, cwd="/r",
+            )
+            worker_db.register_session(
+                conn, name="m", role="manager",
+                codex_session_path=str(rollout),
+                codex_session_id="u-m", pid=2, cwd="/r",
+            )
+            worker_db.bind_sessions(
+                conn, task_name="t",
+                worker_session_name="w", manager_session_name="m",
+            )
+            conn.commit()
+            result = supervise_cycle.run_cycle(
+                conn, task_name="t", now="2026-05-11T14:33:00Z",
+            )
+            self.assertEqual(result["ingest"]["new_events"], 2)
+            self.assertEqual(result["ingest"]["skipped_lines"], 1)
+
+
+class ReadEventsStatsTests(unittest.TestCase):
+    def test_read_events_with_stats_counts_malformed_lines(self):
+        from workerctl import state
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            os.environ["WORKERCTL_STATE_ROOT"] = tmpdir
+            self.addCleanup(os.environ.pop, "WORKERCTL_STATE_ROOT", None)
+            name = "w-stats"
+            state.worker_dir(name).mkdir(parents=True, exist_ok=True)
+            events_path = state.events_path(name)
+            events_path.write_text(
+                '{"type":"x","ts":"2026-05-12T00:00:00Z"}\n'
+                'not-json\n'
+                '{"type":"y","ts":"2026-05-12T00:00:01Z"}\n'
+            )
+            events, skipped = state.read_events_with_stats(name)
+            self.assertEqual(len(events), 2)
+            self.assertEqual(skipped, 1)
 
 
 class CycleCliTests(unittest.TestCase):
