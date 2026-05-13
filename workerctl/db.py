@@ -898,19 +898,32 @@ def list_sessions(
     *,
     role: str | None = None,
     include_legacy: bool = False,
+    state: str | None = None,
 ) -> list[dict[str, Any]]:
     """List sessions, optionally filtering by role.
 
-    By default, excludes legacy sessions (pid IS NULL) from Phase 1 backfill.
-    Use include_legacy=True to opt-in to legacy rows.
+    By default, excludes legacy sessions (pid IS NULL) from Phase 1 backfill and
+    gone sessions. Use include_legacy=True to opt in to legacy rows. Use
+    state="all" to bypass both default filters.
     """
+    if state not in (None, "active", "gone", "all"):
+        raise ValueError(f"invalid state filter: {state!r}")
+
     query = "select * from sessions"
     clauses: list[str] = []
     params: list = []
     if role is not None:
         clauses.append("role = ?")
         params.append(role)
-    if not include_legacy:
+    if state == "gone":
+        clauses.append("state = 'gone'")
+    elif state == "all":
+        pass
+    else:
+        clauses.append("state != 'gone'")
+    if state in (None,) and not include_legacy:
+        clauses.append("pid is not null")
+    elif state == "active":
         clauses.append("pid is not null")
     if clauses:
         query += " where " + " and ".join(clauses)

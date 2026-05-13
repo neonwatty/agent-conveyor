@@ -307,6 +307,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sessions.add_argument("--role", choices=("worker", "manager"), default=None)
     sessions.add_argument(
+        "--state", choices=("active", "gone", "all"), default=None,
+        help="Filter by session state: active is the default view; all includes legacy and gone rows.",
+    )
+    sessions.add_argument(
         "--include-legacy", action="store_true",
         help="Include Phase 1 backfill rows (pid IS NULL) — legacy workers/managers.",
     )

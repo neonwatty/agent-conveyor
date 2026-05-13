@@ -146,11 +146,13 @@ tmux attach -t codex-live-test
 - `register-manager --name N ...` — Same arguments; tmux is not required.
 - `deregister <name>` — Mark a session gone. Refuses if the session is bound
   to an active task.
-- `sessions [--role worker|manager] [--include-legacy]` — List registered sessions.
-  By default, `sessions` hides Phase 1 backfill rows (legacy pre-redesign workers/managers, identified by `pid IS NULL`). Pass `--include-legacy` to show them too:
+- `sessions [--role worker|manager] [--state active|gone|all] [--include-legacy]` — List registered sessions.
+  By default, `sessions` shows active registered sessions and hides Phase 1 backfill rows (legacy pre-redesign workers/managers, identified by `pid IS NULL`) plus rows marked `state='gone'`. Pass `--state all` to show every row, or `--state gone` to inspect only gone rows:
   ```bash
-  workerctl sessions                    # current registered sessions only
-  workerctl sessions --include-legacy   # plus the Phase 1 backfill rows
+  workerctl sessions                    # active registered sessions only
+  workerctl sessions --state active     # explicit equivalent of the default
+  workerctl sessions --state gone       # gone sessions only
+  workerctl sessions --state all        # active, gone, and legacy rows
   ```
 - `tasks [--create NAME --goal G --summary S]` — List or create tasks.
 - `bind --task T --worker W --manager M` — Create the task binding.
@@ -331,7 +333,7 @@ Recent additions to streamline worker setup and observability:
 
 Three quality-of-life additions following Phase 6 dogfood:
 
-- **`sessions --include-legacy`** — by default, `workerctl sessions` now hides Phase 1 backfill rows (`pid IS NULL`). On a long-running deployment with 100+ legacy rows, this restored signal-to-noise without losing the ability to inspect old entries.
+- **`sessions --state`** — by default, `workerctl sessions` now hides Phase 1 backfill rows (`pid IS NULL`) and rows marked `state='gone'`. Use `--state all` to inspect every row, `--state gone` for completed/dead registrations, or `--state active` for the default view.
 - **`worker_alive` / `manager_alive` in cycle output** — every `workerctl cycle` JSON now includes these booleans, computed by `os.kill(pid, 0)` against the registered session pids. Surfaces silently-dead workers between cycles.
 - **`cycle --busy-wait-seconds N`** — exposes the pane-signal classifier's stuck-busy threshold (previously hard-coded at 90s) as a per-cycle flag.
 

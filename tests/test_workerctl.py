@@ -6949,6 +6949,121 @@ class StartWorkerTests(unittest.TestCase):
                 os.environ.pop("WORKERCTL_STATE_ROOT", None)
 
 
+class SessionLookupFallbackTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.old_state_root = os.environ.get("WORKERCTL_STATE_ROOT")
+        self.state_dir = Path(self.tmp.name) / "state"
+        self.state_dir.mkdir()
+        os.environ["WORKERCTL_STATE_ROOT"] = str(self.state_dir)
+        self.addCleanup(self._restore_state_root)
+
+        conn = worker_db.connect()
+        worker_db.initialize_database(conn)
+        worker_db.register_session(
+            conn,
+            name="session-worker",
+            role="worker",
+            codex_session_path="/tmp/rollout.jsonl",
+            codex_session_id="codex-session-id",
+            pid=12345,
+            cwd=str(ROOT),
+            tmux_session="custom-tmux",
+            tmux_pane_id="%7",
+        )
+        conn.commit()
+        conn.close()
+
+    def _restore_state_root(self):
+        if self.old_state_root is None:
+            os.environ.pop("WORKERCTL_STATE_ROOT", None)
+        else:
+            os.environ["WORKERCTL_STATE_ROOT"] = self.old_state_root
+
+    def _patch_tmux(self, output="terminal output"):
+        calls = {"has_session_targets": [], "capture_targets": []}
+        original_run = commands.run
+        original_capture_tmux_target = commands.capture_tmux_target
+
+        def fake_run(cmd, *args, **kwargs):
+            if cmd[:2] == ["tmux", "has-session"]:
+                calls["has_session_targets"].append(cmd[-1])
+                return subprocess.CompletedProcess(cmd, 0, "", "")
+            raise AssertionError(f"unexpected command: {cmd!r}")
+
+        def fake_capture_tmux_target(target, history_lines):
+            calls["capture_targets"].append((target, history_lines))
+            return output
+
+        commands.run = fake_run
+        commands.capture_tmux_target = fake_capture_tmux_target
+        self.addCleanup(setattr, commands, "run", original_run)
+        self.addCleanup(setattr, commands, "capture_tmux_target", original_capture_tmux_target)
+        return calls
+
+    def test_capture_uses_sessions_table_tmux_session_when_legacy_worker_missing(self):
+        calls = self._patch_tmux("session fallback output")
+        args = argparse.Namespace(name="session-worker", lines=42)
+
+        with contextlib.redirect_stdout(io.StringIO()) as stdout:
+            result = commands.command_capture(args)
+
+        self.assertEqual(result, 0)
+        self.assertEqual(stdout.getvalue().strip(), "session fallback output")
+        self.assertEqual(calls["has_session_targets"], ["custom-tmux"])
+        self.assertEqual(calls["capture_targets"], [("custom-tmux", 42)])
+        self.assertEqual(transcript_path("session-worker").read_text(), "session fallback output\n")
+
+    def test_status_resolves_sessions_table_tmux_session(self):
+        calls = self._patch_tmux()
+        args = argparse.Namespace(name="session-worker", refresh=False, lines=80)
+
+        with contextlib.redirect_stdout(io.StringIO()) as stdout:
+            result = commands.command_status(args)
+
+        self.assertEqual(result, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["name"], "session-worker")
+        self.assertEqual(payload["tmux_session"], "custom-tmux")
+        self.assertTrue(payload["running"])
+        self.assertEqual(calls["has_session_targets"], ["custom-tmux"])
+
+    def test_idle_check_resolves_sessions_table_tmux_session(self):
+        calls = self._patch_tmux("idle terminal output")
+        args = argparse.Namespace(
+            name="session-worker",
+            status_stale_seconds=300,
+            terminal_stale_seconds=300,
+            busy_wait_seconds=90,
+            refresh=False,
+            lines=33,
+        )
+
+        with contextlib.redirect_stdout(io.StringIO()) as stdout:
+            result = commands.command_idle_check(args)
+
+        self.assertEqual(result, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["name"], "session-worker")
+        self.assertEqual(payload["tmux_session"], "custom-tmux")
+        self.assertTrue(payload["running"])
+        self.assertEqual(calls["capture_targets"], [("custom-tmux", 33)])
+
+    def test_events_accepts_sessions_table_name_when_legacy_worker_missing(self):
+        append_event("session-worker", "note", {"message": "from sessions fallback"})
+        args = argparse.Namespace(name="session-worker", type=None, limit=None)
+
+        with contextlib.redirect_stdout(io.StringIO()) as stdout:
+            result = commands.command_events(args)
+
+        self.assertEqual(result, 0)
+        events = [json.loads(line) for line in stdout.getvalue().splitlines()]
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["type"], "note")
+        self.assertEqual(events[0]["message"], "from sessions fallback")
+
+
 class SessionsLegacyFilterTests(unittest.TestCase):
     def open_db(self, tmpdir):
         path = Path(tmpdir) / "workerctl.db"
@@ -6973,9 +7088,18 @@ class SessionsLegacyFilterTests(unittest.TestCase):
             """,
             (now,),
         )
+        conn.execute(
+            """
+            insert into sessions(id, name, role, identity_token, cwd,
+                                 registered_at, state, pid)
+            values ('gone-s', 'gone', 'worker', 'tok-gone', '/r',
+                    ?, 'gone', 34567)
+            """,
+            (now,),
+        )
         conn.commit()
 
-    def test_list_sessions_excludes_legacy_pid_null_by_default(self):
+    def test_list_sessions_excludes_legacy_and_gone_by_default(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             conn = self.open_db(tmpdir)
             self._seed_real_and_legacy(conn)
@@ -6983,8 +7107,9 @@ class SessionsLegacyFilterTests(unittest.TestCase):
             names = {s["name"] for s in sessions}
             self.assertIn("real", names)
             self.assertNotIn("legacy", names)
+            self.assertNotIn("gone", names)
 
-    def test_list_sessions_include_legacy_returns_both(self):
+    def test_list_sessions_include_legacy_still_excludes_gone(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             conn = self.open_db(tmpdir)
             self._seed_real_and_legacy(conn)
@@ -6992,6 +7117,32 @@ class SessionsLegacyFilterTests(unittest.TestCase):
             names = {s["name"] for s in sessions}
             self.assertIn("real", names)
             self.assertIn("legacy", names)
+            self.assertNotIn("gone", names)
+
+    def test_list_sessions_state_active_matches_default(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self._seed_real_and_legacy(conn)
+            default_sessions = worker_db.list_sessions(conn)
+            active_sessions = worker_db.list_sessions(conn, state="active")
+            self.assertEqual(
+                [s["name"] for s in active_sessions],
+                [s["name"] for s in default_sessions],
+            )
+
+    def test_list_sessions_state_gone_returns_only_gone(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self._seed_real_and_legacy(conn)
+            sessions = worker_db.list_sessions(conn, state="gone")
+            self.assertEqual({s["name"] for s in sessions}, {"gone"})
+
+    def test_list_sessions_state_all_bypasses_default_filters(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self._seed_real_and_legacy(conn)
+            sessions = worker_db.list_sessions(conn, state="all")
+            self.assertEqual({s["name"] for s in sessions}, {"real", "legacy", "gone"})
 
     def test_list_sessions_role_filter_combined_with_legacy_filter(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -7007,7 +7158,7 @@ class SessionsLegacyFilterTests(unittest.TestCase):
             workers = worker_db.list_sessions(conn, role="worker")
             self.assertEqual({s["name"] for s in workers}, {"real"})
 
-    def test_cli_sessions_default_excludes_legacy(self):
+    def test_cli_sessions_default_excludes_legacy_and_gone(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             state_dir = Path(tmpdir) / "state"
             state_dir.mkdir()
@@ -7029,6 +7180,7 @@ class SessionsLegacyFilterTests(unittest.TestCase):
             names = {r["name"] for r in rows}
             self.assertIn("real", names)
             self.assertNotIn("legacy", names)
+            self.assertNotIn("gone", names)
 
             proc = subprocess.run(
                 [sys.executable, "-m", "workerctl", "sessions", "--include-legacy"],
@@ -7039,6 +7191,31 @@ class SessionsLegacyFilterTests(unittest.TestCase):
             names = {r["name"] for r in rows}
             self.assertIn("real", names)
             self.assertIn("legacy", names)
+            self.assertNotIn("gone", names)
+
+            proc = subprocess.run(
+                [sys.executable, "-m", "workerctl", "sessions", "--state", "active"],
+                env=env, capture_output=True, text=True, cwd=str(ROOT),
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            rows = json.loads(proc.stdout)
+            self.assertEqual({r["name"] for r in rows}, {"real"})
+
+            proc = subprocess.run(
+                [sys.executable, "-m", "workerctl", "sessions", "--state", "gone"],
+                env=env, capture_output=True, text=True, cwd=str(ROOT),
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            rows = json.loads(proc.stdout)
+            self.assertEqual({r["name"] for r in rows}, {"gone"})
+
+            proc = subprocess.run(
+                [sys.executable, "-m", "workerctl", "sessions", "--state", "all"],
+                env=env, capture_output=True, text=True, cwd=str(ROOT),
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            rows = json.loads(proc.stdout)
+            self.assertEqual({r["name"] for r in rows}, {"real", "legacy", "gone"})
 
 
 if __name__ == "__main__":
