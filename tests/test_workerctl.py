@@ -6327,6 +6327,114 @@ class ReconcileTests(unittest.TestCase):
             types = [e["type"] for e in audit["events"]]
             self.assertIn("binding_marked_invalid_by_reconcile", types)
 
+    def test_reconcile_respects_stale_cycles_seconds_override(self):
+        """Threshold should be configurable: a 100-second-old cycle is NOT stuck
+        at the default (3600) but IS stuck at a 50-second threshold."""
+        from workerctl import commands as worker_commands
+        from datetime import datetime, timezone, timedelta
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            now_dt = datetime.now(timezone.utc)
+            old_ts = (now_dt - timedelta(seconds=100)).strftime("%Y-%m-%dT%H:%M:%SZ")
+            recent_ts = now_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+            # Set up a task with an active binding + manager_cycles row 100 seconds old.
+            conn.execute(
+                "insert into tasks(id, name, goal, state, created_at, updated_at) "
+                "values ('task-1', 'aging-task', 'g', 'managed', ?, ?)",
+                (recent_ts, recent_ts),
+            )
+            worker_db.register_session(
+                conn, name="w", role="worker",
+                codex_session_path="/a", codex_session_id="u-w", pid=1, cwd="/r",
+            )
+            worker_db.register_session(
+                conn, name="m", role="manager",
+                codex_session_path="/b", codex_session_id="u-m", pid=2, cwd="/r",
+            )
+            worker_db.bind_sessions(
+                conn, task_name="aging-task",
+                worker_session_name="w", manager_session_name="m",
+            )
+            conn.execute(
+                """
+                insert into manager_cycles(
+                  task_id, started_at, completed_at, state, status_json
+                )
+                values ('task-1', ?, ?, 'succeeded', ?)
+                """,
+                (old_ts, old_ts, json.dumps({"kind": "session_cycle", "task": "aging-task"})),
+            )
+            conn.commit()
+
+            # Default threshold (3600): NOT stuck.
+            report = worker_commands.collect_reconcile_report(conn)
+            stuck_names = [s["task_name"] for s in report["stuck_tasks"]]
+            self.assertNotIn("aging-task", stuck_names)
+
+            # 50s threshold: IS stuck.
+            report = worker_commands.collect_reconcile_report(
+                conn, stale_cycles_seconds=50,
+            )
+            stuck_names = [s["task_name"] for s in report["stuck_tasks"]]
+            self.assertIn("aging-task", stuck_names)
+
+    def test_cli_reconcile_threshold_flag(self):
+        """The --stale-cycles-seconds CLI flag should be plumbed through."""
+        env = os.environ.copy()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_dir = Path(tmpdir) / "state"
+            state_dir.mkdir()
+            env["WORKERCTL_STATE_ROOT"] = str(state_dir)
+
+            # Seed a task with old cycle (same setup as above, via direct DB).
+            db_path = state_dir / "workerctl.db"
+            conn = worker_db.connect(db_path)
+            worker_db.initialize_database(conn)
+            from datetime import datetime, timezone, timedelta
+            now_dt = datetime.now(timezone.utc)
+            old_ts = (now_dt - timedelta(seconds=100)).strftime("%Y-%m-%dT%H:%M:%SZ")
+            recent_ts = now_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+            conn.execute(
+                "insert into tasks(id, name, goal, state, created_at, updated_at) "
+                "values ('task-1', 'aging-task', 'g', 'managed', ?, ?)",
+                (recent_ts, recent_ts),
+            )
+            worker_db.register_session(
+                conn, name="w", role="worker",
+                codex_session_path="/a", codex_session_id="u-w", pid=1, cwd="/r",
+            )
+            worker_db.register_session(
+                conn, name="m", role="manager",
+                codex_session_path="/b", codex_session_id="u-m", pid=2, cwd="/r",
+            )
+            worker_db.bind_sessions(
+                conn, task_name="aging-task",
+                worker_session_name="w", manager_session_name="m",
+            )
+            conn.execute(
+                """
+                insert into manager_cycles(
+                  task_id, started_at, completed_at, state, status_json
+                )
+                values ('task-1', ?, ?, 'succeeded', ?)
+                """,
+                (old_ts, old_ts, json.dumps({"kind": "session_cycle", "task": "aging-task"})),
+            )
+            conn.commit()
+            conn.close()
+
+            # CLI with --stale-cycles-seconds 50 — should flag the 100s-old cycle.
+            proc = subprocess.run(
+                [sys.executable, "-m", "workerctl", "reconcile", "--stale-cycles-seconds", "50"],
+                env=env, capture_output=True, text=True, cwd=str(ROOT),
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            report = json.loads(proc.stdout)
+            stuck_names = [s["task_name"] for s in report["stuck_tasks"]]
+            self.assertIn("aging-task", stuck_names)
+
 
 class CaptureErrorVisibilityTests(unittest.TestCase):
     def _setup_legacy_worker(self, name):

@@ -2175,7 +2175,7 @@ def _pid_is_alive(pid: int) -> bool:
     return True
 
 
-def collect_reconcile_report(conn: "sqlite3.Connection") -> dict:
+def collect_reconcile_report(conn: "sqlite3.Connection", stale_cycles_seconds: float = 3600.0) -> dict:
     """Build a read-only reconciliation report.
 
     Returns a dict with keys:
@@ -2186,8 +2186,9 @@ def collect_reconcile_report(conn: "sqlite3.Connection") -> dict:
         - active or ending bindings whose worker_session_id or manager_session_id
         points at a session with `state='gone'`.
       - `stuck_tasks`: [{task_name, binding_id, last_cycle_at, age_seconds}, ...]
-        - active-bound tasks whose newest manager_cycles row is older than 1 hour.
-        Tasks with no cycles yet are skipped (they may be freshly bound).
+        - active-bound tasks whose newest manager_cycles row is older than
+        stale_cycles_seconds (default 3600). Tasks with no cycles yet are skipped
+        (they may be freshly bound).
     """
     from workerctl import db as worker_db
 
@@ -2258,7 +2259,7 @@ def collect_reconcile_report(conn: "sqlite3.Connection") -> dict:
             ts = ts[:-1] + "+00:00"
         last_dt = datetime.fromisoformat(ts).astimezone(timezone.utc)
         age = (now_dt - last_dt).total_seconds()
-        if age > 3600:
+        if age > stale_cycles_seconds:
             stuck_tasks.append({
                 "task_name": row["task_name"],
                 "binding_id": row["binding_id"],
@@ -2274,7 +2275,7 @@ def collect_reconcile_report(conn: "sqlite3.Connection") -> dict:
     }
 
 
-def apply_reconcile(conn: "sqlite3.Connection") -> dict:
+def apply_reconcile(conn: "sqlite3.Connection", stale_cycles_seconds: float = 3600.0) -> dict:
     """Apply the reconcile changes and return the report with an `applied` key.
 
     Mutations:
@@ -2289,7 +2290,7 @@ def apply_reconcile(conn: "sqlite3.Connection") -> dict:
     from workerctl import db as worker_db
     from workerctl.core import now_iso
 
-    report = collect_reconcile_report(conn)
+    report = collect_reconcile_report(conn, stale_cycles_seconds=stale_cycles_seconds)
     now = now_iso()
     applied = {"sessions_marked_gone": [], "bindings_marked_invalid": []}
 
@@ -2305,7 +2306,7 @@ def apply_reconcile(conn: "sqlite3.Connection") -> dict:
         )
 
     # Re-collect dangling after session updates so newly-dangling rows are included.
-    report_post = collect_reconcile_report(conn)
+    report_post = collect_reconcile_report(conn, stale_cycles_seconds=stale_cycles_seconds)
     for b in report_post["dangling_bindings"]:
         conn.execute(
             "update bindings set state='invalid', ended_at=? where id=?",
@@ -2342,9 +2343,9 @@ def command_reconcile(args: argparse.Namespace) -> int:
     worker_db.initialize_database(conn)
     try:
         if args.apply:
-            report = apply_reconcile(conn)
+            report = apply_reconcile(conn, stale_cycles_seconds=args.stale_cycles_seconds)
         else:
-            report = collect_reconcile_report(conn)
+            report = collect_reconcile_report(conn, stale_cycles_seconds=args.stale_cycles_seconds)
     finally:
         conn.close()
     print(json.dumps(report, indent=2, sort_keys=True, default=str))

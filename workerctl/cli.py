@@ -425,6 +425,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     reconcile.add_argument("--apply", action="store_true",
                           help="Mark dead-pid sessions gone and dangling bindings invalid.")
+    reconcile.add_argument(
+        "--stale-cycles-seconds", type=float, default=3600.0,
+        help="Seconds without a new manager_cycles row before a task is reported stuck (default 3600).",
+    )
     reconcile.set_defaults(func=command_reconcile)
 
     transcript_capture = subparsers.add_parser("transcript-capture", help="Capture deduplicated full transcript segments for a task.")
