@@ -123,6 +123,24 @@ If `lsof` discovery fails (e.g. the codex session was started ephemerally),
 pass the rollout path explicitly with `--codex-session
 ~/.codex/sessions/.../rollout-...-<uuid>.jsonl`.
 
+To register a manager session that's already running:
+
+```bash
+# If the codex is already running and you know its pid:
+workerctl register-manager --name my-mgr --pid 28975
+
+# register-manager runs `lsof -p <pid>` to find the rollout JSONL.
+# If the codex hasn't written its rollout yet (no input typed),
+# you'll get a hint asking you to type something in the codex prompt and retry.
+
+# Or pass --codex-session explicitly to bypass the lsof probe:
+workerctl register-manager --name my-mgr --pid 28975 \
+    --codex-session /path/to/rollout.jsonl
+```
+
+Note: `lsof` is the canonical pid→rollout lookup. `find -newermt` is unreliable because
+filesystem mtime resolution and parsing of "X minutes ago" varies — `lsof` reads the open fd directly.
+
 For low-risk verification without a real task, `workerctl start-test
 <name>` creates a worker, asks it to update only its ignored
 `status.json`, and leaves the tmux session attached:

@@ -11,6 +11,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from workerctl import classify
 from workerctl import commands
@@ -7468,6 +7469,105 @@ class SessionsLegacyFilterTests(unittest.TestCase):
             self.assertEqual(proc.returncode, 0, proc.stderr)
             rows = json.loads(proc.stdout)
             self.assertEqual({r["name"] for r in rows}, {"real", "legacy", "gone"})
+
+
+class RegisterManagerLsofTests(unittest.TestCase):
+    def _fake_lsof_output_with_rollout(self, path: str) -> str:
+        return (
+            "codex 28975 user  10u  REG  1,17  100  401  /private/var/something\n"
+            f"codex 28975 user  34w  REG  1,17  4560872  41566360 {path}\n"
+            "codex 28975 user  21u  KQUEUE                       count=0\n"
+        )
+
+    def _fake_lsof_output_without_rollout(self) -> str:
+        return (
+            "codex 28975 user  10u  REG  1,17  100  401  /private/var/something\n"
+            "codex 28975 user  21u  KQUEUE                       count=0\n"
+        )
+
+    def test_register_manager_uses_lsof_to_find_rollout(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            conn = worker_db.connect(db_path)
+            worker_db.initialize_database(conn)
+            conn.close()
+
+            # Create a real rollout file in a path that matches the pattern (.codex/sessions/...)
+            rollout_dir = Path(tmpdir) / ".codex" / "sessions" / "2026" / "05" / "13"
+            rollout_dir.mkdir(parents=True, exist_ok=True)
+            rollout_path = rollout_dir / "rollout-test.jsonl"
+            rollout_path.write_text(json.dumps({"type": "session_meta", "payload": {"id": "test-id"}}) + "\n")
+
+            fake_proc = subprocess.CompletedProcess(
+                args=[], returncode=0,
+                stdout=self._fake_lsof_output_with_rollout(str(rollout_path)),
+                stderr="",
+            )
+            # Patch subprocess.run directly in the commands module
+            with mock.patch("subprocess.run", return_value=fake_proc):
+                args = argparse.Namespace(
+                    name="lsof-mgr", pid=28975,
+                    codex_session=None, cwd=tmpdir, tmux_session=None,
+                    path=str(db_path),
+                )
+                # Capture stdout since the function prints the result
+                stdout_capture = io.StringIO()
+                with contextlib.redirect_stdout(stdout_capture):
+                    rc = commands.command_register_manager(args)
+                self.assertEqual(rc, 0)
+                result = json.loads(stdout_capture.getvalue())
+                self.assertEqual(result["role"], "manager")
+                self.assertEqual(result["codex_session_path"], str(rollout_path))
+                self.assertEqual(result["pid"], 28975)
+
+    def test_register_manager_fails_with_hint_when_no_jsonl_found(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            conn = worker_db.connect(db_path)
+            worker_db.initialize_database(conn)
+            conn.close()
+
+            fake_proc = subprocess.CompletedProcess(
+                args=[], returncode=0,
+                stdout=self._fake_lsof_output_without_rollout(),
+                stderr="",
+            )
+            with mock.patch("subprocess.run", return_value=fake_proc):
+                args = argparse.Namespace(
+                    name="lsof-mgr", pid=28975,
+                    codex_session=None, cwd=tmpdir, tmux_session=None,
+                    path=str(db_path),
+                )
+                with self.assertRaises(WorkerError) as ctx:
+                    commands.command_register_manager(args)
+            # The error message should hint at the warm-up dance.
+            self.assertIn("rollout", str(ctx.exception).lower())
+
+    def test_register_manager_still_works_with_explicit_codex_session(self):
+        # When --codex-session is passed, lsof is bypassed.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            conn = worker_db.connect(db_path)
+            worker_db.initialize_database(conn)
+            conn.close()
+
+            rollout = Path(tmpdir) / "explicit.jsonl"
+            rollout.write_text(json.dumps({"type": "session_meta", "payload": {"id": "x"}}) + "\n")
+
+            args = argparse.Namespace(
+                name="explicit-mgr", pid=28975,
+                codex_session=str(rollout), cwd=tmpdir, tmux_session=None,
+                path=str(db_path),
+            )
+            # Should not call lsof at all.
+            with mock.patch("subprocess.run") as mocked:
+                stdout_capture = io.StringIO()
+                with contextlib.redirect_stdout(stdout_capture):
+                    rc = commands.command_register_manager(args)
+                mocked.assert_not_called()
+            self.assertEqual(rc, 0)
+            result = json.loads(stdout_capture.getvalue())
+            self.assertEqual(result["codex_session_path"], str(rollout))
 
 
 if __name__ == "__main__":

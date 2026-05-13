@@ -4,7 +4,9 @@ import argparse
 import hashlib
 import os
 import json
+import re
 import shutil
+import subprocess
 import sys
 import time
 import uuid
@@ -1729,12 +1731,48 @@ def command_stop(args: argparse.Namespace) -> int:
     return 0
 
 
+_CODEX_ROLLOUT_PATTERN = re.compile(r"(/[^ \t]+\.codex/sessions/[^ \t]+\.jsonl)")
+
+
+def _lsof_codex_rollout(pid: int) -> str | None:
+    """Run lsof -p <pid> and extract the rollout JSONL path, if found.
+
+    Returns the path string or None if not found or lsof fails.
+    """
+    try:
+        proc = subprocess.run(
+            ["lsof", "-p", str(pid)],
+            capture_output=True, text=True, check=False, timeout=5.0,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return None
+    if proc.returncode != 0:
+        # lsof returns non-zero if some fds can't be inspected — but stdout may still be useful.
+        pass
+    for line in proc.stdout.splitlines():
+        m = _CODEX_ROLLOUT_PATTERN.search(line)
+        if m:
+            return m.group(1)
+    return None
+
+
 def _register_session_from_args(args: argparse.Namespace, *, role: str) -> dict:
     from workerctl import codex_session as cs
     from workerctl import db as worker_db
 
-    if args.codex_session:
-        rollout_path = Path(args.codex_session)
+    codex_session = args.codex_session
+    if codex_session is None and args.pid is not None:
+        # When --codex-session is omitted but --pid is given, use lsof to find the rollout.
+        codex_session = _lsof_codex_rollout(args.pid)
+        if codex_session is None:
+            raise WorkerError(
+                f"could not find a codex rollout JSONL for pid {args.pid} via lsof. "
+                "The codex session may not have written its rollout yet — type any "
+                "input into the codex prompt and retry, or pass --codex-session explicitly."
+            )
+
+    if codex_session:
+        rollout_path = Path(codex_session)
         meta = cs.read_session_meta(rollout_path)
         codex_session_path = str(rollout_path)
         codex_session_id = meta["id"]
@@ -1742,12 +1780,6 @@ def _register_session_from_args(args: argparse.Namespace, *, role: str) -> dict:
         pid = args.pid
         if pid is None:
             raise WorkerError("--pid is required when --codex-session is supplied")
-    elif args.pid is not None:
-        info = cs.discover_session(pid=args.pid)
-        codex_session_path = info["codex_session_path"]
-        codex_session_id = info["codex_session_id"]
-        cwd = args.cwd or info["cwd"]
-        pid = args.pid
     else:
         raise WorkerError("must supply --pid or --codex-session")
 
