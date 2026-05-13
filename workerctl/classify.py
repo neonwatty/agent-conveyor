@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 
+RECENT_EVENT_QUIET_THRESHOLD = 10
 BUSY_WAIT_PATTERNS = [
     (
         "mcp_startup",
@@ -58,7 +59,7 @@ def classify_startup_output(output: str) -> tuple[str, str]:
     return ("starting", "Codex has not reached a recognized startup state")
 
 
-def classify_busy_wait(output: str, status_age: int | None, busy_wait_seconds: int) -> dict[str, Any] | None:
+def classify_busy_wait(output: str, status_age: int | None, busy_wait_seconds: int, recent_event_count: int = 0) -> dict[str, Any] | None:
     if status_age is not None and status_age < busy_wait_seconds:
         return None
     for pattern_id, needle, reason, recommended_action in BUSY_WAIT_PATTERNS:
@@ -69,6 +70,9 @@ def classify_busy_wait(output: str, status_age: int | None, busy_wait_seconds: i
                 "recommended_action": recommended_action,
             }
     if "esc to interrupt" in output.lower() and status_age is not None and status_age >= busy_wait_seconds:
+        # Suppress long_running_interruptible when the worker is actively emitting events.
+        if recent_event_count >= RECENT_EVENT_QUIET_THRESHOLD:
+            return None
         return {
             "pattern": "long_running_interruptible",
             "reason": "terminal shows an interruptible Codex operation while status.json is stale",

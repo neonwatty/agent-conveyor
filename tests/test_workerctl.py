@@ -657,6 +657,27 @@ class ClassifierTests(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertEqual(result["pattern"], "plan_prompt")
 
+    def test_classifier_suppresses_long_running_interruptible_with_recent_events(self):
+        # status_age high (would normally trigger long_running_interruptible),
+        # but recent_event_count is also high — worker is healthy, suppress flag.
+        result = classify.classify_busy_wait(
+            "running tests... esc to interrupt",
+            status_age=300,
+            busy_wait_seconds=60,
+            recent_event_count=133,
+        )
+        # With high recent_event_count, the pattern should be suppressed (None).
+        self.assertIsNone(result)
+
+    def test_classifier_still_flags_long_running_interruptible_when_event_count_low(self):
+        result = classify.classify_busy_wait(
+            "running tests... esc to interrupt",
+            status_age=300,
+            busy_wait_seconds=60,
+            recent_event_count=2,
+        )
+        self.assertEqual(result.get("pattern"), "long_running_interruptible")
+
 
 class CliTests(unittest.TestCase):
     def run_workerctl(self, *args, via_shim=False):
@@ -5683,7 +5704,7 @@ class SuperviseCycleTests(unittest.TestCase):
 
         captured = {}
 
-        def fake_pane_signal(conn, *, session_id, busy_wait_seconds=None, now=None):
+        def fake_pane_signal(conn, *, session_id, busy_wait_seconds=None, now=None, recent_event_count=0, **kwargs):
             if busy_wait_seconds is None:
                 busy_wait_seconds = shadow_state.DEFAULT_BUSY_WAIT_SECONDS
             captured["busy_wait_seconds"] = busy_wait_seconds
@@ -5723,7 +5744,7 @@ class SuperviseCycleTests(unittest.TestCase):
 
         captured = {}
 
-        def fake_pane_signal(conn, *, session_id, busy_wait_seconds=None, now=None):
+        def fake_pane_signal(conn, *, session_id, busy_wait_seconds=None, now=None, recent_event_count=0, **kwargs):
             if busy_wait_seconds is None:
                 busy_wait_seconds = shadow_state.DEFAULT_BUSY_WAIT_SECONDS
             captured["busy_wait_seconds"] = busy_wait_seconds
@@ -6188,6 +6209,43 @@ class ShadowStateTests(unittest.TestCase):
             finally:
                 worker_tmux.capture_tmux_target = original
             self.assertFalse(result["degraded"])
+
+    def test_pane_signal_for_session_forwards_recent_event_count(self):
+        from workerctl import shadow_state
+        from workerctl import tmux as worker_tmux
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            session_id = self._register_with_tmux(conn)
+
+            # Insert a state-bearing event 300 seconds before `now` to trigger
+            # the long_running_interruptible condition on stale status.
+            worker_db.insert_codex_event(
+                conn, session_id=session_id,
+                timestamp="2026-05-11T14:30:00Z",
+                event_type="event_msg", subtype="task_started",
+                payload={}, byte_offset=0,
+            )
+
+            original = worker_tmux.capture_tmux_target
+            worker_tmux.capture_tmux_target = (
+                lambda target, lines=100: "running tests... esc to interrupt\n"
+            )
+            try:
+                # With high recent_event_count, long_running_interruptible should be suppressed.
+                result = shadow_state.pane_signal_for_session(
+                    conn,
+                    session_id=session_id,
+                    busy_wait_seconds=60,
+                    now="2026-05-11T14:35:00Z",  # 300s after the event
+                    recent_event_count=133,
+                )
+            finally:
+                worker_tmux.capture_tmux_target = original
+
+            # With recent_event_count=133, the pattern should be suppressed (None).
+            self.assertEqual(result["captured"], True)
+            self.assertIsNone(result["notable_pattern"])
 
 
 class DivergencesTests(unittest.TestCase):

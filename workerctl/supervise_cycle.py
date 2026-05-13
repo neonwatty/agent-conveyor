@@ -95,6 +95,7 @@ def run_cycle(
                 session_id=binding["worker_session_id"],
                 busy_wait_seconds=busy_wait_seconds,
                 now=started_at,
+                recent_event_count=ingest_result.get("new_events", 0),
             )
         except (sqlite3.Error, WorkerError) as exc:  # pragma: no cover — defensive belt-and-suspenders
             pane_signal = {

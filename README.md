@@ -343,6 +343,10 @@ Three quality-of-life additions following Phase 6 dogfood:
 - **`worker_alive` / `manager_alive` in cycle output** — every `workerctl cycle` JSON now includes these booleans, computed by `os.kill(pid, 0)` against the registered session pids. Surfaces silently-dead workers between cycles.
 - **`cycle --busy-wait-seconds N`** — exposes the pane-signal classifier's stuck-busy threshold (previously hard-coded at 90s) as a per-cycle flag.
 
+## Phase 8 classifier improvements (2026-05-12)
+
+- **Recent event suppression for `long_running_interruptible`** — the classifier now weighs `recent_event_count` (from `ingest.new_events`) alongside `status_age_seconds`. When a worker is actively emitting events (>= 10/cycle), the `long_running_interruptible` flag is suppressed—the worker is healthy despite stale status.json. This stops false positives on long-running tools (e.g. test suites, large file reads) that stay busy but quiet on status updates.
+
 ## Schema
 
 SQLite database at `.codex-workers/workerctl.db`. Key tables:
