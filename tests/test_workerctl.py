@@ -11,6 +11,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from workerctl import classify
 from workerctl import commands
@@ -656,6 +657,27 @@ class ClassifierTests(unittest.TestCase):
 
         self.assertIsNotNone(result)
         self.assertEqual(result["pattern"], "plan_prompt")
+
+    def test_classifier_suppresses_long_running_interruptible_with_recent_events(self):
+        # status_age high (would normally trigger long_running_interruptible),
+        # but recent_event_count is also high — worker is healthy, suppress flag.
+        result = classify.classify_busy_wait(
+            "running tests... esc to interrupt",
+            status_age=300,
+            busy_wait_seconds=60,
+            recent_event_count=133,
+        )
+        # With high recent_event_count, the pattern should be suppressed (None).
+        self.assertIsNone(result)
+
+    def test_classifier_still_flags_long_running_interruptible_when_event_count_low(self):
+        result = classify.classify_busy_wait(
+            "running tests... esc to interrupt",
+            status_age=300,
+            busy_wait_seconds=60,
+            recent_event_count=2,
+        )
+        self.assertEqual(result.get("pattern"), "long_running_interruptible")
 
 
 class CliTests(unittest.TestCase):
@@ -5683,7 +5705,7 @@ class SuperviseCycleTests(unittest.TestCase):
 
         captured = {}
 
-        def fake_pane_signal(conn, *, session_id, busy_wait_seconds=None, now=None):
+        def fake_pane_signal(conn, *, session_id, busy_wait_seconds=None, now=None, recent_event_count=0, **kwargs):
             if busy_wait_seconds is None:
                 busy_wait_seconds = shadow_state.DEFAULT_BUSY_WAIT_SECONDS
             captured["busy_wait_seconds"] = busy_wait_seconds
@@ -5723,7 +5745,7 @@ class SuperviseCycleTests(unittest.TestCase):
 
         captured = {}
 
-        def fake_pane_signal(conn, *, session_id, busy_wait_seconds=None, now=None):
+        def fake_pane_signal(conn, *, session_id, busy_wait_seconds=None, now=None, recent_event_count=0, **kwargs):
             if busy_wait_seconds is None:
                 busy_wait_seconds = shadow_state.DEFAULT_BUSY_WAIT_SECONDS
             captured["busy_wait_seconds"] = busy_wait_seconds
@@ -5755,6 +5777,66 @@ class SuperviseCycleTests(unittest.TestCase):
                 shadow_state.pane_signal_for_session = original
 
         self.assertEqual(captured["busy_wait_seconds"], 37)
+
+    def test_cycle_includes_task_completed_true_after_task_complete_event(self):
+        """Test: task_completed and last_event_subtype are set when task_complete event exists."""
+        from workerctl import supervise_cycle
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self._setup_bound_task(conn, tmpdir, [
+                {"type": "session_meta", "payload": {"id": "u-w", "cwd": "/r"}},
+                {"timestamp": "2026-05-11T14:32:11Z",
+                 "type": "event_msg",
+                 "payload": {"type": "task_started", "turn_id": "t1"}},
+                {"timestamp": "2026-05-11T14:32:30Z",
+                 "type": "event_msg",
+                 "payload": {"type": "task_complete"}},
+            ])
+            result = supervise_cycle.run_cycle(
+                conn, task_name="t", now="2026-05-11T14:33:00Z",
+            )
+            self.assertEqual(result["last_event_subtype"], "task_complete")
+            self.assertTrue(result["task_completed"])
+
+    def test_cycle_includes_task_completed_false_when_no_complete_event(self):
+        """Test: task_completed is false when latest event is not task_complete."""
+        from workerctl import supervise_cycle
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self._setup_bound_task(conn, tmpdir, [
+                {"type": "session_meta", "payload": {"id": "u-w", "cwd": "/r"}},
+                {"timestamp": "2026-05-11T14:32:11Z",
+                 "type": "event_msg",
+                 "payload": {"type": "task_started", "turn_id": "t1"}},
+            ])
+            result = supervise_cycle.run_cycle(
+                conn, task_name="t", now="2026-05-11T14:33:00Z",
+            )
+            self.assertEqual(result["last_event_subtype"], "task_started")
+            self.assertFalse(result["task_completed"])
+
+    def test_cycle_task_completed_false_when_latest_event_is_not_task_complete(self):
+        """Test: task_completed is false when latest event is not task_complete."""
+        from workerctl import supervise_cycle
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self._setup_bound_task(conn, tmpdir, [
+                {"type": "session_meta", "payload": {"id": "u-w", "cwd": "/r"}},
+                {"timestamp": "2026-05-11T14:32:11Z",
+                 "type": "event_msg",
+                 "payload": {"type": "task_started", "turn_id": "t1"}},
+                {"timestamp": "2026-05-11T14:32:15Z",
+                 "type": "event_msg",
+                 "payload": {"type": "token_count", "count": 100}},
+            ])
+            result = supervise_cycle.run_cycle(
+                conn, task_name="t", now="2026-05-11T14:33:00Z",
+            )
+            self.assertEqual(result["last_event_subtype"], "token_count")
+            self.assertFalse(result["task_completed"])
 
 
 class ReadEventsStatsTests(unittest.TestCase):
@@ -6128,6 +6210,43 @@ class ShadowStateTests(unittest.TestCase):
             finally:
                 worker_tmux.capture_tmux_target = original
             self.assertFalse(result["degraded"])
+
+    def test_pane_signal_for_session_forwards_recent_event_count(self):
+        from workerctl import shadow_state
+        from workerctl import tmux as worker_tmux
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            session_id = self._register_with_tmux(conn)
+
+            # Insert a state-bearing event 300 seconds before `now` to trigger
+            # the long_running_interruptible condition on stale status.
+            worker_db.insert_codex_event(
+                conn, session_id=session_id,
+                timestamp="2026-05-11T14:30:00Z",
+                event_type="event_msg", subtype="task_started",
+                payload={}, byte_offset=0,
+            )
+
+            original = worker_tmux.capture_tmux_target
+            worker_tmux.capture_tmux_target = (
+                lambda target, lines=100: "running tests... esc to interrupt\n"
+            )
+            try:
+                # With high recent_event_count, long_running_interruptible should be suppressed.
+                result = shadow_state.pane_signal_for_session(
+                    conn,
+                    session_id=session_id,
+                    busy_wait_seconds=60,
+                    now="2026-05-11T14:35:00Z",  # 300s after the event
+                    recent_event_count=133,
+                )
+            finally:
+                worker_tmux.capture_tmux_target = original
+
+            # With recent_event_count=133, the pattern should be suppressed (None).
+            self.assertEqual(result["captured"], True)
+            self.assertIsNone(result["notable_pattern"])
 
 
 class DivergencesTests(unittest.TestCase):
@@ -6949,6 +7068,140 @@ class StartWorkerTests(unittest.TestCase):
                 os.environ.pop("WORKERCTL_STATE_ROOT", None)
 
 
+class StartManagerTests(unittest.TestCase):
+    """Tests for `workerctl start-manager` — the spawn-and-register convenience for managers."""
+
+    def _build_fake_rollout(self, tmpdir, name="rollout"):
+        rollout = Path(tmpdir) / f"{name}.jsonl"
+        rollout.write_text(
+            json.dumps({
+                "type": "session_meta",
+                "payload": {
+                    "id": f"cuid-{name}",
+                    "cwd": "/repo",
+                    "originator": "codex-tui",
+                },
+            }) + "\n"
+        )
+        return rollout
+
+    def test_start_manager_spawns_tmux_and_registers(self):
+        """Happy path: tmux spawn succeeds, pid + rollout are discovered,
+        a session row is created with role="manager"."""
+        from workerctl import commands as worker_commands
+        from workerctl import tmux as worker_tmux
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_dir = Path(tmpdir) / "state"
+            state_dir.mkdir()
+            os.environ["WORKERCTL_STATE_ROOT"] = str(state_dir)
+            try:
+                rollout = self._build_fake_rollout(tmpdir, "fake")
+
+                spawned: list[list[str]] = []
+
+                def fake_run(cmd, check=True, input_text=None):
+                    spawned.append(list(cmd))
+                    class R:
+                        returncode = 0
+                        stdout = ""
+                        stderr = ""
+                    return R()
+
+                def fake_session_exists(name):
+                    return False
+
+                def fake_discover(tmux_session, *, timeout_seconds=15, poll_interval=0.5):
+                    return {
+                        "native_pid": 88888,
+                        "codex_session_path": str(rollout),
+                        "codex_session_id": "cuid-fake",
+                        "cwd": "/repo",
+                        "originator": "codex-tui",
+                        "cli_version": "",
+                    }
+
+                orig_run = worker_tmux.run
+                orig_session_exists = worker_tmux.session_exists
+                orig_discover = worker_commands._discover_codex_session_in_tmux
+                worker_tmux.run = fake_run
+                worker_tmux.session_exists = fake_session_exists
+                worker_commands._discover_codex_session_in_tmux = fake_discover
+                try:
+                    args = argparse.Namespace(
+                        name="auto-mgr", cwd="/repo",
+                        sandbox="danger-full-access", ask_for_approval="never",
+                        timeout_seconds=15,
+                    )
+                    captured_stdout = io.StringIO()
+                    with contextlib.redirect_stdout(captured_stdout):
+                        exit_code = worker_commands.command_start_manager(args)
+                    self.assertEqual(exit_code, 0)
+
+                    # Confirm tmux was spawned.
+                    tmux_cmds = [c for c in spawned if len(c) > 1 and c[1] == "new-session"]
+                    self.assertEqual(len(tmux_cmds), 1)
+                    self.assertIn("codex-auto-mgr", tmux_cmds[0])
+
+                    # Confirm a session was registered with role="manager".
+                    conn = worker_db.connect(state_dir / "workerctl.db")
+                    self.addCleanup(conn.close)
+                    row = conn.execute(
+                        "select * from sessions where name='auto-mgr'"
+                    ).fetchone()
+                    self.assertIsNotNone(row)
+                    self.assertEqual(row["role"], "manager")
+                    self.assertEqual(row["pid"], 88888)
+                    self.assertEqual(row["codex_session_id"], "cuid-fake")
+                    self.assertEqual(row["tmux_session"], "codex-auto-mgr")
+                finally:
+                    worker_tmux.run = orig_run
+                    worker_tmux.session_exists = orig_session_exists
+                    worker_commands._discover_codex_session_in_tmux = orig_discover
+            finally:
+                os.environ.pop("WORKERCTL_STATE_ROOT", None)
+
+    def test_start_manager_refuses_if_session_name_already_registered(self):
+        """If a session with the given name already exists in the DB, refuse cleanly."""
+        from workerctl import commands as worker_commands
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_dir = Path(tmpdir) / "state"
+            state_dir.mkdir()
+            os.environ["WORKERCTL_STATE_ROOT"] = str(state_dir)
+            try:
+                conn = worker_db.connect()
+                worker_db.initialize_database(conn)
+                worker_db.register_session(
+                    conn, name="taken", role="manager",
+                    codex_session_path="/a", codex_session_id="u",
+                    pid=1, cwd="/repo",
+                )
+                conn.commit()
+                conn.close()
+
+                args = argparse.Namespace(
+                    name="taken", cwd="/repo",
+                    sandbox="danger-full-access", ask_for_approval="never",
+                    timeout_seconds=15,
+                )
+                with self.assertRaises(WorkerError):
+                    worker_commands.command_start_manager(args)
+            finally:
+                os.environ.pop("WORKERCTL_STATE_ROOT", None)
+
+    def test_start_manager_subparser_exists(self):
+        """Verify the start-manager subparser exists and has the right flags."""
+        import subprocess
+        proc = subprocess.run(
+            [sys.executable, "-m", "workerctl", "start-manager", "--help"],
+            capture_output=True, text=True, cwd=str(ROOT),
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("--name", proc.stdout)
+        self.assertNotIn("--task", proc.stdout)  # managers don't take a task prompt
+
+
 class SessionLookupFallbackTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -7216,6 +7469,105 @@ class SessionsLegacyFilterTests(unittest.TestCase):
             self.assertEqual(proc.returncode, 0, proc.stderr)
             rows = json.loads(proc.stdout)
             self.assertEqual({r["name"] for r in rows}, {"real", "legacy", "gone"})
+
+
+class RegisterManagerLsofTests(unittest.TestCase):
+    def _fake_lsof_output_with_rollout(self, path: str) -> str:
+        return (
+            "codex 28975 user  10u  REG  1,17  100  401  /private/var/something\n"
+            f"codex 28975 user  34w  REG  1,17  4560872  41566360 {path}\n"
+            "codex 28975 user  21u  KQUEUE                       count=0\n"
+        )
+
+    def _fake_lsof_output_without_rollout(self) -> str:
+        return (
+            "codex 28975 user  10u  REG  1,17  100  401  /private/var/something\n"
+            "codex 28975 user  21u  KQUEUE                       count=0\n"
+        )
+
+    def test_register_manager_uses_lsof_to_find_rollout(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            conn = worker_db.connect(db_path)
+            worker_db.initialize_database(conn)
+            conn.close()
+
+            # Create a real rollout file in a path that matches the pattern (.codex/sessions/...)
+            rollout_dir = Path(tmpdir) / ".codex" / "sessions" / "2026" / "05" / "13"
+            rollout_dir.mkdir(parents=True, exist_ok=True)
+            rollout_path = rollout_dir / "rollout-test.jsonl"
+            rollout_path.write_text(json.dumps({"type": "session_meta", "payload": {"id": "test-id"}}) + "\n")
+
+            fake_proc = subprocess.CompletedProcess(
+                args=[], returncode=0,
+                stdout=self._fake_lsof_output_with_rollout(str(rollout_path)),
+                stderr="",
+            )
+            # Patch subprocess.run directly in the commands module
+            with mock.patch("subprocess.run", return_value=fake_proc):
+                args = argparse.Namespace(
+                    name="lsof-mgr", pid=28975,
+                    codex_session=None, cwd=tmpdir, tmux_session=None,
+                    path=str(db_path),
+                )
+                # Capture stdout since the function prints the result
+                stdout_capture = io.StringIO()
+                with contextlib.redirect_stdout(stdout_capture):
+                    rc = commands.command_register_manager(args)
+                self.assertEqual(rc, 0)
+                result = json.loads(stdout_capture.getvalue())
+                self.assertEqual(result["role"], "manager")
+                self.assertEqual(result["codex_session_path"], str(rollout_path))
+                self.assertEqual(result["pid"], 28975)
+
+    def test_register_manager_fails_with_hint_when_no_jsonl_found(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            conn = worker_db.connect(db_path)
+            worker_db.initialize_database(conn)
+            conn.close()
+
+            fake_proc = subprocess.CompletedProcess(
+                args=[], returncode=0,
+                stdout=self._fake_lsof_output_without_rollout(),
+                stderr="",
+            )
+            with mock.patch("subprocess.run", return_value=fake_proc):
+                args = argparse.Namespace(
+                    name="lsof-mgr", pid=28975,
+                    codex_session=None, cwd=tmpdir, tmux_session=None,
+                    path=str(db_path),
+                )
+                with self.assertRaises(WorkerError) as ctx:
+                    commands.command_register_manager(args)
+            # The error message should hint at the warm-up dance.
+            self.assertIn("rollout", str(ctx.exception).lower())
+
+    def test_register_manager_still_works_with_explicit_codex_session(self):
+        # When --codex-session is passed, lsof is bypassed.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            conn = worker_db.connect(db_path)
+            worker_db.initialize_database(conn)
+            conn.close()
+
+            rollout = Path(tmpdir) / "explicit.jsonl"
+            rollout.write_text(json.dumps({"type": "session_meta", "payload": {"id": "x"}}) + "\n")
+
+            args = argparse.Namespace(
+                name="explicit-mgr", pid=28975,
+                codex_session=str(rollout), cwd=tmpdir, tmux_session=None,
+                path=str(db_path),
+            )
+            # Should not call lsof at all.
+            with mock.patch("subprocess.run") as mocked:
+                stdout_capture = io.StringIO()
+                with contextlib.redirect_stdout(stdout_capture):
+                    rc = commands.command_register_manager(args)
+                mocked.assert_not_called()
+            self.assertEqual(rc, 0)
+            result = json.loads(stdout_capture.getvalue())
+            self.assertEqual(result["codex_session_path"], str(rollout))
 
 
 if __name__ == "__main__":

@@ -67,6 +67,7 @@ def pane_signal_for_session(
     session_id: str,
     busy_wait_seconds: int = DEFAULT_BUSY_WAIT_SECONDS,
     now: str | None = None,
+    recent_event_count: int = 0,
 ) -> PaneSignal:
     """Capture the session's tmux pane and run `classify_busy_wait` on the text.
 
@@ -124,7 +125,7 @@ def pane_signal_for_session(
         # pane signal. Surface it in `reason`, mark `degraded=True`, and proceed
         # without a status age.
         classifier = worker_classify.classify_busy_wait(
-            output, None, busy_wait_seconds,
+            output, None, busy_wait_seconds, recent_event_count=recent_event_count,
         )
         return _pane_signal(
             captured=True,
@@ -135,7 +136,7 @@ def pane_signal_for_session(
         )
     status_age_seconds = int(staleness) if staleness is not None else None
     classifier = worker_classify.classify_busy_wait(
-        output, status_age_seconds, busy_wait_seconds,
+        output, status_age_seconds, busy_wait_seconds, recent_event_count=recent_event_count,
     )
     return _pane_signal(
         captured=True,

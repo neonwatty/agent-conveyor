@@ -123,6 +123,24 @@ If `lsof` discovery fails (e.g. the codex session was started ephemerally),
 pass the rollout path explicitly with `--codex-session
 ~/.codex/sessions/.../rollout-...-<uuid>.jsonl`.
 
+To register a manager session that's already running:
+
+```bash
+# If the codex is already running and you know its pid:
+workerctl register-manager --name my-mgr --pid 28975
+
+# register-manager runs `lsof -p <pid>` to find the rollout JSONL.
+# If the codex hasn't written its rollout yet (no input typed),
+# you'll get a hint asking you to type something in the codex prompt and retry.
+
+# Or pass --codex-session explicitly to bypass the lsof probe:
+workerctl register-manager --name my-mgr --pid 28975 \
+    --codex-session /path/to/rollout.jsonl
+```
+
+Note: `lsof` is the canonical pid→rollout lookup. `find -newermt` is unreliable because
+filesystem mtime resolution and parsing of "X minutes ago" varies — `lsof` reads the open fd directly.
+
 For low-risk verification without a real task, `workerctl start-test
 <name>` creates a worker, asks it to update only its ignored
 `status.json`, and leaves the tmux session attached:
@@ -140,6 +158,9 @@ tmux attach -t codex-live-test
   Spawn Codex in a fresh tmux session and register it as a worker in one call.
   The fastest way to start a supervised worker. Internally: `tmux new-session`
   + `codex` + poll for rollout + `register-worker`.
+- `start-manager --name N [--cwd D] [--sandbox SANDBOX] [--ask-for-approval ASK_FOR_APPROVAL] [--timeout-seconds N]` —
+  Spawn Codex in a fresh tmux session and register it as a manager in one call.
+  Mirrors `start-worker` (omits `--task` since managers supervise rather than execute).
 - `register-worker --name N [--pid P | --codex-session PATH] [--cwd D] [--tmux-session S]` —
   Register an already-running Codex session as a worker. Rollout JSONL is
   auto-discovered from the pid via `lsof` unless `--codex-session` is given.
@@ -167,7 +188,10 @@ tmux attach -t codex-live-test
 - `cycle <task> [--busy-wait-seconds N]` — One observation cycle. Idempotent. Runs `ingest`, computes
   worker state from the JSON event stream, captures the tmux pane as a shadow
   signal, writes a `manager_cycles` row, and returns a JSON dict the manager
-  Codex consumes. The `status_payload` now includes `worker_alive` and `manager_alive` booleans, computed by probing the registered session pids (`os.kill(pid, 0)`). These are `false` when the session's pid is `NULL` (legacy backfill) or the process has exited — useful for detecting silently-dead workers between cycles.
+  Codex consumes. The `status_payload` includes:
+  - `worker_alive` / `manager_alive` — booleans computed by probing the registered session pids (`os.kill(pid, 0)`). `False` when the session's pid is `NULL` (legacy backfill) or the process has exited — useful for detecting silently-dead workers between cycles.
+  - `last_event_subtype` — the subtype of the most recent `codex_events` row for the worker, or `null` if no events exist.
+  - `task_completed` — `true` iff `last_event_subtype` is `"task_complete"`. Disambiguates "worker finished cleanly" from "worker idle but never started."
   
   The `cycle` subcommand accepts `--busy-wait-seconds N` (default: 90) to tune the pane-signal classifier's stuck-busy threshold. Lower values flag stalls faster but increase false positives on long-running real work:
   ```bash
@@ -336,6 +360,10 @@ Three quality-of-life additions following Phase 6 dogfood:
 - **`sessions --state`** — by default, `workerctl sessions` now hides Phase 1 backfill rows (`pid IS NULL`) and rows marked `state='gone'`. Use `--state all` to inspect every row, `--state gone` for completed/dead registrations, or `--state active` for the default view.
 - **`worker_alive` / `manager_alive` in cycle output** — every `workerctl cycle` JSON now includes these booleans, computed by `os.kill(pid, 0)` against the registered session pids. Surfaces silently-dead workers between cycles.
 - **`cycle --busy-wait-seconds N`** — exposes the pane-signal classifier's stuck-busy threshold (previously hard-coded at 90s) as a per-cycle flag.
+
+## Phase 8 classifier improvements (2026-05-12)
+
+- **Recent event suppression for `long_running_interruptible`** — the classifier now weighs `recent_event_count` (from `ingest.new_events`) alongside `status_age_seconds`. When a worker is actively emitting events (>= 10/cycle), the `long_running_interruptible` flag is suppressed—the worker is healthy despite stale status.json. This stops false positives on long-running tools (e.g. test suites, large file reads) that stay busy but quiet on status updates.
 
 ## Schema
 

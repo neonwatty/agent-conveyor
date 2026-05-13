@@ -95,6 +95,7 @@ def run_cycle(
                 session_id=binding["worker_session_id"],
                 busy_wait_seconds=busy_wait_seconds,
                 now=started_at,
+                recent_event_count=ingest_result.get("new_events", 0),
             )
         except (sqlite3.Error, WorkerError) as exc:  # pragma: no cover — defensive belt-and-suspenders
             pane_signal = {
@@ -162,6 +163,9 @@ def run_cycle(
         except (TypeError, ValueError):
             return False
 
+    last_subtype = worker_db.latest_codex_event_subtype(
+        conn, session_id=binding["worker_session_id"]
+    )
     status_payload = {
         "kind": "session_cycle",
         "task": task_name,
@@ -176,6 +180,8 @@ def run_cycle(
         "notable_pane_pattern": notable_pane_pattern,
         "worker_alive": _alive(worker_row),
         "manager_alive": _alive(manager_row),
+        "last_event_subtype": last_subtype,
+        "task_completed": last_subtype == "task_complete",
     }
     cursor = conn.execute(
         """

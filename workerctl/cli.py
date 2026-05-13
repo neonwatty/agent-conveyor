@@ -43,6 +43,7 @@ from workerctl.commands import (
     command_register_worker,
     command_register_manager,
     command_start_worker,
+    command_start_manager,
     command_deregister,
     command_sessions,
     command_bind,
@@ -282,6 +283,34 @@ def build_parser() -> argparse.ArgumentParser:
         help="Max seconds to wait for codex to write session_meta.",
     )
     start_worker.set_defaults(func=command_start_worker)
+
+    start_manager = subparsers.add_parser(
+        "start-manager",
+        help="Spawn codex in a new tmux session and register it as a manager in one call.",
+    )
+    start_manager.add_argument("--name", required=True)
+    start_manager.add_argument(
+        "--cwd",
+        default=str(INVOCATION_CWD),
+        help="Working directory for codex (default: cwd).",
+    )
+    start_manager.add_argument(
+        "--sandbox",
+        default="danger-full-access",
+        help="Codex --sandbox mode.",
+    )
+    start_manager.add_argument(
+        "--ask-for-approval",
+        default="never",
+        help="Codex --ask-for-approval mode.",
+    )
+    start_manager.add_argument(
+        "--timeout-seconds",
+        type=int,
+        default=15,
+        help="Max seconds to wait for codex to write session_meta.",
+    )
+    start_manager.set_defaults(func=command_start_manager)
 
     register_manager = subparsers.add_parser(
         "register-manager",

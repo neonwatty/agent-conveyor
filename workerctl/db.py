@@ -1002,6 +1002,18 @@ def latest_codex_events_for_session(
     return list(conn.execute(query, tuple(params)))
 
 
+def latest_codex_event_subtype(
+    conn: sqlite3.Connection, *, session_id: str
+) -> str | None:
+    """Return the subtype of the most recent codex event for a session, or None if no events exist."""
+    row = conn.execute(
+        "select subtype from codex_events where session_id = ? "
+        "order by id desc limit 1",
+        (session_id,),
+    ).fetchone()
+    return row["subtype"] if row else None
+
+
 def set_session_ingest_offset(
     conn: sqlite3.Connection,
     *,
