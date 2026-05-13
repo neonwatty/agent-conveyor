@@ -6745,5 +6745,97 @@ class StartWorkerTests(unittest.TestCase):
                 os.environ.pop("WORKERCTL_STATE_ROOT", None)
 
 
+class SessionsLegacyFilterTests(unittest.TestCase):
+    def open_db(self, tmpdir):
+        path = Path(tmpdir) / "workerctl.db"
+        conn = worker_db.connect(path)
+        worker_db.initialize_database(conn)
+        self.addCleanup(conn.close)
+        return conn
+
+    def _seed_real_and_legacy(self, conn):
+        worker_db.register_session(
+            conn, name="real", role="worker",
+            codex_session_path="/a", codex_session_id="u-r",
+            pid=12345, cwd="/r",
+        )
+        now = "2026-05-12T00:00:00Z"
+        conn.execute(
+            """
+            insert into sessions(id, name, role, identity_token, cwd,
+                                 registered_at, state, pid)
+            values ('legacy-s', 'legacy', 'worker', 'tok-legacy', '/r',
+                    ?, 'active', NULL)
+            """,
+            (now,),
+        )
+        conn.commit()
+
+    def test_list_sessions_excludes_legacy_pid_null_by_default(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self._seed_real_and_legacy(conn)
+            sessions = worker_db.list_sessions(conn)
+            names = {s["name"] for s in sessions}
+            self.assertIn("real", names)
+            self.assertNotIn("legacy", names)
+
+    def test_list_sessions_include_legacy_returns_both(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self._seed_real_and_legacy(conn)
+            sessions = worker_db.list_sessions(conn, include_legacy=True)
+            names = {s["name"] for s in sessions}
+            self.assertIn("real", names)
+            self.assertIn("legacy", names)
+
+    def test_list_sessions_role_filter_combined_with_legacy_filter(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self._seed_real_and_legacy(conn)
+            # Add a manager too.
+            worker_db.register_session(
+                conn, name="real-mgr", role="manager",
+                codex_session_path="/a", codex_session_id="u-m",
+                pid=23456, cwd="/r",
+            )
+            conn.commit()
+            workers = worker_db.list_sessions(conn, role="worker")
+            self.assertEqual({s["name"] for s in workers}, {"real"})
+
+    def test_cli_sessions_default_excludes_legacy(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_dir = Path(tmpdir) / "state"
+            state_dir.mkdir()
+            env = os.environ.copy()
+            env["WORKERCTL_STATE_ROOT"] = str(state_dir)
+            db_path = state_dir / "workerctl.db"
+            # Seed via direct DB.
+            conn = worker_db.connect(db_path)
+            worker_db.initialize_database(conn)
+            self._seed_real_and_legacy(conn)
+            conn.close()
+
+            proc = subprocess.run(
+                [sys.executable, "-m", "workerctl", "sessions"],
+                env=env, capture_output=True, text=True, cwd=str(ROOT),
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            rows = json.loads(proc.stdout)
+            names = {r["name"] for r in rows}
+            self.assertIn("real", names)
+            self.assertNotIn("legacy", names)
+
+            proc = subprocess.run(
+                [sys.executable, "-m", "workerctl", "sessions", "--include-legacy"],
+                env=env, capture_output=True, text=True, cwd=str(ROOT),
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            rows = json.loads(proc.stdout)
+            names = {r["name"] for r in rows}
+            self.assertIn("real", names)
+            self.assertIn("legacy", names)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -306,6 +306,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="List registered sessions (workers and managers).",
     )
     sessions.add_argument("--role", choices=("worker", "manager"), default=None)
+    sessions.add_argument(
+        "--include-legacy", action="store_true",
+        help="Include Phase 1 backfill rows (pid IS NULL) — legacy workers/managers.",
+    )
     sessions.set_defaults(func=command_sessions)
 
     bind = subparsers.add_parser(

@@ -1909,7 +1909,9 @@ def command_sessions(args: argparse.Namespace) -> int:
     conn = worker_db.connect()
     worker_db.initialize_database(conn)
     try:
-        rows = worker_db.list_sessions(conn, role=args.role)
+        rows = worker_db.list_sessions(
+            conn, role=args.role, include_legacy=args.include_legacy,
+        )
     finally:
         conn.close()
     print(json.dumps(rows, indent=2, sort_keys=True, default=str))
