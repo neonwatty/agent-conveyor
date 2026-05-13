@@ -2065,6 +2065,105 @@ def command_start_manager(args: argparse.Namespace) -> int:
     return 0
 
 
+def command_pair(args: argparse.Namespace) -> int:
+    """Spawn worker + manager and bind to a task in one shot.
+
+    Combines start-worker + start-manager + bind. If the task doesn't exist
+    and no --task-goal is provided, raises an error with a hint.
+    """
+    from workerctl import db as worker_db
+
+    db_path = Path(args.path).expanduser().resolve() if hasattr(args, 'path') and args.path else None
+
+    # 1. Task lookup/create
+    conn = worker_db.connect(db_path)
+    worker_db.initialize_database(conn)
+    try:
+        task_row = None
+        try:
+            task_row = worker_db.task_row(conn, task=args.task)
+        except WorkerError:
+            pass
+
+        task_created = False
+        if task_row is None:
+            if not args.task_goal:
+                raise WorkerError(
+                    f"Task '{args.task}' does not exist. Pass --task-goal to "
+                    "create it, or run `workerctl tasks --create ...` first."
+                )
+            task_id = worker_db.create_task(
+                conn,
+                name=args.task,
+                goal=args.task_goal,
+                summary=args.task_summary,
+            )
+            task_created = True
+            conn.commit()
+        else:
+            task_id = task_row["id"]
+    finally:
+        conn.close()
+
+    try:
+        # 2. Worker spawn
+        worker_info = _spawn_codex_and_register(
+            name=args.worker_name,
+            role="worker",
+            cwd=args.cwd,
+            task=args.task_prompt,
+            sandbox=args.sandbox,
+            ask_for_approval=args.ask_for_approval,
+            timeout_seconds=args.timeout_seconds,
+        )
+
+        # 3. Manager spawn
+        manager_info = _spawn_codex_and_register(
+            name=args.manager_name,
+            role="manager",
+            cwd=args.cwd,
+            task=None,
+            sandbox=args.sandbox,
+            ask_for_approval=args.ask_for_approval,
+            timeout_seconds=args.timeout_seconds,
+        )
+
+        # 4. Bind
+        conn = worker_db.connect(db_path)
+        worker_db.initialize_database(conn)
+        try:
+            binding_id = worker_db.bind_sessions(
+                conn,
+                task_name=args.task,
+                worker_session_name=args.worker_name,
+                manager_session_name=args.manager_name,
+            )
+            worker_db.insert_event(
+                conn, "binding_created", actor="workerctl",
+                task_id=task_id,
+                payload={
+                    "binding_id": binding_id, "task": args.task,
+                    "worker": args.worker_name, "manager": args.manager_name,
+                },
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        result = {
+            "task": {"name": args.task, "id": task_id, "created": task_created},
+            "worker": worker_info,
+            "manager": manager_info,
+            "binding_id": binding_id,
+        }
+        print(json.dumps(result, indent=2, sort_keys=True))
+        return 0
+    except Exception:
+        # If binding or manager spawn fails, worker is left registered.
+        # User can clean up with `workerctl deregister`.
+        raise
+
+
 def command_deregister(args: argparse.Namespace) -> int:
     from workerctl import db as worker_db
 
