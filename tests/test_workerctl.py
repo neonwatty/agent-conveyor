@@ -5756,6 +5756,66 @@ class SuperviseCycleTests(unittest.TestCase):
 
         self.assertEqual(captured["busy_wait_seconds"], 37)
 
+    def test_cycle_includes_task_completed_true_after_task_complete_event(self):
+        """Test: task_completed and last_event_subtype are set when task_complete event exists."""
+        from workerctl import supervise_cycle
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self._setup_bound_task(conn, tmpdir, [
+                {"type": "session_meta", "payload": {"id": "u-w", "cwd": "/r"}},
+                {"timestamp": "2026-05-11T14:32:11Z",
+                 "type": "event_msg",
+                 "payload": {"type": "task_started", "turn_id": "t1"}},
+                {"timestamp": "2026-05-11T14:32:30Z",
+                 "type": "event_msg",
+                 "payload": {"type": "task_complete"}},
+            ])
+            result = supervise_cycle.run_cycle(
+                conn, task_name="t", now="2026-05-11T14:33:00Z",
+            )
+            self.assertEqual(result["last_event_subtype"], "task_complete")
+            self.assertTrue(result["task_completed"])
+
+    def test_cycle_includes_task_completed_false_when_no_complete_event(self):
+        """Test: task_completed is false when latest event is not task_complete."""
+        from workerctl import supervise_cycle
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self._setup_bound_task(conn, tmpdir, [
+                {"type": "session_meta", "payload": {"id": "u-w", "cwd": "/r"}},
+                {"timestamp": "2026-05-11T14:32:11Z",
+                 "type": "event_msg",
+                 "payload": {"type": "task_started", "turn_id": "t1"}},
+            ])
+            result = supervise_cycle.run_cycle(
+                conn, task_name="t", now="2026-05-11T14:33:00Z",
+            )
+            self.assertEqual(result["last_event_subtype"], "task_started")
+            self.assertFalse(result["task_completed"])
+
+    def test_cycle_task_completed_false_when_latest_event_is_not_task_complete(self):
+        """Test: task_completed is false when latest event is not task_complete."""
+        from workerctl import supervise_cycle
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self._setup_bound_task(conn, tmpdir, [
+                {"type": "session_meta", "payload": {"id": "u-w", "cwd": "/r"}},
+                {"timestamp": "2026-05-11T14:32:11Z",
+                 "type": "event_msg",
+                 "payload": {"type": "task_started", "turn_id": "t1"}},
+                {"timestamp": "2026-05-11T14:32:15Z",
+                 "type": "event_msg",
+                 "payload": {"type": "token_count", "count": 100}},
+            ])
+            result = supervise_cycle.run_cycle(
+                conn, task_name="t", now="2026-05-11T14:33:00Z",
+            )
+            self.assertEqual(result["last_event_subtype"], "token_count")
+            self.assertFalse(result["task_completed"])
+
 
 class ReadEventsStatsTests(unittest.TestCase):
     def test_read_events_with_stats_counts_malformed_lines(self):

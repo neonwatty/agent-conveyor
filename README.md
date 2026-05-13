@@ -167,7 +167,10 @@ tmux attach -t codex-live-test
 - `cycle <task> [--busy-wait-seconds N]` — One observation cycle. Idempotent. Runs `ingest`, computes
   worker state from the JSON event stream, captures the tmux pane as a shadow
   signal, writes a `manager_cycles` row, and returns a JSON dict the manager
-  Codex consumes. The `status_payload` now includes `worker_alive` and `manager_alive` booleans, computed by probing the registered session pids (`os.kill(pid, 0)`). These are `false` when the session's pid is `NULL` (legacy backfill) or the process has exited — useful for detecting silently-dead workers between cycles.
+  Codex consumes. The `status_payload` includes:
+  - `worker_alive` / `manager_alive` — booleans computed by probing the registered session pids (`os.kill(pid, 0)`). `False` when the session's pid is `NULL` (legacy backfill) or the process has exited — useful for detecting silently-dead workers between cycles.
+  - `last_event_subtype` — the subtype of the most recent `codex_events` row for the worker, or `null` if no events exist.
+  - `task_completed` — `true` iff `last_event_subtype` is `"task_complete"`. Disambiguates "worker finished cleanly" from "worker idle but never started."
   
   The `cycle` subcommand accepts `--busy-wait-seconds N` (default: 90) to tune the pane-signal classifier's stuck-busy threshold. Lower values flag stalls faster but increase false positives on long-running real work:
   ```bash
