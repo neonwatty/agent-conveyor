@@ -76,6 +76,12 @@ Register a manager (tmux not required):
 scripts/workerctl register-manager --name foo-mgr --pid <MGR_PID> --cwd "$PWD"
 ```
 
+For new manager sessions started by workerctl, prefer `start-manager` or
+`pair`. These send a manager bootstrap prompt to Codex so the rollout JSONL is
+opened during startup and the manager has setup context. In `pair`, the manager
+prompt includes the task name, goal, worker session, `manager-config
+<task> --questions`, and `cycle <task>`.
+
 List registered sessions:
 
 ```bash
@@ -88,11 +94,74 @@ scripts/workerctl sessions --role manager
 
 ```bash
 scripts/workerctl tasks --create my-task --goal "Refactor auth"
+scripts/workerctl handoff my-task \
+  --summary "Worker explored the current auth flow and found middleware drift." \
+  --next-step "Implement the middleware cleanup from docs/auth-plan.md"
+scripts/workerctl manager-config my-task \
+  --mode guided \
+  --objective "Keep the worker aligned to docs/auth-plan.md" \
+  --reference docs/auth-plan.md \
+  --acceptance "Tests pass" \
+  --guideline "Nudge only when the worker is idle, stale, or blocked"
 scripts/workerctl bind --task my-task --worker foo --manager foo-mgr
 ```
 
 `tasks` lists or creates rows. `bind` ties the worker and manager sessions to
 the task. The task is now active.
+
+Use `handoff` before or during management promotion to save the worker's
+compact progress summary and likely next steps in SQLite. Use `manager-config`
+to save what the manager should check against, how structured supervision
+should be, acceptance criteria, planning/PRD/mockup references, and permissions
+such as `--allow-pr`, `--allow-merge-green`, and
+`--allow-worker-compact-clear`.
+
+When setting up a manager from inside a manager Codex session, prefer:
+
+```bash
+scripts/workerctl manager-config my-task --questions
+```
+
+Read the JSON question schema, ask the user those questions in the manager
+conversation, then persist the answers with `manager-config` flags. This keeps
+the human interaction in the Codex chat where the user is already working and
+keeps SQLite writes explicit. Use `manager-config --interactive` only as a
+terminal fallback for a human running `workerctl` directly.
+
+Before instructing high-level actions such as PR creation, green PR merge, or
+worker compact/clear, check the saved policy:
+
+```bash
+scripts/workerctl manager-permission my-task worker_compact_clear \
+  --require-handoff --require
+```
+
+Use `--require` for fail-closed behavior. Use `--require-handoff` before
+compact/clear so the worker's visible progress is saved first.
+
+To request worker compaction/clear through the audited path, prefer the
+one-command wrapper:
+
+```bash
+scripts/workerctl compact-worker my-task \
+  --reason "Worker context should be compacted after handoff"
+```
+
+Use `--clear` for `/clear`. For lower-level control, first record a `nudge`
+manager decision, then run:
+
+```bash
+decision_id=$(scripts/workerctl record-decision my-task nudge \
+  --reason "Worker context should be compacted after handoff" \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+scripts/workerctl request-worker-compact my-task \
+  --decision-id "$decision_id" --strict-decisions
+```
+
+This command checks `worker_compact_clear`, requires a saved handoff, records a
+durable command, and sends Codex `/compact` to the worker's tmux pane. Use
+`--clear` for `/clear`, or `--prompt-only` to send the conservative
+verify/update-handoff prompt instead of a slash command.
 
 ## Manager Loop Pattern
 
@@ -110,6 +179,10 @@ scripts/workerctl cycle my-task
 #   "staleness_seconds": 4.2,
 #   "notable_pane_pattern": "trust_prompt" | null,
 #   "pane_signal": { "captured": true, "classifier": {...} },
+#   "manager_context": {
+#     "manager_config": {...},
+#     "worker_handoff": {...}
+#   },
 #   "ingest": { "new_events": 3, "new_offset": 12345 },
 #   "cycle_id": 17,
 #   ...

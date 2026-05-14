@@ -285,6 +285,53 @@ class DatabaseTests(unittest.TestCase):
             if worker_path.exists():
                 shutil.rmtree(worker_path)
 
+    def test_worker_handoff_round_trips(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
+
+            handoff_id = worker_db.insert_worker_handoff(
+                conn,
+                task_id=task_id,
+                summary="Implemented parser skeleton.",
+                next_steps=["Run tests", "Fill error handling"],
+                payload={"branch": "feature/parser"},
+                timestamp="2026-05-08T10:00:00Z",
+            )
+            conn.commit()
+
+            handoff = worker_db.latest_worker_handoff(conn, task_id=task_id)
+            self.assertEqual(handoff["id"], handoff_id)
+            self.assertEqual(handoff["summary"], "Implemented parser skeleton.")
+            self.assertEqual(handoff["next_steps"], ["Run tests", "Fill error handling"])
+            self.assertEqual(handoff["payload"], {"branch": "feature/parser"})
+
+    def test_manager_config_round_trips(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
+
+            worker_db.upsert_manager_config(
+                conn,
+                task_id=task_id,
+                supervision_mode="strict",
+                objective="Check against PRD.",
+                guidelines=["Nudge only when stale"],
+                acceptance_criteria=["Tests pass"],
+                reference_paths=["docs/prd.md"],
+                permissions={"create_pr": True, "merge_green_pr": False},
+                timestamp="2026-05-08T10:00:00Z",
+            )
+            conn.commit()
+
+            config = worker_db.manager_config(conn, task_id=task_id)
+            self.assertEqual(config["supervision_mode"], "strict")
+            self.assertEqual(config["objective"], "Check against PRD.")
+            self.assertEqual(config["guidelines"], ["Nudge only when stale"])
+            self.assertEqual(config["acceptance_criteria"], ["Tests pass"])
+            self.assertEqual(config["reference_paths"], ["docs/prd.md"])
+            self.assertEqual(config["permissions"]["create_pr"], True)
+
     def test_create_and_list_tasks(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             conn = self.open_db(tmpdir)
@@ -990,21 +1037,26 @@ class CliTests(unittest.TestCase):
                 self.assertEqual(result, 0)
                 self.assertEqual(payload["session"], "qa-raw")
                 self.assertEqual(payload["attach_command"], "tmux attach -t qa-raw")
-                self.assertEqual(payload["become_managed_command_template"], 'workerctl become-managed --session qa-raw --worker <worker-name> --task <task-name> --goal "<goal>" --summary "<summary>" -- \'--model\' \'gpt-5.4-mini\'')
-                self.assertEqual(payload["manage_command_template"], 'workerctl manage --session qa-raw --worker <worker-name> --task <task-name> --goal "<goal>" --summary "<summary>" --open-manager -- \'--model\' \'gpt-5.4-mini\'')
+                self.assertEqual(payload["register_worker_command_template"], f"workerctl register-worker --name <worker-name> --pid <pid> --codex-session <rollout.jsonl> --cwd '{ROOT}' --tmux-session qa-raw")
+                self.assertEqual(payload["start_manager_command_template"], f"workerctl start-manager --name <manager-name> --cwd '{ROOT}' -- '--model' 'gpt-5.4-mini'")
+                self.assertEqual(payload["bind_command_template"], "workerctl bind --task <task-name> --worker <worker-name> --manager <manager-name>")
+                self.assertEqual(payload["manager_config_questions_command_template"], "workerctl manager-config <task-name> --questions")
                 self.assertTrue(payload["start_prompt_sent"])
                 self.assertTrue(Path(payload["start_prompt_path"]).exists())
                 prompt = Path(payload["start_prompt_path"]).read_text()
                 self.assertIn("workerctl tmux session qa-raw", prompt)
-                self.assertIn("workerctl become-managed --session qa-raw", prompt)
+                self.assertIn("workerctl register-worker --name <worker-name>", prompt)
+                self.assertIn("workerctl start-manager --name <manager-name>", prompt)
+                self.assertIn("workerctl bind --task <task-name>", prompt)
+                self.assertIn("workerctl manager-config <task-name> --questions", prompt)
                 self.assertIn("-- '--model' 'gpt-5.4-mini'", prompt)
-                self.assertIn("Preserve any arguments after `--`", prompt)
-                self.assertIn("workerctl unmanage", prompt)
-                self.assertIn("workerctl my-status", prompt)
-                self.assertIn("workerctl remanage --open-manager", prompt)
+                self.assertNotIn("become-managed", prompt)
+                self.assertNotIn("workerctl unmanage", prompt)
+                self.assertNotIn("workerctl my-status", prompt)
+                self.assertNotIn("workerctl remanage", prompt)
                 self.assertIn("workerctl open-manager <task-name>", prompt)
                 self.assertIn("If any required field is missing, ask the user", prompt)
-                self.assertIn("Do not invent worker name, task name, or goal values", prompt)
+                self.assertIn("Do not invent worker", prompt)
                 self.assertEqual(launched[0][:5], ["tmux", "new-session", "-d", "-s", "qa-raw"])
                 self.assertIn("codex --cd", launched[0][5])
                 self.assertIn("--no-alt-screen", launched[0][5])
@@ -7142,6 +7194,10 @@ class StartManagerTests(unittest.TestCase):
                     tmux_cmds = [c for c in spawned if len(c) > 1 and c[1] == "new-session"]
                     self.assertEqual(len(tmux_cmds), 1)
                     self.assertIn("codex-auto-mgr", tmux_cmds[0])
+                    codex_cmd = tmux_cmds[0][-1]
+                    self.assertIn("manager-config <task> --questions", codex_cmd)
+                    self.assertIn("You are a Codex manager session", codex_cmd)
+                    self.assertNotIn("Do not edit files. Wait for manager instruction.", codex_cmd)
 
                     # Confirm a session was registered with role="manager".
                     conn = worker_db.connect(state_dir / "workerctl.db")
@@ -7569,6 +7625,42 @@ class RegisterManagerLsofTests(unittest.TestCase):
             result = json.loads(stdout_capture.getvalue())
             self.assertEqual(result["codex_session_path"], str(rollout))
 
+    def test_register_manager_respects_path_override(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            default_path = Path(tmpdir) / "default.db"
+            override_path = Path(tmpdir) / "override.db"
+            original_default_db_path = worker_db.default_db_path
+            try:
+                worker_db.default_db_path = lambda: default_path
+                with worker_db.connect(default_path) as conn:
+                    worker_db.initialize_database(conn)
+                    conn.commit()
+
+                rollout = Path(tmpdir) / "explicit.jsonl"
+                rollout.write_text(json.dumps({"type": "session_meta", "payload": {"id": "x"}}) + "\n")
+
+                args = argparse.Namespace(
+                    name="override-mgr", pid=28975,
+                    codex_session=str(rollout), cwd=tmpdir, tmux_session=None,
+                    path=str(override_path),
+                )
+                stdout_capture = io.StringIO()
+                with contextlib.redirect_stdout(stdout_capture):
+                    rc = commands.command_register_manager(args)
+                self.assertEqual(rc, 0)
+
+                with worker_db.connect(default_path) as conn:
+                    worker_db.initialize_database(conn)
+                    default_row = conn.execute("select id from sessions where name = 'override-mgr'").fetchone()
+                with worker_db.connect(override_path) as conn:
+                    worker_db.initialize_database(conn)
+                    override_row = conn.execute("select id from sessions where name = 'override-mgr'").fetchone()
+
+                self.assertIsNone(default_row)
+                self.assertIsNotNone(override_row)
+            finally:
+                worker_db.default_db_path = original_default_db_path
+
 
 class PairCommandTests(unittest.TestCase):
     def _setup_db(self, tmpdir):
@@ -7732,8 +7824,8 @@ class PairCommandTests(unittest.TestCase):
             db_path = self._setup_db(tmpdir)
             recorded = []
 
-            def recorder(*, name, role, task=None, **kwargs):
-                recorded.append({"name": name, "role": role, "task": task})
+            def recorder(*, name, role, task=None, initial_prompt=None, **kwargs):
+                recorded.append({"name": name, "role": role, "task": task, "initial_prompt": initial_prompt})
                 # Still need to register the session
                 conn = worker_db.connect(db_path)
                 worker_db.initialize_database(conn)
@@ -7784,6 +7876,10 @@ class PairCommandTests(unittest.TestCase):
             manager_spawn = next(r for r in recorded if r["role"] == "manager")
             self.assertEqual(worker_spawn["task"], "Do the thing")
             self.assertIsNone(manager_spawn["task"])
+            self.assertIn("manager-config prompt-task --questions", manager_spawn["initial_prompt"])
+            self.assertIn("Task goal: Build a thing", manager_spawn["initial_prompt"])
+            self.assertIn("Worker session: w1", manager_spawn["initial_prompt"])
+            self.assertNotIn("Do the thing", manager_spawn["initial_prompt"])
 
     def test_pair_subparser_exists(self):
         proc = subprocess.run(
@@ -7801,6 +7897,915 @@ class PairCommandTests(unittest.TestCase):
             "--task-goal",
         ):
             self.assertIn(flag, proc.stdout)
+
+    def test_handoff_command_records_summary(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = self._setup_db(tmpdir)
+            conn = worker_db.connect(db_path)
+            try:
+                worker_db.create_task(conn, name="handoff-task", goal="Do handoff.")
+                conn.commit()
+            finally:
+                conn.close()
+
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "workerctl",
+                    "handoff",
+                    "handoff-task",
+                    "--summary",
+                    "Worker finished discovery.",
+                    "--next-step",
+                    "Implement command",
+                    "--payload-json",
+                    '{"branch":"feature"}',
+                    "--path",
+                    str(db_path),
+                ],
+                capture_output=True,
+                text=True,
+                cwd=str(ROOT),
+            )
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            payload = json.loads(proc.stdout)
+            self.assertEqual(payload["summary"], "Worker finished discovery.")
+            self.assertEqual(payload["next_steps"], ["Implement command"])
+            self.assertEqual(payload["payload"], {"branch": "feature"})
+
+    def test_manager_config_command_records_policy(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = self._setup_db(tmpdir)
+            conn = worker_db.connect(db_path)
+            try:
+                worker_db.create_task(conn, name="config-task", goal="Do config.")
+                conn.commit()
+            finally:
+                conn.close()
+
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "workerctl",
+                    "manager-config",
+                    "config-task",
+                    "--mode",
+                    "strict",
+                    "--objective",
+                    "Check against docs/plan.md",
+                    "--guideline",
+                    "Nudge only when stale",
+                    "--acceptance",
+                    "Tests pass",
+                    "--reference",
+                    "docs/plan.md",
+                    "--allow-pr",
+                    "--allow-worker-compact-clear",
+                    "--path",
+                    str(db_path),
+                ],
+                capture_output=True,
+                text=True,
+                cwd=str(ROOT),
+            )
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            payload = json.loads(proc.stdout)
+            self.assertEqual(payload["supervision_mode"], "strict")
+            self.assertEqual(payload["objective"], "Check against docs/plan.md")
+            self.assertEqual(payload["guidelines"], ["Nudge only when stale"])
+            self.assertEqual(payload["acceptance_criteria"], ["Tests pass"])
+            self.assertEqual(payload["reference_paths"], ["docs/plan.md"])
+            self.assertTrue(payload["permissions"]["create_pr"])
+            self.assertTrue(payload["permissions"]["worker_compact_clear"])
+
+    def test_manager_config_questions_prints_setup_schema(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = self._setup_db(tmpdir)
+            conn = worker_db.connect(db_path)
+            try:
+                worker_db.create_task(conn, name="question-task", goal="Do config.")
+                conn.commit()
+            finally:
+                conn.close()
+
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "workerctl",
+                    "manager-config",
+                    "question-task",
+                    "--questions",
+                    "--path",
+                    str(db_path),
+                ],
+                capture_output=True,
+                text=True,
+                cwd=str(ROOT),
+            )
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            payload = json.loads(proc.stdout)
+            self.assertEqual(payload["recommended_collection"], "manager_codex_chat")
+            question_ids = {question["id"] for question in payload["questions"]}
+            self.assertIn("supervision_mode", question_ids)
+            self.assertIn("permissions", question_ids)
+
+            conn = worker_db.connect(db_path)
+            try:
+                task = worker_db.task_row(conn, task="question-task")
+                self.assertIsNone(worker_db.manager_config(conn, task_id=task["id"]))
+            finally:
+                conn.close()
+
+    def test_manager_config_interactive_records_answers_from_stdin(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = self._setup_db(tmpdir)
+            conn = worker_db.connect(db_path)
+            try:
+                worker_db.create_task(conn, name="interactive-config-task", goal="Do config.")
+                conn.commit()
+            finally:
+                conn.close()
+
+            answers = "\n".join(
+                [
+                    "strict",
+                    "Check against docs/plan.md",
+                    "Nudge only when stale, Keep scope fixed",
+                    "Tests pass, PR opened",
+                    "docs/plan.md, https://example.test/mockup",
+                    "yes",
+                    "no",
+                    "yes",
+                    "",
+                ]
+            )
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "workerctl",
+                    "manager-config",
+                    "interactive-config-task",
+                    "--interactive",
+                    "--path",
+                    str(db_path),
+                ],
+                input=answers,
+                capture_output=True,
+                text=True,
+                cwd=str(ROOT),
+            )
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            payload = json.loads(proc.stdout[proc.stdout.index("{"):])
+            self.assertEqual(payload["supervision_mode"], "strict")
+            self.assertEqual(payload["objective"], "Check against docs/plan.md")
+            self.assertEqual(payload["guidelines"], ["Nudge only when stale", "Keep scope fixed"])
+            self.assertEqual(payload["acceptance_criteria"], ["Tests pass", "PR opened"])
+            self.assertEqual(payload["reference_paths"], ["docs/plan.md", "https://example.test/mockup"])
+            self.assertTrue(payload["permissions"]["create_pr"])
+            self.assertFalse(payload["permissions"]["merge_green_pr"])
+            self.assertTrue(payload["permissions"]["worker_compact_clear"])
+
+    def test_manager_config_interactive_can_clear_existing_permissions(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = self._setup_db(tmpdir)
+            conn = worker_db.connect(db_path)
+            try:
+                task_id = worker_db.create_task(conn, name="interactive-clear-task", goal="Do config.")
+                worker_db.upsert_manager_config(
+                    conn,
+                    task_id=task_id,
+                    supervision_mode="strict",
+                    permissions={
+                        "create_pr": True,
+                        "merge_green_pr": True,
+                        "worker_compact_clear": True,
+                    },
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            answers = "\n".join(
+                [
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "no",
+                    "no",
+                    "no",
+                    "",
+                ]
+            )
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "workerctl",
+                    "manager-config",
+                    "interactive-clear-task",
+                    "--interactive",
+                    "--path",
+                    str(db_path),
+                ],
+                input=answers,
+                capture_output=True,
+                text=True,
+                cwd=str(ROOT),
+            )
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            payload = json.loads(proc.stdout[proc.stdout.index("{"):])
+            self.assertFalse(payload["permissions"]["create_pr"])
+            self.assertFalse(payload["permissions"]["merge_green_pr"])
+            self.assertFalse(payload["permissions"]["worker_compact_clear"])
+
+    def test_manager_permission_checks_saved_policy(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = self._setup_db(tmpdir)
+            conn = worker_db.connect(db_path)
+            try:
+                task_id = worker_db.create_task(conn, name="permission-task", goal="Do config.")
+                worker_db.upsert_manager_config(
+                    conn,
+                    task_id=task_id,
+                    supervision_mode="guided",
+                    permissions={"create_pr": False, "worker_compact_clear": True},
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            allowed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "workerctl",
+                    "manager-permission",
+                    "permission-task",
+                    "worker_compact_clear",
+                    "--path",
+                    str(db_path),
+                ],
+                capture_output=True,
+                text=True,
+                cwd=str(ROOT),
+            )
+            self.assertEqual(allowed.returncode, 0, allowed.stderr)
+            allowed_payload = json.loads(allowed.stdout)
+            self.assertTrue(allowed_payload["allowed"])
+            self.assertEqual(allowed_payload["reasons"], [])
+
+            denied = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "workerctl",
+                    "manager-permission",
+                    "permission-task",
+                    "create_pr",
+                    "--require",
+                    "--path",
+                    str(db_path),
+                ],
+                capture_output=True,
+                text=True,
+                cwd=str(ROOT),
+            )
+            self.assertEqual(denied.returncode, 1)
+            denied_payload = json.loads(denied.stdout)
+            self.assertFalse(denied_payload["allowed"])
+            self.assertIn("permission_not_enabled", denied_payload["reasons"])
+
+    def test_manager_permission_can_require_handoff(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = self._setup_db(tmpdir)
+            conn = worker_db.connect(db_path)
+            try:
+                task_id = worker_db.create_task(conn, name="handoff-permission-task", goal="Do config.")
+                worker_db.upsert_manager_config(
+                    conn,
+                    task_id=task_id,
+                    supervision_mode="guided",
+                    permissions={"worker_compact_clear": True},
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            missing = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "workerctl",
+                    "manager-permission",
+                    "handoff-permission-task",
+                    "worker_compact_clear",
+                    "--require-handoff",
+                    "--require",
+                    "--path",
+                    str(db_path),
+                ],
+                capture_output=True,
+                text=True,
+                cwd=str(ROOT),
+            )
+            self.assertEqual(missing.returncode, 1)
+            self.assertIn("missing_worker_handoff", json.loads(missing.stdout)["reasons"])
+
+            conn = worker_db.connect(db_path)
+            try:
+                task = worker_db.task_row(conn, task="handoff-permission-task")
+                worker_db.insert_worker_handoff(
+                    conn,
+                    task_id=task["id"],
+                    summary="Ready to compact.",
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            present = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "workerctl",
+                    "manager-permission",
+                    "handoff-permission-task",
+                    "worker_compact_clear",
+                    "--require-handoff",
+                    "--require",
+                    "--path",
+                    str(db_path),
+                ],
+                capture_output=True,
+                text=True,
+                cwd=str(ROOT),
+            )
+            self.assertEqual(present.returncode, 0, present.stderr)
+            payload = json.loads(present.stdout)
+            self.assertTrue(payload["allowed"])
+            self.assertIsNotNone(payload["handoff_id"])
+
+    def test_record_decision_persists_decision_and_payload(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = self._setup_db(tmpdir)
+            conn = worker_db.connect(db_path)
+            try:
+                worker_db.create_task(conn, name="decision-task", goal="Do config.")
+                worker_db.register_session(
+                    conn,
+                    name="decision-worker",
+                    role="worker",
+                    codex_session_path="/tmp/worker.jsonl",
+                    codex_session_id="worker-session",
+                    pid=123,
+                    cwd=tmpdir,
+                    tmux_session="codex-decision-worker",
+                )
+                worker_db.register_session(
+                    conn,
+                    name="decision-manager",
+                    role="manager",
+                    codex_session_path="/tmp/manager.jsonl",
+                    codex_session_id="manager-session",
+                    pid=124,
+                    cwd=tmpdir,
+                    tmux_session="codex-decision-manager",
+                )
+                worker_db.bind_sessions(
+                    conn,
+                    task_name="decision-task",
+                    worker_session_name="decision-worker",
+                    manager_session_name="decision-manager",
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "workerctl",
+                    "record-decision",
+                    "decision-task",
+                    "nudge",
+                    "--reason",
+                    "Worker is idle and needs the next step.",
+                    "--payload-json",
+                    '{"source":"test"}',
+                    "--path",
+                    str(db_path),
+                ],
+                capture_output=True,
+                text=True,
+                cwd=str(ROOT),
+            )
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            payload = json.loads(proc.stdout)
+            self.assertEqual(payload["decision"], "nudge")
+            self.assertIsNone(payload["manager_id"])
+            self.assertEqual(payload["payload"], {"source": "test"})
+            self.assertEqual(payload["reason"], "Worker is idle and needs the next step.")
+
+            conn = worker_db.connect(db_path)
+            try:
+                audit = worker_db.task_audit(conn, task="decision-task")
+                decisions = audit["manager_decisions"]
+                self.assertEqual(len(decisions), 1)
+                self.assertEqual(decisions[0]["id"], payload["id"])
+                self.assertEqual(decisions[0]["payload"], {"source": "test"})
+                events = [row for row in audit["events"] if row["type"] == "manager_decision_recorded"]
+                self.assertEqual(len(events), 1)
+                self.assertEqual(events[0]["payload"]["decision_id"], payload["id"])
+            finally:
+                conn.close()
+
+    def test_record_decision_rejects_non_object_payload(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = self._setup_db(tmpdir)
+            conn = worker_db.connect(db_path)
+            try:
+                worker_db.create_task(conn, name="decision-bad-payload", goal="Do config.")
+                conn.commit()
+            finally:
+                conn.close()
+
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "workerctl",
+                    "record-decision",
+                    "decision-bad-payload",
+                    "nudge",
+                    "--reason",
+                    "Need a nudge.",
+                    "--payload-json",
+                    '["not-object"]',
+                    "--path",
+                    str(db_path),
+                ],
+                capture_output=True,
+                text=True,
+                cwd=str(ROOT),
+            )
+
+            self.assertNotEqual(proc.returncode, 0)
+            self.assertIn("--payload-json must be a JSON object", proc.stderr)
+
+    def test_request_worker_compact_dry_run_requires_policy_handoff_and_decision(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = self._setup_db(tmpdir)
+            conn = worker_db.connect(db_path)
+            try:
+                task_id = worker_db.create_task(conn, name="compact-task", goal="Do config.")
+                worker_db.register_session(
+                    conn,
+                    name="compact-worker",
+                    role="worker",
+                    codex_session_path="/tmp/worker.jsonl",
+                    codex_session_id="worker-session",
+                    pid=123,
+                    cwd=tmpdir,
+                    tmux_session="codex-compact-worker",
+                )
+                worker_db.register_session(
+                    conn,
+                    name="compact-manager",
+                    role="manager",
+                    codex_session_path="/tmp/manager.jsonl",
+                    codex_session_id="manager-session",
+                    pid=124,
+                    cwd=tmpdir,
+                    tmux_session="codex-compact-manager",
+                )
+                worker_db.bind_sessions(
+                    conn,
+                    task_name="compact-task",
+                    worker_session_name="compact-worker",
+                    manager_session_name="compact-manager",
+                )
+                worker_db.upsert_manager_config(
+                    conn,
+                    task_id=task_id,
+                    supervision_mode="guided",
+                    permissions={"worker_compact_clear": True},
+                )
+                handoff_id = worker_db.insert_worker_handoff(
+                    conn,
+                    task_id=task_id,
+                    summary="Ready to compact.",
+                )
+                decision_id = worker_db.insert_manager_decision(
+                    conn,
+                    task_id=task_id,
+                    manager_id=None,
+                    decision="nudge",
+                    reason="Request worker compaction after handoff.",
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "workerctl",
+                    "request-worker-compact",
+                    "compact-task",
+                    "--decision-id",
+                    str(decision_id),
+                    "--strict-decisions",
+                    "--dry-run",
+                    "--path",
+                    str(db_path),
+                ],
+                capture_output=True,
+                text=True,
+                cwd=str(ROOT),
+            )
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            payload = json.loads(proc.stdout)
+            self.assertEqual(payload["permission_check"]["handoff_id"], handoff_id)
+            self.assertTrue(payload["permission_check"]["allowed"])
+            self.assertEqual(payload["send_result"]["session"], "compact-worker")
+            self.assertTrue(payload["send_result"]["dry_run"])
+            self.assertEqual(payload["slash_command"], "/compact")
+            self.assertEqual(payload["send_text"], "/compact")
+            self.assertEqual(payload["send_result"]["text"], "/compact")
+            self.assertIn("verify the saved handoff", payload["message"])
+
+            conn = worker_db.connect(db_path)
+            try:
+                audit = worker_db.task_audit(conn, task="compact-task")
+                command = [row for row in audit["commands"] if row["type"] == "request_worker_compact"][0]
+                self.assertEqual(command["state"], "succeeded")
+                events = [row["type"] for row in audit["events"]]
+                self.assertIn("worker_compact_requested", events)
+                self.assertIn("worker_compact_request_succeeded", events)
+            finally:
+                conn.close()
+
+    def test_compact_worker_records_decision_and_requests_compact(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = self._setup_db(tmpdir)
+            conn = worker_db.connect(db_path)
+            try:
+                task_id = worker_db.create_task(conn, name="compact-one-shot", goal="Do config.")
+                worker_db.register_session(
+                    conn,
+                    name="compact-one-shot-worker",
+                    role="worker",
+                    codex_session_path="/tmp/worker.jsonl",
+                    codex_session_id="worker-session",
+                    pid=123,
+                    cwd=tmpdir,
+                    tmux_session="codex-compact-one-shot-worker",
+                )
+                worker_db.register_session(
+                    conn,
+                    name="compact-one-shot-manager",
+                    role="manager",
+                    codex_session_path="/tmp/manager.jsonl",
+                    codex_session_id="manager-session",
+                    pid=124,
+                    cwd=tmpdir,
+                    tmux_session="codex-compact-one-shot-manager",
+                )
+                worker_db.bind_sessions(
+                    conn,
+                    task_name="compact-one-shot",
+                    worker_session_name="compact-one-shot-worker",
+                    manager_session_name="compact-one-shot-manager",
+                )
+                worker_db.upsert_manager_config(
+                    conn,
+                    task_id=task_id,
+                    supervision_mode="guided",
+                    permissions={"worker_compact_clear": True},
+                )
+                handoff_id = worker_db.insert_worker_handoff(
+                    conn,
+                    task_id=task_id,
+                    summary="Ready to compact.",
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "workerctl",
+                    "compact-worker",
+                    "compact-one-shot",
+                    "--reason",
+                    "Compact after saved handoff.",
+                    "--dry-run",
+                    "--path",
+                    str(db_path),
+                ],
+                capture_output=True,
+                text=True,
+                cwd=str(ROOT),
+            )
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            payload = json.loads(proc.stdout)
+            self.assertEqual(payload["permission_check"]["handoff_id"], handoff_id)
+            self.assertEqual(payload["slash_command"], "/compact")
+            self.assertEqual(payload["send_text"], "/compact")
+            self.assertEqual(payload["send_result"]["text"], "/compact")
+            self.assertTrue(payload["manager_decision"]["ok"])
+            decision_id = payload["manager_decision"]["decision_id"]
+
+            conn = worker_db.connect(db_path)
+            try:
+                audit = worker_db.task_audit(conn, task="compact-one-shot")
+                decisions = audit["manager_decisions"]
+                self.assertEqual(len(decisions), 1)
+                self.assertEqual(decisions[0]["id"], decision_id)
+                self.assertEqual(decisions[0]["decision"], "nudge")
+                self.assertEqual(decisions[0]["payload"]["source"], "compact-worker")
+                command = [row for row in audit["commands"] if row["type"] == "request_worker_compact"][0]
+                self.assertEqual(command["state"], "succeeded")
+                self.assertEqual(command["payload"]["manager_decision"]["decision_id"], decision_id)
+                events = [row["type"] for row in audit["events"]]
+                self.assertIn("manager_decision_recorded", events)
+                self.assertIn("worker_compact_request_succeeded", events)
+            finally:
+                conn.close()
+
+    def test_compact_worker_clear_sends_clear(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = self._setup_db(tmpdir)
+            conn = worker_db.connect(db_path)
+            try:
+                task_id = worker_db.create_task(conn, name="clear-one-shot", goal="Do config.")
+                worker_db.register_session(
+                    conn,
+                    name="clear-one-shot-worker",
+                    role="worker",
+                    codex_session_path="/tmp/worker.jsonl",
+                    codex_session_id="worker-session",
+                    pid=123,
+                    cwd=tmpdir,
+                    tmux_session="codex-clear-one-shot-worker",
+                )
+                worker_db.register_session(
+                    conn,
+                    name="clear-one-shot-manager",
+                    role="manager",
+                    codex_session_path="/tmp/manager.jsonl",
+                    codex_session_id="manager-session",
+                    pid=124,
+                    cwd=tmpdir,
+                    tmux_session="codex-clear-one-shot-manager",
+                )
+                worker_db.bind_sessions(
+                    conn,
+                    task_name="clear-one-shot",
+                    worker_session_name="clear-one-shot-worker",
+                    manager_session_name="clear-one-shot-manager",
+                )
+                worker_db.upsert_manager_config(
+                    conn,
+                    task_id=task_id,
+                    supervision_mode="guided",
+                    permissions={"worker_compact_clear": True},
+                )
+                worker_db.insert_worker_handoff(
+                    conn,
+                    task_id=task_id,
+                    summary="Ready to clear.",
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "workerctl",
+                    "compact-worker",
+                    "clear-one-shot",
+                    "--reason",
+                    "Clear throwaway worker after saved handoff.",
+                    "--clear",
+                    "--dry-run",
+                    "--path",
+                    str(db_path),
+                ],
+                capture_output=True,
+                text=True,
+                cwd=str(ROOT),
+            )
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            payload = json.loads(proc.stdout)
+            self.assertEqual(payload["slash_command"], "/clear")
+            self.assertEqual(payload["send_text"], "/clear")
+            self.assertEqual(payload["send_result"]["text"], "/clear")
+
+    def test_request_worker_compact_can_send_clear_or_prompt_only(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = self._setup_db(tmpdir)
+            conn = worker_db.connect(db_path)
+            try:
+                task_id = worker_db.create_task(conn, name="compact-action-task", goal="Do config.")
+                worker_db.register_session(
+                    conn,
+                    name="compact-action-worker",
+                    role="worker",
+                    codex_session_path="/tmp/worker.jsonl",
+                    codex_session_id="worker-session",
+                    pid=123,
+                    cwd=tmpdir,
+                    tmux_session="codex-compact-action-worker",
+                )
+                worker_db.register_session(
+                    conn,
+                    name="compact-action-manager",
+                    role="manager",
+                    codex_session_path="/tmp/manager.jsonl",
+                    codex_session_id="manager-session",
+                    pid=124,
+                    cwd=tmpdir,
+                    tmux_session="codex-compact-action-manager",
+                )
+                worker_db.bind_sessions(
+                    conn,
+                    task_name="compact-action-task",
+                    worker_session_name="compact-action-worker",
+                    manager_session_name="compact-action-manager",
+                )
+                worker_db.upsert_manager_config(
+                    conn,
+                    task_id=task_id,
+                    supervision_mode="guided",
+                    permissions={"worker_compact_clear": True},
+                )
+                worker_db.insert_worker_handoff(
+                    conn,
+                    task_id=task_id,
+                    summary="Ready to compact.",
+                )
+                clear_decision_id = worker_db.insert_manager_decision(
+                    conn,
+                    task_id=task_id,
+                    manager_id=None,
+                    decision="nudge",
+                    reason="Request worker clear after handoff.",
+                )
+                prompt_decision_id = worker_db.insert_manager_decision(
+                    conn,
+                    task_id=task_id,
+                    manager_id=None,
+                    decision="nudge",
+                    reason="Request worker prompt after handoff.",
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            clear_proc = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "workerctl",
+                    "request-worker-compact",
+                    "compact-action-task",
+                    "--decision-id",
+                    str(clear_decision_id),
+                    "--strict-decisions",
+                    "--clear",
+                    "--dry-run",
+                    "--path",
+                    str(db_path),
+                ],
+                capture_output=True,
+                text=True,
+                cwd=str(ROOT),
+            )
+
+            self.assertEqual(clear_proc.returncode, 0, clear_proc.stderr)
+            clear_payload = json.loads(clear_proc.stdout)
+            self.assertEqual(clear_payload["slash_command"], "/clear")
+            self.assertEqual(clear_payload["send_text"], "/clear")
+            self.assertEqual(clear_payload["send_result"]["text"], "/clear")
+
+            prompt_proc = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "workerctl",
+                    "request-worker-compact",
+                    "compact-action-task",
+                    "--decision-id",
+                    str(prompt_decision_id),
+                    "--strict-decisions",
+                    "--prompt-only",
+                    "--dry-run",
+                    "--path",
+                    str(db_path),
+                ],
+                capture_output=True,
+                text=True,
+                cwd=str(ROOT),
+            )
+
+            self.assertEqual(prompt_proc.returncode, 0, prompt_proc.stderr)
+            prompt_payload = json.loads(prompt_proc.stdout)
+            self.assertIsNone(prompt_payload["slash_command"])
+            self.assertIn("verify the saved handoff", prompt_payload["send_text"])
+            self.assertEqual(prompt_payload["send_result"]["text"], prompt_payload["send_text"])
+
+    def test_request_worker_compact_fails_closed_without_handoff(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = self._setup_db(tmpdir)
+            conn = worker_db.connect(db_path)
+            try:
+                task_id = worker_db.create_task(conn, name="compact-no-handoff", goal="Do config.")
+                worker_db.register_session(
+                    conn,
+                    name="compact-worker",
+                    role="worker",
+                    codex_session_path="/tmp/worker.jsonl",
+                    codex_session_id="worker-session",
+                    pid=123,
+                    cwd=tmpdir,
+                    tmux_session="codex-compact-worker",
+                )
+                worker_db.register_session(
+                    conn,
+                    name="compact-manager",
+                    role="manager",
+                    codex_session_path="/tmp/manager.jsonl",
+                    codex_session_id="manager-session",
+                    pid=124,
+                    cwd=tmpdir,
+                    tmux_session="codex-compact-manager",
+                )
+                worker_db.bind_sessions(
+                    conn,
+                    task_name="compact-no-handoff",
+                    worker_session_name="compact-worker",
+                    manager_session_name="compact-manager",
+                )
+                worker_db.upsert_manager_config(
+                    conn,
+                    task_id=task_id,
+                    supervision_mode="guided",
+                    permissions={"worker_compact_clear": True},
+                )
+                decision_id = worker_db.insert_manager_decision(
+                    conn,
+                    task_id=task_id,
+                    manager_id=None,
+                    decision="nudge",
+                    reason="Request worker compaction.",
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "workerctl",
+                    "request-worker-compact",
+                    "compact-no-handoff",
+                    "--decision-id",
+                    str(decision_id),
+                    "--strict-decisions",
+                    "--dry-run",
+                    "--path",
+                    str(db_path),
+                ],
+                capture_output=True,
+                text=True,
+                cwd=str(ROOT),
+            )
+
+            self.assertNotEqual(proc.returncode, 0)
+            self.assertIn("missing_worker_handoff", proc.stderr)
 
 
 if __name__ == "__main__":

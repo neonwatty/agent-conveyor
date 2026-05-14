@@ -160,15 +160,19 @@ tmux attach -t codex-live-test
   + `codex` + poll for rollout + `register-worker`.
 - `start-manager --name N [--cwd D] [--sandbox SANDBOX] [--ask-for-approval ASK_FOR_APPROVAL] [--timeout-seconds N]` —
   Spawn Codex in a fresh tmux session and register it as a manager in one call.
-  Mirrors `start-worker` (omits `--task` since managers supervise rather than execute).
+  Mirrors `start-worker` but uses a manager bootstrap prompt instead of a worker
+  task prompt. The bootstrap opens Codex rollout metadata reliably and tells the
+  manager to run `manager-config <task> --questions` before supervising when a
+  task is known.
 - `pair --task T --worker-name W --manager-name M [--cwd D] [--task-prompt PROMPT] [--task-goal GOAL] [--task-summary S] [--sandbox SANDBOX] [--ask-for-approval ASK_FOR_APPROVAL] [--timeout-seconds N]` —
   One-shot: spawn worker + manager and bind to a task in a single command. Combines
   `start-worker` + `start-manager` + `bind`. The task is looked up or created (if
   `--task-goal` is provided); if the task does not exist and no goal is given, an
   error is raised with a hint. The worker receives the optional `--task-prompt` as
-  its initial Codex prompt; the manager does not. If the manager or bind fails after
-  the worker is spawned, the worker remains registered and can be cleaned up with
-  `workerctl deregister`.
+  its initial Codex prompt; the manager receives a manager bootstrap prompt with
+  the task, goal, worker name, `manager-config --questions`, and `cycle` commands.
+  If the manager or bind fails after the worker is spawned, the worker remains
+  registered and can be cleaned up with `workerctl deregister`.
 - `register-worker --name N [--pid P | --codex-session PATH] [--cwd D] [--tmux-session S]` —
   Register an already-running Codex session as a worker. Rollout JSONL is
   auto-discovered from the pid via `lsof` unless `--codex-session` is given.
@@ -184,6 +188,40 @@ tmux attach -t codex-live-test
   workerctl sessions --state all        # active, gone, and legacy rows
   ```
 - `tasks [--create NAME --goal G --summary S]` — List or create tasks.
+- `handoff <task> --summary S [--next-step N ...] [--payload-json JSON]` —
+  Persist a compact worker handoff for the task. Use this when a worker is
+  becoming managed or before a long context transition so the manager can read
+  progress and likely next steps from SQLite.
+- `manager-config <task> [--mode light|guided|strict] [--objective O]
+  [--guideline G ...] [--acceptance A ...] [--reference R ...]
+  [--allow-pr] [--allow-merge-green] [--allow-worker-compact-clear]` —
+  Persist the manager's supervision contract: what to check against, how
+  structured the loop should be, acceptance criteria, source references, and
+  high-level permissions. With no recorded config it creates the default guided
+  config; with no mutating flags after that it prints the current config.
+  Use `--questions` from a manager Codex session to get a stable JSON question
+  schema to ask the user in chat, then save the answers with noninteractive
+  flags. Use `--interactive` only as a terminal fallback when a human is
+  running `workerctl` directly.
+- `manager-permission <task> <create_pr|merge_green_pr|worker_compact_clear>
+  [--require] [--require-handoff]` — Check and audit whether the saved manager
+  config allows a high-level action. Use `--require` when a manager command
+  should fail closed. Use `--require-handoff` before worker compact/clear style
+  instructions so visible context is persisted first.
+- `record-decision <task> <wait|nudge|interrupt|escalate|stop|inspect>
+  --reason R [--cycle-id N] [--payload-json JSON]` — Persist a manager
+  decision and print its id. Use this before strict mutating commands that
+  require `--decision-id`.
+- `compact-worker <task> --reason R [--clear] [--prompt-only]` — Convenience
+  wrapper that records a `nudge` manager decision, then sends Codex `/compact`
+  to the worker through the same strict audited path as
+  `request-worker-compact`. Use `--clear` to send `/clear`.
+- `request-worker-compact <task> --decision-id N --strict-decisions` — Send
+  Codex `/compact` to the worker through the audited path. Use `--clear` to
+  send `/clear`, or `--prompt-only` to send an explanatory prompt instead.
+  Fails closed unless `worker_compact_clear` is enabled in manager config and
+  a worker handoff exists. Records a durable command and audit events
+  before/after sending the worker instruction.
 - `bind --task T --worker W --manager M` — Create the task binding.
 - `unbind --task T` — End the active binding for a task.
 - `finish-task <task> [--reason R] [--stop-manager] [--stop-worker]` — Mark a
@@ -200,6 +238,9 @@ tmux attach -t codex-live-test
   - `worker_alive` / `manager_alive` — booleans computed by probing the registered session pids (`os.kill(pid, 0)`). `False` when the session's pid is `NULL` (legacy backfill) or the process has exited — useful for detecting silently-dead workers between cycles.
   - `last_event_subtype` — the subtype of the most recent `codex_events` row for the worker, or `null` if no events exist.
   - `task_completed` — `true` iff `last_event_subtype` is `"task_complete"`. Disambiguates "worker finished cleanly" from "worker idle but never started."
+  - `manager_context` — the latest `manager-config` and `handoff` records for
+    the task, so each manager loop can reference the saved objective,
+    acceptance criteria, permissions, worker progress, and next steps.
   
   The `cycle` subcommand accepts `--busy-wait-seconds N` (default: 90) to tune the pane-signal classifier's stuck-busy threshold. Lower values flag stalls faster but increase false positives on long-running real work:
   ```bash
@@ -394,9 +435,8 @@ runtime drift (dead-pid sessions, dangling bindings, stuck tasks); add
 
 ## Migration from the Legacy Path
 
-Earlier prototypes used a worker-first promotion flow (`promote`, `manage`,
-`become-managed`, `supervise`, `watch`, `task-*` commands, etc.) where a
-worker was created first and a manager was then spawned to supervise it. Those
+Earlier prototypes used a worker-first promotion flow where a worker was
+created first and a manager was then spawned to supervise it. Those legacy
 commands have been retired. The new path inverts the model: register two
 already-running Codex sessions, create a task, bind them, and let the manager
 Codex drive observation via `cycle`.
