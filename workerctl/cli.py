@@ -21,6 +21,7 @@ from workerctl.commands import (
     command_audit,
     command_capture,
     command_classify,
+    command_compact_worker,
     command_commands,
     command_create,
     command_cycle,
@@ -41,7 +42,9 @@ from workerctl.commands import (
     command_prune,
     command_qa_plan,
     command_reconcile,
+    command_record_decision,
     command_register_worker,
+    command_request_worker_compact,
     command_register_manager,
     command_start_worker,
     command_start_manager,
@@ -50,6 +53,9 @@ from workerctl.commands import (
     command_bind,
     command_ingest,
     command_unbind,
+    command_handoff,
+    command_manager_config,
+    command_manager_permission,
     command_session_nudge,
     command_session_interrupt,
     command_start,
@@ -241,6 +247,112 @@ def build_parser() -> argparse.ArgumentParser:
     tasks.add_argument("--path", help="Override the workerctl database path.")
     tasks.set_defaults(func=command_tasks)
 
+    handoff = subparsers.add_parser(
+        "handoff",
+        help="Record a compact worker handoff summary and next steps for a task.",
+    )
+    handoff.add_argument("task", help="Task name or ID.")
+    handoff.add_argument("--summary", required=True, help="Compact progress summary from the worker.")
+    handoff.add_argument(
+        "--next-step",
+        action="append",
+        default=[],
+        help="Next step to preserve for manager/worker continuation. May be repeated.",
+    )
+    handoff.add_argument("--payload-json", help="Optional structured JSON object to store with the handoff.")
+    handoff.add_argument("--path", help="Override the workerctl database path.")
+    handoff.set_defaults(func=command_handoff)
+
+    manager_config = subparsers.add_parser(
+        "manager-config",
+        help="Record or show the manager's supervision mode, criteria, references, and permissions.",
+    )
+    manager_config.add_argument("task", help="Task name or ID.")
+    manager_config.add_argument(
+        "--mode",
+        choices=("light", "guided", "strict"),
+        default=None,
+        help="How structured manager supervision should be.",
+    )
+    manager_config.add_argument(
+        "--questions",
+        action="store_true",
+        help="Print the manager setup question schema and current defaults without changing config.",
+    )
+    manager_config.add_argument(
+        "--interactive",
+        action="store_true",
+        help="Ask manager setup questions on stdin, then persist the answers.",
+    )
+    manager_config.add_argument("--objective", help="What the manager should do or check against.")
+    manager_config.add_argument(
+        "--guideline",
+        action="append",
+        default=[],
+        help="Manager guideline. May be repeated.",
+    )
+    manager_config.add_argument(
+        "--acceptance",
+        action="append",
+        default=[],
+        help="Acceptance criterion the manager should check regularly. May be repeated.",
+    )
+    manager_config.add_argument(
+        "--reference",
+        action="append",
+        default=[],
+        help="Planning, PRD, mockup, or other reference path/URL. May be repeated.",
+    )
+    manager_config.add_argument("--allow-pr", action="store_true", help="Allow the manager to instruct the worker to create a PR.")
+    manager_config.add_argument("--allow-merge-green", action="store_true", help="Allow the manager to instruct merging a green PR.")
+    manager_config.add_argument(
+        "--allow-worker-compact-clear",
+        action="store_true",
+        help="Allow the manager to instruct the worker to run compact/clear style cleanup when supported.",
+    )
+    manager_config.add_argument("--permissions-json", help="Optional structured JSON object merged into permissions.")
+    manager_config.add_argument("--path", help="Override the workerctl database path.")
+    manager_config.set_defaults(func=command_manager_config)
+
+    manager_permission = subparsers.add_parser(
+        "manager-permission",
+        help="Check and audit whether manager config allows a high-level action.",
+    )
+    manager_permission.add_argument("task", help="Task name or ID.")
+    manager_permission.add_argument(
+        "action",
+        choices=("create_pr", "merge_green_pr", "worker_compact_clear"),
+        help="High-level action to check against manager config.",
+    )
+    manager_permission.add_argument(
+        "--require-handoff",
+        action="store_true",
+        help="Also require a saved worker handoff; recommended before worker compact/clear.",
+    )
+    manager_permission.add_argument(
+        "--require",
+        action="store_true",
+        help="Exit non-zero when the action is not currently allowed.",
+    )
+    manager_permission.add_argument("--path", help="Override the workerctl database path.")
+    manager_permission.set_defaults(func=command_manager_permission)
+
+    record_decision = subparsers.add_parser(
+        "record-decision",
+        help="Record a manager decision for a task and print its decision id.",
+    )
+    record_decision.add_argument("task", help="Task name or ID.")
+    record_decision.add_argument(
+        "decision",
+        choices=("wait", "nudge", "interrupt", "escalate", "stop", "inspect"),
+        help="Decision type to persist.",
+    )
+    record_decision.add_argument("--reason", required=True, help="Human-readable reason for the decision.")
+    record_decision.add_argument("--cycle-id", type=int, help="Optional manager cycle id this decision came from.")
+    record_decision.add_argument("--payload-json", help="Optional structured JSON object to store with the decision.")
+    record_decision.add_argument("--path", help="Override the workerctl database path.")
+    record_decision.set_defaults(func=command_record_decision)
+
     register_worker = subparsers.add_parser(
         "register-worker",
         help="Register an existing Codex session as a worker.",
@@ -250,6 +362,7 @@ def build_parser() -> argparse.ArgumentParser:
     register_worker.add_argument("--codex-session", help="Path to the rollout-*.jsonl file (skips lsof discovery).")
     register_worker.add_argument("--cwd", help="Working directory; defaults to value in session_meta.")
     register_worker.add_argument("--tmux-session", help="Optional tmux session name if the worker is in tmux.")
+    register_worker.add_argument("--path", help="Override the workerctl database path.")
     register_worker.set_defaults(func=command_register_worker)
 
     start_worker = subparsers.add_parser(
@@ -308,7 +421,7 @@ def build_parser() -> argparse.ArgumentParser:
     start_manager.add_argument(
         "--timeout-seconds",
         type=int,
-        default=15,
+        default=60,
         help="Max seconds to wait for codex to write session_meta.",
     )
     start_manager.set_defaults(func=command_start_manager)
@@ -353,7 +466,7 @@ def build_parser() -> argparse.ArgumentParser:
     pair.add_argument(
         "--timeout-seconds",
         type=int,
-        default=15,
+        default=60,
         help="Max seconds to wait for codex to write session_meta.",
     )
     pair.add_argument(
@@ -371,6 +484,7 @@ def build_parser() -> argparse.ArgumentParser:
     register_manager.add_argument("--codex-session")
     register_manager.add_argument("--cwd")
     register_manager.add_argument("--tmux-session")
+    register_manager.add_argument("--path", help="Override the workerctl database path.")
     register_manager.set_defaults(func=command_register_manager)
 
     deregister = subparsers.add_parser(
@@ -445,6 +559,34 @@ def build_parser() -> argparse.ArgumentParser:
     session_interrupt.add_argument("--followup", default=None, help="Optional text to send after the interrupt.")
     session_interrupt.add_argument("--dry-run", action="store_true", help="Resolve target without sending.")
     session_interrupt.set_defaults(func=command_session_interrupt)
+
+    request_worker_compact = subparsers.add_parser(
+        "request-worker-compact",
+        help="Send /compact or /clear to a worker through the audited path.",
+    )
+    request_worker_compact.add_argument("task", help="Task name or ID.")
+    request_worker_compact.add_argument("--decision-id", type=int, help="Manager nudge decision ID justifying the request.")
+    request_worker_compact.add_argument("--strict-decisions", action="store_true", help="Reject unless --decision-id is a valid nudge decision.")
+    request_worker_compact.add_argument("--clear", action="store_true", help="Send /clear instead of the default /compact slash command.")
+    request_worker_compact.add_argument("--prompt-only", action="store_true", help="Send an explanatory prompt instead of a Codex slash command.")
+    request_worker_compact.add_argument("--message", help="Override the prompt used with --prompt-only; audit metadata only otherwise.")
+    request_worker_compact.add_argument("--dry-run", action="store_true", help="Resolve and audit without sending text to the worker.")
+    request_worker_compact.add_argument("--path", help="Override the workerctl database path.")
+    request_worker_compact.set_defaults(func=command_request_worker_compact)
+
+    compact_worker = subparsers.add_parser(
+        "compact-worker",
+        help="Record a nudge decision and send /compact or /clear to the worker.",
+    )
+    compact_worker.add_argument("task", help="Task name or ID.")
+    compact_worker.add_argument("--reason", required=True, help="Human-readable reason for compacting or clearing worker context.")
+    compact_worker.add_argument("--cycle-id", type=int, help="Optional manager cycle id this decision came from.")
+    compact_worker.add_argument("--clear", action="store_true", help="Send /clear instead of the default /compact slash command.")
+    compact_worker.add_argument("--prompt-only", action="store_true", help="Send an explanatory prompt instead of a Codex slash command.")
+    compact_worker.add_argument("--message", help="Override the prompt used with --prompt-only; audit metadata only otherwise.")
+    compact_worker.add_argument("--dry-run", action="store_true", help="Resolve and audit without sending text to the worker.")
+    compact_worker.add_argument("--path", help="Override the workerctl database path.")
+    compact_worker.set_defaults(func=command_compact_worker)
 
     cycle = subparsers.add_parser(
         "cycle",
@@ -690,7 +832,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     parser = build_parser()
     args, unknown = parser.parse_known_args()
-    if unknown and args.command not in {"start", "promote", "resume-manager", "remanage", "self-promote", "manage", "become-managed"}:
+    if unknown and args.command not in {"start"}:
         parser.error(f"unrecognized arguments: {' '.join(unknown)}")
     args.codex_args = unknown
     try:

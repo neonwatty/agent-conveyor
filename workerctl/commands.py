@@ -106,48 +106,97 @@ def codex_arg_suffix(codex_args: list[str]) -> str:
 
 def raw_worker_start_prompt(session_name: str, cwd: Path, manager_codex_args: list[str] | None = None) -> str:
     manager_suffix = codex_arg_suffix(manager_codex_args or [])
-    become_managed_template = (
-        f"workerctl become-managed --session {session_name} --worker <worker-name> "
-        f"--task <task-name> --goal \"<goal>\" --summary \"<summary>\"{manager_suffix}"
-    )
+    start_manager_template = f"workerctl start-manager --name <manager-name> --cwd {sh_quote(str(cwd))}{manager_suffix}"
     return f"""You are a raw worker candidate running inside workerctl tmux session {session_name}.
 
 Current working directory: {cwd}
 
 You are not registered as a worker yet.
 
-If the user asks you to become managed, launch your manager by running:
+The supported manager/worker setup is session-based:
 
-{become_managed_template}
+1. Register this session as a worker after identifying the Codex process pid and
+   rollout JSONL:
+
+   workerctl register-worker --name <worker-name> --pid <pid> --codex-session <rollout.jsonl> --cwd {sh_quote(str(cwd))} --tmux-session {session_name}
+
+2. Create or select a task:
+
+   workerctl tasks --create <task-name> --goal "<goal>"
+
+3. Start a manager:
+
+   {start_manager_template}
+
+4. Bind the sessions:
+
+   workerctl bind --task <task-name> --worker <worker-name> --manager <manager-name>
+
+5. Configure manager supervision:
+
+   workerctl manager-config <task-name> --questions
 
 Required fields:
 - worker name
+- manager name
 - task name
 - goal
 
-If any required field is missing, ask the user for it before running workerctl become-managed.
-Do not invent worker name, task name, or goal values unless the user explicitly asks you to choose them.
-
-After workerctl become-managed succeeds, your current tmux session will be renamed to codex-<worker-name>, and a manager tmux session will be spawned to supervise you. Preserve any arguments after `--` in the template when launching the manager.
-
-After you are managed, if the user asks to take back manual control, stop supervising you, pause your manager, or unmanage this worker, run:
-
-workerctl unmanage
-
-This stops only the manager. It does not stop your worker session. If workerctl unmanage asks for a missing task or session, ask the user for the missing value.
-
-If the user asks for your current managed status, run:
-
-workerctl my-status
-
-If you are paused and the user asks to restart management or get a manager again, run:
-
-workerctl remanage --open-manager
+If any required field is missing, ask the user for it. Do not invent worker
+name, manager name, task name, or goal values unless the user explicitly asks
+you to choose them.
 
 If the user asks to see the manager or worker terminal for your task, run:
 
 workerctl open-manager <task-name>
 workerctl open-worker <task-name>
+"""
+
+
+def manager_bootstrap_prompt(
+    *,
+    manager_name: str,
+    cwd: str | Path,
+    task_name: str | None = None,
+    task_goal: str | None = None,
+    worker_name: str | None = None,
+) -> str:
+    task_line = task_name or "<unbound-task>"
+    goal_line = task_goal or "No task goal supplied yet."
+    worker_line = worker_name or "No worker session supplied yet."
+    setup_command = (
+        f"scripts/workerctl manager-config {task_line} --questions"
+        if task_name
+        else "scripts/workerctl manager-config <task> --questions"
+    )
+    cycle_command = (
+        f"scripts/workerctl cycle {task_line}"
+        if task_name
+        else "scripts/workerctl cycle <task>"
+    )
+    return f"""You are a Codex manager session for workerctl.
+
+Working directory: {cwd}
+Manager session name: {manager_name}
+Task: {task_line}
+Task goal: {goal_line}
+Worker session: {worker_line}
+
+Your role is to supervise, not to implement the worker task.
+
+Initial setup:
+1. Run `{setup_command}`.
+2. Ask the user the returned setup questions in this manager Codex chat.
+3. Persist the answers with `scripts/workerctl manager-config`.
+4. Use `workerctl manager-config --interactive` only when a human is directly
+   running workerctl in a terminal.
+
+Supervision loop:
+- Start observations with `{cycle_command}`.
+- Read `manager_context.manager_config` in cycle output before nudging.
+- Communicate with the worker only through workerctl session/task commands.
+- Do not edit project files unless the user explicitly asks this manager
+  session to change workerctl itself.
 """
 
 
@@ -364,9 +413,11 @@ def command_start(args: argparse.Namespace) -> int:
     manager_suffix = codex_arg_suffix(raw_codex_args)
     result = {
         "attach_command": attach_session_command(session_name),
-        "become_managed_command_template": f"workerctl become-managed --session {session_name} --worker <worker-name> --task <task-name> --goal \"<goal>\" --summary \"<summary>\"{manager_suffix}",
         "cwd": str(directory),
-        "manage_command_template": f"workerctl manage --session {session_name} --worker <worker-name> --task <task-name> --goal \"<goal>\" --summary \"<summary>\" --open-manager{manager_suffix}",
+        "register_worker_command_template": f"workerctl register-worker --name <worker-name> --pid <pid> --codex-session <rollout.jsonl> --cwd {sh_quote(str(directory))} --tmux-session {session_name}",
+        "start_manager_command_template": f"workerctl start-manager --name <manager-name> --cwd {sh_quote(str(directory))}{manager_suffix}",
+        "bind_command_template": "workerctl bind --task <task-name> --worker <worker-name> --manager <manager-name>",
+        "manager_config_questions_command_template": "workerctl manager-config <task-name> --questions",
         "session": session_name,
         "start_prompt_path": str(prompt_path) if prompt_path else None,
         "start_prompt_sent": bool(prompt_path),
@@ -1163,6 +1214,570 @@ def command_tasks(args: argparse.Namespace) -> int:
     return 0
 
 
+def _json_arg(value: str | None, *, flag: str) -> dict[str, Any]:
+    if not value:
+        return {}
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError as exc:
+        raise WorkerError(f"{flag} must be valid JSON: {exc}") from exc
+    if not isinstance(parsed, dict):
+        raise WorkerError(f"{flag} must be a JSON object")
+    return parsed
+
+
+def command_handoff(args: argparse.Namespace) -> int:
+    from workerctl import db as worker_db
+
+    db_path = Path(args.path).expanduser().resolve() if args.path else None
+    payload = _json_arg(args.payload_json, flag="--payload-json")
+    with worker_db.connect(db_path) as conn:
+        worker_db.initialize_database(conn)
+        task = worker_db.task_row(conn, task=args.task)
+        worker_session_id = None
+        try:
+            binding = worker_db.active_binding_for_task(conn, task_name=task["name"])
+            worker_session_id = binding["worker_session_id"]
+        except WorkerError:
+            worker_session_id = None
+        handoff_id = worker_db.insert_worker_handoff(
+            conn,
+            task_id=task["id"],
+            worker_session_id=worker_session_id,
+            summary=args.summary,
+            next_steps=args.next_step,
+            payload=payload,
+        )
+        worker_db.insert_event(
+            conn,
+            "worker_handoff_recorded",
+            actor="workerctl",
+            task_id=task["id"],
+            payload={
+                "handoff_id": handoff_id,
+                "next_step_count": len(args.next_step),
+                "worker_session_id": worker_session_id,
+            },
+        )
+        conn.commit()
+        handoff = worker_db.latest_worker_handoff(conn, task_id=task["id"])
+    print(json.dumps(handoff, indent=2, sort_keys=True))
+    return 0
+
+
+def manager_config_questions(existing: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    existing = existing or {}
+    permissions = existing.get("permissions") or {}
+    return [
+        {
+            "id": "supervision_mode",
+            "kind": "choice",
+            "choices": ["guided", "light", "strict"],
+            "default": existing.get("supervision_mode") or "guided",
+            "question": "How structured should manager supervision be?",
+            "help": "Use guided for normal nudges, light for loose progress checks, strict when the manager must regularly check acceptance criteria.",
+        },
+        {
+            "id": "objective",
+            "kind": "text",
+            "default": existing.get("objective"),
+            "question": "What should the manager do or check against?",
+            "help": "Examples: a PRD, implementation plan, mockup, GitHub issue, branch goal, or testing checklist.",
+        },
+        {
+            "id": "guidelines",
+            "kind": "list",
+            "default": existing.get("guidelines") or [],
+            "question": "What guidelines should constrain manager nudges?",
+            "help": "Examples: nudge only when stale, do not change scope, ask before destructive commands.",
+        },
+        {
+            "id": "acceptance_criteria",
+            "kind": "list",
+            "default": existing.get("acceptance_criteria") or [],
+            "question": "What acceptance criteria should the manager check regularly?",
+            "help": "Examples: tests pass, matches mockup, docs updated, PR opened.",
+        },
+        {
+            "id": "reference_paths",
+            "kind": "list",
+            "default": existing.get("reference_paths") or [],
+            "question": "What planning, PRD, mockup, issue, or file references should be saved?",
+            "help": "Use repo paths or URLs.",
+        },
+        {
+            "id": "permissions",
+            "kind": "booleans",
+            "default": {
+                "create_pr": bool(permissions.get("create_pr", False)),
+                "merge_green_pr": bool(permissions.get("merge_green_pr", False)),
+                "worker_compact_clear": bool(permissions.get("worker_compact_clear", False)),
+            },
+            "question": "Which high-level actions may the manager instruct the worker to do?",
+            "choices": ["create_pr", "merge_green_pr", "worker_compact_clear"],
+        },
+    ]
+
+
+def _split_interactive_list(value: str) -> list[str]:
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def _interactive_bool(prompt: str, *, default: bool) -> bool:
+    suffix = "Y/n" if default else "y/N"
+    answer = input(f"{prompt} [{suffix}]: ").strip().lower()
+    if not answer:
+        return default
+    return answer in {"y", "yes", "true", "1"}
+
+
+def _apply_interactive_manager_config(args: argparse.Namespace, existing: dict[str, Any] | None) -> None:
+    questions = {question["id"]: question for question in manager_config_questions(existing)}
+    print("Manager configuration setup. Press Enter to keep defaults.")
+    mode_default = questions["supervision_mode"]["default"]
+    mode_answer = input(f"{questions['supervision_mode']['question']} [{mode_default}]: ").strip()
+    if mode_answer:
+        if mode_answer not in {"light", "guided", "strict"}:
+            raise WorkerError("--mode must be one of: light, guided, strict")
+        args.mode = mode_answer
+    else:
+        args.mode = mode_default
+
+    objective_default = questions["objective"]["default"] or ""
+    objective_answer = input(f"{questions['objective']['question']} [{objective_default}]: ").strip()
+    args.objective = objective_answer or objective_default or None
+
+    for attr, question_id in (
+        ("guideline", "guidelines"),
+        ("acceptance", "acceptance_criteria"),
+        ("reference", "reference_paths"),
+    ):
+        question = questions[question_id]
+        default_values = question["default"]
+        default_text = ", ".join(default_values)
+        answer = input(f"{question['question']} (comma-separated) [{default_text}]: ").strip()
+        setattr(args, attr, _split_interactive_list(answer) if answer else list(default_values))
+
+    permission_defaults = questions["permissions"]["default"]
+    permissions = {
+        "create_pr": _interactive_bool("Allow manager to instruct worker to create a PR?", default=permission_defaults["create_pr"]),
+        "merge_green_pr": _interactive_bool("Allow manager to instruct merging a green PR?", default=permission_defaults["merge_green_pr"]),
+        "worker_compact_clear": _interactive_bool(
+            "Allow manager to instruct worker compact/clear after a saved handoff?",
+            default=permission_defaults["worker_compact_clear"],
+        ),
+    }
+    args.allow_pr = permissions["create_pr"]
+    args.allow_merge_green = permissions["merge_green_pr"]
+    args.allow_worker_compact_clear = permissions["worker_compact_clear"]
+    args.permissions_json = json.dumps(permissions, sort_keys=True)
+
+
+MANAGER_PERMISSION_ACTIONS = {
+    "create_pr",
+    "merge_green_pr",
+    "worker_compact_clear",
+}
+
+
+MANAGER_DECISIONS = {
+    "wait",
+    "nudge",
+    "interrupt",
+    "escalate",
+    "stop",
+    "inspect",
+}
+
+
+def command_record_decision(args: argparse.Namespace) -> int:
+    from workerctl import db as worker_db
+
+    if args.decision not in MANAGER_DECISIONS:
+        raise WorkerError(f"unknown manager decision: {args.decision}")
+    db_path = Path(args.path).expanduser().resolve() if args.path else None
+    payload = _json_arg(args.payload_json, flag="--payload-json")
+    with worker_db.connect(db_path) as conn:
+        worker_db.initialize_database(conn)
+        task = worker_db.task_row(conn, task=args.task)
+        result = record_manager_decision(
+            conn,
+            task=task,
+            manager_cycle_id=args.cycle_id,
+            decision=args.decision,
+            reason=args.reason,
+            payload=payload,
+        )
+        conn.commit()
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0
+
+
+def record_manager_decision(
+    conn: Any,
+    *,
+    task: dict[str, Any],
+    decision: str,
+    reason: str,
+    manager_cycle_id: int | None = None,
+    payload: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    from workerctl import db as worker_db
+
+    manager = worker_db.active_manager(conn, task=task["id"])
+    decision_id = worker_db.insert_manager_decision(
+        conn,
+        task_id=task["id"],
+        manager_id=manager["id"] if manager else None,
+        manager_cycle_id=manager_cycle_id,
+        decision=decision,
+        reason=reason,
+        payload=payload,
+    )
+    row = conn.execute(
+        """
+        select id, task_id, manager_id, manager_cycle_id, decision, reason,
+               created_at, payload_json
+        from manager_decisions
+        where id = ?
+        """,
+        (decision_id,),
+    ).fetchone()
+    result = {
+        "created_at": row["created_at"],
+        "decision": row["decision"],
+        "id": row["id"],
+        "manager_cycle_id": row["manager_cycle_id"],
+        "manager_id": row["manager_id"],
+        "payload": json.loads(row["payload_json"]),
+        "reason": row["reason"],
+        "task": {"id": task["id"], "name": task["name"]},
+        "task_id": row["task_id"],
+    }
+    worker_db.insert_event(
+        conn,
+        "manager_decision_recorded",
+        actor="workerctl",
+        task_id=task["id"],
+        manager_id=manager["id"] if manager else None,
+        payload={
+            "decision": row["decision"],
+            "decision_id": row["id"],
+            "manager_cycle_id": row["manager_cycle_id"],
+            "reason": row["reason"],
+        },
+    )
+    return result
+
+
+def command_manager_permission(args: argparse.Namespace) -> int:
+    from workerctl import db as worker_db
+
+    if args.action not in MANAGER_PERMISSION_ACTIONS:
+        raise WorkerError(f"unknown manager permission action: {args.action}")
+    db_path = Path(args.path).expanduser().resolve() if args.path else None
+    with worker_db.connect(db_path) as conn:
+        worker_db.initialize_database(conn)
+        task = worker_db.task_row(conn, task=args.task)
+        config = worker_db.manager_config(conn, task_id=task["id"])
+        handoff = worker_db.latest_worker_handoff(conn, task_id=task["id"])
+        reasons: list[str] = []
+        allowed = False
+        if config is None:
+            reasons.append("missing_manager_config")
+        else:
+            allowed = bool(config["permissions"].get(args.action, False))
+            if not allowed:
+                reasons.append("permission_not_enabled")
+        if args.require_handoff and handoff is None:
+            allowed = False
+            reasons.append("missing_worker_handoff")
+        result = {
+            "action": args.action,
+            "allowed": allowed,
+            "config": config,
+            "handoff_id": handoff["id"] if handoff else None,
+            "require_handoff": args.require_handoff,
+            "reasons": reasons,
+            "task": {"id": task["id"], "name": task["name"]},
+        }
+        worker_db.insert_event(
+            conn,
+            "manager_permission_checked",
+            actor="workerctl",
+            task_id=task["id"],
+            payload=result,
+        )
+        conn.commit()
+    print(json.dumps(result, indent=2, sort_keys=True))
+    if args.require and not allowed:
+        return 1
+    return 0
+
+
+def worker_compact_request_text(task_name: str, handoff: dict[str, Any]) -> str:
+    return (
+        "Manager request: prepare for context compaction/clear only if supported by this Codex session.\n\n"
+        f"Task: {task_name}\n"
+        f"Saved handoff id: {handoff['id']}\n"
+        f"Saved handoff summary: {handoff['summary']}\n\n"
+        "Before compacting or clearing visible context, verify the saved handoff still captures current progress. "
+        "If it is stale, update it with `scripts/workerctl handoff` first. "
+        "Then run the Codex compact/clear action only if supported and appropriate. "
+        "Afterward, report whether compaction happened and what the next concrete step is. "
+        "Do not edit project files as part of this request."
+    )
+
+
+def worker_compact_slash_command(args: argparse.Namespace) -> str | None:
+    if args.prompt_only:
+        return None
+    return "/clear" if args.clear else "/compact"
+
+
+def command_request_worker_compact(args: argparse.Namespace) -> int:
+    from workerctl import db as worker_db
+    from workerctl import tmux as worker_tmux
+
+    db_path = Path(args.path).expanduser().resolve() if args.path else None
+    with worker_db.connect(db_path) as conn:
+        worker_db.initialize_database(conn)
+        task = worker_db.task_row(conn, task=args.task)
+        binding = worker_db.active_binding_for_task(conn, task_name=task["name"])
+        config = worker_db.manager_config(conn, task_id=task["id"])
+        handoff = worker_db.latest_worker_handoff(conn, task_id=task["id"])
+        manager = worker_db.active_manager(conn, task=task["id"])
+        decision_check = worker_db.assess_manager_decision(
+            conn,
+            task_id=task["id"],
+            decision_id=args.decision_id,
+            allowed_decisions={"nudge"},
+        )
+        worker_db.require_manager_decision_ok(
+            command_type="request_worker_compact",
+            decision_check=decision_check,
+            strict=args.strict_decisions,
+        )
+        permission_reasons: list[str] = []
+        permission_allowed = bool(config and config["permissions"].get("worker_compact_clear", False))
+        if config is None:
+            permission_reasons.append("missing_manager_config")
+        elif not permission_allowed:
+            permission_reasons.append("permission_not_enabled")
+        if handoff is None:
+            permission_allowed = False
+            permission_reasons.append("missing_worker_handoff")
+        permission_check = {
+            "action": "worker_compact_clear",
+            "allowed": permission_allowed,
+            "handoff_id": handoff["id"] if handoff else None,
+            "reasons": permission_reasons,
+        }
+        worker_db.insert_event(
+            conn,
+            "manager_permission_checked",
+            actor="workerctl",
+            task_id=task["id"],
+            payload={
+                **permission_check,
+                "source": "request_worker_compact",
+            },
+        )
+        if not permission_allowed:
+            conn.commit()
+            raise WorkerError(f"worker compact request is not allowed: {json.dumps(permission_check, sort_keys=True)}")
+        slash_command = worker_compact_slash_command(args)
+        message = args.message or worker_compact_request_text(task["name"], handoff)
+        send_text_value = message if slash_command is None else slash_command
+        command_id = worker_db.create_command(
+            conn,
+            command_type="request_worker_compact",
+            task_id=task["id"],
+            manager_id=manager["id"] if manager else None,
+            payload={
+                "manager_decision": decision_check,
+                "message": message,
+                "permission_check": permission_check,
+                "send_text": send_text_value,
+                "slash_command": slash_command,
+                "task": task["name"],
+                "worker_session": binding["worker_session_name"],
+            },
+        )
+        worker_db.insert_event(
+            conn,
+            "worker_compact_requested",
+            actor="workerctl",
+            command_id=command_id,
+            task_id=task["id"],
+            manager_id=manager["id"] if manager else None,
+            payload={
+                "permission_check": permission_check,
+                "worker_session": binding["worker_session_name"],
+            },
+        )
+        conn.commit()
+
+    result = {
+        "command_id": command_id,
+        "manager_decision": decision_check,
+        "message": message,
+        "permission_check": permission_check,
+        "send_text": send_text_value,
+        "slash_command": slash_command,
+        "task": task["name"],
+        "worker_session": binding["worker_session_name"],
+    }
+    try:
+        with worker_db.connect(db_path) as conn:
+            worker_db.initialize_database(conn)
+            worker_db.mark_command_attempted(conn, command_id=command_id)
+            send_result = worker_tmux.send_text_to_session(
+                conn,
+                session_name=binding["worker_session_name"],
+                text=send_text_value,
+                dry_run=args.dry_run,
+            )
+            result["send_result"] = send_result
+            worker_db.finish_command(conn, command_id=command_id, state="succeeded", result=result)
+            worker_db.insert_event(
+                conn,
+                "worker_compact_request_succeeded",
+                actor="workerctl",
+                command_id=command_id,
+                task_id=task["id"],
+                manager_id=manager["id"] if manager else None,
+                payload=result,
+            )
+            conn.commit()
+    except Exception as exc:
+        with worker_db.connect(db_path) as conn:
+            worker_db.initialize_database(conn)
+            worker_db.finish_command(conn, command_id=command_id, state="failed", result=result, error=str(exc))
+            worker_db.insert_event(
+                conn,
+                "worker_compact_request_failed",
+                actor="workerctl",
+                command_id=command_id,
+                task_id=task["id"],
+                manager_id=manager["id"] if manager else None,
+                payload={**result, "error": str(exc), "error_type": type(exc).__name__},
+            )
+            conn.commit()
+        raise
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0
+
+
+def command_compact_worker(args: argparse.Namespace) -> int:
+    from workerctl import db as worker_db
+
+    db_path = Path(args.path).expanduser().resolve() if args.path else None
+    decision_payload = {
+        "source": "compact-worker",
+        "slash_command": "/clear" if args.clear else (None if args.prompt_only else "/compact"),
+    }
+    with worker_db.connect(db_path) as conn:
+        worker_db.initialize_database(conn)
+        task = worker_db.task_row(conn, task=args.task)
+        decision = record_manager_decision(
+            conn,
+            task=task,
+            manager_cycle_id=args.cycle_id,
+            decision="nudge",
+            reason=args.reason,
+            payload=decision_payload,
+        )
+        conn.commit()
+
+    request_args = argparse.Namespace(
+        clear=args.clear,
+        decision_id=decision["id"],
+        dry_run=args.dry_run,
+        message=args.message,
+        path=args.path,
+        prompt_only=args.prompt_only,
+        strict_decisions=True,
+        task=args.task,
+    )
+    return command_request_worker_compact(request_args)
+
+
+def command_manager_config(args: argparse.Namespace) -> int:
+    from workerctl import db as worker_db
+
+    db_path = Path(args.path).expanduser().resolve() if args.path else None
+    with worker_db.connect(db_path) as conn:
+        worker_db.initialize_database(conn)
+        task = worker_db.task_row(conn, task=args.task)
+        existing = worker_db.manager_config(conn, task_id=task["id"])
+        if args.questions:
+            print(json.dumps({
+                "recommended_collection": "manager_codex_chat",
+                "fallback_collection": "workerctl manager-config --interactive",
+                "questions": manager_config_questions(existing),
+                "task": {"id": task["id"], "name": task["name"]},
+            }, indent=2, sort_keys=True))
+            return 0
+        if args.interactive:
+            try:
+                _apply_interactive_manager_config(args, existing)
+            except EOFError as exc:
+                raise WorkerError("--interactive requires answers on stdin or a terminal") from exc
+        mutating = any(
+            [
+                args.mode is not None,
+                args.objective is not None,
+                args.guideline,
+                args.acceptance,
+                args.reference,
+                args.permissions_json,
+                args.allow_pr,
+                args.allow_merge_green,
+                args.allow_worker_compact_clear,
+            ]
+        )
+        if mutating or existing is None:
+            permissions = dict(existing["permissions"]) if existing else {
+                "create_pr": False,
+                "merge_green_pr": False,
+                "worker_compact_clear": False,
+            }
+            if args.allow_pr:
+                permissions["create_pr"] = True
+            if args.allow_merge_green:
+                permissions["merge_green_pr"] = True
+            if args.allow_worker_compact_clear:
+                permissions["worker_compact_clear"] = True
+            permissions.update(_json_arg(args.permissions_json, flag="--permissions-json"))
+            worker_db.upsert_manager_config(
+                conn,
+                task_id=task["id"],
+                supervision_mode=args.mode or (existing["supervision_mode"] if existing else "guided"),
+                objective=args.objective if args.objective is not None else (existing["objective"] if existing else None),
+                guidelines=args.guideline or (existing["guidelines"] if existing else []),
+                acceptance_criteria=args.acceptance or (existing["acceptance_criteria"] if existing else []),
+                reference_paths=args.reference or (existing["reference_paths"] if existing else []),
+                permissions=permissions,
+            )
+            worker_db.insert_event(
+                conn,
+                "manager_config_recorded",
+                actor="workerctl",
+                task_id=task["id"],
+                payload={
+                    "acceptance_count": len(args.acceptance),
+                    "guideline_count": len(args.guideline),
+                    "reference_count": len(args.reference),
+                    "supervision_mode": args.mode or (existing["supervision_mode"] if existing else "guided"),
+                },
+            )
+            conn.commit()
+        config = worker_db.manager_config(conn, task_id=task["id"])
+    print(json.dumps(config, indent=2, sort_keys=True))
+    return 0
+
+
 def command_commands(args: argparse.Namespace) -> int:
     db_path = Path(args.path).expanduser().resolve() if args.path else None
     filters = []
@@ -1783,7 +2398,8 @@ def _register_session_from_args(args: argparse.Namespace, *, role: str) -> dict:
     else:
         raise WorkerError("must supply --pid or --codex-session")
 
-    conn = worker_db.connect()
+    db_path = Path(args.path).expanduser().resolve() if getattr(args, "path", None) else None
+    conn = worker_db.connect(db_path)
     worker_db.initialize_database(conn)
     try:
         session_id = worker_db.register_session(
@@ -1918,9 +2534,10 @@ def _spawn_codex_and_register(
     role: str,
     cwd: str | None = None,
     task: str | None = None,
+    initial_prompt: str | None = None,
     sandbox: str | None = None,
     ask_for_approval: str | None = None,
-    timeout_seconds: int = 30,
+    timeout_seconds: int = 60,
 ) -> dict:
     """Spawn codex in a fresh tmux session and register it in one call.
 
@@ -1961,14 +2578,17 @@ def _spawn_codex_and_register(
             f"choose a different name or `tmux kill-session -t {tmux_session_name}` first"
         )
 
-    # Build the codex command. Task argument is appended as a literal prompt.
+    # Build the codex command. An initial prompt opens Codex's rollout metadata
+    # reliably and gives manager sessions setup context without assigning them
+    # the worker task.
     codex_args: list[str] = ["codex"]
     if sandbox:
         codex_args += ["--sandbox", sandbox]
     if ask_for_approval:
         codex_args += ["--ask-for-approval", ask_for_approval]
-    if task:
-        codex_args.append(task)
+    prompt = initial_prompt if initial_prompt is not None else task
+    if prompt:
+        codex_args.append(prompt)
     codex_cmd = " ".join(shlex.quote(a) for a in codex_args)
 
     # Spawn tmux + codex.
@@ -1977,9 +2597,22 @@ def _spawn_codex_and_register(
     ])
 
     # Discover codex pid + rollout.
-    discovery = _discover_codex_session_in_tmux(
-        tmux_session_name, timeout_seconds=timeout_seconds,
-    )
+    try:
+        discovery = _discover_codex_session_in_tmux(
+            tmux_session_name, timeout_seconds=timeout_seconds,
+        )
+    except WorkerError as exc:
+        raise WorkerError(
+            f"{exc}\n"
+            f"Recovery: tmux session {tmux_session_name!r} may still be alive. "
+            f"Inspect it with `tmux attach -t {tmux_session_name}`. If Codex is visible, "
+            "submit a prompt or press Enter, then register it with "
+            f"`workerctl register-{role} --name {name} --pid <pid> "
+            f"--codex-session <rollout.jsonl> --cwd {shlex.quote(str(cwd or ''))} "
+            f"--tmux-session {tmux_session_name}`. To clean up, run "
+            f"`tmux kill-session -t {tmux_session_name}` and `workerctl deregister {name}` "
+            "if it was registered."
+        ) from exc
 
     # Register the session.
     conn = worker_db.connect()
@@ -2057,6 +2690,10 @@ def command_start_manager(args: argparse.Namespace) -> int:
         role="manager",
         cwd=args.cwd,
         task=None,
+        initial_prompt=manager_bootstrap_prompt(
+            manager_name=args.name,
+            cwd=args.cwd,
+        ),
         sandbox=args.sandbox,
         ask_for_approval=args.ask_for_approval,
         timeout_seconds=args.timeout_seconds,
@@ -2123,6 +2760,13 @@ def command_pair(args: argparse.Namespace) -> int:
             role="manager",
             cwd=args.cwd,
             task=None,
+            initial_prompt=manager_bootstrap_prompt(
+                manager_name=args.manager_name,
+                cwd=args.cwd,
+                task_name=args.task,
+                task_goal=args.task_goal if task_created else task_row["goal"],
+                worker_name=args.worker_name,
+            ),
             sandbox=args.sandbox,
             ask_for_approval=args.ask_for_approval,
             timeout_seconds=args.timeout_seconds,

@@ -166,6 +166,10 @@ def run_cycle(
     last_subtype = worker_db.latest_codex_event_subtype(
         conn, session_id=binding["worker_session_id"]
     )
+    manager_context = {
+        "manager_config": worker_db.manager_config(conn, task_id=binding["task_id"]),
+        "worker_handoff": worker_db.latest_worker_handoff(conn, task_id=binding["task_id"]),
+    }
     status_payload = {
         "kind": "session_cycle",
         "task": task_name,
@@ -180,6 +184,7 @@ def run_cycle(
         "notable_pane_pattern": notable_pane_pattern,
         "worker_alive": _alive(worker_row),
         "manager_alive": _alive(manager_row),
+        "manager_context": manager_context,
         "last_event_subtype": last_subtype,
         "task_completed": last_subtype == "task_complete",
     }

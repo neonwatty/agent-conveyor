@@ -12,7 +12,7 @@ from workerctl.core import now_iso
 from workerctl.state import state_root
 
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 REQUIRED_TABLES = {
     "agent_observations",
     "bindings",
@@ -21,6 +21,7 @@ REQUIRED_TABLES = {
     "commands",
     "data_migrations",
     "events",
+    "manager_configs",
     "manager_cycles",
     "manager_decisions",
     "managers",
@@ -32,12 +33,14 @@ REQUIRED_TABLES = {
     "terminal_captures",
     "transcript_captures",
     "transcript_segments",
+    "worker_handoffs",
     "workers",
 }
 REQUIRED_INDEXES = {
     "codex_events_session_id",
     "commands_task_state_created",
     "events_task_id",
+    "manager_configs_task_id",
     "one_active_binding_per_task",
     "one_active_binding_per_manager_session",
     "one_active_binding_per_worker_session",
@@ -48,6 +51,7 @@ REQUIRED_INDEXES = {
     "terminal_captures_task_role",
     "transcript_captures_worker_id",
     "transcript_segments_task_role",
+    "worker_handoffs_task_id",
 }
 REQUIRED_TRIGGERS = {
     "events_no_delete",
@@ -262,6 +266,28 @@ def migrate(conn: sqlite3.Connection, from_version: int) -> None:
           error text
         );
 
+        create table if not exists worker_handoffs(
+          id integer primary key autoincrement,
+          task_id text not null references tasks(id),
+          worker_session_id text references sessions(id),
+          summary text not null,
+          next_steps_json text not null check (json_valid(next_steps_json)),
+          payload_json text not null check (json_valid(payload_json)),
+          created_at text not null
+        );
+
+        create table if not exists manager_configs(
+          task_id text primary key references tasks(id),
+          supervision_mode text not null check (supervision_mode in ('light','guided','strict')),
+          objective text,
+          guidelines_json text not null check (json_valid(guidelines_json)),
+          acceptance_criteria_json text not null check (json_valid(acceptance_criteria_json)),
+          reference_paths_json text not null check (json_valid(reference_paths_json)),
+          permissions_json text not null check (json_valid(permissions_json)),
+          created_at text not null,
+          updated_at text not null
+        );
+
         create table if not exists manager_decisions(
           id integer primary key autoincrement,
           task_id text not null references tasks(id),
@@ -350,6 +376,12 @@ def migrate(conn: sqlite3.Connection, from_version: int) -> None:
 
         create index if not exists events_task_id
         on events(task_id, id);
+
+        create index if not exists worker_handoffs_task_id
+        on worker_handoffs(task_id, id);
+
+        create index if not exists manager_configs_task_id
+        on manager_configs(task_id);
 
         create index if not exists codex_events_session_id
         on codex_events(session_id, id);
@@ -1640,6 +1672,129 @@ def insert_prompt(
     return int(cursor.lastrowid)
 
 
+def insert_worker_handoff(
+    conn: sqlite3.Connection,
+    *,
+    task_id: str,
+    summary: str,
+    next_steps: list[str] | None = None,
+    payload: dict[str, Any] | None = None,
+    worker_session_id: str | None = None,
+    timestamp: str | None = None,
+) -> int:
+    cursor = conn.execute(
+        """
+        insert into worker_handoffs(
+          task_id, worker_session_id, summary, next_steps_json, payload_json, created_at
+        )
+        values (?, ?, ?, ?, ?, ?)
+        """,
+        (
+            task_id,
+            worker_session_id,
+            summary,
+            json.dumps(next_steps or [], sort_keys=True),
+            json.dumps(payload or {}, sort_keys=True),
+            timestamp or now_iso(),
+        ),
+    )
+    return int(cursor.lastrowid)
+
+
+def latest_worker_handoff(conn: sqlite3.Connection, *, task_id: str) -> dict[str, Any] | None:
+    row = conn.execute(
+        """
+        select id, task_id, worker_session_id, summary, next_steps_json, payload_json, created_at
+        from worker_handoffs
+        where task_id = ?
+        order by id desc
+        limit 1
+        """,
+        (task_id,),
+    ).fetchone()
+    if row is None:
+        return None
+    return {
+        "created_at": row["created_at"],
+        "id": row["id"],
+        "next_steps": json.loads(row["next_steps_json"]),
+        "payload": json.loads(row["payload_json"]),
+        "summary": row["summary"],
+        "task_id": row["task_id"],
+        "worker_session_id": row["worker_session_id"],
+    }
+
+
+def upsert_manager_config(
+    conn: sqlite3.Connection,
+    *,
+    task_id: str,
+    supervision_mode: str,
+    objective: str | None = None,
+    guidelines: list[str] | None = None,
+    acceptance_criteria: list[str] | None = None,
+    reference_paths: list[str] | None = None,
+    permissions: dict[str, Any] | None = None,
+    timestamp: str | None = None,
+) -> None:
+    now = timestamp or now_iso()
+    conn.execute(
+        """
+        insert into manager_configs(
+          task_id, supervision_mode, objective, guidelines_json,
+          acceptance_criteria_json, reference_paths_json, permissions_json,
+          created_at, updated_at
+        )
+        values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        on conflict(task_id) do update set
+          supervision_mode = excluded.supervision_mode,
+          objective = excluded.objective,
+          guidelines_json = excluded.guidelines_json,
+          acceptance_criteria_json = excluded.acceptance_criteria_json,
+          reference_paths_json = excluded.reference_paths_json,
+          permissions_json = excluded.permissions_json,
+          updated_at = excluded.updated_at
+        """,
+        (
+            task_id,
+            supervision_mode,
+            objective,
+            json.dumps(guidelines or [], sort_keys=True),
+            json.dumps(acceptance_criteria or [], sort_keys=True),
+            json.dumps(reference_paths or [], sort_keys=True),
+            json.dumps(permissions or {}, sort_keys=True),
+            now,
+            now,
+        ),
+    )
+
+
+def manager_config(conn: sqlite3.Connection, *, task_id: str) -> dict[str, Any] | None:
+    row = conn.execute(
+        """
+        select task_id, supervision_mode, objective, guidelines_json,
+               acceptance_criteria_json, reference_paths_json, permissions_json,
+               created_at, updated_at
+        from manager_configs
+        where task_id = ?
+        """,
+        (task_id,),
+    ).fetchone()
+    if row is None:
+        return None
+    return {
+        "acceptance_criteria": json.loads(row["acceptance_criteria_json"]),
+        "created_at": row["created_at"],
+        "guidelines": json.loads(row["guidelines_json"]),
+        "objective": row["objective"],
+        "permissions": json.loads(row["permissions_json"]),
+        "reference_paths": json.loads(row["reference_paths_json"]),
+        "supervision_mode": row["supervision_mode"],
+        "task_id": row["task_id"],
+        "updated_at": row["updated_at"],
+    }
+
+
 def create_manager(
     conn: sqlite3.Connection,
     *,
@@ -2429,6 +2584,8 @@ def task_status_snapshot(conn: sqlite3.Connection, *, task: str) -> dict[str, An
         }
 
     manager = active_manager(conn, task=task_row["id"])
+    handoff = latest_worker_handoff(conn, task_id=task_row["id"])
+    config = manager_config(conn, task_id=task_row["id"])
     integrity_issues = []
     if task_row["state"] == "managed" and worker is None:
         integrity_issues.append("managed_without_active_worker_binding")
@@ -2451,7 +2608,9 @@ def task_status_snapshot(conn: sqlite3.Connection, *, task: str) -> dict[str, An
             "ok": not integrity_issues,
         },
         "manager": manager,
+        "manager_config": config,
         "worker": worker,
+        "worker_handoff": handoff,
         "worker_status": latest_status,
     }
 

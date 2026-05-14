@@ -7,6 +7,7 @@ MUTATING_COMMAND_DECISIONS = {
     "extend_nudge_budget": {"escalate"},
     "finish_task": {"stop"},
     "pause_manager": {"escalate", "stop"},
+    "request_worker_compact": {"nudge"},
     "stop_task": {"stop"},
     "task_interrupt": {"interrupt"},
     "task_nudge": {"nudge"},
