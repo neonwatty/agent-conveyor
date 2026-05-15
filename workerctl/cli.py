@@ -210,7 +210,12 @@ def build_parser() -> argparse.ArgumentParser:
     doctor_self.set_defaults(func=command_doctor_self)
 
     qa_plan = subparsers.add_parser("qa-plan", help="Print a repeatable manual QA checklist.")
-    qa_plan.add_argument("scenario", nargs="?", default="self-management", choices=("self-management",))
+    qa_plan.add_argument(
+        "scenario",
+        nargs="?",
+        default="self-management",
+        choices=("self-management", "emergent-criteria"),
+    )
     qa_plan.add_argument("--json", action="store_true", help="Print stable JSON output.")
     qa_plan.set_defaults(func=command_qa_plan)
 

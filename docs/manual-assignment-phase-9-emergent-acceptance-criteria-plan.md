@@ -440,6 +440,17 @@ Check that README and skill docs explain:
 ## Live QA With Real Worker/Manager Pairs
 
 Run these after the unit suite passes. Use throwaway task names and clean up registrations after each scenario.
+The canonical runnable checklist is exposed by:
+
+```bash
+workerctl qa-plan emergent-criteria
+workerctl qa-plan emergent-criteria --json
+```
+
+Live QA finding: concurrent criteria mutations can finish in different orders.
+Mutation responses are point-in-time receipts for `affected_criterion`; managers
+must run `criteria --list` before final audit when they batch or parallelize
+criteria changes.
 
 ### QA 1: Worker-Proposed Criteria From Progressive Disclosure
 

@@ -256,6 +256,10 @@ criterion_id=$(scripts/workerctl criteria my-task --add --criterion "Targeted pr
 scripts/workerctl criteria my-task --satisfy "$criterion_id" --evidence-json '{"command":"python3 -m unittest tests.test_workerctl.ManagerBootstrapPromptTests -v","status":"pass"}'
 ```
 
+When making multiple criteria changes, use each mutation response's
+`affected_criterion` as the row receipt, then run `scripts/workerctl criteria
+<task> --list` before finishing or making an audit decision.
+
 Sample nudge:
 
 ```bash
@@ -376,4 +380,6 @@ For a repeatable end-to-end checklist:
 ```bash
 scripts/workerctl qa-plan self-management
 scripts/workerctl qa-plan self-management --json
+scripts/workerctl qa-plan emergent-criteria
+scripts/workerctl qa-plan emergent-criteria --json
 ```

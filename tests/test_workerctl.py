@@ -860,6 +860,33 @@ class CliTests(unittest.TestCase):
         for retired in ("become-managed", "manager-observe", "manager-decision", "task-status", "task-health", "extend-nudge-budget", "task-nudge", "task-interrupt", "mutation-audit", "close-manager"):
             self.assertNotIn(retired, joined)
 
+    def test_qa_plan_emergent_criteria_outputs_criteria_flow(self):
+        proc = self.run_workerctl("qa-plan", "emergent-criteria", "--json")
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        payload = json.loads(proc.stdout)
+        self.assertEqual(payload["scenario"], "emergent-criteria")
+        self.assertTrue(any("workerctl pair" in step for step in payload["steps"]))
+        self.assertTrue(any("manager_context.acceptance_criteria" in step for step in payload["steps"]))
+        self.assertTrue(any("worker_proposed" in step for step in payload["steps"]))
+        self.assertTrue(any("manager_inferred" in step for step in payload["steps"]))
+        self.assertTrue(any("criteria qa-emergent-criteria --list" in step for step in payload["steps"]))
+        self.assertTrue(any("--require-criteria-audit" in step for step in payload["steps"]))
+        self.assertTrue(any("acceptance-criteria.json" in step for step in payload["steps"]))
+        self.assertTrue(any("workerctl reconcile" in step for step in payload["steps"]))
+        self.assertTrue(
+            any("accepted criteria block finish-task --require-criteria-audit" in observation
+                for observation in payload["expected_observations"])
+        )
+        self.assertTrue(
+            any("criteria --list is used as the canonical task state" in observation
+                for observation in payload["expected_observations"])
+        )
+        joined = " ".join(payload["steps"] + payload["expected_observations"])
+        self.assertIn("must-have current-task criteria", joined)
+        self.assertIn("deferred follow-up criteria", joined)
+        self.assertIn("acceptance_criterion_updated", joined)
+
     def test_db_doctor_outputs_expected_structure(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "workerctl.db"
@@ -8212,6 +8239,88 @@ class AcceptanceCriteriaCliTests(unittest.TestCase):
             text=True,
             cwd=str(ROOT),
         )
+
+    def test_mutation_response_snapshot_is_built_under_write_lock(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = self._setup_db(tmpdir)
+            task_id = self._create_task(db_path)
+            conn = worker_db.connect(db_path)
+            try:
+                first_id = worker_db.insert_acceptance_criterion(
+                    conn,
+                    task_id=task_id,
+                    criterion="First criterion",
+                    status="accepted",
+                    source="manager_inferred",
+                )
+                second_id = worker_db.insert_acceptance_criterion(
+                    conn,
+                    task_id=task_id,
+                    criterion="Second criterion",
+                    status="accepted",
+                    source="manager_inferred",
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            from workerctl import commands as worker_commands
+
+            original_response = worker_commands._acceptance_criteria_response
+            lock_probe = {"attempted": False, "locked": False}
+
+            def response_with_lock_probe(conn, *, task, statuses=None, affected_criterion=None):
+                lock_probe["attempted"] = True
+                probe = sqlite3.connect(db_path, timeout=0)
+                try:
+                    with self.assertRaises(sqlite3.OperationalError) as raised:
+                        probe.execute(
+                            "update acceptance_criteria set status = 'deferred' where id = ?",
+                            (second_id,),
+                        )
+                    self.assertIn("locked", str(raised.exception).lower())
+                    lock_probe["locked"] = True
+                finally:
+                    probe.close()
+                return original_response(
+                    conn,
+                    task=task,
+                    statuses=statuses,
+                    affected_criterion=affected_criterion,
+                )
+
+            args = argparse.Namespace(
+                accept=None,
+                add=False,
+                criterion=None,
+                defer=first_id,
+                evidence_json=None,
+                list=False,
+                path=str(db_path),
+                proof=None,
+                rationale="Defer first criterion",
+                reject=None,
+                satisfy=None,
+                source=None,
+                status=[],
+                task="criteria-cli-task",
+            )
+
+            try:
+                worker_commands._acceptance_criteria_response = response_with_lock_probe
+                with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                    result = worker_commands.command_criteria(args)
+            finally:
+                worker_commands._acceptance_criteria_response = original_response
+
+            payload = json.loads(stdout.getvalue())
+            self.assertEqual(result, 0)
+            self.assertTrue(lock_probe["attempted"])
+            self.assertTrue(lock_probe["locked"])
+            self.assertEqual(payload["affected_criterion"]["id"], first_id)
+            self.assertEqual(payload["affected_criterion"]["status"], "deferred")
+            self.assertEqual(payload["summary"]["accepted"], 1)
+            self.assertEqual(payload["summary"]["deferred"], 1)
 
     def test_add_and_list_outputs_task_criteria_summary_and_event(self):
         with tempfile.TemporaryDirectory() as tmpdir:
