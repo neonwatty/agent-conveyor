@@ -1118,39 +1118,71 @@ def command_doctor_self(args: argparse.Namespace) -> int:
 
 def command_qa_plan(args: argparse.Namespace) -> int:
     scenario = getattr(args, "scenario", "self-management")
-    if scenario != "self-management":
-        raise WorkerError(f"Unsupported QA scenario: {scenario}")
-    payload = {
-        "expected_observations": [
-            "tmux session hosts a live Codex worker process",
-            "register-worker resolves the rollout JSONL via lsof (or accepts --codex-session) and records the session as a worker",
-            "register-manager records the manager session without requiring tmux",
-            "tasks --create returns a task row; bind links it to the worker and manager sessions",
-            "workerctl cycle <task> returns JSON with keys kind, state, pane_signal, notable_pane_pattern, ingest, cycle_id",
-            "session-nudge delivers text to the worker tmux pane and is observable in subsequent captures",
-            "a follow-up cycle ingests new events (ingest.new_events > 0) when the worker responds",
-            "a divergence (e.g., trust_prompt) surfaces in workerctl divergences <task>",
-            "unbind, deregister leave the SQLite control plane clean",
-            "workerctl reconcile reports no dead-pid sessions, dangling bindings, or stuck tasks after cleanup",
-        ],
-        "scenario": scenario,
-        "steps": [
-            'Start a Codex worker inside tmux: tmux new-session -d -s codex-foo && tmux send-keys -t codex-foo "codex" Enter.',
-            "Capture the worker pid (e.g., pgrep -f 'codex.*--sandbox' | head -1) and confirm the rollout JSONL exists under ~/.codex/sessions/.",
-            'Register the worker: workerctl register-worker --name foo --pid <WORKER_PID> --cwd "$PWD" --tmux-session codex-foo.',
-            'Register the manager (its own Codex session pid): workerctl register-manager --name foo-mgr --pid <MGR_PID> --cwd "$PWD".',
-            'Create the task: workerctl tasks --create my-task --goal "QA: cycle and nudge flow".',
-            "Bind the pair: workerctl bind --task my-task --worker foo --manager foo-mgr.",
-            "Run one observation cycle: workerctl cycle my-task. Verify JSON output includes kind, state, pane_signal, notable_pane_pattern, ingest, and cycle_id.",
-            'Send a nudge: workerctl session-nudge foo "Status?". Verify the worker tmux pane shows the text.',
-            "Run another cycle: workerctl cycle my-task. Verify ingest.new_events > 0 if the worker responded.",
-            "Trigger a divergence: leave the worker at a trust prompt or rate-limit prompt, run workerctl cycle my-task, and run workerctl divergences my-task to confirm the row appears.",
-            'Clean up the binding: workerctl unbind --task my-task. (Optionally: workerctl finish-task my-task --reason "QA complete".)',
-            "Deregister both sessions: workerctl deregister foo && workerctl deregister foo-mgr.",
-            "Run workerctl reconcile and confirm dead_pid_sessions, dangling_bindings, and stuck_tasks are all empty for this task. Add --apply if anything drifted.",
-            "Run workerctl audit my-task and workerctl replay my-task to confirm the observation and actuation history is present.",
-        ],
+    qa_plans = {
+        "self-management": {
+            "expected_observations": [
+                "tmux session hosts a live Codex worker process",
+                "register-worker resolves the rollout JSONL via lsof (or accepts --codex-session) and records the session as a worker",
+                "register-manager records the manager session without requiring tmux",
+                "tasks --create returns a task row; bind links it to the worker and manager sessions",
+                "workerctl cycle <task> returns JSON with keys kind, state, pane_signal, notable_pane_pattern, ingest, cycle_id",
+                "session-nudge delivers text to the worker tmux pane and is observable in subsequent captures",
+                "a follow-up cycle ingests new events (ingest.new_events > 0) when the worker responds",
+                "a divergence (e.g., trust_prompt) surfaces in workerctl divergences <task>",
+                "unbind, deregister leave the SQLite control plane clean",
+                "workerctl reconcile reports no dead-pid sessions, dangling bindings, or stuck tasks after cleanup",
+            ],
+            "steps": [
+                'Start a Codex worker inside tmux: tmux new-session -d -s codex-foo && tmux send-keys -t codex-foo "codex" Enter.',
+                "Capture the worker pid (e.g., pgrep -f 'codex.*--sandbox' | head -1) and confirm the rollout JSONL exists under ~/.codex/sessions/.",
+                'Register the worker: workerctl register-worker --name foo --pid <WORKER_PID> --cwd "$PWD" --tmux-session codex-foo.',
+                'Register the manager (its own Codex session pid): workerctl register-manager --name foo-mgr --pid <MGR_PID> --cwd "$PWD".',
+                'Create the task: workerctl tasks --create my-task --goal "QA: cycle and nudge flow".',
+                "Bind the pair: workerctl bind --task my-task --worker foo --manager foo-mgr.",
+                "Run one observation cycle: workerctl cycle my-task. Verify JSON output includes kind, state, pane_signal, notable_pane_pattern, ingest, and cycle_id.",
+                'Send a nudge: workerctl session-nudge foo "Status?". Verify the worker tmux pane shows the text.',
+                "Run another cycle: workerctl cycle my-task. Verify ingest.new_events > 0 if the worker responded.",
+                "Trigger a divergence: leave the worker at a trust prompt or rate-limit prompt, run workerctl cycle my-task, and run workerctl divergences my-task to confirm the row appears.",
+                'Clean up the binding: workerctl unbind --task my-task. (Optionally: workerctl finish-task my-task --reason "QA complete".)',
+                "Deregister both sessions: workerctl deregister foo && workerctl deregister foo-mgr.",
+                "Run workerctl reconcile and confirm dead_pid_sessions, dangling_bindings, and stuck_tasks are all empty for this task. Add --apply if anything drifted.",
+                "Run workerctl audit my-task and workerctl replay my-task to confirm the observation and actuation history is present.",
+            ],
+        },
+        "emergent-criteria": {
+            "expected_observations": [
+                "manager cycle output includes manager_context.acceptance_criteria with summary/open/proposed/satisfied/deferred/rejected",
+                "the manager asks the worker for must-have current-task criteria versus deferred follow-up criteria",
+                "worker-proposed and manager-inferred criteria are visible through workerctl criteria --list",
+                "accepted criteria block finish-task --require-criteria-audit until satisfied, deferred, or rejected",
+                "satisfied criteria include evidence_json describing the verification receipt",
+                "after multiple criteria mutations, workerctl criteria --list is used as the canonical task state",
+                "replay shows acceptance_criterion_added and acceptance_criterion_updated transitions",
+                "export-task writes acceptance-criteria.json and includes it in manifest.json",
+                "after cleanup, reconcile reports no dangling bindings, dead-pid sessions, or stuck tasks",
+            ],
+            "steps": [
+                'Start a real pair: workerctl pair --task qa-emergent-criteria --worker-name qa-ec-worker --manager-name qa-ec-manager --cwd "$PWD" --task-goal "Make a tiny documented CLI behavior improvement in this repo." --task-prompt "Inspect CLI help/tests and identify one tiny behavior improvement. Do not edit until instructed."',
+                "Run workerctl cycle qa-emergent-criteria and verify manager_context.acceptance_criteria is present with empty status buckets.",
+                'Nudge the worker: workerctl session-nudge qa-ec-worker "Propose 2-4 acceptance criteria for the smallest useful slice you found. Separate must-have current-task criteria from follow-up criteria."',
+                "Record at least one worker-proposed must-have criterion as accepted with workerctl criteria qa-emergent-criteria --add --criterion \"...\" --source worker_proposed --status accepted.",
+                "Record at least one follow-up criterion as deferred with workerctl criteria qa-emergent-criteria --add --criterion \"...\" --source worker_proposed --status deferred --rationale \"Follow-up after this QA slice\".",
+                "Run workerctl cycle qa-emergent-criteria again and verify open contains the accepted criterion while deferred contains the follow-up.",
+                "Ask the worker to implement the tiny slice and provide verification receipts.",
+                "If the worker omits a useful proof, add a manager-inferred accepted criterion with workerctl criteria qa-emergent-criteria --add --criterion \"...\" --source manager_inferred --status accepted.",
+                "Attempt workerctl finish-task qa-emergent-criteria --reason \"QA premature finish\" --require-criteria-audit and verify it fails while accepted criteria remain open.",
+                "Satisfy each accepted criterion with workerctl criteria qa-emergent-criteria --satisfy <id> --evidence-json '{\"command\":\"...\",\"status\":\"pass\"}' --proof \"...\".",
+                "Run workerctl criteria qa-emergent-criteria --list and verify accepted is 0 before attempting the final audited finish.",
+                "Run workerctl replay qa-emergent-criteria and verify criteria add/update transitions appear in chronological order.",
+                "Run workerctl export-task qa-emergent-criteria --output /tmp/qa-emergent-criteria-export and verify acceptance-criteria.json exists and manifest.json lists it.",
+                "Finish with workerctl finish-task qa-emergent-criteria --reason \"QA criteria flow complete\" --require-criteria-audit.",
+                "Clean up sessions if needed: workerctl deregister qa-ec-worker && workerctl deregister qa-ec-manager, then run workerctl reconcile.",
+            ],
+        },
     }
+    if scenario not in qa_plans:
+        raise WorkerError(f"Unsupported QA scenario: {scenario}")
+    payload = {"scenario": scenario, **qa_plans[scenario]}
     if args.json:
         print(json.dumps(payload, indent=2, sort_keys=True))
     else:
@@ -1268,6 +1300,10 @@ def _acceptance_criteria_response(
     return response
 
 
+def _begin_criteria_mutation(conn: Any) -> None:
+    conn.execute("BEGIN IMMEDIATE")
+
+
 def _acceptance_criterion_event_payload(
     *,
     criterion: dict[str, Any],
@@ -1314,6 +1350,7 @@ def command_criteria(args: argparse.Namespace) -> int:
                 raise WorkerError("--source is required with criteria --add")
             if len(args.status) > 1:
                 raise WorkerError("criteria --add accepts at most one --status")
+            _begin_criteria_mutation(conn)
             existing_criteria = worker_db.acceptance_criteria_for_task(conn, task_id=task["id"])
             existing = next(
                 (
@@ -1346,9 +1383,9 @@ def command_criteria(args: argparse.Namespace) -> int:
                         task_id=task["id"],
                         created=True,
                     ),
-                )
-            conn.commit()
+            )
             result = _acceptance_criteria_response(conn, task=task, affected_criterion=criterion)
+            conn.commit()
         elif args.list:
             result = _acceptance_criteria_response(conn, task=task, statuses=args.status or None)
         else:
@@ -1362,6 +1399,7 @@ def command_criteria(args: argparse.Namespace) -> int:
             }
             action_name = next(name for name in action_status if getattr(args, name) is not None)
             criterion_id = getattr(args, action_name)
+            _begin_criteria_mutation(conn)
             task_criteria = worker_db.acceptance_criteria_for_task(conn, task_id=task["id"])
             existing = next((row for row in task_criteria if row["id"] == criterion_id), None)
             if existing is None:
@@ -1390,8 +1428,8 @@ def command_criteria(args: argparse.Namespace) -> int:
                     previous=existing,
                 ),
             )
-            conn.commit()
             result = _acceptance_criteria_response(conn, task=task, affected_criterion=criterion)
+            conn.commit()
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0
 

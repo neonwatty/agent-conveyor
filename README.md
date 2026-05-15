@@ -238,6 +238,10 @@ tmux attach -t codex-live-test
   criterion_id=$(scripts/workerctl criteria my-task --add --criterion "Targeted prompt tests pass" --source worker_proposed --status proposed | python3 -c 'import json,sys; print(json.load(sys.stdin)["affected_criterion"]["id"])')
   scripts/workerctl criteria my-task --satisfy "$criterion_id" --evidence-json '{"command":"python3 -m unittest tests.test_workerctl.ManagerBootstrapPromptTests -v","status":"pass"}'
   ```
+  For mutation responses, treat `affected_criterion` as the authoritative
+  receipt for the row changed by that command. When a manager applies multiple
+  criteria changes, run `criteria <task> --list` before final audit or other
+  decisions; the list command is the canonical task-level criteria state.
 - `manager-permission <task> <create_pr|merge_green_pr|worker_compact_clear>
   [--require] [--require-handoff]` — Check and audit whether the saved manager
   config allows a high-level action. Use `--require` when a manager command
@@ -337,7 +341,8 @@ tmux attach -t codex-live-test
 - `transcript-capture <task> [--role R] [--mode M]` — Capture deduplicated
   transcript segments.
 - `transcript-show <task> [--role R]` — Show stored transcript segments.
-- `qa-plan <name>` — Print a repeatable manual QA checklist.
+- `qa-plan <self-management|emergent-criteria>` — Print a repeatable manual QA
+  checklist.
 - `import-compat` — Dry-run or import existing `.codex-workers/<worker>/`
   artifacts into SQLite.
 
@@ -349,6 +354,16 @@ tmux attach -t codex-live-test
   registering a worker. Useful when you want to register it manually later.
 - `start-test <name>` — Low-risk verification worker that only updates its
   ignored `status.json`.
+
+### QA Plans
+
+Print repeatable live QA checklists from the CLI:
+
+```bash
+scripts/workerctl qa-plan self-management
+scripts/workerctl qa-plan emergent-criteria
+scripts/workerctl qa-plan emergent-criteria --json
+```
 
 ### Terminal helpers
 
