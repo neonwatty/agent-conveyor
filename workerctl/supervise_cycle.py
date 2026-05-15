@@ -13,6 +13,29 @@ from workerctl.commands import _pid_is_alive
 
 
 DEFAULT_BUSY_WAIT_SECONDS = 90
+ACCEPTANCE_CRITERION_STATUSES = ("proposed", "accepted", "satisfied", "deferred", "rejected")
+
+
+def _acceptance_criteria_context(
+    conn: sqlite3.Connection,
+    *,
+    task_id: str,
+) -> dict[str, Any]:
+    grouped = {status: [] for status in ACCEPTANCE_CRITERION_STATUSES}
+    for criterion in worker_db.acceptance_criteria_for_task(conn, task_id=task_id):
+        grouped[criterion["status"]].append(criterion)
+
+    return {
+        "summary": {
+            status: len(grouped[status])
+            for status in ACCEPTANCE_CRITERION_STATUSES
+        },
+        "open": grouped["accepted"],
+        "proposed": grouped["proposed"],
+        "satisfied": grouped["satisfied"],
+        "deferred": grouped["deferred"],
+        "rejected": grouped["rejected"],
+    }
 
 
 def run_cycle(
@@ -169,6 +192,7 @@ def run_cycle(
     manager_context = {
         "manager_config": worker_db.manager_config(conn, task_id=binding["task_id"]),
         "worker_handoff": worker_db.latest_worker_handoff(conn, task_id=binding["task_id"]),
+        "acceptance_criteria": _acceptance_criteria_context(conn, task_id=binding["task_id"]),
     }
     status_payload = {
         "kind": "session_cycle",

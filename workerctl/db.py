@@ -12,8 +12,9 @@ from workerctl.core import now_iso
 from workerctl.state import state_root
 
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 REQUIRED_TABLES = {
+    "acceptance_criteria",
     "agent_observations",
     "bindings",
     "budgets",
@@ -37,6 +38,8 @@ REQUIRED_TABLES = {
     "workers",
 }
 REQUIRED_INDEXES = {
+    "acceptance_criteria_task_source_criterion",
+    "acceptance_criteria_task_status",
     "codex_events_session_id",
     "commands_task_state_created",
     "events_task_id",
@@ -57,6 +60,9 @@ REQUIRED_TRIGGERS = {
     "events_no_delete",
     "events_no_update",
 }
+ACCEPTANCE_CRITERION_STATUSES = {"proposed", "accepted", "satisfied", "deferred", "rejected"}
+ACCEPTANCE_CRITERION_SOURCES = {"user_requested", "manager_inferred", "worker_proposed", "final_audit"}
+_PRESERVE_FIELD = object()
 
 
 def default_db_path() -> Path:
@@ -126,6 +132,19 @@ def migrate(conn: sqlite3.Connection, from_version: int) -> None:
           goal text not null,
           summary text,
           state text not null check (state in ('candidate','managed','paused','done','failed')),
+          created_at text not null,
+          updated_at text not null
+        );
+
+        create table if not exists acceptance_criteria(
+          id integer primary key autoincrement,
+          task_id text not null references tasks(id),
+          criterion text not null,
+          status text not null check (status in ('proposed','accepted','satisfied','deferred','rejected')),
+          source text not null check (source in ('user_requested','manager_inferred','worker_proposed','final_audit')),
+          proof text,
+          rationale text,
+          evidence_json text not null check (json_valid(evidence_json)),
           created_at text not null,
           updated_at text not null
         );
@@ -403,6 +422,12 @@ def migrate(conn: sqlite3.Connection, from_version: int) -> None:
 
         create index if not exists transcript_segments_task_role
         on transcript_segments(task_id, role, id);
+
+        create index if not exists acceptance_criteria_task_status
+        on acceptance_criteria(task_id, status, id);
+
+        create unique index if not exists acceptance_criteria_task_source_criterion
+        on acceptance_criteria(task_id, source, criterion);
 
         create trigger if not exists events_no_update
         before update on events
@@ -1483,6 +1508,174 @@ def task_row(conn: sqlite3.Connection, *, task: str) -> sqlite3.Row:
     return row
 
 
+def _validate_acceptance_criterion_status(status: str) -> None:
+    if status not in ACCEPTANCE_CRITERION_STATUSES:
+        allowed = ", ".join(sorted(ACCEPTANCE_CRITERION_STATUSES))
+        raise WorkerError(f"invalid acceptance criterion status: {status!r}; expected one of: {allowed}")
+
+
+def _validate_acceptance_criterion_source(source: str) -> None:
+    if source not in ACCEPTANCE_CRITERION_SOURCES:
+        allowed = ", ".join(sorted(ACCEPTANCE_CRITERION_SOURCES))
+        raise WorkerError(f"invalid acceptance criterion source: {source!r}; expected one of: {allowed}")
+
+
+def _acceptance_criterion_evidence_json(evidence: dict[str, Any] | None) -> str:
+    if evidence is None:
+        evidence = {}
+    if not isinstance(evidence, dict):
+        raise WorkerError("acceptance criterion evidence must be a JSON object")
+    return json.dumps(evidence, sort_keys=True)
+
+
+def _acceptance_criterion_from_row(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "id": row["id"],
+        "task_id": row["task_id"],
+        "criterion": row["criterion"],
+        "status": row["status"],
+        "source": row["source"],
+        "proof": row["proof"],
+        "rationale": row["rationale"],
+        "evidence": json.loads(row["evidence_json"]),
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+    }
+
+
+def insert_acceptance_criterion(
+    conn: sqlite3.Connection,
+    *,
+    task_id: str,
+    criterion: str,
+    status: str,
+    source: str,
+    proof: str | None = None,
+    rationale: str | None = None,
+    evidence: dict[str, Any] | None = None,
+) -> int:
+    _validate_acceptance_criterion_status(status)
+    _validate_acceptance_criterion_source(source)
+    existing = conn.execute(
+        """
+        select id
+        from acceptance_criteria
+        where task_id = ? and source = ? and criterion = ?
+        """,
+        (task_id, source, criterion),
+    ).fetchone()
+    if existing is not None:
+        return int(existing["id"])
+    now = now_iso()
+    cursor = conn.execute(
+        """
+        insert into acceptance_criteria(
+          task_id, criterion, status, source, proof, rationale,
+          evidence_json, created_at, updated_at
+        )
+        values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            task_id,
+            criterion,
+            status,
+            source,
+            proof,
+            rationale,
+            _acceptance_criterion_evidence_json(evidence),
+            now,
+            now,
+        ),
+    )
+    return int(cursor.lastrowid)
+
+
+def acceptance_criteria_for_task(
+    conn: sqlite3.Connection,
+    *,
+    task_id: str,
+    statuses: list[str] | tuple[str, ...] | set[str] | None = None,
+) -> list[dict[str, Any]]:
+    params: list[Any] = [task_id]
+    where = "where task_id = ?"
+    if statuses is not None:
+        status_list = list(statuses)
+        for status in status_list:
+            _validate_acceptance_criterion_status(status)
+        if not status_list:
+            return []
+        where += f" and status in ({','.join('?' for _ in status_list)})"
+        params.extend(status_list)
+    rows = conn.execute(
+        f"""
+        select id, task_id, criterion, status, source, proof, rationale,
+               evidence_json, created_at, updated_at
+        from acceptance_criteria
+        {where}
+        order by id
+        """,
+        tuple(params),
+    ).fetchall()
+    return [_acceptance_criterion_from_row(row) for row in rows]
+
+
+def update_acceptance_criterion(
+    conn: sqlite3.Connection,
+    *,
+    criterion_id: int,
+    status: str,
+    evidence: Any = _PRESERVE_FIELD,
+    proof: Any = _PRESERVE_FIELD,
+    rationale: Any = _PRESERVE_FIELD,
+) -> dict[str, Any]:
+    _validate_acceptance_criterion_status(status)
+    existing = conn.execute(
+        """
+        select id, task_id, criterion, status, source, proof, rationale,
+               evidence_json, created_at, updated_at
+        from acceptance_criteria
+        where id = ?
+        """,
+        (criterion_id,),
+    ).fetchone()
+    if existing is None:
+        raise WorkerError(f"Unknown acceptance criterion: {criterion_id}")
+    evidence_json = (
+        existing["evidence_json"]
+        if evidence is _PRESERVE_FIELD
+        else _acceptance_criterion_evidence_json(evidence)
+    )
+    conn.execute(
+        """
+        update acceptance_criteria
+        set status = ?,
+            evidence_json = ?,
+            proof = ?,
+            rationale = ?,
+            updated_at = ?
+        where id = ?
+        """,
+        (
+            status,
+            evidence_json,
+            existing["proof"] if proof is _PRESERVE_FIELD else proof,
+            existing["rationale"] if rationale is _PRESERVE_FIELD else rationale,
+            now_iso(),
+            criterion_id,
+        ),
+    )
+    row = conn.execute(
+        """
+        select id, task_id, criterion, status, source, proof, rationale,
+               evidence_json, created_at, updated_at
+        from acceptance_criteria
+        where id = ?
+        """,
+        (criterion_id,),
+    ).fetchone()
+    return _acceptance_criterion_from_row(row)
+
+
 def worker_row(conn: sqlite3.Connection, *, worker: str) -> sqlite3.Row:
     row = conn.execute(
         """
@@ -2374,7 +2567,9 @@ def task_audit(conn: sqlite3.Connection, *, task: str) -> dict[str, Any]:
         """,
         (task_row["id"],),
     ).fetchall()
+    criteria = acceptance_criteria_for_task(conn, task_id=task_row["id"])
     return {
+        "acceptance_criteria": criteria,
         "commands": [
             {
                 "created_at": row["created_at"],

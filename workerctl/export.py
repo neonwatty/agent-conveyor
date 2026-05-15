@@ -77,6 +77,7 @@ def command_export_task(args: argparse.Namespace) -> int:
     captures = [dict(row) for row in capture_rows]
     write_json(export_root / "task-status.json", snapshot)
     write_json(export_root / "audit.json", audit)
+    write_json(export_root / "acceptance-criteria.json", audit.get("acceptance_criteria", []))
     write_json(export_root / "prompts.json", prompts)
     write_json(export_root / "transcript-captures.json", captures)
     write_json(export_root / "terminal-captures.json", audit.get("terminal_captures", []))
@@ -104,6 +105,7 @@ def command_export_task(args: argparse.Namespace) -> int:
         "files": [
             "task-status.json",
             "audit.json",
+            "acceptance-criteria.json",
             "prompts.json",
             "transcript-captures.json",
             "terminal-captures.json",

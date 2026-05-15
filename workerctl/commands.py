@@ -194,6 +194,16 @@ Initial setup:
 Supervision loop:
 - Start observations with `{cycle_command}`.
 - Read `manager_context.manager_config` in cycle output before nudging.
+- Treat acceptance criteria as living supervision state.
+- Inspect `manager_context.acceptance_criteria` each cycle.
+- If worker progress reveals new edge cases, tests, polish, or scope
+  boundaries, ask the worker to propose must-have vs follow-up criteria.
+- Record useful criteria with `scripts/workerctl criteria`.
+  Examples:
+  - `scripts/workerctl criteria {task_line} --add --criterion "..." --source worker_proposed --status proposed`
+  - `criterion_id=$(scripts/workerctl criteria {task_line} --add --criterion "..." --source worker_proposed --status proposed | python3 -c 'import json,sys; print(json.load(sys.stdin)["affected_criterion"]["id"])')`
+  - `scripts/workerctl criteria {task_line} --satisfy "$criterion_id" --evidence-json '{{"command":"...","status":"pass"}}'`
+- Before finishing, compare worker receipts/verification against accepted open criteria.
 - Communicate with the worker only through workerctl session/task commands.
 - Do not edit project files unless the user explicitly asks this manager
   session to change workerctl itself.
@@ -1224,6 +1234,166 @@ def _json_arg(value: str | None, *, flag: str) -> dict[str, Any]:
     if not isinstance(parsed, dict):
         raise WorkerError(f"{flag} must be a JSON object")
     return parsed
+
+
+def _acceptance_criteria_summary(criteria: list[dict[str, Any]]) -> dict[str, int]:
+    summary = {status: 0 for status in ("proposed", "accepted", "satisfied", "deferred", "rejected")}
+    for criterion in criteria:
+        summary[criterion["status"]] += 1
+    return summary
+
+
+def _acceptance_criteria_response(
+    conn: Any,
+    *,
+    task: Any,
+    statuses: list[str] | None = None,
+    affected_criterion: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    from workerctl import db as worker_db
+
+    all_criteria = worker_db.acceptance_criteria_for_task(conn, task_id=task["id"])
+    criteria = (
+        worker_db.acceptance_criteria_for_task(conn, task_id=task["id"], statuses=statuses)
+        if statuses is not None
+        else all_criteria
+    )
+    response = {
+        "task": {"id": task["id"], "name": task["name"]},
+        "criteria": criteria,
+        "summary": _acceptance_criteria_summary(all_criteria),
+    }
+    if affected_criterion is not None:
+        response["affected_criterion"] = affected_criterion
+    return response
+
+
+def _acceptance_criterion_event_payload(
+    *,
+    criterion: dict[str, Any],
+    task_id: str,
+    previous: dict[str, Any] | None = None,
+    created: bool | None = None,
+) -> dict[str, Any]:
+    payload = {
+        "criterion_id": criterion["id"],
+        "criterion": criterion["criterion"],
+        "status": criterion["status"],
+        "source": criterion["source"],
+        "proof": criterion["proof"],
+        "rationale": criterion["rationale"],
+        "evidence": criterion["evidence"],
+        "task_id": task_id,
+    }
+    if created is not None:
+        payload["created"] = created
+    if previous is not None:
+        payload.update(
+            {
+                "previous_status": previous["status"],
+                "previous_proof": previous["proof"],
+                "previous_rationale": previous["rationale"],
+                "previous_evidence": previous["evidence"],
+            }
+        )
+    return payload
+
+
+def command_criteria(args: argparse.Namespace) -> int:
+    from workerctl import db as worker_db
+
+    db_path = Path(args.path).expanduser().resolve() if args.path else None
+    evidence = _json_arg(args.evidence_json, flag="--evidence-json")
+    with worker_db.connect(db_path) as conn:
+        worker_db.initialize_database(conn)
+        task = worker_db.task_row(conn, task=args.task)
+        if args.add:
+            if not args.criterion:
+                raise WorkerError("--criterion is required with criteria --add")
+            if not args.source:
+                raise WorkerError("--source is required with criteria --add")
+            if len(args.status) > 1:
+                raise WorkerError("criteria --add accepts at most one --status")
+            existing_criteria = worker_db.acceptance_criteria_for_task(conn, task_id=task["id"])
+            existing = next(
+                (
+                    row
+                    for row in existing_criteria
+                    if row["source"] == args.source and row["criterion"] == args.criterion
+                ),
+                None,
+            )
+            criterion_id = worker_db.insert_acceptance_criterion(
+                conn,
+                task_id=task["id"],
+                criterion=args.criterion,
+                status=args.status[0] if args.status else "proposed",
+                source=args.source,
+                proof=args.proof,
+                rationale=args.rationale,
+                evidence=evidence,
+            )
+            criteria = worker_db.acceptance_criteria_for_task(conn, task_id=task["id"])
+            criterion = next(row for row in criteria if row["id"] == criterion_id)
+            if existing is None:
+                worker_db.insert_event(
+                    conn,
+                    "acceptance_criterion_added",
+                    actor="workerctl",
+                    task_id=task["id"],
+                    payload=_acceptance_criterion_event_payload(
+                        criterion=criterion,
+                        task_id=task["id"],
+                        created=True,
+                    ),
+                )
+            conn.commit()
+            result = _acceptance_criteria_response(conn, task=task, affected_criterion=criterion)
+        elif args.list:
+            result = _acceptance_criteria_response(conn, task=task, statuses=args.status or None)
+        else:
+            if args.status:
+                raise WorkerError("--status is only supported with criteria --list or --add")
+            action_status = {
+                "accept": "accepted",
+                "satisfy": "satisfied",
+                "defer": "deferred",
+                "reject": "rejected",
+            }
+            action_name = next(name for name in action_status if getattr(args, name) is not None)
+            criterion_id = getattr(args, action_name)
+            task_criteria = worker_db.acceptance_criteria_for_task(conn, task_id=task["id"])
+            existing = next((row for row in task_criteria if row["id"] == criterion_id), None)
+            if existing is None:
+                raise WorkerError(f"Unknown acceptance criterion for task {task['name']}: {criterion_id}")
+            update_kwargs: dict[str, Any] = {}
+            if args.evidence_json is not None:
+                update_kwargs["evidence"] = evidence
+            if args.proof is not None:
+                update_kwargs["proof"] = args.proof
+            if args.rationale is not None:
+                update_kwargs["rationale"] = args.rationale
+            criterion = worker_db.update_acceptance_criterion(
+                conn,
+                criterion_id=criterion_id,
+                status=action_status[action_name],
+                **update_kwargs,
+            )
+            worker_db.insert_event(
+                conn,
+                "acceptance_criterion_updated",
+                actor="workerctl",
+                task_id=task["id"],
+                payload=_acceptance_criterion_event_payload(
+                    criterion=criterion,
+                    task_id=task["id"],
+                    previous=existing,
+                ),
+            )
+            conn.commit()
+            result = _acceptance_criteria_response(conn, task=task, affected_criterion=criterion)
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0
 
 
 def command_handoff(args: argparse.Namespace) -> int:

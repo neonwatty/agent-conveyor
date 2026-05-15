@@ -10,6 +10,7 @@ from workerctl.constants import PROJECT_ROOT, RECOMMENDED_MANAGER_CODEX_ARGS
 from workerctl.core import WorkerError, age_seconds, run, sh_quote
 from workerctl.db import active_manager
 from workerctl.db import assess_manager_decision
+from workerctl.db import acceptance_criteria_for_task
 from workerctl.db import connect as connect_db
 from workerctl.db import create_command as create_db_command
 from workerctl.db import end_active_binding
@@ -37,6 +38,10 @@ from workerctl.tmux import send_text
 from workerctl.tmux import session_exists
 from workerctl.tmux import tmux_session
 from workerctl.tmux import tmux_target
+
+
+CRITERIA_AUDIT_STATUSES = ("proposed", "accepted", "satisfied", "deferred", "rejected")
+
 
 def safe_slug(value: str) -> str:
     slug = re.sub(r"[^A-Za-z0-9_.-]+", "-", value).strip("-")
@@ -75,6 +80,35 @@ def task_artifact_dir(task_id: str) -> Path:
     return state_root() / "artifacts" / "tasks" / task_id
 
 
+def _final_criteria_audit(conn, *, task_id: str, require_criteria_audit: bool) -> dict[str, Any]:
+    criteria = acceptance_criteria_for_task(conn, task_id=task_id)
+    summary = {status: 0 for status in CRITERIA_AUDIT_STATUSES}
+    for criterion in criteria:
+        summary[criterion["status"]] = summary.get(criterion["status"], 0) + 1
+    open_criteria = [
+        {"id": criterion["id"], "criterion": criterion["criterion"]}
+        for criterion in criteria
+        if criterion["status"] == "accepted"
+    ]
+    return {
+        "require_criteria_audit": require_criteria_audit,
+        "open_criteria": open_criteria,
+        "summary": summary,
+        "total": len(criteria),
+    }
+
+
+def _raise_if_final_criteria_audit_fails(final_audit: dict[str, Any], *, task_name: str) -> None:
+    open_criteria = final_audit["open_criteria"]
+    if not open_criteria:
+        return
+    details = "; ".join(f"#{criterion['id']}: {criterion['criterion']}" for criterion in open_criteria)
+    raise WorkerError(
+        f"Task {task_name} has accepted acceptance criteria still open; "
+        f"satisfy, defer, or reject them before finishing: {details}"
+    )
+
+
 def _stop_or_finish_task(args: argparse.Namespace, *, finish: bool) -> int:
     db_path = Path(args.path).expanduser().resolve() if args.path else None
     command_type = "finish_task" if finish else "stop_task"
@@ -86,6 +120,14 @@ def _stop_or_finish_task(args: argparse.Namespace, *, finish: bool) -> int:
         snapshot = task_status_snapshot(conn, task=args.task)
         if snapshot["state"] in {"done", "failed"}:
             raise WorkerError(f"Task {snapshot['name']} is already {snapshot['state']}")
+        require_criteria_audit = bool(getattr(args, "require_criteria_audit", False)) if finish else False
+        final_audit = _final_criteria_audit(
+            conn,
+            task_id=snapshot["id"],
+            require_criteria_audit=require_criteria_audit,
+        )
+        if require_criteria_audit:
+            _raise_if_final_criteria_audit_fails(final_audit, task_name=snapshot["name"])
         manager = active_manager(conn, task=snapshot["id"])
         worker = snapshot["worker"]
         decision_check = assess_manager_decision(
@@ -107,6 +149,7 @@ def _stop_or_finish_task(args: argparse.Namespace, *, finish: bool) -> int:
             manager_id=manager["id"] if manager else None,
             payload={
                 "finish": finish,
+                **({"final_audit": final_audit} if finish else {}),
                 "message": args.message,
                 "manager_decision": decision_check,
                 "reason": final_reason if finish else None,
@@ -149,6 +192,7 @@ def _stop_or_finish_task(args: argparse.Namespace, *, finish: bool) -> int:
             manager_id=manager["id"] if manager else None,
             payload={
                 "finish": finish,
+                **({"final_audit": final_audit} if finish else {}),
                 "final_decision_id": final_decision_id,
                 "final_observation_id": final_observation_id,
                 "manager_decision": decision_check,
@@ -162,6 +206,7 @@ def _stop_or_finish_task(args: argparse.Namespace, *, finish: bool) -> int:
 
     result = {
         "command_id": command_id,
+        **({"final_audit": final_audit} if finish else {}),
         "final_decision_id": final_decision_id,
         "final_observation_id": final_observation_id,
         "finish": finish,
@@ -178,6 +223,17 @@ def _stop_or_finish_task(args: argparse.Namespace, *, finish: bool) -> int:
         with connect_db(db_path) as conn:
             initialize_database(conn)
             mark_command_attempted(conn, command_id=command_id)
+            if finish:
+                insert_db_event(
+                    conn,
+                    "finish_task_criteria_audit",
+                    actor="workerctl",
+                    command_id=command_id,
+                    task_id=snapshot["id"],
+                    worker_id=worker["id"] if worker else None,
+                    manager_id=manager["id"] if manager else None,
+                    payload=final_audit,
+                )
             conn.commit()
         if manager:
             manager_identity = identity.verify_manager_identity(manager)
@@ -528,5 +584,3 @@ def manager_liveness_warnings(results: list[dict[str, Any]], *, stale_seconds: i
                 }
             )
     return warnings
-
-

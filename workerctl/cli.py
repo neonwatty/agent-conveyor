@@ -24,6 +24,7 @@ from workerctl.commands import (
     command_compact_worker,
     command_commands,
     command_create,
+    command_criteria,
     command_cycle,
     command_db_doctor,
     command_divergences,
@@ -246,6 +247,32 @@ def build_parser() -> argparse.ArgumentParser:
     tasks.add_argument("--summary", help="Optional summary text when creating a task.")
     tasks.add_argument("--path", help="Override the workerctl database path.")
     tasks.set_defaults(func=command_tasks)
+
+    criteria = subparsers.add_parser(
+        "criteria",
+        help="List and mutate emergent acceptance criteria for a task.",
+    )
+    criteria.add_argument("task", help="Task name or ID.")
+    criteria_actions = criteria.add_mutually_exclusive_group(required=True)
+    criteria_actions.add_argument("--list", action="store_true", help="List acceptance criteria for the task.")
+    criteria_actions.add_argument("--add", action="store_true", help="Add an acceptance criterion.")
+    criteria_actions.add_argument("--accept", type=int, metavar="ID", help="Mark an acceptance criterion accepted.")
+    criteria_actions.add_argument("--satisfy", type=int, metavar="ID", help="Mark an acceptance criterion satisfied.")
+    criteria_actions.add_argument("--defer", type=int, metavar="ID", help="Mark an acceptance criterion deferred.")
+    criteria_actions.add_argument("--reject", type=int, metavar="ID", help="Mark an acceptance criterion rejected.")
+    criteria.add_argument(
+        "--status",
+        action="append",
+        default=[],
+        help="Status for --add, or repeated status filter for --list.",
+    )
+    criteria.add_argument("--criterion", help="Criterion text for --add.")
+    criteria.add_argument("--source", help="Criterion source for --add.")
+    criteria.add_argument("--proof", help="Optional proof text for add/update actions.")
+    criteria.add_argument("--rationale", help="Optional rationale text for add/update actions.")
+    criteria.add_argument("--evidence-json", help="Optional structured JSON object for add/update actions.")
+    criteria.add_argument("--path", help="Override the workerctl database path.")
+    criteria.set_defaults(func=command_criteria)
 
     handoff = subparsers.add_parser(
         "handoff",
@@ -642,6 +669,11 @@ def build_parser() -> argparse.ArgumentParser:
     finish_task.add_argument("--message", help="Optional final message to send before stopping the worker.")
     finish_task.add_argument("--decision-id", type=int, help="Manager decision ID that justifies this finish.")
     finish_task.add_argument("--strict-decisions", action="store_true", help="Reject the finish unless --decision-id is valid.")
+    finish_task.add_argument(
+        "--require-criteria-audit",
+        action="store_true",
+        help="Fail before finishing if any accepted acceptance criteria remain open.",
+    )
     finish_task.add_argument(
         "--reason",
         default="Task finished by operator.",

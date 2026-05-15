@@ -10,6 +10,7 @@ import sys
 import tempfile
 import time
 import unittest
+import zipfile
 from pathlib import Path
 from unittest import mock
 
@@ -2498,6 +2499,164 @@ class CliTests(unittest.TestCase):
                     shutil.rmtree(worker_path)
 
 
+class CriteriaFinalAuditTests(unittest.TestCase):
+    def _create_task(self, db_path, *, name="criteria-final-task"):
+        with worker_db.connect(db_path) as conn:
+            worker_db.initialize_database(conn)
+            task_id = worker_db.create_task(conn, name=name, goal="Finish only after criteria are audited.")
+            worker_db.set_task_state(conn, task_id=task_id, state="managed")
+            conn.commit()
+        return task_id
+
+    def _finish_args(self, db_path, *, task="criteria-final-task", require_criteria_audit=True):
+        return argparse.Namespace(
+            decision_id=None,
+            message=None,
+            path=str(db_path),
+            reason="final criteria audit passed",
+            require_criteria_audit=require_criteria_audit,
+            stop_manager=False,
+            stop_worker=False,
+            strict_decisions=False,
+            task=task,
+        )
+
+    def test_finish_task_with_criteria_audit_fails_when_accepted_criteria_are_open(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            task_id = self._create_task(db_path)
+            with worker_db.connect(db_path) as conn:
+                worker_db.insert_acceptance_criterion(
+                    conn,
+                    task_id=task_id,
+                    criterion="Run final regression tests",
+                    status="accepted",
+                    source="user_requested",
+                )
+                conn.commit()
+
+            with self.assertRaises(WorkerError):
+                lifecycle.command_finish_task(self._finish_args(db_path))
+
+            with worker_db.connect(db_path) as conn:
+                task = conn.execute("select state from tasks where id = ?", (task_id,)).fetchone()
+                command_count = conn.execute("select count(*) from commands where type = 'finish_task'").fetchone()[0]
+                event_count = conn.execute("select count(*) from events where type like 'finish_task%'").fetchone()[0]
+            self.assertEqual(task["state"], "managed")
+            self.assertEqual(command_count, 0)
+            self.assertEqual(event_count, 0)
+
+    def test_finish_task_with_criteria_audit_succeeds_after_accepted_criteria_are_closed(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            task_id = self._create_task(db_path)
+            statuses = ["satisfied", "deferred", "rejected", "proposed"]
+            with worker_db.connect(db_path) as conn:
+                for status in statuses:
+                    worker_db.insert_acceptance_criterion(
+                        conn,
+                        task_id=task_id,
+                        criterion=f"Criterion is {status}",
+                        status=status,
+                        source="worker_proposed",
+                    )
+                conn.commit()
+
+            with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                result = lifecycle.command_finish_task(self._finish_args(db_path))
+
+            payload = json.loads(stdout.getvalue())
+            self.assertEqual(result, 0)
+            self.assertTrue(payload["final_audit"]["require_criteria_audit"])
+            self.assertEqual(payload["final_audit"]["open_criteria"], [])
+            self.assertEqual(payload["final_audit"]["summary"]["accepted"], 0)
+            self.assertEqual(payload["final_audit"]["summary"]["proposed"], 1)
+            with worker_db.connect(db_path) as conn:
+                task = conn.execute("select state from tasks where id = ?", (task_id,)).fetchone()
+            self.assertEqual(task["state"], "done")
+
+    def test_finish_task_criteria_audit_failure_lists_open_ids_and_text(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            task_id = self._create_task(db_path)
+            with worker_db.connect(db_path) as conn:
+                first_id = worker_db.insert_acceptance_criterion(
+                    conn,
+                    task_id=task_id,
+                    criterion="Confirm deployment receipts",
+                    status="accepted",
+                    source="manager_inferred",
+                )
+                second_id = worker_db.insert_acceptance_criterion(
+                    conn,
+                    task_id=task_id,
+                    criterion="Verify rollback notes",
+                    status="accepted",
+                    source="worker_proposed",
+                )
+                conn.commit()
+
+            with self.assertRaises(WorkerError) as raised:
+                lifecycle.command_finish_task(self._finish_args(db_path))
+
+            message = str(raised.exception)
+            self.assertIn(f"#{first_id}", message)
+            self.assertIn("Confirm deployment receipts", message)
+            self.assertIn(f"#{second_id}", message)
+            self.assertIn("Verify rollback notes", message)
+
+    def test_finish_task_criteria_audit_success_records_result_and_event_metadata(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            task_id = self._create_task(db_path)
+            with worker_db.connect(db_path) as conn:
+                worker_db.insert_acceptance_criterion(
+                    conn,
+                    task_id=task_id,
+                    criterion="Ship docs update",
+                    status="satisfied",
+                    source="user_requested",
+                )
+                worker_db.insert_acceptance_criterion(
+                    conn,
+                    task_id=task_id,
+                    criterion="Consider follow-up dashboard",
+                    status="proposed",
+                    source="worker_proposed",
+                )
+                conn.commit()
+
+            with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                lifecycle.command_finish_task(self._finish_args(db_path))
+
+            payload = json.loads(stdout.getvalue())
+            with worker_db.connect(db_path) as conn:
+                command = conn.execute(
+                    "select payload_json, result_json from commands where type = 'finish_task'"
+                ).fetchone()
+                audit_event = conn.execute(
+                    "select payload_json from events where type = 'finish_task_criteria_audit' and task_id = ?",
+                    (task_id,),
+                ).fetchone()
+                succeeded_event = conn.execute(
+                    "select payload_json from events where type = 'finish_task_succeeded' and task_id = ?",
+                    (task_id,),
+                ).fetchone()
+
+            command_payload = json.loads(command["payload_json"])
+            command_result = json.loads(command["result_json"])
+            audit_payload = json.loads(audit_event["payload_json"])
+            succeeded_payload = json.loads(succeeded_event["payload_json"])
+            self.assertEqual(command_result["final_audit"], payload["final_audit"])
+            self.assertEqual(succeeded_payload["final_audit"], payload["final_audit"])
+            self.assertEqual(audit_payload, payload["final_audit"])
+            self.assertTrue(command_payload["final_audit"]["require_criteria_audit"])
+            self.assertTrue(command_result["final_audit"]["require_criteria_audit"])
+            self.assertEqual(command_result["final_audit"]["open_criteria"], [])
+            self.assertEqual(command_result["final_audit"]["summary"]["satisfied"], 1)
+            self.assertEqual(command_result["final_audit"]["summary"]["proposed"], 1)
+
+
 @unittest.skipIf(shutil.which("tmux") is None, "tmux is not installed")
 class TmuxTests(unittest.TestCase):
     def test_send_text_pastes_and_submits_line(self):
@@ -3117,6 +3276,224 @@ class SessionsSchemaTests(unittest.TestCase):
             ).fetchone()
             self.assertEqual(row["worker_id"], "worker-x")
             self.assertIsNone(row["worker_session_id"])
+
+
+class AcceptanceCriteriaDbTests(unittest.TestCase):
+    def open_db(self, tmpdir):
+        path = Path(tmpdir) / "workerctl.db"
+        conn = worker_db.connect(path)
+        worker_db.initialize_database(conn)
+        self.addCleanup(conn.close)
+        return conn
+
+    def insert_task(self, conn, task_id="task-criteria", name="criteria-task"):
+        now = "2026-05-15T10:00:00Z"
+        conn.execute(
+            """
+            insert into tasks(id, name, goal, state, created_at, updated_at)
+            values (?, ?, 'goal', 'candidate', ?, ?)
+            """,
+            (task_id, name, now, now),
+        )
+
+    def test_insert_list_and_update_acceptance_criteria(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self.insert_task(conn)
+            self.insert_task(conn, task_id="task-other", name="other-task")
+
+            first_id = worker_db.insert_acceptance_criterion(
+                conn,
+                task_id="task-criteria",
+                criterion="Targeted DB tests pass",
+                status="accepted",
+                source="manager_inferred",
+                proof="python3 -m unittest tests.test_workerctl.AcceptanceCriteriaDbTests -v",
+                rationale="The ledger must be covered before CLI integration.",
+                evidence={"phase": "red", "attempt": 1},
+            )
+            second_id = worker_db.insert_acceptance_criterion(
+                conn,
+                task_id="task-criteria",
+                criterion="Worker proposes final audit criteria",
+                status="proposed",
+                source="worker_proposed",
+                evidence={"notes": ["needs manager review"]},
+            )
+            worker_db.insert_acceptance_criterion(
+                conn,
+                task_id="task-other",
+                criterion="Unrelated task criterion",
+                status="accepted",
+                source="user_requested",
+            )
+
+            all_for_task = worker_db.acceptance_criteria_for_task(conn, task_id="task-criteria")
+            accepted = worker_db.acceptance_criteria_for_task(
+                conn,
+                task_id="task-criteria",
+                statuses=["accepted"],
+            )
+            proposed = worker_db.acceptance_criteria_for_task(
+                conn,
+                task_id="task-criteria",
+                statuses=["proposed"],
+            )
+
+            self.assertEqual([row["id"] for row in all_for_task], [first_id, second_id])
+            self.assertEqual([row["id"] for row in accepted], [first_id])
+            self.assertEqual([row["id"] for row in proposed], [second_id])
+            self.assertEqual(accepted[0]["criterion"], "Targeted DB tests pass")
+            self.assertEqual(accepted[0]["status"], "accepted")
+            self.assertEqual(accepted[0]["source"], "manager_inferred")
+            self.assertEqual(accepted[0]["proof"], "python3 -m unittest tests.test_workerctl.AcceptanceCriteriaDbTests -v")
+            self.assertEqual(accepted[0]["rationale"], "The ledger must be covered before CLI integration.")
+            self.assertEqual(accepted[0]["evidence"], {"phase": "red", "attempt": 1})
+            self.assertIsNotNone(accepted[0]["created_at"])
+            self.assertEqual(accepted[0]["created_at"], accepted[0]["updated_at"])
+
+            updated = worker_db.update_acceptance_criterion(
+                conn,
+                criterion_id=first_id,
+                status="satisfied",
+                evidence={"command": "python3 -m unittest", "ok": True},
+                proof="Acceptance criteria DB tests passed",
+                rationale="Satisfied by the targeted DB test run.",
+            )
+
+            self.assertEqual(updated["id"], first_id)
+            self.assertEqual(updated["status"], "satisfied")
+            self.assertEqual(updated["source"], "manager_inferred")
+            self.assertEqual(updated["proof"], "Acceptance criteria DB tests passed")
+            self.assertEqual(updated["rationale"], "Satisfied by the targeted DB test run.")
+            self.assertEqual(updated["evidence"], {"command": "python3 -m unittest", "ok": True})
+            self.assertEqual(updated["created_at"], accepted[0]["created_at"])
+            self.assertGreaterEqual(updated["updated_at"], updated["created_at"])
+
+    def test_duplicate_acceptance_criterion_insert_returns_existing_id(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self.insert_task(conn)
+
+            first_id = worker_db.insert_acceptance_criterion(
+                conn,
+                task_id="task-criteria",
+                criterion="Do not duplicate criteria",
+                status="accepted",
+                source="manager_inferred",
+                proof="original proof",
+                rationale="original rationale",
+                evidence={"original": True},
+            )
+            duplicate_id = worker_db.insert_acceptance_criterion(
+                conn,
+                task_id="task-criteria",
+                criterion="Do not duplicate criteria",
+                status="rejected",
+                source="manager_inferred",
+                proof="replacement proof",
+                rationale="replacement rationale",
+                evidence={"replacement": True},
+            )
+
+            rows = worker_db.acceptance_criteria_for_task(conn, task_id="task-criteria")
+
+            self.assertEqual(duplicate_id, first_id)
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["status"], "accepted")
+            self.assertEqual(rows[0]["proof"], "original proof")
+            self.assertEqual(rows[0]["rationale"], "original rationale")
+            self.assertEqual(rows[0]["evidence"], {"original": True})
+
+    def test_acceptance_criterion_unique_index_exists(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+
+            indexes = {
+                row["name"]
+                for row in conn.execute(
+                    "select name from sqlite_master where type = 'index' and name not like 'sqlite_%'"
+                )
+            }
+
+            self.assertIn("acceptance_criteria_task_source_criterion", indexes)
+
+    def test_update_acceptance_criterion_preserves_and_clears_optional_fields(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self.insert_task(conn)
+            criterion_id = worker_db.insert_acceptance_criterion(
+                conn,
+                task_id="task-criteria",
+                criterion="Optional fields can be preserved or cleared",
+                status="accepted",
+                source="final_audit",
+                proof="existing proof",
+                rationale="existing rationale",
+                evidence={"existing": True},
+            )
+
+            preserved = worker_db.update_acceptance_criterion(
+                conn,
+                criterion_id=criterion_id,
+                status="satisfied",
+            )
+
+            self.assertEqual(preserved["status"], "satisfied")
+            self.assertEqual(preserved["proof"], "existing proof")
+            self.assertEqual(preserved["rationale"], "existing rationale")
+            self.assertEqual(preserved["evidence"], {"existing": True})
+
+            cleared = worker_db.update_acceptance_criterion(
+                conn,
+                criterion_id=criterion_id,
+                status="deferred",
+                proof=None,
+                rationale=None,
+                evidence=None,
+            )
+
+            self.assertEqual(cleared["status"], "deferred")
+            self.assertIsNone(cleared["proof"])
+            self.assertIsNone(cleared["rationale"])
+            self.assertEqual(cleared["evidence"], {})
+
+    def test_acceptance_criteria_validate_status_and_source(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self.insert_task(conn)
+
+            with self.assertRaisesRegex(WorkerError, "invalid acceptance criterion status"):
+                worker_db.insert_acceptance_criterion(
+                    conn,
+                    task_id="task-criteria",
+                    criterion="Bad status",
+                    status="done",
+                    source="manager_inferred",
+                )
+
+            with self.assertRaisesRegex(WorkerError, "invalid acceptance criterion source"):
+                worker_db.insert_acceptance_criterion(
+                    conn,
+                    task_id="task-criteria",
+                    criterion="Bad source",
+                    status="proposed",
+                    source="worker",
+                )
+
+            criterion_id = worker_db.insert_acceptance_criterion(
+                conn,
+                task_id="task-criteria",
+                criterion="Valid criterion",
+                status="proposed",
+                source="final_audit",
+            )
+            with self.assertRaisesRegex(WorkerError, "invalid acceptance criterion status"):
+                worker_db.update_acceptance_criterion(
+                    conn,
+                    criterion_id=criterion_id,
+                    status="done",
+                )
 
 
 class RegisterCommandsTests(unittest.TestCase):
@@ -5891,6 +6268,103 @@ class SuperviseCycleTests(unittest.TestCase):
             self.assertFalse(result["task_completed"])
 
 
+class SuperviseCycleCriteriaTests(unittest.TestCase):
+    def open_db(self, tmpdir):
+        path = Path(tmpdir) / "workerctl.db"
+        conn = worker_db.connect(path)
+        worker_db.initialize_database(conn)
+        self.addCleanup(conn.close)
+        return conn
+
+    def _setup_bound_task(self, conn, tmpdir):
+        rollout = Path(tmpdir) / "rollout.jsonl"
+        rollout.write_text(
+            json.dumps({"type": "session_meta", "payload": {"id": "u-w", "cwd": "/r"}}) + "\n"
+        )
+        now = "2026-05-15T00:00:00Z"
+        conn.execute(
+            "insert into tasks(id, name, goal, state, created_at, updated_at) "
+            "values ('task-criteria-cycle', 'criteria-cycle', 'g', 'candidate', ?, ?)",
+            (now, now),
+        )
+        worker_db.register_session(
+            conn, name="criteria-worker", role="worker",
+            codex_session_path=str(rollout),
+            codex_session_id="u-w", pid=1, cwd="/r",
+        )
+        worker_db.register_session(
+            conn, name="criteria-manager", role="manager",
+            codex_session_path=str(rollout),
+            codex_session_id="u-m", pid=2, cwd="/r",
+        )
+        worker_db.bind_sessions(
+            conn,
+            task_name="criteria-cycle",
+            worker_session_name="criteria-worker",
+            manager_session_name="criteria-manager",
+        )
+        conn.commit()
+
+    def test_run_cycle_groups_acceptance_criteria_in_manager_context(self):
+        from workerctl import supervise_cycle
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self._setup_bound_task(conn, tmpdir)
+            for status in ["proposed", "accepted", "satisfied", "deferred", "rejected"]:
+                worker_db.insert_acceptance_criterion(
+                    conn,
+                    task_id="task-criteria-cycle",
+                    criterion=f"{status} criterion",
+                    status=status,
+                    source="manager_inferred",
+                    proof=f"{status} proof",
+                    rationale=f"{status} rationale",
+                    evidence={"status": status},
+                )
+            conn.commit()
+
+            expected = {
+                status: worker_db.acceptance_criteria_for_task(
+                    conn,
+                    task_id="task-criteria-cycle",
+                    statuses=[status],
+                )
+                for status in ["proposed", "accepted", "satisfied", "deferred", "rejected"]
+            }
+
+            result = supervise_cycle.run_cycle(
+                conn,
+                task_name="criteria-cycle",
+                now="2026-05-15T14:32:15Z",
+            )
+
+            criteria_context = result["manager_context"]["acceptance_criteria"]
+            self.assertEqual(
+                criteria_context["summary"],
+                {
+                    "proposed": 1,
+                    "accepted": 1,
+                    "satisfied": 1,
+                    "deferred": 1,
+                    "rejected": 1,
+                },
+            )
+            self.assertEqual(criteria_context["open"], expected["accepted"])
+            for status in ["proposed", "satisfied", "deferred", "rejected"]:
+                self.assertEqual(criteria_context[status], expected[status])
+
+            row = conn.execute(
+                "select status_json from manager_cycles where id = ?",
+                (result["cycle_id"],),
+            ).fetchone()
+            persisted = json.loads(row["status_json"])
+            self.assertEqual(
+                persisted["manager_context"]["acceptance_criteria"],
+                criteria_context,
+            )
+
+
 class ReadEventsStatsTests(unittest.TestCase):
     def test_read_events_with_stats_counts_malformed_lines(self):
         from workerctl import state
@@ -7120,6 +7594,53 @@ class StartWorkerTests(unittest.TestCase):
                 os.environ.pop("WORKERCTL_STATE_ROOT", None)
 
 
+class ManagerBootstrapPromptTests(unittest.TestCase):
+    def test_prompt_includes_living_criteria_guidance_and_runnable_examples(self):
+        prompt = commands.manager_bootstrap_prompt(
+            manager_name="docs-mgr",
+            cwd="/repo",
+            task_name="docs-task",
+            task_goal="Update documentation",
+            worker_name="docs-worker",
+        )
+
+        self.assertIn("Treat acceptance criteria as living supervision state", prompt)
+        self.assertIn("manager_context.acceptance_criteria", prompt)
+        self.assertIn("must-have vs follow-up criteria", prompt)
+        self.assertIn("Record useful criteria with `scripts/workerctl criteria`", prompt)
+        self.assertIn("compare worker receipts/verification against accepted open criteria", prompt)
+        self.assertIn(
+            'scripts/workerctl criteria docs-task --add --criterion "..." --source worker_proposed --status proposed',
+            prompt,
+        )
+        self.assertIn(
+            """criterion_id=$(scripts/workerctl criteria docs-task --add --criterion "..." --source worker_proposed --status proposed | python3 -c 'import json,sys; print(json.load(sys.stdin)["affected_criterion"]["id"])')""",
+            prompt,
+        )
+        self.assertIn(
+            """scripts/workerctl criteria docs-task --satisfy "$criterion_id" --evidence-json '{"command":"...","status":"pass"}'""",
+            prompt,
+        )
+        self.assertIn("affected_criterion", prompt)
+        self.assertNotIn('["criteria"][0]["id"]', prompt)
+
+    def test_docs_include_criteria_context_and_capture_id_examples(self):
+        readme = (ROOT / "README.md").read_text()
+        skill = (ROOT / "skills/manage-codex-workers/SKILL.md").read_text()
+
+        for document in (readme, skill):
+            self.assertIn("manager_context.acceptance_criteria", document)
+            self.assertIn("criterion_id=$(scripts/workerctl criteria", document)
+            self.assertIn('["affected_criterion"]["id"]', document)
+            self.assertIn('--satisfy "$criterion_id"', document)
+            self.assertNotIn('["criteria"][0]["id"]', document)
+            self.assertIn('"open": [...]', document)
+            self.assertIn('"proposed": [...]', document)
+            self.assertIn('"satisfied": [...]', document)
+            self.assertIn('"deferred": [...]', document)
+            self.assertIn('"rejected": [...]', document)
+
+
 class StartManagerTests(unittest.TestCase):
     """Tests for `workerctl start-manager` — the spawn-and-register convenience for managers."""
 
@@ -7197,6 +7718,11 @@ class StartManagerTests(unittest.TestCase):
                     codex_cmd = tmux_cmds[0][-1]
                     self.assertIn("manager-config <task> --questions", codex_cmd)
                     self.assertIn("You are a Codex manager session", codex_cmd)
+                    self.assertIn("acceptance criteria as living supervision state", codex_cmd)
+                    self.assertIn("manager_context.acceptance_criteria", codex_cmd)
+                    self.assertIn("must-have vs follow-up criteria", codex_cmd)
+                    self.assertIn("scripts/workerctl criteria", codex_cmd)
+                    self.assertIn("compare worker receipts/verification against accepted open criteria", codex_cmd)
                     self.assertNotIn("Do not edit files. Wait for manager instruction.", codex_cmd)
 
                     # Confirm a session was registered with role="manager".
@@ -7662,6 +8188,571 @@ class RegisterManagerLsofTests(unittest.TestCase):
                 worker_db.default_db_path = original_default_db_path
 
 
+class AcceptanceCriteriaCliTests(unittest.TestCase):
+    def _setup_db(self, tmpdir):
+        db_path = Path(tmpdir) / "workerctl.db"
+        conn = worker_db.connect(db_path)
+        worker_db.initialize_database(conn)
+        conn.close()
+        return db_path
+
+    def _create_task(self, db_path, name="criteria-cli-task"):
+        conn = worker_db.connect(db_path)
+        try:
+            task_id = worker_db.create_task(conn, name=name, goal="Track emergent criteria.")
+            conn.commit()
+            return task_id
+        finally:
+            conn.close()
+
+    def _run_workerctl(self, *args):
+        return subprocess.run(
+            [sys.executable, "-m", "workerctl", *args],
+            capture_output=True,
+            text=True,
+            cwd=str(ROOT),
+        )
+
+    def test_add_and_list_outputs_task_criteria_summary_and_event(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = self._setup_db(tmpdir)
+            task_id = self._create_task(db_path)
+
+            add = self._run_workerctl(
+                "criteria",
+                "criteria-cli-task",
+                "--add",
+                "--criterion",
+                "Targeted CLI tests pass",
+                "--source",
+                "worker_proposed",
+                "--status",
+                "proposed",
+                "--proof",
+                "python3 -m unittest tests.test_workerctl.AcceptanceCriteriaCliTests -v",
+                "--rationale",
+                "The command needs CLI coverage.",
+                "--evidence-json",
+                '{"phase":"red"}',
+                "--path",
+                str(db_path),
+            )
+            self.assertEqual(add.returncode, 0, add.stderr)
+            added = json.loads(add.stdout)
+            self.assertEqual(added["task"], {"id": task_id, "name": "criteria-cli-task"})
+            self.assertEqual(added["summary"]["proposed"], 1)
+            self.assertEqual(added["summary"]["accepted"], 0)
+            self.assertEqual(len(added["criteria"]), 1)
+            self.assertEqual(added["criteria"][0]["criterion"], "Targeted CLI tests pass")
+            self.assertEqual(added["criteria"][0]["status"], "proposed")
+            self.assertEqual(added["criteria"][0]["source"], "worker_proposed")
+            self.assertEqual(added["criteria"][0]["proof"], "python3 -m unittest tests.test_workerctl.AcceptanceCriteriaCliTests -v")
+            self.assertEqual(added["criteria"][0]["rationale"], "The command needs CLI coverage.")
+            self.assertEqual(added["criteria"][0]["evidence"], {"phase": "red"})
+            self.assertEqual(added["affected_criterion"], added["criteria"][0])
+            self.assertEqual(added["affected_criterion"]["id"], added["criteria"][0]["id"])
+
+            listed = self._run_workerctl(
+                "criteria",
+                "criteria-cli-task",
+                "--list",
+                "--path",
+                str(db_path),
+            )
+            self.assertEqual(listed.returncode, 0, listed.stderr)
+            payload = json.loads(listed.stdout)
+            self.assertEqual(payload["criteria"], added["criteria"])
+            self.assertNotIn("affected_criterion", payload)
+            self.assertEqual(
+                payload["summary"],
+                {"proposed": 1, "accepted": 0, "satisfied": 0, "deferred": 0, "rejected": 0},
+            )
+
+            conn = worker_db.connect(db_path)
+            try:
+                event = conn.execute(
+                    "select type, payload_json from events where task_id = ? order by id desc limit 1",
+                    (task_id,),
+                ).fetchone()
+            finally:
+                conn.close()
+            self.assertEqual(event["type"], "acceptance_criterion_added")
+            event_payload = json.loads(event["payload_json"])
+            self.assertEqual(event_payload["criterion_id"], added["criteria"][0]["id"])
+            self.assertEqual(event_payload["criterion"], "Targeted CLI tests pass")
+            self.assertEqual(event_payload["status"], "proposed")
+            self.assertEqual(event_payload["source"], "worker_proposed")
+            self.assertEqual(event_payload["proof"], "python3 -m unittest tests.test_workerctl.AcceptanceCriteriaCliTests -v")
+            self.assertEqual(event_payload["rationale"], "The command needs CLI coverage.")
+            self.assertEqual(event_payload["evidence"], {"phase": "red"})
+            self.assertTrue(event_payload["created"])
+
+    def test_duplicate_add_preserves_one_row_and_does_not_emit_second_added_event(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = self._setup_db(tmpdir)
+            task_id = self._create_task(db_path)
+
+            add_args = [
+                "criteria",
+                "criteria-cli-task",
+                "--add",
+                "--criterion",
+                "No duplicate audit mutation",
+                "--source",
+                "manager_inferred",
+                "--status",
+                "proposed",
+                "--path",
+                str(db_path),
+            ]
+            first = self._run_workerctl(*add_args)
+            second = self._run_workerctl(*add_args)
+
+            self.assertEqual(first.returncode, 0, first.stderr)
+            self.assertEqual(second.returncode, 0, second.stderr)
+            first_payload = json.loads(first.stdout)
+            second_payload = json.loads(second.stdout)
+            self.assertEqual(len(first_payload["criteria"]), 1)
+            self.assertEqual(len(second_payload["criteria"]), 1)
+            self.assertEqual(first_payload["criteria"][0]["id"], second_payload["criteria"][0]["id"])
+            self.assertEqual(first_payload["affected_criterion"]["id"], first_payload["criteria"][0]["id"])
+            self.assertEqual(second_payload["affected_criterion"]["id"], first_payload["criteria"][0]["id"])
+            self.assertEqual(second_payload["affected_criterion"], first_payload["criteria"][0])
+
+            conn = worker_db.connect(db_path)
+            try:
+                row_count = conn.execute(
+                    "select count(*) from acceptance_criteria where task_id = ?",
+                    (task_id,),
+                ).fetchone()[0]
+                added_event_count = conn.execute(
+                    "select count(*) from events where task_id = ? and type = 'acceptance_criterion_added'",
+                    (task_id,),
+                ).fetchone()[0]
+            finally:
+                conn.close()
+            self.assertEqual(row_count, 1)
+            self.assertEqual(added_event_count, 1)
+
+    def test_list_filters_by_repeated_status(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = self._setup_db(tmpdir)
+            task_id = self._create_task(db_path)
+            conn = worker_db.connect(db_path)
+            try:
+                worker_db.insert_acceptance_criterion(
+                    conn,
+                    task_id=task_id,
+                    criterion="Manager proposed",
+                    status="proposed",
+                    source="manager_inferred",
+                )
+                worker_db.insert_acceptance_criterion(
+                    conn,
+                    task_id=task_id,
+                    criterion="User accepted",
+                    status="accepted",
+                    source="user_requested",
+                )
+                worker_db.insert_acceptance_criterion(
+                    conn,
+                    task_id=task_id,
+                    criterion="Audit rejected",
+                    status="rejected",
+                    source="final_audit",
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            proc = self._run_workerctl(
+                "criteria",
+                "criteria-cli-task",
+                "--list",
+                "--status",
+                "accepted",
+                "--status",
+                "rejected",
+                "--path",
+                str(db_path),
+            )
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            payload = json.loads(proc.stdout)
+            self.assertEqual([row["status"] for row in payload["criteria"]], ["accepted", "rejected"])
+            self.assertNotIn("affected_criterion", payload)
+            self.assertEqual(payload["summary"]["proposed"], 1)
+            self.assertEqual(payload["summary"]["accepted"], 1)
+            self.assertEqual(payload["summary"]["rejected"], 1)
+
+    def test_update_actions_set_status_and_record_events(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = self._setup_db(tmpdir)
+            task_id = self._create_task(db_path)
+            conn = worker_db.connect(db_path)
+            try:
+                ids = {
+                    action: worker_db.insert_acceptance_criterion(
+                        conn,
+                        task_id=task_id,
+                        criterion=f"{action} criterion",
+                        status="proposed",
+                        source="manager_inferred",
+                    )
+                    for action in ("accept", "satisfy", "defer", "reject")
+                }
+                conn.commit()
+            finally:
+                conn.close()
+
+            actions = [
+                ("--accept", ids["accept"], "accepted", []),
+                (
+                    "--satisfy",
+                    ids["satisfy"],
+                    "satisfied",
+                    ["--evidence-json", '{"command":"python3 -m unittest"}', "--proof", "tests passed"],
+                ),
+                ("--defer", ids["defer"], "deferred", ["--rationale", "Out of scope"]),
+                ("--reject", ids["reject"], "rejected", ["--evidence-json", '{"reason":"duplicate"}']),
+            ]
+            for flag, criterion_id, expected_status, extra_args in actions:
+                proc = self._run_workerctl(
+                    "criteria",
+                    "criteria-cli-task",
+                    flag,
+                    str(criterion_id),
+                    *extra_args,
+                    "--path",
+                    str(db_path),
+                )
+                self.assertEqual(proc.returncode, 0, proc.stderr)
+                payload = json.loads(proc.stdout)
+                row = next(row for row in payload["criteria"] if row["id"] == criterion_id)
+                self.assertEqual(row["status"], expected_status)
+                self.assertEqual(payload["affected_criterion"], row)
+                self.assertEqual(payload["affected_criterion"]["id"], criterion_id)
+
+            conn = worker_db.connect(db_path)
+            try:
+                rows = conn.execute(
+                    "select type, payload_json from events where task_id = ? and type = 'acceptance_criterion_updated' order by id",
+                    (task_id,),
+                ).fetchall()
+            finally:
+                conn.close()
+            self.assertEqual(len(rows), 4)
+            event_payloads = [json.loads(row["payload_json"]) for row in rows]
+            event_statuses = [payload["status"] for payload in event_payloads]
+            self.assertEqual(event_statuses, ["accepted", "satisfied", "deferred", "rejected"])
+            by_status = {payload["status"]: payload for payload in event_payloads}
+            self.assertEqual(by_status["satisfied"]["criterion"], "satisfy criterion")
+            self.assertEqual(by_status["satisfied"]["previous_status"], "proposed")
+            self.assertEqual(by_status["satisfied"]["proof"], "tests passed")
+            self.assertIsNone(by_status["satisfied"]["rationale"])
+            self.assertEqual(by_status["satisfied"]["evidence"], {"command": "python3 -m unittest"})
+            self.assertIsNone(by_status["satisfied"]["previous_proof"])
+            self.assertIsNone(by_status["satisfied"]["previous_rationale"])
+            self.assertEqual(by_status["satisfied"]["previous_evidence"], {})
+            self.assertEqual(by_status["deferred"]["rationale"], "Out of scope")
+            self.assertEqual(by_status["deferred"]["evidence"], {})
+            self.assertEqual(by_status["rejected"]["evidence"], {"reason": "duplicate"})
+
+    def test_invalid_status_source_and_evidence_json_fail(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = self._setup_db(tmpdir)
+            self._create_task(db_path)
+
+            invalid_status = self._run_workerctl(
+                "criteria",
+                "criteria-cli-task",
+                "--add",
+                "--criterion",
+                "Bad status",
+                "--source",
+                "worker_proposed",
+                "--status",
+                "done",
+                "--path",
+                str(db_path),
+            )
+            self.assertNotEqual(invalid_status.returncode, 0)
+            self.assertIn("invalid acceptance criterion status", invalid_status.stderr)
+
+            invalid_source = self._run_workerctl(
+                "criteria",
+                "criteria-cli-task",
+                "--add",
+                "--criterion",
+                "Bad source",
+                "--source",
+                "worker",
+                "--path",
+                str(db_path),
+            )
+            self.assertNotEqual(invalid_source.returncode, 0)
+            self.assertIn("invalid acceptance criterion source", invalid_source.stderr)
+
+            invalid_evidence = self._run_workerctl(
+                "criteria",
+                "criteria-cli-task",
+                "--add",
+                "--criterion",
+                "Bad evidence",
+                "--source",
+                "worker_proposed",
+                "--evidence-json",
+                '["not-an-object"]',
+                "--path",
+                str(db_path),
+            )
+            self.assertNotEqual(invalid_evidence.returncode, 0)
+            self.assertIn("--evidence-json must be a JSON object", invalid_evidence.stderr)
+
+
+class AcceptanceCriteriaReplayExportTests(unittest.TestCase):
+    def _setup_db(self, tmpdir):
+        db_path = Path(tmpdir) / "workerctl.db"
+        conn = worker_db.connect(db_path)
+        worker_db.initialize_database(conn)
+        conn.close()
+        return db_path
+
+    def _run_workerctl(self, *args):
+        return subprocess.run(
+            [sys.executable, str(WORKERCTL_PATH), *args],
+            capture_output=True,
+            text=True,
+            cwd=str(ROOT),
+        )
+
+    def _event_payload(self, criterion, task_id, previous=None, created=None):
+        payload = {
+            "criterion_id": criterion["id"],
+            "criterion": criterion["criterion"],
+            "status": criterion["status"],
+            "source": criterion["source"],
+            "proof": criterion["proof"],
+            "rationale": criterion["rationale"],
+            "evidence": criterion["evidence"],
+            "task_id": task_id,
+        }
+        if created is not None:
+            payload["created"] = created
+        if previous is not None:
+            payload.update(
+                {
+                    "previous_status": previous["status"],
+                    "previous_proof": previous["proof"],
+                    "previous_rationale": previous["rationale"],
+                    "previous_evidence": previous["evidence"],
+                }
+            )
+        return payload
+
+    def _create_task_with_criteria_events(self, db_path):
+        with worker_db.connect(db_path) as conn:
+            worker_db.initialize_database(conn)
+            task_id = worker_db.create_task(conn, name="criteria-replay-task", goal="Track emergent criteria.")
+            proposed_id = worker_db.insert_acceptance_criterion(
+                conn,
+                task_id=task_id,
+                criterion="Run targeted acceptance criteria replay tests",
+                status="proposed",
+                source="worker_proposed",
+                rationale="Worker noticed replay/export should preserve emergent criteria.",
+                evidence={"phase": "proposed"},
+            )
+            criteria = worker_db.acceptance_criteria_for_task(conn, task_id=task_id)
+            proposed = next(row for row in criteria if row["id"] == proposed_id)
+            worker_db.insert_event(
+                conn,
+                "acceptance_criterion_added",
+                actor="workerctl",
+                task_id=task_id,
+                payload=self._event_payload(proposed, task_id, created=True),
+            )
+
+            accepted = worker_db.update_acceptance_criterion(
+                conn,
+                criterion_id=proposed_id,
+                status="accepted",
+                rationale="Manager accepted the emergent replay/export requirement.",
+            )
+            worker_db.insert_event(
+                conn,
+                "acceptance_criterion_updated",
+                actor="workerctl",
+                task_id=task_id,
+                payload=self._event_payload(accepted, task_id, previous=proposed),
+            )
+
+            satisfied_previous = accepted
+            satisfied = worker_db.update_acceptance_criterion(
+                conn,
+                criterion_id=proposed_id,
+                status="satisfied",
+                proof="python3 -m unittest tests.test_workerctl.AcceptanceCriteriaReplayExportTests -v",
+                evidence={"command": "python3 -m unittest", "status": "pass"},
+            )
+            worker_db.insert_event(
+                conn,
+                "acceptance_criterion_updated",
+                actor="workerctl",
+                task_id=task_id,
+                payload=self._event_payload(satisfied, task_id, previous=satisfied_previous),
+            )
+
+            deferred_id = worker_db.insert_acceptance_criterion(
+                conn,
+                task_id=task_id,
+                criterion="Ship unrelated dashboard polish",
+                status="deferred",
+                source="manager_inferred",
+                rationale="Out of scope for this audit change.",
+            )
+            deferred = next(row for row in worker_db.acceptance_criteria_for_task(conn, task_id=task_id) if row["id"] == deferred_id)
+            worker_db.insert_event(
+                conn,
+                "acceptance_criterion_added",
+                actor="workerctl",
+                task_id=task_id,
+                payload=self._event_payload(deferred, task_id, created=True),
+            )
+            conn.commit()
+            return {"task_id": task_id, "proposed_id": proposed_id, "deferred_id": deferred_id}
+
+    def test_task_audit_includes_acceptance_criteria(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = self._setup_db(tmpdir)
+            ids = self._create_task_with_criteria_events(db_path)
+
+            with worker_db.connect(db_path) as conn:
+                audit = worker_db.task_audit(conn, task="criteria-replay-task")
+
+            self.assertIn("acceptance_criteria", audit)
+            by_id = {row["id"]: row for row in audit["acceptance_criteria"]}
+            self.assertEqual(by_id[ids["proposed_id"]]["status"], "satisfied")
+            self.assertEqual(by_id[ids["proposed_id"]]["evidence"], {"command": "python3 -m unittest", "status": "pass"})
+            self.assertEqual(by_id[ids["deferred_id"]]["rationale"], "Out of scope for this audit change.")
+
+    def test_replay_timeline_includes_added_and_updated_criteria_summaries(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = self._setup_db(tmpdir)
+            ids = self._create_task_with_criteria_events(db_path)
+
+            proc = self._run_workerctl("replay", "criteria-replay-task", "--path", str(db_path))
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn(f"proposed criterion #{ids['proposed_id']}: Run targeted acceptance criteria replay tests", proc.stdout)
+            self.assertIn(
+                f"accepted criterion #{ids['proposed_id']} (proposed -> accepted): "
+                "Run targeted acceptance criteria replay tests",
+                proc.stdout,
+            )
+            self.assertIn(
+                f"satisfied criterion #{ids['proposed_id']} (accepted -> satisfied): proof recorded",
+                proc.stdout,
+            )
+            self.assertIn(f"deferred criterion #{ids['deferred_id']}: Out of scope for this audit change.", proc.stdout)
+
+    def test_replay_compact_includes_criteria_transitions(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = self._setup_db(tmpdir)
+            ids = self._create_task_with_criteria_events(db_path)
+
+            compact = self._run_workerctl("replay", "criteria-replay-task", "--format", "compact", "--path", str(db_path))
+            worker_only = self._run_workerctl(
+                "replay",
+                "criteria-replay-task",
+                "--format",
+                "compact",
+                "--role",
+                "worker",
+                "--path",
+                str(db_path),
+            )
+
+            self.assertEqual(compact.returncode, 0, compact.stderr)
+            self.assertIn(f"accepted criterion #{ids['proposed_id']} (proposed -> accepted)", compact.stdout)
+            self.assertIn(f"satisfied criterion #{ids['proposed_id']} (accepted -> satisfied)", compact.stdout)
+            self.assertEqual(worker_only.returncode, 0, worker_only.stderr)
+            self.assertNotIn("criterion #", worker_only.stdout)
+
+    def test_replay_preserves_numeric_event_order_for_same_timestamp_criteria(self):
+        from workerctl import replay as worker_replay
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = self._setup_db(tmpdir)
+            with worker_db.connect(db_path) as conn:
+                task_id = worker_db.create_task(conn, name="criteria-order-task", goal="Track event ordering.")
+                timestamp = "2026-05-15T12:00:00Z"
+                for number in range(1, 12):
+                    conn.execute(
+                        """
+                        insert into events(
+                          created_at, actor, command_id, correlation_id, task_id,
+                          worker_id, manager_id, type, payload_json
+                        )
+                        values (?, 'workerctl', null, null, ?, null, null, ?, ?)
+                        """,
+                        (
+                            timestamp,
+                            task_id,
+                            "acceptance_criterion_updated",
+                            json.dumps(
+                                {
+                                    "criterion": f"Criterion {number}",
+                                    "criterion_id": number,
+                                    "previous_status": "accepted",
+                                    "status": "satisfied",
+                                    "task_id": task_id,
+                                },
+                                sort_keys=True,
+                            ),
+                        ),
+                    )
+                conn.commit()
+                audit = worker_db.task_audit(conn, task="criteria-order-task")
+
+            entries = [
+                entry
+                for entry in worker_replay.replay_entries(audit, role="all", mode="compact")
+                if entry["kind"] == "acceptance_criterion"
+            ]
+
+            source_ids = [entry["source_id"] for entry in entries]
+            self.assertEqual(source_ids, sorted(source_ids))
+            self.assertIn("criterion #2", entries[1]["summary"])
+            self.assertIn("criterion #10", entries[9]["summary"])
+
+    def test_export_writes_acceptance_criteria_file_manifest_and_zip(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = self._setup_db(tmpdir)
+            output = Path(tmpdir) / "export"
+            ids = self._create_task_with_criteria_events(db_path)
+
+            proc = self._run_workerctl(
+                "export-task",
+                "criteria-replay-task",
+                "--output",
+                str(output),
+                "--zip",
+                "--path",
+                str(db_path),
+            )
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            criteria_path = output / "acceptance-criteria.json"
+            self.assertTrue(criteria_path.exists())
+            criteria = json.loads(criteria_path.read_text())
+            self.assertEqual({row["id"] for row in criteria}, {ids["proposed_id"], ids["deferred_id"]})
+            manifest = json.loads((output / "manifest.json").read_text())
+            self.assertIn("acceptance-criteria.json", manifest["files"])
+            with zipfile.ZipFile(output.with_suffix(".zip")) as archive:
+                self.assertIn("acceptance-criteria.json", archive.namelist())
+
+
 class PairCommandTests(unittest.TestCase):
     def _setup_db(self, tmpdir):
         db_path = Path(tmpdir) / "workerctl.db"
@@ -7879,6 +8970,14 @@ class PairCommandTests(unittest.TestCase):
             self.assertIn("manager-config prompt-task --questions", manager_spawn["initial_prompt"])
             self.assertIn("Task goal: Build a thing", manager_spawn["initial_prompt"])
             self.assertIn("Worker session: w1", manager_spawn["initial_prompt"])
+            self.assertIn("acceptance criteria as living supervision state", manager_spawn["initial_prompt"])
+            self.assertIn("manager_context.acceptance_criteria", manager_spawn["initial_prompt"])
+            self.assertIn("must-have vs follow-up criteria", manager_spawn["initial_prompt"])
+            self.assertIn("scripts/workerctl criteria", manager_spawn["initial_prompt"])
+            self.assertIn(
+                "compare worker receipts/verification against accepted open criteria",
+                manager_spawn["initial_prompt"],
+            )
             self.assertNotIn("Do the thing", manager_spawn["initial_prompt"])
 
     def test_pair_subparser_exists(self):
