@@ -7,6 +7,22 @@ The goal is not full autonomy. The goal is lightweight supervision for Codex
 tasks that mostly need progress checks, occasional nudges, test reruns, or
 clean stop/resume handling.
 
+## Motivating Principles
+
+- **Project workflows often need nudging.** Some Codex tasks do not need a
+  second implementer; they need a manager that keeps watching, asks for status
+  at the right time, unblocks predictable terminal prompts, and gently steers
+  the worker back toward the user's goal.
+- **Useful acceptance criteria often emerge during the work.** Even when the
+  user starts with a plan, implementation reveals new edge cases, missing tests,
+  unclear polish requirements, and follow-up decisions. The manager should help
+  discover, record, defer, satisfy, and audit these emergent acceptance criteria
+  instead of assuming the whole checklist can be known up front.
+- **Supervision should be durable and replayable.** Manager observations,
+  nudges, interrupts, handoffs, compaction requests, and final decisions should
+  leave enough structured history to understand why the worker was pushed and
+  what evidence supported finishing or continuing the task.
+
 ## Architecture
 
 Supervision is built on three primitives: **sessions**, **tasks**, and
@@ -203,6 +219,25 @@ tmux attach -t codex-live-test
   schema to ask the user in chat, then save the answers with noninteractive
   flags. Use `--interactive` only as a terminal fallback when a human is
   running `workerctl` directly.
+- `criteria <task>` — Track emergent acceptance criteria discovered during
+  supervision. Managers should add useful proposed criteria, accept must-have
+  items, defer follow-ups, and mark criteria satisfied only when worker
+  receipts and verification cover them.
+  ```bash
+  scripts/workerctl criteria my-task --list
+  scripts/workerctl criteria my-task --list --status accepted
+  scripts/workerctl criteria my-task --add --criterion "..." --source worker_proposed --status proposed
+  scripts/workerctl criteria my-task --accept 12 --rationale "Must-have for this task"
+  scripts/workerctl criteria my-task --satisfy <id> --evidence-json '{"command":"...","status":"pass"}'
+  scripts/workerctl criteria my-task --defer 13 --rationale "Follow-up after this task"
+  scripts/workerctl criteria my-task --reject 14 --rationale "Duplicate or out of scope"
+  ```
+  Replace placeholder `...` values with the actual criterion and verification
+  command. To add a criterion and satisfy that same row after verification:
+  ```bash
+  criterion_id=$(scripts/workerctl criteria my-task --add --criterion "Targeted prompt tests pass" --source worker_proposed --status proposed | python3 -c 'import json,sys; print(json.load(sys.stdin)["affected_criterion"]["id"])')
+  scripts/workerctl criteria my-task --satisfy "$criterion_id" --evidence-json '{"command":"python3 -m unittest tests.test_workerctl.ManagerBootstrapPromptTests -v","status":"pass"}'
+  ```
 - `manager-permission <task> <create_pr|merge_green_pr|worker_compact_clear>
   [--require] [--require-handoff]` — Check and audit whether the saved manager
   config allows a high-level action. Use `--require` when a manager command
@@ -224,8 +259,11 @@ tmux attach -t codex-live-test
   before/after sending the worker instruction.
 - `bind --task T --worker W --manager M` — Create the task binding.
 - `unbind --task T` — End the active binding for a task.
-- `finish-task <task> [--reason R] [--stop-manager] [--stop-worker]` — Mark a
-  task done. Leaves the manager terminal open by default for review.
+- `finish-task <task> [--reason R] [--require-criteria-audit] [--stop-manager]
+  [--stop-worker]` — Mark a task done. Leaves the manager terminal open by
+  default for review. With `--require-criteria-audit`, fails before finishing
+  if any acceptance criteria for the task are still `accepted`; `proposed`,
+  `satisfied`, `deferred`, and `rejected` criteria do not block.
 - `stop-task <task> [--stop-worker]` — Force-stop a task's manager (and
   optionally the worker).
 
@@ -238,9 +276,12 @@ tmux attach -t codex-live-test
   - `worker_alive` / `manager_alive` — booleans computed by probing the registered session pids (`os.kill(pid, 0)`). `False` when the session's pid is `NULL` (legacy backfill) or the process has exited — useful for detecting silently-dead workers between cycles.
   - `last_event_subtype` — the subtype of the most recent `codex_events` row for the worker, or `null` if no events exist.
   - `task_completed` — `true` iff `last_event_subtype` is `"task_complete"`. Disambiguates "worker finished cleanly" from "worker idle but never started."
-  - `manager_context` — the latest `manager-config` and `handoff` records for
-    the task, so each manager loop can reference the saved objective,
-    acceptance criteria, permissions, worker progress, and next steps.
+  - `manager_context` — the latest `manager-config`, `handoff`, and
+    `acceptance_criteria` records for the task, so each manager loop can
+    reference the saved objective, living acceptance criteria, permissions,
+    worker progress, and next steps. `manager_context.acceptance_criteria`
+    groups criteria by status, includes summary counts, and exposes `open` as
+    accepted criteria that still need proof before finishing.
   
   The `cycle` subcommand accepts `--busy-wait-seconds N` (default: 90) to tune the pane-signal classifier's stuck-busy threshold. Lower values flag stalls faster but increase false positives on long-running real work:
   ```bash
@@ -371,6 +412,18 @@ workerctl cycle auth-refactor
 #     "captured": true,
 #     "classifier": { "pattern": "trust_prompt", ... },
 #     "notable_pattern": "trust_prompt"
+#   },
+#   "manager_context": {
+#     "manager_config": {...},
+#     "worker_handoff": {...},
+#     "acceptance_criteria": {
+#       "summary": {"proposed": 1, "accepted": 2, "satisfied": 0, "deferred": 1, "rejected": 0},
+#       "open": [...],
+#       "proposed": [...],
+#       "satisfied": [...],
+#       "deferred": [...],
+#       "rejected": [...]
+#     }
 #   },
 #   "cycle_id": 17,
 #   ...

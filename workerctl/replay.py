@@ -77,6 +77,76 @@ def _command_summary(command: dict[str, Any]) -> tuple[str, str, str]:
     return ("workerctl", "command", f"{command_type} {command['state']}")
 
 
+def _acceptance_criterion_summary(event: dict[str, Any]) -> str | None:
+    payload = event.get("payload") or {}
+    criterion_id = payload.get("criterion_id")
+    criterion_label = f"#{criterion_id}" if criterion_id is not None else "<unknown>"
+    status = payload.get("status")
+    criterion = payload.get("criterion")
+    previous_status = payload.get("previous_status")
+    transition = f" ({previous_status} -> {status})" if previous_status and status else ""
+    if event.get("type") == "acceptance_criterion_added":
+        if status == "proposed":
+            return f"proposed criterion {criterion_label}: {_shorten(criterion or '')}"
+        if status == "accepted":
+            return f"accepted criterion {criterion_label}: {_shorten(criterion or '')}"
+        if status == "satisfied":
+            proof = payload.get("proof")
+            if proof:
+                return f"satisfied criterion {criterion_label}: proof recorded ({_shorten(proof)})"
+            return f"satisfied criterion {criterion_label}: proof recorded"
+        if status == "deferred":
+            rationale = payload.get("rationale")
+            return f"deferred criterion {criterion_label}: {_shorten(rationale or criterion or '')}"
+        if status == "rejected":
+            rationale = payload.get("rationale")
+            return f"rejected criterion {criterion_label}: {_shorten(rationale or criterion or '')}"
+        return f"added {status or 'unknown'} criterion {criterion_label}: {_shorten(criterion or '')}"
+    if event.get("type") != "acceptance_criterion_updated":
+        return None
+    if status == "accepted":
+        return f"accepted criterion {criterion_label}{transition}: {_shorten(criterion or '')}"
+    if status == "satisfied":
+        proof = payload.get("proof")
+        if proof:
+            return f"satisfied criterion {criterion_label}{transition}: proof recorded ({_shorten(proof)})"
+        return f"satisfied criterion {criterion_label}{transition}: proof recorded"
+    if status == "deferred":
+        rationale = payload.get("rationale")
+        suffix = rationale or criterion or ""
+        return f"deferred criterion {criterion_label}{transition}: {_shorten(suffix)}"
+    if status == "rejected":
+        rationale = payload.get("rationale")
+        suffix = rationale or criterion or ""
+        return f"rejected criterion {criterion_label}{transition}: {_shorten(suffix)}"
+    fallback_transition = f"{previous_status} -> {status}" if previous_status else status or "updated"
+    return f"updated criterion {criterion_label}: {fallback_transition}"
+
+
+def _acceptance_criterion_details(event: dict[str, Any]) -> dict[str, Any]:
+    payload = event.get("payload") or {}
+    keys = (
+        "criterion_id",
+        "criterion",
+        "status",
+        "previous_status",
+        "source",
+        "task_id",
+        "proof",
+        "previous_proof",
+        "rationale",
+        "previous_rationale",
+        "evidence",
+        "previous_evidence",
+        "created",
+    )
+    details = {"event_type": event.get("type")}
+    for key in keys:
+        if key in payload:
+            details[key] = payload[key]
+    return details
+
+
 def replay_entries(audit: dict[str, Any], *, role: str = "all", mode: str = "timeline") -> list[dict[str, Any]]:
     entries: list[dict[str, Any]] = []
     seen_capture_hashes_by_role: dict[str, set[str]] = {}
@@ -117,6 +187,24 @@ def replay_entries(audit: dict[str, Any], *, role: str = "all", mode: str = "tim
                 "source_id": decision["id"],
                 "summary": f"decision {decision['decision']}: {_shorten(decision['reason'])}",
                 "timestamp": decision["created_at"],
+            }
+        )
+
+    for event in audit.get("events", []):
+        if role not in {"all", "manager"}:
+            continue
+        summary = _acceptance_criterion_summary(event)
+        if summary is None:
+            continue
+        entries.append(
+            {
+                "actor": event.get("actor") or "workerctl",
+                "details": _acceptance_criterion_details(event),
+                "kind": "acceptance_criterion",
+                "source": "events",
+                "source_id": event["id"],
+                "summary": summary,
+                "timestamp": event["created_at"],
             }
         )
 
@@ -238,7 +326,7 @@ def replay_entries(audit: dict[str, Any], *, role: str = "all", mode: str = "tim
                 }
             )
 
-    entries.sort(key=lambda entry: (entry["timestamp"], str(entry["source"]), str(entry["source_id"])))
+    entries.sort(key=lambda entry: (entry["timestamp"], str(entry["source"]), entry["source_id"]))
     return entries
 
 

@@ -181,7 +181,15 @@ scripts/workerctl cycle my-task
 #   "pane_signal": { "captured": true, "classifier": {...} },
 #   "manager_context": {
 #     "manager_config": {...},
-#     "worker_handoff": {...}
+#     "worker_handoff": {...},
+#     "acceptance_criteria": {
+#       "summary": {"proposed": 1, "accepted": 2, "satisfied": 0, "deferred": 1, "rejected": 0},
+#       "open": [...],
+#       "proposed": [...],
+#       "satisfied": [...],
+#       "deferred": [...],
+#       "rejected": [...]
+#     }
 #   },
 #   "ingest": { "new_events": 3, "new_offset": 12345 },
 #   "cycle_id": 17,
@@ -213,6 +221,47 @@ Interpretation guidance:
 - Long `staleness_seconds` with no notable pattern: send a status nudge before
   interrupting.
 - Clear busy-wait pattern or explicit user request: `session-interrupt`.
+
+Acceptance criteria are living supervision state, not just setup text. Inspect
+`manager_context.acceptance_criteria` every cycle:
+
+- Treat `open` as accepted criteria that still need worker proof before the
+  task can finish.
+- When worker progress reveals new edge cases, missing tests, polish needs, or
+  scope boundaries, ask the worker to propose which criteria are must-have now
+  versus follow-up.
+- Record current-task criteria as proposed or accepted, and record follow-up
+  criteria as deferred.
+- Use `scripts/workerctl criteria` to accept, satisfy, defer, or reject
+  criteria as evidence accumulates.
+- Before finishing, compare the worker's receipts and verification against all
+  accepted open criteria.
+
+Criteria command examples:
+
+```bash
+scripts/workerctl criteria my-task --list
+scripts/workerctl criteria my-task --add --criterion "..." --source worker_proposed --status proposed
+scripts/workerctl criteria my-task --accept 12 --rationale "Must-have for this task"
+scripts/workerctl criteria my-task --satisfy 12 --evidence-json '{"command":"python3 -m unittest tests.test_workerctl.ManagerBootstrapPromptTests -v","status":"pass"}'
+scripts/workerctl criteria my-task --defer 13 --rationale "Follow-up after this task"
+scripts/workerctl criteria my-task --reject 14 --rationale "Duplicate or out of scope"
+```
+
+Replace placeholder `...` values with the actual criterion and verification
+command. To add a criterion and satisfy that same row after verification:
+
+```bash
+criterion_id=$(scripts/workerctl criteria my-task --add --criterion "Targeted prompt tests pass" --source worker_proposed --status proposed | python3 -c 'import json,sys; print(json.load(sys.stdin)["affected_criterion"]["id"])')
+scripts/workerctl criteria my-task --satisfy "$criterion_id" --evidence-json '{"command":"python3 -m unittest tests.test_workerctl.ManagerBootstrapPromptTests -v","status":"pass"}'
+```
+
+Sample nudge:
+
+```bash
+scripts/workerctl session-nudge foo \
+  "Your latest progress exposed extra edge cases. Please propose acceptance criteria split into must-have for this task versus follow-up, and include the verification you expect for each."
+```
 
 ## Actuation
 
@@ -258,11 +307,15 @@ When the task is complete:
 
 ```bash
 scripts/workerctl finish-task my-task --reason "auth refactor merged"
+scripts/workerctl finish-task my-task --reason "..." --require-criteria-audit
 scripts/workerctl finish-task my-task --reason "..." --stop-manager
 scripts/workerctl finish-task my-task --reason "..." --stop-worker
 ```
 
 `finish-task` marks the task done and leaves both sessions running by default.
+Use `--require-criteria-audit` when final acceptance criteria should be enforced:
+it fails before finishing if any task criteria remain `accepted`; `proposed`,
+`satisfied`, `deferred`, and `rejected` criteria do not block.
 Add `--stop-manager` / `--stop-worker` only when the user explicitly wants the
 tmux session torn down.
 
