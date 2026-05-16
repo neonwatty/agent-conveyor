@@ -1033,7 +1033,7 @@ class CliTests(unittest.TestCase):
         self.assertEqual(payload["scenario"], "tmux-errors")
         self.assertTrue(any("doctor-self --json" in step for step in payload["steps"]))
         self.assertTrue(any("PATH=/usr/bin:/bin" in step for step in payload["steps"]))
-        self.assertTrue(any("workerctl list" in step for step in payload["steps"]))
+        self.assertTrue(any("workerctl list --json" in step for step in payload["steps"]))
         self.assertTrue(any("workerctl status" in step for step in payload["steps"]))
         self.assertTrue(any("session-nudge" in step for step in payload["steps"]))
         self.assertTrue(any("workerctl audit" in step for step in payload["steps"]))
