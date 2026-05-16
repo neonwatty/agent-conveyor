@@ -7,7 +7,7 @@ from typing import Any
 
 from workerctl.classify import classify_startup_output
 from workerctl.constants import DEFAULT_HISTORY_LINES
-from workerctl.core import WorkerError, now_iso, run
+from workerctl.core import WorkerError, now_iso, raise_for_tmux_permission_failure, run
 from workerctl.db import connect as connect_db
 from workerctl.db import initialize_database, insert_transcript_capture, upsert_worker
 from workerctl.state import (
@@ -34,11 +34,13 @@ def tmux_target(name: str) -> str:
 
 def session_exists(name: str) -> bool:
     proc = run(["tmux", "has-session", "-t", tmux_target(name)], check=False)
+    raise_for_tmux_permission_failure(proc)
     return proc.returncode == 0
 
 
 def current_pane_id(target: str) -> str | None:
     proc = run(["tmux", "list-panes", "-t", target, "-F", "#{pane_id}"], check=False)
+    raise_for_tmux_permission_failure(proc)
     if proc.returncode != 0:
         return None
     for line in proc.stdout.splitlines():
@@ -50,6 +52,7 @@ def current_pane_id(target: str) -> str | None:
 
 def current_session_name() -> str | None:
     proc = run(["tmux", "display-message", "-p", "#S"], check=False)
+    raise_for_tmux_permission_failure(proc)
     if proc.returncode != 0:
         return None
     session = proc.stdout.strip()
@@ -212,14 +215,8 @@ def _tmux_session_running(tmux_session: str) -> bool:
     name), making it safe to call for session-keyed lookups where the legacy
     `codex-{name}` convention does not apply.
     """
-    try:
-        proc = run(["tmux", "has-session", "-t", tmux_session], check=False)
-    except FileNotFoundError as exc:
-        # tmux binary missing on this host (common in CI). Surface a clean error
-        # that the CLI's top-level handler will format, instead of a raw traceback.
-        raise WorkerError(
-            f"tmux is not installed on this host; cannot reach session {tmux_session!r}"
-        ) from exc
+    proc = run(["tmux", "has-session", "-t", tmux_session], check=False)
+    raise_for_tmux_permission_failure(proc)
     return proc.returncode == 0
 
 

@@ -9,6 +9,14 @@ class WorkerError(RuntimeError):
     pass
 
 
+TMUX_PERMISSION_MARKERS = (
+    "operation not permitted",
+    "permission denied",
+    "not authorized",
+    "not authorised",
+)
+
+
 def now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
@@ -36,21 +44,62 @@ def ensure_tool(name: str) -> str:
     return path
 
 
-def run(args: list[str], *, check: bool = True, input_text: str | None = None) -> subprocess.CompletedProcess[str]:
-    proc = subprocess.run(
-        args,
-        input=input_text,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        check=False,
+def is_tmux_permission_error(detail: str) -> bool:
+    lowered = detail.lower()
+    return any(marker in lowered for marker in TMUX_PERMISSION_MARKERS)
+
+
+def tmux_permission_error_message(detail: str) -> str:
+    detail = detail.strip() or "permission denied"
+    return (
+        "tmux access was denied by the operating system or sandbox: "
+        f"{detail}. Retry from a terminal/session with tmux PTY permissions; "
+        "on macOS, grant the terminal app appropriate Privacy & Security access "
+        "and restart the terminal/tmux server."
     )
+
+
+def raise_for_tmux_permission_failure(proc) -> None:
+    if proc.returncode == 0:
+        return
+    detail = (proc.stderr or proc.stdout or "").strip()
+    if is_tmux_permission_error(detail):
+        raise WorkerError(tmux_permission_error_message(detail))
+
+
+def command_failure_message(args: list[str], detail: str) -> str:
+    command = " ".join(args)
+    if args and args[0] == "tmux" and is_tmux_permission_error(detail):
+        return f"{command} failed: {tmux_permission_error_message(detail)}"
+    return f"{command} failed: {detail}"
+
+
+def run(args: list[str], *, check: bool = True, input_text: str | None = None) -> subprocess.CompletedProcess[str]:
+    try:
+        proc = subprocess.run(
+            args,
+            input=input_text,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+    except FileNotFoundError as exc:
+        tool = args[0] if args else "<empty command>"
+        if tool == "tmux":
+            raise WorkerError("tmux is not installed or is not available on PATH") from exc
+        raise WorkerError(f"Required tool not found on PATH: {tool}") from exc
+    except PermissionError as exc:
+        tool = args[0] if args else "<empty command>"
+        detail = str(exc)
+        if tool == "tmux":
+            raise WorkerError(tmux_permission_error_message(detail)) from exc
+        raise WorkerError(f"{tool} could not be executed: {detail}") from exc
     if check and proc.returncode != 0:
         detail = proc.stderr.strip() or proc.stdout.strip() or f"exit code {proc.returncode}"
-        raise WorkerError(f"{' '.join(args)} failed: {detail}")
+        raise WorkerError(command_failure_message(args, detail))
     return proc
 
 
 def sh_quote(value: str) -> str:
     return "'" + value.replace("'", "'\"'\"'") + "'"
-

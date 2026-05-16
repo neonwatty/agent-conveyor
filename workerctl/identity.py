@@ -4,7 +4,7 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from workerctl.core import WorkerError, run
+from workerctl.core import WorkerError, raise_for_tmux_permission_failure, run
 from workerctl.db import connect as connect_db
 from workerctl.db import initialize_database
 from workerctl.state import require_worker
@@ -14,9 +14,11 @@ def session_snapshot(session_name: str) -> dict[str, Any]:
     if shutil.which("tmux") is None:
         return {"live": False, "pane_id": None, "session": session_name}
     proc = run(["tmux", "has-session", "-t", session_name], check=False)
+    raise_for_tmux_permission_failure(proc)
     if proc.returncode != 0:
         return {"live": False, "pane_id": None, "session": session_name}
     panes = run(["tmux", "list-panes", "-t", session_name, "-F", "#{pane_id}"], check=False)
+    raise_for_tmux_permission_failure(panes)
     pane_ids = [line for line in panes.stdout.splitlines() if line.strip()] if panes.returncode == 0 else []
     return {"live": True, "pane_id": pane_ids[0] if pane_ids else None, "session": session_name}
 
