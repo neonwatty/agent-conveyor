@@ -214,7 +214,7 @@ def build_parser() -> argparse.ArgumentParser:
         "scenario",
         nargs="?",
         default="self-management",
-        choices=("self-management", "emergent-criteria"),
+        choices=("self-management", "emergent-criteria", "tmux-errors"),
     )
     qa_plan.add_argument("--json", action="store_true", help="Print stable JSON output.")
     qa_plan.set_defaults(func=command_qa_plan)

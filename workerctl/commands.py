@@ -1230,6 +1230,31 @@ def command_qa_plan(args: argparse.Namespace) -> int:
                 "Run git status --short --branch and verify tracked status remains clean.",
             ],
         },
+        "tmux-errors": {
+            "expected_observations": [
+                "read-only commands preserve stable JSON output and include actionable tmux error fields when tmux is unavailable or capture fails",
+                "mutating commands that depend on tmux fail loudly with nonzero exit status and actionable stderr",
+                "failed tmux send/kill attempts do not claim success and do not leave misleading partial-success audit rows",
+                "cycle reports pane_signal.degraded true for terminal capture failures while worker_alive and manager_alive continue to reflect process liveness",
+                "finish-task --stop-manager --stop-worker reports stop failures clearly when tmux cannot stop one side of the session-bound pair",
+                "reconcile remains the recovery path for DB/runtime drift after tmux failures",
+                "live failure simulations are isolated to disposable sessions or a controlled PATH/env override and do not disturb active user sessions",
+            ],
+            "steps": [
+                "Record a clean preflight: workerctl doctor-self --json, workerctl sessions --state active, tmux list-sessions, and git status --short --branch.",
+                "Run a read-only missing-tmux simulation, for example PATH=/usr/bin:/bin workerctl doctor-self --json, and verify the output remains parseable JSON with tmux_available false or an actionable tmux error field.",
+                "Run workerctl list and workerctl status <disposable-worker> under the same missing-tmux simulation, if a disposable worker exists, and verify JSON shape is preserved rather than replaced by a traceback.",
+                "Create or reuse only a disposable pair for mutation checks; do not target active project work sessions.",
+                "Force a tmux send failure for workerctl session-nudge <disposable-worker> by using a missing tmux binary, killed tmux session, or invalid disposable tmux target; verify nonzero exit and actionable stderr.",
+                "After the failed nudge, run workerctl audit <task> and workerctl replay <task>; verify no misleading successful session_nudged event was recorded for the failed send.",
+                "Run workerctl cycle <task> with the disposable worker's tmux pane unavailable and verify pane_signal.degraded is true, terminal capture failure details are present, and worker_alive/manager_alive still describe registered process liveness.",
+                "Exercise finish-task --stop-manager --stop-worker against a disposable pair where one tmux session is already gone; verify the command reports which stop failed or was already unavailable instead of silently claiming full cleanup.",
+                "Run workerctl reconcile --stale-cycles-seconds 1 after each simulated failure and verify dead_pid_sessions, dangling_bindings, and stuck_tasks are understandable and recoverable.",
+                "Run workerctl reconcile --apply only after inspecting the dry-run output and only for disposable sessions created by this QA.",
+                "Verify cleanup with tmux list-sessions, workerctl sessions --state all, workerctl reconcile --stale-cycles-seconds 1, and git status --short --branch.",
+                "If any live simulation would require disrupting real tmux or active Codex sessions, stop at the generated plan and cover that case with unit tests or dependency injection instead.",
+            ],
+        },
     }
     if scenario not in qa_plans:
         raise WorkerError(f"Unsupported QA scenario: {scenario}")

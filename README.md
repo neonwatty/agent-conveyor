@@ -345,8 +345,8 @@ tmux attach -t codex-live-test
 - `transcript-capture <task> [--role R] [--mode M]` — Capture deduplicated
   transcript segments.
 - `transcript-show <task> [--role R]` — Show stored transcript segments.
-- `qa-plan <self-management|emergent-criteria>` — Print a repeatable manual QA
-  checklist.
+- `qa-plan <self-management|emergent-criteria|tmux-errors>` — Print a
+  repeatable manual QA checklist.
 - `import-compat` — Dry-run or import existing `.codex-workers/<worker>/`
   artifacts into SQLite.
 
@@ -367,11 +367,16 @@ Print repeatable live QA checklists from the CLI:
 scripts/workerctl qa-plan self-management
 scripts/workerctl qa-plan emergent-criteria
 scripts/workerctl qa-plan emergent-criteria --json
+scripts/workerctl qa-plan tmux-errors
 ```
 
 The `emergent-criteria` scenario covers a real worker/manager pair, criteria
 negotiation, audited finish gating, replay/export evidence, and
 `--stop-manager --stop-worker` cleanup verification.
+
+The `tmux-errors` scenario covers read-only JSON degradation, mutating command
+failures, pane capture degradation, stop failures, and reconcile recovery when
+tmux is unavailable or a disposable tmux target disappears.
 
 ### Terminal helpers
 
