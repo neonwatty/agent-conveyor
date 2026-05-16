@@ -369,6 +369,10 @@ scripts/workerctl qa-plan emergent-criteria
 scripts/workerctl qa-plan emergent-criteria --json
 ```
 
+The `emergent-criteria` scenario covers a real worker/manager pair, criteria
+negotiation, audited finish gating, replay/export evidence, and
+`--stop-manager --stop-worker` cleanup verification.
+
 ### Terminal helpers
 
 - `open <name>` — Open a macOS terminal window attached to a registered

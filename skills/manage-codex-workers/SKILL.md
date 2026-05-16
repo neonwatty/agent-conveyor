@@ -392,3 +392,7 @@ scripts/workerctl qa-plan self-management --json
 scripts/workerctl qa-plan emergent-criteria
 scripts/workerctl qa-plan emergent-criteria --json
 ```
+
+Use `emergent-criteria` when validating a real worker/manager pair through
+criteria negotiation, audited finish gating, replay/export, and
+`--stop-manager --stop-worker` cleanup.
