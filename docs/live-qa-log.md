@@ -39,6 +39,8 @@ Resolved findings from the first tmux-errors run:
 - `stop-task --reason` was originally rejected by argparse; fixed in `ded46de`
   and the reason is now recorded in command payloads, result payloads, and
   success events.
+- The canonical read-only JSON-shape check now uses `workerctl list --json`
+  rather than legacy text `workerctl list`; clarified in `3bf30c0`.
 
 Final cleanup:
 
