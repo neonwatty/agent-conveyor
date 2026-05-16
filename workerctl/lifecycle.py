@@ -7,8 +7,9 @@ from pathlib import Path
 from typing import Any
 
 from workerctl.constants import PROJECT_ROOT, RECOMMENDED_MANAGER_CODEX_ARGS
-from workerctl.core import WorkerError, age_seconds, run, sh_quote
+from workerctl.core import WorkerError, age_seconds, now_iso, run, sh_quote
 from workerctl.db import active_manager
+from workerctl.db import active_binding_for_task
 from workerctl.db import assess_manager_decision
 from workerctl.db import acceptance_criteria_for_task
 from workerctl.db import connect as connect_db
@@ -27,6 +28,7 @@ from workerctl.db import set_manager_pane_id
 from workerctl.db import set_manager_state
 from workerctl.db import set_task_state
 from workerctl.db import set_worker_pane_id
+from workerctl.db import session_by_id
 from workerctl.db import task_status_snapshot
 from workerctl import identity
 from workerctl.state import append_event
@@ -35,6 +37,7 @@ from workerctl.state import load_json
 from workerctl.state import state_root
 from workerctl.state import write_json
 from workerctl.tmux import send_text
+from workerctl.tmux import send_text_to_session
 from workerctl.tmux import session_exists
 from workerctl.tmux import tmux_session
 from workerctl.tmux import tmux_target
@@ -109,6 +112,51 @@ def _raise_if_final_criteria_audit_fails(final_audit: dict[str, Any], *, task_na
     )
 
 
+def _resolve_session_binding(conn, *, task_name: str) -> dict[str, Any] | None:
+    try:
+        binding = active_binding_for_task(conn, task_name=task_name)
+    except WorkerError:
+        return None
+    worker_session = session_by_id(conn, session_id=binding["worker_session_id"])
+    manager_session = session_by_id(conn, session_id=binding["manager_session_id"])
+    return {
+        "binding": binding,
+        "manager": dict(manager_session) if manager_session is not None else None,
+        "worker": dict(worker_session) if worker_session is not None else None,
+    }
+
+
+def _verify_session_identity(session: dict[str, Any]) -> dict[str, Any]:
+    tmux_session_name = session.get("tmux_session")
+    live = (
+        identity.session_snapshot(tmux_session_name)
+        if tmux_session_name
+        else {"live": False, "pane_id": None, "session": None}
+    )
+    verification = {
+        "db_pane_id": session.get("tmux_pane_id"),
+        "db_session": tmux_session_name,
+        "live": live["live"],
+        "live_pane_id": live["pane_id"],
+        "role": session["role"],
+        "session": session["name"],
+    }
+    mismatches = []
+    if not tmux_session_name:
+        mismatches.append("tmux_session_missing")
+    elif not live["live"]:
+        mismatches.append("tmux_session_missing")
+    if session.get("tmux_pane_id") and live["pane_id"] and live["pane_id"] != session["tmux_pane_id"]:
+        mismatches.append("tmux_pane_mismatch")
+    verification["mismatches"] = mismatches
+    if mismatches:
+        raise WorkerError(
+            f"Session identity verification failed for {session['name']}: "
+            f"{', '.join(mismatches)}"
+        )
+    return verification
+
+
 def _stop_or_finish_task(args: argparse.Namespace, *, finish: bool) -> int:
     db_path = Path(args.path).expanduser().resolve() if args.path else None
     command_type = "finish_task" if finish else "stop_task"
@@ -130,6 +178,9 @@ def _stop_or_finish_task(args: argparse.Namespace, *, finish: bool) -> int:
             _raise_if_final_criteria_audit_fails(final_audit, task_name=snapshot["name"])
         manager = active_manager(conn, task=snapshot["id"])
         worker = snapshot["worker"]
+        session_binding = _resolve_session_binding(conn, task_name=snapshot["name"])
+        manager_session = session_binding["manager"] if session_binding else None
+        worker_session = session_binding["worker"] if session_binding else None
         decision_check = assess_manager_decision(
             conn,
             task_id=snapshot["id"],
@@ -156,7 +207,9 @@ def _stop_or_finish_task(args: argparse.Namespace, *, finish: bool) -> int:
                 "stop_manager": stop_manager,
                 "stop_worker": args.stop_worker,
                 "task": snapshot["name"],
-                "worker": worker["name"] if worker else None,
+                "worker": worker["name"] if worker else (worker_session["name"] if worker_session else None),
+                "worker_session": worker_session["name"] if worker_session else None,
+                "manager_session": manager_session["name"] if manager_session else None,
             },
         )
         final_decision_id = None
@@ -217,7 +270,9 @@ def _stop_or_finish_task(args: argparse.Namespace, *, finish: bool) -> int:
         "stop_manager": stop_manager,
         "stop_worker": args.stop_worker,
         "task": snapshot["name"],
-        "worker": worker["name"] if worker else None,
+        "worker": worker["name"] if worker else (worker_session["name"] if worker_session else None),
+        "worker_session": worker_session["name"] if worker_session else None,
+        "manager_session": manager_session["name"] if manager_session else None,
     }
     try:
         with connect_db(db_path) as conn:
@@ -252,8 +307,27 @@ def _stop_or_finish_task(args: argparse.Namespace, *, finish: bool) -> int:
                     payload=manager_identity,
                 )
                 conn.commit()
-        if stop_manager and manager and result["manager_identity"]["live"]:
-            run(["tmux", "kill-session", "-t", manager["tmux_session"]])
+        elif manager_session:
+            manager_identity = _verify_session_identity(manager_session)
+            result["manager_identity"] = manager_identity
+            with connect_db(db_path) as conn:
+                initialize_database(conn)
+                insert_db_event(
+                    conn,
+                    "manager_identity_verified",
+                    actor="workerctl",
+                    command_id=command_id,
+                    task_id=snapshot["id"],
+                    payload=manager_identity,
+                )
+                conn.commit()
+        manager_tmux_session = None
+        if manager and result.get("manager_identity", {}).get("live"):
+            manager_tmux_session = manager["tmux_session"]
+        elif manager_session and result.get("manager_identity", {}).get("live"):
+            manager_tmux_session = manager_session["tmux_session"]
+        if stop_manager and manager_tmux_session:
+            run(["tmux", "kill-session", "-t", manager_tmux_session])
             result["killed_manager"] = True
         if args.stop_worker and worker:
             worker_identity = identity.verify_worker_record_identity(db_path, worker)
@@ -277,12 +351,44 @@ def _stop_or_finish_task(args: argparse.Namespace, *, finish: bool) -> int:
                 run(["tmux", "kill-session", "-t", tmux_target(worker["name"])])
                 append_event(worker["name"], event_prefix, {"command_id": command_id, "task": snapshot["name"]})
                 result["killed_worker"] = True
+        elif args.stop_worker and worker_session:
+            worker_identity = _verify_session_identity(worker_session)
+            result["worker_identity"] = worker_identity
+            with connect_db(db_path) as conn:
+                initialize_database(conn)
+                insert_db_event(
+                    conn,
+                    "worker_identity_verified",
+                    actor="workerctl",
+                    command_id=command_id,
+                    task_id=snapshot["id"],
+                    payload=worker_identity,
+                )
+                conn.commit()
+            if args.message and worker_identity["live"]:
+                with connect_db(db_path) as conn:
+                    initialize_database(conn)
+                    send_text_to_session(conn, session_name=worker_session["name"], text=args.message)
+            if worker_identity["live"]:
+                run(["tmux", "kill-session", "-t", worker_session["tmux_session"]])
+                result["killed_worker"] = True
         with connect_db(db_path) as conn:
             initialize_database(conn)
+            stopped_at = now_iso()
             if manager and stop_manager:
                 set_manager_state(conn, manager_id=manager["id"], state="stopped")
             if worker and args.stop_worker:
                 mark_worker_state(conn, name=worker["name"], state="stopped")
+            if manager_session and stop_manager:
+                conn.execute(
+                    "update sessions set state='gone', last_heartbeat_at=? where id=?",
+                    (stopped_at, manager_session["id"]),
+                )
+            if worker_session and args.stop_worker:
+                conn.execute(
+                    "update sessions set state='gone', last_heartbeat_at=? where id=?",
+                    (stopped_at, worker_session["id"]),
+                )
             end_active_binding(conn, task_id=snapshot["id"])
             set_task_state(conn, task_id=snapshot["id"], state="done")
             finish_db_command(conn, command_id=command_id, state="succeeded", result=result)

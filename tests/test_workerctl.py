@@ -2072,6 +2072,104 @@ class CliTests(unittest.TestCase):
                 if worker_path.exists():
                     shutil.rmtree(worker_path)
 
+    def test_finish_task_stops_session_bound_worker_and_manager(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                task_id = worker_db.create_task(conn, name="session-task", goal="Do task.")
+                worker_db.register_session(
+                    conn,
+                    name="session-worker",
+                    role="worker",
+                    codex_session_path="/tmp/worker.jsonl",
+                    codex_session_id="codex-worker",
+                    pid=111,
+                    cwd=str(ROOT),
+                    tmux_session="codex-session-worker",
+                    tmux_pane_id="%1",
+                )
+                worker_db.register_session(
+                    conn,
+                    name="session-manager",
+                    role="manager",
+                    codex_session_path="/tmp/manager.jsonl",
+                    codex_session_id="codex-manager",
+                    pid=222,
+                    cwd=str(ROOT),
+                    tmux_session="codex-session-manager",
+                    tmux_pane_id="%2",
+                )
+                binding_id = worker_db.bind_sessions(
+                    conn,
+                    task_name="session-task",
+                    worker_session_name="session-worker",
+                    manager_session_name="session-manager",
+                )
+                conn.commit()
+
+            original_run = lifecycle.run
+            original_session_snapshot = worker_identity.session_snapshot
+            try:
+                run_calls = []
+
+                def fake_run(argv, **kwargs):
+                    run_calls.append(argv)
+                    return subprocess.CompletedProcess(argv, 0, "", "")
+
+                lifecycle.run = fake_run
+                worker_identity.session_snapshot = lambda session: {
+                    "live": True,
+                    "pane_id": "%2" if session == "codex-session-manager" else "%1",
+                    "session": session,
+                }
+                args = argparse.Namespace(
+                    message=None,
+                    path=str(db_path),
+                    reason="session work complete",
+                    stop_manager=True,
+                    stop_worker=True,
+                    task="session-task",
+                    require_criteria_audit=True,
+                    decision_id=None,
+                    strict_decisions=False,
+                )
+
+                with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                    result = lifecycle.command_finish_task(args)
+
+                payload = json.loads(stdout.getvalue())
+                self.assertEqual(result, 0)
+                self.assertTrue(payload["killed_manager"])
+                self.assertTrue(payload["killed_worker"])
+                self.assertEqual(payload["manager_session"], "session-manager")
+                self.assertEqual(payload["worker"], "session-worker")
+                self.assertEqual(
+                    [call for call in run_calls if call[:2] == ["tmux", "kill-session"]],
+                    [
+                        ["tmux", "kill-session", "-t", "codex-session-manager"],
+                        ["tmux", "kill-session", "-t", "codex-session-worker"],
+                    ],
+                )
+                with worker_db.connect(db_path) as conn:
+                    task = conn.execute("select state from tasks where id = ?", (task_id,)).fetchone()
+                    binding = conn.execute("select state, ended_at from bindings where id = ?", (binding_id,)).fetchone()
+                    sessions = {
+                        row["name"]: row["state"]
+                        for row in conn.execute("select name, state from sessions")
+                    }
+                    command = conn.execute("select state, result_json from commands where type = 'finish_task'").fetchone()
+                self.assertEqual(task["state"], "done")
+                self.assertEqual(binding["state"], "ended")
+                self.assertIsNotNone(binding["ended_at"])
+                self.assertEqual(sessions["session-worker"], "gone")
+                self.assertEqual(sessions["session-manager"], "gone")
+                self.assertEqual(command["state"], "succeeded")
+                self.assertEqual(json.loads(command["result_json"])["worker"], "session-worker")
+            finally:
+                lifecycle.run = original_run
+                worker_identity.session_snapshot = original_session_snapshot
+
     def test_stop_task_refuses_worker_pane_mismatch_before_kill(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "workerctl.db"
