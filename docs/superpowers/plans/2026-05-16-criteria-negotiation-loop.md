@@ -196,7 +196,8 @@ def _criteria_negotiation_context(
         "prompt": CRITERIA_NEGOTIATION_PROMPT,
         "suggested_actions": [
             "Ask the worker to split must-have current-task criteria from follow-up criteria.",
-            f"Record current-task criteria with workerctl criteria {task_name} --add --criterion \"...\" --source worker_proposed --status accepted or proposed.",
+            f"Record accepted current-task criteria with workerctl criteria {task_name} --add --criterion \"...\" --source worker_proposed --status accepted.",
+            f"Record proposed current-task criteria with workerctl criteria {task_name} --add --criterion \"...\" --source worker_proposed --status proposed.",
             f"Record follow-up criteria with workerctl criteria {task_name} --add --criterion \"...\" --source worker_proposed --status deferred.",
         ],
     }

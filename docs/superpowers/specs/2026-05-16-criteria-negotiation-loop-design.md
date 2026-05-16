@@ -23,7 +23,8 @@ Example:
   "prompt": "Please propose 2-4 acceptance criteria for the current slice. Split them into must-have current-task criteria and follow-up criteria. Include the verification you expect for each.",
   "suggested_actions": [
     "Ask the worker to split must-have current-task criteria from follow-up criteria.",
-    "Record current-task criteria with workerctl criteria <task> --add ... --status accepted or proposed.",
+    "Record accepted current-task criteria with workerctl criteria <task> --add ... --status accepted.",
+    "Record proposed current-task criteria with workerctl criteria <task> --add ... --status proposed.",
     "Record follow-up criteria as deferred."
   ]
 }
