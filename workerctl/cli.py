@@ -25,6 +25,7 @@ from workerctl.commands import (
     command_commands,
     command_create,
     command_criteria,
+    command_criteria_plan,
     command_cycle,
     command_db_doctor,
     command_divergences,
@@ -278,6 +279,19 @@ def build_parser() -> argparse.ArgumentParser:
     criteria.add_argument("--evidence-json", help="Optional structured JSON object for add/update actions.")
     criteria.add_argument("--path", help="Override the workerctl database path.")
     criteria.set_defaults(func=command_criteria)
+
+    criteria_plan = subparsers.add_parser(
+        "criteria-plan",
+        help="Draft reviewed criteria add commands from worker-proposed criteria text without mutating state.",
+    )
+    criteria_plan.add_argument("task", help="Task name or ID.")
+    criteria_plan_input = criteria_plan.add_mutually_exclusive_group(required=True)
+    criteria_plan_input.add_argument("--from-worker-response", help="Read worker response text from this file.")
+    criteria_plan_input.add_argument("--from-text", help="Use this worker response text directly.")
+    criteria_plan_input.add_argument("--from-stdin", action="store_true", help="Read worker response text from stdin.")
+    criteria_plan.add_argument("--json", action="store_true", help="Print stable JSON output.")
+    criteria_plan.add_argument("--path", help="Override the workerctl database path.")
+    criteria_plan.set_defaults(func=command_criteria_plan)
 
     handoff = subparsers.add_parser(
         "handoff",

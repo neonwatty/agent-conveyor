@@ -1,0 +1,341 @@
+# GoalBuddy v2 state.yaml
+# Board truth lives here. goal.md is the editable charter; notes/ holds long receipts only.
+
+version: 2
+
+goal:
+  title: "Dogfood Reliability Ladder"
+  slug: "dogfood-reliability-ladder"
+  kind: existing_plan
+  tranche: "Normalize and commit the dogfood reliability ladder baseline, then choose the next safe gate or prerequisite helper."
+  status: done
+  intake:
+    original_request: "Use goalbuddy:goal-prep to drive the dogfood reliability ladder with verifiable acceptance criteria."
+    interpreted_outcome: "A GoalBuddy board exists that can safely drive development and QA from the dogfood reliability ladder."
+    input_shape: existing_plan
+    audience: "Jeremy and future codex-terminal-manager dogfood runs"
+    authority: requested
+    proof_type: artifact
+    completion_proof: "A final Judge or PM audit maps task receipts to the revised dogfood plan and shows the baseline is clean/explicit and the current tranche either unlocked the next gate or identified the exact blocker."
+    likely_misfire: "Producing more planning or running isolated commands without proving manager-led nudging, emergent criteria, replay/export evidence, and guardrail behavior."
+    blind_spots_considered:
+      - "Whether to run live pair QA first or build missing QA helpers first."
+      - "Whether the untracked plan should be committed before live QA."
+      - "Whether manager behavior needs separate Judge review from deterministic control-plane checks."
+    existing_plan_facts:
+      - "docs/superpowers/plans/2026-05-16-dogfood-reliability-ladder.md defines product thesis, evidence bundles, stop conditions, scenarios, promotion gates, and reliability backlog."
+      - "The first useful tranche should preserve that plan and decide whether criteria-plan, qa-run, JSON output support, qa-doctor, or live Scenario 1/2 QA comes first."
+
+rules:
+  pm_owns_state: true
+  one_active_task: true
+  max_write_workers: 1
+  no_implementation_without_worker_or_pm_task: true
+  no_completion_without_judge_or_pm_audit: true
+  planning_is_not_completion: true
+  queued_required_worker_blocks_completion: true
+  continuous_until_full_outcome: true
+  missing_input_or_credentials_do_not_stop_goal: true
+  preserve_and_validate_existing_plan: true
+  intake_misfire_must_be_audited: true
+  slice_policy:
+    max_consecutive_tiny_tasks: 2
+    prefer_vertical_slices: true
+    judge_picks_largest_safe_slice: true
+    worker_completes_whole_slice: true
+
+agents:
+  scout: unknown
+  worker: unknown
+  judge: unknown
+
+visual_board:
+  selected: local
+  local:
+    status: live
+    url: "http://goalbuddy.localhost:41737/dogfood-reliability-ladder/"
+    command: "npx goalbuddy board docs/goals/dogfood-reliability-ladder"
+  github_projects:
+    status: not_requested
+    url: null
+    command: "npx goalbuddy extend github-projects"
+    missing: []
+
+active_task: null
+
+tasks:
+  - id: T001
+    type: pm
+    assignee: PM
+    status: done
+    reasoning_hint: default
+    objective: "Normalize the revised dogfood reliability ladder baseline before live QA or helper implementation."
+    inputs:
+      - "docs/superpowers/plans/2026-05-16-dogfood-reliability-ladder.md"
+      - "docs/goals/dogfood-reliability-ladder/goal.md"
+      - "docs/goals/dogfood-reliability-ladder/state.yaml"
+      - "git status --short --branch"
+    constraints:
+      - "Do not run live worker/manager sessions."
+      - "Do not implement app helpers."
+      - "Commit only the revised plan and GoalBuddy control files if the operator has approved committing."
+      - "If commit is blocked by unrelated dirty work or missing approval, record the exact blocker and leave git state explicit."
+    expected_output:
+      - "Baseline decision: committed, intentionally uncommitted, or blocked."
+      - "Exact files included or intentionally excluded."
+      - "Current git status after normalization."
+      - "Next recommended tranche: live Scenario 1/2 QA or missing QA helper."
+    receipt:
+      result: done
+      summary: "Baseline normalization prepared for commit with the revised dogfood plan, GoalBuddy charter/state, and generated local board artifact."
+      baseline_decision: "commit"
+      files_included:
+        - "docs/superpowers/plans/2026-05-16-dogfood-reliability-ladder.md"
+        - "docs/goals/dogfood-reliability-ladder/goal.md"
+        - "docs/goals/dogfood-reliability-ladder/state.yaml"
+        - "docs/goals/dogfood-reliability-ladder/.goalbuddy-board/app.js"
+        - "docs/goals/dogfood-reliability-ladder/.goalbuddy-board/goalbuddy-mark.png"
+        - "docs/goals/dogfood-reliability-ladder/.goalbuddy-board/index.html"
+        - "docs/goals/dogfood-reliability-ladder/.goalbuddy-board/styles.css"
+      files_excluded: []
+      commands:
+        - cmd: "node /Users/neonwatty/.codex/plugins/cache/goalbuddy/goalbuddy/0.3.6/skills/goalbuddy/scripts/check-update.mjs --json"
+          status: pass
+        - cmd: "git status --short --branch"
+          status: pass
+      next_recommended_tranche: "Judge whether to run live Scenario 1/2 QA next or implement a missing QA helper first."
+  - id: T002
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "After baseline normalization, choose the first safe execution task from the dogfood reliability ladder."
+    inputs:
+      - "T001 receipt"
+      - "docs/superpowers/plans/2026-05-16-dogfood-reliability-ladder.md"
+      - "docs/live-qa-log.md"
+      - "README.md"
+      - "scripts/workerctl qa-plan emergent-criteria"
+    constraints:
+      - "Read-only."
+      - "Preserve the existing plan facts rather than rediscovering from scratch."
+      - "Separate deterministic control-plane proof from live manager-behavior proof."
+      - "Choose the largest safe useful next slice with explicit allowed_files, verify commands, and stop conditions."
+    expected_output:
+      - "Decision: run live QA next or implement a helper first."
+      - "Exact next Worker objective."
+      - "allowed_files for the next write-capable task."
+      - "verify commands for the next task."
+      - "stop_if conditions for the next task."
+      - "Promotion gate or blocker that the next task addresses."
+    receipt:
+      result: done
+      decision: "implement_criteria_plan_first"
+      rationale: "The dogfood ladder and dedicated helper plan both identify prose-to-criteria conversion as the weakest manual step before live emergent-criteria QA. Implementing a read-only criteria-plan helper is safer than starting live worker/manager sessions immediately because it makes Scenario 2 more mechanically repeatable without mutating task state."
+      promotion_gate_or_blocker: "Blocks cleaner Gate 2 emergent criteria readiness; unblocks live Scenario 1/2 QA with lower manual command-construction risk."
+      next_worker_objective: "Implement read-only workerctl criteria-plan for explicit worker response text, wire CLI/docs/QA plan, and add focused tests proving suggestions are deterministic and non-mutating."
+      allowed_files:
+        - "workerctl/criteria_plan.py"
+        - "workerctl/commands.py"
+        - "workerctl/cli.py"
+        - "README.md"
+        - "docs/superpowers/plans/2026-05-16-manager-criteria-command-helpers.md"
+        - "docs/superpowers/plans/2026-05-16-dogfood-reliability-ladder.md"
+        - "tests/test_workerctl.py"
+        - "docs/goals/dogfood-reliability-ladder/state.yaml"
+      verify:
+        - "python3 -m unittest tests.test_workerctl.WorkerCtlCliTests -v"
+        - "python3 -m unittest discover -s tests -v"
+        - "scripts/workerctl qa-plan emergent-criteria | rg 'criteria-plan'"
+      stop_if:
+        - "Need to parse arbitrary transcripts instead of explicit text/file/stdin input."
+        - "Need to add LLM calls or mutate acceptance criteria from criteria-plan."
+        - "Need a database schema change."
+        - "Focused tests fail twice with the same unexplained failure."
+  - id: T003
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: default
+    objective: "Implement read-only workerctl criteria-plan for explicit worker response text, wire CLI/docs/QA plan, and add focused tests proving suggestions are deterministic and non-mutating."
+    allowed_files:
+      - "workerctl/criteria_plan.py"
+      - "workerctl/commands.py"
+      - "workerctl/cli.py"
+      - "README.md"
+      - "docs/superpowers/plans/2026-05-16-manager-criteria-command-helpers.md"
+      - "docs/superpowers/plans/2026-05-16-dogfood-reliability-ladder.md"
+      - "tests/test_workerctl.py"
+      - "docs/goals/dogfood-reliability-ladder/state.yaml"
+    verify:
+      - "python3 -m unittest tests.test_workerctl.WorkerCtlCliTests -v"
+      - "python3 -m unittest discover -s tests -v"
+      - "scripts/workerctl qa-plan emergent-criteria | rg 'criteria-plan'"
+    stop_if:
+      - "Need files outside allowed_files."
+      - "Need to parse arbitrary transcripts instead of explicit text/file/stdin input."
+      - "Need to add LLM calls or mutate acceptance criteria from criteria-plan."
+      - "Need a database schema change."
+      - "Verification fails twice."
+      - "The task would perform destructive or unattended manager actions."
+    receipt:
+      result: done
+      changed_files:
+        - "workerctl/criteria_plan.py"
+        - "workerctl/commands.py"
+        - "workerctl/cli.py"
+        - "README.md"
+        - "docs/superpowers/plans/2026-05-16-manager-criteria-command-helpers.md"
+        - "docs/superpowers/plans/2026-05-16-dogfood-reliability-ladder.md"
+        - "tests/test_workerctl.py"
+        - "docs/goals/dogfood-reliability-ladder/state.yaml"
+      summary: "Added read-only workerctl criteria-plan for explicit worker response text/file/stdin, deterministic JSON/text suggestions, reviewed command rendering, manager/QA/docs references, and tests proving separated headings parse while ambiguous prose warns and no criteria/audit tables mutate."
+      commands:
+        - cmd: "python3 -m unittest tests.test_workerctl.CliTests -v"
+          status: pass
+        - cmd: "scripts/workerctl qa-plan emergent-criteria | rg 'criteria-plan'"
+          status: pass
+        - cmd: "python3 -m unittest discover -s tests -v"
+          status: pass
+          note: "334 tests passed; known Python ResourceWarning noise for unclosed SQLite connections remains."
+        - cmd: "scripts/workerctl criteria-plan --help"
+          status: pass
+      acceptance_criteria:
+        - "criteria-plan returns deterministic suggestions for separated must-have and deferred sections."
+        - "Ambiguous input returns warnings and no suggestions."
+        - "criteria-plan does not mutate acceptance_criteria, events, or commands."
+        - "Suggested commands use worker_proposed and accepted/deferred statuses."
+        - "Existing criteria mutation flow remains unchanged."
+        - "Focused and full unit tests pass."
+  - id: T004
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Audit whether the completed first tranche task unlocks the next dogfood promotion gate or identifies a precise blocker."
+    inputs:
+      - "T001 receipt"
+      - "T002/T003 receipt, whichever executed"
+      - "Current git status"
+      - "Any evidence bundle or verification output"
+    constraints:
+      - "Do not implement."
+      - "Reject completion if evidence does not map to the dogfood plan's acceptance criteria."
+      - "Reject completion if required Worker work is still queued or active."
+    expected_output:
+      - "complete | not_complete"
+      - "full_outcome_complete: true | false"
+      - "Promotion gate unlocked or exact blocker."
+      - "Missing evidence."
+      - "Next task if not complete."
+    receipt:
+      result: done
+      decision: "not_complete_continue_to_live_qa"
+      full_outcome_complete: false
+      rationale: "The verified criteria-plan helper resolves the manual prose-to-command blocker identified by the dogfood plan, but no live dogfood promotion gate is unlocked until Scenario 1 and the deterministic/manager-led portions of Scenario 2 are run with evidence."
+      promotion_gate_unlocked: null
+      exact_blocker: "Gate 1 and Gate 2 still require live worker/manager QA evidence bundles and docs/live-qa-log.md entries."
+      evidence:
+        - "workerctl/criteria_plan.py implements the read-only parser and command suggestions."
+        - "workerctl/cli.py exposes criteria-plan with explicit text/file/stdin inputs."
+        - "workerctl/commands.py resolves the task, renders JSON/text suggestions, updates the manager bootstrap prompt, and adds criteria-plan to qa-plan emergent-criteria."
+        - "tests/test_workerctl.py covers separated parser output, ambiguous warning output, CLI JSON shape, text output, and non-mutation of acceptance_criteria/events/commands."
+        - "python3 -m unittest tests.test_workerctl.CliTests -v passed."
+        - "scripts/workerctl qa-plan emergent-criteria | rg 'criteria-plan' passed."
+        - "python3 -m unittest discover -s tests -v passed with 334 tests and known SQLite ResourceWarning noise."
+      missing_evidence:
+        - "No live Scenario 1 status-only pair QA evidence bundle yet."
+        - "No live Scenario 2 emergent-criteria manager-led QA evidence bundle yet."
+      next_task: T005
+  - id: T005
+    type: pm
+    assignee: PM
+    status: done
+    reasoning_hint: default
+    objective: "Prepare the operator decision for starting live Scenario 1/2 QA now that criteria-plan is implemented."
+    inputs:
+      - "T004 receipt"
+      - "docs/superpowers/plans/2026-05-16-dogfood-reliability-ladder.md"
+      - "scripts/workerctl qa-plan emergent-criteria"
+      - "git status --short --branch"
+    constraints:
+      - "Do not start live worker/manager sessions until the operator confirms."
+      - "Do not implement more helpers unless live QA is declined or blocked."
+      - "Preserve current verified implementation state."
+    expected_output:
+      - "Operator-facing recommendation for live Scenario 1/2 QA."
+      - "Exact command or checklist entry to start from."
+      - "Current git status and commit state."
+    receipt:
+      result: done
+      recommendation: "Start live Scenario 1/2 QA next, beginning with the status-only portions of scripts/workerctl qa-plan emergent-criteria."
+      exact_starting_point: "scripts/workerctl qa-plan emergent-criteria"
+      live_session_gate: "Do not start workerctl pair until the operator confirms live worker/manager sessions are allowed."
+      current_git_status: "main...origin/main [ahead 2]"
+      current_commit_state:
+        - "f28a7e0 Add dogfood reliability GoalBuddy plan"
+        - "3730989 Add criteria plan helper"
+      checklist_entry:
+        - "Run readiness baseline from docs/superpowers/plans/2026-05-16-dogfood-reliability-ladder.md."
+        - "Run status-only parts of qa-plan emergent-criteria."
+        - "Use criteria-plan on the saved worker criteria response before mutating criteria."
+        - "Record evidence bundle and docs/live-qa-log.md entry."
+        - "Stop on any global stop condition or unexpected tracked-file drift."
+      blocker: "Operator confirmation is required before starting live worker/manager sessions."
+  - id: T999
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Final audit for the current GoalBuddy tranche."
+    inputs:
+      - "All done task receipts"
+      - "Last verification"
+      - "Current dirty diff"
+      - "Dogfood reliability ladder promotion gates"
+    constraints:
+      - "Do not implement."
+      - "Reject completion if the current tranche did not either unlock a gate or record the exact blocker."
+    expected_output:
+      - "complete | not_complete"
+      - "full_outcome_complete: true | false"
+      - "missing evidence"
+      - "next task if not complete"
+    receipt:
+      result: done
+      decision: "complete"
+      full_outcome_complete: true
+      summary: "The current GoalBuddy tranche is complete: the dogfood reliability plan baseline was committed, the first prerequisite helper was implemented and verified, and the next live QA action plus operator-confirmation blocker are recorded."
+      prompt_to_artifact_checklist:
+        - requirement: "Follow docs/goals/dogfood-reliability-ladder/goal.md."
+          evidence: "GoalBuddy state records T001 through T005 receipts and this final audit."
+          status: pass
+        - requirement: "Normalize and commit the dogfood reliability ladder baseline."
+          evidence: "Commit f28a7e0 Add dogfood reliability GoalBuddy plan."
+          status: pass
+        - requirement: "Choose the first safe gate or prerequisite helper."
+          evidence: "T002 receipt selected read-only criteria-plan before live QA."
+          status: pass
+        - requirement: "Implement or record exact blocker."
+          evidence: "Commit 3730989 Add criteria plan helper; T004 records remaining Gate 1/2 blocker as live QA evidence."
+          status: pass
+        - requirement: "Verify helper work."
+          evidence: "T003 receipt records focused CLI tests, qa-plan criteria-plan grep, full unittest discovery, and criteria-plan help checks."
+          status: pass
+        - requirement: "Do not start live worker/manager sessions without confirmation."
+          evidence: "T005 receipt records operator confirmation as the live session gate."
+          status: pass
+        - requirement: "Record next action."
+          evidence: "T005 receipt recommends scripts/workerctl qa-plan emergent-criteria and the status-only Scenario 1/2 path."
+          status: pass
+      remaining_work:
+        - "Gate 1 and Gate 2 live QA are not run yet; they require operator confirmation before starting real worker/manager sessions."
+        - "Repository is ahead of origin by two commits and should be pushed or PR'd when ready."
+        - "Known SQLite ResourceWarning noise remains as a later reliability cleanup item."
+
+checks:
+  dirty_fingerprint: unknown
+  last_verification:
+    result: unknown
+    task: null
+    commands: []

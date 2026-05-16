@@ -242,6 +242,14 @@ tmux attach -t codex-live-test
   receipt for the row changed by that command. When a manager applies multiple
   criteria changes, run `criteria <task> --list` before final audit or other
   decisions; the list command is the canonical task-level criteria state.
+- `criteria-plan <task> --from-text ...|--from-worker-response PATH|--from-stdin
+  [--json]` — Draft reviewed `criteria --add` commands from a worker response
+  that separates must-have current-task criteria from deferred follow-ups. This
+  helper is read-only: it resolves the task and prints suggestions, but does not
+  mutate acceptance criteria, events, or commands.
+  ```bash
+  scripts/workerctl criteria-plan my-task --from-worker-response response.md --json
+  ```
 - `manager-permission <task> <create_pr|merge_green_pr|worker_compact_clear>
   [--require] [--require-handoff]` — Check and audit whether the saved manager
   config allows a high-level action. Use `--require` when a manager command
@@ -373,7 +381,9 @@ scripts/workerctl qa-plan tmux-errors
 
 The `emergent-criteria` scenario covers a real worker/manager pair, criteria
 negotiation, audited finish gating, replay/export evidence, and
-`--stop-manager --stop-worker` cleanup verification.
+`--stop-manager --stop-worker` cleanup verification. It also includes an
+optional `criteria-plan` step for drafting reviewed criteria commands from the
+worker's separated must-have and follow-up response.
 
 The `tmux-errors` scenario covers read-only JSON degradation, mutating command
 failures, pane capture degradation, stop failures, and reconcile recovery when
