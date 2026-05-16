@@ -8,7 +8,7 @@ goal:
   slug: "manager-led-scenario-3-gate3"
   kind: existing_plan
   tranche: "Validate and run the manager-led disposable edit readiness QA slice."
-  status: active
+  status: done
   intake:
     original_request: "Merge current PR and set up Gate 3 with GoalBuddy."
     interpreted_outcome: "A fresh GoalBuddy board exists for Gate 3 disposable edit readiness after the Gate 2 PR is merged."
@@ -64,7 +64,7 @@ visual_board:
     command: "npx goalbuddy extend github-projects"
     missing: []
 
-active_task: T006
+active_task: null
 
 tasks:
   - id: T001
@@ -456,7 +456,7 @@ tasks:
   - id: T006
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Final audit for the manager-led Scenario 3 Gate 3 tranche."
     inputs:
@@ -473,7 +473,68 @@ tasks:
       - "full_outcome_complete: true | false"
       - "Gate 3 passed or exact blocker."
       - "Next recommended tranche."
-    receipt: null
+    receipt:
+      result: done
+      decision: complete
+      full_outcome_complete: true
+      gate_3_status: passed
+      gate_unlocked: "Gate 3 disposable edit readiness."
+      summary: "The manager-led Gate 3 disposable edit tranche is complete. The run produced a real manager-led worker/manager disposable edit proof, a Gate 3 Judge pass decision, packaged evidence, clean cleanup state, and PR #59."
+      prompt_to_artifact_checklist:
+        - prompt_requirement: "Follow docs/goals/manager-led-scenario-3-gate3/goal.md."
+          artifact: "T001 through T006 receipts in docs/goals/manager-led-scenario-3-gate3/state.yaml."
+          status: pass
+        - prompt_requirement: "Prepare and run manager-led disposable edit readiness."
+          artifact: "T001 runbook approval and T002 live QA receipt."
+          status: pass
+        - prompt_requirement: "Use a real manager and worker pair."
+          artifact: "T002 task_run qa-g3-disposable-edit, worker qa-g3-worker, manager qa-g3-manager, and evidence export."
+          status: pass
+        - prompt_requirement: "Worker operates on disposable bounded files only."
+          artifact: "T003 bounded_write_audit and worker-disposable-edit.md."
+          status: pass
+        - prompt_requirement: "Preserve manager-led criteria negotiation and criteria closure."
+          artifact: "commands/02-criteria-list.json and export/replay.json show accepted/deferred/satisfied lifecycle."
+          status: pass
+        - prompt_requirement: "Replay/export visibility."
+          artifact: "export/manifest.json lists acceptance-criteria.json, replay.json, replay-full-transcript.json, transcripts, and audit artifacts."
+          status: pass
+        - prompt_requirement: "Cleanup."
+          artifact: "commands/06-sessions-all.json shows qa-g3 sessions gone; commands/08-tmux-postflight.txt is empty; commands/07-reconcile.json is clean."
+          status: pass
+        - prompt_requirement: "Gate 3 passed or exact blocker."
+          artifact: "T003 receipt decision gate3_passed."
+          status: pass
+        - prompt_requirement: "Package changed evidence/docs/board state."
+          artifact: "PR #59, https://github.com/neonwatty/codex-terminal-manager/pull/59."
+          status: pass
+      verification:
+        local:
+          - command: "node /Users/neonwatty/.codex/plugins/cache/goalbuddy/goalbuddy/0.3.6/skills/goalbuddy/scripts/check-goal-state.mjs docs/goals/manager-led-scenario-3-gate3/state.yaml"
+            status: pass
+          - command: "rg -n \"session-token-|/Users/neonwatty|OPENAI|ANTHROPIC|api[_-]?key\" docs/live-qa-artifacts/2026-05-16-manager-led-gate3-disposable-edit docs/goals/manager-led-scenario-3-gate3 || true"
+            status: pass
+          - command: "git diff --check"
+            status: pass
+          - command: "scripts/workerctl reconcile --stale-cycles-seconds 1"
+            status: pass
+          - command: "tmux list-sessions 2>/dev/null | rg 'qa-g3|codex-qa-g3' || true"
+            status: pass
+        pr:
+          url: "https://github.com/neonwatty/codex-terminal-manager/pull/59"
+          merge_state: CLEAN
+          checks:
+            - name: unittest
+              conclusion: SUCCESS
+              details_url: "https://github.com/neonwatty/codex-terminal-manager/actions/runs/25976051627/job/76356247498"
+            - name: unittest
+              conclusion: SUCCESS
+              details_url: "https://github.com/neonwatty/codex-terminal-manager/actions/runs/25976052263/job/76356249267"
+      residual_risks:
+        - "Manager attribution for criteria mutations still relies on manager transcript/export context while mutation audit records actor=workerctl."
+        - "The manager stopped only the worker and PM performed final manager cleanup after report capture."
+        - "The goal slug says Scenario 3 even though the ladder maps Gate 3 to Scenario 4 disposable edit readiness."
+      next_recommended_tranche: "Gate 4 recovery readiness: scenarios 5, 7, and 8 with isolated state roots where appropriate."
 
 checks:
   dirty_fingerprint: unknown
