@@ -1025,6 +1025,50 @@ class CliTests(unittest.TestCase):
         self.assertIn("acceptance_criterion_updated", joined)
         self.assertIn("status-only", joined)
 
+    def test_qa_plan_tmux_errors_outputs_failure_flow(self):
+        proc = self.run_workerctl("qa-plan", "tmux-errors", "--json")
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        payload = json.loads(proc.stdout)
+        self.assertEqual(payload["scenario"], "tmux-errors")
+        self.assertTrue(any("doctor-self --json" in step for step in payload["steps"]))
+        self.assertTrue(any("PATH=/usr/bin:/bin" in step for step in payload["steps"]))
+        self.assertTrue(any("workerctl list" in step for step in payload["steps"]))
+        self.assertTrue(any("workerctl status" in step for step in payload["steps"]))
+        self.assertTrue(any("session-nudge" in step for step in payload["steps"]))
+        self.assertTrue(any("workerctl audit" in step for step in payload["steps"]))
+        self.assertTrue(any("workerctl replay" in step for step in payload["steps"]))
+        self.assertTrue(any("workerctl cycle" in step for step in payload["steps"]))
+        self.assertTrue(any("finish-task --stop-manager --stop-worker" in step for step in payload["steps"]))
+        self.assertTrue(any("workerctl reconcile --stale-cycles-seconds 1" in step for step in payload["steps"]))
+        self.assertTrue(any("reconcile --apply" in step for step in payload["steps"]))
+        self.assertTrue(any("git status --short --branch" in step for step in payload["steps"]))
+        self.assertTrue(
+            any("read-only commands preserve stable JSON output" in observation
+                for observation in payload["expected_observations"])
+        )
+        self.assertTrue(
+            any("mutating commands that depend on tmux fail loudly" in observation
+                for observation in payload["expected_observations"])
+        )
+        self.assertTrue(
+            any("pane_signal.degraded true" in observation
+                for observation in payload["expected_observations"])
+        )
+        self.assertTrue(
+            any("reports stop failures clearly" in observation
+                for observation in payload["expected_observations"])
+        )
+        self.assertTrue(
+            any("disposable sessions" in observation
+                for observation in payload["expected_observations"])
+        )
+        joined = " ".join(payload["steps"] + payload["expected_observations"])
+        self.assertIn("actionable tmux error", joined)
+        self.assertIn("nonzero exit", joined)
+        self.assertIn("no misleading successful session_nudged event", joined)
+        self.assertIn("worker_alive/manager_alive", joined)
+
     def test_db_doctor_outputs_expected_structure(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "workerctl.db"

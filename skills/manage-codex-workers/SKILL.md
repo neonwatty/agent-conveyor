@@ -391,8 +391,14 @@ scripts/workerctl qa-plan self-management
 scripts/workerctl qa-plan self-management --json
 scripts/workerctl qa-plan emergent-criteria
 scripts/workerctl qa-plan emergent-criteria --json
+scripts/workerctl qa-plan tmux-errors
+scripts/workerctl qa-plan tmux-errors --json
 ```
 
 Use `emergent-criteria` when validating a real worker/manager pair through
 criteria negotiation, audited finish gating, replay/export, and
 `--stop-manager --stop-worker` cleanup.
+
+Use `tmux-errors` when validating read-only JSON degradation, mutating command
+failures, pane capture degradation, stop failures, and reconcile recovery for
+disposable tmux failure scenarios.
