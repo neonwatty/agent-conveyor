@@ -8,7 +8,7 @@ goal:
   slug: "dogfood-reliability-ladder"
   kind: existing_plan
   tranche: "Run live Scenario 1 status-only pair QA and Scenario 2 emergent-criteria QA with durable evidence."
-  status: active
+  status: done
   intake:
     original_request: "Use goalbuddy:goal-prep to drive the dogfood reliability ladder with verifiable acceptance criteria."
     interpreted_outcome: "A GoalBuddy board exists that can safely drive development and QA from the dogfood reliability ladder."
@@ -61,7 +61,7 @@ visual_board:
     command: "npx goalbuddy extend github-projects"
     missing: []
 
-active_task: T010
+active_task: null
 
 tasks:
   - id: T001
@@ -579,7 +579,7 @@ tasks:
   - id: T010
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Final audit for the live Scenario 1/2 dogfood tranche."
     inputs:
@@ -596,7 +596,60 @@ tasks:
       - "Gate unlocked or exact blocker."
       - "Missing evidence."
       - "Next task if not complete."
-    receipt: null
+    receipt:
+      result: done
+      decision: complete
+      full_outcome_complete: true
+      summary: "The live Scenario 1/2 tranche is complete. The run produced durable evidence, passed Gate 1 status-only readiness, recorded Gate 2 as partial with an exact remaining manager-led evidence gap, packaged the evidence in PR #57, and left cleanup/CI green."
+      gate_unlocked: "Gate 1: Status-only readiness"
+      exact_blocker: "Gate 2 is not unlocked until a fuller manager-led Scenario 2 run proves the manager performs initial criteria negotiation, criteria-plan review, accepted/deferred mutations, and criteria closure end to end without PM mutation help."
+      prompt_to_artifact_checklist:
+        - requirement: "Follow docs/goals/dogfood-reliability-ladder/goal.md."
+          evidence: "T006 through T010 receipts execute and audit the active live QA tranche."
+          status: pass
+        - requirement: "Run live Scenario 1 status-only pair QA."
+          evidence: "T006 receipt, docs/live-qa-log.md, and commands/02-pair-run2.txt, 03-cycle-initial.json, 35-manager-capture-final.txt, 36-finish-task-final.json."
+          status: pass
+        - requirement: "Run deterministic/manager-led portions of Scenario 2 emergent criteria QA."
+          evidence: "T006 receipt and commands/07-criteria-plan.json, 13-criteria-list-after-add.json, 18-cycle-after-criteria.json, 19-finish-premature-expected-fail.txt, 24-27 satisfy/list artifacts, 34-replay-final.txt, 33-export-verify.txt."
+          status: pass
+        - requirement: "Use criteria-plan on saved worker response before mutating criteria."
+          evidence: "responses/worker-criteria-response.md and commands/07-criteria-plan.json precede criteria add commands 08-12."
+          status: pass
+        - requirement: "Preserve an evidence bundle."
+          evidence: "docs/live-qa-artifacts/2026-05-16-emergent-criteria/ contains command captures, response text, export artifacts, and summary.md."
+          status: pass
+        - requirement: "Update docs/live-qa-log.md."
+          evidence: "docs/live-qa-log.md has a 2026-05-16 emergent-criteria live QA entry."
+          status: pass
+        - requirement: "Stop before meaningful project work, unattended management, destructive cleanup, or unapproved compact/clear behavior."
+          evidence: "T006/T007 receipts record status-only worker behavior, no compact/clear/merge/destructive actions, and controlled cleanup through finish-task."
+          status: pass
+        - requirement: "Audit gate decision."
+          evidence: "T007 receipt says Gate 1 passed and Gate 2 partial, with missing manager-led evidence named."
+          status: pass
+        - requirement: "Package PR/follow-up outcome."
+          evidence: "T009 receipt records PR #57, branch live-dogfood-emergent-criteria-qa, and passing CI."
+          status: pass
+        - requirement: "Verify final cleanup and current state."
+          evidence: "commands/37-tmux-postfinish.txt, 38-sessions-postfinish.json, 39-reconcile-postfinish.json, git status clean on branch, PR #57 mergeStateStatus CLEAN, and latest unittest checks passed."
+          status: pass
+      latest_pr_state:
+        pr_url: "https://github.com/neonwatty/codex-terminal-manager/pull/57"
+        branch: "live-dogfood-emergent-criteria-qa"
+        merge_state: CLEAN
+        checks:
+          - check: unittest
+            status: pass
+            duration: "23s"
+            url: "https://github.com/neonwatty/codex-terminal-manager/actions/runs/25973203917/job/76348752988"
+          - check: unittest
+            status: pass
+            duration: "23s"
+            url: "https://github.com/neonwatty/codex-terminal-manager/actions/runs/25973204653/job/76348754699"
+      residual_risk:
+        - "Evidence artifacts are intentionally verbose; future qa-run tooling should generate smaller scrubbed bundles."
+        - "Gate 2 still needs the fully manager-led variant before meaningful supervised dogfood can progress toward later gates."
 
 checks:
   dirty_fingerprint: unknown
