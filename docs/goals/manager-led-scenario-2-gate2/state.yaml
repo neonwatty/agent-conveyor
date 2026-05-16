@@ -8,7 +8,7 @@ goal:
   slug: "manager-led-scenario-2-gate2"
   kind: existing_plan
   tranche: "Run the full manager-led Scenario 2 emergent criteria QA slice and decide Gate 2."
-  status: active
+  status: done
   intake:
     original_request: "Set up the next GoalBuddy goal for the manager-led Scenario 2 Gate 2 follow-up."
     interpreted_outcome: "A GoalBuddy board exists that can safely run and audit the full manager-led emergent criteria QA scenario."
@@ -63,7 +63,7 @@ visual_board:
     command: "npx goalbuddy extend github-projects"
     missing: []
 
-active_task: T005
+active_task: null
 
 tasks:
   - id: T001
@@ -376,7 +376,7 @@ tasks:
   - id: T005
     type: pm
     assignee: PM
-    status: active
+    status: done
     reasoning_hint: default
     objective: "Package the manager-led Scenario 2 Gate 2 outcome."
     inputs:
@@ -391,12 +391,40 @@ tasks:
       - "PR/issue/no-PR decision."
       - "Branch/status/check state if PR is created."
       - "Next recommended dogfood gate or blocker."
-    receipt: null
+    receipt:
+      result: done
+      decision: "pr_created"
+      pr_url: "https://github.com/neonwatty/codex-terminal-manager/pull/58"
+      branch: "manager-led-scenario-2-gate2-qa"
+      commit: "8ea07b6 Record manager-led Scenario 2 Gate 2 QA"
+      summary: "Packaged the Gate 2 manager-led Scenario 2 evidence, live QA log, and GoalBuddy receipts on PR #58. Initial PR state is clean and CI is green."
+      ci_state:
+        merge_state: CLEAN
+        checks:
+          - name: unittest
+            conclusion: SUCCESS
+            details_url: "https://github.com/neonwatty/codex-terminal-manager/actions/runs/25973805309/job/76350354837"
+          - name: unittest
+            conclusion: SUCCESS
+            details_url: "https://github.com/neonwatty/codex-terminal-manager/actions/runs/25973808885/job/76350364799"
+      next_recommended_tranche: "Gate 3 disposable edit readiness."
+      optional_followup: "Evidence hardening for manager-attributed criteria mutations, so audit/export surfaces can identify the manager directly instead of relying on terminal capture."
+      commands:
+        - cmd: "git switch -c manager-led-scenario-2-gate2-qa"
+          status: pass
+        - cmd: "git commit -m \"Record manager-led Scenario 2 Gate 2 QA\""
+          status: pass
+        - cmd: "git push -u origin manager-led-scenario-2-gate2-qa"
+          status: pass
+        - cmd: "gh pr create --base main --head manager-led-scenario-2-gate2-qa ..."
+          status: pass
+        - cmd: "gh pr checks 58 --watch --interval 10"
+          status: pass
 
   - id: T006
     type: judge
     assignee: Judge
-    status: queued
+    status: done
     reasoning_hint: high
     objective: "Final audit for the manager-led Scenario 2 Gate 2 tranche."
     inputs:
@@ -413,7 +441,42 @@ tasks:
       - "full_outcome_complete: true | false"
       - "Gate 2 passed or exact blocker."
       - "Next recommended tranche."
-    receipt: null
+    receipt:
+      result: done
+      decision: complete
+      full_outcome_complete: true
+      gate_2_status: passed
+      gate_unlocked: "Gate 2 emergent criteria readiness."
+      summary: "The manager-led Scenario 2 Gate 2 tranche is complete. Live QA evidence proves the manager drove emergent acceptance criteria negotiation, planning, mutation, guarded finish, satisfaction, replay/export, and cleanup. Gate 2 is unlocked."
+      prompt_to_artifact_checklist:
+        - prompt_requirement: "Follow the manager-led Scenario 2 Gate 2 goal."
+          artifact: "T001 through T006 receipts in docs/goals/manager-led-scenario-2-gate2/state.yaml."
+          status: pass
+        - prompt_requirement: "Validate the runbook before live sessions."
+          artifact: "T001 receipt."
+          status: pass
+        - prompt_requirement: "Run the full manager-led Scenario 2 with a real disposable worker/manager pair."
+          artifact: "T002 receipt and docs/live-qa-artifacts/2026-05-16-manager-led-scenario-2/."
+          status: pass
+        - prompt_requirement: "PM must not perform core criteria mutations."
+          artifact: "T002 actor_boundary and manager terminal captures in the evidence bundle."
+          status: pass
+        - prompt_requirement: "Gate 2 judge must decide passed or exact blocker."
+          artifact: "T003 receipt with gate2_passed decision."
+          status: pass
+        - prompt_requirement: "Package evidence and update live QA log."
+          artifact: "docs/live-qa-log.md and docs/live-qa-artifacts/2026-05-16-manager-led-scenario-2/summary.md."
+          status: pass
+        - prompt_requirement: "Cleanup disposable sessions."
+          artifact: "T002 final command evidence reports killed_manager true and killed_worker true; postflight tmux and reconcile checks are clean."
+          status: pass
+        - prompt_requirement: "Create PR/check state for changed artifacts."
+          artifact: "PR #58, https://github.com/neonwatty/codex-terminal-manager/pull/58."
+          status: pass
+      residual_risks:
+        - "Manager attribution for criteria mutations is proven by terminal capture; audit/export surfaces still record the generic workerctl actor."
+        - "Evidence bundles are verbose and require manual scrubbing; a future qa-run or qa-doctor helper could compact and scrub automatically."
+      next_recommended_tranche: "Gate 3 disposable edit readiness, with optional evidence hardening before or during that tranche."
 
 checks:
   dirty_fingerprint: unknown
