@@ -8,7 +8,7 @@ goal:
   slug: "dogfood-reliability-ladder"
   kind: existing_plan
   tranche: "Normalize and commit the dogfood reliability ladder baseline, then choose the next safe gate or prerequisite helper."
-  status: active
+  status: done
   intake:
     original_request: "Use goalbuddy:goal-prep to drive the dogfood reliability ladder with verifiable acceptance criteria."
     interpreted_outcome: "A GoalBuddy board exists that can safely drive development and QA from the dogfood reliability ladder."
@@ -61,7 +61,7 @@ visual_board:
     command: "npx goalbuddy extend github-projects"
     missing: []
 
-active_task: T005
+active_task: null
 
 tasks:
   - id: T001
@@ -250,7 +250,7 @@ tasks:
   - id: T005
     type: pm
     assignee: PM
-    status: active
+    status: done
     reasoning_hint: default
     objective: "Prepare the operator decision for starting live Scenario 1/2 QA now that criteria-plan is implemented."
     inputs:
@@ -266,11 +266,26 @@ tasks:
       - "Operator-facing recommendation for live Scenario 1/2 QA."
       - "Exact command or checklist entry to start from."
       - "Current git status and commit state."
-    receipt: null
+    receipt:
+      result: done
+      recommendation: "Start live Scenario 1/2 QA next, beginning with the status-only portions of scripts/workerctl qa-plan emergent-criteria."
+      exact_starting_point: "scripts/workerctl qa-plan emergent-criteria"
+      live_session_gate: "Do not start workerctl pair until the operator confirms live worker/manager sessions are allowed."
+      current_git_status: "main...origin/main [ahead 2]"
+      current_commit_state:
+        - "f28a7e0 Add dogfood reliability GoalBuddy plan"
+        - "3730989 Add criteria plan helper"
+      checklist_entry:
+        - "Run readiness baseline from docs/superpowers/plans/2026-05-16-dogfood-reliability-ladder.md."
+        - "Run status-only parts of qa-plan emergent-criteria."
+        - "Use criteria-plan on the saved worker criteria response before mutating criteria."
+        - "Record evidence bundle and docs/live-qa-log.md entry."
+        - "Stop on any global stop condition or unexpected tracked-file drift."
+      blocker: "Operator confirmation is required before starting live worker/manager sessions."
   - id: T999
     type: judge
     assignee: Judge
-    status: queued
+    status: done
     reasoning_hint: high
     objective: "Final audit for the current GoalBuddy tranche."
     inputs:
@@ -286,7 +301,37 @@ tasks:
       - "full_outcome_complete: true | false"
       - "missing evidence"
       - "next task if not complete"
-    receipt: null
+    receipt:
+      result: done
+      decision: "complete"
+      full_outcome_complete: true
+      summary: "The current GoalBuddy tranche is complete: the dogfood reliability plan baseline was committed, the first prerequisite helper was implemented and verified, and the next live QA action plus operator-confirmation blocker are recorded."
+      prompt_to_artifact_checklist:
+        - requirement: "Follow docs/goals/dogfood-reliability-ladder/goal.md."
+          evidence: "GoalBuddy state records T001 through T005 receipts and this final audit."
+          status: pass
+        - requirement: "Normalize and commit the dogfood reliability ladder baseline."
+          evidence: "Commit f28a7e0 Add dogfood reliability GoalBuddy plan."
+          status: pass
+        - requirement: "Choose the first safe gate or prerequisite helper."
+          evidence: "T002 receipt selected read-only criteria-plan before live QA."
+          status: pass
+        - requirement: "Implement or record exact blocker."
+          evidence: "Commit 3730989 Add criteria plan helper; T004 records remaining Gate 1/2 blocker as live QA evidence."
+          status: pass
+        - requirement: "Verify helper work."
+          evidence: "T003 receipt records focused CLI tests, qa-plan criteria-plan grep, full unittest discovery, and criteria-plan help checks."
+          status: pass
+        - requirement: "Do not start live worker/manager sessions without confirmation."
+          evidence: "T005 receipt records operator confirmation as the live session gate."
+          status: pass
+        - requirement: "Record next action."
+          evidence: "T005 receipt recommends scripts/workerctl qa-plan emergent-criteria and the status-only Scenario 1/2 path."
+          status: pass
+      remaining_work:
+        - "Gate 1 and Gate 2 live QA are not run yet; they require operator confirmation before starting real worker/manager sessions."
+        - "Repository is ahead of origin by two commits and should be pushed or PR'd when ready."
+        - "Known SQLite ResourceWarning noise remains as a later reliability cleanup item."
 
 checks:
   dirty_fingerprint: unknown
