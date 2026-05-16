@@ -16,6 +16,7 @@ from unittest import mock
 
 from workerctl import classify
 from workerctl import commands
+from workerctl import core as worker_core
 from workerctl import db as worker_db
 from workerctl import importer
 from workerctl import identity as worker_identity
@@ -39,6 +40,23 @@ ROOT = Path(__file__).resolve().parents[1]
 WORKERCTL_PATH = ROOT / "scripts" / "workerctl"
 WORKERCTL_SHIM_PATH = ROOT / "bin" / "workerctl"
 INSTALL_LOCAL_PATH = ROOT / "scripts" / "install-local"
+
+
+class CoreRunTests(unittest.TestCase):
+    def test_tmux_permission_failure_gets_actionable_message(self):
+        def fake_run(argv, **kwargs):
+            return subprocess.CompletedProcess(argv, 1, "", "Operation not permitted\n")
+
+        with mock.patch("workerctl.core.subprocess.run", side_effect=fake_run):
+            with self.assertRaisesRegex(WorkerError, "tmux access was denied"):
+                worker_core.run(["tmux", "new-session", "-d", "-s", "blocked"])
+
+        with mock.patch("workerctl.core.subprocess.run", side_effect=fake_run):
+            try:
+                worker_core.run(["tmux", "new-session", "-d", "-s", "blocked"])
+            except WorkerError as exc:
+                self.assertIn("Privacy & Security", str(exc))
+                self.assertIn("Operation not permitted", str(exc))
 
 
 class DatabaseTests(unittest.TestCase):
@@ -764,12 +782,90 @@ class CliTests(unittest.TestCase):
         finally:
             worker_identity.shutil.which = original_which
 
+    def test_session_snapshot_raises_on_tmux_permission_denied(self):
+        original_which = worker_identity.shutil.which
+        original_run = worker_identity.run
+        try:
+            worker_identity.shutil.which = lambda name: "/usr/bin/tmux" if name == "tmux" else original_which(name)
+            worker_identity.run = lambda argv, **kwargs: subprocess.CompletedProcess(
+                argv, 1, "", "Operation not permitted\n"
+            )
+
+            with self.assertRaisesRegex(WorkerError, "tmux access was denied"):
+                worker_identity.session_snapshot("blocked-tmux-session")
+        finally:
+            worker_identity.shutil.which = original_which
+            worker_identity.run = original_run
+
     def test_list_json_outputs_json_array(self):
         proc = self.run_workerctl("list", "--json")
 
         self.assertEqual(proc.returncode, 0, proc.stderr)
         data = json.loads(proc.stdout)
         self.assertIsInstance(data, list)
+
+    def test_list_json_reports_tmux_permission_error_without_failing(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_dir = Path(tmpdir) / "state"
+            worker_path = state_dir / "worker-a"
+            worker_path.mkdir(parents=True)
+            (worker_path / "config.json").write_text(json.dumps({"name": "worker-a"}) + "\n")
+            (worker_path / "status.json").write_text(json.dumps({"state": "waiting"}) + "\n")
+            original_root = os.environ.get("WORKERCTL_STATE_ROOT")
+            original_session_exists = commands.session_exists
+            try:
+                os.environ["WORKERCTL_STATE_ROOT"] = str(state_dir)
+
+                def permission_denied(_name):
+                    raise WorkerError("tmux access was denied by the operating system or sandbox")
+
+                commands.session_exists = permission_denied
+                with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                    result = commands.command_list(argparse.Namespace(json=True))
+
+                payload = json.loads(stdout.getvalue())
+                self.assertEqual(result, 0)
+                self.assertEqual(payload[0]["running"], False)
+                self.assertIn("tmux access was denied", payload[0]["terminal_error"])
+            finally:
+                commands.session_exists = original_session_exists
+                if original_root is None:
+                    os.environ.pop("WORKERCTL_STATE_ROOT", None)
+                else:
+                    os.environ["WORKERCTL_STATE_ROOT"] = original_root
+
+    def test_status_reports_tmux_permission_error_without_failing(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_dir = Path(tmpdir) / "state"
+            worker_path = state_dir / "worker-a"
+            worker_path.mkdir(parents=True)
+            (worker_path / "config.json").write_text(
+                json.dumps({"name": "worker-a", "tmux_session": "codex-worker-a"}) + "\n"
+            )
+            (worker_path / "status.json").write_text(json.dumps({"state": "waiting"}) + "\n")
+            original_root = os.environ.get("WORKERCTL_STATE_ROOT")
+            original_session_exists = commands.session_exists
+            try:
+                os.environ["WORKERCTL_STATE_ROOT"] = str(state_dir)
+
+                def permission_denied(_name):
+                    raise WorkerError("tmux access was denied by the operating system or sandbox")
+
+                commands.session_exists = permission_denied
+                args = argparse.Namespace(name="worker-a", refresh=False, lines=80)
+                with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                    result = commands.command_status(args)
+
+                payload = json.loads(stdout.getvalue())
+                self.assertEqual(result, 0)
+                self.assertEqual(payload["running"], False)
+                self.assertIn("tmux access was denied", payload["terminal_capture_error"])
+            finally:
+                commands.session_exists = original_session_exists
+                if original_root is None:
+                    os.environ.pop("WORKERCTL_STATE_ROOT", None)
+                else:
+                    os.environ["WORKERCTL_STATE_ROOT"] = original_root
 
     def test_doctor_outputs_expected_structure(self):
         proc = self.run_workerctl("doctor")
@@ -842,6 +938,29 @@ class CliTests(unittest.TestCase):
                 self.assertNotIn(retired, serialized)
         finally:
             commands.current_session_name = original_current_session_name
+
+    def test_doctor_self_reports_tmux_permission_error_as_unsupported_json(self):
+        original_current_session_name = commands.current_session_name
+        original_which = commands.shutil.which
+        original_run = commands.run
+        try:
+            commands.current_session_name = lambda: (_ for _ in ()).throw(
+                WorkerError("tmux access was denied by the operating system or sandbox")
+            )
+            commands.shutil.which = lambda name: f"/usr/bin/{name}"
+            commands.run = lambda argv, **kwargs: subprocess.CompletedProcess(argv, 0, '{"ok": true}\n', "")
+            with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                result = commands.command_doctor_self(argparse.Namespace(json=True, session=None))
+
+            payload = json.loads(stdout.getvalue())
+            self.assertEqual(result, 1)
+            self.assertFalse(payload["supported"])
+            self.assertTrue(any(check["name"] == "tmux_access" for check in payload["checks"]))
+            self.assertIn("tmux access was denied", json.dumps(payload))
+        finally:
+            commands.current_session_name = original_current_session_name
+            commands.shutil.which = original_which
+            commands.run = original_run
 
     def test_qa_plan_self_management_outputs_repeatable_steps(self):
         proc = self.run_workerctl("qa-plan", "self-management", "--json")
@@ -5195,6 +5314,20 @@ class SessionTmuxTests(unittest.TestCase):
             row = worker_db.session_row(conn, name="w")
             self.assertEqual(worker_tmux.session_tmux_target(row), "codex-w")
 
+    def test_session_exists_raises_on_tmux_permission_denied(self):
+        from workerctl import tmux as worker_tmux
+
+        original_run = worker_tmux.run
+        try:
+            worker_tmux.run = lambda argv, **kwargs: subprocess.CompletedProcess(
+                argv, 1, "", "Operation not permitted\n"
+            )
+
+            with self.assertRaisesRegex(WorkerError, "tmux access was denied"):
+                worker_tmux.session_exists("blocked")
+        finally:
+            worker_tmux.run = original_run
+
     def test_send_text_to_session_raises_when_no_tmux_session(self):
         from workerctl import tmux as worker_tmux
         from workerctl.core import WorkerError
@@ -5237,6 +5370,23 @@ class SessionTmuxTests(unittest.TestCase):
             self.assertEqual(result["dry_run"], True)
             self.assertEqual(result["target"], "codex-w:%5")
             self.assertEqual(result["text"], "hello")
+
+    def test_send_text_to_session_raises_permission_error_instead_of_missing(self):
+        from workerctl import tmux as worker_tmux
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self._register_with_tmux(conn)
+            original_run = worker_tmux.run
+            try:
+                worker_tmux.run = lambda argv, **kwargs: subprocess.CompletedProcess(
+                    argv, 1, "", "Operation not permitted\n"
+                )
+
+                with self.assertRaisesRegex(WorkerError, "tmux access was denied"):
+                    worker_tmux.send_text_to_session(conn, session_name="w", text="hello")
+            finally:
+                worker_tmux.run = original_run
 
     def test_send_text_to_session_invokes_set_paste_send_keys(self):
         from workerctl import tmux as worker_tmux

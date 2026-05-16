@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from workerctl.constants import PROJECT_ROOT, RECOMMENDED_MANAGER_CODEX_ARGS
-from workerctl.core import WorkerError, age_seconds, now_iso, run, sh_quote
+from workerctl.core import WorkerError, age_seconds, now_iso, raise_for_tmux_permission_failure, run, sh_quote
 from workerctl.db import active_manager
 from workerctl.db import active_binding_for_task
 from workerctl.db import assess_manager_decision
@@ -61,6 +61,7 @@ def cli_path_prefix() -> str:
 
 def manager_session_exists(session_name: str) -> bool:
     proc = run(["tmux", "has-session", "-t", session_name], check=False)
+    raise_for_tmux_permission_failure(proc)
     return proc.returncode == 0
 
 

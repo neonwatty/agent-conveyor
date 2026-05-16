@@ -16,7 +16,7 @@ from typing import Any
 from workerctl.classify import classify_busy_wait, classify_startup_output
 from workerctl.audit import mutation_audit_result
 from workerctl.constants import DEFAULT_HISTORY_LINES, DEFAULT_MANAGER_STALE_SECONDS, PROJECT_ROOT, VALID_STATES
-from workerctl.core import WorkerError, age_seconds, ensure_tool, now_iso, run, sh_quote
+from workerctl.core import WorkerError, age_seconds, ensure_tool, now_iso, raise_for_tmux_permission_failure, run, sh_quote
 from workerctl.db import active_manager, active_task_worker
 from workerctl.db import connect as connect_db
 from workerctl.db import create_task as create_db_task
@@ -273,6 +273,7 @@ def open_tmux_session_window(session_name: str, *, terminal: str, dry_run: bool)
     if sys.platform != "darwin":
         raise WorkerError("workerctl terminal opening commands are currently implemented for macOS only.")
     proc = run(["tmux", "has-session", "-t", session_name], check=False)
+    raise_for_tmux_permission_failure(proc)
     if proc.returncode != 0:
         raise WorkerError(f"tmux session is not running: {session_name}")
 
@@ -339,6 +340,7 @@ def _session_exists_for_config(name: str, config: dict[str, Any]) -> bool:
     if target == tmux_target(name):
         return session_exists(name)
     proc = run(["tmux", "has-session", "-t", target], check=False)
+    raise_for_tmux_permission_failure(proc)
     return proc.returncode == 0
 
 
@@ -404,7 +406,9 @@ def command_start(args: argparse.Namespace) -> int:
     directory = Path(args.cwd).expanduser().resolve()
     if not directory.exists() or not directory.is_dir():
         raise WorkerError(f"Session cwd does not exist or is not a directory: {directory}")
-    if run(["tmux", "has-session", "-t", session_name], check=False).returncode == 0:
+    proc = run(["tmux", "has-session", "-t", session_name], check=False)
+    raise_for_tmux_permission_failure(proc)
+    if proc.returncode == 0:
         raise WorkerError(f"tmux session already exists: {session_name}")
 
     raw_codex_args = list(args.codex_args or [])
@@ -742,16 +746,22 @@ def command_list(args: argparse.Namespace) -> int:
         config = load_json(path / "config.json", {})
         status = load_json(path / "status.json", {})
         name = config.get("name", path.name)
-        running = session_exists(name)
-        workers.append(
-            {
-                "name": name,
-                "running": running,
-                "status": "running" if running else "stopped",
-                "state": status.get("state", "unknown"),
-                "current_task": status.get("current_task", ""),
-            }
-        )
+        terminal_error = None
+        try:
+            running = session_exists(name)
+        except WorkerError as exc:
+            running = False
+            terminal_error = str(exc)
+        worker = {
+            "name": name,
+            "running": running,
+            "status": "running" if running else "stopped",
+            "state": status.get("state", "unknown"),
+            "current_task": status.get("current_task", ""),
+        }
+        if terminal_error is not None:
+            worker["terminal_error"] = terminal_error
+        workers.append(worker)
     if args.json:
         print(json.dumps(workers, indent=2, sort_keys=True))
         return 0
@@ -770,10 +780,14 @@ def command_capture(args: argparse.Namespace) -> int:
 
 def command_status(args: argparse.Namespace) -> int:
     config = _worker_config_or_session(args.name)
-    running = _session_exists_for_config(args.name, config)
     status = latest_status(args.name)
     capture_meta = load_json(capture_meta_path(args.name), {})
     terminal_capture_error: str | None = None
+    try:
+        running = _session_exists_for_config(args.name, config)
+    except WorkerError as exc:
+        running = False
+        terminal_capture_error = str(exc)
     if running and args.refresh:
         try:
             _capture_output_for_config(args.name, config, args.lines)
@@ -781,7 +795,7 @@ def command_status(args: argparse.Namespace) -> int:
         except WorkerError as exc:
             terminal_capture_error = str(exc)
             capture_meta = {"error": terminal_capture_error}
-    elif capture_meta.get("error"):
+    elif terminal_capture_error is None and capture_meta.get("error"):
         terminal_capture_error = capture_meta.get("error")
 
     state = status.get("state", "unknown")
@@ -818,10 +832,14 @@ def idle_summary(
     lines: int,
 ) -> dict[str, Any]:
     config = _worker_config_or_session(name)
-    running = _session_exists_for_config(name, config)
     status = latest_status(name)
     capture_meta = load_json(capture_meta_path(name), {})
     capture_error = None
+    try:
+        running = _session_exists_for_config(name, config)
+    except WorkerError as exc:
+        running = False
+        capture_error = str(exc)
 
     if running and refresh:
         try:
@@ -977,6 +995,24 @@ def command_update_status(args: argparse.Namespace) -> int:
     return 0
 
 
+def _doctor_worker_summary(name: str, config: dict[str, Any], path: Path) -> dict[str, Any]:
+    terminal_error = None
+    try:
+        running = session_exists(name)
+    except WorkerError as exc:
+        running = False
+        terminal_error = str(exc)
+    summary = {
+        "name": name,
+        "running": running,
+        "startup": config.get("startup"),
+        "state": load_json(path / "status.json", {}).get("state", "unknown"),
+    }
+    if terminal_error is not None:
+        summary["terminal_error"] = terminal_error
+    return summary
+
+
 def command_doctor(args: argparse.Namespace) -> int:
     checks: list[dict[str, Any]] = []
 
@@ -1010,12 +1046,7 @@ def command_doctor(args: argparse.Namespace) -> int:
                 config = load_json(path / "config.json", {})
                 name = config.get("name", path.name)
                 workers.append(
-                    {
-                        "name": name,
-                        "running": session_exists(name),
-                        "startup": config.get("startup"),
-                        "state": load_json(path / "status.json", {}).get("state", "unknown"),
-                    }
+                    _doctor_worker_summary(name, config, path)
                 )
 
     ok = all(check.get("ok", False) for check in checks if check["name"] != "state_root_exists")
@@ -1060,7 +1091,12 @@ def command_doctor_self(args: argparse.Namespace) -> int:
     workerctl binary on PATH and, if the session is to be nudged via tmux, a
     live tmux session. Managers do not require tmux at all.
     """
-    session = getattr(args, "session", None) or current_session_name()
+    session_error = None
+    try:
+        session = getattr(args, "session", None) or current_session_name()
+    except WorkerError as exc:
+        session = None
+        session_error = str(exc)
     tmux_path = shutil.which("tmux")
     codex_path = shutil.which("codex")
     workerctl_path = shutil.which("workerctl")
@@ -1072,9 +1108,15 @@ def command_doctor_self(args: argparse.Namespace) -> int:
         {"name": "inside_tmux", "ok": bool(session), "session": session},
         {"name": "manage_skill_installed", "ok": skill_path.exists(), "path": str(skill_path)},
     ]
+    if session_error is not None:
+        checks.append({"name": "tmux_access", "ok": False, "error": session_error})
     if session and tmux_path:
-        proc = run(["tmux", "has-session", "-t", session], check=False)
-        checks.append({"name": "current_tmux_session_live", "ok": proc.returncode == 0, "session": session})
+        try:
+            proc = run(["tmux", "has-session", "-t", session], check=False)
+            raise_for_tmux_permission_failure(proc)
+            checks.append({"name": "current_tmux_session_live", "ok": proc.returncode == 0, "session": session})
+        except WorkerError as exc:
+            checks.append({"name": "current_tmux_session_live", "ok": False, "session": session, "error": str(exc)})
     if workerctl_path:
         proc = run(["workerctl", "classify", "--text", "workerctl self doctor"], check=False)
         checks.append({"name": "workerctl_executable", "ok": proc.returncode == 0, "path": workerctl_path})
