@@ -1,0 +1,28 @@
+{
+  "binding_id": "binding-b7de4181-30cf-4762-aac9-ec13a16d7e54",
+  "manager": {
+    "codex_session_id": "019e32bb-c682-7a03-976d-a79c6569c094",
+    "codex_session_path": "[REDACTED_CODEX_SESSIONS]/2026/05/16/rollout-2026-05-16T14-40-27-019e32bb-c682-7a03-976d-a79c6569c094.jsonl",
+    "cwd": "<repo>",
+    "name": "qa-g2-manager",
+    "pid": 16779,
+    "role": "manager",
+    "session_id": "session-05fa7418-8146-4db2-947a-4dda4cf739aa",
+    "tmux_session": "codex-qa-g2-manager"
+  },
+  "task": {
+    "created": true,
+    "id": "task-3745ef67-2398-49fb-a3e3-63905aa0e9b5",
+    "name": "qa-g2-manager-led-scenario-2"
+  },
+  "worker": {
+    "codex_session_id": "019e32bb-bec4-75d3-835f-2456e3177edd",
+    "codex_session_path": "[REDACTED_CODEX_SESSIONS]/2026/05/16/rollout-2026-05-16T14-40-25-019e32bb-bec4-75d3-835f-2456e3177edd.jsonl",
+    "cwd": "<repo>",
+    "name": "qa-g2-worker",
+    "pid": 15807,
+    "role": "worker",
+    "session_id": "session-083fe37f-dc44-4e91-af3f-1018a548cbee",
+    "tmux_session": "codex-qa-g2-worker"
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "expected_observations": [
+    "manager cycle output includes manager_context.acceptance_criteria with summary/open/proposed/satisfied/deferred/rejected",
+    "criteria_negotiation.needed starts true before active current-task criteria exist and turns false after proposed, accepted, or satisfied criteria exist",
+    "the manager asks the worker for must-have current-task criteria versus deferred follow-up criteria",
+    "criteria-plan can draft reviewed workerctl criteria --add commands from separated worker criteria text without mutating task state",
+    "worker-proposed and manager-inferred criteria are visible through workerctl criteria --list",
+    "accepted criteria block finish-task --require-criteria-audit until satisfied, deferred, or rejected",
+    "satisfied criteria include evidence_json describing the verification receipt",
+    "after multiple criteria mutations, workerctl criteria --list is used as the canonical task state",
+    "replay shows acceptance_criterion_added and acceptance_criterion_updated transitions",
+    "export-task writes acceptance-criteria.json and includes it in manifest.json",
+    "finish-task --stop-manager --stop-worker reports killed_worker and killed_manager true for the session-bound pair",
+    "after cleanup, no matching tmux sessions remain and the worker/manager session rows are marked gone",
+    "after cleanup, reconcile reports no dangling bindings, dead-pid sessions, or stuck tasks and git status remains clean"
+  ],
+  "scenario": "emergent-criteria",
+  "steps": [
+    "Start a real pair: workerctl pair --task qa-emergent-criteria --worker-name qa-ec-worker --manager-name qa-ec-manager --cwd \"$PWD\" --task-goal \"QA emergent acceptance criteria and cleanup lifecycle without tracked edits.\" --task-summary \"Real worker/manager QA for criteria negotiation, finish cleanup, and tmux diagnostics.\" --task-prompt \"Inspect README.md and workerctl help. Do not edit tracked files. Wait for manager instructions. When asked, propose 2-4 acceptance criteria for this QA slice, separating must-have criteria from follow-up criteria.\"",
+    "Run workerctl cycle qa-emergent-criteria and verify manager_context.acceptance_criteria is present with empty status buckets.",
+    "Verify manager_context.criteria_negotiation.needed is true and reason is no_criteria on the first cycle.",
+    "Nudge the worker: workerctl session-nudge qa-ec-worker \"Propose 2-4 acceptance criteria for this QA slice. Separate must-have current-task criteria from deferred follow-up criteria. Keep this status-only: do not edit tracked files.\"",
+    "Optionally save the worker response and run workerctl criteria-plan qa-emergent-criteria --from-worker-response response.md --json; review suggestions before running any criteria mutations.",
+    "Record at least one worker-proposed must-have criterion as accepted with workerctl criteria qa-emergent-criteria --add --criterion \"...\" --source worker_proposed --status accepted.",
+    "Record at least one follow-up criterion as deferred with workerctl criteria qa-emergent-criteria --add --criterion \"...\" --source worker_proposed --status deferred --rationale \"Follow-up after this QA slice\".",
+    "Run workerctl cycle qa-emergent-criteria again and verify open contains the accepted criterion while deferred contains the follow-up.",
+    "Run workerctl cycle qa-emergent-criteria again and verify manager_context.criteria_negotiation.needed is false after active criteria exist.",
+    "Check git status --short --branch and verify the status-only worker has not edited tracked files.",
+    "If the worker omits a useful proof, add a manager-inferred accepted criterion with workerctl criteria qa-emergent-criteria --add --criterion \"...\" --source manager_inferred --status accepted.",
+    "Attempt workerctl finish-task qa-emergent-criteria --reason \"QA premature finish\" --require-criteria-audit and verify it fails while accepted criteria remain open.",
+    "Satisfy each accepted criterion with workerctl criteria qa-emergent-criteria --satisfy <id> --evidence-json '{\"command\":\"...\",\"status\":\"pass\"}' --proof \"...\".",
+    "Run workerctl criteria qa-emergent-criteria --list and verify accepted is 0 before attempting the final audited finish.",
+    "Run workerctl replay qa-emergent-criteria and verify criteria add/update transitions appear in chronological order.",
+    "Run workerctl export-task qa-emergent-criteria --output /tmp/qa-emergent-criteria-export and verify acceptance-criteria.json exists and manifest.json lists it.",
+    "Finish with workerctl finish-task qa-emergent-criteria --reason \"QA criteria flow complete\" --require-criteria-audit --stop-manager --stop-worker and verify killed_worker and killed_manager are true.",
+    "Run tmux list-sessions 2>/dev/null | rg 'qa-ec-(worker|manager)|codex-qa-ec' || true and verify no matching tmux sessions remain.",
+    "Run workerctl sessions --state all and verify qa-ec-worker and qa-ec-manager are both state gone.",
+    "Run workerctl reconcile --stale-cycles-seconds 1 and confirm dead_pid_sessions, dangling_bindings, and stuck_tasks are empty.",
+    "Run git status --short --branch and verify tracked status remains clean."
+  ]
+}

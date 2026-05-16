@@ -1,0 +1,21 @@
+Task: qa-g2-manager-led-scenario-2
+State: done
+Mode: timeline
+
+Finished:
+- finished task: Gate 2 manager-led emergent acceptance criteria QA completed with criteria audit clean after replay/export. (manager stopped)
+- Review: workerctl replay <task> --format compact
+- Audit: workerctl mutation-audit <task> --json
+
+21:40:59  manager          observed session qa-g2-worker state busy (staleness 28.2s)
+21:41:14  manager          observed session qa-g2-worker state busy (staleness 3.0s)
+21:41:41  workerctl        accepted criterion #20: Repo-local entrypoints are used exclusively for CLI inspection.
+21:41:45  workerctl        accepted criterion #21: README and help agree on the relevant criteria workflow commands.
+21:41:48  workerctl        accepted criterion #22: No tracked files are edited during the QA slice.
+21:41:52  workerctl        deferred criterion #23: Follow-up after this QA slice.
+21:42:15  workerctl        satisfied criterion #20 (accepted -> satisfied): proof recorded (Worker capture shows scripts/workerctl --help and bin/workerctl --help both ran successfully from the repo root.)
+21:42:19  workerctl        satisfied criterion #21 (accepted -> satisfied): proof recorded (Worker capture shows README was read and scripts/workerctl criteria --help plus scripts/workerctl criteria-plan --help exposed the expected criteria workflow options.)
+21:42:24  workerctl        satisfied criterion #22 (accepted -> satisfied): proof recorded (git status --short shows no modified tracked files; only untracked QA artifact directories are present.)
+21:42:29  manager          observed session qa-g2-worker state idle (staleness 71.2s)
+21:42:46  manager          finished task: Gate 2 manager-led emergent acceptance criteria QA completed with criteria audit clean after replay/export. (manager stopped)
+21:42:46  manager          decision stop: Gate 2 manager-led emergent acceptance criteria QA completed with criteria audit clean after replay/export.

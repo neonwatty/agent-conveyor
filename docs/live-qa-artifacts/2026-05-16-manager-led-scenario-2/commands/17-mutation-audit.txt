@@ -1,0 +1,2 @@
+qa-g2-manager-led-scenario-2	mutations=1	warnings=0
+2026-05-16T21:42:46Z	finish_task	decision=8	ok

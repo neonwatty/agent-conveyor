@@ -1,0 +1,5 @@
+{
+  "archive": null,
+  "export_dir": "<repo>/docs/live-qa-artifacts/2026-05-16-manager-led-scenario-2/export",
+  "task": "qa-g2-manager-led-scenario-2"
+}

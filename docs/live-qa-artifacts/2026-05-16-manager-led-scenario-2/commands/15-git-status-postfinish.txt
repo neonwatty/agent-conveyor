@@ -1,0 +1,3 @@
+## main...origin/main
+?? docs/goals/manager-led-scenario-2-gate2/
+?? docs/live-qa-artifacts/2026-05-16-manager-led-scenario-2/

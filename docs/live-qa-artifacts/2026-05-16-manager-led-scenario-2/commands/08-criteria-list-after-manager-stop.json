@@ -1,0 +1,85 @@
+{
+  "criteria": [
+    {
+      "created_at": "2026-05-16T21:41:41Z",
+      "criterion": "Repo-local entrypoints are used exclusively for CLI inspection.",
+      "evidence": {
+        "commands": [
+          "scripts/workerctl --help",
+          "bin/workerctl --help"
+        ],
+        "source": "worker_capture",
+        "status": "pass"
+      },
+      "id": 20,
+      "proof": "Worker capture shows scripts/workerctl --help and bin/workerctl --help both ran successfully from the repo root.",
+      "rationale": null,
+      "source": "worker_proposed",
+      "status": "satisfied",
+      "task_id": "task-3745ef67-2398-49fb-a3e3-63905aa0e9b5",
+      "updated_at": "2026-05-16T21:42:15Z"
+    },
+    {
+      "created_at": "2026-05-16T21:41:45Z",
+      "criterion": "README and help agree on the relevant criteria workflow commands.",
+      "evidence": {
+        "commands": [
+          "sed/read README.md",
+          "scripts/workerctl criteria --help",
+          "scripts/workerctl criteria-plan --help"
+        ],
+        "source": "worker_capture",
+        "status": "pass"
+      },
+      "id": 21,
+      "proof": "Worker capture shows README was read and scripts/workerctl criteria --help plus scripts/workerctl criteria-plan --help exposed the expected criteria workflow options.",
+      "rationale": null,
+      "source": "worker_proposed",
+      "status": "satisfied",
+      "task_id": "task-3745ef67-2398-49fb-a3e3-63905aa0e9b5",
+      "updated_at": "2026-05-16T21:42:19Z"
+    },
+    {
+      "created_at": "2026-05-16T21:41:48Z",
+      "criterion": "No tracked files are edited during the QA slice.",
+      "evidence": {
+        "commands": [
+          "git status --short"
+        ],
+        "observed": "only untracked docs/goals/manager-led-scenario-2-gate2/ and docs/live-qa-artifacts/2026-05-16-manager-led-scenario-2/",
+        "source": "manager_and_worker_capture",
+        "status": "pass"
+      },
+      "id": 22,
+      "proof": "git status --short shows no modified tracked files; only untracked QA artifact directories are present.",
+      "rationale": null,
+      "source": "worker_proposed",
+      "status": "satisfied",
+      "task_id": "task-3745ef67-2398-49fb-a3e3-63905aa0e9b5",
+      "updated_at": "2026-05-16T21:42:24Z"
+    },
+    {
+      "created_at": "2026-05-16T21:41:52Z",
+      "criterion": "Exercise criteria-plan against a sample worker response and confirm its output is usable as reviewed criteria --add commands.",
+      "evidence": {},
+      "id": 23,
+      "proof": null,
+      "rationale": "Follow-up after this QA slice.",
+      "source": "worker_proposed",
+      "status": "deferred",
+      "task_id": "task-3745ef67-2398-49fb-a3e3-63905aa0e9b5",
+      "updated_at": "2026-05-16T21:41:52Z"
+    }
+  ],
+  "summary": {
+    "accepted": 0,
+    "deferred": 1,
+    "proposed": 0,
+    "rejected": 0,
+    "satisfied": 3
+  },
+  "task": {
+    "id": "task-3745ef67-2398-49fb-a3e3-63905aa0e9b5",
+    "name": "qa-g2-manager-led-scenario-2"
+  }
+}

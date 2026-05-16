@@ -1,0 +1,372 @@
+[
+  {
+    "completed_at": "2026-05-16T21:40:59Z",
+    "decision": null,
+    "error": null,
+    "health": null,
+    "health_observation_id": null,
+    "id": 18,
+    "manager_capture_id": null,
+    "manager_id": null,
+    "started_at": "2026-05-16T21:40:59Z",
+    "state": "succeeded",
+    "status": {
+      "binding_id": "binding-b7de4181-30cf-4762-aac9-ec13a16d7e54",
+      "ingest": {
+        "new_events": 36,
+        "new_offset": 114576,
+        "skipped_lines": 0
+      },
+      "kind": "session_cycle",
+      "last_event_subtype": null,
+      "last_state_event_at": "2026-05-16T21:40:30.799Z",
+      "manager_alive": true,
+      "manager_context": {
+        "acceptance_criteria": {
+          "deferred": [],
+          "open": [],
+          "proposed": [],
+          "rejected": [],
+          "satisfied": [],
+          "summary": {
+            "accepted": 0,
+            "deferred": 0,
+            "proposed": 0,
+            "rejected": 0,
+            "satisfied": 0
+          }
+        },
+        "criteria_negotiation": {
+          "needed": true,
+          "prompt": "Please propose 2-4 acceptance criteria for the current slice. Split them into must-have current-task criteria and follow-up criteria. Include the verification you expect for each.",
+          "reason": "no_criteria",
+          "suggested_actions": [
+            "Ask the worker to split must-have current-task criteria from follow-up criteria.",
+            "Record accepted current-task criteria with workerctl criteria qa-g2-manager-led-scenario-2 --add --criterion \"...\" --source worker_proposed --status accepted.",
+            "Record proposed current-task criteria with workerctl criteria qa-g2-manager-led-scenario-2 --add --criterion \"...\" --source worker_proposed --status proposed.",
+            "Record follow-up criteria with workerctl criteria qa-g2-manager-led-scenario-2 --add --criterion \"...\" --source worker_proposed --status deferred."
+          ]
+        },
+        "manager_config": {
+          "acceptance_criteria": [
+            "First cycle shows criteria_negotiation.needed true with reason no_criteria.",
+            "Manager asks worker for separated must-have current-task criteria and deferred follow-up criteria.",
+            "Manager runs criteria-plan on worker criteria text before any criteria mutation.",
+            "Manager records at least one accepted worker_proposed criterion and at least one deferred follow-up with rationale.",
+            "Premature finish-task --require-criteria-audit fails while accepted criteria remain open.",
+            "Manager satisfies or otherwise closes accepted criteria with proof text and structured evidence JSON.",
+            "Replay/export show criteria lifecycle and final finish stops both sessions."
+          ],
+          "created_at": "2026-05-16T21:40:44Z",
+          "guidelines": [
+            "Use only workerctl task/session commands; do not edit product files.",
+            "Do not compact/clear, create PR, merge, or run destructive cleanup.",
+            "Keep worker work status-only; stop if tracked product files change.",
+            "The PM observer must not perform criteria add/satisfy/defer/reject mutations; record enough terminal output to prove manager-led behavior."
+          ],
+          "objective": "Prove Gate 2 manager-led emergent criteria readiness. You, the manager, must drive the criteria loop end to end using workerctl: cycle, notice no_criteria, ask worker for separated criteria, run criteria-plan, record accepted/deferred criteria, verify premature finish blocks, collect proof, satisfy/defer/reject criteria, replay/export, and finish cleanup.",
+          "permissions": {
+            "create_pr": false,
+            "merge_green_pr": false,
+            "worker_compact_clear": false
+          },
+          "reference_paths": [
+            "docs/superpowers/plans/2026-05-16-dogfood-reliability-ladder.md",
+            "docs/live-qa-artifacts/2026-05-16-manager-led-scenario-2/"
+          ],
+          "supervision_mode": "guided",
+          "task_id": "task-3745ef67-2398-49fb-a3e3-63905aa0e9b5",
+          "updated_at": "2026-05-16T21:40:44Z"
+        },
+        "worker_handoff": null
+      },
+      "manager_session": "qa-g2-manager",
+      "notable_pane_pattern": null,
+      "pane_signal": {
+        "captured": true,
+        "classifier": null,
+        "degraded": false,
+        "notable_pattern": null,
+        "reason": null,
+        "status_age_seconds": 28
+      },
+      "staleness_seconds": 28.201,
+      "state": "busy",
+      "task": "qa-g2-manager-led-scenario-2",
+      "task_completed": false,
+      "worker_alive": true,
+      "worker_session": "qa-g2-worker"
+    },
+    "task_id": "task-3745ef67-2398-49fb-a3e3-63905aa0e9b5",
+    "worker_capture_id": null
+  },
+  {
+    "completed_at": "2026-05-16T21:41:14Z",
+    "decision": null,
+    "error": null,
+    "health": null,
+    "health_observation_id": null,
+    "id": 19,
+    "manager_capture_id": null,
+    "manager_id": null,
+    "started_at": "2026-05-16T21:41:14Z",
+    "state": "succeeded",
+    "status": {
+      "binding_id": "binding-b7de4181-30cf-4762-aac9-ec13a16d7e54",
+      "ingest": {
+        "new_events": 20,
+        "new_offset": 137854,
+        "skipped_lines": 0
+      },
+      "kind": "session_cycle",
+      "last_event_subtype": null,
+      "last_state_event_at": "2026-05-16T21:41:11.019Z",
+      "manager_alive": true,
+      "manager_context": {
+        "acceptance_criteria": {
+          "deferred": [],
+          "open": [],
+          "proposed": [],
+          "rejected": [],
+          "satisfied": [],
+          "summary": {
+            "accepted": 0,
+            "deferred": 0,
+            "proposed": 0,
+            "rejected": 0,
+            "satisfied": 0
+          }
+        },
+        "criteria_negotiation": {
+          "needed": true,
+          "prompt": "Please propose 2-4 acceptance criteria for the current slice. Split them into must-have current-task criteria and follow-up criteria. Include the verification you expect for each.",
+          "reason": "no_criteria",
+          "suggested_actions": [
+            "Ask the worker to split must-have current-task criteria from follow-up criteria.",
+            "Record accepted current-task criteria with workerctl criteria qa-g2-manager-led-scenario-2 --add --criterion \"...\" --source worker_proposed --status accepted.",
+            "Record proposed current-task criteria with workerctl criteria qa-g2-manager-led-scenario-2 --add --criterion \"...\" --source worker_proposed --status proposed.",
+            "Record follow-up criteria with workerctl criteria qa-g2-manager-led-scenario-2 --add --criterion \"...\" --source worker_proposed --status deferred."
+          ]
+        },
+        "manager_config": {
+          "acceptance_criteria": [
+            "First cycle shows criteria_negotiation.needed true with reason no_criteria.",
+            "Manager asks worker for separated must-have current-task criteria and deferred follow-up criteria.",
+            "Manager runs criteria-plan on worker criteria text before any criteria mutation.",
+            "Manager records at least one accepted worker_proposed criterion and at least one deferred follow-up with rationale.",
+            "Premature finish-task --require-criteria-audit fails while accepted criteria remain open.",
+            "Manager satisfies or otherwise closes accepted criteria with proof text and structured evidence JSON.",
+            "Replay/export show criteria lifecycle and final finish stops both sessions."
+          ],
+          "created_at": "2026-05-16T21:40:44Z",
+          "guidelines": [
+            "Use only workerctl task/session commands; do not edit product files.",
+            "Do not compact/clear, create PR, merge, or run destructive cleanup.",
+            "Keep worker work status-only; stop if tracked product files change.",
+            "The PM observer must not perform criteria add/satisfy/defer/reject mutations; record enough terminal output to prove manager-led behavior."
+          ],
+          "objective": "Prove Gate 2 manager-led emergent criteria readiness. You, the manager, must drive the criteria loop end to end using workerctl: cycle, notice no_criteria, ask worker for separated criteria, run criteria-plan, record accepted/deferred criteria, verify premature finish blocks, collect proof, satisfy/defer/reject criteria, replay/export, and finish cleanup.",
+          "permissions": {
+            "create_pr": false,
+            "merge_green_pr": false,
+            "worker_compact_clear": false
+          },
+          "reference_paths": [
+            "docs/superpowers/plans/2026-05-16-dogfood-reliability-ladder.md",
+            "docs/live-qa-artifacts/2026-05-16-manager-led-scenario-2/"
+          ],
+          "supervision_mode": "guided",
+          "task_id": "task-3745ef67-2398-49fb-a3e3-63905aa0e9b5",
+          "updated_at": "2026-05-16T21:40:44Z"
+        },
+        "worker_handoff": null
+      },
+      "manager_session": "qa-g2-manager",
+      "notable_pane_pattern": null,
+      "pane_signal": {
+        "captured": true,
+        "classifier": null,
+        "degraded": false,
+        "notable_pattern": null,
+        "reason": null,
+        "status_age_seconds": 2
+      },
+      "staleness_seconds": 2.981,
+      "state": "busy",
+      "task": "qa-g2-manager-led-scenario-2",
+      "task_completed": false,
+      "worker_alive": true,
+      "worker_session": "qa-g2-worker"
+    },
+    "task_id": "task-3745ef67-2398-49fb-a3e3-63905aa0e9b5",
+    "worker_capture_id": null
+  },
+  {
+    "completed_at": "2026-05-16T21:42:29Z",
+    "decision": null,
+    "error": null,
+    "health": null,
+    "health_observation_id": null,
+    "id": 20,
+    "manager_capture_id": null,
+    "manager_id": null,
+    "started_at": "2026-05-16T21:42:29Z",
+    "state": "succeeded",
+    "status": {
+      "binding_id": "binding-b7de4181-30cf-4762-aac9-ec13a16d7e54",
+      "ingest": {
+        "new_events": 4,
+        "new_offset": 142520,
+        "skipped_lines": 0
+      },
+      "kind": "session_cycle",
+      "last_event_subtype": "task_complete",
+      "last_state_event_at": "2026-05-16T21:41:17.780Z",
+      "manager_alive": true,
+      "manager_context": {
+        "acceptance_criteria": {
+          "deferred": [
+            {
+              "created_at": "2026-05-16T21:41:52Z",
+              "criterion": "Exercise criteria-plan against a sample worker response and confirm its output is usable as reviewed criteria --add commands.",
+              "evidence": {},
+              "id": 23,
+              "proof": null,
+              "rationale": "Follow-up after this QA slice.",
+              "source": "worker_proposed",
+              "status": "deferred",
+              "task_id": "task-3745ef67-2398-49fb-a3e3-63905aa0e9b5",
+              "updated_at": "2026-05-16T21:41:52Z"
+            }
+          ],
+          "open": [],
+          "proposed": [],
+          "rejected": [],
+          "satisfied": [
+            {
+              "created_at": "2026-05-16T21:41:41Z",
+              "criterion": "Repo-local entrypoints are used exclusively for CLI inspection.",
+              "evidence": {
+                "commands": [
+                  "scripts/workerctl --help",
+                  "bin/workerctl --help"
+                ],
+                "source": "worker_capture",
+                "status": "pass"
+              },
+              "id": 20,
+              "proof": "Worker capture shows scripts/workerctl --help and bin/workerctl --help both ran successfully from the repo root.",
+              "rationale": null,
+              "source": "worker_proposed",
+              "status": "satisfied",
+              "task_id": "task-3745ef67-2398-49fb-a3e3-63905aa0e9b5",
+              "updated_at": "2026-05-16T21:42:15Z"
+            },
+            {
+              "created_at": "2026-05-16T21:41:45Z",
+              "criterion": "README and help agree on the relevant criteria workflow commands.",
+              "evidence": {
+                "commands": [
+                  "sed/read README.md",
+                  "scripts/workerctl criteria --help",
+                  "scripts/workerctl criteria-plan --help"
+                ],
+                "source": "worker_capture",
+                "status": "pass"
+              },
+              "id": 21,
+              "proof": "Worker capture shows README was read and scripts/workerctl criteria --help plus scripts/workerctl criteria-plan --help exposed the expected criteria workflow options.",
+              "rationale": null,
+              "source": "worker_proposed",
+              "status": "satisfied",
+              "task_id": "task-3745ef67-2398-49fb-a3e3-63905aa0e9b5",
+              "updated_at": "2026-05-16T21:42:19Z"
+            },
+            {
+              "created_at": "2026-05-16T21:41:48Z",
+              "criterion": "No tracked files are edited during the QA slice.",
+              "evidence": {
+                "commands": [
+                  "git status --short"
+                ],
+                "observed": "only untracked docs/goals/manager-led-scenario-2-gate2/ and docs/live-qa-artifacts/2026-05-16-manager-led-scenario-2/",
+                "source": "manager_and_worker_capture",
+                "status": "pass"
+              },
+              "id": 22,
+              "proof": "git status --short shows no modified tracked files; only untracked QA artifact directories are present.",
+              "rationale": null,
+              "source": "worker_proposed",
+              "status": "satisfied",
+              "task_id": "task-3745ef67-2398-49fb-a3e3-63905aa0e9b5",
+              "updated_at": "2026-05-16T21:42:24Z"
+            }
+          ],
+          "summary": {
+            "accepted": 0,
+            "deferred": 1,
+            "proposed": 0,
+            "rejected": 0,
+            "satisfied": 3
+          }
+        },
+        "criteria_negotiation": {
+          "needed": false,
+          "prompt": null,
+          "reason": "active_criteria_present",
+          "suggested_actions": []
+        },
+        "manager_config": {
+          "acceptance_criteria": [
+            "First cycle shows criteria_negotiation.needed true with reason no_criteria.",
+            "Manager asks worker for separated must-have current-task criteria and deferred follow-up criteria.",
+            "Manager runs criteria-plan on worker criteria text before any criteria mutation.",
+            "Manager records at least one accepted worker_proposed criterion and at least one deferred follow-up with rationale.",
+            "Premature finish-task --require-criteria-audit fails while accepted criteria remain open.",
+            "Manager satisfies or otherwise closes accepted criteria with proof text and structured evidence JSON.",
+            "Replay/export show criteria lifecycle and final finish stops both sessions."
+          ],
+          "created_at": "2026-05-16T21:40:44Z",
+          "guidelines": [
+            "Use only workerctl task/session commands; do not edit product files.",
+            "Do not compact/clear, create PR, merge, or run destructive cleanup.",
+            "Keep worker work status-only; stop if tracked product files change.",
+            "The PM observer must not perform criteria add/satisfy/defer/reject mutations; record enough terminal output to prove manager-led behavior."
+          ],
+          "objective": "Prove Gate 2 manager-led emergent criteria readiness. You, the manager, must drive the criteria loop end to end using workerctl: cycle, notice no_criteria, ask worker for separated criteria, run criteria-plan, record accepted/deferred criteria, verify premature finish blocks, collect proof, satisfy/defer/reject criteria, replay/export, and finish cleanup.",
+          "permissions": {
+            "create_pr": false,
+            "merge_green_pr": false,
+            "worker_compact_clear": false
+          },
+          "reference_paths": [
+            "docs/superpowers/plans/2026-05-16-dogfood-reliability-ladder.md",
+            "docs/live-qa-artifacts/2026-05-16-manager-led-scenario-2/"
+          ],
+          "supervision_mode": "guided",
+          "task_id": "task-3745ef67-2398-49fb-a3e3-63905aa0e9b5",
+          "updated_at": "2026-05-16T21:40:44Z"
+        },
+        "worker_handoff": null
+      },
+      "manager_session": "qa-g2-manager",
+      "notable_pane_pattern": null,
+      "pane_signal": {
+        "captured": true,
+        "classifier": null,
+        "degraded": false,
+        "notable_pattern": null,
+        "reason": null,
+        "status_age_seconds": 71
+      },
+      "staleness_seconds": 71.22,
+      "state": "idle",
+      "task": "qa-g2-manager-led-scenario-2",
+      "task_completed": true,
+      "worker_alive": true,
+      "worker_session": "qa-g2-worker"
+    },
+    "task_id": "task-3745ef67-2398-49fb-a3e3-63905aa0e9b5",
+    "worker_capture_id": null
+  }
+]

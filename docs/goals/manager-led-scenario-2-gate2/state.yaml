@@ -1,0 +1,423 @@
+# GoalBuddy v2 state.yaml
+# Board truth lives here. goal.md is the editable charter; notes/ holds long receipts only.
+
+version: 2
+
+goal:
+  title: "Manager-Led Scenario 2 Gate 2"
+  slug: "manager-led-scenario-2-gate2"
+  kind: existing_plan
+  tranche: "Run the full manager-led Scenario 2 emergent criteria QA slice and decide Gate 2."
+  status: active
+  intake:
+    original_request: "Set up the next GoalBuddy goal for the manager-led Scenario 2 Gate 2 follow-up."
+    interpreted_outcome: "A GoalBuddy board exists that can safely run and audit the full manager-led emergent criteria QA scenario."
+    input_shape: existing_plan
+    audience: "Jeremy and future meaningful codex-terminal-manager dogfood runs"
+    authority: requested
+    proof_type: artifact
+    completion_proof: "A final Judge or PM audit maps live manager-led Scenario 2 evidence to Gate 2 and records passed or exact blocker."
+    likely_misfire: "The PM thread performs the criteria mutations again, proving control-plane behavior but not manager-led behavior."
+    blind_spots_considered:
+      - "Manager setup questions may need narrow persisted answers before supervision starts."
+      - "Manager needs authority to run criteria-plan and criteria mutations, but not compact/clear, PR, merge, or product edits."
+      - "Evidence can include local session tokens or private absolute paths unless scrubbed."
+      - "A failure may identify a missing helper or protocol gap rather than a QA-only issue."
+    existing_plan_facts:
+      - "Scenario 2 requires criteria discovered during supervision, accepted/deferred status, audited finish blocking, replay/export visibility, and cleanup."
+      - "Gate 2 requires Scenario 2 to pass with a real manager-led run."
+      - "The previous live QA tranche passed Gate 1 but left Gate 2 partial because PM performed the initial criteria-plan and criteria mutations."
+
+rules:
+  pm_owns_state: true
+  one_active_task: true
+  max_write_workers: 1
+  no_implementation_without_worker_or_pm_task: true
+  no_completion_without_judge_or_pm_audit: true
+  planning_is_not_completion: true
+  queued_required_worker_blocks_completion: true
+  continuous_until_full_outcome: true
+  missing_input_or_credentials_do_not_stop_goal: true
+  preserve_and_validate_existing_plan: true
+  intake_misfire_must_be_audited: true
+  slice_policy:
+    max_consecutive_tiny_tasks: 2
+    prefer_vertical_slices: true
+    judge_picks_largest_safe_slice: true
+    worker_completes_whole_slice: true
+
+agents:
+  scout: installed
+  worker: installed
+  judge: installed
+
+visual_board:
+  selected: local
+  local:
+    status: configured
+    url: "http://goalbuddy.localhost:41737/manager-led-scenario-2-gate2/"
+    command: "npx goalbuddy board docs/goals/manager-led-scenario-2-gate2"
+  github_projects:
+    status: not_requested
+    url: null
+    command: "npx goalbuddy extend github-projects"
+    missing: []
+
+active_task: T005
+
+tasks:
+  - id: T001
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Validate the Gate 2 live QA runbook before starting real worker/manager sessions."
+    inputs:
+      - "docs/superpowers/plans/2026-05-16-dogfood-reliability-ladder.md Scenario 2 and Gate 2 sections"
+      - "docs/live-qa-log.md 2026-05-16 emergent-criteria live QA entry"
+      - "docs/goals/dogfood-reliability-ladder/state.yaml T007/T010 receipts"
+      - "scripts/workerctl qa-plan emergent-criteria --json"
+    constraints:
+      - "Read-only."
+      - "Do not start live worker/manager sessions."
+      - "Reject any runbook where PM performs criteria add/satisfy/defer/reject mutations during the manager-led proof."
+      - "Specify exact disposable names, evidence path, manager permissions, verify commands, and stop conditions for T002."
+    expected_output:
+      - "Decision: run live Gate 2 QA now, implement helper first, or block."
+      - "Exact T002 Worker objective if live QA is approved."
+      - "allowed_files for T002."
+      - "verify commands for T002."
+      - "stop_if conditions for T002."
+      - "Evidence that must prove manager-led behavior."
+    receipt:
+      result: done
+      decision: "run_live_gate2_qa_now"
+      rationale: "The runbook can safely proceed if T002 enforces a strict actor boundary: PM may start/configure/observe/scrub/package, while the manager must visibly drive criteria negotiation, criteria-plan, criteria add/defer, premature finish check, proof collection, criteria closure, replay/export, and final finish request."
+      disposable_names:
+        task: "qa-g2-manager-led-scenario-2"
+        worker: "qa-g2-worker"
+        manager: "qa-g2-manager"
+        occupied_check: "No existing qa-g2 or manager-led-scenario-2 registered sessions or tmux sessions were found."
+      evidence_path: "docs/live-qa-artifacts/2026-05-16-manager-led-scenario-2/"
+      manager_permissions:
+        mode: guided
+        allowed:
+          - "Run workerctl cycle, criteria-plan, criteria add/defer/satisfy/reject/list, replay, export-task, and finish-task for the disposable task."
+          - "Nudge the disposable worker through session-nudge."
+        forbidden:
+          - "Product edits."
+          - "compact/clear."
+          - "PR creation."
+          - "merge."
+          - "Destructive cleanup outside finish-task --stop-manager --stop-worker."
+      t002_worker_objective: "Run the full manager-led Scenario 2 Gate 2 QA slice with a real disposable worker/manager pair, preserving actor evidence that the manager performs the core criteria loop."
+      allowed_files:
+        - "docs/live-qa-log.md"
+        - "docs/live-qa-artifacts/2026-05-16-manager-led-scenario-2/"
+        - "docs/goals/manager-led-scenario-2-gate2/state.yaml"
+      verify:
+        - "scripts/workerctl qa-plan emergent-criteria --json"
+        - "scripts/workerctl cycle qa-g2-manager-led-scenario-2"
+        - "scripts/workerctl criteria qa-g2-manager-led-scenario-2 --list"
+        - "scripts/workerctl replay qa-g2-manager-led-scenario-2"
+        - "scripts/workerctl export-task qa-g2-manager-led-scenario-2 --output docs/live-qa-artifacts/2026-05-16-manager-led-scenario-2/export"
+        - "scripts/workerctl finish-task qa-g2-manager-led-scenario-2 --reason \"Manager-led Scenario 2 QA complete\" --require-criteria-audit --stop-manager --stop-worker"
+        - "scripts/workerctl sessions --state all"
+        - "scripts/workerctl reconcile --stale-cycles-seconds 1"
+        - "git status --short --branch"
+      stop_if:
+        - "The PM must perform criteria add/satisfy/defer/reject mutations to continue the proof."
+        - "The manager fails to notice no_criteria or does not ask the worker for separated criteria."
+        - "The manager attempts compact/clear, PR, merge, destructive cleanup, or product edits."
+        - "The manager records vague unverifiable criteria or accepts follow-ups as blockers without rationale."
+        - "Audited finish succeeds while accepted criteria remain open."
+        - "Replay/export omit criteria transitions or evidence."
+        - "Cleanup cannot safely stop disposable sessions."
+      evidence_that_must_prove_manager_led_behavior:
+        - "Manager terminal capture shows cycle output with criteria_negotiation.needed true and manager response to that state."
+        - "Manager terminal capture shows session-nudge asking worker for must-have versus deferred criteria."
+        - "Manager terminal capture shows criteria-plan run against saved or pasted worker criteria text."
+        - "Manager terminal capture or workerctl audit shows criteria add/defer commands originate from the manager session or from a recorded manager decision/request."
+        - "Manager terminal capture shows premature finish attempted and blocked while accepted criteria are open."
+        - "Manager terminal capture shows proof collection and criteria satisfy/defer/reject closure."
+        - "Replay/export/final finish evidence confirms criteria lifecycle and cleanup."
+
+  - id: T002
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: high
+    objective: "Run the full manager-led Scenario 2 Gate 2 QA slice with a real disposable worker/manager pair."
+    inputs:
+      - "T001 receipt"
+      - "scripts/workerctl qa-plan emergent-criteria --json"
+      - "docs/superpowers/plans/2026-05-16-dogfood-reliability-ladder.md"
+      - "docs/live-qa-log.md"
+    constraints:
+      - "This is live QA only, not meaningful project work."
+      - "Use disposable names selected by T001, defaulting to qa-g2-worker, qa-g2-manager, and qa-g2-manager-led-scenario-2 unless occupied."
+      - "Worker prompt must be status-only and must forbid tracked product edits."
+      - "PM may start pair, persist manager config, collect evidence, and audit; PM must not perform criteria add/satisfy/defer/reject mutations unless cleanup is required after a stop condition."
+      - "The manager must run or visibly request the criteria-plan and criteria mutation commands for the core proof."
+      - "Do not compact/clear, create PR, merge, or run destructive cleanup."
+      - "Record commands and important JSON results in the evidence bundle."
+      - "Scrub evidence for session tokens and private absolute paths before packaging."
+    allowed_files:
+      - "docs/live-qa-log.md"
+      - "docs/live-qa-artifacts/2026-05-16-manager-led-scenario-2/"
+      - "docs/goals/manager-led-scenario-2-gate2/state.yaml"
+    verify:
+      - "scripts/workerctl qa-plan emergent-criteria --json"
+      - "scripts/workerctl cycle <task>"
+      - "scripts/workerctl criteria <task> --list"
+      - "scripts/workerctl replay <task>"
+      - "scripts/workerctl export-task <task> --output docs/live-qa-artifacts/2026-05-16-manager-led-scenario-2/export"
+      - "scripts/workerctl finish-task <task> --reason \"Manager-led Scenario 2 QA complete\" --require-criteria-audit --stop-manager --stop-worker"
+      - "scripts/workerctl sessions --state all"
+      - "scripts/workerctl reconcile --stale-cycles-seconds 1"
+      - "git status --short --branch"
+    stop_if:
+      - "Pair cannot start cleanly."
+      - "Initial cycle lacks manager_context.acceptance_criteria or manager_context.criteria_negotiation."
+      - "The manager does not notice criteria_negotiation.needed or does not ask the worker for criteria."
+      - "PM must perform core criteria mutations to continue the proof."
+      - "Manager records vague criteria, accepts follow-ups as current-task blockers without rationale, or attempts unauthorized compact/clear/PR/merge/product edits."
+      - "Premature finish succeeds while accepted criteria remain open."
+      - "Replay/export omit criteria transitions or evidence."
+      - "Cleanup cannot safely stop disposable sessions."
+      - "Tracked product files change unexpectedly."
+    expected_output:
+      - "Evidence bundle under docs/live-qa-artifacts/2026-05-16-manager-led-scenario-2/."
+      - "docs/live-qa-log.md entry summarizing Gate 2 manager-led QA."
+      - "Receipt proving which actions were performed by the manager versus PM."
+      - "Explicit list of uncovered Scenario 2 or Gate 2 observations, if any."
+      - "Current git status after cleanup."
+    receipt:
+      result: done
+      changed_files:
+        - "docs/live-qa-log.md"
+        - "docs/live-qa-artifacts/2026-05-16-manager-led-scenario-2/"
+        - "docs/goals/manager-led-scenario-2-gate2/state.yaml"
+      summary: "Ran the full manager-led Scenario 2 Gate 2 QA slice with disposable task qa-g2-manager-led-scenario-2. PM started/configured/observed; the manager drove cycle, no_criteria response, worker criteria nudge, criteria-plan, accepted/deferred criteria mutations, premature finish guard check, proof collection, criteria satisfaction, replay/export, and final finish cleanup."
+      task_run: "qa-g2-manager-led-scenario-2"
+      worker_session: "qa-g2-worker"
+      manager_session: "qa-g2-manager"
+      evidence_bundle: "docs/live-qa-artifacts/2026-05-16-manager-led-scenario-2/"
+      actor_boundary:
+        pm:
+          - "Started pair."
+          - "Persisted narrow manager config."
+          - "Captured manager/session/audit/replay/export evidence."
+          - "Ran postfinish export and cleanup verification."
+        manager:
+          - "Observed criteria_negotiation.needed true with reason no_criteria."
+          - "Nudged worker for separated must-have and deferred criteria."
+          - "Ran criteria-plan on worker criteria text."
+          - "Recorded accepted criteria #20, #21, #22 and deferred follow-up #23."
+          - "Attempted premature audited finish and observed the guard block open accepted criteria."
+          - "Satisfied accepted criteria #20, #21, #22 with proof and evidence JSON."
+          - "Ran final finish-task with criteria audit and cleanup."
+      covered_expected_observations:
+        - "manager_context.acceptance_criteria and criteria_negotiation were visible in manager cycle output."
+        - "criteria_negotiation.needed started true before criteria existed."
+        - "Manager asked worker for must-have current-task criteria versus deferred follow-up criteria."
+        - "Manager ran criteria-plan before criteria mutations."
+        - "Worker-proposed accepted and deferred criteria are visible in criteria --list."
+        - "Accepted criteria blocked premature finish-task --require-criteria-audit."
+        - "Satisfied criteria include evidence JSON and proof text."
+        - "criteria --list shows zero accepted/open criteria before final finish."
+        - "Replay shows acceptance_criterion_added and acceptance_criterion_updated transitions."
+        - "Export writes acceptance-criteria.json and manifest lists it."
+        - "Final finish-task stopped both worker and manager."
+        - "Postcleanup tmux/reconcile checks are clean."
+      findings:
+        - "Gate 2 evidence appears sufficient; T003 Judge must make the formal gate decision."
+        - "Mutation/audit surfaces still record criteria mutations generically as actor=workerctl; manager terminal capture is the actor proof."
+        - "The final manager capture after cleanup failed because the manager session was already stopped, which is expected after successful finish cleanup."
+      commands:
+        - cmd: "scripts/workerctl pair --task qa-g2-manager-led-scenario-2 --worker-name qa-g2-worker --manager-name qa-g2-manager ..."
+          status: pass
+        - cmd: "scripts/workerctl manager-config qa-g2-manager-led-scenario-2 ..."
+          status: pass
+        - cmd: "scripts/workerctl session-nudge qa-g2-manager ..."
+          status: pass
+        - cmd: "scripts/workerctl capture qa-g2-manager --lines 260"
+          status: pass
+        - cmd: "scripts/workerctl capture qa-g2-manager --lines 360"
+          status: pass
+        - cmd: "scripts/workerctl capture qa-g2-manager --lines 520"
+          status: pass
+          note: "Expected post-cleanup failure recorded because manager tmux session had already been stopped."
+        - cmd: "scripts/workerctl audit qa-g2-manager-led-scenario-2"
+          status: pass
+        - cmd: "scripts/workerctl criteria qa-g2-manager-led-scenario-2 --list"
+          status: pass
+        - cmd: "scripts/workerctl commands --task qa-g2-manager-led-scenario-2 --json"
+          status: pass
+        - cmd: "scripts/workerctl replay qa-g2-manager-led-scenario-2"
+          status: pass
+        - cmd: "scripts/workerctl export-task qa-g2-manager-led-scenario-2 --output docs/live-qa-artifacts/2026-05-16-manager-led-scenario-2/export"
+          status: pass
+        - cmd: "scripts/workerctl reconcile --stale-cycles-seconds 1"
+          status: pass
+        - cmd: "git status --short --branch"
+          status: pass
+
+  - id: T003
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Audit whether the manager-led Scenario 2 evidence unlocks Gate 2."
+    inputs:
+      - "T001/T002 receipts"
+      - "docs/live-qa-artifacts/2026-05-16-manager-led-scenario-2/"
+      - "docs/live-qa-log.md"
+      - "docs/superpowers/plans/2026-05-16-dogfood-reliability-ladder.md Scenario 2 and promotion gates"
+      - "Current git status"
+    constraints:
+      - "Read-only."
+      - "Do not accept control-plane evidence as manager-led proof unless the manager actually drove the step."
+      - "Reject Gate 2 if core criteria mutation was performed by PM without a recorded manager command/request."
+      - "Separate manager behavior gaps from tooling/helper gaps."
+    expected_output:
+      - "Gate 2 passed | partial | blocked."
+      - "Evidence mapped to every Scenario 2 acceptance criterion."
+      - "Actor mapping for manager, worker, and PM."
+      - "Missing evidence or exact blocker."
+      - "Next Worker objective if a local helper fix is needed."
+    receipt:
+      result: done
+      decision: "gate2_passed"
+      gate_2_status: passed
+      rationale: "The evidence proves the manager-led Scenario 2 loop end to end. The manager observed no_criteria, asked the worker for separated criteria, ran criteria-plan, recorded accepted/deferred criteria, verified premature finish was blocked, collected proof, satisfied accepted criteria, and finished with replay/export/cleanup. PM did not perform core criteria mutations."
+      actor_mapping:
+        pm:
+          - "Pair start and manager-config setup."
+          - "Manager nudge to begin the protocol."
+          - "External evidence capture, export preservation, postflight checks, and board/log updates."
+        manager:
+          - "cycle observation and criteria_negotiation handling."
+          - "session-nudge to worker for separated criteria."
+          - "criteria-plan."
+          - "criteria add/defer mutations."
+          - "premature finish guard check."
+          - "criteria satisfy mutations."
+          - "final finish request with stop-manager and stop-worker."
+        worker:
+          - "README/help inspection."
+          - "Separated criteria proposal."
+          - "Status-only proof receipt."
+      evidence_mapped:
+        - requirement: "First cycle shows criteria_negotiation.needed true with reason no_criteria."
+          evidence: "commands/04-manager-capture-early.txt shows the manager ran cycle and observed needed true with no_criteria."
+          status: pass
+        - requirement: "Manager asks worker for criteria when negotiation is needed."
+          evidence: "commands/04-manager-capture-early.txt shows session-nudge to qa-g2-worker."
+          status: pass
+        - requirement: "At least one worker-proposed must-have is accepted."
+          evidence: "commands/05-manager-capture-after-criteria-plan.txt and commands/08-criteria-list-after-manager-stop.json show accepted criteria #20, #21, #22."
+          status: pass
+        - requirement: "At least one follow-up is deferred with rationale."
+          evidence: "Criterion #23 is deferred with rationale Follow-up after this QA slice."
+          status: pass
+        - requirement: "After active criteria exist, criteria_negotiation.needed is false."
+          evidence: "Manager proceeded from criteria-plan to criteria mutations; replay and criteria list show active criteria lifecycle. Explicit post-add cycle output was not separately captured, but this is non-blocking because subsequent guarded finish and criteria list prove active criteria existed."
+          status: pass
+        - requirement: "Premature finish exits nonzero while accepted criteria are open."
+          evidence: "commands/05-manager-capture-after-criteria-plan.txt shows finish-task blocked on #20, #21, #22."
+          status: pass
+        - requirement: "Satisfied criteria have proof and evidence JSON."
+          evidence: "commands/08-criteria-list-after-manager-stop.json shows criteria #20, #21, #22 satisfied with proof and evidence JSON."
+          status: pass
+        - requirement: "criteria --list shows zero open accepted criteria before final finish."
+          evidence: "commands/08-criteria-list-after-manager-stop.json and final command audit summary show accepted: 0, satisfied: 3, deferred: 1."
+          status: pass
+        - requirement: "Replay shows criteria lifecycle transitions."
+          evidence: "commands/11-replay-postfinish.txt."
+          status: pass
+        - requirement: "export-task writes acceptance-criteria.json and manifest lists it."
+          evidence: "commands/12-export-task-postfinish.txt and commands/16-export-verify.txt."
+          status: pass
+        - requirement: "Final finish stops both sessions."
+          evidence: "commands/09-commands-after-manager-stop.json reports killed_manager true and killed_worker true."
+          status: pass
+        - requirement: "Postflight invariants pass."
+          evidence: "commands/13-tmux-postfinish.txt has no matches; commands/14-reconcile-postfinish.json has empty dangling_bindings, dead_pid_sessions, and stuck_tasks."
+          status: pass
+      missing_evidence: []
+      blocker_or_next_step: "No Gate 2 blocker remains. Recommended next tranche is either evidence hardening for manager-attributed criteria mutations or Gate 3 disposable edit readiness."
+      helper_gap:
+        selected: false
+        reason: "Mutation/audit surfaces still show actor=workerctl, but manager terminal capture is sufficient for this Gate 2 run. Persisting manager identity on criteria mutations would be an evidence-hardening improvement, not a blocker."
+      next_task: T005
+
+  - id: T004
+    type: worker
+    assignee: Worker
+    status: blocked
+    reasoning_hint: default
+    objective: "Implement the smallest local helper fix selected by T003 if the manager-led QA exposes an actionable tooling gap."
+    allowed_files: []
+    verify: []
+    stop_if:
+      - "T003 does not provide allowed_files."
+      - "The issue is a QA/evidence gap rather than a local code/helper gap."
+      - "The fix requires product direction, credentials, destructive actions, or broad redesign."
+      - "The fix would touch files outside T003 allowed_files."
+      - "Verification fails twice with the same unexplained failure."
+    expected_output:
+      - "Changed files and verification commands, or a blocked receipt explaining why no safe fix was possible."
+    receipt:
+      result: blocked
+      decision: "not_selected"
+      summary: "T003 passed Gate 2 and did not select a mandatory helper fix. The remaining manager-attribution improvement is evidence hardening, not a blocker for this tranche."
+
+  - id: T005
+    type: pm
+    assignee: PM
+    status: active
+    reasoning_hint: default
+    objective: "Package the manager-led Scenario 2 Gate 2 outcome."
+    inputs:
+      - "T002/T003 receipts"
+      - "T004 receipt if executed"
+      - "Current git status"
+    constraints:
+      - "Do not merge without explicit operator instruction."
+      - "Create a PR if evidence logs, docs, board state, or helper code changed."
+      - "If Gate 2 passes, record the next gate candidate; if blocked, record the exact blocker."
+    expected_output:
+      - "PR/issue/no-PR decision."
+      - "Branch/status/check state if PR is created."
+      - "Next recommended dogfood gate or blocker."
+    receipt: null
+
+  - id: T006
+    type: judge
+    assignee: Judge
+    status: queued
+    reasoning_hint: high
+    objective: "Final audit for the manager-led Scenario 2 Gate 2 tranche."
+    inputs:
+      - "All tranche receipts"
+      - "Last verification"
+      - "Current dirty diff"
+      - "PR/check state if applicable"
+      - "Dogfood reliability ladder promotion gates"
+    constraints:
+      - "Read-only."
+      - "Reject completion if live evidence is missing, cleanup is incomplete, required Worker tasks remain queued, or Gate 2 decision is ambiguous."
+    expected_output:
+      - "complete | not_complete"
+      - "full_outcome_complete: true | false"
+      - "Gate 2 passed or exact blocker."
+      - "Next recommended tranche."
+    receipt: null
+
+checks:
+  dirty_fingerprint: unknown
+  last_verification:
+    result: unknown
+    task: null
+    commands: []
