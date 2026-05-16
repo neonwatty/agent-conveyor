@@ -268,8 +268,9 @@ tmux attach -t codex-live-test
   default for review. With `--require-criteria-audit`, fails before finishing
   if any acceptance criteria for the task are still `accepted`; `proposed`,
   `satisfied`, `deferred`, and `rejected` criteria do not block.
-- `stop-task <task> [--stop-worker]` — Force-stop a task's manager (and
-  optionally the worker).
+- `stop-task <task> [--reason R] [--stop-worker]` — Force-stop a task's
+  manager (and optionally the worker), recording the reason in the audit
+  payload.
 
 ### Observation
 

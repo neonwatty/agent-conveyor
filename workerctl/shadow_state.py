@@ -81,12 +81,14 @@ def pane_signal_for_session(
         `status_age` argument (Phase 2 JSON staleness, truncated to int seconds).
       - `reason` (str | None): a short message describing a non-default outcome.
         Non-None when `captured=False` (e.g. "no tmux session attached",
-        "<exception text>"), AND non-None on the captured-but-degraded path
-        (`captured=True, degraded=True`) where it explains why classification
-        ran with reduced inputs. None on the clean success path.
-      - `degraded` (bool): True when the signal was collected but classification
-        ran with reduced inputs (currently: when staleness was unavailable).
-        Operators / callers should distinguish this from clean captures.
+        "<exception text>"), AND non-None on captured-but-degraded paths where it
+        explains why classification ran with reduced inputs. None on the clean
+        success path.
+      - `degraded` (bool): True when an attached pane signal could not be
+        collected cleanly, or when classification ran with reduced inputs. It is
+        false for expected non-pane states like unknown/no-tmux sessions.
+        Operators / callers should distinguish degraded signals from clean
+        captures.
 
     The returned dict ALWAYS contains all six keys — callers must NOT check
     `pane_signal is None`. Use `pane_signal["captured"]` (and optionally
@@ -115,6 +117,7 @@ def pane_signal_for_session(
         return _pane_signal(
             captured=False,
             reason=f"tmux capture failed: {exc}",
+            degraded=True,
         )
     try:
         staleness = worker_ingest.session_staleness_seconds(

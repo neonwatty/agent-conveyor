@@ -2023,13 +2023,20 @@ class CliTests(unittest.TestCase):
                     "session": session,
                 }
                 lifecycle.run = lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, "", "")
-                args = argparse.Namespace(message=None, path=str(db_path), stop_worker=True, task="task-a")
+                args = argparse.Namespace(
+                    message=None,
+                    path=str(db_path),
+                    reason="QA cleanup after tmux failure simulation",
+                    stop_worker=True,
+                    task="task-a",
+                )
 
                 with contextlib.redirect_stdout(io.StringIO()) as stdout:
                     result = lifecycle.command_stop_task(args)
 
                 payload = json.loads(stdout.getvalue())
                 self.assertEqual(result, 0)
+                self.assertEqual(payload["reason"], "QA cleanup after tmux failure simulation")
                 self.assertTrue(payload["killed_manager"])
                 self.assertTrue(payload["killed_worker"])
                 with worker_db.connect(db_path) as conn:
@@ -2037,13 +2044,26 @@ class CliTests(unittest.TestCase):
                     binding = conn.execute("select state, ended_at from bindings where id = 'binding-1'").fetchone()
                     manager = conn.execute("select state from managers where id = ?", (manager_id,)).fetchone()
                     worker = conn.execute("select state from workers where name = 'worker-a'").fetchone()
-                    command = conn.execute("select state from commands where type = 'stop_task'").fetchone()
+                    command = conn.execute("select state, payload_json, result_json from commands where type = 'stop_task'").fetchone()
+                    event = conn.execute("select payload_json from events where type = 'stop_task_succeeded'").fetchone()
                 self.assertEqual(task["state"], "done")
                 self.assertEqual(binding["state"], "ended")
                 self.assertIsNotNone(binding["ended_at"])
                 self.assertEqual(manager["state"], "stopped")
                 self.assertEqual(worker["state"], "stopped")
                 self.assertEqual(command["state"], "succeeded")
+                self.assertEqual(
+                    json.loads(command["payload_json"])["reason"],
+                    "QA cleanup after tmux failure simulation",
+                )
+                self.assertEqual(
+                    json.loads(command["result_json"])["reason"],
+                    "QA cleanup after tmux failure simulation",
+                )
+                self.assertEqual(
+                    json.loads(event["payload_json"])["reason"],
+                    "QA cleanup after tmux failure simulation",
+                )
             finally:
                 lifecycle.manager_session_exists = original_manager_session_exists
                 lifecycle.session_exists = original_session_exists
@@ -2515,6 +2535,12 @@ class CliTests(unittest.TestCase):
         self.assertIn("transcript-capture", proc.stdout)
         self.assertIn("transcript-prune", proc.stdout)
         self.assertIn("transcript-show", proc.stdout)
+
+    def test_stop_task_help_includes_reason(self):
+        proc = self.run_workerctl("stop-task", "--help")
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("--reason", proc.stdout)
 
     def test_start_test_is_listed_in_help(self):
         proc = self.run_workerctl("--help")
@@ -6283,6 +6309,7 @@ class SuperviseCycleTests(unittest.TestCase):
 
             self.assertEqual(result["state"], "idle")
             self.assertEqual(result["pane_signal"]["captured"], False)
+            self.assertTrue(result["pane_signal"]["degraded"])
             self.assertIn("tmux server went away", result["pane_signal"]["reason"])
             self.assertIsNone(result["notable_pane_pattern"])
 
@@ -7163,6 +7190,7 @@ class ShadowStateTests(unittest.TestCase):
             self.assertEqual(result["captured"], False)
             self.assertIsNone(result["classifier"])
             self.assertIsNone(result["notable_pattern"])
+            self.assertTrue(result["degraded"])
             self.assertIn("tmux died", result["reason"])
 
     def test_pane_signal_for_session_uses_staleness_as_status_age(self):
@@ -7299,8 +7327,7 @@ class ShadowStateTests(unittest.TestCase):
             self.assertIn("staleness unavailable", result["reason"])
 
     def test_pane_signal_for_session_degraded_false_on_normal_paths(self):
-        """`degraded` defaults to False on the unknown-session, no-tmux, and
-        successful-classify paths."""
+        """`degraded` defaults to False on expected non-pane and clean-capture paths."""
         from workerctl import shadow_state
         from workerctl import tmux as worker_tmux
 

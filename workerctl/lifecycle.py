@@ -162,7 +162,8 @@ def _stop_or_finish_task(args: argparse.Namespace, *, finish: bool) -> int:
     db_path = Path(args.path).expanduser().resolve() if args.path else None
     command_type = "finish_task" if finish else "stop_task"
     event_prefix = "finish_task" if finish else "stop_task"
-    final_reason = getattr(args, "reason", None) or "Task finished by operator."
+    default_reason = "Task finished by operator." if finish else "Task stopped by operator."
+    final_reason = getattr(args, "reason", None) or default_reason
     stop_manager = (not finish) or bool(getattr(args, "stop_manager", False))
     with connect_db(db_path) as conn:
         initialize_database(conn)
@@ -204,7 +205,7 @@ def _stop_or_finish_task(args: argparse.Namespace, *, finish: bool) -> int:
                 **({"final_audit": final_audit} if finish else {}),
                 "message": args.message,
                 "manager_decision": decision_check,
-                "reason": final_reason if finish else None,
+                "reason": final_reason,
                 "stop_manager": stop_manager,
                 "stop_worker": args.stop_worker,
                 "task": snapshot["name"],
@@ -251,7 +252,7 @@ def _stop_or_finish_task(args: argparse.Namespace, *, finish: bool) -> int:
                 "final_observation_id": final_observation_id,
                 "manager_decision": decision_check,
                 "message": args.message,
-                "reason": final_reason if finish else None,
+                "reason": final_reason,
                 "stop_manager": stop_manager,
                 "stop_worker": args.stop_worker,
             },
@@ -267,7 +268,7 @@ def _stop_or_finish_task(args: argparse.Namespace, *, finish: bool) -> int:
         "manager_decision": decision_check,
         "killed_manager": False,
         "killed_worker": False,
-        "reason": final_reason if finish else None,
+        "reason": final_reason,
         "stop_manager": stop_manager,
         "stop_worker": args.stop_worker,
         "task": snapshot["name"],
