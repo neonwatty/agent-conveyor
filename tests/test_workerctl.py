@@ -868,6 +868,7 @@ class CliTests(unittest.TestCase):
         self.assertEqual(payload["scenario"], "emergent-criteria")
         self.assertTrue(any("workerctl pair" in step for step in payload["steps"]))
         self.assertTrue(any("manager_context.acceptance_criteria" in step for step in payload["steps"]))
+        self.assertTrue(any("manager_context.criteria_negotiation" in step for step in payload["steps"]))
         self.assertTrue(any("worker_proposed" in step for step in payload["steps"]))
         self.assertTrue(any("manager_inferred" in step for step in payload["steps"]))
         self.assertTrue(any("criteria qa-emergent-criteria --list" in step for step in payload["steps"]))
@@ -880,6 +881,10 @@ class CliTests(unittest.TestCase):
         )
         self.assertTrue(
             any("criteria --list is used as the canonical task state" in observation
+                for observation in payload["expected_observations"])
+        )
+        self.assertTrue(
+            any("criteria_negotiation.needed starts true" in observation
                 for observation in payload["expected_observations"])
         )
         joined = " ".join(payload["steps"] + payload["expected_observations"])
@@ -6534,6 +6539,112 @@ class SuperviseCycleCriteriaTests(unittest.TestCase):
                 criteria_context,
             )
 
+    def test_run_cycle_recommends_criteria_negotiation_when_no_criteria_exist(self):
+        from workerctl import supervise_cycle
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self._setup_bound_task(conn, tmpdir)
+
+            result = supervise_cycle.run_cycle(
+                conn,
+                task_name="criteria-cycle",
+                now="2026-05-15T14:32:15Z",
+            )
+
+            negotiation = result["manager_context"]["criteria_negotiation"]
+            self.assertTrue(negotiation["needed"])
+            self.assertEqual(negotiation["reason"], "no_criteria")
+            self.assertIn("must-have current-task criteria", negotiation["prompt"])
+            self.assertIn("follow-up criteria", negotiation["prompt"])
+            self.assertTrue(
+                any("workerctl criteria criteria-cycle --add" in action for action in negotiation["suggested_actions"])
+            )
+
+            row = conn.execute(
+                "select status_json from manager_cycles where id = ?",
+                (result["cycle_id"],),
+            ).fetchone()
+            persisted = json.loads(row["status_json"])
+            self.assertEqual(
+                persisted["manager_context"]["criteria_negotiation"],
+                negotiation,
+            )
+
+    def test_run_cycle_recommends_criteria_negotiation_when_only_non_current_criteria_exist(self):
+        from workerctl import supervise_cycle
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self._setup_bound_task(conn, tmpdir)
+            for status in ["deferred", "rejected"]:
+                worker_db.insert_acceptance_criterion(
+                    conn,
+                    task_id="task-criteria-cycle",
+                    criterion=f"{status} criterion",
+                    status=status,
+                    source="manager_inferred",
+                )
+            conn.commit()
+
+            result = supervise_cycle.run_cycle(
+                conn,
+                task_name="criteria-cycle",
+                now="2026-05-15T14:32:15Z",
+            )
+
+            negotiation = result["manager_context"]["criteria_negotiation"]
+            self.assertTrue(negotiation["needed"])
+            self.assertEqual(negotiation["reason"], "no_current_task_criteria")
+
+    def test_criteria_negotiation_quotes_task_names_in_suggested_commands(self):
+        from workerctl import supervise_cycle
+
+        negotiation = supervise_cycle._criteria_negotiation_context(
+            task_name="criteria cycle; echo bad",
+            criteria_context={
+                "summary": {
+                    "proposed": 0,
+                    "accepted": 0,
+                    "satisfied": 0,
+                    "deferred": 0,
+                    "rejected": 0,
+                },
+            },
+        )
+
+        joined_actions = " ".join(negotiation["suggested_actions"])
+        self.assertIn("workerctl criteria 'criteria cycle; echo bad' --add", joined_actions)
+        self.assertNotIn("workerctl criteria criteria cycle; echo bad --add", joined_actions)
+
+    def test_run_cycle_does_not_recommend_criteria_negotiation_when_active_criteria_exist(self):
+        from workerctl import supervise_cycle
+
+        for active_status in ["proposed", "accepted", "satisfied"]:
+            with self.subTest(active_status=active_status):
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    conn = self.open_db(tmpdir)
+                    self._setup_bound_task(conn, tmpdir)
+                    worker_db.insert_acceptance_criterion(
+                        conn,
+                        task_id="task-criteria-cycle",
+                        criterion=f"{active_status} criterion",
+                        status=active_status,
+                        source="manager_inferred",
+                    )
+                    conn.commit()
+
+                    result = supervise_cycle.run_cycle(
+                        conn,
+                        task_name="criteria-cycle",
+                        now="2026-05-15T14:32:15Z",
+                    )
+
+                    negotiation = result["manager_context"]["criteria_negotiation"]
+                    self.assertFalse(negotiation["needed"])
+                    self.assertEqual(negotiation["reason"], "active_criteria_present")
+                    self.assertIsNone(negotiation["prompt"])
+
 
 class ReadEventsStatsTests(unittest.TestCase):
     def test_read_events_with_stats_counts_malformed_lines(self):
@@ -7776,6 +7887,8 @@ class ManagerBootstrapPromptTests(unittest.TestCase):
 
         self.assertIn("Treat acceptance criteria as living supervision state", prompt)
         self.assertIn("manager_context.acceptance_criteria", prompt)
+        self.assertIn("manager_context.criteria_negotiation", prompt)
+        self.assertIn("use its prompt when needed is true", prompt)
         self.assertIn("must-have vs follow-up criteria", prompt)
         self.assertIn("Record useful criteria with `scripts/workerctl criteria`", prompt)
         self.assertIn("compare worker receipts/verification against accepted open criteria", prompt)
@@ -7800,6 +7913,8 @@ class ManagerBootstrapPromptTests(unittest.TestCase):
 
         for document in (readme, skill):
             self.assertIn("manager_context.acceptance_criteria", document)
+            self.assertIn("manager_context.criteria_negotiation", document)
+            self.assertIn('"criteria_negotiation"', document)
             self.assertIn("criterion_id=$(scripts/workerctl criteria", document)
             self.assertIn('["affected_criterion"]["id"]', document)
             self.assertIn('--satisfy "$criterion_id"', document)

@@ -196,6 +196,7 @@ Supervision loop:
 - Read `manager_context.manager_config` in cycle output before nudging.
 - Treat acceptance criteria as living supervision state.
 - Inspect `manager_context.acceptance_criteria` each cycle.
+- Inspect `manager_context.criteria_negotiation`; use its prompt when needed is true.
 - If worker progress reveals new edge cases, tests, polish, or scope
   boundaries, ask the worker to propose must-have vs follow-up criteria.
 - Record useful criteria with `scripts/workerctl criteria`.
@@ -1152,6 +1153,7 @@ def command_qa_plan(args: argparse.Namespace) -> int:
         "emergent-criteria": {
             "expected_observations": [
                 "manager cycle output includes manager_context.acceptance_criteria with summary/open/proposed/satisfied/deferred/rejected",
+                "criteria_negotiation.needed starts true before active current-task criteria exist and turns false after proposed, accepted, or satisfied criteria exist",
                 "the manager asks the worker for must-have current-task criteria versus deferred follow-up criteria",
                 "worker-proposed and manager-inferred criteria are visible through workerctl criteria --list",
                 "accepted criteria block finish-task --require-criteria-audit until satisfied, deferred, or rejected",
@@ -1164,10 +1166,12 @@ def command_qa_plan(args: argparse.Namespace) -> int:
             "steps": [
                 'Start a real pair: workerctl pair --task qa-emergent-criteria --worker-name qa-ec-worker --manager-name qa-ec-manager --cwd "$PWD" --task-goal "Make a tiny documented CLI behavior improvement in this repo." --task-prompt "Inspect CLI help/tests and identify one tiny behavior improvement. Do not edit until instructed."',
                 "Run workerctl cycle qa-emergent-criteria and verify manager_context.acceptance_criteria is present with empty status buckets.",
+                "Verify manager_context.criteria_negotiation.needed is true and reason is no_criteria on the first cycle.",
                 'Nudge the worker: workerctl session-nudge qa-ec-worker "Propose 2-4 acceptance criteria for the smallest useful slice you found. Separate must-have current-task criteria from follow-up criteria."',
                 "Record at least one worker-proposed must-have criterion as accepted with workerctl criteria qa-emergent-criteria --add --criterion \"...\" --source worker_proposed --status accepted.",
                 "Record at least one follow-up criterion as deferred with workerctl criteria qa-emergent-criteria --add --criterion \"...\" --source worker_proposed --status deferred --rationale \"Follow-up after this QA slice\".",
                 "Run workerctl cycle qa-emergent-criteria again and verify open contains the accepted criterion while deferred contains the follow-up.",
+                "Run workerctl cycle qa-emergent-criteria again and verify manager_context.criteria_negotiation.needed is false after active criteria exist.",
                 "Ask the worker to implement the tiny slice and provide verification receipts.",
                 "If the worker omits a useful proof, add a manager-inferred accepted criterion with workerctl criteria qa-emergent-criteria --add --criterion \"...\" --source manager_inferred --status accepted.",
                 "Attempt workerctl finish-task qa-emergent-criteria --reason \"QA premature finish\" --require-criteria-audit and verify it fails while accepted criteria remain open.",

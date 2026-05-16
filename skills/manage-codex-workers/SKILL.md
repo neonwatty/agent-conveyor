@@ -189,6 +189,12 @@ scripts/workerctl cycle my-task
 #       "satisfied": [...],
 #       "deferred": [...],
 #       "rejected": [...]
+#     },
+#     "criteria_negotiation": {
+#       "needed": true,
+#       "reason": "no_criteria",
+#       "prompt": "Please propose 2-4 acceptance criteria for the current slice...",
+#       "suggested_actions": [...]
 #     }
 #   },
 #   "ingest": { "new_events": 3, "new_offset": 12345 },
@@ -227,6 +233,9 @@ Acceptance criteria are living supervision state, not just setup text. Inspect
 
 - Treat `open` as accepted criteria that still need worker proof before the
   task can finish.
+- Inspect `manager_context.criteria_negotiation` every cycle. When `needed` is
+  true, use its `prompt` as the worker nudge or adapt it to the situation before
+  recording criteria.
 - When worker progress reveals new edge cases, missing tests, polish needs, or
   scope boundaries, ask the worker to propose which criteria are must-have now
   versus follow-up.

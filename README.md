@@ -286,6 +286,10 @@ tmux attach -t codex-live-test
     worker progress, and next steps. `manager_context.acceptance_criteria`
     groups criteria by status, includes summary counts, and exposes `open` as
     accepted criteria that still need proof before finishing.
+    `manager_context.criteria_negotiation` is advisory: when `needed` is true,
+    the manager should ask the worker for must-have current-task criteria versus
+    follow-up criteria, then record the result with `workerctl criteria`. The
+    field does not send nudges or mutate criteria automatically.
   
   The `cycle` subcommand accepts `--busy-wait-seconds N` (default: 90) to tune the pane-signal classifier's stuck-busy threshold. Lower values flag stalls faster but increase false positives on long-running real work:
   ```bash
@@ -438,6 +442,12 @@ workerctl cycle auth-refactor
 #       "satisfied": [...],
 #       "deferred": [...],
 #       "rejected": [...]
+#     },
+#     "criteria_negotiation": {
+#       "needed": true,
+#       "reason": "no_criteria",
+#       "prompt": "Please propose 2-4 acceptance criteria for the current slice...",
+#       "suggested_actions": [...]
 #     }
 #   },
 #   "cycle_id": 17,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shlex
 import sqlite3
 import sys
 from typing import Any
@@ -14,6 +15,11 @@ from workerctl.commands import _pid_is_alive
 
 DEFAULT_BUSY_WAIT_SECONDS = 90
 ACCEPTANCE_CRITERION_STATUSES = ("proposed", "accepted", "satisfied", "deferred", "rejected")
+CRITERIA_NEGOTIATION_PROMPT = (
+    "Please propose 2-4 acceptance criteria for the current slice. "
+    "Split them into must-have current-task criteria and follow-up criteria. "
+    "Include the verification you expect for each."
+)
 
 
 def _acceptance_criteria_context(
@@ -35,6 +41,40 @@ def _acceptance_criteria_context(
         "satisfied": grouped["satisfied"],
         "deferred": grouped["deferred"],
         "rejected": grouped["rejected"],
+    }
+
+
+def _criteria_negotiation_context(
+    *,
+    task_name: str,
+    criteria_context: dict[str, Any],
+) -> dict[str, Any]:
+    summary = criteria_context["summary"]
+    active_count = summary["proposed"] + summary["accepted"] + summary["satisfied"]
+    total_count = sum(summary.values())
+    if total_count == 0:
+        reason = "no_criteria"
+    elif active_count == 0:
+        reason = "no_current_task_criteria"
+    else:
+        return {
+            "needed": False,
+            "reason": "active_criteria_present",
+            "prompt": None,
+            "suggested_actions": [],
+        }
+
+    task_arg = shlex.quote(task_name)
+    return {
+        "needed": True,
+        "reason": reason,
+        "prompt": CRITERIA_NEGOTIATION_PROMPT,
+        "suggested_actions": [
+            "Ask the worker to split must-have current-task criteria from follow-up criteria.",
+            f"Record accepted current-task criteria with workerctl criteria {task_arg} --add --criterion \"...\" --source worker_proposed --status accepted.",
+            f"Record proposed current-task criteria with workerctl criteria {task_arg} --add --criterion \"...\" --source worker_proposed --status proposed.",
+            f"Record follow-up criteria with workerctl criteria {task_arg} --add --criterion \"...\" --source worker_proposed --status deferred.",
+        ],
     }
 
 
@@ -189,10 +229,15 @@ def run_cycle(
     last_subtype = worker_db.latest_codex_event_subtype(
         conn, session_id=binding["worker_session_id"]
     )
+    criteria_context = _acceptance_criteria_context(conn, task_id=binding["task_id"])
     manager_context = {
         "manager_config": worker_db.manager_config(conn, task_id=binding["task_id"]),
         "worker_handoff": worker_db.latest_worker_handoff(conn, task_id=binding["task_id"]),
-        "acceptance_criteria": _acceptance_criteria_context(conn, task_id=binding["task_id"]),
+        "acceptance_criteria": criteria_context,
+        "criteria_negotiation": _criteria_negotiation_context(
+            task_name=task_name,
+            criteria_context=criteria_context,
+        ),
     }
     status_payload = {
         "kind": "session_cycle",
