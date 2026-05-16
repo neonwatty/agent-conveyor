@@ -61,7 +61,7 @@ visual_board:
     command: "npx goalbuddy extend github-projects"
     missing: []
 
-active_task: T009
+active_task: T010
 
 tasks:
   - id: T001
@@ -531,7 +531,7 @@ tasks:
   - id: T009
     type: pm
     assignee: PM
-    status: active
+    status: done
     reasoning_hint: default
     objective: "Prepare the PR or follow-up issue for the live QA tranche outcome."
     inputs:
@@ -546,11 +546,40 @@ tasks:
       - "PR/issue/no-PR decision."
       - "Exact branch/status/check state if a PR is created."
       - "Follow-up tasks or blockers."
-    receipt: null
+    receipt:
+      result: done
+      decision: "pr_created"
+      pr_url: "https://github.com/neonwatty/codex-terminal-manager/pull/57"
+      branch: "live-dogfood-emergent-criteria-qa"
+      commit: "00b7c43 Record emergent criteria live QA"
+      summary: "Created PR #57 with the live emergent-criteria QA evidence bundle, live QA log entry, and GoalBuddy board receipts. CI passed on the initial PR commit."
+      ci_state:
+        - check: unittest
+          status: pass
+          duration: "29s"
+          url: "https://github.com/neonwatty/codex-terminal-manager/actions/runs/25973180155/job/76348686421"
+        - check: unittest
+          status: pass
+          duration: "23s"
+          url: "https://github.com/neonwatty/codex-terminal-manager/actions/runs/25973184499/job/76348698350"
+      follow_up:
+        - "Run a fuller manager-led Scenario 2 variant where the manager performs initial criteria-plan, accepted/deferred mutations, and satisfy/defer/reject decisions end to end."
+        - "Consider a dedicated qa-run harness or qa-doctor wrapper so future evidence bundles can be generated and scrubbed mechanically."
+      commands:
+        - cmd: "git switch -c live-dogfood-emergent-criteria-qa"
+          status: pass
+        - cmd: "git commit -m \"Record emergent criteria live QA\""
+          status: pass
+        - cmd: "git push -u origin live-dogfood-emergent-criteria-qa"
+          status: pass
+        - cmd: "gh pr create --title \"Record emergent criteria live QA\" ..."
+          status: pass
+        - cmd: "gh pr checks 57 --watch --interval 10"
+          status: pass
   - id: T010
     type: judge
     assignee: Judge
-    status: queued
+    status: active
     reasoning_hint: high
     objective: "Final audit for the live Scenario 1/2 dogfood tranche."
     inputs:
