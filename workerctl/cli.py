@@ -661,6 +661,11 @@ def build_parser() -> argparse.ArgumentParser:
     stop_task.add_argument("--message", help="Optional final message to send before stopping the worker.")
     stop_task.add_argument("--decision-id", type=int, help="Manager decision ID that justifies this stop.")
     stop_task.add_argument("--strict-decisions", action="store_true", help="Reject the stop unless --decision-id is valid.")
+    stop_task.add_argument(
+        "--reason",
+        default="Task stopped by operator.",
+        help="Reason recorded in the stop command audit payload.",
+    )
     stop_task.add_argument("--path", help="Override the workerctl database path.")
     stop_task.set_defaults(func=command_stop_task)
 
