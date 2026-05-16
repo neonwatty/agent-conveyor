@@ -992,10 +992,23 @@ class CliTests(unittest.TestCase):
         self.assertTrue(any("manager_inferred" in step for step in payload["steps"]))
         self.assertTrue(any("criteria qa-emergent-criteria --list" in step for step in payload["steps"]))
         self.assertTrue(any("--require-criteria-audit" in step for step in payload["steps"]))
+        self.assertTrue(any("--stop-manager --stop-worker" in step for step in payload["steps"]))
+        self.assertTrue(any("killed_worker and killed_manager" in step for step in payload["steps"]))
+        self.assertTrue(any("tmux list-sessions" in step for step in payload["steps"]))
+        self.assertTrue(any("sessions --state all" in step for step in payload["steps"]))
         self.assertTrue(any("acceptance-criteria.json" in step for step in payload["steps"]))
         self.assertTrue(any("workerctl reconcile" in step for step in payload["steps"]))
+        self.assertTrue(any("git status --short --branch" in step for step in payload["steps"]))
         self.assertTrue(
             any("accepted criteria block finish-task --require-criteria-audit" in observation
+                for observation in payload["expected_observations"])
+        )
+        self.assertTrue(
+            any("finish-task --stop-manager --stop-worker reports killed_worker" in observation
+                for observation in payload["expected_observations"])
+        )
+        self.assertTrue(
+            any("session rows are marked gone" in observation
                 for observation in payload["expected_observations"])
         )
         self.assertTrue(
@@ -1010,6 +1023,7 @@ class CliTests(unittest.TestCase):
         self.assertIn("must-have current-task criteria", joined)
         self.assertIn("deferred follow-up criteria", joined)
         self.assertIn("acceptance_criterion_updated", joined)
+        self.assertIn("status-only", joined)
 
     def test_db_doctor_outputs_expected_structure(self):
         with tempfile.TemporaryDirectory() as tmpdir:
