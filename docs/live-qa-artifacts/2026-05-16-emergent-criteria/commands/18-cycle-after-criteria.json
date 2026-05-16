@@ -1,0 +1,144 @@
+{
+  "binding_id": "binding-2c803d19-4415-4990-8d42-1c994391e98f",
+  "cycle_completed_at": "2026-05-16T21:10:48Z",
+  "cycle_id": 14,
+  "cycle_started_at": "2026-05-16T21:10:48Z",
+  "ingest": {
+    "new_events": 25,
+    "new_offset": 97520,
+    "skipped_lines": 0
+  },
+  "kind": "session_cycle",
+  "last_event_subtype": "task_complete",
+  "last_state_event_at": "2026-05-16T21:09:36.154Z",
+  "manager_alive": true,
+  "manager_context": {
+    "acceptance_criteria": {
+      "deferred": [
+        {
+          "created_at": "2026-05-16T21:10:12Z",
+          "criterion": "Run a live qa-plan scenario, likely emergent-criteria, against a disposable worker/manager pair and capture the audit/replay evidence.",
+          "evidence": {},
+          "id": 18,
+          "proof": null,
+          "rationale": "Follow-up after this QA slice.",
+          "source": "worker_proposed",
+          "status": "deferred",
+          "task_id": "task-21ef9621-5c4f-45ac-8a73-6e4a2c75dec4",
+          "updated_at": "2026-05-16T21:10:12Z"
+        },
+        {
+          "created_at": "2026-05-16T21:10:12Z",
+          "criterion": "Verify install/path behavior so workerctl --help works after documented setup, not only through repo-local wrappers.",
+          "evidence": {},
+          "id": 19,
+          "proof": null,
+          "rationale": "Follow-up after this QA slice.",
+          "source": "worker_proposed",
+          "status": "deferred",
+          "task_id": "task-21ef9621-5c4f-45ac-8a73-6e4a2c75dec4",
+          "updated_at": "2026-05-16T21:10:12Z"
+        }
+      ],
+      "open": [
+        {
+          "created_at": "2026-05-16T21:10:12Z",
+          "criterion": "README command coverage is understood well enough to identify the QA surface: worker/manager setup, binding, cycle observation, criteria tracking, audit/replay, and cleanup.",
+          "evidence": {},
+          "id": 15,
+          "proof": null,
+          "rationale": null,
+          "source": "worker_proposed",
+          "status": "accepted",
+          "task_id": "task-21ef9621-5c4f-45ac-8a73-6e4a2c75dec4",
+          "updated_at": "2026-05-16T21:10:12Z"
+        },
+        {
+          "created_at": "2026-05-16T21:10:12Z",
+          "criterion": "workerctl help is checked through a valid entrypoint, with any entrypoint issue recorded separately from product behavior. Current note: root ./workerctl is a package directory, not an executable; bin/workerctl and scripts/workerctl are executable.",
+          "evidence": {},
+          "id": 16,
+          "proof": null,
+          "rationale": null,
+          "source": "worker_proposed",
+          "status": "accepted",
+          "task_id": "task-21ef9621-5c4f-45ac-8a73-6e4a2c75dec4",
+          "updated_at": "2026-05-16T21:10:12Z"
+        },
+        {
+          "created_at": "2026-05-16T21:10:12Z",
+          "criterion": "QA execution remains status-only for this slice: no tracked files are edited, reformatted, or regenerated.",
+          "evidence": {},
+          "id": 17,
+          "proof": null,
+          "rationale": null,
+          "source": "worker_proposed",
+          "status": "accepted",
+          "task_id": "task-21ef9621-5c4f-45ac-8a73-6e4a2c75dec4",
+          "updated_at": "2026-05-16T21:10:12Z"
+        }
+      ],
+      "proposed": [],
+      "rejected": [],
+      "satisfied": [],
+      "summary": {
+        "accepted": 3,
+        "deferred": 2,
+        "proposed": 0,
+        "rejected": 0,
+        "satisfied": 0
+      }
+    },
+    "criteria_negotiation": {
+      "needed": false,
+      "prompt": null,
+      "reason": "active_criteria_present",
+      "suggested_actions": []
+    },
+    "manager_config": {
+      "acceptance_criteria": [
+        "Manager context exposes acceptance_criteria and criteria_negotiation.",
+        "Worker proposes separated must-have and deferred criteria without editing tracked files.",
+        "criteria-plan is used before criteria mutations.",
+        "Accepted criteria block finish-task until satisfied, deferred, or rejected.",
+        "Replay/export/cleanup evidence is captured."
+      ],
+      "created_at": "2026-05-16T21:10:39Z",
+      "guidelines": [
+        "Use only workerctl session/task commands to communicate with the worker.",
+        "Do not ask for meaningful product work, compact/clear, PR creation, merge, or destructive cleanup.",
+        "Stop and report if tracked files change outside docs/live-qa-artifacts or docs/live-qa-log.md."
+      ],
+      "objective": "Run status-only live QA for emergent acceptance criteria and cleanup lifecycle without tracked product edits.",
+      "permissions": {
+        "create_pr": false,
+        "merge_green_pr": false,
+        "worker_compact_clear": false
+      },
+      "reference_paths": [
+        "docs/superpowers/plans/2026-05-16-dogfood-reliability-ladder.md",
+        "docs/live-qa-artifacts/2026-05-16-emergent-criteria/"
+      ],
+      "supervision_mode": "guided",
+      "task_id": "task-21ef9621-5c4f-45ac-8a73-6e4a2c75dec4",
+      "updated_at": "2026-05-16T21:10:39Z"
+    },
+    "worker_handoff": null
+  },
+  "manager_session": "qa-ec-manager-run2",
+  "notable_pane_pattern": null,
+  "pane_signal": {
+    "captured": true,
+    "classifier": null,
+    "degraded": false,
+    "notable_pattern": null,
+    "reason": null,
+    "status_age_seconds": 71
+  },
+  "staleness_seconds": 71.846,
+  "state": "idle",
+  "task": "qa-emergent-criteria-20260516-run2",
+  "task_completed": true,
+  "worker_alive": true,
+  "worker_session": "qa-ec-worker-run2"
+}

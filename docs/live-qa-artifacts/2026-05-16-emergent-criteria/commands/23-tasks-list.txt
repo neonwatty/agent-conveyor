@@ -1,0 +1,7 @@
+qa-emergent-criteria	done	Make a tiny documented CLI behavior improvement in this repo.
+qa-criteria-concurrency-1778870168	done	QA criteria mutation fresh-read response
+qa-criteria-concurrency-1778872603	done	QA criteria mutation response consistency
+qa-criteria-concurrency-rerun-1778872918	done	QA criteria mutation response consistency rerun
+qa-criteria-negotiation-1778896332	done	Make a tiny documented CLI behavior improvement in this repo.
+qa-emergent-criteria-20260516	done	QA emergent acceptance criteria and cleanup lifecycle without tracked edits.
+qa-emergent-criteria-20260516-run2	candidate	QA emergent acceptance criteria and cleanup lifecycle without tracked edits.

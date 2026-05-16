@@ -1,0 +1,66 @@
+
+╭────────────────────────────────────────────────╮
+│ >_ OpenAI Codex (v0.130.0)                     │
+│                                                │
+│ model:       gpt-5.5 medium   /model to change │
+│ directory:   ~/Desktop/codex-terminal-manager  │
+│ permissions: YOLO mode                         │
+╰────────────────────────────────────────────────╯
+
+  Tip: Try the Codex App. Run 'codex app' or visit
+  https://chatgpt.com/codex?app-landing-page=true
+
+
+› Inspect README.md and workerctl help. Do not edit tracked files. Wait for
+  manager instructions. When asked, propose 2-4 acceptance criteria for this QA
+  slice, separating must-have criteria from follow-up criteria.
+
+
+⚠ Skill descriptions were shortened to fit the 2% skills context budget. Codex
+  can still see every skill, but some descriptions are shorter. Disable unused
+  skills or plugins to leave more room for the rest.
+
+• I’ll read the project README and the workerctl help output only, with no file
+  edits. After that I’ll hold for the manager instructions.
+
+• Explored
+  └ Read README.md
+
+• Ran ./workerctl --help
+  └ zsh:1: permission denied: ./workerctl
+
+• Explored
+  └ Read README.md
+
+────────────────────────────────────────────────────────────────────────────────
+
+• The README confirms this repo is a tmux-backed Codex supervisor with workerctl
+  as the control plane. The root ./workerctl is not executable in this checkout,
+  so I’m checking the installed/bin entrypoint and the rest of the README
+  without modifying anything.
+
+• Explored
+  └ Read README.md
+    List workerctl
+
+
+› Propose 2-4 acceptance criteria for this QA slice. Separate must-have
+  current-task criteria from deferred follow-up criteria. Keep this status-
+  only: do not edit tracked files.
+
+
+• Explored
+  └ Read README.md
+
+• Explored
+  └ List workerctl
+
+• Ran command -v workerctl && workerctl --help
+  └ (no output)
+
+• Working (19s • esc to interrupt)
+
+
+› Implement {feature}
+
+  gpt-5.5 medium · ~/Desktop/codex-terminal-manager · main

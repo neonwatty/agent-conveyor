@@ -1,0 +1,100 @@
+{
+  "suggestions": [
+    {
+      "command": [
+        "workerctl",
+        "criteria",
+        "qa-emergent-criteria-20260516-run2",
+        "--add",
+        "--criterion",
+        "README command coverage is understood well enough to identify the QA surface: worker/manager setup, binding, cycle observation, criteria tracking, audit/replay, and cleanup.",
+        "--source",
+        "worker_proposed",
+        "--status",
+        "accepted"
+      ],
+      "criterion": "README command coverage is understood well enough to identify the QA surface: worker/manager setup, binding, cycle observation, criteria tracking, audit/replay, and cleanup.",
+      "rationale": null,
+      "source": "worker_proposed",
+      "status": "accepted"
+    },
+    {
+      "command": [
+        "workerctl",
+        "criteria",
+        "qa-emergent-criteria-20260516-run2",
+        "--add",
+        "--criterion",
+        "workerctl help is checked through a valid entrypoint, with any entrypoint issue recorded separately from product behavior. Current note: root ./workerctl is a package directory, not an executable; bin/workerctl and scripts/workerctl are executable.",
+        "--source",
+        "worker_proposed",
+        "--status",
+        "accepted"
+      ],
+      "criterion": "workerctl help is checked through a valid entrypoint, with any entrypoint issue recorded separately from product behavior. Current note: root ./workerctl is a package directory, not an executable; bin/workerctl and scripts/workerctl are executable.",
+      "rationale": null,
+      "source": "worker_proposed",
+      "status": "accepted"
+    },
+    {
+      "command": [
+        "workerctl",
+        "criteria",
+        "qa-emergent-criteria-20260516-run2",
+        "--add",
+        "--criterion",
+        "QA execution remains status-only for this slice: no tracked files are edited, reformatted, or regenerated.",
+        "--source",
+        "worker_proposed",
+        "--status",
+        "accepted"
+      ],
+      "criterion": "QA execution remains status-only for this slice: no tracked files are edited, reformatted, or regenerated.",
+      "rationale": null,
+      "source": "worker_proposed",
+      "status": "accepted"
+    },
+    {
+      "command": [
+        "workerctl",
+        "criteria",
+        "qa-emergent-criteria-20260516-run2",
+        "--add",
+        "--criterion",
+        "Run a live qa-plan scenario, likely emergent-criteria, against a disposable worker/manager pair and capture the audit/replay evidence.",
+        "--source",
+        "worker_proposed",
+        "--status",
+        "deferred",
+        "--rationale",
+        "Follow-up after this QA slice."
+      ],
+      "criterion": "Run a live qa-plan scenario, likely emergent-criteria, against a disposable worker/manager pair and capture the audit/replay evidence.",
+      "rationale": "Follow-up after this QA slice.",
+      "source": "worker_proposed",
+      "status": "deferred"
+    },
+    {
+      "command": [
+        "workerctl",
+        "criteria",
+        "qa-emergent-criteria-20260516-run2",
+        "--add",
+        "--criterion",
+        "Verify install/path behavior so workerctl --help works after documented setup, not only through repo-local wrappers.",
+        "--source",
+        "worker_proposed",
+        "--status",
+        "deferred",
+        "--rationale",
+        "Follow-up after this QA slice."
+      ],
+      "criterion": "Verify install/path behavior so workerctl --help works after documented setup, not only through repo-local wrappers.",
+      "rationale": "Follow-up after this QA slice.",
+      "source": "worker_proposed",
+      "status": "deferred"
+    }
+  ],
+  "task": "qa-emergent-criteria-20260516-run2",
+  "warnings": []
+}

@@ -1,0 +1,15 @@
+Task: qa-emergent-criteria-20260516-run2
+State: candidate
+Mode: timeline
+
+21:09:21  manager          observed session qa-ec-worker-run2 state busy (staleness 4.2s)
+21:10:12  workerctl        accepted criterion #15: README command coverage is understood well enough to identify the QA surface: worker/manager setup, binding, cycle observation, criteria tracking, audit/replay, and cleanup.
+21:10:12  workerctl        accepted criterion #16: workerctl help is checked through a valid entrypoint, with any entrypoint issue recorded separately from product behavior. Current note: root ./workerctl is a package directory, not an executable; bin/workerctl and scri...
+21:10:12  workerctl        accepted criterion #17: QA execution remains status-only for this slice: no tracked files are edited, reformatted, or regenerated.
+21:10:12  workerctl        deferred criterion #18: Follow-up after this QA slice.
+21:10:12  workerctl        deferred criterion #19: Follow-up after this QA slice.
+21:10:48  manager          observed session qa-ec-worker-run2 state idle (staleness 71.8s)
+21:10:53  manager          observed session qa-ec-worker-run2 state idle (staleness 76.8s)
+21:11:26  workerctl        satisfied criterion #15 (accepted -> satisfied): proof recorded (README/help surface mapped to live pair, cycle, criteria, replay/export, finish cleanup commands during QA run.)
+21:11:26  workerctl        satisfied criterion #16 (accepted -> satisfied): proof recorded (Valid repo-local workerctl entrypoints were verified; root ./workerctl issue recorded as follow-up path/documentation observation.)
+21:11:26  workerctl        satisfied criterion #17 (accepted -> satisfied): proof recorded (Worker stayed status-only; no tracked product files were edited by the worker.)

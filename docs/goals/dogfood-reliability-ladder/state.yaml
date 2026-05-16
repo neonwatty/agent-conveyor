@@ -7,7 +7,7 @@ goal:
   title: "Dogfood Reliability Ladder"
   slug: "dogfood-reliability-ladder"
   kind: existing_plan
-  tranche: "Normalize and commit the dogfood reliability ladder baseline, then choose the next safe gate or prerequisite helper."
+  tranche: "Run live Scenario 1 status-only pair QA and Scenario 2 emergent-criteria QA with durable evidence."
   status: done
   intake:
     original_request: "Use goalbuddy:goal-prep to drive the dogfood reliability ladder with verifiable acceptance criteria."
@@ -45,9 +45,9 @@ rules:
     worker_completes_whole_slice: true
 
 agents:
-  scout: unknown
-  worker: unknown
-  judge: unknown
+  scout: installed
+  worker: installed
+  judge: installed
 
 visual_board:
   selected: local
@@ -99,7 +99,7 @@ tasks:
         - "docs/goals/dogfood-reliability-ladder/.goalbuddy-board/styles.css"
       files_excluded: []
       commands:
-        - cmd: "node /Users/neonwatty/.codex/plugins/cache/goalbuddy/goalbuddy/0.3.6/skills/goalbuddy/scripts/check-update.mjs --json"
+        - cmd: "node <goalbuddy-cache>/goalbuddy/0.3.6/skills/goalbuddy/scripts/check-update.mjs --json"
           status: pass
         - cmd: "git status --short --branch"
           status: pass
@@ -332,6 +332,324 @@ tasks:
         - "Gate 1 and Gate 2 live QA are not run yet; they require operator confirmation before starting real worker/manager sessions."
         - "Repository is ahead of origin by two commits and should be pushed or PR'd when ready."
         - "Known SQLite ResourceWarning noise remains as a later reliability cleanup item."
+  - id: T006
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: high
+    objective: "Run live Scenario 1 status-only pair QA and the deterministic Scenario 2 criteria-negotiation path using a real worker/manager pair."
+    inputs:
+      - "docs/superpowers/plans/2026-05-16-dogfood-reliability-ladder.md"
+      - "scripts/workerctl qa-plan emergent-criteria"
+      - "README.md"
+      - "Current merged main containing criteria-plan."
+    constraints:
+      - "This is live worker/manager QA, not meaningful project work."
+      - "Worker prompt must remain status-only and must not edit tracked product files."
+      - "Use qa-ec-worker, qa-ec-manager, and qa-emergent-criteria as disposable names unless already occupied."
+      - "Use criteria-plan on the saved worker criteria response before mutating criteria."
+      - "Record every command and important JSON result in the evidence bundle."
+      - "Stop on unexpected tracked-file drift, tmux permission errors that prevent safe cleanup, missing manager_context fields, or any worker attempt to edit tracked files."
+      - "Do not perform compact/clear, merge, destructive cleanup, or unattended management outside the explicit qa-plan steps."
+    allowed_files:
+      - "docs/live-qa-log.md"
+      - "docs/live-qa-artifacts/2026-05-16-emergent-criteria/"
+      - "docs/goals/dogfood-reliability-ladder/state.yaml"
+    verify:
+      - "scripts/workerctl qa-plan emergent-criteria --json"
+      - "scripts/workerctl cycle qa-emergent-criteria"
+      - "scripts/workerctl criteria qa-emergent-criteria --list"
+      - "scripts/workerctl replay qa-emergent-criteria"
+      - "scripts/workerctl export-task qa-emergent-criteria --output docs/live-qa-artifacts/2026-05-16-emergent-criteria/export"
+      - "scripts/workerctl finish-task qa-emergent-criteria --reason \"QA criteria flow complete\" --require-criteria-audit --stop-manager --stop-worker"
+      - "scripts/workerctl sessions --state all"
+      - "scripts/workerctl reconcile --stale-cycles-seconds 1"
+      - "git status --short --branch"
+    stop_if:
+      - "The initial pair cannot start cleanly."
+      - "cycle output lacks manager_context.acceptance_criteria or manager_context.criteria_negotiation."
+      - "criteria-plan suggests commands that would mutate the wrong task or database."
+      - "finish-task --require-criteria-audit passes while accepted criteria remain open."
+      - "finish-task cleanup cannot safely stop the disposable worker/manager sessions."
+      - "Any tracked file outside allowed_files changes."
+      - "Manual recovery would require destructive tmux or git operations."
+    expected_output:
+      - "Evidence bundle under docs/live-qa-artifacts/2026-05-16-emergent-criteria/."
+      - "docs/live-qa-log.md entry summarizing commands, observations, failures, and cleanup."
+      - "Receipt mapping observed output to each qa-plan expected observation that was covered."
+      - "Explicit list of uncovered qa-plan observations, if any."
+      - "Current git status after cleanup."
+    receipt:
+      result: done
+      task_run: "qa-emergent-criteria-20260516-run2"
+      worker_session: "qa-ec-worker-run2"
+      manager_session: "qa-ec-manager-run2"
+      evidence_bundle: "docs/live-qa-artifacts/2026-05-16-emergent-criteria/"
+      summary: "Ran live disposable worker/manager QA for Scenario 1 status-only behavior and the deterministic/manager-led portions of Scenario 2 emergent acceptance criteria. The pair completed, criteria-plan transformed saved worker criteria text into reviewed commands, accepted criteria blocked premature finish, satisfied criteria carried evidence JSON, replay/export worked, and audited cleanup killed both sessions."
+      changed_files:
+        - "docs/live-qa-log.md"
+        - "docs/live-qa-artifacts/2026-05-16-emergent-criteria/"
+        - "docs/goals/dogfood-reliability-ladder/state.yaml"
+      deviations:
+        - "Unsuffixed qa-ec-worker and qa-ec-manager names were occupied by old gone registry rows, so the run used suffixed disposable run2 names."
+        - "The manager recovered from legacy `workerctl nudge qa-ec-worker-run2` failing with Unknown worker by switching to session-nudge."
+        - "The PM thread performed the initial criteria-plan and criteria add/satisfy mutations; the live manager independently noticed open criteria, drove a follow-up worker receipt, and audited replay/export surfaces."
+        - "Worker observed `./workerctl --help` permission denied because root workerctl is not the executable entrypoint; `scripts/workerctl --help` and `bin/workerctl --help` passed."
+      covered_expected_observations:
+        - "manager_context.acceptance_criteria with summary/open/proposed/satisfied/deferred/rejected was present in cycle output."
+        - "criteria_negotiation.needed was true with reason no_criteria before active criteria and false with reason active_criteria_present after criteria were added."
+        - "Worker proposed separated must-have and deferred follow-up criteria without product edits."
+        - "criteria-plan generated reviewed workerctl criteria add commands from saved worker response text without warnings."
+        - "worker_proposed accepted and deferred criteria were visible through criteria --list."
+        - "finish-task --require-criteria-audit failed while accepted criteria remained open."
+        - "Satisfy mutations stored evidence_json and proof text."
+        - "criteria --list was used as canonical state after add and satisfy mutations."
+        - "replay showed acceptance_criterion_added and acceptance_criterion_updated transitions."
+        - "export-task wrote acceptance-criteria.json and manifest.json listed it."
+        - "finish-task --stop-manager --stop-worker reported killed_worker and killed_manager true."
+        - "Postcleanup tmux check found no matching sessions; sessions were state gone; reconcile reported no dangling_bindings, dead_pid_sessions, or stuck_tasks."
+      uncovered_or_partial_observations:
+        - "Full autonomous manager-led criteria mutation was not proven; the manager-led portion covered config gating, criteria-state inspection, session-nudge recovery, worker follow-up receipt, and replay/export audit."
+        - "Git status was not clean due to pre-existing GoalBuddy prep edits and new allowed QA artifacts, but no tracked product source file drift was observed."
+      artifacts:
+        - "docs/live-qa-artifacts/2026-05-16-emergent-criteria/summary.md"
+        - "docs/live-qa-artifacts/2026-05-16-emergent-criteria/commands/"
+        - "docs/live-qa-artifacts/2026-05-16-emergent-criteria/responses/worker-criteria-response.md"
+        - "docs/live-qa-artifacts/2026-05-16-emergent-criteria/export/acceptance-criteria.json"
+        - "docs/live-qa-artifacts/2026-05-16-emergent-criteria/export/manifest.json"
+      commands:
+        - cmd: "scripts/workerctl qa-plan emergent-criteria --json"
+          status: pass
+        - cmd: "scripts/workerctl pair --task qa-emergent-criteria-20260516-run2 --worker-name qa-ec-worker-run2 --manager-name qa-ec-manager-run2 ..."
+          status: pass
+        - cmd: "scripts/workerctl cycle qa-emergent-criteria-20260516-run2"
+          status: pass
+        - cmd: "scripts/workerctl criteria-plan qa-emergent-criteria-20260516-run2 --from-worker-response docs/live-qa-artifacts/2026-05-16-emergent-criteria/responses/worker-criteria-response.md --json"
+          status: pass
+        - cmd: "scripts/workerctl finish-task qa-emergent-criteria-20260516-run2 --reason \"QA premature finish\" --require-criteria-audit"
+          status: pass
+          note: "Expected nonzero guardrail failure occurred because accepted criteria were still open."
+        - cmd: "scripts/workerctl criteria qa-emergent-criteria-20260516-run2 --list"
+          status: pass
+        - cmd: "scripts/workerctl replay qa-emergent-criteria-20260516-run2"
+          status: pass
+        - cmd: "scripts/workerctl export-task qa-emergent-criteria-20260516-run2 --output docs/live-qa-artifacts/2026-05-16-emergent-criteria/export"
+          status: pass
+        - cmd: "scripts/workerctl finish-task qa-emergent-criteria-20260516-run2 --reason \"QA criteria flow complete\" --require-criteria-audit --stop-manager --stop-worker"
+          status: pass
+        - cmd: "scripts/workerctl sessions --state all"
+          status: pass
+        - cmd: "scripts/workerctl reconcile --stale-cycles-seconds 1"
+          status: pass
+        - cmd: "git status --short --branch"
+          status: pass
+      current_git_status: "main...origin/main with pre-existing GoalBuddy prep edits plus docs/live-qa-log.md and docs/live-qa-artifacts/."
+  - id: T007
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Audit whether the live Scenario 1/2 QA evidence is sufficient to unlock Gate 1 or Gate 2."
+    inputs:
+      - "T006 receipt"
+      - "docs/live-qa-artifacts/2026-05-16-emergent-criteria/"
+      - "docs/live-qa-log.md"
+      - "docs/superpowers/plans/2026-05-16-dogfood-reliability-ladder.md promotion gates"
+      - "Current git status"
+    constraints:
+      - "Read-only."
+      - "Do not accept partial live QA as a passed gate unless the missing evidence is explicitly non-blocking."
+      - "Separate control-plane success from manager-behavior success."
+    expected_output:
+      - "Gate decision: Gate 1 passed, Gate 2 passed, partial, or blocked."
+      - "Evidence mapped to qa-plan expected_observations."
+      - "Missing evidence or blocker."
+      - "Next Worker objective if not complete."
+    receipt:
+      result: done
+      decision: "gate1_pass_gate2_partial"
+      gate_1_status: passed
+      gate_2_status: partial
+      rationale: "The live run proves status-only pair startup, cycle context, session-aware manager nudging, evidence capture, replay/export, audited finish, and cleanup. It does not prove the full Scenario 2 manager-led variant because the PM thread performed the first criteria-plan and add/satisfy mutations before the manager independently inspected open criteria and drove a worker follow-up receipt."
+      evidence_mapped:
+        - requirement: "Scenario 1 pair starts and binds."
+          evidence: "commands/02-pair-run2.txt created task qa-emergent-criteria-20260516-run2 with live worker and manager sessions."
+          status: pass
+        - requirement: "First cycle parseable with worker_alive, manager_alive, pane_signal, manager_context, and acceptance_criteria."
+          evidence: "commands/03-cycle-initial.json."
+          status: pass
+        - requirement: "Manager sends at least one nudge through an audited path."
+          evidence: "commands/35-manager-capture-final.txt shows manager recovering from legacy nudge failure and using session-nudge; commands/30/31 capture the worker response."
+          status: pass
+        - requirement: "Cleanup satisfies reusable postflight invariants."
+          evidence: "commands/36-finish-task-final.json, 37-tmux-postfinish.txt, 38-sessions-postfinish.json, 39-reconcile-postfinish.json."
+          status: pass
+        - requirement: "Scenario 2 first cycle criteria_negotiation needed true with no_criteria."
+          evidence: "commands/03-cycle-initial.json."
+          status: pass
+        - requirement: "At least one must-have accepted and one follow-up deferred."
+          evidence: "commands/13-criteria-list-after-add.json shows accepted ids 15-17 and deferred ids 18-19."
+          status: pass
+        - requirement: "Later cycle shows open accepted criteria, deferred criteria, and negotiation false."
+          evidence: "commands/18-cycle-after-criteria.json."
+          status: pass
+        - requirement: "Premature audited finish exits nonzero while accepted criteria are open."
+          evidence: "commands/19-finish-premature-expected-fail.txt."
+          status: pass
+        - requirement: "Satisfied criteria include proof text and evidence JSON."
+          evidence: "commands/24-satisfy-15.json, 25-satisfy-16.json, 26-satisfy-17.json, 27-criteria-list-after-satisfy.json."
+          status: pass
+        - requirement: "Replay/export show criteria transitions and acceptance-criteria artifact."
+          evidence: "commands/34-replay-final.txt, 32-export-task.txt, 33-export-verify.txt."
+          status: pass
+        - requirement: "Full manager-led Scenario 2 variant."
+          evidence: "Manager performed config-gated inspection, noticed open criteria, sent follow-up nudge, and audited replay/export; PM still performed initial criteria-plan and mutations."
+          status: partial
+      missing_evidence:
+        - "No proof that the manager alone noticed initial no_criteria, asked for first criteria, ran criteria-plan against the worker response, chose accepted/deferred criteria, and performed add/satisfy mutations end to end."
+      blocker_or_next_step: "Package this evidence and create a follow-up task or issue for a fully manager-led Scenario 2 variant; no immediate code fix is selected by this audit."
+      next_task: T009
+  - id: T008
+    type: worker
+    assignee: Worker
+    status: blocked
+    reasoning_hint: default
+    objective: "Implement the smallest blocker fix or evidence-hardening helper selected by T007, if live QA exposes a local actionable gap."
+    allowed_files: []
+    verify: []
+    stop_if:
+      - "T007 does not provide allowed_files."
+      - "The blocker requires product direction, credentials, destructive actions, or broad redesign."
+      - "The fix would touch files outside allowed_files."
+      - "Verification fails twice with the same unexplained failure."
+    expected_output:
+      - "Changed files and verification commands, or a blocked receipt explaining why no safe fix was possible."
+    receipt:
+      result: blocked
+      decision: "not_selected"
+      summary: "T007 did not select a local blocker fix with allowed_files. The remaining Gate 2 gap is evidence for a fuller manager-led Scenario 2 run, not a scoped implementation fix in this tranche."
+  - id: T009
+    type: pm
+    assignee: PM
+    status: done
+    reasoning_hint: default
+    objective: "Prepare the PR or follow-up issue for the live QA tranche outcome."
+    inputs:
+      - "T006/T007 receipts"
+      - "T008 receipt if executed"
+      - "Current git status"
+    constraints:
+      - "Do not merge without explicit operator instruction."
+      - "If no code/docs changed beyond evidence logs, record that no PR is needed."
+      - "If live QA identifies follow-up work outside the tranche, record it as a board task or ask before creating an external issue."
+    expected_output:
+      - "PR/issue/no-PR decision."
+      - "Exact branch/status/check state if a PR is created."
+      - "Follow-up tasks or blockers."
+    receipt:
+      result: done
+      decision: "pr_created"
+      pr_url: "https://github.com/neonwatty/codex-terminal-manager/pull/57"
+      branch: "live-dogfood-emergent-criteria-qa"
+      commit: "00b7c43 Record emergent criteria live QA"
+      summary: "Created PR #57 with the live emergent-criteria QA evidence bundle, live QA log entry, and GoalBuddy board receipts. CI passed on the initial PR commit."
+      ci_state:
+        - check: unittest
+          status: pass
+          duration: "29s"
+          url: "https://github.com/neonwatty/codex-terminal-manager/actions/runs/25973180155/job/76348686421"
+        - check: unittest
+          status: pass
+          duration: "23s"
+          url: "https://github.com/neonwatty/codex-terminal-manager/actions/runs/25973184499/job/76348698350"
+      follow_up:
+        - "Run a fuller manager-led Scenario 2 variant where the manager performs initial criteria-plan, accepted/deferred mutations, and satisfy/defer/reject decisions end to end."
+        - "Consider a dedicated qa-run harness or qa-doctor wrapper so future evidence bundles can be generated and scrubbed mechanically."
+      commands:
+        - cmd: "git switch -c live-dogfood-emergent-criteria-qa"
+          status: pass
+        - cmd: "git commit -m \"Record emergent criteria live QA\""
+          status: pass
+        - cmd: "git push -u origin live-dogfood-emergent-criteria-qa"
+          status: pass
+        - cmd: "gh pr create --title \"Record emergent criteria live QA\" ..."
+          status: pass
+        - cmd: "gh pr checks 57 --watch --interval 10"
+          status: pass
+  - id: T010
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Final audit for the live Scenario 1/2 dogfood tranche."
+    inputs:
+      - "All live-tranche receipts"
+      - "Last verification"
+      - "Current dirty diff"
+      - "Dogfood reliability ladder promotion gates"
+    constraints:
+      - "Read-only."
+      - "Reject completion if live evidence is missing, cleanup is incomplete, or required Worker tasks remain queued."
+    expected_output:
+      - "complete | not_complete"
+      - "full_outcome_complete: true | false"
+      - "Gate unlocked or exact blocker."
+      - "Missing evidence."
+      - "Next task if not complete."
+    receipt:
+      result: done
+      decision: complete
+      full_outcome_complete: true
+      summary: "The live Scenario 1/2 tranche is complete. The run produced durable evidence, passed Gate 1 status-only readiness, recorded Gate 2 as partial with an exact remaining manager-led evidence gap, packaged the evidence in PR #57, and left cleanup/CI green."
+      gate_unlocked: "Gate 1: Status-only readiness"
+      exact_blocker: "Gate 2 is not unlocked until a fuller manager-led Scenario 2 run proves the manager performs initial criteria negotiation, criteria-plan review, accepted/deferred mutations, and criteria closure end to end without PM mutation help."
+      prompt_to_artifact_checklist:
+        - requirement: "Follow docs/goals/dogfood-reliability-ladder/goal.md."
+          evidence: "T006 through T010 receipts execute and audit the active live QA tranche."
+          status: pass
+        - requirement: "Run live Scenario 1 status-only pair QA."
+          evidence: "T006 receipt, docs/live-qa-log.md, and commands/02-pair-run2.txt, 03-cycle-initial.json, 35-manager-capture-final.txt, 36-finish-task-final.json."
+          status: pass
+        - requirement: "Run deterministic/manager-led portions of Scenario 2 emergent criteria QA."
+          evidence: "T006 receipt and commands/07-criteria-plan.json, 13-criteria-list-after-add.json, 18-cycle-after-criteria.json, 19-finish-premature-expected-fail.txt, 24-27 satisfy/list artifacts, 34-replay-final.txt, 33-export-verify.txt."
+          status: pass
+        - requirement: "Use criteria-plan on saved worker response before mutating criteria."
+          evidence: "responses/worker-criteria-response.md and commands/07-criteria-plan.json precede criteria add commands 08-12."
+          status: pass
+        - requirement: "Preserve an evidence bundle."
+          evidence: "docs/live-qa-artifacts/2026-05-16-emergent-criteria/ contains command captures, response text, export artifacts, and summary.md."
+          status: pass
+        - requirement: "Update docs/live-qa-log.md."
+          evidence: "docs/live-qa-log.md has a 2026-05-16 emergent-criteria live QA entry."
+          status: pass
+        - requirement: "Stop before meaningful project work, unattended management, destructive cleanup, or unapproved compact/clear behavior."
+          evidence: "T006/T007 receipts record status-only worker behavior, no compact/clear/merge/destructive actions, and controlled cleanup through finish-task."
+          status: pass
+        - requirement: "Audit gate decision."
+          evidence: "T007 receipt says Gate 1 passed and Gate 2 partial, with missing manager-led evidence named."
+          status: pass
+        - requirement: "Package PR/follow-up outcome."
+          evidence: "T009 receipt records PR #57, branch live-dogfood-emergent-criteria-qa, and passing CI."
+          status: pass
+        - requirement: "Verify final cleanup and current state."
+          evidence: "commands/37-tmux-postfinish.txt, 38-sessions-postfinish.json, 39-reconcile-postfinish.json, git status clean on branch, PR #57 mergeStateStatus CLEAN, and latest unittest checks passed."
+          status: pass
+      latest_pr_state:
+        pr_url: "https://github.com/neonwatty/codex-terminal-manager/pull/57"
+        branch: "live-dogfood-emergent-criteria-qa"
+        merge_state: CLEAN
+        checks:
+          - check: unittest
+            status: pass
+            duration: "23s"
+            url: "https://github.com/neonwatty/codex-terminal-manager/actions/runs/25973203917/job/76348752988"
+          - check: unittest
+            status: pass
+            duration: "23s"
+            url: "https://github.com/neonwatty/codex-terminal-manager/actions/runs/25973204653/job/76348754699"
+      residual_risk:
+        - "Evidence artifacts are intentionally verbose; future qa-run tooling should generate smaller scrubbed bundles."
+        - "Gate 2 still needs the fully manager-led variant before meaningful supervised dogfood can progress toward later gates."
 
 checks:
   dirty_fingerprint: unknown

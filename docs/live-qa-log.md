@@ -1,5 +1,62 @@
 # Live QA Log
 
+## 2026-05-16: emergent-criteria live QA
+
+Scenario:
+
+- `scripts/workerctl qa-plan emergent-criteria --json`
+- Live disposable pair:
+  - task `qa-emergent-criteria-20260516-run2`
+  - worker `qa-ec-worker-run2`
+  - manager `qa-ec-manager-run2`
+- Evidence bundle:
+  `docs/live-qa-artifacts/2026-05-16-emergent-criteria/`
+
+Validated:
+
+- Initial pair creation worked with suffixed disposable names. The preferred
+  unsuffixed `qa-ec-worker` / `qa-ec-manager` names were still registered as
+  `gone` from an older run, so the run avoided deregistering history.
+- First `cycle` output included `manager_context.acceptance_criteria` with
+  empty status buckets and `criteria_negotiation.needed: true`,
+  `reason: no_criteria`.
+- Worker produced separated must-have and deferred criteria while staying
+  status-only.
+- `criteria-plan` generated reviewed add commands from the saved worker
+  response with no warnings and without mutating task state.
+- Three worker-proposed criteria were recorded as accepted and two follow-up
+  criteria were recorded as deferred.
+- A later `cycle` showed accepted criteria in `open`, deferred criteria in
+  `deferred`, and `criteria_negotiation.needed: false`.
+- Premature `finish-task --require-criteria-audit` failed while accepted
+  criteria were still open.
+- Accepted criteria were satisfied with evidence JSON, and
+  `criteria --list` reported `accepted: 0`, `satisfied: 3`, `deferred: 2`.
+- The live manager noticed open criteria, recovered from legacy `nudge` not
+  resolving the session-bound worker, used `session-nudge`, and got a
+  status-only follow-up receipt from the worker.
+- `replay` showed criteria add/defer/satisfy transitions.
+- `export-task` wrote `acceptance-criteria.json`, and `manifest.json` lists it.
+- Final audited `finish-task --stop-manager --stop-worker` reported
+  `killed_worker: true` and `killed_manager: true`.
+- Postfinish cleanup found no matching tmux sessions, both run2 sessions marked
+  `gone`, and `reconcile --stale-cycles-seconds 1` returned empty
+  `dangling_bindings`, `dead_pid_sessions`, and `stuck_tasks`.
+
+Findings:
+
+- This is a strong Scenario 1 / deterministic Scenario 2 pass, but not a full
+  autonomous manager-led Scenario 2 pass. The PM thread still performed the
+  initial `criteria-plan` and criteria add/satisfy mutations.
+- The manager recovered correctly from `workerctl nudge qa-ec-worker-run2`
+  failing with `Unknown worker`, switching to `session-nudge`.
+- The worker first tried `./workerctl --help` and hit `permission denied`;
+  `scripts/workerctl --help` and `bin/workerctl --help` both passed. Install
+  and path behavior outside repo-local wrappers remains a follow-up.
+- Git status was not clean after cleanup because GoalBuddy prep files were
+  already modified before this run and the QA evidence bundle is new. No
+  tracked product source file drift was observed.
+
 ## 2026-05-16: tmux-errors QA Pass
 
 Scenario:

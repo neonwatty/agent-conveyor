@@ -1,0 +1,268 @@
+{
+  "entries": [
+    {
+      "actor": "manager",
+      "details": {
+        "cycle_id": 13,
+        "manager_capture_id": null,
+        "state": "succeeded",
+        "worker_capture_id": null
+      },
+      "kind": "observe",
+      "source": "manager_cycles",
+      "source_id": 13,
+      "summary": "observed session qa-ec-worker-run2 state busy (staleness 4.2s)",
+      "timestamp": "2026-05-16T21:09:21Z"
+    },
+    {
+      "actor": "workerctl",
+      "details": {
+        "created": true,
+        "criterion": "README command coverage is understood well enough to identify the QA surface: worker/manager setup, binding, cycle observation, criteria tracking, audit/replay, and cleanup.",
+        "criterion_id": 15,
+        "event_type": "acceptance_criterion_added",
+        "evidence": {},
+        "proof": null,
+        "rationale": null,
+        "source": "worker_proposed",
+        "status": "accepted",
+        "task_id": "task-21ef9621-5c4f-45ac-8a73-6e4a2c75dec4"
+      },
+      "kind": "acceptance_criterion",
+      "source": "events",
+      "source_id": 75,
+      "summary": "accepted criterion #15: README command coverage is understood well enough to identify the QA surface: worker/manager setup, binding, cycle observation, criteria tracking, audit/replay, and cleanup.",
+      "timestamp": "2026-05-16T21:10:12Z"
+    },
+    {
+      "actor": "workerctl",
+      "details": {
+        "created": true,
+        "criterion": "workerctl help is checked through a valid entrypoint, with any entrypoint issue recorded separately from product behavior. Current note: root ./workerctl is a package directory, not an executable; bin/workerctl and scripts/workerctl are executable.",
+        "criterion_id": 16,
+        "event_type": "acceptance_criterion_added",
+        "evidence": {},
+        "proof": null,
+        "rationale": null,
+        "source": "worker_proposed",
+        "status": "accepted",
+        "task_id": "task-21ef9621-5c4f-45ac-8a73-6e4a2c75dec4"
+      },
+      "kind": "acceptance_criterion",
+      "source": "events",
+      "source_id": 76,
+      "summary": "accepted criterion #16: workerctl help is checked through a valid entrypoint, with any entrypoint issue recorded separately from product behavior. Current note: root ./workerctl is a package directory, not an executable; bin/workerctl and scri...",
+      "timestamp": "2026-05-16T21:10:12Z"
+    },
+    {
+      "actor": "workerctl",
+      "details": {
+        "created": true,
+        "criterion": "QA execution remains status-only for this slice: no tracked files are edited, reformatted, or regenerated.",
+        "criterion_id": 17,
+        "event_type": "acceptance_criterion_added",
+        "evidence": {},
+        "proof": null,
+        "rationale": null,
+        "source": "worker_proposed",
+        "status": "accepted",
+        "task_id": "task-21ef9621-5c4f-45ac-8a73-6e4a2c75dec4"
+      },
+      "kind": "acceptance_criterion",
+      "source": "events",
+      "source_id": 77,
+      "summary": "accepted criterion #17: QA execution remains status-only for this slice: no tracked files are edited, reformatted, or regenerated.",
+      "timestamp": "2026-05-16T21:10:12Z"
+    },
+    {
+      "actor": "workerctl",
+      "details": {
+        "created": true,
+        "criterion": "Run a live qa-plan scenario, likely emergent-criteria, against a disposable worker/manager pair and capture the audit/replay evidence.",
+        "criterion_id": 18,
+        "event_type": "acceptance_criterion_added",
+        "evidence": {},
+        "proof": null,
+        "rationale": "Follow-up after this QA slice.",
+        "source": "worker_proposed",
+        "status": "deferred",
+        "task_id": "task-21ef9621-5c4f-45ac-8a73-6e4a2c75dec4"
+      },
+      "kind": "acceptance_criterion",
+      "source": "events",
+      "source_id": 78,
+      "summary": "deferred criterion #18: Follow-up after this QA slice.",
+      "timestamp": "2026-05-16T21:10:12Z"
+    },
+    {
+      "actor": "workerctl",
+      "details": {
+        "created": true,
+        "criterion": "Verify install/path behavior so workerctl --help works after documented setup, not only through repo-local wrappers.",
+        "criterion_id": 19,
+        "event_type": "acceptance_criterion_added",
+        "evidence": {},
+        "proof": null,
+        "rationale": "Follow-up after this QA slice.",
+        "source": "worker_proposed",
+        "status": "deferred",
+        "task_id": "task-21ef9621-5c4f-45ac-8a73-6e4a2c75dec4"
+      },
+      "kind": "acceptance_criterion",
+      "source": "events",
+      "source_id": 79,
+      "summary": "deferred criterion #19: Follow-up after this QA slice.",
+      "timestamp": "2026-05-16T21:10:12Z"
+    },
+    {
+      "actor": "manager",
+      "details": {
+        "cycle_id": 14,
+        "manager_capture_id": null,
+        "state": "succeeded",
+        "worker_capture_id": null
+      },
+      "kind": "observe",
+      "source": "manager_cycles",
+      "source_id": 14,
+      "summary": "observed session qa-ec-worker-run2 state idle (staleness 71.8s)",
+      "timestamp": "2026-05-16T21:10:48Z"
+    },
+    {
+      "actor": "manager",
+      "details": {
+        "cycle_id": 15,
+        "manager_capture_id": null,
+        "state": "succeeded",
+        "worker_capture_id": null
+      },
+      "kind": "observe",
+      "source": "manager_cycles",
+      "source_id": 15,
+      "summary": "observed session qa-ec-worker-run2 state idle (staleness 76.8s)",
+      "timestamp": "2026-05-16T21:10:53Z"
+    },
+    {
+      "actor": "workerctl",
+      "details": {
+        "criterion": "README command coverage is understood well enough to identify the QA surface: worker/manager setup, binding, cycle observation, criteria tracking, audit/replay, and cleanup.",
+        "criterion_id": 15,
+        "event_type": "acceptance_criterion_updated",
+        "evidence": {
+          "artifact": "docs/live-qa-artifacts/2026-05-16-emergent-criteria/commands/03-cycle-initial.json,13-criteria-list-after-add.json,18-cycle-after-criteria.json",
+          "command": "scripts/workerctl qa-plan emergent-criteria --json; scripts/workerctl cycle qa-emergent-criteria-20260516-run2; scripts/workerctl criteria --list",
+          "status": "pass"
+        },
+        "previous_evidence": {},
+        "previous_proof": null,
+        "previous_rationale": null,
+        "previous_status": "accepted",
+        "proof": "README/help surface mapped to live pair, cycle, criteria, replay/export, finish cleanup commands during QA run.",
+        "rationale": null,
+        "source": "worker_proposed",
+        "status": "satisfied",
+        "task_id": "task-21ef9621-5c4f-45ac-8a73-6e4a2c75dec4"
+      },
+      "kind": "acceptance_criterion",
+      "source": "events",
+      "source_id": 82,
+      "summary": "satisfied criterion #15 (accepted -> satisfied): proof recorded (README/help surface mapped to live pair, cycle, criteria, replay/export, finish cleanup commands during QA run.)",
+      "timestamp": "2026-05-16T21:11:26Z"
+    },
+    {
+      "actor": "workerctl",
+      "details": {
+        "criterion": "workerctl help is checked through a valid entrypoint, with any entrypoint issue recorded separately from product behavior. Current note: root ./workerctl is a package directory, not an executable; bin/workerctl and scripts/workerctl are executable.",
+        "criterion_id": 16,
+        "event_type": "acceptance_criterion_updated",
+        "evidence": {
+          "artifact": "docs/live-qa-artifacts/2026-05-16-emergent-criteria/commands/20-scripts-workerctl-help.txt,21-bin-workerctl-help.txt",
+          "command": "scripts/workerctl --help; bin/workerctl --help",
+          "note": "worker observed ./workerctl permission denied because root workerctl is a directory/package entry, while scripts/bin wrappers work.",
+          "status": "pass"
+        },
+        "previous_evidence": {},
+        "previous_proof": null,
+        "previous_rationale": null,
+        "previous_status": "accepted",
+        "proof": "Valid repo-local workerctl entrypoints were verified; root ./workerctl issue recorded as follow-up path/documentation observation.",
+        "rationale": null,
+        "source": "worker_proposed",
+        "status": "satisfied",
+        "task_id": "task-21ef9621-5c4f-45ac-8a73-6e4a2c75dec4"
+      },
+      "kind": "acceptance_criterion",
+      "source": "events",
+      "source_id": 83,
+      "summary": "satisfied criterion #16 (accepted -> satisfied): proof recorded (Valid repo-local workerctl entrypoints were verified; root ./workerctl issue recorded as follow-up path/documentation observation.)",
+      "timestamp": "2026-05-16T21:11:26Z"
+    },
+    {
+      "actor": "workerctl",
+      "details": {
+        "criterion": "QA execution remains status-only for this slice: no tracked files are edited, reformatted, or regenerated.",
+        "criterion_id": 17,
+        "event_type": "acceptance_criterion_updated",
+        "evidence": {
+          "artifact": "docs/live-qa-artifacts/2026-05-16-emergent-criteria/commands/22-git-status-before-satisfy.txt",
+          "command": "git status --short --branch",
+          "note": "Tracked changes are pre-existing GoalBuddy prep plus allowed live QA artifacts; no product source files changed.",
+          "status": "pass"
+        },
+        "previous_evidence": {},
+        "previous_proof": null,
+        "previous_rationale": null,
+        "previous_status": "accepted",
+        "proof": "Worker stayed status-only; no tracked product files were edited by the worker.",
+        "rationale": null,
+        "source": "worker_proposed",
+        "status": "satisfied",
+        "task_id": "task-21ef9621-5c4f-45ac-8a73-6e4a2c75dec4"
+      },
+      "kind": "acceptance_criterion",
+      "source": "events",
+      "source_id": 84,
+      "summary": "satisfied criterion #17 (accepted -> satisfied): proof recorded (Worker stayed status-only; no tracked product files were edited by the worker.)",
+      "timestamp": "2026-05-16T21:11:26Z"
+    },
+    {
+      "actor": "manager",
+      "details": {
+        "cycle_id": 16,
+        "manager_capture_id": null,
+        "state": "succeeded",
+        "worker_capture_id": null
+      },
+      "kind": "observe",
+      "source": "manager_cycles",
+      "source_id": 16,
+      "summary": "observed session qa-ec-worker-run2 state busy (staleness 13.7s)",
+      "timestamp": "2026-05-16T21:11:52Z"
+    },
+    {
+      "actor": "manager",
+      "details": {
+        "cycle_id": 17,
+        "manager_capture_id": null,
+        "state": "succeeded",
+        "worker_capture_id": null
+      },
+      "kind": "observe",
+      "source": "manager_cycles",
+      "source_id": 17,
+      "summary": "observed session qa-ec-worker-run2 state idle (staleness 1.2s)",
+      "timestamp": "2026-05-16T21:12:20Z"
+    }
+  ],
+  "mode": "timeline",
+  "role": "all",
+  "task": {
+    "created_at": "2026-05-16T21:09:11Z",
+    "goal": "QA emergent acceptance criteria and cleanup lifecycle without tracked edits.",
+    "id": "task-21ef9621-5c4f-45ac-8a73-6e4a2c75dec4",
+    "name": "qa-emergent-criteria-20260516-run2",
+    "state": "candidate",
+    "summary": "Real worker/manager QA for criteria negotiation, finish cleanup, and tmux diagnostics.",
+    "updated_at": "2026-05-16T21:09:11Z"
+  }
+}
