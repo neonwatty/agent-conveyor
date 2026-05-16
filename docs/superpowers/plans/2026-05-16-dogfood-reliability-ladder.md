@@ -62,8 +62,9 @@ Known caveats:
 
 - The manager is still an LLM following a tool protocol, not a daemon with every
   policy decision mechanically enforced.
-- Emergent criteria are functional, but prose-to-command criteria extraction is
-  still manager-mediated until a `criteria-plan` helper exists.
+- Emergent criteria are functional, and the first read-only `criteria-plan`
+  helper exists to reduce manual prose-to-command extraction. It still requires
+  manager review before any suggested criteria commands are run.
 - The tmux error path has a recorded live QA pass; the emergent-criteria path
   still needs a complete recorded real-pair QA pass.
 - The test suite currently passes with Python `ResourceWarning` noise for
@@ -563,7 +564,7 @@ management.
 These are likely development tasks that can be driven by `/goal` or GoalBuddy:
 
 1. Add `criteria-plan` as a read-only helper that converts worker prose into
-   proposed `criteria` commands without mutating DB state.
+   proposed `criteria` commands without mutating DB state. ✅
 2. Add a `qa-run` or script harness for at least `emergent-criteria` that writes
    structured check results to an artifact directory.
 3. Add JSON output modes where missing for replay, criteria list, export

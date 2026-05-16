@@ -16,6 +16,7 @@ from unittest import mock
 
 from workerctl import classify
 from workerctl import commands
+from workerctl import criteria_plan
 from workerctl import core as worker_core
 from workerctl import db as worker_db
 from workerctl import importer
@@ -989,6 +990,7 @@ class CliTests(unittest.TestCase):
         self.assertTrue(any("manager_context.acceptance_criteria" in step for step in payload["steps"]))
         self.assertTrue(any("manager_context.criteria_negotiation" in step for step in payload["steps"]))
         self.assertTrue(any("worker_proposed" in step for step in payload["steps"]))
+        self.assertTrue(any("criteria-plan" in step for step in payload["steps"]))
         self.assertTrue(any("manager_inferred" in step for step in payload["steps"]))
         self.assertTrue(any("criteria qa-emergent-criteria --list" in step for step in payload["steps"]))
         self.assertTrue(any("--require-criteria-audit" in step for step in payload["steps"]))
@@ -1022,8 +1024,109 @@ class CliTests(unittest.TestCase):
         joined = " ".join(payload["steps"] + payload["expected_observations"])
         self.assertIn("must-have current-task criteria", joined)
         self.assertIn("deferred follow-up criteria", joined)
+        self.assertIn("criteria-plan can draft reviewed", joined)
         self.assertIn("acceptance_criterion_updated", joined)
         self.assertIn("status-only", joined)
+
+    def test_criteria_plan_parser_extracts_separated_criteria(self):
+        text = """
+Must-have current-task criteria:
+- README and workerctl help are inspected.
+1. First cycle shows criteria negotiation is needed.
+
+Deferred follow-up criteria:
+- Add a future qa-run harness.
+"""
+
+        suggestions, warnings = criteria_plan.parse_worker_criteria_response(text)
+
+        self.assertEqual(warnings, [])
+        self.assertEqual([suggestion.status for suggestion in suggestions], ["accepted", "accepted", "deferred"])
+        self.assertEqual(suggestions[0].criterion, "README and workerctl help are inspected.")
+        self.assertEqual(suggestions[0].source, "worker_proposed")
+        self.assertIsNone(suggestions[0].rationale)
+        self.assertEqual(suggestions[2].rationale, criteria_plan.DEFAULT_DEFERRED_RATIONALE)
+
+    def test_criteria_plan_parser_warns_on_ambiguous_prose(self):
+        suggestions, warnings = criteria_plan.parse_worker_criteria_response(
+            "I think we should make sure this generally works and maybe improve docs later."
+        )
+
+        self.assertEqual(suggestions, [])
+        self.assertTrue(warnings)
+        self.assertIn("No clear", warnings[0])
+
+    def test_criteria_plan_cli_json_drafts_commands_without_mutation(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            create = self.run_workerctl("tasks", "--create", "criteria-task", "--goal", "goal", "--path", str(db_path))
+            self.assertEqual(create.returncode, 0, create.stderr)
+            with worker_db.connect(db_path) as conn:
+                before_counts = {
+                    "acceptance_criteria": conn.execute("select count(*) from acceptance_criteria").fetchone()[0],
+                    "events": conn.execute("select count(*) from events").fetchone()[0],
+                    "commands": conn.execute("select count(*) from commands").fetchone()[0],
+                }
+
+            text = "\n".join(
+                [
+                    "Must-have current-task criteria:",
+                    "- README inspected",
+                    "Deferred follow-up criteria:",
+                    "- Build qa-run later",
+                ]
+            )
+            proc = self.run_workerctl(
+                "criteria-plan",
+                "criteria-task",
+                "--from-text",
+                text,
+                "--json",
+                "--path",
+                str(db_path),
+            )
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            payload = json.loads(proc.stdout)
+            self.assertEqual(payload["task"], "criteria-task")
+            self.assertEqual(payload["warnings"], [])
+            self.assertEqual(len(payload["suggestions"]), 2)
+            self.assertEqual(payload["suggestions"][0]["source"], "worker_proposed")
+            self.assertEqual(payload["suggestions"][0]["status"], "accepted")
+            self.assertEqual(payload["suggestions"][0]["command"][:4], ["workerctl", "criteria", "criteria-task", "--add"])
+            self.assertEqual(payload["suggestions"][1]["status"], "deferred")
+            self.assertIn("--rationale", payload["suggestions"][1]["command"])
+
+            criteria = self.run_workerctl("criteria", "criteria-task", "--list", "--path", str(db_path))
+            self.assertEqual(criteria.returncode, 0, criteria.stderr)
+            criteria_payload = json.loads(criteria.stdout)
+            self.assertEqual(criteria_payload["criteria"], [])
+            self.assertEqual(criteria_payload["summary"]["accepted"], 0)
+            self.assertEqual(criteria_payload["summary"]["deferred"], 0)
+            with worker_db.connect(db_path) as conn:
+                self.assertEqual(conn.execute("select count(*) from acceptance_criteria").fetchone()[0], before_counts["acceptance_criteria"])
+                self.assertEqual(conn.execute("select count(*) from events").fetchone()[0], before_counts["events"])
+                self.assertEqual(conn.execute("select count(*) from commands").fetchone()[0], before_counts["commands"])
+
+    def test_criteria_plan_cli_text_renders_reviewed_commands(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            create = self.run_workerctl("tasks", "--create", "criteria-task", "--goal", "goal", "--path", str(db_path))
+            self.assertEqual(create.returncode, 0, create.stderr)
+
+            proc = self.run_workerctl(
+                "criteria-plan",
+                "criteria-task",
+                "--from-text",
+                "Must-have current-task criteria:\n- README inspected\n",
+                "--path",
+                str(db_path),
+            )
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("Suggested criteria commands for criteria-task", proc.stdout)
+            self.assertIn("workerctl criteria criteria-task --add --criterion", proc.stdout)
+            self.assertIn("Review these commands before running them.", proc.stdout)
 
     def test_qa_plan_tmux_errors_outputs_failure_flow(self):
         proc = self.run_workerctl("qa-plan", "tmux-errors", "--json")

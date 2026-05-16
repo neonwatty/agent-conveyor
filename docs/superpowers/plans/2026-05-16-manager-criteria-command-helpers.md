@@ -107,23 +107,23 @@ live QA worker response shape.
 
 ## Implementation Steps
 
-1. Add a pure parser helper in `workerctl/criteria_plan.py`.
+1. Add a pure parser helper in `workerctl/criteria_plan.py`. ✅
    - Input: raw worker response text.
    - Output: structured accepted/deferred suggestions plus warnings.
-2. Add command rendering helpers.
+2. Add command rendering helpers. ✅
    - `suggestion_to_argv(task, suggestion)`.
    - `suggestion_to_shell(task, suggestion)` using `shlex.quote`.
-3. Add `command_criteria_plan` in `workerctl/commands.py`.
+3. Add `command_criteria_plan` in `workerctl/commands.py`. ✅
    - Resolve task by name/ID to fail early on unknown tasks.
    - Read from `--from-worker-response`, `--from-text`, or `--from-stdin`.
    - Print JSON or reviewed text output.
-4. Wire `criteria-plan` into `workerctl/cli.py`.
+4. Wire `criteria-plan` into `workerctl/cli.py`. ✅
 5. Update manager prompt/docs to mention the helper after a worker proposes
-   criteria.
-6. Extend `qa-plan emergent-criteria`.
+   criteria. ✅
+6. Extend `qa-plan emergent-criteria`. ✅
    - Add an optional step: run `criteria-plan` on the worker response, review
      suggestions, then run chosen `workerctl criteria ... --add` commands.
-7. Add tests.
+7. Add tests. ✅
    - Parser: must-have and deferred headings.
    - Parser: ambiguous prose returns warning and no suggestions.
    - CLI JSON shape.

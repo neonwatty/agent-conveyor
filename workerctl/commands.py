@@ -5,6 +5,7 @@ import hashlib
 import os
 import json
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -17,6 +18,7 @@ from workerctl.classify import classify_busy_wait, classify_startup_output
 from workerctl.audit import mutation_audit_result
 from workerctl.constants import DEFAULT_HISTORY_LINES, DEFAULT_MANAGER_STALE_SECONDS, PROJECT_ROOT, VALID_STATES
 from workerctl.core import WorkerError, age_seconds, ensure_tool, now_iso, raise_for_tmux_permission_failure, run, sh_quote
+from workerctl.criteria_plan import plan_criteria_commands
 from workerctl.db import active_manager, active_task_worker
 from workerctl.db import connect as connect_db
 from workerctl.db import create_task as create_db_task
@@ -199,6 +201,8 @@ Supervision loop:
 - Inspect `manager_context.criteria_negotiation`; use its prompt when needed is true.
 - If worker progress reveals new edge cases, tests, polish, or scope
   boundaries, ask the worker to propose must-have vs follow-up criteria.
+- After a worker proposes separated criteria, use `scripts/workerctl criteria-plan`
+  to draft reviewed criteria commands, then run only the commands you agree with.
 - Record useful criteria with `scripts/workerctl criteria`.
   Examples:
   - `scripts/workerctl criteria {task_line} --add --criterion "..." --source worker_proposed --status proposed`
@@ -1197,6 +1201,7 @@ def command_qa_plan(args: argparse.Namespace) -> int:
                 "manager cycle output includes manager_context.acceptance_criteria with summary/open/proposed/satisfied/deferred/rejected",
                 "criteria_negotiation.needed starts true before active current-task criteria exist and turns false after proposed, accepted, or satisfied criteria exist",
                 "the manager asks the worker for must-have current-task criteria versus deferred follow-up criteria",
+                "criteria-plan can draft reviewed workerctl criteria --add commands from separated worker criteria text without mutating task state",
                 "worker-proposed and manager-inferred criteria are visible through workerctl criteria --list",
                 "accepted criteria block finish-task --require-criteria-audit until satisfied, deferred, or rejected",
                 "satisfied criteria include evidence_json describing the verification receipt",
@@ -1212,6 +1217,7 @@ def command_qa_plan(args: argparse.Namespace) -> int:
                 "Run workerctl cycle qa-emergent-criteria and verify manager_context.acceptance_criteria is present with empty status buckets.",
                 "Verify manager_context.criteria_negotiation.needed is true and reason is no_criteria on the first cycle.",
                 'Nudge the worker: workerctl session-nudge qa-ec-worker "Propose 2-4 acceptance criteria for this QA slice. Separate must-have current-task criteria from deferred follow-up criteria. Keep this status-only: do not edit tracked files."',
+                "Optionally save the worker response and run workerctl criteria-plan qa-emergent-criteria --from-worker-response response.md --json; review suggestions before running any criteria mutations.",
                 "Record at least one worker-proposed must-have criterion as accepted with workerctl criteria qa-emergent-criteria --add --criterion \"...\" --source worker_proposed --status accepted.",
                 "Record at least one follow-up criterion as deferred with workerctl criteria qa-emergent-criteria --add --criterion \"...\" --source worker_proposed --status deferred --rationale \"Follow-up after this QA slice\".",
                 "Run workerctl cycle qa-emergent-criteria again and verify open contains the accepted criterion while deferred contains the follow-up.",
@@ -1507,6 +1513,60 @@ def command_criteria(args: argparse.Namespace) -> int:
             result = _acceptance_criteria_response(conn, task=task, affected_criterion=criterion)
             conn.commit()
     print(json.dumps(result, indent=2, sort_keys=True))
+    return 0
+
+
+def _criteria_plan_input(args: argparse.Namespace) -> str:
+    if args.from_text is not None:
+        return args.from_text
+    if args.from_worker_response is not None:
+        return Path(args.from_worker_response).expanduser().read_text()
+    if args.from_stdin:
+        return sys.stdin.read()
+    raise WorkerError("One of --from-text, --from-worker-response, or --from-stdin is required.")
+
+
+def _shell_join(argv: list[str]) -> str:
+    return " ".join(shlex.quote(part) for part in argv)
+
+
+def command_criteria_plan(args: argparse.Namespace) -> int:
+    from workerctl import db as worker_db
+
+    db_path = Path(args.path).expanduser().resolve() if args.path else None
+    with worker_db.connect(db_path) as conn:
+        worker_db.initialize_database(conn)
+        task = worker_db.task_row(conn, task=args.task)
+
+    result = plan_criteria_commands(task["name"], _criteria_plan_input(args))
+    if args.json:
+        print(json.dumps(result, indent=2, sort_keys=True))
+        return 0
+
+    print(f"Suggested criteria commands for {task['name']}")
+    print("")
+    accepted = [item for item in result["suggestions"] if item["status"] == "accepted"]
+    deferred = [item for item in result["suggestions"] if item["status"] == "deferred"]
+    print("Accepted current-task criteria:")
+    if accepted:
+        for index, item in enumerate(accepted, start=1):
+            print(f"{index}. {_shell_join(item['command'])}")
+    else:
+        print("None.")
+    print("")
+    print("Deferred follow-up criteria:")
+    if deferred:
+        for index, item in enumerate(deferred, start=1):
+            print(f"{index}. {_shell_join(item['command'])}")
+    else:
+        print("None.")
+    if result["warnings"]:
+        print("")
+        print("Warnings:")
+        for warning in result["warnings"]:
+            print(f"- {warning}")
+    print("")
+    print("Review these commands before running them.")
     return 0
 
 
