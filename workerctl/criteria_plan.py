@@ -88,7 +88,7 @@ def parse_worker_criteria_response(text: str) -> tuple[list[CriteriaSuggestion],
     return suggestions, warnings
 
 
-def suggestion_to_argv(task: str, suggestion: CriteriaSuggestion) -> list[str]:
+def suggestion_to_argv(task: str, suggestion: CriteriaSuggestion, *, path: str | None = None) -> list[str]:
     argv = [
         "workerctl",
         "criteria",
@@ -103,21 +103,23 @@ def suggestion_to_argv(task: str, suggestion: CriteriaSuggestion) -> list[str]:
     ]
     if suggestion.rationale:
         argv.extend(["--rationale", suggestion.rationale])
+    if path:
+        argv.extend(["--path", path])
     return argv
 
 
-def suggestion_to_shell(task: str, suggestion: CriteriaSuggestion) -> str:
-    return " ".join(shlex.quote(part) for part in suggestion_to_argv(task, suggestion))
+def suggestion_to_shell(task: str, suggestion: CriteriaSuggestion, *, path: str | None = None) -> str:
+    return " ".join(shlex.quote(part) for part in suggestion_to_argv(task, suggestion, path=path))
 
 
-def plan_criteria_commands(task: str, text: str) -> dict[str, Any]:
+def plan_criteria_commands(task: str, text: str, *, path: str | None = None) -> dict[str, Any]:
     suggestions, warnings = parse_worker_criteria_response(text)
     return {
         "task": task,
         "suggestions": [
             {
                 **suggestion.as_dict(),
-                "command": suggestion_to_argv(task, suggestion),
+                "command": suggestion_to_argv(task, suggestion, path=path),
             }
             for suggestion in suggestions
         ],

@@ -1116,18 +1116,30 @@ Deferred follow-up criteria:
             self.assertEqual(payload["suggestions"][0]["source"], "worker_proposed")
             self.assertEqual(payload["suggestions"][0]["status"], "accepted")
             self.assertEqual(payload["suggestions"][0]["command"][:4], ["workerctl", "criteria", "criteria-task", "--add"])
+            self.assertEqual(payload["suggestions"][0]["command"][-2:], ["--path", str(db_path.resolve())])
             self.assertEqual(payload["suggestions"][1]["status"], "deferred")
             self.assertIn("--rationale", payload["suggestions"][1]["command"])
+
+            criteria_before_add = self.run_workerctl("criteria", "criteria-task", "--list", "--path", str(db_path))
+            self.assertEqual(criteria_before_add.returncode, 0, criteria_before_add.stderr)
+            criteria_before_add_payload = json.loads(criteria_before_add.stdout)
+            self.assertEqual(criteria_before_add_payload["criteria"], [])
+            self.assertEqual(criteria_before_add_payload["summary"]["accepted"], 0)
+            self.assertEqual(criteria_before_add_payload["summary"]["deferred"], 0)
+
+            generated_args = payload["suggestions"][0]["command"][1:]
+            add = self.run_workerctl(*generated_args)
+            self.assertEqual(add.returncode, 0, add.stderr)
 
             criteria = self.run_workerctl("criteria", "criteria-task", "--list", "--path", str(db_path))
             self.assertEqual(criteria.returncode, 0, criteria.stderr)
             criteria_payload = json.loads(criteria.stdout)
-            self.assertEqual(criteria_payload["criteria"], [])
-            self.assertEqual(criteria_payload["summary"]["accepted"], 0)
+            self.assertEqual([item["criterion"] for item in criteria_payload["criteria"]], ["README inspected"])
+            self.assertEqual(criteria_payload["summary"]["accepted"], 1)
             self.assertEqual(criteria_payload["summary"]["deferred"], 0)
             with worker_db.connect(db_path) as conn:
-                self.assertEqual(conn.execute("select count(*) from acceptance_criteria").fetchone()[0], before_counts["acceptance_criteria"])
-                self.assertEqual(conn.execute("select count(*) from events").fetchone()[0], before_counts["events"])
+                self.assertEqual(conn.execute("select count(*) from acceptance_criteria").fetchone()[0], before_counts["acceptance_criteria"] + 1)
+                self.assertEqual(conn.execute("select count(*) from events").fetchone()[0], before_counts["events"] + 1)
                 self.assertEqual(conn.execute("select count(*) from commands").fetchone()[0], before_counts["commands"])
 
     def test_criteria_plan_cli_text_renders_reviewed_commands(self):
@@ -1148,6 +1160,7 @@ Deferred follow-up criteria:
             self.assertEqual(proc.returncode, 0, proc.stderr)
             self.assertIn("Suggested criteria commands for criteria-task", proc.stdout)
             self.assertIn("workerctl criteria criteria-task --add --criterion", proc.stdout)
+            self.assertIn(f"--path {db_path.resolve()}", proc.stdout)
             self.assertIn("Review these commands before running them.", proc.stdout)
 
     def test_qa_plan_tmux_errors_outputs_failure_flow(self):

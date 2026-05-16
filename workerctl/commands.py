@@ -1538,7 +1538,7 @@ def command_criteria_plan(args: argparse.Namespace) -> int:
         worker_db.initialize_database(conn)
         task = worker_db.task_row(conn, task=args.task)
 
-    result = plan_criteria_commands(task["name"], _criteria_plan_input(args))
+    result = plan_criteria_commands(task["name"], _criteria_plan_input(args), path=str(db_path) if db_path else None)
     if args.json:
         print(json.dumps(result, indent=2, sort_keys=True))
         return 0
