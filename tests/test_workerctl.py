@@ -6597,6 +6597,26 @@ class SuperviseCycleCriteriaTests(unittest.TestCase):
             self.assertTrue(negotiation["needed"])
             self.assertEqual(negotiation["reason"], "no_current_task_criteria")
 
+    def test_criteria_negotiation_quotes_task_names_in_suggested_commands(self):
+        from workerctl import supervise_cycle
+
+        negotiation = supervise_cycle._criteria_negotiation_context(
+            task_name="criteria cycle; echo bad",
+            criteria_context={
+                "summary": {
+                    "proposed": 0,
+                    "accepted": 0,
+                    "satisfied": 0,
+                    "deferred": 0,
+                    "rejected": 0,
+                },
+            },
+        )
+
+        joined_actions = " ".join(negotiation["suggested_actions"])
+        self.assertIn("workerctl criteria 'criteria cycle; echo bad' --add", joined_actions)
+        self.assertNotIn("workerctl criteria criteria cycle; echo bad --add", joined_actions)
+
     def test_run_cycle_does_not_recommend_criteria_negotiation_when_active_criteria_exist(self):
         from workerctl import supervise_cycle
 
