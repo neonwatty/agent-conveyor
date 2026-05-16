@@ -1,0 +1,194 @@
+# GoalBuddy v2 state.yaml
+# Board truth lives here. goal.md is the editable charter; notes/ holds long receipts only.
+
+version: 2
+
+goal:
+  title: "Dogfood Reliability Ladder"
+  slug: "dogfood-reliability-ladder"
+  kind: existing_plan
+  tranche: "Normalize and commit the dogfood reliability ladder baseline, then choose the next safe gate or prerequisite helper."
+  status: active
+  intake:
+    original_request: "Use goalbuddy:goal-prep to drive the dogfood reliability ladder with verifiable acceptance criteria."
+    interpreted_outcome: "A GoalBuddy board exists that can safely drive development and QA from the dogfood reliability ladder."
+    input_shape: existing_plan
+    audience: "Jeremy and future codex-terminal-manager dogfood runs"
+    authority: requested
+    proof_type: artifact
+    completion_proof: "A final Judge or PM audit maps task receipts to the revised dogfood plan and shows the baseline is clean/explicit and the current tranche either unlocked the next gate or identified the exact blocker."
+    likely_misfire: "Producing more planning or running isolated commands without proving manager-led nudging, emergent criteria, replay/export evidence, and guardrail behavior."
+    blind_spots_considered:
+      - "Whether to run live pair QA first or build missing QA helpers first."
+      - "Whether the untracked plan should be committed before live QA."
+      - "Whether manager behavior needs separate Judge review from deterministic control-plane checks."
+    existing_plan_facts:
+      - "docs/superpowers/plans/2026-05-16-dogfood-reliability-ladder.md defines product thesis, evidence bundles, stop conditions, scenarios, promotion gates, and reliability backlog."
+      - "The first useful tranche should preserve that plan and decide whether criteria-plan, qa-run, JSON output support, qa-doctor, or live Scenario 1/2 QA comes first."
+
+rules:
+  pm_owns_state: true
+  one_active_task: true
+  max_write_workers: 1
+  no_implementation_without_worker_or_pm_task: true
+  no_completion_without_judge_or_pm_audit: true
+  planning_is_not_completion: true
+  queued_required_worker_blocks_completion: true
+  continuous_until_full_outcome: true
+  missing_input_or_credentials_do_not_stop_goal: true
+  preserve_and_validate_existing_plan: true
+  intake_misfire_must_be_audited: true
+  slice_policy:
+    max_consecutive_tiny_tasks: 2
+    prefer_vertical_slices: true
+    judge_picks_largest_safe_slice: true
+    worker_completes_whole_slice: true
+
+agents:
+  scout: unknown
+  worker: unknown
+  judge: unknown
+
+visual_board:
+  selected: local
+  local:
+    status: live
+    url: "http://goalbuddy.localhost:41737/dogfood-reliability-ladder/"
+    command: "npx goalbuddy board docs/goals/dogfood-reliability-ladder"
+  github_projects:
+    status: not_requested
+    url: null
+    command: "npx goalbuddy extend github-projects"
+    missing: []
+
+active_task: T002
+
+tasks:
+  - id: T001
+    type: pm
+    assignee: PM
+    status: done
+    reasoning_hint: default
+    objective: "Normalize the revised dogfood reliability ladder baseline before live QA or helper implementation."
+    inputs:
+      - "docs/superpowers/plans/2026-05-16-dogfood-reliability-ladder.md"
+      - "docs/goals/dogfood-reliability-ladder/goal.md"
+      - "docs/goals/dogfood-reliability-ladder/state.yaml"
+      - "git status --short --branch"
+    constraints:
+      - "Do not run live worker/manager sessions."
+      - "Do not implement app helpers."
+      - "Commit only the revised plan and GoalBuddy control files if the operator has approved committing."
+      - "If commit is blocked by unrelated dirty work or missing approval, record the exact blocker and leave git state explicit."
+    expected_output:
+      - "Baseline decision: committed, intentionally uncommitted, or blocked."
+      - "Exact files included or intentionally excluded."
+      - "Current git status after normalization."
+      - "Next recommended tranche: live Scenario 1/2 QA or missing QA helper."
+    receipt:
+      result: done
+      summary: "Baseline normalization prepared for commit with the revised dogfood plan, GoalBuddy charter/state, and generated local board artifact."
+      baseline_decision: "commit"
+      files_included:
+        - "docs/superpowers/plans/2026-05-16-dogfood-reliability-ladder.md"
+        - "docs/goals/dogfood-reliability-ladder/goal.md"
+        - "docs/goals/dogfood-reliability-ladder/state.yaml"
+        - "docs/goals/dogfood-reliability-ladder/.goalbuddy-board/app.js"
+        - "docs/goals/dogfood-reliability-ladder/.goalbuddy-board/goalbuddy-mark.png"
+        - "docs/goals/dogfood-reliability-ladder/.goalbuddy-board/index.html"
+        - "docs/goals/dogfood-reliability-ladder/.goalbuddy-board/styles.css"
+      files_excluded: []
+      commands:
+        - cmd: "node /Users/neonwatty/.codex/plugins/cache/goalbuddy/goalbuddy/0.3.6/skills/goalbuddy/scripts/check-update.mjs --json"
+          status: pass
+        - cmd: "git status --short --branch"
+          status: pass
+      next_recommended_tranche: "Judge whether to run live Scenario 1/2 QA next or implement a missing QA helper first."
+  - id: T002
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: high
+    objective: "After baseline normalization, choose the first safe execution task from the dogfood reliability ladder."
+    inputs:
+      - "T001 receipt"
+      - "docs/superpowers/plans/2026-05-16-dogfood-reliability-ladder.md"
+      - "docs/live-qa-log.md"
+      - "README.md"
+      - "scripts/workerctl qa-plan emergent-criteria"
+    constraints:
+      - "Read-only."
+      - "Preserve the existing plan facts rather than rediscovering from scratch."
+      - "Separate deterministic control-plane proof from live manager-behavior proof."
+      - "Choose the largest safe useful next slice with explicit allowed_files, verify commands, and stop conditions."
+    expected_output:
+      - "Decision: run live QA next or implement a helper first."
+      - "Exact next Worker objective."
+      - "allowed_files for the next write-capable task."
+      - "verify commands for the next task."
+      - "stop_if conditions for the next task."
+      - "Promotion gate or blocker that the next task addresses."
+    receipt: null
+  - id: T003
+    type: worker
+    assignee: Worker
+    status: queued
+    reasoning_hint: default
+    objective: "Execute the first safe implementation or QA task selected by T001."
+    allowed_files: []
+    verify: []
+    stop_if:
+      - "Need files outside allowed_files."
+      - "The selected slice depends on unapproved live worker/manager sessions."
+      - "Verification fails twice."
+      - "The task would perform destructive or unattended manager actions."
+    receipt: null
+  - id: T004
+    type: judge
+    assignee: Judge
+    status: queued
+    reasoning_hint: high
+    objective: "Audit whether the completed first tranche task unlocks the next dogfood promotion gate or identifies a precise blocker."
+    inputs:
+      - "T001 receipt"
+      - "T002/T003 receipt, whichever executed"
+      - "Current git status"
+      - "Any evidence bundle or verification output"
+    constraints:
+      - "Do not implement."
+      - "Reject completion if evidence does not map to the dogfood plan's acceptance criteria."
+      - "Reject completion if required Worker work is still queued or active."
+    expected_output:
+      - "complete | not_complete"
+      - "full_outcome_complete: true | false"
+      - "Promotion gate unlocked or exact blocker."
+      - "Missing evidence."
+      - "Next task if not complete."
+    receipt: null
+  - id: T999
+    type: judge
+    assignee: Judge
+    status: queued
+    reasoning_hint: high
+    objective: "Final audit for the current GoalBuddy tranche."
+    inputs:
+      - "All done task receipts"
+      - "Last verification"
+      - "Current dirty diff"
+      - "Dogfood reliability ladder promotion gates"
+    constraints:
+      - "Do not implement."
+      - "Reject completion if the current tranche did not either unlock a gate or record the exact blocker."
+    expected_output:
+      - "complete | not_complete"
+      - "full_outcome_complete: true | false"
+      - "missing evidence"
+      - "next task if not complete"
+    receipt: null
+
+checks:
+  dirty_fingerprint: unknown
+  last_verification:
+    result: unknown
+    task: null
+    commands: []
