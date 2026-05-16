@@ -510,9 +510,9 @@ tasks:
           status: pass
       verification:
         local:
-          - command: "node /Users/neonwatty/.codex/plugins/cache/goalbuddy/goalbuddy/0.3.6/skills/goalbuddy/scripts/check-goal-state.mjs docs/goals/manager-led-scenario-3-gate3/state.yaml"
+          - command: "node <goalbuddy-skill>/scripts/check-goal-state.mjs docs/goals/manager-led-scenario-3-gate3/state.yaml"
             status: pass
-          - command: "rg -n \"session-token-|/Users/neonwatty|OPENAI|ANTHROPIC|api[_-]?key\" docs/live-qa-artifacts/2026-05-16-manager-led-gate3-disposable-edit docs/goals/manager-led-scenario-3-gate3 || true"
+          - command: "sensitive artifact scrub check for session tokens, local user paths, and API key markers"
             status: pass
           - command: "git diff --check"
             status: pass
