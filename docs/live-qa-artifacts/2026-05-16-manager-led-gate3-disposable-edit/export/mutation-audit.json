@@ -1,0 +1,57 @@
+{
+  "ok": true,
+  "records": [
+    {
+      "allowed_decisions": [
+        "stop"
+      ],
+      "command": {
+        "created_at": "2026-05-16T23:37:31Z",
+        "id": "command-a1697e70-ab1a-4e59-8978-60d5c0869362",
+        "state": "succeeded",
+        "type": "finish_task"
+      },
+      "linked_decision": {
+        "created_at": "2026-05-16T23:37:31Z",
+        "decision": "stop",
+        "id": 9,
+        "manager_cycle_id": null,
+        "manager_id": null,
+        "payload": {
+          "command_id": "command-a1697e70-ab1a-4e59-8978-60d5c0869362",
+          "source": "finish_task"
+        },
+        "reason": "Gate 3 manager-led disposable edit QA complete; accepted criteria satisfied, one follow-up deferred, replay/export captured.",
+        "task_id": "task-d72a6352-7b4e-42cc-a3a1-8964afcb8ab3"
+      },
+      "nearest_prior_decision": {
+        "created_at": "2026-05-16T23:37:31Z",
+        "decision": "stop",
+        "id": 9,
+        "manager_cycle_id": null,
+        "manager_id": null,
+        "payload": {
+          "command_id": "command-a1697e70-ab1a-4e59-8978-60d5c0869362",
+          "source": "finish_task"
+        },
+        "reason": "Gate 3 manager-led disposable edit QA complete; accepted criteria satisfied, one follow-up deferred, replay/export captured.",
+        "task_id": "task-d72a6352-7b4e-42cc-a3a1-8964afcb8ab3"
+      },
+      "ok": true,
+      "warnings": []
+    }
+  ],
+  "summary": {
+    "mutations": 1,
+    "with_warnings": 0
+  },
+  "task": {
+    "created_at": "2026-05-16T23:33:12Z",
+    "goal": "Gate 3 manager-led disposable edit QA with bounded worker write scope.",
+    "id": "task-d72a6352-7b4e-42cc-a3a1-8964afcb8ab3",
+    "name": "qa-g3-disposable-edit",
+    "state": "done",
+    "summary": "Real worker/manager QA for manager-supervised disposable edit, emergent criteria, replay/export, and cleanup.",
+    "updated_at": "2026-05-16T23:37:32Z"
+  }
+}

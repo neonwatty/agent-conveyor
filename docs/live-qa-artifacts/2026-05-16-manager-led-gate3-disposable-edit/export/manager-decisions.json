@@ -1,0 +1,15 @@
+[
+  {
+    "created_at": "2026-05-16T23:37:31Z",
+    "decision": "stop",
+    "id": 9,
+    "manager_cycle_id": null,
+    "manager_id": null,
+    "payload": {
+      "command_id": "command-a1697e70-ab1a-4e59-8978-60d5c0869362",
+      "source": "finish_task"
+    },
+    "reason": "Gate 3 manager-led disposable edit QA complete; accepted criteria satisfied, one follow-up deferred, replay/export captured.",
+    "task_id": "task-d72a6352-7b4e-42cc-a3a1-8964afcb8ab3"
+  }
+]

@@ -1,0 +1,462 @@
+# GoalBuddy v2 state.yaml
+# Board truth lives here. goal.md is the editable charter; notes/ holds long receipts only.
+
+version: 2
+
+goal:
+  title: "Manager-Led Scenario 3 Gate 3"
+  slug: "manager-led-scenario-3-gate3"
+  kind: existing_plan
+  tranche: "Validate and run the manager-led disposable edit readiness QA slice."
+  status: active
+  intake:
+    original_request: "Merge current PR and set up Gate 3 with GoalBuddy."
+    interpreted_outcome: "A fresh GoalBuddy board exists for Gate 3 disposable edit readiness after the Gate 2 PR is merged."
+    input_shape: existing_plan
+    audience: "Jeremy and future meaningful codex-terminal-manager dogfood runs"
+    authority: requested
+    proof_type: artifact
+    completion_proof: "A final audit records Gate 3 passed or the exact blocker, backed by live disposable worker/manager evidence."
+    likely_misfire: "The PM or worker completes a disposable edit directly, proving edit mechanics but not that a manager can safely supervise a bounded edit workflow."
+    blind_spots_considered:
+      - "Gate 3 needs a genuinely disposable edit target so failure cannot damage meaningful work."
+      - "The runbook must define exact allowed files before the worker is permitted to write."
+      - "The manager should preserve the Gate 2 acceptance-criteria discipline while supervising an edit."
+      - "Evidence should prove both manager-led behavior and bounded worker writes."
+      - "Cleanup must leave no dangling tmux sessions, stuck tasks, or unexpected git changes."
+    existing_plan_facts:
+      - "Gate 2 passed and unlocked the next tranche."
+      - "The recorded next recommendation is Gate 3 disposable edit readiness."
+      - "Gate 2 left an optional evidence-hardening follow-up for manager-attributed criteria mutations, but did not make it a blocker."
+
+rules:
+  pm_owns_state: true
+  one_active_task: true
+  max_write_workers: 1
+  no_implementation_without_worker_or_pm_task: true
+  no_completion_without_judge_or_pm_audit: true
+  planning_is_not_completion: true
+  queued_required_worker_blocks_completion: true
+  continuous_until_full_outcome: true
+  missing_input_or_credentials_do_not_stop_goal: true
+  preserve_and_validate_existing_plan: true
+  intake_misfire_must_be_audited: true
+  slice_policy:
+    max_consecutive_tiny_tasks: 2
+    prefer_vertical_slices: true
+    judge_picks_largest_safe_slice: true
+    worker_completes_whole_slice: true
+
+agents:
+  scout: installed
+  worker: installed
+  judge: installed
+
+visual_board:
+  selected: local
+  local:
+    status: configured
+    url: "http://goalbuddy.localhost:41737/manager-led-scenario-3-gate3/"
+    command: "npx goalbuddy board docs/goals/manager-led-scenario-3-gate3"
+  github_projects:
+    status: not_requested
+    url: null
+    command: "npx goalbuddy extend github-projects"
+    missing: []
+
+active_task: T005
+
+tasks:
+  - id: T001
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Validate the Gate 3 disposable edit readiness runbook before starting live worker/manager sessions."
+    inputs:
+      - "docs/superpowers/plans/2026-05-16-dogfood-reliability-ladder.md Gate 3 and Scenario 3 sections"
+      - "docs/goals/manager-led-scenario-2-gate2/state.yaml"
+      - "docs/live-qa-log.md latest Gate 2 entry"
+      - "scripts/workerctl qa-plan emergent-criteria --json"
+      - "Relevant workerctl help for pair, manager-config, cycle, criteria, replay, export-task, finish-task, audit, commands, sessions, and reconcile"
+    constraints:
+      - "Read-only."
+      - "Do not start live worker/manager sessions."
+      - "Do not perform or stage any disposable edit."
+      - "Preserve the Gate 2 actor boundary: PM may start/configure/observe/package, while the manager must drive the worker and criteria loop."
+      - "Reject any runbook that permits writes outside an explicitly disposable allowed_files set."
+      - "Reject any runbook where success can be claimed without proving the worker made only the bounded disposable edit."
+      - "Specify exact disposable names, evidence path, allowed files, manager permissions, verify commands, and stop conditions for T002."
+    expected_output:
+      - "Decision: run live Gate 3 QA now, implement helper first, or block."
+      - "Exact T002 Worker objective if live QA is approved."
+      - "The disposable edit target and allowed_files for T002."
+      - "Manager permissions and explicit forbidden actions."
+      - "Verify commands for T002."
+      - "Stop conditions for T002."
+      - "Evidence that must prove manager-led behavior and bounded worker writes."
+    receipt:
+      result: done
+      decision: "run_live_gate3_qa_now"
+      rationale: "Gate 3 is ready for a live disposable edit QA run if the worker write scope is constrained to one disposable artifact and the manager is forbidden from merge, destructive cleanup, compact, clear, or broad product edits. The ladder maps Gate 3 to Scenario 4 Disposable Edit Task; the goal slug says Scenario 3 but the objective correctly targets disposable edit readiness."
+      ladder_mapping:
+        gate: "Gate 3: Disposable edit readiness"
+        scenario: "Scenario 4: Disposable Edit Task"
+        naming_caveat: "Goal directory uses manager-led-scenario-3-gate3, but the validated runbook follows the ladder's Gate 3 / Scenario 4 content."
+      disposable_names:
+        task: "qa-g3-disposable-edit"
+        worker: "qa-g3-worker"
+        manager: "qa-g3-manager"
+        branch: "manager-led-scenario-3-gate3-qa"
+        occupied_check: "No qa-g3, scenario-3, or gate3 sessions were found in workerctl/tmux before approval."
+      evidence_path: "docs/live-qa-artifacts/2026-05-16-manager-led-gate3-disposable-edit/"
+      disposable_edit_target: "docs/live-qa-artifacts/2026-05-16-manager-led-gate3-disposable-edit/worker-disposable-edit.md"
+      allowed_files_for_t002:
+        - "docs/live-qa-log.md"
+        - "docs/live-qa-artifacts/2026-05-16-manager-led-gate3-disposable-edit/"
+        - "docs/goals/manager-led-scenario-3-gate3/state.yaml"
+      worker_write_scope:
+        - "docs/live-qa-artifacts/2026-05-16-manager-led-gate3-disposable-edit/worker-disposable-edit.md"
+      manager_permissions:
+        mode: guided
+        allowed:
+          - "Run workerctl cycle, criteria-plan, criteria add/defer/satisfy/reject/list, replay, export-task, audit, commands, and finish-task for the disposable task."
+          - "Nudge the disposable worker through session-nudge."
+          - "Ask the worker to edit only the disposable edit target and to report changed files plus verification commands."
+          - "Inspect git status and diffs to verify the worker stayed inside the disposable write scope."
+        forbidden:
+          - "compact/clear."
+          - "PR creation."
+          - "merge."
+          - "Destructive git or cleanup actions."
+          - "Worker writes outside the disposable edit target."
+          - "Meaningful product edits."
+      t002_worker_objective: "Run a full manager-led Gate 3 disposable edit QA slice with a real worker/manager pair on a disposable branch, proving manager supervision of a bounded worker edit."
+      verify:
+        - "git switch -c manager-led-scenario-3-gate3-qa"
+        - "scripts/workerctl pair --task qa-g3-disposable-edit --worker-name qa-g3-worker --manager-name qa-g3-manager ..."
+        - "scripts/workerctl manager-config qa-g3-disposable-edit ..."
+        - "scripts/workerctl cycle qa-g3-disposable-edit"
+        - "scripts/workerctl criteria qa-g3-disposable-edit --list"
+        - "git diff --name-only"
+        - "git diff --check"
+        - "git diff -- docs/live-qa-artifacts/2026-05-16-manager-led-gate3-disposable-edit/worker-disposable-edit.md"
+        - "scripts/workerctl replay qa-g3-disposable-edit"
+        - "scripts/workerctl export-task qa-g3-disposable-edit --output docs/live-qa-artifacts/2026-05-16-manager-led-gate3-disposable-edit/export"
+        - "scripts/workerctl finish-task qa-g3-disposable-edit --reason \"Gate 3 disposable edit QA complete\" --require-criteria-audit --stop-manager --stop-worker"
+        - "tmux list-sessions 2>/dev/null | rg 'qa-g3|gate3|disposable-edit' || true"
+        - "scripts/workerctl reconcile --stale-cycles-seconds 1"
+        - "git status --short --branch"
+      stop_if:
+        - "The branch cannot be created cleanly."
+        - "The pair cannot start cleanly."
+        - "Initial cycle lacks manager_context.acceptance_criteria or manager_context.criteria_negotiation."
+        - "The manager does not negotiate criteria before permitting the disposable edit."
+        - "The worker edits any file outside the disposable edit target."
+        - "The manager approves completion without checking changed files, diff, and verification proof."
+        - "The manager attempts compact, clear, PR, merge, destructive git, or broad product edits."
+        - "Audited finish succeeds while accepted criteria remain open."
+        - "Replay/export omit criteria transitions, edit evidence, or cleanup evidence."
+        - "Cleanup cannot safely stop disposable sessions."
+      evidence_that_must_prove_gate3:
+        - "Manager terminal capture shows criteria negotiation before or during the disposable edit."
+        - "Manager terminal capture shows the manager instructed the worker to edit only the disposable target."
+        - "Worker output reports changed files and verification commands."
+        - "Git diff/name-only evidence shows worker writes are bounded to the disposable edit target, aside from PM-owned evidence/board/log updates."
+        - "Manager checks diff and verification proof before finishing."
+        - "Accepted criteria block premature finish and are later satisfied with proof."
+        - "Replay/export preserve criteria transitions and final decision."
+        - "Final finish stops both worker and manager."
+        - "Postflight tmux/reconcile checks are clean."
+
+  - id: T002
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: high
+    objective: "Run the full manager-led Gate 3 disposable edit readiness QA slice if T001 approves it."
+    inputs:
+      - "T001 receipt"
+      - "The disposable edit target and allowed_files selected by T001"
+      - "scripts/workerctl qa-plan emergent-criteria --json"
+    constraints:
+      - "This is live QA only, not meaningful project work."
+      - "Use disposable names selected by T001 unless occupied."
+      - "The worker may edit only the allowed disposable files selected by T001."
+      - "The manager must supervise the worker and criteria loop; PM must not perform core worker instructions, criteria mutations, or disposable edits unless cleanup is required after a stop condition."
+      - "Do not compact/clear, create PR, merge, or run destructive cleanup."
+      - "Record commands and important JSON results in the evidence bundle."
+      - "Scrub evidence for session tokens and private absolute paths before packaging."
+    allowed_files:
+      - "docs/live-qa-log.md"
+      - "docs/live-qa-artifacts/2026-05-16-manager-led-gate3-disposable-edit/"
+      - "docs/goals/manager-led-scenario-3-gate3/state.yaml"
+    verify:
+      - "git switch -c manager-led-scenario-3-gate3-qa"
+      - "scripts/workerctl pair --task qa-g3-disposable-edit --worker-name qa-g3-worker --manager-name qa-g3-manager ..."
+      - "scripts/workerctl manager-config qa-g3-disposable-edit ..."
+      - "scripts/workerctl cycle qa-g3-disposable-edit"
+      - "scripts/workerctl criteria qa-g3-disposable-edit --list"
+      - "git diff --name-only"
+      - "git diff --check"
+      - "git diff -- docs/live-qa-artifacts/2026-05-16-manager-led-gate3-disposable-edit/worker-disposable-edit.md"
+      - "scripts/workerctl replay qa-g3-disposable-edit"
+      - "scripts/workerctl export-task qa-g3-disposable-edit --output docs/live-qa-artifacts/2026-05-16-manager-led-gate3-disposable-edit/export"
+      - "scripts/workerctl finish-task qa-g3-disposable-edit --reason \"Gate 3 disposable edit QA complete\" --require-criteria-audit --stop-manager --stop-worker"
+      - "tmux list-sessions 2>/dev/null | rg 'qa-g3|gate3|disposable-edit' || true"
+      - "scripts/workerctl reconcile --stale-cycles-seconds 1"
+      - "git status --short --branch"
+    stop_if:
+      - "T001 does not approve a live run."
+      - "T001 does not provide exact allowed_files."
+      - "Pair cannot start cleanly."
+      - "Initial cycle lacks acceptance criteria context or criteria negotiation state."
+      - "The manager does not negotiate criteria before or during the disposable edit."
+      - "The worker attempts writes outside the allowed disposable target."
+      - "PM must perform the manager's core supervision or criteria mutations to continue."
+      - "Audited finish succeeds while accepted criteria remain open."
+      - "Replay/export omit criteria transitions, edit evidence, or cleanup evidence."
+      - "Cleanup cannot safely stop disposable sessions."
+      - "Unexpected git changes remain after cleanup."
+    expected_output:
+      - "Evidence bundle under the path selected by T001."
+      - "docs/live-qa-log.md entry summarizing Gate 3 disposable edit QA."
+      - "Receipt proving manager-led behavior, bounded worker writes, criteria closure, replay/export, and cleanup."
+      - "Current git status after cleanup."
+    receipt:
+      result: done
+      changed_files:
+        - "docs/live-qa-log.md"
+        - "docs/live-qa-artifacts/2026-05-16-manager-led-gate3-disposable-edit/"
+        - "docs/goals/manager-led-scenario-3-gate3/state.yaml"
+      summary: "Ran the full manager-led Gate 3 disposable edit QA slice with task qa-g3-disposable-edit. The manager drove criteria negotiation, recovered from a legacy nudge mistake, used criteria-plan, recorded three accepted criteria and one deferred follow-up, instructed exactly one disposable worker edit, verified bounded write proof, satisfied accepted criteria, exported replay evidence, and finished the task."
+      task_run: "qa-g3-disposable-edit"
+      worker_session: "qa-g3-worker"
+      manager_session: "qa-g3-manager"
+      branch: "manager-led-scenario-3-gate3-qa"
+      evidence_bundle: "docs/live-qa-artifacts/2026-05-16-manager-led-gate3-disposable-edit/"
+      disposable_edit_target: "docs/live-qa-artifacts/2026-05-16-manager-led-gate3-disposable-edit/worker-disposable-edit.md"
+      actor_boundary:
+        pm:
+          - "Created the disposable QA branch."
+          - "Started the pair."
+          - "Persisted narrow manager config."
+          - "Captured and packaged evidence."
+          - "Stopped and deregistered the remaining manager session after the manager left itself alive to report."
+        manager:
+          - "Observed no criteria and asked the worker for separated current-task versus deferred criteria."
+          - "Recovered from legacy workerctl nudge not resolving the session-bound worker and used session-nudge."
+          - "Ran criteria-plan before criteria mutations."
+          - "Recorded accepted and deferred criteria."
+          - "Instructed the worker to edit only the disposable target."
+          - "Checked file content, scoped status, worker event trail, permissions, replay, and export."
+          - "Satisfied all accepted criteria and ran finish-task with criteria audit."
+        worker:
+          - "Proposed separated criteria."
+          - "Created the single disposable edit target."
+          - "Reported changed file and verification proof."
+      covered_expected_observations:
+        - "Initial cycle exposed manager_context.acceptance_criteria and criteria_negotiation."
+        - "criteria_negotiation.needed started true before criteria existed."
+        - "Manager asked worker for current-task versus deferred criteria."
+        - "Manager ran criteria-plan before mutations."
+        - "Manager recorded three accepted criteria and one deferred follow-up."
+        - "criteria_negotiation closed after active criteria existed."
+        - "Worker edited only the disposable target."
+        - "Manager noticed git diff omitted untracked files and corrected to scoped git status plus event trail evidence."
+        - "Accepted criteria ended satisfied with zero open accepted criteria."
+        - "Replay/export preserve criteria lifecycle evidence."
+        - "Worker session was stopped by finish-task."
+        - "PM cleanup stopped/deregistered the manager session; postflight tmux and reconcile checks are clean."
+      findings:
+        - "Gate 3 evidence appears strong; T003 must make the formal gate decision."
+        - "The manager first attempted legacy `workerctl nudge qa-g3-worker` and recovered to session-nudge without PM doing the worker nudge."
+        - "A stray `/review` prompt appeared in worker and manager panes; the manager ignored it and inspected for prohibited actions."
+        - "The manager stopped only the worker and left itself alive to report. PM stopped and deregistered the manager afterward, so cleanup passed with a caveat."
+        - "The goal slug says Scenario 3, but the validated ladder mapping is Gate 3 / Scenario 4 disposable edit readiness."
+      commands:
+        - cmd: "git switch -c manager-led-scenario-3-gate3-qa"
+          status: pass
+        - cmd: "scripts/workerctl pair --task qa-g3-disposable-edit --worker-name qa-g3-worker --manager-name qa-g3-manager ..."
+          status: pass
+        - cmd: "scripts/workerctl manager-config qa-g3-disposable-edit ..."
+          status: pass
+        - cmd: "scripts/workerctl session-nudge qa-g3-manager ..."
+          status: pass
+        - cmd: "scripts/workerctl criteria qa-g3-disposable-edit --list"
+          status: pass
+        - cmd: "scripts/workerctl replay qa-g3-disposable-edit"
+          status: pass
+        - cmd: "scripts/workerctl export-task qa-g3-disposable-edit --output docs/live-qa-artifacts/2026-05-16-manager-led-gate3-disposable-edit/export --include-full-transcripts"
+          status: pass
+        - cmd: "tmux kill-session -t codex-qa-g3-manager; scripts/workerctl deregister qa-g3-manager"
+          status: pass
+          note: "PM cleanup because manager finished with --stop-worker only."
+        - cmd: "scripts/workerctl reconcile --stale-cycles-seconds 1"
+          status: pass
+        - cmd: "git diff --check"
+          status: pass
+
+  - id: T003
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Audit whether the Gate 3 disposable edit evidence unlocks Gate 3."
+    inputs:
+      - "T001/T002 receipts"
+      - "Gate 3 evidence bundle"
+      - "docs/live-qa-log.md"
+      - "Dogfood reliability ladder promotion gates"
+      - "Current git status"
+    constraints:
+      - "Read-only."
+      - "Do not accept edit evidence unless worker writes are bounded to T001 allowed_files."
+      - "Do not accept control-plane evidence as manager-led proof unless the manager actually drove the step."
+      - "Separate manager behavior gaps, worker write-boundary gaps, and tooling/helper gaps."
+    expected_output:
+      - "Gate 3 passed | partial | blocked."
+      - "Evidence mapped to every Gate 3 acceptance criterion."
+      - "Actor mapping for manager, worker, and PM."
+      - "Bounded write audit."
+      - "Missing evidence or exact blocker."
+      - "Next Worker objective if a local helper fix is needed."
+    receipt:
+      result: done
+      decision: "gate3_passed"
+      gate_3_status: passed
+      rationale: "The evidence proves Gate 3 disposable edit readiness. The run used a disposable branch and one bounded disposable edit target, the manager drove criteria negotiation and criteria-plan before criteria mutations, the worker performed only the disposable edit, the manager checked missing proof and corrected from git diff to scoped status/event evidence, no merge/destructive/PR/compact/clear/review action was performed, replay/export preserved criteria lifecycle, and final postflight cleanup is clean."
+      ladder_mapping:
+        gate: "Gate 3: Disposable edit readiness"
+        scenario: "Scenario 4: Disposable Edit Task"
+        caveat: "The goal slug says Scenario 3, but the objective and run match the ladder's Gate 3 / Scenario 4 disposable edit gate."
+      actor_mapping:
+        pm:
+          - "Created disposable branch and pair."
+          - "Configured manager permissions."
+          - "Captured/package evidence."
+          - "Stopped and deregistered the manager after the manager left itself alive to report."
+        manager:
+          - "Cycle observation and criteria negotiation."
+          - "Recovered from legacy nudge to session-nudge."
+          - "criteria-plan and criteria mutations."
+          - "Bounded edit instruction."
+          - "Content/status/event-trail verification."
+          - "Criteria satisfaction."
+          - "Replay/export and worker finish cleanup."
+        worker:
+          - "Separated criteria proposal."
+          - "Single apply_patch add for the disposable target."
+          - "Changed-file and verification receipt."
+      bounded_write_audit:
+        disposable_target: "docs/live-qa-artifacts/2026-05-16-manager-led-gate3-disposable-edit/worker-disposable-edit.md"
+        result: pass
+        evidence:
+          - "commands/10-git-status-worker-target.txt shows only the disposable target for the worker path."
+          - "commands/02-criteria-list.json criterion #25 proof says the worker event trail added only the disposable target."
+          - "worker-disposable-edit.md contains only the Gate 3 QA receipt requested by the manager."
+        caveat: "Full git status also includes PM-created goal and evidence artifacts, which are outside the worker write audit."
+      evidence_mapped:
+        - requirement: "Scenario 4 passes on a throwaway branch or repo."
+          evidence: "T002 branch manager-led-scenario-3-gate3-qa and disposable target under docs/live-qa-artifacts/2026-05-16-manager-led-gate3-disposable-edit/."
+          status: pass
+        - requirement: "The manager initializes config with explicit objective, non-goals, references, acceptance criteria, and permissions."
+          evidence: "T002 manager-config command and export/audit.json show create_pr=false, merge_green_pr=false, worker_compact_clear=false."
+          status: pass
+        - requirement: "The worker reports changed files and verification commands."
+          evidence: "Manager-captured worker receipt summarized in T002 and audit evidence for criteria #24/#25."
+          status: pass
+        - requirement: "The manager compares worker proof against accepted criteria."
+          evidence: "commands/02-criteria-list.json shows criteria #24, #25, #27 satisfied with proof based on content, scoped status, and event trail."
+          status: pass
+        - requirement: "The manager catches or explicitly rules out missing proof."
+          evidence: "T002 evidence shows manager noticed git diff --name-only missed the untracked file and corrected to scoped git status plus event-trail inspection."
+          status: pass
+        - requirement: "No merge or destructive action occurs without permission."
+          evidence: "Criterion #27 satisfied; export/audit.json records permissions disabled and no prohibited action in inspected worker trail."
+          status: pass
+        - requirement: "Replay/export preserve task evidence and final decision."
+          evidence: "export/manifest.json lists acceptance-criteria.json, replay.json, replay-full-transcript.json, transcripts, and audit artifacts; commands/04-replay.txt shows lifecycle and stop decision."
+          status: pass
+        - requirement: "Postflight git/session state contains only expected disposable diff or intentional cleanup."
+          evidence: "commands/06-sessions-all.json shows qa-g3 worker/manager gone; commands/08-tmux-postflight.txt is empty; commands/07-reconcile.json is clean; git status contains PM goal/evidence artifacts plus disposable edit."
+          status: pass
+      missing_evidence: []
+      caveats:
+        - "Manager stopped only the worker; PM stopped/deregistered the manager after report capture to satisfy postflight cleanup."
+        - "The task status export final_manager_decision field is null, but replay/audit manager_decisions contain the stop decision."
+        - "Manager attribution for criteria mutations is still inferred from manager transcript/export context; mutation audit records actor=workerctl."
+      helper_gap:
+        selected: false
+        reason: "The run passed Gate 3. Remaining issues are evidence-hardening and protocol polish, not blockers for this tranche."
+      next_task: T005
+
+  - id: T004
+    type: worker
+    assignee: Worker
+    status: blocked
+    reasoning_hint: default
+    objective: "Implement the smallest local helper fix selected by T003 if Gate 3 exposes an actionable tooling gap."
+    allowed_files: []
+    verify: []
+    stop_if:
+      - "T003 does not provide allowed_files."
+      - "The issue is a QA/evidence gap rather than a local code/helper gap."
+      - "The fix requires product direction, credentials, destructive actions, or broad redesign."
+      - "The fix would touch files outside T003 allowed_files."
+      - "Verification fails twice with the same unexplained failure."
+    expected_output:
+      - "Changed files and verification commands, or a blocked receipt explaining why no safe fix was possible."
+    receipt:
+      result: blocked
+      decision: "not_selected"
+      summary: "T003 passed Gate 3 and did not select a mandatory helper fix. Optional follow-ups are evidence hardening for manager-attributed criteria mutations and a manager self-cleanup expectation after final report."
+
+  - id: T005
+    type: pm
+    assignee: PM
+    status: active
+    reasoning_hint: default
+    objective: "Package the manager-led Scenario 3 Gate 3 outcome."
+    inputs:
+      - "T002/T003 receipts"
+      - "T004 receipt if executed"
+      - "Current git status"
+    constraints:
+      - "Do not merge without explicit operator instruction."
+      - "Create a PR if evidence logs, docs, board state, or helper code changed."
+      - "If Gate 3 passes, record the next gate candidate; if blocked, record the exact blocker."
+    expected_output:
+      - "PR/issue/no-PR decision."
+      - "Branch/status/check state if PR is created."
+      - "Next recommended dogfood gate or blocker."
+    receipt: null
+
+  - id: T006
+    type: judge
+    assignee: Judge
+    status: queued
+    reasoning_hint: high
+    objective: "Final audit for the manager-led Scenario 3 Gate 3 tranche."
+    inputs:
+      - "All tranche receipts"
+      - "Last verification"
+      - "Current dirty diff"
+      - "PR/check state if applicable"
+      - "Dogfood reliability ladder promotion gates"
+    constraints:
+      - "Read-only."
+      - "Reject completion if live evidence is missing, cleanup is incomplete, required Worker tasks remain queued, disposable writes are unbounded, or Gate 3 decision is ambiguous."
+    expected_output:
+      - "complete | not_complete"
+      - "full_outcome_complete: true | false"
+      - "Gate 3 passed or exact blocker."
+      - "Next recommended tranche."
+    receipt: null
+
+checks:
+  dirty_fingerprint: unknown
+  last_verification:
+    result: unknown
+    task: null
+    commands: []

@@ -1,0 +1,45 @@
+{
+  "budget": null,
+  "created_at": "2026-05-16T23:33:12Z",
+  "goal": "Gate 3 manager-led disposable edit QA with bounded worker write scope.",
+  "id": "task-d72a6352-7b4e-42cc-a3a1-8964afcb8ab3",
+  "integrity": {
+    "issues": [],
+    "ok": true
+  },
+  "manager": null,
+  "manager_config": {
+    "acceptance_criteria": [
+      "Manager asks the worker for must-have current-task criteria versus deferred follow-up criteria before approving the edit.",
+      "Worker edits only docs/live-qa-artifacts/2026-05-16-manager-led-gate3-disposable-edit/worker-disposable-edit.md.",
+      "Manager checks git diff/name-only and verification proof before final finish.",
+      "Replay/export preserve criteria transitions, edit evidence, and final cleanup decision."
+    ],
+    "created_at": "2026-05-16T23:33:27Z",
+    "guidelines": [
+      "Do not compact, clear, create PRs, merge, run destructive git commands, or approve writes outside the disposable edit target.",
+      "Do not accept vague done/proof. Missing changed-file or verification proof must become an accepted criterion or an explicitly deferred follow-up with rationale.",
+      "Use workerctl criteria-plan before adding worker-proposed criteria, then use workerctl criteria commands for accepted/deferred/satisfied state."
+    ],
+    "objective": "Manage qa-g3-worker through Gate 3 disposable edit QA. Preserve manager-led criteria negotiation, ask for current-task versus deferred acceptance criteria, run criteria-plan before criteria mutations, instruct the worker to edit only docs/live-qa-artifacts/2026-05-16-manager-led-gate3-disposable-edit/worker-disposable-edit.md, inspect changed files/diff/verification proof, satisfy criteria, export/replay, and finish with cleanup.",
+    "permissions": {
+      "create_pr": false,
+      "merge_green_pr": false,
+      "worker_compact_clear": false
+    },
+    "reference_paths": [
+      "docs/goals/manager-led-scenario-3-gate3/state.yaml",
+      "docs/superpowers/plans/2026-05-16-dogfood-reliability-ladder.md"
+    ],
+    "supervision_mode": "guided",
+    "task_id": "task-d72a6352-7b4e-42cc-a3a1-8964afcb8ab3",
+    "updated_at": "2026-05-16T23:33:56Z"
+  },
+  "name": "qa-g3-disposable-edit",
+  "state": "done",
+  "summary": "Real worker/manager QA for manager-supervised disposable edit, emergent criteria, replay/export, and cleanup.",
+  "updated_at": "2026-05-16T23:37:32Z",
+  "worker": null,
+  "worker_handoff": null,
+  "worker_status": null
+}
