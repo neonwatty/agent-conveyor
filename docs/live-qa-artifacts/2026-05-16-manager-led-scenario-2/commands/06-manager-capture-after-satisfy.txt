@@ -1,0 +1,1 @@
+workerctl: tmux session is not running for worker qa-g2-manager: codex-qa-g2-manager

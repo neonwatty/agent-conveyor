@@ -1,5 +1,57 @@
 # Live QA Log
 
+## 2026-05-16: manager-led Scenario 2 Gate 2 QA
+
+Scenario:
+
+- `scripts/workerctl qa-plan emergent-criteria --json`
+- Live disposable pair:
+  - task `qa-g2-manager-led-scenario-2`
+  - worker `qa-g2-worker`
+  - manager `qa-g2-manager`
+- Evidence bundle:
+  `docs/live-qa-artifacts/2026-05-16-manager-led-scenario-2/`
+
+Validated:
+
+- PM only started the pair, persisted narrow manager config, observed, exported,
+  and ran postflight checks.
+- The manager ran the first cycle, saw `criteria_negotiation.needed: true` with
+  `reason: no_criteria`, and acted on it.
+- The manager nudged the worker for separated must-have current-task criteria
+  versus deferred follow-up criteria.
+- The worker returned three must-have criteria and one deferred follow-up while
+  keeping the task status-only.
+- The manager ran `criteria-plan` on the worker criteria text before any
+  criteria mutation.
+- The manager recorded three worker-proposed accepted criteria and one
+  worker-proposed deferred follow-up.
+- The manager attempted a premature audited finish and `workerctl` blocked it
+  while accepted criteria remained open.
+- The manager satisfied all accepted criteria with proof text and structured
+  evidence JSON.
+- Replay shows criteria add/defer/satisfy/final finish transitions.
+- Export wrote `acceptance-criteria.json`, and `manifest.json` lists it.
+- Final `finish-task --require-criteria-audit --stop-manager --stop-worker`
+  reported `killed_worker: true` and `killed_manager: true`.
+- Postfinish cleanup found no matching tmux sessions, session rows marked
+  `gone`, and `reconcile --stale-cycles-seconds 1` returned empty
+  `dangling_bindings`, `dead_pid_sessions`, and `stuck_tasks`.
+
+Gate decision:
+
+- Gate 2 emergent criteria readiness is unlocked by this run.
+
+Findings:
+
+- Mutation audit currently reports the criteria mutations as `actor=workerctl`;
+  manager terminal capture is the proof that the manager drove those commands.
+  A future evidence-hardening helper could persist manager decision IDs or
+  session identity for criteria mutations.
+- The final manager capture after cleanup failed because the manager tmux
+  session had already been stopped by successful final finish. That is expected
+  after cleanup.
+
 ## 2026-05-16: emergent-criteria live QA
 
 Scenario:

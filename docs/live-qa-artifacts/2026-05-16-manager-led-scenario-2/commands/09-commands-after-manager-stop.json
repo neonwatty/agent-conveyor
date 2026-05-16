@@ -1,0 +1,104 @@
+[
+  {
+    "created_at": "2026-05-16T21:42:46Z",
+    "error": null,
+    "id": "command-45dfd50d-c2b3-45e4-8520-146b64221c4f",
+    "manager_id": null,
+    "payload": {
+      "final_audit": {
+        "open_criteria": [],
+        "require_criteria_audit": true,
+        "summary": {
+          "accepted": 0,
+          "deferred": 1,
+          "proposed": 0,
+          "rejected": 0,
+          "satisfied": 3
+        },
+        "total": 4
+      },
+      "finish": true,
+      "manager_decision": {
+        "allowed_decisions": [
+          "stop"
+        ],
+        "decision": null,
+        "decision_id": null,
+        "ok": false,
+        "warnings": [
+          "missing_decision_id"
+        ]
+      },
+      "manager_session": "qa-g2-manager",
+      "message": "Gate 2 QA complete: manager-led criteria loop was exercised, accepted criteria were satisfied with proof, follow-up criterion was deferred, and final cleanup is stopping the sessions.",
+      "reason": "Gate 2 manager-led emergent acceptance criteria QA completed with criteria audit clean after replay/export.",
+      "stop_manager": true,
+      "stop_worker": true,
+      "task": "qa-g2-manager-led-scenario-2",
+      "worker": "qa-g2-worker",
+      "worker_session": "qa-g2-worker"
+    },
+    "result": {
+      "command_id": "command-45dfd50d-c2b3-45e4-8520-146b64221c4f",
+      "final_audit": {
+        "open_criteria": [],
+        "require_criteria_audit": true,
+        "summary": {
+          "accepted": 0,
+          "deferred": 1,
+          "proposed": 0,
+          "rejected": 0,
+          "satisfied": 3
+        },
+        "total": 4
+      },
+      "final_decision_id": 8,
+      "final_observation_id": 8,
+      "finish": true,
+      "killed_manager": true,
+      "killed_worker": true,
+      "manager_decision": {
+        "allowed_decisions": [
+          "stop"
+        ],
+        "decision": null,
+        "decision_id": null,
+        "ok": false,
+        "warnings": [
+          "missing_decision_id"
+        ]
+      },
+      "manager_identity": {
+        "db_pane_id": null,
+        "db_session": "codex-qa-g2-manager",
+        "live": true,
+        "live_pane_id": "%1",
+        "mismatches": [],
+        "role": "manager",
+        "session": "qa-g2-manager"
+      },
+      "manager_session": "qa-g2-manager",
+      "reason": "Gate 2 manager-led emergent acceptance criteria QA completed with criteria audit clean after replay/export.",
+      "stop_manager": true,
+      "stop_worker": true,
+      "task": "qa-g2-manager-led-scenario-2",
+      "worker": "qa-g2-worker",
+      "worker_identity": {
+        "db_pane_id": null,
+        "db_session": "codex-qa-g2-worker",
+        "live": true,
+        "live_pane_id": "%0",
+        "mismatches": [],
+        "role": "worker",
+        "session": "qa-g2-worker"
+      },
+      "worker_session": "qa-g2-worker"
+    },
+    "state": "succeeded",
+    "task_id": "task-3745ef67-2398-49fb-a3e3-63905aa0e9b5",
+    "task_name": "qa-g2-manager-led-scenario-2",
+    "type": "finish_task",
+    "updated_at": "2026-05-16T21:42:47Z",
+    "worker_id": null
+  }
+]

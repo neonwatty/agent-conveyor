@@ -1,0 +1,7 @@
+{
+  "dry_run": false,
+  "session": "qa-g2-manager",
+  "target": "codex-qa-g2-manager",
+  "text": "Manager config is persisted. Begin the manager-led Gate 2 QA now. Use workerctl only. You must drive the criteria loop yourself: run cycle for qa-g2-manager-led-scenario-2, inspect manager_context.criteria_negotiation, ask qa-g2-worker for separated criteria when needed, save or quote the worker response, run criteria-plan, then run the reviewed criteria add/defer commands you agree with. Later verify premature finish is blocked, collect proof, satisfy or close accepted criteria, replay/export, and request final finish cleanup. Do not edit files, compact/clear, create PR, merge, or ask the PM to perform criteria mutations.",
+  "time": "2026-05-16T21:40:54Z"
+}
