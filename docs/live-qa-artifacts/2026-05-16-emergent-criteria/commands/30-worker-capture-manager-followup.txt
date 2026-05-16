@@ -1,0 +1,126 @@
+
+╭────────────────────────────────────────────────╮
+│ >_ OpenAI Codex (v0.130.0)                     │
+│                                                │
+│ model:       gpt-5.5 medium   /model to change │
+│ directory:   ~/Desktop/codex-terminal-manager  │
+│ permissions: YOLO mode                         │
+╰────────────────────────────────────────────────╯
+
+  Tip: Try the Codex App. Run 'codex app' or visit
+  https://chatgpt.com/codex?app-landing-page=true
+
+
+› Inspect README.md and workerctl help. Do not edit tracked files. Wait for
+  manager instructions. When asked, propose 2-4 acceptance criteria for this QA
+  slice, separating must-have criteria from follow-up criteria.
+
+
+⚠ Skill descriptions were shortened to fit the 2% skills context budget. Codex
+  can still see every skill, but some descriptions are shorter. Disable unused
+  skills or plugins to leave more room for the rest.
+
+• I’ll read the project README and the workerctl help output only, with no file
+  edits. After that I’ll hold for the manager instructions.
+
+• Explored
+  └ Read README.md
+
+• Ran ./workerctl --help
+  └ zsh:1: permission denied: ./workerctl
+
+• Explored
+  └ Read README.md
+
+────────────────────────────────────────────────────────────────────────────────
+
+• The README confirms this repo is a tmux-backed Codex supervisor with workerctl
+  as the control plane. The root ./workerctl is not executable in this checkout,
+  so I’m checking the installed/bin entrypoint and the rest of the README
+  without modifying anything.
+
+• Explored
+  └ Read README.md
+    List workerctl
+
+
+› Propose 2-4 acceptance criteria for this QA slice. Separate must-have
+  current-task criteria from deferred follow-up criteria. Keep this status-
+  only: do not edit tracked files.
+
+
+• Explored
+  └ Read README.md
+
+• Explored
+  └ List workerctl
+
+• Ran command -v workerctl && workerctl --help
+  └ (no output)
+
+────────────────────────────────────────────────────────────────────────────────
+
+• Must-have current-task criteria:
+
+  1. README command coverage is understood well enough to identify the QA
+     surface: worker/manager setup, binding, cycle observation, criteria
+     tracking, audit/replay, and cleanup.
+  2. workerctl help is checked through a valid entrypoint, with any entrypoint
+     issue recorded separately from product behavior. Current note: root ./
+     workerctl is a package directory, not an executable; bin/workerctl and
+     scripts/workerctl are executable.
+  3. QA execution remains status-only for this slice: no tracked files are
+     edited, reformatted, or regenerated.
+
+  Deferred follow-up criteria:
+
+  1. Run a live qa-plan scenario, likely emergent-criteria, against a disposable
+     worker/manager pair and capture the audit/replay evidence.
+  2. Verify install/path behavior so workerctl --help works after documented
+     setup, not only through repo-local wrappers.
+
+────────────────────────────────────────────────────────────────────────────────
+
+
+› Status-only follow-up for qa-emergent-criteria-20260516-run2: please verify
+  the accepted open criteria and report concise evidence. Specifically: run a
+  valid repo-local workerctl help entrypoint if not already done, confirm
+  README QA surface coverage, and confirm no tracked files were edited. Do not
+  edit tracked files or start product work.
+
+
+• I’ll keep this status-only: verify the repo-local help wrapper, inspect the
+  task criteria state, confirm README QA coverage from the existing docs, and
+  check the worktree for tracked-file edits.
+
+• Explored
+  └ Search qa-plan|emergent-criteria|criteria <task>|finish-task|cycle <task>|
+replay
+           <task>|export-task in README.md
+
+• Ran git status --short
+  └  M docs/goals/dogfood-reliability-ladder/.goalbuddy-board/app.js
+     M docs/goals/dogfood-reliability-ladder/goal.md
+     M docs/goals/dogfood-reliability-ladder/state.yaml
+    ?? docs/live-qa-artifacts/
+
+• Ran scripts/workerctl criteria qa-emergent-criteria-20260516-run2 --list
+  └ {
+      "criteria": [
+    … +87 lines (ctrl + t to view transcript)
+      }
+    }
+
+• Ran bin/workerctl --help
+  └ usage: workerctl [-h]
+
+    … +107 lines (ctrl + t to view transcript)
+    options:
+      -h, --help            show this help message and exit
+
+• Working (34s • esc to interrupt)
+
+
+› Implement {feature}
+
+  gpt-5.5 medium · ~/Desktop/codex-terminal-manager · main

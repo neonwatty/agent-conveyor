@@ -1,0 +1,60 @@
+{
+  "binding_id": "binding-2c803d19-4415-4990-8d42-1c994391e98f",
+  "cycle_completed_at": "2026-05-16T21:09:21Z",
+  "cycle_id": 13,
+  "cycle_started_at": "2026-05-16T21:09:21Z",
+  "ingest": {
+    "new_events": 9,
+    "new_offset": 55006,
+    "skipped_lines": 0
+  },
+  "kind": "session_cycle",
+  "last_event_subtype": null,
+  "last_state_event_at": "2026-05-16T21:09:16.787Z",
+  "manager_alive": true,
+  "manager_context": {
+    "acceptance_criteria": {
+      "deferred": [],
+      "open": [],
+      "proposed": [],
+      "rejected": [],
+      "satisfied": [],
+      "summary": {
+        "accepted": 0,
+        "deferred": 0,
+        "proposed": 0,
+        "rejected": 0,
+        "satisfied": 0
+      }
+    },
+    "criteria_negotiation": {
+      "needed": true,
+      "prompt": "Please propose 2-4 acceptance criteria for the current slice. Split them into must-have current-task criteria and follow-up criteria. Include the verification you expect for each.",
+      "reason": "no_criteria",
+      "suggested_actions": [
+        "Ask the worker to split must-have current-task criteria from follow-up criteria.",
+        "Record accepted current-task criteria with workerctl criteria qa-emergent-criteria-20260516-run2 --add --criterion \"...\" --source worker_proposed --status accepted.",
+        "Record proposed current-task criteria with workerctl criteria qa-emergent-criteria-20260516-run2 --add --criterion \"...\" --source worker_proposed --status proposed.",
+        "Record follow-up criteria with workerctl criteria qa-emergent-criteria-20260516-run2 --add --criterion \"...\" --source worker_proposed --status deferred."
+      ]
+    },
+    "manager_config": null,
+    "worker_handoff": null
+  },
+  "manager_session": "qa-ec-manager-run2",
+  "notable_pane_pattern": null,
+  "pane_signal": {
+    "captured": true,
+    "classifier": null,
+    "degraded": false,
+    "notable_pattern": null,
+    "reason": null,
+    "status_age_seconds": 4
+  },
+  "staleness_seconds": 4.213,
+  "state": "busy",
+  "task": "qa-emergent-criteria-20260516-run2",
+  "task_completed": false,
+  "worker_alive": true,
+  "worker_session": "qa-ec-worker-run2"
+}

@@ -1,0 +1,75 @@
+{
+  "affected_criterion": {
+    "created_at": "2026-05-16T21:10:12Z",
+    "criterion": "Run a live qa-plan scenario, likely emergent-criteria, against a disposable worker/manager pair and capture the audit/replay evidence.",
+    "evidence": {},
+    "id": 18,
+    "proof": null,
+    "rationale": "Follow-up after this QA slice.",
+    "source": "worker_proposed",
+    "status": "deferred",
+    "task_id": "task-21ef9621-5c4f-45ac-8a73-6e4a2c75dec4",
+    "updated_at": "2026-05-16T21:10:12Z"
+  },
+  "criteria": [
+    {
+      "created_at": "2026-05-16T21:10:12Z",
+      "criterion": "README command coverage is understood well enough to identify the QA surface: worker/manager setup, binding, cycle observation, criteria tracking, audit/replay, and cleanup.",
+      "evidence": {},
+      "id": 15,
+      "proof": null,
+      "rationale": null,
+      "source": "worker_proposed",
+      "status": "accepted",
+      "task_id": "task-21ef9621-5c4f-45ac-8a73-6e4a2c75dec4",
+      "updated_at": "2026-05-16T21:10:12Z"
+    },
+    {
+      "created_at": "2026-05-16T21:10:12Z",
+      "criterion": "workerctl help is checked through a valid entrypoint, with any entrypoint issue recorded separately from product behavior. Current note: root ./workerctl is a package directory, not an executable; bin/workerctl and scripts/workerctl are executable.",
+      "evidence": {},
+      "id": 16,
+      "proof": null,
+      "rationale": null,
+      "source": "worker_proposed",
+      "status": "accepted",
+      "task_id": "task-21ef9621-5c4f-45ac-8a73-6e4a2c75dec4",
+      "updated_at": "2026-05-16T21:10:12Z"
+    },
+    {
+      "created_at": "2026-05-16T21:10:12Z",
+      "criterion": "QA execution remains status-only for this slice: no tracked files are edited, reformatted, or regenerated.",
+      "evidence": {},
+      "id": 17,
+      "proof": null,
+      "rationale": null,
+      "source": "worker_proposed",
+      "status": "accepted",
+      "task_id": "task-21ef9621-5c4f-45ac-8a73-6e4a2c75dec4",
+      "updated_at": "2026-05-16T21:10:12Z"
+    },
+    {
+      "created_at": "2026-05-16T21:10:12Z",
+      "criterion": "Run a live qa-plan scenario, likely emergent-criteria, against a disposable worker/manager pair and capture the audit/replay evidence.",
+      "evidence": {},
+      "id": 18,
+      "proof": null,
+      "rationale": "Follow-up after this QA slice.",
+      "source": "worker_proposed",
+      "status": "deferred",
+      "task_id": "task-21ef9621-5c4f-45ac-8a73-6e4a2c75dec4",
+      "updated_at": "2026-05-16T21:10:12Z"
+    }
+  ],
+  "summary": {
+    "accepted": 3,
+    "deferred": 1,
+    "proposed": 0,
+    "rejected": 0,
+    "satisfied": 0
+  },
+  "task": {
+    "id": "task-21ef9621-5c4f-45ac-8a73-6e4a2c75dec4",
+    "name": "qa-emergent-criteria-20260516-run2"
+  }
+}

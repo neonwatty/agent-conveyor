@@ -1,0 +1,104 @@
+[
+  {
+    "created_at": "2026-05-16T21:12:59Z",
+    "error": null,
+    "id": "command-00cd232a-b132-4a17-929a-a1816be67eca",
+    "manager_id": null,
+    "payload": {
+      "final_audit": {
+        "open_criteria": [],
+        "require_criteria_audit": true,
+        "summary": {
+          "accepted": 0,
+          "deferred": 2,
+          "proposed": 0,
+          "rejected": 0,
+          "satisfied": 3
+        },
+        "total": 5
+      },
+      "finish": true,
+      "manager_decision": {
+        "allowed_decisions": [
+          "stop"
+        ],
+        "decision": null,
+        "decision_id": null,
+        "ok": false,
+        "warnings": [
+          "missing_decision_id"
+        ]
+      },
+      "manager_session": "qa-ec-manager-run2",
+      "message": null,
+      "reason": "QA criteria flow complete",
+      "stop_manager": true,
+      "stop_worker": true,
+      "task": "qa-emergent-criteria-20260516-run2",
+      "worker": "qa-ec-worker-run2",
+      "worker_session": "qa-ec-worker-run2"
+    },
+    "result": {
+      "command_id": "command-00cd232a-b132-4a17-929a-a1816be67eca",
+      "final_audit": {
+        "open_criteria": [],
+        "require_criteria_audit": true,
+        "summary": {
+          "accepted": 0,
+          "deferred": 2,
+          "proposed": 0,
+          "rejected": 0,
+          "satisfied": 3
+        },
+        "total": 5
+      },
+      "final_decision_id": 7,
+      "final_observation_id": 7,
+      "finish": true,
+      "killed_manager": true,
+      "killed_worker": true,
+      "manager_decision": {
+        "allowed_decisions": [
+          "stop"
+        ],
+        "decision": null,
+        "decision_id": null,
+        "ok": false,
+        "warnings": [
+          "missing_decision_id"
+        ]
+      },
+      "manager_identity": {
+        "db_pane_id": null,
+        "db_session": "codex-qa-ec-manager-run2",
+        "live": true,
+        "live_pane_id": "%1",
+        "mismatches": [],
+        "role": "manager",
+        "session": "qa-ec-manager-run2"
+      },
+      "manager_session": "qa-ec-manager-run2",
+      "reason": "QA criteria flow complete",
+      "stop_manager": true,
+      "stop_worker": true,
+      "task": "qa-emergent-criteria-20260516-run2",
+      "worker": "qa-ec-worker-run2",
+      "worker_identity": {
+        "db_pane_id": null,
+        "db_session": "codex-qa-ec-worker-run2",
+        "live": true,
+        "live_pane_id": "%0",
+        "mismatches": [],
+        "role": "worker",
+        "session": "qa-ec-worker-run2"
+      },
+      "worker_session": "qa-ec-worker-run2"
+    },
+    "state": "succeeded",
+    "task_id": "task-21ef9621-5c4f-45ac-8a73-6e4a2c75dec4",
+    "task_name": "qa-emergent-criteria-20260516-run2",
+    "type": "finish_task",
+    "updated_at": "2026-05-16T21:12:59Z",
+    "worker_id": null
+  }
+]

@@ -1,0 +1,46 @@
+{
+  "budget": null,
+  "created_at": "2026-05-16T21:09:11Z",
+  "goal": "QA emergent acceptance criteria and cleanup lifecycle without tracked edits.",
+  "id": "task-21ef9621-5c4f-45ac-8a73-6e4a2c75dec4",
+  "integrity": {
+    "issues": [],
+    "ok": true
+  },
+  "manager": null,
+  "manager_config": {
+    "acceptance_criteria": [
+      "Manager context exposes acceptance_criteria and criteria_negotiation.",
+      "Worker proposes separated must-have and deferred criteria without editing tracked files.",
+      "criteria-plan is used before criteria mutations.",
+      "Accepted criteria block finish-task until satisfied, deferred, or rejected.",
+      "Replay/export/cleanup evidence is captured."
+    ],
+    "created_at": "2026-05-16T21:10:39Z",
+    "guidelines": [
+      "Use only workerctl session/task commands to communicate with the worker.",
+      "Do not ask for meaningful product work, compact/clear, PR creation, merge, or destructive cleanup.",
+      "Stop and report if tracked files change outside docs/live-qa-artifacts or docs/live-qa-log.md."
+    ],
+    "objective": "Run status-only live QA for emergent acceptance criteria and cleanup lifecycle without tracked product edits.",
+    "permissions": {
+      "create_pr": false,
+      "merge_green_pr": false,
+      "worker_compact_clear": false
+    },
+    "reference_paths": [
+      "docs/superpowers/plans/2026-05-16-dogfood-reliability-ladder.md",
+      "docs/live-qa-artifacts/2026-05-16-emergent-criteria/"
+    ],
+    "supervision_mode": "guided",
+    "task_id": "task-21ef9621-5c4f-45ac-8a73-6e4a2c75dec4",
+    "updated_at": "2026-05-16T21:10:39Z"
+  },
+  "name": "qa-emergent-criteria-20260516-run2",
+  "state": "candidate",
+  "summary": "Real worker/manager QA for criteria negotiation, finish cleanup, and tmux diagnostics.",
+  "updated_at": "2026-05-16T21:09:11Z",
+  "worker": null,
+  "worker_handoff": null,
+  "worker_status": null
+}

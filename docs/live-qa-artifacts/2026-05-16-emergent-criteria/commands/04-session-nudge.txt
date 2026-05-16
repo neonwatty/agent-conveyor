@@ -1,0 +1,7 @@
+{
+  "dry_run": false,
+  "session": "qa-ec-worker-run2",
+  "target": "codex-qa-ec-worker-run2",
+  "text": "Propose 2-4 acceptance criteria for this QA slice. Separate must-have current-task criteria from deferred follow-up criteria. Keep this status-only: do not edit tracked files.",
+  "time": "2026-05-16T21:09:27Z"
+}

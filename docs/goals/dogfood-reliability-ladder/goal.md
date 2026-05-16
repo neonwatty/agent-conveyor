@@ -40,11 +40,12 @@ verifiable acceptance criteria for each step.
 
 ## Current Tranche
 
-Validate and operationalize the revised dogfood reliability ladder, starting
-with a clean explicit baseline: normalize and commit the plan/control files or
-record exactly why committing is blocked. After that, choose the next safe slice:
-live Scenario 1/2 QA or a missing helper such as `criteria-plan`, `qa-run`, JSON
-output support, or `qa-doctor`.
+Run the next live dogfood gate: Scenario 1 status-only pair QA and the
+deterministic/manager-led portions of Scenario 2 emergent criteria QA. The
+tranche should use the now-implemented `criteria-plan` helper, preserve an
+evidence bundle, update `docs/live-qa-log.md`, and stop before meaningful
+project work, unattended management, destructive cleanup, or unapproved
+compact/clear behavior.
 
 ## Non-Negotiable Constraints
 
@@ -61,9 +62,10 @@ output support, or `qa-doctor`.
 
 ## Stop Rule
 
-Stop only when a final audit proves the current tranche has established a clean
-baseline and either unlocked the next dogfood promotion gate or recorded exactly
-what helper/fix blocks it.
+Stop only when a final audit proves the current tranche has produced live
+Scenario 1/2 evidence and either unlocks the next dogfood promotion gate or
+records exactly what live QA failure, tool limitation, or missing helper blocks
+it.
 
 Do not stop after planning, discovery, or Judge selection if a safe Worker or PM
 task can be activated.

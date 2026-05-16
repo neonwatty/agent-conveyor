@@ -1,0 +1,1 @@
+workerctl: a session named 'qa-ec-worker' is already registered; choose a different name or `workerctl deregister qa-ec-worker` first

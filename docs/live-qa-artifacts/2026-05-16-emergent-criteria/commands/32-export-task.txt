@@ -1,0 +1,5 @@
+{
+  "archive": null,
+  "export_dir": "<repo>/docs/live-qa-artifacts/2026-05-16-emergent-criteria/export",
+  "task": "qa-emergent-criteria-20260516-run2"
+}

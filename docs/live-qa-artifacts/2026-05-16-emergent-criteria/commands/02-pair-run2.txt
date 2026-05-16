@@ -1,0 +1,28 @@
+{
+  "binding_id": "binding-2c803d19-4415-4990-8d42-1c994391e98f",
+  "manager": {
+    "codex_session_id": "019e329f-3042-7cf0-93df-39448dc5a1ba",
+    "codex_session_path": "[REDACTED_CODEX_SESSIONS]/2026/05/16/rollout-2026-05-16T14-09-13-019e329f-3042-7cf0-93df-39448dc5a1ba.jsonl",
+    "cwd": "<repo>",
+    "name": "qa-ec-manager-run2",
+    "pid": 26139,
+    "role": "manager",
+    "session_id": "session-46f49761-6294-46e3-8115-8cb1a4b8545c",
+    "tmux_session": "codex-qa-ec-manager-run2"
+  },
+  "task": {
+    "created": true,
+    "id": "task-21ef9621-5c4f-45ac-8a73-6e4a2c75dec4",
+    "name": "qa-emergent-criteria-20260516-run2"
+  },
+  "worker": {
+    "codex_session_id": "019e329f-283a-7ce1-a0fc-031ee74aa039",
+    "codex_session_path": "[REDACTED_CODEX_SESSIONS]/2026/05/16/rollout-2026-05-16T14-09-11-019e329f-283a-7ce1-a0fc-031ee74aa039.jsonl",
+    "cwd": "<repo>",
+    "name": "qa-ec-worker-run2",
+    "pid": 25165,
+    "role": "worker",
+    "session_id": "session-5ee7845f-d86f-4778-81a4-53ff19f77082",
+    "tmux_session": "codex-qa-ec-worker-run2"
+  }
+}
