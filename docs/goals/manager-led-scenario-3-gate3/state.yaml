@@ -64,7 +64,7 @@ visual_board:
     command: "npx goalbuddy extend github-projects"
     missing: []
 
-active_task: T005
+active_task: T006
 
 tasks:
   - id: T001
@@ -415,7 +415,7 @@ tasks:
   - id: T005
     type: pm
     assignee: PM
-    status: active
+    status: done
     reasoning_hint: default
     objective: "Package the manager-led Scenario 3 Gate 3 outcome."
     inputs:
@@ -430,12 +430,33 @@ tasks:
       - "PR/issue/no-PR decision."
       - "Branch/status/check state if PR is created."
       - "Next recommended dogfood gate or blocker."
-    receipt: null
+    receipt:
+      result: done
+      decision: "pr_created"
+      pr_url: "https://github.com/neonwatty/codex-terminal-manager/pull/59"
+      branch: "manager-led-scenario-3-gate3-qa"
+      commit: "596a556 Record manager-led Gate 3 disposable edit QA"
+      summary: "Packaged the Gate 3 disposable edit evidence, live QA log, and GoalBuddy receipts on PR #59."
+      gate_status: "Gate 3 passed per T003."
+      next_recommended_tranche: "Gate 4 recovery readiness: scenarios 5, 7, and 8 with isolated state roots where appropriate."
+      optional_followups:
+        - "Evidence hardening for manager-attributed criteria mutations."
+        - "Protocol polish so manager final cleanup stops both worker and manager or records an explicit post-report self-cleanup handoff."
+        - "Rename or supersede the goal slug to avoid Scenario 3 versus Scenario 4 ladder confusion in future references."
+      commands:
+        - cmd: "git add docs/live-qa-log.md docs/goals/manager-led-scenario-3-gate3 docs/live-qa-artifacts/2026-05-16-manager-led-gate3-disposable-edit"
+          status: pass
+        - cmd: "git commit -m \"Record manager-led Gate 3 disposable edit QA\""
+          status: pass
+        - cmd: "git push -u origin manager-led-scenario-3-gate3-qa"
+          status: pass
+        - cmd: "gh pr create --base main --head manager-led-scenario-3-gate3-qa ..."
+          status: pass
 
   - id: T006
     type: judge
     assignee: Judge
-    status: queued
+    status: active
     reasoning_hint: high
     objective: "Final audit for the manager-led Scenario 3 Gate 3 tranche."
     inputs:
