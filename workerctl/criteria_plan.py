@@ -57,26 +57,25 @@ def parse_worker_criteria_response(text: str) -> tuple[list[CriteriaSuggestion],
         if not line:
             continue
 
+        match = _LIST_ITEM_RE.match(raw_line)
+        if match is not None and current_status is not None:
+            criterion = _clean_item(match.group("text"))
+            if not criterion:
+                continue
+            suggestions.append(
+                CriteriaSuggestion(
+                    criterion=criterion,
+                    status=current_status,
+                    rationale=DEFAULT_DEFERRED_RATIONALE if current_status == "deferred" else None,
+                )
+            )
+            continue
+
         heading_status = _heading_status(line)
         if heading_status is not None:
             current_status = heading_status
             saw_heading = True
             continue
-
-        match = _LIST_ITEM_RE.match(raw_line)
-        if match is None or current_status is None:
-            continue
-
-        criterion = _clean_item(match.group("text"))
-        if not criterion:
-            continue
-        suggestions.append(
-            CriteriaSuggestion(
-                criterion=criterion,
-                status=current_status,
-                rationale=DEFAULT_DEFERRED_RATIONALE if current_status == "deferred" else None,
-            )
-        )
 
     if not saw_heading:
         warnings.append(

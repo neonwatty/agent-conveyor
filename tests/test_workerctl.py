@@ -1047,6 +1047,28 @@ Deferred follow-up criteria:
         self.assertIsNone(suggestions[0].rationale)
         self.assertEqual(suggestions[2].rationale, criteria_plan.DEFAULT_DEFERRED_RATIONALE)
 
+    def test_criteria_plan_parser_keeps_items_with_heading_keywords(self):
+        text = """
+Must-have current-task criteria:
+- Current-task docs are updated.
+- README inspected.
+
+Deferred follow-up criteria:
+- Follow-up QA harness is documented.
+"""
+
+        suggestions, warnings = criteria_plan.parse_worker_criteria_response(text)
+
+        self.assertEqual(warnings, [])
+        self.assertEqual(
+            [(suggestion.criterion, suggestion.status) for suggestion in suggestions],
+            [
+                ("Current-task docs are updated.", "accepted"),
+                ("README inspected.", "accepted"),
+                ("Follow-up QA harness is documented.", "deferred"),
+            ],
+        )
+
     def test_criteria_plan_parser_warns_on_ambiguous_prose(self):
         suggestions, warnings = criteria_plan.parse_worker_criteria_response(
             "I think we should make sure this generally works and maybe improve docs later."
