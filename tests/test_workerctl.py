@@ -2684,8 +2684,149 @@ class CriteriaFinalAuditTests(unittest.TestCase):
             self.assertEqual(command_result["final_audit"]["summary"]["proposed"], 1)
 
 
-@unittest.skipIf(shutil.which("tmux") is None, "tmux is not installed")
+def _tmux_integration_skip_reason() -> str | None:
+    if shutil.which("tmux") is None:
+        return "tmux is not installed"
+
+    session = f"workerctl-test-probe-{os.getpid()}"
+    try:
+        subprocess.run(
+            ["tmux", "kill-session", "-t", session],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=2,
+        )
+        proc = subprocess.run(
+            ["tmux", "new-session", "-d", "-s", session, "sleep 1"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=2,
+        )
+    except subprocess.TimeoutExpired:
+        return "tmux integration unavailable: probe timed out"
+
+    if proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout or "tmux new-session failed").strip()
+        return f"tmux integration unavailable: {detail}"
+
+    try:
+        subprocess.run(
+            ["tmux", "kill-session", "-t", session],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=2,
+        )
+    except subprocess.TimeoutExpired:
+        return "tmux integration unavailable: probe timed out"
+
+    return None
+
+
+class TmuxIntegrationCapabilityTests(unittest.TestCase):
+    def test_missing_tmux_returns_installed_reason(self):
+        with mock.patch("tests.test_workerctl.shutil.which", return_value=None), mock.patch(
+            "tests.test_workerctl.subprocess.run"
+        ) as run:
+            reason = _tmux_integration_skip_reason()
+
+        self.assertEqual(reason, "tmux is not installed")
+        run.assert_not_called()
+
+    def test_new_session_failure_returns_detail_and_attempts_probe(self):
+        calls = []
+
+        def fake_run(argv, **kwargs):
+            calls.append((argv, kwargs))
+            if argv[:2] == ["tmux", "new-session"]:
+                return subprocess.CompletedProcess(argv, 1, "", "Operation not permitted\n")
+            return subprocess.CompletedProcess(argv, 0, "", "")
+
+        session = f"workerctl-test-probe-{os.getpid()}"
+        with mock.patch("tests.test_workerctl.shutil.which", return_value="/usr/bin/tmux"), mock.patch(
+            "tests.test_workerctl.subprocess.run", side_effect=fake_run
+        ):
+            reason = _tmux_integration_skip_reason()
+
+        self.assertEqual(reason, "tmux integration unavailable: Operation not permitted")
+        self.assertEqual(
+            calls,
+            [
+                (
+                    ["tmux", "kill-session", "-t", session],
+                    {"stdout": subprocess.PIPE, "stderr": subprocess.PIPE, "timeout": 2},
+                ),
+                (
+                    ["tmux", "new-session", "-d", "-s", session, "sleep 1"],
+                    {"stdout": subprocess.PIPE, "stderr": subprocess.PIPE, "text": True, "timeout": 2},
+                ),
+            ],
+        )
+
+    def test_successful_probe_returns_none_and_cleans_up(self):
+        calls = []
+
+        def fake_run(argv, **kwargs):
+            calls.append((argv, kwargs))
+            return subprocess.CompletedProcess(argv, 0, "", "")
+
+        session = f"workerctl-test-probe-{os.getpid()}"
+        with mock.patch("tests.test_workerctl.shutil.which", return_value="/usr/bin/tmux"), mock.patch(
+            "tests.test_workerctl.subprocess.run", side_effect=fake_run
+        ):
+            reason = _tmux_integration_skip_reason()
+
+        self.assertIsNone(reason)
+        self.assertEqual(
+            calls,
+            [
+                (
+                    ["tmux", "kill-session", "-t", session],
+                    {"stdout": subprocess.PIPE, "stderr": subprocess.PIPE, "timeout": 2},
+                ),
+                (
+                    ["tmux", "new-session", "-d", "-s", session, "sleep 1"],
+                    {"stdout": subprocess.PIPE, "stderr": subprocess.PIPE, "text": True, "timeout": 2},
+                ),
+                (
+                    ["tmux", "kill-session", "-t", session],
+                    {"stdout": subprocess.PIPE, "stderr": subprocess.PIPE, "timeout": 2},
+                ),
+            ],
+        )
+
+    def test_probe_timeout_returns_timeout_reason(self):
+        def fake_run(argv, **kwargs):
+            raise subprocess.TimeoutExpired(argv, kwargs["timeout"])
+
+        with mock.patch("tests.test_workerctl.shutil.which", return_value="/usr/bin/tmux"), mock.patch(
+            "tests.test_workerctl.subprocess.run", side_effect=fake_run
+        ):
+            reason = _tmux_integration_skip_reason()
+
+        self.assertEqual(reason, "tmux integration unavailable: probe timed out")
+
+    def test_real_tmux_skip_is_method_scoped(self):
+        self.assertFalse(getattr(TmuxTests, "__unittest_skip__", False))
+        tmux_methods = [
+            TmuxTests.test_send_text_pastes_and_submits_line,
+            TmuxTests.test_open_refuses_second_window_without_force,
+            TmuxTests.test_open_refuses_after_prior_attempt_without_force,
+        ]
+        for method in tmux_methods:
+            self.assertEqual(
+                getattr(method, "__unittest_skip__", False),
+                bool(TMUX_INTEGRATION_SKIP_REASON),
+            )
+        self.assertFalse(getattr(TmuxTests.test_open_manager_dry_run_resolves_task_manager, "__unittest_skip__", False))
+
+
+TMUX_INTEGRATION_SKIP_REASON = _tmux_integration_skip_reason()
+requires_tmux_integration = unittest.skipIf(TMUX_INTEGRATION_SKIP_REASON, TMUX_INTEGRATION_SKIP_REASON)
+
+
 class TmuxTests(unittest.TestCase):
+    @requires_tmux_integration
     def test_send_text_pastes_and_submits_line(self):
         name = "submit-smoke"
         session = f"codex-{name}"
@@ -2715,6 +2856,7 @@ class TmuxTests(unittest.TestCase):
                 shutil.rmtree(worker_path)
             output_path.unlink(missing_ok=True)
 
+    @requires_tmux_integration
     def test_open_refuses_second_window_without_force(self):
         name = "open-guard"
         session = f"codex-{name}"
@@ -2739,6 +2881,7 @@ class TmuxTests(unittest.TestCase):
             if worker_path.exists():
                 shutil.rmtree(worker_path)
 
+    @requires_tmux_integration
     def test_open_refuses_after_prior_attempt_without_force(self):
         name = "open-attempt-guard"
         session = f"codex-{name}"
