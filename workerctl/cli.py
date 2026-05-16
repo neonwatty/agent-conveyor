@@ -401,7 +401,7 @@ def build_parser() -> argparse.ArgumentParser:
         "start-worker",
         help="Spawn codex in a new tmux session and register it as a worker in one call.",
     )
-    start_worker.add_argument("--name", required=True)
+    start_worker.add_argument("--name", required=True, help="Worker session name.")
     start_worker.add_argument(
         "--cwd",
         default=str(INVOCATION_CWD),
@@ -434,7 +434,7 @@ def build_parser() -> argparse.ArgumentParser:
         "start-manager",
         help="Spawn codex in a new tmux session and register it as a manager in one call.",
     )
-    start_manager.add_argument("--name", required=True)
+    start_manager.add_argument("--name", required=True, help="Manager session name.")
     start_manager.add_argument(
         "--cwd",
         default=str(INVOCATION_CWD),

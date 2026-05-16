@@ -7874,6 +7874,17 @@ class StartWorkerTests(unittest.TestCase):
             finally:
                 os.environ.pop("WORKERCTL_STATE_ROOT", None)
 
+    def test_start_worker_subparser_describes_name_flag(self):
+        proc = subprocess.run(
+            [sys.executable, "-m", "workerctl", "start-worker", "--help"],
+            capture_output=True,
+            text=True,
+            cwd=str(ROOT),
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("--name", proc.stdout)
+        self.assertIn("Worker session name.", proc.stdout)
+
 
 class ManagerBootstrapPromptTests(unittest.TestCase):
     def test_prompt_includes_living_criteria_guidance_and_runnable_examples(self):
@@ -8066,6 +8077,7 @@ class StartManagerTests(unittest.TestCase):
         )
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertIn("--name", proc.stdout)
+        self.assertIn("Manager session name.", proc.stdout)
         self.assertNotIn("--task", proc.stdout)  # managers don't take a task prompt
 
 
