@@ -313,7 +313,7 @@ function tasksChangingColumns(board, previousColumns) {
 }
 
 function highlightMovingCards(taskIds) {
-  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  if (shouldReduceMotion()) return;
   for (const card of boardEl.querySelectorAll("[data-task-id]")) {
     if (!taskIds.has(card.dataset.taskId)) continue;
     card.classList.add("is-moving");
@@ -329,7 +329,7 @@ function highlightMovingCards(taskIds) {
 }
 
 function animateCardMoves(previousPositions, movingTaskIds = new Set()) {
-  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  if (shouldReduceMotion()) return;
 
   for (const card of boardEl.querySelectorAll("[data-task-id]")) {
     const previous = previousPositions.get(card.dataset.taskId);
@@ -369,6 +369,13 @@ function animateCardMoves(previousPositions, movingTaskIds = new Set()) {
       easing: "cubic-bezier(0.19, 1, 0.22, 1)",
     });
   }
+}
+
+function shouldReduceMotion() {
+  const motion = normalizeSettings(currentSettings).motion;
+  if (motion === "reduce") return true;
+  if (motion === "allow") return false;
+  return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 
 function openTask(taskId) {
@@ -540,4 +547,3 @@ loadSettings()
     setLiveState("Offline", false);
     boardEl.textContent = error.message;
   });
-

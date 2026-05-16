@@ -1078,6 +1078,25 @@ Deferred follow-up criteria:
         self.assertTrue(warnings)
         self.assertIn("No clear", warnings[0])
 
+    def test_criteria_plan_parser_ignores_empty_placeholder_items(self):
+        text = """
+Must-have current-task criteria:
+- README inspected.
+
+Deferred follow-up criteria:
+- None
+- N/A.
+- No follow-ups
+"""
+
+        suggestions, warnings = criteria_plan.parse_worker_criteria_response(text)
+
+        self.assertEqual(warnings, [])
+        self.assertEqual(
+            [(suggestion.criterion, suggestion.status) for suggestion in suggestions],
+            [("README inspected.", "accepted")],
+        )
+
     def test_criteria_plan_cli_json_drafts_commands_without_mutation(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "workerctl.db"

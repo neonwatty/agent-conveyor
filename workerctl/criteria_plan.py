@@ -28,6 +28,7 @@ class CriteriaSuggestion:
 _ACCEPTED_HEADING_RE = re.compile(r"\b(must[- ]?have|current[- ]?task|accepted)\b", re.IGNORECASE)
 _DEFERRED_HEADING_RE = re.compile(r"\b(follow[- ]?up|deferred)\b", re.IGNORECASE)
 _LIST_ITEM_RE = re.compile(r"^\s*(?:[-*+]|\d+[.)]|\[[ xX]\])\s+(?P<text>.+?)\s*$")
+_EMPTY_ITEM_RE = re.compile(r"^(?:n/?a|none|no follow[- ]?ups?|no deferred(?: criteria)?|nothing)$", re.IGNORECASE)
 
 
 def _heading_status(line: str) -> str | None:
@@ -46,6 +47,10 @@ def _clean_item(text: str) -> str:
     return re.sub(r"\s+", " ", text)
 
 
+def _is_empty_placeholder(text: str) -> bool:
+    return _EMPTY_ITEM_RE.fullmatch(text.strip().rstrip(".")) is not None
+
+
 def parse_worker_criteria_response(text: str) -> tuple[list[CriteriaSuggestion], list[str]]:
     suggestions: list[CriteriaSuggestion] = []
     warnings: list[str] = []
@@ -60,7 +65,7 @@ def parse_worker_criteria_response(text: str) -> tuple[list[CriteriaSuggestion],
         match = _LIST_ITEM_RE.match(raw_line)
         if match is not None and current_status is not None:
             criterion = _clean_item(match.group("text"))
-            if not criterion:
+            if not criterion or _is_empty_placeholder(criterion):
                 continue
             suggestions.append(
                 CriteriaSuggestion(
