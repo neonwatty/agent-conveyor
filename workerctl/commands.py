@@ -1243,7 +1243,7 @@ def command_qa_plan(args: argparse.Namespace) -> int:
             "steps": [
                 "Record a clean preflight: workerctl doctor-self --json, workerctl sessions --state active, tmux list-sessions, and git status --short --branch.",
                 "Run a read-only missing-tmux simulation, for example PATH=/usr/bin:/bin workerctl doctor-self --json, and verify the output remains parseable JSON with tmux_available false or an actionable tmux error field.",
-                "Run workerctl list and workerctl status <disposable-worker> under the same missing-tmux simulation, if a disposable worker exists, and verify JSON shape is preserved rather than replaced by a traceback.",
+                "Run workerctl list --json and workerctl status <disposable-worker> under the same missing-tmux simulation, if a disposable worker exists, and verify JSON shape is preserved rather than replaced by a traceback.",
                 "Create or reuse only a disposable pair for mutation checks; do not target active project work sessions.",
                 "Force a tmux send failure for workerctl session-nudge <disposable-worker> by using a missing tmux binary, killed tmux session, or invalid disposable tmux target; verify nonzero exit and actionable stderr.",
                 "After the failed nudge, run workerctl audit <task> and workerctl replay <task>; verify no misleading successful session_nudged event was recorded for the failed send.",
