@@ -3030,11 +3030,19 @@ class CriteriaFinalAuditTests(unittest.TestCase):
 
             with worker_db.connect(db_path) as conn:
                 task = conn.execute("select state from tasks where id = ?", (task_id,)).fetchone()
-                command_count = conn.execute("select count(*) from commands where type = 'finish_task'").fetchone()[0]
-                event_count = conn.execute("select count(*) from events where type like 'finish_task%'").fetchone()[0]
+                command = conn.execute(
+                    "select state, result_json, error from commands where type = 'finish_task'"
+                ).fetchone()
+                event = conn.execute(
+                    "select type, payload_json from events where type = 'finish_task_failed'"
+                ).fetchone()
             self.assertEqual(task["state"], "managed")
-            self.assertEqual(command_count, 0)
-            self.assertEqual(event_count, 0)
+            self.assertIsNotNone(command)
+            self.assertEqual(command["state"], "failed")
+            self.assertIn("accepted acceptance criteria still open", command["error"])
+            self.assertIsNotNone(event)
+            self.assertTrue(json.loads(command["result_json"])["expected_failure"])
+            self.assertTrue(json.loads(event["payload_json"])["expected_failure"])
 
     def test_finish_task_with_criteria_audit_succeeds_after_accepted_criteria_are_closed(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -3094,6 +3102,13 @@ class CriteriaFinalAuditTests(unittest.TestCase):
             self.assertIn("Confirm deployment receipts", message)
             self.assertIn(f"#{second_id}", message)
             self.assertIn("Verify rollback notes", message)
+
+            with worker_db.connect(db_path) as conn:
+                audit = worker_db.task_audit(conn, task="criteria-final-task")
+            command = [row for row in audit["commands"] if row["type"] == "finish_task"][0]
+            self.assertEqual(command["state"], "failed")
+            self.assertEqual(command["result"]["failure_stage"], "final_criteria_audit")
+            self.assertEqual(command["result"]["final_audit"]["summary"]["accepted"], 2)
 
     def test_finish_task_criteria_audit_success_records_result_and_event_metadata(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -4360,6 +4375,44 @@ class RegisterCommandsTests(unittest.TestCase):
             self.addCleanup(conn.close)
             row = conn.execute("select state from sessions where name='w'").fetchone()
             self.assertEqual(row["state"], "gone")
+
+    def test_cli_deregister_bound_session_records_failed_command(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            rollout = Path(tmpdir) / "r.jsonl"
+            rollout.write_text(json.dumps({
+                "type": "session_meta",
+                "payload": {"id": "u1", "cwd": str(ROOT), "originator": "codex-tui"},
+            }) + "\n")
+            state_dir = Path(tmpdir) / "state"
+            state_dir.mkdir()
+            env = {"WORKERCTL_STATE_ROOT": str(state_dir)}
+
+            self.run_cli("register-worker", "--name", "w", "--codex-session", str(rollout),
+                         "--pid", "1", "--cwd", str(ROOT), env_extra=env)
+            self.run_cli("register-manager", "--name", "m", "--codex-session", str(rollout),
+                         "--pid", "2", "--cwd", str(ROOT), env_extra=env)
+            conn = worker_db.connect(state_dir / "workerctl.db")
+            self.addCleanup(conn.close)
+            task_id = worker_db.create_task(conn, name="bound-task", goal="g")
+            worker_db.bind_sessions(
+                conn,
+                task_name="bound-task",
+                worker_session_name="w",
+                manager_session_name="m",
+            )
+            conn.commit()
+
+            proc = self.run_cli("deregister", "w", env_extra=env)
+
+            self.assertNotEqual(proc.returncode, 0)
+            self.assertIn("still bound to task", proc.stderr)
+            audit = worker_db.task_audit(conn, task="bound-task")
+            command = [row for row in audit["commands"] if row["type"] == "deregister_session"][0]
+            self.assertEqual(command["state"], "failed")
+            self.assertTrue(command["result"]["expected_failure"])
+            self.assertEqual(command["task_id"], task_id)
+            events = [row["type"] for row in audit["events"]]
+            self.assertIn("session_deregister_failed", events)
 
     def test_cli_register_worker_bad_rollout_path_returns_clean_error(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -10425,6 +10478,85 @@ class PairCommandTests(unittest.TestCase):
                 events = [row["type"] for row in audit["events"]]
                 self.assertIn("worker_compact_requested", events)
                 self.assertIn("worker_compact_request_succeeded", events)
+            finally:
+                conn.close()
+
+    def test_request_worker_compact_strict_decision_failure_records_failed_command(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = self._setup_db(tmpdir)
+            conn = worker_db.connect(db_path)
+            try:
+                task_id = worker_db.create_task(conn, name="compact-missing-decision", goal="Do config.")
+                worker_db.register_session(
+                    conn,
+                    name="compact-worker",
+                    role="worker",
+                    codex_session_path="/tmp/worker.jsonl",
+                    codex_session_id="worker-session",
+                    pid=123,
+                    cwd=tmpdir,
+                    tmux_session="codex-compact-worker",
+                )
+                worker_db.register_session(
+                    conn,
+                    name="compact-manager",
+                    role="manager",
+                    codex_session_path="/tmp/manager.jsonl",
+                    codex_session_id="manager-session",
+                    pid=124,
+                    cwd=tmpdir,
+                    tmux_session="codex-compact-manager",
+                )
+                worker_db.bind_sessions(
+                    conn,
+                    task_name="compact-missing-decision",
+                    worker_session_name="compact-worker",
+                    manager_session_name="compact-manager",
+                )
+                worker_db.upsert_manager_config(
+                    conn,
+                    task_id=task_id,
+                    supervision_mode="guided",
+                    permissions={"worker_compact_clear": True},
+                )
+                worker_db.insert_worker_handoff(
+                    conn,
+                    task_id=task_id,
+                    summary="Ready to compact.",
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "workerctl",
+                    "request-worker-compact",
+                    "compact-missing-decision",
+                    "--strict-decisions",
+                    "--dry-run",
+                    "--path",
+                    str(db_path),
+                ],
+                capture_output=True,
+                text=True,
+                cwd=str(ROOT),
+            )
+
+            self.assertNotEqual(proc.returncode, 0)
+            self.assertIn("manager_decision_validation_failed", proc.stderr)
+            conn = worker_db.connect(db_path)
+            try:
+                audit = worker_db.task_audit(conn, task="compact-missing-decision")
+                command = [row for row in audit["commands"] if row["type"] == "request_worker_compact"][0]
+                self.assertEqual(command["state"], "failed")
+                self.assertTrue(command["result"]["expected_failure"])
+                self.assertEqual(command["result"]["failure_stage"], "preflight")
+                self.assertIn("missing_decision_id", command["result"]["manager_decision"]["warnings"])
+                events = [row["type"] for row in audit["events"]]
+                self.assertIn("worker_compact_request_failed", events)
             finally:
                 conn.close()
 

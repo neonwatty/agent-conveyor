@@ -102,12 +102,12 @@ def _final_criteria_audit(conn, *, task_id: str, require_criteria_audit: bool) -
     }
 
 
-def _raise_if_final_criteria_audit_fails(final_audit: dict[str, Any], *, task_name: str) -> None:
+def _final_criteria_audit_error(final_audit: dict[str, Any], *, task_name: str) -> str | None:
     open_criteria = final_audit["open_criteria"]
     if not open_criteria:
-        return
+        return None
     details = "; ".join(f"#{criterion['id']}: {criterion['criterion']}" for criterion in open_criteria)
-    raise WorkerError(
+    return (
         f"Task {task_name} has accepted acceptance criteria still open; "
         f"satisfy, defer, or reject them before finishing: {details}"
     )
@@ -177,7 +177,46 @@ def _stop_or_finish_task(args: argparse.Namespace, *, finish: bool) -> int:
             require_criteria_audit=require_criteria_audit,
         )
         if require_criteria_audit:
-            _raise_if_final_criteria_audit_fails(final_audit, task_name=snapshot["name"])
+            audit_error = _final_criteria_audit_error(final_audit, task_name=snapshot["name"])
+            if audit_error is not None:
+                command_id = create_db_command(
+                    conn,
+                    command_type=command_type,
+                    task_id=snapshot["id"],
+                    worker_id=snapshot["worker"]["id"] if snapshot["worker"] else None,
+                    payload={
+                        "expected_failure": True,
+                        "failure_stage": "final_criteria_audit",
+                        "final_audit": final_audit,
+                        "finish": finish,
+                        "message": args.message,
+                        "reason": final_reason,
+                        "stop_manager": stop_manager,
+                        "stop_worker": args.stop_worker,
+                        "task": snapshot["name"],
+                    },
+                )
+                mark_command_attempted(conn, command_id=command_id)
+                result = {
+                    "command_id": command_id,
+                    "expected_failure": True,
+                    "failure_stage": "final_criteria_audit",
+                    "final_audit": final_audit,
+                    "finish": finish,
+                    "task": snapshot["name"],
+                }
+                finish_db_command(conn, command_id=command_id, state="failed", result=result, error=audit_error)
+                insert_db_event(
+                    conn,
+                    f"{event_prefix}_failed",
+                    actor="workerctl",
+                    command_id=command_id,
+                    task_id=snapshot["id"],
+                    worker_id=snapshot["worker"]["id"] if snapshot["worker"] else None,
+                    payload={**result, "error": audit_error, "error_type": "WorkerError"},
+                )
+                conn.commit()
+                raise WorkerError(audit_error)
         manager = active_manager(conn, task=snapshot["id"])
         worker = snapshot["worker"]
         session_binding = _resolve_session_binding(conn, task_name=snapshot["name"])
