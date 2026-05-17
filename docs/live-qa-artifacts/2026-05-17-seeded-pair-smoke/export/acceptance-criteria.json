@@ -1,0 +1,68 @@
+[
+  {
+    "created_at": "2026-05-17T20:25:16Z",
+    "criterion": "Manager first behavior after launch is scripts/workerctl cycle qa-seeded-pair-smoke, not manager-config --questions.",
+    "evidence": {
+      "command": "scripts/workerctl cycle qa-seeded-pair-smoke",
+      "evidence": "Initial manager action was cycle; cycle output included populated manager_context.manager_config and no setup questions were asked.",
+      "status": "pass"
+    },
+    "id": 40,
+    "proof": null,
+    "rationale": null,
+    "source": "manager_inferred",
+    "status": "satisfied",
+    "task_id": "task-ec662396-bbe8-4518-8c3e-c6c7c1e2efbe",
+    "updated_at": "2026-05-17T20:26:02Z"
+  },
+  {
+    "created_at": "2026-05-17T20:25:20Z",
+    "criterion": "Manager uses scripts/workerctl session-nudge qa-seeded-pair-worker to request the proof artifact.",
+    "evidence": {
+      "command": "scripts/workerctl session-nudge qa-seeded-pair-worker \"Please create the seeded-pair proof artifact now, then report the path and git status output.\"",
+      "evidence": "session-nudge targeted codex-qa-seeded-pair-worker and worker transcript shows the nudge was received before proof creation.",
+      "status": "pass"
+    },
+    "id": 41,
+    "proof": null,
+    "rationale": null,
+    "source": "manager_inferred",
+    "status": "satisfied",
+    "task_id": "task-ec662396-bbe8-4518-8c3e-c6c7c1e2efbe",
+    "updated_at": "2026-05-17T20:26:07Z"
+  },
+  {
+    "created_at": "2026-05-17T20:25:24Z",
+    "criterion": "Worker creates only .codex-workers/qa-seeded-pair-worker/seeded-pair-proof.txt and reports git status output.",
+    "evidence": {
+      "command": "sed -n 1,120p .codex-workers/qa-seeded-pair-worker/seeded-pair-proof.txt; git status --short; scripts/workerctl capture qa-seeded-pair-worker --lines 260",
+      "evidence": "Proof file contains nudge summary. Worker transcript reports exact proof path and git status output. Existing untracked docs/goals/seeded-pair-smoke/ is PM-created goal state; .codex-workers is ignored.",
+      "git_status": "?? docs/goals/seeded-pair-smoke/",
+      "proof_path": ".codex-workers/qa-seeded-pair-worker/seeded-pair-proof.txt",
+      "status": "pass"
+    },
+    "id": 42,
+    "proof": null,
+    "rationale": null,
+    "source": "manager_inferred",
+    "status": "satisfied",
+    "task_id": "task-ec662396-bbe8-4518-8c3e-c6c7c1e2efbe",
+    "updated_at": "2026-05-17T20:26:13Z"
+  },
+  {
+    "created_at": "2026-05-17T20:25:30Z",
+    "criterion": "Manager verifies evidence, satisfies durable accepted criteria, and finishes with no active sessions.",
+    "evidence": {
+      "command": "scripts/workerctl finish-task qa-seeded-pair-smoke --require-criteria-audit --stop-manager --stop-worker --reason \"Seeded pair smoke completed with verified startup and session-nudge evidence.\"",
+      "evidence": "Worker evidence verified, transcript captured, criteria audit reduced to satisfied rows before finish-task with stop-manager and stop-worker flags.",
+      "status": "ready"
+    },
+    "id": 43,
+    "proof": null,
+    "rationale": null,
+    "source": "manager_inferred",
+    "status": "satisfied",
+    "task_id": "task-ec662396-bbe8-4518-8c3e-c6c7c1e2efbe",
+    "updated_at": "2026-05-17T20:26:18Z"
+  }
+]

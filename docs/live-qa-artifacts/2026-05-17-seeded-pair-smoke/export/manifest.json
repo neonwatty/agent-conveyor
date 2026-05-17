@@ -1,0 +1,20 @@
+{
+  "created_at": "2026-05-17T20:27:05Z",
+  "files": [
+    "task-status.json",
+    "audit.json",
+    "acceptance-criteria.json",
+    "prompts.json",
+    "transcript-captures.json",
+    "terminal-captures.json",
+    "agent-observations.json",
+    "manager-cycles.json",
+    "manager-decisions.json",
+    "mutation-audit.json",
+    "replay.json"
+  ],
+  "task": {
+    "id": "task-ec662396-bbe8-4518-8c3e-c6c7c1e2efbe",
+    "name": "qa-seeded-pair-smoke"
+  }
+}

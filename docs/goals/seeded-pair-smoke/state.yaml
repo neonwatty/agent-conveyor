@@ -1,0 +1,258 @@
+version: 2
+
+goal:
+  title: "Seeded Pair Smoke"
+  slug: "seeded-pair-smoke"
+  kind: specific
+  tranche: "Run and document one disposable live seeded-pair smoke for workerctl pair --manager-* startup behavior."
+  status: done
+  intake:
+    original_request: "Use GoalBuddy for the seeded-pair smoke QA."
+    interpreted_outcome: "A GoalBuddy-run live QA smoke proves seeded manager config makes the manager start supervising from cycle instead of asking setup questions."
+    input_shape: specific
+    audience: "Jeremy Watt and future codex-terminal-manager dogfood runs"
+    authority: requested
+    proof_type: artifact
+    completion_proof: "Exported task evidence and QA-log entry show manager used seeded config, started with cycle, nudged the worker, verified evidence, satisfied criteria, finished cleanly, and left no active sessions."
+    likely_misfire: "Passing the smoke on CLI/config evidence without proving the launched manager skipped setup questions and actually supervised from seeded config."
+    blind_spots_considered:
+      - "`manager_configs.acceptance_criteria_json` may not create durable accepted criteria rows for finish-task auditing."
+      - "Transcript capture has to happen before stopping sessions."
+      - "The manager bootstrap may still ask setup questions if seeded-config wording is too weak."
+    existing_plan_facts:
+      - "Task: qa-seeded-pair-smoke"
+      - "Worker: qa-seeded-pair-worker"
+      - "Manager: qa-seeded-pair-manager"
+      - "Artifact root: docs/live-qa-artifacts/2026-05-17-seeded-pair-smoke/"
+      - "Worker must only write ignored QA artifacts."
+      - "Verify active sessions [] and reconcile clean."
+
+rules:
+  pm_owns_state: true
+  one_active_task: true
+  max_write_workers: 1
+  no_implementation_without_worker_or_pm_task: true
+  no_completion_without_judge_or_pm_audit: true
+  planning_is_not_completion: true
+  queued_required_worker_blocks_completion: true
+  continuous_until_full_outcome: true
+  missing_input_or_credentials_do_not_stop_goal: true
+  preserve_and_validate_existing_plan: true
+  intake_misfire_must_be_audited: true
+  slice_policy:
+    max_consecutive_tiny_tasks: 2
+    prefer_vertical_slices: true
+    judge_picks_largest_safe_slice: true
+    worker_completes_whole_slice: true
+
+agents:
+  scout: installed
+  worker: installed
+  judge: installed
+
+visual_board:
+  selected: local
+  local:
+    status: live
+    url: "http://goalbuddy.localhost:41737/seeded-pair-smoke/"
+    command: "npx goalbuddy board /Users/neonwatty/Desktop/codex-terminal-manager/docs/goals/seeded-pair-smoke"
+  github_projects:
+    status: not_requested
+    url: null
+    command: "npx goalbuddy extend github-projects"
+    missing: []
+
+active_task: null
+
+tasks:
+  - id: T001
+    type: pm
+    assignee: PM
+    status: done
+    reasoning_hint: medium
+    objective: "Run the disposable seeded-pair smoke through workerctl and capture durable evidence."
+    inputs:
+      - "docs/goals/seeded-pair-smoke/goal.md"
+      - "PR #72 merged behavior on main"
+      - "Task qa-seeded-pair-smoke"
+      - "Worker qa-seeded-pair-worker"
+      - "Manager qa-seeded-pair-manager"
+    constraints:
+      - "Use workerctl pair with --manager-objective, --manager-guideline, and --manager-acceptance flags."
+      - "Worker may only write ignored artifacts under .codex-workers/qa-seeded-pair-worker/."
+      - "Do not edit product implementation files during this task."
+      - "Capture transcript segments before stopping sessions if transcript evidence is needed."
+    expected_output:
+      - "Pair creation command and result."
+      - "Evidence of manager first behavior."
+      - "Evidence manager used cycle before setup questions."
+      - "Evidence manager used session-nudge."
+      - "Worker proof artifact and clean git status evidence."
+      - "Criteria state before final audit."
+    receipt:
+      result: done
+      summary: "Disposable seeded pair was created with --manager-* flags; manager config was seeded by pair before manager launch; manager skipped setup questions, started with cycle, recovered invalid criteria source to manager_inferred after PM nudge, used session-nudge, verified worker proof, satisfied four durable criteria, and finish-task stopped both sessions."
+      evidence:
+        - "scripts/workerctl pair --task qa-seeded-pair-smoke --worker-name qa-seeded-pair-worker --manager-name qa-seeded-pair-manager ... --manager-objective ... --manager-guideline ... --manager-acceptance ..."
+        - "pair output: manager_config_seeded=true, manager_config_seeded_by_pair=true"
+        - "manager capture: bootstrap says manager config already recorded and first supervision action included scripts/workerctl cycle qa-seeded-pair-smoke"
+        - "criteria ids 40-43 satisfied"
+        - "scripts/workerctl mutation-audit qa-seeded-pair-smoke --json: ok=true"
+        - "docs/live-qa-artifacts/2026-05-17-seeded-pair-smoke/export/"
+      observations:
+        - "The manager initially attempted invalid criteria source manager_config before recovering to manager_inferred after PM nudge."
+        - "Transcript capture after finish failed because both sessions had already stopped; the manager's own criterion evidence says transcript captured, but export shows no transcript segments."
+        - "Worker git status included untracked docs/goals/seeded-pair-smoke/ from PM goal state; worker artifact was under ignored .codex-workers/."
+
+  - id: T002
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Audit whether the seeded-pair smoke actually proved the startup behavior and acceptance criteria path."
+    inputs:
+      - "T001 receipt"
+      - "workerctl replay qa-seeded-pair-smoke"
+      - "workerctl mutation-audit qa-seeded-pair-smoke --json"
+      - "workerctl criteria qa-seeded-pair-smoke --list"
+      - "worker and manager captures or transcript segments"
+    constraints:
+      - "Read-only."
+      - "Reject if the manager asked setup questions before cycle."
+      - "Reject if manager config was only seeded but not used by the manager."
+      - "Reject if accepted criteria cannot be audited before finish."
+    expected_output:
+      - "pass | fail"
+      - "Evidence map"
+      - "Missing evidence"
+      - "Product follow-up recommendation if failed or partial"
+    receipt:
+      result: done
+      decision: "pass_with_caveats"
+      full_outcome_complete: false
+      summary: "The smoke proves the merged seeded-pair startup behavior: pair seeded manager config before launch, the manager bootstrap told it config was already recorded, and the manager's first supervision action included cycle rather than setup questions. The task also proved session-nudge, durable criteria satisfaction, finish-task criteria audit, and cleanup. Two caveats remain for documentation/follow-up: the manager first tried invalid criteria source manager_config, and transcript-capture was missed because finish-task stopped sessions before capture."
+      evidence:
+        - "export/manager-cycles.json cycle 43 includes populated manager_context.manager_config and zero durable criteria rows."
+        - "manager capture shows bootstrap seeded-config path and no manager-config --questions prompt before cycle."
+        - "export/acceptance-criteria.json: criteria 40-43 are satisfied."
+        - "export/mutation-audit.json: finish_task mutation ok=true with zero warnings."
+        - "sessions --state active returned [] and reconcile reported no dangling/dead/stuck sessions."
+      missing_or_weak_evidence:
+        - "export/transcript-captures.json and terminal-captures.json are empty because transcript capture ran after sessions stopped."
+        - "Criterion 43 evidence says transcript captured, but exported transcript evidence contradicts that; QA log should record the miss."
+      product_followups:
+        - "Consider adding a valid criteria source or prompt guidance for criteria derived from manager_config; manager guessed manager_config but CLI only accepts final_audit, manager_inferred, user_requested, worker_proposed."
+        - "Consider a finish-task option or manager prompt convention to export/capture transcript segments before stopping sessions."
+
+  - id: T003
+    type: pm
+    assignee: PM
+    status: done
+    reasoning_hint: medium
+    objective: "Record the seeded-pair smoke result in repo QA artifacts and clean up all live sessions."
+    inputs:
+      - "T001 receipt"
+      - "T002 receipt"
+      - "docs/live-qa-log.md"
+      - "docs/live-qa-artifacts/2026-05-17-seeded-pair-smoke/"
+    constraints:
+      - "Only edit QA documentation/artifact files unless T002 explicitly requires a product follow-up task."
+      - "Run sessions and reconcile cleanup checks."
+      - "If product implementation follow-up is needed, record it as a follow-up instead of silently fixing it inside the QA doc task."
+    expected_output:
+      - "QA log entry."
+      - "Export bundle path."
+      - "Cleanup command results."
+      - "Any follow-up task or PR recommendation."
+    receipt:
+      result: done
+      summary: "Recorded the seeded-pair smoke in docs/live-qa-log.md, exported the task evidence bundle, and verified cleanup."
+      changed_files:
+        - "docs/live-qa-log.md"
+        - "docs/live-qa-artifacts/2026-05-17-seeded-pair-smoke/export/"
+        - "docs/live-qa-artifacts/2026-05-17-seeded-pair-smoke/export.zip"
+      commands:
+        - cmd: "scripts/workerctl export-task qa-seeded-pair-smoke --output docs/live-qa-artifacts/2026-05-17-seeded-pair-smoke/export --zip"
+          status: pass
+        - cmd: "scripts/workerctl sessions --state active"
+          status: pass
+          output: "[]"
+        - cmd: "scripts/workerctl reconcile --stale-cycles-seconds 1"
+          status: pass
+          output: "No dangling bindings, dead pid sessions, or stuck tasks; schema health ok."
+      followups:
+        - "Document or encode manager_inferred as the expected source for manager-config-derived criteria."
+        - "Consider pre-stop transcript capture support for finish-task or manager guidance."
+
+  - id: T999
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Final audit: decide whether the seeded-pair smoke tranche is complete."
+    inputs:
+      - "All done task receipts"
+      - "Last verification"
+      - "Current dirty diff"
+      - "QA log/artifact paths"
+    constraints:
+      - "Do not implement."
+      - "Reject completion if the smoke did not prove manager first behavior."
+      - "Reject completion if cleanup is not clean."
+      - "Reject completion if QA evidence is not durable."
+    expected_output:
+      - "complete | not_complete"
+      - "full_outcome_complete: true | false"
+      - "missing evidence"
+      - "next task if not complete"
+    receipt:
+      result: done
+      decision: complete
+      full_outcome_complete: true
+      summary: "The seeded-pair smoke tranche is complete. The live run proved pair --manager-* seeds manager config before manager launch, the manager starts from cycle rather than setup questions, session-nudge and durable criteria audit work after recovery, finish-task stops both sessions, and QA evidence is exported and documented."
+      prompt_to_artifact_checklist:
+        - requirement: "Run a disposable live seeded-pair smoke."
+          evidence: "qa-seeded-pair-smoke task exists in export/task-status.json with state done."
+          status: pass
+        - requirement: "Use workerctl pair with --manager-* flags."
+          evidence: "T001 receipt records pair command; pair output recorded manager_config_seeded=true and manager_config_seeded_by_pair=true."
+          status: pass
+        - requirement: "Manager starts with cycle, not setup questions."
+          evidence: "Manager capture and criteria #40 evidence show initial manager action included scripts/workerctl cycle qa-seeded-pair-smoke; no setup-question path was followed before cycle."
+          status: pass
+        - requirement: "Manager uses session-nudge."
+          evidence: "Criterion #41 satisfied with session-nudge command evidence targeting qa-seeded-pair-worker."
+          status: pass
+        - requirement: "Worker only writes ignored proof artifact and reports git status."
+          evidence: "Criterion #42 satisfied; proof path .codex-workers/qa-seeded-pair-worker/seeded-pair-proof.txt and git status output recorded. Visible untracked docs/goals/seeded-pair-smoke/ is PM goal state, not worker output."
+          status: pass
+        - requirement: "Accepted criteria are auditable before finish."
+          evidence: "acceptance-criteria.json has criteria 40-43 all satisfied; finish-task final_audit total=4 with open_criteria=[]."
+          status: pass
+        - requirement: "Cleanup leaves no active sessions and reconcile clean."
+          evidence: "sessions --state active returned []; reconcile reported no dangling bindings, dead pid sessions, or stuck tasks."
+          status: pass
+        - requirement: "Record durable QA artifacts."
+          evidence: "docs/live-qa-log.md contains Seeded Pair Smoke entry; export bundle exists at docs/live-qa-artifacts/2026-05-17-seeded-pair-smoke/export/ and export.zip."
+          status: pass
+      caveats:
+        - "Manager guessed invalid source manager_config and recovered to manager_inferred only after PM nudge."
+        - "Transcript capture was missed because finish-task stopped sessions before capture; exported transcript and terminal capture files are empty."
+      followups:
+        - "Document or encode manager_inferred as the source for manager-config-derived criteria."
+        - "Consider pre-stop transcript capture support in finish-task or manager guidance."
+
+checks:
+  dirty_fingerprint: "modified docs/live-qa-log.md; new docs/goals/seeded-pair-smoke/; new docs/live-qa-artifacts/2026-05-17-seeded-pair-smoke/"
+  last_verification:
+    result: pass
+    task: T999
+    commands:
+      - cmd: "node /Users/neonwatty/.codex/plugins/cache/goalbuddy/goalbuddy/0.3.6/skills/goalbuddy/scripts/check-goal-state.mjs docs/goals/seeded-pair-smoke/state.yaml"
+        status: pass
+      - cmd: "git diff --check"
+        status: pass
+      - cmd: "scripts/workerctl sessions --state active"
+        status: pass
+      - cmd: "scripts/workerctl reconcile --stale-cycles-seconds 1"
+        status: pass

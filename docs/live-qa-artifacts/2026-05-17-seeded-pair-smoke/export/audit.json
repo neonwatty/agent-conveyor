@@ -1,0 +1,1027 @@
+{
+  "acceptance_criteria": [
+    {
+      "created_at": "2026-05-17T20:25:16Z",
+      "criterion": "Manager first behavior after launch is scripts/workerctl cycle qa-seeded-pair-smoke, not manager-config --questions.",
+      "evidence": {
+        "command": "scripts/workerctl cycle qa-seeded-pair-smoke",
+        "evidence": "Initial manager action was cycle; cycle output included populated manager_context.manager_config and no setup questions were asked.",
+        "status": "pass"
+      },
+      "id": 40,
+      "proof": null,
+      "rationale": null,
+      "source": "manager_inferred",
+      "status": "satisfied",
+      "task_id": "task-ec662396-bbe8-4518-8c3e-c6c7c1e2efbe",
+      "updated_at": "2026-05-17T20:26:02Z"
+    },
+    {
+      "created_at": "2026-05-17T20:25:20Z",
+      "criterion": "Manager uses scripts/workerctl session-nudge qa-seeded-pair-worker to request the proof artifact.",
+      "evidence": {
+        "command": "scripts/workerctl session-nudge qa-seeded-pair-worker \"Please create the seeded-pair proof artifact now, then report the path and git status output.\"",
+        "evidence": "session-nudge targeted codex-qa-seeded-pair-worker and worker transcript shows the nudge was received before proof creation.",
+        "status": "pass"
+      },
+      "id": 41,
+      "proof": null,
+      "rationale": null,
+      "source": "manager_inferred",
+      "status": "satisfied",
+      "task_id": "task-ec662396-bbe8-4518-8c3e-c6c7c1e2efbe",
+      "updated_at": "2026-05-17T20:26:07Z"
+    },
+    {
+      "created_at": "2026-05-17T20:25:24Z",
+      "criterion": "Worker creates only .codex-workers/qa-seeded-pair-worker/seeded-pair-proof.txt and reports git status output.",
+      "evidence": {
+        "command": "sed -n 1,120p .codex-workers/qa-seeded-pair-worker/seeded-pair-proof.txt; git status --short; scripts/workerctl capture qa-seeded-pair-worker --lines 260",
+        "evidence": "Proof file contains nudge summary. Worker transcript reports exact proof path and git status output. Existing untracked docs/goals/seeded-pair-smoke/ is PM-created goal state; .codex-workers is ignored.",
+        "git_status": "?? docs/goals/seeded-pair-smoke/",
+        "proof_path": ".codex-workers/qa-seeded-pair-worker/seeded-pair-proof.txt",
+        "status": "pass"
+      },
+      "id": 42,
+      "proof": null,
+      "rationale": null,
+      "source": "manager_inferred",
+      "status": "satisfied",
+      "task_id": "task-ec662396-bbe8-4518-8c3e-c6c7c1e2efbe",
+      "updated_at": "2026-05-17T20:26:13Z"
+    },
+    {
+      "created_at": "2026-05-17T20:25:30Z",
+      "criterion": "Manager verifies evidence, satisfies durable accepted criteria, and finishes with no active sessions.",
+      "evidence": {
+        "command": "scripts/workerctl finish-task qa-seeded-pair-smoke --require-criteria-audit --stop-manager --stop-worker --reason \"Seeded pair smoke completed with verified startup and session-nudge evidence.\"",
+        "evidence": "Worker evidence verified, transcript captured, criteria audit reduced to satisfied rows before finish-task with stop-manager and stop-worker flags.",
+        "status": "ready"
+      },
+      "id": 43,
+      "proof": null,
+      "rationale": null,
+      "source": "manager_inferred",
+      "status": "satisfied",
+      "task_id": "task-ec662396-bbe8-4518-8c3e-c6c7c1e2efbe",
+      "updated_at": "2026-05-17T20:26:18Z"
+    }
+  ],
+  "agent_observations": [
+    {
+      "command_id": "command-ca2e79c6-ac24-4393-9b24-e0750f4b5bb9",
+      "created_at": "2026-05-17T20:26:22Z",
+      "id": 14,
+      "manager_id": null,
+      "message": "Seeded pair smoke completed with verified startup and session-nudge evidence.",
+      "observation_type": "decision",
+      "payload": {
+        "decision": "stop",
+        "decision_id": 24,
+        "source": "finish_task"
+      },
+      "role": "manager",
+      "severity": "info",
+      "source_capture_id": null,
+      "task_id": "task-ec662396-bbe8-4518-8c3e-c6c7c1e2efbe",
+      "worker_id": null
+    }
+  ],
+  "commands": [
+    {
+      "created_at": "2026-05-17T20:26:22Z",
+      "error": null,
+      "id": "command-ca2e79c6-ac24-4393-9b24-e0750f4b5bb9",
+      "idempotency_key": "command-ca2e79c6-ac24-4393-9b24-e0750f4b5bb9",
+      "manager_id": null,
+      "payload": {
+        "final_audit": {
+          "open_criteria": [],
+          "require_criteria_audit": true,
+          "summary": {
+            "accepted": 0,
+            "deferred": 0,
+            "proposed": 0,
+            "rejected": 0,
+            "satisfied": 4
+          },
+          "total": 4
+        },
+        "finish": true,
+        "manager_decision": {
+          "allowed_decisions": [
+            "stop"
+          ],
+          "decision": null,
+          "decision_id": null,
+          "ok": false,
+          "warnings": [
+            "missing_decision_id"
+          ]
+        },
+        "manager_session": "qa-seeded-pair-manager",
+        "message": null,
+        "reason": "Seeded pair smoke completed with verified startup and session-nudge evidence.",
+        "stop_manager": true,
+        "stop_worker": true,
+        "task": "qa-seeded-pair-smoke",
+        "worker": "qa-seeded-pair-worker",
+        "worker_session": "qa-seeded-pair-worker"
+      },
+      "result": {
+        "command_id": "command-ca2e79c6-ac24-4393-9b24-e0750f4b5bb9",
+        "final_audit": {
+          "open_criteria": [],
+          "require_criteria_audit": true,
+          "summary": {
+            "accepted": 0,
+            "deferred": 0,
+            "proposed": 0,
+            "rejected": 0,
+            "satisfied": 4
+          },
+          "total": 4
+        },
+        "final_decision_id": 24,
+        "final_observation_id": 14,
+        "finish": true,
+        "killed_manager": true,
+        "killed_worker": true,
+        "manager_decision": {
+          "allowed_decisions": [
+            "stop"
+          ],
+          "decision": null,
+          "decision_id": null,
+          "ok": false,
+          "warnings": [
+            "missing_decision_id"
+          ]
+        },
+        "manager_identity": {
+          "db_pane_id": null,
+          "db_session": "codex-qa-seeded-pair-manager",
+          "live": true,
+          "live_pane_id": "%1",
+          "mismatches": [],
+          "role": "manager",
+          "session": "qa-seeded-pair-manager"
+        },
+        "manager_session": "qa-seeded-pair-manager",
+        "reason": "Seeded pair smoke completed with verified startup and session-nudge evidence.",
+        "stop_manager": true,
+        "stop_worker": true,
+        "task": "qa-seeded-pair-smoke",
+        "worker": "qa-seeded-pair-worker",
+        "worker_identity": {
+          "db_pane_id": null,
+          "db_session": "codex-qa-seeded-pair-worker",
+          "live": true,
+          "live_pane_id": "%0",
+          "mismatches": [],
+          "role": "worker",
+          "session": "qa-seeded-pair-worker"
+        },
+        "worker_session": "qa-seeded-pair-worker"
+      },
+      "state": "succeeded",
+      "task_id": "task-ec662396-bbe8-4518-8c3e-c6c7c1e2efbe",
+      "type": "finish_task",
+      "updated_at": "2026-05-17T20:26:22Z",
+      "worker_id": null
+    }
+  ],
+  "events": [
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-17T20:24:35Z",
+      "id": 245,
+      "manager_id": null,
+      "payload": {
+        "goal": "Disposable seeded-pair smoke proving pair --manager-* launches a preconfigured manager that starts supervising from cycle.",
+        "name": "qa-seeded-pair-smoke",
+        "summary": "GoalBuddy-run QA smoke for seeded manager config startup behavior."
+      },
+      "task_id": "task-ec662396-bbe8-4518-8c3e-c6c7c1e2efbe",
+      "type": "task_created",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-17T20:24:35Z",
+      "id": 246,
+      "manager_id": null,
+      "payload": {
+        "acceptance_count": 4,
+        "guideline_count": 4,
+        "reference_count": 0,
+        "source": "pair",
+        "supervision_mode": "guided"
+      },
+      "task_id": "task-ec662396-bbe8-4518-8c3e-c6c7c1e2efbe",
+      "type": "manager_config_recorded",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-17T20:24:40Z",
+      "id": 249,
+      "manager_id": null,
+      "payload": {
+        "binding_id": "binding-b2a1c533-9a91-42e9-94f2-063bae41736c",
+        "manager": "qa-seeded-pair-manager",
+        "task": "qa-seeded-pair-smoke",
+        "worker": "qa-seeded-pair-worker"
+      },
+      "task_id": "task-ec662396-bbe8-4518-8c3e-c6c7c1e2efbe",
+      "type": "binding_created",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-17T20:25:16Z",
+      "id": 250,
+      "manager_id": null,
+      "payload": {
+        "created": true,
+        "criterion": "Manager first behavior after launch is scripts/workerctl cycle qa-seeded-pair-smoke, not manager-config --questions.",
+        "criterion_id": 40,
+        "evidence": {},
+        "proof": null,
+        "rationale": null,
+        "source": "manager_inferred",
+        "status": "accepted",
+        "task_id": "task-ec662396-bbe8-4518-8c3e-c6c7c1e2efbe"
+      },
+      "task_id": "task-ec662396-bbe8-4518-8c3e-c6c7c1e2efbe",
+      "type": "acceptance_criterion_added",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-17T20:25:20Z",
+      "id": 251,
+      "manager_id": null,
+      "payload": {
+        "created": true,
+        "criterion": "Manager uses scripts/workerctl session-nudge qa-seeded-pair-worker to request the proof artifact.",
+        "criterion_id": 41,
+        "evidence": {},
+        "proof": null,
+        "rationale": null,
+        "source": "manager_inferred",
+        "status": "accepted",
+        "task_id": "task-ec662396-bbe8-4518-8c3e-c6c7c1e2efbe"
+      },
+      "task_id": "task-ec662396-bbe8-4518-8c3e-c6c7c1e2efbe",
+      "type": "acceptance_criterion_added",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-17T20:25:24Z",
+      "id": 252,
+      "manager_id": null,
+      "payload": {
+        "created": true,
+        "criterion": "Worker creates only .codex-workers/qa-seeded-pair-worker/seeded-pair-proof.txt and reports git status output.",
+        "criterion_id": 42,
+        "evidence": {},
+        "proof": null,
+        "rationale": null,
+        "source": "manager_inferred",
+        "status": "accepted",
+        "task_id": "task-ec662396-bbe8-4518-8c3e-c6c7c1e2efbe"
+      },
+      "task_id": "task-ec662396-bbe8-4518-8c3e-c6c7c1e2efbe",
+      "type": "acceptance_criterion_added",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-17T20:25:30Z",
+      "id": 253,
+      "manager_id": null,
+      "payload": {
+        "created": true,
+        "criterion": "Manager verifies evidence, satisfies durable accepted criteria, and finishes with no active sessions.",
+        "criterion_id": 43,
+        "evidence": {},
+        "proof": null,
+        "rationale": null,
+        "source": "manager_inferred",
+        "status": "accepted",
+        "task_id": "task-ec662396-bbe8-4518-8c3e-c6c7c1e2efbe"
+      },
+      "task_id": "task-ec662396-bbe8-4518-8c3e-c6c7c1e2efbe",
+      "type": "acceptance_criterion_added",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-17T20:26:02Z",
+      "id": 257,
+      "manager_id": null,
+      "payload": {
+        "criterion": "Manager first behavior after launch is scripts/workerctl cycle qa-seeded-pair-smoke, not manager-config --questions.",
+        "criterion_id": 40,
+        "evidence": {
+          "command": "scripts/workerctl cycle qa-seeded-pair-smoke",
+          "evidence": "Initial manager action was cycle; cycle output included populated manager_context.manager_config and no setup questions were asked.",
+          "status": "pass"
+        },
+        "previous_evidence": {},
+        "previous_proof": null,
+        "previous_rationale": null,
+        "previous_status": "accepted",
+        "proof": null,
+        "rationale": null,
+        "source": "manager_inferred",
+        "status": "satisfied",
+        "task_id": "task-ec662396-bbe8-4518-8c3e-c6c7c1e2efbe"
+      },
+      "task_id": "task-ec662396-bbe8-4518-8c3e-c6c7c1e2efbe",
+      "type": "acceptance_criterion_updated",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-17T20:26:07Z",
+      "id": 258,
+      "manager_id": null,
+      "payload": {
+        "criterion": "Manager uses scripts/workerctl session-nudge qa-seeded-pair-worker to request the proof artifact.",
+        "criterion_id": 41,
+        "evidence": {
+          "command": "scripts/workerctl session-nudge qa-seeded-pair-worker \"Please create the seeded-pair proof artifact now, then report the path and git status output.\"",
+          "evidence": "session-nudge targeted codex-qa-seeded-pair-worker and worker transcript shows the nudge was received before proof creation.",
+          "status": "pass"
+        },
+        "previous_evidence": {},
+        "previous_proof": null,
+        "previous_rationale": null,
+        "previous_status": "accepted",
+        "proof": null,
+        "rationale": null,
+        "source": "manager_inferred",
+        "status": "satisfied",
+        "task_id": "task-ec662396-bbe8-4518-8c3e-c6c7c1e2efbe"
+      },
+      "task_id": "task-ec662396-bbe8-4518-8c3e-c6c7c1e2efbe",
+      "type": "acceptance_criterion_updated",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-17T20:26:13Z",
+      "id": 259,
+      "manager_id": null,
+      "payload": {
+        "criterion": "Worker creates only .codex-workers/qa-seeded-pair-worker/seeded-pair-proof.txt and reports git status output.",
+        "criterion_id": 42,
+        "evidence": {
+          "command": "sed -n 1,120p .codex-workers/qa-seeded-pair-worker/seeded-pair-proof.txt; git status --short; scripts/workerctl capture qa-seeded-pair-worker --lines 260",
+          "evidence": "Proof file contains nudge summary. Worker transcript reports exact proof path and git status output. Existing untracked docs/goals/seeded-pair-smoke/ is PM-created goal state; .codex-workers is ignored.",
+          "git_status": "?? docs/goals/seeded-pair-smoke/",
+          "proof_path": ".codex-workers/qa-seeded-pair-worker/seeded-pair-proof.txt",
+          "status": "pass"
+        },
+        "previous_evidence": {},
+        "previous_proof": null,
+        "previous_rationale": null,
+        "previous_status": "accepted",
+        "proof": null,
+        "rationale": null,
+        "source": "manager_inferred",
+        "status": "satisfied",
+        "task_id": "task-ec662396-bbe8-4518-8c3e-c6c7c1e2efbe"
+      },
+      "task_id": "task-ec662396-bbe8-4518-8c3e-c6c7c1e2efbe",
+      "type": "acceptance_criterion_updated",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-17T20:26:18Z",
+      "id": 260,
+      "manager_id": null,
+      "payload": {
+        "criterion": "Manager verifies evidence, satisfies durable accepted criteria, and finishes with no active sessions.",
+        "criterion_id": 43,
+        "evidence": {
+          "command": "scripts/workerctl finish-task qa-seeded-pair-smoke --require-criteria-audit --stop-manager --stop-worker --reason \"Seeded pair smoke completed with verified startup and session-nudge evidence.\"",
+          "evidence": "Worker evidence verified, transcript captured, criteria audit reduced to satisfied rows before finish-task with stop-manager and stop-worker flags.",
+          "status": "ready"
+        },
+        "previous_evidence": {},
+        "previous_proof": null,
+        "previous_rationale": null,
+        "previous_status": "accepted",
+        "proof": null,
+        "rationale": null,
+        "source": "manager_inferred",
+        "status": "satisfied",
+        "task_id": "task-ec662396-bbe8-4518-8c3e-c6c7c1e2efbe"
+      },
+      "task_id": "task-ec662396-bbe8-4518-8c3e-c6c7c1e2efbe",
+      "type": "acceptance_criterion_updated",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": "command-ca2e79c6-ac24-4393-9b24-e0750f4b5bb9",
+      "correlation_id": null,
+      "created_at": "2026-05-17T20:26:22Z",
+      "id": 261,
+      "manager_id": null,
+      "payload": {
+        "final_audit": {
+          "open_criteria": [],
+          "require_criteria_audit": true,
+          "summary": {
+            "accepted": 0,
+            "deferred": 0,
+            "proposed": 0,
+            "rejected": 0,
+            "satisfied": 4
+          },
+          "total": 4
+        },
+        "final_decision_id": 24,
+        "final_observation_id": 14,
+        "finish": true,
+        "manager_decision": {
+          "allowed_decisions": [
+            "stop"
+          ],
+          "decision": null,
+          "decision_id": null,
+          "ok": false,
+          "warnings": [
+            "missing_decision_id"
+          ]
+        },
+        "message": null,
+        "reason": "Seeded pair smoke completed with verified startup and session-nudge evidence.",
+        "stop_manager": true,
+        "stop_worker": true
+      },
+      "task_id": "task-ec662396-bbe8-4518-8c3e-c6c7c1e2efbe",
+      "type": "finish_task_intent",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": "command-ca2e79c6-ac24-4393-9b24-e0750f4b5bb9",
+      "correlation_id": null,
+      "created_at": "2026-05-17T20:26:22Z",
+      "id": 262,
+      "manager_id": null,
+      "payload": {
+        "open_criteria": [],
+        "require_criteria_audit": true,
+        "summary": {
+          "accepted": 0,
+          "deferred": 0,
+          "proposed": 0,
+          "rejected": 0,
+          "satisfied": 4
+        },
+        "total": 4
+      },
+      "task_id": "task-ec662396-bbe8-4518-8c3e-c6c7c1e2efbe",
+      "type": "finish_task_criteria_audit",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": "command-ca2e79c6-ac24-4393-9b24-e0750f4b5bb9",
+      "correlation_id": null,
+      "created_at": "2026-05-17T20:26:22Z",
+      "id": 263,
+      "manager_id": null,
+      "payload": {
+        "db_pane_id": null,
+        "db_session": "codex-qa-seeded-pair-manager",
+        "live": true,
+        "live_pane_id": "%1",
+        "mismatches": [],
+        "role": "manager",
+        "session": "qa-seeded-pair-manager"
+      },
+      "task_id": "task-ec662396-bbe8-4518-8c3e-c6c7c1e2efbe",
+      "type": "manager_identity_verified",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": "command-ca2e79c6-ac24-4393-9b24-e0750f4b5bb9",
+      "correlation_id": null,
+      "created_at": "2026-05-17T20:26:22Z",
+      "id": 264,
+      "manager_id": null,
+      "payload": {
+        "db_pane_id": null,
+        "db_session": "codex-qa-seeded-pair-worker",
+        "live": true,
+        "live_pane_id": "%0",
+        "mismatches": [],
+        "role": "worker",
+        "session": "qa-seeded-pair-worker"
+      },
+      "task_id": "task-ec662396-bbe8-4518-8c3e-c6c7c1e2efbe",
+      "type": "worker_identity_verified",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": "command-ca2e79c6-ac24-4393-9b24-e0750f4b5bb9",
+      "correlation_id": null,
+      "created_at": "2026-05-17T20:26:22Z",
+      "id": 265,
+      "manager_id": null,
+      "payload": {
+        "command_id": "command-ca2e79c6-ac24-4393-9b24-e0750f4b5bb9",
+        "final_audit": {
+          "open_criteria": [],
+          "require_criteria_audit": true,
+          "summary": {
+            "accepted": 0,
+            "deferred": 0,
+            "proposed": 0,
+            "rejected": 0,
+            "satisfied": 4
+          },
+          "total": 4
+        },
+        "final_decision_id": 24,
+        "final_observation_id": 14,
+        "finish": true,
+        "killed_manager": true,
+        "killed_worker": true,
+        "manager_decision": {
+          "allowed_decisions": [
+            "stop"
+          ],
+          "decision": null,
+          "decision_id": null,
+          "ok": false,
+          "warnings": [
+            "missing_decision_id"
+          ]
+        },
+        "manager_identity": {
+          "db_pane_id": null,
+          "db_session": "codex-qa-seeded-pair-manager",
+          "live": true,
+          "live_pane_id": "%1",
+          "mismatches": [],
+          "role": "manager",
+          "session": "qa-seeded-pair-manager"
+        },
+        "manager_session": "qa-seeded-pair-manager",
+        "reason": "Seeded pair smoke completed with verified startup and session-nudge evidence.",
+        "stop_manager": true,
+        "stop_worker": true,
+        "task": "qa-seeded-pair-smoke",
+        "worker": "qa-seeded-pair-worker",
+        "worker_identity": {
+          "db_pane_id": null,
+          "db_session": "codex-qa-seeded-pair-worker",
+          "live": true,
+          "live_pane_id": "%0",
+          "mismatches": [],
+          "role": "worker",
+          "session": "qa-seeded-pair-worker"
+        },
+        "worker_session": "qa-seeded-pair-worker"
+      },
+      "task_id": "task-ec662396-bbe8-4518-8c3e-c6c7c1e2efbe",
+      "type": "finish_task_succeeded",
+      "worker_id": null
+    }
+  ],
+  "manager_cycles": [
+    {
+      "completed_at": "2026-05-17T20:24:48Z",
+      "decision": null,
+      "error": null,
+      "health": null,
+      "health_observation_id": null,
+      "id": 43,
+      "manager_capture_id": null,
+      "manager_id": null,
+      "started_at": "2026-05-17T20:24:48Z",
+      "state": "succeeded",
+      "status": {
+        "binding_id": "binding-b2a1c533-9a91-42e9-94f2-063bae41736c",
+        "ingest": {
+          "new_events": 14,
+          "new_offset": 57186,
+          "skipped_lines": 0
+        },
+        "kind": "session_cycle",
+        "last_event_subtype": "task_complete",
+        "last_state_event_at": "2026-05-17T20:24:46.083Z",
+        "manager_alive": true,
+        "manager_context": {
+          "acceptance_criteria": {
+            "deferred": [],
+            "open": [],
+            "proposed": [],
+            "rejected": [],
+            "satisfied": [],
+            "summary": {
+              "accepted": 0,
+              "deferred": 0,
+              "proposed": 0,
+              "rejected": 0,
+              "satisfied": 0
+            }
+          },
+          "criteria_negotiation": {
+            "needed": true,
+            "prompt": "Please propose 2-4 acceptance criteria for the current slice. Split them into must-have current-task criteria and follow-up criteria. Include the verification you expect for each.",
+            "reason": "no_criteria",
+            "suggested_actions": [
+              "Ask the worker to split must-have current-task criteria from follow-up criteria.",
+              "Record accepted current-task criteria with workerctl criteria qa-seeded-pair-smoke --add --criterion \"...\" --source worker_proposed --status accepted.",
+              "Record proposed current-task criteria with workerctl criteria qa-seeded-pair-smoke --add --criterion \"...\" --source worker_proposed --status proposed.",
+              "Record follow-up criteria with workerctl criteria qa-seeded-pair-smoke --add --criterion \"...\" --source worker_proposed --status deferred."
+            ]
+          },
+          "manager_config": {
+            "acceptance_criteria": [
+              "Manager first behavior after launch is scripts/workerctl cycle qa-seeded-pair-smoke, not manager-config --questions.",
+              "Manager uses scripts/workerctl session-nudge qa-seeded-pair-worker to request the proof artifact.",
+              "Worker creates only .codex-workers/qa-seeded-pair-worker/seeded-pair-proof.txt and reports git status output.",
+              "Manager verifies evidence, satisfies durable accepted criteria, and finishes with no active sessions."
+            ],
+            "created_at": "2026-05-17T20:24:35Z",
+            "guidelines": [
+              "Manager config is already recorded. Do not ask setup questions first; start with scripts/workerctl cycle qa-seeded-pair-smoke.",
+              "Use scripts/workerctl session-nudge qa-seeded-pair-worker for worker communication.",
+              "If cycle output has no durable accepted criteria rows, add accepted criteria rows matching manager_config.acceptance_criteria before finish.",
+              "Do not edit product implementation files."
+            ],
+            "objective": "Supervise the seeded-pair smoke from already-recorded config. Prove startup begins with cycle, then nudge the worker, verify evidence, satisfy durable accepted criteria, and finish cleanly.",
+            "permissions": {
+              "create_pr": false,
+              "merge_green_pr": false,
+              "worker_compact_clear": false
+            },
+            "reference_paths": [],
+            "supervision_mode": "guided",
+            "task_id": "task-ec662396-bbe8-4518-8c3e-c6c7c1e2efbe",
+            "updated_at": "2026-05-17T20:24:35Z"
+          },
+          "worker_handoff": null
+        },
+        "manager_session": "qa-seeded-pair-manager",
+        "notable_pane_pattern": null,
+        "pane_signal": {
+          "captured": true,
+          "classifier": null,
+          "degraded": false,
+          "notable_pattern": null,
+          "reason": null,
+          "status_age_seconds": 1
+        },
+        "staleness_seconds": 1.917,
+        "state": "idle",
+        "task": "qa-seeded-pair-smoke",
+        "task_completed": true,
+        "worker_alive": true,
+        "worker_session": "qa-seeded-pair-worker"
+      },
+      "task_id": "task-ec662396-bbe8-4518-8c3e-c6c7c1e2efbe",
+      "worker_capture_id": null
+    },
+    {
+      "completed_at": "2026-05-17T20:25:48Z",
+      "decision": null,
+      "error": null,
+      "health": null,
+      "health_observation_id": null,
+      "id": 44,
+      "manager_capture_id": null,
+      "manager_id": null,
+      "started_at": "2026-05-17T20:25:48Z",
+      "state": "succeeded",
+      "status": {
+        "binding_id": "binding-b2a1c533-9a91-42e9-94f2-063bae41736c",
+        "ingest": {
+          "new_events": 18,
+          "new_offset": 67138,
+          "skipped_lines": 0
+        },
+        "kind": "session_cycle",
+        "last_event_subtype": null,
+        "last_state_event_at": "2026-05-17T20:25:42.731Z",
+        "manager_alive": true,
+        "manager_context": {
+          "acceptance_criteria": {
+            "deferred": [],
+            "open": [
+              {
+                "created_at": "2026-05-17T20:25:16Z",
+                "criterion": "Manager first behavior after launch is scripts/workerctl cycle qa-seeded-pair-smoke, not manager-config --questions.",
+                "evidence": {},
+                "id": 40,
+                "proof": null,
+                "rationale": null,
+                "source": "manager_inferred",
+                "status": "accepted",
+                "task_id": "task-ec662396-bbe8-4518-8c3e-c6c7c1e2efbe",
+                "updated_at": "2026-05-17T20:25:16Z"
+              },
+              {
+                "created_at": "2026-05-17T20:25:20Z",
+                "criterion": "Manager uses scripts/workerctl session-nudge qa-seeded-pair-worker to request the proof artifact.",
+                "evidence": {},
+                "id": 41,
+                "proof": null,
+                "rationale": null,
+                "source": "manager_inferred",
+                "status": "accepted",
+                "task_id": "task-ec662396-bbe8-4518-8c3e-c6c7c1e2efbe",
+                "updated_at": "2026-05-17T20:25:20Z"
+              },
+              {
+                "created_at": "2026-05-17T20:25:24Z",
+                "criterion": "Worker creates only .codex-workers/qa-seeded-pair-worker/seeded-pair-proof.txt and reports git status output.",
+                "evidence": {},
+                "id": 42,
+                "proof": null,
+                "rationale": null,
+                "source": "manager_inferred",
+                "status": "accepted",
+                "task_id": "task-ec662396-bbe8-4518-8c3e-c6c7c1e2efbe",
+                "updated_at": "2026-05-17T20:25:24Z"
+              },
+              {
+                "created_at": "2026-05-17T20:25:30Z",
+                "criterion": "Manager verifies evidence, satisfies durable accepted criteria, and finishes with no active sessions.",
+                "evidence": {},
+                "id": 43,
+                "proof": null,
+                "rationale": null,
+                "source": "manager_inferred",
+                "status": "accepted",
+                "task_id": "task-ec662396-bbe8-4518-8c3e-c6c7c1e2efbe",
+                "updated_at": "2026-05-17T20:25:30Z"
+              }
+            ],
+            "proposed": [],
+            "rejected": [],
+            "satisfied": [],
+            "summary": {
+              "accepted": 4,
+              "deferred": 0,
+              "proposed": 0,
+              "rejected": 0,
+              "satisfied": 0
+            }
+          },
+          "criteria_negotiation": {
+            "needed": false,
+            "prompt": null,
+            "reason": "active_criteria_present",
+            "suggested_actions": []
+          },
+          "manager_config": {
+            "acceptance_criteria": [
+              "Manager first behavior after launch is scripts/workerctl cycle qa-seeded-pair-smoke, not manager-config --questions.",
+              "Manager uses scripts/workerctl session-nudge qa-seeded-pair-worker to request the proof artifact.",
+              "Worker creates only .codex-workers/qa-seeded-pair-worker/seeded-pair-proof.txt and reports git status output.",
+              "Manager verifies evidence, satisfies durable accepted criteria, and finishes with no active sessions."
+            ],
+            "created_at": "2026-05-17T20:24:35Z",
+            "guidelines": [
+              "Manager config is already recorded. Do not ask setup questions first; start with scripts/workerctl cycle qa-seeded-pair-smoke.",
+              "Use scripts/workerctl session-nudge qa-seeded-pair-worker for worker communication.",
+              "If cycle output has no durable accepted criteria rows, add accepted criteria rows matching manager_config.acceptance_criteria before finish.",
+              "Do not edit product implementation files."
+            ],
+            "objective": "Supervise the seeded-pair smoke from already-recorded config. Prove startup begins with cycle, then nudge the worker, verify evidence, satisfy durable accepted criteria, and finish cleanly.",
+            "permissions": {
+              "create_pr": false,
+              "merge_green_pr": false,
+              "worker_compact_clear": false
+            },
+            "reference_paths": [],
+            "supervision_mode": "guided",
+            "task_id": "task-ec662396-bbe8-4518-8c3e-c6c7c1e2efbe",
+            "updated_at": "2026-05-17T20:24:35Z"
+          },
+          "worker_handoff": null
+        },
+        "manager_session": "qa-seeded-pair-manager",
+        "notable_pane_pattern": null,
+        "pane_signal": {
+          "captured": true,
+          "classifier": null,
+          "degraded": false,
+          "notable_pattern": null,
+          "reason": null,
+          "status_age_seconds": 5
+        },
+        "staleness_seconds": 5.269,
+        "state": "busy",
+        "task": "qa-seeded-pair-smoke",
+        "task_completed": false,
+        "worker_alive": true,
+        "worker_session": "qa-seeded-pair-worker"
+      },
+      "task_id": "task-ec662396-bbe8-4518-8c3e-c6c7c1e2efbe",
+      "worker_capture_id": null
+    },
+    {
+      "completed_at": "2026-05-17T20:25:54Z",
+      "decision": null,
+      "error": null,
+      "health": null,
+      "health_observation_id": null,
+      "id": 45,
+      "manager_capture_id": null,
+      "manager_id": null,
+      "started_at": "2026-05-17T20:25:54Z",
+      "state": "succeeded",
+      "status": {
+        "binding_id": "binding-b2a1c533-9a91-42e9-94f2-063bae41736c",
+        "ingest": {
+          "new_events": 7,
+          "new_offset": 70219,
+          "skipped_lines": 0
+        },
+        "kind": "session_cycle",
+        "last_event_subtype": "task_complete",
+        "last_state_event_at": "2026-05-17T20:25:51.908Z",
+        "manager_alive": true,
+        "manager_context": {
+          "acceptance_criteria": {
+            "deferred": [],
+            "open": [
+              {
+                "created_at": "2026-05-17T20:25:16Z",
+                "criterion": "Manager first behavior after launch is scripts/workerctl cycle qa-seeded-pair-smoke, not manager-config --questions.",
+                "evidence": {},
+                "id": 40,
+                "proof": null,
+                "rationale": null,
+                "source": "manager_inferred",
+                "status": "accepted",
+                "task_id": "task-ec662396-bbe8-4518-8c3e-c6c7c1e2efbe",
+                "updated_at": "2026-05-17T20:25:16Z"
+              },
+              {
+                "created_at": "2026-05-17T20:25:20Z",
+                "criterion": "Manager uses scripts/workerctl session-nudge qa-seeded-pair-worker to request the proof artifact.",
+                "evidence": {},
+                "id": 41,
+                "proof": null,
+                "rationale": null,
+                "source": "manager_inferred",
+                "status": "accepted",
+                "task_id": "task-ec662396-bbe8-4518-8c3e-c6c7c1e2efbe",
+                "updated_at": "2026-05-17T20:25:20Z"
+              },
+              {
+                "created_at": "2026-05-17T20:25:24Z",
+                "criterion": "Worker creates only .codex-workers/qa-seeded-pair-worker/seeded-pair-proof.txt and reports git status output.",
+                "evidence": {},
+                "id": 42,
+                "proof": null,
+                "rationale": null,
+                "source": "manager_inferred",
+                "status": "accepted",
+                "task_id": "task-ec662396-bbe8-4518-8c3e-c6c7c1e2efbe",
+                "updated_at": "2026-05-17T20:25:24Z"
+              },
+              {
+                "created_at": "2026-05-17T20:25:30Z",
+                "criterion": "Manager verifies evidence, satisfies durable accepted criteria, and finishes with no active sessions.",
+                "evidence": {},
+                "id": 43,
+                "proof": null,
+                "rationale": null,
+                "source": "manager_inferred",
+                "status": "accepted",
+                "task_id": "task-ec662396-bbe8-4518-8c3e-c6c7c1e2efbe",
+                "updated_at": "2026-05-17T20:25:30Z"
+              }
+            ],
+            "proposed": [],
+            "rejected": [],
+            "satisfied": [],
+            "summary": {
+              "accepted": 4,
+              "deferred": 0,
+              "proposed": 0,
+              "rejected": 0,
+              "satisfied": 0
+            }
+          },
+          "criteria_negotiation": {
+            "needed": false,
+            "prompt": null,
+            "reason": "active_criteria_present",
+            "suggested_actions": []
+          },
+          "manager_config": {
+            "acceptance_criteria": [
+              "Manager first behavior after launch is scripts/workerctl cycle qa-seeded-pair-smoke, not manager-config --questions.",
+              "Manager uses scripts/workerctl session-nudge qa-seeded-pair-worker to request the proof artifact.",
+              "Worker creates only .codex-workers/qa-seeded-pair-worker/seeded-pair-proof.txt and reports git status output.",
+              "Manager verifies evidence, satisfies durable accepted criteria, and finishes with no active sessions."
+            ],
+            "created_at": "2026-05-17T20:24:35Z",
+            "guidelines": [
+              "Manager config is already recorded. Do not ask setup questions first; start with scripts/workerctl cycle qa-seeded-pair-smoke.",
+              "Use scripts/workerctl session-nudge qa-seeded-pair-worker for worker communication.",
+              "If cycle output has no durable accepted criteria rows, add accepted criteria rows matching manager_config.acceptance_criteria before finish.",
+              "Do not edit product implementation files."
+            ],
+            "objective": "Supervise the seeded-pair smoke from already-recorded config. Prove startup begins with cycle, then nudge the worker, verify evidence, satisfy durable accepted criteria, and finish cleanly.",
+            "permissions": {
+              "create_pr": false,
+              "merge_green_pr": false,
+              "worker_compact_clear": false
+            },
+            "reference_paths": [],
+            "supervision_mode": "guided",
+            "task_id": "task-ec662396-bbe8-4518-8c3e-c6c7c1e2efbe",
+            "updated_at": "2026-05-17T20:24:35Z"
+          },
+          "worker_handoff": null
+        },
+        "manager_session": "qa-seeded-pair-manager",
+        "notable_pane_pattern": null,
+        "pane_signal": {
+          "captured": true,
+          "classifier": null,
+          "degraded": false,
+          "notable_pattern": null,
+          "reason": null,
+          "status_age_seconds": 2
+        },
+        "staleness_seconds": 2.092,
+        "state": "idle",
+        "task": "qa-seeded-pair-smoke",
+        "task_completed": true,
+        "worker_alive": true,
+        "worker_session": "qa-seeded-pair-worker"
+      },
+      "task_id": "task-ec662396-bbe8-4518-8c3e-c6c7c1e2efbe",
+      "worker_capture_id": null
+    }
+  ],
+  "manager_decisions": [
+    {
+      "created_at": "2026-05-17T20:26:22Z",
+      "decision": "stop",
+      "id": 24,
+      "manager_cycle_id": null,
+      "manager_id": null,
+      "payload": {
+        "command_id": "command-ca2e79c6-ac24-4393-9b24-e0750f4b5bb9",
+        "source": "finish_task"
+      },
+      "reason": "Seeded pair smoke completed with verified startup and session-nudge evidence.",
+      "task_id": "task-ec662396-bbe8-4518-8c3e-c6c7c1e2efbe"
+    }
+  ],
+  "task": {
+    "created_at": "2026-05-17T20:24:35Z",
+    "goal": "Disposable seeded-pair smoke proving pair --manager-* launches a preconfigured manager that starts supervising from cycle.",
+    "id": "task-ec662396-bbe8-4518-8c3e-c6c7c1e2efbe",
+    "name": "qa-seeded-pair-smoke",
+    "state": "done",
+    "summary": "GoalBuddy-run QA smoke for seeded manager config startup behavior.",
+    "updated_at": "2026-05-17T20:26:22Z"
+  },
+  "terminal_captures": [],
+  "transcript_segments": []
+}

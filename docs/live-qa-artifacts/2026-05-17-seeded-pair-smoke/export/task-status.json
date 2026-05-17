@@ -1,0 +1,43 @@
+{
+  "budget": null,
+  "created_at": "2026-05-17T20:24:35Z",
+  "goal": "Disposable seeded-pair smoke proving pair --manager-* launches a preconfigured manager that starts supervising from cycle.",
+  "id": "task-ec662396-bbe8-4518-8c3e-c6c7c1e2efbe",
+  "integrity": {
+    "issues": [],
+    "ok": true
+  },
+  "manager": null,
+  "manager_config": {
+    "acceptance_criteria": [
+      "Manager first behavior after launch is scripts/workerctl cycle qa-seeded-pair-smoke, not manager-config --questions.",
+      "Manager uses scripts/workerctl session-nudge qa-seeded-pair-worker to request the proof artifact.",
+      "Worker creates only .codex-workers/qa-seeded-pair-worker/seeded-pair-proof.txt and reports git status output.",
+      "Manager verifies evidence, satisfies durable accepted criteria, and finishes with no active sessions."
+    ],
+    "created_at": "2026-05-17T20:24:35Z",
+    "guidelines": [
+      "Manager config is already recorded. Do not ask setup questions first; start with scripts/workerctl cycle qa-seeded-pair-smoke.",
+      "Use scripts/workerctl session-nudge qa-seeded-pair-worker for worker communication.",
+      "If cycle output has no durable accepted criteria rows, add accepted criteria rows matching manager_config.acceptance_criteria before finish.",
+      "Do not edit product implementation files."
+    ],
+    "objective": "Supervise the seeded-pair smoke from already-recorded config. Prove startup begins with cycle, then nudge the worker, verify evidence, satisfy durable accepted criteria, and finish cleanly.",
+    "permissions": {
+      "create_pr": false,
+      "merge_green_pr": false,
+      "worker_compact_clear": false
+    },
+    "reference_paths": [],
+    "supervision_mode": "guided",
+    "task_id": "task-ec662396-bbe8-4518-8c3e-c6c7c1e2efbe",
+    "updated_at": "2026-05-17T20:24:35Z"
+  },
+  "name": "qa-seeded-pair-smoke",
+  "state": "done",
+  "summary": "GoalBuddy-run QA smoke for seeded manager config startup behavior.",
+  "updated_at": "2026-05-17T20:26:22Z",
+  "worker": null,
+  "worker_handoff": null,
+  "worker_status": null
+}

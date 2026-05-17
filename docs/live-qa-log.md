@@ -682,3 +682,82 @@ Result:
 - The merged session-nudge guidance worked in a live disposable pair: the
   manager chose `session-nudge` first, gathered evidence, satisfied criteria,
   and closed the task without leaving active sessions.
+
+## 2026-05-17: Seeded Pair Smoke
+
+Follow-up from:
+
+- `2026-05-17: Nudge Fallback Dogfood Drill`
+- PR #72: seeded `workerctl pair --manager-*` manager config before manager
+  launch.
+
+GoalBuddy:
+
+- Goal: `docs/goals/seeded-pair-smoke/goal.md`
+- Board: `docs/goals/seeded-pair-smoke/state.yaml`
+
+Task:
+
+- `qa-seeded-pair-smoke`
+- Worker session: `qa-seeded-pair-worker`
+- Manager session: `qa-seeded-pair-manager`
+- Export:
+  `docs/live-qa-artifacts/2026-05-17-seeded-pair-smoke/export/`
+
+Validated:
+
+- `scripts/workerctl pair ... --manager-objective ... --manager-guideline ...
+  --manager-acceptance ...` created a disposable pair and reported
+  `manager_config_seeded=true` and `manager_config_seeded_by_pair=true`.
+- The manager bootstrap said manager config had already been recorded and told
+  the manager to start with
+  `scripts/workerctl cycle qa-seeded-pair-smoke`.
+- The manager did not ask setup questions first. Its first supervision action
+  included `scripts/workerctl cycle qa-seeded-pair-smoke`, and cycle output
+  included populated `manager_context.manager_config`.
+- Cycle output initially had zero durable accepted criteria rows even though
+  `manager_config.acceptance_criteria` was populated.
+- The manager inferred durable criteria from manager config, used
+  `session-nudge` to ask the worker for a proof artifact, verified the worker
+  proof, satisfied criteria `40`, `41`, `42`, and `43`, and ran
+  `finish-task --require-criteria-audit --stop-manager --stop-worker`.
+- The worker waited for the manager nudge before creating
+  `.codex-workers/qa-seeded-pair-worker/seeded-pair-proof.txt`.
+- The worker reported the proof path and `git status --short` output. The only
+  visible status output was the PM-created untracked
+  `docs/goals/seeded-pair-smoke/` goal state; the worker artifact remained
+  under ignored `.codex-workers/`.
+- Final `sessions --state active` returned `[]`, and final
+  `reconcile --stale-cycles-seconds 1` was clean.
+
+Verification:
+
+- `scripts/workerctl replay qa-seeded-pair-smoke`
+- `scripts/workerctl criteria qa-seeded-pair-smoke --list`
+- `scripts/workerctl mutation-audit qa-seeded-pair-smoke --json`
+- `scripts/workerctl audit qa-seeded-pair-smoke --json`
+- `scripts/workerctl export-task qa-seeded-pair-smoke --output
+  docs/live-qa-artifacts/2026-05-17-seeded-pair-smoke/export --zip`
+- `scripts/workerctl sessions --state active`
+- `scripts/workerctl reconcile --stale-cycles-seconds 1`
+
+Observations:
+
+- Core seeded-manager startup behavior passed: pre-seeded `pair` config changed
+  the manager startup path from setup questions to `cycle`.
+- The manager initially tried to add durable criteria with invalid source
+  `manager_config`; the CLI only accepts `final_audit`, `manager_inferred`,
+  `user_requested`, and `worker_proposed`. A PM recovery nudge told the manager
+  to use `manager_inferred`, after which it recovered.
+- Transcript capture was missed again: `transcript-capture` ran after
+  `finish-task` stopped both sessions, so exported `transcript-captures.json`
+  and `terminal-captures.json` are empty. The audit/replay/criteria evidence is
+  durable, but future drills needing transcript segments should capture before
+  stopping or productize a pre-stop capture/export path.
+
+Result:
+
+- The seeded-pair startup fix is validated for the main dogfood behavior.
+- Follow-up candidates: document or encode `manager_inferred` as the expected
+  source for manager-config-derived criteria, and consider a pre-stop transcript
+  capture option for `finish-task`.
