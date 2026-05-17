@@ -1,0 +1,34 @@
+[
+  {
+    "codex_session_id": "019e3323-052a-7d81-be85-a23cfe30a977",
+    "codex_session_path": "[CODEX_SESSIONS]/2026/05/16/rollout-2026-05-16T16-33-13-019e3323-052a-7d81-be85-a23cfe30a977.jsonl",
+    "cwd": "[REPO]",
+    "id": "session-91e6f4eb-b29f-40c5-9516-a8b7ec5ac626",
+    "identity_token": "[REDACTED_SESSION_TOKEN]",
+    "last_heartbeat_at": "2026-05-16T23:37:32Z",
+    "last_ingest_offset": 158670,
+    "name": "qa-g3-worker",
+    "pid": 96126,
+    "registered_at": "2026-05-16T23:33:14Z",
+    "role": "worker",
+    "state": "gone",
+    "tmux_pane_id": null,
+    "tmux_session": "codex-qa-g3-worker"
+  },
+  {
+    "codex_session_id": "019e3323-0d67-7132-a35d-5d6bc9c79ee5",
+    "codex_session_path": "[CODEX_SESSIONS]/2026/05/16/rollout-2026-05-16T16-33-15-019e3323-0d67-7132-a35d-5d6bc9c79ee5.jsonl",
+    "cwd": "[REPO]",
+    "id": "session-9d8f53df-0142-41f2-b0f8-5cf97cd51b87",
+    "identity_token": "[REDACTED_SESSION_TOKEN]",
+    "last_heartbeat_at": "2026-05-16T23:38:43Z",
+    "last_ingest_offset": null,
+    "name": "qa-g3-manager",
+    "pid": 97098,
+    "registered_at": "2026-05-16T23:33:16Z",
+    "role": "manager",
+    "state": "gone",
+    "tmux_pane_id": null,
+    "tmux_session": "codex-qa-g3-manager"
+  }
+]

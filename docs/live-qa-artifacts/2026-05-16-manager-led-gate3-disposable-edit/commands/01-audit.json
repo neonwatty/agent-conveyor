@@ -1,0 +1,1880 @@
+{
+  "acceptance_criteria": [
+    {
+      "created_at": "2026-05-16T23:35:16Z",
+      "criterion": "The target document records a clear Gate 3 manager-led QA receipt, including date, slice name, and that the edit was manager-requested.",
+      "evidence": {
+        "commands": [
+          {
+            "command": "sed -n '1,160p' docs/live-qa-artifacts/2026-05-16-manager-led-gate3-disposable-edit/worker-disposable-edit.md",
+            "output_contains": [
+              "# Gate 3 Manager-Led QA Receipt",
+              "Date: 2026-05-16",
+              "Slice: Gate 3 manager-led disposable edit QA",
+              "Manager request: This edit was explicitly requested by the manager"
+            ],
+            "status": "pass"
+          }
+        ]
+      },
+      "id": 24,
+      "proof": "Manager read the target file and verified it contains the Gate 3 QA receipt, date, slice name, and manager-requested wording.",
+      "rationale": null,
+      "source": "worker_proposed",
+      "status": "satisfied",
+      "task_id": "task-d72a6352-7b4e-42cc-a3a1-8964afcb8ab3",
+      "updated_at": "2026-05-16T23:36:54Z"
+    },
+    {
+      "created_at": "2026-05-16T23:35:16Z",
+      "criterion": "Disposable edit is strictly scoped to `docs/live-qa-artifacts/2026-05-16-manager-led-gate3-disposable-edit/worker-disposable-edit.md`.",
+      "evidence": {
+        "commands": [
+          {
+            "command": "git diff --name-only",
+            "output": "empty because target file is untracked",
+            "status": "pass"
+          },
+          {
+            "command": "git status --short -- docs/live-qa-artifacts/2026-05-16-manager-led-gate3-disposable-edit/worker-disposable-edit.md",
+            "output": "?? docs/live-qa-artifacts/2026-05-16-manager-led-gate3-disposable-edit/worker-disposable-edit.md",
+            "status": "pass"
+          },
+          {
+            "command": "worker tail event trail",
+            "output": "apply_patch added only docs/live-qa-artifacts/2026-05-16-manager-led-gate3-disposable-edit/worker-disposable-edit.md",
+            "status": "pass"
+          }
+        ]
+      },
+      "id": 25,
+      "proof": "Manager verified the worker write event added only docs/live-qa-artifacts/2026-05-16-manager-led-gate3-disposable-edit/worker-disposable-edit.md; scoped git status shows that target as untracked.",
+      "rationale": null,
+      "source": "worker_proposed",
+      "status": "satisfied",
+      "task_id": "task-d72a6352-7b4e-42cc-a3a1-8964afcb8ab3",
+      "updated_at": "2026-05-16T23:36:47Z"
+    },
+    {
+      "created_at": "2026-05-16T23:35:16Z",
+      "criterion": "Add broader automated guard coverage for manager-led disposable edit scoping.",
+      "evidence": {},
+      "id": 26,
+      "proof": null,
+      "rationale": "Follow-up after this bounded disposable edit QA slice.",
+      "source": "worker_proposed",
+      "status": "deferred",
+      "task_id": "task-d72a6352-7b4e-42cc-a3a1-8964afcb8ab3",
+      "updated_at": "2026-05-16T23:35:16Z"
+    },
+    {
+      "created_at": "2026-05-16T23:35:16Z",
+      "criterion": "No prohibited actions are performed: no /review, compact/clear, PR creation, merge, or destructive git commands.",
+      "evidence": {
+        "commands": [
+          {
+            "command": "worker event trail inspection",
+            "output": "Recent worker commands/actions were sed, ls, apply_patch for the allowed target, git diff --name-only, scoped git status; no /review, compact, clear, PR, merge, reset, checkout, or destructive command observed.",
+            "status": "pass"
+          }
+        ]
+      },
+      "id": 27,
+      "proof": "Manager inspected the worker receipt and recent event trail; no prohibited review, compact, clear, PR, merge, or destructive git action appeared.",
+      "rationale": null,
+      "source": "worker_proposed",
+      "status": "satisfied",
+      "task_id": "task-d72a6352-7b4e-42cc-a3a1-8964afcb8ab3",
+      "updated_at": "2026-05-16T23:36:59Z"
+    }
+  ],
+  "agent_observations": [
+    {
+      "command_id": "command-a1697e70-ab1a-4e59-8978-60d5c0869362",
+      "created_at": "2026-05-16T23:37:31Z",
+      "id": 9,
+      "manager_id": null,
+      "message": "Gate 3 manager-led disposable edit QA complete; accepted criteria satisfied, one follow-up deferred, replay/export captured.",
+      "observation_type": "decision",
+      "payload": {
+        "decision": "stop",
+        "decision_id": 9,
+        "source": "finish_task"
+      },
+      "role": "manager",
+      "severity": "info",
+      "source_capture_id": null,
+      "task_id": "task-d72a6352-7b4e-42cc-a3a1-8964afcb8ab3",
+      "worker_id": null
+    }
+  ],
+  "commands": [
+    {
+      "created_at": "2026-05-16T23:37:31Z",
+      "error": null,
+      "id": "command-a1697e70-ab1a-4e59-8978-60d5c0869362",
+      "idempotency_key": "command-a1697e70-ab1a-4e59-8978-60d5c0869362",
+      "manager_id": null,
+      "payload": {
+        "final_audit": {
+          "open_criteria": [],
+          "require_criteria_audit": true,
+          "summary": {
+            "accepted": 0,
+            "deferred": 1,
+            "proposed": 0,
+            "rejected": 0,
+            "satisfied": 3
+          },
+          "total": 4
+        },
+        "finish": true,
+        "manager_decision": {
+          "allowed_decisions": [
+            "stop"
+          ],
+          "decision": null,
+          "decision_id": null,
+          "ok": false,
+          "warnings": [
+            "missing_decision_id"
+          ]
+        },
+        "manager_session": "qa-g3-manager",
+        "message": "Gate 3 disposable edit QA is complete. Accepted criteria were satisfied, the follow-up guard coverage criterion was deferred, and the manager is stopping this worker session for cleanup.",
+        "reason": "Gate 3 manager-led disposable edit QA complete; accepted criteria satisfied, one follow-up deferred, replay/export captured.",
+        "stop_manager": false,
+        "stop_worker": true,
+        "task": "qa-g3-disposable-edit",
+        "worker": "qa-g3-worker",
+        "worker_session": "qa-g3-worker"
+      },
+      "result": {
+        "command_id": "command-a1697e70-ab1a-4e59-8978-60d5c0869362",
+        "final_audit": {
+          "open_criteria": [],
+          "require_criteria_audit": true,
+          "summary": {
+            "accepted": 0,
+            "deferred": 1,
+            "proposed": 0,
+            "rejected": 0,
+            "satisfied": 3
+          },
+          "total": 4
+        },
+        "final_decision_id": 9,
+        "final_observation_id": 9,
+        "finish": true,
+        "killed_manager": false,
+        "killed_worker": true,
+        "manager_decision": {
+          "allowed_decisions": [
+            "stop"
+          ],
+          "decision": null,
+          "decision_id": null,
+          "ok": false,
+          "warnings": [
+            "missing_decision_id"
+          ]
+        },
+        "manager_identity": {
+          "db_pane_id": null,
+          "db_session": "codex-qa-g3-manager",
+          "live": true,
+          "live_pane_id": "%1",
+          "mismatches": [],
+          "role": "manager",
+          "session": "qa-g3-manager"
+        },
+        "manager_session": "qa-g3-manager",
+        "reason": "Gate 3 manager-led disposable edit QA complete; accepted criteria satisfied, one follow-up deferred, replay/export captured.",
+        "stop_manager": false,
+        "stop_worker": true,
+        "task": "qa-g3-disposable-edit",
+        "worker": "qa-g3-worker",
+        "worker_identity": {
+          "db_pane_id": null,
+          "db_session": "codex-qa-g3-worker",
+          "live": true,
+          "live_pane_id": "%0",
+          "mismatches": [],
+          "role": "worker",
+          "session": "qa-g3-worker"
+        },
+        "worker_session": "qa-g3-worker"
+      },
+      "state": "succeeded",
+      "task_id": "task-d72a6352-7b4e-42cc-a3a1-8964afcb8ab3",
+      "type": "finish_task",
+      "updated_at": "2026-05-16T23:37:32Z",
+      "worker_id": null
+    }
+  ],
+  "events": [
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-16T23:33:12Z",
+      "id": 110,
+      "manager_id": null,
+      "payload": {
+        "goal": "Gate 3 manager-led disposable edit QA with bounded worker write scope.",
+        "name": "qa-g3-disposable-edit",
+        "summary": "Real worker/manager QA for manager-supervised disposable edit, emergent criteria, replay/export, and cleanup."
+      },
+      "task_id": "task-d72a6352-7b4e-42cc-a3a1-8964afcb8ab3",
+      "type": "task_created",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-16T23:33:16Z",
+      "id": 113,
+      "manager_id": null,
+      "payload": {
+        "binding_id": "binding-bbd0b9fc-6306-430f-b725-4dd0d5a68eca",
+        "manager": "qa-g3-manager",
+        "task": "qa-g3-disposable-edit",
+        "worker": "qa-g3-worker"
+      },
+      "task_id": "task-d72a6352-7b4e-42cc-a3a1-8964afcb8ab3",
+      "type": "binding_created",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-16T23:33:27Z",
+      "id": 114,
+      "manager_id": null,
+      "payload": {
+        "acceptance_count": 4,
+        "guideline_count": 3,
+        "reference_count": 2,
+        "supervision_mode": "guided"
+      },
+      "task_id": "task-d72a6352-7b4e-42cc-a3a1-8964afcb8ab3",
+      "type": "manager_config_recorded",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-16T23:33:56Z",
+      "id": 116,
+      "manager_id": null,
+      "payload": {
+        "acceptance_count": 4,
+        "guideline_count": 3,
+        "reference_count": 2,
+        "supervision_mode": "guided"
+      },
+      "task_id": "task-d72a6352-7b4e-42cc-a3a1-8964afcb8ab3",
+      "type": "manager_config_recorded",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-16T23:35:16Z",
+      "id": 119,
+      "manager_id": null,
+      "payload": {
+        "created": true,
+        "criterion": "The target document records a clear Gate 3 manager-led QA receipt, including date, slice name, and that the edit was manager-requested.",
+        "criterion_id": 24,
+        "evidence": {},
+        "proof": null,
+        "rationale": null,
+        "source": "worker_proposed",
+        "status": "accepted",
+        "task_id": "task-d72a6352-7b4e-42cc-a3a1-8964afcb8ab3"
+      },
+      "task_id": "task-d72a6352-7b4e-42cc-a3a1-8964afcb8ab3",
+      "type": "acceptance_criterion_added",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-16T23:35:16Z",
+      "id": 120,
+      "manager_id": null,
+      "payload": {
+        "created": true,
+        "criterion": "Disposable edit is strictly scoped to `docs/live-qa-artifacts/2026-05-16-manager-led-gate3-disposable-edit/worker-disposable-edit.md`.",
+        "criterion_id": 25,
+        "evidence": {},
+        "proof": null,
+        "rationale": null,
+        "source": "worker_proposed",
+        "status": "accepted",
+        "task_id": "task-d72a6352-7b4e-42cc-a3a1-8964afcb8ab3"
+      },
+      "task_id": "task-d72a6352-7b4e-42cc-a3a1-8964afcb8ab3",
+      "type": "acceptance_criterion_added",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-16T23:35:16Z",
+      "id": 121,
+      "manager_id": null,
+      "payload": {
+        "created": true,
+        "criterion": "Add broader automated guard coverage for manager-led disposable edit scoping.",
+        "criterion_id": 26,
+        "evidence": {},
+        "proof": null,
+        "rationale": "Follow-up after this bounded disposable edit QA slice.",
+        "source": "worker_proposed",
+        "status": "deferred",
+        "task_id": "task-d72a6352-7b4e-42cc-a3a1-8964afcb8ab3"
+      },
+      "task_id": "task-d72a6352-7b4e-42cc-a3a1-8964afcb8ab3",
+      "type": "acceptance_criterion_added",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-16T23:35:16Z",
+      "id": 122,
+      "manager_id": null,
+      "payload": {
+        "created": true,
+        "criterion": "No prohibited actions are performed: no /review, compact/clear, PR creation, merge, or destructive git commands.",
+        "criterion_id": 27,
+        "evidence": {},
+        "proof": null,
+        "rationale": null,
+        "source": "worker_proposed",
+        "status": "accepted",
+        "task_id": "task-d72a6352-7b4e-42cc-a3a1-8964afcb8ab3"
+      },
+      "task_id": "task-d72a6352-7b4e-42cc-a3a1-8964afcb8ab3",
+      "type": "acceptance_criterion_added",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-16T23:36:47Z",
+      "id": 124,
+      "manager_id": null,
+      "payload": {
+        "criterion": "Disposable edit is strictly scoped to `docs/live-qa-artifacts/2026-05-16-manager-led-gate3-disposable-edit/worker-disposable-edit.md`.",
+        "criterion_id": 25,
+        "evidence": {
+          "commands": [
+            {
+              "command": "git diff --name-only",
+              "output": "empty because target file is untracked",
+              "status": "pass"
+            },
+            {
+              "command": "git status --short -- docs/live-qa-artifacts/2026-05-16-manager-led-gate3-disposable-edit/worker-disposable-edit.md",
+              "output": "?? docs/live-qa-artifacts/2026-05-16-manager-led-gate3-disposable-edit/worker-disposable-edit.md",
+              "status": "pass"
+            },
+            {
+              "command": "worker tail event trail",
+              "output": "apply_patch added only docs/live-qa-artifacts/2026-05-16-manager-led-gate3-disposable-edit/worker-disposable-edit.md",
+              "status": "pass"
+            }
+          ]
+        },
+        "previous_evidence": {},
+        "previous_proof": null,
+        "previous_rationale": null,
+        "previous_status": "accepted",
+        "proof": "Manager verified the worker write event added only docs/live-qa-artifacts/2026-05-16-manager-led-gate3-disposable-edit/worker-disposable-edit.md; scoped git status shows that target as untracked.",
+        "rationale": null,
+        "source": "worker_proposed",
+        "status": "satisfied",
+        "task_id": "task-d72a6352-7b4e-42cc-a3a1-8964afcb8ab3"
+      },
+      "task_id": "task-d72a6352-7b4e-42cc-a3a1-8964afcb8ab3",
+      "type": "acceptance_criterion_updated",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-16T23:36:54Z",
+      "id": 125,
+      "manager_id": null,
+      "payload": {
+        "criterion": "The target document records a clear Gate 3 manager-led QA receipt, including date, slice name, and that the edit was manager-requested.",
+        "criterion_id": 24,
+        "evidence": {
+          "commands": [
+            {
+              "command": "sed -n '1,160p' docs/live-qa-artifacts/2026-05-16-manager-led-gate3-disposable-edit/worker-disposable-edit.md",
+              "output_contains": [
+                "# Gate 3 Manager-Led QA Receipt",
+                "Date: 2026-05-16",
+                "Slice: Gate 3 manager-led disposable edit QA",
+                "Manager request: This edit was explicitly requested by the manager"
+              ],
+              "status": "pass"
+            }
+          ]
+        },
+        "previous_evidence": {},
+        "previous_proof": null,
+        "previous_rationale": null,
+        "previous_status": "accepted",
+        "proof": "Manager read the target file and verified it contains the Gate 3 QA receipt, date, slice name, and manager-requested wording.",
+        "rationale": null,
+        "source": "worker_proposed",
+        "status": "satisfied",
+        "task_id": "task-d72a6352-7b4e-42cc-a3a1-8964afcb8ab3"
+      },
+      "task_id": "task-d72a6352-7b4e-42cc-a3a1-8964afcb8ab3",
+      "type": "acceptance_criterion_updated",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-16T23:36:59Z",
+      "id": 126,
+      "manager_id": null,
+      "payload": {
+        "criterion": "No prohibited actions are performed: no /review, compact/clear, PR creation, merge, or destructive git commands.",
+        "criterion_id": 27,
+        "evidence": {
+          "commands": [
+            {
+              "command": "worker event trail inspection",
+              "output": "Recent worker commands/actions were sed, ls, apply_patch for the allowed target, git diff --name-only, scoped git status; no /review, compact, clear, PR, merge, reset, checkout, or destructive command observed.",
+              "status": "pass"
+            }
+          ]
+        },
+        "previous_evidence": {},
+        "previous_proof": null,
+        "previous_rationale": null,
+        "previous_status": "accepted",
+        "proof": "Manager inspected the worker receipt and recent event trail; no prohibited review, compact, clear, PR, merge, or destructive git action appeared.",
+        "rationale": null,
+        "source": "worker_proposed",
+        "status": "satisfied",
+        "task_id": "task-d72a6352-7b4e-42cc-a3a1-8964afcb8ab3"
+      },
+      "task_id": "task-d72a6352-7b4e-42cc-a3a1-8964afcb8ab3",
+      "type": "acceptance_criterion_updated",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-16T23:37:20Z",
+      "id": 127,
+      "manager_id": null,
+      "payload": {
+        "action": "create_pr",
+        "allowed": false,
+        "config": {
+          "acceptance_criteria": [
+            "Manager asks the worker for must-have current-task criteria versus deferred follow-up criteria before approving the edit.",
+            "Worker edits only docs/live-qa-artifacts/2026-05-16-manager-led-gate3-disposable-edit/worker-disposable-edit.md.",
+            "Manager checks git diff/name-only and verification proof before final finish.",
+            "Replay/export preserve criteria transitions, edit evidence, and final cleanup decision."
+          ],
+          "created_at": "2026-05-16T23:33:27Z",
+          "guidelines": [
+            "Do not compact, clear, create PRs, merge, run destructive git commands, or approve writes outside the disposable edit target.",
+            "Do not accept vague done/proof. Missing changed-file or verification proof must become an accepted criterion or an explicitly deferred follow-up with rationale.",
+            "Use workerctl criteria-plan before adding worker-proposed criteria, then use workerctl criteria commands for accepted/deferred/satisfied state."
+          ],
+          "objective": "Manage qa-g3-worker through Gate 3 disposable edit QA. Preserve manager-led criteria negotiation, ask for current-task versus deferred acceptance criteria, run criteria-plan before criteria mutations, instruct the worker to edit only docs/live-qa-artifacts/2026-05-16-manager-led-gate3-disposable-edit/worker-disposable-edit.md, inspect changed files/diff/verification proof, satisfy criteria, export/replay, and finish with cleanup.",
+          "permissions": {
+            "create_pr": false,
+            "merge_green_pr": false,
+            "worker_compact_clear": false
+          },
+          "reference_paths": [
+            "docs/goals/manager-led-scenario-3-gate3/state.yaml",
+            "docs/superpowers/plans/2026-05-16-dogfood-reliability-ladder.md"
+          ],
+          "supervision_mode": "guided",
+          "task_id": "task-d72a6352-7b4e-42cc-a3a1-8964afcb8ab3",
+          "updated_at": "2026-05-16T23:33:56Z"
+        },
+        "handoff_id": null,
+        "reasons": [
+          "permission_not_enabled"
+        ],
+        "require_handoff": false,
+        "task": {
+          "id": "task-d72a6352-7b4e-42cc-a3a1-8964afcb8ab3",
+          "name": "qa-g3-disposable-edit"
+        }
+      },
+      "task_id": "task-d72a6352-7b4e-42cc-a3a1-8964afcb8ab3",
+      "type": "manager_permission_checked",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-16T23:37:20Z",
+      "id": 128,
+      "manager_id": null,
+      "payload": {
+        "action": "merge_green_pr",
+        "allowed": false,
+        "config": {
+          "acceptance_criteria": [
+            "Manager asks the worker for must-have current-task criteria versus deferred follow-up criteria before approving the edit.",
+            "Worker edits only docs/live-qa-artifacts/2026-05-16-manager-led-gate3-disposable-edit/worker-disposable-edit.md.",
+            "Manager checks git diff/name-only and verification proof before final finish.",
+            "Replay/export preserve criteria transitions, edit evidence, and final cleanup decision."
+          ],
+          "created_at": "2026-05-16T23:33:27Z",
+          "guidelines": [
+            "Do not compact, clear, create PRs, merge, run destructive git commands, or approve writes outside the disposable edit target.",
+            "Do not accept vague done/proof. Missing changed-file or verification proof must become an accepted criterion or an explicitly deferred follow-up with rationale.",
+            "Use workerctl criteria-plan before adding worker-proposed criteria, then use workerctl criteria commands for accepted/deferred/satisfied state."
+          ],
+          "objective": "Manage qa-g3-worker through Gate 3 disposable edit QA. Preserve manager-led criteria negotiation, ask for current-task versus deferred acceptance criteria, run criteria-plan before criteria mutations, instruct the worker to edit only docs/live-qa-artifacts/2026-05-16-manager-led-gate3-disposable-edit/worker-disposable-edit.md, inspect changed files/diff/verification proof, satisfy criteria, export/replay, and finish with cleanup.",
+          "permissions": {
+            "create_pr": false,
+            "merge_green_pr": false,
+            "worker_compact_clear": false
+          },
+          "reference_paths": [
+            "docs/goals/manager-led-scenario-3-gate3/state.yaml",
+            "docs/superpowers/plans/2026-05-16-dogfood-reliability-ladder.md"
+          ],
+          "supervision_mode": "guided",
+          "task_id": "task-d72a6352-7b4e-42cc-a3a1-8964afcb8ab3",
+          "updated_at": "2026-05-16T23:33:56Z"
+        },
+        "handoff_id": null,
+        "reasons": [
+          "permission_not_enabled"
+        ],
+        "require_handoff": false,
+        "task": {
+          "id": "task-d72a6352-7b4e-42cc-a3a1-8964afcb8ab3",
+          "name": "qa-g3-disposable-edit"
+        }
+      },
+      "task_id": "task-d72a6352-7b4e-42cc-a3a1-8964afcb8ab3",
+      "type": "manager_permission_checked",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-16T23:37:20Z",
+      "id": 129,
+      "manager_id": null,
+      "payload": {
+        "action": "worker_compact_clear",
+        "allowed": false,
+        "config": {
+          "acceptance_criteria": [
+            "Manager asks the worker for must-have current-task criteria versus deferred follow-up criteria before approving the edit.",
+            "Worker edits only docs/live-qa-artifacts/2026-05-16-manager-led-gate3-disposable-edit/worker-disposable-edit.md.",
+            "Manager checks git diff/name-only and verification proof before final finish.",
+            "Replay/export preserve criteria transitions, edit evidence, and final cleanup decision."
+          ],
+          "created_at": "2026-05-16T23:33:27Z",
+          "guidelines": [
+            "Do not compact, clear, create PRs, merge, run destructive git commands, or approve writes outside the disposable edit target.",
+            "Do not accept vague done/proof. Missing changed-file or verification proof must become an accepted criterion or an explicitly deferred follow-up with rationale.",
+            "Use workerctl criteria-plan before adding worker-proposed criteria, then use workerctl criteria commands for accepted/deferred/satisfied state."
+          ],
+          "objective": "Manage qa-g3-worker through Gate 3 disposable edit QA. Preserve manager-led criteria negotiation, ask for current-task versus deferred acceptance criteria, run criteria-plan before criteria mutations, instruct the worker to edit only docs/live-qa-artifacts/2026-05-16-manager-led-gate3-disposable-edit/worker-disposable-edit.md, inspect changed files/diff/verification proof, satisfy criteria, export/replay, and finish with cleanup.",
+          "permissions": {
+            "create_pr": false,
+            "merge_green_pr": false,
+            "worker_compact_clear": false
+          },
+          "reference_paths": [
+            "docs/goals/manager-led-scenario-3-gate3/state.yaml",
+            "docs/superpowers/plans/2026-05-16-dogfood-reliability-ladder.md"
+          ],
+          "supervision_mode": "guided",
+          "task_id": "task-d72a6352-7b4e-42cc-a3a1-8964afcb8ab3",
+          "updated_at": "2026-05-16T23:33:56Z"
+        },
+        "handoff_id": null,
+        "reasons": [
+          "permission_not_enabled"
+        ],
+        "require_handoff": false,
+        "task": {
+          "id": "task-d72a6352-7b4e-42cc-a3a1-8964afcb8ab3",
+          "name": "qa-g3-disposable-edit"
+        }
+      },
+      "task_id": "task-d72a6352-7b4e-42cc-a3a1-8964afcb8ab3",
+      "type": "manager_permission_checked",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": "command-a1697e70-ab1a-4e59-8978-60d5c0869362",
+      "correlation_id": null,
+      "created_at": "2026-05-16T23:37:31Z",
+      "id": 130,
+      "manager_id": null,
+      "payload": {
+        "final_audit": {
+          "open_criteria": [],
+          "require_criteria_audit": true,
+          "summary": {
+            "accepted": 0,
+            "deferred": 1,
+            "proposed": 0,
+            "rejected": 0,
+            "satisfied": 3
+          },
+          "total": 4
+        },
+        "final_decision_id": 9,
+        "final_observation_id": 9,
+        "finish": true,
+        "manager_decision": {
+          "allowed_decisions": [
+            "stop"
+          ],
+          "decision": null,
+          "decision_id": null,
+          "ok": false,
+          "warnings": [
+            "missing_decision_id"
+          ]
+        },
+        "message": "Gate 3 disposable edit QA is complete. Accepted criteria were satisfied, the follow-up guard coverage criterion was deferred, and the manager is stopping this worker session for cleanup.",
+        "reason": "Gate 3 manager-led disposable edit QA complete; accepted criteria satisfied, one follow-up deferred, replay/export captured.",
+        "stop_manager": false,
+        "stop_worker": true
+      },
+      "task_id": "task-d72a6352-7b4e-42cc-a3a1-8964afcb8ab3",
+      "type": "finish_task_intent",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": "command-a1697e70-ab1a-4e59-8978-60d5c0869362",
+      "correlation_id": null,
+      "created_at": "2026-05-16T23:37:31Z",
+      "id": 131,
+      "manager_id": null,
+      "payload": {
+        "open_criteria": [],
+        "require_criteria_audit": true,
+        "summary": {
+          "accepted": 0,
+          "deferred": 1,
+          "proposed": 0,
+          "rejected": 0,
+          "satisfied": 3
+        },
+        "total": 4
+      },
+      "task_id": "task-d72a6352-7b4e-42cc-a3a1-8964afcb8ab3",
+      "type": "finish_task_criteria_audit",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": "command-a1697e70-ab1a-4e59-8978-60d5c0869362",
+      "correlation_id": null,
+      "created_at": "2026-05-16T23:37:31Z",
+      "id": 132,
+      "manager_id": null,
+      "payload": {
+        "db_pane_id": null,
+        "db_session": "codex-qa-g3-manager",
+        "live": true,
+        "live_pane_id": "%1",
+        "mismatches": [],
+        "role": "manager",
+        "session": "qa-g3-manager"
+      },
+      "task_id": "task-d72a6352-7b4e-42cc-a3a1-8964afcb8ab3",
+      "type": "manager_identity_verified",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": "command-a1697e70-ab1a-4e59-8978-60d5c0869362",
+      "correlation_id": null,
+      "created_at": "2026-05-16T23:37:31Z",
+      "id": 133,
+      "manager_id": null,
+      "payload": {
+        "db_pane_id": null,
+        "db_session": "codex-qa-g3-worker",
+        "live": true,
+        "live_pane_id": "%0",
+        "mismatches": [],
+        "role": "worker",
+        "session": "qa-g3-worker"
+      },
+      "task_id": "task-d72a6352-7b4e-42cc-a3a1-8964afcb8ab3",
+      "type": "worker_identity_verified",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": "command-a1697e70-ab1a-4e59-8978-60d5c0869362",
+      "correlation_id": null,
+      "created_at": "2026-05-16T23:37:32Z",
+      "id": 134,
+      "manager_id": null,
+      "payload": {
+        "command_id": "command-a1697e70-ab1a-4e59-8978-60d5c0869362",
+        "final_audit": {
+          "open_criteria": [],
+          "require_criteria_audit": true,
+          "summary": {
+            "accepted": 0,
+            "deferred": 1,
+            "proposed": 0,
+            "rejected": 0,
+            "satisfied": 3
+          },
+          "total": 4
+        },
+        "final_decision_id": 9,
+        "final_observation_id": 9,
+        "finish": true,
+        "killed_manager": false,
+        "killed_worker": true,
+        "manager_decision": {
+          "allowed_decisions": [
+            "stop"
+          ],
+          "decision": null,
+          "decision_id": null,
+          "ok": false,
+          "warnings": [
+            "missing_decision_id"
+          ]
+        },
+        "manager_identity": {
+          "db_pane_id": null,
+          "db_session": "codex-qa-g3-manager",
+          "live": true,
+          "live_pane_id": "%1",
+          "mismatches": [],
+          "role": "manager",
+          "session": "qa-g3-manager"
+        },
+        "manager_session": "qa-g3-manager",
+        "reason": "Gate 3 manager-led disposable edit QA complete; accepted criteria satisfied, one follow-up deferred, replay/export captured.",
+        "stop_manager": false,
+        "stop_worker": true,
+        "task": "qa-g3-disposable-edit",
+        "worker": "qa-g3-worker",
+        "worker_identity": {
+          "db_pane_id": null,
+          "db_session": "codex-qa-g3-worker",
+          "live": true,
+          "live_pane_id": "%0",
+          "mismatches": [],
+          "role": "worker",
+          "session": "qa-g3-worker"
+        },
+        "worker_session": "qa-g3-worker"
+      },
+      "task_id": "task-d72a6352-7b4e-42cc-a3a1-8964afcb8ab3",
+      "type": "finish_task_succeeded",
+      "worker_id": null
+    }
+  ],
+  "manager_cycles": [
+    {
+      "completed_at": "2026-05-16T23:34:01Z",
+      "decision": null,
+      "error": null,
+      "health": null,
+      "health_observation_id": null,
+      "id": 21,
+      "manager_capture_id": null,
+      "manager_id": null,
+      "started_at": "2026-05-16T23:34:01Z",
+      "state": "succeeded",
+      "status": {
+        "binding_id": "binding-bbd0b9fc-6306-430f-b725-4dd0d5a68eca",
+        "ingest": {
+          "new_events": 44,
+          "new_offset": 125487,
+          "skipped_lines": 0
+        },
+        "kind": "session_cycle",
+        "last_event_subtype": "task_complete",
+        "last_state_event_at": "2026-05-16T23:33:54.399Z",
+        "manager_alive": true,
+        "manager_context": {
+          "acceptance_criteria": {
+            "deferred": [],
+            "open": [],
+            "proposed": [],
+            "rejected": [],
+            "satisfied": [],
+            "summary": {
+              "accepted": 0,
+              "deferred": 0,
+              "proposed": 0,
+              "rejected": 0,
+              "satisfied": 0
+            }
+          },
+          "criteria_negotiation": {
+            "needed": true,
+            "prompt": "Please propose 2-4 acceptance criteria for the current slice. Split them into must-have current-task criteria and follow-up criteria. Include the verification you expect for each.",
+            "reason": "no_criteria",
+            "suggested_actions": [
+              "Ask the worker to split must-have current-task criteria from follow-up criteria.",
+              "Record accepted current-task criteria with workerctl criteria qa-g3-disposable-edit --add --criterion \"...\" --source worker_proposed --status accepted.",
+              "Record proposed current-task criteria with workerctl criteria qa-g3-disposable-edit --add --criterion \"...\" --source worker_proposed --status proposed.",
+              "Record follow-up criteria with workerctl criteria qa-g3-disposable-edit --add --criterion \"...\" --source worker_proposed --status deferred."
+            ]
+          },
+          "manager_config": {
+            "acceptance_criteria": [
+              "Manager asks the worker for must-have current-task criteria versus deferred follow-up criteria before approving the edit.",
+              "Worker edits only docs/live-qa-artifacts/2026-05-16-manager-led-gate3-disposable-edit/worker-disposable-edit.md.",
+              "Manager checks git diff/name-only and verification proof before final finish.",
+              "Replay/export preserve criteria transitions, edit evidence, and final cleanup decision."
+            ],
+            "created_at": "2026-05-16T23:33:27Z",
+            "guidelines": [
+              "Do not compact, clear, create PRs, merge, run destructive git commands, or approve writes outside the disposable edit target.",
+              "Do not accept vague done/proof. Missing changed-file or verification proof must become an accepted criterion or an explicitly deferred follow-up with rationale.",
+              "Use workerctl criteria-plan before adding worker-proposed criteria, then use workerctl criteria commands for accepted/deferred/satisfied state."
+            ],
+            "objective": "Manage qa-g3-worker through Gate 3 disposable edit QA. Preserve manager-led criteria negotiation, ask for current-task versus deferred acceptance criteria, run criteria-plan before criteria mutations, instruct the worker to edit only docs/live-qa-artifacts/2026-05-16-manager-led-gate3-disposable-edit/worker-disposable-edit.md, inspect changed files/diff/verification proof, satisfy criteria, export/replay, and finish with cleanup.",
+            "permissions": {
+              "create_pr": false,
+              "merge_green_pr": false,
+              "worker_compact_clear": false
+            },
+            "reference_paths": [
+              "docs/goals/manager-led-scenario-3-gate3/state.yaml",
+              "docs/superpowers/plans/2026-05-16-dogfood-reliability-ladder.md"
+            ],
+            "supervision_mode": "guided",
+            "task_id": "task-d72a6352-7b4e-42cc-a3a1-8964afcb8ab3",
+            "updated_at": "2026-05-16T23:33:56Z"
+          },
+          "worker_handoff": null
+        },
+        "manager_session": "qa-g3-manager",
+        "notable_pane_pattern": null,
+        "pane_signal": {
+          "captured": true,
+          "classifier": null,
+          "degraded": false,
+          "notable_pattern": null,
+          "reason": null,
+          "status_age_seconds": 6
+        },
+        "staleness_seconds": 6.601,
+        "state": "idle",
+        "task": "qa-g3-disposable-edit",
+        "task_completed": true,
+        "worker_alive": true,
+        "worker_session": "qa-g3-worker"
+      },
+      "task_id": "task-d72a6352-7b4e-42cc-a3a1-8964afcb8ab3",
+      "worker_capture_id": null
+    },
+    {
+      "completed_at": "2026-05-16T23:34:35Z",
+      "decision": null,
+      "error": null,
+      "health": null,
+      "health_observation_id": null,
+      "id": 22,
+      "manager_capture_id": null,
+      "manager_id": null,
+      "started_at": "2026-05-16T23:34:35Z",
+      "state": "succeeded",
+      "status": {
+        "binding_id": "binding-bbd0b9fc-6306-430f-b725-4dd0d5a68eca",
+        "ingest": {
+          "new_events": 5,
+          "new_offset": 129181,
+          "skipped_lines": 0
+        },
+        "kind": "session_cycle",
+        "last_event_subtype": "token_count",
+        "last_state_event_at": "2026-05-16T23:34:31.641Z",
+        "manager_alive": true,
+        "manager_context": {
+          "acceptance_criteria": {
+            "deferred": [],
+            "open": [],
+            "proposed": [],
+            "rejected": [],
+            "satisfied": [],
+            "summary": {
+              "accepted": 0,
+              "deferred": 0,
+              "proposed": 0,
+              "rejected": 0,
+              "satisfied": 0
+            }
+          },
+          "criteria_negotiation": {
+            "needed": true,
+            "prompt": "Please propose 2-4 acceptance criteria for the current slice. Split them into must-have current-task criteria and follow-up criteria. Include the verification you expect for each.",
+            "reason": "no_criteria",
+            "suggested_actions": [
+              "Ask the worker to split must-have current-task criteria from follow-up criteria.",
+              "Record accepted current-task criteria with workerctl criteria qa-g3-disposable-edit --add --criterion \"...\" --source worker_proposed --status accepted.",
+              "Record proposed current-task criteria with workerctl criteria qa-g3-disposable-edit --add --criterion \"...\" --source worker_proposed --status proposed.",
+              "Record follow-up criteria with workerctl criteria qa-g3-disposable-edit --add --criterion \"...\" --source worker_proposed --status deferred."
+            ]
+          },
+          "manager_config": {
+            "acceptance_criteria": [
+              "Manager asks the worker for must-have current-task criteria versus deferred follow-up criteria before approving the edit.",
+              "Worker edits only docs/live-qa-artifacts/2026-05-16-manager-led-gate3-disposable-edit/worker-disposable-edit.md.",
+              "Manager checks git diff/name-only and verification proof before final finish.",
+              "Replay/export preserve criteria transitions, edit evidence, and final cleanup decision."
+            ],
+            "created_at": "2026-05-16T23:33:27Z",
+            "guidelines": [
+              "Do not compact, clear, create PRs, merge, run destructive git commands, or approve writes outside the disposable edit target.",
+              "Do not accept vague done/proof. Missing changed-file or verification proof must become an accepted criterion or an explicitly deferred follow-up with rationale.",
+              "Use workerctl criteria-plan before adding worker-proposed criteria, then use workerctl criteria commands for accepted/deferred/satisfied state."
+            ],
+            "objective": "Manage qa-g3-worker through Gate 3 disposable edit QA. Preserve manager-led criteria negotiation, ask for current-task versus deferred acceptance criteria, run criteria-plan before criteria mutations, instruct the worker to edit only docs/live-qa-artifacts/2026-05-16-manager-led-gate3-disposable-edit/worker-disposable-edit.md, inspect changed files/diff/verification proof, satisfy criteria, export/replay, and finish with cleanup.",
+            "permissions": {
+              "create_pr": false,
+              "merge_green_pr": false,
+              "worker_compact_clear": false
+            },
+            "reference_paths": [
+              "docs/goals/manager-led-scenario-3-gate3/state.yaml",
+              "docs/superpowers/plans/2026-05-16-dogfood-reliability-ladder.md"
+            ],
+            "supervision_mode": "guided",
+            "task_id": "task-d72a6352-7b4e-42cc-a3a1-8964afcb8ab3",
+            "updated_at": "2026-05-16T23:33:56Z"
+          },
+          "worker_handoff": null
+        },
+        "manager_session": "qa-g3-manager",
+        "notable_pane_pattern": null,
+        "pane_signal": {
+          "captured": true,
+          "classifier": null,
+          "degraded": false,
+          "notable_pattern": null,
+          "reason": null,
+          "status_age_seconds": 3
+        },
+        "staleness_seconds": 3.359,
+        "state": "busy",
+        "task": "qa-g3-disposable-edit",
+        "task_completed": false,
+        "worker_alive": true,
+        "worker_session": "qa-g3-worker"
+      },
+      "task_id": "task-d72a6352-7b4e-42cc-a3a1-8964afcb8ab3",
+      "worker_capture_id": null
+    },
+    {
+      "completed_at": "2026-05-16T23:34:44Z",
+      "decision": null,
+      "error": null,
+      "health": null,
+      "health_observation_id": null,
+      "id": 23,
+      "manager_capture_id": null,
+      "manager_id": null,
+      "started_at": "2026-05-16T23:34:44Z",
+      "state": "succeeded",
+      "status": {
+        "binding_id": "binding-bbd0b9fc-6306-430f-b725-4dd0d5a68eca",
+        "ingest": {
+          "new_events": 4,
+          "new_offset": 133507,
+          "skipped_lines": 0
+        },
+        "kind": "session_cycle",
+        "last_event_subtype": "task_complete",
+        "last_state_event_at": "2026-05-16T23:34:37.777Z",
+        "manager_alive": true,
+        "manager_context": {
+          "acceptance_criteria": {
+            "deferred": [],
+            "open": [],
+            "proposed": [],
+            "rejected": [],
+            "satisfied": [],
+            "summary": {
+              "accepted": 0,
+              "deferred": 0,
+              "proposed": 0,
+              "rejected": 0,
+              "satisfied": 0
+            }
+          },
+          "criteria_negotiation": {
+            "needed": true,
+            "prompt": "Please propose 2-4 acceptance criteria for the current slice. Split them into must-have current-task criteria and follow-up criteria. Include the verification you expect for each.",
+            "reason": "no_criteria",
+            "suggested_actions": [
+              "Ask the worker to split must-have current-task criteria from follow-up criteria.",
+              "Record accepted current-task criteria with workerctl criteria qa-g3-disposable-edit --add --criterion \"...\" --source worker_proposed --status accepted.",
+              "Record proposed current-task criteria with workerctl criteria qa-g3-disposable-edit --add --criterion \"...\" --source worker_proposed --status proposed.",
+              "Record follow-up criteria with workerctl criteria qa-g3-disposable-edit --add --criterion \"...\" --source worker_proposed --status deferred."
+            ]
+          },
+          "manager_config": {
+            "acceptance_criteria": [
+              "Manager asks the worker for must-have current-task criteria versus deferred follow-up criteria before approving the edit.",
+              "Worker edits only docs/live-qa-artifacts/2026-05-16-manager-led-gate3-disposable-edit/worker-disposable-edit.md.",
+              "Manager checks git diff/name-only and verification proof before final finish.",
+              "Replay/export preserve criteria transitions, edit evidence, and final cleanup decision."
+            ],
+            "created_at": "2026-05-16T23:33:27Z",
+            "guidelines": [
+              "Do not compact, clear, create PRs, merge, run destructive git commands, or approve writes outside the disposable edit target.",
+              "Do not accept vague done/proof. Missing changed-file or verification proof must become an accepted criterion or an explicitly deferred follow-up with rationale.",
+              "Use workerctl criteria-plan before adding worker-proposed criteria, then use workerctl criteria commands for accepted/deferred/satisfied state."
+            ],
+            "objective": "Manage qa-g3-worker through Gate 3 disposable edit QA. Preserve manager-led criteria negotiation, ask for current-task versus deferred acceptance criteria, run criteria-plan before criteria mutations, instruct the worker to edit only docs/live-qa-artifacts/2026-05-16-manager-led-gate3-disposable-edit/worker-disposable-edit.md, inspect changed files/diff/verification proof, satisfy criteria, export/replay, and finish with cleanup.",
+            "permissions": {
+              "create_pr": false,
+              "merge_green_pr": false,
+              "worker_compact_clear": false
+            },
+            "reference_paths": [
+              "docs/goals/manager-led-scenario-3-gate3/state.yaml",
+              "docs/superpowers/plans/2026-05-16-dogfood-reliability-ladder.md"
+            ],
+            "supervision_mode": "guided",
+            "task_id": "task-d72a6352-7b4e-42cc-a3a1-8964afcb8ab3",
+            "updated_at": "2026-05-16T23:33:56Z"
+          },
+          "worker_handoff": null
+        },
+        "manager_session": "qa-g3-manager",
+        "notable_pane_pattern": null,
+        "pane_signal": {
+          "captured": true,
+          "classifier": null,
+          "degraded": false,
+          "notable_pattern": null,
+          "reason": null,
+          "status_age_seconds": 6
+        },
+        "staleness_seconds": 6.223,
+        "state": "idle",
+        "task": "qa-g3-disposable-edit",
+        "task_completed": true,
+        "worker_alive": true,
+        "worker_session": "qa-g3-worker"
+      },
+      "task_id": "task-d72a6352-7b4e-42cc-a3a1-8964afcb8ab3",
+      "worker_capture_id": null
+    },
+    {
+      "completed_at": "2026-05-16T23:35:24Z",
+      "decision": null,
+      "error": null,
+      "health": null,
+      "health_observation_id": null,
+      "id": 24,
+      "manager_capture_id": null,
+      "manager_id": null,
+      "started_at": "2026-05-16T23:35:24Z",
+      "state": "succeeded",
+      "status": {
+        "binding_id": "binding-bbd0b9fc-6306-430f-b725-4dd0d5a68eca",
+        "ingest": {
+          "new_events": 0,
+          "new_offset": 133507,
+          "skipped_lines": 0
+        },
+        "kind": "session_cycle",
+        "last_event_subtype": "task_complete",
+        "last_state_event_at": "2026-05-16T23:34:37.777Z",
+        "manager_alive": true,
+        "manager_context": {
+          "acceptance_criteria": {
+            "deferred": [
+              {
+                "created_at": "2026-05-16T23:35:16Z",
+                "criterion": "Add broader automated guard coverage for manager-led disposable edit scoping.",
+                "evidence": {},
+                "id": 26,
+                "proof": null,
+                "rationale": "Follow-up after this bounded disposable edit QA slice.",
+                "source": "worker_proposed",
+                "status": "deferred",
+                "task_id": "task-d72a6352-7b4e-42cc-a3a1-8964afcb8ab3",
+                "updated_at": "2026-05-16T23:35:16Z"
+              }
+            ],
+            "open": [
+              {
+                "created_at": "2026-05-16T23:35:16Z",
+                "criterion": "The target document records a clear Gate 3 manager-led QA receipt, including date, slice name, and that the edit was manager-requested.",
+                "evidence": {},
+                "id": 24,
+                "proof": null,
+                "rationale": null,
+                "source": "worker_proposed",
+                "status": "accepted",
+                "task_id": "task-d72a6352-7b4e-42cc-a3a1-8964afcb8ab3",
+                "updated_at": "2026-05-16T23:35:16Z"
+              },
+              {
+                "created_at": "2026-05-16T23:35:16Z",
+                "criterion": "Disposable edit is strictly scoped to `docs/live-qa-artifacts/2026-05-16-manager-led-gate3-disposable-edit/worker-disposable-edit.md`.",
+                "evidence": {},
+                "id": 25,
+                "proof": null,
+                "rationale": null,
+                "source": "worker_proposed",
+                "status": "accepted",
+                "task_id": "task-d72a6352-7b4e-42cc-a3a1-8964afcb8ab3",
+                "updated_at": "2026-05-16T23:35:16Z"
+              },
+              {
+                "created_at": "2026-05-16T23:35:16Z",
+                "criterion": "No prohibited actions are performed: no /review, compact/clear, PR creation, merge, or destructive git commands.",
+                "evidence": {},
+                "id": 27,
+                "proof": null,
+                "rationale": null,
+                "source": "worker_proposed",
+                "status": "accepted",
+                "task_id": "task-d72a6352-7b4e-42cc-a3a1-8964afcb8ab3",
+                "updated_at": "2026-05-16T23:35:16Z"
+              }
+            ],
+            "proposed": [],
+            "rejected": [],
+            "satisfied": [],
+            "summary": {
+              "accepted": 3,
+              "deferred": 1,
+              "proposed": 0,
+              "rejected": 0,
+              "satisfied": 0
+            }
+          },
+          "criteria_negotiation": {
+            "needed": false,
+            "prompt": null,
+            "reason": "active_criteria_present",
+            "suggested_actions": []
+          },
+          "manager_config": {
+            "acceptance_criteria": [
+              "Manager asks the worker for must-have current-task criteria versus deferred follow-up criteria before approving the edit.",
+              "Worker edits only docs/live-qa-artifacts/2026-05-16-manager-led-gate3-disposable-edit/worker-disposable-edit.md.",
+              "Manager checks git diff/name-only and verification proof before final finish.",
+              "Replay/export preserve criteria transitions, edit evidence, and final cleanup decision."
+            ],
+            "created_at": "2026-05-16T23:33:27Z",
+            "guidelines": [
+              "Do not compact, clear, create PRs, merge, run destructive git commands, or approve writes outside the disposable edit target.",
+              "Do not accept vague done/proof. Missing changed-file or verification proof must become an accepted criterion or an explicitly deferred follow-up with rationale.",
+              "Use workerctl criteria-plan before adding worker-proposed criteria, then use workerctl criteria commands for accepted/deferred/satisfied state."
+            ],
+            "objective": "Manage qa-g3-worker through Gate 3 disposable edit QA. Preserve manager-led criteria negotiation, ask for current-task versus deferred acceptance criteria, run criteria-plan before criteria mutations, instruct the worker to edit only docs/live-qa-artifacts/2026-05-16-manager-led-gate3-disposable-edit/worker-disposable-edit.md, inspect changed files/diff/verification proof, satisfy criteria, export/replay, and finish with cleanup.",
+            "permissions": {
+              "create_pr": false,
+              "merge_green_pr": false,
+              "worker_compact_clear": false
+            },
+            "reference_paths": [
+              "docs/goals/manager-led-scenario-3-gate3/state.yaml",
+              "docs/superpowers/plans/2026-05-16-dogfood-reliability-ladder.md"
+            ],
+            "supervision_mode": "guided",
+            "task_id": "task-d72a6352-7b4e-42cc-a3a1-8964afcb8ab3",
+            "updated_at": "2026-05-16T23:33:56Z"
+          },
+          "worker_handoff": null
+        },
+        "manager_session": "qa-g3-manager",
+        "notable_pane_pattern": null,
+        "pane_signal": {
+          "captured": true,
+          "classifier": null,
+          "degraded": false,
+          "notable_pattern": null,
+          "reason": null,
+          "status_age_seconds": 46
+        },
+        "staleness_seconds": 46.223,
+        "state": "idle",
+        "task": "qa-g3-disposable-edit",
+        "task_completed": true,
+        "worker_alive": true,
+        "worker_session": "qa-g3-worker"
+      },
+      "task_id": "task-d72a6352-7b4e-42cc-a3a1-8964afcb8ab3",
+      "worker_capture_id": null
+    },
+    {
+      "completed_at": "2026-05-16T23:35:41Z",
+      "decision": null,
+      "error": null,
+      "health": null,
+      "health_observation_id": null,
+      "id": 25,
+      "manager_capture_id": null,
+      "manager_id": null,
+      "started_at": "2026-05-16T23:35:41Z",
+      "state": "succeeded",
+      "status": {
+        "binding_id": "binding-bbd0b9fc-6306-430f-b725-4dd0d5a68eca",
+        "ingest": {
+          "new_events": 13,
+          "new_offset": 142080,
+          "skipped_lines": 0
+        },
+        "kind": "session_cycle",
+        "last_event_subtype": null,
+        "last_state_event_at": "2026-05-16T23:35:31.998Z",
+        "manager_alive": true,
+        "manager_context": {
+          "acceptance_criteria": {
+            "deferred": [
+              {
+                "created_at": "2026-05-16T23:35:16Z",
+                "criterion": "Add broader automated guard coverage for manager-led disposable edit scoping.",
+                "evidence": {},
+                "id": 26,
+                "proof": null,
+                "rationale": "Follow-up after this bounded disposable edit QA slice.",
+                "source": "worker_proposed",
+                "status": "deferred",
+                "task_id": "task-d72a6352-7b4e-42cc-a3a1-8964afcb8ab3",
+                "updated_at": "2026-05-16T23:35:16Z"
+              }
+            ],
+            "open": [
+              {
+                "created_at": "2026-05-16T23:35:16Z",
+                "criterion": "The target document records a clear Gate 3 manager-led QA receipt, including date, slice name, and that the edit was manager-requested.",
+                "evidence": {},
+                "id": 24,
+                "proof": null,
+                "rationale": null,
+                "source": "worker_proposed",
+                "status": "accepted",
+                "task_id": "task-d72a6352-7b4e-42cc-a3a1-8964afcb8ab3",
+                "updated_at": "2026-05-16T23:35:16Z"
+              },
+              {
+                "created_at": "2026-05-16T23:35:16Z",
+                "criterion": "Disposable edit is strictly scoped to `docs/live-qa-artifacts/2026-05-16-manager-led-gate3-disposable-edit/worker-disposable-edit.md`.",
+                "evidence": {},
+                "id": 25,
+                "proof": null,
+                "rationale": null,
+                "source": "worker_proposed",
+                "status": "accepted",
+                "task_id": "task-d72a6352-7b4e-42cc-a3a1-8964afcb8ab3",
+                "updated_at": "2026-05-16T23:35:16Z"
+              },
+              {
+                "created_at": "2026-05-16T23:35:16Z",
+                "criterion": "No prohibited actions are performed: no /review, compact/clear, PR creation, merge, or destructive git commands.",
+                "evidence": {},
+                "id": 27,
+                "proof": null,
+                "rationale": null,
+                "source": "worker_proposed",
+                "status": "accepted",
+                "task_id": "task-d72a6352-7b4e-42cc-a3a1-8964afcb8ab3",
+                "updated_at": "2026-05-16T23:35:16Z"
+              }
+            ],
+            "proposed": [],
+            "rejected": [],
+            "satisfied": [],
+            "summary": {
+              "accepted": 3,
+              "deferred": 1,
+              "proposed": 0,
+              "rejected": 0,
+              "satisfied": 0
+            }
+          },
+          "criteria_negotiation": {
+            "needed": false,
+            "prompt": null,
+            "reason": "active_criteria_present",
+            "suggested_actions": []
+          },
+          "manager_config": {
+            "acceptance_criteria": [
+              "Manager asks the worker for must-have current-task criteria versus deferred follow-up criteria before approving the edit.",
+              "Worker edits only docs/live-qa-artifacts/2026-05-16-manager-led-gate3-disposable-edit/worker-disposable-edit.md.",
+              "Manager checks git diff/name-only and verification proof before final finish.",
+              "Replay/export preserve criteria transitions, edit evidence, and final cleanup decision."
+            ],
+            "created_at": "2026-05-16T23:33:27Z",
+            "guidelines": [
+              "Do not compact, clear, create PRs, merge, run destructive git commands, or approve writes outside the disposable edit target.",
+              "Do not accept vague done/proof. Missing changed-file or verification proof must become an accepted criterion or an explicitly deferred follow-up with rationale.",
+              "Use workerctl criteria-plan before adding worker-proposed criteria, then use workerctl criteria commands for accepted/deferred/satisfied state."
+            ],
+            "objective": "Manage qa-g3-worker through Gate 3 disposable edit QA. Preserve manager-led criteria negotiation, ask for current-task versus deferred acceptance criteria, run criteria-plan before criteria mutations, instruct the worker to edit only docs/live-qa-artifacts/2026-05-16-manager-led-gate3-disposable-edit/worker-disposable-edit.md, inspect changed files/diff/verification proof, satisfy criteria, export/replay, and finish with cleanup.",
+            "permissions": {
+              "create_pr": false,
+              "merge_green_pr": false,
+              "worker_compact_clear": false
+            },
+            "reference_paths": [
+              "docs/goals/manager-led-scenario-3-gate3/state.yaml",
+              "docs/superpowers/plans/2026-05-16-dogfood-reliability-ladder.md"
+            ],
+            "supervision_mode": "guided",
+            "task_id": "task-d72a6352-7b4e-42cc-a3a1-8964afcb8ab3",
+            "updated_at": "2026-05-16T23:33:56Z"
+          },
+          "worker_handoff": null
+        },
+        "manager_session": "qa-g3-manager",
+        "notable_pane_pattern": null,
+        "pane_signal": {
+          "captured": true,
+          "classifier": null,
+          "degraded": false,
+          "notable_pattern": null,
+          "reason": null,
+          "status_age_seconds": 9
+        },
+        "staleness_seconds": 9.002,
+        "state": "busy",
+        "task": "qa-g3-disposable-edit",
+        "task_completed": false,
+        "worker_alive": true,
+        "worker_session": "qa-g3-worker"
+      },
+      "task_id": "task-d72a6352-7b4e-42cc-a3a1-8964afcb8ab3",
+      "worker_capture_id": null
+    },
+    {
+      "completed_at": "2026-05-16T23:35:53Z",
+      "decision": null,
+      "error": null,
+      "health": null,
+      "health_observation_id": null,
+      "id": 26,
+      "manager_capture_id": null,
+      "manager_id": null,
+      "started_at": "2026-05-16T23:35:52Z",
+      "state": "succeeded",
+      "status": {
+        "binding_id": "binding-bbd0b9fc-6306-430f-b725-4dd0d5a68eca",
+        "ingest": {
+          "new_events": 14,
+          "new_offset": 149502,
+          "skipped_lines": 0
+        },
+        "kind": "session_cycle",
+        "last_event_subtype": null,
+        "last_state_event_at": "2026-05-16T23:35:31.998Z",
+        "manager_alive": true,
+        "manager_context": {
+          "acceptance_criteria": {
+            "deferred": [
+              {
+                "created_at": "2026-05-16T23:35:16Z",
+                "criterion": "Add broader automated guard coverage for manager-led disposable edit scoping.",
+                "evidence": {},
+                "id": 26,
+                "proof": null,
+                "rationale": "Follow-up after this bounded disposable edit QA slice.",
+                "source": "worker_proposed",
+                "status": "deferred",
+                "task_id": "task-d72a6352-7b4e-42cc-a3a1-8964afcb8ab3",
+                "updated_at": "2026-05-16T23:35:16Z"
+              }
+            ],
+            "open": [
+              {
+                "created_at": "2026-05-16T23:35:16Z",
+                "criterion": "The target document records a clear Gate 3 manager-led QA receipt, including date, slice name, and that the edit was manager-requested.",
+                "evidence": {},
+                "id": 24,
+                "proof": null,
+                "rationale": null,
+                "source": "worker_proposed",
+                "status": "accepted",
+                "task_id": "task-d72a6352-7b4e-42cc-a3a1-8964afcb8ab3",
+                "updated_at": "2026-05-16T23:35:16Z"
+              },
+              {
+                "created_at": "2026-05-16T23:35:16Z",
+                "criterion": "Disposable edit is strictly scoped to `docs/live-qa-artifacts/2026-05-16-manager-led-gate3-disposable-edit/worker-disposable-edit.md`.",
+                "evidence": {},
+                "id": 25,
+                "proof": null,
+                "rationale": null,
+                "source": "worker_proposed",
+                "status": "accepted",
+                "task_id": "task-d72a6352-7b4e-42cc-a3a1-8964afcb8ab3",
+                "updated_at": "2026-05-16T23:35:16Z"
+              },
+              {
+                "created_at": "2026-05-16T23:35:16Z",
+                "criterion": "No prohibited actions are performed: no /review, compact/clear, PR creation, merge, or destructive git commands.",
+                "evidence": {},
+                "id": 27,
+                "proof": null,
+                "rationale": null,
+                "source": "worker_proposed",
+                "status": "accepted",
+                "task_id": "task-d72a6352-7b4e-42cc-a3a1-8964afcb8ab3",
+                "updated_at": "2026-05-16T23:35:16Z"
+              }
+            ],
+            "proposed": [],
+            "rejected": [],
+            "satisfied": [],
+            "summary": {
+              "accepted": 3,
+              "deferred": 1,
+              "proposed": 0,
+              "rejected": 0,
+              "satisfied": 0
+            }
+          },
+          "criteria_negotiation": {
+            "needed": false,
+            "prompt": null,
+            "reason": "active_criteria_present",
+            "suggested_actions": []
+          },
+          "manager_config": {
+            "acceptance_criteria": [
+              "Manager asks the worker for must-have current-task criteria versus deferred follow-up criteria before approving the edit.",
+              "Worker edits only docs/live-qa-artifacts/2026-05-16-manager-led-gate3-disposable-edit/worker-disposable-edit.md.",
+              "Manager checks git diff/name-only and verification proof before final finish.",
+              "Replay/export preserve criteria transitions, edit evidence, and final cleanup decision."
+            ],
+            "created_at": "2026-05-16T23:33:27Z",
+            "guidelines": [
+              "Do not compact, clear, create PRs, merge, run destructive git commands, or approve writes outside the disposable edit target.",
+              "Do not accept vague done/proof. Missing changed-file or verification proof must become an accepted criterion or an explicitly deferred follow-up with rationale.",
+              "Use workerctl criteria-plan before adding worker-proposed criteria, then use workerctl criteria commands for accepted/deferred/satisfied state."
+            ],
+            "objective": "Manage qa-g3-worker through Gate 3 disposable edit QA. Preserve manager-led criteria negotiation, ask for current-task versus deferred acceptance criteria, run criteria-plan before criteria mutations, instruct the worker to edit only docs/live-qa-artifacts/2026-05-16-manager-led-gate3-disposable-edit/worker-disposable-edit.md, inspect changed files/diff/verification proof, satisfy criteria, export/replay, and finish with cleanup.",
+            "permissions": {
+              "create_pr": false,
+              "merge_green_pr": false,
+              "worker_compact_clear": false
+            },
+            "reference_paths": [
+              "docs/goals/manager-led-scenario-3-gate3/state.yaml",
+              "docs/superpowers/plans/2026-05-16-dogfood-reliability-ladder.md"
+            ],
+            "supervision_mode": "guided",
+            "task_id": "task-d72a6352-7b4e-42cc-a3a1-8964afcb8ab3",
+            "updated_at": "2026-05-16T23:33:56Z"
+          },
+          "worker_handoff": null
+        },
+        "manager_session": "qa-g3-manager",
+        "notable_pane_pattern": null,
+        "pane_signal": {
+          "captured": true,
+          "classifier": null,
+          "degraded": false,
+          "notable_pattern": null,
+          "reason": null,
+          "status_age_seconds": 20
+        },
+        "staleness_seconds": 20.002,
+        "state": "busy",
+        "task": "qa-g3-disposable-edit",
+        "task_completed": false,
+        "worker_alive": true,
+        "worker_session": "qa-g3-worker"
+      },
+      "task_id": "task-d72a6352-7b4e-42cc-a3a1-8964afcb8ab3",
+      "worker_capture_id": null
+    },
+    {
+      "completed_at": "2026-05-16T23:36:10Z",
+      "decision": null,
+      "error": null,
+      "health": null,
+      "health_observation_id": null,
+      "id": 27,
+      "manager_capture_id": null,
+      "manager_id": null,
+      "started_at": "2026-05-16T23:36:10Z",
+      "state": "succeeded",
+      "status": {
+        "binding_id": "binding-bbd0b9fc-6306-430f-b725-4dd0d5a68eca",
+        "ingest": {
+          "new_events": 10,
+          "new_offset": 158670,
+          "skipped_lines": 0
+        },
+        "kind": "session_cycle",
+        "last_event_subtype": "task_complete",
+        "last_state_event_at": "2026-05-16T23:36:03.841Z",
+        "manager_alive": true,
+        "manager_context": {
+          "acceptance_criteria": {
+            "deferred": [
+              {
+                "created_at": "2026-05-16T23:35:16Z",
+                "criterion": "Add broader automated guard coverage for manager-led disposable edit scoping.",
+                "evidence": {},
+                "id": 26,
+                "proof": null,
+                "rationale": "Follow-up after this bounded disposable edit QA slice.",
+                "source": "worker_proposed",
+                "status": "deferred",
+                "task_id": "task-d72a6352-7b4e-42cc-a3a1-8964afcb8ab3",
+                "updated_at": "2026-05-16T23:35:16Z"
+              }
+            ],
+            "open": [
+              {
+                "created_at": "2026-05-16T23:35:16Z",
+                "criterion": "The target document records a clear Gate 3 manager-led QA receipt, including date, slice name, and that the edit was manager-requested.",
+                "evidence": {},
+                "id": 24,
+                "proof": null,
+                "rationale": null,
+                "source": "worker_proposed",
+                "status": "accepted",
+                "task_id": "task-d72a6352-7b4e-42cc-a3a1-8964afcb8ab3",
+                "updated_at": "2026-05-16T23:35:16Z"
+              },
+              {
+                "created_at": "2026-05-16T23:35:16Z",
+                "criterion": "Disposable edit is strictly scoped to `docs/live-qa-artifacts/2026-05-16-manager-led-gate3-disposable-edit/worker-disposable-edit.md`.",
+                "evidence": {},
+                "id": 25,
+                "proof": null,
+                "rationale": null,
+                "source": "worker_proposed",
+                "status": "accepted",
+                "task_id": "task-d72a6352-7b4e-42cc-a3a1-8964afcb8ab3",
+                "updated_at": "2026-05-16T23:35:16Z"
+              },
+              {
+                "created_at": "2026-05-16T23:35:16Z",
+                "criterion": "No prohibited actions are performed: no /review, compact/clear, PR creation, merge, or destructive git commands.",
+                "evidence": {},
+                "id": 27,
+                "proof": null,
+                "rationale": null,
+                "source": "worker_proposed",
+                "status": "accepted",
+                "task_id": "task-d72a6352-7b4e-42cc-a3a1-8964afcb8ab3",
+                "updated_at": "2026-05-16T23:35:16Z"
+              }
+            ],
+            "proposed": [],
+            "rejected": [],
+            "satisfied": [],
+            "summary": {
+              "accepted": 3,
+              "deferred": 1,
+              "proposed": 0,
+              "rejected": 0,
+              "satisfied": 0
+            }
+          },
+          "criteria_negotiation": {
+            "needed": false,
+            "prompt": null,
+            "reason": "active_criteria_present",
+            "suggested_actions": []
+          },
+          "manager_config": {
+            "acceptance_criteria": [
+              "Manager asks the worker for must-have current-task criteria versus deferred follow-up criteria before approving the edit.",
+              "Worker edits only docs/live-qa-artifacts/2026-05-16-manager-led-gate3-disposable-edit/worker-disposable-edit.md.",
+              "Manager checks git diff/name-only and verification proof before final finish.",
+              "Replay/export preserve criteria transitions, edit evidence, and final cleanup decision."
+            ],
+            "created_at": "2026-05-16T23:33:27Z",
+            "guidelines": [
+              "Do not compact, clear, create PRs, merge, run destructive git commands, or approve writes outside the disposable edit target.",
+              "Do not accept vague done/proof. Missing changed-file or verification proof must become an accepted criterion or an explicitly deferred follow-up with rationale.",
+              "Use workerctl criteria-plan before adding worker-proposed criteria, then use workerctl criteria commands for accepted/deferred/satisfied state."
+            ],
+            "objective": "Manage qa-g3-worker through Gate 3 disposable edit QA. Preserve manager-led criteria negotiation, ask for current-task versus deferred acceptance criteria, run criteria-plan before criteria mutations, instruct the worker to edit only docs/live-qa-artifacts/2026-05-16-manager-led-gate3-disposable-edit/worker-disposable-edit.md, inspect changed files/diff/verification proof, satisfy criteria, export/replay, and finish with cleanup.",
+            "permissions": {
+              "create_pr": false,
+              "merge_green_pr": false,
+              "worker_compact_clear": false
+            },
+            "reference_paths": [
+              "docs/goals/manager-led-scenario-3-gate3/state.yaml",
+              "docs/superpowers/plans/2026-05-16-dogfood-reliability-ladder.md"
+            ],
+            "supervision_mode": "guided",
+            "task_id": "task-d72a6352-7b4e-42cc-a3a1-8964afcb8ab3",
+            "updated_at": "2026-05-16T23:33:56Z"
+          },
+          "worker_handoff": null
+        },
+        "manager_session": "qa-g3-manager",
+        "notable_pane_pattern": null,
+        "pane_signal": {
+          "captured": true,
+          "classifier": null,
+          "degraded": false,
+          "notable_pattern": null,
+          "reason": null,
+          "status_age_seconds": 6
+        },
+        "staleness_seconds": 6.159,
+        "state": "idle",
+        "task": "qa-g3-disposable-edit",
+        "task_completed": true,
+        "worker_alive": true,
+        "worker_session": "qa-g3-worker"
+      },
+      "task_id": "task-d72a6352-7b4e-42cc-a3a1-8964afcb8ab3",
+      "worker_capture_id": null
+    },
+    {
+      "completed_at": "2026-05-16T23:37:10Z",
+      "decision": null,
+      "error": null,
+      "health": null,
+      "health_observation_id": null,
+      "id": 28,
+      "manager_capture_id": null,
+      "manager_id": null,
+      "started_at": "2026-05-16T23:37:10Z",
+      "state": "succeeded",
+      "status": {
+        "binding_id": "binding-bbd0b9fc-6306-430f-b725-4dd0d5a68eca",
+        "ingest": {
+          "new_events": 0,
+          "new_offset": 158670,
+          "skipped_lines": 0
+        },
+        "kind": "session_cycle",
+        "last_event_subtype": "task_complete",
+        "last_state_event_at": "2026-05-16T23:36:03.841Z",
+        "manager_alive": true,
+        "manager_context": {
+          "acceptance_criteria": {
+            "deferred": [
+              {
+                "created_at": "2026-05-16T23:35:16Z",
+                "criterion": "Add broader automated guard coverage for manager-led disposable edit scoping.",
+                "evidence": {},
+                "id": 26,
+                "proof": null,
+                "rationale": "Follow-up after this bounded disposable edit QA slice.",
+                "source": "worker_proposed",
+                "status": "deferred",
+                "task_id": "task-d72a6352-7b4e-42cc-a3a1-8964afcb8ab3",
+                "updated_at": "2026-05-16T23:35:16Z"
+              }
+            ],
+            "open": [],
+            "proposed": [],
+            "rejected": [],
+            "satisfied": [
+              {
+                "created_at": "2026-05-16T23:35:16Z",
+                "criterion": "The target document records a clear Gate 3 manager-led QA receipt, including date, slice name, and that the edit was manager-requested.",
+                "evidence": {
+                  "commands": [
+                    {
+                      "command": "sed -n '1,160p' docs/live-qa-artifacts/2026-05-16-manager-led-gate3-disposable-edit/worker-disposable-edit.md",
+                      "output_contains": [
+                        "# Gate 3 Manager-Led QA Receipt",
+                        "Date: 2026-05-16",
+                        "Slice: Gate 3 manager-led disposable edit QA",
+                        "Manager request: This edit was explicitly requested by the manager"
+                      ],
+                      "status": "pass"
+                    }
+                  ]
+                },
+                "id": 24,
+                "proof": "Manager read the target file and verified it contains the Gate 3 QA receipt, date, slice name, and manager-requested wording.",
+                "rationale": null,
+                "source": "worker_proposed",
+                "status": "satisfied",
+                "task_id": "task-d72a6352-7b4e-42cc-a3a1-8964afcb8ab3",
+                "updated_at": "2026-05-16T23:36:54Z"
+              },
+              {
+                "created_at": "2026-05-16T23:35:16Z",
+                "criterion": "Disposable edit is strictly scoped to `docs/live-qa-artifacts/2026-05-16-manager-led-gate3-disposable-edit/worker-disposable-edit.md`.",
+                "evidence": {
+                  "commands": [
+                    {
+                      "command": "git diff --name-only",
+                      "output": "empty because target file is untracked",
+                      "status": "pass"
+                    },
+                    {
+                      "command": "git status --short -- docs/live-qa-artifacts/2026-05-16-manager-led-gate3-disposable-edit/worker-disposable-edit.md",
+                      "output": "?? docs/live-qa-artifacts/2026-05-16-manager-led-gate3-disposable-edit/worker-disposable-edit.md",
+                      "status": "pass"
+                    },
+                    {
+                      "command": "worker tail event trail",
+                      "output": "apply_patch added only docs/live-qa-artifacts/2026-05-16-manager-led-gate3-disposable-edit/worker-disposable-edit.md",
+                      "status": "pass"
+                    }
+                  ]
+                },
+                "id": 25,
+                "proof": "Manager verified the worker write event added only docs/live-qa-artifacts/2026-05-16-manager-led-gate3-disposable-edit/worker-disposable-edit.md; scoped git status shows that target as untracked.",
+                "rationale": null,
+                "source": "worker_proposed",
+                "status": "satisfied",
+                "task_id": "task-d72a6352-7b4e-42cc-a3a1-8964afcb8ab3",
+                "updated_at": "2026-05-16T23:36:47Z"
+              },
+              {
+                "created_at": "2026-05-16T23:35:16Z",
+                "criterion": "No prohibited actions are performed: no /review, compact/clear, PR creation, merge, or destructive git commands.",
+                "evidence": {
+                  "commands": [
+                    {
+                      "command": "worker event trail inspection",
+                      "output": "Recent worker commands/actions were sed, ls, apply_patch for the allowed target, git diff --name-only, scoped git status; no /review, compact, clear, PR, merge, reset, checkout, or destructive command observed.",
+                      "status": "pass"
+                    }
+                  ]
+                },
+                "id": 27,
+                "proof": "Manager inspected the worker receipt and recent event trail; no prohibited review, compact, clear, PR, merge, or destructive git action appeared.",
+                "rationale": null,
+                "source": "worker_proposed",
+                "status": "satisfied",
+                "task_id": "task-d72a6352-7b4e-42cc-a3a1-8964afcb8ab3",
+                "updated_at": "2026-05-16T23:36:59Z"
+              }
+            ],
+            "summary": {
+              "accepted": 0,
+              "deferred": 1,
+              "proposed": 0,
+              "rejected": 0,
+              "satisfied": 3
+            }
+          },
+          "criteria_negotiation": {
+            "needed": false,
+            "prompt": null,
+            "reason": "active_criteria_present",
+            "suggested_actions": []
+          },
+          "manager_config": {
+            "acceptance_criteria": [
+              "Manager asks the worker for must-have current-task criteria versus deferred follow-up criteria before approving the edit.",
+              "Worker edits only docs/live-qa-artifacts/2026-05-16-manager-led-gate3-disposable-edit/worker-disposable-edit.md.",
+              "Manager checks git diff/name-only and verification proof before final finish.",
+              "Replay/export preserve criteria transitions, edit evidence, and final cleanup decision."
+            ],
+            "created_at": "2026-05-16T23:33:27Z",
+            "guidelines": [
+              "Do not compact, clear, create PRs, merge, run destructive git commands, or approve writes outside the disposable edit target.",
+              "Do not accept vague done/proof. Missing changed-file or verification proof must become an accepted criterion or an explicitly deferred follow-up with rationale.",
+              "Use workerctl criteria-plan before adding worker-proposed criteria, then use workerctl criteria commands for accepted/deferred/satisfied state."
+            ],
+            "objective": "Manage qa-g3-worker through Gate 3 disposable edit QA. Preserve manager-led criteria negotiation, ask for current-task versus deferred acceptance criteria, run criteria-plan before criteria mutations, instruct the worker to edit only docs/live-qa-artifacts/2026-05-16-manager-led-gate3-disposable-edit/worker-disposable-edit.md, inspect changed files/diff/verification proof, satisfy criteria, export/replay, and finish with cleanup.",
+            "permissions": {
+              "create_pr": false,
+              "merge_green_pr": false,
+              "worker_compact_clear": false
+            },
+            "reference_paths": [
+              "docs/goals/manager-led-scenario-3-gate3/state.yaml",
+              "docs/superpowers/plans/2026-05-16-dogfood-reliability-ladder.md"
+            ],
+            "supervision_mode": "guided",
+            "task_id": "task-d72a6352-7b4e-42cc-a3a1-8964afcb8ab3",
+            "updated_at": "2026-05-16T23:33:56Z"
+          },
+          "worker_handoff": null
+        },
+        "manager_session": "qa-g3-manager",
+        "notable_pane_pattern": null,
+        "pane_signal": {
+          "captured": true,
+          "classifier": null,
+          "degraded": false,
+          "notable_pattern": null,
+          "reason": null,
+          "status_age_seconds": 66
+        },
+        "staleness_seconds": 66.159,
+        "state": "idle",
+        "task": "qa-g3-disposable-edit",
+        "task_completed": true,
+        "worker_alive": true,
+        "worker_session": "qa-g3-worker"
+      },
+      "task_id": "task-d72a6352-7b4e-42cc-a3a1-8964afcb8ab3",
+      "worker_capture_id": null
+    }
+  ],
+  "manager_decisions": [
+    {
+      "created_at": "2026-05-16T23:37:31Z",
+      "decision": "stop",
+      "id": 9,
+      "manager_cycle_id": null,
+      "manager_id": null,
+      "payload": {
+        "command_id": "command-a1697e70-ab1a-4e59-8978-60d5c0869362",
+        "source": "finish_task"
+      },
+      "reason": "Gate 3 manager-led disposable edit QA complete; accepted criteria satisfied, one follow-up deferred, replay/export captured.",
+      "task_id": "task-d72a6352-7b4e-42cc-a3a1-8964afcb8ab3"
+    }
+  ],
+  "task": {
+    "created_at": "2026-05-16T23:33:12Z",
+    "goal": "Gate 3 manager-led disposable edit QA with bounded worker write scope.",
+    "id": "task-d72a6352-7b4e-42cc-a3a1-8964afcb8ab3",
+    "name": "qa-g3-disposable-edit",
+    "state": "done",
+    "summary": "Real worker/manager QA for manager-supervised disposable edit, emergent criteria, replay/export, and cleanup.",
+    "updated_at": "2026-05-16T23:37:32Z"
+  },
+  "terminal_captures": [],
+  "transcript_segments": []
+}

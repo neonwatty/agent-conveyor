@@ -1,5 +1,52 @@
 # Live QA Log
 
+## 2026-05-16: manager-led Gate 3 disposable edit QA
+
+Scenario:
+
+- Ladder gate: Gate 3 disposable edit readiness.
+- Ladder scenario: Scenario 4 disposable edit task.
+- Live disposable pair:
+  - task `qa-g3-disposable-edit`
+  - worker `qa-g3-worker`
+  - manager `qa-g3-manager`
+- Disposable edit target:
+  `docs/live-qa-artifacts/2026-05-16-manager-led-gate3-disposable-edit/worker-disposable-edit.md`
+- Evidence bundle:
+  `docs/live-qa-artifacts/2026-05-16-manager-led-gate3-disposable-edit/`
+
+Validated:
+
+- The manager ran the first cycle and saw criteria negotiation was needed before
+  criteria existed.
+- The manager recovered from legacy `workerctl nudge` not resolving the
+  session-bound worker and used `workerctl session-nudge`.
+- The worker proposed three current-task criteria and one deferred follow-up.
+- The manager ran `criteria-plan` before criteria mutations.
+- The manager recorded three accepted criteria and one deferred follow-up.
+- The manager instructed the worker to edit exactly one disposable target file.
+- The worker created
+  `docs/live-qa-artifacts/2026-05-16-manager-led-gate3-disposable-edit/worker-disposable-edit.md`
+  and reported scoped verification.
+- The manager noticed `git diff --name-only` missed the untracked target and
+  corrected to scoped `git status --short` plus event-trail evidence.
+- The manager satisfied all accepted criteria and exported replay evidence.
+- Final postflight cleanup left both qa-g3 sessions marked `gone`, no matching
+  tmux sessions, and clean `reconcile` state.
+
+Gate decision:
+
+- Pending Judge audit in
+  `docs/goals/manager-led-scenario-3-gate3/state.yaml`.
+
+Findings:
+
+- A stray `/review` prompt appeared in both panes; the manager explicitly
+  ignored it and no review, compact, clear, PR, merge, or destructive git action
+  appeared in inspected evidence.
+- The manager stopped the worker but left itself alive to report. PM stopped and
+  deregistered the manager afterward to satisfy postflight invariants.
+
 ## 2026-05-16: manager-led Scenario 2 Gate 2 QA
 
 Scenario:
