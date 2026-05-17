@@ -219,6 +219,10 @@ tmux attach -t codex-live-test
   schema to ask the user in chat, then save the answers with noninteractive
   flags. Use `--interactive` only as a terminal fallback when a human is
   running `workerctl` directly.
+  `--permissions-json` uses canonical keys `create_pr`, `merge_green_pr`, and
+  `worker_compact_clear`; legacy-style `allow_pr`, `allow_merge_green`, and
+  `allow_worker_compact_clear` aliases are normalized to those canonical keys
+  when saved.
 - `criteria <task>` — Track emergent acceptance criteria discovered during
   supervision. Managers should add useful proposed criteria, accept must-have
   items, defer follow-ups, and mark criteria satisfied only when worker

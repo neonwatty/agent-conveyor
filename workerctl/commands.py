@@ -1723,6 +1723,34 @@ MANAGER_PERMISSION_ACTIONS = {
     "worker_compact_clear",
 }
 
+MANAGER_PERMISSION_ALIASES = {
+    "allow_pr": "create_pr",
+    "allow_merge_green": "merge_green_pr",
+    "allow_worker_compact_clear": "worker_compact_clear",
+}
+
+
+def normalize_manager_permissions(permissions: dict[str, Any] | None) -> dict[str, bool]:
+    normalized = {
+        "create_pr": False,
+        "merge_green_pr": False,
+        "worker_compact_clear": False,
+    }
+    for key, value in (permissions or {}).items():
+        canonical = MANAGER_PERMISSION_ALIASES.get(key, key)
+        if canonical in normalized:
+            normalized[canonical] = bool(value)
+    return normalized
+
+
+def normalize_manager_permission_overrides(permissions: dict[str, Any] | None) -> dict[str, bool]:
+    normalized: dict[str, bool] = {}
+    for key, value in (permissions or {}).items():
+        canonical = MANAGER_PERMISSION_ALIASES.get(key, key)
+        if canonical in MANAGER_PERMISSION_ACTIONS:
+            normalized[canonical] = bool(value)
+    return normalized
+
 
 MANAGER_DECISIONS = {
     "wait",
@@ -1830,6 +1858,7 @@ def command_manager_permission(args: argparse.Namespace) -> int:
         if config is None:
             reasons.append("missing_manager_config")
         else:
+            config["permissions"] = normalize_manager_permissions(config["permissions"])
             allowed = bool(config["permissions"].get(args.action, False))
             if not allowed:
                 reasons.append("permission_not_enabled")
@@ -2109,18 +2138,14 @@ def command_manager_config(args: argparse.Namespace) -> int:
             ]
         )
         if mutating or existing is None:
-            permissions = dict(existing["permissions"]) if existing else {
-                "create_pr": False,
-                "merge_green_pr": False,
-                "worker_compact_clear": False,
-            }
+            permissions = normalize_manager_permissions(existing["permissions"] if existing else None)
             if args.allow_pr:
                 permissions["create_pr"] = True
             if args.allow_merge_green:
                 permissions["merge_green_pr"] = True
             if args.allow_worker_compact_clear:
                 permissions["worker_compact_clear"] = True
-            permissions.update(_json_arg(args.permissions_json, flag="--permissions-json"))
+            permissions.update(normalize_manager_permission_overrides(_json_arg(args.permissions_json, flag="--permissions-json")))
             worker_db.upsert_manager_config(
                 conn,
                 task_id=task["id"],

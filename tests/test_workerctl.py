@@ -10128,6 +10128,106 @@ class PairCommandTests(unittest.TestCase):
             self.assertTrue(payload["permissions"]["create_pr"])
             self.assertTrue(payload["permissions"]["worker_compact_clear"])
 
+    def test_manager_config_permissions_json_normalizes_allow_aliases(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = self._setup_db(tmpdir)
+            conn = worker_db.connect(db_path)
+            try:
+                worker_db.create_task(conn, name="alias-config-task", goal="Do config.")
+                conn.commit()
+            finally:
+                conn.close()
+
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "workerctl",
+                    "manager-config",
+                    "alias-config-task",
+                    "--permissions-json",
+                    json.dumps(
+                        {
+                            "allow_pr": True,
+                            "allow_merge_green": True,
+                            "allow_worker_compact_clear": True,
+                        }
+                    ),
+                    "--path",
+                    str(db_path),
+                ],
+                capture_output=True,
+                text=True,
+                cwd=str(ROOT),
+            )
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            payload = json.loads(proc.stdout)
+            self.assertEqual(
+                payload["permissions"],
+                {
+                    "create_pr": True,
+                    "merge_green_pr": True,
+                    "worker_compact_clear": True,
+                },
+            )
+
+            allowed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "workerctl",
+                    "manager-permission",
+                    "alias-config-task",
+                    "worker_compact_clear",
+                    "--require",
+                    "--path",
+                    str(db_path),
+                ],
+                capture_output=True,
+                text=True,
+                cwd=str(ROOT),
+            )
+            self.assertEqual(allowed.returncode, 0, allowed.stderr)
+            self.assertTrue(json.loads(allowed.stdout)["allowed"])
+
+    def test_manager_config_permissions_json_alias_can_clear_existing_permission(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = self._setup_db(tmpdir)
+            conn = worker_db.connect(db_path)
+            try:
+                task_id = worker_db.create_task(conn, name="alias-clear-task", goal="Do config.")
+                worker_db.upsert_manager_config(
+                    conn,
+                    task_id=task_id,
+                    supervision_mode="guided",
+                    permissions={"worker_compact_clear": True},
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "workerctl",
+                    "manager-config",
+                    "alias-clear-task",
+                    "--permissions-json",
+                    json.dumps({"allow_worker_compact_clear": False}),
+                    "--path",
+                    str(db_path),
+                ],
+                capture_output=True,
+                text=True,
+                cwd=str(ROOT),
+            )
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            payload = json.loads(proc.stdout)
+            self.assertFalse(payload["permissions"]["worker_compact_clear"])
+
     def test_manager_config_questions_prints_setup_schema(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = self._setup_db(tmpdir)
