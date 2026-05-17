@@ -469,3 +469,63 @@ Result:
 - Compact/clear guardrail drill passed; the mutation-audit visibility caveat is
   covered by the follow-up work above.
 - Follow-up: consider documenting or normalizing permission key aliases.
+
+## 2026-05-17: Compact/Clear Mutation-Audit Receipt
+
+Scenario:
+
+- Live follow-up receipt for PR #67 dry-run compact/clear mutation-audit
+  visibility.
+- GoalBuddy goal: `docs/goals/compact-clear-audit-receipt/goal.md`
+- Task: `qa-compact-clear-audit-receipt`
+- Worker session: `qa-compact-clear-audit-worker`
+- Manager session: `qa-compact-clear-audit-manager`
+- Evidence root:
+  `docs/live-qa-artifacts/2026-05-17-compact-clear-audit-receipt/`
+
+Validated:
+
+- Before manager config and worker handoff, `manager-permission
+  worker_compact_clear --require-handoff --require` failed closed with
+  `missing_manager_config` and `missing_worker_handoff`.
+- Worker produced a status-only receipt and did not edit files, install
+  packages, commit, open PRs, or run `/compact` or `/clear`.
+- A durable handoff was recorded before compact/clear permission was enabled.
+- Manager config enabled only canonical `worker_compact_clear: true`; create PR
+  and merge permissions remained false.
+- `manager-permission worker_compact_clear --require-handoff --require` passed
+  after handoff plus permission.
+- Dry-run compact request used nudge decision `17` and command
+  `command-1324787d-4d26-4761-b3ce-7ee2ec068ff8`.
+- Dry-run clear request used nudge decision `18` and command
+  `command-17aeb67a-5677-491b-8397-2fd6d31a53f2`.
+- `mutation-audit qa-compact-clear-audit-receipt --json` reported `ok: true`,
+  three mutation records total, and zero warnings.
+- The compact mutation record showed `effect.dry_run: true`,
+  `effect.sent: false`, `effect.slash_command: "/compact"`, and linked nudge
+  decision `17`.
+- The clear mutation record showed `effect.dry_run: true`,
+  `effect.sent: false`, `effect.slash_command: "/clear"`, and linked nudge
+  decision `18`.
+- `finish-task --require-criteria-audit --stop-manager --stop-worker` completed
+  with zero open accepted criteria and stopped both disposable sessions.
+- Final `sessions --state active` returned `[]`, final `reconcile
+  --stale-cycles-seconds 1` was clean, and no `codex-qa-compact-clear-audit`
+  tmux sessions remained.
+
+Verification:
+
+- `scripts/workerctl mutation-audit qa-compact-clear-audit-receipt --json`
+- `scripts/workerctl commands --task qa-compact-clear-audit-receipt --json`
+- `scripts/workerctl replay qa-compact-clear-audit-receipt`
+- `scripts/workerctl export-task qa-compact-clear-audit-receipt --output
+  docs/live-qa-artifacts/2026-05-17-compact-clear-audit-receipt/export --zip`
+- `scripts/workerctl sessions --state active`
+- `scripts/workerctl reconcile --stale-cycles-seconds 1`
+- `tmux list-sessions 2>/dev/null | rg '^codex-qa-compact-clear-audit' || true`
+
+Result:
+
+- The prior compact/clear mutation-audit caveat is live-verified as closed:
+  dry-run compact and clear requests now appear on the decision-to-consequence
+  audit surface with explicit no-send effect metadata.

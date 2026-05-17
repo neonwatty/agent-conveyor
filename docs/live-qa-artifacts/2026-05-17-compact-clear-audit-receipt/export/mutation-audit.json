@@ -1,0 +1,166 @@
+{
+  "ok": true,
+  "records": [
+    {
+      "allowed_decisions": [
+        "nudge"
+      ],
+      "command": {
+        "created_at": "2026-05-17T15:58:50Z",
+        "id": "command-1324787d-4d26-4761-b3ce-7ee2ec068ff8",
+        "state": "succeeded",
+        "type": "request_worker_compact"
+      },
+      "effect": {
+        "dry_run": true,
+        "permission_check": {
+          "action": "worker_compact_clear",
+          "allowed": true,
+          "handoff_id": 1,
+          "reasons": []
+        },
+        "send_text": "/compact",
+        "sent": false,
+        "slash_command": "/compact",
+        "worker_session": "qa-compact-clear-audit-worker"
+      },
+      "expected_failure": false,
+      "linked_decision": {
+        "created_at": "2026-05-17T15:58:44Z",
+        "decision": "nudge",
+        "id": 17,
+        "manager_cycle_id": null,
+        "manager_id": null,
+        "reason": "Dry-run compact audit verification after saved handoff and compact/clear permission.",
+        "task_id": "task-f6ab07e9-4d1c-4ef9-a34c-470e4427f3ef"
+      },
+      "nearest_prior_decision": {
+        "created_at": "2026-05-17T15:58:44Z",
+        "decision": "nudge",
+        "id": 17,
+        "manager_cycle_id": null,
+        "manager_id": null,
+        "payload": {
+          "action": "compact",
+          "dry_run_required": true,
+          "source": "compact-clear-audit-receipt"
+        },
+        "reason": "Dry-run compact audit verification after saved handoff and compact/clear permission.",
+        "task_id": "task-f6ab07e9-4d1c-4ef9-a34c-470e4427f3ef"
+      },
+      "ok": true,
+      "warnings": []
+    },
+    {
+      "allowed_decisions": [
+        "nudge"
+      ],
+      "command": {
+        "created_at": "2026-05-17T15:59:03Z",
+        "id": "command-17aeb67a-5677-491b-8397-2fd6d31a53f2",
+        "state": "succeeded",
+        "type": "request_worker_compact"
+      },
+      "effect": {
+        "dry_run": true,
+        "permission_check": {
+          "action": "worker_compact_clear",
+          "allowed": true,
+          "handoff_id": 1,
+          "reasons": []
+        },
+        "send_text": "/clear",
+        "sent": false,
+        "slash_command": "/clear",
+        "worker_session": "qa-compact-clear-audit-worker"
+      },
+      "expected_failure": false,
+      "linked_decision": {
+        "created_at": "2026-05-17T15:58:57Z",
+        "decision": "nudge",
+        "id": 18,
+        "manager_cycle_id": null,
+        "manager_id": null,
+        "reason": "Dry-run clear audit verification after saved handoff and compact/clear permission.",
+        "task_id": "task-f6ab07e9-4d1c-4ef9-a34c-470e4427f3ef"
+      },
+      "nearest_prior_decision": {
+        "created_at": "2026-05-17T15:58:57Z",
+        "decision": "nudge",
+        "id": 18,
+        "manager_cycle_id": null,
+        "manager_id": null,
+        "payload": {
+          "action": "clear",
+          "dry_run_required": true,
+          "source": "compact-clear-audit-receipt"
+        },
+        "reason": "Dry-run clear audit verification after saved handoff and compact/clear permission.",
+        "task_id": "task-f6ab07e9-4d1c-4ef9-a34c-470e4427f3ef"
+      },
+      "ok": true,
+      "warnings": []
+    },
+    {
+      "allowed_decisions": [
+        "stop"
+      ],
+      "command": {
+        "created_at": "2026-05-17T15:59:52Z",
+        "id": "command-4885714b-eee0-4222-955c-67d80e9f6ab2",
+        "state": "succeeded",
+        "type": "finish_task"
+      },
+      "effect": {
+        "dry_run": false,
+        "permission_check": null,
+        "send_text": null,
+        "sent": false,
+        "slash_command": null,
+        "worker_session": "qa-compact-clear-audit-worker"
+      },
+      "expected_failure": false,
+      "linked_decision": {
+        "created_at": "2026-05-17T15:59:52Z",
+        "decision": "stop",
+        "id": 19,
+        "manager_cycle_id": null,
+        "manager_id": null,
+        "payload": {
+          "command_id": "command-4885714b-eee0-4222-955c-67d80e9f6ab2",
+          "source": "finish_task"
+        },
+        "reason": "Compact/clear dry-run audit receipt captured and exported.",
+        "task_id": "task-f6ab07e9-4d1c-4ef9-a34c-470e4427f3ef"
+      },
+      "nearest_prior_decision": {
+        "created_at": "2026-05-17T15:59:52Z",
+        "decision": "stop",
+        "id": 19,
+        "manager_cycle_id": null,
+        "manager_id": null,
+        "payload": {
+          "command_id": "command-4885714b-eee0-4222-955c-67d80e9f6ab2",
+          "source": "finish_task"
+        },
+        "reason": "Compact/clear dry-run audit receipt captured and exported.",
+        "task_id": "task-f6ab07e9-4d1c-4ef9-a34c-470e4427f3ef"
+      },
+      "ok": true,
+      "warnings": []
+    }
+  ],
+  "summary": {
+    "mutations": 3,
+    "with_warnings": 0
+  },
+  "task": {
+    "created_at": "2026-05-17T15:58:00Z",
+    "goal": "Disposable compact/clear audit receipt QA.",
+    "id": "task-f6ab07e9-4d1c-4ef9-a34c-470e4427f3ef",
+    "name": "qa-compact-clear-audit-receipt",
+    "state": "done",
+    "summary": "Live-verify dry-run compact/clear mutation-audit effect records.",
+    "updated_at": "2026-05-17T15:59:52Z"
+  }
+}

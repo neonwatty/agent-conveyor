@@ -1,0 +1,254 @@
+# GoalBuddy v2 state.yaml
+# Board truth lives here. goal.md is the editable charter; notes/ holds long receipts only.
+
+version: 2
+
+goal:
+  title: "Compact Clear Audit Receipt"
+  slug: "compact-clear-audit-receipt"
+  kind: existing_plan
+  tranche: "Live-verify and document dry-run compact/clear mutation-audit effect records in a disposable manager/worker QA run."
+  status: done
+  intake:
+    original_request: "Use GoalBuddy to manage the live PR #67 compact/clear audit receipt QA."
+    interpreted_outcome: "A live disposable QA receipt proves dry-run compact/clear requests appear in mutation-audit with no-send effect metadata."
+    input_shape: existing_plan
+    audience: "Jeremy and future manager/worker dogfooding runs"
+    authority: approved
+    proof_type: artifact
+    completion_proof: "docs/live-qa-log.md and artifact files show live mutation-audit effect.dry_run true, effect.sent false, linked nudge decisions, distinguishable compact/clear slash commands, and clean cleanup receipts."
+    likely_misfire: "Re-proving commands/replay audit coverage without proving mutation-audit.effect exposes the dry-run no-send result."
+    blind_spots_considered:
+      - "Accidentally sending real /compact or /clear instead of --dry-run."
+      - "Forgetting worker handoff or canonical worker_compact_clear permission."
+      - "Leaving disposable sessions, bindings, tmux sessions, or reconcile drift behind."
+      - "Documenting unit-test proof instead of a live disposable QA receipt."
+    existing_plan_facts:
+      - "Create a disposable task/session pair."
+      - "Record a worker handoff and enable canonical worker_compact_clear permission."
+      - "Run dry-run compact and clear through request-worker-compact with strict nudge decisions."
+      - "Verify mutation-audit records include effect.dry_run true and effect.sent false."
+      - "Capture commands, replay, export, cleanup, and QA log evidence."
+
+rules:
+  pm_owns_state: true
+  one_active_task: true
+  max_write_workers: 1
+  no_implementation_without_worker_or_pm_task: true
+  no_completion_without_judge_or_pm_audit: true
+  planning_is_not_completion: true
+  queued_required_worker_blocks_completion: true
+  continuous_until_full_outcome: true
+  missing_input_or_credentials_do_not_stop_goal: true
+  preserve_and_validate_existing_plan: true
+  intake_misfire_must_be_audited: true
+  slice_policy:
+    max_consecutive_tiny_tasks: 2
+    prefer_vertical_slices: true
+    judge_picks_largest_safe_slice: true
+    worker_completes_whole_slice: true
+
+agents:
+  scout: installed
+  worker: installed
+  judge: installed
+
+visual_board:
+  selected: local
+  local:
+    status: live
+    url: "http://goalbuddy.localhost:41737/compact-clear-audit-receipt/"
+    command: "npx goalbuddy board /Users/neonwatty/Desktop/codex-terminal-manager/docs/goals/compact-clear-audit-receipt"
+  github_projects:
+    status: not_requested
+    url: null
+    command: "npx goalbuddy extend github-projects"
+    missing: []
+
+active_task: null
+
+tasks:
+  - id: T001
+    type: scout
+    assignee: Scout
+    status: done
+    reasoning_hint: low
+    objective: "Map exact live QA commands, artifact filenames, and acceptance checks for the compact/clear audit receipt."
+    inputs:
+      - "docs/goals/compact-clear-audit-receipt/goal.md"
+      - "README.md compact/clear command docs"
+      - "docs/live-qa-log.md compact/clear guardrail entry"
+      - "workerctl CLI help for compact/clear, mutation-audit, commands, replay, export-task, sessions, reconcile"
+    constraints:
+      - "Read-only."
+      - "Do not run the live QA flow."
+      - "Do not edit product or documentation files."
+      - "Prefer exact command lines and artifact paths over prose."
+    expected_output:
+      - "Disposable task/session names and evidence root."
+      - "Exact setup, dry-run compact, dry-run clear, audit, export, and cleanup commands."
+      - "Acceptance checks that specifically inspect mutation-audit.effect."
+      - "Any missing command capability or ambiguity."
+    receipt:
+      result: done
+      summary: "Mapped the disposable live QA flow. Use task qa-compact-clear-audit-receipt, sessions qa-compact-clear-audit-worker and qa-compact-clear-audit-manager, and evidence root docs/live-qa-artifacts/2026-05-17-compact-clear-audit-receipt/. The key proof is mutation-audit JSON showing both request_worker_compact records with effect.dry_run true, effect.sent false, linked nudge decisions, and slash_command values /compact and /clear."
+      evidence:
+        - "scripts/workerctl request-worker-compact --help"
+        - "scripts/workerctl manager-config --help"
+        - "scripts/workerctl manager-permission --help"
+        - "scripts/workerctl handoff --help"
+        - "scripts/workerctl record-decision --help"
+        - "scripts/workerctl mutation-audit --help"
+        - "scripts/workerctl commands --help"
+        - "scripts/workerctl replay --help"
+        - "scripts/workerctl export-task --help"
+        - "scripts/workerctl sessions --state active"
+        - "scripts/workerctl doctor"
+      commands:
+        - cmd: "scripts/workerctl pair qa-compact-clear-audit-receipt --worker-name qa-compact-clear-audit-worker --manager-name qa-compact-clear-audit-manager --cwd \"$PWD\" --task-goal \"Disposable compact/clear audit receipt QA.\""
+          status: mapped
+        - cmd: "scripts/workerctl request-worker-compact qa-compact-clear-audit-receipt --decision-id <compact_decision_id> --strict-decisions --dry-run"
+          status: mapped
+        - cmd: "scripts/workerctl request-worker-compact qa-compact-clear-audit-receipt --decision-id <clear_decision_id> --strict-decisions --clear --dry-run"
+          status: mapped
+        - cmd: "scripts/workerctl mutation-audit qa-compact-clear-audit-receipt --json"
+          status: mapped
+        - cmd: "scripts/workerctl export-task qa-compact-clear-audit-receipt --output docs/live-qa-artifacts/2026-05-17-compact-clear-audit-receipt/export --zip"
+          status: mapped
+      next_task: T002
+
+  - id: T002
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "Run the disposable compact/clear audit receipt QA and document the live evidence."
+    inputs:
+      - "T001 receipt"
+      - "docs/goals/compact-clear-audit-receipt/goal.md"
+    constraints:
+      - "Use --dry-run for compact and clear requests."
+      - "Do not send real /compact or /clear."
+      - "Use disposable task/session names prefixed qa-compact-clear-audit."
+      - "Clean up disposable sessions and tmux sessions before finishing."
+      - "If mutation-audit.effect is missing or wrong, stop and record the failure instead of editing implementation files."
+    allowed_files:
+      - "docs/live-qa-log.md"
+      - "docs/live-qa-artifacts/2026-05-17-compact-clear-audit-receipt/**"
+    verify:
+      - "scripts/workerctl mutation-audit qa-compact-clear-audit-receipt --json"
+      - "scripts/workerctl commands --task qa-compact-clear-audit-receipt"
+      - "scripts/workerctl replay qa-compact-clear-audit-receipt"
+      - "scripts/workerctl sessions --state active"
+      - "scripts/workerctl reconcile --stale-cycles-seconds 1"
+      - "git diff --check"
+    stop_if:
+      - "A command would send real /compact or /clear."
+      - "Need to edit files outside allowed_files."
+      - "mutation-audit does not expose effect.dry_run true and effect.sent false for both compact and clear."
+      - "Cleanup leaves disposable active sessions, bindings, or scenario-prefixed tmux sessions."
+      - "Verification fails twice."
+    receipt:
+      result: done
+      changed_files:
+        - "docs/live-qa-log.md"
+        - "docs/live-qa-artifacts/2026-05-17-compact-clear-audit-receipt/worker-prompt.md"
+        - "docs/live-qa-artifacts/2026-05-17-compact-clear-audit-receipt/export/"
+        - "docs/live-qa-artifacts/2026-05-17-compact-clear-audit-receipt/export.zip"
+      summary: "Ran the full disposable live QA flow. The permission check failed closed before setup, handoff and canonical worker_compact_clear permission were recorded, dry-run /compact and /clear requests succeeded with linked nudge decisions, mutation-audit exposed effect.dry_run true and effect.sent false for both slash commands, the task export was written, and disposable sessions/tmux state were cleaned up."
+      commands:
+        - cmd: "scripts/workerctl manager-permission qa-compact-clear-audit-receipt worker_compact_clear --require-handoff --require"
+          status: pass
+          evidence: "missing_manager_config and missing_worker_handoff"
+        - cmd: "scripts/workerctl handoff qa-compact-clear-audit-receipt ..."
+          status: pass
+          evidence: "handoff id 1"
+        - cmd: "scripts/workerctl manager-config qa-compact-clear-audit-receipt --allow-worker-compact-clear ..."
+          status: pass
+          evidence: "worker_compact_clear true, create_pr false, merge_green_pr false"
+        - cmd: "scripts/workerctl request-worker-compact qa-compact-clear-audit-receipt --decision-id 17 --strict-decisions --dry-run"
+          status: pass
+          evidence: "command-1324787d-4d26-4761-b3ce-7ee2ec068ff8, /compact, send_result.dry_run true"
+        - cmd: "scripts/workerctl request-worker-compact qa-compact-clear-audit-receipt --decision-id 18 --strict-decisions --clear --dry-run"
+          status: pass
+          evidence: "command-17aeb67a-5677-491b-8397-2fd6d31a53f2, /clear, send_result.dry_run true"
+        - cmd: "scripts/workerctl mutation-audit qa-compact-clear-audit-receipt --json"
+          status: pass
+          evidence: "ok true, with_warnings 0; compact and clear records have effect.dry_run true and effect.sent false"
+        - cmd: "scripts/workerctl finish-task qa-compact-clear-audit-receipt --reason \"Compact/clear dry-run audit receipt captured and exported.\" --require-criteria-audit --stop-manager --stop-worker"
+          status: pass
+          evidence: "killed_manager true, killed_worker true, zero open criteria"
+        - cmd: "scripts/workerctl sessions --state active"
+          status: pass
+          evidence: "[]"
+        - cmd: "scripts/workerctl reconcile --stale-cycles-seconds 1"
+          status: pass
+          evidence: "dangling_bindings [], dead_pid_sessions [], stuck_tasks []"
+        - cmd: "tmux list-sessions 2>/dev/null | rg '^codex-qa-compact-clear-audit' || true"
+          status: pass
+          evidence: "no matching sessions"
+      next_task: T999
+
+  - id: T999
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Audit whether the live compact/clear audit receipt fully closes the PR #67 verification goal."
+    inputs:
+      - "T001 receipt"
+      - "T002 receipt"
+      - "docs/live-qa-log.md"
+      - "docs/live-qa-artifacts/2026-05-17-compact-clear-audit-receipt/"
+      - "Current git diff"
+    constraints:
+      - "Read-only."
+      - "Do not implement."
+      - "Reject completion if the proof relies only on commands/replay and not mutation-audit.effect."
+      - "Reject completion if cleanup receipts are missing or dirty state is unexplained."
+    expected_output:
+      - "complete | not_complete"
+      - "full_outcome_complete: true | false"
+      - "Evidence mapping for dry-run compact and clear mutation-audit records."
+      - "Missing evidence or next task if not complete."
+    receipt:
+      result: done
+      decision: complete
+      full_outcome_complete: true
+      summary: "The live compact/clear audit receipt fully closes the PR #67 verification goal. Exported mutation-audit JSON contains warning-free compact and clear request_worker_compact records with effect.dry_run true, effect.sent false, linked nudge decisions 17 and 18, and distinguishable slash_command values /compact and /clear. The QA log records the same evidence, cleanup is currently clean, and PR #68 is open with green CI."
+      evidence:
+        - "docs/live-qa-artifacts/2026-05-17-compact-clear-audit-receipt/export/mutation-audit.json"
+        - "docs/live-qa-artifacts/2026-05-17-compact-clear-audit-receipt/export/audit.json"
+        - "docs/live-qa-artifacts/2026-05-17-compact-clear-audit-receipt/export/replay.json"
+        - "docs/live-qa-artifacts/2026-05-17-compact-clear-audit-receipt/export.zip"
+        - "docs/live-qa-log.md"
+        - "https://github.com/neonwatty/codex-terminal-manager/pull/68"
+      commands:
+        - cmd: "scripts/workerctl sessions --state active"
+          status: pass
+          evidence: "[]"
+        - cmd: "scripts/workerctl reconcile --stale-cycles-seconds 1"
+          status: pass
+          evidence: "dangling_bindings [], dead_pid_sessions [], stuck_tasks []"
+        - cmd: "tmux list-sessions 2>/dev/null | rg '^codex-qa-compact-clear-audit' || true"
+          status: pass
+          evidence: "no output"
+        - cmd: "git diff --check"
+          status: pass
+          evidence: "no whitespace errors"
+        - cmd: "gh pr view 68 --json number,url,state,mergeStateStatus,statusCheckRollup,headRefName"
+          status: pass
+          evidence: "PR #68 open, mergeStateStatus CLEAN, two unittest checks SUCCESS"
+
+checks:
+  dirty_fingerprint: unknown
+  last_verification:
+    result: pass
+    task: T999
+    commands:
+      - "node /Users/neonwatty/.codex/plugins/cache/goalbuddy/goalbuddy/0.3.6/skills/goalbuddy/scripts/check-goal-state.mjs docs/goals/compact-clear-audit-receipt/state.yaml"
+      - "scripts/workerctl sessions --state active"
+      - "scripts/workerctl reconcile --stale-cycles-seconds 1"
+      - "tmux list-sessions 2>/dev/null | rg '^codex-qa-compact-clear-audit' || true"
+      - "git diff --check"
+      - "gh pr view 68 --json number,url,state,mergeStateStatus,statusCheckRollup,headRefName"
