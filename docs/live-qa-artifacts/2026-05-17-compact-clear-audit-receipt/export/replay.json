@@ -1,0 +1,90 @@
+{
+  "entries": [
+    {
+      "actor": "manager",
+      "details": {
+        "decision": "nudge",
+        "manager_cycle_id": null
+      },
+      "kind": "decision",
+      "source": "manager_decisions",
+      "source_id": 17,
+      "summary": "decision nudge: Dry-run compact audit verification after saved handoff and compact/clear permission.",
+      "timestamp": "2026-05-17T15:58:44Z"
+    },
+    {
+      "actor": "workerctl",
+      "details": {
+        "command_id": "command-1324787d-4d26-4761-b3ce-7ee2ec068ff8",
+        "state": "succeeded",
+        "type": "request_worker_compact"
+      },
+      "kind": "command",
+      "source": "commands",
+      "source_id": "command-1324787d-4d26-4761-b3ce-7ee2ec068ff8",
+      "summary": "request_worker_compact succeeded",
+      "timestamp": "2026-05-17T15:58:50Z"
+    },
+    {
+      "actor": "manager",
+      "details": {
+        "decision": "nudge",
+        "manager_cycle_id": null
+      },
+      "kind": "decision",
+      "source": "manager_decisions",
+      "source_id": 18,
+      "summary": "decision nudge: Dry-run clear audit verification after saved handoff and compact/clear permission.",
+      "timestamp": "2026-05-17T15:58:57Z"
+    },
+    {
+      "actor": "workerctl",
+      "details": {
+        "command_id": "command-17aeb67a-5677-491b-8397-2fd6d31a53f2",
+        "state": "succeeded",
+        "type": "request_worker_compact"
+      },
+      "kind": "command",
+      "source": "commands",
+      "source_id": "command-17aeb67a-5677-491b-8397-2fd6d31a53f2",
+      "summary": "request_worker_compact succeeded",
+      "timestamp": "2026-05-17T15:59:03Z"
+    },
+    {
+      "actor": "manager",
+      "details": {
+        "command_id": "command-4885714b-eee0-4222-955c-67d80e9f6ab2",
+        "state": "succeeded",
+        "type": "finish_task"
+      },
+      "kind": "finish",
+      "source": "commands",
+      "source_id": "command-4885714b-eee0-4222-955c-67d80e9f6ab2",
+      "summary": "finished task: Compact/clear dry-run audit receipt captured and exported. (manager stopped)",
+      "timestamp": "2026-05-17T15:59:52Z"
+    },
+    {
+      "actor": "manager",
+      "details": {
+        "decision": "stop",
+        "manager_cycle_id": null
+      },
+      "kind": "decision",
+      "source": "manager_decisions",
+      "source_id": 19,
+      "summary": "decision stop: Compact/clear dry-run audit receipt captured and exported.",
+      "timestamp": "2026-05-17T15:59:52Z"
+    }
+  ],
+  "mode": "timeline",
+  "role": "all",
+  "task": {
+    "created_at": "2026-05-17T15:58:00Z",
+    "goal": "Disposable compact/clear audit receipt QA.",
+    "id": "task-f6ab07e9-4d1c-4ef9-a34c-470e4427f3ef",
+    "name": "qa-compact-clear-audit-receipt",
+    "state": "done",
+    "summary": "Live-verify dry-run compact/clear mutation-audit effect records.",
+    "updated_at": "2026-05-17T15:59:52Z"
+  }
+}

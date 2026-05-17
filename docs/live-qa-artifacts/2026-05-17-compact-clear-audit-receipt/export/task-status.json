@@ -1,0 +1,53 @@
+{
+  "budget": null,
+  "created_at": "2026-05-17T15:58:00Z",
+  "goal": "Disposable compact/clear audit receipt QA.",
+  "id": "task-f6ab07e9-4d1c-4ef9-a34c-470e4427f3ef",
+  "integrity": {
+    "issues": [],
+    "ok": true
+  },
+  "manager": null,
+  "manager_config": {
+    "acceptance_criteria": [
+      "mutation-audit contains compact and clear request_worker_compact records with effect.dry_run true and effect.sent false.",
+      "Cleanup leaves no active disposable sessions or scenario-prefixed tmux sessions."
+    ],
+    "created_at": "2026-05-17T15:58:30Z",
+    "guidelines": [
+      "Use --dry-run only for compact and clear.",
+      "Do not ask the worker to edit files, commit, open PRs, install packages, or run real compact/clear."
+    ],
+    "objective": "Verify dry-run compact/clear mutation-audit effect metadata only.",
+    "permissions": {
+      "create_pr": false,
+      "merge_green_pr": false,
+      "worker_compact_clear": true
+    },
+    "reference_paths": [],
+    "supervision_mode": "guided",
+    "task_id": "task-f6ab07e9-4d1c-4ef9-a34c-470e4427f3ef",
+    "updated_at": "2026-05-17T15:58:30Z"
+  },
+  "name": "qa-compact-clear-audit-receipt",
+  "state": "done",
+  "summary": "Live-verify dry-run compact/clear mutation-audit effect records.",
+  "updated_at": "2026-05-17T15:59:52Z",
+  "worker": null,
+  "worker_handoff": {
+    "created_at": "2026-05-17T15:58:30Z",
+    "id": 1,
+    "next_steps": [
+      "Manager should enable compact/clear permission, record nudge decisions, run request-worker-compact with --dry-run for /compact and /clear, then verify mutation-audit effect metadata."
+    ],
+    "payload": {
+      "risk": "accidental real compact or clear avoided by --dry-run",
+      "source": "compact-clear-audit-receipt",
+      "worker_receipt": "status-only"
+    },
+    "summary": "Disposable QA worker reported status-only readiness for dry-run compact/clear audit verification; no file edits, installs, commits, PRs, /compact, or /clear actions performed.",
+    "task_id": "task-f6ab07e9-4d1c-4ef9-a34c-470e4427f3ef",
+    "worker_session_id": "session-1ea25de7-f13c-4144-ba01-96c208e083f4"
+  },
+  "worker_status": null
+}

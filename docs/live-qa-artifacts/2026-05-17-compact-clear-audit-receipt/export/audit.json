@@ -1,0 +1,872 @@
+{
+  "acceptance_criteria": [],
+  "agent_observations": [
+    {
+      "command_id": "command-4885714b-eee0-4222-955c-67d80e9f6ab2",
+      "created_at": "2026-05-17T15:59:52Z",
+      "id": 11,
+      "manager_id": null,
+      "message": "Compact/clear dry-run audit receipt captured and exported.",
+      "observation_type": "decision",
+      "payload": {
+        "decision": "stop",
+        "decision_id": 19,
+        "source": "finish_task"
+      },
+      "role": "manager",
+      "severity": "info",
+      "source_capture_id": null,
+      "task_id": "task-f6ab07e9-4d1c-4ef9-a34c-470e4427f3ef",
+      "worker_id": null
+    }
+  ],
+  "commands": [
+    {
+      "created_at": "2026-05-17T15:58:50Z",
+      "error": null,
+      "id": "command-1324787d-4d26-4761-b3ce-7ee2ec068ff8",
+      "idempotency_key": "command-1324787d-4d26-4761-b3ce-7ee2ec068ff8",
+      "manager_id": null,
+      "payload": {
+        "manager_decision": {
+          "age_seconds": 6,
+          "allowed_decisions": [
+            "nudge"
+          ],
+          "decision": {
+            "created_at": "2026-05-17T15:58:44Z",
+            "decision": "nudge",
+            "id": 17,
+            "manager_cycle_id": null,
+            "manager_id": null,
+            "reason": "Dry-run compact audit verification after saved handoff and compact/clear permission.",
+            "task_id": "task-f6ab07e9-4d1c-4ef9-a34c-470e4427f3ef"
+          },
+          "decision_id": 17,
+          "max_age_seconds": 900,
+          "ok": true,
+          "warnings": []
+        },
+        "message": "Manager request: prepare for context compaction/clear only if supported by this Codex session.\n\nTask: qa-compact-clear-audit-receipt\nSaved handoff id: 1\nSaved handoff summary: Disposable QA worker reported status-only readiness for dry-run compact/clear audit verification; no file edits, installs, commits, PRs, /compact, or /clear actions performed.\n\nBefore compacting or clearing visible context, verify the saved handoff still captures current progress. If it is stale, update it with `scripts/workerctl handoff` first. Then run the Codex compact/clear action only if supported and appropriate. Afterward, report whether compaction happened and what the next concrete step is. Do not edit project files as part of this request.",
+        "permission_check": {
+          "action": "worker_compact_clear",
+          "allowed": true,
+          "handoff_id": 1,
+          "reasons": []
+        },
+        "send_text": "/compact",
+        "slash_command": "/compact",
+        "task": "qa-compact-clear-audit-receipt",
+        "worker_session": "qa-compact-clear-audit-worker"
+      },
+      "result": {
+        "command_id": "command-1324787d-4d26-4761-b3ce-7ee2ec068ff8",
+        "manager_decision": {
+          "age_seconds": 6,
+          "allowed_decisions": [
+            "nudge"
+          ],
+          "decision": {
+            "created_at": "2026-05-17T15:58:44Z",
+            "decision": "nudge",
+            "id": 17,
+            "manager_cycle_id": null,
+            "manager_id": null,
+            "reason": "Dry-run compact audit verification after saved handoff and compact/clear permission.",
+            "task_id": "task-f6ab07e9-4d1c-4ef9-a34c-470e4427f3ef"
+          },
+          "decision_id": 17,
+          "max_age_seconds": 900,
+          "ok": true,
+          "warnings": []
+        },
+        "message": "Manager request: prepare for context compaction/clear only if supported by this Codex session.\n\nTask: qa-compact-clear-audit-receipt\nSaved handoff id: 1\nSaved handoff summary: Disposable QA worker reported status-only readiness for dry-run compact/clear audit verification; no file edits, installs, commits, PRs, /compact, or /clear actions performed.\n\nBefore compacting or clearing visible context, verify the saved handoff still captures current progress. If it is stale, update it with `scripts/workerctl handoff` first. Then run the Codex compact/clear action only if supported and appropriate. Afterward, report whether compaction happened and what the next concrete step is. Do not edit project files as part of this request.",
+        "permission_check": {
+          "action": "worker_compact_clear",
+          "allowed": true,
+          "handoff_id": 1,
+          "reasons": []
+        },
+        "send_result": {
+          "dry_run": true,
+          "session": "qa-compact-clear-audit-worker",
+          "target": "codex-qa-compact-clear-audit-worker",
+          "text": "/compact",
+          "time": "2026-05-17T15:58:50Z"
+        },
+        "send_text": "/compact",
+        "slash_command": "/compact",
+        "task": "qa-compact-clear-audit-receipt",
+        "worker_session": "qa-compact-clear-audit-worker"
+      },
+      "state": "succeeded",
+      "task_id": "task-f6ab07e9-4d1c-4ef9-a34c-470e4427f3ef",
+      "type": "request_worker_compact",
+      "updated_at": "2026-05-17T15:58:50Z",
+      "worker_id": null
+    },
+    {
+      "created_at": "2026-05-17T15:59:03Z",
+      "error": null,
+      "id": "command-17aeb67a-5677-491b-8397-2fd6d31a53f2",
+      "idempotency_key": "command-17aeb67a-5677-491b-8397-2fd6d31a53f2",
+      "manager_id": null,
+      "payload": {
+        "manager_decision": {
+          "age_seconds": 6,
+          "allowed_decisions": [
+            "nudge"
+          ],
+          "decision": {
+            "created_at": "2026-05-17T15:58:57Z",
+            "decision": "nudge",
+            "id": 18,
+            "manager_cycle_id": null,
+            "manager_id": null,
+            "reason": "Dry-run clear audit verification after saved handoff and compact/clear permission.",
+            "task_id": "task-f6ab07e9-4d1c-4ef9-a34c-470e4427f3ef"
+          },
+          "decision_id": 18,
+          "max_age_seconds": 900,
+          "ok": true,
+          "warnings": []
+        },
+        "message": "Manager request: prepare for context compaction/clear only if supported by this Codex session.\n\nTask: qa-compact-clear-audit-receipt\nSaved handoff id: 1\nSaved handoff summary: Disposable QA worker reported status-only readiness for dry-run compact/clear audit verification; no file edits, installs, commits, PRs, /compact, or /clear actions performed.\n\nBefore compacting or clearing visible context, verify the saved handoff still captures current progress. If it is stale, update it with `scripts/workerctl handoff` first. Then run the Codex compact/clear action only if supported and appropriate. Afterward, report whether compaction happened and what the next concrete step is. Do not edit project files as part of this request.",
+        "permission_check": {
+          "action": "worker_compact_clear",
+          "allowed": true,
+          "handoff_id": 1,
+          "reasons": []
+        },
+        "send_text": "/clear",
+        "slash_command": "/clear",
+        "task": "qa-compact-clear-audit-receipt",
+        "worker_session": "qa-compact-clear-audit-worker"
+      },
+      "result": {
+        "command_id": "command-17aeb67a-5677-491b-8397-2fd6d31a53f2",
+        "manager_decision": {
+          "age_seconds": 6,
+          "allowed_decisions": [
+            "nudge"
+          ],
+          "decision": {
+            "created_at": "2026-05-17T15:58:57Z",
+            "decision": "nudge",
+            "id": 18,
+            "manager_cycle_id": null,
+            "manager_id": null,
+            "reason": "Dry-run clear audit verification after saved handoff and compact/clear permission.",
+            "task_id": "task-f6ab07e9-4d1c-4ef9-a34c-470e4427f3ef"
+          },
+          "decision_id": 18,
+          "max_age_seconds": 900,
+          "ok": true,
+          "warnings": []
+        },
+        "message": "Manager request: prepare for context compaction/clear only if supported by this Codex session.\n\nTask: qa-compact-clear-audit-receipt\nSaved handoff id: 1\nSaved handoff summary: Disposable QA worker reported status-only readiness for dry-run compact/clear audit verification; no file edits, installs, commits, PRs, /compact, or /clear actions performed.\n\nBefore compacting or clearing visible context, verify the saved handoff still captures current progress. If it is stale, update it with `scripts/workerctl handoff` first. Then run the Codex compact/clear action only if supported and appropriate. Afterward, report whether compaction happened and what the next concrete step is. Do not edit project files as part of this request.",
+        "permission_check": {
+          "action": "worker_compact_clear",
+          "allowed": true,
+          "handoff_id": 1,
+          "reasons": []
+        },
+        "send_result": {
+          "dry_run": true,
+          "session": "qa-compact-clear-audit-worker",
+          "target": "codex-qa-compact-clear-audit-worker",
+          "text": "/clear",
+          "time": "2026-05-17T15:59:03Z"
+        },
+        "send_text": "/clear",
+        "slash_command": "/clear",
+        "task": "qa-compact-clear-audit-receipt",
+        "worker_session": "qa-compact-clear-audit-worker"
+      },
+      "state": "succeeded",
+      "task_id": "task-f6ab07e9-4d1c-4ef9-a34c-470e4427f3ef",
+      "type": "request_worker_compact",
+      "updated_at": "2026-05-17T15:59:03Z",
+      "worker_id": null
+    },
+    {
+      "created_at": "2026-05-17T15:59:52Z",
+      "error": null,
+      "id": "command-4885714b-eee0-4222-955c-67d80e9f6ab2",
+      "idempotency_key": "command-4885714b-eee0-4222-955c-67d80e9f6ab2",
+      "manager_id": null,
+      "payload": {
+        "final_audit": {
+          "open_criteria": [],
+          "require_criteria_audit": true,
+          "summary": {
+            "accepted": 0,
+            "deferred": 0,
+            "proposed": 0,
+            "rejected": 0,
+            "satisfied": 0
+          },
+          "total": 0
+        },
+        "finish": true,
+        "manager_decision": {
+          "allowed_decisions": [
+            "stop"
+          ],
+          "decision": null,
+          "decision_id": null,
+          "ok": false,
+          "warnings": [
+            "missing_decision_id"
+          ]
+        },
+        "manager_session": "qa-compact-clear-audit-manager",
+        "message": null,
+        "reason": "Compact/clear dry-run audit receipt captured and exported.",
+        "stop_manager": true,
+        "stop_worker": true,
+        "task": "qa-compact-clear-audit-receipt",
+        "worker": "qa-compact-clear-audit-worker",
+        "worker_session": "qa-compact-clear-audit-worker"
+      },
+      "result": {
+        "command_id": "command-4885714b-eee0-4222-955c-67d80e9f6ab2",
+        "final_audit": {
+          "open_criteria": [],
+          "require_criteria_audit": true,
+          "summary": {
+            "accepted": 0,
+            "deferred": 0,
+            "proposed": 0,
+            "rejected": 0,
+            "satisfied": 0
+          },
+          "total": 0
+        },
+        "final_decision_id": 19,
+        "final_observation_id": 11,
+        "finish": true,
+        "killed_manager": true,
+        "killed_worker": true,
+        "manager_decision": {
+          "allowed_decisions": [
+            "stop"
+          ],
+          "decision": null,
+          "decision_id": null,
+          "ok": false,
+          "warnings": [
+            "missing_decision_id"
+          ]
+        },
+        "manager_identity": {
+          "db_pane_id": null,
+          "db_session": "codex-qa-compact-clear-audit-manager",
+          "live": true,
+          "live_pane_id": "%1",
+          "mismatches": [],
+          "role": "manager",
+          "session": "qa-compact-clear-audit-manager"
+        },
+        "manager_session": "qa-compact-clear-audit-manager",
+        "reason": "Compact/clear dry-run audit receipt captured and exported.",
+        "stop_manager": true,
+        "stop_worker": true,
+        "task": "qa-compact-clear-audit-receipt",
+        "worker": "qa-compact-clear-audit-worker",
+        "worker_identity": {
+          "db_pane_id": null,
+          "db_session": "codex-qa-compact-clear-audit-worker",
+          "live": true,
+          "live_pane_id": "%0",
+          "mismatches": [],
+          "role": "worker",
+          "session": "qa-compact-clear-audit-worker"
+        },
+        "worker_session": "qa-compact-clear-audit-worker"
+      },
+      "state": "succeeded",
+      "task_id": "task-f6ab07e9-4d1c-4ef9-a34c-470e4427f3ef",
+      "type": "finish_task",
+      "updated_at": "2026-05-17T15:59:52Z",
+      "worker_id": null
+    }
+  ],
+  "events": [
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-17T15:58:00Z",
+      "id": 187,
+      "manager_id": null,
+      "payload": {
+        "goal": "Disposable compact/clear audit receipt QA.",
+        "name": "qa-compact-clear-audit-receipt",
+        "summary": "Live-verify dry-run compact/clear mutation-audit effect records."
+      },
+      "task_id": "task-f6ab07e9-4d1c-4ef9-a34c-470e4427f3ef",
+      "type": "task_created",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-17T15:58:04Z",
+      "id": 190,
+      "manager_id": null,
+      "payload": {
+        "binding_id": "binding-0a96f525-1495-4d7c-81f0-d1f6bb39460b",
+        "manager": "qa-compact-clear-audit-manager",
+        "task": "qa-compact-clear-audit-receipt",
+        "worker": "qa-compact-clear-audit-worker"
+      },
+      "task_id": "task-f6ab07e9-4d1c-4ef9-a34c-470e4427f3ef",
+      "type": "binding_created",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-17T15:58:16Z",
+      "id": 191,
+      "manager_id": null,
+      "payload": {
+        "action": "worker_compact_clear",
+        "allowed": false,
+        "config": null,
+        "handoff_id": null,
+        "reasons": [
+          "missing_manager_config",
+          "missing_worker_handoff"
+        ],
+        "require_handoff": true,
+        "task": {
+          "id": "task-f6ab07e9-4d1c-4ef9-a34c-470e4427f3ef",
+          "name": "qa-compact-clear-audit-receipt"
+        }
+      },
+      "task_id": "task-f6ab07e9-4d1c-4ef9-a34c-470e4427f3ef",
+      "type": "manager_permission_checked",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-17T15:58:30Z",
+      "id": 192,
+      "manager_id": null,
+      "payload": {
+        "handoff_id": 1,
+        "next_step_count": 1,
+        "worker_session_id": "session-1ea25de7-f13c-4144-ba01-96c208e083f4"
+      },
+      "task_id": "task-f6ab07e9-4d1c-4ef9-a34c-470e4427f3ef",
+      "type": "worker_handoff_recorded",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-17T15:58:30Z",
+      "id": 193,
+      "manager_id": null,
+      "payload": {
+        "acceptance_count": 2,
+        "guideline_count": 2,
+        "reference_count": 0,
+        "supervision_mode": "guided"
+      },
+      "task_id": "task-f6ab07e9-4d1c-4ef9-a34c-470e4427f3ef",
+      "type": "manager_config_recorded",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-17T15:58:38Z",
+      "id": 194,
+      "manager_id": null,
+      "payload": {
+        "action": "worker_compact_clear",
+        "allowed": true,
+        "config": {
+          "acceptance_criteria": [
+            "mutation-audit contains compact and clear request_worker_compact records with effect.dry_run true and effect.sent false.",
+            "Cleanup leaves no active disposable sessions or scenario-prefixed tmux sessions."
+          ],
+          "created_at": "2026-05-17T15:58:30Z",
+          "guidelines": [
+            "Use --dry-run only for compact and clear.",
+            "Do not ask the worker to edit files, commit, open PRs, install packages, or run real compact/clear."
+          ],
+          "objective": "Verify dry-run compact/clear mutation-audit effect metadata only.",
+          "permissions": {
+            "create_pr": false,
+            "merge_green_pr": false,
+            "worker_compact_clear": true
+          },
+          "reference_paths": [],
+          "supervision_mode": "guided",
+          "task_id": "task-f6ab07e9-4d1c-4ef9-a34c-470e4427f3ef",
+          "updated_at": "2026-05-17T15:58:30Z"
+        },
+        "handoff_id": 1,
+        "reasons": [],
+        "require_handoff": true,
+        "task": {
+          "id": "task-f6ab07e9-4d1c-4ef9-a34c-470e4427f3ef",
+          "name": "qa-compact-clear-audit-receipt"
+        }
+      },
+      "task_id": "task-f6ab07e9-4d1c-4ef9-a34c-470e4427f3ef",
+      "type": "manager_permission_checked",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-17T15:58:44Z",
+      "id": 195,
+      "manager_id": null,
+      "payload": {
+        "decision": "nudge",
+        "decision_id": 17,
+        "manager_cycle_id": null,
+        "reason": "Dry-run compact audit verification after saved handoff and compact/clear permission."
+      },
+      "task_id": "task-f6ab07e9-4d1c-4ef9-a34c-470e4427f3ef",
+      "type": "manager_decision_recorded",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-17T15:58:50Z",
+      "id": 196,
+      "manager_id": null,
+      "payload": {
+        "action": "worker_compact_clear",
+        "allowed": true,
+        "handoff_id": 1,
+        "reasons": [],
+        "source": "request_worker_compact"
+      },
+      "task_id": "task-f6ab07e9-4d1c-4ef9-a34c-470e4427f3ef",
+      "type": "manager_permission_checked",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": "command-1324787d-4d26-4761-b3ce-7ee2ec068ff8",
+      "correlation_id": null,
+      "created_at": "2026-05-17T15:58:50Z",
+      "id": 197,
+      "manager_id": null,
+      "payload": {
+        "permission_check": {
+          "action": "worker_compact_clear",
+          "allowed": true,
+          "handoff_id": 1,
+          "reasons": []
+        },
+        "worker_session": "qa-compact-clear-audit-worker"
+      },
+      "task_id": "task-f6ab07e9-4d1c-4ef9-a34c-470e4427f3ef",
+      "type": "worker_compact_requested",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": "command-1324787d-4d26-4761-b3ce-7ee2ec068ff8",
+      "correlation_id": null,
+      "created_at": "2026-05-17T15:58:50Z",
+      "id": 198,
+      "manager_id": null,
+      "payload": {
+        "command_id": "command-1324787d-4d26-4761-b3ce-7ee2ec068ff8",
+        "manager_decision": {
+          "age_seconds": 6,
+          "allowed_decisions": [
+            "nudge"
+          ],
+          "decision": {
+            "created_at": "2026-05-17T15:58:44Z",
+            "decision": "nudge",
+            "id": 17,
+            "manager_cycle_id": null,
+            "manager_id": null,
+            "reason": "Dry-run compact audit verification after saved handoff and compact/clear permission.",
+            "task_id": "task-f6ab07e9-4d1c-4ef9-a34c-470e4427f3ef"
+          },
+          "decision_id": 17,
+          "max_age_seconds": 900,
+          "ok": true,
+          "warnings": []
+        },
+        "message": "Manager request: prepare for context compaction/clear only if supported by this Codex session.\n\nTask: qa-compact-clear-audit-receipt\nSaved handoff id: 1\nSaved handoff summary: Disposable QA worker reported status-only readiness for dry-run compact/clear audit verification; no file edits, installs, commits, PRs, /compact, or /clear actions performed.\n\nBefore compacting or clearing visible context, verify the saved handoff still captures current progress. If it is stale, update it with `scripts/workerctl handoff` first. Then run the Codex compact/clear action only if supported and appropriate. Afterward, report whether compaction happened and what the next concrete step is. Do not edit project files as part of this request.",
+        "permission_check": {
+          "action": "worker_compact_clear",
+          "allowed": true,
+          "handoff_id": 1,
+          "reasons": []
+        },
+        "send_result": {
+          "dry_run": true,
+          "session": "qa-compact-clear-audit-worker",
+          "target": "codex-qa-compact-clear-audit-worker",
+          "text": "/compact",
+          "time": "2026-05-17T15:58:50Z"
+        },
+        "send_text": "/compact",
+        "slash_command": "/compact",
+        "task": "qa-compact-clear-audit-receipt",
+        "worker_session": "qa-compact-clear-audit-worker"
+      },
+      "task_id": "task-f6ab07e9-4d1c-4ef9-a34c-470e4427f3ef",
+      "type": "worker_compact_request_succeeded",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-17T15:58:57Z",
+      "id": 199,
+      "manager_id": null,
+      "payload": {
+        "decision": "nudge",
+        "decision_id": 18,
+        "manager_cycle_id": null,
+        "reason": "Dry-run clear audit verification after saved handoff and compact/clear permission."
+      },
+      "task_id": "task-f6ab07e9-4d1c-4ef9-a34c-470e4427f3ef",
+      "type": "manager_decision_recorded",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-17T15:59:03Z",
+      "id": 200,
+      "manager_id": null,
+      "payload": {
+        "action": "worker_compact_clear",
+        "allowed": true,
+        "handoff_id": 1,
+        "reasons": [],
+        "source": "request_worker_compact"
+      },
+      "task_id": "task-f6ab07e9-4d1c-4ef9-a34c-470e4427f3ef",
+      "type": "manager_permission_checked",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": "command-17aeb67a-5677-491b-8397-2fd6d31a53f2",
+      "correlation_id": null,
+      "created_at": "2026-05-17T15:59:03Z",
+      "id": 201,
+      "manager_id": null,
+      "payload": {
+        "permission_check": {
+          "action": "worker_compact_clear",
+          "allowed": true,
+          "handoff_id": 1,
+          "reasons": []
+        },
+        "worker_session": "qa-compact-clear-audit-worker"
+      },
+      "task_id": "task-f6ab07e9-4d1c-4ef9-a34c-470e4427f3ef",
+      "type": "worker_compact_requested",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": "command-17aeb67a-5677-491b-8397-2fd6d31a53f2",
+      "correlation_id": null,
+      "created_at": "2026-05-17T15:59:03Z",
+      "id": 202,
+      "manager_id": null,
+      "payload": {
+        "command_id": "command-17aeb67a-5677-491b-8397-2fd6d31a53f2",
+        "manager_decision": {
+          "age_seconds": 6,
+          "allowed_decisions": [
+            "nudge"
+          ],
+          "decision": {
+            "created_at": "2026-05-17T15:58:57Z",
+            "decision": "nudge",
+            "id": 18,
+            "manager_cycle_id": null,
+            "manager_id": null,
+            "reason": "Dry-run clear audit verification after saved handoff and compact/clear permission.",
+            "task_id": "task-f6ab07e9-4d1c-4ef9-a34c-470e4427f3ef"
+          },
+          "decision_id": 18,
+          "max_age_seconds": 900,
+          "ok": true,
+          "warnings": []
+        },
+        "message": "Manager request: prepare for context compaction/clear only if supported by this Codex session.\n\nTask: qa-compact-clear-audit-receipt\nSaved handoff id: 1\nSaved handoff summary: Disposable QA worker reported status-only readiness for dry-run compact/clear audit verification; no file edits, installs, commits, PRs, /compact, or /clear actions performed.\n\nBefore compacting or clearing visible context, verify the saved handoff still captures current progress. If it is stale, update it with `scripts/workerctl handoff` first. Then run the Codex compact/clear action only if supported and appropriate. Afterward, report whether compaction happened and what the next concrete step is. Do not edit project files as part of this request.",
+        "permission_check": {
+          "action": "worker_compact_clear",
+          "allowed": true,
+          "handoff_id": 1,
+          "reasons": []
+        },
+        "send_result": {
+          "dry_run": true,
+          "session": "qa-compact-clear-audit-worker",
+          "target": "codex-qa-compact-clear-audit-worker",
+          "text": "/clear",
+          "time": "2026-05-17T15:59:03Z"
+        },
+        "send_text": "/clear",
+        "slash_command": "/clear",
+        "task": "qa-compact-clear-audit-receipt",
+        "worker_session": "qa-compact-clear-audit-worker"
+      },
+      "task_id": "task-f6ab07e9-4d1c-4ef9-a34c-470e4427f3ef",
+      "type": "worker_compact_request_succeeded",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": "command-4885714b-eee0-4222-955c-67d80e9f6ab2",
+      "correlation_id": null,
+      "created_at": "2026-05-17T15:59:52Z",
+      "id": 203,
+      "manager_id": null,
+      "payload": {
+        "final_audit": {
+          "open_criteria": [],
+          "require_criteria_audit": true,
+          "summary": {
+            "accepted": 0,
+            "deferred": 0,
+            "proposed": 0,
+            "rejected": 0,
+            "satisfied": 0
+          },
+          "total": 0
+        },
+        "final_decision_id": 19,
+        "final_observation_id": 11,
+        "finish": true,
+        "manager_decision": {
+          "allowed_decisions": [
+            "stop"
+          ],
+          "decision": null,
+          "decision_id": null,
+          "ok": false,
+          "warnings": [
+            "missing_decision_id"
+          ]
+        },
+        "message": null,
+        "reason": "Compact/clear dry-run audit receipt captured and exported.",
+        "stop_manager": true,
+        "stop_worker": true
+      },
+      "task_id": "task-f6ab07e9-4d1c-4ef9-a34c-470e4427f3ef",
+      "type": "finish_task_intent",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": "command-4885714b-eee0-4222-955c-67d80e9f6ab2",
+      "correlation_id": null,
+      "created_at": "2026-05-17T15:59:52Z",
+      "id": 204,
+      "manager_id": null,
+      "payload": {
+        "open_criteria": [],
+        "require_criteria_audit": true,
+        "summary": {
+          "accepted": 0,
+          "deferred": 0,
+          "proposed": 0,
+          "rejected": 0,
+          "satisfied": 0
+        },
+        "total": 0
+      },
+      "task_id": "task-f6ab07e9-4d1c-4ef9-a34c-470e4427f3ef",
+      "type": "finish_task_criteria_audit",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": "command-4885714b-eee0-4222-955c-67d80e9f6ab2",
+      "correlation_id": null,
+      "created_at": "2026-05-17T15:59:52Z",
+      "id": 205,
+      "manager_id": null,
+      "payload": {
+        "db_pane_id": null,
+        "db_session": "codex-qa-compact-clear-audit-manager",
+        "live": true,
+        "live_pane_id": "%1",
+        "mismatches": [],
+        "role": "manager",
+        "session": "qa-compact-clear-audit-manager"
+      },
+      "task_id": "task-f6ab07e9-4d1c-4ef9-a34c-470e4427f3ef",
+      "type": "manager_identity_verified",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": "command-4885714b-eee0-4222-955c-67d80e9f6ab2",
+      "correlation_id": null,
+      "created_at": "2026-05-17T15:59:52Z",
+      "id": 206,
+      "manager_id": null,
+      "payload": {
+        "db_pane_id": null,
+        "db_session": "codex-qa-compact-clear-audit-worker",
+        "live": true,
+        "live_pane_id": "%0",
+        "mismatches": [],
+        "role": "worker",
+        "session": "qa-compact-clear-audit-worker"
+      },
+      "task_id": "task-f6ab07e9-4d1c-4ef9-a34c-470e4427f3ef",
+      "type": "worker_identity_verified",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": "command-4885714b-eee0-4222-955c-67d80e9f6ab2",
+      "correlation_id": null,
+      "created_at": "2026-05-17T15:59:52Z",
+      "id": 207,
+      "manager_id": null,
+      "payload": {
+        "command_id": "command-4885714b-eee0-4222-955c-67d80e9f6ab2",
+        "final_audit": {
+          "open_criteria": [],
+          "require_criteria_audit": true,
+          "summary": {
+            "accepted": 0,
+            "deferred": 0,
+            "proposed": 0,
+            "rejected": 0,
+            "satisfied": 0
+          },
+          "total": 0
+        },
+        "final_decision_id": 19,
+        "final_observation_id": 11,
+        "finish": true,
+        "killed_manager": true,
+        "killed_worker": true,
+        "manager_decision": {
+          "allowed_decisions": [
+            "stop"
+          ],
+          "decision": null,
+          "decision_id": null,
+          "ok": false,
+          "warnings": [
+            "missing_decision_id"
+          ]
+        },
+        "manager_identity": {
+          "db_pane_id": null,
+          "db_session": "codex-qa-compact-clear-audit-manager",
+          "live": true,
+          "live_pane_id": "%1",
+          "mismatches": [],
+          "role": "manager",
+          "session": "qa-compact-clear-audit-manager"
+        },
+        "manager_session": "qa-compact-clear-audit-manager",
+        "reason": "Compact/clear dry-run audit receipt captured and exported.",
+        "stop_manager": true,
+        "stop_worker": true,
+        "task": "qa-compact-clear-audit-receipt",
+        "worker": "qa-compact-clear-audit-worker",
+        "worker_identity": {
+          "db_pane_id": null,
+          "db_session": "codex-qa-compact-clear-audit-worker",
+          "live": true,
+          "live_pane_id": "%0",
+          "mismatches": [],
+          "role": "worker",
+          "session": "qa-compact-clear-audit-worker"
+        },
+        "worker_session": "qa-compact-clear-audit-worker"
+      },
+      "task_id": "task-f6ab07e9-4d1c-4ef9-a34c-470e4427f3ef",
+      "type": "finish_task_succeeded",
+      "worker_id": null
+    }
+  ],
+  "manager_cycles": [],
+  "manager_decisions": [
+    {
+      "created_at": "2026-05-17T15:58:44Z",
+      "decision": "nudge",
+      "id": 17,
+      "manager_cycle_id": null,
+      "manager_id": null,
+      "payload": {
+        "action": "compact",
+        "dry_run_required": true,
+        "source": "compact-clear-audit-receipt"
+      },
+      "reason": "Dry-run compact audit verification after saved handoff and compact/clear permission.",
+      "task_id": "task-f6ab07e9-4d1c-4ef9-a34c-470e4427f3ef"
+    },
+    {
+      "created_at": "2026-05-17T15:58:57Z",
+      "decision": "nudge",
+      "id": 18,
+      "manager_cycle_id": null,
+      "manager_id": null,
+      "payload": {
+        "action": "clear",
+        "dry_run_required": true,
+        "source": "compact-clear-audit-receipt"
+      },
+      "reason": "Dry-run clear audit verification after saved handoff and compact/clear permission.",
+      "task_id": "task-f6ab07e9-4d1c-4ef9-a34c-470e4427f3ef"
+    },
+    {
+      "created_at": "2026-05-17T15:59:52Z",
+      "decision": "stop",
+      "id": 19,
+      "manager_cycle_id": null,
+      "manager_id": null,
+      "payload": {
+        "command_id": "command-4885714b-eee0-4222-955c-67d80e9f6ab2",
+        "source": "finish_task"
+      },
+      "reason": "Compact/clear dry-run audit receipt captured and exported.",
+      "task_id": "task-f6ab07e9-4d1c-4ef9-a34c-470e4427f3ef"
+    }
+  ],
+  "task": {
+    "created_at": "2026-05-17T15:58:00Z",
+    "goal": "Disposable compact/clear audit receipt QA.",
+    "id": "task-f6ab07e9-4d1c-4ef9-a34c-470e4427f3ef",
+    "name": "qa-compact-clear-audit-receipt",
+    "state": "done",
+    "summary": "Live-verify dry-run compact/clear mutation-audit effect records.",
+    "updated_at": "2026-05-17T15:59:52Z"
+  },
+  "terminal_captures": [],
+  "transcript_segments": []
+}
