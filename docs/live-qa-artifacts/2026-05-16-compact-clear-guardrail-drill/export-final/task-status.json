@@ -1,0 +1,66 @@
+{
+  "budget": null,
+  "created_at": "2026-05-17T02:25:55Z",
+  "goal": "Validate compact/clear guardrails: permission and handoff are required before an audited manager compact/clear request, and replay/export/mutation-audit explain the sequence.",
+  "id": "task-754a3549-cd9d-45bc-887a-8884419addb1",
+  "integrity": {
+    "issues": [],
+    "ok": true
+  },
+  "manager": null,
+  "manager_config": {
+    "acceptance_criteria": [
+      "Without permission and handoff, manager-permission --require-handoff --require fails closed.",
+      "After durable handoff and explicit worker_compact_clear permission, manager-permission --require-handoff --require passes.",
+      "request-worker-compact --strict-decisions --dry-run succeeds only with a valid nudge decision and records an audited command.",
+      "Replay, export, commands, and mutation-audit explain the permission, handoff, decision, compact request, and cleanup sequence."
+    ],
+    "created_at": "2026-05-17T02:26:08Z",
+    "guidelines": [
+      "No meaningful project edits, commits, PRs, merges, destructive cleanup, or manual /compact /clear outside workerctl.",
+      "Prove fail-closed behavior before permission/handoff and prove allowed dry-run behavior after permission/handoff.",
+      "Use dry-run for compact/clear so this QA validates guardrails without changing worker context."
+    ],
+    "objective": "Validate compact/clear guardrails. The manager may request worker compact/clear only through workerctl, only after a durable handoff, explicit worker_compact_clear permission, and a fresh nudge decision.",
+    "permissions": {
+      "allow_merge_green": false,
+      "allow_pr": false,
+      "allow_worker_compact_clear": true,
+      "create_pr": false,
+      "merge_green_pr": false,
+      "worker_compact_clear": true
+    },
+    "reference_paths": [],
+    "supervision_mode": "guided",
+    "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1",
+    "updated_at": "2026-05-17T02:27:54Z"
+  },
+  "name": "qa-compact-clear-guardrail",
+  "state": "done",
+  "summary": "Disposable compact/clear permission and handoff guardrail drill.",
+  "updated_at": "2026-05-17T02:29:11Z",
+  "worker": null,
+  "worker_handoff": {
+    "created_at": "2026-05-17T02:27:17Z",
+    "id": 1,
+    "next_steps": [
+      "Manager/operator should validate fail-closed permission and strict-decision behavior.",
+      "Manager/operator should enable worker_compact_clear only after this durable handoff, then use dry-run audited compact and clear requests.",
+      "Replay/export/mutation-audit should explain permission, handoff, decision, compact/clear request, and cleanup sequence."
+    ],
+    "payload": {
+      "current_status": "status-only receipt complete; worker idle",
+      "direct_compact_clear_by_worker": false,
+      "known_risks": [
+        "compaction may drop constraints",
+        "resumed worker may treat QA as implementation",
+        "criteria may be lost unless preserved"
+      ],
+      "worker_receipt": "docs/live-qa-artifacts/2026-05-16-compact-clear-guardrail-drill/worker-capture.txt"
+    },
+    "summary": "Disposable worker completed a status-only compact/clear guardrail receipt. Worker performed no file edits, branches, commits, PRs, dependency installs, compact, clear, or meaningful project work.",
+    "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1",
+    "worker_session_id": "session-7f5c8d8b-3462-4f79-bd5d-cba0c2aace98"
+  },
+  "worker_status": null
+}

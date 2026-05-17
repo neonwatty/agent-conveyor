@@ -1,0 +1,2 @@
+## dogfood-compact-clear-guardrail
+?? docs/live-qa-artifacts/2026-05-16-compact-clear-guardrail-drill/

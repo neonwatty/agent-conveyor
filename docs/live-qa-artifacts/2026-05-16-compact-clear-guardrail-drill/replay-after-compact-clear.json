@@ -1,0 +1,173 @@
+{
+  "entries": [
+    {
+      "actor": "workerctl",
+      "details": {
+        "command_id": "command-e68a297f-8b2e-4d34-9302-89ce460164d4",
+        "state": "failed",
+        "type": "request_worker_compact"
+      },
+      "kind": "command",
+      "source": "commands",
+      "source_id": "command-e68a297f-8b2e-4d34-9302-89ce460164d4",
+      "summary": "request_worker_compact failed",
+      "timestamp": "2026-05-17T02:26:20Z"
+    },
+    {
+      "actor": "manager",
+      "details": {
+        "cycle_id": 1,
+        "manager_capture_id": null,
+        "state": "succeeded",
+        "worker_capture_id": null
+      },
+      "kind": "observe",
+      "source": "manager_cycles",
+      "source_id": 1,
+      "summary": "observed session qa-compact-clear-worker state idle (staleness 12.8s)",
+      "timestamp": "2026-05-17T02:26:20Z"
+    },
+    {
+      "actor": "workerctl",
+      "details": {
+        "created": true,
+        "criterion": "After compaction, manager confirms guardrails survived.",
+        "criterion_id": 1,
+        "event_type": "acceptance_criterion_added",
+        "evidence": {},
+        "proof": null,
+        "rationale": "Deferred because this drill uses dry-run compact/clear to validate guardrail auditability without changing worker context.",
+        "source": "worker_proposed",
+        "status": "deferred",
+        "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1"
+      },
+      "kind": "acceptance_criterion",
+      "source": "events",
+      "source_id": 9,
+      "summary": "deferred criterion #1: Deferred because this drill uses dry-run compact/clear to validate guardrail auditability without changing worker context.",
+      "timestamp": "2026-05-17T02:27:02Z"
+    },
+    {
+      "actor": "workerctl",
+      "details": {
+        "created": true,
+        "criterion": "Receipt includes current status, next surviving steps, known risks, and acceptance criteria.",
+        "criterion_id": 2,
+        "event_type": "acceptance_criterion_added",
+        "evidence": {},
+        "proof": null,
+        "rationale": null,
+        "source": "worker_proposed",
+        "status": "accepted",
+        "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1"
+      },
+      "kind": "acceptance_criterion",
+      "source": "events",
+      "source_id": 10,
+      "summary": "accepted criterion #2: Receipt includes current status, next surviving steps, known risks, and acceptance criteria.",
+      "timestamp": "2026-05-17T02:27:02Z"
+    },
+    {
+      "actor": "workerctl",
+      "details": {
+        "created": true,
+        "criterion": "No files, branches, commits, PRs, dependency installs, direct /compact, or direct /clear actions are performed by the worker.",
+        "criterion_id": 3,
+        "event_type": "acceptance_criterion_added",
+        "evidence": {},
+        "proof": null,
+        "rationale": null,
+        "source": "worker_proposed",
+        "status": "accepted",
+        "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1"
+      },
+      "kind": "acceptance_criterion",
+      "source": "events",
+      "source_id": 11,
+      "summary": "accepted criterion #3: No files, branches, commits, PRs, dependency installs, direct /compact, or direct /clear actions are performed by the worker.",
+      "timestamp": "2026-05-17T02:27:02Z"
+    },
+    {
+      "actor": "workerctl",
+      "details": {
+        "created": true,
+        "criterion": "After clear, manager confirms no unintended work occurred.",
+        "criterion_id": 4,
+        "event_type": "acceptance_criterion_added",
+        "evidence": {},
+        "proof": null,
+        "rationale": "Deferred because this drill uses dry-run compact/clear to validate guardrail auditability without changing worker context.",
+        "source": "worker_proposed",
+        "status": "deferred",
+        "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1"
+      },
+      "kind": "acceptance_criterion",
+      "source": "events",
+      "source_id": 12,
+      "summary": "deferred criterion #4: Deferred because this drill uses dry-run compact/clear to validate guardrail auditability without changing worker context.",
+      "timestamp": "2026-05-17T02:27:02Z"
+    },
+    {
+      "actor": "manager",
+      "details": {
+        "decision": "nudge",
+        "manager_cycle_id": null
+      },
+      "kind": "decision",
+      "source": "manager_decisions",
+      "source_id": 1,
+      "summary": "decision nudge: Durable handoff exists and canonical worker_compact_clear permission is enabled; run audited dry-run compact request to validate guardrails without changing worker context.",
+      "timestamp": "2026-05-17T02:28:02Z"
+    },
+    {
+      "actor": "workerctl",
+      "details": {
+        "command_id": "command-94ca6632-de3b-4870-bcc4-c698d1e558ad",
+        "state": "succeeded",
+        "type": "request_worker_compact"
+      },
+      "kind": "command",
+      "source": "commands",
+      "source_id": "command-94ca6632-de3b-4870-bcc4-c698d1e558ad",
+      "summary": "request_worker_compact succeeded",
+      "timestamp": "2026-05-17T02:28:12Z"
+    },
+    {
+      "actor": "manager",
+      "details": {
+        "decision": "nudge",
+        "manager_cycle_id": null
+      },
+      "kind": "decision",
+      "source": "manager_decisions",
+      "source_id": 2,
+      "summary": "decision nudge: Durable handoff exists and worker_compact_clear permission is enabled; run audited dry-run clear request to validate the clear path without changing worker context.",
+      "timestamp": "2026-05-17T02:28:12Z"
+    },
+    {
+      "actor": "workerctl",
+      "details": {
+        "command_id": "command-f9498b08-645c-4270-833d-ce33ba70034a",
+        "state": "succeeded",
+        "type": "request_worker_compact"
+      },
+      "kind": "command",
+      "source": "commands",
+      "source_id": "command-f9498b08-645c-4270-833d-ce33ba70034a",
+      "summary": "request_worker_compact succeeded",
+      "timestamp": "2026-05-17T02:28:21Z"
+    }
+  ],
+  "entry_count": 10,
+  "mode": "timeline",
+  "role": "all",
+  "task": {
+    "created_at": "2026-05-17T02:25:55Z",
+    "goal": "Validate compact/clear guardrails: permission and handoff are required before an audited manager compact/clear request, and replay/export/mutation-audit explain the sequence.",
+    "id": "task-754a3549-cd9d-45bc-887a-8884419addb1",
+    "name": "qa-compact-clear-guardrail",
+    "state": "candidate",
+    "summary": "Disposable compact/clear permission and handoff guardrail drill.",
+    "updated_at": "2026-05-17T02:25:55Z"
+  }
+}

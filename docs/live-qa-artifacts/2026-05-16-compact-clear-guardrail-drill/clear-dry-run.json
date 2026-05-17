@@ -1,0 +1,40 @@
+{
+  "command_id": "command-f9498b08-645c-4270-833d-ce33ba70034a",
+  "manager_decision": {
+    "age_seconds": 9,
+    "allowed_decisions": [
+      "nudge"
+    ],
+    "decision": {
+      "created_at": "2026-05-17T02:28:12Z",
+      "decision": "nudge",
+      "id": 2,
+      "manager_cycle_id": null,
+      "manager_id": null,
+      "reason": "Durable handoff exists and worker_compact_clear permission is enabled; run audited dry-run clear request to validate the clear path without changing worker context.",
+      "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1"
+    },
+    "decision_id": 2,
+    "max_age_seconds": 900,
+    "ok": true,
+    "warnings": []
+  },
+  "message": "Manager request: prepare for context compaction/clear only if supported by this Codex session.\n\nTask: qa-compact-clear-guardrail\nSaved handoff id: 1\nSaved handoff summary: Disposable worker completed a status-only compact/clear guardrail receipt. Worker performed no file edits, branches, commits, PRs, dependency installs, compact, clear, or meaningful project work.\n\nBefore compacting or clearing visible context, verify the saved handoff still captures current progress. If it is stale, update it with `scripts/workerctl handoff` first. Then run the Codex compact/clear action only if supported and appropriate. Afterward, report whether compaction happened and what the next concrete step is. Do not edit project files as part of this request.",
+  "permission_check": {
+    "action": "worker_compact_clear",
+    "allowed": true,
+    "handoff_id": 1,
+    "reasons": []
+  },
+  "send_result": {
+    "dry_run": true,
+    "session": "qa-compact-clear-worker",
+    "target": "codex-qa-compact-clear-worker",
+    "text": "/clear",
+    "time": "2026-05-17T02:28:21Z"
+  },
+  "send_text": "/clear",
+  "slash_command": "/clear",
+  "task": "qa-compact-clear-guardrail",
+  "worker_session": "qa-compact-clear-worker"
+}

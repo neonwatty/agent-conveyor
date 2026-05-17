@@ -1,0 +1,74 @@
+
+╭────────────────────────────────────────────────╮
+│ >_ OpenAI Codex (v0.130.0)                     │
+│                                                │
+│ model:       gpt-5.5 medium   /model to change │
+│ directory:   ~/Desktop/codex-terminal-manager  │
+│ permissions: YOLO mode                         │
+╰────────────────────────────────────────────────╯
+
+  Tip: Use /init to create an AGENTS.md with project-specific guidance.
+
+
+› Disposable compact/clear guardrail QA worker.
+
+  Do not edit files, commit, branch, open PRs, merge, install dependencies, or
+  perform meaningful project work.
+
+  Your job is to provide a compact status-only receipt for a manager-led
+  compact/clear drill. Report:
+
+  - Current status
+  - Next steps that must survive context compaction
+  - Known risks
+  - 2-4 acceptance criteria split into must-have current-task criteria and
+  deferred follow-ups
+
+  Then stop and wait. Do not run /compact or /clear yourself. The manager/
+  operator will use workerctl audited commands only.
+
+
+⚠ Skill descriptions were shortened to fit the 2% skills context budget. Codex
+  can still see every skill, but some descriptions are shorter. Disable unused
+  skills or plugins to leave more room for the rest.
+
+• Current Status
+
+  Standing by as a disposable QA/status worker. No files edited, no commands
+  run, no project work performed.
+
+  Next Steps To Survive Compaction
+
+  - Manager/operator should perform the compact/clear drill using only audited
+    workerctl commands.
+  - After compaction, verify the surviving context preserves the drill
+    constraints and requested receipt shape.
+  - This worker should remain idle unless explicitly asked for another status-
+    only receipt.
+
+  Known Risks
+
+  - Context compaction may drop the “do not edit/run project work” constraint.
+  - A resumed worker could accidentally treat this as an implementation task
+    instead of a QA drill.
+  - Acceptance criteria may be lost unless explicitly preserved in the compacted
+    summary.
+
+  Acceptance Criteria
+
+  Must-have current-task criteria:
+
+  - Receipt includes current status, next surviving steps, known risks, and
+    acceptance criteria.
+  - No files, branches, commits, PRs, dependency installs, /compact, or /clear
+    actions are performed.
+
+  Deferred follow-ups:
+
+  - After compaction, manager confirms guardrails survived.
+  - After clear, manager confirms no unintended work occurred.
+
+
+› Run /review on my current changes
+
+  gpt-5.5 medium · ~/Desktop/codex-terminal-manager · dogfood-compact-clear-gua…

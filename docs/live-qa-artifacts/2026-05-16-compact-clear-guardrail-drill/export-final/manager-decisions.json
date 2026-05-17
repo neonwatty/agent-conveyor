@@ -1,0 +1,68 @@
+[
+  {
+    "created_at": "2026-05-17T02:28:02Z",
+    "decision": "nudge",
+    "id": 1,
+    "manager_cycle_id": null,
+    "manager_id": null,
+    "payload": {
+      "action": "request_worker_compact",
+      "dry_run": true,
+      "handoff_id": 1,
+      "permission_check": "docs/live-qa-artifacts/2026-05-16-compact-clear-guardrail-drill/permission-after-enable-canonical.json"
+    },
+    "reason": "Durable handoff exists and canonical worker_compact_clear permission is enabled; run audited dry-run compact request to validate guardrails without changing worker context.",
+    "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1"
+  },
+  {
+    "created_at": "2026-05-17T02:28:12Z",
+    "decision": "nudge",
+    "id": 2,
+    "manager_cycle_id": null,
+    "manager_id": null,
+    "payload": {
+      "action": "request_worker_clear",
+      "dry_run": true,
+      "handoff_id": 1,
+      "permission_check": "docs/live-qa-artifacts/2026-05-16-compact-clear-guardrail-drill/permission-after-enable-canonical.json"
+    },
+    "reason": "Durable handoff exists and worker_compact_clear permission is enabled; run audited dry-run clear request to validate the clear path without changing worker context.",
+    "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1"
+  },
+  {
+    "created_at": "2026-05-17T02:29:11Z",
+    "decision": "stop",
+    "id": 3,
+    "manager_cycle_id": null,
+    "manager_id": null,
+    "payload": {
+      "caveat": "mutation-audit is clean but reports zero mutations for dry-run request-worker-compact commands; commands and replay carry the detailed command audit.",
+      "clear_command": "command-f9498b08-645c-4270-833d-ce33ba70034a",
+      "compact_command": "command-94ca6632-de3b-4870-bcc4-c698d1e558ad",
+      "deferred_criteria": [
+        1,
+        4
+      ],
+      "qa_result": "passed_with_caveat",
+      "satisfied_criteria": [
+        2,
+        3
+      ]
+    },
+    "reason": "Compact/clear guardrail drill complete: fail-closed checks, durable handoff, canonical permission, strict nudge decisions, compact dry-run, clear dry-run, commands/replay/export evidence, and criteria audit are recorded.",
+    "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1"
+  },
+  {
+    "created_at": "2026-05-17T02:29:11Z",
+    "decision": "stop",
+    "id": 4,
+    "manager_cycle_id": null,
+    "manager_id": null,
+    "payload": {
+      "command_id": "command-9154fb8d-72d9-4c37-bbb9-784cb49e6a49",
+      "source": "finish_task"
+    },
+    "reason": "Finish compact/clear guardrail drill after satisfied accepted criteria and recorded command audit evidence.",
+    "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1"
+  }
+]

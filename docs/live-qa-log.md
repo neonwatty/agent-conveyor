@@ -420,3 +420,53 @@ Result:
 - The first meaningful manager-led dogfood task passed.
 - Follow-ups remain deferred for richer nested Markdown parsing and broader
   fixture coverage from future dogfood transcripts.
+
+## 2026-05-16: Compact/Clear Guardrail Drill
+
+Scenario:
+
+- Disposable compact/clear guardrail QA drill after Gate 5.
+- Branch: `dogfood-compact-clear-guardrail`
+- Isolated state root:
+  `/tmp/codex-terminal-manager-compact-clear-state`
+- Evidence root:
+  `docs/live-qa-artifacts/2026-05-16-compact-clear-guardrail-drill/`
+
+Validated:
+
+- Before handoff and permission, `manager-permission worker_compact_clear
+  --require-handoff --require` failed closed with `permission_not_enabled` and
+  `missing_worker_handoff`.
+- Before a manager nudge decision, `request-worker-compact --strict-decisions
+  --dry-run` failed closed with `missing_decision_id`.
+- Worker produced a status-only receipt and did not edit files, branch, commit,
+  open PRs, install dependencies, or directly run `/compact` or `/clear`.
+- Durable `handoff.json` preserved current status, next steps, and known risks.
+- Handoff alone was insufficient while permission remained disabled.
+- Setting only `allow_worker_compact_clear` in `--permissions-json` did not
+  satisfy `manager-permission`; the canonical checked key is
+  `worker_compact_clear`.
+- After setting canonical `worker_compact_clear: true`, permission plus handoff
+  passed.
+- Audited dry-run `/compact` and `/clear` requests succeeded only with valid
+  nudge decisions.
+- `commands`, `replay`, and export evidence show the failed preflight, allowed
+  permission check, decision ids, handoff id, dry-run slash command targets, and
+  final cleanup.
+- `finish-task --require-criteria-audit --stop-manager --stop-worker` finished
+  with zero open accepted criteria.
+- Final isolated reconcile, default reconcile, and matching tmux checks were
+  clean.
+
+Caveat:
+
+- `mutation-audit` is clean but reports zero mutations for dry-run
+  `request-worker-compact` commands. The detailed audit trail is currently in
+  `commands` and `replay`, not mutation-audit.
+
+Result:
+
+- Compact/clear guardrail drill passed with the caveat above.
+- Follow-up: consider documenting or normalizing permission key aliases, and
+  decide whether dry-run compact/clear command attempts should appear in
+  mutation-audit or whether command/replay audit is the intended surface.
