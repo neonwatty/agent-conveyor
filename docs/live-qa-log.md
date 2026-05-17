@@ -594,3 +594,31 @@ Result:
 - Follow-up: the legacy `nudge` command path remains discoverability friction
   for managers; manager prompts or CLI aliases should steer managers toward
   `session-nudge` for session-name targets.
+
+## 2026-05-17: Scenario 10 Nudge Friction Follow-Up
+
+Follow-up from:
+
+- `2026-05-17: Scenario 10 Manager Quality Drill`
+
+Resolved:
+
+- Legacy `scripts/workerctl nudge <name> "<text>"` now falls back to
+  session-name delivery when no legacy file-backed worker directory exists.
+- The fallback records a `session_nudged` event with `legacy_command: "nudge"`,
+  preserving the audited session path.
+- Manager bootstrap now tells managers to use
+  `scripts/workerctl session-nudge <worker> "..."` first for session-bound
+  pairs, and frames legacy `nudge` as the old file-backed worker path.
+- README documents the same distinction.
+
+Verification:
+
+- Focused regression tests for legacy nudge fallback, `session-nudge`, and the
+  manager bootstrap prompt passed.
+- Full unittest suite passed: 344 tests.
+
+Result:
+
+- The Scenario 10 command-discoverability friction is resolved by both behavior
+  and prompt guidance.

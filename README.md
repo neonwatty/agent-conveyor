@@ -413,7 +413,9 @@ debugging.
 - `status <name>` — Print worker status as JSON.
 - `idle-check <name>` — Classify worker freshness and recommend an action.
 - `capture <name>` — Capture recent terminal output.
-- `nudge <name> "<text>"` — Send text into the worker terminal.
+- `nudge <name> "<text>"` — Legacy worker-directory nudge. For managed
+  session pairs, prefer `session-nudge <name> "<text>"`; `nudge` falls back to
+  session-name delivery when no legacy worker directory exists.
 - `interrupt <name>` — Send an explicit interrupt key.
 - `stop <name>` — Stop a worker tmux session.
 - `update-status <name>` — Update a worker status contract.
