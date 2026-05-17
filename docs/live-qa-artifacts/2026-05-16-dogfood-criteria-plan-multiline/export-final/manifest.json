@@ -1,0 +1,20 @@
+{
+  "created_at": "2026-05-17T02:20:47Z",
+  "files": [
+    "task-status.json",
+    "audit.json",
+    "acceptance-criteria.json",
+    "prompts.json",
+    "transcript-captures.json",
+    "terminal-captures.json",
+    "agent-observations.json",
+    "manager-cycles.json",
+    "manager-decisions.json",
+    "mutation-audit.json",
+    "replay.json"
+  ],
+  "task": {
+    "id": "task-6cbfd9de-0add-48ce-a074-7455b294ce7f",
+    "name": "dogfood-criteria-plan-multiline"
+  }
+}

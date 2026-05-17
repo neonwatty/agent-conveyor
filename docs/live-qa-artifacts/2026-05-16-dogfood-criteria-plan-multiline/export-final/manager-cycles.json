@@ -1,0 +1,924 @@
+[
+  {
+    "completed_at": "2026-05-17T02:15:44Z",
+    "decision": null,
+    "error": null,
+    "health": null,
+    "health_observation_id": null,
+    "id": 33,
+    "manager_capture_id": null,
+    "manager_id": null,
+    "started_at": "2026-05-17T02:15:44Z",
+    "state": "succeeded",
+    "status": {
+      "binding_id": "binding-227ca446-1369-4594-806a-fa1e7c2d1816",
+      "ingest": {
+        "new_events": 18,
+        "new_offset": 115723,
+        "skipped_lines": 0
+      },
+      "kind": "session_cycle",
+      "last_event_subtype": null,
+      "last_state_event_at": "2026-05-17T02:15:30.427Z",
+      "manager_alive": true,
+      "manager_context": {
+        "acceptance_criteria": {
+          "deferred": [],
+          "open": [],
+          "proposed": [],
+          "rejected": [],
+          "satisfied": [],
+          "summary": {
+            "accepted": 0,
+            "deferred": 0,
+            "proposed": 0,
+            "rejected": 0,
+            "satisfied": 0
+          }
+        },
+        "criteria_negotiation": {
+          "needed": true,
+          "prompt": "Please propose 2-4 acceptance criteria for the current slice. Split them into must-have current-task criteria and follow-up criteria. Include the verification you expect for each.",
+          "reason": "no_criteria",
+          "suggested_actions": [
+            "Ask the worker to split must-have current-task criteria from follow-up criteria.",
+            "Record accepted current-task criteria with workerctl criteria dogfood-criteria-plan-multiline --add --criterion \"...\" --source worker_proposed --status accepted.",
+            "Record proposed current-task criteria with workerctl criteria dogfood-criteria-plan-multiline --add --criterion \"...\" --source worker_proposed --status proposed.",
+            "Record follow-up criteria with workerctl criteria dogfood-criteria-plan-multiline --add --criterion \"...\" --source worker_proposed --status deferred."
+          ]
+        },
+        "manager_config": {
+          "acceptance_criteria": [
+            "Current-task acceptance criteria are recorded before completion and deferred follow-ups are separated with rationale.",
+            "criteria-plan correctly preserves multi-line bullet criteria under current-task and follow-up headings.",
+            "criteria-plan remains read-only and does not mutate acceptance_criteria, events, or commands.",
+            "Focused and full unit tests pass, or any test limitation is recorded with exact output."
+          ],
+          "created_at": "2026-05-17T02:15:36Z",
+          "guidelines": [
+            "Do not merge PRs, do not switch away from branch dogfood-criteria-plan-multiline, and do not perform destructive cleanup.",
+            "When criteria are proposed, use criteria-plan as a draft only; record reviewed accepted/deferred criteria manually if needed.",
+            "Nudge only when durable state shows the worker is blocked, stale, missing criteria, or needs a concrete next action."
+          ],
+          "objective": "Manage the worker through a low-risk meaningful branch-scoped fix for criteria-plan multi-line criteria extraction. Ensure emergent acceptance criteria are recorded before accepting completion, and require proof from tests and replay/export before finish.",
+          "permissions": {
+            "allow_merge_green": false,
+            "allow_pr": true,
+            "allow_worker_compact_clear": false,
+            "create_pr": false,
+            "merge_green_pr": false,
+            "worker_compact_clear": false
+          },
+          "reference_paths": [],
+          "supervision_mode": "guided",
+          "task_id": "task-6cbfd9de-0add-48ce-a074-7455b294ce7f",
+          "updated_at": "2026-05-17T02:15:36Z"
+        },
+        "worker_handoff": null
+      },
+      "manager_session": "dogfood-criteria-plan-manager",
+      "notable_pane_pattern": "mcp_startup",
+      "pane_signal": {
+        "captured": true,
+        "classifier": {
+          "pattern": "mcp_startup",
+          "reason": "terminal shows Codex waiting on MCP server startup",
+          "recommended_action": "inspect_or_interrupt"
+        },
+        "degraded": false,
+        "notable_pattern": "mcp_startup",
+        "reason": null,
+        "status_age_seconds": 13
+      },
+      "staleness_seconds": 13.573,
+      "state": "busy",
+      "task": "dogfood-criteria-plan-multiline",
+      "task_completed": false,
+      "worker_alive": true,
+      "worker_session": "dogfood-criteria-plan-worker"
+    },
+    "task_id": "task-6cbfd9de-0add-48ce-a074-7455b294ce7f",
+    "worker_capture_id": null
+  },
+  {
+    "completed_at": "2026-05-17T02:16:10Z",
+    "decision": null,
+    "error": null,
+    "health": null,
+    "health_observation_id": null,
+    "id": 34,
+    "manager_capture_id": null,
+    "manager_id": null,
+    "started_at": "2026-05-17T02:16:10Z",
+    "state": "succeeded",
+    "status": {
+      "binding_id": "binding-227ca446-1369-4594-806a-fa1e7c2d1816",
+      "ingest": {
+        "new_events": 25,
+        "new_offset": 188333,
+        "skipped_lines": 0
+      },
+      "kind": "session_cycle",
+      "last_event_subtype": null,
+      "last_state_event_at": "2026-05-17T02:15:30.427Z",
+      "manager_alive": true,
+      "manager_context": {
+        "acceptance_criteria": {
+          "deferred": [],
+          "open": [],
+          "proposed": [],
+          "rejected": [],
+          "satisfied": [],
+          "summary": {
+            "accepted": 0,
+            "deferred": 0,
+            "proposed": 0,
+            "rejected": 0,
+            "satisfied": 0
+          }
+        },
+        "criteria_negotiation": {
+          "needed": true,
+          "prompt": "Please propose 2-4 acceptance criteria for the current slice. Split them into must-have current-task criteria and follow-up criteria. Include the verification you expect for each.",
+          "reason": "no_criteria",
+          "suggested_actions": [
+            "Ask the worker to split must-have current-task criteria from follow-up criteria.",
+            "Record accepted current-task criteria with workerctl criteria dogfood-criteria-plan-multiline --add --criterion \"...\" --source worker_proposed --status accepted.",
+            "Record proposed current-task criteria with workerctl criteria dogfood-criteria-plan-multiline --add --criterion \"...\" --source worker_proposed --status proposed.",
+            "Record follow-up criteria with workerctl criteria dogfood-criteria-plan-multiline --add --criterion \"...\" --source worker_proposed --status deferred."
+          ]
+        },
+        "manager_config": {
+          "acceptance_criteria": [
+            "Current-task acceptance criteria are recorded before completion and deferred follow-ups are separated with rationale.",
+            "criteria-plan correctly preserves multi-line bullet criteria under current-task and follow-up headings.",
+            "criteria-plan remains read-only and does not mutate acceptance_criteria, events, or commands.",
+            "Focused and full unit tests pass, or any test limitation is recorded with exact output."
+          ],
+          "created_at": "2026-05-17T02:15:36Z",
+          "guidelines": [
+            "Do not merge PRs, do not switch away from branch dogfood-criteria-plan-multiline, and do not perform destructive cleanup.",
+            "When criteria are proposed, use criteria-plan as a draft only; record reviewed accepted/deferred criteria manually if needed.",
+            "Nudge only when durable state shows the worker is blocked, stale, missing criteria, or needs a concrete next action."
+          ],
+          "objective": "Manage the worker through a low-risk meaningful branch-scoped fix for criteria-plan multi-line criteria extraction. Ensure emergent acceptance criteria are recorded before accepting completion, and require proof from tests and replay/export before finish.",
+          "permissions": {
+            "allow_merge_green": false,
+            "allow_pr": true,
+            "allow_worker_compact_clear": false,
+            "create_pr": false,
+            "merge_green_pr": false,
+            "worker_compact_clear": false
+          },
+          "reference_paths": [],
+          "supervision_mode": "guided",
+          "task_id": "task-6cbfd9de-0add-48ce-a074-7455b294ce7f",
+          "updated_at": "2026-05-17T02:15:36Z"
+        },
+        "worker_handoff": null
+      },
+      "manager_session": "dogfood-criteria-plan-manager",
+      "notable_pane_pattern": "mcp_startup",
+      "pane_signal": {
+        "captured": true,
+        "classifier": {
+          "pattern": "mcp_startup",
+          "reason": "terminal shows Codex waiting on MCP server startup",
+          "recommended_action": "inspect_or_interrupt"
+        },
+        "degraded": false,
+        "notable_pattern": "mcp_startup",
+        "reason": null,
+        "status_age_seconds": 39
+      },
+      "staleness_seconds": 39.573,
+      "state": "busy",
+      "task": "dogfood-criteria-plan-multiline",
+      "task_completed": false,
+      "worker_alive": true,
+      "worker_session": "dogfood-criteria-plan-worker"
+    },
+    "task_id": "task-6cbfd9de-0add-48ce-a074-7455b294ce7f",
+    "worker_capture_id": null
+  },
+  {
+    "completed_at": "2026-05-17T02:16:31Z",
+    "decision": null,
+    "error": null,
+    "health": null,
+    "health_observation_id": null,
+    "id": 35,
+    "manager_capture_id": null,
+    "manager_id": null,
+    "started_at": "2026-05-17T02:16:31Z",
+    "state": "succeeded",
+    "status": {
+      "binding_id": "binding-227ca446-1369-4594-806a-fa1e7c2d1816",
+      "ingest": {
+        "new_events": 7,
+        "new_offset": 197536,
+        "skipped_lines": 0
+      },
+      "kind": "session_cycle",
+      "last_event_subtype": null,
+      "last_state_event_at": "2026-05-17T02:15:30.427Z",
+      "manager_alive": true,
+      "manager_context": {
+        "acceptance_criteria": {
+          "deferred": [],
+          "open": [],
+          "proposed": [],
+          "rejected": [],
+          "satisfied": [],
+          "summary": {
+            "accepted": 0,
+            "deferred": 0,
+            "proposed": 0,
+            "rejected": 0,
+            "satisfied": 0
+          }
+        },
+        "criteria_negotiation": {
+          "needed": true,
+          "prompt": "Please propose 2-4 acceptance criteria for the current slice. Split them into must-have current-task criteria and follow-up criteria. Include the verification you expect for each.",
+          "reason": "no_criteria",
+          "suggested_actions": [
+            "Ask the worker to split must-have current-task criteria from follow-up criteria.",
+            "Record accepted current-task criteria with workerctl criteria dogfood-criteria-plan-multiline --add --criterion \"...\" --source worker_proposed --status accepted.",
+            "Record proposed current-task criteria with workerctl criteria dogfood-criteria-plan-multiline --add --criterion \"...\" --source worker_proposed --status proposed.",
+            "Record follow-up criteria with workerctl criteria dogfood-criteria-plan-multiline --add --criterion \"...\" --source worker_proposed --status deferred."
+          ]
+        },
+        "manager_config": {
+          "acceptance_criteria": [
+            "Current-task acceptance criteria are recorded before completion and deferred follow-ups are separated with rationale.",
+            "criteria-plan correctly preserves multi-line bullet criteria under current-task and follow-up headings.",
+            "criteria-plan remains read-only and does not mutate acceptance_criteria, events, or commands.",
+            "Focused and full unit tests pass, or any test limitation is recorded with exact output."
+          ],
+          "created_at": "2026-05-17T02:15:36Z",
+          "guidelines": [
+            "Do not merge PRs, do not switch away from branch dogfood-criteria-plan-multiline, and do not perform destructive cleanup.",
+            "When criteria are proposed, use criteria-plan as a draft only; record reviewed accepted/deferred criteria manually if needed.",
+            "Nudge only when durable state shows the worker is blocked, stale, missing criteria, or needs a concrete next action."
+          ],
+          "objective": "Manage the worker through a low-risk meaningful branch-scoped fix for criteria-plan multi-line criteria extraction. Ensure emergent acceptance criteria are recorded before accepting completion, and require proof from tests and replay/export before finish.",
+          "permissions": {
+            "allow_merge_green": false,
+            "allow_pr": true,
+            "allow_worker_compact_clear": false,
+            "create_pr": false,
+            "merge_green_pr": false,
+            "worker_compact_clear": false
+          },
+          "reference_paths": [],
+          "supervision_mode": "guided",
+          "task_id": "task-6cbfd9de-0add-48ce-a074-7455b294ce7f",
+          "updated_at": "2026-05-17T02:15:36Z"
+        },
+        "worker_handoff": null
+      },
+      "manager_session": "dogfood-criteria-plan-manager",
+      "notable_pane_pattern": null,
+      "pane_signal": {
+        "captured": true,
+        "classifier": null,
+        "degraded": false,
+        "notable_pattern": null,
+        "reason": null,
+        "status_age_seconds": 60
+      },
+      "staleness_seconds": 60.573,
+      "state": "busy",
+      "task": "dogfood-criteria-plan-multiline",
+      "task_completed": false,
+      "worker_alive": true,
+      "worker_session": "dogfood-criteria-plan-worker"
+    },
+    "task_id": "task-6cbfd9de-0add-48ce-a074-7455b294ce7f",
+    "worker_capture_id": null
+  },
+  {
+    "completed_at": "2026-05-17T02:17:07Z",
+    "decision": null,
+    "error": null,
+    "health": null,
+    "health_observation_id": null,
+    "id": 36,
+    "manager_capture_id": null,
+    "manager_id": null,
+    "started_at": "2026-05-17T02:17:07Z",
+    "state": "succeeded",
+    "status": {
+      "binding_id": "binding-227ca446-1369-4594-806a-fa1e7c2d1816",
+      "ingest": {
+        "new_events": 26,
+        "new_offset": 225476,
+        "skipped_lines": 0
+      },
+      "kind": "session_cycle",
+      "last_event_subtype": null,
+      "last_state_event_at": "2026-05-17T02:15:30.427Z",
+      "manager_alive": true,
+      "manager_context": {
+        "acceptance_criteria": {
+          "deferred": [],
+          "open": [
+            {
+              "created_at": "2026-05-17T02:16:59Z",
+              "criterion": "criteria-plan preserves multi-line bullet criteria by joining continuation lines into the same criterion text for both must-have/current-task and follow-up/deferred sections.",
+              "evidence": {},
+              "id": 28,
+              "proof": null,
+              "rationale": null,
+              "source": "worker_proposed",
+              "status": "accepted",
+              "task_id": "task-6cbfd9de-0add-48ce-a074-7455b294ce7f",
+              "updated_at": "2026-05-17T02:16:59Z"
+            },
+            {
+              "created_at": "2026-05-17T02:17:04Z",
+              "criterion": "The parser only joins clear continuation prose under an active list item and does not convert unrelated prose, headings, or separate list items into the prior criterion.",
+              "evidence": {},
+              "id": 29,
+              "proof": null,
+              "rationale": null,
+              "source": "worker_proposed",
+              "status": "accepted",
+              "task_id": "task-6cbfd9de-0add-48ce-a074-7455b294ce7f",
+              "updated_at": "2026-05-17T02:17:04Z"
+            }
+          ],
+          "proposed": [],
+          "rejected": [],
+          "satisfied": [],
+          "summary": {
+            "accepted": 2,
+            "deferred": 0,
+            "proposed": 0,
+            "rejected": 0,
+            "satisfied": 0
+          }
+        },
+        "criteria_negotiation": {
+          "needed": false,
+          "prompt": null,
+          "reason": "active_criteria_present",
+          "suggested_actions": []
+        },
+        "manager_config": {
+          "acceptance_criteria": [
+            "Current-task acceptance criteria are recorded before completion and deferred follow-ups are separated with rationale.",
+            "criteria-plan correctly preserves multi-line bullet criteria under current-task and follow-up headings.",
+            "criteria-plan remains read-only and does not mutate acceptance_criteria, events, or commands.",
+            "Focused and full unit tests pass, or any test limitation is recorded with exact output."
+          ],
+          "created_at": "2026-05-17T02:15:36Z",
+          "guidelines": [
+            "Do not merge PRs, do not switch away from branch dogfood-criteria-plan-multiline, and do not perform destructive cleanup.",
+            "When criteria are proposed, use criteria-plan as a draft only; record reviewed accepted/deferred criteria manually if needed.",
+            "Nudge only when durable state shows the worker is blocked, stale, missing criteria, or needs a concrete next action."
+          ],
+          "objective": "Manage the worker through a low-risk meaningful branch-scoped fix for criteria-plan multi-line criteria extraction. Ensure emergent acceptance criteria are recorded before accepting completion, and require proof from tests and replay/export before finish.",
+          "permissions": {
+            "allow_merge_green": false,
+            "allow_pr": true,
+            "allow_worker_compact_clear": false,
+            "create_pr": false,
+            "merge_green_pr": false,
+            "worker_compact_clear": false
+          },
+          "reference_paths": [],
+          "supervision_mode": "guided",
+          "task_id": "task-6cbfd9de-0add-48ce-a074-7455b294ce7f",
+          "updated_at": "2026-05-17T02:15:36Z"
+        },
+        "worker_handoff": null
+      },
+      "manager_session": "dogfood-criteria-plan-manager",
+      "notable_pane_pattern": "mcp_startup",
+      "pane_signal": {
+        "captured": true,
+        "classifier": {
+          "pattern": "mcp_startup",
+          "reason": "terminal shows Codex waiting on MCP server startup",
+          "recommended_action": "inspect_or_interrupt"
+        },
+        "degraded": false,
+        "notable_pattern": "mcp_startup",
+        "reason": null,
+        "status_age_seconds": 96
+      },
+      "staleness_seconds": 96.573,
+      "state": "busy",
+      "task": "dogfood-criteria-plan-multiline",
+      "task_completed": false,
+      "worker_alive": true,
+      "worker_session": "dogfood-criteria-plan-worker"
+    },
+    "task_id": "task-6cbfd9de-0add-48ce-a074-7455b294ce7f",
+    "worker_capture_id": null
+  },
+  {
+    "completed_at": "2026-05-17T02:17:23Z",
+    "decision": null,
+    "error": null,
+    "health": null,
+    "health_observation_id": null,
+    "id": 37,
+    "manager_capture_id": null,
+    "manager_id": null,
+    "started_at": "2026-05-17T02:17:23Z",
+    "state": "succeeded",
+    "status": {
+      "binding_id": "binding-227ca446-1369-4594-806a-fa1e7c2d1816",
+      "ingest": {
+        "new_events": 10,
+        "new_offset": 237706,
+        "skipped_lines": 0
+      },
+      "kind": "session_cycle",
+      "last_event_subtype": "token_count",
+      "last_state_event_at": "2026-05-17T02:15:30.427Z",
+      "manager_alive": true,
+      "manager_context": {
+        "acceptance_criteria": {
+          "deferred": [
+            {
+              "created_at": "2026-05-17T02:17:15Z",
+              "criterion": "Broaden criteria-plan parsing for nested sub-bullets or richer Markdown structure if managers need to preserve indentation/structure rather than flattened criterion text.",
+              "evidence": {},
+              "id": 32,
+              "proof": null,
+              "rationale": "Follow-up after this QA slice.",
+              "source": "worker_proposed",
+              "status": "deferred",
+              "task_id": "task-6cbfd9de-0add-48ce-a074-7455b294ce7f",
+              "updated_at": "2026-05-17T02:17:15Z"
+            },
+            {
+              "created_at": "2026-05-17T02:17:18Z",
+              "criterion": "Add fixture-based regression coverage from more real dogfood transcripts if additional truncation shapes appear beyond the Gate 5-style wrapped prose.",
+              "evidence": {},
+              "id": 33,
+              "proof": null,
+              "rationale": "Follow-up after this QA slice.",
+              "source": "worker_proposed",
+              "status": "deferred",
+              "task_id": "task-6cbfd9de-0add-48ce-a074-7455b294ce7f",
+              "updated_at": "2026-05-17T02:17:18Z"
+            }
+          ],
+          "open": [
+            {
+              "created_at": "2026-05-17T02:16:59Z",
+              "criterion": "criteria-plan preserves multi-line bullet criteria by joining continuation lines into the same criterion text for both must-have/current-task and follow-up/deferred sections.",
+              "evidence": {},
+              "id": 28,
+              "proof": null,
+              "rationale": null,
+              "source": "worker_proposed",
+              "status": "accepted",
+              "task_id": "task-6cbfd9de-0add-48ce-a074-7455b294ce7f",
+              "updated_at": "2026-05-17T02:16:59Z"
+            },
+            {
+              "created_at": "2026-05-17T02:17:04Z",
+              "criterion": "The parser only joins clear continuation prose under an active list item and does not convert unrelated prose, headings, or separate list items into the prior criterion.",
+              "evidence": {},
+              "id": 29,
+              "proof": null,
+              "rationale": null,
+              "source": "worker_proposed",
+              "status": "accepted",
+              "task_id": "task-6cbfd9de-0add-48ce-a074-7455b294ce7f",
+              "updated_at": "2026-05-17T02:17:04Z"
+            },
+            {
+              "created_at": "2026-05-17T02:17:07Z",
+              "criterion": "Deferred suggestions still receive the default deferred rationale, accepted suggestions do not, and existing single-line extraction behavior is preserved.",
+              "evidence": {},
+              "id": 30,
+              "proof": null,
+              "rationale": null,
+              "source": "worker_proposed",
+              "status": "accepted",
+              "task_id": "task-6cbfd9de-0add-48ce-a074-7455b294ce7f",
+              "updated_at": "2026-05-17T02:17:07Z"
+            },
+            {
+              "created_at": "2026-05-17T02:17:11Z",
+              "criterion": "criteria-plan remains read-only: running it does not create or mutate acceptance_criteria, events, or commands rows.",
+              "evidence": {},
+              "id": 31,
+              "proof": null,
+              "rationale": null,
+              "source": "worker_proposed",
+              "status": "accepted",
+              "task_id": "task-6cbfd9de-0add-48ce-a074-7455b294ce7f",
+              "updated_at": "2026-05-17T02:17:11Z"
+            }
+          ],
+          "proposed": [],
+          "rejected": [],
+          "satisfied": [],
+          "summary": {
+            "accepted": 4,
+            "deferred": 2,
+            "proposed": 0,
+            "rejected": 0,
+            "satisfied": 0
+          }
+        },
+        "criteria_negotiation": {
+          "needed": false,
+          "prompt": null,
+          "reason": "active_criteria_present",
+          "suggested_actions": []
+        },
+        "manager_config": {
+          "acceptance_criteria": [
+            "Current-task acceptance criteria are recorded before completion and deferred follow-ups are separated with rationale.",
+            "criteria-plan correctly preserves multi-line bullet criteria under current-task and follow-up headings.",
+            "criteria-plan remains read-only and does not mutate acceptance_criteria, events, or commands.",
+            "Focused and full unit tests pass, or any test limitation is recorded with exact output."
+          ],
+          "created_at": "2026-05-17T02:15:36Z",
+          "guidelines": [
+            "Do not merge PRs, do not switch away from branch dogfood-criteria-plan-multiline, and do not perform destructive cleanup.",
+            "When criteria are proposed, use criteria-plan as a draft only; record reviewed accepted/deferred criteria manually if needed.",
+            "Nudge only when durable state shows the worker is blocked, stale, missing criteria, or needs a concrete next action."
+          ],
+          "objective": "Manage the worker through a low-risk meaningful branch-scoped fix for criteria-plan multi-line criteria extraction. Ensure emergent acceptance criteria are recorded before accepting completion, and require proof from tests and replay/export before finish.",
+          "permissions": {
+            "allow_merge_green": false,
+            "allow_pr": true,
+            "allow_worker_compact_clear": false,
+            "create_pr": false,
+            "merge_green_pr": false,
+            "worker_compact_clear": false
+          },
+          "reference_paths": [],
+          "supervision_mode": "guided",
+          "task_id": "task-6cbfd9de-0add-48ce-a074-7455b294ce7f",
+          "updated_at": "2026-05-17T02:15:36Z"
+        },
+        "worker_handoff": null
+      },
+      "manager_session": "dogfood-criteria-plan-manager",
+      "notable_pane_pattern": "mcp_startup",
+      "pane_signal": {
+        "captured": true,
+        "classifier": {
+          "pattern": "mcp_startup",
+          "reason": "terminal shows Codex waiting on MCP server startup",
+          "recommended_action": "inspect_or_interrupt"
+        },
+        "degraded": false,
+        "notable_pattern": "mcp_startup",
+        "reason": null,
+        "status_age_seconds": 112
+      },
+      "staleness_seconds": 112.573,
+      "state": "busy",
+      "task": "dogfood-criteria-plan-multiline",
+      "task_completed": false,
+      "worker_alive": true,
+      "worker_session": "dogfood-criteria-plan-worker"
+    },
+    "task_id": "task-6cbfd9de-0add-48ce-a074-7455b294ce7f",
+    "worker_capture_id": null
+  },
+  {
+    "completed_at": "2026-05-17T02:18:20Z",
+    "decision": null,
+    "error": null,
+    "health": null,
+    "health_observation_id": null,
+    "id": 38,
+    "manager_capture_id": null,
+    "manager_id": null,
+    "started_at": "2026-05-17T02:18:20Z",
+    "state": "succeeded",
+    "status": {
+      "binding_id": "binding-227ca446-1369-4594-806a-fa1e7c2d1816",
+      "ingest": {
+        "new_events": 16,
+        "new_offset": 263447,
+        "skipped_lines": 0
+      },
+      "kind": "session_cycle",
+      "last_event_subtype": "task_complete",
+      "last_state_event_at": "2026-05-17T02:17:43.861Z",
+      "manager_alive": true,
+      "manager_context": {
+        "acceptance_criteria": {
+          "deferred": [
+            {
+              "created_at": "2026-05-17T02:17:15Z",
+              "criterion": "Broaden criteria-plan parsing for nested sub-bullets or richer Markdown structure if managers need to preserve indentation/structure rather than flattened criterion text.",
+              "evidence": {},
+              "id": 32,
+              "proof": null,
+              "rationale": "Follow-up after this QA slice.",
+              "source": "worker_proposed",
+              "status": "deferred",
+              "task_id": "task-6cbfd9de-0add-48ce-a074-7455b294ce7f",
+              "updated_at": "2026-05-17T02:17:15Z"
+            },
+            {
+              "created_at": "2026-05-17T02:17:18Z",
+              "criterion": "Add fixture-based regression coverage from more real dogfood transcripts if additional truncation shapes appear beyond the Gate 5-style wrapped prose.",
+              "evidence": {},
+              "id": 33,
+              "proof": null,
+              "rationale": "Follow-up after this QA slice.",
+              "source": "worker_proposed",
+              "status": "deferred",
+              "task_id": "task-6cbfd9de-0add-48ce-a074-7455b294ce7f",
+              "updated_at": "2026-05-17T02:17:18Z"
+            }
+          ],
+          "open": [
+            {
+              "created_at": "2026-05-17T02:16:59Z",
+              "criterion": "criteria-plan preserves multi-line bullet criteria by joining continuation lines into the same criterion text for both must-have/current-task and follow-up/deferred sections.",
+              "evidence": {},
+              "id": 28,
+              "proof": null,
+              "rationale": null,
+              "source": "worker_proposed",
+              "status": "accepted",
+              "task_id": "task-6cbfd9de-0add-48ce-a074-7455b294ce7f",
+              "updated_at": "2026-05-17T02:16:59Z"
+            },
+            {
+              "created_at": "2026-05-17T02:17:04Z",
+              "criterion": "The parser only joins clear continuation prose under an active list item and does not convert unrelated prose, headings, or separate list items into the prior criterion.",
+              "evidence": {},
+              "id": 29,
+              "proof": null,
+              "rationale": null,
+              "source": "worker_proposed",
+              "status": "accepted",
+              "task_id": "task-6cbfd9de-0add-48ce-a074-7455b294ce7f",
+              "updated_at": "2026-05-17T02:17:04Z"
+            },
+            {
+              "created_at": "2026-05-17T02:17:07Z",
+              "criterion": "Deferred suggestions still receive the default deferred rationale, accepted suggestions do not, and existing single-line extraction behavior is preserved.",
+              "evidence": {},
+              "id": 30,
+              "proof": null,
+              "rationale": null,
+              "source": "worker_proposed",
+              "status": "accepted",
+              "task_id": "task-6cbfd9de-0add-48ce-a074-7455b294ce7f",
+              "updated_at": "2026-05-17T02:17:07Z"
+            },
+            {
+              "created_at": "2026-05-17T02:17:11Z",
+              "criterion": "criteria-plan remains read-only: running it does not create or mutate acceptance_criteria, events, or commands rows.",
+              "evidence": {},
+              "id": 31,
+              "proof": null,
+              "rationale": null,
+              "source": "worker_proposed",
+              "status": "accepted",
+              "task_id": "task-6cbfd9de-0add-48ce-a074-7455b294ce7f",
+              "updated_at": "2026-05-17T02:17:11Z"
+            }
+          ],
+          "proposed": [],
+          "rejected": [],
+          "satisfied": [],
+          "summary": {
+            "accepted": 4,
+            "deferred": 2,
+            "proposed": 0,
+            "rejected": 0,
+            "satisfied": 0
+          }
+        },
+        "criteria_negotiation": {
+          "needed": false,
+          "prompt": null,
+          "reason": "active_criteria_present",
+          "suggested_actions": []
+        },
+        "manager_config": {
+          "acceptance_criteria": [
+            "Current-task acceptance criteria are recorded before completion and deferred follow-ups are separated with rationale.",
+            "criteria-plan correctly preserves multi-line bullet criteria under current-task and follow-up headings.",
+            "criteria-plan remains read-only and does not mutate acceptance_criteria, events, or commands.",
+            "Focused and full unit tests pass, or any test limitation is recorded with exact output."
+          ],
+          "created_at": "2026-05-17T02:15:36Z",
+          "guidelines": [
+            "Do not merge PRs, do not switch away from branch dogfood-criteria-plan-multiline, and do not perform destructive cleanup.",
+            "When criteria are proposed, use criteria-plan as a draft only; record reviewed accepted/deferred criteria manually if needed.",
+            "Nudge only when durable state shows the worker is blocked, stale, missing criteria, or needs a concrete next action."
+          ],
+          "objective": "Manage the worker through a low-risk meaningful branch-scoped fix for criteria-plan multi-line criteria extraction. Ensure emergent acceptance criteria are recorded before accepting completion, and require proof from tests and replay/export before finish.",
+          "permissions": {
+            "allow_merge_green": false,
+            "allow_pr": true,
+            "allow_worker_compact_clear": false,
+            "create_pr": false,
+            "merge_green_pr": false,
+            "worker_compact_clear": false
+          },
+          "reference_paths": [],
+          "supervision_mode": "guided",
+          "task_id": "task-6cbfd9de-0add-48ce-a074-7455b294ce7f",
+          "updated_at": "2026-05-17T02:15:36Z"
+        },
+        "worker_handoff": null
+      },
+      "manager_session": "dogfood-criteria-plan-manager",
+      "notable_pane_pattern": null,
+      "pane_signal": {
+        "captured": false,
+        "classifier": null,
+        "degraded": true,
+        "notable_pattern": null,
+        "reason": "tmux capture failed: tmux capture-pane -p -S -200 -t codex-dogfood-criteria-plan-worker failed: can't find pane: codex-dogfood-criteria-plan-worker",
+        "status_age_seconds": null
+      },
+      "staleness_seconds": 36.139,
+      "state": "idle",
+      "task": "dogfood-criteria-plan-multiline",
+      "task_completed": true,
+      "worker_alive": false,
+      "worker_session": "dogfood-criteria-plan-worker"
+    },
+    "task_id": "task-6cbfd9de-0add-48ce-a074-7455b294ce7f",
+    "worker_capture_id": null
+  },
+  {
+    "completed_at": "2026-05-17T02:18:27Z",
+    "decision": null,
+    "error": null,
+    "health": null,
+    "health_observation_id": null,
+    "id": 39,
+    "manager_capture_id": null,
+    "manager_id": null,
+    "started_at": "2026-05-17T02:18:27Z",
+    "state": "succeeded",
+    "status": {
+      "binding_id": "binding-227ca446-1369-4594-806a-fa1e7c2d1816",
+      "ingest": {
+        "new_events": 0,
+        "new_offset": 263447,
+        "skipped_lines": 0
+      },
+      "kind": "session_cycle",
+      "last_event_subtype": "task_complete",
+      "last_state_event_at": "2026-05-17T02:17:43.861Z",
+      "manager_alive": true,
+      "manager_context": {
+        "acceptance_criteria": {
+          "deferred": [
+            {
+              "created_at": "2026-05-17T02:17:15Z",
+              "criterion": "Broaden criteria-plan parsing for nested sub-bullets or richer Markdown structure if managers need to preserve indentation/structure rather than flattened criterion text.",
+              "evidence": {},
+              "id": 32,
+              "proof": null,
+              "rationale": "Follow-up after this QA slice.",
+              "source": "worker_proposed",
+              "status": "deferred",
+              "task_id": "task-6cbfd9de-0add-48ce-a074-7455b294ce7f",
+              "updated_at": "2026-05-17T02:17:15Z"
+            },
+            {
+              "created_at": "2026-05-17T02:17:18Z",
+              "criterion": "Add fixture-based regression coverage from more real dogfood transcripts if additional truncation shapes appear beyond the Gate 5-style wrapped prose.",
+              "evidence": {},
+              "id": 33,
+              "proof": null,
+              "rationale": "Follow-up after this QA slice.",
+              "source": "worker_proposed",
+              "status": "deferred",
+              "task_id": "task-6cbfd9de-0add-48ce-a074-7455b294ce7f",
+              "updated_at": "2026-05-17T02:17:18Z"
+            }
+          ],
+          "open": [
+            {
+              "created_at": "2026-05-17T02:16:59Z",
+              "criterion": "criteria-plan preserves multi-line bullet criteria by joining continuation lines into the same criterion text for both must-have/current-task and follow-up/deferred sections.",
+              "evidence": {},
+              "id": 28,
+              "proof": null,
+              "rationale": null,
+              "source": "worker_proposed",
+              "status": "accepted",
+              "task_id": "task-6cbfd9de-0add-48ce-a074-7455b294ce7f",
+              "updated_at": "2026-05-17T02:16:59Z"
+            },
+            {
+              "created_at": "2026-05-17T02:17:04Z",
+              "criterion": "The parser only joins clear continuation prose under an active list item and does not convert unrelated prose, headings, or separate list items into the prior criterion.",
+              "evidence": {},
+              "id": 29,
+              "proof": null,
+              "rationale": null,
+              "source": "worker_proposed",
+              "status": "accepted",
+              "task_id": "task-6cbfd9de-0add-48ce-a074-7455b294ce7f",
+              "updated_at": "2026-05-17T02:17:04Z"
+            },
+            {
+              "created_at": "2026-05-17T02:17:07Z",
+              "criterion": "Deferred suggestions still receive the default deferred rationale, accepted suggestions do not, and existing single-line extraction behavior is preserved.",
+              "evidence": {},
+              "id": 30,
+              "proof": null,
+              "rationale": null,
+              "source": "worker_proposed",
+              "status": "accepted",
+              "task_id": "task-6cbfd9de-0add-48ce-a074-7455b294ce7f",
+              "updated_at": "2026-05-17T02:17:07Z"
+            },
+            {
+              "created_at": "2026-05-17T02:17:11Z",
+              "criterion": "criteria-plan remains read-only: running it does not create or mutate acceptance_criteria, events, or commands rows.",
+              "evidence": {},
+              "id": 31,
+              "proof": null,
+              "rationale": null,
+              "source": "worker_proposed",
+              "status": "accepted",
+              "task_id": "task-6cbfd9de-0add-48ce-a074-7455b294ce7f",
+              "updated_at": "2026-05-17T02:17:11Z"
+            }
+          ],
+          "proposed": [],
+          "rejected": [],
+          "satisfied": [],
+          "summary": {
+            "accepted": 4,
+            "deferred": 2,
+            "proposed": 0,
+            "rejected": 0,
+            "satisfied": 0
+          }
+        },
+        "criteria_negotiation": {
+          "needed": false,
+          "prompt": null,
+          "reason": "active_criteria_present",
+          "suggested_actions": []
+        },
+        "manager_config": {
+          "acceptance_criteria": [
+            "Current-task acceptance criteria are recorded before completion and deferred follow-ups are separated with rationale.",
+            "criteria-plan correctly preserves multi-line bullet criteria under current-task and follow-up headings.",
+            "criteria-plan remains read-only and does not mutate acceptance_criteria, events, or commands.",
+            "Focused and full unit tests pass, or any test limitation is recorded with exact output."
+          ],
+          "created_at": "2026-05-17T02:15:36Z",
+          "guidelines": [
+            "Do not merge PRs, do not switch away from branch dogfood-criteria-plan-multiline, and do not perform destructive cleanup.",
+            "When criteria are proposed, use criteria-plan as a draft only; record reviewed accepted/deferred criteria manually if needed.",
+            "Nudge only when durable state shows the worker is blocked, stale, missing criteria, or needs a concrete next action."
+          ],
+          "objective": "Manage the worker through a low-risk meaningful branch-scoped fix for criteria-plan multi-line criteria extraction. Ensure emergent acceptance criteria are recorded before accepting completion, and require proof from tests and replay/export before finish.",
+          "permissions": {
+            "allow_merge_green": false,
+            "allow_pr": true,
+            "allow_worker_compact_clear": false,
+            "create_pr": false,
+            "merge_green_pr": false,
+            "worker_compact_clear": false
+          },
+          "reference_paths": [],
+          "supervision_mode": "guided",
+          "task_id": "task-6cbfd9de-0add-48ce-a074-7455b294ce7f",
+          "updated_at": "2026-05-17T02:15:36Z"
+        },
+        "worker_handoff": null
+      },
+      "manager_session": "dogfood-criteria-plan-manager",
+      "notable_pane_pattern": null,
+      "pane_signal": {
+        "captured": false,
+        "classifier": null,
+        "degraded": true,
+        "notable_pattern": null,
+        "reason": "tmux capture failed: tmux capture-pane -p -S -200 -t codex-dogfood-criteria-plan-worker failed: can't find pane: codex-dogfood-criteria-plan-worker",
+        "status_age_seconds": null
+      },
+      "staleness_seconds": 43.139,
+      "state": "idle",
+      "task": "dogfood-criteria-plan-multiline",
+      "task_completed": true,
+      "worker_alive": false,
+      "worker_session": "dogfood-criteria-plan-worker"
+    },
+    "task_id": "task-6cbfd9de-0add-48ce-a074-7455b294ce7f",
+    "worker_capture_id": null
+  }
+]

@@ -1,0 +1,45 @@
+{
+  "budget": null,
+  "created_at": "2026-05-17T02:15:24Z",
+  "goal": "Fix workerctl criteria-plan extraction quality for multi-line worker criteria prose, preserving read-only behavior and tests.",
+  "id": "task-6cbfd9de-0add-48ce-a074-7455b294ce7f",
+  "integrity": {
+    "issues": [],
+    "ok": true
+  },
+  "manager": null,
+  "manager_config": {
+    "acceptance_criteria": [
+      "Current-task acceptance criteria are recorded before completion and deferred follow-ups are separated with rationale.",
+      "criteria-plan correctly preserves multi-line bullet criteria under current-task and follow-up headings.",
+      "criteria-plan remains read-only and does not mutate acceptance_criteria, events, or commands.",
+      "Focused and full unit tests pass, or any test limitation is recorded with exact output."
+    ],
+    "created_at": "2026-05-17T02:15:36Z",
+    "guidelines": [
+      "Do not merge PRs, do not switch away from branch dogfood-criteria-plan-multiline, and do not perform destructive cleanup.",
+      "When criteria are proposed, use criteria-plan as a draft only; record reviewed accepted/deferred criteria manually if needed.",
+      "Nudge only when durable state shows the worker is blocked, stale, missing criteria, or needs a concrete next action."
+    ],
+    "objective": "Manage the worker through a low-risk meaningful branch-scoped fix for criteria-plan multi-line criteria extraction. Ensure emergent acceptance criteria are recorded before accepting completion, and require proof from tests and replay/export before finish.",
+    "permissions": {
+      "allow_merge_green": false,
+      "allow_pr": true,
+      "allow_worker_compact_clear": false,
+      "create_pr": false,
+      "merge_green_pr": false,
+      "worker_compact_clear": false
+    },
+    "reference_paths": [],
+    "supervision_mode": "guided",
+    "task_id": "task-6cbfd9de-0add-48ce-a074-7455b294ce7f",
+    "updated_at": "2026-05-17T02:15:36Z"
+  },
+  "name": "dogfood-criteria-plan-multiline",
+  "state": "done",
+  "summary": "Low-risk meaningful dogfood task after Gate 5: improve criteria-plan parsing for multi-line bullet/prose criteria.",
+  "updated_at": "2026-05-17T02:20:34Z",
+  "worker": null,
+  "worker_handoff": null,
+  "worker_status": null
+}

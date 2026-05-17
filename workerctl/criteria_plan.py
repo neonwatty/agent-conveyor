@@ -29,6 +29,7 @@ _ACCEPTED_HEADING_RE = re.compile(r"\b(must[- ]?have|current[- ]?task|accepted)\
 _DEFERRED_HEADING_RE = re.compile(r"\b(follow[- ]?up|deferred)\b", re.IGNORECASE)
 _LIST_ITEM_RE = re.compile(r"^\s*(?:[-*+]|\d+[.)]|\[[ xX]\])\s+(?P<text>.+?)\s*$")
 _EMPTY_ITEM_RE = re.compile(r"^(?:n/?a|none|no follow[- ]?ups?|no deferred(?: criteria)?|nothing)$", re.IGNORECASE)
+_INDENTED_CONTINUATION_RE = re.compile(r"^\s+\S")
 
 
 def _heading_status(line: str) -> str | None:
@@ -51,36 +52,61 @@ def _is_empty_placeholder(text: str) -> bool:
     return _EMPTY_ITEM_RE.fullmatch(text.strip().rstrip(".")) is not None
 
 
+def _make_suggestion(text: str, status: str) -> CriteriaSuggestion | None:
+    criterion = _clean_item(text)
+    if not criterion or _is_empty_placeholder(criterion):
+        return None
+    return CriteriaSuggestion(
+        criterion=criterion,
+        status=status,
+        rationale=DEFAULT_DEFERRED_RATIONALE if status == "deferred" else None,
+    )
+
+
 def parse_worker_criteria_response(text: str) -> tuple[list[CriteriaSuggestion], list[str]]:
     suggestions: list[CriteriaSuggestion] = []
     warnings: list[str] = []
     current_status: str | None = None
+    active_item_parts: list[str] = []
+    active_item_status: str | None = None
     saw_heading = False
+
+    def flush_active_item() -> None:
+        nonlocal active_item_parts, active_item_status
+        if active_item_status is not None:
+            suggestion = _make_suggestion(" ".join(active_item_parts), active_item_status)
+            if suggestion is not None:
+                suggestions.append(suggestion)
+        active_item_parts = []
+        active_item_status = None
 
     for raw_line in text.splitlines():
         line = raw_line.strip()
         if not line:
+            flush_active_item()
             continue
 
         match = _LIST_ITEM_RE.match(raw_line)
         if match is not None and current_status is not None:
-            criterion = _clean_item(match.group("text"))
-            if not criterion or _is_empty_placeholder(criterion):
-                continue
-            suggestions.append(
-                CriteriaSuggestion(
-                    criterion=criterion,
-                    status=current_status,
-                    rationale=DEFAULT_DEFERRED_RATIONALE if current_status == "deferred" else None,
-                )
-            )
+            flush_active_item()
+            active_item_parts = [match.group("text")]
+            active_item_status = current_status
+            continue
+
+        if active_item_status is not None and _INDENTED_CONTINUATION_RE.match(raw_line):
+            active_item_parts.append(line)
             continue
 
         heading_status = _heading_status(line)
         if heading_status is not None:
+            flush_active_item()
             current_status = heading_status
             saw_heading = True
             continue
+
+        flush_active_item()
+
+    flush_active_item()
 
     if not saw_heading:
         warnings.append(

@@ -380,3 +380,43 @@ Result:
 - Recommended next dogfood step: run a low-risk meaningful branch-scoped task
   under manager supervision, and run a separate compact/clear drill before
   relying on those controls.
+
+## 2026-05-16: Meaningful Dogfood Criteria-Plan Multiline Fix
+
+Scenario:
+
+- First low-risk meaningful branch-scoped manager/worker dogfood task after
+  Gate 5.
+- Branch: `dogfood-criteria-plan-multiline`
+- Task: `dogfood-criteria-plan-multiline`
+- Evidence root:
+  `docs/live-qa-artifacts/2026-05-16-dogfood-criteria-plan-multiline/`
+
+Validated:
+
+- Worker proposed separated current-task acceptance criteria and deferred
+  follow-ups before editing.
+- Manager recorded four accepted criteria and two deferred follow-ups using
+  `criteria-plan` as a reviewed draft.
+- Worker fixed `criteria-plan` so indented continuation lines are joined into
+  the active bullet item, preventing Gate 5-style wrapped prose from being
+  truncated or reclassified.
+- Worker added regression coverage for normal multiline bullets and the Gate 5
+  wrapped follow-up prose shape.
+- Manager satisfied accepted criteria from durable transcript, diff, criteria
+  state, and test evidence.
+- `finish-task --require-criteria-audit --stop-manager --strict-decisions`
+  finished the task with zero open accepted criteria and stopped the manager.
+- Final replay/export/reconcile evidence was captured.
+
+Verification:
+
+- Focused criteria-plan unittest selection: 8 tests passed.
+- `python3 -m unittest discover -s tests -v`: 341 tests passed.
+- `git diff --check`: passed.
+
+Result:
+
+- The first meaningful manager-led dogfood task passed.
+- Follow-ups remain deferred for richer nested Markdown parsing and broader
+  fixture coverage from future dogfood transcripts.

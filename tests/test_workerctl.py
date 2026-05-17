@@ -1069,6 +1069,71 @@ Deferred follow-up criteria:
             ],
         )
 
+    def test_criteria_plan_parser_joins_multiline_bullets(self):
+        text = """
+Must-have current-task criteria:
+- Parser preserves the first line
+  and joins the verification detail under it.
+
+Deferred follow-up criteria:
+- Add fixture-based transcript coverage
+  after more dogfood shapes are collected.
+"""
+
+        suggestions, warnings = criteria_plan.parse_worker_criteria_response(text)
+
+        self.assertEqual(warnings, [])
+        self.assertEqual(
+            [(suggestion.criterion, suggestion.status) for suggestion in suggestions],
+            [
+                ("Parser preserves the first line and joins the verification detail under it.", "accepted"),
+                ("Add fixture-based transcript coverage after more dogfood shapes are collected.", "deferred"),
+            ],
+        )
+        self.assertIsNone(suggestions[0].rationale)
+        self.assertEqual(suggestions[1].rationale, criteria_plan.DEFAULT_DEFERRED_RATIONALE)
+
+    def test_criteria_plan_parser_handles_gate5_wrapped_followup_prose(self):
+        text = """
+Must-have current-task criteria:
+
+- A durable worker handoff records current status, next steps, and known risks.
+  Verification: `workerctl handoff` output and replay/export include the handoff.
+- The current task has accepted criteria for resume safety and a deferred
+  follow-up for optional compact/clear coverage. Verification: `workerctl
+  criteria --list` shows accepted and deferred criteria.
+- A resumed manager records a decision based on durable replay/export/handoff
+  state, not live chat memory. Verification: `workerctl record-decision` payload
+  names replay, export, handoff, and criteria as evidence.
+
+Follow-up criteria:
+
+- Run the same resume drill with actual compact/clear only after handoff and
+  manager permission are configured.
+"""
+
+        suggestions, warnings = criteria_plan.parse_worker_criteria_response(text)
+
+        self.assertEqual(warnings, [])
+        self.assertEqual([suggestion.status for suggestion in suggestions], ["accepted", "accepted", "accepted", "deferred"])
+        self.assertEqual(
+            suggestions[1].criterion,
+            "The current task has accepted criteria for resume safety and a deferred "
+            "follow-up for optional compact/clear coverage. Verification: `workerctl "
+            "criteria --list` shows accepted and deferred criteria.",
+        )
+        self.assertEqual(
+            suggestions[2].criterion,
+            "A resumed manager records a decision based on durable replay/export/handoff "
+            "state, not live chat memory. Verification: `workerctl record-decision` payload "
+            "names replay, export, handoff, and criteria as evidence.",
+        )
+        self.assertEqual(
+            suggestions[3].criterion,
+            "Run the same resume drill with actual compact/clear only after handoff and "
+            "manager permission are configured.",
+        )
+
     def test_criteria_plan_parser_warns_on_ambiguous_prose(self):
         suggestions, warnings = criteria_plan.parse_worker_criteria_response(
             "I think we should make sure this generally works and maybe improve docs later."

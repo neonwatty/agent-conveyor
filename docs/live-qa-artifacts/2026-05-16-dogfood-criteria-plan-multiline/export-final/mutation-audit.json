@@ -1,0 +1,58 @@
+{
+  "ok": true,
+  "records": [
+    {
+      "allowed_decisions": [
+        "stop"
+      ],
+      "command": {
+        "created_at": "2026-05-17T02:20:34Z",
+        "id": "command-1efed288-1bea-41e0-ae81-f8132ade9053",
+        "state": "succeeded",
+        "type": "finish_task"
+      },
+      "expected_failure": false,
+      "linked_decision": {
+        "created_at": "2026-05-17T02:20:34Z",
+        "decision": "stop",
+        "id": 16,
+        "manager_cycle_id": null,
+        "manager_id": null,
+        "payload": {
+          "command_id": "command-1efed288-1bea-41e0-ae81-f8132ade9053",
+          "source": "finish_task"
+        },
+        "reason": "Finish criteria-plan multiline dogfood task after satisfied criteria and passing tests.",
+        "task_id": "task-6cbfd9de-0add-48ce-a074-7455b294ce7f"
+      },
+      "nearest_prior_decision": {
+        "created_at": "2026-05-17T02:20:34Z",
+        "decision": "stop",
+        "id": 16,
+        "manager_cycle_id": null,
+        "manager_id": null,
+        "payload": {
+          "command_id": "command-1efed288-1bea-41e0-ae81-f8132ade9053",
+          "source": "finish_task"
+        },
+        "reason": "Finish criteria-plan multiline dogfood task after satisfied criteria and passing tests.",
+        "task_id": "task-6cbfd9de-0add-48ce-a074-7455b294ce7f"
+      },
+      "ok": true,
+      "warnings": []
+    }
+  ],
+  "summary": {
+    "mutations": 1,
+    "with_warnings": 0
+  },
+  "task": {
+    "created_at": "2026-05-17T02:15:24Z",
+    "goal": "Fix workerctl criteria-plan extraction quality for multi-line worker criteria prose, preserving read-only behavior and tests.",
+    "id": "task-6cbfd9de-0add-48ce-a074-7455b294ce7f",
+    "name": "dogfood-criteria-plan-multiline",
+    "state": "done",
+    "summary": "Low-risk meaningful dogfood task after Gate 5: improve criteria-plan parsing for multi-line bullet/prose criteria.",
+    "updated_at": "2026-05-17T02:20:34Z"
+  }
+}

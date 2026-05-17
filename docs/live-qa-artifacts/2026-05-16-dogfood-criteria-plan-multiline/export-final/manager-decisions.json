@@ -1,0 +1,88 @@
+[
+  {
+    "created_at": "2026-05-17T02:19:33Z",
+    "decision": "inspect",
+    "id": 14,
+    "manager_cycle_id": null,
+    "manager_id": null,
+    "payload": {
+      "audited_criteria": [
+        28,
+        29,
+        30,
+        31
+      ],
+      "cleanup_status": "not_started",
+      "deferred_followups": [
+        32,
+        33
+      ],
+      "durable_sources": [
+        "scripts/workerctl events dogfood-criteria-plan-worker --limit 40 (returned no legacy rows)",
+        "scripts/workerctl criteria dogfood-criteria-plan-multiline --list",
+        "git diff -- workerctl/criteria_plan.py tests/test_workerctl.py",
+        "scripts/workerctl tail dogfood-criteria-plan-worker --limit 40"
+      ],
+      "satisfied_criteria": [
+        28,
+        29,
+        30,
+        31
+      ],
+      "verification": [
+        {
+          "command": "focused criteria-plan unittest selection",
+          "result": "Ran 8 tests in 0.314s OK",
+          "status": "pass"
+        },
+        {
+          "command": "python3 -m unittest discover",
+          "result": "Ran 341 tests in 11.498s OK",
+          "status": "pass"
+        }
+      ],
+      "worker_receipt": "task_complete at 2026-05-17T02:17:43.861Z"
+    },
+    "reason": "Accepted criteria 28-31 audited against durable worker transcript, criteria state, git diff, and test output; all four current-task criteria marked satisfied before cleanup.",
+    "task_id": "task-6cbfd9de-0add-48ce-a074-7455b294ce7f"
+  },
+  {
+    "created_at": "2026-05-17T02:20:29Z",
+    "decision": "stop",
+    "id": 15,
+    "manager_cycle_id": null,
+    "manager_id": null,
+    "payload": {
+      "cleanup": "stop_manager_only_worker_already_exited",
+      "deferred_criteria": [
+        32,
+        33
+      ],
+      "satisfied_criteria": [
+        28,
+        29,
+        30,
+        31
+      ],
+      "tests": [
+        "python3 -m unittest focused criteria-plan selection",
+        "python3 -m unittest discover -s tests -v"
+      ]
+    },
+    "reason": "Criteria-plan multiline dogfood task is complete: accepted criteria 28-31 are satisfied, focused and full tests pass, export/replay evidence exists; stop remaining manager session.",
+    "task_id": "task-6cbfd9de-0add-48ce-a074-7455b294ce7f"
+  },
+  {
+    "created_at": "2026-05-17T02:20:34Z",
+    "decision": "stop",
+    "id": 16,
+    "manager_cycle_id": null,
+    "manager_id": null,
+    "payload": {
+      "command_id": "command-1efed288-1bea-41e0-ae81-f8132ade9053",
+      "source": "finish_task"
+    },
+    "reason": "Finish criteria-plan multiline dogfood task after satisfied criteria and passing tests.",
+    "task_id": "task-6cbfd9de-0add-48ce-a074-7455b294ce7f"
+  }
+]
