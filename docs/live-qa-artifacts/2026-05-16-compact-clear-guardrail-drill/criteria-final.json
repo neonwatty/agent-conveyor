@@ -1,0 +1,70 @@
+{
+  "criteria": [
+    {
+      "created_at": "2026-05-17T02:27:02Z",
+      "criterion": "After compaction, manager confirms guardrails survived.",
+      "evidence": {},
+      "id": 1,
+      "proof": null,
+      "rationale": "Deferred because this drill uses dry-run compact/clear to validate guardrail auditability without changing worker context.",
+      "source": "worker_proposed",
+      "status": "deferred",
+      "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1",
+      "updated_at": "2026-05-17T02:27:02Z"
+    },
+    {
+      "created_at": "2026-05-17T02:27:02Z",
+      "criterion": "Receipt includes current status, next surviving steps, known risks, and acceptance criteria.",
+      "evidence": {
+        "handoff": "docs/live-qa-artifacts/2026-05-16-compact-clear-guardrail-drill/handoff.json",
+        "worker_capture": "docs/live-qa-artifacts/2026-05-16-compact-clear-guardrail-drill/worker-capture.txt"
+      },
+      "id": 2,
+      "proof": "Worker capture and durable handoff include current status, next surviving steps, known risks, and acceptance criteria.",
+      "rationale": null,
+      "source": "worker_proposed",
+      "status": "satisfied",
+      "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1",
+      "updated_at": "2026-05-17T02:29:01Z"
+    },
+    {
+      "created_at": "2026-05-17T02:27:02Z",
+      "criterion": "No files, branches, commits, PRs, dependency installs, direct /compact, or direct /clear actions are performed by the worker.",
+      "evidence": {
+        "clear_dry_run": "docs/live-qa-artifacts/2026-05-16-compact-clear-guardrail-drill/clear-dry-run.json",
+        "compact_dry_run": "docs/live-qa-artifacts/2026-05-16-compact-clear-guardrail-drill/compact-dry-run.json",
+        "worker_capture": "docs/live-qa-artifacts/2026-05-16-compact-clear-guardrail-drill/worker-capture.txt"
+      },
+      "id": 3,
+      "proof": "Worker capture shows status-only behavior; git status changed only by QA evidence files; compact and clear requests were dry-run through workerctl, not direct worker actions.",
+      "rationale": null,
+      "source": "worker_proposed",
+      "status": "satisfied",
+      "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1",
+      "updated_at": "2026-05-17T02:29:01Z"
+    },
+    {
+      "created_at": "2026-05-17T02:27:02Z",
+      "criterion": "After clear, manager confirms no unintended work occurred.",
+      "evidence": {},
+      "id": 4,
+      "proof": null,
+      "rationale": "Deferred because this drill uses dry-run compact/clear to validate guardrail auditability without changing worker context.",
+      "source": "worker_proposed",
+      "status": "deferred",
+      "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1",
+      "updated_at": "2026-05-17T02:27:02Z"
+    }
+  ],
+  "summary": {
+    "accepted": 0,
+    "deferred": 2,
+    "proposed": 0,
+    "rejected": 0,
+    "satisfied": 2
+  },
+  "task": {
+    "id": "task-754a3549-cd9d-45bc-887a-8884419addb1",
+    "name": "qa-compact-clear-guardrail"
+  }
+}

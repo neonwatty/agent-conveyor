@@ -1,0 +1,57 @@
+{
+  "dangling_bindings": [],
+  "dead_pid_sessions": [],
+  "schema_health": {
+    "checks": [
+      {
+        "name": "foreign_keys",
+        "ok": true,
+        "value": 1
+      },
+      {
+        "name": "journal_mode_wal",
+        "ok": true,
+        "value": "wal"
+      },
+      {
+        "name": "busy_timeout",
+        "ok": true,
+        "value": 5000
+      },
+      {
+        "name": "schema_version",
+        "ok": true,
+        "value": 8
+      },
+      {
+        "name": "user_version",
+        "ok": true,
+        "value": 8
+      },
+      {
+        "missing": [],
+        "name": "required_tables",
+        "ok": true
+      },
+      {
+        "missing": [],
+        "name": "required_indexes",
+        "ok": true
+      },
+      {
+        "missing": [],
+        "name": "required_triggers",
+        "ok": true
+      },
+      {
+        "name": "foreign_key_check",
+        "ok": true,
+        "violations": []
+      }
+    ],
+    "ok": true,
+    "schema_version": 8,
+    "user_version": 8
+  },
+  "stuck_tasks": []
+}

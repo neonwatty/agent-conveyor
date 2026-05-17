@@ -1,0 +1,38 @@
+{
+  "action": "worker_compact_clear",
+  "allowed": true,
+  "config": {
+    "acceptance_criteria": [
+      "Without permission and handoff, manager-permission --require-handoff --require fails closed.",
+      "After durable handoff and explicit worker_compact_clear permission, manager-permission --require-handoff --require passes.",
+      "request-worker-compact --strict-decisions --dry-run succeeds only with a valid nudge decision and records an audited command.",
+      "Replay, export, commands, and mutation-audit explain the permission, handoff, decision, compact request, and cleanup sequence."
+    ],
+    "created_at": "2026-05-17T02:26:08Z",
+    "guidelines": [
+      "No meaningful project edits, commits, PRs, merges, destructive cleanup, or manual /compact /clear outside workerctl.",
+      "Prove fail-closed behavior before permission/handoff and prove allowed dry-run behavior after permission/handoff.",
+      "Use dry-run for compact/clear so this QA validates guardrails without changing worker context."
+    ],
+    "objective": "Validate compact/clear guardrails. The manager may request worker compact/clear only through workerctl, only after a durable handoff, explicit worker_compact_clear permission, and a fresh nudge decision.",
+    "permissions": {
+      "allow_merge_green": false,
+      "allow_pr": false,
+      "allow_worker_compact_clear": true,
+      "create_pr": false,
+      "merge_green_pr": false,
+      "worker_compact_clear": true
+    },
+    "reference_paths": [],
+    "supervision_mode": "guided",
+    "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1",
+    "updated_at": "2026-05-17T02:27:54Z"
+  },
+  "handoff_id": 1,
+  "reasons": [],
+  "require_handoff": true,
+  "task": {
+    "id": "task-754a3549-cd9d-45bc-887a-8884419addb1",
+    "name": "qa-compact-clear-guardrail"
+  }
+}

@@ -1,0 +1,110 @@
+{
+  "ok": true,
+  "records": [
+    {
+      "allowed_decisions": [
+        "nudge"
+      ],
+      "command": {
+        "created_at": "2026-05-17T02:26:20Z",
+        "id": "command-e68a297f-8b2e-4d34-9302-89ce460164d4",
+        "state": "failed",
+        "type": "request_worker_compact"
+      },
+      "expected_failure": true,
+      "linked_decision": null,
+      "nearest_prior_decision": null,
+      "ok": true,
+      "warnings": []
+    },
+    {
+      "allowed_decisions": [
+        "nudge"
+      ],
+      "command": {
+        "created_at": "2026-05-17T02:28:12Z",
+        "id": "command-94ca6632-de3b-4870-bcc4-c698d1e558ad",
+        "state": "succeeded",
+        "type": "request_worker_compact"
+      },
+      "expected_failure": false,
+      "linked_decision": {
+        "created_at": "2026-05-17T02:28:02Z",
+        "decision": "nudge",
+        "id": 1,
+        "manager_cycle_id": null,
+        "manager_id": null,
+        "reason": "Durable handoff exists and canonical worker_compact_clear permission is enabled; run audited dry-run compact request to validate guardrails without changing worker context.",
+        "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1"
+      },
+      "nearest_prior_decision": {
+        "created_at": "2026-05-17T02:28:12Z",
+        "decision": "nudge",
+        "id": 2,
+        "manager_cycle_id": null,
+        "manager_id": null,
+        "payload": {
+          "action": "request_worker_clear",
+          "dry_run": true,
+          "handoff_id": 1,
+          "permission_check": "docs/live-qa-artifacts/2026-05-16-compact-clear-guardrail-drill/permission-after-enable-canonical.json"
+        },
+        "reason": "Durable handoff exists and worker_compact_clear permission is enabled; run audited dry-run clear request to validate the clear path without changing worker context.",
+        "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1"
+      },
+      "ok": true,
+      "warnings": []
+    },
+    {
+      "allowed_decisions": [
+        "nudge"
+      ],
+      "command": {
+        "created_at": "2026-05-17T02:28:21Z",
+        "id": "command-f9498b08-645c-4270-833d-ce33ba70034a",
+        "state": "succeeded",
+        "type": "request_worker_compact"
+      },
+      "expected_failure": false,
+      "linked_decision": {
+        "created_at": "2026-05-17T02:28:12Z",
+        "decision": "nudge",
+        "id": 2,
+        "manager_cycle_id": null,
+        "manager_id": null,
+        "reason": "Durable handoff exists and worker_compact_clear permission is enabled; run audited dry-run clear request to validate the clear path without changing worker context.",
+        "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1"
+      },
+      "nearest_prior_decision": {
+        "created_at": "2026-05-17T02:28:12Z",
+        "decision": "nudge",
+        "id": 2,
+        "manager_cycle_id": null,
+        "manager_id": null,
+        "payload": {
+          "action": "request_worker_clear",
+          "dry_run": true,
+          "handoff_id": 1,
+          "permission_check": "docs/live-qa-artifacts/2026-05-16-compact-clear-guardrail-drill/permission-after-enable-canonical.json"
+        },
+        "reason": "Durable handoff exists and worker_compact_clear permission is enabled; run audited dry-run clear request to validate the clear path without changing worker context.",
+        "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1"
+      },
+      "ok": true,
+      "warnings": []
+    }
+  ],
+  "summary": {
+    "mutations": 3,
+    "with_warnings": 0
+  },
+  "task": {
+    "created_at": "2026-05-17T02:25:55Z",
+    "goal": "Validate compact/clear guardrails: permission and handoff are required before an audited manager compact/clear request, and replay/export/mutation-audit explain the sequence.",
+    "id": "task-754a3549-cd9d-45bc-887a-8884419addb1",
+    "name": "qa-compact-clear-guardrail",
+    "state": "candidate",
+    "summary": "Disposable compact/clear permission and handoff guardrail drill.",
+    "updated_at": "2026-05-17T02:25:55Z"
+  }
+}

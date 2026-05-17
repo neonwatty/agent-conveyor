@@ -1,0 +1,22 @@
+{
+  "created_at": "2026-05-17T02:27:17Z",
+  "id": 1,
+  "next_steps": [
+    "Manager/operator should validate fail-closed permission and strict-decision behavior.",
+    "Manager/operator should enable worker_compact_clear only after this durable handoff, then use dry-run audited compact and clear requests.",
+    "Replay/export/mutation-audit should explain permission, handoff, decision, compact/clear request, and cleanup sequence."
+  ],
+  "payload": {
+    "current_status": "status-only receipt complete; worker idle",
+    "direct_compact_clear_by_worker": false,
+    "known_risks": [
+      "compaction may drop constraints",
+      "resumed worker may treat QA as implementation",
+      "criteria may be lost unless preserved"
+    ],
+    "worker_receipt": "docs/live-qa-artifacts/2026-05-16-compact-clear-guardrail-drill/worker-capture.txt"
+  },
+  "summary": "Disposable worker completed a status-only compact/clear guardrail receipt. Worker performed no file edits, branches, commits, PRs, dependency installs, compact, clear, or meaningful project work.",
+  "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1",
+  "worker_session_id": "session-7f5c8d8b-3462-4f79-bd5d-cba0c2aace98"
+}

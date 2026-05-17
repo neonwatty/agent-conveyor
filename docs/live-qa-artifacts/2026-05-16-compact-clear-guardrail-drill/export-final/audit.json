@@ -1,0 +1,1540 @@
+{
+  "acceptance_criteria": [
+    {
+      "created_at": "2026-05-17T02:27:02Z",
+      "criterion": "After compaction, manager confirms guardrails survived.",
+      "evidence": {},
+      "id": 1,
+      "proof": null,
+      "rationale": "Deferred because this drill uses dry-run compact/clear to validate guardrail auditability without changing worker context.",
+      "source": "worker_proposed",
+      "status": "deferred",
+      "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1",
+      "updated_at": "2026-05-17T02:27:02Z"
+    },
+    {
+      "created_at": "2026-05-17T02:27:02Z",
+      "criterion": "Receipt includes current status, next surviving steps, known risks, and acceptance criteria.",
+      "evidence": {
+        "handoff": "docs/live-qa-artifacts/2026-05-16-compact-clear-guardrail-drill/handoff.json",
+        "worker_capture": "docs/live-qa-artifacts/2026-05-16-compact-clear-guardrail-drill/worker-capture.txt"
+      },
+      "id": 2,
+      "proof": "Worker capture and durable handoff include current status, next surviving steps, known risks, and acceptance criteria.",
+      "rationale": null,
+      "source": "worker_proposed",
+      "status": "satisfied",
+      "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1",
+      "updated_at": "2026-05-17T02:29:01Z"
+    },
+    {
+      "created_at": "2026-05-17T02:27:02Z",
+      "criterion": "No files, branches, commits, PRs, dependency installs, direct /compact, or direct /clear actions are performed by the worker.",
+      "evidence": {
+        "clear_dry_run": "docs/live-qa-artifacts/2026-05-16-compact-clear-guardrail-drill/clear-dry-run.json",
+        "compact_dry_run": "docs/live-qa-artifacts/2026-05-16-compact-clear-guardrail-drill/compact-dry-run.json",
+        "worker_capture": "docs/live-qa-artifacts/2026-05-16-compact-clear-guardrail-drill/worker-capture.txt"
+      },
+      "id": 3,
+      "proof": "Worker capture shows status-only behavior; git status changed only by QA evidence files; compact and clear requests were dry-run through workerctl, not direct worker actions.",
+      "rationale": null,
+      "source": "worker_proposed",
+      "status": "satisfied",
+      "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1",
+      "updated_at": "2026-05-17T02:29:01Z"
+    },
+    {
+      "created_at": "2026-05-17T02:27:02Z",
+      "criterion": "After clear, manager confirms no unintended work occurred.",
+      "evidence": {},
+      "id": 4,
+      "proof": null,
+      "rationale": "Deferred because this drill uses dry-run compact/clear to validate guardrail auditability without changing worker context.",
+      "source": "worker_proposed",
+      "status": "deferred",
+      "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1",
+      "updated_at": "2026-05-17T02:27:02Z"
+    }
+  ],
+  "agent_observations": [
+    {
+      "command_id": "command-9154fb8d-72d9-4c37-bbb9-784cb49e6a49",
+      "created_at": "2026-05-17T02:29:11Z",
+      "id": 1,
+      "manager_id": null,
+      "message": "Finish compact/clear guardrail drill after satisfied accepted criteria and recorded command audit evidence.",
+      "observation_type": "decision",
+      "payload": {
+        "decision": "stop",
+        "decision_id": 4,
+        "source": "finish_task"
+      },
+      "role": "manager",
+      "severity": "info",
+      "source_capture_id": null,
+      "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1",
+      "worker_id": null
+    }
+  ],
+  "commands": [
+    {
+      "created_at": "2026-05-17T02:26:20Z",
+      "error": "strict manager decision validation failed: {\"command_type\": \"request_worker_compact\", \"error\": \"manager_decision_validation_failed\", \"manager_decision\": {\"allowed_decisions\": [\"nudge\"], \"decision\": null, \"decision_id\": null, \"ok\": false, \"warnings\": [\"missing_decision_id\"]}}",
+      "id": "command-e68a297f-8b2e-4d34-9302-89ce460164d4",
+      "idempotency_key": "command-e68a297f-8b2e-4d34-9302-89ce460164d4",
+      "manager_id": null,
+      "payload": {
+        "manager_decision": {
+          "allowed_decisions": [
+            "nudge"
+          ],
+          "decision": null,
+          "decision_id": null,
+          "ok": false,
+          "warnings": [
+            "missing_decision_id"
+          ]
+        },
+        "message": "Manager request: prepare for context compaction/clear after a saved handoff exists.",
+        "permission_check": {
+          "action": "worker_compact_clear",
+          "allowed": false,
+          "handoff_id": null,
+          "reasons": [
+            "permission_not_enabled",
+            "missing_worker_handoff"
+          ]
+        },
+        "send_text": "/compact",
+        "slash_command": "/compact",
+        "task": "qa-compact-clear-guardrail",
+        "worker_session": "qa-compact-clear-worker"
+      },
+      "result": {
+        "command_id": "command-e68a297f-8b2e-4d34-9302-89ce460164d4",
+        "expected_failure": true,
+        "failure_stage": "preflight",
+        "manager_decision": {
+          "allowed_decisions": [
+            "nudge"
+          ],
+          "decision": null,
+          "decision_id": null,
+          "ok": false,
+          "warnings": [
+            "missing_decision_id"
+          ]
+        },
+        "permission_check": {
+          "action": "worker_compact_clear",
+          "allowed": false,
+          "handoff_id": null,
+          "reasons": [
+            "permission_not_enabled",
+            "missing_worker_handoff"
+          ]
+        },
+        "task": "qa-compact-clear-guardrail",
+        "worker_session": "qa-compact-clear-worker"
+      },
+      "state": "failed",
+      "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1",
+      "type": "request_worker_compact",
+      "updated_at": "2026-05-17T02:26:20Z",
+      "worker_id": null
+    },
+    {
+      "created_at": "2026-05-17T02:28:12Z",
+      "error": null,
+      "id": "command-94ca6632-de3b-4870-bcc4-c698d1e558ad",
+      "idempotency_key": "command-94ca6632-de3b-4870-bcc4-c698d1e558ad",
+      "manager_id": null,
+      "payload": {
+        "manager_decision": {
+          "age_seconds": 10,
+          "allowed_decisions": [
+            "nudge"
+          ],
+          "decision": {
+            "created_at": "2026-05-17T02:28:02Z",
+            "decision": "nudge",
+            "id": 1,
+            "manager_cycle_id": null,
+            "manager_id": null,
+            "reason": "Durable handoff exists and canonical worker_compact_clear permission is enabled; run audited dry-run compact request to validate guardrails without changing worker context.",
+            "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1"
+          },
+          "decision_id": 1,
+          "max_age_seconds": 900,
+          "ok": true,
+          "warnings": []
+        },
+        "message": "Manager request: prepare for context compaction/clear only if supported by this Codex session.\n\nTask: qa-compact-clear-guardrail\nSaved handoff id: 1\nSaved handoff summary: Disposable worker completed a status-only compact/clear guardrail receipt. Worker performed no file edits, branches, commits, PRs, dependency installs, compact, clear, or meaningful project work.\n\nBefore compacting or clearing visible context, verify the saved handoff still captures current progress. If it is stale, update it with `scripts/workerctl handoff` first. Then run the Codex compact/clear action only if supported and appropriate. Afterward, report whether compaction happened and what the next concrete step is. Do not edit project files as part of this request.",
+        "permission_check": {
+          "action": "worker_compact_clear",
+          "allowed": true,
+          "handoff_id": 1,
+          "reasons": []
+        },
+        "send_text": "/compact",
+        "slash_command": "/compact",
+        "task": "qa-compact-clear-guardrail",
+        "worker_session": "qa-compact-clear-worker"
+      },
+      "result": {
+        "command_id": "command-94ca6632-de3b-4870-bcc4-c698d1e558ad",
+        "manager_decision": {
+          "age_seconds": 10,
+          "allowed_decisions": [
+            "nudge"
+          ],
+          "decision": {
+            "created_at": "2026-05-17T02:28:02Z",
+            "decision": "nudge",
+            "id": 1,
+            "manager_cycle_id": null,
+            "manager_id": null,
+            "reason": "Durable handoff exists and canonical worker_compact_clear permission is enabled; run audited dry-run compact request to validate guardrails without changing worker context.",
+            "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1"
+          },
+          "decision_id": 1,
+          "max_age_seconds": 900,
+          "ok": true,
+          "warnings": []
+        },
+        "message": "Manager request: prepare for context compaction/clear only if supported by this Codex session.\n\nTask: qa-compact-clear-guardrail\nSaved handoff id: 1\nSaved handoff summary: Disposable worker completed a status-only compact/clear guardrail receipt. Worker performed no file edits, branches, commits, PRs, dependency installs, compact, clear, or meaningful project work.\n\nBefore compacting or clearing visible context, verify the saved handoff still captures current progress. If it is stale, update it with `scripts/workerctl handoff` first. Then run the Codex compact/clear action only if supported and appropriate. Afterward, report whether compaction happened and what the next concrete step is. Do not edit project files as part of this request.",
+        "permission_check": {
+          "action": "worker_compact_clear",
+          "allowed": true,
+          "handoff_id": 1,
+          "reasons": []
+        },
+        "send_result": {
+          "dry_run": true,
+          "session": "qa-compact-clear-worker",
+          "target": "codex-qa-compact-clear-worker",
+          "text": "/compact",
+          "time": "2026-05-17T02:28:12Z"
+        },
+        "send_text": "/compact",
+        "slash_command": "/compact",
+        "task": "qa-compact-clear-guardrail",
+        "worker_session": "qa-compact-clear-worker"
+      },
+      "state": "succeeded",
+      "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1",
+      "type": "request_worker_compact",
+      "updated_at": "2026-05-17T02:28:12Z",
+      "worker_id": null
+    },
+    {
+      "created_at": "2026-05-17T02:28:21Z",
+      "error": null,
+      "id": "command-f9498b08-645c-4270-833d-ce33ba70034a",
+      "idempotency_key": "command-f9498b08-645c-4270-833d-ce33ba70034a",
+      "manager_id": null,
+      "payload": {
+        "manager_decision": {
+          "age_seconds": 9,
+          "allowed_decisions": [
+            "nudge"
+          ],
+          "decision": {
+            "created_at": "2026-05-17T02:28:12Z",
+            "decision": "nudge",
+            "id": 2,
+            "manager_cycle_id": null,
+            "manager_id": null,
+            "reason": "Durable handoff exists and worker_compact_clear permission is enabled; run audited dry-run clear request to validate the clear path without changing worker context.",
+            "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1"
+          },
+          "decision_id": 2,
+          "max_age_seconds": 900,
+          "ok": true,
+          "warnings": []
+        },
+        "message": "Manager request: prepare for context compaction/clear only if supported by this Codex session.\n\nTask: qa-compact-clear-guardrail\nSaved handoff id: 1\nSaved handoff summary: Disposable worker completed a status-only compact/clear guardrail receipt. Worker performed no file edits, branches, commits, PRs, dependency installs, compact, clear, or meaningful project work.\n\nBefore compacting or clearing visible context, verify the saved handoff still captures current progress. If it is stale, update it with `scripts/workerctl handoff` first. Then run the Codex compact/clear action only if supported and appropriate. Afterward, report whether compaction happened and what the next concrete step is. Do not edit project files as part of this request.",
+        "permission_check": {
+          "action": "worker_compact_clear",
+          "allowed": true,
+          "handoff_id": 1,
+          "reasons": []
+        },
+        "send_text": "/clear",
+        "slash_command": "/clear",
+        "task": "qa-compact-clear-guardrail",
+        "worker_session": "qa-compact-clear-worker"
+      },
+      "result": {
+        "command_id": "command-f9498b08-645c-4270-833d-ce33ba70034a",
+        "manager_decision": {
+          "age_seconds": 9,
+          "allowed_decisions": [
+            "nudge"
+          ],
+          "decision": {
+            "created_at": "2026-05-17T02:28:12Z",
+            "decision": "nudge",
+            "id": 2,
+            "manager_cycle_id": null,
+            "manager_id": null,
+            "reason": "Durable handoff exists and worker_compact_clear permission is enabled; run audited dry-run clear request to validate the clear path without changing worker context.",
+            "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1"
+          },
+          "decision_id": 2,
+          "max_age_seconds": 900,
+          "ok": true,
+          "warnings": []
+        },
+        "message": "Manager request: prepare for context compaction/clear only if supported by this Codex session.\n\nTask: qa-compact-clear-guardrail\nSaved handoff id: 1\nSaved handoff summary: Disposable worker completed a status-only compact/clear guardrail receipt. Worker performed no file edits, branches, commits, PRs, dependency installs, compact, clear, or meaningful project work.\n\nBefore compacting or clearing visible context, verify the saved handoff still captures current progress. If it is stale, update it with `scripts/workerctl handoff` first. Then run the Codex compact/clear action only if supported and appropriate. Afterward, report whether compaction happened and what the next concrete step is. Do not edit project files as part of this request.",
+        "permission_check": {
+          "action": "worker_compact_clear",
+          "allowed": true,
+          "handoff_id": 1,
+          "reasons": []
+        },
+        "send_result": {
+          "dry_run": true,
+          "session": "qa-compact-clear-worker",
+          "target": "codex-qa-compact-clear-worker",
+          "text": "/clear",
+          "time": "2026-05-17T02:28:21Z"
+        },
+        "send_text": "/clear",
+        "slash_command": "/clear",
+        "task": "qa-compact-clear-guardrail",
+        "worker_session": "qa-compact-clear-worker"
+      },
+      "state": "succeeded",
+      "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1",
+      "type": "request_worker_compact",
+      "updated_at": "2026-05-17T02:28:21Z",
+      "worker_id": null
+    },
+    {
+      "created_at": "2026-05-17T02:29:11Z",
+      "error": null,
+      "id": "command-9154fb8d-72d9-4c37-bbb9-784cb49e6a49",
+      "idempotency_key": "command-9154fb8d-72d9-4c37-bbb9-784cb49e6a49",
+      "manager_id": null,
+      "payload": {
+        "final_audit": {
+          "open_criteria": [],
+          "require_criteria_audit": true,
+          "summary": {
+            "accepted": 0,
+            "deferred": 2,
+            "proposed": 0,
+            "rejected": 0,
+            "satisfied": 2
+          },
+          "total": 4
+        },
+        "finish": true,
+        "manager_decision": {
+          "age_seconds": 0,
+          "allowed_decisions": [
+            "stop"
+          ],
+          "decision": {
+            "created_at": "2026-05-17T02:29:11Z",
+            "decision": "stop",
+            "id": 3,
+            "manager_cycle_id": null,
+            "manager_id": null,
+            "reason": "Compact/clear guardrail drill complete: fail-closed checks, durable handoff, canonical permission, strict nudge decisions, compact dry-run, clear dry-run, commands/replay/export evidence, and criteria audit are recorded.",
+            "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1"
+          },
+          "decision_id": 3,
+          "max_age_seconds": 900,
+          "ok": true,
+          "warnings": []
+        },
+        "manager_session": "qa-compact-clear-manager",
+        "message": null,
+        "reason": "Finish compact/clear guardrail drill after satisfied accepted criteria and recorded command audit evidence.",
+        "stop_manager": true,
+        "stop_worker": true,
+        "task": "qa-compact-clear-guardrail",
+        "worker": "qa-compact-clear-worker",
+        "worker_session": "qa-compact-clear-worker"
+      },
+      "result": {
+        "command_id": "command-9154fb8d-72d9-4c37-bbb9-784cb49e6a49",
+        "final_audit": {
+          "open_criteria": [],
+          "require_criteria_audit": true,
+          "summary": {
+            "accepted": 0,
+            "deferred": 2,
+            "proposed": 0,
+            "rejected": 0,
+            "satisfied": 2
+          },
+          "total": 4
+        },
+        "final_decision_id": 4,
+        "final_observation_id": 1,
+        "finish": true,
+        "killed_manager": true,
+        "killed_worker": true,
+        "manager_decision": {
+          "age_seconds": 0,
+          "allowed_decisions": [
+            "stop"
+          ],
+          "decision": {
+            "created_at": "2026-05-17T02:29:11Z",
+            "decision": "stop",
+            "id": 3,
+            "manager_cycle_id": null,
+            "manager_id": null,
+            "reason": "Compact/clear guardrail drill complete: fail-closed checks, durable handoff, canonical permission, strict nudge decisions, compact dry-run, clear dry-run, commands/replay/export evidence, and criteria audit are recorded.",
+            "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1"
+          },
+          "decision_id": 3,
+          "max_age_seconds": 900,
+          "ok": true,
+          "warnings": []
+        },
+        "manager_identity": {
+          "db_pane_id": null,
+          "db_session": "codex-qa-compact-clear-manager",
+          "live": true,
+          "live_pane_id": "%1",
+          "mismatches": [],
+          "role": "manager",
+          "session": "qa-compact-clear-manager"
+        },
+        "manager_session": "qa-compact-clear-manager",
+        "reason": "Finish compact/clear guardrail drill after satisfied accepted criteria and recorded command audit evidence.",
+        "stop_manager": true,
+        "stop_worker": true,
+        "task": "qa-compact-clear-guardrail",
+        "worker": "qa-compact-clear-worker",
+        "worker_identity": {
+          "db_pane_id": null,
+          "db_session": "codex-qa-compact-clear-worker",
+          "live": true,
+          "live_pane_id": "%0",
+          "mismatches": [],
+          "role": "worker",
+          "session": "qa-compact-clear-worker"
+        },
+        "worker_session": "qa-compact-clear-worker"
+      },
+      "state": "succeeded",
+      "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1",
+      "type": "finish_task",
+      "updated_at": "2026-05-17T02:29:11Z",
+      "worker_id": null
+    }
+  ],
+  "events": [
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-17T02:25:55Z",
+      "id": 1,
+      "manager_id": null,
+      "payload": {
+        "goal": "Validate compact/clear guardrails: permission and handoff are required before an audited manager compact/clear request, and replay/export/mutation-audit explain the sequence.",
+        "name": "qa-compact-clear-guardrail",
+        "summary": "Disposable compact/clear permission and handoff guardrail drill."
+      },
+      "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1",
+      "type": "task_created",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-17T02:25:58Z",
+      "id": 4,
+      "manager_id": null,
+      "payload": {
+        "binding_id": "binding-eae5682f-041e-47d3-a621-0866bae0c593",
+        "manager": "qa-compact-clear-manager",
+        "task": "qa-compact-clear-guardrail",
+        "worker": "qa-compact-clear-worker"
+      },
+      "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1",
+      "type": "binding_created",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-17T02:26:08Z",
+      "id": 5,
+      "manager_id": null,
+      "payload": {
+        "acceptance_count": 4,
+        "guideline_count": 3,
+        "reference_count": 0,
+        "supervision_mode": "guided"
+      },
+      "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1",
+      "type": "manager_config_recorded",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-17T02:26:20Z",
+      "id": 6,
+      "manager_id": null,
+      "payload": {
+        "action": "worker_compact_clear",
+        "allowed": false,
+        "config": {
+          "acceptance_criteria": [
+            "Without permission and handoff, manager-permission --require-handoff --require fails closed.",
+            "After durable handoff and explicit worker_compact_clear permission, manager-permission --require-handoff --require passes.",
+            "request-worker-compact --strict-decisions --dry-run succeeds only with a valid nudge decision and records an audited command.",
+            "Replay, export, commands, and mutation-audit explain the permission, handoff, decision, compact request, and cleanup sequence."
+          ],
+          "created_at": "2026-05-17T02:26:08Z",
+          "guidelines": [
+            "No meaningful project edits, commits, PRs, merges, destructive cleanup, or manual /compact /clear outside workerctl.",
+            "Prove fail-closed behavior before permission/handoff and prove allowed dry-run behavior after permission/handoff.",
+            "Use dry-run for compact/clear so this QA validates guardrails without changing worker context."
+          ],
+          "objective": "Validate compact/clear guardrails. The manager may request worker compact/clear only through workerctl, only after a durable handoff, explicit worker_compact_clear permission, and a fresh nudge decision.",
+          "permissions": {
+            "allow_merge_green": false,
+            "allow_pr": false,
+            "allow_worker_compact_clear": false,
+            "create_pr": false,
+            "merge_green_pr": false,
+            "worker_compact_clear": false
+          },
+          "reference_paths": [],
+          "supervision_mode": "guided",
+          "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1",
+          "updated_at": "2026-05-17T02:26:08Z"
+        },
+        "handoff_id": null,
+        "reasons": [
+          "permission_not_enabled",
+          "missing_worker_handoff"
+        ],
+        "require_handoff": true,
+        "task": {
+          "id": "task-754a3549-cd9d-45bc-887a-8884419addb1",
+          "name": "qa-compact-clear-guardrail"
+        }
+      },
+      "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1",
+      "type": "manager_permission_checked",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-17T02:26:20Z",
+      "id": 7,
+      "manager_id": null,
+      "payload": {
+        "action": "worker_compact_clear",
+        "allowed": false,
+        "handoff_id": null,
+        "reasons": [
+          "permission_not_enabled",
+          "missing_worker_handoff"
+        ],
+        "source": "request_worker_compact"
+      },
+      "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1",
+      "type": "manager_permission_checked",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": "command-e68a297f-8b2e-4d34-9302-89ce460164d4",
+      "correlation_id": null,
+      "created_at": "2026-05-17T02:26:20Z",
+      "id": 8,
+      "manager_id": null,
+      "payload": {
+        "command_id": "command-e68a297f-8b2e-4d34-9302-89ce460164d4",
+        "error": "strict manager decision validation failed: {\"command_type\": \"request_worker_compact\", \"error\": \"manager_decision_validation_failed\", \"manager_decision\": {\"allowed_decisions\": [\"nudge\"], \"decision\": null, \"decision_id\": null, \"ok\": false, \"warnings\": [\"missing_decision_id\"]}}",
+        "error_type": "WorkerError",
+        "expected_failure": true,
+        "failure_stage": "preflight",
+        "manager_decision": {
+          "allowed_decisions": [
+            "nudge"
+          ],
+          "decision": null,
+          "decision_id": null,
+          "ok": false,
+          "warnings": [
+            "missing_decision_id"
+          ]
+        },
+        "permission_check": {
+          "action": "worker_compact_clear",
+          "allowed": false,
+          "handoff_id": null,
+          "reasons": [
+            "permission_not_enabled",
+            "missing_worker_handoff"
+          ]
+        },
+        "task": "qa-compact-clear-guardrail",
+        "worker_session": "qa-compact-clear-worker"
+      },
+      "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1",
+      "type": "worker_compact_request_failed",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-17T02:27:02Z",
+      "id": 9,
+      "manager_id": null,
+      "payload": {
+        "created": true,
+        "criterion": "After compaction, manager confirms guardrails survived.",
+        "criterion_id": 1,
+        "evidence": {},
+        "proof": null,
+        "rationale": "Deferred because this drill uses dry-run compact/clear to validate guardrail auditability without changing worker context.",
+        "source": "worker_proposed",
+        "status": "deferred",
+        "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1"
+      },
+      "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1",
+      "type": "acceptance_criterion_added",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-17T02:27:02Z",
+      "id": 10,
+      "manager_id": null,
+      "payload": {
+        "created": true,
+        "criterion": "Receipt includes current status, next surviving steps, known risks, and acceptance criteria.",
+        "criterion_id": 2,
+        "evidence": {},
+        "proof": null,
+        "rationale": null,
+        "source": "worker_proposed",
+        "status": "accepted",
+        "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1"
+      },
+      "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1",
+      "type": "acceptance_criterion_added",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-17T02:27:02Z",
+      "id": 11,
+      "manager_id": null,
+      "payload": {
+        "created": true,
+        "criterion": "No files, branches, commits, PRs, dependency installs, direct /compact, or direct /clear actions are performed by the worker.",
+        "criterion_id": 3,
+        "evidence": {},
+        "proof": null,
+        "rationale": null,
+        "source": "worker_proposed",
+        "status": "accepted",
+        "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1"
+      },
+      "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1",
+      "type": "acceptance_criterion_added",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-17T02:27:02Z",
+      "id": 12,
+      "manager_id": null,
+      "payload": {
+        "created": true,
+        "criterion": "After clear, manager confirms no unintended work occurred.",
+        "criterion_id": 4,
+        "evidence": {},
+        "proof": null,
+        "rationale": "Deferred because this drill uses dry-run compact/clear to validate guardrail auditability without changing worker context.",
+        "source": "worker_proposed",
+        "status": "deferred",
+        "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1"
+      },
+      "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1",
+      "type": "acceptance_criterion_added",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-17T02:27:17Z",
+      "id": 13,
+      "manager_id": null,
+      "payload": {
+        "handoff_id": 1,
+        "next_step_count": 3,
+        "worker_session_id": "session-7f5c8d8b-3462-4f79-bd5d-cba0c2aace98"
+      },
+      "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1",
+      "type": "worker_handoff_recorded",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-17T02:27:31Z",
+      "id": 14,
+      "manager_id": null,
+      "payload": {
+        "action": "worker_compact_clear",
+        "allowed": false,
+        "config": {
+          "acceptance_criteria": [
+            "Without permission and handoff, manager-permission --require-handoff --require fails closed.",
+            "After durable handoff and explicit worker_compact_clear permission, manager-permission --require-handoff --require passes.",
+            "request-worker-compact --strict-decisions --dry-run succeeds only with a valid nudge decision and records an audited command.",
+            "Replay, export, commands, and mutation-audit explain the permission, handoff, decision, compact request, and cleanup sequence."
+          ],
+          "created_at": "2026-05-17T02:26:08Z",
+          "guidelines": [
+            "No meaningful project edits, commits, PRs, merges, destructive cleanup, or manual /compact /clear outside workerctl.",
+            "Prove fail-closed behavior before permission/handoff and prove allowed dry-run behavior after permission/handoff.",
+            "Use dry-run for compact/clear so this QA validates guardrails without changing worker context."
+          ],
+          "objective": "Validate compact/clear guardrails. The manager may request worker compact/clear only through workerctl, only after a durable handoff, explicit worker_compact_clear permission, and a fresh nudge decision.",
+          "permissions": {
+            "allow_merge_green": false,
+            "allow_pr": false,
+            "allow_worker_compact_clear": false,
+            "create_pr": false,
+            "merge_green_pr": false,
+            "worker_compact_clear": false
+          },
+          "reference_paths": [],
+          "supervision_mode": "guided",
+          "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1",
+          "updated_at": "2026-05-17T02:26:08Z"
+        },
+        "handoff_id": 1,
+        "reasons": [
+          "permission_not_enabled"
+        ],
+        "require_handoff": true,
+        "task": {
+          "id": "task-754a3549-cd9d-45bc-887a-8884419addb1",
+          "name": "qa-compact-clear-guardrail"
+        }
+      },
+      "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1",
+      "type": "manager_permission_checked",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-17T02:27:31Z",
+      "id": 15,
+      "manager_id": null,
+      "payload": {
+        "acceptance_count": 4,
+        "guideline_count": 3,
+        "reference_count": 0,
+        "supervision_mode": "guided"
+      },
+      "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1",
+      "type": "manager_config_recorded",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-17T02:27:32Z",
+      "id": 16,
+      "manager_id": null,
+      "payload": {
+        "action": "worker_compact_clear",
+        "allowed": false,
+        "config": {
+          "acceptance_criteria": [
+            "Without permission and handoff, manager-permission --require-handoff --require fails closed.",
+            "After durable handoff and explicit worker_compact_clear permission, manager-permission --require-handoff --require passes.",
+            "request-worker-compact --strict-decisions --dry-run succeeds only with a valid nudge decision and records an audited command.",
+            "Replay, export, commands, and mutation-audit explain the permission, handoff, decision, compact request, and cleanup sequence."
+          ],
+          "created_at": "2026-05-17T02:26:08Z",
+          "guidelines": [
+            "No meaningful project edits, commits, PRs, merges, destructive cleanup, or manual /compact /clear outside workerctl.",
+            "Prove fail-closed behavior before permission/handoff and prove allowed dry-run behavior after permission/handoff.",
+            "Use dry-run for compact/clear so this QA validates guardrails without changing worker context."
+          ],
+          "objective": "Validate compact/clear guardrails. The manager may request worker compact/clear only through workerctl, only after a durable handoff, explicit worker_compact_clear permission, and a fresh nudge decision.",
+          "permissions": {
+            "allow_merge_green": false,
+            "allow_pr": false,
+            "allow_worker_compact_clear": true,
+            "create_pr": false,
+            "merge_green_pr": false,
+            "worker_compact_clear": false
+          },
+          "reference_paths": [],
+          "supervision_mode": "guided",
+          "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1",
+          "updated_at": "2026-05-17T02:27:31Z"
+        },
+        "handoff_id": 1,
+        "reasons": [
+          "permission_not_enabled"
+        ],
+        "require_handoff": true,
+        "task": {
+          "id": "task-754a3549-cd9d-45bc-887a-8884419addb1",
+          "name": "qa-compact-clear-guardrail"
+        }
+      },
+      "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1",
+      "type": "manager_permission_checked",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-17T02:27:54Z",
+      "id": 17,
+      "manager_id": null,
+      "payload": {
+        "acceptance_count": 4,
+        "guideline_count": 3,
+        "reference_count": 0,
+        "supervision_mode": "guided"
+      },
+      "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1",
+      "type": "manager_config_recorded",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-17T02:27:54Z",
+      "id": 18,
+      "manager_id": null,
+      "payload": {
+        "action": "worker_compact_clear",
+        "allowed": true,
+        "config": {
+          "acceptance_criteria": [
+            "Without permission and handoff, manager-permission --require-handoff --require fails closed.",
+            "After durable handoff and explicit worker_compact_clear permission, manager-permission --require-handoff --require passes.",
+            "request-worker-compact --strict-decisions --dry-run succeeds only with a valid nudge decision and records an audited command.",
+            "Replay, export, commands, and mutation-audit explain the permission, handoff, decision, compact request, and cleanup sequence."
+          ],
+          "created_at": "2026-05-17T02:26:08Z",
+          "guidelines": [
+            "No meaningful project edits, commits, PRs, merges, destructive cleanup, or manual /compact /clear outside workerctl.",
+            "Prove fail-closed behavior before permission/handoff and prove allowed dry-run behavior after permission/handoff.",
+            "Use dry-run for compact/clear so this QA validates guardrails without changing worker context."
+          ],
+          "objective": "Validate compact/clear guardrails. The manager may request worker compact/clear only through workerctl, only after a durable handoff, explicit worker_compact_clear permission, and a fresh nudge decision.",
+          "permissions": {
+            "allow_merge_green": false,
+            "allow_pr": false,
+            "allow_worker_compact_clear": true,
+            "create_pr": false,
+            "merge_green_pr": false,
+            "worker_compact_clear": true
+          },
+          "reference_paths": [],
+          "supervision_mode": "guided",
+          "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1",
+          "updated_at": "2026-05-17T02:27:54Z"
+        },
+        "handoff_id": 1,
+        "reasons": [],
+        "require_handoff": true,
+        "task": {
+          "id": "task-754a3549-cd9d-45bc-887a-8884419addb1",
+          "name": "qa-compact-clear-guardrail"
+        }
+      },
+      "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1",
+      "type": "manager_permission_checked",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-17T02:28:02Z",
+      "id": 19,
+      "manager_id": null,
+      "payload": {
+        "decision": "nudge",
+        "decision_id": 1,
+        "manager_cycle_id": null,
+        "reason": "Durable handoff exists and canonical worker_compact_clear permission is enabled; run audited dry-run compact request to validate guardrails without changing worker context."
+      },
+      "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1",
+      "type": "manager_decision_recorded",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-17T02:28:12Z",
+      "id": 20,
+      "manager_id": null,
+      "payload": {
+        "action": "worker_compact_clear",
+        "allowed": true,
+        "handoff_id": 1,
+        "reasons": [],
+        "source": "request_worker_compact"
+      },
+      "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1",
+      "type": "manager_permission_checked",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": "command-94ca6632-de3b-4870-bcc4-c698d1e558ad",
+      "correlation_id": null,
+      "created_at": "2026-05-17T02:28:12Z",
+      "id": 21,
+      "manager_id": null,
+      "payload": {
+        "permission_check": {
+          "action": "worker_compact_clear",
+          "allowed": true,
+          "handoff_id": 1,
+          "reasons": []
+        },
+        "worker_session": "qa-compact-clear-worker"
+      },
+      "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1",
+      "type": "worker_compact_requested",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": "command-94ca6632-de3b-4870-bcc4-c698d1e558ad",
+      "correlation_id": null,
+      "created_at": "2026-05-17T02:28:12Z",
+      "id": 22,
+      "manager_id": null,
+      "payload": {
+        "command_id": "command-94ca6632-de3b-4870-bcc4-c698d1e558ad",
+        "manager_decision": {
+          "age_seconds": 10,
+          "allowed_decisions": [
+            "nudge"
+          ],
+          "decision": {
+            "created_at": "2026-05-17T02:28:02Z",
+            "decision": "nudge",
+            "id": 1,
+            "manager_cycle_id": null,
+            "manager_id": null,
+            "reason": "Durable handoff exists and canonical worker_compact_clear permission is enabled; run audited dry-run compact request to validate guardrails without changing worker context.",
+            "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1"
+          },
+          "decision_id": 1,
+          "max_age_seconds": 900,
+          "ok": true,
+          "warnings": []
+        },
+        "message": "Manager request: prepare for context compaction/clear only if supported by this Codex session.\n\nTask: qa-compact-clear-guardrail\nSaved handoff id: 1\nSaved handoff summary: Disposable worker completed a status-only compact/clear guardrail receipt. Worker performed no file edits, branches, commits, PRs, dependency installs, compact, clear, or meaningful project work.\n\nBefore compacting or clearing visible context, verify the saved handoff still captures current progress. If it is stale, update it with `scripts/workerctl handoff` first. Then run the Codex compact/clear action only if supported and appropriate. Afterward, report whether compaction happened and what the next concrete step is. Do not edit project files as part of this request.",
+        "permission_check": {
+          "action": "worker_compact_clear",
+          "allowed": true,
+          "handoff_id": 1,
+          "reasons": []
+        },
+        "send_result": {
+          "dry_run": true,
+          "session": "qa-compact-clear-worker",
+          "target": "codex-qa-compact-clear-worker",
+          "text": "/compact",
+          "time": "2026-05-17T02:28:12Z"
+        },
+        "send_text": "/compact",
+        "slash_command": "/compact",
+        "task": "qa-compact-clear-guardrail",
+        "worker_session": "qa-compact-clear-worker"
+      },
+      "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1",
+      "type": "worker_compact_request_succeeded",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-17T02:28:12Z",
+      "id": 23,
+      "manager_id": null,
+      "payload": {
+        "decision": "nudge",
+        "decision_id": 2,
+        "manager_cycle_id": null,
+        "reason": "Durable handoff exists and worker_compact_clear permission is enabled; run audited dry-run clear request to validate the clear path without changing worker context."
+      },
+      "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1",
+      "type": "manager_decision_recorded",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-17T02:28:21Z",
+      "id": 24,
+      "manager_id": null,
+      "payload": {
+        "action": "worker_compact_clear",
+        "allowed": true,
+        "handoff_id": 1,
+        "reasons": [],
+        "source": "request_worker_compact"
+      },
+      "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1",
+      "type": "manager_permission_checked",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": "command-f9498b08-645c-4270-833d-ce33ba70034a",
+      "correlation_id": null,
+      "created_at": "2026-05-17T02:28:21Z",
+      "id": 25,
+      "manager_id": null,
+      "payload": {
+        "permission_check": {
+          "action": "worker_compact_clear",
+          "allowed": true,
+          "handoff_id": 1,
+          "reasons": []
+        },
+        "worker_session": "qa-compact-clear-worker"
+      },
+      "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1",
+      "type": "worker_compact_requested",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": "command-f9498b08-645c-4270-833d-ce33ba70034a",
+      "correlation_id": null,
+      "created_at": "2026-05-17T02:28:21Z",
+      "id": 26,
+      "manager_id": null,
+      "payload": {
+        "command_id": "command-f9498b08-645c-4270-833d-ce33ba70034a",
+        "manager_decision": {
+          "age_seconds": 9,
+          "allowed_decisions": [
+            "nudge"
+          ],
+          "decision": {
+            "created_at": "2026-05-17T02:28:12Z",
+            "decision": "nudge",
+            "id": 2,
+            "manager_cycle_id": null,
+            "manager_id": null,
+            "reason": "Durable handoff exists and worker_compact_clear permission is enabled; run audited dry-run clear request to validate the clear path without changing worker context.",
+            "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1"
+          },
+          "decision_id": 2,
+          "max_age_seconds": 900,
+          "ok": true,
+          "warnings": []
+        },
+        "message": "Manager request: prepare for context compaction/clear only if supported by this Codex session.\n\nTask: qa-compact-clear-guardrail\nSaved handoff id: 1\nSaved handoff summary: Disposable worker completed a status-only compact/clear guardrail receipt. Worker performed no file edits, branches, commits, PRs, dependency installs, compact, clear, or meaningful project work.\n\nBefore compacting or clearing visible context, verify the saved handoff still captures current progress. If it is stale, update it with `scripts/workerctl handoff` first. Then run the Codex compact/clear action only if supported and appropriate. Afterward, report whether compaction happened and what the next concrete step is. Do not edit project files as part of this request.",
+        "permission_check": {
+          "action": "worker_compact_clear",
+          "allowed": true,
+          "handoff_id": 1,
+          "reasons": []
+        },
+        "send_result": {
+          "dry_run": true,
+          "session": "qa-compact-clear-worker",
+          "target": "codex-qa-compact-clear-worker",
+          "text": "/clear",
+          "time": "2026-05-17T02:28:21Z"
+        },
+        "send_text": "/clear",
+        "slash_command": "/clear",
+        "task": "qa-compact-clear-guardrail",
+        "worker_session": "qa-compact-clear-worker"
+      },
+      "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1",
+      "type": "worker_compact_request_succeeded",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-17T02:29:01Z",
+      "id": 27,
+      "manager_id": null,
+      "payload": {
+        "criterion": "Receipt includes current status, next surviving steps, known risks, and acceptance criteria.",
+        "criterion_id": 2,
+        "evidence": {
+          "handoff": "docs/live-qa-artifacts/2026-05-16-compact-clear-guardrail-drill/handoff.json",
+          "worker_capture": "docs/live-qa-artifacts/2026-05-16-compact-clear-guardrail-drill/worker-capture.txt"
+        },
+        "previous_evidence": {},
+        "previous_proof": null,
+        "previous_rationale": null,
+        "previous_status": "accepted",
+        "proof": "Worker capture and durable handoff include current status, next surviving steps, known risks, and acceptance criteria.",
+        "rationale": null,
+        "source": "worker_proposed",
+        "status": "satisfied",
+        "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1"
+      },
+      "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1",
+      "type": "acceptance_criterion_updated",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-17T02:29:01Z",
+      "id": 28,
+      "manager_id": null,
+      "payload": {
+        "criterion": "No files, branches, commits, PRs, dependency installs, direct /compact, or direct /clear actions are performed by the worker.",
+        "criterion_id": 3,
+        "evidence": {
+          "clear_dry_run": "docs/live-qa-artifacts/2026-05-16-compact-clear-guardrail-drill/clear-dry-run.json",
+          "compact_dry_run": "docs/live-qa-artifacts/2026-05-16-compact-clear-guardrail-drill/compact-dry-run.json",
+          "worker_capture": "docs/live-qa-artifacts/2026-05-16-compact-clear-guardrail-drill/worker-capture.txt"
+        },
+        "previous_evidence": {},
+        "previous_proof": null,
+        "previous_rationale": null,
+        "previous_status": "accepted",
+        "proof": "Worker capture shows status-only behavior; git status changed only by QA evidence files; compact and clear requests were dry-run through workerctl, not direct worker actions.",
+        "rationale": null,
+        "source": "worker_proposed",
+        "status": "satisfied",
+        "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1"
+      },
+      "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1",
+      "type": "acceptance_criterion_updated",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-17T02:29:11Z",
+      "id": 29,
+      "manager_id": null,
+      "payload": {
+        "decision": "stop",
+        "decision_id": 3,
+        "manager_cycle_id": null,
+        "reason": "Compact/clear guardrail drill complete: fail-closed checks, durable handoff, canonical permission, strict nudge decisions, compact dry-run, clear dry-run, commands/replay/export evidence, and criteria audit are recorded."
+      },
+      "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1",
+      "type": "manager_decision_recorded",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": "command-9154fb8d-72d9-4c37-bbb9-784cb49e6a49",
+      "correlation_id": null,
+      "created_at": "2026-05-17T02:29:11Z",
+      "id": 30,
+      "manager_id": null,
+      "payload": {
+        "final_audit": {
+          "open_criteria": [],
+          "require_criteria_audit": true,
+          "summary": {
+            "accepted": 0,
+            "deferred": 2,
+            "proposed": 0,
+            "rejected": 0,
+            "satisfied": 2
+          },
+          "total": 4
+        },
+        "final_decision_id": 4,
+        "final_observation_id": 1,
+        "finish": true,
+        "manager_decision": {
+          "age_seconds": 0,
+          "allowed_decisions": [
+            "stop"
+          ],
+          "decision": {
+            "created_at": "2026-05-17T02:29:11Z",
+            "decision": "stop",
+            "id": 3,
+            "manager_cycle_id": null,
+            "manager_id": null,
+            "reason": "Compact/clear guardrail drill complete: fail-closed checks, durable handoff, canonical permission, strict nudge decisions, compact dry-run, clear dry-run, commands/replay/export evidence, and criteria audit are recorded.",
+            "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1"
+          },
+          "decision_id": 3,
+          "max_age_seconds": 900,
+          "ok": true,
+          "warnings": []
+        },
+        "message": null,
+        "reason": "Finish compact/clear guardrail drill after satisfied accepted criteria and recorded command audit evidence.",
+        "stop_manager": true,
+        "stop_worker": true
+      },
+      "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1",
+      "type": "finish_task_intent",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": "command-9154fb8d-72d9-4c37-bbb9-784cb49e6a49",
+      "correlation_id": null,
+      "created_at": "2026-05-17T02:29:11Z",
+      "id": 31,
+      "manager_id": null,
+      "payload": {
+        "open_criteria": [],
+        "require_criteria_audit": true,
+        "summary": {
+          "accepted": 0,
+          "deferred": 2,
+          "proposed": 0,
+          "rejected": 0,
+          "satisfied": 2
+        },
+        "total": 4
+      },
+      "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1",
+      "type": "finish_task_criteria_audit",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": "command-9154fb8d-72d9-4c37-bbb9-784cb49e6a49",
+      "correlation_id": null,
+      "created_at": "2026-05-17T02:29:11Z",
+      "id": 32,
+      "manager_id": null,
+      "payload": {
+        "db_pane_id": null,
+        "db_session": "codex-qa-compact-clear-manager",
+        "live": true,
+        "live_pane_id": "%1",
+        "mismatches": [],
+        "role": "manager",
+        "session": "qa-compact-clear-manager"
+      },
+      "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1",
+      "type": "manager_identity_verified",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": "command-9154fb8d-72d9-4c37-bbb9-784cb49e6a49",
+      "correlation_id": null,
+      "created_at": "2026-05-17T02:29:11Z",
+      "id": 33,
+      "manager_id": null,
+      "payload": {
+        "db_pane_id": null,
+        "db_session": "codex-qa-compact-clear-worker",
+        "live": true,
+        "live_pane_id": "%0",
+        "mismatches": [],
+        "role": "worker",
+        "session": "qa-compact-clear-worker"
+      },
+      "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1",
+      "type": "worker_identity_verified",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": "command-9154fb8d-72d9-4c37-bbb9-784cb49e6a49",
+      "correlation_id": null,
+      "created_at": "2026-05-17T02:29:11Z",
+      "id": 34,
+      "manager_id": null,
+      "payload": {
+        "command_id": "command-9154fb8d-72d9-4c37-bbb9-784cb49e6a49",
+        "final_audit": {
+          "open_criteria": [],
+          "require_criteria_audit": true,
+          "summary": {
+            "accepted": 0,
+            "deferred": 2,
+            "proposed": 0,
+            "rejected": 0,
+            "satisfied": 2
+          },
+          "total": 4
+        },
+        "final_decision_id": 4,
+        "final_observation_id": 1,
+        "finish": true,
+        "killed_manager": true,
+        "killed_worker": true,
+        "manager_decision": {
+          "age_seconds": 0,
+          "allowed_decisions": [
+            "stop"
+          ],
+          "decision": {
+            "created_at": "2026-05-17T02:29:11Z",
+            "decision": "stop",
+            "id": 3,
+            "manager_cycle_id": null,
+            "manager_id": null,
+            "reason": "Compact/clear guardrail drill complete: fail-closed checks, durable handoff, canonical permission, strict nudge decisions, compact dry-run, clear dry-run, commands/replay/export evidence, and criteria audit are recorded.",
+            "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1"
+          },
+          "decision_id": 3,
+          "max_age_seconds": 900,
+          "ok": true,
+          "warnings": []
+        },
+        "manager_identity": {
+          "db_pane_id": null,
+          "db_session": "codex-qa-compact-clear-manager",
+          "live": true,
+          "live_pane_id": "%1",
+          "mismatches": [],
+          "role": "manager",
+          "session": "qa-compact-clear-manager"
+        },
+        "manager_session": "qa-compact-clear-manager",
+        "reason": "Finish compact/clear guardrail drill after satisfied accepted criteria and recorded command audit evidence.",
+        "stop_manager": true,
+        "stop_worker": true,
+        "task": "qa-compact-clear-guardrail",
+        "worker": "qa-compact-clear-worker",
+        "worker_identity": {
+          "db_pane_id": null,
+          "db_session": "codex-qa-compact-clear-worker",
+          "live": true,
+          "live_pane_id": "%0",
+          "mismatches": [],
+          "role": "worker",
+          "session": "qa-compact-clear-worker"
+        },
+        "worker_session": "qa-compact-clear-worker"
+      },
+      "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1",
+      "type": "finish_task_succeeded",
+      "worker_id": null
+    }
+  ],
+  "manager_cycles": [
+    {
+      "completed_at": "2026-05-17T02:26:20Z",
+      "decision": null,
+      "error": null,
+      "health": null,
+      "health_observation_id": null,
+      "id": 1,
+      "manager_capture_id": null,
+      "manager_id": null,
+      "started_at": "2026-05-17T02:26:20Z",
+      "state": "succeeded",
+      "status": {
+        "binding_id": "binding-eae5682f-041e-47d3-a621-0866bae0c593",
+        "ingest": {
+          "new_events": 13,
+          "new_offset": 60217,
+          "skipped_lines": 0
+        },
+        "kind": "session_cycle",
+        "last_event_subtype": "task_complete",
+        "last_state_event_at": "2026-05-17T02:26:07.245Z",
+        "manager_alive": true,
+        "manager_context": {
+          "acceptance_criteria": {
+            "deferred": [],
+            "open": [],
+            "proposed": [],
+            "rejected": [],
+            "satisfied": [],
+            "summary": {
+              "accepted": 0,
+              "deferred": 0,
+              "proposed": 0,
+              "rejected": 0,
+              "satisfied": 0
+            }
+          },
+          "criteria_negotiation": {
+            "needed": true,
+            "prompt": "Please propose 2-4 acceptance criteria for the current slice. Split them into must-have current-task criteria and follow-up criteria. Include the verification you expect for each.",
+            "reason": "no_criteria",
+            "suggested_actions": [
+              "Ask the worker to split must-have current-task criteria from follow-up criteria.",
+              "Record accepted current-task criteria with workerctl criteria qa-compact-clear-guardrail --add --criterion \"...\" --source worker_proposed --status accepted.",
+              "Record proposed current-task criteria with workerctl criteria qa-compact-clear-guardrail --add --criterion \"...\" --source worker_proposed --status proposed.",
+              "Record follow-up criteria with workerctl criteria qa-compact-clear-guardrail --add --criterion \"...\" --source worker_proposed --status deferred."
+            ]
+          },
+          "manager_config": {
+            "acceptance_criteria": [
+              "Without permission and handoff, manager-permission --require-handoff --require fails closed.",
+              "After durable handoff and explicit worker_compact_clear permission, manager-permission --require-handoff --require passes.",
+              "request-worker-compact --strict-decisions --dry-run succeeds only with a valid nudge decision and records an audited command.",
+              "Replay, export, commands, and mutation-audit explain the permission, handoff, decision, compact request, and cleanup sequence."
+            ],
+            "created_at": "2026-05-17T02:26:08Z",
+            "guidelines": [
+              "No meaningful project edits, commits, PRs, merges, destructive cleanup, or manual /compact /clear outside workerctl.",
+              "Prove fail-closed behavior before permission/handoff and prove allowed dry-run behavior after permission/handoff.",
+              "Use dry-run for compact/clear so this QA validates guardrails without changing worker context."
+            ],
+            "objective": "Validate compact/clear guardrails. The manager may request worker compact/clear only through workerctl, only after a durable handoff, explicit worker_compact_clear permission, and a fresh nudge decision.",
+            "permissions": {
+              "allow_merge_green": false,
+              "allow_pr": false,
+              "allow_worker_compact_clear": false,
+              "create_pr": false,
+              "merge_green_pr": false,
+              "worker_compact_clear": false
+            },
+            "reference_paths": [],
+            "supervision_mode": "guided",
+            "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1",
+            "updated_at": "2026-05-17T02:26:08Z"
+          },
+          "worker_handoff": null
+        },
+        "manager_session": "qa-compact-clear-manager",
+        "notable_pane_pattern": null,
+        "pane_signal": {
+          "captured": true,
+          "classifier": null,
+          "degraded": false,
+          "notable_pattern": null,
+          "reason": null,
+          "status_age_seconds": 12
+        },
+        "staleness_seconds": 12.755,
+        "state": "idle",
+        "task": "qa-compact-clear-guardrail",
+        "task_completed": true,
+        "worker_alive": true,
+        "worker_session": "qa-compact-clear-worker"
+      },
+      "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1",
+      "worker_capture_id": null
+    }
+  ],
+  "manager_decisions": [
+    {
+      "created_at": "2026-05-17T02:28:02Z",
+      "decision": "nudge",
+      "id": 1,
+      "manager_cycle_id": null,
+      "manager_id": null,
+      "payload": {
+        "action": "request_worker_compact",
+        "dry_run": true,
+        "handoff_id": 1,
+        "permission_check": "docs/live-qa-artifacts/2026-05-16-compact-clear-guardrail-drill/permission-after-enable-canonical.json"
+      },
+      "reason": "Durable handoff exists and canonical worker_compact_clear permission is enabled; run audited dry-run compact request to validate guardrails without changing worker context.",
+      "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1"
+    },
+    {
+      "created_at": "2026-05-17T02:28:12Z",
+      "decision": "nudge",
+      "id": 2,
+      "manager_cycle_id": null,
+      "manager_id": null,
+      "payload": {
+        "action": "request_worker_clear",
+        "dry_run": true,
+        "handoff_id": 1,
+        "permission_check": "docs/live-qa-artifacts/2026-05-16-compact-clear-guardrail-drill/permission-after-enable-canonical.json"
+      },
+      "reason": "Durable handoff exists and worker_compact_clear permission is enabled; run audited dry-run clear request to validate the clear path without changing worker context.",
+      "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1"
+    },
+    {
+      "created_at": "2026-05-17T02:29:11Z",
+      "decision": "stop",
+      "id": 3,
+      "manager_cycle_id": null,
+      "manager_id": null,
+      "payload": {
+        "caveat": "mutation-audit is clean but reports zero mutations for dry-run request-worker-compact commands; commands and replay carry the detailed command audit.",
+        "clear_command": "command-f9498b08-645c-4270-833d-ce33ba70034a",
+        "compact_command": "command-94ca6632-de3b-4870-bcc4-c698d1e558ad",
+        "deferred_criteria": [
+          1,
+          4
+        ],
+        "qa_result": "passed_with_caveat",
+        "satisfied_criteria": [
+          2,
+          3
+        ]
+      },
+      "reason": "Compact/clear guardrail drill complete: fail-closed checks, durable handoff, canonical permission, strict nudge decisions, compact dry-run, clear dry-run, commands/replay/export evidence, and criteria audit are recorded.",
+      "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1"
+    },
+    {
+      "created_at": "2026-05-17T02:29:11Z",
+      "decision": "stop",
+      "id": 4,
+      "manager_cycle_id": null,
+      "manager_id": null,
+      "payload": {
+        "command_id": "command-9154fb8d-72d9-4c37-bbb9-784cb49e6a49",
+        "source": "finish_task"
+      },
+      "reason": "Finish compact/clear guardrail drill after satisfied accepted criteria and recorded command audit evidence.",
+      "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1"
+    }
+  ],
+  "task": {
+    "created_at": "2026-05-17T02:25:55Z",
+    "goal": "Validate compact/clear guardrails: permission and handoff are required before an audited manager compact/clear request, and replay/export/mutation-audit explain the sequence.",
+    "id": "task-754a3549-cd9d-45bc-887a-8884419addb1",
+    "name": "qa-compact-clear-guardrail",
+    "state": "done",
+    "summary": "Disposable compact/clear permission and handoff guardrail drill.",
+    "updated_at": "2026-05-17T02:29:11Z"
+  },
+  "terminal_captures": [],
+  "transcript_segments": []
+}

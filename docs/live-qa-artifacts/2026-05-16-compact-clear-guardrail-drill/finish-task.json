@@ -1,0 +1,64 @@
+{
+  "command_id": "command-9154fb8d-72d9-4c37-bbb9-784cb49e6a49",
+  "final_audit": {
+    "open_criteria": [],
+    "require_criteria_audit": true,
+    "summary": {
+      "accepted": 0,
+      "deferred": 2,
+      "proposed": 0,
+      "rejected": 0,
+      "satisfied": 2
+    },
+    "total": 4
+  },
+  "final_decision_id": 4,
+  "final_observation_id": 1,
+  "finish": true,
+  "killed_manager": true,
+  "killed_worker": true,
+  "manager_decision": {
+    "age_seconds": 0,
+    "allowed_decisions": [
+      "stop"
+    ],
+    "decision": {
+      "created_at": "2026-05-17T02:29:11Z",
+      "decision": "stop",
+      "id": 3,
+      "manager_cycle_id": null,
+      "manager_id": null,
+      "reason": "Compact/clear guardrail drill complete: fail-closed checks, durable handoff, canonical permission, strict nudge decisions, compact dry-run, clear dry-run, commands/replay/export evidence, and criteria audit are recorded.",
+      "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1"
+    },
+    "decision_id": 3,
+    "max_age_seconds": 900,
+    "ok": true,
+    "warnings": []
+  },
+  "manager_identity": {
+    "db_pane_id": null,
+    "db_session": "codex-qa-compact-clear-manager",
+    "live": true,
+    "live_pane_id": "%1",
+    "mismatches": [],
+    "role": "manager",
+    "session": "qa-compact-clear-manager"
+  },
+  "manager_session": "qa-compact-clear-manager",
+  "reason": "Finish compact/clear guardrail drill after satisfied accepted criteria and recorded command audit evidence.",
+  "stop_manager": true,
+  "stop_worker": true,
+  "task": "qa-compact-clear-guardrail",
+  "worker": "qa-compact-clear-worker",
+  "worker_identity": {
+    "db_pane_id": null,
+    "db_session": "codex-qa-compact-clear-worker",
+    "live": true,
+    "live_pane_id": "%0",
+    "mismatches": [],
+    "role": "worker",
+    "session": "qa-compact-clear-worker"
+  },
+  "worker_session": "qa-compact-clear-worker"
+}

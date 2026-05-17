@@ -1,0 +1,1 @@
+workerctl: strict manager decision validation failed: {"command_type": "request_worker_compact", "error": "manager_decision_validation_failed", "manager_decision": {"allowed_decisions": ["nudge"], "decision": null, "decision_id": null, "ok": false, "warnings": ["missing_decision_id"]}}

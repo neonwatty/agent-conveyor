@@ -1,0 +1,99 @@
+[
+  {
+    "completed_at": "2026-05-17T02:26:20Z",
+    "decision": null,
+    "error": null,
+    "health": null,
+    "health_observation_id": null,
+    "id": 1,
+    "manager_capture_id": null,
+    "manager_id": null,
+    "started_at": "2026-05-17T02:26:20Z",
+    "state": "succeeded",
+    "status": {
+      "binding_id": "binding-eae5682f-041e-47d3-a621-0866bae0c593",
+      "ingest": {
+        "new_events": 13,
+        "new_offset": 60217,
+        "skipped_lines": 0
+      },
+      "kind": "session_cycle",
+      "last_event_subtype": "task_complete",
+      "last_state_event_at": "2026-05-17T02:26:07.245Z",
+      "manager_alive": true,
+      "manager_context": {
+        "acceptance_criteria": {
+          "deferred": [],
+          "open": [],
+          "proposed": [],
+          "rejected": [],
+          "satisfied": [],
+          "summary": {
+            "accepted": 0,
+            "deferred": 0,
+            "proposed": 0,
+            "rejected": 0,
+            "satisfied": 0
+          }
+        },
+        "criteria_negotiation": {
+          "needed": true,
+          "prompt": "Please propose 2-4 acceptance criteria for the current slice. Split them into must-have current-task criteria and follow-up criteria. Include the verification you expect for each.",
+          "reason": "no_criteria",
+          "suggested_actions": [
+            "Ask the worker to split must-have current-task criteria from follow-up criteria.",
+            "Record accepted current-task criteria with workerctl criteria qa-compact-clear-guardrail --add --criterion \"...\" --source worker_proposed --status accepted.",
+            "Record proposed current-task criteria with workerctl criteria qa-compact-clear-guardrail --add --criterion \"...\" --source worker_proposed --status proposed.",
+            "Record follow-up criteria with workerctl criteria qa-compact-clear-guardrail --add --criterion \"...\" --source worker_proposed --status deferred."
+          ]
+        },
+        "manager_config": {
+          "acceptance_criteria": [
+            "Without permission and handoff, manager-permission --require-handoff --require fails closed.",
+            "After durable handoff and explicit worker_compact_clear permission, manager-permission --require-handoff --require passes.",
+            "request-worker-compact --strict-decisions --dry-run succeeds only with a valid nudge decision and records an audited command.",
+            "Replay, export, commands, and mutation-audit explain the permission, handoff, decision, compact request, and cleanup sequence."
+          ],
+          "created_at": "2026-05-17T02:26:08Z",
+          "guidelines": [
+            "No meaningful project edits, commits, PRs, merges, destructive cleanup, or manual /compact /clear outside workerctl.",
+            "Prove fail-closed behavior before permission/handoff and prove allowed dry-run behavior after permission/handoff.",
+            "Use dry-run for compact/clear so this QA validates guardrails without changing worker context."
+          ],
+          "objective": "Validate compact/clear guardrails. The manager may request worker compact/clear only through workerctl, only after a durable handoff, explicit worker_compact_clear permission, and a fresh nudge decision.",
+          "permissions": {
+            "allow_merge_green": false,
+            "allow_pr": false,
+            "allow_worker_compact_clear": false,
+            "create_pr": false,
+            "merge_green_pr": false,
+            "worker_compact_clear": false
+          },
+          "reference_paths": [],
+          "supervision_mode": "guided",
+          "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1",
+          "updated_at": "2026-05-17T02:26:08Z"
+        },
+        "worker_handoff": null
+      },
+      "manager_session": "qa-compact-clear-manager",
+      "notable_pane_pattern": null,
+      "pane_signal": {
+        "captured": true,
+        "classifier": null,
+        "degraded": false,
+        "notable_pattern": null,
+        "reason": null,
+        "status_age_seconds": 12
+      },
+      "staleness_seconds": 12.755,
+      "state": "idle",
+      "task": "qa-compact-clear-guardrail",
+      "task_completed": true,
+      "worker_alive": true,
+      "worker_session": "qa-compact-clear-worker"
+    },
+    "task_id": "task-754a3549-cd9d-45bc-887a-8884419addb1",
+    "worker_capture_id": null
+  }
+]
