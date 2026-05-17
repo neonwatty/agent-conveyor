@@ -1897,11 +1897,6 @@ def command_request_worker_compact(args: argparse.Namespace) -> int:
             decision_id=args.decision_id,
             allowed_decisions={"nudge"},
         )
-        worker_db.require_manager_decision_ok(
-            command_type="request_worker_compact",
-            decision_check=decision_check,
-            strict=args.strict_decisions,
-        )
         permission_reasons: list[str] = []
         permission_allowed = bool(config and config["permissions"].get("worker_compact_clear", False))
         if config is None:
@@ -1927,11 +1922,12 @@ def command_request_worker_compact(args: argparse.Namespace) -> int:
                 "source": "request_worker_compact",
             },
         )
-        if not permission_allowed:
-            conn.commit()
-            raise WorkerError(f"worker compact request is not allowed: {json.dumps(permission_check, sort_keys=True)}")
         slash_command = worker_compact_slash_command(args)
-        message = args.message or worker_compact_request_text(task["name"], handoff)
+        message = args.message or (
+            worker_compact_request_text(task["name"], handoff)
+            if handoff is not None
+            else "Manager request: prepare for context compaction/clear after a saved handoff exists."
+        )
         send_text_value = message if slash_command is None else slash_command
         command_id = worker_db.create_command(
             conn,
@@ -1948,6 +1944,37 @@ def command_request_worker_compact(args: argparse.Namespace) -> int:
                 "worker_session": binding["worker_session_name"],
             },
         )
+        try:
+            worker_db.require_manager_decision_ok(
+                command_type="request_worker_compact",
+                decision_check=decision_check,
+                strict=args.strict_decisions,
+            )
+            if not permission_allowed:
+                raise WorkerError(f"worker compact request is not allowed: {json.dumps(permission_check, sort_keys=True)}")
+        except Exception as exc:
+            result = {
+                "command_id": command_id,
+                "expected_failure": True,
+                "failure_stage": "preflight",
+                "manager_decision": decision_check,
+                "permission_check": permission_check,
+                "task": task["name"],
+                "worker_session": binding["worker_session_name"],
+            }
+            worker_db.mark_command_attempted(conn, command_id=command_id)
+            worker_db.finish_command(conn, command_id=command_id, state="failed", result=result, error=str(exc))
+            worker_db.insert_event(
+                conn,
+                "worker_compact_request_failed",
+                actor="workerctl",
+                command_id=command_id,
+                task_id=task["id"],
+                manager_id=manager["id"] if manager else None,
+                payload={**result, "error": str(exc), "error_type": type(exc).__name__},
+            )
+            conn.commit()
+            raise
         worker_db.insert_event(
             conn,
             "worker_compact_requested",
@@ -3158,12 +3185,82 @@ def command_deregister(args: argparse.Namespace) -> int:
     conn = worker_db.connect()
     worker_db.initialize_database(conn)
     try:
+        session = conn.execute(
+            "select id, role from sessions where name = ?",
+            (args.name,),
+        ).fetchone()
+        active_binding = None
+        task_id = None
+        command_id = None
+        if session is not None:
+            active_binding = conn.execute(
+                """
+                select bindings.id, bindings.task_id
+                from bindings
+                where bindings.state in ('active', 'ending')
+                  and (bindings.worker_session_id = ? or bindings.manager_session_id = ?)
+                limit 1
+                """,
+                (session["id"], session["id"]),
+            ).fetchone()
+            task_id = active_binding["task_id"] if active_binding is not None else None
+            command_id = worker_db.create_command(
+                conn,
+                command_type="deregister_session",
+                task_id=task_id,
+                payload={
+                    "active_binding": dict(active_binding) if active_binding is not None else None,
+                    "expected_failure": active_binding is not None,
+                    "name": args.name,
+                    "role": session["role"],
+                },
+            )
+            worker_db.mark_command_attempted(conn, command_id=command_id)
         worker_db.deregister_session(conn, name=args.name)
         worker_db.insert_event(
             conn, "session_deregistered", actor="workerctl",
+            command_id=command_id,
+            task_id=task_id,
             payload={"name": args.name},
         )
+        if command_id is not None:
+            worker_db.finish_command(
+                conn,
+                command_id=command_id,
+                state="succeeded",
+                result={"command_id": command_id, "name": args.name, "state": "gone"},
+            )
         conn.commit()
+    except Exception as exc:
+        if command_id is not None:
+            worker_db.finish_command(
+                conn,
+                command_id=command_id,
+                state="failed",
+                result={
+                    "active_binding": dict(active_binding) if active_binding is not None else None,
+                    "command_id": command_id,
+                    "expected_failure": active_binding is not None,
+                    "name": args.name,
+                },
+                error=str(exc),
+            )
+            worker_db.insert_event(
+                conn,
+                "session_deregister_failed",
+                actor="workerctl",
+                command_id=command_id,
+                task_id=task_id,
+                payload={
+                    "active_binding": dict(active_binding) if active_binding is not None else None,
+                    "error": str(exc),
+                    "error_type": type(exc).__name__,
+                    "expected_failure": active_binding is not None,
+                    "name": args.name,
+                },
+            )
+            conn.commit()
+        raise
     finally:
         conn.close()
     print(json.dumps({"name": args.name, "state": "gone"}))

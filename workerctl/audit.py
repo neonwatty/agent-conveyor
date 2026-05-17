@@ -4,6 +4,7 @@ from typing import Any
 
 
 MUTATING_COMMAND_DECISIONS = {
+    "deregister_session": set(),
     "extend_nudge_budget": {"escalate"},
     "finish_task": {"stop"},
     "pause_manager": {"escalate", "stop"},
@@ -43,13 +44,16 @@ def mutation_audit_result(audit: dict[str, Any]) -> dict[str, Any]:
         nearest = nearest_prior_decision(command, decisions)
         linked = decision_check.get("decision") if isinstance(decision_check, dict) else None
         warnings = []
-        if isinstance(decision_check, dict):
+        if not allowed:
+            if linked:
+                warnings.append("unexpected_linked_decision")
+        elif isinstance(decision_check, dict):
             warnings.extend(decision_check.get("warnings", []))
         else:
             warnings.append("missing_decision_metadata")
-        if nearest and not linked:
+        if allowed and nearest and not linked:
             warnings.append("nearest_decision_unlinked")
-        if linked and linked.get("decision") not in allowed:
+        if allowed and linked and linked.get("decision") not in allowed:
             warnings.append("linked_decision_incompatible")
         records.append(
             {
