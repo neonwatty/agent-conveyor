@@ -6024,6 +6024,70 @@ class SessionActionCliTests(unittest.TestCase):
             self.assertEqual(payload["dry_run"], True)
             self.assertIn("codex-w", payload["target"])
 
+    def test_legacy_nudge_falls_back_to_registered_session_name(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_dir = Path(tmpdir) / "state"
+            state_dir.mkdir()
+            old_state_root = os.environ.get("WORKERCTL_STATE_ROOT")
+            os.environ["WORKERCTL_STATE_ROOT"] = str(state_dir)
+            conn = worker_db.connect()
+            worker_db.initialize_database(conn)
+            try:
+                worker_db.register_session(
+                    conn,
+                    name="session-worker",
+                    role="worker",
+                    codex_session_path="/tmp/session-worker.jsonl",
+                    codex_session_id="codex-session-worker",
+                    pid=123,
+                    cwd=str(ROOT),
+                    tmux_session="codex-session-worker",
+                    tmux_pane_id="%7",
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            calls = []
+
+            def fake_run(cmd, check=True):
+                calls.append(list(cmd))
+                class Result:
+                    returncode = 0
+                    stdout = ""
+                    stderr = ""
+                return Result()
+
+            try:
+                with mock.patch("workerctl.tmux.run", side_effect=fake_run):
+                    stdout = io.StringIO()
+                    with contextlib.redirect_stdout(stdout):
+                        result = commands.command_nudge(
+                            argparse.Namespace(name="session-worker", message="status please")
+                        )
+                self.assertEqual(result, 0)
+                self.assertIn("sent nudge to session session-worker", stdout.getvalue())
+                self.assertTrue(any(call[1] == "set-buffer" and "status please" in call for call in calls))
+                self.assertTrue(any(call[1] == "paste-buffer" and "codex-session-worker:%7" in call for call in calls))
+
+                conn = worker_db.connect()
+                try:
+                    row = conn.execute(
+                        "select payload_json from events where type='session_nudged'"
+                    ).fetchone()
+                finally:
+                    conn.close()
+                self.assertIsNotNone(row)
+                payload = json.loads(row["payload_json"])
+                self.assertEqual(payload["legacy_command"], "nudge")
+                self.assertEqual(payload["session"], "session-worker")
+                self.assertTrue(payload["success"])
+            finally:
+                if old_state_root is None:
+                    os.environ.pop("WORKERCTL_STATE_ROOT", None)
+                else:
+                    os.environ["WORKERCTL_STATE_ROOT"] = old_state_root
+
     def test_cli_session_nudge_rejects_session_without_tmux(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             rollout = Path(tmpdir) / "rollout.jsonl"
@@ -8568,6 +8632,8 @@ class ManagerBootstrapPromptTests(unittest.TestCase):
         self.assertIn("manager_context.acceptance_criteria", prompt)
         self.assertIn("manager_context.criteria_negotiation", prompt)
         self.assertIn("use its prompt when needed is true", prompt)
+        self.assertIn("scripts/workerctl session-nudge docs-worker", prompt)
+        self.assertIn("legacy `nudge` command is only for old file-backed workers", prompt)
         self.assertIn("must-have vs follow-up criteria", prompt)
         self.assertIn("Record useful criteria with `scripts/workerctl criteria`", prompt)
         self.assertIn("compare worker receipts/verification against accepted open criteria", prompt)

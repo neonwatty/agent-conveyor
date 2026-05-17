@@ -199,6 +199,9 @@ Supervision loop:
 - Treat acceptance criteria as living supervision state.
 - Inspect `manager_context.acceptance_criteria` each cycle.
 - Inspect `manager_context.criteria_negotiation`; use its prompt when needed is true.
+- Nudge the worker with `scripts/workerctl session-nudge {worker_line} "..."`;
+  the legacy `nudge` command is only for old file-backed workers and should not
+  be the first choice for session-bound pairs.
 - If worker progress reveals new edge cases, tests, polish, or scope
   boundaries, ask the worker to propose must-have vs follow-up criteria.
 - After a worker proposes separated criteria, use `scripts/workerctl criteria-plan`
@@ -2721,9 +2724,44 @@ def command_classify(args: argparse.Namespace) -> int:
 
 def command_nudge(args: argparse.Namespace) -> int:
     message = args.message
-    send_text(args.name, message)
-    append_event(args.name, "nudge", {"message": message})
-    print(f"sent nudge to {args.name}")
+    try:
+        send_text(args.name, message)
+        append_event(args.name, "nudge", {"message": message})
+        print(f"sent nudge to {args.name}")
+        return 0
+    except WorkerError as exc:
+        if not str(exc).startswith("Unknown worker:"):
+            raise
+
+    from workerctl import db as worker_db
+    from workerctl import tmux as worker_tmux
+
+    with worker_db.connect() as conn:
+        worker_db.initialize_database(conn)
+        try:
+            result = worker_tmux.send_text_to_session(
+                conn, session_name=args.name, text=message,
+            )
+        except WorkerError as session_exc:
+            raise WorkerError(
+                f"Unknown worker: {args.name}; also failed to resolve registered session "
+                f"{args.name!r}. For session-backed workers, use "
+                f"`workerctl session-nudge {args.name} \"...\"`. "
+                f"Session lookup error: {session_exc}"
+            ) from session_exc
+        worker_db.insert_event(
+            conn,
+            "session_nudged",
+            actor="workerctl",
+            payload={
+                "legacy_command": "nudge",
+                "session": args.name,
+                "text_length": len(message),
+                "success": True,
+            },
+        )
+        conn.commit()
+    print(f"sent nudge to session {result['session']} via session-nudge target {result['target']}")
     return 0
 
 
