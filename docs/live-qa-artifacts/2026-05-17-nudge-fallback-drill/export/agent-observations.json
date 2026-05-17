@@ -1,0 +1,20 @@
+[
+  {
+    "command_id": "command-4a1fe935-a833-43e2-aac9-d66988deca41",
+    "created_at": "2026-05-17T17:09:25Z",
+    "id": 13,
+    "manager_id": null,
+    "message": "Nudge fallback dogfood drill completed with verified session-nudge evidence.",
+    "observation_type": "decision",
+    "payload": {
+      "decision": "stop",
+      "decision_id": 23,
+      "source": "finish_task"
+    },
+    "role": "manager",
+    "severity": "info",
+    "source_capture_id": null,
+    "task_id": "task-36f5887e-b639-4db8-9f0a-e5153a6c98b1",
+    "worker_id": null
+  }
+]
