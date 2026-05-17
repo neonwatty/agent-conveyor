@@ -10706,6 +10706,36 @@ class PairCommandTests(unittest.TestCase):
             finally:
                 conn.close()
 
+            mutation_proc = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "workerctl",
+                    "mutation-audit",
+                    "compact-task",
+                    "--json",
+                    "--path",
+                    str(db_path),
+                ],
+                capture_output=True,
+                text=True,
+                cwd=str(ROOT),
+            )
+
+            self.assertEqual(mutation_proc.returncode, 0, mutation_proc.stderr)
+            mutation_payload = json.loads(mutation_proc.stdout)
+            self.assertTrue(mutation_payload["ok"])
+            self.assertEqual(mutation_payload["summary"]["mutations"], 1)
+            record = mutation_payload["records"][0]
+            self.assertEqual(record["command"]["type"], "request_worker_compact")
+            self.assertEqual(record["linked_decision"]["id"], decision_id)
+            self.assertTrue(record["effect"]["dry_run"])
+            self.assertFalse(record["effect"]["sent"])
+            self.assertEqual(record["effect"]["slash_command"], "/compact")
+            self.assertEqual(record["effect"]["send_text"], "/compact")
+            self.assertEqual(record["effect"]["worker_session"], "compact-worker")
+            self.assertTrue(record["effect"]["permission_check"]["allowed"])
+
     def test_request_worker_compact_strict_decision_failure_records_failed_command(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = self._setup_db(tmpdir)
@@ -10947,6 +10977,32 @@ class PairCommandTests(unittest.TestCase):
             self.assertEqual(payload["slash_command"], "/clear")
             self.assertEqual(payload["send_text"], "/clear")
             self.assertEqual(payload["send_result"]["text"], "/clear")
+
+            mutation_proc = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "workerctl",
+                    "mutation-audit",
+                    "clear-one-shot",
+                    "--json",
+                    "--path",
+                    str(db_path),
+                ],
+                capture_output=True,
+                text=True,
+                cwd=str(ROOT),
+            )
+
+            self.assertEqual(mutation_proc.returncode, 0, mutation_proc.stderr)
+            mutation_payload = json.loads(mutation_proc.stdout)
+            self.assertTrue(mutation_payload["ok"])
+            self.assertEqual(mutation_payload["summary"]["mutations"], 1)
+            record = mutation_payload["records"][0]
+            self.assertTrue(record["effect"]["dry_run"])
+            self.assertFalse(record["effect"]["sent"])
+            self.assertEqual(record["effect"]["slash_command"], "/clear")
+            self.assertEqual(record["effect"]["send_text"], "/clear")
 
     def test_request_worker_compact_can_send_clear_or_prompt_only(self):
         with tempfile.TemporaryDirectory() as tmpdir:
