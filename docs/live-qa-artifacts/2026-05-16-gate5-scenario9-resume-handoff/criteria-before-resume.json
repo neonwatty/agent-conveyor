@@ -1,0 +1,65 @@
+{
+  "criteria": [
+    {
+      "created_at": "2026-05-17T02:01:31Z",
+      "criterion": "A durable worker handoff records current status, next steps, and known risks.",
+      "evidence": {
+        "handoff": "docs/live-qa-artifacts/2026-05-16-gate5-scenario9-resume-handoff/handoff.json"
+      },
+      "id": 1,
+      "proof": "handoff.json records summary, next steps, and known risks.",
+      "rationale": null,
+      "source": "worker_proposed",
+      "status": "accepted",
+      "task_id": "task-86bafd01-dccd-4dd0-80d3-53a44fbb52de",
+      "updated_at": "2026-05-17T02:01:31Z"
+    },
+    {
+      "created_at": "2026-05-17T02:01:31Z",
+      "criterion": "Accepted resume-safety criteria and a deferred compact/clear follow-up remain visible after resume.",
+      "evidence": {},
+      "id": 2,
+      "proof": "criteria list before/after resume must show accepted and deferred state.",
+      "rationale": null,
+      "source": "worker_proposed",
+      "status": "accepted",
+      "task_id": "task-86bafd01-dccd-4dd0-80d3-53a44fbb52de",
+      "updated_at": "2026-05-17T02:01:31Z"
+    },
+    {
+      "created_at": "2026-05-17T02:01:31Z",
+      "criterion": "A resumed manager records a decision based on durable replay/export/handoff/criteria state, not live chat memory.",
+      "evidence": {},
+      "id": 3,
+      "proof": "resumed decision payload must name replay, export, handoff, and criteria evidence.",
+      "rationale": null,
+      "source": "worker_proposed",
+      "status": "accepted",
+      "task_id": "task-86bafd01-dccd-4dd0-80d3-53a44fbb52de",
+      "updated_at": "2026-05-17T02:01:31Z"
+    },
+    {
+      "created_at": "2026-05-17T02:01:31Z",
+      "criterion": "Run the same resume drill with actual compact/clear only after handoff and manager permission are configured.",
+      "evidence": {},
+      "id": 4,
+      "proof": null,
+      "rationale": "Follow-up after this Gate 5 QA slice; compact/clear is intentionally not used here.",
+      "source": "worker_proposed",
+      "status": "deferred",
+      "task_id": "task-86bafd01-dccd-4dd0-80d3-53a44fbb52de",
+      "updated_at": "2026-05-17T02:01:31Z"
+    }
+  ],
+  "summary": {
+    "accepted": 3,
+    "deferred": 1,
+    "proposed": 0,
+    "rejected": 0,
+    "satisfied": 0
+  },
+  "task": {
+    "id": "task-86bafd01-dccd-4dd0-80d3-53a44fbb52de",
+    "name": "qa-g5-s9-resume"
+  }
+}

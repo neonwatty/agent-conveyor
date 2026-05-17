@@ -1,0 +1,17 @@
+{
+  "ok": true,
+  "records": [],
+  "summary": {
+    "mutations": 0,
+    "with_warnings": 0
+  },
+  "task": {
+    "created_at": "2026-05-17T01:59:56Z",
+    "goal": "Gate 5 Scenario 9 resume/handoff dogfood: prove durable handoff, replay/export, criteria state, and resumed manager decision are enough to continue without live chat memory.",
+    "id": "task-86bafd01-dccd-4dd0-80d3-53a44fbb52de",
+    "name": "qa-g5-s9-resume",
+    "state": "candidate",
+    "summary": "Disposable isolated Scenario 9 resume and handoff dogfood.",
+    "updated_at": "2026-05-17T01:59:56Z"
+  }
+}

@@ -1,0 +1,253 @@
+# GoalBuddy v2 state.yaml
+version: 2
+
+goal:
+  title: "Manager-Led Gate 5 Resume And Handoff"
+  slug: "manager-led-gate5-resume-handoff"
+  kind: existing_plan
+  tranche: "Validate Gate 5 with Scenario 9 resume and handoff dogfood."
+  status: completed
+  intake:
+    original_request: "Do the next Gate 5 Scenario 9 resume/handoff dogfood."
+    interpreted_outcome: "Scenario 9 is run or precisely blocked, and Gate 5 readiness is updated with evidence."
+    input_shape: existing_plan
+    audience: "Jeremy and future meaningful codex-terminal-manager dogfood runs"
+    authority: requested
+    proof_type: artifact
+    completion_proof: "A final audit records Gate 5 passed, blocked, or intentionally deferred with evidence."
+    likely_misfire: "The drill appears to pass because live chat memory helped, while durable replay/export/handoff state is insufficient."
+    blind_spots_considered:
+      - "Resume must be proven from durable workerctl artifacts, not the PM's memory."
+      - "Compact/clear is optional and should not be used unless the handoff and permission guardrails are satisfied."
+      - "Scenario 9 should remain disposable and avoid meaningful project work."
+      - "Gate 5 also depends on criteria-plan risk being implemented or explicitly accepted."
+    existing_plan_facts:
+      - "Gate 4 passed after Scenario 8 rerun."
+      - "Scenario 9 acceptance requires handoff, replay/export, criteria state, and resumed decision sequence."
+      - "Only after Gate 5 should this app be used on meaningful branch-scoped tasks."
+
+rules:
+  pm_owns_state: true
+  one_active_task: true
+  max_write_workers: 1
+  no_implementation_without_worker_or_pm_task: true
+  no_completion_without_judge_or_pm_audit: true
+  planning_is_not_completion: true
+  queued_required_worker_blocks_completion: true
+  continuous_until_full_outcome: true
+  missing_input_or_credentials_do_not_stop_goal: true
+  preserve_and_validate_existing_plan: true
+  intake_misfire_must_be_audited: true
+
+agents:
+  scout: installed
+  worker: installed
+  judge: installed
+
+visual_board:
+  selected: local
+  local:
+    status: generated
+    url: null
+    command: "npx goalbuddy board \"$PWD/docs/goals/manager-led-gate5-resume-handoff\""
+  github_projects:
+    status: not_requested
+    url: null
+    command: "npx goalbuddy extend github-projects"
+    missing: []
+
+active_task: null
+
+tasks:
+  - id: T001
+    type: judge
+    assignee: PM/Judge
+    status: completed
+    objective: "Validate Scenario 9 runbook and criteria-plan readiness before the live isolated drill."
+    inputs:
+      - "docs/superpowers/plans/2026-05-16-dogfood-reliability-ladder.md Scenario 9 and Gate 5 sections"
+      - "docs/goals/manager-led-gate4-recovery-readiness/state.yaml"
+      - "workerctl help for handoff, replay, export-task, criteria, criteria-plan, manager-config, cycle, stop-task, reconcile"
+    constraints:
+      - "Do not start sessions until the runbook is recorded."
+      - "Use isolated WORKERCTL_STATE_ROOT for Scenario 9."
+      - "Specify exact disposable names, evidence paths, verify commands, and stop conditions."
+      - "Confirm criteria-plan exists or record explicit accepted risk."
+    expected_output:
+      - "Runbook decision: run, block, or defer."
+      - "Exact Scenario 9 worker objective."
+      - "Evidence requirements proving resume did not rely on live chat memory."
+      - "Stop conditions."
+    receipt:
+      decision: "run_scenario_9_now"
+      criteria_plan_readiness: "implemented"
+      state_root: "/tmp/codex-terminal-manager-g5-s9-state"
+      evidence_root: "docs/live-qa-artifacts/2026-05-16-gate5-scenario9-resume-handoff/"
+      disposable_names:
+        task: "qa-g5-s9-resume"
+        worker_initial: "qa-g5-s9-worker"
+        manager_initial: "qa-g5-s9-manager"
+        manager_resumed: "qa-g5-s9-manager-resumed"
+      worker_objective: "Run a disposable status-only task, propose must-have and follow-up criteria, then rely on durable workerctl handoff/replay/export/criteria state for a resumed manager to identify the next action."
+      evidence_requirements:
+        - "A worker handoff records current status, next steps, and known risks."
+        - "criteria-plan output is captured from worker criteria prose before criteria are added."
+        - "Accepted/deferred criteria state is visible before and after manager resume."
+        - "Replay and export explain handoff plus resumed decision sequence."
+        - "A new resumed manager decision is recorded from durable state, not live chat memory."
+        - "Cleanup leaves isolated and default reconcile clean with no matching tmux sessions."
+      stop_conditions:
+        - "Resume requires unstored live chat context."
+        - "Open criteria or blockers disappear across handoff."
+        - "Replay/export omit the handoff or resumed decision sequence."
+        - "Cleanup leaves active disposable sessions or dirty isolated/default state."
+      compact_clear: "not_used"
+
+  - id: T002
+    type: worker
+    assignee: PM/Worker
+    status: completed
+    objective: "Run Scenario 9 disposable isolated resume/handoff dogfood."
+    inputs:
+      - "T001 receipt"
+    constraints:
+      - "No meaningful project work."
+      - "Use disposable names from T001."
+      - "Record handoff, criteria state, replay, export, resumed decision, and cleanup."
+      - "Do not compact or clear unless T001 explicitly permits it."
+    allowed_files:
+      - "docs/live-qa-artifacts/2026-05-16-gate5-scenario9-resume-handoff/**"
+      - "docs/live-qa-log.md"
+      - "docs/goals/manager-led-gate5-resume-handoff/state.yaml"
+    verify:
+      - "WORKERCTL_STATE_ROOT=/tmp/codex-terminal-manager-g5-s9-state scripts/workerctl pair --task qa-g5-s9-resume --worker-name qa-g5-s9-worker --manager-name qa-g5-s9-manager --cwd $PWD --task-prompt <file>"
+      - "WORKERCTL_STATE_ROOT=/tmp/codex-terminal-manager-g5-s9-state scripts/workerctl handoff qa-g5-s9-resume --summary <summary> --next-step <step> --payload-json <json>"
+      - "WORKERCTL_STATE_ROOT=/tmp/codex-terminal-manager-g5-s9-state scripts/workerctl criteria-plan qa-g5-s9-resume --from-worker-response <file> --json"
+      - "WORKERCTL_STATE_ROOT=/tmp/codex-terminal-manager-g5-s9-state scripts/workerctl criteria qa-g5-s9-resume --list"
+      - "WORKERCTL_STATE_ROOT=/tmp/codex-terminal-manager-g5-s9-state scripts/workerctl replay qa-g5-s9-resume --json"
+      - "WORKERCTL_STATE_ROOT=/tmp/codex-terminal-manager-g5-s9-state scripts/workerctl export-task qa-g5-s9-resume --output docs/live-qa-artifacts/2026-05-16-gate5-scenario9-resume-handoff/export"
+      - "WORKERCTL_STATE_ROOT=/tmp/codex-terminal-manager-g5-s9-state scripts/workerctl record-decision qa-g5-s9-resume <decision> --reason <durable-state-reason>"
+      - "WORKERCTL_STATE_ROOT=/tmp/codex-terminal-manager-g5-s9-state scripts/workerctl reconcile --stale-cycles-seconds 1"
+      - "scripts/workerctl reconcile --stale-cycles-seconds 1"
+    stop_if:
+      - "Resume depends on unstored chat context."
+      - "Open criteria or blockers disappear across handoff."
+      - "Replay/export cannot explain the handoff and resumed decision sequence."
+      - "Cleanup leaves active disposable sessions or dirty isolated/default state."
+    expected_output:
+      - "Scenario 9 evidence bundle."
+      - "Receipt mapping every Scenario 9 acceptance criterion."
+    receipt:
+      result: "scenario_9_passed"
+      state_root: "/tmp/codex-terminal-manager-g5-s9-state"
+      evidence_root: "docs/live-qa-artifacts/2026-05-16-gate5-scenario9-resume-handoff/"
+      durable_handoff:
+        path: "docs/live-qa-artifacts/2026-05-16-gate5-scenario9-resume-handoff/handoff.json"
+        recorded: true
+        includes:
+          - "current status"
+          - "next steps"
+          - "known risks"
+      criteria_plan:
+        path: "docs/live-qa-artifacts/2026-05-16-gate5-scenario9-resume-handoff/criteria-plan.json"
+        implemented: true
+        caveat: "Extraction truncated some multi-line worker criteria prose, so criteria were added manually from the captured worker receipt."
+        risk_status: "manual_extraction_risk_accepted_for_gate_5"
+      criteria_state:
+        before_resume: "docs/live-qa-artifacts/2026-05-16-gate5-scenario9-resume-handoff/criteria-before-resume.json"
+        after_resume: "docs/live-qa-artifacts/2026-05-16-gate5-scenario9-resume-handoff/criteria-after-resume.json"
+        final: "docs/live-qa-artifacts/2026-05-16-gate5-scenario9-resume-handoff/criteria-final.json"
+        satisfied: [1, 2, 3]
+        deferred: [4]
+      resumed_manager:
+        initial_manager_replaced: true
+        resumed_manager: "qa-g5-s9-manager-resumed"
+        decision_id: 1
+        decision_path: "docs/live-qa-artifacts/2026-05-16-gate5-scenario9-resume-handoff/export-after-resume/manager-decisions.json"
+        capture: "docs/live-qa-artifacts/2026-05-16-gate5-scenario9-resume-handoff/manager-resumed-capture-final.txt"
+        durable_evidence_named:
+          - "replay"
+          - "export"
+          - "handoff"
+          - "criteria"
+        worker_nudged_after_resume: false
+      replay_and_export:
+        before_resume_replay: "docs/live-qa-artifacts/2026-05-16-gate5-scenario9-resume-handoff/replay-before-resume.json"
+        after_resume_replay: "docs/live-qa-artifacts/2026-05-16-gate5-scenario9-resume-handoff/replay-after-resume.json"
+        final_replay: "docs/live-qa-artifacts/2026-05-16-gate5-scenario9-resume-handoff/replay-final.json"
+        before_resume_export: "docs/live-qa-artifacts/2026-05-16-gate5-scenario9-resume-handoff/export-before-resume"
+        after_resume_export: "docs/live-qa-artifacts/2026-05-16-gate5-scenario9-resume-handoff/export-after-resume"
+        final_export: "docs/live-qa-artifacts/2026-05-16-gate5-scenario9-resume-handoff/export-final"
+      cleanup:
+        stop_decision_id: 2
+        stop_decision: "docs/live-qa-artifacts/2026-05-16-gate5-scenario9-resume-handoff/stop-decision.json"
+        stop_task: "docs/live-qa-artifacts/2026-05-16-gate5-scenario9-resume-handoff/stop-task.json"
+        isolated_reconcile: "docs/live-qa-artifacts/2026-05-16-gate5-scenario9-resume-handoff/reconcile-final-isolated-check.json"
+        default_reconcile: "docs/live-qa-artifacts/2026-05-16-gate5-scenario9-resume-handoff/reconcile-final-default-check.json"
+        tmux_matching: "docs/live-qa-artifacts/2026-05-16-gate5-scenario9-resume-handoff/tmux-final-matching.txt"
+        result: "clean"
+      compact_clear: "not_used"
+
+  - id: T003
+    type: judge
+    assignee: PM/Judge
+    status: completed
+    objective: "Audit Scenario 9 and Gate 5 readiness."
+    inputs:
+      - "T001/T002 receipts"
+      - "Scenario 9 evidence bundle"
+      - "Gate 5 promotion criteria"
+    constraints:
+      - "Read-only."
+      - "Reject if durable state is insufficient for resume."
+      - "Reject if criteria-plan risk is unresolved."
+    expected_output:
+      - "Scenario 9 passed | blocked | deferred."
+      - "Gate 5 passed | blocked | deferred."
+      - "Next meaningful dogfood recommendation or blocker."
+    receipt:
+      scenario_9: "passed"
+      gate_5: "passed"
+      audit_summary:
+        - "Worker handoff recorded current status, next steps, and known risks."
+        - "Resumed manager decision 1 used durable replay, export, handoff, and criteria state instead of live chat memory."
+        - "Accepted criteria 1-3 were satisfied after resume; compact/clear criterion 4 remains explicitly deferred."
+        - "Final isolated/default reconcile checks were clean and no matching disposable tmux sessions remained."
+      caveats:
+        - "criteria-plan is implemented but currently truncates some multi-line prose, so manual criteria extraction is still a quality follow-up."
+        - "This Scenario 9 drill did not use compact/clear; the ladder only requires those permission and handoff checks if compact/clear is used."
+      recommendation: "Proceed to a low-risk meaningful branch-scoped dogfood task, while separately improving criteria-plan extraction and running a compact/clear-specific follow-up before relying on those controls."
+
+  - id: T004
+    type: pm
+    assignee: PM
+    status: completed
+    objective: "Package Gate 5 Scenario 9 outcome."
+    constraints:
+      - "Create a PR for evidence/docs/code changes."
+      - "Do not merge without explicit operator instruction."
+    expected_output:
+      - "PR/status or no-PR rationale."
+    receipt:
+      pr: "https://github.com/neonwatty/codex-terminal-manager/pull/63"
+      branch: "manager-led-gate5-resume-handoff"
+      commit: "a2fda12"
+      ci: "green"
+      package_summary:
+        - "Committed Gate 5 Scenario 9 GoalBuddy state and evidence bundle."
+        - "Created PR #63 for review."
+        - "GitHub unittest checks passed."
+      merge_status: "not_merged_operator_instruction_required"
+
+checks:
+  dirty_fingerprint: unknown
+  last_verification:
+    result: passed
+    task: T003
+    commands:
+      - "ruby -e 'require \"yaml\"; YAML.load_file(\"docs/goals/manager-led-gate5-resume-handoff/state.yaml\"); puts \"yaml ok\"'"
+      - "WORKERCTL_STATE_ROOT=/tmp/codex-terminal-manager-g5-s9-state scripts/workerctl reconcile --stale-cycles-seconds 1"
+      - "scripts/workerctl reconcile --stale-cycles-seconds 1"
+      - "tmux list-sessions -F '#{session_name}' | rg 'codex-qa-g5-s9' || true"
+      - "sensitive-pattern scan over the goal, evidence bundle, and QA log"
+      - "python3 -m unittest tests/test_workerctl.py"

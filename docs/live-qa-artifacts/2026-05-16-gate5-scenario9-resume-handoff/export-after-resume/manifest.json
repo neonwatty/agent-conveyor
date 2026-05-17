@@ -1,0 +1,20 @@
+{
+  "created_at": "2026-05-17T02:05:57Z",
+  "files": [
+    "task-status.json",
+    "audit.json",
+    "acceptance-criteria.json",
+    "prompts.json",
+    "transcript-captures.json",
+    "terminal-captures.json",
+    "agent-observations.json",
+    "manager-cycles.json",
+    "manager-decisions.json",
+    "mutation-audit.json",
+    "replay.json"
+  ],
+  "task": {
+    "id": "task-86bafd01-dccd-4dd0-80d3-53a44fbb52de",
+    "name": "qa-g5-s9-resume"
+  }
+}

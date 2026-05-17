@@ -1,0 +1,137 @@
+{
+  "entries": [
+    {
+      "actor": "manager",
+      "details": {
+        "cycle_id": 1,
+        "manager_capture_id": null,
+        "state": "succeeded",
+        "worker_capture_id": null
+      },
+      "kind": "observe",
+      "source": "manager_cycles",
+      "source_id": 1,
+      "summary": "observed session qa-g5-s9-worker state busy (staleness 9.7s) [pane pattern: mcp_startup]",
+      "timestamp": "2026-05-17T02:00:14Z"
+    },
+    {
+      "actor": "workerctl",
+      "details": {
+        "created": true,
+        "criterion": "A durable worker handoff records current status, next steps, and known risks.",
+        "criterion_id": 1,
+        "event_type": "acceptance_criterion_added",
+        "evidence": {
+          "handoff": "docs/live-qa-artifacts/2026-05-16-gate5-scenario9-resume-handoff/handoff.json"
+        },
+        "proof": "handoff.json records summary, next steps, and known risks.",
+        "rationale": null,
+        "source": "worker_proposed",
+        "status": "accepted",
+        "task_id": "task-86bafd01-dccd-4dd0-80d3-53a44fbb52de"
+      },
+      "kind": "acceptance_criterion",
+      "source": "events",
+      "source_id": 8,
+      "summary": "accepted criterion #1: A durable worker handoff records current status, next steps, and known risks.",
+      "timestamp": "2026-05-17T02:01:31Z"
+    },
+    {
+      "actor": "workerctl",
+      "details": {
+        "created": true,
+        "criterion": "Accepted resume-safety criteria and a deferred compact/clear follow-up remain visible after resume.",
+        "criterion_id": 2,
+        "event_type": "acceptance_criterion_added",
+        "evidence": {},
+        "proof": "criteria list before/after resume must show accepted and deferred state.",
+        "rationale": null,
+        "source": "worker_proposed",
+        "status": "accepted",
+        "task_id": "task-86bafd01-dccd-4dd0-80d3-53a44fbb52de"
+      },
+      "kind": "acceptance_criterion",
+      "source": "events",
+      "source_id": 9,
+      "summary": "accepted criterion #2: Accepted resume-safety criteria and a deferred compact/clear follow-up remain visible after resume.",
+      "timestamp": "2026-05-17T02:01:31Z"
+    },
+    {
+      "actor": "workerctl",
+      "details": {
+        "created": true,
+        "criterion": "A resumed manager records a decision based on durable replay/export/handoff/criteria state, not live chat memory.",
+        "criterion_id": 3,
+        "event_type": "acceptance_criterion_added",
+        "evidence": {},
+        "proof": "resumed decision payload must name replay, export, handoff, and criteria evidence.",
+        "rationale": null,
+        "source": "worker_proposed",
+        "status": "accepted",
+        "task_id": "task-86bafd01-dccd-4dd0-80d3-53a44fbb52de"
+      },
+      "kind": "acceptance_criterion",
+      "source": "events",
+      "source_id": 10,
+      "summary": "accepted criterion #3: A resumed manager records a decision based on durable replay/export/handoff/criteria state, not live chat memory.",
+      "timestamp": "2026-05-17T02:01:31Z"
+    },
+    {
+      "actor": "workerctl",
+      "details": {
+        "created": true,
+        "criterion": "Run the same resume drill with actual compact/clear only after handoff and manager permission are configured.",
+        "criterion_id": 4,
+        "event_type": "acceptance_criterion_added",
+        "evidence": {},
+        "proof": null,
+        "rationale": "Follow-up after this Gate 5 QA slice; compact/clear is intentionally not used here.",
+        "source": "worker_proposed",
+        "status": "deferred",
+        "task_id": "task-86bafd01-dccd-4dd0-80d3-53a44fbb52de"
+      },
+      "kind": "acceptance_criterion",
+      "source": "events",
+      "source_id": 11,
+      "summary": "deferred criterion #4: Follow-up after this Gate 5 QA slice; compact/clear is intentionally not used here.",
+      "timestamp": "2026-05-17T02:01:31Z"
+    },
+    {
+      "actor": "manager",
+      "details": {
+        "cycle_id": 2,
+        "manager_capture_id": null,
+        "state": "succeeded",
+        "worker_capture_id": null
+      },
+      "kind": "observe",
+      "source": "manager_cycles",
+      "source_id": 2,
+      "summary": "observed session qa-g5-s9-worker state idle (staleness 208.8s)",
+      "timestamp": "2026-05-17T02:04:24Z"
+    },
+    {
+      "actor": "manager",
+      "details": {
+        "decision": "inspect",
+        "manager_cycle_id": 2
+      },
+      "kind": "decision",
+      "source": "manager_decisions",
+      "source_id": 1,
+      "summary": "decision inspect: Resumed manager inspected durable replay, export, handoff, and criteria state; worker is idle, task is completed, and no nudge is needed.",
+      "timestamp": "2026-05-17T02:04:49Z"
+    }
+  ],
+  "mode": "timeline",
+  "role": "all",
+  "task": {
+    "created_at": "2026-05-17T01:59:56Z",
+    "goal": "Gate 5 Scenario 9 resume/handoff dogfood: prove durable handoff, replay/export, criteria state, and resumed manager decision are enough to continue without live chat memory.",
+    "id": "task-86bafd01-dccd-4dd0-80d3-53a44fbb52de",
+    "name": "qa-g5-s9-resume",
+    "state": "candidate",
+    "summary": "Disposable isolated Scenario 9 resume and handoff dogfood.",
+    "updated_at": "2026-05-17T01:59:56Z"
+  }
+}

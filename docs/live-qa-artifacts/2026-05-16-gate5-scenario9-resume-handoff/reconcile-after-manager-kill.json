@@ -1,0 +1,79 @@
+{
+  "applied": {
+    "bindings_marked_invalid": [
+      "binding-2cb2d9cb-8f29-4703-8315-c0c2df949cac"
+    ],
+    "sessions_marked_gone": [
+      "qa-g5-s9-manager"
+    ]
+  },
+  "dangling_bindings": [],
+  "dead_pid_sessions": [
+    {
+      "last_heartbeat_at": "2026-05-17T02:00:00Z",
+      "name": "qa-g5-s9-manager",
+      "pid": 35393,
+      "role": "manager"
+    }
+  ],
+  "schema_health": {
+    "checks": [
+      {
+        "name": "foreign_keys",
+        "ok": true,
+        "value": 1
+      },
+      {
+        "name": "journal_mode_wal",
+        "ok": true,
+        "value": "wal"
+      },
+      {
+        "name": "busy_timeout",
+        "ok": true,
+        "value": 5000
+      },
+      {
+        "name": "schema_version",
+        "ok": true,
+        "value": 8
+      },
+      {
+        "name": "user_version",
+        "ok": true,
+        "value": 8
+      },
+      {
+        "missing": [],
+        "name": "required_tables",
+        "ok": true
+      },
+      {
+        "missing": [],
+        "name": "required_indexes",
+        "ok": true
+      },
+      {
+        "missing": [],
+        "name": "required_triggers",
+        "ok": true
+      },
+      {
+        "name": "foreign_key_check",
+        "ok": true,
+        "violations": []
+      }
+    ],
+    "ok": true,
+    "schema_version": 8,
+    "user_version": 8
+  },
+  "stuck_tasks": [
+    {
+      "age_seconds": 221.684884,
+      "binding_id": "binding-2cb2d9cb-8f29-4703-8315-c0c2df949cac",
+      "last_cycle_at": "2026-05-17T02:00:14Z",
+      "task_name": "qa-g5-s9-resume"
+    }
+  ]
+}

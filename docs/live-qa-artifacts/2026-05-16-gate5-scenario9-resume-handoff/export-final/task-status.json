@@ -1,0 +1,64 @@
+{
+  "budget": null,
+  "created_at": "2026-05-17T01:59:56Z",
+  "goal": "Gate 5 Scenario 9 resume/handoff dogfood: prove durable handoff, replay/export, criteria state, and resumed manager decision are enough to continue without live chat memory.",
+  "id": "task-86bafd01-dccd-4dd0-80d3-53a44fbb52de",
+  "integrity": {
+    "issues": [],
+    "ok": true
+  },
+  "manager": null,
+  "manager_config": {
+    "acceptance_criteria": [
+      "A worker handoff records current status, next steps, and known risks.",
+      "criteria-plan output is captured and accepted/deferred criteria state remains visible after resume.",
+      "A resumed manager decision names durable evidence from replay, export, handoff, and criteria state.",
+      "Cleanup leaves isolated and default reconcile clean with no matching tmux sessions."
+    ],
+    "created_at": "2026-05-17T02:00:35Z",
+    "guidelines": [
+      "No meaningful project edits, commits, branches, PRs, merges, compact, clear, or destructive cleanup.",
+      "Separate current-task criteria from follow-up criteria. Do not accept done without checking criteria, replay/export, handoff, and cleanup state."
+    ],
+    "objective": "Validate Scenario 9 resume/handoff readiness. The manager must use durable workerctl handoff, replay, export, and criteria state to decide the next action after resume, not live chat memory.",
+    "permissions": {
+      "allow_merge_green": false,
+      "allow_pr": false,
+      "allow_worker_compact_clear": false,
+      "create_pr": false,
+      "merge_green_pr": false,
+      "worker_compact_clear": false
+    },
+    "reference_paths": [],
+    "supervision_mode": "guided",
+    "task_id": "task-86bafd01-dccd-4dd0-80d3-53a44fbb52de",
+    "updated_at": "2026-05-17T02:00:35Z"
+  },
+  "name": "qa-g5-s9-resume",
+  "state": "done",
+  "summary": "Disposable isolated Scenario 9 resume and handoff dogfood.",
+  "updated_at": "2026-05-17T02:07:01Z",
+  "worker": null,
+  "worker_handoff": {
+    "created_at": "2026-05-17T02:01:14Z",
+    "id": 1,
+    "next_steps": [
+      "Persist accepted and deferred criteria from worker receipt.",
+      "Resume management from durable handoff/replay/export/criteria state and record a decision.",
+      "Export evidence and verify cleanup invariants."
+    ],
+    "payload": {
+      "known_risks": [
+        "false pass if resumed manager relies on live chat memory",
+        "replay/export may omit handoff or criteria context",
+        "criteria state could drift across resume",
+        "cleanup may leave disposable sessions"
+      ],
+      "worker_receipt": "docs/live-qa-artifacts/2026-05-16-gate5-scenario9-resume-handoff/worker-capture-after-nudge.txt"
+    },
+    "summary": "Status-only Scenario 9 worker inspected repo shape, proposed resume-safety criteria, and identified next steps/risks without editing files or doing meaningful project work.",
+    "task_id": "task-86bafd01-dccd-4dd0-80d3-53a44fbb52de",
+    "worker_session_id": "session-ba274a69-5634-4917-923e-ef45fe737cd9"
+  },
+  "worker_status": null
+}
