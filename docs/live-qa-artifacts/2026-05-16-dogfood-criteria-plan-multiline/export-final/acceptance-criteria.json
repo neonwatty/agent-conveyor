@@ -1,0 +1,141 @@
+[
+  {
+    "created_at": "2026-05-17T02:16:59Z",
+    "criterion": "criteria-plan preserves multi-line bullet criteria by joining continuation lines into the same criterion text for both must-have/current-task and follow-up/deferred sections.",
+    "evidence": {
+      "diff_evidence": "tests add multiline must-have/current-task and deferred/follow-up parser coverage; parser accumulates indented continuation lines before suggestion creation.",
+      "sources": [
+        "workerctl tail dogfood-criteria-plan-worker --limit 40",
+        "git diff -- workerctl/criteria_plan.py tests/test_workerctl.py"
+      ],
+      "test_commands": [
+        {
+          "command": "python3 -m unittest tests.test_workerctl.CliTests.test_criteria_plan_parser_extracts_separated_criteria tests.test_workerctl.CliTests.test_criteria_plan_parser_keeps_items_with_heading_keywords tests.test_workerctl.CliTests.test_criteria_plan_parser_joins_multiline_bullets tests.test_workerctl.CliTests.test_criteria_plan_parser_handles_gate5_wrapped_followup_prose tests.test_workerctl.CliTests.test_criteria_plan_parser_warns_on_ambiguous_prose tests.test_workerctl.CliTests.test_criteria_plan_parser_ignores_empty_placeholder_items tests.test_workerctl.CliTests.test_criteria_plan_cli_json_drafts_commands_without_mutation tests.test_workerctl.CliTests.test_criteria_plan_cli_text_renders_reviewed_commands",
+          "result": "Ran 8 tests in 0.314s OK",
+          "status": "pass"
+        },
+        {
+          "command": "python3 -m unittest discover",
+          "result": "Ran 341 tests in 11.498s OK",
+          "status": "pass"
+        }
+      ]
+    },
+    "id": 28,
+    "proof": "Worker transcript task_complete says multi-line bullet items accumulate indented continuation lines; focused criteria-plan tests passed (8 tests), full unittest discover passed (341 tests), and direct Gate 5 parse returned accepted, accepted, accepted, deferred with wrapped text preserved.",
+    "rationale": null,
+    "source": "worker_proposed",
+    "status": "satisfied",
+    "task_id": "task-6cbfd9de-0add-48ce-a074-7455b294ce7f",
+    "updated_at": "2026-05-17T02:18:58Z"
+  },
+  {
+    "created_at": "2026-05-17T02:17:04Z",
+    "criterion": "The parser only joins clear continuation prose under an active list item and does not convert unrelated prose, headings, or separate list items into the prior criterion.",
+    "evidence": {
+      "implementation": "_INDENTED_CONTINUATION_RE matches only indented non-empty continuation lines; flush_active_item runs before headings, new list items, blank lines, and unrelated prose.",
+      "sources": [
+        "git diff -- workerctl/criteria_plan.py tests/test_workerctl.py",
+        "workerctl tail dogfood-criteria-plan-worker --limit 40"
+      ],
+      "status": "satisfied",
+      "tests": [
+        "test_criteria_plan_parser_joins_multiline_bullets",
+        "test_criteria_plan_parser_handles_gate5_wrapped_followup_prose",
+        "test_criteria_plan_parser_keeps_items_with_heading_keywords"
+      ]
+    },
+    "id": 29,
+    "proof": "Git diff shows the parser only appends lines matching indented continuation while flushing on blank lines, headings, unrelated prose, and new list items. Transcript shows focused tests passed, including multiline and Gate 5 wrapped prose coverage.",
+    "rationale": null,
+    "source": "worker_proposed",
+    "status": "satisfied",
+    "task_id": "task-6cbfd9de-0add-48ce-a074-7455b294ce7f",
+    "updated_at": "2026-05-17T02:19:06Z"
+  },
+  {
+    "created_at": "2026-05-17T02:17:07Z",
+    "criterion": "Deferred suggestions still receive the default deferred rationale, accepted suggestions do not, and existing single-line extraction behavior is preserved.",
+    "evidence": {
+      "sources": [
+        "git diff -- workerctl/criteria_plan.py tests/test_workerctl.py",
+        "workerctl tail dogfood-criteria-plan-worker --limit 40"
+      ],
+      "status": "satisfied",
+      "test_commands": [
+        {
+          "command": "focused criteria-plan unittest selection",
+          "result": "Ran 8 tests in 0.314s OK",
+          "status": "pass"
+        }
+      ],
+      "tests": [
+        "test_criteria_plan_parser_extracts_separated_criteria",
+        "test_criteria_plan_parser_joins_multiline_bullets",
+        "test_criteria_plan_cli_text_renders_reviewed_commands"
+      ]
+    },
+    "id": 30,
+    "proof": "Diff preserves _make_suggestion rationale behavior: deferred suggestions receive DEFAULT_DEFERRED_RATIONALE and accepted suggestions receive None. Tests assert accepted rationale is None, deferred rationale is DEFAULT_DEFERRED_RATIONALE, and existing single-line separated criteria behavior still passes.",
+    "rationale": null,
+    "source": "worker_proposed",
+    "status": "satisfied",
+    "task_id": "task-6cbfd9de-0add-48ce-a074-7455b294ce7f",
+    "updated_at": "2026-05-17T02:19:13Z"
+  },
+  {
+    "created_at": "2026-05-17T02:17:11Z",
+    "criterion": "criteria-plan remains read-only: running it does not create or mutate acceptance_criteria, events, or commands rows.",
+    "evidence": {
+      "read_only_evidence": "No command/database mutation path changed; parser-only diff plus tests. Focused passing set includes test_criteria_plan_cli_json_drafts_commands_without_mutation.",
+      "sources": [
+        "workerctl tail dogfood-criteria-plan-worker --limit 40",
+        "git diff -- workerctl/criteria_plan.py tests/test_workerctl.py"
+      ],
+      "status": "satisfied",
+      "test_commands": [
+        {
+          "command": "focused criteria-plan unittest selection",
+          "result": "Ran 8 tests in 0.314s OK",
+          "status": "pass"
+        },
+        {
+          "command": "python3 -m unittest discover",
+          "result": "Ran 341 tests in 11.498s OK",
+          "status": "pass"
+        }
+      ]
+    },
+    "id": 31,
+    "proof": "Worker transcript final receipt says criteria-plan remains read-only and no command/database mutation path changed. Diff is limited to parser and tests; existing CLI read-only mutation test remained in the focused passing set.",
+    "rationale": null,
+    "source": "worker_proposed",
+    "status": "satisfied",
+    "task_id": "task-6cbfd9de-0add-48ce-a074-7455b294ce7f",
+    "updated_at": "2026-05-17T02:19:20Z"
+  },
+  {
+    "created_at": "2026-05-17T02:17:15Z",
+    "criterion": "Broaden criteria-plan parsing for nested sub-bullets or richer Markdown structure if managers need to preserve indentation/structure rather than flattened criterion text.",
+    "evidence": {},
+    "id": 32,
+    "proof": null,
+    "rationale": "Follow-up after this QA slice.",
+    "source": "worker_proposed",
+    "status": "deferred",
+    "task_id": "task-6cbfd9de-0add-48ce-a074-7455b294ce7f",
+    "updated_at": "2026-05-17T02:17:15Z"
+  },
+  {
+    "created_at": "2026-05-17T02:17:18Z",
+    "criterion": "Add fixture-based regression coverage from more real dogfood transcripts if additional truncation shapes appear beyond the Gate 5-style wrapped prose.",
+    "evidence": {},
+    "id": 33,
+    "proof": null,
+    "rationale": "Follow-up after this QA slice.",
+    "source": "worker_proposed",
+    "status": "deferred",
+    "task_id": "task-6cbfd9de-0add-48ce-a074-7455b294ce7f",
+    "updated_at": "2026-05-17T02:17:18Z"
+  }
+]

@@ -1,0 +1,17 @@
+{
+  "ok": true,
+  "records": [],
+  "summary": {
+    "mutations": 0,
+    "with_warnings": 0
+  },
+  "task": {
+    "created_at": "2026-05-17T02:15:24Z",
+    "goal": "Fix workerctl criteria-plan extraction quality for multi-line worker criteria prose, preserving read-only behavior and tests.",
+    "id": "task-6cbfd9de-0add-48ce-a074-7455b294ce7f",
+    "name": "dogfood-criteria-plan-multiline",
+    "state": "candidate",
+    "summary": "Low-risk meaningful dogfood task after Gate 5: improve criteria-plan parsing for multi-line bullet/prose criteria.",
+    "updated_at": "2026-05-17T02:15:24Z"
+  }
+}
