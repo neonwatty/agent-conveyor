@@ -1,0 +1,20 @@
+{
+  "created_at": "2026-05-17T16:22:28Z",
+  "files": [
+    "task-status.json",
+    "audit.json",
+    "acceptance-criteria.json",
+    "prompts.json",
+    "transcript-captures.json",
+    "terminal-captures.json",
+    "agent-observations.json",
+    "manager-cycles.json",
+    "manager-decisions.json",
+    "mutation-audit.json",
+    "replay.json"
+  ],
+  "task": {
+    "id": "task-cc3bd15d-1689-40ee-98ef-599f73442d57",
+    "name": "qa-manager-quality-drill"
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "budget": null,
+  "created_at": "2026-05-17T16:19:07Z",
+  "goal": "Disposable Scenario 10 manager quality drill.",
+  "id": "task-cc3bd15d-1689-40ee-98ef-599f73442d57",
+  "integrity": {
+    "issues": [],
+    "ok": true
+  },
+  "manager": null,
+  "manager_config": null,
+  "name": "qa-manager-quality-drill",
+  "state": "done",
+  "summary": "Evaluate whether manager chooses evidence-backed next action from an imperfect worker done claim.",
+  "updated_at": "2026-05-17T16:22:17Z",
+  "worker": null,
+  "worker_handoff": null,
+  "worker_status": null
+}

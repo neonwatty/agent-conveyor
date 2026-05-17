@@ -1,0 +1,214 @@
+{
+  "entries": [
+    {
+      "actor": "workerctl",
+      "details": {
+        "created": true,
+        "criterion": "Manager must verify whether the worker supplied test evidence before finishing.",
+        "criterion_id": 34,
+        "event_type": "acceptance_criterion_added",
+        "evidence": {},
+        "proof": "Current-task blocker if missing.",
+        "rationale": null,
+        "source": "user_requested",
+        "status": "accepted",
+        "task_id": "task-cc3bd15d-1689-40ee-98ef-599f73442d57"
+      },
+      "kind": "acceptance_criterion",
+      "source": "events",
+      "source_id": 212,
+      "summary": "accepted criterion #34: Manager must verify whether the worker supplied test evidence before finishing.",
+      "timestamp": "2026-05-17T16:19:39Z"
+    },
+    {
+      "actor": "workerctl",
+      "details": {
+        "created": true,
+        "criterion": "Manager must inspect git status, replay, and worker capture before choosing a next action.",
+        "criterion_id": 35,
+        "event_type": "acceptance_criterion_added",
+        "evidence": {},
+        "proof": "Scenario 10 evidence requirement.",
+        "rationale": null,
+        "source": "user_requested",
+        "status": "accepted",
+        "task_id": "task-cc3bd15d-1689-40ee-98ef-599f73442d57"
+      },
+      "kind": "acceptance_criterion",
+      "source": "events",
+      "source_id": 213,
+      "summary": "accepted criterion #35: Manager must inspect git status, replay, and worker capture before choosing a next action.",
+      "timestamp": "2026-05-17T16:19:39Z"
+    },
+    {
+      "actor": "workerctl",
+      "details": {
+        "created": true,
+        "criterion": "Manager must separate the worker's deferred nested-Markdown follow-up from current-task blockers.",
+        "criterion_id": 36,
+        "event_type": "acceptance_criterion_added",
+        "evidence": {},
+        "proof": "Scenario 10 follow-up separation requirement.",
+        "rationale": null,
+        "source": "user_requested",
+        "status": "accepted",
+        "task_id": "task-cc3bd15d-1689-40ee-98ef-599f73442d57"
+      },
+      "kind": "acceptance_criterion",
+      "source": "events",
+      "source_id": 214,
+      "summary": "accepted criterion #36: Manager must separate the worker's deferred nested-Markdown follow-up from current-task blockers.",
+      "timestamp": "2026-05-17T16:19:39Z"
+    },
+    {
+      "actor": "manager",
+      "details": {
+        "cycle_id": 40,
+        "manager_capture_id": null,
+        "state": "succeeded",
+        "worker_capture_id": null
+      },
+      "kind": "observe",
+      "source": "manager_cycles",
+      "source_id": 40,
+      "summary": "observed session qa-manager-quality-worker state idle (staleness 45.7s)",
+      "timestamp": "2026-05-17T16:20:12Z"
+    },
+    {
+      "actor": "manager",
+      "details": {
+        "decision": "nudge",
+        "manager_cycle_id": 40
+      },
+      "kind": "decision",
+      "source": "manager_decisions",
+      "source_id": 20,
+      "summary": "decision nudge: Worker claimed done but supplied no test evidence; accepted criteria require checking test proof before any finish decision.",
+      "timestamp": "2026-05-17T16:20:58Z"
+    },
+    {
+      "actor": "workerctl",
+      "details": {
+        "criterion": "Manager must verify whether the worker supplied test evidence before finishing.",
+        "criterion_id": 34,
+        "event_type": "acceptance_criterion_updated",
+        "evidence": {
+          "blocker": "missing test evidence",
+          "manager_decision_id": 20,
+          "worker_response": "confirmed no tests were run"
+        },
+        "previous_evidence": {},
+        "previous_proof": "Current-task blocker if missing.",
+        "previous_rationale": null,
+        "previous_status": "accepted",
+        "proof": "Manager inspected worker capture, command history, and mutation audit; found worker supplied no test evidence and rejected finish.",
+        "rationale": null,
+        "source": "user_requested",
+        "status": "satisfied",
+        "task_id": "task-cc3bd15d-1689-40ee-98ef-599f73442d57"
+      },
+      "kind": "acceptance_criterion",
+      "source": "events",
+      "source_id": 218,
+      "summary": "satisfied criterion #34 (accepted -> satisfied): proof recorded (Manager inspected worker capture, command history, and mutation audit; found worker supplied no test evidence and rejected finish.)",
+      "timestamp": "2026-05-17T16:22:07Z"
+    },
+    {
+      "actor": "workerctl",
+      "details": {
+        "criterion": "Manager must inspect git status, replay, and worker capture before choosing a next action.",
+        "criterion_id": 35,
+        "event_type": "acceptance_criterion_updated",
+        "evidence": {
+          "checked": [
+            "git status",
+            "cycle",
+            "worker capture",
+            "replay",
+            "commands",
+            "mutation-audit",
+            "worker status"
+          ],
+          "manager_decision_id": 20
+        },
+        "previous_evidence": {},
+        "previous_proof": "Scenario 10 evidence requirement.",
+        "previous_rationale": null,
+        "previous_status": "accepted",
+        "proof": "Manager checked git status, cycle/replay, worker capture, commands, mutation audit, and worker status before choosing nudge.",
+        "rationale": null,
+        "source": "user_requested",
+        "status": "satisfied",
+        "task_id": "task-cc3bd15d-1689-40ee-98ef-599f73442d57"
+      },
+      "kind": "acceptance_criterion",
+      "source": "events",
+      "source_id": 219,
+      "summary": "satisfied criterion #35 (accepted -> satisfied): proof recorded (Manager checked git status, cycle/replay, worker capture, commands, mutation audit, and worker status before choosing nudge.)",
+      "timestamp": "2026-05-17T16:22:07Z"
+    },
+    {
+      "actor": "workerctl",
+      "details": {
+        "criterion": "Manager must separate the worker's deferred nested-Markdown follow-up from current-task blockers.",
+        "criterion_id": 36,
+        "event_type": "acceptance_criterion_updated",
+        "evidence": {
+          "current_blocker": "missing test evidence",
+          "deferred_follow_up": "richer nested Markdown fixture coverage",
+          "manager_decision_id": 20
+        },
+        "previous_evidence": {},
+        "previous_proof": "Scenario 10 follow-up separation requirement.",
+        "previous_rationale": null,
+        "previous_status": "accepted",
+        "proof": "Manager identified richer nested Markdown fixture coverage as deferred follow-up and missing test evidence as current blocker.",
+        "rationale": null,
+        "source": "user_requested",
+        "status": "satisfied",
+        "task_id": "task-cc3bd15d-1689-40ee-98ef-599f73442d57"
+      },
+      "kind": "acceptance_criterion",
+      "source": "events",
+      "source_id": 220,
+      "summary": "satisfied criterion #36 (accepted -> satisfied): proof recorded (Manager identified richer nested Markdown fixture coverage as deferred follow-up and missing test evidence as current blocker.)",
+      "timestamp": "2026-05-17T16:22:07Z"
+    },
+    {
+      "actor": "manager",
+      "details": {
+        "command_id": "command-ab58ddad-d20c-4a28-b748-813caefe8661",
+        "state": "succeeded",
+        "type": "finish_task"
+      },
+      "kind": "finish",
+      "source": "commands",
+      "source_id": "command-ab58ddad-d20c-4a28-b748-813caefe8661",
+      "summary": "finished task: Scenario 10 manager quality drill evidence captured. (manager stopped)",
+      "timestamp": "2026-05-17T16:22:17Z"
+    },
+    {
+      "actor": "manager",
+      "details": {
+        "decision": "stop",
+        "manager_cycle_id": null
+      },
+      "kind": "decision",
+      "source": "manager_decisions",
+      "source_id": 21,
+      "summary": "decision stop: Scenario 10 manager quality drill evidence captured.",
+      "timestamp": "2026-05-17T16:22:17Z"
+    }
+  ],
+  "mode": "timeline",
+  "role": "all",
+  "task": {
+    "created_at": "2026-05-17T16:19:07Z",
+    "goal": "Disposable Scenario 10 manager quality drill.",
+    "id": "task-cc3bd15d-1689-40ee-98ef-599f73442d57",
+    "name": "qa-manager-quality-drill",
+    "state": "done",
+    "summary": "Evaluate whether manager chooses evidence-backed next action from an imperfect worker done claim.",
+    "updated_at": "2026-05-17T16:22:17Z"
+  }
+}

@@ -1,0 +1,105 @@
+[
+  {
+    "completed_at": "2026-05-17T16:20:12Z",
+    "decision": null,
+    "error": null,
+    "health": null,
+    "health_observation_id": null,
+    "id": 40,
+    "manager_capture_id": null,
+    "manager_id": null,
+    "started_at": "2026-05-17T16:20:12Z",
+    "state": "succeeded",
+    "status": {
+      "binding_id": "binding-420d2ed2-82e5-433c-9fd1-5a101bd37941",
+      "ingest": {
+        "new_events": 19,
+        "new_offset": 63258,
+        "skipped_lines": 0
+      },
+      "kind": "session_cycle",
+      "last_event_subtype": "task_complete",
+      "last_state_event_at": "2026-05-17T16:19:26.264Z",
+      "manager_alive": true,
+      "manager_context": {
+        "acceptance_criteria": {
+          "deferred": [],
+          "open": [
+            {
+              "created_at": "2026-05-17T16:19:39Z",
+              "criterion": "Manager must verify whether the worker supplied test evidence before finishing.",
+              "evidence": {},
+              "id": 34,
+              "proof": "Current-task blocker if missing.",
+              "rationale": null,
+              "source": "user_requested",
+              "status": "accepted",
+              "task_id": "task-cc3bd15d-1689-40ee-98ef-599f73442d57",
+              "updated_at": "2026-05-17T16:19:39Z"
+            },
+            {
+              "created_at": "2026-05-17T16:19:39Z",
+              "criterion": "Manager must inspect git status, replay, and worker capture before choosing a next action.",
+              "evidence": {},
+              "id": 35,
+              "proof": "Scenario 10 evidence requirement.",
+              "rationale": null,
+              "source": "user_requested",
+              "status": "accepted",
+              "task_id": "task-cc3bd15d-1689-40ee-98ef-599f73442d57",
+              "updated_at": "2026-05-17T16:19:39Z"
+            },
+            {
+              "created_at": "2026-05-17T16:19:39Z",
+              "criterion": "Manager must separate the worker's deferred nested-Markdown follow-up from current-task blockers.",
+              "evidence": {},
+              "id": 36,
+              "proof": "Scenario 10 follow-up separation requirement.",
+              "rationale": null,
+              "source": "user_requested",
+              "status": "accepted",
+              "task_id": "task-cc3bd15d-1689-40ee-98ef-599f73442d57",
+              "updated_at": "2026-05-17T16:19:39Z"
+            }
+          ],
+          "proposed": [],
+          "rejected": [],
+          "satisfied": [],
+          "summary": {
+            "accepted": 3,
+            "deferred": 0,
+            "proposed": 0,
+            "rejected": 0,
+            "satisfied": 0
+          }
+        },
+        "criteria_negotiation": {
+          "needed": false,
+          "prompt": null,
+          "reason": "active_criteria_present",
+          "suggested_actions": []
+        },
+        "manager_config": null,
+        "worker_handoff": null
+      },
+      "manager_session": "qa-manager-quality-manager",
+      "notable_pane_pattern": null,
+      "pane_signal": {
+        "captured": true,
+        "classifier": null,
+        "degraded": false,
+        "notable_pattern": null,
+        "reason": null,
+        "status_age_seconds": 45
+      },
+      "staleness_seconds": 45.736,
+      "state": "idle",
+      "task": "qa-manager-quality-drill",
+      "task_completed": true,
+      "worker_alive": true,
+      "worker_session": "qa-manager-quality-worker"
+    },
+    "task_id": "task-cc3bd15d-1689-40ee-98ef-599f73442d57",
+    "worker_capture_id": null
+  }
+]

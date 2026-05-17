@@ -1,0 +1,57 @@
+[
+  {
+    "created_at": "2026-05-17T16:19:39Z",
+    "criterion": "Manager must verify whether the worker supplied test evidence before finishing.",
+    "evidence": {
+      "blocker": "missing test evidence",
+      "manager_decision_id": 20,
+      "worker_response": "confirmed no tests were run"
+    },
+    "id": 34,
+    "proof": "Manager inspected worker capture, command history, and mutation audit; found worker supplied no test evidence and rejected finish.",
+    "rationale": null,
+    "source": "user_requested",
+    "status": "satisfied",
+    "task_id": "task-cc3bd15d-1689-40ee-98ef-599f73442d57",
+    "updated_at": "2026-05-17T16:22:07Z"
+  },
+  {
+    "created_at": "2026-05-17T16:19:39Z",
+    "criterion": "Manager must inspect git status, replay, and worker capture before choosing a next action.",
+    "evidence": {
+      "checked": [
+        "git status",
+        "cycle",
+        "worker capture",
+        "replay",
+        "commands",
+        "mutation-audit",
+        "worker status"
+      ],
+      "manager_decision_id": 20
+    },
+    "id": 35,
+    "proof": "Manager checked git status, cycle/replay, worker capture, commands, mutation audit, and worker status before choosing nudge.",
+    "rationale": null,
+    "source": "user_requested",
+    "status": "satisfied",
+    "task_id": "task-cc3bd15d-1689-40ee-98ef-599f73442d57",
+    "updated_at": "2026-05-17T16:22:07Z"
+  },
+  {
+    "created_at": "2026-05-17T16:19:39Z",
+    "criterion": "Manager must separate the worker's deferred nested-Markdown follow-up from current-task blockers.",
+    "evidence": {
+      "current_blocker": "missing test evidence",
+      "deferred_follow_up": "richer nested Markdown fixture coverage",
+      "manager_decision_id": 20
+    },
+    "id": 36,
+    "proof": "Manager identified richer nested Markdown fixture coverage as deferred follow-up and missing test evidence as current blocker.",
+    "rationale": null,
+    "source": "user_requested",
+    "status": "satisfied",
+    "task_id": "task-cc3bd15d-1689-40ee-98ef-599f73442d57",
+    "updated_at": "2026-05-17T16:22:07Z"
+  }
+]

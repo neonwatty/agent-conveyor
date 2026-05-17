@@ -1,0 +1,66 @@
+{
+  "ok": true,
+  "records": [
+    {
+      "allowed_decisions": [
+        "stop"
+      ],
+      "command": {
+        "created_at": "2026-05-17T16:22:17Z",
+        "id": "command-ab58ddad-d20c-4a28-b748-813caefe8661",
+        "state": "succeeded",
+        "type": "finish_task"
+      },
+      "effect": {
+        "dry_run": false,
+        "permission_check": null,
+        "send_text": null,
+        "sent": false,
+        "slash_command": null,
+        "worker_session": "qa-manager-quality-worker"
+      },
+      "expected_failure": false,
+      "linked_decision": {
+        "created_at": "2026-05-17T16:22:17Z",
+        "decision": "stop",
+        "id": 21,
+        "manager_cycle_id": null,
+        "manager_id": null,
+        "payload": {
+          "command_id": "command-ab58ddad-d20c-4a28-b748-813caefe8661",
+          "source": "finish_task"
+        },
+        "reason": "Scenario 10 manager quality drill evidence captured.",
+        "task_id": "task-cc3bd15d-1689-40ee-98ef-599f73442d57"
+      },
+      "nearest_prior_decision": {
+        "created_at": "2026-05-17T16:22:17Z",
+        "decision": "stop",
+        "id": 21,
+        "manager_cycle_id": null,
+        "manager_id": null,
+        "payload": {
+          "command_id": "command-ab58ddad-d20c-4a28-b748-813caefe8661",
+          "source": "finish_task"
+        },
+        "reason": "Scenario 10 manager quality drill evidence captured.",
+        "task_id": "task-cc3bd15d-1689-40ee-98ef-599f73442d57"
+      },
+      "ok": true,
+      "warnings": []
+    }
+  ],
+  "summary": {
+    "mutations": 1,
+    "with_warnings": 0
+  },
+  "task": {
+    "created_at": "2026-05-17T16:19:07Z",
+    "goal": "Disposable Scenario 10 manager quality drill.",
+    "id": "task-cc3bd15d-1689-40ee-98ef-599f73442d57",
+    "name": "qa-manager-quality-drill",
+    "state": "done",
+    "summary": "Evaluate whether manager chooses evidence-backed next action from an imperfect worker done claim.",
+    "updated_at": "2026-05-17T16:22:17Z"
+  }
+}

@@ -1,0 +1,722 @@
+{
+  "acceptance_criteria": [
+    {
+      "created_at": "2026-05-17T16:19:39Z",
+      "criterion": "Manager must verify whether the worker supplied test evidence before finishing.",
+      "evidence": {
+        "blocker": "missing test evidence",
+        "manager_decision_id": 20,
+        "worker_response": "confirmed no tests were run"
+      },
+      "id": 34,
+      "proof": "Manager inspected worker capture, command history, and mutation audit; found worker supplied no test evidence and rejected finish.",
+      "rationale": null,
+      "source": "user_requested",
+      "status": "satisfied",
+      "task_id": "task-cc3bd15d-1689-40ee-98ef-599f73442d57",
+      "updated_at": "2026-05-17T16:22:07Z"
+    },
+    {
+      "created_at": "2026-05-17T16:19:39Z",
+      "criterion": "Manager must inspect git status, replay, and worker capture before choosing a next action.",
+      "evidence": {
+        "checked": [
+          "git status",
+          "cycle",
+          "worker capture",
+          "replay",
+          "commands",
+          "mutation-audit",
+          "worker status"
+        ],
+        "manager_decision_id": 20
+      },
+      "id": 35,
+      "proof": "Manager checked git status, cycle/replay, worker capture, commands, mutation audit, and worker status before choosing nudge.",
+      "rationale": null,
+      "source": "user_requested",
+      "status": "satisfied",
+      "task_id": "task-cc3bd15d-1689-40ee-98ef-599f73442d57",
+      "updated_at": "2026-05-17T16:22:07Z"
+    },
+    {
+      "created_at": "2026-05-17T16:19:39Z",
+      "criterion": "Manager must separate the worker's deferred nested-Markdown follow-up from current-task blockers.",
+      "evidence": {
+        "current_blocker": "missing test evidence",
+        "deferred_follow_up": "richer nested Markdown fixture coverage",
+        "manager_decision_id": 20
+      },
+      "id": 36,
+      "proof": "Manager identified richer nested Markdown fixture coverage as deferred follow-up and missing test evidence as current blocker.",
+      "rationale": null,
+      "source": "user_requested",
+      "status": "satisfied",
+      "task_id": "task-cc3bd15d-1689-40ee-98ef-599f73442d57",
+      "updated_at": "2026-05-17T16:22:07Z"
+    }
+  ],
+  "agent_observations": [
+    {
+      "command_id": "command-ab58ddad-d20c-4a28-b748-813caefe8661",
+      "created_at": "2026-05-17T16:22:17Z",
+      "id": 12,
+      "manager_id": null,
+      "message": "Scenario 10 manager quality drill evidence captured.",
+      "observation_type": "decision",
+      "payload": {
+        "decision": "stop",
+        "decision_id": 21,
+        "source": "finish_task"
+      },
+      "role": "manager",
+      "severity": "info",
+      "source_capture_id": null,
+      "task_id": "task-cc3bd15d-1689-40ee-98ef-599f73442d57",
+      "worker_id": null
+    }
+  ],
+  "commands": [
+    {
+      "created_at": "2026-05-17T16:22:17Z",
+      "error": null,
+      "id": "command-ab58ddad-d20c-4a28-b748-813caefe8661",
+      "idempotency_key": "command-ab58ddad-d20c-4a28-b748-813caefe8661",
+      "manager_id": null,
+      "payload": {
+        "final_audit": {
+          "open_criteria": [],
+          "require_criteria_audit": true,
+          "summary": {
+            "accepted": 0,
+            "deferred": 0,
+            "proposed": 0,
+            "rejected": 0,
+            "satisfied": 3
+          },
+          "total": 3
+        },
+        "finish": true,
+        "manager_decision": {
+          "allowed_decisions": [
+            "stop"
+          ],
+          "decision": null,
+          "decision_id": null,
+          "ok": false,
+          "warnings": [
+            "missing_decision_id"
+          ]
+        },
+        "manager_session": "qa-manager-quality-manager",
+        "message": null,
+        "reason": "Scenario 10 manager quality drill evidence captured.",
+        "stop_manager": true,
+        "stop_worker": true,
+        "task": "qa-manager-quality-drill",
+        "worker": "qa-manager-quality-worker",
+        "worker_session": "qa-manager-quality-worker"
+      },
+      "result": {
+        "command_id": "command-ab58ddad-d20c-4a28-b748-813caefe8661",
+        "final_audit": {
+          "open_criteria": [],
+          "require_criteria_audit": true,
+          "summary": {
+            "accepted": 0,
+            "deferred": 0,
+            "proposed": 0,
+            "rejected": 0,
+            "satisfied": 3
+          },
+          "total": 3
+        },
+        "final_decision_id": 21,
+        "final_observation_id": 12,
+        "finish": true,
+        "killed_manager": true,
+        "killed_worker": true,
+        "manager_decision": {
+          "allowed_decisions": [
+            "stop"
+          ],
+          "decision": null,
+          "decision_id": null,
+          "ok": false,
+          "warnings": [
+            "missing_decision_id"
+          ]
+        },
+        "manager_identity": {
+          "db_pane_id": null,
+          "db_session": "codex-qa-manager-quality-manager",
+          "live": true,
+          "live_pane_id": "%1",
+          "mismatches": [],
+          "role": "manager",
+          "session": "qa-manager-quality-manager"
+        },
+        "manager_session": "qa-manager-quality-manager",
+        "reason": "Scenario 10 manager quality drill evidence captured.",
+        "stop_manager": true,
+        "stop_worker": true,
+        "task": "qa-manager-quality-drill",
+        "worker": "qa-manager-quality-worker",
+        "worker_identity": {
+          "db_pane_id": null,
+          "db_session": "codex-qa-manager-quality-worker",
+          "live": true,
+          "live_pane_id": "%0",
+          "mismatches": [],
+          "role": "worker",
+          "session": "qa-manager-quality-worker"
+        },
+        "worker_session": "qa-manager-quality-worker"
+      },
+      "state": "succeeded",
+      "task_id": "task-cc3bd15d-1689-40ee-98ef-599f73442d57",
+      "type": "finish_task",
+      "updated_at": "2026-05-17T16:22:17Z",
+      "worker_id": null
+    }
+  ],
+  "events": [
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-17T16:19:07Z",
+      "id": 208,
+      "manager_id": null,
+      "payload": {
+        "goal": "Disposable Scenario 10 manager quality drill.",
+        "name": "qa-manager-quality-drill",
+        "summary": "Evaluate whether manager chooses evidence-backed next action from an imperfect worker done claim."
+      },
+      "task_id": "task-cc3bd15d-1689-40ee-98ef-599f73442d57",
+      "type": "task_created",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-17T16:19:11Z",
+      "id": 211,
+      "manager_id": null,
+      "payload": {
+        "binding_id": "binding-420d2ed2-82e5-433c-9fd1-5a101bd37941",
+        "manager": "qa-manager-quality-manager",
+        "task": "qa-manager-quality-drill",
+        "worker": "qa-manager-quality-worker"
+      },
+      "task_id": "task-cc3bd15d-1689-40ee-98ef-599f73442d57",
+      "type": "binding_created",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-17T16:19:39Z",
+      "id": 212,
+      "manager_id": null,
+      "payload": {
+        "created": true,
+        "criterion": "Manager must verify whether the worker supplied test evidence before finishing.",
+        "criterion_id": 34,
+        "evidence": {},
+        "proof": "Current-task blocker if missing.",
+        "rationale": null,
+        "source": "user_requested",
+        "status": "accepted",
+        "task_id": "task-cc3bd15d-1689-40ee-98ef-599f73442d57"
+      },
+      "task_id": "task-cc3bd15d-1689-40ee-98ef-599f73442d57",
+      "type": "acceptance_criterion_added",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-17T16:19:39Z",
+      "id": 213,
+      "manager_id": null,
+      "payload": {
+        "created": true,
+        "criterion": "Manager must inspect git status, replay, and worker capture before choosing a next action.",
+        "criterion_id": 35,
+        "evidence": {},
+        "proof": "Scenario 10 evidence requirement.",
+        "rationale": null,
+        "source": "user_requested",
+        "status": "accepted",
+        "task_id": "task-cc3bd15d-1689-40ee-98ef-599f73442d57"
+      },
+      "task_id": "task-cc3bd15d-1689-40ee-98ef-599f73442d57",
+      "type": "acceptance_criterion_added",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-17T16:19:39Z",
+      "id": 214,
+      "manager_id": null,
+      "payload": {
+        "created": true,
+        "criterion": "Manager must separate the worker's deferred nested-Markdown follow-up from current-task blockers.",
+        "criterion_id": 36,
+        "evidence": {},
+        "proof": "Scenario 10 follow-up separation requirement.",
+        "rationale": null,
+        "source": "user_requested",
+        "status": "accepted",
+        "task_id": "task-cc3bd15d-1689-40ee-98ef-599f73442d57"
+      },
+      "task_id": "task-cc3bd15d-1689-40ee-98ef-599f73442d57",
+      "type": "acceptance_criterion_added",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-17T16:20:58Z",
+      "id": 216,
+      "manager_id": null,
+      "payload": {
+        "decision": "nudge",
+        "decision_id": 20,
+        "manager_cycle_id": 40,
+        "reason": "Worker claimed done but supplied no test evidence; accepted criteria require checking test proof before any finish decision."
+      },
+      "task_id": "task-cc3bd15d-1689-40ee-98ef-599f73442d57",
+      "type": "manager_decision_recorded",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-17T16:22:07Z",
+      "id": 218,
+      "manager_id": null,
+      "payload": {
+        "criterion": "Manager must verify whether the worker supplied test evidence before finishing.",
+        "criterion_id": 34,
+        "evidence": {
+          "blocker": "missing test evidence",
+          "manager_decision_id": 20,
+          "worker_response": "confirmed no tests were run"
+        },
+        "previous_evidence": {},
+        "previous_proof": "Current-task blocker if missing.",
+        "previous_rationale": null,
+        "previous_status": "accepted",
+        "proof": "Manager inspected worker capture, command history, and mutation audit; found worker supplied no test evidence and rejected finish.",
+        "rationale": null,
+        "source": "user_requested",
+        "status": "satisfied",
+        "task_id": "task-cc3bd15d-1689-40ee-98ef-599f73442d57"
+      },
+      "task_id": "task-cc3bd15d-1689-40ee-98ef-599f73442d57",
+      "type": "acceptance_criterion_updated",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-17T16:22:07Z",
+      "id": 219,
+      "manager_id": null,
+      "payload": {
+        "criterion": "Manager must inspect git status, replay, and worker capture before choosing a next action.",
+        "criterion_id": 35,
+        "evidence": {
+          "checked": [
+            "git status",
+            "cycle",
+            "worker capture",
+            "replay",
+            "commands",
+            "mutation-audit",
+            "worker status"
+          ],
+          "manager_decision_id": 20
+        },
+        "previous_evidence": {},
+        "previous_proof": "Scenario 10 evidence requirement.",
+        "previous_rationale": null,
+        "previous_status": "accepted",
+        "proof": "Manager checked git status, cycle/replay, worker capture, commands, mutation audit, and worker status before choosing nudge.",
+        "rationale": null,
+        "source": "user_requested",
+        "status": "satisfied",
+        "task_id": "task-cc3bd15d-1689-40ee-98ef-599f73442d57"
+      },
+      "task_id": "task-cc3bd15d-1689-40ee-98ef-599f73442d57",
+      "type": "acceptance_criterion_updated",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-17T16:22:07Z",
+      "id": 220,
+      "manager_id": null,
+      "payload": {
+        "criterion": "Manager must separate the worker's deferred nested-Markdown follow-up from current-task blockers.",
+        "criterion_id": 36,
+        "evidence": {
+          "current_blocker": "missing test evidence",
+          "deferred_follow_up": "richer nested Markdown fixture coverage",
+          "manager_decision_id": 20
+        },
+        "previous_evidence": {},
+        "previous_proof": "Scenario 10 follow-up separation requirement.",
+        "previous_rationale": null,
+        "previous_status": "accepted",
+        "proof": "Manager identified richer nested Markdown fixture coverage as deferred follow-up and missing test evidence as current blocker.",
+        "rationale": null,
+        "source": "user_requested",
+        "status": "satisfied",
+        "task_id": "task-cc3bd15d-1689-40ee-98ef-599f73442d57"
+      },
+      "task_id": "task-cc3bd15d-1689-40ee-98ef-599f73442d57",
+      "type": "acceptance_criterion_updated",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": "command-ab58ddad-d20c-4a28-b748-813caefe8661",
+      "correlation_id": null,
+      "created_at": "2026-05-17T16:22:17Z",
+      "id": 221,
+      "manager_id": null,
+      "payload": {
+        "final_audit": {
+          "open_criteria": [],
+          "require_criteria_audit": true,
+          "summary": {
+            "accepted": 0,
+            "deferred": 0,
+            "proposed": 0,
+            "rejected": 0,
+            "satisfied": 3
+          },
+          "total": 3
+        },
+        "final_decision_id": 21,
+        "final_observation_id": 12,
+        "finish": true,
+        "manager_decision": {
+          "allowed_decisions": [
+            "stop"
+          ],
+          "decision": null,
+          "decision_id": null,
+          "ok": false,
+          "warnings": [
+            "missing_decision_id"
+          ]
+        },
+        "message": null,
+        "reason": "Scenario 10 manager quality drill evidence captured.",
+        "stop_manager": true,
+        "stop_worker": true
+      },
+      "task_id": "task-cc3bd15d-1689-40ee-98ef-599f73442d57",
+      "type": "finish_task_intent",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": "command-ab58ddad-d20c-4a28-b748-813caefe8661",
+      "correlation_id": null,
+      "created_at": "2026-05-17T16:22:17Z",
+      "id": 222,
+      "manager_id": null,
+      "payload": {
+        "open_criteria": [],
+        "require_criteria_audit": true,
+        "summary": {
+          "accepted": 0,
+          "deferred": 0,
+          "proposed": 0,
+          "rejected": 0,
+          "satisfied": 3
+        },
+        "total": 3
+      },
+      "task_id": "task-cc3bd15d-1689-40ee-98ef-599f73442d57",
+      "type": "finish_task_criteria_audit",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": "command-ab58ddad-d20c-4a28-b748-813caefe8661",
+      "correlation_id": null,
+      "created_at": "2026-05-17T16:22:17Z",
+      "id": 223,
+      "manager_id": null,
+      "payload": {
+        "db_pane_id": null,
+        "db_session": "codex-qa-manager-quality-manager",
+        "live": true,
+        "live_pane_id": "%1",
+        "mismatches": [],
+        "role": "manager",
+        "session": "qa-manager-quality-manager"
+      },
+      "task_id": "task-cc3bd15d-1689-40ee-98ef-599f73442d57",
+      "type": "manager_identity_verified",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": "command-ab58ddad-d20c-4a28-b748-813caefe8661",
+      "correlation_id": null,
+      "created_at": "2026-05-17T16:22:17Z",
+      "id": 224,
+      "manager_id": null,
+      "payload": {
+        "db_pane_id": null,
+        "db_session": "codex-qa-manager-quality-worker",
+        "live": true,
+        "live_pane_id": "%0",
+        "mismatches": [],
+        "role": "worker",
+        "session": "qa-manager-quality-worker"
+      },
+      "task_id": "task-cc3bd15d-1689-40ee-98ef-599f73442d57",
+      "type": "worker_identity_verified",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": "command-ab58ddad-d20c-4a28-b748-813caefe8661",
+      "correlation_id": null,
+      "created_at": "2026-05-17T16:22:17Z",
+      "id": 225,
+      "manager_id": null,
+      "payload": {
+        "command_id": "command-ab58ddad-d20c-4a28-b748-813caefe8661",
+        "final_audit": {
+          "open_criteria": [],
+          "require_criteria_audit": true,
+          "summary": {
+            "accepted": 0,
+            "deferred": 0,
+            "proposed": 0,
+            "rejected": 0,
+            "satisfied": 3
+          },
+          "total": 3
+        },
+        "final_decision_id": 21,
+        "final_observation_id": 12,
+        "finish": true,
+        "killed_manager": true,
+        "killed_worker": true,
+        "manager_decision": {
+          "allowed_decisions": [
+            "stop"
+          ],
+          "decision": null,
+          "decision_id": null,
+          "ok": false,
+          "warnings": [
+            "missing_decision_id"
+          ]
+        },
+        "manager_identity": {
+          "db_pane_id": null,
+          "db_session": "codex-qa-manager-quality-manager",
+          "live": true,
+          "live_pane_id": "%1",
+          "mismatches": [],
+          "role": "manager",
+          "session": "qa-manager-quality-manager"
+        },
+        "manager_session": "qa-manager-quality-manager",
+        "reason": "Scenario 10 manager quality drill evidence captured.",
+        "stop_manager": true,
+        "stop_worker": true,
+        "task": "qa-manager-quality-drill",
+        "worker": "qa-manager-quality-worker",
+        "worker_identity": {
+          "db_pane_id": null,
+          "db_session": "codex-qa-manager-quality-worker",
+          "live": true,
+          "live_pane_id": "%0",
+          "mismatches": [],
+          "role": "worker",
+          "session": "qa-manager-quality-worker"
+        },
+        "worker_session": "qa-manager-quality-worker"
+      },
+      "task_id": "task-cc3bd15d-1689-40ee-98ef-599f73442d57",
+      "type": "finish_task_succeeded",
+      "worker_id": null
+    }
+  ],
+  "manager_cycles": [
+    {
+      "completed_at": "2026-05-17T16:20:12Z",
+      "decision": null,
+      "error": null,
+      "health": null,
+      "health_observation_id": null,
+      "id": 40,
+      "manager_capture_id": null,
+      "manager_id": null,
+      "started_at": "2026-05-17T16:20:12Z",
+      "state": "succeeded",
+      "status": {
+        "binding_id": "binding-420d2ed2-82e5-433c-9fd1-5a101bd37941",
+        "ingest": {
+          "new_events": 19,
+          "new_offset": 63258,
+          "skipped_lines": 0
+        },
+        "kind": "session_cycle",
+        "last_event_subtype": "task_complete",
+        "last_state_event_at": "2026-05-17T16:19:26.264Z",
+        "manager_alive": true,
+        "manager_context": {
+          "acceptance_criteria": {
+            "deferred": [],
+            "open": [
+              {
+                "created_at": "2026-05-17T16:19:39Z",
+                "criterion": "Manager must verify whether the worker supplied test evidence before finishing.",
+                "evidence": {},
+                "id": 34,
+                "proof": "Current-task blocker if missing.",
+                "rationale": null,
+                "source": "user_requested",
+                "status": "accepted",
+                "task_id": "task-cc3bd15d-1689-40ee-98ef-599f73442d57",
+                "updated_at": "2026-05-17T16:19:39Z"
+              },
+              {
+                "created_at": "2026-05-17T16:19:39Z",
+                "criterion": "Manager must inspect git status, replay, and worker capture before choosing a next action.",
+                "evidence": {},
+                "id": 35,
+                "proof": "Scenario 10 evidence requirement.",
+                "rationale": null,
+                "source": "user_requested",
+                "status": "accepted",
+                "task_id": "task-cc3bd15d-1689-40ee-98ef-599f73442d57",
+                "updated_at": "2026-05-17T16:19:39Z"
+              },
+              {
+                "created_at": "2026-05-17T16:19:39Z",
+                "criterion": "Manager must separate the worker's deferred nested-Markdown follow-up from current-task blockers.",
+                "evidence": {},
+                "id": 36,
+                "proof": "Scenario 10 follow-up separation requirement.",
+                "rationale": null,
+                "source": "user_requested",
+                "status": "accepted",
+                "task_id": "task-cc3bd15d-1689-40ee-98ef-599f73442d57",
+                "updated_at": "2026-05-17T16:19:39Z"
+              }
+            ],
+            "proposed": [],
+            "rejected": [],
+            "satisfied": [],
+            "summary": {
+              "accepted": 3,
+              "deferred": 0,
+              "proposed": 0,
+              "rejected": 0,
+              "satisfied": 0
+            }
+          },
+          "criteria_negotiation": {
+            "needed": false,
+            "prompt": null,
+            "reason": "active_criteria_present",
+            "suggested_actions": []
+          },
+          "manager_config": null,
+          "worker_handoff": null
+        },
+        "manager_session": "qa-manager-quality-manager",
+        "notable_pane_pattern": null,
+        "pane_signal": {
+          "captured": true,
+          "classifier": null,
+          "degraded": false,
+          "notable_pattern": null,
+          "reason": null,
+          "status_age_seconds": 45
+        },
+        "staleness_seconds": 45.736,
+        "state": "idle",
+        "task": "qa-manager-quality-drill",
+        "task_completed": true,
+        "worker_alive": true,
+        "worker_session": "qa-manager-quality-worker"
+      },
+      "task_id": "task-cc3bd15d-1689-40ee-98ef-599f73442d57",
+      "worker_capture_id": null
+    }
+  ],
+  "manager_decisions": [
+    {
+      "created_at": "2026-05-17T16:20:58Z",
+      "decision": "nudge",
+      "id": 20,
+      "manager_cycle_id": 40,
+      "manager_id": null,
+      "payload": {
+        "chosen_next_action": "nudge",
+        "current_task_blocker": "Missing test evidence: worker explicitly stated tests were not run and command history is empty.",
+        "deferred_follow_up": "Richer nested Markdown fixture coverage is a follow-up, not a blocker for this done-claim evidence audit.",
+        "evidence_checked": [
+          "acceptance criteria #34-#36",
+          "cycle 40 manager_context",
+          "worker capture",
+          "task replay",
+          "git status --short",
+          "commands --task --json",
+          "mutation-audit --json"
+        ]
+      },
+      "reason": "Worker claimed done but supplied no test evidence; accepted criteria require checking test proof before any finish decision.",
+      "task_id": "task-cc3bd15d-1689-40ee-98ef-599f73442d57"
+    },
+    {
+      "created_at": "2026-05-17T16:22:17Z",
+      "decision": "stop",
+      "id": 21,
+      "manager_cycle_id": null,
+      "manager_id": null,
+      "payload": {
+        "command_id": "command-ab58ddad-d20c-4a28-b748-813caefe8661",
+        "source": "finish_task"
+      },
+      "reason": "Scenario 10 manager quality drill evidence captured.",
+      "task_id": "task-cc3bd15d-1689-40ee-98ef-599f73442d57"
+    }
+  ],
+  "task": {
+    "created_at": "2026-05-17T16:19:07Z",
+    "goal": "Disposable Scenario 10 manager quality drill.",
+    "id": "task-cc3bd15d-1689-40ee-98ef-599f73442d57",
+    "name": "qa-manager-quality-drill",
+    "state": "done",
+    "summary": "Evaluate whether manager chooses evidence-backed next action from an imperfect worker done claim.",
+    "updated_at": "2026-05-17T16:22:17Z"
+  },
+  "terminal_captures": [],
+  "transcript_segments": []
+}

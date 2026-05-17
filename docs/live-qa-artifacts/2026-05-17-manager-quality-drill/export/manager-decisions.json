@@ -1,0 +1,38 @@
+[
+  {
+    "created_at": "2026-05-17T16:20:58Z",
+    "decision": "nudge",
+    "id": 20,
+    "manager_cycle_id": 40,
+    "manager_id": null,
+    "payload": {
+      "chosen_next_action": "nudge",
+      "current_task_blocker": "Missing test evidence: worker explicitly stated tests were not run and command history is empty.",
+      "deferred_follow_up": "Richer nested Markdown fixture coverage is a follow-up, not a blocker for this done-claim evidence audit.",
+      "evidence_checked": [
+        "acceptance criteria #34-#36",
+        "cycle 40 manager_context",
+        "worker capture",
+        "task replay",
+        "git status --short",
+        "commands --task --json",
+        "mutation-audit --json"
+      ]
+    },
+    "reason": "Worker claimed done but supplied no test evidence; accepted criteria require checking test proof before any finish decision.",
+    "task_id": "task-cc3bd15d-1689-40ee-98ef-599f73442d57"
+  },
+  {
+    "created_at": "2026-05-17T16:22:17Z",
+    "decision": "stop",
+    "id": 21,
+    "manager_cycle_id": null,
+    "manager_id": null,
+    "payload": {
+      "command_id": "command-ab58ddad-d20c-4a28-b748-813caefe8661",
+      "source": "finish_task"
+    },
+    "reason": "Scenario 10 manager quality drill evidence captured.",
+    "task_id": "task-cc3bd15d-1689-40ee-98ef-599f73442d57"
+  }
+]
