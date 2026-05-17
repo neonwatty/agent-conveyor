@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from workerctl.constants import PROJECT_ROOT, RECOMMENDED_MANAGER_CODEX_ARGS
+from workerctl.constants import DEFAULT_HISTORY_LINES, PROJECT_ROOT, RECOMMENDED_MANAGER_CODEX_ARGS
 from workerctl.core import WorkerError, age_seconds, now_iso, raise_for_tmux_permission_failure, run, sh_quote
 from workerctl.db import active_manager
 from workerctl.db import active_binding_for_task
@@ -158,6 +158,58 @@ def _verify_session_identity(session: dict[str, Any]) -> dict[str, Any]:
     return verification
 
 
+def _summarize_pre_stop_capture(capture: dict[str, Any]) -> dict[str, Any]:
+    capture_row = capture["capture"]
+    segment = capture.get("transcript_segment")
+    return {
+        "capture_id": capture_row["id"],
+        "content_sha256": capture_row["content_sha256"],
+        "history_lines": capture_row["history_lines"],
+        "line_count": capture_row["line_count"],
+        "role": capture["role"],
+        "source": capture_row["source"],
+        "transcript_segment": (
+            {
+                "id": segment["id"],
+                "kind": segment["segment_kind"],
+                "line_count": segment["line_count"],
+                "retention_class": segment.get("retention_class", "hot"),
+            }
+            if segment
+            else None
+        ),
+    }
+
+
+def _capture_pre_stop_transcripts(
+    db_path: Path | None,
+    *,
+    task: str,
+    command_id: str,
+    stop_worker: bool,
+    stop_manager: bool,
+    lines: int,
+    mode: str,
+) -> list[dict[str, Any]]:
+    from workerctl.commands import capture_task_terminal
+
+    captures = []
+    for role, should_capture in (("worker", stop_worker), ("manager", stop_manager)):
+        if not should_capture:
+            continue
+        capture = capture_task_terminal(
+            db_path,
+            task=task,
+            role=role,
+            lines=lines,
+            source="finish_task_pre_stop",
+            command_id=command_id,
+            transcript_mode=mode,
+        )
+        captures.append(_summarize_pre_stop_capture(capture))
+    return captures
+
+
 def _stop_or_finish_task(args: argparse.Namespace, *, finish: bool) -> int:
     db_path = Path(args.path).expanduser().resolve() if args.path else None
     command_type = "finish_task" if finish else "stop_task"
@@ -165,6 +217,9 @@ def _stop_or_finish_task(args: argparse.Namespace, *, finish: bool) -> int:
     default_reason = "Task finished by operator." if finish else "Task stopped by operator."
     final_reason = getattr(args, "reason", None) or default_reason
     stop_manager = (not finish) or bool(getattr(args, "stop_manager", False))
+    capture_transcript_before_stop = bool(getattr(args, "capture_transcript_before_stop", False))
+    capture_transcript_lines = int(getattr(args, "capture_transcript_lines", DEFAULT_HISTORY_LINES))
+    capture_transcript_mode = getattr(args, "capture_transcript_mode", "segment")
     with connect_db(db_path) as conn:
         initialize_database(conn)
         snapshot = task_status_snapshot(conn, task=args.task)
@@ -191,6 +246,7 @@ def _stop_or_finish_task(args: argparse.Namespace, *, finish: bool) -> int:
                         "finish": finish,
                         "message": args.message,
                         "reason": final_reason,
+                        "capture_transcript_before_stop": capture_transcript_before_stop,
                         "stop_manager": stop_manager,
                         "stop_worker": args.stop_worker,
                         "task": snapshot["name"],
@@ -242,6 +298,9 @@ def _stop_or_finish_task(args: argparse.Namespace, *, finish: bool) -> int:
             payload={
                 "finish": finish,
                 **({"final_audit": final_audit} if finish else {}),
+                "capture_transcript_before_stop": capture_transcript_before_stop,
+                "capture_transcript_lines": capture_transcript_lines,
+                "capture_transcript_mode": capture_transcript_mode,
                 "message": args.message,
                 "manager_decision": decision_check,
                 "reason": final_reason,
@@ -291,6 +350,9 @@ def _stop_or_finish_task(args: argparse.Namespace, *, finish: bool) -> int:
                 "final_observation_id": final_observation_id,
                 "manager_decision": decision_check,
                 "message": args.message,
+                "capture_transcript_before_stop": capture_transcript_before_stop,
+                "capture_transcript_lines": capture_transcript_lines,
+                "capture_transcript_mode": capture_transcript_mode,
                 "reason": final_reason,
                 "stop_manager": stop_manager,
                 "stop_worker": args.stop_worker,
@@ -307,6 +369,7 @@ def _stop_or_finish_task(args: argparse.Namespace, *, finish: bool) -> int:
         "manager_decision": decision_check,
         "killed_manager": False,
         "killed_worker": False,
+        "pre_stop_transcript_captures": [],
         "reason": final_reason,
         "stop_manager": stop_manager,
         "stop_worker": args.stop_worker,
@@ -367,6 +430,33 @@ def _stop_or_finish_task(args: argparse.Namespace, *, finish: bool) -> int:
             manager_tmux_session = manager["tmux_session"]
         elif manager_session and result.get("manager_identity", {}).get("live"):
             manager_tmux_session = manager_session["tmux_session"]
+        if finish and capture_transcript_before_stop and (args.stop_worker or stop_manager):
+            result["pre_stop_transcript_captures"] = _capture_pre_stop_transcripts(
+                db_path,
+                task=snapshot["name"],
+                command_id=command_id,
+                stop_worker=bool(args.stop_worker),
+                stop_manager=bool(stop_manager),
+                lines=capture_transcript_lines,
+                mode=capture_transcript_mode,
+            )
+            with connect_db(db_path) as conn:
+                initialize_database(conn)
+                insert_db_event(
+                    conn,
+                    "finish_task_pre_stop_transcript_captured",
+                    actor="workerctl",
+                    command_id=command_id,
+                    task_id=snapshot["id"],
+                    worker_id=worker["id"] if worker else None,
+                    manager_id=manager["id"] if manager else None,
+                    payload={
+                        "captures": result["pre_stop_transcript_captures"],
+                        "lines": capture_transcript_lines,
+                        "mode": capture_transcript_mode,
+                    },
+                )
+                conn.commit()
         if stop_manager and manager_tmux_session:
             run(["tmux", "kill-session", "-t", manager_tmux_session])
             result["killed_manager"] = True

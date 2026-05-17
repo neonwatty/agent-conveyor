@@ -743,6 +743,23 @@ def build_parser() -> argparse.ArgumentParser:
     finish_task.add_argument("--decision-id", type=int, help="Manager decision ID that justifies this finish.")
     finish_task.add_argument("--strict-decisions", action="store_true", help="Reject the finish unless --decision-id is valid.")
     finish_task.add_argument(
+        "--capture-transcript-before-stop",
+        action="store_true",
+        help="Capture transcript segments for any sessions being stopped before killing tmux sessions.",
+    )
+    finish_task.add_argument(
+        "--capture-transcript-mode",
+        choices=("metadata", "excerpt", "snapshot", "segment", "full"),
+        default="segment",
+        help="Transcript mode to use with --capture-transcript-before-stop.",
+    )
+    finish_task.add_argument(
+        "--capture-transcript-lines",
+        type=int,
+        default=DEFAULT_HISTORY_LINES,
+        help="History lines to capture with --capture-transcript-before-stop.",
+    )
+    finish_task.add_argument(
         "--require-criteria-audit",
         action="store_true",
         help="Fail before finishing if any accepted acceptance criteria remain open.",

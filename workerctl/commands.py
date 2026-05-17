@@ -19,7 +19,7 @@ from workerctl.audit import mutation_audit_result
 from workerctl.constants import DEFAULT_HISTORY_LINES, DEFAULT_MANAGER_STALE_SECONDS, PROJECT_ROOT, VALID_STATES
 from workerctl.core import WorkerError, age_seconds, ensure_tool, now_iso, raise_for_tmux_permission_failure, run, sh_quote
 from workerctl.criteria_plan import plan_criteria_commands
-from workerctl.db import active_manager, active_task_worker
+from workerctl.db import active_binding_for_task, active_manager, active_task_worker
 from workerctl.db import connect as connect_db
 from workerctl.db import create_task as create_db_task
 from workerctl.db import database_health, default_db_path, initialize_database
@@ -33,6 +33,7 @@ from workerctl.db import latest_terminal_capture_for_role
 from workerctl.db import list_tasks as list_db_tasks
 from workerctl.db import mark_manager_seen
 from workerctl.db import mark_worker_state, upsert_worker
+from workerctl.db import session_by_id
 from workerctl.db import set_worker_pane_id
 from workerctl.db import task_audit
 from workerctl.db import task_status_snapshot
@@ -2312,27 +2313,53 @@ def capture_task_terminal(
         initialize_database(conn)
         snapshot = task_status_snapshot(conn, task=task)
         binding = active_task_worker(conn, task=task) if snapshot["worker"] else None
+        try:
+            session_binding = active_binding_for_task(conn, task_name=snapshot["name"])
+        except WorkerError:
+            session_binding = None
+        worker_session = (
+            dict(session_by_id(conn, session_id=session_binding["worker_session_id"]))
+            if session_binding
+            else None
+        )
+        manager_session = (
+            dict(session_by_id(conn, session_id=session_binding["manager_session_id"]))
+            if session_binding
+            else None
+        )
         manager = active_manager(conn, task=snapshot["id"])
 
     if role == "worker":
-        if binding is None:
+        if binding is None and worker_session is None:
             raise WorkerError(f"Task {snapshot['name']} has no active worker")
-        verification = identity.verify_worker_binding_identity(binding)
-        output = capture_output(binding["worker_name"], lines)
-        worker_id = binding["worker_id"]
+        if binding is not None:
+            verification = identity.verify_worker_binding_identity(binding)
+            output = capture_output(binding["worker_name"], lines)
+            tmux_session_value = binding["worker_tmux_session"]
+            tmux_pane_id = verification.get("live_pane_id") or binding.get("worker_tmux_pane_id")
+        else:
+            verification = _verify_session_capture_identity(worker_session)
+            proc = run(["tmux", "capture-pane", "-p", "-t", worker_session["tmux_session"], "-S", f"-{lines}"])
+            output = proc.stdout
+            tmux_session_value = worker_session["tmux_session"]
+            tmux_pane_id = verification.get("live_pane_id") or worker_session.get("tmux_pane_id")
+        worker_id = binding["worker_id"] if binding else None
         manager_id = None
-        tmux_session_value = binding["worker_tmux_session"]
-        tmux_pane_id = verification.get("live_pane_id") or binding.get("worker_tmux_pane_id")
     elif role == "manager":
-        if manager is None:
+        if manager is None and manager_session is None:
             raise WorkerError(f"Task {snapshot['name']} has no active manager")
-        verification = identity.verify_manager_identity(manager)
-        proc = run(["tmux", "capture-pane", "-p", "-t", manager["tmux_session"], "-S", f"-{lines}"])
+        if manager is not None:
+            verification = identity.verify_manager_identity(manager)
+            tmux_session_value = manager["tmux_session"]
+            tmux_pane_id = verification.get("live_pane_id") or manager.get("tmux_pane_id")
+        else:
+            verification = _verify_session_capture_identity(manager_session)
+            tmux_session_value = manager_session["tmux_session"]
+            tmux_pane_id = verification.get("live_pane_id") or manager_session.get("tmux_pane_id")
+        proc = run(["tmux", "capture-pane", "-p", "-t", tmux_session_value, "-S", f"-{lines}"])
         output = proc.stdout
         worker_id = None
-        manager_id = manager["id"]
-        tmux_session_value = manager["tmux_session"]
-        tmux_pane_id = verification.get("live_pane_id") or manager.get("tmux_pane_id")
+        manager_id = manager["id"] if manager else None
     else:
         raise WorkerError(f"Unsupported capture role: {role}")
 
@@ -2418,13 +2445,72 @@ def capture_task_terminal(
         "task": {"id": snapshot["id"], "name": snapshot["name"], "state": snapshot["state"]},
         "transcript_segment": transcript_segment,
         role: {
-            "id": worker_id or manager_id,
-            "name": binding["worker_name"] if role == "worker" and binding else manager["name"] if role == "manager" and manager else None,
-            "state": binding["worker_state"] if role == "worker" and binding else manager["state"] if role == "manager" and manager else None,
+            "id": worker_id
+            or manager_id
+            or (
+                worker_session["id"]
+                if role == "worker" and worker_session
+                else manager_session["id"] if role == "manager" and manager_session else None
+            ),
+            "name": (
+                binding["worker_name"]
+                if role == "worker" and binding
+                else worker_session["name"]
+                if role == "worker" and worker_session
+                else manager["name"]
+                if role == "manager" and manager
+                else manager_session["name"]
+                if role == "manager" and manager_session
+                else None
+            ),
+            "state": (
+                binding["worker_state"]
+                if role == "worker" and binding
+                else worker_session["state"]
+                if role == "worker" and worker_session
+                else manager["state"]
+                if role == "manager" and manager
+                else manager_session["state"]
+                if role == "manager" and manager_session
+                else None
+            ),
             "tmux_pane_id": tmux_pane_id,
             "tmux_session": tmux_session_value,
         },
     }
+
+
+def _verify_session_capture_identity(session: dict[str, Any] | None) -> dict[str, Any]:
+    if session is None:
+        raise WorkerError("session capture identity missing")
+    tmux_session_name = session.get("tmux_session")
+    live = (
+        identity.session_snapshot(tmux_session_name)
+        if tmux_session_name
+        else {"live": False, "pane_id": None, "session": None}
+    )
+    verification = {
+        "db_pane_id": session.get("tmux_pane_id"),
+        "db_session": tmux_session_name,
+        "live": live["live"],
+        "live_pane_id": live["pane_id"],
+        "role": session["role"],
+        "session": session["name"],
+    }
+    mismatches = []
+    if not tmux_session_name:
+        mismatches.append("tmux_session_missing")
+    elif not live["live"]:
+        mismatches.append("tmux_session_missing")
+    if session.get("tmux_pane_id") and live["pane_id"] and live["pane_id"] != session["tmux_pane_id"]:
+        mismatches.append("tmux_pane_mismatch")
+    verification["mismatches"] = mismatches
+    if mismatches:
+        raise WorkerError(
+            f"Session identity verification failed for {session['name']}: "
+            f"{', '.join(mismatches)}"
+        )
+    return verification
 
 
 def segment_text_delta(previous: str | None, current: str) -> tuple[str | None, int | None, int | None, str]:
