@@ -205,3 +205,100 @@ Final cleanup:
 - `scripts/workerctl reconcile --stale-cycles-seconds 1` reported no dangling
   bindings, dead pid sessions, or stuck tasks.
 - Git status was clean before starting the doc update.
+
+## 2026-05-16: Gate 4 Scenario 5 Intentional Blocker
+
+Scenario:
+
+- Gate 4 recovery readiness, Scenario 5 intentional blocker.
+- Evidence root:
+  `docs/live-qa-artifacts/2026-05-16-gate4-recovery-readiness/scenario-5-intentional-blocker/`
+- Run 2 disposable pair:
+  - task: `qa-g4-s5-blocker-run2`
+  - worker: `qa-g4-s5-worker-run2`
+  - manager: `qa-g4-s5-manager-run2`
+
+Validated:
+
+- Worker checked
+  `docs/live-qa-artifacts/nonexistent-gate4-prerequisite.txt`, reported it
+  missing, did not edit files, did not invent evidence, and did not claim
+  completion.
+- Manager inspected worker pane evidence and recorded decision id 12
+  classifying the intentional missing-prerequisite blocker.
+- `mutation-audit qa-g4-s5-blocker-run2 --json` linked the stop mutation to
+  manager decision id 12 with no warnings.
+- `replay qa-g4-s5-blocker-run2 --json` showed observe events, decision id 12,
+  and the linked successful `stop_task`.
+- `reconcile --stale-cycles-seconds 1` reported no dangling bindings, dead pid
+  sessions, or stuck tasks.
+
+Caveats:
+
+- Attempt 1 used `workspace-write` and exposed manager tmux inspection
+  permission friction, so it was exported and stopped before rerun.
+- In run 2, the manager needed one targeted PM nudge with the exact
+  `record-decision` / `stop-task` command pattern after spending too long on
+  command discovery. This is a reliability follow-up, not a fake success.
+
+## 2026-05-16: Gate 4 Scenario 7 Failure Recovery
+
+Scenario:
+
+- Gate 4 recovery readiness, Scenario 7 failure recovery drill.
+- Isolated state root:
+  `/tmp/codex-terminal-manager-g4-s7-state`
+- Evidence root:
+  `docs/live-qa-artifacts/2026-05-16-gate4-recovery-readiness/scenario-7-failure-recovery/`
+
+Validated:
+
+- Initial isolated `cycle` saw both disposable sessions alive.
+- After `tmux kill-session -t codex-qa-g4-s7-worker`, `cycle` reported
+  `worker_alive: false` and `pane_signal.degraded: true` with a missing-pane
+  tmux capture reason.
+- Isolated `reconcile --stale-cycles-seconds 1` reported dead pid session
+  `qa-g4-s7-worker` and stuck task `qa-g4-s7-recovery`.
+- Isolated `reconcile --apply --stale-cycles-seconds 1` invalidated the
+  binding and marked the worker gone.
+- After killing the disposable manager, isolated `reconcile --apply` marked the
+  manager gone.
+- Final isolated reconcile, active sessions, and tmux checks were clean.
+- Default state reconcile stayed clean after the isolated destructive drill.
+
+Finding:
+
+- `stop-task` after reconcile invalidated the binding could not stop the
+  still-live manager because the task no longer had a live bound manager. Manual
+  tmux cleanup plus reconcile handled it, but this is a useful recovery UX
+  follow-up.
+
+## 2026-05-16: Gate 4 Scenario 8 Guardrail Drill
+
+Scenario:
+
+- Gate 4 recovery readiness, Scenario 8 guardrail drill.
+- Isolated state root:
+  `/tmp/codex-terminal-manager-g4-s8-state`
+- Evidence root:
+  `docs/live-qa-artifacts/2026-05-16-gate4-recovery-readiness/scenario-8-guardrail-drill/`
+
+Validated:
+
+- `finish-task qa-g4-s8-guardrail --require-criteria-audit` failed closed
+  while an accepted criterion was still open, and named the open criterion.
+- `deregister qa-g4-s8-worker` failed closed while the worker was bound to the
+  active task, and named the binding/task requirement.
+- `request-worker-compact qa-g4-s8-guardrail --strict-decisions --dry-run`
+  failed closed without a manager decision, and named the missing decision.
+- Cleanup `stop-task --stop-worker --strict-decisions --decision-id 1` killed
+  the disposable manager and worker.
+- Final isolated reconcile, default reconcile, and tmux checks were clean.
+
+Blocker:
+
+- The three denied guardrail attempts failed closed but did not appear in
+  `commands --task`, `mutation-audit`, or `replay`. Scenario 8 requires the
+  audit trail to record attempted failures accurately without implying success,
+  so Gate 4 is blocked on durable expected-failure audit records for denied
+  guardrail attempts.

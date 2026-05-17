@@ -1,0 +1,14 @@
+[
+  {
+    "created_at": "2026-05-17T01:24:35Z",
+    "criterion": "Synthetic accepted criterion intentionally left open so finish-task --require-criteria-audit must fail closed.",
+    "evidence": {},
+    "id": 1,
+    "proof": null,
+    "rationale": null,
+    "source": "user_requested",
+    "status": "accepted",
+    "task_id": "task-3acf8714-9538-4524-9e49-f56b251bf8fd",
+    "updated_at": "2026-05-17T01:24:35Z"
+  }
+]

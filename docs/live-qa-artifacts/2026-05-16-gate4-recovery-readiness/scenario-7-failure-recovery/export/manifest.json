@@ -1,0 +1,20 @@
+{
+  "created_at": "2026-05-17T01:23:27Z",
+  "files": [
+    "task-status.json",
+    "audit.json",
+    "acceptance-criteria.json",
+    "prompts.json",
+    "transcript-captures.json",
+    "terminal-captures.json",
+    "agent-observations.json",
+    "manager-cycles.json",
+    "manager-decisions.json",
+    "mutation-audit.json",
+    "replay.json"
+  ],
+  "task": {
+    "id": "task-c0e5f6bb-0fe3-41d4-afb6-cd3f5ff3497e",
+    "name": "qa-g4-s7-recovery"
+  }
+}

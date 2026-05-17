@@ -1,0 +1,19 @@
+{
+  "budget": null,
+  "created_at": "2026-05-17T01:22:16Z",
+  "goal": "Gate 4 Scenario 7 failure recovery drill: create a disposable pair, kill/stale worker session, verify cycle/reconcile/reporting, and prove no fake success.",
+  "id": "task-c0e5f6bb-0fe3-41d4-afb6-cd3f5ff3497e",
+  "integrity": {
+    "issues": [],
+    "ok": true
+  },
+  "manager": null,
+  "manager_config": null,
+  "name": "qa-g4-s7-recovery",
+  "state": "done",
+  "summary": "Disposable isolated failure recovery drill.",
+  "updated_at": "2026-05-17T01:22:58Z",
+  "worker": null,
+  "worker_handoff": null,
+  "worker_status": null
+}

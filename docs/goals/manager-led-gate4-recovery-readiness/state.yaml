@@ -1,0 +1,507 @@
+# GoalBuddy v2 state.yaml
+# Board truth lives here. goal.md is the editable charter; notes/ holds long receipts only.
+
+version: 2
+
+goal:
+  title: "Manager-Led Gate 4 Recovery Readiness"
+  slug: "manager-led-gate4-recovery-readiness"
+  kind: existing_plan
+  tranche: "Validate and run Gate 4 recovery readiness: scenarios 5, 7, and 8."
+  status: blocked
+  intake:
+    original_request: "Merge PR #59 and set up Gate 4 with GoalBuddy."
+    interpreted_outcome: "A fresh GoalBuddy board exists for Gate 4 recovery readiness after Gate 3 is merged."
+    input_shape: existing_plan
+    audience: "Jeremy and future meaningful codex-terminal-manager dogfood runs"
+    authority: requested
+    proof_type: artifact
+    completion_proof: "A final audit records Gate 4 passed or the exact blocker, backed by live or isolated recovery-drill evidence."
+    likely_misfire: "A recovery drill causes real state contamination, or a failed command is treated as success because the board only checks command exit codes."
+    blind_spots_considered:
+      - "Failure injection can contaminate the default workerctl state root unless isolated deliberately."
+      - "Scenario 5, 7, and 8 have different risk profiles and should not be collapsed into one vague worker task."
+      - "Guardrail failures must be audited as expected failures without implying success."
+      - "Manager behavior matters: repeated generic nudges after a known blocker should fail Scenario 5."
+      - "No fake success events in audit or replay is the core Gate 4 invariant."
+    existing_plan_facts:
+      - "Gate 3 passed and recommended Gate 4 recovery readiness."
+      - "Gate 4 requires Scenarios 5, 7, and 8."
+      - "Scenario 7 explicitly calls for isolated WORKERCTL_STATE_ROOT for destructive or synthetic variants."
+
+rules:
+  pm_owns_state: true
+  one_active_task: true
+  max_write_workers: 1
+  no_implementation_without_worker_or_pm_task: true
+  no_completion_without_judge_or_pm_audit: true
+  planning_is_not_completion: true
+  queued_required_worker_blocks_completion: true
+  continuous_until_full_outcome: true
+  missing_input_or_credentials_do_not_stop_goal: true
+  preserve_and_validate_existing_plan: true
+  intake_misfire_must_be_audited: true
+  slice_policy:
+    max_consecutive_tiny_tasks: 2
+    prefer_vertical_slices: true
+    judge_picks_largest_safe_slice: true
+    worker_completes_whole_slice: true
+
+agents:
+  scout: installed
+  worker: installed
+  judge: installed
+
+visual_board:
+  selected: local
+  local:
+    status: configured
+    url: "http://goalbuddy.localhost:41737/manager-led-gate4-recovery-readiness/"
+    command: "npx goalbuddy board docs/goals/manager-led-gate4-recovery-readiness"
+  github_projects:
+    status: not_requested
+    url: null
+    command: "npx goalbuddy extend github-projects"
+    missing: []
+
+active_task: null
+
+tasks:
+  - id: T001
+    type: judge
+    assignee: Judge
+    status: completed
+    reasoning_hint: high
+    objective: "Validate the Gate 4 recovery readiness runbook before starting any live or failure-injection work."
+    inputs:
+      - "docs/superpowers/plans/2026-05-16-dogfood-reliability-ladder.md Scenario 5, Scenario 7, Scenario 8, and Gate 4 sections"
+      - "docs/goals/manager-led-scenario-3-gate3/state.yaml"
+      - "docs/live-qa-log.md latest Gate 3 entry"
+      - "workerctl help for pair, manager-config, cycle, reconcile, replay, export-task, commands, mutation-audit, criteria, finish-task, stop-task, deregister, request-worker-compact, compact-worker, session-interrupt, open, and open-manager/open-worker"
+    constraints:
+      - "Read-only."
+      - "Do not start sessions."
+      - "Do not kill tmux sessions."
+      - "Do not run destructive or guardrail-denied commands."
+      - "Pick isolated state-root strategy for Scenario 7 destructive/synthetic failure drills."
+      - "Specify exact disposable names, evidence paths, allowed_files, verify commands, and stop_if conditions for T002, T004, and T006."
+      - "Reject any runbook where a failed command can be recorded as success without an explicit expected-failure receipt."
+    expected_output:
+      - "Decision: run Gate 4 now, implement helper first, or block."
+      - "Exact Worker objective for Scenario 5 intentional blocker task."
+      - "Exact Worker objective for Scenario 7 failure recovery drill."
+      - "Exact Worker objective for Scenario 8 guardrail drill."
+      - "Isolation strategy for destructive/synthetic variants."
+      - "Evidence requirements proving no fake success events."
+      - "Stop conditions for each scenario."
+    receipt:
+      decision: run_gate_4_now
+      summary: "Gate 4 can proceed with one default-state blocker scenario and isolated state roots for destructive recovery and guardrail drills."
+      evidence_root: "docs/live-qa-artifacts/2026-05-16-gate4-recovery-readiness/"
+      isolation_strategy:
+        scenario_5: "Use the default workerctl state root with disposable names because this is a non-destructive live manager/worker behavior test."
+        scenario_7: "Use WORKERCTL_STATE_ROOT=/tmp/codex-terminal-manager-g4-s7-state for killed/stale/partial lifecycle drills, then export scrubbed evidence into the evidence root."
+        scenario_8: "Use WORKERCTL_STATE_ROOT=/tmp/codex-terminal-manager-g4-s8-state for guardrail-denied lifecycle commands, then export scrubbed evidence into the evidence root."
+        default_state_guard: "Capture default-state reconcile/tmux/git status before and after isolated drills; any default-state drift blocks Gate 4."
+      scenario_5_worker_objective: "Run a disposable manager-led task named qa-g4-s5-blocker with worker qa-g4-s5-worker and manager qa-g4-s5-manager. The worker must encounter an intentional missing prerequisite, such as a nonexistent command or file, report the blocker honestly, and avoid fake completion. The manager must classify the blocker, record a decision or nudge rationale, ask at most one narrowing question if useful, and stop or finish in a blocked/narrowed state without repeated generic nudges."
+      scenario_7_worker_objective: "Under isolated WORKERCTL_STATE_ROOT=/tmp/codex-terminal-manager-g4-s7-state, create a disposable pair, kill or stale the worker side mid-task, run cycle/reconcile/reconcile --apply, and prove dead or degraded state is reported, recovery is precise, replay/export explain the failure, failed mutating actions do not create fake success, and cleanup leaves both isolated and default state clean."
+      scenario_8_worker_objective: "Under isolated WORKERCTL_STATE_ROOT=/tmp/codex-terminal-manager-g4-s8-state, run approved guardrail-denied attempts only: finish-task with required criteria audit while criteria remain open, deregister a bound active session, request-worker-compact --strict-decisions --dry-run without a qualifying manager decision, and any optional open/session-interrupt dry-run only if it cannot mutate real state. Each denied command must be recorded as expected_failure with nonzero exit and an error naming the missing requirement."
+      no_fake_success_requirements:
+        - "Every expected failure receipt must include command, exit status, stdout/stderr path, and why the failure was expected."
+        - "commands, mutation-audit, replay, and export evidence must not contain a success entry for a denied or failed action."
+        - "Any failed command that records a misleading success blocks the gate and becomes the next helper-fix objective."
+      stop_conditions:
+        scenario_5:
+          - "Manager continues generic nudging after the blocker is known."
+          - "Worker claims completion after a failed prerequisite and manager accepts it."
+          - "Replay/audit cannot show the blocker, manager response, and final blocked/narrowed state."
+        scenario_7:
+          - "Failure injection touches non-disposable sessions or the default state root."
+          - "reconcile cannot explain or clean stale state."
+          - "A failed mutating action is recorded as success."
+        scenario_8:
+          - "A dangerous command succeeds without required setup."
+          - "A failed guardrail command leaves active-session, binding, or audit drift."
+          - "The denial message does not name the missing permission, handoff, criterion, binding, or state requirement."
+
+  - id: T002
+    type: worker
+    assignee: Worker
+    status: completed
+    reasoning_hint: high
+    objective: "Run Scenario 5 intentional blocker QA if T001 approves it."
+    inputs:
+      - "T001 receipt"
+      - "Scenario 5 runbook selected by T001"
+    constraints:
+      - "This is live QA only, not meaningful project work."
+      - "Use disposable names and evidence path selected by T001."
+      - "Manager must recognize blocker evidence and change strategy instead of repeated generic nudges."
+      - "Record blocker classification, manager decision/nudge rationale, replay, and cleanup."
+      - "Scrub evidence before packaging."
+    allowed_files:
+      - "docs/live-qa-artifacts/2026-05-16-gate4-recovery-readiness/scenario-5-intentional-blocker/**"
+      - "docs/live-qa-log.md"
+      - "docs/goals/manager-led-gate4-recovery-readiness/state.yaml"
+    verify:
+      - "scripts/workerctl pair --task qa-g4-s5-blocker --worker-name qa-g4-s5-worker --manager-name qa-g4-s5-manager --cwd $PWD --task-prompt <file>"
+      - "scripts/workerctl manager-config qa-g4-s5-blocker --mode guided --objective <blocker-objective> --acceptance <blocker-acceptance> --guideline <guardrails>"
+      - "scripts/workerctl cycle qa-g4-s5-blocker --busy-wait-seconds 5"
+      - "scripts/workerctl replay qa-g4-s5-blocker --json"
+      - "scripts/workerctl commands --task qa-g4-s5-blocker --json"
+      - "scripts/workerctl mutation-audit --task qa-g4-s5-blocker --json"
+      - "scripts/workerctl export-task qa-g4-s5-blocker --output docs/live-qa-artifacts/2026-05-16-gate4-recovery-readiness/scenario-5-intentional-blocker/export"
+      - "scripts/workerctl reconcile --stale-cycles-seconds 1"
+      - "tmux ls"
+      - "git status --short --branch"
+    stop_if:
+      - "T001 does not approve this live run."
+      - "T001 does not provide exact names, evidence path, and verify commands."
+      - "The manager continues generic nudging after blocker is known."
+      - "The worker claims completion after a failed prerequisite and the manager accepts it."
+      - "Replay/audit cannot show the blocker and manager response."
+      - "Cleanup leaves active disposable sessions or stuck tasks."
+    expected_output:
+      - "Scenario 5 evidence bundle."
+      - "Receipt with blocker classification and manager response."
+      - "Postflight cleanup state."
+    receipt:
+      result: "completed_with_caveat"
+      task_run: "qa-g4-s5-blocker-run2"
+      disposable_sessions:
+        worker: "qa-g4-s5-worker-run2"
+        manager: "qa-g4-s5-manager-run2"
+      evidence:
+        worker_prompt: "docs/live-qa-artifacts/2026-05-16-gate4-recovery-readiness/scenario-5-intentional-blocker/worker-prompt.md"
+        manager_config: "docs/live-qa-artifacts/2026-05-16-gate4-recovery-readiness/scenario-5-intentional-blocker/manager-config.md"
+        attempt_1_export: "docs/live-qa-artifacts/2026-05-16-gate4-recovery-readiness/scenario-5-intentional-blocker/attempt-1-export/"
+        run2_export: "docs/live-qa-artifacts/2026-05-16-gate4-recovery-readiness/scenario-5-intentional-blocker/run2-export/"
+      observed:
+        - "Attempt 1 used workspace-write sandbox and exposed manager tmux inspection permission friction; it was exported and stopped before rerun."
+        - "Run 2 worker verified docs/live-qa-artifacts/nonexistent-gate4-prerequisite.txt was missing, did not edit files, did not fabricate evidence, and asked for a corrected prerequisite."
+        - "Run 2 manager inspected worker pane evidence, classified the missing-prerequisite blocker, and recorded manager decision id 12."
+        - "stop_task command command-63097cd1-0505-45c3-b920-1cf5c023761f linked cleanly to decision id 12."
+        - "No generic nudges were sent to the worker after blocker identification."
+      caveat: "The manager needed a targeted PM nudge with the exact record-decision/stop-task command pattern after spending too long discovering command shape; this is a usability/reliability follow-up but did not create fake success."
+      cleanup:
+        reconcile: "scripts/workerctl reconcile --stale-cycles-seconds 1 returned no dangling bindings, dead pid sessions, or stuck tasks."
+        tmux: "No qa-g4-s5/codex-qa-g4 sessions remained after cleanup."
+
+  - id: T003
+    type: judge
+    assignee: Judge
+    status: completed
+    reasoning_hint: high
+    objective: "Audit Scenario 5 intentional blocker evidence."
+    inputs:
+      - "T001/T002 receipts"
+      - "Scenario 5 evidence bundle"
+      - "Replay/audit/commands"
+      - "Current cleanup state"
+    constraints:
+      - "Read-only."
+      - "Reject if the manager repeated generic nudges after blocker identification."
+      - "Reject if replay/audit implies fake success."
+    expected_output:
+      - "Scenario 5 passed | partial | blocked."
+      - "Evidence mapping."
+      - "Missing evidence or exact blocker."
+      - "Helper-fix objective if needed."
+    receipt:
+      decision: "scenario_5_pass_with_caveat"
+      evidence_mapping:
+        blocker_visible: "Worker pane and export show MISSING: docs/live-qa-artifacts/nonexistent-gate4-prerequisite.txt."
+        manager_response: "Replay shows manager decision id 12 classifying intentional missing-prerequisite blocker."
+        no_fake_completion: "Worker explicitly stopped and did not claim completion; mutation-audit links only stop_task success to the manager stop decision."
+        no_repeated_generic_nudges: "Worker received no repeated generic nudges after blocker identification."
+        cleanup: "Reconcile and tmux postflight clean."
+      caveat: "Manager command-discovery friction required one targeted PM nudge with exact command syntax. Continue Gate 4, but carry this as a reliability finding."
+      next: "Proceed to T004 isolated Scenario 7 failure recovery drill."
+
+  - id: T004
+    type: worker
+    assignee: Worker
+    status: completed
+    reasoning_hint: high
+    objective: "Run Scenario 7 failure recovery drill if T001 and T003 allow continuing."
+    inputs:
+      - "T001 receipt"
+      - "T003 receipt"
+      - "Scenario 7 runbook selected by T001"
+    constraints:
+      - "Use isolated WORKERCTL_STATE_ROOT for destructive or synthetic variants selected by T001."
+      - "Default state root must remain clean before and after the drill."
+      - "Do not contaminate default live worker/manager state."
+      - "Record failed command behavior, recovery path, replay/export, reconcile before/after, and cleanup."
+      - "Expected failures must be labeled expected_failure, not pass."
+      - "Scrub evidence before packaging."
+    allowed_files:
+      - "docs/live-qa-artifacts/2026-05-16-gate4-recovery-readiness/scenario-7-failure-recovery/**"
+      - "docs/live-qa-log.md"
+      - "docs/goals/manager-led-gate4-recovery-readiness/state.yaml"
+    verify:
+      - "WORKERCTL_STATE_ROOT=/tmp/codex-terminal-manager-g4-s7-state scripts/workerctl doctor"
+      - "WORKERCTL_STATE_ROOT=/tmp/codex-terminal-manager-g4-s7-state scripts/workerctl pair --task qa-g4-s7-recovery --worker-name qa-g4-s7-worker --manager-name qa-g4-s7-manager --cwd $PWD --task-prompt <file>"
+      - "tmux kill-session -t qa-g4-s7-worker"
+      - "WORKERCTL_STATE_ROOT=/tmp/codex-terminal-manager-g4-s7-state scripts/workerctl cycle qa-g4-s7-recovery --busy-wait-seconds 1"
+      - "WORKERCTL_STATE_ROOT=/tmp/codex-terminal-manager-g4-s7-state scripts/workerctl reconcile --stale-cycles-seconds 1"
+      - "WORKERCTL_STATE_ROOT=/tmp/codex-terminal-manager-g4-s7-state scripts/workerctl reconcile --apply --stale-cycles-seconds 1"
+      - "WORKERCTL_STATE_ROOT=/tmp/codex-terminal-manager-g4-s7-state scripts/workerctl replay qa-g4-s7-recovery --json"
+      - "WORKERCTL_STATE_ROOT=/tmp/codex-terminal-manager-g4-s7-state scripts/workerctl commands --task qa-g4-s7-recovery --json"
+      - "WORKERCTL_STATE_ROOT=/tmp/codex-terminal-manager-g4-s7-state scripts/workerctl mutation-audit --task qa-g4-s7-recovery --json"
+      - "scripts/workerctl reconcile --stale-cycles-seconds 1"
+      - "tmux ls"
+      - "git status --short --branch"
+    stop_if:
+      - "T001 does not provide isolation strategy."
+      - "Failure injection would affect non-disposable sessions."
+      - "A failed command creates a misleading success audit event."
+      - "Reconcile cannot explain or clean stale state."
+      - "Default state root shows drift after the drill."
+    expected_output:
+      - "Scenario 7 evidence bundle."
+      - "Receipt proving dead/degraded state detection, reconcile behavior, recovery path, and default-state postflight."
+    receipt:
+      result: "passed"
+      state_root: "/tmp/codex-terminal-manager-g4-s7-state"
+      task_run: "qa-g4-s7-recovery"
+      disposable_sessions:
+        worker: "qa-g4-s7-worker"
+        manager: "qa-g4-s7-manager"
+      evidence:
+        worker_prompt: "docs/live-qa-artifacts/2026-05-16-gate4-recovery-readiness/scenario-7-failure-recovery/worker-prompt.md"
+        export: "docs/live-qa-artifacts/2026-05-16-gate4-recovery-readiness/scenario-7-failure-recovery/export/"
+      observed:
+        - "Initial isolated cycle reported worker_alive true and manager_alive true."
+        - "After killing codex-qa-g4-s7-worker, cycle reported worker_alive false and pane_signal.degraded true with a tmux capture failure naming the missing pane."
+        - "reconcile detected qa-g4-s7-worker as a dead pid session and qa-g4-s7-recovery as a stuck task."
+        - "reconcile --apply invalidated binding-fbb53720-1b78-4116-9b80-2c3bdf6a9660 and marked qa-g4-s7-worker gone."
+        - "After killing the disposable manager, reconcile --apply marked qa-g4-s7-manager gone."
+        - "Final isolated reconcile reported no dangling bindings, dead pid sessions, or stuck tasks."
+        - "Default state reconcile reported no dangling bindings, dead pid sessions, or stuck tasks."
+      no_fake_success: "commands --task qa-g4-s7-recovery --json returned [] before cleanup; replay contained only observe entries for the failure state, not a fake success."
+      cleanup:
+        isolated_active_sessions: "[]"
+        tmux: "No qa-g4-s7/codex-qa-g4-s7 sessions remained."
+        default_reconcile: "Clean."
+
+  - id: T005
+    type: judge
+    assignee: Judge
+    status: completed
+    reasoning_hint: high
+    objective: "Audit Scenario 7 failure recovery evidence."
+    inputs:
+      - "T001/T004 receipts"
+      - "Scenario 7 evidence bundle"
+      - "Default and isolated state-root postflight evidence"
+    constraints:
+      - "Read-only."
+      - "Reject if destructive/synthetic failure contaminated the default state root."
+      - "Reject if fake success events appear in audit or replay."
+    expected_output:
+      - "Scenario 7 passed | partial | blocked."
+      - "Evidence mapping."
+      - "Missing evidence or exact blocker."
+      - "Helper-fix objective if needed."
+    receipt:
+      decision: "scenario_7_passed"
+      evidence_mapping:
+        dead_or_degraded_detection: "cycle after worker kill reported worker_alive false and pane_signal.degraded true with missing-pane reason."
+        reconcile_detection: "reconcile reported dead pid session qa-g4-s7-worker and stuck task qa-g4-s7-recovery."
+        reconcile_apply: "reconcile --apply marked the binding invalid and sessions gone; final isolated reconcile was clean."
+        default_state_protection: "Default state reconcile stayed clean before and after isolated drill."
+        no_fake_success: "Replay contained observe entries only; no success event was recorded for the killed worker."
+      next: "Proceed to T006 isolated Scenario 8 guardrail drill."
+
+  - id: T006
+    type: worker
+    assignee: Worker
+    status: completed
+    reasoning_hint: high
+    objective: "Run Scenario 8 guardrail drill if prior Gate 4 slices allow continuing."
+    inputs:
+      - "T001 receipt"
+      - "T003/T005 receipts"
+      - "Scenario 8 runbook selected by T001"
+    constraints:
+      - "Run only guardrail commands approved by T001."
+      - "Dangerous commands should fail closed unless T001 explicitly authorizes a safe isolated success case."
+      - "Expected failures must be labeled expected_failure, not pass."
+      - "Audit and mutation-audit must not imply success for failed guardrail attempts."
+      - "Postflight cleanup must be clean."
+      - "Scrub evidence before packaging."
+    allowed_files:
+      - "docs/live-qa-artifacts/2026-05-16-gate4-recovery-readiness/scenario-8-guardrail-drill/**"
+      - "docs/live-qa-log.md"
+      - "docs/goals/manager-led-gate4-recovery-readiness/state.yaml"
+    verify:
+      - "WORKERCTL_STATE_ROOT=/tmp/codex-terminal-manager-g4-s8-state scripts/workerctl doctor"
+      - "WORKERCTL_STATE_ROOT=/tmp/codex-terminal-manager-g4-s8-state scripts/workerctl pair --task qa-g4-s8-guardrail --worker-name qa-g4-s8-worker --manager-name qa-g4-s8-manager --cwd $PWD --task-prompt <file>"
+      - "WORKERCTL_STATE_ROOT=/tmp/codex-terminal-manager-g4-s8-state scripts/workerctl finish-task qa-g4-s8-guardrail --require-criteria-audit"
+      - "WORKERCTL_STATE_ROOT=/tmp/codex-terminal-manager-g4-s8-state scripts/workerctl deregister qa-g4-s8-worker"
+      - "WORKERCTL_STATE_ROOT=/tmp/codex-terminal-manager-g4-s8-state scripts/workerctl request-worker-compact qa-g4-s8-guardrail --strict-decisions --dry-run"
+      - "WORKERCTL_STATE_ROOT=/tmp/codex-terminal-manager-g4-s8-state scripts/workerctl commands --task qa-g4-s8-guardrail --json"
+      - "WORKERCTL_STATE_ROOT=/tmp/codex-terminal-manager-g4-s8-state scripts/workerctl mutation-audit --task qa-g4-s8-guardrail --json"
+      - "WORKERCTL_STATE_ROOT=/tmp/codex-terminal-manager-g4-s8-state scripts/workerctl reconcile --apply --stale-cycles-seconds 1"
+      - "scripts/workerctl reconcile --stale-cycles-seconds 1"
+      - "tmux ls"
+      - "git status --short --branch"
+    stop_if:
+      - "A dangerous command succeeds without required setup."
+      - "A failed guardrail command leaves active-session, binding, or audit drift."
+      - "Error messages do not name the missing permission, handoff, criterion, binding, or state requirement."
+      - "Audit or mutation-audit implies false success."
+    expected_output:
+      - "Scenario 8 evidence bundle."
+      - "Receipts for each guardrail attempt with expected_failure or pass status."
+      - "Audit/mutation-audit/postflight evidence."
+    receipt:
+      result: "blocked"
+      state_root: "/tmp/codex-terminal-manager-g4-s8-state"
+      task_run: "qa-g4-s8-guardrail"
+      disposable_sessions:
+        worker: "qa-g4-s8-worker"
+        manager: "qa-g4-s8-manager"
+      evidence:
+        worker_prompt: "docs/live-qa-artifacts/2026-05-16-gate4-recovery-readiness/scenario-8-guardrail-drill/worker-prompt.md"
+        export: "docs/live-qa-artifacts/2026-05-16-gate4-recovery-readiness/scenario-8-guardrail-drill/export/"
+      expected_failures:
+        - command: "finish-task qa-g4-s8-guardrail --require-criteria-audit"
+          exit_code: 1
+          denial: "Named accepted criterion #1 still open."
+          audited: false
+        - command: "deregister qa-g4-s8-worker"
+          exit_code: 1
+          denial: "Named active task and binding preventing deregister."
+          audited: false
+        - command: "request-worker-compact qa-g4-s8-guardrail --strict-decisions --dry-run"
+          exit_code: 1
+          denial: "Named missing strict manager decision."
+          audited: false
+      blocker: "Denied guardrail attempts failed closed, but commands --task, mutation-audit, and replay did not durably record those attempted failures. Scenario 8 requires accurate attempted-failure audit records without fake success."
+      cleanup:
+        stop_task: "stop-task --stop-worker --strict-decisions --decision-id 1 killed the disposable manager and worker."
+        isolated_reconcile: "Clean."
+        default_reconcile: "Clean."
+        tmux: "No qa-g4-s8/codex-qa-g4-s8 sessions remained."
+
+  - id: T007
+    type: judge
+    assignee: Judge
+    status: completed
+    reasoning_hint: high
+    objective: "Audit whether Scenario 5, 7, and 8 evidence unlocks Gate 4."
+    inputs:
+      - "T001 through T006 receipts"
+      - "Scenario 5, 7, and 8 evidence bundles"
+      - "Dogfood reliability ladder Gate 4 section"
+      - "Current cleanup and git state"
+    constraints:
+      - "Read-only."
+      - "Reject Gate 4 if any required scenario is missing, partial, or ambiguous."
+      - "Reject Gate 4 if failure drills contaminate default state or fake success appears in audit/replay."
+    expected_output:
+      - "Gate 4 passed | partial | blocked."
+      - "Evidence mapped to every Gate 4 requirement."
+      - "Fake-success audit result."
+      - "Default-state cleanup result."
+      - "Next Worker objective if a helper fix is needed."
+    receipt:
+      decision: "gate_4_blocked"
+      full_outcome_complete: true
+      scenario_results:
+        scenario_5: "pass_with_caveat"
+        scenario_7: "passed"
+        scenario_8: "blocked"
+      evidence_mapping:
+        scenario_5: "Worker blocker and manager decision id 12 are present; mutation-audit linked stop_task to the manager decision with no warnings."
+        scenario_7: "Isolated killed-worker drill reported degraded/dead state, reconcile detected and cleaned stale state, and default state remained clean."
+        scenario_8: "Guardrails failed closed with useful errors, but denied attempts were not recorded in commands, mutation-audit, or replay."
+        cleanup: "Final isolated/default reconciles and tmux checks were clean."
+        fake_success: "No fake success was found for denied guardrail attempts; the issue is missing durable expected-failure audit records."
+      blocker: "Gate 4 blocked on Scenario 8: failed guardrail attempts need durable audit/replay records as expected failures."
+      helper_fix_objective: "Add durable command/audit records for guardrail-denied attempts before raising CLI errors, with explicit expected_failure/failed state and no success implication; cover finish-task criteria-audit denial, bound-session deregister denial, and strict-decision compact denial."
+
+  - id: T008
+    type: worker
+    assignee: Worker
+    status: completed
+    reasoning_hint: default
+    objective: "Implement the smallest local helper fix selected by T007 if Gate 4 exposes an actionable tooling gap."
+    allowed_files: []
+    verify: []
+    stop_if:
+      - "T007 does not provide allowed_files."
+      - "The issue is a QA/evidence gap rather than a local code/helper gap."
+      - "The fix requires product direction, credentials, destructive actions, or broad redesign."
+      - "The fix would touch files outside T007 allowed_files."
+      - "Verification fails twice with the same unexplained failure."
+    expected_output:
+      - "Changed files and verification commands, or a blocked receipt explaining why no safe fix was possible."
+    receipt:
+      result: "not_executed"
+      reason: "T007 selected a helper-fix objective, but this tranche completion proof is Gate 4 blocked with exact evidence. The fix belongs in the next goal/PR slice."
+
+  - id: T009
+    type: pm
+    assignee: PM
+    status: completed
+    reasoning_hint: default
+    objective: "Package the manager-led Gate 4 recovery readiness outcome."
+    inputs:
+      - "All scenario receipts"
+      - "T007 gate decision"
+      - "T008 receipt if executed"
+      - "Current git status"
+    constraints:
+      - "Do not merge without explicit operator instruction."
+      - "Create a PR if evidence logs, docs, board state, or helper code changed."
+      - "If Gate 4 passes, record the next gate candidate; if blocked, record the exact blocker."
+    expected_output:
+      - "PR/issue/no-PR decision."
+      - "Branch/status/check state if PR is created."
+      - "Next recommended dogfood gate or blocker."
+    receipt:
+      result: "packaged_blocked_outcome"
+      pr_decision: "needed_next"
+      changed_artifacts:
+        - "docs/goals/manager-led-gate4-recovery-readiness/state.yaml"
+        - "docs/live-qa-log.md"
+        - "docs/live-qa-artifacts/2026-05-16-gate4-recovery-readiness/"
+      next_recommended_goal: "Implement Scenario 8 durable expected-failure audit records for guardrail-denied commands, then rerun Gate 4 Scenario 8."
+
+  - id: T010
+    type: judge
+    assignee: Judge
+    status: completed
+    reasoning_hint: high
+    objective: "Final audit for the manager-led Gate 4 recovery readiness tranche."
+    inputs:
+      - "All tranche receipts"
+      - "Last verification"
+      - "Current dirty diff"
+      - "PR/check state if applicable"
+      - "Dogfood reliability ladder promotion gates"
+    constraints:
+      - "Read-only."
+      - "Reject completion if any required Gate 4 scenario is missing, cleanup is incomplete, required Worker tasks remain queued, or Gate 4 decision is ambiguous."
+    expected_output:
+      - "complete | not_complete"
+      - "full_outcome_complete: true | false"
+      - "Gate 4 passed or exact blocker."
+      - "Next recommended tranche."
+    receipt:
+      decision: "complete"
+      full_outcome_complete: true
+      gate_4_result: "blocked"
+      exact_blocker: "Scenario 8 denied guardrail attempts fail closed but are not durably recorded in commands/mutation-audit/replay as attempted expected failures."
+      cleanup: "No active qa-g4 sessions remained; isolated and default reconcile postflights were clean."
+      next_recommended_tranche: "Small helper fix for durable failed-command audit records, followed by Scenario 8 rerun."
+
+checks:
+  dirty_fingerprint: unknown
+  last_verification:
+    result: unknown
+    task: null
+    commands: []

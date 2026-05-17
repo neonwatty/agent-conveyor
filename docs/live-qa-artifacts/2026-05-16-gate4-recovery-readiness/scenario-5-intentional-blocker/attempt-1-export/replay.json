@@ -1,0 +1,43 @@
+{
+  "entries": [
+    {
+      "actor": "manager",
+      "details": {
+        "cycle_id": 29,
+        "manager_capture_id": null,
+        "state": "succeeded",
+        "worker_capture_id": null
+      },
+      "kind": "observe",
+      "source": "manager_cycles",
+      "source_id": 29,
+      "summary": "observed session qa-g4-s5-worker state busy (staleness 8.0s) [pane pattern: mcp_startup]",
+      "timestamp": "2026-05-17T01:17:39Z"
+    },
+    {
+      "actor": "manager",
+      "details": {
+        "cycle_id": 30,
+        "manager_capture_id": null,
+        "state": "succeeded",
+        "worker_capture_id": null
+      },
+      "kind": "observe",
+      "source": "manager_cycles",
+      "source_id": 30,
+      "summary": "observed session qa-g4-s5-worker state idle (staleness 25.9s)",
+      "timestamp": "2026-05-17T01:18:13Z"
+    }
+  ],
+  "mode": "timeline",
+  "role": "all",
+  "task": {
+    "created_at": "2026-05-17T01:17:22Z",
+    "goal": "Gate 4 Scenario 5 intentional blocker QA: worker should hit a missing prerequisite and report blocked honestly; manager should recognize and stop or narrow without generic repeated nudges.",
+    "id": "task-c1b41f8a-40fa-4d80-ae0a-7b74eab583af",
+    "name": "qa-g4-s5-blocker",
+    "state": "candidate",
+    "summary": "Disposable Scenario 5 intentional blocker QA.",
+    "updated_at": "2026-05-17T01:17:22Z"
+  }
+}

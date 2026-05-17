@@ -1,0 +1,359 @@
+{
+  "acceptance_criteria": [
+    {
+      "created_at": "2026-05-17T01:24:35Z",
+      "criterion": "Synthetic accepted criterion intentionally left open so finish-task --require-criteria-audit must fail closed.",
+      "evidence": {},
+      "id": 1,
+      "proof": null,
+      "rationale": null,
+      "source": "user_requested",
+      "status": "accepted",
+      "task_id": "task-3acf8714-9538-4524-9e49-f56b251bf8fd",
+      "updated_at": "2026-05-17T01:24:35Z"
+    }
+  ],
+  "agent_observations": [],
+  "commands": [
+    {
+      "created_at": "2026-05-17T01:25:28Z",
+      "error": null,
+      "id": "command-1d9d15d0-a73e-4953-8aac-ced3a5f5eab8",
+      "idempotency_key": "command-1d9d15d0-a73e-4953-8aac-ced3a5f5eab8",
+      "manager_id": null,
+      "payload": {
+        "finish": false,
+        "manager_decision": {
+          "age_seconds": 5,
+          "allowed_decisions": [
+            "stop"
+          ],
+          "decision": {
+            "created_at": "2026-05-17T01:25:23Z",
+            "decision": "stop",
+            "id": 1,
+            "manager_cycle_id": null,
+            "manager_id": null,
+            "reason": "Cleanup isolated Scenario 8 after expected guardrail denials; Gate 4 blocked because denied attempts failed closed but were not durably audited as attempted failures.",
+            "task_id": "task-3acf8714-9538-4524-9e49-f56b251bf8fd"
+          },
+          "decision_id": 1,
+          "max_age_seconds": 900,
+          "ok": true,
+          "warnings": []
+        },
+        "manager_session": "qa-g4-s8-manager",
+        "message": null,
+        "reason": "Cleanup isolated Scenario 8 blocked guardrail drill.",
+        "stop_manager": true,
+        "stop_worker": true,
+        "task": "qa-g4-s8-guardrail",
+        "worker": "qa-g4-s8-worker",
+        "worker_session": "qa-g4-s8-worker"
+      },
+      "result": {
+        "command_id": "command-1d9d15d0-a73e-4953-8aac-ced3a5f5eab8",
+        "final_decision_id": null,
+        "final_observation_id": null,
+        "finish": false,
+        "killed_manager": true,
+        "killed_worker": true,
+        "manager_decision": {
+          "age_seconds": 5,
+          "allowed_decisions": [
+            "stop"
+          ],
+          "decision": {
+            "created_at": "2026-05-17T01:25:23Z",
+            "decision": "stop",
+            "id": 1,
+            "manager_cycle_id": null,
+            "manager_id": null,
+            "reason": "Cleanup isolated Scenario 8 after expected guardrail denials; Gate 4 blocked because denied attempts failed closed but were not durably audited as attempted failures.",
+            "task_id": "task-3acf8714-9538-4524-9e49-f56b251bf8fd"
+          },
+          "decision_id": 1,
+          "max_age_seconds": 900,
+          "ok": true,
+          "warnings": []
+        },
+        "manager_identity": {
+          "db_pane_id": null,
+          "db_session": "codex-qa-g4-s8-manager",
+          "live": true,
+          "live_pane_id": "%1",
+          "mismatches": [],
+          "role": "manager",
+          "session": "qa-g4-s8-manager"
+        },
+        "manager_session": "qa-g4-s8-manager",
+        "reason": "Cleanup isolated Scenario 8 blocked guardrail drill.",
+        "stop_manager": true,
+        "stop_worker": true,
+        "task": "qa-g4-s8-guardrail",
+        "worker": "qa-g4-s8-worker",
+        "worker_identity": {
+          "db_pane_id": null,
+          "db_session": "codex-qa-g4-s8-worker",
+          "live": true,
+          "live_pane_id": "%0",
+          "mismatches": [],
+          "role": "worker",
+          "session": "qa-g4-s8-worker"
+        },
+        "worker_session": "qa-g4-s8-worker"
+      },
+      "state": "succeeded",
+      "task_id": "task-3acf8714-9538-4524-9e49-f56b251bf8fd",
+      "type": "stop_task",
+      "updated_at": "2026-05-17T01:25:28Z",
+      "worker_id": null
+    }
+  ],
+  "events": [
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-17T01:24:18Z",
+      "id": 1,
+      "manager_id": null,
+      "payload": {
+        "goal": "Gate 4 Scenario 8 guardrail drill: verify denied lifecycle-changing commands fail closed and do not create fake success.",
+        "name": "qa-g4-s8-guardrail",
+        "summary": "Disposable isolated guardrail drill."
+      },
+      "task_id": "task-3acf8714-9538-4524-9e49-f56b251bf8fd",
+      "type": "task_created",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-17T01:24:22Z",
+      "id": 4,
+      "manager_id": null,
+      "payload": {
+        "binding_id": "binding-d46bc366-3865-4cdf-8099-9586bf5df6da",
+        "manager": "qa-g4-s8-manager",
+        "task": "qa-g4-s8-guardrail",
+        "worker": "qa-g4-s8-worker"
+      },
+      "task_id": "task-3acf8714-9538-4524-9e49-f56b251bf8fd",
+      "type": "binding_created",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-17T01:24:35Z",
+      "id": 5,
+      "manager_id": null,
+      "payload": {
+        "created": true,
+        "criterion": "Synthetic accepted criterion intentionally left open so finish-task --require-criteria-audit must fail closed.",
+        "criterion_id": 1,
+        "evidence": {},
+        "proof": null,
+        "rationale": null,
+        "source": "user_requested",
+        "status": "accepted",
+        "task_id": "task-3acf8714-9538-4524-9e49-f56b251bf8fd"
+      },
+      "task_id": "task-3acf8714-9538-4524-9e49-f56b251bf8fd",
+      "type": "acceptance_criterion_added",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-17T01:25:23Z",
+      "id": 6,
+      "manager_id": null,
+      "payload": {
+        "decision": "stop",
+        "decision_id": 1,
+        "manager_cycle_id": null,
+        "reason": "Cleanup isolated Scenario 8 after expected guardrail denials; Gate 4 blocked because denied attempts failed closed but were not durably audited as attempted failures."
+      },
+      "task_id": "task-3acf8714-9538-4524-9e49-f56b251bf8fd",
+      "type": "manager_decision_recorded",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": "command-1d9d15d0-a73e-4953-8aac-ced3a5f5eab8",
+      "correlation_id": null,
+      "created_at": "2026-05-17T01:25:28Z",
+      "id": 7,
+      "manager_id": null,
+      "payload": {
+        "final_decision_id": null,
+        "final_observation_id": null,
+        "finish": false,
+        "manager_decision": {
+          "age_seconds": 5,
+          "allowed_decisions": [
+            "stop"
+          ],
+          "decision": {
+            "created_at": "2026-05-17T01:25:23Z",
+            "decision": "stop",
+            "id": 1,
+            "manager_cycle_id": null,
+            "manager_id": null,
+            "reason": "Cleanup isolated Scenario 8 after expected guardrail denials; Gate 4 blocked because denied attempts failed closed but were not durably audited as attempted failures.",
+            "task_id": "task-3acf8714-9538-4524-9e49-f56b251bf8fd"
+          },
+          "decision_id": 1,
+          "max_age_seconds": 900,
+          "ok": true,
+          "warnings": []
+        },
+        "message": null,
+        "reason": "Cleanup isolated Scenario 8 blocked guardrail drill.",
+        "stop_manager": true,
+        "stop_worker": true
+      },
+      "task_id": "task-3acf8714-9538-4524-9e49-f56b251bf8fd",
+      "type": "stop_task_intent",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": "command-1d9d15d0-a73e-4953-8aac-ced3a5f5eab8",
+      "correlation_id": null,
+      "created_at": "2026-05-17T01:25:28Z",
+      "id": 8,
+      "manager_id": null,
+      "payload": {
+        "db_pane_id": null,
+        "db_session": "codex-qa-g4-s8-manager",
+        "live": true,
+        "live_pane_id": "%1",
+        "mismatches": [],
+        "role": "manager",
+        "session": "qa-g4-s8-manager"
+      },
+      "task_id": "task-3acf8714-9538-4524-9e49-f56b251bf8fd",
+      "type": "manager_identity_verified",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": "command-1d9d15d0-a73e-4953-8aac-ced3a5f5eab8",
+      "correlation_id": null,
+      "created_at": "2026-05-17T01:25:28Z",
+      "id": 9,
+      "manager_id": null,
+      "payload": {
+        "db_pane_id": null,
+        "db_session": "codex-qa-g4-s8-worker",
+        "live": true,
+        "live_pane_id": "%0",
+        "mismatches": [],
+        "role": "worker",
+        "session": "qa-g4-s8-worker"
+      },
+      "task_id": "task-3acf8714-9538-4524-9e49-f56b251bf8fd",
+      "type": "worker_identity_verified",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": "command-1d9d15d0-a73e-4953-8aac-ced3a5f5eab8",
+      "correlation_id": null,
+      "created_at": "2026-05-17T01:25:28Z",
+      "id": 10,
+      "manager_id": null,
+      "payload": {
+        "command_id": "command-1d9d15d0-a73e-4953-8aac-ced3a5f5eab8",
+        "final_decision_id": null,
+        "final_observation_id": null,
+        "finish": false,
+        "killed_manager": true,
+        "killed_worker": true,
+        "manager_decision": {
+          "age_seconds": 5,
+          "allowed_decisions": [
+            "stop"
+          ],
+          "decision": {
+            "created_at": "2026-05-17T01:25:23Z",
+            "decision": "stop",
+            "id": 1,
+            "manager_cycle_id": null,
+            "manager_id": null,
+            "reason": "Cleanup isolated Scenario 8 after expected guardrail denials; Gate 4 blocked because denied attempts failed closed but were not durably audited as attempted failures.",
+            "task_id": "task-3acf8714-9538-4524-9e49-f56b251bf8fd"
+          },
+          "decision_id": 1,
+          "max_age_seconds": 900,
+          "ok": true,
+          "warnings": []
+        },
+        "manager_identity": {
+          "db_pane_id": null,
+          "db_session": "codex-qa-g4-s8-manager",
+          "live": true,
+          "live_pane_id": "%1",
+          "mismatches": [],
+          "role": "manager",
+          "session": "qa-g4-s8-manager"
+        },
+        "manager_session": "qa-g4-s8-manager",
+        "reason": "Cleanup isolated Scenario 8 blocked guardrail drill.",
+        "stop_manager": true,
+        "stop_worker": true,
+        "task": "qa-g4-s8-guardrail",
+        "worker": "qa-g4-s8-worker",
+        "worker_identity": {
+          "db_pane_id": null,
+          "db_session": "codex-qa-g4-s8-worker",
+          "live": true,
+          "live_pane_id": "%0",
+          "mismatches": [],
+          "role": "worker",
+          "session": "qa-g4-s8-worker"
+        },
+        "worker_session": "qa-g4-s8-worker"
+      },
+      "task_id": "task-3acf8714-9538-4524-9e49-f56b251bf8fd",
+      "type": "stop_task_succeeded",
+      "worker_id": null
+    }
+  ],
+  "manager_cycles": [],
+  "manager_decisions": [
+    {
+      "created_at": "2026-05-17T01:25:23Z",
+      "decision": "stop",
+      "id": 1,
+      "manager_cycle_id": null,
+      "manager_id": null,
+      "payload": {
+        "blocked_on": "guardrail_denials_not_audited",
+        "compact_denied": true,
+        "deregister_denied": true,
+        "finish_task_denied": true,
+        "qa_result": "scenario_8_blocked"
+      },
+      "reason": "Cleanup isolated Scenario 8 after expected guardrail denials; Gate 4 blocked because denied attempts failed closed but were not durably audited as attempted failures.",
+      "task_id": "task-3acf8714-9538-4524-9e49-f56b251bf8fd"
+    }
+  ],
+  "task": {
+    "created_at": "2026-05-17T01:24:18Z",
+    "goal": "Gate 4 Scenario 8 guardrail drill: verify denied lifecycle-changing commands fail closed and do not create fake success.",
+    "id": "task-3acf8714-9538-4524-9e49-f56b251bf8fd",
+    "name": "qa-g4-s8-guardrail",
+    "state": "done",
+    "summary": "Disposable isolated guardrail drill.",
+    "updated_at": "2026-05-17T01:25:28Z"
+  },
+  "terminal_captures": [],
+  "transcript_segments": []
+}
