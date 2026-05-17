@@ -115,7 +115,7 @@ workerctl cycle my-task
 workerctl session-nudge foo "What's your current state?"
 
 # When the task is complete:
-workerctl finish-task my-task --reason "auth refactor merged"
+workerctl finish-task my-task --reason "auth refactor merged" --capture-transcript-before-stop --stop-manager --stop-worker
 workerctl unbind --task my-task
 workerctl deregister foo
 workerctl deregister foo-mgr
@@ -288,10 +288,13 @@ tmux attach -t codex-live-test
 - `bind --task T --worker W --manager M` — Create the task binding.
 - `unbind --task T` — End the active binding for a task.
 - `finish-task <task> [--reason R] [--require-criteria-audit] [--stop-manager]
-  [--stop-worker]` — Mark a task done. Leaves the manager terminal open by
-  default for review. With `--require-criteria-audit`, fails before finishing
-  if any acceptance criteria for the task are still `accepted`; `proposed`,
-  `satisfied`, `deferred`, and `rejected` criteria do not block.
+  [--stop-worker] [--capture-transcript-before-stop]` — Mark a task done.
+  Leaves the manager terminal open by default for review. With
+  `--require-criteria-audit`, fails before finishing if any acceptance criteria
+  for the task are still `accepted`; `proposed`, `satisfied`, `deferred`, and
+  `rejected` criteria do not block. With `--capture-transcript-before-stop`,
+  captures transcript segments for any worker/manager sessions being stopped
+  before killing tmux sessions; capture failure fails before stop side effects.
 - `stop-task <task> [--reason R] [--stop-worker]` — Force-stop a task's
   manager (and optionally the worker), recording the reason in the audit
   payload.

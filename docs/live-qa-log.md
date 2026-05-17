@@ -752,12 +752,13 @@ Observations:
 - Transcript capture was missed again: `transcript-capture` ran after
   `finish-task` stopped both sessions, so exported `transcript-captures.json`
   and `terminal-captures.json` are empty. The audit/replay/criteria evidence is
-  durable, but future drills needing transcript segments should capture before
-  stopping or productize a pre-stop capture/export path.
+  durable. Follow-up product work added `finish-task
+  --capture-transcript-before-stop`, which captures transcript segments for any
+  worker/manager sessions being stopped before killing tmux sessions.
 
 Result:
 
 - The seeded-pair startup fix is validated for the main dogfood behavior.
 - Follow-up candidates: document or encode `manager_inferred` as the expected
-  source for manager-config-derived criteria, and consider a pre-stop transcript
-  capture option for `finish-task`.
+  source for manager-config-derived criteria, and use the pre-stop transcript
+  capture option in the next seeded-pair smoke.

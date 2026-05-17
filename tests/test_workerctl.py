@@ -2649,6 +2649,120 @@ Deferred follow-up criteria:
                 lifecycle.run = original_run
                 worker_identity.session_snapshot = original_session_snapshot
 
+    def test_finish_task_captures_session_transcripts_before_stop(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                task_id = worker_db.create_task(conn, name="session-task", goal="Do task.")
+                worker_db.register_session(
+                    conn,
+                    name="session-worker",
+                    role="worker",
+                    codex_session_path="/tmp/worker.jsonl",
+                    codex_session_id="codex-worker",
+                    pid=111,
+                    cwd=str(ROOT),
+                    tmux_session="codex-session-worker",
+                    tmux_pane_id="%1",
+                )
+                worker_db.register_session(
+                    conn,
+                    name="session-manager",
+                    role="manager",
+                    codex_session_path="/tmp/manager.jsonl",
+                    codex_session_id="codex-manager",
+                    pid=222,
+                    cwd=str(ROOT),
+                    tmux_session="codex-session-manager",
+                    tmux_pane_id="%2",
+                )
+                worker_db.bind_sessions(
+                    conn,
+                    task_name="session-task",
+                    worker_session_name="session-worker",
+                    manager_session_name="session-manager",
+                )
+                conn.commit()
+
+            original_lifecycle_run = lifecycle.run
+            original_commands_run = commands.run
+            original_session_snapshot = worker_identity.session_snapshot
+            try:
+                operation_order = []
+
+                def fake_lifecycle_run(argv, **kwargs):
+                    operation_order.append(("kill", argv[-1]))
+                    return subprocess.CompletedProcess(argv, 0, "", "")
+
+                def fake_commands_run(argv, **kwargs):
+                    operation_order.append(("capture", argv[4]))
+                    output = "worker evidence\ncomplete" if argv[4] == "codex-session-worker" else "manager summary\naccepted"
+                    return subprocess.CompletedProcess(argv, 0, output, "")
+
+                lifecycle.run = fake_lifecycle_run
+                commands.run = fake_commands_run
+                worker_identity.session_snapshot = lambda session: {
+                    "live": True,
+                    "pane_id": "%2" if session == "codex-session-manager" else "%1",
+                    "session": session,
+                }
+                args = argparse.Namespace(
+                    capture_transcript_before_stop=True,
+                    capture_transcript_lines=80,
+                    capture_transcript_mode="segment",
+                    decision_id=None,
+                    message=None,
+                    path=str(db_path),
+                    reason="session work complete",
+                    require_criteria_audit=True,
+                    stop_manager=True,
+                    stop_worker=True,
+                    strict_decisions=False,
+                    task="session-task",
+                )
+
+                with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                    result = lifecycle.command_finish_task(args)
+
+                payload = json.loads(stdout.getvalue())
+                self.assertEqual(result, 0)
+                self.assertEqual([capture["role"] for capture in payload["pre_stop_transcript_captures"]], ["worker", "manager"])
+                self.assertEqual(
+                    operation_order,
+                    [
+                        ("capture", "codex-session-worker"),
+                        ("capture", "codex-session-manager"),
+                        ("kill", "codex-session-manager"),
+                        ("kill", "codex-session-worker"),
+                    ],
+                )
+                with worker_db.connect(db_path) as conn:
+                    captures = conn.execute(
+                        "select role, source, line_count from terminal_captures order by id"
+                    ).fetchall()
+                    segments = conn.execute(
+                        "select role, segment_kind, segment_text from transcript_segments order by id"
+                    ).fetchall()
+                    event = conn.execute(
+                        "select payload_json from events where type = 'finish_task_pre_stop_transcript_captured'"
+                    ).fetchone()
+                    command = conn.execute("select result_json from commands where type = 'finish_task'").fetchone()
+                self.assertEqual([row["role"] for row in captures], ["worker", "manager"])
+                self.assertTrue(all(row["source"] == "finish_task_pre_stop" for row in captures))
+                self.assertEqual([row["role"] for row in segments], ["worker", "manager"])
+                self.assertEqual(segments[0]["segment_text"], "worker evidence\ncomplete")
+                self.assertEqual(segments[1]["segment_text"], "manager summary\naccepted")
+                self.assertEqual(json.loads(event["payload_json"])["mode"], "segment")
+                self.assertEqual(
+                    [capture["role"] for capture in json.loads(command["result_json"])["pre_stop_transcript_captures"]],
+                    ["worker", "manager"],
+                )
+            finally:
+                lifecycle.run = original_lifecycle_run
+                commands.run = original_commands_run
+                worker_identity.session_snapshot = original_session_snapshot
+
     def test_stop_task_refuses_worker_pane_mismatch_before_kill(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "workerctl.db"
