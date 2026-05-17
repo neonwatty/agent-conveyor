@@ -8642,6 +8642,12 @@ class ManagerBootstrapPromptTests(unittest.TestCase):
             prompt,
         )
         self.assertIn(
+            'scripts/workerctl criteria docs-task --add --criterion "..." --source manager_inferred --status accepted',
+            prompt,
+        )
+        self.assertIn("Use `manager_inferred` for criteria inferred from manager config", prompt)
+        self.assertIn("`manager_config` is not a valid", prompt)
+        self.assertIn(
             """criterion_id=$(scripts/workerctl criteria docs-task --add --criterion "..." --source worker_proposed --status proposed | python3 -c 'import json,sys; print(json.load(sys.stdin)["affected_criterion"]["id"])')""",
             prompt,
         )

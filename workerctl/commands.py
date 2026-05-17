@@ -218,8 +218,13 @@ Supervision loop:
 - Record useful criteria with `scripts/workerctl criteria`.
   Examples:
   - `scripts/workerctl criteria {task_line} --add --criterion "..." --source worker_proposed --status proposed`
+  - `scripts/workerctl criteria {task_line} --add --criterion "..." --source manager_inferred --status accepted`
   - `criterion_id=$(scripts/workerctl criteria {task_line} --add --criterion "..." --source worker_proposed --status proposed | python3 -c 'import json,sys; print(json.load(sys.stdin)["affected_criterion"]["id"])')`
   - `scripts/workerctl criteria {task_line} --satisfy "$criterion_id" --evidence-json '{{"command":"...","status":"pass"}}'`
+- Use `worker_proposed` for criteria that came from the worker.
+- Use `manager_inferred` for criteria inferred from manager config, cycle
+  evidence, or the manager's own inspection; `manager_config` is not a valid
+  criteria source.
 - Before finishing, compare worker receipts/verification against accepted open criteria.
 - Communicate with the worker only through workerctl session/task commands.
 - Do not edit project files unless the user explicitly asks this manager
