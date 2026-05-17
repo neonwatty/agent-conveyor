@@ -1,0 +1,18 @@
+[
+  {
+    "created_at": "2026-05-17T01:25:23Z",
+    "decision": "stop",
+    "id": 1,
+    "manager_cycle_id": null,
+    "manager_id": null,
+    "payload": {
+      "blocked_on": "guardrail_denials_not_audited",
+      "compact_denied": true,
+      "deregister_denied": true,
+      "finish_task_denied": true,
+      "qa_result": "scenario_8_blocked"
+    },
+    "reason": "Cleanup isolated Scenario 8 after expected guardrail denials; Gate 4 blocked because denied attempts failed closed but were not durably audited as attempted failures.",
+    "task_id": "task-3acf8714-9538-4524-9e49-f56b251bf8fd"
+  }
+]

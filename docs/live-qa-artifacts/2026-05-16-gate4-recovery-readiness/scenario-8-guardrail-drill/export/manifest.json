@@ -1,0 +1,20 @@
+{
+  "created_at": "2026-05-17T01:25:37Z",
+  "files": [
+    "task-status.json",
+    "audit.json",
+    "acceptance-criteria.json",
+    "prompts.json",
+    "transcript-captures.json",
+    "terminal-captures.json",
+    "agent-observations.json",
+    "manager-cycles.json",
+    "manager-decisions.json",
+    "mutation-audit.json",
+    "replay.json"
+  ],
+  "task": {
+    "id": "task-3acf8714-9538-4524-9e49-f56b251bf8fd",
+    "name": "qa-g4-s8-guardrail"
+  }
+}

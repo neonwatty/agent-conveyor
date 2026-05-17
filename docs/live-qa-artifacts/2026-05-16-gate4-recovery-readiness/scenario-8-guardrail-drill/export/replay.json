@@ -1,0 +1,60 @@
+{
+  "entries": [
+    {
+      "actor": "workerctl",
+      "details": {
+        "created": true,
+        "criterion": "Synthetic accepted criterion intentionally left open so finish-task --require-criteria-audit must fail closed.",
+        "criterion_id": 1,
+        "event_type": "acceptance_criterion_added",
+        "evidence": {},
+        "proof": null,
+        "rationale": null,
+        "source": "user_requested",
+        "status": "accepted",
+        "task_id": "task-3acf8714-9538-4524-9e49-f56b251bf8fd"
+      },
+      "kind": "acceptance_criterion",
+      "source": "events",
+      "source_id": 5,
+      "summary": "accepted criterion #1: Synthetic accepted criterion intentionally left open so finish-task --require-criteria-audit must fail closed.",
+      "timestamp": "2026-05-17T01:24:35Z"
+    },
+    {
+      "actor": "manager",
+      "details": {
+        "decision": "stop",
+        "manager_cycle_id": null
+      },
+      "kind": "decision",
+      "source": "manager_decisions",
+      "source_id": 1,
+      "summary": "decision stop: Cleanup isolated Scenario 8 after expected guardrail denials; Gate 4 blocked because denied attempts failed closed but were not durably audited as attempted failures.",
+      "timestamp": "2026-05-17T01:25:23Z"
+    },
+    {
+      "actor": "workerctl",
+      "details": {
+        "command_id": "command-1d9d15d0-a73e-4953-8aac-ced3a5f5eab8",
+        "state": "succeeded",
+        "type": "stop_task"
+      },
+      "kind": "command",
+      "source": "commands",
+      "source_id": "command-1d9d15d0-a73e-4953-8aac-ced3a5f5eab8",
+      "summary": "stop_task succeeded",
+      "timestamp": "2026-05-17T01:25:28Z"
+    }
+  ],
+  "mode": "timeline",
+  "role": "all",
+  "task": {
+    "created_at": "2026-05-17T01:24:18Z",
+    "goal": "Gate 4 Scenario 8 guardrail drill: verify denied lifecycle-changing commands fail closed and do not create fake success.",
+    "id": "task-3acf8714-9538-4524-9e49-f56b251bf8fd",
+    "name": "qa-g4-s8-guardrail",
+    "state": "done",
+    "summary": "Disposable isolated guardrail drill.",
+    "updated_at": "2026-05-17T01:25:28Z"
+  }
+}

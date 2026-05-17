@@ -1,0 +1,20 @@
+{
+  "created_at": "2026-05-17T01:20:55Z",
+  "files": [
+    "task-status.json",
+    "audit.json",
+    "acceptance-criteria.json",
+    "prompts.json",
+    "transcript-captures.json",
+    "terminal-captures.json",
+    "agent-observations.json",
+    "manager-cycles.json",
+    "manager-decisions.json",
+    "mutation-audit.json",
+    "replay.json"
+  ],
+  "task": {
+    "id": "task-b91004be-68b8-4cfc-96c9-71ca16aa6746",
+    "name": "qa-g4-s5-blocker-run2"
+  }
+}
