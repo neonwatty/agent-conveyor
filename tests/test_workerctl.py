@@ -10093,6 +10093,97 @@ class PairCommandTests(unittest.TestCase):
             )
             self.assertNotIn("Do the thing", manager_spawn["initial_prompt"])
 
+    def test_pair_seeds_manager_config_before_manager_spawn(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = self._setup_db(tmpdir)
+            recorded = []
+
+            def recorder(*, name, role, task=None, initial_prompt=None, **kwargs):
+                recorded.append({"name": name, "role": role, "task": task, "initial_prompt": initial_prompt})
+                conn = worker_db.connect(db_path)
+                worker_db.initialize_database(conn)
+                try:
+                    session_id = worker_db.register_session(
+                        conn,
+                        name=name,
+                        role=role,
+                        codex_session_path=f"/tmp/{name}.jsonl",
+                        codex_session_id=f"codex-id-{name}",
+                        pid=10000 + hash(name) % 1000,
+                        cwd=kwargs.get("cwd", "/tmp"),
+                        tmux_session=f"codex-{name}",
+                    )
+                    conn.commit()
+                finally:
+                    conn.close()
+
+                return {
+                    "name": name,
+                    "role": role,
+                    "session_id": session_id,
+                    "pid": 10000 + hash(name) % 1000,
+                    "tmux_session": f"codex-{name}",
+                    "codex_session_path": f"/tmp/{name}.jsonl",
+                    "codex_session_id": f"codex-id-{name}",
+                    "cwd": kwargs.get("cwd", "/tmp"),
+                }
+
+            args = argparse.Namespace(
+                task="seeded-manager-task",
+                worker_name="w1",
+                manager_name="m1",
+                cwd=tmpdir,
+                task_prompt="Do the worker part",
+                task_goal="Dogfood seeded manager config",
+                task_summary=None,
+                manager_mode="strict",
+                manager_objective="Drive the worker from seeded criteria.",
+                manager_guideline=["Use session-nudge first."],
+                manager_acceptance=["Worker receipt is verified."],
+                manager_reference=["docs/live-qa-log.md"],
+                manager_allow_pr=False,
+                manager_allow_merge_green=False,
+                manager_allow_worker_compact_clear=True,
+                manager_permissions_json=None,
+                sandbox="danger-full-access",
+                ask_for_approval="never",
+                timeout_seconds=30,
+                path=str(db_path),
+            )
+            with mock.patch.object(commands, "_spawn_codex_and_register", side_effect=recorder):
+                stdout_capture = io.StringIO()
+                with contextlib.redirect_stdout(stdout_capture):
+                    result = commands.command_pair(args)
+
+            self.assertEqual(result, 0)
+            output = json.loads(stdout_capture.getvalue())
+            self.assertTrue(output["manager_config_seeded"])
+            self.assertTrue(output["manager_config_seeded_by_pair"])
+            manager_spawn = next(r for r in recorded if r["role"] == "manager")
+            self.assertIn("Manager config has already been recorded for this task.", manager_spawn["initial_prompt"])
+            self.assertIn("Start with `scripts/workerctl cycle seeded-manager-task`", manager_spawn["initial_prompt"])
+            self.assertIn("Ask setup questions only if", manager_spawn["initial_prompt"])
+            self.assertNotIn("Ask the user the returned setup questions", manager_spawn["initial_prompt"])
+
+            conn = worker_db.connect(db_path)
+            try:
+                task_row = worker_db.task_row(conn, task="seeded-manager-task")
+                config = worker_db.manager_config(conn, task_id=task_row["id"])
+                event = conn.execute(
+                    "select payload_json from events where type='manager_config_recorded' and task_id = ?",
+                    (task_row["id"],),
+                ).fetchone()
+            finally:
+                conn.close()
+            self.assertEqual(config["supervision_mode"], "strict")
+            self.assertEqual(config["objective"], "Drive the worker from seeded criteria.")
+            self.assertEqual(config["guidelines"], ["Use session-nudge first."])
+            self.assertEqual(config["acceptance_criteria"], ["Worker receipt is verified."])
+            self.assertEqual(config["reference_paths"], ["docs/live-qa-log.md"])
+            self.assertTrue(config["permissions"]["worker_compact_clear"])
+            self.assertIsNotNone(event)
+            self.assertEqual(json.loads(event["payload_json"])["source"], "pair")
+
     def test_pair_subparser_exists(self):
         proc = subprocess.run(
             [sys.executable, "-m", "workerctl", "pair", "--help"],
@@ -10107,6 +10198,9 @@ class PairCommandTests(unittest.TestCase):
             "--manager-name",
             "--task-prompt",
             "--task-goal",
+            "--manager-objective",
+            "--manager-guideline",
+            "--manager-acceptance",
         ):
             self.assertIn(flag, proc.stdout)
 

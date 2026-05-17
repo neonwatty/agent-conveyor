@@ -180,13 +180,19 @@ tmux attach -t codex-live-test
   task prompt. The bootstrap opens Codex rollout metadata reliably and tells the
   manager to run `manager-config <task> --questions` before supervising when a
   task is known.
-- `pair --task T --worker-name W --manager-name M [--cwd D] [--task-prompt PROMPT] [--task-goal GOAL] [--task-summary S] [--sandbox SANDBOX] [--ask-for-approval ASK_FOR_APPROVAL] [--timeout-seconds N]` —
+- `pair --task T --worker-name W --manager-name M [--cwd D] [--task-prompt PROMPT] [--task-goal GOAL] [--task-summary S] [--manager-objective O] [--manager-guideline G ...] [--manager-acceptance A ...] [--sandbox SANDBOX] [--ask-for-approval ASK_FOR_APPROVAL] [--timeout-seconds N]` —
   One-shot: spawn worker + manager and bind to a task in a single command. Combines
   `start-worker` + `start-manager` + `bind`. The task is looked up or created (if
   `--task-goal` is provided); if the task does not exist and no goal is given, an
   error is raised with a hint. The worker receives the optional `--task-prompt` as
   its initial Codex prompt; the manager receives a manager bootstrap prompt with
   the task, goal, worker name, `manager-config --questions`, and `cycle` commands.
+  If manager config flags are supplied (`--manager-mode`,
+  `--manager-objective`, repeated `--manager-guideline`,
+  `--manager-acceptance`, `--manager-reference`, or manager permission flags),
+  `pair` records that config before launching the manager and the bootstrap tells
+  the manager to start supervising with `cycle` instead of asking setup
+  questions first.
   If the manager or bind fails after the worker is spawned, the worker remains
   registered and can be cleaned up with `workerctl deregister`.
 - `register-worker --name N [--pid P | --codex-session PATH] [--cwd D] [--tmux-session S]` —

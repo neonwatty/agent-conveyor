@@ -500,6 +500,55 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional task summary (when creating).",
     )
     pair.add_argument(
+        "--manager-mode",
+        choices=("light", "guided", "strict"),
+        default=None,
+        help="Seed manager supervision mode before launching the manager.",
+    )
+    pair.add_argument(
+        "--manager-objective",
+        default=None,
+        help="Seed the manager objective before launching the manager.",
+    )
+    pair.add_argument(
+        "--manager-guideline",
+        action="append",
+        default=[],
+        help="Seed a manager guideline before launch. May be repeated.",
+    )
+    pair.add_argument(
+        "--manager-acceptance",
+        action="append",
+        default=[],
+        help="Seed a manager acceptance criterion before launch. May be repeated.",
+    )
+    pair.add_argument(
+        "--manager-reference",
+        action="append",
+        default=[],
+        help="Seed a manager reference path or URL before launch. May be repeated.",
+    )
+    pair.add_argument(
+        "--manager-allow-pr",
+        action="store_true",
+        help="Allow the manager to instruct the worker to create a PR.",
+    )
+    pair.add_argument(
+        "--manager-allow-merge-green",
+        action="store_true",
+        help="Allow the manager to instruct merging a green PR.",
+    )
+    pair.add_argument(
+        "--manager-allow-worker-compact-clear",
+        action="store_true",
+        help="Allow the manager to instruct worker compact/clear cleanup.",
+    )
+    pair.add_argument(
+        "--manager-permissions-json",
+        default=None,
+        help="Structured permission overrides merged into the seeded manager config.",
+    )
+    pair.add_argument(
         "--sandbox",
         default="danger-full-access",
         help="Codex --sandbox mode.",
