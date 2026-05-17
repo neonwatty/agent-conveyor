@@ -1,0 +1,52 @@
+{
+  "command_id": "command-1368f1e0-3c6e-4e79-aea4-0a9bcb03c0ea",
+  "final_decision_id": null,
+  "final_observation_id": null,
+  "finish": false,
+  "killed_manager": true,
+  "killed_worker": true,
+  "manager_decision": {
+    "age_seconds": 10,
+    "allowed_decisions": [
+      "stop"
+    ],
+    "decision": {
+      "created_at": "2026-05-17T02:06:51Z",
+      "decision": "stop",
+      "id": 2,
+      "manager_cycle_id": null,
+      "manager_id": null,
+      "reason": "Gate 5 Scenario 9 passed: durable handoff, criteria, replay/export, and resumed manager decision evidence satisfied; compact/clear remains deferred.",
+      "task_id": "task-86bafd01-dccd-4dd0-80d3-53a44fbb52de"
+    },
+    "decision_id": 2,
+    "max_age_seconds": 900,
+    "ok": true,
+    "warnings": []
+  },
+  "manager_identity": {
+    "db_pane_id": null,
+    "db_session": "codex-qa-g5-s9-manager-resumed",
+    "live": true,
+    "live_pane_id": "%2",
+    "mismatches": [],
+    "role": "manager",
+    "session": "qa-g5-s9-manager-resumed"
+  },
+  "manager_session": "qa-g5-s9-manager-resumed",
+  "reason": "Cleanup isolated Gate 5 Scenario 9 disposable worker and resumed manager.",
+  "stop_manager": true,
+  "stop_worker": true,
+  "task": "qa-g5-s9-resume",
+  "worker": "qa-g5-s9-worker",
+  "worker_identity": {
+    "db_pane_id": null,
+    "db_session": "codex-qa-g5-s9-worker",
+    "live": true,
+    "live_pane_id": "%0",
+    "mismatches": [],
+    "role": "worker",
+    "session": "qa-g5-s9-worker"
+  },
+  "worker_session": "qa-g5-s9-worker"
+}

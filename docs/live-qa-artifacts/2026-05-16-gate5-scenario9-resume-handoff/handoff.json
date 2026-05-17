@@ -1,0 +1,21 @@
+{
+  "created_at": "2026-05-17T02:01:14Z",
+  "id": 1,
+  "next_steps": [
+    "Persist accepted and deferred criteria from worker receipt.",
+    "Resume management from durable handoff/replay/export/criteria state and record a decision.",
+    "Export evidence and verify cleanup invariants."
+  ],
+  "payload": {
+    "known_risks": [
+      "false pass if resumed manager relies on live chat memory",
+      "replay/export may omit handoff or criteria context",
+      "criteria state could drift across resume",
+      "cleanup may leave disposable sessions"
+    ],
+    "worker_receipt": "docs/live-qa-artifacts/2026-05-16-gate5-scenario9-resume-handoff/worker-capture-after-nudge.txt"
+  },
+  "summary": "Status-only Scenario 9 worker inspected repo shape, proposed resume-safety criteria, and identified next steps/risks without editing files or doing meaningful project work.",
+  "task_id": "task-86bafd01-dccd-4dd0-80d3-53a44fbb52de",
+  "worker_session_id": "session-ba274a69-5634-4917-923e-ef45fe737cd9"
+}

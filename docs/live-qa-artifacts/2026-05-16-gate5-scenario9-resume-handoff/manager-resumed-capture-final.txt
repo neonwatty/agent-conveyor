@@ -1,0 +1,23 @@
+  - export created at docs/live-qa-artifacts/2026-05-16-gate5-scenario9-resume-
+    handoff/export-resumed-manager
+  - handoff at docs/live-qa-artifacts/2026-05-16-gate5-scenario9-resume-handoff/
+    handoff.json
+  - worker receipt at docs/live-qa-artifacts/2026-05-16-gate5-scenario9-resume-
+    handoff/worker-capture-after-nudge.txt
+
+  Criteria comparison:
+
+  - Criteria 1, 2, and 3 remain accepted/open.
+  - Criterion 4 remains deferred for the later compact/clear drill.
+  - Next action recorded in the decision: review exported artifacts and criteria
+    evidence, then mark accepted criteria satisfied where evidence is
+    sufficient; leave compact/clear deferred.
+
+  No worker nudge was sent.
+
+─ Worked for 1m 03s ────────────────────────────────────────────────────────────
+
+
+› Find and fix a bug in @filename
+
+  gpt-5.5 medium · ~/Desktop/codex-terminal-manager · manager-led-gate5-resume-…

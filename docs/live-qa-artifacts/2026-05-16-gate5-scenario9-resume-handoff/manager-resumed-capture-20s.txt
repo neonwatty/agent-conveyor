@@ -1,0 +1,23 @@
+  criteria negotiation not needed. I’m checking the workerctl command shape for
+  recording the manager decision so I can persist it without nudging the worker.
+
+• Ran scripts/workerctl --help
+  └ usage: workerctl [-h]
+
+    … +107 lines (ctrl + t to view transcript)
+    options:
+      -h, --help            show this help message and exit
+
+• Ran scripts/workerctl record-decision --help
+  └ usage: workerctl record-decision [-h] --reason REASON [--cycle-id CYCLE_ID]
+                                     [--payload-json PAYLOAD_JSON] [--path PATH]
+    … +15 lines (ctrl + t to view transcript)
+                            decision.
+      --path PATH           Override the workerctl database path.
+
+• Working (25s • esc to interrupt)
+
+
+› Find and fix a bug in @filename
+
+  gpt-5.5 medium · ~/Desktop/codex-terminal-manager · manager-led-gate5-resume-…

@@ -1,0 +1,82 @@
+{
+  "suggestions": [
+    {
+      "command": [
+        "workerctl",
+        "criteria",
+        "qa-g5-s9-resume",
+        "--add",
+        "--criterion",
+        "A durable worker handoff records current status, next steps, and known risks.",
+        "--source",
+        "worker_proposed",
+        "--status",
+        "accepted"
+      ],
+      "criterion": "A durable worker handoff records current status, next steps, and known risks.",
+      "rationale": null,
+      "source": "worker_proposed",
+      "status": "accepted"
+    },
+    {
+      "command": [
+        "workerctl",
+        "criteria",
+        "qa-g5-s9-resume",
+        "--add",
+        "--criterion",
+        "The current task has accepted criteria for resume safety and a deferred",
+        "--source",
+        "worker_proposed",
+        "--status",
+        "accepted"
+      ],
+      "criterion": "The current task has accepted criteria for resume safety and a deferred",
+      "rationale": null,
+      "source": "worker_proposed",
+      "status": "accepted"
+    },
+    {
+      "command": [
+        "workerctl",
+        "criteria",
+        "qa-g5-s9-resume",
+        "--add",
+        "--criterion",
+        "A resumed manager records a decision based on durable replay/export/handoff",
+        "--source",
+        "worker_proposed",
+        "--status",
+        "deferred",
+        "--rationale",
+        "Follow-up after this QA slice."
+      ],
+      "criterion": "A resumed manager records a decision based on durable replay/export/handoff",
+      "rationale": "Follow-up after this QA slice.",
+      "source": "worker_proposed",
+      "status": "deferred"
+    },
+    {
+      "command": [
+        "workerctl",
+        "criteria",
+        "qa-g5-s9-resume",
+        "--add",
+        "--criterion",
+        "Run the same resume drill with actual compact/clear only after handoff and",
+        "--source",
+        "worker_proposed",
+        "--status",
+        "deferred",
+        "--rationale",
+        "Follow-up after this QA slice."
+      ],
+      "criterion": "Run the same resume drill with actual compact/clear only after handoff and",
+      "rationale": "Follow-up after this QA slice.",
+      "source": "worker_proposed",
+      "status": "deferred"
+    }
+  ],
+  "task": "qa-g5-s9-resume",
+  "warnings": []
+}

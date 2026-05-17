@@ -1,0 +1,26 @@
+{
+  "created_at": "2026-05-17T02:06:51Z",
+  "decision": "stop",
+  "id": 2,
+  "manager_cycle_id": null,
+  "manager_id": null,
+  "payload": {
+    "cleanup": "approved_disposable_cleanup",
+    "compact_clear": "not_used",
+    "deferred_criteria": [
+      4
+    ],
+    "qa_result": "scenario_9_passed",
+    "satisfied_criteria": [
+      1,
+      2,
+      3
+    ]
+  },
+  "reason": "Gate 5 Scenario 9 passed: durable handoff, criteria, replay/export, and resumed manager decision evidence satisfied; compact/clear remains deferred.",
+  "task": {
+    "id": "task-86bafd01-dccd-4dd0-80d3-53a44fbb52de",
+    "name": "qa-g5-s9-resume"
+  },
+  "task_id": "task-86bafd01-dccd-4dd0-80d3-53a44fbb52de"
+}

@@ -1,0 +1,50 @@
+[
+  {
+    "created_at": "2026-05-17T02:04:49Z",
+    "decision": "inspect",
+    "id": 1,
+    "manager_cycle_id": 2,
+    "manager_id": null,
+    "payload": {
+      "decision": "do_not_nudge_worker",
+      "deferred_criteria": [
+        {
+          "criterion": "Run the same resume drill with actual compact/clear only after handoff and manager permission are configured.",
+          "id": 4,
+          "status": "deferred"
+        }
+      ],
+      "durable_state": {
+        "criteria_negotiation_needed": false,
+        "task_completed": true,
+        "worker_state": "idle"
+      },
+      "evidence": {
+        "criteria": "scripts/workerctl criteria qa-g5-s9-resume --list showed accepted criteria 1-3 open and deferred criterion 4",
+        "export": "docs/live-qa-artifacts/2026-05-16-gate5-scenario9-resume-handoff/export-resumed-manager",
+        "handoff": "docs/live-qa-artifacts/2026-05-16-gate5-scenario9-resume-handoff/handoff.json",
+        "replay": "scripts/workerctl replay qa-g5-s9-resume --json showed accepted criteria, deferred follow-up, and cycle 2 observation"
+      },
+      "next_action": "Review exported artifacts and criteria evidence, then mark accepted criteria satisfied where evidence is sufficient; leave compact/clear criterion deferred.",
+      "open_criteria": [
+        {
+          "criterion": "A durable worker handoff records current status, next steps, and known risks.",
+          "id": 1,
+          "status": "accepted"
+        },
+        {
+          "criterion": "Accepted resume-safety criteria and a deferred compact/clear follow-up remain visible after resume.",
+          "id": 2,
+          "status": "accepted"
+        },
+        {
+          "criterion": "A resumed manager records a decision based on durable replay/export/handoff/criteria state, not live chat memory.",
+          "id": 3,
+          "status": "accepted"
+        }
+      ]
+    },
+    "reason": "Resumed manager inspected durable replay, export, handoff, and criteria state; worker is idle, task is completed, and no nudge is needed.",
+    "task_id": "task-86bafd01-dccd-4dd0-80d3-53a44fbb52de"
+  }
+]

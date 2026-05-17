@@ -1,0 +1,23 @@
+
+  Next Steps
+
+  - PM records this receipt as a durable handoff/criteria source.
+  - PM or manager uses workerctl criteria-plan, criteria, handoff, replay, and
+    export-task to persist and verify Scenario 9 state.
+  - A resumed manager should make the next decision from durable workerctl
+    evidence only.
+  - Judge audits whether Gate 5 passed, blocked, or should be deferred.
+
+  Known Risks
+
+  - Scenario 9 could falsely pass if resumed manager behavior depends on live
+    chat memory.
+  - Replay/export might not include sufficient handoff or criteria context.
+  - Criteria state could drift or disappear across resume.
+  - Disposable sessions or isolated state may remain after cleanup if reconcile
+    is not verified.
+
+
+› Explain this codebase
+
+  gpt-5.5 medium · ~/Desktop/codex-terminal-manager · manager-led-gate5-resume-…

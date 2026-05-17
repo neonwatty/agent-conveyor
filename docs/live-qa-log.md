@@ -338,3 +338,45 @@ Validated:
 Result:
 
 - Gate 4 is promoted to passed after the Scenario 8 rerun.
+
+## 2026-05-16: Gate 5 Scenario 9 Resume/Handoff Drill
+
+Scenario:
+
+- Gate 5 resume/handoff readiness, Scenario 9 from the dogfood reliability
+  ladder.
+- Isolated state root:
+  `/tmp/codex-terminal-manager-g5-s9-state`
+- Evidence root:
+  `docs/live-qa-artifacts/2026-05-16-gate5-scenario9-resume-handoff/`
+
+Validated:
+
+- Worker produced a status-only receipt without editing files or doing
+  meaningful project work.
+- `handoff.json` recorded current status, next steps, and known risks.
+- `criteria-plan` ran before criteria were added, proving the command exists in
+  the workflow. Its output truncated some multi-line prose, so the accepted
+  criteria were manually added from the captured worker receipt.
+- Accepted criteria and the deferred compact/clear follow-up were visible before
+  and after manager resume.
+- The original disposable manager was killed, reconciled as gone, and replaced
+  with `qa-g5-s9-manager-resumed` bound to the same task and worker.
+- Resumed manager decision id 1 named durable replay, export, handoff, and
+  criteria evidence; it identified the next action/open criteria and did not
+  nudge the worker.
+- Accepted criteria 1-3 were marked satisfied from durable evidence. Criterion 4
+  remains deferred for a later compact/clear-specific drill.
+- Cleanup `stop-task --stop-worker --strict-decisions --decision-id 2` killed
+  the disposable resumed manager and worker.
+- Final isolated reconcile, default reconcile, and matching tmux checks were
+  clean.
+
+Result:
+
+- Gate 5 resume/handoff readiness passes.
+- Known follow-up: improve `criteria-plan` extraction quality for multi-line
+  criteria prose before depending on it without manual review.
+- Recommended next dogfood step: run a low-risk meaningful branch-scoped task
+  under manager supervision, and run a separate compact/clear drill before
+  relying on those controls.

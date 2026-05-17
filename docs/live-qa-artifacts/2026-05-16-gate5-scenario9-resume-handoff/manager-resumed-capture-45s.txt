@@ -1,0 +1,23 @@
+
+• The manager decision is now persisted as decision 1 with replay, export,
+  handoff, and criteria evidence. I’m doing the closeout comparison against the
+  accepted criteria from durable files before reporting back.
+
+• Explored
+  └ List 2026-05-16-gate5-scenario9-resume-handoff
+    Read handoff.json, worker-capture-after-nudge.txt
+
+• Ran WORKERCTL_STATE_ROOT=/tmp/codex-terminal-manager-g5-s9-state scripts/
+  │ workerctl replay qa-g5-s9-resume --json
+  └ {
+      "entries": [
+    … +134 lines (ctrl + t to view transcript)
+      }
+    }
+
+• Working (55s • esc to interrupt)
+
+
+› Find and fix a bug in @filename
+
+  gpt-5.5 medium · ~/Desktop/codex-terminal-manager · manager-led-gate5-resume-…

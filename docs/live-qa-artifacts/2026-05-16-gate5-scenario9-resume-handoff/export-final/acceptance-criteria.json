@@ -1,0 +1,61 @@
+[
+  {
+    "created_at": "2026-05-17T02:01:31Z",
+    "criterion": "A durable worker handoff records current status, next steps, and known risks.",
+    "evidence": {
+      "export": "docs/live-qa-artifacts/2026-05-16-gate5-scenario9-resume-handoff/export-after-resume",
+      "handoff": "docs/live-qa-artifacts/2026-05-16-gate5-scenario9-resume-handoff/handoff.json",
+      "replay": "docs/live-qa-artifacts/2026-05-16-gate5-scenario9-resume-handoff/replay-after-resume.json"
+    },
+    "id": 1,
+    "proof": "handoff.json plus replay/export record current status, next steps, and known risks.",
+    "rationale": null,
+    "source": "worker_proposed",
+    "status": "satisfied",
+    "task_id": "task-86bafd01-dccd-4dd0-80d3-53a44fbb52de",
+    "updated_at": "2026-05-17T02:06:32Z"
+  },
+  {
+    "created_at": "2026-05-17T02:01:31Z",
+    "criterion": "Accepted resume-safety criteria and a deferred compact/clear follow-up remain visible after resume.",
+    "evidence": {
+      "after": "docs/live-qa-artifacts/2026-05-16-gate5-scenario9-resume-handoff/criteria-after-resume.json",
+      "before": "docs/live-qa-artifacts/2026-05-16-gate5-scenario9-resume-handoff/criteria-before-resume.json"
+    },
+    "id": 2,
+    "proof": "criteria-before-resume.json and criteria-after-resume.json show accepted criteria and deferred compact/clear follow-up survived resume.",
+    "rationale": null,
+    "source": "worker_proposed",
+    "status": "satisfied",
+    "task_id": "task-86bafd01-dccd-4dd0-80d3-53a44fbb52de",
+    "updated_at": "2026-05-17T02:06:32Z"
+  },
+  {
+    "created_at": "2026-05-17T02:01:31Z",
+    "criterion": "A resumed manager records a decision based on durable replay/export/handoff/criteria state, not live chat memory.",
+    "evidence": {
+      "manager_capture": "docs/live-qa-artifacts/2026-05-16-gate5-scenario9-resume-handoff/manager-resumed-capture-final.txt",
+      "manager_decision_id": 1,
+      "manager_decisions": "docs/live-qa-artifacts/2026-05-16-gate5-scenario9-resume-handoff/export-after-resume/manager-decisions.json"
+    },
+    "id": 3,
+    "proof": "resumed manager decision 1 names durable replay, export, handoff, and criteria evidence and avoids worker nudge.",
+    "rationale": null,
+    "source": "worker_proposed",
+    "status": "satisfied",
+    "task_id": "task-86bafd01-dccd-4dd0-80d3-53a44fbb52de",
+    "updated_at": "2026-05-17T02:06:32Z"
+  },
+  {
+    "created_at": "2026-05-17T02:01:31Z",
+    "criterion": "Run the same resume drill with actual compact/clear only after handoff and manager permission are configured.",
+    "evidence": {},
+    "id": 4,
+    "proof": null,
+    "rationale": "Follow-up after this Gate 5 QA slice; compact/clear is intentionally not used here.",
+    "source": "worker_proposed",
+    "status": "deferred",
+    "task_id": "task-86bafd01-dccd-4dd0-80d3-53a44fbb52de",
+    "updated_at": "2026-05-17T02:01:31Z"
+  }
+]
