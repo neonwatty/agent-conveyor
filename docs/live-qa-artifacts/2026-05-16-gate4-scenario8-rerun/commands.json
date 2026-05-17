@@ -1,0 +1,161 @@
+[
+  {
+    "created_at": "2026-05-17T01:43:56Z",
+    "error": "Task qa-g4-s8-rerun has accepted acceptance criteria still open; satisfy, defer, or reject them before finishing: #1: Synthetic accepted criterion intentionally left open so finish-task --require-criteria-audit must fail closed and be audited.",
+    "id": "command-17c6c154-25eb-4b06-814a-27d05e02b0b3",
+    "manager_id": null,
+    "payload": {
+      "expected_failure": true,
+      "failure_stage": "final_criteria_audit",
+      "final_audit": {
+        "open_criteria": [
+          {
+            "criterion": "Synthetic accepted criterion intentionally left open so finish-task --require-criteria-audit must fail closed and be audited.",
+            "id": 1
+          }
+        ],
+        "require_criteria_audit": true,
+        "summary": {
+          "accepted": 1,
+          "deferred": 0,
+          "proposed": 0,
+          "rejected": 0,
+          "satisfied": 0
+        },
+        "total": 1
+      },
+      "finish": true,
+      "message": null,
+      "reason": "Task finished by operator.",
+      "stop_manager": false,
+      "stop_worker": false,
+      "task": "qa-g4-s8-rerun"
+    },
+    "result": {
+      "command_id": "command-17c6c154-25eb-4b06-814a-27d05e02b0b3",
+      "expected_failure": true,
+      "failure_stage": "final_criteria_audit",
+      "final_audit": {
+        "open_criteria": [
+          {
+            "criterion": "Synthetic accepted criterion intentionally left open so finish-task --require-criteria-audit must fail closed and be audited.",
+            "id": 1
+          }
+        ],
+        "require_criteria_audit": true,
+        "summary": {
+          "accepted": 1,
+          "deferred": 0,
+          "proposed": 0,
+          "rejected": 0,
+          "satisfied": 0
+        },
+        "total": 1
+      },
+      "finish": true,
+      "task": "qa-g4-s8-rerun"
+    },
+    "state": "failed",
+    "task_id": "task-05ad19c1-1d78-456e-b095-66306be0949b",
+    "task_name": "qa-g4-s8-rerun",
+    "type": "finish_task",
+    "updated_at": "2026-05-17T01:43:56Z",
+    "worker_id": null
+  },
+  {
+    "created_at": "2026-05-17T01:43:57Z",
+    "error": "cannot deregister session 'qa-g4-s8-rerun-worker': it is still bound to task 'task-05ad19c1-1d78-456e-b095-66306be0949b' (binding 'binding-328ead7b-a27d-4621-a1b4-5c91fdb14a77'). Unbind the task first.",
+    "id": "command-129ca5a3-d532-4b20-a764-9e7dfa6e3b91",
+    "manager_id": null,
+    "payload": {
+      "active_binding": {
+        "id": "binding-328ead7b-a27d-4621-a1b4-5c91fdb14a77",
+        "task_id": "task-05ad19c1-1d78-456e-b095-66306be0949b"
+      },
+      "expected_failure": true,
+      "name": "qa-g4-s8-rerun-worker",
+      "role": "worker"
+    },
+    "result": {
+      "active_binding": {
+        "id": "binding-328ead7b-a27d-4621-a1b4-5c91fdb14a77",
+        "task_id": "task-05ad19c1-1d78-456e-b095-66306be0949b"
+      },
+      "command_id": "command-129ca5a3-d532-4b20-a764-9e7dfa6e3b91",
+      "expected_failure": true,
+      "name": "qa-g4-s8-rerun-worker"
+    },
+    "state": "failed",
+    "task_id": "task-05ad19c1-1d78-456e-b095-66306be0949b",
+    "task_name": "qa-g4-s8-rerun",
+    "type": "deregister_session",
+    "updated_at": "2026-05-17T01:43:57Z",
+    "worker_id": null
+  },
+  {
+    "created_at": "2026-05-17T01:43:57Z",
+    "error": "strict manager decision validation failed: {\"command_type\": \"request_worker_compact\", \"error\": \"manager_decision_validation_failed\", \"manager_decision\": {\"allowed_decisions\": [\"nudge\"], \"decision\": null, \"decision_id\": null, \"ok\": false, \"warnings\": [\"missing_decision_id\"]}}",
+    "id": "command-c04366d5-775d-4fcb-b863-127ed70cbd39",
+    "manager_id": null,
+    "payload": {
+      "manager_decision": {
+        "allowed_decisions": [
+          "nudge"
+        ],
+        "decision": null,
+        "decision_id": null,
+        "ok": false,
+        "warnings": [
+          "missing_decision_id"
+        ]
+      },
+      "message": "Manager request: prepare for context compaction/clear after a saved handoff exists.",
+      "permission_check": {
+        "action": "worker_compact_clear",
+        "allowed": false,
+        "handoff_id": null,
+        "reasons": [
+          "missing_manager_config",
+          "missing_worker_handoff"
+        ]
+      },
+      "send_text": "/compact",
+      "slash_command": "/compact",
+      "task": "qa-g4-s8-rerun",
+      "worker_session": "qa-g4-s8-rerun-worker"
+    },
+    "result": {
+      "command_id": "command-c04366d5-775d-4fcb-b863-127ed70cbd39",
+      "expected_failure": true,
+      "failure_stage": "preflight",
+      "manager_decision": {
+        "allowed_decisions": [
+          "nudge"
+        ],
+        "decision": null,
+        "decision_id": null,
+        "ok": false,
+        "warnings": [
+          "missing_decision_id"
+        ]
+      },
+      "permission_check": {
+        "action": "worker_compact_clear",
+        "allowed": false,
+        "handoff_id": null,
+        "reasons": [
+          "missing_manager_config",
+          "missing_worker_handoff"
+        ]
+      },
+      "task": "qa-g4-s8-rerun",
+      "worker_session": "qa-g4-s8-rerun-worker"
+    },
+    "state": "failed",
+    "task_id": "task-05ad19c1-1d78-456e-b095-66306be0949b",
+    "task_name": "qa-g4-s8-rerun",
+    "type": "request_worker_compact",
+    "updated_at": "2026-05-17T01:43:57Z",
+    "worker_id": null
+  }
+]

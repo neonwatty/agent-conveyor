@@ -34,6 +34,7 @@ def mutation_audit_result(audit: dict[str, Any]) -> dict[str, Any]:
             continue
         payload = command.get("payload") or {}
         result = command.get("result") or {}
+        expected_failure = bool(result.get("expected_failure") or payload.get("expected_failure"))
         decision_check = result.get("manager_decision") or payload.get("manager_decision")
         if (
             command["type"] == "finish_task"
@@ -44,7 +45,9 @@ def mutation_audit_result(audit: dict[str, Any]) -> dict[str, Any]:
         nearest = nearest_prior_decision(command, decisions)
         linked = decision_check.get("decision") if isinstance(decision_check, dict) else None
         warnings = []
-        if not allowed:
+        if expected_failure and command["state"] == "failed":
+            pass
+        elif not allowed:
             if linked:
                 warnings.append("unexpected_linked_decision")
         elif isinstance(decision_check, dict):
@@ -64,6 +67,7 @@ def mutation_audit_result(audit: dict[str, Any]) -> dict[str, Any]:
                     "state": command["state"],
                     "type": command["type"],
                 },
+                "expected_failure": expected_failure,
                 "linked_decision": linked,
                 "nearest_prior_decision": nearest,
                 "ok": not warnings,

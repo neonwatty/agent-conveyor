@@ -302,3 +302,39 @@ Blocker:
   audit trail to record attempted failures accurately without implying success,
   so Gate 4 is blocked on durable expected-failure audit records for denied
   guardrail attempts.
+
+## 2026-05-16: Gate 4 Scenario 8 Rerun Pass
+
+Scenario:
+
+- Gate 4 recovery readiness, Scenario 8 rerun after PR #61 fixed durable
+  expected-failure audit records.
+- Isolated state root:
+  `/tmp/codex-terminal-manager-g4-s8-rerun-state`
+- Evidence root:
+  `docs/live-qa-artifacts/2026-05-16-gate4-scenario8-rerun/`
+
+Validated:
+
+- `finish-task qa-g4-s8-rerun --require-criteria-audit` failed closed with
+  exit code 1, named the open accepted criterion, and recorded a failed
+  `finish_task` command with `expected_failure: true`.
+- `deregister qa-g4-s8-rerun-worker` failed closed with exit code 1, named the
+  active task and binding, and recorded a failed `deregister_session` command
+  with `expected_failure: true`.
+- `request-worker-compact qa-g4-s8-rerun --strict-decisions --dry-run` failed
+  closed with exit code 1, named the missing manager decision, and recorded a
+  failed `request_worker_compact` command with `expected_failure: true`.
+- `commands --task qa-g4-s8-rerun --json` showed all three denied attempts as
+  failed commands.
+- `mutation-audit qa-g4-s8-rerun --json` reported `ok: true`, three mutations,
+  and zero warnings after the expected-failure audit fix.
+- `replay qa-g4-s8-rerun --json` showed the failed guardrail attempts in the
+  task timeline without fake success.
+- Cleanup `stop-task --stop-worker --strict-decisions --decision-id 1` killed
+  the disposable manager and worker.
+- Final isolated reconcile, default reconcile, and tmux checks were clean.
+
+Result:
+
+- Gate 4 is promoted to passed after the Scenario 8 rerun.

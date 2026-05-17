@@ -1,0 +1,16 @@
+[
+  {
+    "created_at": "2026-05-17T01:45:14Z",
+    "decision": "stop",
+    "id": 1,
+    "manager_cycle_id": null,
+    "manager_id": null,
+    "payload": {
+      "expected_failures_audited": true,
+      "mutation_audit_ok": true,
+      "qa_result": "scenario_8_rerun_passed"
+    },
+    "reason": "Scenario 8 rerun passed: denied guardrail attempts failed closed and are durably audited as expected failures; stop disposable pair for cleanup.",
+    "task_id": "task-05ad19c1-1d78-456e-b095-66306be0949b"
+  }
+]

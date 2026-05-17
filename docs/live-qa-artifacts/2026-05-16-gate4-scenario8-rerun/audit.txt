@@ -1,0 +1,8 @@
+qa-g4-s8-rerun	candidate	Gate 4 Scenario 8 rerun: verify denied guardrail commands fail closed and are durably recorded in commands, mutation-audit, and replay.
+2026-05-17T01:43:30Z	task_created	actor=workerctl
+2026-05-17T01:43:34Z	binding_created	actor=workerctl
+2026-05-17T01:43:40Z	acceptance_criterion_added	actor=workerctl
+2026-05-17T01:43:56Z	finish_task_failed	actor=workerctl	command=command-17c6c154-25eb-4b06-814a-27d05e02b0b3
+2026-05-17T01:43:57Z	session_deregister_failed	actor=workerctl	command=command-129ca5a3-d532-4b20-a764-9e7dfa6e3b91
+2026-05-17T01:43:57Z	manager_permission_checked	actor=workerctl
+2026-05-17T01:43:57Z	worker_compact_request_failed	actor=workerctl	command=command-c04366d5-775d-4fcb-b863-127ed70cbd39

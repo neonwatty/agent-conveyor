@@ -1,0 +1,101 @@
+{
+  "ok": true,
+  "records": [
+    {
+      "allowed_decisions": [
+        "stop"
+      ],
+      "command": {
+        "created_at": "2026-05-17T01:43:56Z",
+        "id": "command-17c6c154-25eb-4b06-814a-27d05e02b0b3",
+        "state": "failed",
+        "type": "finish_task"
+      },
+      "expected_failure": true,
+      "linked_decision": null,
+      "nearest_prior_decision": null,
+      "ok": true,
+      "warnings": []
+    },
+    {
+      "allowed_decisions": [],
+      "command": {
+        "created_at": "2026-05-17T01:43:57Z",
+        "id": "command-129ca5a3-d532-4b20-a764-9e7dfa6e3b91",
+        "state": "failed",
+        "type": "deregister_session"
+      },
+      "expected_failure": true,
+      "linked_decision": null,
+      "nearest_prior_decision": null,
+      "ok": true,
+      "warnings": []
+    },
+    {
+      "allowed_decisions": [
+        "nudge"
+      ],
+      "command": {
+        "created_at": "2026-05-17T01:43:57Z",
+        "id": "command-c04366d5-775d-4fcb-b863-127ed70cbd39",
+        "state": "failed",
+        "type": "request_worker_compact"
+      },
+      "expected_failure": true,
+      "linked_decision": null,
+      "nearest_prior_decision": null,
+      "ok": true,
+      "warnings": []
+    },
+    {
+      "allowed_decisions": [
+        "stop"
+      ],
+      "command": {
+        "created_at": "2026-05-17T01:45:20Z",
+        "id": "command-dc75bb7b-f2f2-4340-aad5-4e457c23601e",
+        "state": "succeeded",
+        "type": "stop_task"
+      },
+      "expected_failure": false,
+      "linked_decision": {
+        "created_at": "2026-05-17T01:45:14Z",
+        "decision": "stop",
+        "id": 1,
+        "manager_cycle_id": null,
+        "manager_id": null,
+        "reason": "Scenario 8 rerun passed: denied guardrail attempts failed closed and are durably audited as expected failures; stop disposable pair for cleanup.",
+        "task_id": "task-05ad19c1-1d78-456e-b095-66306be0949b"
+      },
+      "nearest_prior_decision": {
+        "created_at": "2026-05-17T01:45:14Z",
+        "decision": "stop",
+        "id": 1,
+        "manager_cycle_id": null,
+        "manager_id": null,
+        "payload": {
+          "expected_failures_audited": true,
+          "mutation_audit_ok": true,
+          "qa_result": "scenario_8_rerun_passed"
+        },
+        "reason": "Scenario 8 rerun passed: denied guardrail attempts failed closed and are durably audited as expected failures; stop disposable pair for cleanup.",
+        "task_id": "task-05ad19c1-1d78-456e-b095-66306be0949b"
+      },
+      "ok": true,
+      "warnings": []
+    }
+  ],
+  "summary": {
+    "mutations": 4,
+    "with_warnings": 0
+  },
+  "task": {
+    "created_at": "2026-05-17T01:43:30Z",
+    "goal": "Gate 4 Scenario 8 rerun: verify denied guardrail commands fail closed and are durably recorded in commands, mutation-audit, and replay.",
+    "id": "task-05ad19c1-1d78-456e-b095-66306be0949b",
+    "name": "qa-g4-s8-rerun",
+    "state": "done",
+    "summary": "Disposable isolated Scenario 8 guardrail rerun after failed-command audit fix.",
+    "updated_at": "2026-05-17T01:45:20Z"
+  }
+}

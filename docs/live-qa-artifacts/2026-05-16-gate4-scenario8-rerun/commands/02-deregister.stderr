@@ -1,0 +1,1 @@
+workerctl: cannot deregister session 'qa-g4-s8-rerun-worker': it is still bound to task 'task-05ad19c1-1d78-456e-b095-66306be0949b' (binding 'binding-328ead7b-a27d-4621-a1b4-5c91fdb14a77'). Unbind the task first.
