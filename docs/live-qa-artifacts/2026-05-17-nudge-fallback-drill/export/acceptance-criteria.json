@@ -1,0 +1,59 @@
+[
+  {
+    "created_at": "2026-05-17T17:07:53Z",
+    "criterion": "Worker creates only .codex-workers/qa-nudge-fallback-worker/manager-nudge-proof.txt and reports git status output.",
+    "evidence": {
+      "capture_lines": "worker reported proof path and blank git status output",
+      "file_check": "exists",
+      "git_status_short": "",
+      "proof_content": "Manager nudge request summary: create the proof artifact now, then report the path and git status output.",
+      "proof_path": ".codex-workers/qa-nudge-fallback-worker/manager-nudge-proof.txt"
+    },
+    "id": 37,
+    "proof": "Capture and direct file check show only .codex-workers/qa-nudge-fallback-worker/manager-nudge-proof.txt was created; worker reported the path and empty git status output.",
+    "rationale": null,
+    "source": "user_requested",
+    "status": "satisfied",
+    "task_id": "task-36f5887e-b639-4db8-9f0a-e5153a6c98b1",
+    "updated_at": "2026-05-17T17:09:19Z"
+  },
+  {
+    "created_at": "2026-05-17T17:07:53Z",
+    "criterion": "Manager uses scripts/workerctl session-nudge qa-nudge-fallback-worker to request the proof artifact, rather than choosing legacy nudge first.",
+    "evidence": {
+      "command": "scripts/workerctl session-nudge qa-nudge-fallback-worker \"Please create the proof artifact now, then report the path and git status output.\"",
+      "status": "sent",
+      "target": "codex-qa-nudge-fallback-worker",
+      "time": "2026-05-17T17:08:21Z"
+    },
+    "id": 38,
+    "proof": "Manager sent the requested message with scripts/workerctl session-nudge qa-nudge-fallback-worker; no legacy nudge was used first.",
+    "rationale": null,
+    "source": "user_requested",
+    "status": "satisfied",
+    "task_id": "task-36f5887e-b639-4db8-9f0a-e5153a6c98b1",
+    "updated_at": "2026-05-17T17:09:19Z"
+  },
+  {
+    "created_at": "2026-05-17T17:07:53Z",
+    "criterion": "Manager verifies capture, replay, commands, or status evidence before finishing the drill.",
+    "evidence": {
+      "commands": [
+        "scripts/workerctl cycle qa-nudge-fallback-drill",
+        "scripts/workerctl capture qa-nudge-fallback-worker --lines 260",
+        "test -f .codex-workers/qa-nudge-fallback-worker/manager-nudge-proof.txt && sed -n '1,80p' .codex-workers/qa-nudge-fallback-worker/manager-nudge-proof.txt",
+        "git status --short"
+      ],
+      "cycle_id": 42,
+      "git_status_short": "",
+      "proof_verified": true
+    },
+    "id": 39,
+    "proof": "Manager verified evidence using cycle output, capture, direct file existence/content check, and git status before finishing.",
+    "rationale": null,
+    "source": "user_requested",
+    "status": "satisfied",
+    "task_id": "task-36f5887e-b639-4db8-9f0a-e5153a6c98b1",
+    "updated_at": "2026-05-17T17:09:19Z"
+  }
+]

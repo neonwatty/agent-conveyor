@@ -622,3 +622,63 @@ Result:
 
 - The Scenario 10 command-discoverability friction is resolved by both behavior
   and prompt guidance.
+
+## 2026-05-17: Nudge Fallback Dogfood Drill
+
+Follow-up from:
+
+- `2026-05-17: Scenario 10 Nudge Friction Follow-Up`
+
+Task:
+
+- `qa-nudge-fallback-drill`
+- Worker session: `qa-nudge-fallback-worker`
+- Manager session: `qa-nudge-fallback-manager`
+- Export:
+  `docs/live-qa-artifacts/2026-05-17-nudge-fallback-drill/export/`
+
+Validated:
+
+- A disposable manager/worker pair was created after the nudge fallback fix
+  landed on `main`.
+- Manager config and three accepted criteria were seeded before the manager
+  acted.
+- The manager inspected cycle output and accepted criteria, then used
+  `scripts/workerctl session-nudge qa-nudge-fallback-worker "Please create the
+  proof artifact now, then report the path and git status output."`
+- The worker waited for the manager nudge before creating
+  `.codex-workers/qa-nudge-fallback-worker/manager-nudge-proof.txt`.
+- The worker reported the proof path and an empty `git status --short` output.
+- The manager verified evidence using cycle output, worker capture, direct file
+  existence/content checks, and `git status --short`.
+- Criteria `37`, `38`, and `39` were satisfied with structured evidence.
+- `finish-task --require-criteria-audit --stop-manager --stop-worker`
+  completed with zero open accepted criteria and stopped both disposable
+  sessions.
+
+Verification:
+
+- `scripts/workerctl replay qa-nudge-fallback-drill`
+- `scripts/workerctl mutation-audit qa-nudge-fallback-drill --json`
+- `scripts/workerctl commands --task qa-nudge-fallback-drill --json`
+- `scripts/workerctl audit qa-nudge-fallback-drill --json`
+- `scripts/workerctl export-task qa-nudge-fallback-drill --output
+  docs/live-qa-artifacts/2026-05-17-nudge-fallback-drill/export --zip`
+- `scripts/workerctl sessions --state active`
+- `scripts/workerctl reconcile --stale-cycles-seconds 1`
+
+Observations:
+
+- The manager initially followed the bootstrap setup-question path because it
+  started before the seeded config existed. A PM nudge was enough to make it
+  proceed with the already-seeded config, but this is still friction for
+  preconfigured manager pairs.
+- Post-finish `transcript-capture` fails because the task has no active worker
+  or manager. Future live drills that need transcript segments should capture
+  them before `finish-task --stop-manager --stop-worker`.
+
+Result:
+
+- The merged session-nudge guidance worked in a live disposable pair: the
+  manager chose `session-nudge` first, gathered evidence, satisfied criteria,
+  and closed the task without leaving active sessions.

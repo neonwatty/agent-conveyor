@@ -1,0 +1,20 @@
+{
+  "created_at": "2026-05-17T17:10:27Z",
+  "files": [
+    "task-status.json",
+    "audit.json",
+    "acceptance-criteria.json",
+    "prompts.json",
+    "transcript-captures.json",
+    "terminal-captures.json",
+    "agent-observations.json",
+    "manager-cycles.json",
+    "manager-decisions.json",
+    "mutation-audit.json",
+    "replay.json"
+  ],
+  "task": {
+    "id": "task-36f5887e-b639-4db8-9f0a-e5153a6c98b1",
+    "name": "qa-nudge-fallback-drill"
+  }
+}

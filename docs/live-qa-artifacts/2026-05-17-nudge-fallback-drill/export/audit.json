@@ -1,0 +1,890 @@
+{
+  "acceptance_criteria": [
+    {
+      "created_at": "2026-05-17T17:07:53Z",
+      "criterion": "Worker creates only .codex-workers/qa-nudge-fallback-worker/manager-nudge-proof.txt and reports git status output.",
+      "evidence": {
+        "capture_lines": "worker reported proof path and blank git status output",
+        "file_check": "exists",
+        "git_status_short": "",
+        "proof_content": "Manager nudge request summary: create the proof artifact now, then report the path and git status output.",
+        "proof_path": ".codex-workers/qa-nudge-fallback-worker/manager-nudge-proof.txt"
+      },
+      "id": 37,
+      "proof": "Capture and direct file check show only .codex-workers/qa-nudge-fallback-worker/manager-nudge-proof.txt was created; worker reported the path and empty git status output.",
+      "rationale": null,
+      "source": "user_requested",
+      "status": "satisfied",
+      "task_id": "task-36f5887e-b639-4db8-9f0a-e5153a6c98b1",
+      "updated_at": "2026-05-17T17:09:19Z"
+    },
+    {
+      "created_at": "2026-05-17T17:07:53Z",
+      "criterion": "Manager uses scripts/workerctl session-nudge qa-nudge-fallback-worker to request the proof artifact, rather than choosing legacy nudge first.",
+      "evidence": {
+        "command": "scripts/workerctl session-nudge qa-nudge-fallback-worker \"Please create the proof artifact now, then report the path and git status output.\"",
+        "status": "sent",
+        "target": "codex-qa-nudge-fallback-worker",
+        "time": "2026-05-17T17:08:21Z"
+      },
+      "id": 38,
+      "proof": "Manager sent the requested message with scripts/workerctl session-nudge qa-nudge-fallback-worker; no legacy nudge was used first.",
+      "rationale": null,
+      "source": "user_requested",
+      "status": "satisfied",
+      "task_id": "task-36f5887e-b639-4db8-9f0a-e5153a6c98b1",
+      "updated_at": "2026-05-17T17:09:19Z"
+    },
+    {
+      "created_at": "2026-05-17T17:07:53Z",
+      "criterion": "Manager verifies capture, replay, commands, or status evidence before finishing the drill.",
+      "evidence": {
+        "commands": [
+          "scripts/workerctl cycle qa-nudge-fallback-drill",
+          "scripts/workerctl capture qa-nudge-fallback-worker --lines 260",
+          "test -f .codex-workers/qa-nudge-fallback-worker/manager-nudge-proof.txt && sed -n '1,80p' .codex-workers/qa-nudge-fallback-worker/manager-nudge-proof.txt",
+          "git status --short"
+        ],
+        "cycle_id": 42,
+        "git_status_short": "",
+        "proof_verified": true
+      },
+      "id": 39,
+      "proof": "Manager verified evidence using cycle output, capture, direct file existence/content check, and git status before finishing.",
+      "rationale": null,
+      "source": "user_requested",
+      "status": "satisfied",
+      "task_id": "task-36f5887e-b639-4db8-9f0a-e5153a6c98b1",
+      "updated_at": "2026-05-17T17:09:19Z"
+    }
+  ],
+  "agent_observations": [
+    {
+      "command_id": "command-4a1fe935-a833-43e2-aac9-d66988deca41",
+      "created_at": "2026-05-17T17:09:25Z",
+      "id": 13,
+      "manager_id": null,
+      "message": "Nudge fallback dogfood drill completed with verified session-nudge evidence.",
+      "observation_type": "decision",
+      "payload": {
+        "decision": "stop",
+        "decision_id": 23,
+        "source": "finish_task"
+      },
+      "role": "manager",
+      "severity": "info",
+      "source_capture_id": null,
+      "task_id": "task-36f5887e-b639-4db8-9f0a-e5153a6c98b1",
+      "worker_id": null
+    }
+  ],
+  "commands": [
+    {
+      "created_at": "2026-05-17T17:09:25Z",
+      "error": null,
+      "id": "command-4a1fe935-a833-43e2-aac9-d66988deca41",
+      "idempotency_key": "command-4a1fe935-a833-43e2-aac9-d66988deca41",
+      "manager_id": null,
+      "payload": {
+        "final_audit": {
+          "open_criteria": [],
+          "require_criteria_audit": true,
+          "summary": {
+            "accepted": 0,
+            "deferred": 0,
+            "proposed": 0,
+            "rejected": 0,
+            "satisfied": 3
+          },
+          "total": 3
+        },
+        "finish": true,
+        "manager_decision": {
+          "allowed_decisions": [
+            "stop"
+          ],
+          "decision": null,
+          "decision_id": null,
+          "ok": false,
+          "warnings": [
+            "missing_decision_id"
+          ]
+        },
+        "manager_session": "qa-nudge-fallback-manager",
+        "message": null,
+        "reason": "Nudge fallback dogfood drill completed with verified session-nudge evidence.",
+        "stop_manager": true,
+        "stop_worker": true,
+        "task": "qa-nudge-fallback-drill",
+        "worker": "qa-nudge-fallback-worker",
+        "worker_session": "qa-nudge-fallback-worker"
+      },
+      "result": {
+        "command_id": "command-4a1fe935-a833-43e2-aac9-d66988deca41",
+        "final_audit": {
+          "open_criteria": [],
+          "require_criteria_audit": true,
+          "summary": {
+            "accepted": 0,
+            "deferred": 0,
+            "proposed": 0,
+            "rejected": 0,
+            "satisfied": 3
+          },
+          "total": 3
+        },
+        "final_decision_id": 23,
+        "final_observation_id": 13,
+        "finish": true,
+        "killed_manager": true,
+        "killed_worker": true,
+        "manager_decision": {
+          "allowed_decisions": [
+            "stop"
+          ],
+          "decision": null,
+          "decision_id": null,
+          "ok": false,
+          "warnings": [
+            "missing_decision_id"
+          ]
+        },
+        "manager_identity": {
+          "db_pane_id": null,
+          "db_session": "codex-qa-nudge-fallback-manager",
+          "live": true,
+          "live_pane_id": "%2",
+          "mismatches": [],
+          "role": "manager",
+          "session": "qa-nudge-fallback-manager"
+        },
+        "manager_session": "qa-nudge-fallback-manager",
+        "reason": "Nudge fallback dogfood drill completed with verified session-nudge evidence.",
+        "stop_manager": true,
+        "stop_worker": true,
+        "task": "qa-nudge-fallback-drill",
+        "worker": "qa-nudge-fallback-worker",
+        "worker_identity": {
+          "db_pane_id": null,
+          "db_session": "codex-qa-nudge-fallback-worker",
+          "live": true,
+          "live_pane_id": "%1",
+          "mismatches": [],
+          "role": "worker",
+          "session": "qa-nudge-fallback-worker"
+        },
+        "worker_session": "qa-nudge-fallback-worker"
+      },
+      "state": "succeeded",
+      "task_id": "task-36f5887e-b639-4db8-9f0a-e5153a6c98b1",
+      "type": "finish_task",
+      "updated_at": "2026-05-17T17:09:25Z",
+      "worker_id": null
+    }
+  ],
+  "events": [
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-17T17:07:26Z",
+      "id": 226,
+      "manager_id": null,
+      "payload": {
+        "goal": "Disposable dogfood drill proving manager nudges session-bound workers with session-nudge after the legacy fallback fix.",
+        "name": "qa-nudge-fallback-drill",
+        "summary": "Low-risk QA drill: worker only writes ignored artifacts under .codex-workers; manager must inspect evidence and nudge through session commands."
+      },
+      "task_id": "task-36f5887e-b639-4db8-9f0a-e5153a6c98b1",
+      "type": "task_created",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-17T17:07:30Z",
+      "id": 229,
+      "manager_id": null,
+      "payload": {
+        "binding_id": "binding-359fc8ef-fc52-4ec5-b6b5-a474a36a74aa",
+        "manager": "qa-nudge-fallback-manager",
+        "task": "qa-nudge-fallback-drill",
+        "worker": "qa-nudge-fallback-worker"
+      },
+      "task_id": "task-36f5887e-b639-4db8-9f0a-e5153a6c98b1",
+      "type": "binding_created",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-17T17:07:43Z",
+      "id": 230,
+      "manager_id": null,
+      "payload": {
+        "acceptance_count": 3,
+        "guideline_count": 3,
+        "reference_count": 0,
+        "supervision_mode": "guided"
+      },
+      "task_id": "task-36f5887e-b639-4db8-9f0a-e5153a6c98b1",
+      "type": "manager_config_recorded",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-17T17:07:53Z",
+      "id": 231,
+      "manager_id": null,
+      "payload": {
+        "created": true,
+        "criterion": "Worker creates only .codex-workers/qa-nudge-fallback-worker/manager-nudge-proof.txt and reports git status output.",
+        "criterion_id": 37,
+        "evidence": {},
+        "proof": null,
+        "rationale": null,
+        "source": "user_requested",
+        "status": "accepted",
+        "task_id": "task-36f5887e-b639-4db8-9f0a-e5153a6c98b1"
+      },
+      "task_id": "task-36f5887e-b639-4db8-9f0a-e5153a6c98b1",
+      "type": "acceptance_criterion_added",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-17T17:07:53Z",
+      "id": 232,
+      "manager_id": null,
+      "payload": {
+        "created": true,
+        "criterion": "Manager uses scripts/workerctl session-nudge qa-nudge-fallback-worker to request the proof artifact, rather than choosing legacy nudge first.",
+        "criterion_id": 38,
+        "evidence": {},
+        "proof": null,
+        "rationale": null,
+        "source": "user_requested",
+        "status": "accepted",
+        "task_id": "task-36f5887e-b639-4db8-9f0a-e5153a6c98b1"
+      },
+      "task_id": "task-36f5887e-b639-4db8-9f0a-e5153a6c98b1",
+      "type": "acceptance_criterion_added",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-17T17:07:53Z",
+      "id": 233,
+      "manager_id": null,
+      "payload": {
+        "created": true,
+        "criterion": "Manager verifies capture, replay, commands, or status evidence before finishing the drill.",
+        "criterion_id": 39,
+        "evidence": {},
+        "proof": null,
+        "rationale": null,
+        "source": "user_requested",
+        "status": "accepted",
+        "task_id": "task-36f5887e-b639-4db8-9f0a-e5153a6c98b1"
+      },
+      "task_id": "task-36f5887e-b639-4db8-9f0a-e5153a6c98b1",
+      "type": "acceptance_criterion_added",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-17T17:09:07Z",
+      "id": 236,
+      "manager_id": null,
+      "payload": {
+        "decision": "inspect",
+        "decision_id": 22,
+        "manager_cycle_id": 42,
+        "reason": "Verified worker receipt after session-nudge: proof artifact exists at required ignored path and git status output is clean."
+      },
+      "task_id": "task-36f5887e-b639-4db8-9f0a-e5153a6c98b1",
+      "type": "manager_decision_recorded",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-17T17:09:19Z",
+      "id": 237,
+      "manager_id": null,
+      "payload": {
+        "criterion": "Worker creates only .codex-workers/qa-nudge-fallback-worker/manager-nudge-proof.txt and reports git status output.",
+        "criterion_id": 37,
+        "evidence": {
+          "capture_lines": "worker reported proof path and blank git status output",
+          "file_check": "exists",
+          "git_status_short": "",
+          "proof_content": "Manager nudge request summary: create the proof artifact now, then report the path and git status output.",
+          "proof_path": ".codex-workers/qa-nudge-fallback-worker/manager-nudge-proof.txt"
+        },
+        "previous_evidence": {},
+        "previous_proof": null,
+        "previous_rationale": null,
+        "previous_status": "accepted",
+        "proof": "Capture and direct file check show only .codex-workers/qa-nudge-fallback-worker/manager-nudge-proof.txt was created; worker reported the path and empty git status output.",
+        "rationale": null,
+        "source": "user_requested",
+        "status": "satisfied",
+        "task_id": "task-36f5887e-b639-4db8-9f0a-e5153a6c98b1"
+      },
+      "task_id": "task-36f5887e-b639-4db8-9f0a-e5153a6c98b1",
+      "type": "acceptance_criterion_updated",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-17T17:09:19Z",
+      "id": 238,
+      "manager_id": null,
+      "payload": {
+        "criterion": "Manager uses scripts/workerctl session-nudge qa-nudge-fallback-worker to request the proof artifact, rather than choosing legacy nudge first.",
+        "criterion_id": 38,
+        "evidence": {
+          "command": "scripts/workerctl session-nudge qa-nudge-fallback-worker \"Please create the proof artifact now, then report the path and git status output.\"",
+          "status": "sent",
+          "target": "codex-qa-nudge-fallback-worker",
+          "time": "2026-05-17T17:08:21Z"
+        },
+        "previous_evidence": {},
+        "previous_proof": null,
+        "previous_rationale": null,
+        "previous_status": "accepted",
+        "proof": "Manager sent the requested message with scripts/workerctl session-nudge qa-nudge-fallback-worker; no legacy nudge was used first.",
+        "rationale": null,
+        "source": "user_requested",
+        "status": "satisfied",
+        "task_id": "task-36f5887e-b639-4db8-9f0a-e5153a6c98b1"
+      },
+      "task_id": "task-36f5887e-b639-4db8-9f0a-e5153a6c98b1",
+      "type": "acceptance_criterion_updated",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-17T17:09:19Z",
+      "id": 239,
+      "manager_id": null,
+      "payload": {
+        "criterion": "Manager verifies capture, replay, commands, or status evidence before finishing the drill.",
+        "criterion_id": 39,
+        "evidence": {
+          "commands": [
+            "scripts/workerctl cycle qa-nudge-fallback-drill",
+            "scripts/workerctl capture qa-nudge-fallback-worker --lines 260",
+            "test -f .codex-workers/qa-nudge-fallback-worker/manager-nudge-proof.txt && sed -n '1,80p' .codex-workers/qa-nudge-fallback-worker/manager-nudge-proof.txt",
+            "git status --short"
+          ],
+          "cycle_id": 42,
+          "git_status_short": "",
+          "proof_verified": true
+        },
+        "previous_evidence": {},
+        "previous_proof": null,
+        "previous_rationale": null,
+        "previous_status": "accepted",
+        "proof": "Manager verified evidence using cycle output, capture, direct file existence/content check, and git status before finishing.",
+        "rationale": null,
+        "source": "user_requested",
+        "status": "satisfied",
+        "task_id": "task-36f5887e-b639-4db8-9f0a-e5153a6c98b1"
+      },
+      "task_id": "task-36f5887e-b639-4db8-9f0a-e5153a6c98b1",
+      "type": "acceptance_criterion_updated",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": "command-4a1fe935-a833-43e2-aac9-d66988deca41",
+      "correlation_id": null,
+      "created_at": "2026-05-17T17:09:25Z",
+      "id": 240,
+      "manager_id": null,
+      "payload": {
+        "final_audit": {
+          "open_criteria": [],
+          "require_criteria_audit": true,
+          "summary": {
+            "accepted": 0,
+            "deferred": 0,
+            "proposed": 0,
+            "rejected": 0,
+            "satisfied": 3
+          },
+          "total": 3
+        },
+        "final_decision_id": 23,
+        "final_observation_id": 13,
+        "finish": true,
+        "manager_decision": {
+          "allowed_decisions": [
+            "stop"
+          ],
+          "decision": null,
+          "decision_id": null,
+          "ok": false,
+          "warnings": [
+            "missing_decision_id"
+          ]
+        },
+        "message": null,
+        "reason": "Nudge fallback dogfood drill completed with verified session-nudge evidence.",
+        "stop_manager": true,
+        "stop_worker": true
+      },
+      "task_id": "task-36f5887e-b639-4db8-9f0a-e5153a6c98b1",
+      "type": "finish_task_intent",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": "command-4a1fe935-a833-43e2-aac9-d66988deca41",
+      "correlation_id": null,
+      "created_at": "2026-05-17T17:09:25Z",
+      "id": 241,
+      "manager_id": null,
+      "payload": {
+        "open_criteria": [],
+        "require_criteria_audit": true,
+        "summary": {
+          "accepted": 0,
+          "deferred": 0,
+          "proposed": 0,
+          "rejected": 0,
+          "satisfied": 3
+        },
+        "total": 3
+      },
+      "task_id": "task-36f5887e-b639-4db8-9f0a-e5153a6c98b1",
+      "type": "finish_task_criteria_audit",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": "command-4a1fe935-a833-43e2-aac9-d66988deca41",
+      "correlation_id": null,
+      "created_at": "2026-05-17T17:09:25Z",
+      "id": 242,
+      "manager_id": null,
+      "payload": {
+        "db_pane_id": null,
+        "db_session": "codex-qa-nudge-fallback-manager",
+        "live": true,
+        "live_pane_id": "%2",
+        "mismatches": [],
+        "role": "manager",
+        "session": "qa-nudge-fallback-manager"
+      },
+      "task_id": "task-36f5887e-b639-4db8-9f0a-e5153a6c98b1",
+      "type": "manager_identity_verified",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": "command-4a1fe935-a833-43e2-aac9-d66988deca41",
+      "correlation_id": null,
+      "created_at": "2026-05-17T17:09:25Z",
+      "id": 243,
+      "manager_id": null,
+      "payload": {
+        "db_pane_id": null,
+        "db_session": "codex-qa-nudge-fallback-worker",
+        "live": true,
+        "live_pane_id": "%1",
+        "mismatches": [],
+        "role": "worker",
+        "session": "qa-nudge-fallback-worker"
+      },
+      "task_id": "task-36f5887e-b639-4db8-9f0a-e5153a6c98b1",
+      "type": "worker_identity_verified",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": "command-4a1fe935-a833-43e2-aac9-d66988deca41",
+      "correlation_id": null,
+      "created_at": "2026-05-17T17:09:25Z",
+      "id": 244,
+      "manager_id": null,
+      "payload": {
+        "command_id": "command-4a1fe935-a833-43e2-aac9-d66988deca41",
+        "final_audit": {
+          "open_criteria": [],
+          "require_criteria_audit": true,
+          "summary": {
+            "accepted": 0,
+            "deferred": 0,
+            "proposed": 0,
+            "rejected": 0,
+            "satisfied": 3
+          },
+          "total": 3
+        },
+        "final_decision_id": 23,
+        "final_observation_id": 13,
+        "finish": true,
+        "killed_manager": true,
+        "killed_worker": true,
+        "manager_decision": {
+          "allowed_decisions": [
+            "stop"
+          ],
+          "decision": null,
+          "decision_id": null,
+          "ok": false,
+          "warnings": [
+            "missing_decision_id"
+          ]
+        },
+        "manager_identity": {
+          "db_pane_id": null,
+          "db_session": "codex-qa-nudge-fallback-manager",
+          "live": true,
+          "live_pane_id": "%2",
+          "mismatches": [],
+          "role": "manager",
+          "session": "qa-nudge-fallback-manager"
+        },
+        "manager_session": "qa-nudge-fallback-manager",
+        "reason": "Nudge fallback dogfood drill completed with verified session-nudge evidence.",
+        "stop_manager": true,
+        "stop_worker": true,
+        "task": "qa-nudge-fallback-drill",
+        "worker": "qa-nudge-fallback-worker",
+        "worker_identity": {
+          "db_pane_id": null,
+          "db_session": "codex-qa-nudge-fallback-worker",
+          "live": true,
+          "live_pane_id": "%1",
+          "mismatches": [],
+          "role": "worker",
+          "session": "qa-nudge-fallback-worker"
+        },
+        "worker_session": "qa-nudge-fallback-worker"
+      },
+      "task_id": "task-36f5887e-b639-4db8-9f0a-e5153a6c98b1",
+      "type": "finish_task_succeeded",
+      "worker_id": null
+    }
+  ],
+  "manager_cycles": [
+    {
+      "completed_at": "2026-05-17T17:08:16Z",
+      "decision": null,
+      "error": null,
+      "health": null,
+      "health_observation_id": null,
+      "id": 41,
+      "manager_capture_id": null,
+      "manager_id": null,
+      "started_at": "2026-05-17T17:08:16Z",
+      "state": "succeeded",
+      "status": {
+        "binding_id": "binding-359fc8ef-fc52-4ec5-b6b5-a474a36a74aa",
+        "ingest": {
+          "new_events": 13,
+          "new_offset": 58070,
+          "skipped_lines": 0
+        },
+        "kind": "session_cycle",
+        "last_event_subtype": "task_complete",
+        "last_state_event_at": "2026-05-17T17:07:37.160Z",
+        "manager_alive": true,
+        "manager_context": {
+          "acceptance_criteria": {
+            "deferred": [],
+            "open": [
+              {
+                "created_at": "2026-05-17T17:07:53Z",
+                "criterion": "Worker creates only .codex-workers/qa-nudge-fallback-worker/manager-nudge-proof.txt and reports git status output.",
+                "evidence": {},
+                "id": 37,
+                "proof": null,
+                "rationale": null,
+                "source": "user_requested",
+                "status": "accepted",
+                "task_id": "task-36f5887e-b639-4db8-9f0a-e5153a6c98b1",
+                "updated_at": "2026-05-17T17:07:53Z"
+              },
+              {
+                "created_at": "2026-05-17T17:07:53Z",
+                "criterion": "Manager uses scripts/workerctl session-nudge qa-nudge-fallback-worker to request the proof artifact, rather than choosing legacy nudge first.",
+                "evidence": {},
+                "id": 38,
+                "proof": null,
+                "rationale": null,
+                "source": "user_requested",
+                "status": "accepted",
+                "task_id": "task-36f5887e-b639-4db8-9f0a-e5153a6c98b1",
+                "updated_at": "2026-05-17T17:07:53Z"
+              },
+              {
+                "created_at": "2026-05-17T17:07:53Z",
+                "criterion": "Manager verifies capture, replay, commands, or status evidence before finishing the drill.",
+                "evidence": {},
+                "id": 39,
+                "proof": null,
+                "rationale": null,
+                "source": "user_requested",
+                "status": "accepted",
+                "task_id": "task-36f5887e-b639-4db8-9f0a-e5153a6c98b1",
+                "updated_at": "2026-05-17T17:07:53Z"
+              }
+            ],
+            "proposed": [],
+            "rejected": [],
+            "satisfied": [],
+            "summary": {
+              "accepted": 3,
+              "deferred": 0,
+              "proposed": 0,
+              "rejected": 0,
+              "satisfied": 0
+            }
+          },
+          "criteria_negotiation": {
+            "needed": false,
+            "prompt": null,
+            "reason": "active_criteria_present",
+            "suggested_actions": []
+          },
+          "manager_config": {
+            "acceptance_criteria": [
+              "Manager uses session-nudge to request the worker proof artifact.",
+              "Worker creates only .codex-workers/qa-nudge-fallback-worker/manager-nudge-proof.txt and reports git status.",
+              "Manager verifies evidence via capture, status or replay before finishing."
+            ],
+            "created_at": "2026-05-17T17:07:43Z",
+            "guidelines": [
+              "Use scripts/workerctl cycle qa-nudge-fallback-drill before acting.",
+              "Use scripts/workerctl session-nudge qa-nudge-fallback-worker for worker communication; do not choose legacy nudge first.",
+              "Do not edit tracked files; this is a QA supervision drill."
+            ],
+            "objective": "Supervise a low-risk nudge fallback dogfood drill. Verify the worker waits for manager instruction, nudge with session-nudge, inspect evidence, and finish only with a clean receipt.",
+            "permissions": {
+              "create_pr": false,
+              "merge_green_pr": false,
+              "worker_compact_clear": false
+            },
+            "reference_paths": [],
+            "supervision_mode": "guided",
+            "task_id": "task-36f5887e-b639-4db8-9f0a-e5153a6c98b1",
+            "updated_at": "2026-05-17T17:07:43Z"
+          },
+          "worker_handoff": null
+        },
+        "manager_session": "qa-nudge-fallback-manager",
+        "notable_pane_pattern": null,
+        "pane_signal": {
+          "captured": true,
+          "classifier": null,
+          "degraded": false,
+          "notable_pattern": null,
+          "reason": null,
+          "status_age_seconds": 38
+        },
+        "staleness_seconds": 38.84,
+        "state": "idle",
+        "task": "qa-nudge-fallback-drill",
+        "task_completed": true,
+        "worker_alive": true,
+        "worker_session": "qa-nudge-fallback-worker"
+      },
+      "task_id": "task-36f5887e-b639-4db8-9f0a-e5153a6c98b1",
+      "worker_capture_id": null
+    },
+    {
+      "completed_at": "2026-05-17T17:08:43Z",
+      "decision": null,
+      "error": null,
+      "health": null,
+      "health_observation_id": null,
+      "id": 42,
+      "manager_capture_id": null,
+      "manager_id": null,
+      "started_at": "2026-05-17T17:08:43Z",
+      "state": "succeeded",
+      "status": {
+        "binding_id": "binding-359fc8ef-fc52-4ec5-b6b5-a474a36a74aa",
+        "ingest": {
+          "new_events": 24,
+          "new_offset": 69981,
+          "skipped_lines": 0
+        },
+        "kind": "session_cycle",
+        "last_event_subtype": "task_complete",
+        "last_state_event_at": "2026-05-17T17:08:37.854Z",
+        "manager_alive": true,
+        "manager_context": {
+          "acceptance_criteria": {
+            "deferred": [],
+            "open": [
+              {
+                "created_at": "2026-05-17T17:07:53Z",
+                "criterion": "Worker creates only .codex-workers/qa-nudge-fallback-worker/manager-nudge-proof.txt and reports git status output.",
+                "evidence": {},
+                "id": 37,
+                "proof": null,
+                "rationale": null,
+                "source": "user_requested",
+                "status": "accepted",
+                "task_id": "task-36f5887e-b639-4db8-9f0a-e5153a6c98b1",
+                "updated_at": "2026-05-17T17:07:53Z"
+              },
+              {
+                "created_at": "2026-05-17T17:07:53Z",
+                "criterion": "Manager uses scripts/workerctl session-nudge qa-nudge-fallback-worker to request the proof artifact, rather than choosing legacy nudge first.",
+                "evidence": {},
+                "id": 38,
+                "proof": null,
+                "rationale": null,
+                "source": "user_requested",
+                "status": "accepted",
+                "task_id": "task-36f5887e-b639-4db8-9f0a-e5153a6c98b1",
+                "updated_at": "2026-05-17T17:07:53Z"
+              },
+              {
+                "created_at": "2026-05-17T17:07:53Z",
+                "criterion": "Manager verifies capture, replay, commands, or status evidence before finishing the drill.",
+                "evidence": {},
+                "id": 39,
+                "proof": null,
+                "rationale": null,
+                "source": "user_requested",
+                "status": "accepted",
+                "task_id": "task-36f5887e-b639-4db8-9f0a-e5153a6c98b1",
+                "updated_at": "2026-05-17T17:07:53Z"
+              }
+            ],
+            "proposed": [],
+            "rejected": [],
+            "satisfied": [],
+            "summary": {
+              "accepted": 3,
+              "deferred": 0,
+              "proposed": 0,
+              "rejected": 0,
+              "satisfied": 0
+            }
+          },
+          "criteria_negotiation": {
+            "needed": false,
+            "prompt": null,
+            "reason": "active_criteria_present",
+            "suggested_actions": []
+          },
+          "manager_config": {
+            "acceptance_criteria": [
+              "Manager uses session-nudge to request the worker proof artifact.",
+              "Worker creates only .codex-workers/qa-nudge-fallback-worker/manager-nudge-proof.txt and reports git status.",
+              "Manager verifies evidence via capture, status or replay before finishing."
+            ],
+            "created_at": "2026-05-17T17:07:43Z",
+            "guidelines": [
+              "Use scripts/workerctl cycle qa-nudge-fallback-drill before acting.",
+              "Use scripts/workerctl session-nudge qa-nudge-fallback-worker for worker communication; do not choose legacy nudge first.",
+              "Do not edit tracked files; this is a QA supervision drill."
+            ],
+            "objective": "Supervise a low-risk nudge fallback dogfood drill. Verify the worker waits for manager instruction, nudge with session-nudge, inspect evidence, and finish only with a clean receipt.",
+            "permissions": {
+              "create_pr": false,
+              "merge_green_pr": false,
+              "worker_compact_clear": false
+            },
+            "reference_paths": [],
+            "supervision_mode": "guided",
+            "task_id": "task-36f5887e-b639-4db8-9f0a-e5153a6c98b1",
+            "updated_at": "2026-05-17T17:07:43Z"
+          },
+          "worker_handoff": null
+        },
+        "manager_session": "qa-nudge-fallback-manager",
+        "notable_pane_pattern": null,
+        "pane_signal": {
+          "captured": true,
+          "classifier": null,
+          "degraded": false,
+          "notable_pattern": null,
+          "reason": null,
+          "status_age_seconds": 5
+        },
+        "staleness_seconds": 5.146,
+        "state": "idle",
+        "task": "qa-nudge-fallback-drill",
+        "task_completed": true,
+        "worker_alive": true,
+        "worker_session": "qa-nudge-fallback-worker"
+      },
+      "task_id": "task-36f5887e-b639-4db8-9f0a-e5153a6c98b1",
+      "worker_capture_id": null
+    }
+  ],
+  "manager_decisions": [
+    {
+      "created_at": "2026-05-17T17:09:07Z",
+      "decision": "inspect",
+      "id": 22,
+      "manager_cycle_id": 42,
+      "manager_id": null,
+      "payload": {
+        "evidence_commands": [
+          "scripts/workerctl capture qa-nudge-fallback-worker --lines 260",
+          "test -f .codex-workers/qa-nudge-fallback-worker/manager-nudge-proof.txt && sed -n '1,80p' .codex-workers/qa-nudge-fallback-worker/manager-nudge-proof.txt",
+          "git status --short"
+        ],
+        "git_status_short": "",
+        "proof_path": ".codex-workers/qa-nudge-fallback-worker/manager-nudge-proof.txt",
+        "session_nudge": {
+          "command": "scripts/workerctl session-nudge qa-nudge-fallback-worker \"Please create the proof artifact now, then report the path and git status output.\"",
+          "status": "sent",
+          "time": "2026-05-17T17:08:21Z"
+        }
+      },
+      "reason": "Verified worker receipt after session-nudge: proof artifact exists at required ignored path and git status output is clean.",
+      "task_id": "task-36f5887e-b639-4db8-9f0a-e5153a6c98b1"
+    },
+    {
+      "created_at": "2026-05-17T17:09:25Z",
+      "decision": "stop",
+      "id": 23,
+      "manager_cycle_id": null,
+      "manager_id": null,
+      "payload": {
+        "command_id": "command-4a1fe935-a833-43e2-aac9-d66988deca41",
+        "source": "finish_task"
+      },
+      "reason": "Nudge fallback dogfood drill completed with verified session-nudge evidence.",
+      "task_id": "task-36f5887e-b639-4db8-9f0a-e5153a6c98b1"
+    }
+  ],
+  "task": {
+    "created_at": "2026-05-17T17:07:26Z",
+    "goal": "Disposable dogfood drill proving manager nudges session-bound workers with session-nudge after the legacy fallback fix.",
+    "id": "task-36f5887e-b639-4db8-9f0a-e5153a6c98b1",
+    "name": "qa-nudge-fallback-drill",
+    "state": "done",
+    "summary": "Low-risk QA drill: worker only writes ignored artifacts under .codex-workers; manager must inspect evidence and nudge through session commands.",
+    "updated_at": "2026-05-17T17:09:25Z"
+  },
+  "terminal_captures": [],
+  "transcript_segments": []
+}
