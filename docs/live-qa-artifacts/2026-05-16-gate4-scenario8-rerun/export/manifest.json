@@ -1,0 +1,20 @@
+{
+  "created_at": "2026-05-17T01:45:31Z",
+  "files": [
+    "task-status.json",
+    "audit.json",
+    "acceptance-criteria.json",
+    "prompts.json",
+    "transcript-captures.json",
+    "terminal-captures.json",
+    "agent-observations.json",
+    "manager-cycles.json",
+    "manager-decisions.json",
+    "mutation-audit.json",
+    "replay.json"
+  ],
+  "task": {
+    "id": "task-05ad19c1-1d78-456e-b095-66306be0949b",
+    "name": "qa-g4-s8-rerun"
+  }
+}

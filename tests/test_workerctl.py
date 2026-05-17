@@ -1940,6 +1940,66 @@ Deferred follow-up criteria:
             self.assertEqual(payload["summary"]["mutations"], 1)
             self.assertEqual(payload["records"][0]["linked_decision"]["id"], decision_id)
 
+    def test_mutation_audit_accepts_expected_failed_guardrail_commands(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
+                finish_command = worker_db.create_command(
+                    conn,
+                    command_type="finish_task",
+                    task_id=task_id,
+                    payload={"expected_failure": True, "failure_stage": "final_criteria_audit"},
+                    timestamp="2026-05-11T10:00:00Z",
+                )
+                worker_db.finish_command(
+                    conn,
+                    command_id=finish_command,
+                    state="failed",
+                    result={"expected_failure": True, "failure_stage": "final_criteria_audit"},
+                    error="accepted acceptance criteria still open",
+                    timestamp="2026-05-11T10:00:01Z",
+                )
+                compact_command = worker_db.create_command(
+                    conn,
+                    command_type="request_worker_compact",
+                    task_id=task_id,
+                    payload={
+                        "manager_decision": {
+                            "decision": None,
+                            "ok": False,
+                            "warnings": ["missing_decision_id"],
+                        }
+                    },
+                    timestamp="2026-05-11T10:00:02Z",
+                )
+                worker_db.finish_command(
+                    conn,
+                    command_id=compact_command,
+                    state="failed",
+                    result={
+                        "expected_failure": True,
+                        "manager_decision": {
+                            "decision": None,
+                            "ok": False,
+                            "warnings": ["missing_decision_id"],
+                        },
+                    },
+                    error="strict manager decision validation failed",
+                    timestamp="2026-05-11T10:00:03Z",
+                )
+                conn.commit()
+
+            proc = self.run_workerctl("mutation-audit", "task-a", "--json", "--path", str(db_path))
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            payload = json.loads(proc.stdout)
+            self.assertTrue(payload["ok"])
+            self.assertEqual(payload["summary"]["mutations"], 2)
+            self.assertEqual(payload["summary"]["with_warnings"], 0)
+            self.assertTrue(all(record["expected_failure"] for record in payload["records"]))
+
     def test_replay_outputs_chronological_text(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "workerctl.db"

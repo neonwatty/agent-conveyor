@@ -1,0 +1,65 @@
+{
+  "ok": false,
+  "records": [
+    {
+      "allowed_decisions": [
+        "stop"
+      ],
+      "command": {
+        "created_at": "2026-05-17T01:43:56Z",
+        "id": "command-17c6c154-25eb-4b06-814a-27d05e02b0b3",
+        "state": "failed",
+        "type": "finish_task"
+      },
+      "linked_decision": null,
+      "nearest_prior_decision": null,
+      "ok": false,
+      "warnings": [
+        "missing_decision_metadata"
+      ]
+    },
+    {
+      "allowed_decisions": [],
+      "command": {
+        "created_at": "2026-05-17T01:43:57Z",
+        "id": "command-129ca5a3-d532-4b20-a764-9e7dfa6e3b91",
+        "state": "failed",
+        "type": "deregister_session"
+      },
+      "linked_decision": null,
+      "nearest_prior_decision": null,
+      "ok": true,
+      "warnings": []
+    },
+    {
+      "allowed_decisions": [
+        "nudge"
+      ],
+      "command": {
+        "created_at": "2026-05-17T01:43:57Z",
+        "id": "command-c04366d5-775d-4fcb-b863-127ed70cbd39",
+        "state": "failed",
+        "type": "request_worker_compact"
+      },
+      "linked_decision": null,
+      "nearest_prior_decision": null,
+      "ok": false,
+      "warnings": [
+        "missing_decision_id"
+      ]
+    }
+  ],
+  "summary": {
+    "mutations": 3,
+    "with_warnings": 2
+  },
+  "task": {
+    "created_at": "2026-05-17T01:43:30Z",
+    "goal": "Gate 4 Scenario 8 rerun: verify denied guardrail commands fail closed and are durably recorded in commands, mutation-audit, and replay.",
+    "id": "task-05ad19c1-1d78-456e-b095-66306be0949b",
+    "name": "qa-g4-s8-rerun",
+    "state": "candidate",
+    "summary": "Disposable isolated Scenario 8 guardrail rerun after failed-command audit fix.",
+    "updated_at": "2026-05-17T01:43:30Z"
+  }
+}

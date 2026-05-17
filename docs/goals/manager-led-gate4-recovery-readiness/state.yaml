@@ -8,7 +8,7 @@ goal:
   slug: "manager-led-gate4-recovery-readiness"
   kind: existing_plan
   tranche: "Validate and run Gate 4 recovery readiness: scenarios 5, 7, and 8."
-  status: blocked
+  status: completed
   intake:
     original_request: "Merge PR #59 and set up Gate 4 with GoalBuddy."
     interpreted_outcome: "A fresh GoalBuddy board exists for Gate 4 recovery readiness after Gate 3 is merged."
@@ -408,20 +408,20 @@ tasks:
       - "Default-state cleanup result."
       - "Next Worker objective if a helper fix is needed."
     receipt:
-      decision: "gate_4_blocked"
+      decision: "gate_4_passed_after_scenario_8_rerun"
       full_outcome_complete: true
       scenario_results:
         scenario_5: "pass_with_caveat"
         scenario_7: "passed"
-        scenario_8: "blocked"
+        scenario_8: "passed_after_fix"
       evidence_mapping:
         scenario_5: "Worker blocker and manager decision id 12 are present; mutation-audit linked stop_task to the manager decision with no warnings."
         scenario_7: "Isolated killed-worker drill reported degraded/dead state, reconcile detected and cleaned stale state, and default state remained clean."
-        scenario_8: "Guardrails failed closed with useful errors, but denied attempts were not recorded in commands, mutation-audit, or replay."
+        scenario_8: "Initial guardrail drill blocked because denied attempts were not recorded. Follow-up fix PR #61 added durable expected-failure audit records, and rerun evidence in docs/live-qa-artifacts/2026-05-16-gate4-scenario8-rerun shows all three denied attempts in commands, mutation-audit, and replay."
         cleanup: "Final isolated/default reconciles and tmux checks were clean."
-        fake_success: "No fake success was found for denied guardrail attempts; the issue is missing durable expected-failure audit records."
-      blocker: "Gate 4 blocked on Scenario 8: failed guardrail attempts need durable audit/replay records as expected failures."
-      helper_fix_objective: "Add durable command/audit records for guardrail-denied attempts before raising CLI errors, with explicit expected_failure/failed state and no success implication; cover finish-task criteria-audit denial, bound-session deregister denial, and strict-decision compact denial."
+        fake_success: "Denied guardrail attempts now record failed expected_failure commands; no fake success appears in audit or replay."
+      blocker: null
+      helper_fix_objective: "Completed in PR #61: durable command/audit records for guardrail-denied attempts before raising CLI errors, with explicit expected_failure/failed state and no success implication."
 
   - id: T008
     type: worker
@@ -440,8 +440,15 @@ tasks:
     expected_output:
       - "Changed files and verification commands, or a blocked receipt explaining why no safe fix was possible."
     receipt:
-      result: "not_executed"
-      reason: "T007 selected a helper-fix objective, but this tranche completion proof is Gate 4 blocked with exact evidence. The fix belongs in the next goal/PR slice."
+      result: "executed_in_followup"
+      reason: "Implemented in PR #61 after the initial Gate 4 blocked outcome."
+      changed_files:
+        - "workerctl/audit.py"
+        - "workerctl/commands.py"
+        - "workerctl/lifecycle.py"
+        - "tests/test_workerctl.py"
+      verification:
+        - "python3 -m unittest tests/test_workerctl.py"
 
   - id: T009
     type: pm
@@ -463,13 +470,14 @@ tasks:
       - "Branch/status/check state if PR is created."
       - "Next recommended dogfood gate or blocker."
     receipt:
-      result: "packaged_blocked_outcome"
-      pr_decision: "needed_next"
+      result: "packaged_passed_outcome_after_rerun"
+      pr_decision: "created"
       changed_artifacts:
         - "docs/goals/manager-led-gate4-recovery-readiness/state.yaml"
         - "docs/live-qa-log.md"
         - "docs/live-qa-artifacts/2026-05-16-gate4-recovery-readiness/"
-      next_recommended_goal: "Implement Scenario 8 durable expected-failure audit records for guardrail-denied commands, then rerun Gate 4 Scenario 8."
+        - "docs/live-qa-artifacts/2026-05-16-gate4-scenario8-rerun/"
+      next_recommended_goal: "Start the next reliability ladder gate after merging the Scenario 8 rerun evidence."
 
   - id: T010
     type: judge
@@ -494,10 +502,10 @@ tasks:
     receipt:
       decision: "complete"
       full_outcome_complete: true
-      gate_4_result: "blocked"
-      exact_blocker: "Scenario 8 denied guardrail attempts fail closed but are not durably recorded in commands/mutation-audit/replay as attempted expected failures."
+      gate_4_result: "passed_after_scenario_8_rerun"
+      exact_blocker: null
       cleanup: "No active qa-g4 sessions remained; isolated and default reconcile postflights were clean."
-      next_recommended_tranche: "Small helper fix for durable failed-command audit records, followed by Scenario 8 rerun."
+      next_recommended_tranche: "Next reliability ladder gate."
 
 checks:
   dirty_fingerprint: unknown

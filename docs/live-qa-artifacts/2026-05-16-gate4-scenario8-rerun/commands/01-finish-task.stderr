@@ -1,0 +1,1 @@
+workerctl: Task qa-g4-s8-rerun has accepted acceptance criteria still open; satisfy, defer, or reject them before finishing: #1: Synthetic accepted criterion intentionally left open so finish-task --require-criteria-audit must fail closed and be audited.

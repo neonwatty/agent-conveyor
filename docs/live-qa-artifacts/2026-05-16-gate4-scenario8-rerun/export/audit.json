@@ -1,0 +1,635 @@
+{
+  "acceptance_criteria": [
+    {
+      "created_at": "2026-05-17T01:43:40Z",
+      "criterion": "Synthetic accepted criterion intentionally left open so finish-task --require-criteria-audit must fail closed and be audited.",
+      "evidence": {},
+      "id": 1,
+      "proof": null,
+      "rationale": null,
+      "source": "user_requested",
+      "status": "accepted",
+      "task_id": "task-05ad19c1-1d78-456e-b095-66306be0949b",
+      "updated_at": "2026-05-17T01:43:40Z"
+    }
+  ],
+  "agent_observations": [],
+  "commands": [
+    {
+      "created_at": "2026-05-17T01:43:56Z",
+      "error": "Task qa-g4-s8-rerun has accepted acceptance criteria still open; satisfy, defer, or reject them before finishing: #1: Synthetic accepted criterion intentionally left open so finish-task --require-criteria-audit must fail closed and be audited.",
+      "id": "command-17c6c154-25eb-4b06-814a-27d05e02b0b3",
+      "idempotency_key": "command-17c6c154-25eb-4b06-814a-27d05e02b0b3",
+      "manager_id": null,
+      "payload": {
+        "expected_failure": true,
+        "failure_stage": "final_criteria_audit",
+        "final_audit": {
+          "open_criteria": [
+            {
+              "criterion": "Synthetic accepted criterion intentionally left open so finish-task --require-criteria-audit must fail closed and be audited.",
+              "id": 1
+            }
+          ],
+          "require_criteria_audit": true,
+          "summary": {
+            "accepted": 1,
+            "deferred": 0,
+            "proposed": 0,
+            "rejected": 0,
+            "satisfied": 0
+          },
+          "total": 1
+        },
+        "finish": true,
+        "message": null,
+        "reason": "Task finished by operator.",
+        "stop_manager": false,
+        "stop_worker": false,
+        "task": "qa-g4-s8-rerun"
+      },
+      "result": {
+        "command_id": "command-17c6c154-25eb-4b06-814a-27d05e02b0b3",
+        "expected_failure": true,
+        "failure_stage": "final_criteria_audit",
+        "final_audit": {
+          "open_criteria": [
+            {
+              "criterion": "Synthetic accepted criterion intentionally left open so finish-task --require-criteria-audit must fail closed and be audited.",
+              "id": 1
+            }
+          ],
+          "require_criteria_audit": true,
+          "summary": {
+            "accepted": 1,
+            "deferred": 0,
+            "proposed": 0,
+            "rejected": 0,
+            "satisfied": 0
+          },
+          "total": 1
+        },
+        "finish": true,
+        "task": "qa-g4-s8-rerun"
+      },
+      "state": "failed",
+      "task_id": "task-05ad19c1-1d78-456e-b095-66306be0949b",
+      "type": "finish_task",
+      "updated_at": "2026-05-17T01:43:56Z",
+      "worker_id": null
+    },
+    {
+      "created_at": "2026-05-17T01:43:57Z",
+      "error": "cannot deregister session 'qa-g4-s8-rerun-worker': it is still bound to task 'task-05ad19c1-1d78-456e-b095-66306be0949b' (binding 'binding-328ead7b-a27d-4621-a1b4-5c91fdb14a77'). Unbind the task first.",
+      "id": "command-129ca5a3-d532-4b20-a764-9e7dfa6e3b91",
+      "idempotency_key": "command-129ca5a3-d532-4b20-a764-9e7dfa6e3b91",
+      "manager_id": null,
+      "payload": {
+        "active_binding": {
+          "id": "binding-328ead7b-a27d-4621-a1b4-5c91fdb14a77",
+          "task_id": "task-05ad19c1-1d78-456e-b095-66306be0949b"
+        },
+        "expected_failure": true,
+        "name": "qa-g4-s8-rerun-worker",
+        "role": "worker"
+      },
+      "result": {
+        "active_binding": {
+          "id": "binding-328ead7b-a27d-4621-a1b4-5c91fdb14a77",
+          "task_id": "task-05ad19c1-1d78-456e-b095-66306be0949b"
+        },
+        "command_id": "command-129ca5a3-d532-4b20-a764-9e7dfa6e3b91",
+        "expected_failure": true,
+        "name": "qa-g4-s8-rerun-worker"
+      },
+      "state": "failed",
+      "task_id": "task-05ad19c1-1d78-456e-b095-66306be0949b",
+      "type": "deregister_session",
+      "updated_at": "2026-05-17T01:43:57Z",
+      "worker_id": null
+    },
+    {
+      "created_at": "2026-05-17T01:43:57Z",
+      "error": "strict manager decision validation failed: {\"command_type\": \"request_worker_compact\", \"error\": \"manager_decision_validation_failed\", \"manager_decision\": {\"allowed_decisions\": [\"nudge\"], \"decision\": null, \"decision_id\": null, \"ok\": false, \"warnings\": [\"missing_decision_id\"]}}",
+      "id": "command-c04366d5-775d-4fcb-b863-127ed70cbd39",
+      "idempotency_key": "command-c04366d5-775d-4fcb-b863-127ed70cbd39",
+      "manager_id": null,
+      "payload": {
+        "manager_decision": {
+          "allowed_decisions": [
+            "nudge"
+          ],
+          "decision": null,
+          "decision_id": null,
+          "ok": false,
+          "warnings": [
+            "missing_decision_id"
+          ]
+        },
+        "message": "Manager request: prepare for context compaction/clear after a saved handoff exists.",
+        "permission_check": {
+          "action": "worker_compact_clear",
+          "allowed": false,
+          "handoff_id": null,
+          "reasons": [
+            "missing_manager_config",
+            "missing_worker_handoff"
+          ]
+        },
+        "send_text": "/compact",
+        "slash_command": "/compact",
+        "task": "qa-g4-s8-rerun",
+        "worker_session": "qa-g4-s8-rerun-worker"
+      },
+      "result": {
+        "command_id": "command-c04366d5-775d-4fcb-b863-127ed70cbd39",
+        "expected_failure": true,
+        "failure_stage": "preflight",
+        "manager_decision": {
+          "allowed_decisions": [
+            "nudge"
+          ],
+          "decision": null,
+          "decision_id": null,
+          "ok": false,
+          "warnings": [
+            "missing_decision_id"
+          ]
+        },
+        "permission_check": {
+          "action": "worker_compact_clear",
+          "allowed": false,
+          "handoff_id": null,
+          "reasons": [
+            "missing_manager_config",
+            "missing_worker_handoff"
+          ]
+        },
+        "task": "qa-g4-s8-rerun",
+        "worker_session": "qa-g4-s8-rerun-worker"
+      },
+      "state": "failed",
+      "task_id": "task-05ad19c1-1d78-456e-b095-66306be0949b",
+      "type": "request_worker_compact",
+      "updated_at": "2026-05-17T01:43:57Z",
+      "worker_id": null
+    },
+    {
+      "created_at": "2026-05-17T01:45:20Z",
+      "error": null,
+      "id": "command-dc75bb7b-f2f2-4340-aad5-4e457c23601e",
+      "idempotency_key": "command-dc75bb7b-f2f2-4340-aad5-4e457c23601e",
+      "manager_id": null,
+      "payload": {
+        "finish": false,
+        "manager_decision": {
+          "age_seconds": 6,
+          "allowed_decisions": [
+            "stop"
+          ],
+          "decision": {
+            "created_at": "2026-05-17T01:45:14Z",
+            "decision": "stop",
+            "id": 1,
+            "manager_cycle_id": null,
+            "manager_id": null,
+            "reason": "Scenario 8 rerun passed: denied guardrail attempts failed closed and are durably audited as expected failures; stop disposable pair for cleanup.",
+            "task_id": "task-05ad19c1-1d78-456e-b095-66306be0949b"
+          },
+          "decision_id": 1,
+          "max_age_seconds": 900,
+          "ok": true,
+          "warnings": []
+        },
+        "manager_session": "qa-g4-s8-rerun-manager",
+        "message": null,
+        "reason": "Cleanup isolated Scenario 8 rerun after pass.",
+        "stop_manager": true,
+        "stop_worker": true,
+        "task": "qa-g4-s8-rerun",
+        "worker": "qa-g4-s8-rerun-worker",
+        "worker_session": "qa-g4-s8-rerun-worker"
+      },
+      "result": {
+        "command_id": "command-dc75bb7b-f2f2-4340-aad5-4e457c23601e",
+        "final_decision_id": null,
+        "final_observation_id": null,
+        "finish": false,
+        "killed_manager": true,
+        "killed_worker": true,
+        "manager_decision": {
+          "age_seconds": 6,
+          "allowed_decisions": [
+            "stop"
+          ],
+          "decision": {
+            "created_at": "2026-05-17T01:45:14Z",
+            "decision": "stop",
+            "id": 1,
+            "manager_cycle_id": null,
+            "manager_id": null,
+            "reason": "Scenario 8 rerun passed: denied guardrail attempts failed closed and are durably audited as expected failures; stop disposable pair for cleanup.",
+            "task_id": "task-05ad19c1-1d78-456e-b095-66306be0949b"
+          },
+          "decision_id": 1,
+          "max_age_seconds": 900,
+          "ok": true,
+          "warnings": []
+        },
+        "manager_identity": {
+          "db_pane_id": null,
+          "db_session": "codex-qa-g4-s8-rerun-manager",
+          "live": true,
+          "live_pane_id": "%1",
+          "mismatches": [],
+          "role": "manager",
+          "session": "qa-g4-s8-rerun-manager"
+        },
+        "manager_session": "qa-g4-s8-rerun-manager",
+        "reason": "Cleanup isolated Scenario 8 rerun after pass.",
+        "stop_manager": true,
+        "stop_worker": true,
+        "task": "qa-g4-s8-rerun",
+        "worker": "qa-g4-s8-rerun-worker",
+        "worker_identity": {
+          "db_pane_id": null,
+          "db_session": "codex-qa-g4-s8-rerun-worker",
+          "live": true,
+          "live_pane_id": "%0",
+          "mismatches": [],
+          "role": "worker",
+          "session": "qa-g4-s8-rerun-worker"
+        },
+        "worker_session": "qa-g4-s8-rerun-worker"
+      },
+      "state": "succeeded",
+      "task_id": "task-05ad19c1-1d78-456e-b095-66306be0949b",
+      "type": "stop_task",
+      "updated_at": "2026-05-17T01:45:20Z",
+      "worker_id": null
+    }
+  ],
+  "events": [
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-17T01:43:30Z",
+      "id": 1,
+      "manager_id": null,
+      "payload": {
+        "goal": "Gate 4 Scenario 8 rerun: verify denied guardrail commands fail closed and are durably recorded in commands, mutation-audit, and replay.",
+        "name": "qa-g4-s8-rerun",
+        "summary": "Disposable isolated Scenario 8 guardrail rerun after failed-command audit fix."
+      },
+      "task_id": "task-05ad19c1-1d78-456e-b095-66306be0949b",
+      "type": "task_created",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-17T01:43:34Z",
+      "id": 4,
+      "manager_id": null,
+      "payload": {
+        "binding_id": "binding-328ead7b-a27d-4621-a1b4-5c91fdb14a77",
+        "manager": "qa-g4-s8-rerun-manager",
+        "task": "qa-g4-s8-rerun",
+        "worker": "qa-g4-s8-rerun-worker"
+      },
+      "task_id": "task-05ad19c1-1d78-456e-b095-66306be0949b",
+      "type": "binding_created",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-17T01:43:40Z",
+      "id": 5,
+      "manager_id": null,
+      "payload": {
+        "created": true,
+        "criterion": "Synthetic accepted criterion intentionally left open so finish-task --require-criteria-audit must fail closed and be audited.",
+        "criterion_id": 1,
+        "evidence": {},
+        "proof": null,
+        "rationale": null,
+        "source": "user_requested",
+        "status": "accepted",
+        "task_id": "task-05ad19c1-1d78-456e-b095-66306be0949b"
+      },
+      "task_id": "task-05ad19c1-1d78-456e-b095-66306be0949b",
+      "type": "acceptance_criterion_added",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": "command-17c6c154-25eb-4b06-814a-27d05e02b0b3",
+      "correlation_id": null,
+      "created_at": "2026-05-17T01:43:56Z",
+      "id": 6,
+      "manager_id": null,
+      "payload": {
+        "command_id": "command-17c6c154-25eb-4b06-814a-27d05e02b0b3",
+        "error": "Task qa-g4-s8-rerun has accepted acceptance criteria still open; satisfy, defer, or reject them before finishing: #1: Synthetic accepted criterion intentionally left open so finish-task --require-criteria-audit must fail closed and be audited.",
+        "error_type": "WorkerError",
+        "expected_failure": true,
+        "failure_stage": "final_criteria_audit",
+        "final_audit": {
+          "open_criteria": [
+            {
+              "criterion": "Synthetic accepted criterion intentionally left open so finish-task --require-criteria-audit must fail closed and be audited.",
+              "id": 1
+            }
+          ],
+          "require_criteria_audit": true,
+          "summary": {
+            "accepted": 1,
+            "deferred": 0,
+            "proposed": 0,
+            "rejected": 0,
+            "satisfied": 0
+          },
+          "total": 1
+        },
+        "finish": true,
+        "task": "qa-g4-s8-rerun"
+      },
+      "task_id": "task-05ad19c1-1d78-456e-b095-66306be0949b",
+      "type": "finish_task_failed",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": "command-129ca5a3-d532-4b20-a764-9e7dfa6e3b91",
+      "correlation_id": null,
+      "created_at": "2026-05-17T01:43:57Z",
+      "id": 7,
+      "manager_id": null,
+      "payload": {
+        "active_binding": {
+          "id": "binding-328ead7b-a27d-4621-a1b4-5c91fdb14a77",
+          "task_id": "task-05ad19c1-1d78-456e-b095-66306be0949b"
+        },
+        "error": "cannot deregister session 'qa-g4-s8-rerun-worker': it is still bound to task 'task-05ad19c1-1d78-456e-b095-66306be0949b' (binding 'binding-328ead7b-a27d-4621-a1b4-5c91fdb14a77'). Unbind the task first.",
+        "error_type": "WorkerError",
+        "expected_failure": true,
+        "name": "qa-g4-s8-rerun-worker"
+      },
+      "task_id": "task-05ad19c1-1d78-456e-b095-66306be0949b",
+      "type": "session_deregister_failed",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-17T01:43:57Z",
+      "id": 8,
+      "manager_id": null,
+      "payload": {
+        "action": "worker_compact_clear",
+        "allowed": false,
+        "handoff_id": null,
+        "reasons": [
+          "missing_manager_config",
+          "missing_worker_handoff"
+        ],
+        "source": "request_worker_compact"
+      },
+      "task_id": "task-05ad19c1-1d78-456e-b095-66306be0949b",
+      "type": "manager_permission_checked",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": "command-c04366d5-775d-4fcb-b863-127ed70cbd39",
+      "correlation_id": null,
+      "created_at": "2026-05-17T01:43:57Z",
+      "id": 9,
+      "manager_id": null,
+      "payload": {
+        "command_id": "command-c04366d5-775d-4fcb-b863-127ed70cbd39",
+        "error": "strict manager decision validation failed: {\"command_type\": \"request_worker_compact\", \"error\": \"manager_decision_validation_failed\", \"manager_decision\": {\"allowed_decisions\": [\"nudge\"], \"decision\": null, \"decision_id\": null, \"ok\": false, \"warnings\": [\"missing_decision_id\"]}}",
+        "error_type": "WorkerError",
+        "expected_failure": true,
+        "failure_stage": "preflight",
+        "manager_decision": {
+          "allowed_decisions": [
+            "nudge"
+          ],
+          "decision": null,
+          "decision_id": null,
+          "ok": false,
+          "warnings": [
+            "missing_decision_id"
+          ]
+        },
+        "permission_check": {
+          "action": "worker_compact_clear",
+          "allowed": false,
+          "handoff_id": null,
+          "reasons": [
+            "missing_manager_config",
+            "missing_worker_handoff"
+          ]
+        },
+        "task": "qa-g4-s8-rerun",
+        "worker_session": "qa-g4-s8-rerun-worker"
+      },
+      "task_id": "task-05ad19c1-1d78-456e-b095-66306be0949b",
+      "type": "worker_compact_request_failed",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-17T01:45:14Z",
+      "id": 10,
+      "manager_id": null,
+      "payload": {
+        "decision": "stop",
+        "decision_id": 1,
+        "manager_cycle_id": null,
+        "reason": "Scenario 8 rerun passed: denied guardrail attempts failed closed and are durably audited as expected failures; stop disposable pair for cleanup."
+      },
+      "task_id": "task-05ad19c1-1d78-456e-b095-66306be0949b",
+      "type": "manager_decision_recorded",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": "command-dc75bb7b-f2f2-4340-aad5-4e457c23601e",
+      "correlation_id": null,
+      "created_at": "2026-05-17T01:45:20Z",
+      "id": 11,
+      "manager_id": null,
+      "payload": {
+        "final_decision_id": null,
+        "final_observation_id": null,
+        "finish": false,
+        "manager_decision": {
+          "age_seconds": 6,
+          "allowed_decisions": [
+            "stop"
+          ],
+          "decision": {
+            "created_at": "2026-05-17T01:45:14Z",
+            "decision": "stop",
+            "id": 1,
+            "manager_cycle_id": null,
+            "manager_id": null,
+            "reason": "Scenario 8 rerun passed: denied guardrail attempts failed closed and are durably audited as expected failures; stop disposable pair for cleanup.",
+            "task_id": "task-05ad19c1-1d78-456e-b095-66306be0949b"
+          },
+          "decision_id": 1,
+          "max_age_seconds": 900,
+          "ok": true,
+          "warnings": []
+        },
+        "message": null,
+        "reason": "Cleanup isolated Scenario 8 rerun after pass.",
+        "stop_manager": true,
+        "stop_worker": true
+      },
+      "task_id": "task-05ad19c1-1d78-456e-b095-66306be0949b",
+      "type": "stop_task_intent",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": "command-dc75bb7b-f2f2-4340-aad5-4e457c23601e",
+      "correlation_id": null,
+      "created_at": "2026-05-17T01:45:20Z",
+      "id": 12,
+      "manager_id": null,
+      "payload": {
+        "db_pane_id": null,
+        "db_session": "codex-qa-g4-s8-rerun-manager",
+        "live": true,
+        "live_pane_id": "%1",
+        "mismatches": [],
+        "role": "manager",
+        "session": "qa-g4-s8-rerun-manager"
+      },
+      "task_id": "task-05ad19c1-1d78-456e-b095-66306be0949b",
+      "type": "manager_identity_verified",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": "command-dc75bb7b-f2f2-4340-aad5-4e457c23601e",
+      "correlation_id": null,
+      "created_at": "2026-05-17T01:45:20Z",
+      "id": 13,
+      "manager_id": null,
+      "payload": {
+        "db_pane_id": null,
+        "db_session": "codex-qa-g4-s8-rerun-worker",
+        "live": true,
+        "live_pane_id": "%0",
+        "mismatches": [],
+        "role": "worker",
+        "session": "qa-g4-s8-rerun-worker"
+      },
+      "task_id": "task-05ad19c1-1d78-456e-b095-66306be0949b",
+      "type": "worker_identity_verified",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": "command-dc75bb7b-f2f2-4340-aad5-4e457c23601e",
+      "correlation_id": null,
+      "created_at": "2026-05-17T01:45:20Z",
+      "id": 14,
+      "manager_id": null,
+      "payload": {
+        "command_id": "command-dc75bb7b-f2f2-4340-aad5-4e457c23601e",
+        "final_decision_id": null,
+        "final_observation_id": null,
+        "finish": false,
+        "killed_manager": true,
+        "killed_worker": true,
+        "manager_decision": {
+          "age_seconds": 6,
+          "allowed_decisions": [
+            "stop"
+          ],
+          "decision": {
+            "created_at": "2026-05-17T01:45:14Z",
+            "decision": "stop",
+            "id": 1,
+            "manager_cycle_id": null,
+            "manager_id": null,
+            "reason": "Scenario 8 rerun passed: denied guardrail attempts failed closed and are durably audited as expected failures; stop disposable pair for cleanup.",
+            "task_id": "task-05ad19c1-1d78-456e-b095-66306be0949b"
+          },
+          "decision_id": 1,
+          "max_age_seconds": 900,
+          "ok": true,
+          "warnings": []
+        },
+        "manager_identity": {
+          "db_pane_id": null,
+          "db_session": "codex-qa-g4-s8-rerun-manager",
+          "live": true,
+          "live_pane_id": "%1",
+          "mismatches": [],
+          "role": "manager",
+          "session": "qa-g4-s8-rerun-manager"
+        },
+        "manager_session": "qa-g4-s8-rerun-manager",
+        "reason": "Cleanup isolated Scenario 8 rerun after pass.",
+        "stop_manager": true,
+        "stop_worker": true,
+        "task": "qa-g4-s8-rerun",
+        "worker": "qa-g4-s8-rerun-worker",
+        "worker_identity": {
+          "db_pane_id": null,
+          "db_session": "codex-qa-g4-s8-rerun-worker",
+          "live": true,
+          "live_pane_id": "%0",
+          "mismatches": [],
+          "role": "worker",
+          "session": "qa-g4-s8-rerun-worker"
+        },
+        "worker_session": "qa-g4-s8-rerun-worker"
+      },
+      "task_id": "task-05ad19c1-1d78-456e-b095-66306be0949b",
+      "type": "stop_task_succeeded",
+      "worker_id": null
+    }
+  ],
+  "manager_cycles": [],
+  "manager_decisions": [
+    {
+      "created_at": "2026-05-17T01:45:14Z",
+      "decision": "stop",
+      "id": 1,
+      "manager_cycle_id": null,
+      "manager_id": null,
+      "payload": {
+        "expected_failures_audited": true,
+        "mutation_audit_ok": true,
+        "qa_result": "scenario_8_rerun_passed"
+      },
+      "reason": "Scenario 8 rerun passed: denied guardrail attempts failed closed and are durably audited as expected failures; stop disposable pair for cleanup.",
+      "task_id": "task-05ad19c1-1d78-456e-b095-66306be0949b"
+    }
+  ],
+  "task": {
+    "created_at": "2026-05-17T01:43:30Z",
+    "goal": "Gate 4 Scenario 8 rerun: verify denied guardrail commands fail closed and are durably recorded in commands, mutation-audit, and replay.",
+    "id": "task-05ad19c1-1d78-456e-b095-66306be0949b",
+    "name": "qa-g4-s8-rerun",
+    "state": "done",
+    "summary": "Disposable isolated Scenario 8 guardrail rerun after failed-command audit fix.",
+    "updated_at": "2026-05-17T01:45:20Z"
+  },
+  "terminal_captures": [],
+  "transcript_segments": []
+}

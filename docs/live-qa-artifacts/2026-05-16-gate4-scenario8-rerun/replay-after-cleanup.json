@@ -1,0 +1,100 @@
+{
+  "entries": [
+    {
+      "actor": "workerctl",
+      "details": {
+        "created": true,
+        "criterion": "Synthetic accepted criterion intentionally left open so finish-task --require-criteria-audit must fail closed and be audited.",
+        "criterion_id": 1,
+        "event_type": "acceptance_criterion_added",
+        "evidence": {},
+        "proof": null,
+        "rationale": null,
+        "source": "user_requested",
+        "status": "accepted",
+        "task_id": "task-05ad19c1-1d78-456e-b095-66306be0949b"
+      },
+      "kind": "acceptance_criterion",
+      "source": "events",
+      "source_id": 5,
+      "summary": "accepted criterion #1: Synthetic accepted criterion intentionally left open so finish-task --require-criteria-audit must fail closed and be audited.",
+      "timestamp": "2026-05-17T01:43:40Z"
+    },
+    {
+      "actor": "manager",
+      "details": {
+        "command_id": "command-17c6c154-25eb-4b06-814a-27d05e02b0b3",
+        "state": "failed",
+        "type": "finish_task"
+      },
+      "kind": "finish",
+      "source": "commands",
+      "source_id": "command-17c6c154-25eb-4b06-814a-27d05e02b0b3",
+      "summary": "finished task: Task finished by operator. (manager left open)",
+      "timestamp": "2026-05-17T01:43:56Z"
+    },
+    {
+      "actor": "workerctl",
+      "details": {
+        "command_id": "command-129ca5a3-d532-4b20-a764-9e7dfa6e3b91",
+        "state": "failed",
+        "type": "deregister_session"
+      },
+      "kind": "command",
+      "source": "commands",
+      "source_id": "command-129ca5a3-d532-4b20-a764-9e7dfa6e3b91",
+      "summary": "deregister_session failed",
+      "timestamp": "2026-05-17T01:43:57Z"
+    },
+    {
+      "actor": "workerctl",
+      "details": {
+        "command_id": "command-c04366d5-775d-4fcb-b863-127ed70cbd39",
+        "state": "failed",
+        "type": "request_worker_compact"
+      },
+      "kind": "command",
+      "source": "commands",
+      "source_id": "command-c04366d5-775d-4fcb-b863-127ed70cbd39",
+      "summary": "request_worker_compact failed",
+      "timestamp": "2026-05-17T01:43:57Z"
+    },
+    {
+      "actor": "manager",
+      "details": {
+        "decision": "stop",
+        "manager_cycle_id": null
+      },
+      "kind": "decision",
+      "source": "manager_decisions",
+      "source_id": 1,
+      "summary": "decision stop: Scenario 8 rerun passed: denied guardrail attempts failed closed and are durably audited as expected failures; stop disposable pair for cleanup.",
+      "timestamp": "2026-05-17T01:45:14Z"
+    },
+    {
+      "actor": "workerctl",
+      "details": {
+        "command_id": "command-dc75bb7b-f2f2-4340-aad5-4e457c23601e",
+        "state": "succeeded",
+        "type": "stop_task"
+      },
+      "kind": "command",
+      "source": "commands",
+      "source_id": "command-dc75bb7b-f2f2-4340-aad5-4e457c23601e",
+      "summary": "stop_task succeeded",
+      "timestamp": "2026-05-17T01:45:20Z"
+    }
+  ],
+  "entry_count": 6,
+  "mode": "timeline",
+  "role": "all",
+  "task": {
+    "created_at": "2026-05-17T01:43:30Z",
+    "goal": "Gate 4 Scenario 8 rerun: verify denied guardrail commands fail closed and are durably recorded in commands, mutation-audit, and replay.",
+    "id": "task-05ad19c1-1d78-456e-b095-66306be0949b",
+    "name": "qa-g4-s8-rerun",
+    "state": "done",
+    "summary": "Disposable isolated Scenario 8 guardrail rerun after failed-command audit fix.",
+    "updated_at": "2026-05-17T01:45:20Z"
+  }
+}
