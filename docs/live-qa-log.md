@@ -529,3 +529,68 @@ Result:
 - The prior compact/clear mutation-audit caveat is live-verified as closed:
   dry-run compact and clear requests now appear on the decision-to-consequence
   audit surface with explicit no-send effect metadata.
+
+## 2026-05-17: Scenario 10 Manager Quality Drill
+
+Scenario:
+
+- Ladder scenario: Scenario 10 manager-quality drill.
+- GoalBuddy goal: `docs/goals/manager-quality-drill/goal.md`
+- Task: `qa-manager-quality-drill`
+- Worker session: `qa-manager-quality-worker`
+- Manager session: `qa-manager-quality-manager`
+- Evidence root:
+  `docs/live-qa-artifacts/2026-05-17-manager-quality-drill/`
+
+Validated:
+
+- Worker made an imperfect "done" claim: no product files changed, product git
+  status looked clean, no tests were run, and richer nested Markdown fixture
+  coverage was named as a deferred follow-up.
+- Three accepted criteria were seeded for the manager-quality evaluation:
+  verify worker-supplied test evidence, inspect git status/replay/worker
+  capture before choosing a next action, and separate deferred follow-ups from
+  current blockers.
+- Manager inspected acceptance criteria, `git status --short`, cycle output,
+  worker capture, task replay, command history, mutation audit, and worker
+  status before choosing an action.
+- Manager did not blindly accept the worker's done claim and did not finish the
+  task.
+- Manager identified missing test evidence as the current-task blocker because
+  the worker explicitly said tests were not run and command history contained
+  no test command output.
+- Manager separated richer nested Markdown fixture coverage as a deferred
+  follow-up rather than a current blocker.
+- Manager recorded nudge decision `20` before taking the mutating action.
+- Manager initially tried legacy `scripts/workerctl nudge`, received `Unknown
+  worker`, recovered by discovering `session-nudge`, and successfully nudged
+  `qa-manager-quality-worker`.
+- Worker confirmed no tests were run and that this should block finish.
+- Criteria `34`, `35`, and `36` were satisfied with evidence tied to manager
+  decision `20`.
+- `finish-task --require-criteria-audit --stop-manager --stop-worker` completed
+  with zero open accepted criteria and stopped both disposable sessions.
+- Final `sessions --state active` returned `[]`, final `reconcile
+  --stale-cycles-seconds 1` was clean, and no `codex-qa-manager-quality` tmux
+  sessions remained.
+
+Verification:
+
+- `scripts/workerctl capture qa-manager-quality-manager --lines 340`
+- `scripts/workerctl capture qa-manager-quality-worker --lines 180`
+- `scripts/workerctl replay qa-manager-quality-drill`
+- `scripts/workerctl mutation-audit qa-manager-quality-drill --json`
+- `scripts/workerctl commands --task qa-manager-quality-drill --json`
+- `scripts/workerctl export-task qa-manager-quality-drill --output
+  docs/live-qa-artifacts/2026-05-17-manager-quality-drill/export --zip`
+- `scripts/workerctl sessions --state active`
+- `scripts/workerctl reconcile --stale-cycles-seconds 1`
+- `tmux list-sessions 2>/dev/null | rg '^codex-qa-manager-quality' || true`
+
+Result:
+
+- Scenario 10 passed for the core manager-quality behavior: the manager made an
+  evidence-backed nudge decision instead of finishing blindly.
+- Follow-up: the legacy `nudge` command path remains discoverability friction
+  for managers; manager prompts or CLI aliases should steer managers toward
+  `session-nudge` for session-name targets.

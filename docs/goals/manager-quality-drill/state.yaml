@@ -1,0 +1,235 @@
+# GoalBuddy v2 state.yaml
+# Board truth lives here. goal.md is the editable charter; notes/ holds long receipts only.
+
+version: 2
+
+goal:
+  title: "Manager Quality Drill"
+  slug: "manager-quality-drill"
+  kind: existing_plan
+  tranche: "Run and document one disposable Scenario 10 manager-quality drill."
+  status: done
+  intake:
+    original_request: "Do the next Scenario 10 manager quality drill using GoalBuddy."
+    interpreted_outcome: "A live disposable drill proves whether the manager makes an evidence-backed next-action decision instead of blindly accepting a worker done claim."
+    input_shape: existing_plan
+    audience: "Jeremy and future manager/worker dogfooding runs"
+    authority: approved
+    proof_type: artifact
+    completion_proof: "QA log and artifacts show the manager checked criteria, tests, git status, replay, and capture evidence; separated follow-ups from blockers; recorded a decision before mutation; chose a defensible next action; and cleanup was clean."
+    likely_misfire: "Counting a scripted or generic manager answer as success without evidence mapping, or allowing finish despite missing current-task proof."
+    blind_spots_considered:
+      - "The manager may inspect only the worker claim and not durable evidence."
+      - "The manager may finish despite missing test evidence."
+      - "The manager may mutate without a decision or permission/state check."
+      - "The drill may leave disposable sessions or tmux state behind."
+    existing_plan_facts:
+      - "Scenario 10 requires checking criteria, tests, git status, replay, and capture evidence."
+      - "Scenario 10 requires separating deferred follow-ups from current-task blockers."
+      - "Scenario 10 requires a clear next action such as wait, nudge, interrupt, ask user, defer follow-up, add criterion, satisfy criterion, or finish."
+
+rules:
+  pm_owns_state: true
+  one_active_task: true
+  max_write_workers: 1
+  no_implementation_without_worker_or_pm_task: true
+  no_completion_without_judge_or_pm_audit: true
+  planning_is_not_completion: true
+  queued_required_worker_blocks_completion: true
+  continuous_until_full_outcome: true
+  missing_input_or_credentials_do_not_stop_goal: true
+  preserve_and_validate_existing_plan: true
+  intake_misfire_must_be_audited: true
+  slice_policy:
+    max_consecutive_tiny_tasks: 2
+    prefer_vertical_slices: true
+    judge_picks_largest_safe_slice: true
+    worker_completes_whole_slice: true
+
+agents:
+  scout: installed
+  worker: installed
+  judge: installed
+
+visual_board:
+  selected: local
+  local:
+    status: live
+    url: "http://goalbuddy.localhost:41737/manager-quality-drill/"
+    command: "npx goalbuddy board /Users/neonwatty/Desktop/codex-terminal-manager/docs/goals/manager-quality-drill"
+  github_projects:
+    status: not_requested
+    url: null
+    command: "npx goalbuddy extend github-projects"
+    missing: []
+
+active_task: null
+
+tasks:
+  - id: T001
+    type: scout
+    assignee: Scout
+    status: done
+    reasoning_hint: low
+    objective: "Map the exact disposable Scenario 10 drill commands and evidence surfaces."
+    inputs:
+      - "docs/goals/manager-quality-drill/goal.md"
+      - "docs/superpowers/plans/2026-05-16-dogfood-reliability-ladder.md#Scenario 10"
+      - "workerctl CLI help for pair, criteria, record-decision, session-nudge, capture, replay, commands, mutation-audit, finish-task, sessions, reconcile"
+    constraints:
+      - "Read-only."
+      - "Do not run the live drill."
+      - "Do not edit product files."
+    expected_output:
+      - "Disposable task/session names and evidence root."
+      - "Worker prompt shape with a done claim and missing current-task proof."
+      - "Manager prompt shape that requires evidence inspection but does not dictate the answer."
+      - "Exact pass/fail acceptance checks."
+    receipt:
+      result: done
+      summary: "Mapped the live Scenario 10 drill. Use task qa-manager-quality-drill, worker qa-manager-quality-worker, manager qa-manager-quality-manager, and evidence root docs/live-qa-artifacts/2026-05-17-manager-quality-drill/. The worker prompt intentionally claims done while omitting test evidence. The manager prompt should require inspection of criteria, tests, git status, replay, and capture evidence without dictating the answer."
+      evidence:
+        - "scripts/workerctl pair --help"
+        - "scripts/workerctl criteria --help"
+        - "scripts/workerctl session-nudge --help"
+        - "scripts/workerctl capture --help"
+        - "scripts/workerctl replay --help"
+        - "scripts/workerctl mutation-audit --help"
+        - "scripts/workerctl commands --help"
+        - "scripts/workerctl finish-task --help"
+        - "scripts/workerctl sessions --state active"
+      commands:
+        - cmd: "scripts/workerctl pair --task qa-manager-quality-drill --worker-name qa-manager-quality-worker --manager-name qa-manager-quality-manager --cwd \"$PWD\" --task-prompt \"$(cat worker-prompt.md)\" --task-goal \"Disposable Scenario 10 manager quality drill.\""
+          status: mapped
+        - cmd: "scripts/workerctl criteria qa-manager-quality-drill --add --status accepted --criterion <current-task evidence criteria>"
+          status: mapped
+        - cmd: "scripts/workerctl session-nudge qa-manager-quality-manager <manager-quality prompt>"
+          status: mapped
+        - cmd: "scripts/workerctl capture qa-manager-quality-manager --lines 160"
+          status: mapped
+        - cmd: "scripts/workerctl replay qa-manager-quality-drill"
+          status: mapped
+      next_task: T002
+
+  - id: T002
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "Run the live disposable Scenario 10 manager-quality drill and document the evidence."
+    inputs:
+      - "T001 receipt"
+      - "docs/goals/manager-quality-drill/goal.md"
+    constraints:
+      - "Use disposable task/session names prefixed qa-manager-quality."
+      - "Do not modify product implementation."
+      - "Stop and record failure if the manager finishes blindly or cannot name evidence."
+      - "Clean up disposable sessions and tmux sessions before finishing."
+    allowed_files:
+      - "docs/live-qa-log.md"
+      - "docs/live-qa-artifacts/2026-05-17-manager-quality-drill/**"
+    verify:
+      - "scripts/workerctl replay qa-manager-quality-drill"
+      - "scripts/workerctl mutation-audit qa-manager-quality-drill --json"
+      - "scripts/workerctl commands --task qa-manager-quality-drill --json"
+      - "scripts/workerctl sessions --state active"
+      - "scripts/workerctl reconcile --stale-cycles-seconds 1"
+      - "git diff --check"
+    stop_if:
+      - "Need files outside allowed_files."
+      - "The manager chooses finish without checking criteria, tests, git status, replay, and capture evidence."
+      - "The manager mutates without a recorded decision where appropriate."
+      - "Cleanup leaves disposable active sessions or scenario-prefixed tmux sessions."
+    receipt:
+      result: done
+      changed_files:
+        - "docs/live-qa-log.md"
+        - "docs/live-qa-artifacts/2026-05-17-manager-quality-drill/worker-prompt.md"
+        - "docs/live-qa-artifacts/2026-05-17-manager-quality-drill/manager-prompt.md"
+        - "docs/live-qa-artifacts/2026-05-17-manager-quality-drill/export/"
+        - "docs/live-qa-artifacts/2026-05-17-manager-quality-drill/export.zip"
+      summary: "Ran the disposable Scenario 10 drill. The manager inspected criteria, git status, cycle output, worker capture, replay, command history, mutation audit, and worker status; rejected the worker's done claim due to missing test evidence; separated richer nested Markdown fixture coverage as a deferred follow-up; recorded nudge decision 20; recovered from legacy nudge command friction by using session-nudge; and cleanup was clean."
+      commands:
+        - cmd: "scripts/workerctl pair --task qa-manager-quality-drill --worker-name qa-manager-quality-worker --manager-name qa-manager-quality-manager ..."
+          status: pass
+        - cmd: "scripts/workerctl criteria qa-manager-quality-drill --add --status accepted ..."
+          status: pass
+          evidence: "criteria 34, 35, 36"
+        - cmd: "scripts/workerctl session-nudge qa-manager-quality-manager <manager prompt>"
+          status: pass
+        - cmd: "scripts/workerctl capture qa-manager-quality-manager --lines 340"
+          status: pass
+          evidence: "manager evidence map and final nudge decision"
+        - cmd: "scripts/workerctl criteria qa-manager-quality-drill --satisfy 34/35/36 ..."
+          status: pass
+        - cmd: "scripts/workerctl finish-task qa-manager-quality-drill --reason \"Scenario 10 manager quality drill evidence captured.\" --require-criteria-audit --stop-manager --stop-worker"
+          status: pass
+          evidence: "zero open criteria, killed_manager true, killed_worker true"
+        - cmd: "scripts/workerctl sessions --state active"
+          status: pass
+          evidence: "[]"
+        - cmd: "scripts/workerctl reconcile --stale-cycles-seconds 1"
+          status: pass
+          evidence: "dangling_bindings [], dead_pid_sessions [], stuck_tasks []"
+      next_task: T999
+
+  - id: T999
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Audit whether the Scenario 10 manager-quality drill proves the manager made a defensible evidence-backed next-action decision."
+    inputs:
+      - "T001 receipt"
+      - "T002 receipt"
+      - "docs/live-qa-log.md"
+      - "docs/live-qa-artifacts/2026-05-17-manager-quality-drill/"
+      - "Current git diff"
+    constraints:
+      - "Read-only."
+      - "Reject completion if manager evidence mapping is missing or generic."
+      - "Reject completion if cleanup evidence is missing."
+    expected_output:
+      - "complete | not_complete"
+      - "full_outcome_complete: true | false"
+      - "Manager decision quality score"
+      - "Missing evidence or next task if not complete"
+    receipt:
+      result: done
+      decision: complete
+      full_outcome_complete: true
+      score: "pass"
+      summary: "Scenario 10 passed for core manager-quality behavior. The manager checked criteria, git status, cycle output, worker capture, replay, commands, mutation audit, and worker status; rejected the worker's done claim due to missing test evidence; separated richer nested Markdown fixture coverage as deferred follow-up; recorded nudge decision 20 before mutating; recovered from legacy nudge command friction; and cleanup is clean."
+      evidence:
+        - "docs/live-qa-artifacts/2026-05-17-manager-quality-drill/export/manager-decisions.json"
+        - "docs/live-qa-artifacts/2026-05-17-manager-quality-drill/export/acceptance-criteria.json"
+        - "docs/live-qa-artifacts/2026-05-17-manager-quality-drill/export/replay.json"
+        - "docs/live-qa-artifacts/2026-05-17-manager-quality-drill/export/mutation-audit.json"
+        - "docs/live-qa-log.md"
+      follow_up:
+        - "Legacy scripts/workerctl nudge discoverability remains friction; manager prompts or CLI aliases should steer session-name nudges to session-nudge."
+      commands:
+        - cmd: "scripts/workerctl sessions --state active"
+          status: pass
+          evidence: "[]"
+        - cmd: "scripts/workerctl reconcile --stale-cycles-seconds 1"
+          status: pass
+          evidence: "dangling_bindings [], dead_pid_sessions [], stuck_tasks []"
+        - cmd: "tmux list-sessions 2>/dev/null | rg '^codex-qa-manager-quality' || true"
+          status: pass
+          evidence: "no output"
+        - cmd: "git diff --check"
+          status: pass
+          evidence: "no whitespace errors"
+
+checks:
+  dirty_fingerprint: unknown
+  last_verification:
+    result: pass
+    task: T999
+    commands:
+      - "node /Users/neonwatty/.codex/plugins/cache/goalbuddy/goalbuddy/0.3.6/skills/goalbuddy/scripts/check-goal-state.mjs docs/goals/manager-quality-drill/state.yaml"
+      - "scripts/workerctl sessions --state active"
+      - "scripts/workerctl reconcile --stale-cycles-seconds 1"
+      - "tmux list-sessions 2>/dev/null | rg '^codex-qa-manager-quality' || true"
+      - "git diff --check"
