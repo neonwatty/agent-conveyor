@@ -162,6 +162,7 @@ def manager_bootstrap_prompt(
     task_name: str | None = None,
     task_goal: str | None = None,
     worker_name: str | None = None,
+    manager_config_seeded: bool = False,
 ) -> str:
     task_line = task_name or "<unbound-task>"
     goal_line = task_goal or "No task goal supplied yet."
@@ -176,6 +177,19 @@ def manager_bootstrap_prompt(
         if task_name
         else "scripts/workerctl cycle <task>"
     )
+    if manager_config_seeded:
+        initial_setup = f"""Initial setup:
+- Manager config has already been recorded for this task.
+- Start with `{cycle_command}` and inspect `manager_context.manager_config`.
+- Ask setup questions only if the cycle output shows missing or unsuitable manager config."""
+    else:
+        initial_setup = f"""Initial setup:
+1. Run `{setup_command}`.
+2. Ask the user the returned setup questions in this manager Codex chat.
+3. Persist the answers with `scripts/workerctl manager-config`.
+4. Use `workerctl manager-config --interactive` only when a human is directly
+   running workerctl in a terminal."""
+
     return f"""You are a Codex manager session for workerctl.
 
 Working directory: {cwd}
@@ -186,12 +200,7 @@ Worker session: {worker_line}
 
 Your role is to supervise, not to implement the worker task.
 
-Initial setup:
-1. Run `{setup_command}`.
-2. Ask the user the returned setup questions in this manager Codex chat.
-3. Persist the answers with `scripts/workerctl manager-config`.
-4. Use `workerctl manager-config --interactive` only when a human is directly
-   running workerctl in a terminal.
+{initial_setup}
 
 Supervision loop:
 - Start observations with `{cycle_command}`.
@@ -3136,6 +3145,22 @@ def command_start_manager(args: argparse.Namespace) -> int:
     return 0
 
 
+def pair_manager_config_requested(args: argparse.Namespace) -> bool:
+    return any(
+        [
+            getattr(args, "manager_mode", None) is not None,
+            getattr(args, "manager_objective", None) is not None,
+            bool(getattr(args, "manager_guideline", None)),
+            bool(getattr(args, "manager_acceptance", None)),
+            bool(getattr(args, "manager_reference", None)),
+            getattr(args, "manager_permissions_json", None) is not None,
+            bool(getattr(args, "manager_allow_pr", False)),
+            bool(getattr(args, "manager_allow_merge_green", False)),
+            bool(getattr(args, "manager_allow_worker_compact_clear", False)),
+        ]
+    )
+
+
 def command_pair(args: argparse.Namespace) -> int:
     """Spawn worker + manager and bind to a task in one shot.
 
@@ -3173,6 +3198,57 @@ def command_pair(args: argparse.Namespace) -> int:
             conn.commit()
         else:
             task_id = task_row["id"]
+
+        existing_manager_config = worker_db.manager_config(conn, task_id=task_id)
+        manager_config_seeded_by_pair = False
+        if pair_manager_config_requested(args):
+            permissions = normalize_manager_permissions(
+                existing_manager_config["permissions"] if existing_manager_config else None
+            )
+            if getattr(args, "manager_allow_pr", False):
+                permissions["create_pr"] = True
+            if getattr(args, "manager_allow_merge_green", False):
+                permissions["merge_green_pr"] = True
+            if getattr(args, "manager_allow_worker_compact_clear", False):
+                permissions["worker_compact_clear"] = True
+            permissions.update(
+                normalize_manager_permission_overrides(
+                    _json_arg(getattr(args, "manager_permissions_json", None), flag="--manager-permissions-json")
+                )
+            )
+            worker_db.upsert_manager_config(
+                conn,
+                task_id=task_id,
+                supervision_mode=getattr(args, "manager_mode", None)
+                or (existing_manager_config["supervision_mode"] if existing_manager_config else "guided"),
+                objective=getattr(args, "manager_objective", None)
+                if getattr(args, "manager_objective", None) is not None
+                else (existing_manager_config["objective"] if existing_manager_config else None),
+                guidelines=getattr(args, "manager_guideline", None)
+                or (existing_manager_config["guidelines"] if existing_manager_config else []),
+                acceptance_criteria=getattr(args, "manager_acceptance", None)
+                or (existing_manager_config["acceptance_criteria"] if existing_manager_config else []),
+                reference_paths=getattr(args, "manager_reference", None)
+                or (existing_manager_config["reference_paths"] if existing_manager_config else []),
+                permissions=permissions,
+            )
+            existing_manager_config = worker_db.manager_config(conn, task_id=task_id)
+            manager_config_seeded_by_pair = True
+            worker_db.insert_event(
+                conn,
+                "manager_config_recorded",
+                actor="workerctl",
+                task_id=task_id,
+                payload={
+                    "acceptance_count": len(existing_manager_config["acceptance_criteria"]),
+                    "guideline_count": len(existing_manager_config["guidelines"]),
+                    "reference_count": len(existing_manager_config["reference_paths"]),
+                    "source": "pair",
+                    "supervision_mode": existing_manager_config["supervision_mode"],
+                },
+            )
+            conn.commit()
+        manager_config_seeded = existing_manager_config is not None
     finally:
         conn.close()
 
@@ -3200,6 +3276,7 @@ def command_pair(args: argparse.Namespace) -> int:
                 task_name=args.task,
                 task_goal=args.task_goal if task_created else task_row["goal"],
                 worker_name=args.worker_name,
+                manager_config_seeded=manager_config_seeded,
             ),
             sandbox=args.sandbox,
             ask_for_approval=args.ask_for_approval,
@@ -3233,6 +3310,8 @@ def command_pair(args: argparse.Namespace) -> int:
             "worker": worker_info,
             "manager": manager_info,
             "binding_id": binding_id,
+            "manager_config_seeded": manager_config_seeded,
+            "manager_config_seeded_by_pair": manager_config_seeded_by_pair,
         }
         print(json.dumps(result, indent=2, sort_keys=True))
         return 0
