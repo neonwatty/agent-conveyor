@@ -272,7 +272,9 @@ tmux attach -t codex-live-test
   send `/clear`, or `--prompt-only` to send an explanatory prompt instead.
   Fails closed unless `worker_compact_clear` is enabled in manager config and
   a worker handoff exists. Records a durable command and audit events
-  before/after sending the worker instruction.
+  before/after sending the worker instruction. `--dry-run` still records the
+  command in `commands`, `replay`, and `mutation-audit` with `dry_run: true`
+  and `sent: false`.
 - `bind --task T --worker W --manager M` — Create the task binding.
 - `unbind --task T` — End the active binding for a task.
 - `finish-task <task> [--reason R] [--require-criteria-audit] [--stop-manager]

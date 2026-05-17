@@ -458,15 +458,14 @@ Validated:
 - Final isolated reconcile, default reconcile, and matching tmux checks were
   clean.
 
-Caveat:
+Caveat resolved by follow-up work:
 
-- `mutation-audit` is clean but reports zero mutations for dry-run
-  `request-worker-compact` commands. The detailed audit trail is currently in
-  `commands` and `replay`, not mutation-audit.
+- Dry-run `request-worker-compact` commands should appear in `mutation-audit`
+  with `effect.dry_run: true` and `effect.sent: false`, so the no-send result
+  is visible on the same decision-to-consequence audit surface.
 
 Result:
 
-- Compact/clear guardrail drill passed with the caveat above.
-- Follow-up: consider documenting or normalizing permission key aliases, and
-  decide whether dry-run compact/clear command attempts should appear in
-  mutation-audit or whether command/replay audit is the intended surface.
+- Compact/clear guardrail drill passed; the mutation-audit visibility caveat is
+  covered by the follow-up work above.
+- Follow-up: consider documenting or normalizing permission key aliases.

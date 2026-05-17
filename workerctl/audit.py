@@ -24,6 +24,22 @@ def nearest_prior_decision(command: dict[str, Any], decisions: list[dict[str, An
     return prior[-1] if prior else None
 
 
+def command_effect(command: dict[str, Any]) -> dict[str, Any]:
+    payload = command.get("payload") or {}
+    result = command.get("result") or {}
+    send_result = result.get("send_result") if isinstance(result.get("send_result"), dict) else None
+    dry_run = bool(send_result.get("dry_run")) if send_result else False
+    sent = command["state"] == "succeeded" and send_result is not None and not dry_run
+    return {
+        "dry_run": dry_run,
+        "permission_check": result.get("permission_check") or payload.get("permission_check"),
+        "send_text": result.get("send_text") or payload.get("send_text"),
+        "sent": sent,
+        "slash_command": result.get("slash_command") if "slash_command" in result else payload.get("slash_command"),
+        "worker_session": result.get("worker_session") or payload.get("worker_session"),
+    }
+
+
 def mutation_audit_result(audit: dict[str, Any]) -> dict[str, Any]:
     decisions = audit["manager_decisions"]
     decisions_by_id = {decision["id"]: decision for decision in decisions}
@@ -67,6 +83,7 @@ def mutation_audit_result(audit: dict[str, Any]) -> dict[str, Any]:
                     "state": command["state"],
                     "type": command["type"],
                 },
+                "effect": command_effect(command),
                 "expected_failure": expected_failure,
                 "linked_decision": linked,
                 "nearest_prior_decision": nearest,
