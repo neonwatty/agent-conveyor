@@ -237,13 +237,17 @@ tmux attach -t codex-live-test
   scripts/workerctl criteria my-task --list
   scripts/workerctl criteria my-task --list --status accepted
   scripts/workerctl criteria my-task --add --criterion "..." --source worker_proposed --status proposed
+  scripts/workerctl criteria my-task --add --criterion "..." --source manager_inferred --status accepted
   scripts/workerctl criteria my-task --accept 12 --rationale "Must-have for this task"
   scripts/workerctl criteria my-task --satisfy <id> --evidence-json '{"command":"...","status":"pass"}'
   scripts/workerctl criteria my-task --defer 13 --rationale "Follow-up after this task"
   scripts/workerctl criteria my-task --reject 14 --rationale "Duplicate or out of scope"
   ```
   Replace placeholder `...` values with the actual criterion and verification
-  command. To add a criterion and satisfy that same row after verification:
+  command. Use `worker_proposed` for criteria proposed by the worker. Use
+  `manager_inferred` for criteria inferred from manager config, cycle evidence,
+  or manager inspection; `manager_config` is not a valid criteria source.
+  To add a criterion and satisfy that same row after verification:
   ```bash
   criterion_id=$(scripts/workerctl criteria my-task --add --criterion "Targeted prompt tests pass" --source worker_proposed --status proposed | python3 -c 'import json,sys; print(json.load(sys.stdin)["affected_criterion"]["id"])')
   scripts/workerctl criteria my-task --satisfy "$criterion_id" --evidence-json '{"command":"python3 -m unittest tests.test_workerctl.ManagerBootstrapPromptTests -v","status":"pass"}'
