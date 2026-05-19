@@ -3,6 +3,7 @@ import contextlib
 import io
 import json
 import os
+import shlex
 import shutil
 import sqlite3
 import subprocess
@@ -749,23 +750,28 @@ class ClassifierTests(unittest.TestCase):
 
 
 class LiveSmokeScriptTests(unittest.TestCase):
-    def test_live_smoke_uses_existing_workerctl_subcommands(self):
+    def assert_script_uses_existing_workerctl_subcommands(self, script_name):
         parser = worker_cli.build_parser()
         subparser_action = next(
             action for action in parser._actions if isinstance(action, argparse._SubParsersAction)
         )
         subcommands = set(subparser_action.choices)
-        script = (ROOT / "scripts" / "live-smoke").read_text()
+        script = (ROOT / "scripts" / script_name).read_text()
 
         used = set()
         for line in script.splitlines():
-            stripped = line.strip()
-            if "WORKERCTL" not in stripped and "workerctl" not in stripped:
+            stripped = line.strip().rstrip("\\").strip()
+            if not stripped or stripped.startswith("#"):
                 continue
-            parts = stripped.replace('"${WORKERCTL}"', "workerctl").replace('"$WORKERCTL"', "workerctl").split()
-            if "workerctl" not in parts:
+            try:
+                parts = shlex.split(stripped, comments=True, posix=True)
+            except ValueError:
                 continue
-            index = parts.index("workerctl")
+            workerctl_tokens = {"workerctl", "${WORKERCTL}", "$WORKERCTL", str(WORKERCTL_PATH)}
+            indexes = [index for index, part in enumerate(parts) if part in workerctl_tokens]
+            if not indexes:
+                continue
+            index = indexes[0]
             if index + 1 < len(parts):
                 candidate = parts[index + 1]
                 if candidate and not candidate.startswith("-"):
@@ -774,6 +780,12 @@ class LiveSmokeScriptTests(unittest.TestCase):
         self.assertTrue(used)
         missing = sorted(command for command in used if command not in subcommands)
         self.assertEqual([], missing)
+
+    def test_live_smoke_uses_existing_workerctl_subcommands(self):
+        self.assert_script_uses_existing_workerctl_subcommands("live-smoke")
+
+    def test_live_smoke_repeat_uses_existing_workerctl_subcommands(self):
+        self.assert_script_uses_existing_workerctl_subcommands("live-smoke-repeat")
 
 
 class CliTests(unittest.TestCase):
@@ -1889,6 +1901,18 @@ Deferred follow-up criteria:
     def test_live_smoke_script_has_valid_bash_syntax(self):
         proc = subprocess.run(
             ["bash", "-n", str(ROOT / "scripts" / "live-smoke")],
+            cwd=ROOT,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+
+    def test_live_smoke_repeat_script_has_valid_bash_syntax(self):
+        proc = subprocess.run(
+            ["bash", "-n", str(ROOT / "scripts" / "live-smoke-repeat")],
             cwd=ROOT,
             text=True,
             stdout=subprocess.PIPE,
