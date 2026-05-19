@@ -45,6 +45,14 @@ WORKERCTL_SHIM_PATH = ROOT / "bin" / "workerctl"
 INSTALL_LOCAL_PATH = ROOT / "scripts" / "install-local"
 
 
+def namespaced_test_name(base: str) -> str:
+    namespace = os.environ.get("WORKERCTL_TEST_NAMESPACE")
+    if not namespace:
+        return base
+    safe = "".join(char if char.isalnum() or char in "-_" else "-" for char in namespace)
+    return f"{base}-{safe}"[:64]
+
+
 class CoreRunTests(unittest.TestCase):
     def test_tmux_permission_failure_gets_actionable_message(self):
         def fake_run(argv, **kwargs):
@@ -3688,6 +3696,27 @@ class TmuxIntegrationCapabilityTests(unittest.TestCase):
         self.assertFalse(getattr(TmuxTests.test_open_manager_dry_run_resolves_task_manager, "__unittest_skip__", False))
 
 
+class TestNameNamespaceTests(unittest.TestCase):
+    def test_namespaced_test_name_defaults_to_base(self):
+        old = os.environ.pop("WORKERCTL_TEST_NAMESPACE", None)
+        self.addCleanup(
+            lambda: os.environ.__setitem__("WORKERCTL_TEST_NAMESPACE", old)
+            if old is not None
+            else os.environ.pop("WORKERCTL_TEST_NAMESPACE", None)
+        )
+        self.assertEqual(namespaced_test_name("submit-smoke"), "submit-smoke")
+
+    def test_namespaced_test_name_appends_sanitized_namespace(self):
+        old = os.environ.get("WORKERCTL_TEST_NAMESPACE")
+        os.environ["WORKERCTL_TEST_NAMESPACE"] = "run/one"
+        self.addCleanup(
+            lambda: os.environ.__setitem__("WORKERCTL_TEST_NAMESPACE", old)
+            if old is not None
+            else os.environ.pop("WORKERCTL_TEST_NAMESPACE", None)
+        )
+        self.assertEqual(namespaced_test_name("submit-smoke"), "submit-smoke-run-one")
+
+
 TMUX_INTEGRATION_SKIP_REASON = _tmux_integration_skip_reason()
 requires_tmux_integration = unittest.skipIf(TMUX_INTEGRATION_SKIP_REASON, TMUX_INTEGRATION_SKIP_REASON)
 
@@ -3695,7 +3724,7 @@ requires_tmux_integration = unittest.skipIf(TMUX_INTEGRATION_SKIP_REASON, TMUX_I
 class TmuxTests(unittest.TestCase):
     @requires_tmux_integration
     def test_send_text_pastes_and_submits_line(self):
-        name = "submit-smoke"
+        name = namespaced_test_name("submit-smoke")
         session = f"codex-{name}"
         output_path = Path(tempfile.gettempdir()) / f"workerctl-{name}.txt"
         output_path.unlink(missing_ok=True)
@@ -3725,7 +3754,7 @@ class TmuxTests(unittest.TestCase):
 
     @requires_tmux_integration
     def test_open_refuses_second_window_without_force(self):
-        name = "open-guard"
+        name = namespaced_test_name("open-guard")
         session = f"codex-{name}"
         worker_path = worker_dir(name)
         if worker_path.exists():
@@ -3750,7 +3779,7 @@ class TmuxTests(unittest.TestCase):
 
     @requires_tmux_integration
     def test_open_refuses_after_prior_attempt_without_force(self):
-        name = "open-attempt-guard"
+        name = namespaced_test_name("open-attempt-guard")
         session = f"codex-{name}"
         worker_path = worker_dir(name)
         if worker_path.exists():
