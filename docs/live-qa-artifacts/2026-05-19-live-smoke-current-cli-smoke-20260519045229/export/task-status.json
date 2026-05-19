@@ -1,0 +1,39 @@
+{
+  "budget": null,
+  "created_at": "2026-05-19T11:52:30Z",
+  "goal": "Live smoke test worker-manager lifecycle",
+  "id": "task-20d2844a-6a7e-4508-912a-2add63d4a3ba",
+  "integrity": {
+    "issues": [],
+    "ok": true
+  },
+  "manager": null,
+  "manager_config": {
+    "acceptance_criteria": [
+      "The worker remains status-only and no product files are edited."
+    ],
+    "created_at": "2026-05-19T11:52:30Z",
+    "guidelines": [
+      "Use workerctl cycle before deciding."
+    ],
+    "objective": "Verify live smoke lifecycle without editing product files.",
+    "permissions": {
+      "create_pr": false,
+      "merge_green_pr": false,
+      "worker_compact_clear": false
+    },
+    "reference_paths": [
+      "scripts/live-smoke"
+    ],
+    "supervision_mode": "strict",
+    "task_id": "task-20d2844a-6a7e-4508-912a-2add63d4a3ba",
+    "updated_at": "2026-05-19T11:52:30Z"
+  },
+  "name": "codex-smoke-task-smoke-20260519045229",
+  "state": "done",
+  "summary": "Current CLI live smoke",
+  "updated_at": "2026-05-19T11:52:35Z",
+  "worker": null,
+  "worker_handoff": null,
+  "worker_status": null
+}

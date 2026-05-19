@@ -1,0 +1,21 @@
+{
+  "created_at": "2026-05-19T13:01:35Z",
+  "files": [
+    "task-status.json",
+    "audit.json",
+    "acceptance-criteria.json",
+    "prompts.json",
+    "transcript-captures.json",
+    "terminal-captures.json",
+    "agent-observations.json",
+    "manager-cycles.json",
+    "manager-decisions.json",
+    "mutation-audit.json",
+    "replay.json",
+    "transcript-segments.json"
+  ],
+  "task": {
+    "id": "task-248a896b-f61a-434b-bb8e-5c86b696923b",
+    "name": "codex-smoke-task-smoke-20260519060131"
+  }
+}

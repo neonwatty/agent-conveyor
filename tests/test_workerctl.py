@@ -3,6 +3,7 @@ import contextlib
 import io
 import json
 import os
+import shlex
 import shutil
 import sqlite3
 import subprocess
@@ -15,6 +16,7 @@ from pathlib import Path
 from unittest import mock
 
 from workerctl import classify
+from workerctl import cli as worker_cli
 from workerctl import commands
 from workerctl import criteria_plan
 from workerctl import core as worker_core
@@ -113,6 +115,42 @@ class DatabaseTests(unittest.TestCase):
 
             with self.assertRaises(RuntimeError):
                 worker_db.initialize_database(conn)
+
+    def test_connect_context_manager_commits_and_closes_connection(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "workerctl.db"
+            setup_conn = self.open_db(tmpdir)
+            setup_conn.close()
+
+            with worker_db.connect(path) as conn:
+                self.insert_task(conn, task_id="task-context")
+
+            with self.assertRaises(sqlite3.ProgrammingError):
+                conn.execute("select 1")
+
+            verify_conn = worker_db.connect(path)
+            self.addCleanup(verify_conn.close)
+            row = verify_conn.execute("select id from tasks where id = 'task-context'").fetchone()
+            self.assertIsNotNone(row)
+
+    def test_connect_context_manager_rolls_back_and_closes_connection_on_error(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "workerctl.db"
+            setup_conn = self.open_db(tmpdir)
+            setup_conn.close()
+
+            with self.assertRaisesRegex(RuntimeError, "boom"):
+                with worker_db.connect(path) as conn:
+                    self.insert_task(conn, task_id="task-rollback")
+                    raise RuntimeError("boom")
+
+            with self.assertRaises(sqlite3.ProgrammingError):
+                conn.execute("select 1")
+
+            verify_conn = worker_db.connect(path)
+            self.addCleanup(verify_conn.close)
+            row = verify_conn.execute("select id from tasks where id = 'task-rollback'").fetchone()
+            self.assertIsNone(row)
 
     def test_database_health_reports_ok(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -745,6 +783,45 @@ class ClassifierTests(unittest.TestCase):
             recent_event_count=2,
         )
         self.assertEqual(result.get("pattern"), "long_running_interruptible")
+
+
+class LiveSmokeScriptTests(unittest.TestCase):
+    def assert_script_uses_existing_workerctl_subcommands(self, script_name):
+        parser = worker_cli.build_parser()
+        subparser_action = next(
+            action for action in parser._actions if isinstance(action, argparse._SubParsersAction)
+        )
+        subcommands = set(subparser_action.choices)
+        script = (ROOT / "scripts" / script_name).read_text()
+
+        used = set()
+        for line in script.splitlines():
+            stripped = line.strip().rstrip("\\").strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            try:
+                parts = shlex.split(stripped, comments=True, posix=True)
+            except ValueError:
+                continue
+            workerctl_tokens = {"workerctl", "${WORKERCTL}", "$WORKERCTL", str(WORKERCTL_PATH)}
+            indexes = [index for index, part in enumerate(parts) if part in workerctl_tokens]
+            if not indexes:
+                continue
+            index = indexes[0]
+            if index + 1 < len(parts):
+                candidate = parts[index + 1]
+                if candidate and not candidate.startswith("-"):
+                    used.add(candidate)
+
+        self.assertTrue(used)
+        missing = sorted(command for command in used if command not in subcommands)
+        self.assertEqual([], missing)
+
+    def test_live_smoke_uses_existing_workerctl_subcommands(self):
+        self.assert_script_uses_existing_workerctl_subcommands("live-smoke")
+
+    def test_live_smoke_repeat_uses_existing_workerctl_subcommands(self):
+        self.assert_script_uses_existing_workerctl_subcommands("live-smoke-repeat")
 
 
 class CliTests(unittest.TestCase):
@@ -1860,6 +1937,18 @@ Deferred follow-up criteria:
     def test_live_smoke_script_has_valid_bash_syntax(self):
         proc = subprocess.run(
             ["bash", "-n", str(ROOT / "scripts" / "live-smoke")],
+            cwd=ROOT,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+
+    def test_live_smoke_repeat_script_has_valid_bash_syntax(self):
+        proc = subprocess.run(
+            ["bash", "-n", str(ROOT / "scripts" / "live-smoke-repeat")],
             cwd=ROOT,
             text=True,
             stdout=subprocess.PIPE,

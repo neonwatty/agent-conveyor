@@ -1,0 +1,38 @@
+{
+  "budget": null,
+  "created_at": "2026-05-19T12:33:50Z",
+  "goal": "Manual QA pass for current workerctl lifecycle",
+  "id": "task-5c7a6e98-6592-43f0-811c-70344654981b",
+  "integrity": {
+    "issues": [],
+    "ok": true
+  },
+  "manager": null,
+  "manager_config": {
+    "acceptance_criteria": [
+      "No product source files are edited.",
+      "Finish captures transcript before stopping both sessions."
+    ],
+    "created_at": "2026-05-19T12:33:50Z",
+    "guidelines": [],
+    "objective": "Run a focused manual QA pass without product edits.",
+    "permissions": {
+      "create_pr": false,
+      "merge_green_pr": false,
+      "worker_compact_clear": false
+    },
+    "reference_paths": [
+      "docs/manual-qa-checklist.md"
+    ],
+    "supervision_mode": "strict",
+    "task_id": "task-5c7a6e98-6592-43f0-811c-70344654981b",
+    "updated_at": "2026-05-19T12:33:50Z"
+  },
+  "name": "manual-qa-task-20260519053350",
+  "state": "done",
+  "summary": "Disposable focused manual QA run",
+  "updated_at": "2026-05-19T12:34:29Z",
+  "worker": null,
+  "worker_handoff": null,
+  "worker_status": null
+}

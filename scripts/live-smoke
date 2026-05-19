@@ -3,11 +3,11 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 WORKERCTL="${ROOT}/scripts/workerctl"
-MODEL="${WORKERCTL_SMOKE_MODEL:-gpt-5.4-mini}"
 SMOKE_ID="smoke-$(date +%Y%m%d%H%M%S)"
-WORKER="codex-smoke-worker-${SMOKE_ID}"
 TASK="codex-smoke-task-${SMOKE_ID}"
-MANAGER_SESSION=""
+WORKER="codex-smoke-worker-${SMOKE_ID}"
+MANAGER="codex-smoke-manager-${SMOKE_ID}"
+ARTIFACT_ROOT="${ROOT}/docs/live-qa-artifacts/$(date +%Y-%m-%d)-live-smoke-current-cli-${SMOKE_ID}"
 
 require_tool() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -16,12 +16,33 @@ require_tool() {
   fi
 }
 
+run_capture() {
+  local name="$1"
+  local status
+  shift
+
+  set +e
+  "$@" > "${ARTIFACT_ROOT}/${name}.stdout" 2> "${ARTIFACT_ROOT}/${name}.stderr"
+  status="$?"
+  set -e
+
+  printf '%s\n' "${status}" > "${ARTIFACT_ROOT}/${name}.exit"
+  return "${status}"
+}
+
 cleanup() {
-  tmux kill-session -t "codex-${WORKER}" 2>/dev/null || true
-  if [ -n "${MANAGER_SESSION}" ]; then
-    tmux kill-session -t "${MANAGER_SESSION}" 2>/dev/null || true
+  if [ -d "${ARTIFACT_ROOT}" ]; then
+    run_capture "cleanup-finish-task" "${WORKERCTL}" finish-task "${TASK}" \
+      --reason "live smoke cleanup after failure" \
+      --stop-manager \
+      --stop-worker || true
+    run_capture "cleanup-unbind" "${WORKERCTL}" unbind --task "${TASK}" || true
+    run_capture "cleanup-deregister-worker" "${WORKERCTL}" deregister "${WORKER}" || true
+    run_capture "cleanup-deregister-manager" "${WORKERCTL}" deregister "${MANAGER}" || true
   fi
-  tmux list-sessions -F '#S' 2>/dev/null | rg "^codex-manager-${TASK}" | xargs -r -n1 tmux kill-session -t 2>/dev/null || true
+
+  tmux kill-session -t "codex-${WORKER}" 2>/dev/null || true
+  tmux kill-session -t "codex-${MANAGER}" 2>/dev/null || true
 }
 
 trap cleanup EXIT
@@ -30,46 +51,78 @@ require_tool tmux
 require_tool codex
 require_tool rg
 
+mkdir -p "${ARTIFACT_ROOT}"
 cd "${ROOT}"
 
-echo "smoke worker: ${WORKER}"
+echo "artifact root: ${ARTIFACT_ROOT}"
 echo "smoke task: ${TASK}"
+echo "smoke worker: ${WORKER}"
+echo "smoke manager: ${MANAGER}"
 
-python3 "${WORKERCTL}" create "${WORKER}" \
-  --cwd "${ROOT}" \
-  --task "Smoke test worker. Do not edit files." \
-  --no-initial-prompt
-
-python3 "${WORKERCTL}" promote "${WORKER}" \
+run_capture "01-pair" "${WORKERCTL}" pair \
   --task "${TASK}" \
-  --goal "Smoke test worker-manager lifecycle" \
-  --summary "Live smoke test" \
-  --max-nudges 1 \
-  -- --model "${MODEL}" > /tmp/workerctl-live-smoke-promote.json
+  --worker-name "${WORKER}" \
+  --manager-name "${MANAGER}" \
+  --cwd "${ROOT}" \
+  --task-goal "Live smoke test worker-manager lifecycle" \
+  --task-summary "Current CLI live smoke" \
+  --task-prompt "Smoke test worker. Do not edit files. Wait for manager instructions and report status only." \
+  --manager-mode strict \
+  --manager-objective "Verify live smoke lifecycle without editing product files." \
+  --manager-guideline "Use workerctl cycle before deciding." \
+  --manager-acceptance "The worker remains status-only and no product files are edited." \
+  --manager-reference "scripts/live-smoke" \
+  --sandbox workspace-write \
+  --ask-for-approval never \
+  --timeout-seconds 90
 
-python3 "${WORKERCTL}" task-status "${TASK}" --json > /tmp/workerctl-live-smoke-status.json
-python3 "${WORKERCTL}" task-nudge "${TASK}" "dry-run status request" --dry-run > /tmp/workerctl-live-smoke-nudge.json
-python3 "${WORKERCTL}" pause-manager "${TASK}" > /tmp/workerctl-live-smoke-pause.json
-python3 "${WORKERCTL}" resume-manager "${TASK}" -- --model "${MODEL}" > /tmp/workerctl-live-smoke-resume.json
+run_capture "02-cycle" "${WORKERCTL}" cycle "${TASK}" --busy-wait-seconds 5
+run_capture "03-session-nudge-dry-run" "${WORKERCTL}" session-nudge "${WORKER}" "dry-run status request" --dry-run
 
-MANAGER_SESSION="$(python3 - <<'PY'
+run_capture "04-criteria-add" "${WORKERCTL}" criteria "${TASK}" --add \
+  --criterion "Live smoke reached current CLI criterion mutation path" \
+  --source manager_inferred \
+  --status accepted \
+  --proof "Added by scripts/live-smoke" \
+  --evidence-json '{"command":"scripts/live-smoke","status":"running"}'
+CRITERION_ID="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["affected_criterion"]["id"])' < "${ARTIFACT_ROOT}/04-criteria-add.stdout")"
+printf '%s\n' "${CRITERION_ID}" > "${ARTIFACT_ROOT}/04-criteria-id.txt"
+
+run_capture "05-criteria-satisfy" "${WORKERCTL}" criteria "${TASK}" --satisfy "${CRITERION_ID}" \
+  --proof "Current CLI smoke criterion satisfied" \
+  --evidence-json '{"command":"scripts/live-smoke criteria satisfy","status":"pass"}'
+
+run_capture "06-criteria-list" "${WORKERCTL}" criteria "${TASK}" --list
+run_capture "07-finish-task" "${WORKERCTL}" finish-task "${TASK}" \
+  --reason "live smoke complete" \
+  --require-criteria-audit \
+  --capture-transcript-before-stop \
+  --capture-transcript-mode excerpt \
+  --capture-transcript-lines 120 \
+  --stop-manager \
+  --stop-worker
+
+run_capture "08-transcript-show" "${WORKERCTL}" transcript-show "${TASK}" --json --limit 20
+run_capture "09-mutation-audit" "${WORKERCTL}" mutation-audit "${TASK}" --json
+run_capture "10-replay" "${WORKERCTL}" replay "${TASK}" --json
+run_capture "11-export-task" "${WORKERCTL}" export-task "${TASK}" --output "${ARTIFACT_ROOT}/export" --zip --include-transcripts
+run_capture "12-sessions-active" "${WORKERCTL}" sessions --state active
+run_capture "13-reconcile" "${WORKERCTL}" reconcile --stale-cycles-seconds 1
+
+if rg "${WORKER}|${MANAGER}" "${ARTIFACT_ROOT}/12-sessions-active.stdout" >/dev/null; then
+  echo "live smoke left smoke sessions active" >&2
+  exit 1
+fi
+
+python3 - "${ARTIFACT_ROOT}/13-reconcile.stdout" <<'PY'
 import json
-print(json.load(open('/tmp/workerctl-live-smoke-resume.json'))['manager_session'])
+import sys
+
+data = json.load(open(sys.argv[1]))
+for key in ("dangling_bindings", "dead_pid_sessions", "stuck_tasks"):
+    if data.get(key):
+        raise SystemExit(f"reconcile reported {key}: {data[key]}")
 PY
-)"
 
-tmux kill-session -t "${MANAGER_SESSION}"
-python3 "${WORKERCTL}" recover "${TASK}" > /tmp/workerctl-live-smoke-recover.json
-python3 "${WORKERCTL}" export-task "${TASK}" --zip > /tmp/workerctl-live-smoke-export.json
-python3 "${WORKERCTL}" stop-task "${TASK}" --stop-worker > /tmp/workerctl-live-smoke-stop-task.json
-
-cat /tmp/workerctl-live-smoke-promote.json
-cat /tmp/workerctl-live-smoke-status.json
-cat /tmp/workerctl-live-smoke-nudge.json
-cat /tmp/workerctl-live-smoke-pause.json
-cat /tmp/workerctl-live-smoke-resume.json
-cat /tmp/workerctl-live-smoke-recover.json
-cat /tmp/workerctl-live-smoke-export.json
-cat /tmp/workerctl-live-smoke-stop-task.json
-
+trap - EXIT
 echo "live smoke passed"

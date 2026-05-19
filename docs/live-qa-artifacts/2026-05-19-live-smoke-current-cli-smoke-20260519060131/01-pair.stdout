@@ -1,0 +1,30 @@
+{
+  "binding_id": "binding-4f4c5ea9-e067-49ef-85af-a6962c1c7ece",
+  "manager": {
+    "codex_session_id": "019e4053-cd11-70d3-92a2-f6ffd7acea80",
+    "codex_session_path": "/Users/neonwatty/.codex/sessions/2026/05/19/rollout-2026-05-19T06-01-34-019e4053-cd11-70d3-92a2-f6ffd7acea80.jsonl",
+    "cwd": "/Users/neonwatty/Desktop/codex-terminal-manager",
+    "name": "codex-smoke-manager-smoke-20260519060131",
+    "pid": 42952,
+    "role": "manager",
+    "session_id": "session-e5866fa8-2ea8-4f82-842c-2e53c3aa4ff1",
+    "tmux_session": "codex-codex-smoke-manager-smoke-20260519060131"
+  },
+  "manager_config_seeded": true,
+  "manager_config_seeded_by_pair": true,
+  "task": {
+    "created": true,
+    "id": "task-248a896b-f61a-434b-bb8e-5c86b696923b",
+    "name": "codex-smoke-task-smoke-20260519060131"
+  },
+  "worker": {
+    "codex_session_id": "019e4053-c46e-7b43-8ea9-b6bf2912b855",
+    "codex_session_path": "/Users/neonwatty/.codex/sessions/2026/05/19/rollout-2026-05-19T06-01-32-019e4053-c46e-7b43-8ea9-b6bf2912b855.jsonl",
+    "cwd": "/Users/neonwatty/Desktop/codex-terminal-manager",
+    "name": "codex-smoke-worker-smoke-20260519060131",
+    "pid": 39899,
+    "role": "worker",
+    "session_id": "session-7804158e-5ea2-43aa-84fa-9315f6963e1b",
+    "tmux_session": "codex-codex-smoke-worker-smoke-20260519060131"
+  }
+}

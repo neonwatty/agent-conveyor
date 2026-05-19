@@ -65,6 +65,14 @@ ACCEPTANCE_CRITERION_SOURCES = {"user_requested", "manager_inferred", "worker_pr
 _PRESERVE_FIELD = object()
 
 
+class _ClosingConnection(sqlite3.Connection):
+    def __exit__(self, exc_type, exc_value, traceback):
+        try:
+            return super().__exit__(exc_type, exc_value, traceback)
+        finally:
+            self.close()
+
+
 def default_db_path() -> Path:
     return state_root() / "workerctl.db"
 
@@ -72,7 +80,7 @@ def default_db_path() -> Path:
 def connect(path: Path | None = None) -> sqlite3.Connection:
     db_path = path or default_db_path()
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(db_path)
+    conn = sqlite3.connect(db_path, factory=_ClosingConnection)
     conn.row_factory = sqlite3.Row
     configure_connection(conn)
     return conn

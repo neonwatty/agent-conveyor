@@ -1,0 +1,119 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+WORKERCTL="${ROOT}/scripts/workerctl"
+COUNT="${1:-3}"
+RUN_ID="repeat-$(date +%Y%m%d%H%M%S)"
+ARTIFACT_ROOT="${ROOT}/docs/live-qa-artifacts/$(date +%Y-%m-%d)-live-smoke-repeat-${RUN_ID}"
+SUMMARY="${ARTIFACT_ROOT}/summary.jsonl"
+
+if ! [[ "${COUNT}" =~ ^[0-9]+$ ]] || [ "${COUNT}" -lt 1 ]; then
+  echo "usage: scripts/live-smoke-repeat [positive-count]" >&2
+  exit 2
+fi
+
+mkdir -p "${ARTIFACT_ROOT}"
+cd "${ROOT}"
+
+echo "repeat artifact root: ${ARTIFACT_ROOT}"
+echo "repeat count: ${COUNT}"
+
+run_capture() {
+  local name="$1"
+  local status
+  shift
+
+  set +e
+  "$@" > "${run_dir}/${name}.stdout" 2> "${run_dir}/${name}.stderr"
+  status="$?"
+  set -e
+
+  printf '%s\n' "${status}" > "${run_dir}/${name}.exit"
+  return "${status}"
+}
+
+for index in $(seq 1 "${COUNT}"); do
+  run_dir="${ARTIFACT_ROOT}/run-${index}"
+  mkdir -p "${run_dir}"
+  echo "live smoke repeat run ${index}/${COUNT}"
+
+  set +e
+  scripts/live-smoke > "${run_dir}/live-smoke.stdout" 2> "${run_dir}/live-smoke.stderr"
+  status="$?"
+  set -e
+  printf '%s\n' "${status}" > "${run_dir}/live-smoke.exit"
+
+  run_capture "sessions-active" "${WORKERCTL}" sessions --state active
+  run_capture "reconcile" "${WORKERCTL}" reconcile --stale-cycles-seconds 1
+
+  python3 - "${index}" "${status}" "${run_dir}/live-smoke.stdout" "${run_dir}/reconcile.stdout" >> "${SUMMARY}" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+index = int(sys.argv[1])
+status = int(sys.argv[2])
+stdout_path = Path(sys.argv[3])
+reconcile_path = Path(sys.argv[4])
+stdout = stdout_path.read_text()
+artifact_line = next((line for line in stdout.splitlines() if line.startswith("artifact root: ")), "")
+artifact_root = artifact_line.removeprefix("artifact root: ") if artifact_line else None
+worker_line = next((line for line in stdout.splitlines() if line.startswith("smoke worker: ")), "")
+manager_line = next((line for line in stdout.splitlines() if line.startswith("smoke manager: ")), "")
+worker = worker_line.removeprefix("smoke worker: ") if worker_line else None
+manager = manager_line.removeprefix("smoke manager: ") if manager_line else None
+reconcile = json.loads(reconcile_path.read_text())
+record = {
+    "run": index,
+    "status": status,
+    "artifact_root": artifact_root,
+    "worker": worker,
+    "manager": manager,
+    "reconcile_clean": not (
+        reconcile.get("dangling_bindings")
+        or reconcile.get("dead_pid_sessions")
+        or reconcile.get("stuck_tasks")
+    ),
+}
+print(json.dumps(record, sort_keys=True))
+PY
+
+  if [ "${status}" -ne 0 ]; then
+    echo "live smoke repeat failed on run ${index}; see ${run_dir}" >&2
+    exit "${status}"
+  fi
+
+  python3 - "${run_dir}/live-smoke.stdout" "${run_dir}/sessions-active.stdout" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+stdout = Path(sys.argv[1]).read_text()
+sessions = json.loads(Path(sys.argv[2]).read_text())
+worker_line = next((line for line in stdout.splitlines() if line.startswith("smoke worker: ")), "")
+manager_line = next((line for line in stdout.splitlines() if line.startswith("smoke manager: ")), "")
+names = {
+    line.removeprefix(prefix)
+    for line, prefix in ((worker_line, "smoke worker: "), (manager_line, "smoke manager: "))
+    if line
+}
+active = {session.get("name") for session in sessions}
+leftovers = sorted(names & active)
+if leftovers:
+    raise SystemExit(f"live smoke sessions still active: {leftovers}")
+PY
+
+  python3 - "${run_dir}/reconcile.stdout" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+data = json.loads(Path(sys.argv[1]).read_text())
+for key in ("dangling_bindings", "dead_pid_sessions", "stuck_tasks"):
+    if data.get(key):
+        raise SystemExit(f"reconcile reported {key}: {data[key]}")
+PY
+done
+
+echo "live smoke repeat passed"

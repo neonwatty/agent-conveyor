@@ -1,5 +1,205 @@
 # Live QA Log
 
+## 2026-05-19: Release Readiness Decision
+
+Decision:
+
+- Ready for release candidate: yes.
+- Ready to reduce manual QA dependence: yes for the covered workerctl
+  lifecycle; hosted live smoke remains manual because hosted runners may not
+  have `codex`.
+
+Evidence:
+
+- Unit tests: `python3 -m unittest discover -s tests -v` passed 351 tests.
+- ResourceWarning gate: `scripts/check-resource-warnings` passed 351 tests with
+  no `ResourceWarning` output.
+- Compile: `python3 -m py_compile scripts/workerctl
+  scripts/check-resource-warnings workerctl/*.py` passed.
+- Shell syntax: `bash -n scripts/live-smoke` and
+  `bash -n scripts/live-smoke-repeat` passed.
+- Repeat live smoke: `scripts/live-smoke-repeat 3` passed and wrote
+  `docs/live-qa-artifacts/2026-05-19-live-smoke-repeat-repeat-20260519060124/`.
+- Repeat summary: runs 1-3 all recorded `status: 0` and
+  `reconcile_clean: true`.
+- Focused manual QA: focused manual QA pass recorded in this log with evidence
+  under
+  `docs/live-qa-artifacts/2026-05-19-manual-qa-pass-manual-qa-20260519053320/`.
+- Cleanup: `scripts/workerctl sessions --state active` returned `[]`, and
+  `scripts/workerctl reconcile --stale-cycles-seconds 1` reported no dangling
+  bindings, dead PID sessions, or stuck tasks.
+
+Remaining risks:
+
+- Hosted GitHub live smoke remains manual and skips the live step when `codex`
+  is unavailable on the runner.
+- The ResourceWarning gate intentionally fails on any `ResourceWarning` text in
+  unittest output, so future tests that mention that string without emitting the
+  warning may need to keep that text out of successful output.
+
+## 2026-05-19: ResourceWarning CI Gate
+
+Scenario:
+
+- Task: Task 6 from
+  `docs/superpowers/plans/2026-05-19-next-qa-hardening-release-readiness.md`
+- Change: GitHub Actions now runs `scripts/check-resource-warnings`, which
+  executes the unittest suite with `ResourceWarning` output enabled and fails if
+  any `ResourceWarning` appears in stdout or stderr.
+
+Validated:
+
+- The normal unittest suite still passes.
+- The ResourceWarning output gate passes.
+- The compile gate still passes.
+
+Verification:
+
+- `python3 -m unittest discover -s tests -v` passed 351 tests.
+- `scripts/check-resource-warnings` passed 351 tests with no `ResourceWarning`
+  output.
+- A throwaway leaking unittest returned failure through
+  `scripts/check-resource-warnings -- ...`, proving the gate catches
+  finalization-time `ResourceWarning` output even when `unittest` exits `0`.
+- `python3 -m py_compile scripts/workerctl scripts/check-resource-warnings
+  workerctl/*.py` passed.
+
+Decision:
+
+- The earlier QA-readiness ResourceWarning risk is now resolved for CI: future
+  pushes and pull requests fail if the unittest suite prints a
+  `ResourceWarning`, including finalization-time warnings that do not reliably
+  make Python exit nonzero under `-W error`.
+
+## 2026-05-19: Focused Manual QA Pass
+
+Scenario:
+
+- Checklist: `docs/manual-qa-checklist.md`
+- Evidence bundle:
+  `docs/live-qa-artifacts/2026-05-19-manual-qa-pass-manual-qa-20260519053320/`
+- Task: `manual-qa-task-20260519053350`
+- Worker: `manual-qa-worker-manual-qa-task-20260519053350`
+- Manager: `manual-qa-manager-manual-qa-task-20260519053350`
+
+Validated:
+
+- Preflight `doctor`, `db-doctor`, `sessions --state active`, and
+  `reconcile --stale-cycles-seconds 1` passed; sessions before the run were
+  empty and reconcile reported no dangling bindings, dead PID sessions, or
+  stuck tasks.
+- Disposable pair with seeded manager config was created.
+- `cycle` reported pane signal and manager context.
+- `session-nudge --dry-run` resolved the manual QA worker target.
+- Criteria add, blocked audited finish, criteria satisfy, criteria list,
+  final audited finish, transcript-show, default replay, transcript replay,
+  full-transcript replay, and export were exercised.
+- The blocked audited finish exited `1` before criteria satisfaction and
+  reported accepted criteria still open, so the intended blocked-finish
+  behavior was verified before final finish.
+- Final finish reported `killed_worker: true` and `killed_manager: true`.
+- Default replay showed lifecycle, criteria, finish, and observation evidence.
+  Transcript replay/full-transcript replay showed terminal capture and
+  transcript segment evidence.
+- Export wrote `manifest.json`, transcript artifacts, replay artifacts, and
+  `export.zip`.
+- Final cleanup left no sessions active and reconcile clean.
+
+Notes:
+
+- The separate `criteria --list` capture was run after satisfaction as
+  `10b-criteria-list-after-satisfy.*`; the planned command block did not include
+  a list command before satisfaction.
+- The initial default `replay --json` capture did not include transcript segment
+  entries, so supplemental `13b-replay-transcript.*` and
+  `13c-replay-full-transcript.*` captures were added.
+- `finish-task` recorded the expected missing-decision warning because this
+  operator-driven pass used `--reason` without a manager decision ID.
+
+Decision:
+
+- Focused manual QA passed.
+
+## 2026-05-19: Repeat Live Smoke
+
+Scenario:
+
+- Script: `scripts/live-smoke-repeat 3`
+- Evidence bundle: `docs/live-qa-artifacts/2026-05-19-live-smoke-repeat-repeat-20260519052854/`
+
+Validated:
+
+- Three consecutive `scripts/live-smoke` runs passed.
+- Each run wrote an artifact root.
+- Each post-run `sessions --state active` check completed.
+- Each post-run `reconcile --stale-cycles-seconds 1` reported clean state.
+
+Decision:
+
+- Live smoke is repeatable enough to proceed to focused manual QA.
+
+## 2026-05-19: QA Readiness Decision
+
+Decision:
+
+- Ready for focused manual QA: yes.
+- Automated QA confidence: unit/regression coverage is green; live lifecycle
+  coverage passed once locally through the refreshed `scripts/live-smoke`.
+
+Evidence:
+
+- Unit tests: `python3 -m unittest discover -s tests -v` passed 347 tests.
+- Compile: `python3 -m py_compile scripts/workerctl workerctl/*.py` passed.
+- Shell syntax: `bash -n scripts/live-smoke` passed.
+- Live smoke: `scripts/live-smoke` passed and wrote
+  `docs/live-qa-artifacts/2026-05-19-live-smoke-current-cli-smoke-20260519045229/`.
+- Cleanup: `scripts/workerctl sessions --state active` returned `[]`.
+- Cleanup: `scripts/workerctl reconcile --stale-cycles-seconds 1` reported no
+  dangling bindings, dead PID sessions, or stuck tasks.
+
+Remaining risks:
+
+- Real Codex/tmux behavior still needs focused manual inspection until live
+  smoke is stable across repeated runs.
+- The unittest suite still emits non-fatal `ResourceWarning: unclosed database`
+  warnings under Python 3.14; this is test hygiene debt, not a current gate
+  failure.
+- The GitHub Actions live-smoke workflow is manual and skips the smoke step when
+  `codex` is unavailable on the runner, so local live smoke remains the
+  authoritative live lifecycle gate for now.
+
+## 2026-05-19: Current CLI Live Smoke
+
+Scenario:
+
+- Script: `scripts/live-smoke`
+- Evidence bundle:
+  `docs/live-qa-artifacts/2026-05-19-live-smoke-current-cli-smoke-20260519045229/`
+- Codex model: current Codex CLI default.
+
+Validated:
+
+- `pair` created a session-bound worker and manager using current CLI flags.
+- `cycle` returned a manager observation for the task.
+- `session-nudge --dry-run` resolved the worker session target.
+- Acceptance criteria add/list/satisfy flow worked.
+- `finish-task --require-criteria-audit --capture-transcript-before-stop --stop-manager --stop-worker` completed.
+- Pre-stop transcript capture recorded worker and manager transcript segments.
+- `transcript-show`, `mutation-audit`, `replay`, and `export-task` produced evidence.
+- `export-task --zip --include-transcripts` wrote `manifest.json`,
+  `transcript-captures.json`, `transcript-segments.json`, and `export.zip`.
+- Post-run `sessions --state active` contained no smoke sessions.
+- Post-run `reconcile --stale-cycles-seconds 1` reported no dangling bindings,
+  dead PID sessions, or stuck tasks.
+
+Findings:
+
+- No smoke failures observed.
+- `finish-task` recorded the expected missing-decision warning because the smoke
+  uses `--reason` without `--decision-id`; the command still recorded
+  `final_decision_id` and completed with `killed_worker: true` and
+  `killed_manager: true`.
+
 ## 2026-05-16: manager-led Gate 3 disposable edit QA
 
 Scenario:

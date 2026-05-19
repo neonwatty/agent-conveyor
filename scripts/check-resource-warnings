@@ -1,0 +1,39 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import subprocess
+import sys
+
+
+def main() -> int:
+    if sys.argv[1:2] == ["--"]:
+        cmd = sys.argv[2:]
+    else:
+        cmd = [
+            sys.executable,
+            "-W",
+            "always::ResourceWarning",
+            "-m",
+            "unittest",
+            "discover",
+            "-s",
+            "tests",
+            "-v",
+        ]
+    if not cmd:
+        print("usage: check-resource-warnings [-- command ...]", file=sys.stderr)
+        return 2
+    proc = subprocess.run(cmd, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    sys.stdout.write(proc.stdout)
+    sys.stderr.write(proc.stderr)
+    if proc.returncode != 0:
+        return proc.returncode
+    combined = f"{proc.stdout}\n{proc.stderr}"
+    if "ResourceWarning" in combined:
+        print("ResourceWarning detected in unittest output", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
