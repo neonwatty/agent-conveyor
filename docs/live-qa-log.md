@@ -9,10 +9,13 @@ Decision:
 Evidence:
 
 - Release candidate receipt: `docs/release-candidates/2026-05-19-rc1.md`.
+- Release candidate tag: `rc-2026-05-19-1` at `6a80077`.
 - Deterministic command artifacts:
   `docs/release-candidates/2026-05-19-rc1-artifacts/`.
 - Repeat live smoke artifact:
   `docs/live-qa-artifacts/2026-05-19-live-smoke-repeat-repeat-20260519081324/`.
+- Final RC wrapper repeat artifact:
+  `docs/live-qa-artifacts/2026-05-19-live-smoke-repeat-repeat-20260519083456/`.
 - Unit tests, ResourceWarning gate, compile, shell syntax, repeat live smoke,
   active-session cleanup, and reconcile all passed on `main`.
 

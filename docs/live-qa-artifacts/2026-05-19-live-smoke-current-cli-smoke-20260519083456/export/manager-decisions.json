@@ -1,0 +1,15 @@
+[
+  {
+    "created_at": "2026-05-19T15:35:01Z",
+    "decision": "stop",
+    "id": 36,
+    "manager_cycle_id": null,
+    "manager_id": null,
+    "payload": {
+      "command_id": "command-157fb387-6a46-4e4f-b025-a8483c579d65",
+      "source": "finish_task"
+    },
+    "reason": "live smoke complete",
+    "task_id": "task-7f613ec0-7b30-4ed3-acd6-fefe9b3f6149"
+  }
+]

@@ -629,7 +629,7 @@ git commit -m "ci: use rc check wrapper"
 **Files:**
 - Modify: `docs/release-candidates/2026-05-19-rc1.md`
 
-- [ ] **Step 1: Confirm clean main**
+- [x] **Step 1: Confirm clean main**
 
 Run:
 
@@ -643,7 +643,7 @@ Expected:
 - Branch is `main`.
 - Worktree is clean.
 
-- [ ] **Step 2: Run the full RC wrapper**
+- [x] **Step 2: Run the full RC wrapper**
 
 Run:
 
@@ -656,7 +656,7 @@ Expected:
 - All deterministic checks pass.
 - Repeat live smoke passes and records an artifact root.
 
-- [ ] **Step 3: Create an annotated RC tag**
+- [x] **Step 3: Create an annotated RC tag**
 
 Run:
 
@@ -669,7 +669,7 @@ Expected:
 
 - Tag is pushed to GitHub.
 
-- [ ] **Step 4: Record the tag**
+- [x] **Step 4: Record the tag**
 
 Update `docs/release-candidates/2026-05-19-rc1.md`:
 
@@ -679,7 +679,7 @@ Tag:
 - `rc-2026-05-19-1`
 ```
 
-- [ ] **Step 5: Commit the receipt update**
+- [x] **Step 5: Commit the receipt update**
 
 Run:
 
