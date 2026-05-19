@@ -6,26 +6,33 @@ Scenario:
 
 - Task: Task 6 from
   `docs/superpowers/plans/2026-05-19-next-qa-hardening-release-readiness.md`
-- Change: GitHub Actions now runs the unittest suite with
-  `ResourceWarning` promoted to an error.
+- Change: GitHub Actions now runs `scripts/check-resource-warnings`, which
+  executes the unittest suite with `ResourceWarning` output enabled and fails if
+  any `ResourceWarning` appears in stdout or stderr.
 
 Validated:
 
 - The normal unittest suite still passes.
-- The ResourceWarning-as-error unittest gate passes.
+- The ResourceWarning output gate passes.
 - The compile gate still passes.
 
 Verification:
 
 - `python3 -m unittest discover -s tests -v` passed 351 tests.
-- `python3 -W error::ResourceWarning -m unittest discover -s tests -v`
-  passed 351 tests.
-- `python3 -m py_compile scripts/workerctl workerctl/*.py` passed.
+- `scripts/check-resource-warnings` passed 351 tests with no `ResourceWarning`
+  output.
+- A throwaway leaking unittest returned failure through
+  `scripts/check-resource-warnings -- ...`, proving the gate catches
+  finalization-time `ResourceWarning` output even when `unittest` exits `0`.
+- `python3 -m py_compile scripts/workerctl scripts/check-resource-warnings
+  workerctl/*.py` passed.
 
 Decision:
 
 - The earlier QA-readiness ResourceWarning risk is now resolved for CI: future
-  pushes and pull requests fail if the unittest suite emits a `ResourceWarning`.
+  pushes and pull requests fail if the unittest suite prints a
+  `ResourceWarning`, including finalization-time warnings that do not reliably
+  make Python exit nonzero under `-W error`.
 
 ## 2026-05-19: Focused Manual QA Pass
 

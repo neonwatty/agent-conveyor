@@ -572,12 +572,15 @@ Fast deterministic gate:
 
 ```bash
 python3 -m unittest discover -s tests -v
-python3 -W error::ResourceWarning -m unittest discover -s tests -v
-python3 -m py_compile scripts/workerctl workerctl/*.py
+scripts/check-resource-warnings
+python3 -m py_compile scripts/workerctl scripts/check-resource-warnings workerctl/*.py
 ```
 
-GitHub Actions runs the same suite, the ResourceWarning-as-error suite, and a
+GitHub Actions runs the same suite, a ResourceWarning output gate, and a
 `py_compile` check on every push and pull request.
+The ResourceWarning gate intentionally fails on any `ResourceWarning` text in
+test output so finalization-time resource warnings cannot be hidden by a zero
+`unittest` exit status.
 
 Live local smoke gate:
 

@@ -589,32 +589,33 @@ git commit -m "docs: record focused manual qa pass"
   - `workerctl/db.py`
   - `workerctl/lifecycle.py`
 
-- [ ] **Step 1: Reproduce warnings as failures**
+- [x] **Step 1: Reproduce warnings with allocation traces**
 
 Run:
 
 ```bash
-python3 -W error::ResourceWarning -m unittest discover -s tests -v
+PYTHONTRACEMALLOC=10 python3 -W always::ResourceWarning -m unittest discover -s tests -v
 ```
 
 Expected:
 
-- Fails or errors where unclosed SQLite connections are created.
-- Note the first failing test and traceback.
+- ResourceWarning output includes allocation traces for unclosed SQLite
+  connections.
+- Note the first warning test and traceback.
 
-- [ ] **Step 2: Isolate the first failing area**
+- [x] **Step 2: Isolate the first warning area**
 
-Run the first failing test by name, replacing the example:
+Run the first warning test by name, replacing the example:
 
 ```bash
-python3 -W error::ResourceWarning -m unittest tests.test_workerctl.CaptureErrorVisibilityTests.test_wait_for_status_update_writes_capture_failed_event_on_capture_error -v
+PYTHONTRACEMALLOC=10 python3 -W always::ResourceWarning -m unittest tests.test_workerctl.CaptureErrorVisibilityTests.test_wait_for_status_update_writes_capture_failed_event_on_capture_error -v
 ```
 
 Expected:
 
-- Same ResourceWarning failure appears in a smaller run.
+- Same ResourceWarning output appears in a smaller run.
 
-- [ ] **Step 3: Fix connection ownership**
+- [x] **Step 3: Fix connection ownership**
 
 Use the traceback to identify each `worker_db.connect(...)` call that is not closed. The preferred fix pattern is:
 
@@ -627,13 +628,13 @@ with worker_db.connect(db_path) as conn:
 
 If the connection is returned to the caller, do not close it in the callee. Instead, update the test to close it with `self.addCleanup(conn.close)` or a `with` block.
 
-- [ ] **Step 4: Verify targeted warning-clean test**
+- [x] **Step 4: Verify targeted warning-clean test**
 
 Run the targeted test again. If the first failing test is still the known
 capture-error case, use:
 
 ```bash
-python3 -W error::ResourceWarning -m unittest tests.test_workerctl.CaptureErrorVisibilityTests.test_wait_for_status_update_writes_capture_failed_event_on_capture_error -v
+PYTHONTRACEMALLOC=10 python3 -W always::ResourceWarning -m unittest tests.test_workerctl.CaptureErrorVisibilityTests.test_wait_for_status_update_writes_capture_failed_event_on_capture_error -v
 ```
 
 Expected:
@@ -642,32 +643,32 @@ Expected:
   different first failing test, run that exact test name and record it in the
   commit message body.
 
-- [ ] **Step 5: Repeat until full warning-clean suite passes**
+- [x] **Step 5: Repeat until full warning-clean suite passes**
 
 Run:
 
 ```bash
-python3 -W error::ResourceWarning -m unittest discover -s tests -v
+scripts/check-resource-warnings
 ```
 
 Expected:
 
-- Full test suite passes with ResourceWarnings treated as errors.
+- Full test suite passes with no ResourceWarning output.
 
-- [ ] **Step 6: Run normal verification**
+- [x] **Step 6: Run normal verification**
 
 Run:
 
 ```bash
 python3 -m unittest discover -s tests -v
-python3 -m py_compile scripts/workerctl workerctl/*.py
+python3 -m py_compile scripts/workerctl scripts/check-resource-warnings workerctl/*.py
 ```
 
 Expected:
 
 - Normal suite and compile pass.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add tests/test_workerctl.py workerctl
@@ -687,8 +688,8 @@ git commit -m "test: close database resources cleanly"
 Modify `.github/workflows/test.yml` so the test job includes this step after the normal unittest step:
 
 ```yaml
-      - name: Run unit tests with ResourceWarning as error
-        run: python3 -W error::ResourceWarning -m unittest discover -s tests -v
+      - name: Fail on ResourceWarning output
+        run: scripts/check-resource-warnings
 ```
 
 - [x] **Step 2: Update README QA gate**
@@ -697,8 +698,8 @@ In `README.md`, update the deterministic gate block to:
 
 ```bash
 python3 -m unittest discover -s tests -v
-python3 -W error::ResourceWarning -m unittest discover -s tests -v
-python3 -m py_compile scripts/workerctl workerctl/*.py
+scripts/check-resource-warnings
+python3 -m py_compile scripts/workerctl scripts/check-resource-warnings workerctl/*.py
 ```
 
 - [x] **Step 3: Run verification**
@@ -707,8 +708,8 @@ Run:
 
 ```bash
 python3 -m unittest discover -s tests -v
-python3 -W error::ResourceWarning -m unittest discover -s tests -v
-python3 -m py_compile scripts/workerctl workerctl/*.py
+scripts/check-resource-warnings
+python3 -m py_compile scripts/workerctl scripts/check-resource-warnings workerctl/*.py
 ```
 
 Expected:
@@ -736,8 +737,8 @@ Run:
 
 ```bash
 python3 -m unittest discover -s tests -v
-python3 -W error::ResourceWarning -m unittest discover -s tests -v
-python3 -m py_compile scripts/workerctl workerctl/*.py
+scripts/check-resource-warnings
+python3 -m py_compile scripts/workerctl scripts/check-resource-warnings workerctl/*.py
 bash -n scripts/live-smoke
 bash -n scripts/live-smoke-repeat
 scripts/live-smoke-repeat 3
@@ -749,7 +750,7 @@ git status --short
 Expected:
 
 - Unit tests pass.
-- ResourceWarning gate passes.
+- ResourceWarning output gate passes.
 - Compile passes.
 - Both scripts are syntax-clean.
 - Repeat live smoke passes.
@@ -774,8 +775,8 @@ Decision:
 Evidence:
 
 - Unit tests: `python3 -m unittest discover -s tests -v` passed.
-- ResourceWarning gate: `python3 -W error::ResourceWarning -m unittest discover -s tests -v` passed.
-- Compile: `python3 -m py_compile scripts/workerctl workerctl/*.py` passed.
+- ResourceWarning gate: `scripts/check-resource-warnings` passed.
+- Compile: `python3 -m py_compile scripts/workerctl scripts/check-resource-warnings workerctl/*.py` passed.
 - Repeat live smoke: `scripts/live-smoke-repeat 3` passed.
 - Focused manual QA: focused manual QA pass recorded in `docs/live-qa-log.md`.
 - Cleanup: `scripts/workerctl sessions --state active` and `scripts/workerctl reconcile --stale-cycles-seconds 1` were clean.
