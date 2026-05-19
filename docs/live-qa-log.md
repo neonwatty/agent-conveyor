@@ -9,6 +9,8 @@ Decision:
 Evidence:
 
 - Release candidate receipt: `docs/release-candidates/2026-05-19-rc1.md`.
+- Deterministic command artifacts:
+  `docs/release-candidates/2026-05-19-rc1-artifacts/`.
 - Repeat live smoke artifact:
   `docs/live-qa-artifacts/2026-05-19-live-smoke-repeat-repeat-20260519081324/`.
 - Unit tests, ResourceWarning gate, compile, shell syntax, repeat live smoke,
