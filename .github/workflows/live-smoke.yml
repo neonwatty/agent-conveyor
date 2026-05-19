@@ -1,0 +1,42 @@
+name: Live Smoke
+
+on:
+  workflow_dispatch:
+
+jobs:
+  live-smoke:
+    runs-on: macos-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Show Python version
+        run: python3 --version
+
+      - name: Install required tools
+        run: |
+          brew install tmux ripgrep
+
+      - name: Check Codex CLI availability
+        id: codex
+        run: |
+          if ! command -v codex >/dev/null 2>&1; then
+            echo "codex CLI is not available in GitHub Actions; run scripts/live-smoke locally instead"
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "available=true" >> "$GITHUB_OUTPUT"
+
+      - name: Run live smoke
+        if: steps.codex.outputs.available == 'true'
+        run: scripts/live-smoke
+
+      - name: Upload live smoke artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-smoke-artifacts
+          path: docs/live-qa-artifacts/
+          if-no-files-found: ignore
