@@ -40,7 +40,7 @@
 - Create: `docs/release-candidates/2026-05-19-rc1.md`
 - Modify: `docs/live-qa-log.md`
 
-- [ ] **Step 1: Create the RC evidence file**
+- [x] **Step 1: Create the RC evidence file**
 
 Create `docs/release-candidates/2026-05-19-rc1.md`:
 
@@ -80,7 +80,7 @@ Decision:
 - Notes:
 ```
 
-- [ ] **Step 2: Fill the current commit**
+- [x] **Step 2: Fill the current commit**
 
 Run:
 
@@ -101,7 +101,7 @@ Expected:
 
 - The RC file contains the current short commit hash.
 
-- [ ] **Step 3: Run the deterministic gates**
+- [x] **Step 3: Run the deterministic gates**
 
 Run sequentially:
 
@@ -118,7 +118,7 @@ Expected:
 - All commands exit `0`.
 - Do not run these in parallel; the current full suite still shares tmux and `.codex-workers` state.
 
-- [ ] **Step 4: Run the live RC gate**
+- [x] **Step 4: Run the live RC gate**
 
 Run:
 
@@ -134,7 +134,7 @@ Expected:
 - `sessions --state active` prints `[]` or only explicitly unrelated sessions.
 - `reconcile` reports empty `dangling_bindings`, `dead_pid_sessions`, and `stuck_tasks`.
 
-- [ ] **Step 5: Update the RC file and live QA log**
+- [x] **Step 5: Update the RC file and live QA log**
 
 Append a short entry near the top of `docs/live-qa-log.md`:
 
@@ -154,7 +154,7 @@ Evidence:
 
 Update `docs/release-candidates/2026-05-19-rc1.md` checkboxes and result fields with the actual artifact path.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 Run:
 
@@ -176,7 +176,7 @@ Expected:
 - Modify: `README.md`
 - Modify: `tests/test_workerctl.py`
 
-- [ ] **Step 1: Add a script syntax test**
+- [x] **Step 1: Add a script syntax test**
 
 In `tests/test_workerctl.py`, add this method to `CliTests` near the existing script syntax tests:
 
@@ -186,7 +186,7 @@ In `tests/test_workerctl.py`, add this method to `CliTests` near the existing sc
         self.assertEqual(proc.returncode, 0, proc.stderr)
 ```
 
-- [ ] **Step 2: Run the new test and confirm it fails**
+- [x] **Step 2: Run the new test and confirm it fails**
 
 Run:
 
@@ -198,7 +198,7 @@ Expected:
 
 - Fails because `scripts/rc-check` does not exist yet.
 
-- [ ] **Step 3: Create the RC check script**
+- [x] **Step 3: Create the RC check script**
 
 Create `scripts/rc-check`:
 
@@ -264,7 +264,7 @@ Run:
 chmod +x scripts/rc-check
 ```
 
-- [ ] **Step 4: Run focused verification**
+- [x] **Step 4: Run focused verification**
 
 Run:
 
@@ -280,7 +280,7 @@ Expected:
 - The focused unit test passes.
 - `scripts/rc-check --skip-live-smoke-repeat` exits `0`.
 
-- [ ] **Step 5: Document the wrapper**
+- [x] **Step 5: Document the wrapper**
 
 In `README.md`, update the Tests section so the deterministic gate says:
 
@@ -298,7 +298,7 @@ scripts/rc-check --with-live-smoke-repeat
 ```
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 Run:
 
@@ -314,7 +314,7 @@ git commit -m "test: add rc check wrapper"
 **Files:**
 - Modify: `tests/test_workerctl.py`
 
-- [ ] **Step 1: Add detector tests without printing the warning token from successful tests**
+- [x] **Step 1: Add detector tests without printing the warning token from successful tests**
 
 Add this class near the other script tests. Do not put the exact warning class name in test method names, because the detector intentionally fails on that token in successful output.
 
@@ -342,7 +342,7 @@ class WarningGateScriptTests(unittest.TestCase):
         self.assertIn("ResourceWarning detected", proc.stderr)
 ```
 
-- [ ] **Step 2: Run focused tests**
+- [x] **Step 2: Run focused tests**
 
 Run:
 
@@ -354,7 +354,7 @@ Expected:
 
 - Both tests pass.
 
-- [ ] **Step 3: Run the detector on the full suite**
+- [x] **Step 3: Run the detector on the full suite**
 
 Run:
 
@@ -366,7 +366,7 @@ Expected:
 
 - Passes. If the newly added focused tests cause the detector to fail because the exact warning token appears in verbose test names, rename the methods before committing.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 Run:
 
@@ -384,7 +384,7 @@ git commit -m "test: cover resource warning gate"
 - Modify: `README.md`
 - Modify: `tests/test_workerctl.py`
 
-- [ ] **Step 1: Write a script syntax test**
+- [x] **Step 1: Write a script syntax test**
 
 Add this method to `CliTests`:
 
@@ -394,7 +394,7 @@ Add this method to `CliTests`:
         self.assertEqual(proc.returncode, 0, proc.stderr)
 ```
 
-- [ ] **Step 2: Create the isolated runner**
+- [x] **Step 2: Create the isolated runner**
 
 Create `scripts/run-unittests-isolated`:
 
@@ -424,7 +424,7 @@ Run:
 chmod +x scripts/run-unittests-isolated
 ```
 
-- [ ] **Step 3: Run focused syntax verification**
+- [x] **Step 3: Run focused syntax verification**
 
 Run:
 
@@ -437,7 +437,7 @@ Expected:
 
 - Both pass.
 
-- [ ] **Step 4: Document the runner**
+- [x] **Step 4: Document the runner**
 
 Add this note to `README.md` under Tests:
 
@@ -452,7 +452,7 @@ This gives the process a temporary `WORKERCTL_STATE_ROOT` and a test namespace.
 The standard CI job remains serial.
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 Run:
 
@@ -468,7 +468,7 @@ git commit -m "test: add isolated unittest runner"
 **Files:**
 - Modify: `tests/test_workerctl.py`
 
-- [ ] **Step 1: Add a namespace helper**
+- [x] **Step 1: Add a namespace helper**
 
 Near the top of `tests/test_workerctl.py`, below path constants, add:
 
@@ -481,7 +481,7 @@ def namespaced_test_name(base: str) -> str:
     return f"{base}-{safe}"[:64]
 ```
 
-- [ ] **Step 2: Update the three real-tmux tests**
+- [x] **Step 2: Update the three real-tmux tests**
 
 Change these assignments in `TmuxTests`:
 
@@ -519,7 +519,7 @@ to:
 name = namespaced_test_name("open-attempt-guard")
 ```
 
-- [ ] **Step 3: Add helper coverage**
+- [x] **Step 3: Add helper coverage**
 
 Add a small test class near `TmuxIntegrationCapabilityTests`:
 
@@ -537,7 +537,7 @@ class TestNameNamespaceTests(unittest.TestCase):
         self.assertEqual(namespaced_test_name("submit-smoke"), "submit-smoke-run-one")
 ```
 
-- [ ] **Step 4: Run focused tests**
+- [x] **Step 4: Run focused tests**
 
 Run:
 
@@ -550,7 +550,7 @@ Expected:
 - Namespace helper tests pass.
 - `TmuxTests` pass or the real-tmux methods are skipped for the existing tmux capability reason.
 
-- [ ] **Step 5: Run isolated runner once**
+- [x] **Step 5: Run isolated runner once**
 
 Run:
 
@@ -563,7 +563,7 @@ Expected:
 - Full suite passes.
 - No files are left under the repo-level `.codex-workers` from the isolated run.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 Run:
 
@@ -580,7 +580,7 @@ git commit -m "test: namespace tmux integration tests"
 - Modify: `.github/workflows/test.yml`
 - Modify: `README.md`
 
-- [ ] **Step 1: Update CI to use the wrapper**
+- [x] **Step 1: Update CI to use the wrapper**
 
 Change `.github/workflows/test.yml` job steps from separate unit/resource/compile commands to:
 
@@ -591,7 +591,7 @@ Change `.github/workflows/test.yml` job steps from separate unit/resource/compil
 
 Keep the checkout and Python version steps unchanged.
 
-- [ ] **Step 2: Update README wording**
+- [x] **Step 2: Update README wording**
 
 Ensure README says:
 
@@ -601,7 +601,7 @@ and pull request. The live smoke repeat remains local/manual because hosted
 runners may not have `codex`.
 ```
 
-- [ ] **Step 3: Verify locally**
+- [x] **Step 3: Verify locally**
 
 Run:
 
@@ -613,7 +613,7 @@ Expected:
 
 - Passes.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 Run:
 
