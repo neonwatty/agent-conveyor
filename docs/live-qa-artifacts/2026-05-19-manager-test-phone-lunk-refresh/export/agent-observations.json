@@ -1,0 +1,20 @@
+[
+  {
+    "command_id": "command-f873b8f3-8d30-43a7-a89e-666cc2a457fa",
+    "created_at": "2026-05-19T17:17:49Z",
+    "id": 57,
+    "manager_id": null,
+    "message": "Worker completed bounded Phone Lunk Alarm-inspired rebuild, opened unmerged PR, and provided evidence satisfying all accepted criteria.",
+    "observation_type": "decision",
+    "payload": {
+      "decision": "stop",
+      "decision_id": 39,
+      "source": "finish_task"
+    },
+    "role": "manager",
+    "severity": "info",
+    "source_capture_id": null,
+    "task_id": "task-07748f05-d996-4c66-8b6a-ac3ff4f11142",
+    "worker_id": null
+  }
+]

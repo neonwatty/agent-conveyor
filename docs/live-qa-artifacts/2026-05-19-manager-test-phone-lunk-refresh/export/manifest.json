@@ -1,0 +1,21 @@
+{
+  "created_at": "2026-05-19T17:19:48Z",
+  "files": [
+    "task-status.json",
+    "audit.json",
+    "acceptance-criteria.json",
+    "prompts.json",
+    "transcript-captures.json",
+    "terminal-captures.json",
+    "agent-observations.json",
+    "manager-cycles.json",
+    "manager-decisions.json",
+    "mutation-audit.json",
+    "replay.json",
+    "transcript-segments.json"
+  ],
+  "task": {
+    "id": "task-07748f05-d996-4c66-8b6a-ac3ff4f11142",
+    "name": "manager-test-phone-lunk-refresh"
+  }
+}

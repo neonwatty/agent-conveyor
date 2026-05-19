@@ -1,0 +1,106 @@
+[
+  {
+    "created_at": "2026-05-19T17:11:33Z",
+    "criterion": "A complete runnable app exists in manager-test-app and reflects the Phone Lunk Alarm concept.",
+    "evidence": {
+      "cycle_id": 71,
+      "evidence": [
+        "Fresh Vite + React + TypeScript app in src/App.tsx with camera preview, manual phone spot simulation, alarm modes, detection counter, clearable overlay, and responsive UI",
+        "Worker ran npm run dev -- --host 127.0.0.1 and curl -I http://127.0.0.1:5173/ returned HTTP/1.1 200 OK"
+      ],
+      "source": "worker_final_receipt_and_tail"
+    },
+    "id": 58,
+    "proof": null,
+    "rationale": null,
+    "source": "manager_inferred",
+    "status": "satisfied",
+    "task_id": "task-07748f05-d996-4c66-8b6a-ac3ff4f11142",
+    "updated_at": "2026-05-19T17:17:34Z"
+  },
+  {
+    "created_at": "2026-05-19T17:11:33Z",
+    "criterion": "The worker explains what was borrowed conceptually from phone-lunk-alarm and what was rebuilt.",
+    "evidence": {
+      "cycle_id": 71,
+      "evidence": "Worker receipt explains the reference app is a larger Next.js/Tailwind/TensorFlow camera detector with sound, recording, theme persistence, and Playwright flows, while this rebuild keeps the core idea and privacy/alarm UX with a deterministic local React app and no wholesale copied components, styles, tests, or assets.",
+      "source": "worker_final_receipt"
+    },
+    "id": 59,
+    "proof": null,
+    "rationale": null,
+    "source": "manager_inferred",
+    "status": "satisfied",
+    "task_id": "task-07748f05-d996-4c66-8b6a-ac3ff4f11142",
+    "updated_at": "2026-05-19T17:17:34Z"
+  },
+  {
+    "created_at": "2026-05-19T17:11:33Z",
+    "criterion": "README/setup instructions are present and accurate for the new app.",
+    "evidence": {
+      "cycle_id": 71,
+      "evidence": "README.md contains setup, verification, concept-vs-rebuild notes, and known gaps; tail shows README was updated with Quick Start and Verification commands.",
+      "source": "worker_final_receipt_and_tail"
+    },
+    "id": 60,
+    "proof": null,
+    "rationale": null,
+    "source": "manager_inferred",
+    "status": "satisfied",
+    "task_id": "task-07748f05-d996-4c66-8b6a-ac3ff4f11142",
+    "updated_at": "2026-05-19T17:17:34Z"
+  },
+  {
+    "created_at": "2026-05-19T17:11:33Z",
+    "criterion": "Build/test/lint verification passes, or any failure is explicitly explained with next steps.",
+    "evidence": {
+      "commands": [
+        {
+          "command": "npm run lint",
+          "evidence": "worker event tail shows eslint command exited 0",
+          "status": "pass"
+        },
+        {
+          "command": "npm run test",
+          "evidence": "worker event tail: src/App.test.tsx 5 tests passed",
+          "status": "pass"
+        },
+        {
+          "command": "npm run build",
+          "evidence": "worker event tail: vite production build completed",
+          "status": "pass"
+        }
+      ],
+      "cycle_id": 68,
+      "source": "worker_tail"
+    },
+    "id": 61,
+    "proof": null,
+    "rationale": null,
+    "source": "manager_inferred",
+    "status": "satisfied",
+    "task_id": "task-07748f05-d996-4c66-8b6a-ac3ff4f11142",
+    "updated_at": "2026-05-19T17:15:35Z"
+  },
+  {
+    "created_at": "2026-05-19T17:11:33Z",
+    "criterion": "A PR is opened against neonwatty/manager-test-app main and is not merged.",
+    "evidence": {
+      "base": "main",
+      "cycle_id": 71,
+      "head": "feature/phone-lunk-alarm-refresh",
+      "is_draft": false,
+      "not_merged_evidence": "worker receipt says PR is open against main, not merged; gh pr view output shows state OPEN",
+      "pr_url": "https://github.com/neonwatty/manager-test-app/pull/1",
+      "source": "worker_final_receipt_and_pr_metadata",
+      "state": "OPEN"
+    },
+    "id": 62,
+    "proof": null,
+    "rationale": null,
+    "source": "manager_inferred",
+    "status": "satisfied",
+    "task_id": "task-07748f05-d996-4c66-8b6a-ac3ff4f11142",
+    "updated_at": "2026-05-19T17:17:34Z"
+  }
+]
