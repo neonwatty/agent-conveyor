@@ -1,0 +1,58 @@
+[
+  {
+    "command_id": "command-377ea969-ec09-4beb-bfb2-7e2b100501ac",
+    "created_at": "2026-05-19T15:35:08Z",
+    "id": 51,
+    "manager_id": null,
+    "message": "live smoke complete",
+    "observation_type": "decision",
+    "payload": {
+      "decision": "stop",
+      "decision_id": 37,
+      "source": "finish_task"
+    },
+    "role": "manager",
+    "severity": "info",
+    "source_capture_id": null,
+    "task_id": "task-f139bbfc-18ef-465d-9e94-ee83e13d60de",
+    "worker_id": null
+  },
+  {
+    "command_id": "command-377ea969-ec09-4beb-bfb2-7e2b100501ac",
+    "created_at": "2026-05-19T15:35:08Z",
+    "id": 52,
+    "manager_id": null,
+    "message": "worker terminal captured",
+    "observation_type": "capture",
+    "payload": {
+      "content_sha256": "94c3bc1102827bf5e5e4bd4c1f93151a266f242b1ff1afc14b9d23145649f7cd",
+      "history_lines": 120,
+      "source": "finish_task_pre_stop",
+      "transcript_segment_id": 25
+    },
+    "role": "worker",
+    "severity": "info",
+    "source_capture_id": 25,
+    "task_id": "task-f139bbfc-18ef-465d-9e94-ee83e13d60de",
+    "worker_id": null
+  },
+  {
+    "command_id": "command-377ea969-ec09-4beb-bfb2-7e2b100501ac",
+    "created_at": "2026-05-19T15:35:08Z",
+    "id": 53,
+    "manager_id": null,
+    "message": "manager terminal captured",
+    "observation_type": "capture",
+    "payload": {
+      "content_sha256": "3add2b323cda5e2881e0e210656e09f272e8aac02f106a660c2083ef3f51d899",
+      "history_lines": 120,
+      "source": "finish_task_pre_stop",
+      "transcript_segment_id": 26
+    },
+    "role": "manager",
+    "severity": "info",
+    "source_capture_id": 26,
+    "task_id": "task-f139bbfc-18ef-465d-9e94-ee83e13d60de",
+    "worker_id": null
+  }
+]

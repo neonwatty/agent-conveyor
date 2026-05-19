@@ -1,0 +1,45 @@
+{
+  "segments": [
+    {
+      "byte_count": 1540,
+      "captured_at": "2026-05-19T15:35:01Z",
+      "content_sha256": "bf8416c5bbb968894428a491b980a3ce32a0f451bb56ad14747e64b091797e3c",
+      "created_at": "2026-05-19T15:35:01Z",
+      "id": 23,
+      "line_count": 32,
+      "previous_capture_id": null,
+      "redacted": false,
+      "retention_class": "hot",
+      "role": "worker",
+      "segment_end_line": 32,
+      "segment_kind": "excerpt",
+      "segment_start_line": 1,
+      "segment_text": "\n\u256d\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u256e\n\u2502 \u2728\u200aUpdate available! 0.130.0 -> 0.131.0         \u2502\n\u2502 Run npm install -g @openai/codex to update.     \u2502\n\u2502                                                 \u2502\n\u2502 See full release notes:                         \u2502\n\u2502 https://github.com/openai/codex/releases/latest \u2502\n\u2570\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u256f\n\n\u256d\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u256e\n\u2502 >_ OpenAI Codex (v0.130.0)                   \u2502\n\u2502                                              \u2502\n\u2502 model:     gpt-5.5 medium   /model to change \u2502\n\u2502 directory: ~/Desktop/codex-terminal-manager  \u2502\n\u2570\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u256f\n\n  Tip: New Use /fast to enable our fastest inference with increased plan usage.\n\n\n\u203a Smoke test worker. Do not edit files. Wait for manager instructions and\n  report status only.\n\n\n\u26a0 Heads up, you have less than 25% of your 5h limit left. Run /status for a\n  breakdown.\n\n\u25e6 Starting MCP servers (2/3): posthog (4s \u2022 esc to interrupt)\n\n\n\u203a Use /skills to list available skills\n\n  gpt-5.5 medium \u00b7 ~/Desktop/codex-terminal-manager \u00b7 main",
+      "source_capture_id": 23,
+      "task_id": "task-7f613ec0-7b30-4ed3-acd6-fefe9b3f6149"
+    },
+    {
+      "byte_count": 1926,
+      "captured_at": "2026-05-19T15:35:01Z",
+      "content_sha256": "fe34746997295af3c2777d2a01d532cf81ccd9b6f89000c831b2a036212eb753",
+      "created_at": "2026-05-19T15:35:01Z",
+      "id": 24,
+      "line_count": 40,
+      "previous_capture_id": null,
+      "redacted": false,
+      "retention_class": "hot",
+      "role": "manager",
+      "segment_end_line": 89,
+      "segment_kind": "excerpt",
+      "segment_start_line": 50,
+      "segment_text": "    be the first choice for session-bound pairs.\n  - If worker progress reveals new edge cases, tests, polish, or scope\n    boundaries, ask the worker to propose must-have vs follow-up criteria.\n  - After a worker proposes separated criteria, use `scripts/workerctl\n  criteria-plan`\n    to draft reviewed criteria commands, then run only the commands you agree\n  with.\n  - Record useful criteria with `scripts/workerctl criteria`.\n    Examples:\n    - `scripts/workerctl criteria codex-smoke-task-smoke-20260519083456 --add\n  --criterion \"...\" --source worker_proposed --status proposed`\n    - `scripts/workerctl criteria codex-smoke-task-smoke-20260519083456 --add\n  --criterion \"...\" --source manager_inferred --status accepted`\n    - `criterion_id=$(scripts/workerctl criteria codex-smoke-task-smoke-\n  20260519083456 --add --criterion \"...\" --source worker_proposed --status\n  proposed | python3 -c 'import json,sys; print(json.load(sys.stdin)\n  [\"affected_criterion\"][\"id\"])')`\n    - `scripts/workerctl criteria codex-smoke-task-smoke-20260519083456\n  --satisfy \"$criterion_id\" --evidence-json\n  '{\"command\":\"...\",\"status\":\"pass\"}'`\n  - Use `worker_proposed` for criteria that came from the worker.\n  - Use `manager_inferred` for criteria inferred from manager config, cycle\n    evidence, or the manager's own inspection; `manager_config` is not a valid\n    criteria source.\n  - Before finishing, compare worker receipts/verification against accepted\n  open criteria.\n  - Communicate with the worker only through workerctl session/task commands.\n  - Do not edit project files unless the user explicitly asks this manager\n    session to change workerctl itself.\n\n\n\u26a0 Heads up, you have less than 25% of your 5h limit left. Run /status for a\n  breakdown.\n\n\u2022 Starting MCP servers (2/3): posthog (1s \u2022 esc to interrupt)\n\n\n\u203a Run /review on my current changes\n\n  gpt-5.5 medium \u00b7 ~/Desktop/codex-terminal-manager \u00b7 main",
+      "source_capture_id": 24,
+      "task_id": "task-7f613ec0-7b30-4ed3-acd6-fefe9b3f6149"
+    }
+  ],
+  "task": {
+    "id": "task-7f613ec0-7b30-4ed3-acd6-fefe9b3f6149",
+    "name": "codex-smoke-task-smoke-20260519083456",
+    "state": "done"
+  }
+}

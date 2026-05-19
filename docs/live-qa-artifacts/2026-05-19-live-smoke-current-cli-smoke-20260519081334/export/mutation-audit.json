@@ -1,0 +1,66 @@
+{
+  "ok": true,
+  "records": [
+    {
+      "allowed_decisions": [
+        "stop"
+      ],
+      "command": {
+        "created_at": "2026-05-19T15:13:39Z",
+        "id": "command-8f96203c-b44a-41cc-82d2-a52b5159c5c9",
+        "state": "succeeded",
+        "type": "finish_task"
+      },
+      "effect": {
+        "dry_run": false,
+        "permission_check": null,
+        "send_text": null,
+        "sent": false,
+        "slash_command": null,
+        "worker_session": "codex-smoke-worker-smoke-20260519081334"
+      },
+      "expected_failure": false,
+      "linked_decision": {
+        "created_at": "2026-05-19T15:13:39Z",
+        "decision": "stop",
+        "id": 35,
+        "manager_cycle_id": null,
+        "manager_id": null,
+        "payload": {
+          "command_id": "command-8f96203c-b44a-41cc-82d2-a52b5159c5c9",
+          "source": "finish_task"
+        },
+        "reason": "live smoke complete",
+        "task_id": "task-337f0375-9714-4706-a876-3b4a9090adc2"
+      },
+      "nearest_prior_decision": {
+        "created_at": "2026-05-19T15:13:39Z",
+        "decision": "stop",
+        "id": 35,
+        "manager_cycle_id": null,
+        "manager_id": null,
+        "payload": {
+          "command_id": "command-8f96203c-b44a-41cc-82d2-a52b5159c5c9",
+          "source": "finish_task"
+        },
+        "reason": "live smoke complete",
+        "task_id": "task-337f0375-9714-4706-a876-3b4a9090adc2"
+      },
+      "ok": true,
+      "warnings": []
+    }
+  ],
+  "summary": {
+    "mutations": 1,
+    "with_warnings": 0
+  },
+  "task": {
+    "created_at": "2026-05-19T15:13:34Z",
+    "goal": "Live smoke test worker-manager lifecycle",
+    "id": "task-337f0375-9714-4706-a876-3b4a9090adc2",
+    "name": "codex-smoke-task-smoke-20260519081334",
+    "state": "done",
+    "summary": "Current CLI live smoke",
+    "updated_at": "2026-05-19T15:13:39Z"
+  }
+}

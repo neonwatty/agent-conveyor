@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+STATE_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/workerctl-test-state.XXXXXX")"
+NAMESPACE="iso-$$-$(date +%s)"
+
+cleanup() {
+  rm -rf "$STATE_ROOT"
+}
+trap cleanup EXIT
+
+export WORKERCTL_STATE_ROOT="$STATE_ROOT"
+export WORKERCTL_TEST_NAMESPACE="$NAMESPACE"
+
+cd "$ROOT_DIR"
+python3 -m unittest discover -s tests -v "$@"
