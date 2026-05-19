@@ -116,6 +116,42 @@ class DatabaseTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 worker_db.initialize_database(conn)
 
+    def test_connect_context_manager_commits_and_closes_connection(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "workerctl.db"
+            setup_conn = self.open_db(tmpdir)
+            setup_conn.close()
+
+            with worker_db.connect(path) as conn:
+                self.insert_task(conn, task_id="task-context")
+
+            with self.assertRaises(sqlite3.ProgrammingError):
+                conn.execute("select 1")
+
+            verify_conn = worker_db.connect(path)
+            self.addCleanup(verify_conn.close)
+            row = verify_conn.execute("select id from tasks where id = 'task-context'").fetchone()
+            self.assertIsNotNone(row)
+
+    def test_connect_context_manager_rolls_back_and_closes_connection_on_error(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "workerctl.db"
+            setup_conn = self.open_db(tmpdir)
+            setup_conn.close()
+
+            with self.assertRaisesRegex(RuntimeError, "boom"):
+                with worker_db.connect(path) as conn:
+                    self.insert_task(conn, task_id="task-rollback")
+                    raise RuntimeError("boom")
+
+            with self.assertRaises(sqlite3.ProgrammingError):
+                conn.execute("select 1")
+
+            verify_conn = worker_db.connect(path)
+            self.addCleanup(verify_conn.close)
+            row = verify_conn.execute("select id from tasks where id = 'task-rollback'").fetchone()
+            self.assertIsNone(row)
+
     def test_database_health_reports_ok(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             conn = self.open_db(tmpdir)
