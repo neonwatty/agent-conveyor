@@ -8,6 +8,7 @@ import sys
 from textwrap import dedent
 
 from workerctl.constants import (
+    CODEX_STARTUP_PROFILES,
     DEFAULT_HISTORY_LINES,
     DEFAULT_INTERRUPT_FOLLOWUP,
     DEFAULT_MANAGER_STALE_SECONDS,
@@ -88,6 +89,15 @@ def add_manager_codex_arg_options(command: argparse.ArgumentParser) -> None:
         "--no-manager-codex-args",
         action="store_true",
         help="Start the manager without the default recommended Codex args. Use only when intentionally overriding manager sandbox/approval behavior.",
+    )
+
+
+def add_codex_startup_options(command: argparse.ArgumentParser) -> None:
+    command.add_argument(
+        "--codex-profile",
+        choices=tuple(sorted(CODEX_STARTUP_PROFILES)),
+        default=None,
+        help="Named Codex startup profile. 'yolo' expands to --sandbox danger-full-access --ask-for-approval never.",
     )
 
 
@@ -436,6 +446,7 @@ def build_parser() -> argparse.ArgumentParser:
         default="never",
         help="Codex --ask-for-approval mode.",
     )
+    add_codex_startup_options(start_worker)
     start_worker.add_argument(
         "--timeout-seconds",
         type=int,
@@ -464,6 +475,7 @@ def build_parser() -> argparse.ArgumentParser:
         default="never",
         help="Codex --ask-for-approval mode.",
     )
+    add_codex_startup_options(start_manager)
     start_manager.add_argument(
         "--timeout-seconds",
         type=int,
@@ -558,6 +570,7 @@ def build_parser() -> argparse.ArgumentParser:
         default="never",
         help="Codex --ask-for-approval mode.",
     )
+    add_codex_startup_options(pair)
     pair.add_argument(
         "--timeout-seconds",
         type=int,
@@ -760,6 +773,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="History lines to capture with --capture-transcript-before-stop.",
     )
     finish_task.add_argument(
+        "--require-transcript-segment",
+        action="store_true",
+        help="With --capture-transcript-before-stop, fail before stopping sessions if any requested role lacks a non-empty transcript segment.",
+    )
+    finish_task.add_argument(
         "--require-criteria-audit",
         action="store_true",
         help="Fail before finishing if any accepted acceptance criteria remain open.",
@@ -791,6 +809,11 @@ def build_parser() -> argparse.ArgumentParser:
     transcript_capture.add_argument("--role", choices=("all", "worker", "manager"), default="all")
     transcript_capture.add_argument("--mode", choices=("metadata", "excerpt", "snapshot", "segment", "full"), default="segment")
     transcript_capture.add_argument("--lines", type=int, default=DEFAULT_HISTORY_LINES)
+    transcript_capture.add_argument(
+        "--require-segment",
+        action="store_true",
+        help="Fail if capture does not create a non-empty transcript segment.",
+    )
     transcript_capture.add_argument("--json", action="store_true")
     transcript_capture.add_argument("--path", help="Override the workerctl database path.")
     transcript_capture.set_defaults(func=command_transcript_capture)

@@ -210,6 +210,19 @@ def _capture_pre_stop_transcripts(
     return captures
 
 
+def _require_nonempty_transcript_segments(captures: list[dict[str, Any]]) -> None:
+    missing = []
+    for capture in captures:
+        segment = capture.get("transcript_segment")
+        if not segment or int(segment.get("line_count") or 0) <= 0:
+            missing.append(capture.get("role", "unknown"))
+    if missing:
+        raise WorkerError(
+            "no non-empty transcript segment captured for role(s): "
+            + ", ".join(missing)
+        )
+
+
 def _stop_or_finish_task(args: argparse.Namespace, *, finish: bool) -> int:
     db_path = Path(args.path).expanduser().resolve() if args.path else None
     command_type = "finish_task" if finish else "stop_task"
@@ -220,6 +233,7 @@ def _stop_or_finish_task(args: argparse.Namespace, *, finish: bool) -> int:
     capture_transcript_before_stop = bool(getattr(args, "capture_transcript_before_stop", False))
     capture_transcript_lines = int(getattr(args, "capture_transcript_lines", DEFAULT_HISTORY_LINES))
     capture_transcript_mode = getattr(args, "capture_transcript_mode", "segment")
+    require_transcript_segment = bool(getattr(args, "require_transcript_segment", False))
     with connect_db(db_path) as conn:
         initialize_database(conn)
         snapshot = task_status_snapshot(conn, task=args.task)
@@ -440,6 +454,8 @@ def _stop_or_finish_task(args: argparse.Namespace, *, finish: bool) -> int:
                 lines=capture_transcript_lines,
                 mode=capture_transcript_mode,
             )
+            if require_transcript_segment:
+                _require_nonempty_transcript_segments(result["pre_stop_transcript_captures"])
             with connect_db(db_path) as conn:
                 initialize_database(conn)
                 insert_db_event(

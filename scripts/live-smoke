@@ -72,6 +72,7 @@ run_capture "01-pair" "${WORKERCTL}" pair \
   --manager-guideline "Use workerctl cycle before deciding." \
   --manager-acceptance "The worker remains status-only and no product files are edited." \
   --manager-reference "scripts/live-smoke" \
+  --codex-profile yolo \
   --sandbox workspace-write \
   --ask-for-approval never \
   --timeout-seconds 90
@@ -99,6 +100,7 @@ run_capture "07-finish-task" "${WORKERCTL}" finish-task "${TASK}" \
   --capture-transcript-before-stop \
   --capture-transcript-mode excerpt \
   --capture-transcript-lines 120 \
+  --require-transcript-segment \
   --stop-manager \
   --stop-worker
 
