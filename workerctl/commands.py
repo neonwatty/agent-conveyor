@@ -16,7 +16,7 @@ from typing import Any
 
 from workerctl.classify import classify_busy_wait, classify_startup_output
 from workerctl.audit import mutation_audit_result
-from workerctl.constants import DEFAULT_HISTORY_LINES, DEFAULT_MANAGER_STALE_SECONDS, PROJECT_ROOT, VALID_STATES
+from workerctl.constants import CODEX_STARTUP_PROFILES, DEFAULT_HISTORY_LINES, DEFAULT_MANAGER_STALE_SECONDS, PROJECT_ROOT, VALID_STATES
 from workerctl.core import WorkerError, age_seconds, ensure_tool, now_iso, raise_for_tmux_permission_failure, run, sh_quote
 from workerctl.criteria_plan import plan_criteria_commands
 from workerctl.db import active_binding_for_task, active_manager, active_task_worker
@@ -81,6 +81,23 @@ def stop_command(name: str) -> str:
 
 def cli_path_prefix() -> str:
     return f"PATH={sh_quote(str(PROJECT_ROOT / 'bin'))}:$PATH"
+
+
+def resolve_codex_startup_options(
+    *,
+    profile: str | None,
+    sandbox: str | None,
+    ask_for_approval: str | None,
+) -> tuple[str | None, str | None]:
+    if profile is None:
+        return sandbox, ask_for_approval
+    if profile not in CODEX_STARTUP_PROFILES:
+        raise WorkerError(f"Unknown Codex startup profile: {profile}")
+    profile_options = CODEX_STARTUP_PROFILES[profile]
+    return (
+        profile_options["sandbox"] if sandbox is None else sandbox,
+        profile_options["ask_for_approval"] if ask_for_approval is None else ask_for_approval,
+    )
 
 
 def print_worker_commands(name: str) -> None:
@@ -2672,6 +2689,17 @@ def command_transcript_capture(args: argparse.Namespace) -> int:
             if args.role != "all":
                 raise
             captures.append({"error": str(exc), "role": role})
+    if getattr(args, "require_segment", False):
+        missing = []
+        for capture in captures:
+            segment = capture.get("transcript_segment")
+            if capture.get("error") or not segment or int(segment.get("line_count") or 0) <= 0:
+                missing.append(capture.get("role", "unknown"))
+        if missing:
+            raise WorkerError(
+                "no non-empty transcript segment captured for role(s): "
+                + ", ".join(missing)
+            )
     result = {"captures": captures, "mode": args.mode, "role": args.role, "task": args.task}
     if args.json:
         print(json.dumps(result, indent=2, sort_keys=True))
@@ -3197,13 +3225,18 @@ def command_start_worker(args: argparse.Namespace) -> int:
     Refuses if either the tmux session `codex-<name>` already exists or the DB
     already has a session named `<name>`.
     """
+    sandbox, ask_for_approval = resolve_codex_startup_options(
+        profile=getattr(args, "codex_profile", None),
+        sandbox=args.sandbox,
+        ask_for_approval=args.ask_for_approval,
+    )
     result = _spawn_codex_and_register(
         name=args.name,
         role="worker",
         cwd=args.cwd,
         task=args.task,
-        sandbox=args.sandbox,
-        ask_for_approval=args.ask_for_approval,
+        sandbox=sandbox,
+        ask_for_approval=ask_for_approval,
         timeout_seconds=args.timeout_seconds,
     )
     print(json.dumps(result, indent=2, sort_keys=True))
@@ -3219,6 +3252,11 @@ def command_start_manager(args: argparse.Namespace) -> int:
     Refuses if either the tmux session `codex-<name>` already exists or the DB
     already has a session named `<name>`.
     """
+    sandbox, ask_for_approval = resolve_codex_startup_options(
+        profile=getattr(args, "codex_profile", None),
+        sandbox=args.sandbox,
+        ask_for_approval=args.ask_for_approval,
+    )
     result = _spawn_codex_and_register(
         name=args.name,
         role="manager",
@@ -3228,8 +3266,8 @@ def command_start_manager(args: argparse.Namespace) -> int:
             manager_name=args.name,
             cwd=args.cwd,
         ),
-        sandbox=args.sandbox,
-        ask_for_approval=args.ask_for_approval,
+        sandbox=sandbox,
+        ask_for_approval=ask_for_approval,
         timeout_seconds=args.timeout_seconds,
     )
     print(json.dumps(result, indent=2, sort_keys=True))
@@ -3343,6 +3381,11 @@ def command_pair(args: argparse.Namespace) -> int:
     finally:
         conn.close()
 
+    sandbox, ask_for_approval = resolve_codex_startup_options(
+        profile=getattr(args, "codex_profile", None),
+        sandbox=args.sandbox,
+        ask_for_approval=args.ask_for_approval,
+    )
     try:
         # 2. Worker spawn
         worker_info = _spawn_codex_and_register(
@@ -3350,8 +3393,8 @@ def command_pair(args: argparse.Namespace) -> int:
             role="worker",
             cwd=args.cwd,
             task=args.task_prompt,
-            sandbox=args.sandbox,
-            ask_for_approval=args.ask_for_approval,
+            sandbox=sandbox,
+            ask_for_approval=ask_for_approval,
             timeout_seconds=args.timeout_seconds,
         )
 
@@ -3369,8 +3412,8 @@ def command_pair(args: argparse.Namespace) -> int:
                 worker_name=args.worker_name,
                 manager_config_seeded=manager_config_seeded,
             ),
-            sandbox=args.sandbox,
-            ask_for_approval=args.ask_for_approval,
+            sandbox=sandbox,
+            ask_for_approval=ask_for_approval,
             timeout_seconds=args.timeout_seconds,
         )
 

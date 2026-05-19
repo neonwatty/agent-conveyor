@@ -1,0 +1,86 @@
+{
+  "command_id": "command-4f91a170-205f-4a9c-a0bf-94d631a918af",
+  "final_audit": {
+    "open_criteria": [],
+    "require_criteria_audit": true,
+    "summary": {
+      "accepted": 0,
+      "deferred": 0,
+      "proposed": 0,
+      "rejected": 0,
+      "satisfied": 1
+    },
+    "total": 1
+  },
+  "final_decision_id": 40,
+  "final_observation_id": 58,
+  "finish": true,
+  "killed_manager": true,
+  "killed_worker": true,
+  "manager_decision": {
+    "allowed_decisions": [
+      "stop"
+    ],
+    "decision": null,
+    "decision_id": null,
+    "ok": false,
+    "warnings": [
+      "missing_decision_id"
+    ]
+  },
+  "manager_identity": {
+    "db_pane_id": null,
+    "db_session": "codex-codex-smoke-manager-smoke-20260519121323",
+    "live": true,
+    "live_pane_id": "%1",
+    "mismatches": [],
+    "role": "manager",
+    "session": "codex-smoke-manager-smoke-20260519121323"
+  },
+  "manager_session": "codex-smoke-manager-smoke-20260519121323",
+  "pre_stop_transcript_captures": [
+    {
+      "capture_id": 29,
+      "content_sha256": "fc860b3c70583f5f30a9f7b3400d182c9365a38b5296d8ce974bddff3f376097",
+      "history_lines": 120,
+      "line_count": 24,
+      "role": "worker",
+      "source": "finish_task_pre_stop",
+      "transcript_segment": {
+        "id": 29,
+        "kind": "excerpt",
+        "line_count": 23,
+        "retention_class": "hot"
+      }
+    },
+    {
+      "capture_id": 30,
+      "content_sha256": "ceefff6a9b2ec8a84b557733fb70c371911be5daf75943a19483a7185c4d7714",
+      "history_lines": 120,
+      "line_count": 77,
+      "role": "manager",
+      "source": "finish_task_pre_stop",
+      "transcript_segment": {
+        "id": 30,
+        "kind": "excerpt",
+        "line_count": 40,
+        "retention_class": "hot"
+      }
+    }
+  ],
+  "reason": "live smoke complete",
+  "stop_manager": true,
+  "stop_worker": true,
+  "task": "codex-smoke-task-smoke-20260519121323",
+  "worker": "codex-smoke-worker-smoke-20260519121323",
+  "worker_identity": {
+    "db_pane_id": null,
+    "db_session": "codex-codex-smoke-worker-smoke-20260519121323",
+    "live": true,
+    "live_pane_id": "%0",
+    "mismatches": [],
+    "role": "worker",
+    "session": "codex-smoke-worker-smoke-20260519121323"
+  },
+  "worker_session": "codex-smoke-worker-smoke-20260519121323"
+}

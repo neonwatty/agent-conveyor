@@ -18,6 +18,12 @@ DEFAULT_INTERRUPT_FOLLOWUP = (
     "and the next safe action."
 )
 RECOMMENDED_MANAGER_CODEX_ARGS = ["--sandbox", "danger-full-access", "--ask-for-approval", "never"]
+CODEX_STARTUP_PROFILES = {
+    "yolo": {
+        "sandbox": "danger-full-access",
+        "ask_for_approval": "never",
+    },
+}
 DEFAULT_STATUS_NUDGE = (
     "Please pause and write a concise status update in your status.json: "
     "current task, what changed, whether you are blocked, and your next action."

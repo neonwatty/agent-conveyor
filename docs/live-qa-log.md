@@ -1,5 +1,42 @@
 # Live QA Log
 
+## 2026-05-19: Startup Profile and Required Transcript Smoke
+
+Decision:
+
+- Live smoke passed after adding `--codex-profile yolo` and required
+  transcript evidence gates.
+
+Scenario:
+
+- Task: `codex-smoke-task-smoke-20260519121323`.
+- Worker: `codex-smoke-worker-smoke-20260519121323`.
+- Manager: `codex-smoke-manager-smoke-20260519121323`.
+- Artifact bundle:
+  `docs/live-qa-artifacts/2026-05-19-live-smoke-current-cli-smoke-20260519121323/`.
+
+Evidence:
+
+- `scripts/live-smoke` used `workerctl pair --codex-profile yolo` and
+  `finish-task --capture-transcript-before-stop
+  --require-transcript-segment`.
+- `finish-task` recorded non-empty transcript segments for both roles before
+  stopping sessions: worker segment `29` had 23 lines and manager segment `30`
+  had 40 lines.
+- `transcript-show --json` returned readable worker and manager transcript
+  records.
+- `mutation-audit --json` reported `ok: true` with one linked `finish_task`
+  mutation and zero warnings.
+- `sessions --state active` returned `[]`.
+- `reconcile --stale-cycles-seconds 1` reported no dangling bindings, no dead
+  PID sessions, no stuck tasks, and schema health `ok: true`.
+
+Verification:
+
+- `bash -n scripts/live-smoke`
+- `python3 -m unittest tests.test_workerctl -v`
+- `scripts/live-smoke`
+
 ## 2026-05-19: Manager/Worker External App Rebuild Drill
 
 Decision:

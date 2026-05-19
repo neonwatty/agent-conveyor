@@ -2085,6 +2085,45 @@ Deferred follow-up criteria:
                 commands.capture_output = original_capture_output
                 worker_identity.verify_worker_binding_identity = original_verify_worker
 
+    def test_transcript_capture_can_require_nonempty_segment_evidence(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                worker_db.upsert_worker(
+                    conn,
+                    name="worker-a",
+                    cwd=str(ROOT),
+                    tmux_session="codex-worker-a",
+                    identity_token="token-worker-a",
+                    tmux_pane_id="%1",
+                    state="active",
+                )
+                worker_db.create_task(conn, name="task-a", goal="Do task A.")
+                worker_db.bind_task_worker(conn, task="task-a", worker="worker-a", binding_id="binding-1")
+                conn.commit()
+
+            original_capture_output = commands.capture_output
+            original_verify_worker = worker_identity.verify_worker_binding_identity
+            try:
+                commands.capture_output = lambda name, lines: ""
+                worker_identity.verify_worker_binding_identity = lambda binding: {"live": True, "live_pane_id": "%1", "mismatches": []}
+                args = argparse.Namespace(
+                    json=True,
+                    lines=80,
+                    mode="segment",
+                    path=str(db_path),
+                    require_segment=True,
+                    role="worker",
+                    task="task-a",
+                )
+
+                with self.assertRaisesRegex(WorkerError, "no non-empty transcript segment"):
+                    commands.command_transcript_capture(args)
+            finally:
+                commands.capture_output = original_capture_output
+                worker_identity.verify_worker_binding_identity = original_verify_worker
+
     def test_replay_full_transcript_includes_segments(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "workerctl.db"
@@ -2874,6 +2913,7 @@ Deferred follow-up criteria:
                     path=str(db_path),
                     reason="session work complete",
                     require_criteria_audit=True,
+                    require_transcript_segment=True,
                     stop_manager=True,
                     stop_worker=True,
                     strict_decisions=False,
@@ -2916,6 +2956,88 @@ Deferred follow-up criteria:
                     [capture["role"] for capture in json.loads(command["result_json"])["pre_stop_transcript_captures"]],
                     ["worker", "manager"],
                 )
+            finally:
+                lifecycle.run = original_lifecycle_run
+                commands.run = original_commands_run
+                worker_identity.session_snapshot = original_session_snapshot
+
+    def test_finish_task_required_transcript_segment_fails_before_stopping_empty_capture(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                worker_db.create_task(conn, name="session-task", goal="Do task.")
+                worker_db.register_session(
+                    conn,
+                    name="session-worker",
+                    role="worker",
+                    codex_session_path="/tmp/worker.jsonl",
+                    codex_session_id="codex-worker",
+                    pid=111,
+                    cwd=str(ROOT),
+                    tmux_session="codex-session-worker",
+                    tmux_pane_id="%1",
+                )
+                worker_db.register_session(
+                    conn,
+                    name="session-manager",
+                    role="manager",
+                    codex_session_path="/tmp/manager.jsonl",
+                    codex_session_id="codex-manager",
+                    pid=222,
+                    cwd=str(ROOT),
+                    tmux_session="codex-session-manager",
+                    tmux_pane_id="%2",
+                )
+                worker_db.bind_sessions(
+                    conn,
+                    task_name="session-task",
+                    worker_session_name="session-worker",
+                    manager_session_name="session-manager",
+                )
+                conn.commit()
+
+            original_lifecycle_run = lifecycle.run
+            original_commands_run = commands.run
+            original_session_snapshot = worker_identity.session_snapshot
+            try:
+                operation_order = []
+
+                def fake_lifecycle_run(argv, **kwargs):
+                    operation_order.append(("kill", argv[-1]))
+                    return subprocess.CompletedProcess(argv, 0, "", "")
+
+                def fake_commands_run(argv, **kwargs):
+                    operation_order.append(("capture", argv[4]))
+                    return subprocess.CompletedProcess(argv, 0, "", "")
+
+                lifecycle.run = fake_lifecycle_run
+                commands.run = fake_commands_run
+                worker_identity.session_snapshot = lambda session: {
+                    "live": True,
+                    "pane_id": "%2" if session == "codex-session-manager" else "%1",
+                    "session": session,
+                }
+                args = argparse.Namespace(
+                    capture_transcript_before_stop=True,
+                    capture_transcript_lines=80,
+                    capture_transcript_mode="segment",
+                    decision_id=None,
+                    message=None,
+                    path=str(db_path),
+                    reason="session work complete",
+                    require_criteria_audit=True,
+                    require_transcript_segment=True,
+                    stop_manager=True,
+                    stop_worker=True,
+                    strict_decisions=False,
+                    task="session-task",
+                )
+
+                with self.assertRaisesRegex(WorkerError, "no non-empty transcript segment"):
+                    lifecycle.command_finish_task(args)
+                self.assertNotIn(("kill", "codex-session-manager"), operation_order)
+                self.assertNotIn(("kill", "codex-session-worker"), operation_order)
             finally:
                 lifecycle.run = original_lifecycle_run
                 commands.run = original_commands_run
@@ -8823,6 +8945,69 @@ class StartWorkerTests(unittest.TestCase):
             finally:
                 os.environ.pop("WORKERCTL_STATE_ROOT", None)
 
+    def test_start_worker_yolo_profile_expands_to_full_access_no_approval_flags(self):
+        from workerctl import commands as worker_commands
+        from workerctl import tmux as worker_tmux
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_dir = Path(tmpdir) / "state"
+            state_dir.mkdir()
+            os.environ["WORKERCTL_STATE_ROOT"] = str(state_dir)
+            try:
+                rollout = self._build_fake_rollout(tmpdir, "profile")
+                spawned: list[list[str]] = []
+
+                def fake_run(cmd, check=True, input_text=None):
+                    spawned.append(list(cmd))
+
+                    class R:
+                        returncode = 0
+                        stdout = ""
+                        stderr = ""
+
+                    return R()
+
+                def fake_discover(tmux_session, *, timeout_seconds=15, poll_interval=0.5):
+                    return {
+                        "native_pid": 99998,
+                        "codex_session_path": str(rollout),
+                        "codex_session_id": "cuid-profile",
+                        "cwd": "/repo",
+                        "originator": "codex-tui",
+                        "cli_version": "",
+                    }
+
+                orig_run = worker_tmux.run
+                orig_session_exists = worker_tmux.session_exists
+                orig_discover = worker_commands._discover_codex_session_in_tmux
+                worker_tmux.run = fake_run
+                worker_tmux.session_exists = lambda name: False
+                worker_commands._discover_codex_session_in_tmux = fake_discover
+                try:
+                    args = argparse.Namespace(
+                        name="profile-worker",
+                        cwd="/repo",
+                        task="Do work",
+                        sandbox=None,
+                        ask_for_approval=None,
+                        codex_profile="yolo",
+                        timeout_seconds=15,
+                    )
+                    with contextlib.redirect_stdout(io.StringIO()):
+                        self.assertEqual(worker_commands.command_start_worker(args), 0)
+
+                    tmux_cmd = next(c for c in spawned if len(c) > 1 and c[1] == "new-session")
+                    codex_cmd = tmux_cmd[-1]
+                    self.assertIn("--sandbox danger-full-access", codex_cmd)
+                    self.assertIn("--ask-for-approval never", codex_cmd)
+                    self.assertIn("'Do work'", codex_cmd)
+                finally:
+                    worker_tmux.run = orig_run
+                    worker_tmux.session_exists = orig_session_exists
+                    worker_commands._discover_codex_session_in_tmux = orig_discover
+            finally:
+                os.environ.pop("WORKERCTL_STATE_ROOT", None)
+
     def test_start_worker_refuses_if_session_name_already_registered(self):
         """If a session with the given name already exists in the DB, refuse cleanly."""
         from workerctl import commands as worker_commands
@@ -8909,6 +9094,7 @@ class StartWorkerTests(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertIn("--name", proc.stdout)
         self.assertIn("Worker session name.", proc.stdout)
+        self.assertIn("--codex-profile", proc.stdout)
 
 
 class ManagerBootstrapPromptTests(unittest.TestCase):
