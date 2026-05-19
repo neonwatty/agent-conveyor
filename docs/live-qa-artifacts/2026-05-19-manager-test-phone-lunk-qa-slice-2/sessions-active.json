@@ -1,0 +1,34 @@
+[
+  {
+    "codex_session_id": "019e41d7-9c67-7262-9ea0-2f9aa2b87a5d",
+    "codex_session_path": "/Users/neonwatty/.codex/sessions/2026/05/19/rollout-2026-05-19T13-05-09-019e41d7-9c67-7262-9ea0-2f9aa2b87a5d.jsonl",
+    "cwd": "/Users/neonwatty/Desktop/manager-test-app",
+    "id": "session-5a85168c-f8cb-422a-8f36-0e669301376e",
+    "identity_token": "session-token-0240847f-af2c-40d3-85ff-de35498a3f66",
+    "last_heartbeat_at": "2026-05-19T20:11:22Z",
+    "last_ingest_offset": 466246,
+    "name": "manager-test-phone-qa-worker-2",
+    "pid": 84416,
+    "registered_at": "2026-05-19T20:05:10Z",
+    "role": "worker",
+    "state": "active",
+    "tmux_pane_id": null,
+    "tmux_session": "codex-manager-test-phone-qa-worker-2"
+  },
+  {
+    "codex_session_id": "019e41d7-a464-7ec2-89c4-2112f9823fd6",
+    "codex_session_path": "/Users/neonwatty/.codex/sessions/2026/05/19/rollout-2026-05-19T13-05-11-019e41d7-a464-7ec2-89c4-2112f9823fd6.jsonl",
+    "cwd": "/Users/neonwatty/Desktop/manager-test-app",
+    "id": "session-21ac26c9-c925-480b-ab4e-708eb1f634d7",
+    "identity_token": "session-token-2adf1be5-110a-4985-b716-b9c085ac9d3e",
+    "last_heartbeat_at": "2026-05-19T20:05:13Z",
+    "last_ingest_offset": null,
+    "name": "manager-test-phone-qa-manager-2",
+    "pid": 85465,
+    "registered_at": "2026-05-19T20:05:13Z",
+    "role": "manager",
+    "state": "active",
+    "tmux_pane_id": null,
+    "tmux_session": "codex-manager-test-phone-qa-manager-2"
+  }
+]

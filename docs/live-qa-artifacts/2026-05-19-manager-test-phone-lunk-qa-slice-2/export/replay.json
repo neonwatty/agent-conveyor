@@ -1,0 +1,745 @@
+{
+  "entries": [
+    {
+      "actor": "manager",
+      "details": {
+        "cycle_id": 73,
+        "manager_capture_id": null,
+        "state": "succeeded",
+        "worker_capture_id": null
+      },
+      "kind": "observe",
+      "source": "manager_cycles",
+      "source_id": 73,
+      "summary": "observed session manager-test-phone-qa-worker-2 state busy (staleness 5.9s)",
+      "timestamp": "2026-05-19T20:05:21Z"
+    },
+    {
+      "actor": "manager",
+      "details": {
+        "cycle_id": 74,
+        "manager_capture_id": null,
+        "state": "succeeded",
+        "worker_capture_id": null
+      },
+      "kind": "observe",
+      "source": "manager_cycles",
+      "source_id": 74,
+      "summary": "observed session manager-test-phone-qa-worker-2 state busy (staleness 25.9s)",
+      "timestamp": "2026-05-19T20:05:41Z"
+    },
+    {
+      "actor": "workerctl",
+      "details": {
+        "created": true,
+        "criterion": "Worker updates the existing manager-test-app PR #1 branch or opens a clearly linked follow-up PR, and leaves it unmerged.",
+        "criterion_id": 64,
+        "event_type": "acceptance_criterion_added",
+        "evidence": {},
+        "proof": "Seeded from manager config after manager relative-path recovery.",
+        "rationale": null,
+        "source": "manager_inferred",
+        "status": "accepted",
+        "task_id": "task-9c352a73-6fae-49c5-b2bf-1f0db4a83577"
+      },
+      "kind": "acceptance_criterion",
+      "source": "events",
+      "source_id": 536,
+      "summary": "accepted criterion #64: Worker updates the existing manager-test-app PR #1 branch or opens a clearly linked follow-up PR, and leaves it unmerged.",
+      "timestamp": "2026-05-19T20:05:56Z"
+    },
+    {
+      "actor": "workerctl",
+      "details": {
+        "created": true,
+        "criterion": "The app includes real browser audio alarm playback with a user-controlled enable/disable path.",
+        "criterion_id": 65,
+        "event_type": "acceptance_criterion_added",
+        "evidence": {},
+        "proof": "Seeded from manager config after manager relative-path recovery.",
+        "rationale": null,
+        "source": "manager_inferred",
+        "status": "accepted",
+        "task_id": "task-9c352a73-6fae-49c5-b2bf-1f0db4a83577"
+      },
+      "kind": "acceptance_criterion",
+      "source": "events",
+      "source_id": 537,
+      "summary": "accepted criterion #65: The app includes real browser audio alarm playback with a user-controlled enable/disable path.",
+      "timestamp": "2026-05-19T20:05:56Z"
+    },
+    {
+      "actor": "workerctl",
+      "details": {
+        "created": true,
+        "criterion": "Camera permission, unsupported-browser, and error states are clearer than before.",
+        "criterion_id": 66,
+        "event_type": "acceptance_criterion_added",
+        "evidence": {},
+        "proof": "Seeded from manager config after manager relative-path recovery.",
+        "rationale": null,
+        "source": "manager_inferred",
+        "status": "accepted",
+        "task_id": "task-9c352a73-6fae-49c5-b2bf-1f0db4a83577"
+      },
+      "kind": "acceptance_criterion",
+      "source": "events",
+      "source_id": 538,
+      "summary": "accepted criterion #66: Camera permission, unsupported-browser, and error states are clearer than before.",
+      "timestamp": "2026-05-19T20:05:56Z"
+    },
+    {
+      "actor": "workerctl",
+      "details": {
+        "created": true,
+        "criterion": "README includes a short manual QA script for the new alarm and camera states.",
+        "criterion_id": 67,
+        "event_type": "acceptance_criterion_added",
+        "evidence": {},
+        "proof": "Seeded from manager config after manager relative-path recovery.",
+        "rationale": null,
+        "source": "manager_inferred",
+        "status": "accepted",
+        "task_id": "task-9c352a73-6fae-49c5-b2bf-1f0db4a83577"
+      },
+      "kind": "acceptance_criterion",
+      "source": "events",
+      "source_id": 539,
+      "summary": "accepted criterion #67: README includes a short manual QA script for the new alarm and camera states.",
+      "timestamp": "2026-05-19T20:05:56Z"
+    },
+    {
+      "actor": "workerctl",
+      "details": {
+        "created": true,
+        "criterion": "Worker reports npm run lint, npm run test, and npm run build results, with failures explained if any.",
+        "criterion_id": 68,
+        "event_type": "acceptance_criterion_added",
+        "evidence": {},
+        "proof": "Seeded from manager config after manager relative-path recovery.",
+        "rationale": null,
+        "source": "manager_inferred",
+        "status": "accepted",
+        "task_id": "task-9c352a73-6fae-49c5-b2bf-1f0db4a83577"
+      },
+      "kind": "acceptance_criterion",
+      "source": "events",
+      "source_id": 540,
+      "summary": "accepted criterion #68: Worker reports npm run lint, npm run test, and npm run build results, with failures explained if any.",
+      "timestamp": "2026-05-19T20:05:56Z"
+    },
+    {
+      "actor": "manager",
+      "details": {
+        "cycle_id": 75,
+        "manager_capture_id": null,
+        "state": "succeeded",
+        "worker_capture_id": null
+      },
+      "kind": "observe",
+      "source": "manager_cycles",
+      "source_id": 75,
+      "summary": "observed session manager-test-phone-qa-worker-2 state busy (staleness 53.9s)",
+      "timestamp": "2026-05-19T20:06:09Z"
+    },
+    {
+      "actor": "manager",
+      "details": {
+        "cycle_id": 76,
+        "manager_capture_id": null,
+        "state": "succeeded",
+        "worker_capture_id": null
+      },
+      "kind": "observe",
+      "source": "manager_cycles",
+      "source_id": 76,
+      "summary": "observed session manager-test-phone-qa-worker-2 state busy (staleness 69.9s)",
+      "timestamp": "2026-05-19T20:06:25Z"
+    },
+    {
+      "actor": "manager",
+      "details": {
+        "cycle_id": 77,
+        "manager_capture_id": null,
+        "state": "succeeded",
+        "worker_capture_id": null
+      },
+      "kind": "observe",
+      "source": "manager_cycles",
+      "source_id": 77,
+      "summary": "observed session manager-test-phone-qa-worker-2 state busy (staleness 7.4s)",
+      "timestamp": "2026-05-19T20:06:35Z"
+    },
+    {
+      "actor": "manager",
+      "details": {
+        "cycle_id": 78,
+        "manager_capture_id": null,
+        "state": "succeeded",
+        "worker_capture_id": null
+      },
+      "kind": "observe",
+      "source": "manager_cycles",
+      "source_id": 78,
+      "summary": "observed session manager-test-phone-qa-worker-2 state busy (staleness 20.4s)",
+      "timestamp": "2026-05-19T20:06:48Z"
+    },
+    {
+      "actor": "manager",
+      "details": {
+        "cycle_id": 79,
+        "manager_capture_id": null,
+        "state": "succeeded",
+        "worker_capture_id": null
+      },
+      "kind": "observe",
+      "source": "manager_cycles",
+      "source_id": 79,
+      "summary": "observed session manager-test-phone-qa-worker-2 state busy (staleness 75.4s)",
+      "timestamp": "2026-05-19T20:07:43Z"
+    },
+    {
+      "actor": "manager",
+      "details": {
+        "cycle_id": 80,
+        "manager_capture_id": null,
+        "state": "succeeded",
+        "worker_capture_id": null
+      },
+      "kind": "observe",
+      "source": "manager_cycles",
+      "source_id": 80,
+      "summary": "observed session manager-test-phone-qa-worker-2 state busy (staleness 75.4s)",
+      "timestamp": "2026-05-19T20:07:43Z"
+    },
+    {
+      "actor": "manager",
+      "details": {
+        "cycle_id": 81,
+        "manager_capture_id": null,
+        "state": "succeeded",
+        "worker_capture_id": null
+      },
+      "kind": "observe",
+      "source": "manager_cycles",
+      "source_id": 81,
+      "summary": "observed session manager-test-phone-qa-worker-2 state busy (staleness 120.4s)",
+      "timestamp": "2026-05-19T20:08:28Z"
+    },
+    {
+      "actor": "manager",
+      "details": {
+        "cycle_id": 82,
+        "manager_capture_id": null,
+        "state": "succeeded",
+        "worker_capture_id": null
+      },
+      "kind": "observe",
+      "source": "manager_cycles",
+      "source_id": 82,
+      "summary": "observed session manager-test-phone-qa-worker-2 state busy (staleness 166.4s)",
+      "timestamp": "2026-05-19T20:09:14Z"
+    },
+    {
+      "actor": "manager",
+      "details": {
+        "cycle_id": 83,
+        "manager_capture_id": null,
+        "state": "succeeded",
+        "worker_capture_id": null
+      },
+      "kind": "observe",
+      "source": "manager_cycles",
+      "source_id": 83,
+      "summary": "observed session manager-test-phone-qa-worker-2 state busy (staleness 170.4s) [pane pattern: long_running_interruptible]",
+      "timestamp": "2026-05-19T20:09:18Z"
+    },
+    {
+      "actor": "workerctl",
+      "details": {
+        "criterion": "Worker reports npm run lint, npm run test, and npm run build results, with failures explained if any.",
+        "criterion_id": 68,
+        "event_type": "acceptance_criterion_updated",
+        "evidence": {
+          "commands": [
+            {
+              "command": "npm run lint",
+              "exit_code": 0,
+              "status": "pass"
+            },
+            {
+              "command": "npm run test",
+              "exit_code": 0,
+              "status": "pass",
+              "summary": "8/8 tests passing"
+            },
+            {
+              "command": "npm run build",
+              "exit_code": 0,
+              "status": "pass",
+              "summary": "Vite production bundle emitted"
+            }
+          ],
+          "source": "worker_report",
+          "worker_event_id": 1149
+        },
+        "previous_evidence": {},
+        "previous_proof": "Seeded from manager config after manager relative-path recovery.",
+        "previous_rationale": null,
+        "previous_status": "accepted",
+        "proof": "Seeded from manager config after manager relative-path recovery.",
+        "rationale": null,
+        "source": "manager_inferred",
+        "status": "satisfied",
+        "task_id": "task-9c352a73-6fae-49c5-b2bf-1f0db4a83577"
+      },
+      "kind": "acceptance_criterion",
+      "source": "events",
+      "source_id": 542,
+      "summary": "satisfied criterion #68 (accepted -> satisfied): proof recorded (Seeded from manager config after manager relative-path recovery.)",
+      "timestamp": "2026-05-19T20:09:28Z"
+    },
+    {
+      "actor": "manager",
+      "details": {
+        "cycle_id": 84,
+        "manager_capture_id": null,
+        "state": "succeeded",
+        "worker_capture_id": null
+      },
+      "kind": "observe",
+      "source": "manager_cycles",
+      "source_id": 84,
+      "summary": "observed session manager-test-phone-qa-worker-2 state busy (staleness 211.4s)",
+      "timestamp": "2026-05-19T20:09:59Z"
+    },
+    {
+      "actor": "manager",
+      "details": {
+        "cycle_id": 85,
+        "manager_capture_id": null,
+        "state": "succeeded",
+        "worker_capture_id": null
+      },
+      "kind": "observe",
+      "source": "manager_cycles",
+      "source_id": 85,
+      "summary": "observed session manager-test-phone-qa-worker-2 state idle (staleness 2.6s)",
+      "timestamp": "2026-05-19T20:10:10Z"
+    },
+    {
+      "actor": "manager",
+      "details": {
+        "cycle_id": 86,
+        "manager_capture_id": null,
+        "state": "succeeded",
+        "worker_capture_id": null
+      },
+      "kind": "observe",
+      "source": "manager_cycles",
+      "source_id": 86,
+      "summary": "observed session manager-test-phone-qa-worker-2 state idle (staleness 34.6s)",
+      "timestamp": "2026-05-19T20:10:42Z"
+    },
+    {
+      "actor": "manager",
+      "details": {
+        "cycle_id": 87,
+        "manager_capture_id": null,
+        "state": "succeeded",
+        "worker_capture_id": null
+      },
+      "kind": "observe",
+      "source": "manager_cycles",
+      "source_id": 87,
+      "summary": "observed session manager-test-phone-qa-worker-2 state idle (staleness 45.6s)",
+      "timestamp": "2026-05-19T20:10:53Z"
+    },
+    {
+      "actor": "manager",
+      "details": {
+        "cycle_id": 88,
+        "manager_capture_id": null,
+        "state": "succeeded",
+        "worker_capture_id": null
+      },
+      "kind": "observe",
+      "source": "manager_cycles",
+      "source_id": 88,
+      "summary": "observed session manager-test-phone-qa-worker-2 state idle (staleness 62.6s)",
+      "timestamp": "2026-05-19T20:11:10Z"
+    },
+    {
+      "actor": "workerctl",
+      "details": {
+        "criterion": "Worker updates the existing manager-test-app PR #1 branch or opens a clearly linked follow-up PR, and leaves it unmerged.",
+        "criterion_id": 64,
+        "event_type": "acceptance_criterion_updated",
+        "evidence": {
+          "base": "main",
+          "commit": "5655516b02c29ab205094bc9289a8bf6a334c16d",
+          "head": "feature/phone-lunk-alarm-refresh",
+          "isDraft": false,
+          "merged": false,
+          "pr_metadata_event_id": 1214,
+          "pr_number": 1,
+          "pr_state": "OPEN",
+          "pr_url": "https://github.com/neonwatty/manager-test-app/pull/1",
+          "push": "b346f7b..5655516 feature/phone-lunk-alarm-refresh -> feature/phone-lunk-alarm-refresh",
+          "receipt_event_id": 1228,
+          "source": "worker_receipt_and_pr_metadata"
+        },
+        "previous_evidence": {},
+        "previous_proof": "Seeded from manager config after manager relative-path recovery.",
+        "previous_rationale": null,
+        "previous_status": "accepted",
+        "proof": "Seeded from manager config after manager relative-path recovery.",
+        "rationale": null,
+        "source": "manager_inferred",
+        "status": "satisfied",
+        "task_id": "task-9c352a73-6fae-49c5-b2bf-1f0db4a83577"
+      },
+      "kind": "acceptance_criterion",
+      "source": "events",
+      "source_id": 544,
+      "summary": "satisfied criterion #64 (accepted -> satisfied): proof recorded (Seeded from manager config after manager relative-path recovery.)",
+      "timestamp": "2026-05-19T20:11:14Z"
+    },
+    {
+      "actor": "workerctl",
+      "details": {
+        "criterion": "The app includes real browser audio alarm playback with a user-controlled enable/disable path.",
+        "criterion_id": 65,
+        "event_type": "acceptance_criterion_updated",
+        "evidence": {
+          "changed_files": [
+            "src/App.tsx",
+            "src/App.test.tsx",
+            "src/styles.css"
+          ],
+          "implementation": "Web Audio alarm enable/mute flow and tone playback on alarm",
+          "known_gap": "true audible speaker interaction not automated",
+          "receipt_event_id": 1228,
+          "source": "worker_receipt",
+          "test_coverage": "audio opt-in and mute behavior",
+          "verification": [
+            "npm run test exit 0, 8 tests passed",
+            "dev server smoke returned 200 text/html"
+          ]
+        },
+        "previous_evidence": {},
+        "previous_proof": "Seeded from manager config after manager relative-path recovery.",
+        "previous_rationale": null,
+        "previous_status": "accepted",
+        "proof": "Seeded from manager config after manager relative-path recovery.",
+        "rationale": null,
+        "source": "manager_inferred",
+        "status": "satisfied",
+        "task_id": "task-9c352a73-6fae-49c5-b2bf-1f0db4a83577"
+      },
+      "kind": "acceptance_criterion",
+      "source": "events",
+      "source_id": 545,
+      "summary": "satisfied criterion #65 (accepted -> satisfied): proof recorded (Seeded from manager config after manager relative-path recovery.)",
+      "timestamp": "2026-05-19T20:11:14Z"
+    },
+    {
+      "actor": "workerctl",
+      "details": {
+        "criterion": "README includes a short manual QA script for the new alarm and camera states.",
+        "criterion_id": 67,
+        "event_type": "acceptance_criterion_updated",
+        "evidence": {
+          "changed_files": [
+            "README.md"
+          ],
+          "coverage": "manual QA covers real browser audio and camera prompt paths",
+          "implementation": "README manual QA script added and known gaps updated",
+          "receipt_event_id": 1228,
+          "source": "worker_receipt"
+        },
+        "previous_evidence": {},
+        "previous_proof": "Seeded from manager config after manager relative-path recovery.",
+        "previous_rationale": null,
+        "previous_status": "accepted",
+        "proof": "Seeded from manager config after manager relative-path recovery.",
+        "rationale": null,
+        "source": "manager_inferred",
+        "status": "satisfied",
+        "task_id": "task-9c352a73-6fae-49c5-b2bf-1f0db4a83577"
+      },
+      "kind": "acceptance_criterion",
+      "source": "events",
+      "source_id": 546,
+      "summary": "satisfied criterion #67 (accepted -> satisfied): proof recorded (Seeded from manager config after manager relative-path recovery.)",
+      "timestamp": "2026-05-19T20:11:14Z"
+    },
+    {
+      "actor": "workerctl",
+      "details": {
+        "criterion": "Camera permission, unsupported-browser, and error states are clearer than before.",
+        "criterion_id": 66,
+        "event_type": "acceptance_criterion_updated",
+        "evidence": {
+          "changed_files": [
+            "src/App.tsx",
+            "src/App.test.tsx"
+          ],
+          "implementation": "clearer camera denied/unsupported/error copy and retry camera state",
+          "receipt_event_id": 1228,
+          "source": "worker_receipt",
+          "test_coverage": "denied camera recovery copy",
+          "verification": "npm run test exit 0, 8 tests passed"
+        },
+        "previous_evidence": {},
+        "previous_proof": "Seeded from manager config after manager relative-path recovery.",
+        "previous_rationale": null,
+        "previous_status": "accepted",
+        "proof": "Seeded from manager config after manager relative-path recovery.",
+        "rationale": null,
+        "source": "manager_inferred",
+        "status": "satisfied",
+        "task_id": "task-9c352a73-6fae-49c5-b2bf-1f0db4a83577"
+      },
+      "kind": "acceptance_criterion",
+      "source": "events",
+      "source_id": 547,
+      "summary": "satisfied criterion #66 (accepted -> satisfied): proof recorded (Seeded from manager config after manager relative-path recovery.)",
+      "timestamp": "2026-05-19T20:11:14Z"
+    },
+    {
+      "actor": "manager",
+      "details": {
+        "cycle_id": 89,
+        "manager_capture_id": null,
+        "state": "succeeded",
+        "worker_capture_id": null
+      },
+      "kind": "observe",
+      "source": "manager_cycles",
+      "source_id": 89,
+      "summary": "observed session manager-test-phone-qa-worker-2 state idle (staleness 74.6s)",
+      "timestamp": "2026-05-19T20:11:22Z"
+    },
+    {
+      "actor": "workerctl",
+      "details": {
+        "criterion": "Worker updates the existing manager-test-app PR #1 branch or opens a clearly linked follow-up PR, and leaves it unmerged.",
+        "criterion_id": 64,
+        "event_type": "acceptance_criterion_updated",
+        "evidence": {
+          "commit": "5655516b02c29ab205094bc9289a8bf6a334c16d",
+          "isDraft": false,
+          "merged": false,
+          "pr": "https://github.com/neonwatty/manager-test-app/pull/1",
+          "source": "worker_final_receipt",
+          "state": "OPEN"
+        },
+        "previous_evidence": {
+          "base": "main",
+          "commit": "5655516b02c29ab205094bc9289a8bf6a334c16d",
+          "head": "feature/phone-lunk-alarm-refresh",
+          "isDraft": false,
+          "merged": false,
+          "pr_metadata_event_id": 1214,
+          "pr_number": 1,
+          "pr_state": "OPEN",
+          "pr_url": "https://github.com/neonwatty/manager-test-app/pull/1",
+          "push": "b346f7b..5655516 feature/phone-lunk-alarm-refresh -> feature/phone-lunk-alarm-refresh",
+          "receipt_event_id": 1228,
+          "source": "worker_receipt_and_pr_metadata"
+        },
+        "previous_proof": "Seeded from manager config after manager relative-path recovery.",
+        "previous_rationale": null,
+        "previous_status": "satisfied",
+        "proof": "Worker pushed commit 5655516 to existing PR #1 branch; PR remains OPEN, not draft, base main, head feature/phone-lunk-alarm-refresh.",
+        "rationale": null,
+        "source": "manager_inferred",
+        "status": "satisfied",
+        "task_id": "task-9c352a73-6fae-49c5-b2bf-1f0db4a83577"
+      },
+      "kind": "acceptance_criterion",
+      "source": "events",
+      "source_id": 548,
+      "summary": "satisfied criterion #64 (satisfied -> satisfied): proof recorded (Worker pushed commit 5655516 to existing PR #1 branch; PR remains OPEN, not draft, base main, head feature/phone-lunk-alarm-refresh.)",
+      "timestamp": "2026-05-19T20:11:26Z"
+    },
+    {
+      "actor": "workerctl",
+      "details": {
+        "criterion": "The app includes real browser audio alarm playback with a user-controlled enable/disable path.",
+        "criterion_id": 65,
+        "event_type": "acceptance_criterion_updated",
+        "evidence": {
+          "features": [
+            "Enable Audio Alarm",
+            "Mute Audio Alarm",
+            "browser-generated tone",
+            "silent mode suppresses tone"
+          ],
+          "files": [
+            "src/App.tsx",
+            "src/App.test.tsx",
+            "src/styles.css"
+          ],
+          "source": "worker_final_receipt",
+          "test_coverage": "audio opt-in and mute behavior"
+        },
+        "previous_evidence": {
+          "changed_files": [
+            "src/App.tsx",
+            "src/App.test.tsx",
+            "src/styles.css"
+          ],
+          "implementation": "Web Audio alarm enable/mute flow and tone playback on alarm",
+          "known_gap": "true audible speaker interaction not automated",
+          "receipt_event_id": 1228,
+          "source": "worker_receipt",
+          "test_coverage": "audio opt-in and mute behavior",
+          "verification": [
+            "npm run test exit 0, 8 tests passed",
+            "dev server smoke returned 200 text/html"
+          ]
+        },
+        "previous_proof": "Seeded from manager config after manager relative-path recovery.",
+        "previous_rationale": null,
+        "previous_status": "satisfied",
+        "proof": "Worker implemented Web Audio alarm enable/mute controls and tone playback on alarm.",
+        "rationale": null,
+        "source": "manager_inferred",
+        "status": "satisfied",
+        "task_id": "task-9c352a73-6fae-49c5-b2bf-1f0db4a83577"
+      },
+      "kind": "acceptance_criterion",
+      "source": "events",
+      "source_id": 549,
+      "summary": "satisfied criterion #65 (satisfied -> satisfied): proof recorded (Worker implemented Web Audio alarm enable/mute controls and tone playback on alarm.)",
+      "timestamp": "2026-05-19T20:11:26Z"
+    },
+    {
+      "actor": "workerctl",
+      "details": {
+        "criterion": "Camera permission, unsupported-browser, and error states are clearer than before.",
+        "criterion_id": 66,
+        "event_type": "acceptance_criterion_updated",
+        "evidence": {
+          "files": [
+            "src/App.tsx",
+            "src/App.test.tsx"
+          ],
+          "source": "worker_final_receipt",
+          "states": [
+            "Camera permission blocked",
+            "Retry Camera",
+            "Camera APIs unavailable",
+            "No camera was found"
+          ],
+          "test_coverage": "denied camera recovery copy"
+        },
+        "previous_evidence": {
+          "changed_files": [
+            "src/App.tsx",
+            "src/App.test.tsx"
+          ],
+          "implementation": "clearer camera denied/unsupported/error copy and retry camera state",
+          "receipt_event_id": 1228,
+          "source": "worker_receipt",
+          "test_coverage": "denied camera recovery copy",
+          "verification": "npm run test exit 0, 8 tests passed"
+        },
+        "previous_proof": "Seeded from manager config after manager relative-path recovery.",
+        "previous_rationale": null,
+        "previous_status": "satisfied",
+        "proof": "Worker added clearer camera denied, unsupported, and retry copy/states.",
+        "rationale": null,
+        "source": "manager_inferred",
+        "status": "satisfied",
+        "task_id": "task-9c352a73-6fae-49c5-b2bf-1f0db4a83577"
+      },
+      "kind": "acceptance_criterion",
+      "source": "events",
+      "source_id": 550,
+      "summary": "satisfied criterion #66 (satisfied -> satisfied): proof recorded (Worker added clearer camera denied, unsupported, and retry copy/states.)",
+      "timestamp": "2026-05-19T20:11:26Z"
+    },
+    {
+      "actor": "workerctl",
+      "details": {
+        "criterion": "README includes a short manual QA script for the new alarm and camera states.",
+        "criterion_id": 67,
+        "event_type": "acceptance_criterion_updated",
+        "evidence": {
+          "coverage": [
+            "audio off before opt-in",
+            "audio ready",
+            "audio muted",
+            "camera allow",
+            "camera deny",
+            "camera unsupported"
+          ],
+          "file": "README.md",
+          "section": "Manual QA Script",
+          "source": "worker_final_receipt"
+        },
+        "previous_evidence": {
+          "changed_files": [
+            "README.md"
+          ],
+          "coverage": "manual QA covers real browser audio and camera prompt paths",
+          "implementation": "README manual QA script added and known gaps updated",
+          "receipt_event_id": 1228,
+          "source": "worker_receipt"
+        },
+        "previous_proof": "Seeded from manager config after manager relative-path recovery.",
+        "previous_rationale": null,
+        "previous_status": "satisfied",
+        "proof": "Worker added README Manual QA Script covering audio alarm and camera states.",
+        "rationale": null,
+        "source": "manager_inferred",
+        "status": "satisfied",
+        "task_id": "task-9c352a73-6fae-49c5-b2bf-1f0db4a83577"
+      },
+      "kind": "acceptance_criterion",
+      "source": "events",
+      "source_id": 551,
+      "summary": "satisfied criterion #67 (satisfied -> satisfied): proof recorded (Worker added README Manual QA Script covering audio alarm and camera states.)",
+      "timestamp": "2026-05-19T20:11:26Z"
+    },
+    {
+      "actor": "manager",
+      "details": {
+        "command_id": "command-d0f8b3d8-2d46-4e14-b8e1-b98fd8a7f8f3",
+        "state": "succeeded",
+        "type": "finish_task"
+      },
+      "kind": "finish",
+      "source": "commands",
+      "source_id": "command-d0f8b3d8-2d46-4e14-b8e1-b98fd8a7f8f3",
+      "summary": "finished task: All accepted criteria satisfied from worker task_complete receipt and PR metadata; PR #1 remains open and unmerged. (manager left open)",
+      "timestamp": "2026-05-19T20:11:34Z"
+    },
+    {
+      "actor": "manager",
+      "details": {
+        "decision": "stop",
+        "manager_cycle_id": null
+      },
+      "kind": "decision",
+      "source": "manager_decisions",
+      "source_id": 41,
+      "summary": "decision stop: All accepted criteria satisfied from worker task_complete receipt and PR metadata; PR #1 remains open and unmerged.",
+      "timestamp": "2026-05-19T20:11:34Z"
+    }
+  ],
+  "mode": "timeline",
+  "role": "all",
+  "task": {
+    "created_at": "2026-05-19T20:05:09Z",
+    "goal": "Realistic manager/worker QA slice for the Phone Lunk Alarm test app.",
+    "id": "task-9c352a73-6fae-49c5-b2bf-1f0db4a83577",
+    "name": "manager-test-phone-lunk-qa-slice-20260519",
+    "state": "done",
+    "summary": "Add a bounded app improvement to the open manager-test-app PR and verify evidence.",
+    "updated_at": "2026-05-19T20:11:34Z"
+  }
+}

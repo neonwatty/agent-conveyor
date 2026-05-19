@@ -1,0 +1,44 @@
+{
+  "budget": null,
+  "created_at": "2026-05-19T20:05:09Z",
+  "goal": "Realistic manager/worker QA slice for the Phone Lunk Alarm test app.",
+  "id": "task-9c352a73-6fae-49c5-b2bf-1f0db4a83577",
+  "integrity": {
+    "issues": [],
+    "ok": true
+  },
+  "manager": null,
+  "manager_config": {
+    "acceptance_criteria": [
+      "Worker updates the existing manager-test-app PR #1 branch or opens a clearly linked follow-up PR, and leaves it unmerged.",
+      "The app includes real browser audio alarm playback with a user-controlled enable/disable path.",
+      "Camera permission, unsupported-browser, and error states are clearer than before.",
+      "README includes a short manual QA script for the new alarm and camera states.",
+      "Worker reports npm run lint, npm run test, and npm run build results, with failures explained if any."
+    ],
+    "created_at": "2026-05-19T20:05:09Z",
+    "guidelines": [
+      "Use /Users/neonwatty/Desktop/codex-terminal-manager/scripts/workerctl from the app cwd; do not edit project files yourself.",
+      "Prefer observation and evidence review over interruption unless the worker is stuck or scope drifts."
+    ],
+    "objective": "Supervise a realistic bounded follow-up to manager-test-app PR #1 and require concrete evidence before finish.",
+    "permissions": {
+      "create_pr": true,
+      "merge_green_pr": false,
+      "worker_compact_clear": false
+    },
+    "reference_paths": [
+      "https://github.com/neonwatty/manager-test-app/pull/1"
+    ],
+    "supervision_mode": "strict",
+    "task_id": "task-9c352a73-6fae-49c5-b2bf-1f0db4a83577",
+    "updated_at": "2026-05-19T20:05:09Z"
+  },
+  "name": "manager-test-phone-lunk-qa-slice-20260519",
+  "state": "done",
+  "summary": "Add a bounded app improvement to the open manager-test-app PR and verify evidence.",
+  "updated_at": "2026-05-19T20:11:34Z",
+  "worker": null,
+  "worker_handoff": null,
+  "worker_status": null
+}

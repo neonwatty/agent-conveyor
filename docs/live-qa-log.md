@@ -1,5 +1,52 @@
 # Live QA Log
 
+## 2026-05-19: Manager-Test App QA Slice 2
+
+Decision:
+
+- App-side realistic QA slice passed, but workerctl transcript evidence capture
+  did not pass the stricter expectation. Follow-up issue:
+  `https://github.com/neonwatty/codex-terminal-manager/issues/81`.
+
+Scenario:
+
+- Task: `manager-test-phone-lunk-qa-slice-20260519`.
+- Worker: `manager-test-phone-qa-worker-2`.
+- Manager: `manager-test-phone-qa-manager-2`.
+- Target PR: `https://github.com/neonwatty/manager-test-app/pull/1`.
+- Artifact bundle:
+  `docs/live-qa-artifacts/2026-05-19-manager-test-phone-lunk-qa-slice-2/`.
+
+Evidence:
+
+- Worker pushed commit `5655516b02c29ab205094bc9289a8bf6a334c16d`
+  (`Add audio alarm and camera QA states`) to existing PR #1.
+- PR #1 remains `OPEN`, not draft, base `main`, head
+  `feature/phone-lunk-alarm-refresh`, and unmerged.
+- Worker added Web Audio alarm enable/mute behavior, clearer camera
+  denied/unsupported/retry states, responsive audio controls, and README manual
+  QA script coverage for audio and camera paths.
+- Worker reported `npm run lint`, `npm run test`, `npm run build`,
+  `git diff --check`, and dev-server `curl` smoke passed.
+- Criteria #64-#68 were satisfied and `mutation-audit --json` reported
+  `ok: true` with zero warnings.
+- Cleanup after manual session stop/deregister returned active sessions `[]`;
+  reconcile reported no dangling bindings, dead PID sessions, or stuck tasks.
+
+Observations:
+
+- `workerctl pair --codex-profile yolo` avoided permission prompts, and both
+  sessions launched in YOLO mode.
+- Manager bootstrap still instructed `scripts/workerctl` relative to the target
+  app cwd. The manager first failed on `scripts/workerctl`; operator recovery
+  nudged it to use the absolute
+  `/Users/neonwatty/Desktop/codex-terminal-manager/scripts/workerctl` path.
+- The manager finished the task with criteria satisfied but left sessions open.
+  A later operator attempt to run `transcript-capture --require-segment` failed
+  with no non-empty worker/manager segments because the task was already done
+  and the active binding was no longer usable for capture. `qa-finding.txt`
+  records this in the artifact bundle.
+
 ## 2026-05-19: Startup Profile and Required Transcript Smoke
 
 Decision:

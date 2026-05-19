@@ -1,0 +1,5 @@
+Finding: Required transcript evidence was not captured for this drill.
+
+The manager finished the task with criteria satisfied but left sessions open. A later operator attempt to run transcript-capture --require-segment after task completion failed with: no non-empty transcript segment captured for role(s): worker, manager. Cleanup then stopped and deregistered both sessions. Replay, criteria, PR metadata, and mutation audit evidence exist, but transcript segment evidence is missing.
+
+Implication: workerctl should support required transcript capture when finishing an already-done task with still-active sessions, or finish-task should be able to stop/capture open sessions idempotently after a manager leaves them open.

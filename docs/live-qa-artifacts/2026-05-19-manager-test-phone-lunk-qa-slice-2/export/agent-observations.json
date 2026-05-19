@@ -1,0 +1,20 @@
+[
+  {
+    "command_id": "command-d0f8b3d8-2d46-4e14-b8e1-b98fd8a7f8f3",
+    "created_at": "2026-05-19T20:11:34Z",
+    "id": 61,
+    "manager_id": null,
+    "message": "All accepted criteria satisfied from worker task_complete receipt and PR metadata; PR #1 remains open and unmerged.",
+    "observation_type": "decision",
+    "payload": {
+      "decision": "stop",
+      "decision_id": 41,
+      "source": "finish_task"
+    },
+    "role": "manager",
+    "severity": "info",
+    "source_capture_id": null,
+    "task_id": "task-9c352a73-6fae-49c5-b2bf-1f0db4a83577",
+    "worker_id": null
+  }
+]
