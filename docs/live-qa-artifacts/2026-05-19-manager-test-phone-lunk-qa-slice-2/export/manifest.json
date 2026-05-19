@@ -1,0 +1,21 @@
+{
+  "created_at": "2026-05-19T20:12:46Z",
+  "files": [
+    "task-status.json",
+    "audit.json",
+    "acceptance-criteria.json",
+    "prompts.json",
+    "transcript-captures.json",
+    "terminal-captures.json",
+    "agent-observations.json",
+    "manager-cycles.json",
+    "manager-decisions.json",
+    "mutation-audit.json",
+    "replay.json",
+    "transcript-segments.json"
+  ],
+  "task": {
+    "id": "task-9c352a73-6fae-49c5-b2bf-1f0db4a83577",
+    "name": "manager-test-phone-lunk-qa-slice-20260519"
+  }
+}

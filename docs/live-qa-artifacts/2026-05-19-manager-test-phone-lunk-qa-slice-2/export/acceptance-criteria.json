@@ -1,0 +1,130 @@
+[
+  {
+    "created_at": "2026-05-19T20:05:56Z",
+    "criterion": "Worker updates the existing manager-test-app PR #1 branch or opens a clearly linked follow-up PR, and leaves it unmerged.",
+    "evidence": {
+      "commit": "5655516b02c29ab205094bc9289a8bf6a334c16d",
+      "isDraft": false,
+      "merged": false,
+      "pr": "https://github.com/neonwatty/manager-test-app/pull/1",
+      "source": "worker_final_receipt",
+      "state": "OPEN"
+    },
+    "id": 64,
+    "proof": "Worker pushed commit 5655516 to existing PR #1 branch; PR remains OPEN, not draft, base main, head feature/phone-lunk-alarm-refresh.",
+    "rationale": null,
+    "source": "manager_inferred",
+    "status": "satisfied",
+    "task_id": "task-9c352a73-6fae-49c5-b2bf-1f0db4a83577",
+    "updated_at": "2026-05-19T20:11:26Z"
+  },
+  {
+    "created_at": "2026-05-19T20:05:56Z",
+    "criterion": "The app includes real browser audio alarm playback with a user-controlled enable/disable path.",
+    "evidence": {
+      "features": [
+        "Enable Audio Alarm",
+        "Mute Audio Alarm",
+        "browser-generated tone",
+        "silent mode suppresses tone"
+      ],
+      "files": [
+        "src/App.tsx",
+        "src/App.test.tsx",
+        "src/styles.css"
+      ],
+      "source": "worker_final_receipt",
+      "test_coverage": "audio opt-in and mute behavior"
+    },
+    "id": 65,
+    "proof": "Worker implemented Web Audio alarm enable/mute controls and tone playback on alarm.",
+    "rationale": null,
+    "source": "manager_inferred",
+    "status": "satisfied",
+    "task_id": "task-9c352a73-6fae-49c5-b2bf-1f0db4a83577",
+    "updated_at": "2026-05-19T20:11:26Z"
+  },
+  {
+    "created_at": "2026-05-19T20:05:56Z",
+    "criterion": "Camera permission, unsupported-browser, and error states are clearer than before.",
+    "evidence": {
+      "files": [
+        "src/App.tsx",
+        "src/App.test.tsx"
+      ],
+      "source": "worker_final_receipt",
+      "states": [
+        "Camera permission blocked",
+        "Retry Camera",
+        "Camera APIs unavailable",
+        "No camera was found"
+      ],
+      "test_coverage": "denied camera recovery copy"
+    },
+    "id": 66,
+    "proof": "Worker added clearer camera denied, unsupported, and retry copy/states.",
+    "rationale": null,
+    "source": "manager_inferred",
+    "status": "satisfied",
+    "task_id": "task-9c352a73-6fae-49c5-b2bf-1f0db4a83577",
+    "updated_at": "2026-05-19T20:11:26Z"
+  },
+  {
+    "created_at": "2026-05-19T20:05:56Z",
+    "criterion": "README includes a short manual QA script for the new alarm and camera states.",
+    "evidence": {
+      "coverage": [
+        "audio off before opt-in",
+        "audio ready",
+        "audio muted",
+        "camera allow",
+        "camera deny",
+        "camera unsupported"
+      ],
+      "file": "README.md",
+      "section": "Manual QA Script",
+      "source": "worker_final_receipt"
+    },
+    "id": 67,
+    "proof": "Worker added README Manual QA Script covering audio alarm and camera states.",
+    "rationale": null,
+    "source": "manager_inferred",
+    "status": "satisfied",
+    "task_id": "task-9c352a73-6fae-49c5-b2bf-1f0db4a83577",
+    "updated_at": "2026-05-19T20:11:26Z"
+  },
+  {
+    "created_at": "2026-05-19T20:05:56Z",
+    "criterion": "Worker reports npm run lint, npm run test, and npm run build results, with failures explained if any.",
+    "evidence": {
+      "commands": [
+        {
+          "command": "npm run lint",
+          "exit_code": 0,
+          "status": "pass"
+        },
+        {
+          "command": "npm run test",
+          "exit_code": 0,
+          "status": "pass",
+          "summary": "8/8 tests passing"
+        },
+        {
+          "command": "npm run build",
+          "exit_code": 0,
+          "status": "pass",
+          "summary": "Vite production bundle emitted"
+        }
+      ],
+      "source": "worker_report",
+      "worker_event_id": 1149
+    },
+    "id": 68,
+    "proof": "Seeded from manager config after manager relative-path recovery.",
+    "rationale": null,
+    "source": "manager_inferred",
+    "status": "satisfied",
+    "task_id": "task-9c352a73-6fae-49c5-b2bf-1f0db4a83577",
+    "updated_at": "2026-05-19T20:09:28Z"
+  }
+]
