@@ -1,5 +1,50 @@
 # Live QA Log
 
+## 2026-05-19: Manager/Worker External App Rebuild Drill
+
+Decision:
+
+- Realistic manager/worker QA drill passed.
+- Resulting app PR is open and intentionally not merged:
+  `https://github.com/neonwatty/manager-test-app/pull/1`.
+
+Scenario:
+
+- Target repo: `neonwatty/manager-test-app`.
+- Reference repo: `neonwatty/phone-lunk-alarm`.
+- Task: `manager-test-phone-lunk-refresh`.
+- Worker: `manager-test-phone-worker-1`.
+- Manager: `manager-test-phone-manager-1`.
+- Goal: build a fresh Phone Lunk Alarm-inspired app from scratch, using the
+  reference repo for concept only, then open a PR.
+
+Evidence:
+
+- Evidence bundle:
+  `docs/live-qa-artifacts/2026-05-19-manager-test-phone-lunk-refresh/`.
+- PR metadata: `pr-1.json` records state `OPEN`, base `main`, head
+  `feature/phone-lunk-alarm-refresh`, merge state `CLEAN`, and not draft.
+- Worker opened PR #1 at commit `b346f7b`.
+- Worker reported `npm run lint`, `npm run test`, and `npm run build` passed.
+- Worker reported `curl -I http://127.0.0.1:5173/` returned `HTTP/1.1 200 OK`
+  during local dev-server verification.
+- Manager marked all five accepted criteria satisfied and finished the task
+  with `--require-criteria-audit`.
+- Replay, mutation audit, transcript capture/show, and export artifacts were
+  captured.
+- Cleanup: active sessions returned `[]`, and final reconcile reported no
+  dangling bindings, dead PID sessions, or stuck tasks.
+
+Notes:
+
+- The worker intentionally used a scoped Vite/React rebuild rather than copying
+  the original Next/Tailwind/TensorFlow implementation wholesale.
+- Known gaps from the worker receipt: no TensorFlow detection, audio playback,
+  recording/watermark export, or Playwright camera workflow yet.
+- Setup exposed a useful operational issue: first launch paused on Codex's
+  trust prompt for the new repo, so the worker had to be registered manually
+  after accepting the prompt.
+
 ## 2026-05-19: Post-Merge RC1
 
 Decision:

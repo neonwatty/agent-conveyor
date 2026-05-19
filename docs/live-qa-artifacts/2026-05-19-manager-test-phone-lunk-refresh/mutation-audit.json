@@ -1,0 +1,66 @@
+{
+  "ok": true,
+  "records": [
+    {
+      "allowed_decisions": [
+        "stop"
+      ],
+      "command": {
+        "created_at": "2026-05-19T17:17:49Z",
+        "id": "command-f873b8f3-8d30-43a7-a89e-666cc2a457fa",
+        "state": "succeeded",
+        "type": "finish_task"
+      },
+      "effect": {
+        "dry_run": false,
+        "permission_check": null,
+        "send_text": null,
+        "sent": false,
+        "slash_command": null,
+        "worker_session": "manager-test-phone-worker-1"
+      },
+      "expected_failure": false,
+      "linked_decision": {
+        "created_at": "2026-05-19T17:17:49Z",
+        "decision": "stop",
+        "id": 39,
+        "manager_cycle_id": null,
+        "manager_id": null,
+        "payload": {
+          "command_id": "command-f873b8f3-8d30-43a7-a89e-666cc2a457fa",
+          "source": "finish_task"
+        },
+        "reason": "Worker completed bounded Phone Lunk Alarm-inspired rebuild, opened unmerged PR, and provided evidence satisfying all accepted criteria.",
+        "task_id": "task-07748f05-d996-4c66-8b6a-ac3ff4f11142"
+      },
+      "nearest_prior_decision": {
+        "created_at": "2026-05-19T17:17:49Z",
+        "decision": "stop",
+        "id": 39,
+        "manager_cycle_id": null,
+        "manager_id": null,
+        "payload": {
+          "command_id": "command-f873b8f3-8d30-43a7-a89e-666cc2a457fa",
+          "source": "finish_task"
+        },
+        "reason": "Worker completed bounded Phone Lunk Alarm-inspired rebuild, opened unmerged PR, and provided evidence satisfying all accepted criteria.",
+        "task_id": "task-07748f05-d996-4c66-8b6a-ac3ff4f11142"
+      },
+      "ok": true,
+      "warnings": []
+    }
+  ],
+  "summary": {
+    "mutations": 1,
+    "with_warnings": 0
+  },
+  "task": {
+    "created_at": "2026-05-19T17:08:15Z",
+    "goal": "Build a fresh Phone Lunk Alarm-inspired app in manager-test-app and open a PR with the result.",
+    "id": "task-07748f05-d996-4c66-8b6a-ac3ff4f11142",
+    "name": "manager-test-phone-lunk-refresh",
+    "state": "done",
+    "summary": "Realistic manager/worker QA drill: rebuild a refreshed app from scratch using phone-lunk-alarm as reference material, then produce a reviewed PR to manager-test-app.",
+    "updated_at": "2026-05-19T17:17:49Z"
+  }
+}
