@@ -568,7 +568,19 @@ CLI command writes to them. To resume work on a legacy task, call
 
 ## Tests
 
-Fast deterministic gate:
+Release-candidate deterministic gate:
+
+```bash
+scripts/rc-check --skip-live-smoke-repeat
+```
+
+Full local release-candidate gate:
+
+```bash
+scripts/rc-check --with-live-smoke-repeat
+```
+
+Underlying deterministic checks:
 
 ```bash
 python3 -m unittest discover -s tests -v

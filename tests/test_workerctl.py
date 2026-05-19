@@ -1958,6 +1958,18 @@ Deferred follow-up criteria:
 
         self.assertEqual(proc.returncode, 0, proc.stderr)
 
+    def test_rc_check_script_has_valid_bash_syntax(self):
+        proc = subprocess.run(
+            ["bash", "-n", str(ROOT / "scripts" / "rc-check")],
+            cwd=ROOT,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+
     def test_transcript_capture_records_deduped_segments_and_show_prune(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "workerctl.db"

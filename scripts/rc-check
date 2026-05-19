@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+RUN_LIVE_SMOKE_REPEAT=0
+
+for arg in "$@"; do
+  case "$arg" in
+    --with-live-smoke-repeat)
+      RUN_LIVE_SMOKE_REPEAT=1
+      ;;
+    --skip-live-smoke-repeat)
+      RUN_LIVE_SMOKE_REPEAT=0
+      ;;
+    -h|--help)
+      cat <<'EOF'
+usage: scripts/rc-check [--with-live-smoke-repeat|--skip-live-smoke-repeat]
+
+Runs the deterministic release-candidate gates sequentially. The repeat live
+smoke gate is opt-in because it requires live tmux/codex behavior.
+EOF
+      exit 0
+      ;;
+    *)
+      echo "rc-check: unknown argument: $arg" >&2
+      exit 2
+      ;;
+  esac
+done
+
+echo "== unit tests =="
+python3 -m unittest discover -s tests -v
+
+echo "== ResourceWarning output gate =="
+scripts/check-resource-warnings
+
+echo "== py_compile =="
+python3 -m py_compile scripts/workerctl scripts/check-resource-warnings workerctl/*.py
+
+echo "== shell syntax =="
+bash -n scripts/live-smoke
+bash -n scripts/live-smoke-repeat
+
+if [[ "$RUN_LIVE_SMOKE_REPEAT" == "1" ]]; then
+  echo "== repeat live smoke =="
+  scripts/live-smoke-repeat 3
+
+  echo "== cleanup checks =="
+  scripts/workerctl sessions --state active
+  scripts/workerctl reconcile --stale-cycles-seconds 1
+else
+  echo "== repeat live smoke skipped =="
+  echo "run scripts/rc-check --with-live-smoke-repeat for the full local RC gate"
+fi
