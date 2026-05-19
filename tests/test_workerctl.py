@@ -713,7 +713,7 @@ class ContractTests(unittest.TestCase):
         self.assertIn("--state planning", contract)
         self.assertIn("--blocker", contract)
         self.assertIn("compatibility file", contract)
-        self.assertIn(".codex-workers/worker-a/status.json", contract)
+        self.assertIn(str(status_path("worker-a")), contract)
 
 
 class ClassifierTests(unittest.TestCase):
