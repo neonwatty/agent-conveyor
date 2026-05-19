@@ -1,0 +1,45 @@
+{
+  "affected_criterion": {
+    "created_at": "2026-05-19T15:13:28Z",
+    "criterion": "Live smoke reached current CLI criterion mutation path",
+    "evidence": {
+      "command": "scripts/live-smoke",
+      "status": "running"
+    },
+    "id": 52,
+    "proof": "Added by scripts/live-smoke",
+    "rationale": null,
+    "source": "manager_inferred",
+    "status": "accepted",
+    "task_id": "task-90f9a220-b191-4fb8-8f17-75fb442cdec0",
+    "updated_at": "2026-05-19T15:13:28Z"
+  },
+  "criteria": [
+    {
+      "created_at": "2026-05-19T15:13:28Z",
+      "criterion": "Live smoke reached current CLI criterion mutation path",
+      "evidence": {
+        "command": "scripts/live-smoke",
+        "status": "running"
+      },
+      "id": 52,
+      "proof": "Added by scripts/live-smoke",
+      "rationale": null,
+      "source": "manager_inferred",
+      "status": "accepted",
+      "task_id": "task-90f9a220-b191-4fb8-8f17-75fb442cdec0",
+      "updated_at": "2026-05-19T15:13:28Z"
+    }
+  ],
+  "summary": {
+    "accepted": 1,
+    "deferred": 0,
+    "proposed": 0,
+    "rejected": 0,
+    "satisfied": 0
+  },
+  "task": {
+    "id": "task-90f9a220-b191-4fb8-8f17-75fb442cdec0",
+    "name": "codex-smoke-task-smoke-20260519081324"
+  }
+}

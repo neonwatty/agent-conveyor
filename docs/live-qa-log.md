@@ -1,5 +1,19 @@
 # Live QA Log
 
+## 2026-05-19: Post-Merge RC1
+
+Decision:
+
+- RC accepted: yes.
+
+Evidence:
+
+- Release candidate receipt: `docs/release-candidates/2026-05-19-rc1.md`.
+- Repeat live smoke artifact:
+  `docs/live-qa-artifacts/2026-05-19-live-smoke-repeat-repeat-20260519081324/`.
+- Unit tests, ResourceWarning gate, compile, shell syntax, repeat live smoke,
+  active-session cleanup, and reconcile all passed on `main`.
+
 ## 2026-05-19: Release Readiness Decision
 
 Decision:
