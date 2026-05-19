@@ -20,6 +20,7 @@ from workerctl.db import insert_agent_observation
 from workerctl.db import insert_event as insert_db_event
 from workerctl.db import insert_manager_decision
 from workerctl.db import initialize_database
+from workerctl.db import latest_session_binding_for_task
 from workerctl.db import mark_manager_seen
 from workerctl.db import mark_command_attempted
 from workerctl.db import mark_worker_state
@@ -113,11 +114,16 @@ def _final_criteria_audit_error(final_audit: dict[str, Any], *, task_name: str) 
     )
 
 
-def _resolve_session_binding(conn, *, task_name: str) -> dict[str, Any] | None:
+def _resolve_session_binding(conn, *, task_name: str, include_ended: bool = False) -> dict[str, Any] | None:
     try:
         binding = active_binding_for_task(conn, task_name=task_name)
     except WorkerError:
-        return None
+        if not include_ended:
+            return None
+        try:
+            binding = latest_session_binding_for_task(conn, task_name=task_name)
+        except WorkerError:
+            return None
     worker_session = session_by_id(conn, session_id=binding["worker_session_id"])
     manager_session = session_by_id(conn, session_id=binding["manager_session_id"])
     return {
@@ -237,7 +243,16 @@ def _stop_or_finish_task(args: argparse.Namespace, *, finish: bool) -> int:
     with connect_db(db_path) as conn:
         initialize_database(conn)
         snapshot = task_status_snapshot(conn, task=args.task)
-        if snapshot["state"] in {"done", "failed"}:
+        already_done_followup = (
+            finish
+            and snapshot["state"] == "done"
+            and (
+                bool(getattr(args, "capture_transcript_before_stop", False))
+                or bool(getattr(args, "stop_manager", False))
+                or bool(getattr(args, "stop_worker", False))
+            )
+        )
+        if snapshot["state"] in {"done", "failed"} and not already_done_followup:
             raise WorkerError(f"Task {snapshot['name']} is already {snapshot['state']}")
         require_criteria_audit = bool(getattr(args, "require_criteria_audit", False)) if finish else False
         final_audit = _final_criteria_audit(
@@ -289,7 +304,11 @@ def _stop_or_finish_task(args: argparse.Namespace, *, finish: bool) -> int:
                 raise WorkerError(audit_error)
         manager = active_manager(conn, task=snapshot["id"])
         worker = snapshot["worker"]
-        session_binding = _resolve_session_binding(conn, task_name=snapshot["name"])
+        session_binding = _resolve_session_binding(
+            conn,
+            task_name=snapshot["name"],
+            include_ended=already_done_followup,
+        )
         manager_session = session_binding["manager"] if session_binding else None
         worker_session = session_binding["worker"] if session_binding else None
         decision_check = assess_manager_decision(
@@ -315,6 +334,7 @@ def _stop_or_finish_task(args: argparse.Namespace, *, finish: bool) -> int:
                 "capture_transcript_before_stop": capture_transcript_before_stop,
                 "capture_transcript_lines": capture_transcript_lines,
                 "capture_transcript_mode": capture_transcript_mode,
+                "already_done_followup": already_done_followup,
                 "message": args.message,
                 "manager_decision": decision_check,
                 "reason": final_reason,
@@ -380,6 +400,7 @@ def _stop_or_finish_task(args: argparse.Namespace, *, finish: bool) -> int:
         "final_decision_id": final_decision_id,
         "final_observation_id": final_observation_id,
         "finish": finish,
+        "already_done_followup": already_done_followup,
         "manager_decision": decision_check,
         "killed_manager": False,
         "killed_worker": False,

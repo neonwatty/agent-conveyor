@@ -2393,6 +2393,41 @@ def active_binding_for_task(
     return dict(row)
 
 
+def latest_session_binding_for_task(
+    conn: sqlite3.Connection,
+    *,
+    task_name: str,
+) -> dict[str, Any]:
+    """Return the latest session-based binding for a task, including ended bindings."""
+    task = task_row(conn, task=task_name)
+    row = conn.execute(
+        """
+        select
+          b.id as binding_id,
+          b.task_id as task_id,
+          b.worker_session_id as worker_session_id,
+          b.manager_session_id as manager_session_id,
+          ws.name as worker_session_name,
+          ms.name as manager_session_name,
+          b.state as state,
+          b.created_at as created_at,
+          b.ended_at as ended_at
+        from bindings b
+        join sessions ws on ws.id = b.worker_session_id
+        join sessions ms on ms.id = b.manager_session_id
+        where b.task_id = ?
+          and b.worker_session_id is not null
+          and b.manager_session_id is not null
+        order by b.created_at desc
+        limit 1
+        """,
+        (task["id"],),
+    ).fetchone()
+    if row is None:
+        raise WorkerError(f"no session-based binding for task {task_name!r}")
+    return dict(row)
+
+
 def divergent_cycles_for_task(
     conn: sqlite3.Connection,
     *,
