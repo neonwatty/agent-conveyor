@@ -588,6 +588,15 @@ scripts/check-resource-warnings
 python3 -m py_compile scripts/workerctl scripts/check-resource-warnings workerctl/*.py
 ```
 
+For local parallel experiments, prefer:
+
+```bash
+scripts/run-unittests-isolated
+```
+
+This gives the process a temporary `WORKERCTL_STATE_ROOT` and a test namespace.
+The standard CI job remains serial.
+
 GitHub Actions runs the same suite, a ResourceWarning output gate, and a
 `py_compile` check on every push and pull request.
 The ResourceWarning gate intentionally fails on any `ResourceWarning` text in

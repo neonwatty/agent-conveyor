@@ -2007,6 +2007,18 @@ Deferred follow-up criteria:
 
         self.assertEqual(proc.returncode, 0, proc.stderr)
 
+    def test_run_unittests_isolated_script_has_valid_bash_syntax(self):
+        proc = subprocess.run(
+            ["bash", "-n", str(ROOT / "scripts" / "run-unittests-isolated")],
+            cwd=ROOT,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+
     def test_transcript_capture_records_deduped_segments_and_show_prune(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "workerctl.db"
