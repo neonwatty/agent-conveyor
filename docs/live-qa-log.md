@@ -1,5 +1,37 @@
 # Live QA Log
 
+## 2026-05-19: Current CLI Live Smoke
+
+Scenario:
+
+- Script: `scripts/live-smoke`
+- Evidence bundle:
+  `docs/live-qa-artifacts/2026-05-19-live-smoke-current-cli-smoke-20260519045229/`
+- Codex model: current Codex CLI default.
+
+Validated:
+
+- `pair` created a session-bound worker and manager using current CLI flags.
+- `cycle` returned a manager observation for the task.
+- `session-nudge --dry-run` resolved the worker session target.
+- Acceptance criteria add/list/satisfy flow worked.
+- `finish-task --require-criteria-audit --capture-transcript-before-stop --stop-manager --stop-worker` completed.
+- Pre-stop transcript capture recorded worker and manager transcript segments.
+- `transcript-show`, `mutation-audit`, `replay`, and `export-task` produced evidence.
+- `export-task --zip --include-transcripts` wrote `manifest.json`,
+  `transcript-captures.json`, `transcript-segments.json`, and `export.zip`.
+- Post-run `sessions --state active` contained no smoke sessions.
+- Post-run `reconcile --stale-cycles-seconds 1` reported no dangling bindings,
+  dead PID sessions, or stuck tasks.
+
+Findings:
+
+- No smoke failures observed.
+- `finish-task` recorded the expected missing-decision warning because the smoke
+  uses `--reason` without `--decision-id`; the command still recorded
+  `final_decision_id` and completed with `killed_worker: true` and
+  `killed_manager: true`.
+
 ## 2026-05-16: manager-led Gate 3 disposable edit QA
 
 Scenario:

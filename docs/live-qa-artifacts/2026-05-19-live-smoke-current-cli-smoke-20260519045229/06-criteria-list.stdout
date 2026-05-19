@@ -1,0 +1,30 @@
+{
+  "criteria": [
+    {
+      "created_at": "2026-05-19T11:52:35Z",
+      "criterion": "Live smoke reached current CLI criterion mutation path",
+      "evidence": {
+        "command": "scripts/live-smoke criteria satisfy",
+        "status": "pass"
+      },
+      "id": 44,
+      "proof": "Current CLI smoke criterion satisfied",
+      "rationale": null,
+      "source": "manager_inferred",
+      "status": "satisfied",
+      "task_id": "task-20d2844a-6a7e-4508-912a-2add63d4a3ba",
+      "updated_at": "2026-05-19T11:52:35Z"
+    }
+  ],
+  "summary": {
+    "accepted": 0,
+    "deferred": 0,
+    "proposed": 0,
+    "rejected": 0,
+    "satisfied": 1
+  },
+  "task": {
+    "id": "task-20d2844a-6a7e-4508-912a-2add63d4a3ba",
+    "name": "codex-smoke-task-smoke-20260519045229"
+  }
+}

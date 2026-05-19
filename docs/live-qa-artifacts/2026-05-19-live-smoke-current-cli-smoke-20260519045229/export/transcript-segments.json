@@ -1,0 +1,38 @@
+[
+  {
+    "byte_count": 866,
+    "captured_at": "2026-05-19T11:52:35Z",
+    "content_sha256": "f7995ad426b08551fceb63c0d433943bae26d9dfb9b630ec3852effbba5d8f99",
+    "created_at": "2026-05-19T11:52:35Z",
+    "id": 1,
+    "line_count": 23,
+    "previous_capture_id": null,
+    "redacted": false,
+    "retention_class": "hot",
+    "role": "worker",
+    "segment_end_line": 24,
+    "segment_kind": "excerpt",
+    "segment_start_line": 1,
+    "segment_text": "\n\u256d\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u256e\n\u2502 >_ OpenAI Codex (v0.130.0)                   \u2502\n\u2502                                              \u2502\n\u2502 model:     gpt-5.5 medium   /model to change \u2502\n\u2502 directory: ~/Desktop/codex-terminal-manager  \u2502\n\u2570\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u256f\n\n  Tip: New Use /fast to enable our fastest inference with increased plan usage.\n\n\n\u203a Smoke test worker. Do not edit files. Wait for manager instructions and\n  report status only.\n\n\n\u2022 Starting MCP servers (2/3): posthog (3s \u2022 esc to interrupt)\n\n\n\u203a Summarize recent commits\n\n  gpt-5.5 medium \u00b7 ~/Desktop/codex-terminal-manager \u00b7 qa-live-smoke-readiness\n\n\n",
+    "source_capture_id": 1,
+    "task_id": "task-20d2844a-6a7e-4508-912a-2add63d4a3ba"
+  },
+  {
+    "byte_count": 1968,
+    "captured_at": "2026-05-19T11:52:35Z",
+    "content_sha256": "d20dbcde856d24a057deeed98daee92bdd5e7afb4600a05dfe4bf5e394d5b499",
+    "created_at": "2026-05-19T11:52:35Z",
+    "id": 2,
+    "line_count": 40,
+    "previous_capture_id": null,
+    "redacted": false,
+    "retention_class": "hot",
+    "role": "manager",
+    "segment_end_line": 83,
+    "segment_kind": "excerpt",
+    "segment_start_line": 44,
+    "segment_text": "  smoke-20260519045229 \"...\"`;\n    the legacy `nudge` command is only for old file-backed workers and should\n  not\n    be the first choice for session-bound pairs.\n  - If worker progress reveals new edge cases, tests, polish, or scope\n    boundaries, ask the worker to propose must-have vs follow-up criteria.\n  - After a worker proposes separated criteria, use `scripts/workerctl\n  criteria-plan`\n    to draft reviewed criteria commands, then run only the commands you agree\n  with.\n  - Record useful criteria with `scripts/workerctl criteria`.\n    Examples:\n    - `scripts/workerctl criteria codex-smoke-task-smoke-20260519045229 --add\n  --criterion \"...\" --source worker_proposed --status proposed`\n    - `scripts/workerctl criteria codex-smoke-task-smoke-20260519045229 --add\n  --criterion \"...\" --source manager_inferred --status accepted`\n    - `criterion_id=$(scripts/workerctl criteria codex-smoke-task-smoke-\n  20260519045229 --add --criterion \"...\" --source worker_proposed --status\n  proposed | python3 -c 'import json,sys; print(json.load(sys.stdin)\n  [\"affected_criterion\"][\"id\"])')`\n    - `scripts/workerctl criteria codex-smoke-task-smoke-20260519045229\n  --satisfy \"$criterion_id\" --evidence-json\n  '{\"command\":\"...\",\"status\":\"pass\"}'`\n  - Use `worker_proposed` for criteria that came from the worker.\n  - Use `manager_inferred` for criteria inferred from manager config, cycle\n    evidence, or the manager's own inspection; `manager_config` is not a valid\n    criteria source.\n  - Before finishing, compare worker receipts/verification against accepted\n  open criteria.\n  - Communicate with the worker only through workerctl session/task commands.\n  - Do not edit project files unless the user explicitly asks this manager\n    session to change workerctl itself.\n\n\n\u2022 Starting MCP servers (2/3): posthog (1s \u2022 esc to interrupt)\n\n\n\u203a Run /review on my current changes\n\n  gpt-5.5 medium \u00b7 ~/Desktop/codex-terminal-manager \u00b7 qa-live-smoke-readiness",
+    "source_capture_id": 2,
+    "task_id": "task-20d2844a-6a7e-4508-912a-2add63d4a3ba"
+  }
+]

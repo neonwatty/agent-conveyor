@@ -1,0 +1,823 @@
+{
+  "acceptance_criteria": [
+    {
+      "created_at": "2026-05-19T11:52:35Z",
+      "criterion": "Live smoke reached current CLI criterion mutation path",
+      "evidence": {
+        "command": "scripts/live-smoke criteria satisfy",
+        "status": "pass"
+      },
+      "id": 44,
+      "proof": "Current CLI smoke criterion satisfied",
+      "rationale": null,
+      "source": "manager_inferred",
+      "status": "satisfied",
+      "task_id": "task-20d2844a-6a7e-4508-912a-2add63d4a3ba",
+      "updated_at": "2026-05-19T11:52:35Z"
+    }
+  ],
+  "agent_observations": [
+    {
+      "command_id": "command-ce09da76-58fd-4115-961e-c67c6d6d035e",
+      "created_at": "2026-05-19T11:52:35Z",
+      "id": 15,
+      "manager_id": null,
+      "message": "live smoke complete",
+      "observation_type": "decision",
+      "payload": {
+        "decision": "stop",
+        "decision_id": 25,
+        "source": "finish_task"
+      },
+      "role": "manager",
+      "severity": "info",
+      "source_capture_id": null,
+      "task_id": "task-20d2844a-6a7e-4508-912a-2add63d4a3ba",
+      "worker_id": null
+    },
+    {
+      "command_id": "command-ce09da76-58fd-4115-961e-c67c6d6d035e",
+      "created_at": "2026-05-19T11:52:35Z",
+      "id": 16,
+      "manager_id": null,
+      "message": "worker terminal captured",
+      "observation_type": "capture",
+      "payload": {
+        "content_sha256": "f7995ad426b08551fceb63c0d433943bae26d9dfb9b630ec3852effbba5d8f99",
+        "history_lines": 120,
+        "source": "finish_task_pre_stop",
+        "transcript_segment_id": 1
+      },
+      "role": "worker",
+      "severity": "info",
+      "source_capture_id": 1,
+      "task_id": "task-20d2844a-6a7e-4508-912a-2add63d4a3ba",
+      "worker_id": null
+    },
+    {
+      "command_id": "command-ce09da76-58fd-4115-961e-c67c6d6d035e",
+      "created_at": "2026-05-19T11:52:35Z",
+      "id": 17,
+      "manager_id": null,
+      "message": "manager terminal captured",
+      "observation_type": "capture",
+      "payload": {
+        "content_sha256": "d20dbcde856d24a057deeed98daee92bdd5e7afb4600a05dfe4bf5e394d5b499",
+        "history_lines": 120,
+        "source": "finish_task_pre_stop",
+        "transcript_segment_id": 2
+      },
+      "role": "manager",
+      "severity": "info",
+      "source_capture_id": 2,
+      "task_id": "task-20d2844a-6a7e-4508-912a-2add63d4a3ba",
+      "worker_id": null
+    }
+  ],
+  "commands": [
+    {
+      "created_at": "2026-05-19T11:52:35Z",
+      "error": null,
+      "id": "command-ce09da76-58fd-4115-961e-c67c6d6d035e",
+      "idempotency_key": "command-ce09da76-58fd-4115-961e-c67c6d6d035e",
+      "manager_id": null,
+      "payload": {
+        "capture_transcript_before_stop": true,
+        "capture_transcript_lines": 120,
+        "capture_transcript_mode": "excerpt",
+        "final_audit": {
+          "open_criteria": [],
+          "require_criteria_audit": true,
+          "summary": {
+            "accepted": 0,
+            "deferred": 0,
+            "proposed": 0,
+            "rejected": 0,
+            "satisfied": 1
+          },
+          "total": 1
+        },
+        "finish": true,
+        "manager_decision": {
+          "allowed_decisions": [
+            "stop"
+          ],
+          "decision": null,
+          "decision_id": null,
+          "ok": false,
+          "warnings": [
+            "missing_decision_id"
+          ]
+        },
+        "manager_session": "codex-smoke-manager-smoke-20260519045229",
+        "message": null,
+        "reason": "live smoke complete",
+        "stop_manager": true,
+        "stop_worker": true,
+        "task": "codex-smoke-task-smoke-20260519045229",
+        "worker": "codex-smoke-worker-smoke-20260519045229",
+        "worker_session": "codex-smoke-worker-smoke-20260519045229"
+      },
+      "result": {
+        "command_id": "command-ce09da76-58fd-4115-961e-c67c6d6d035e",
+        "final_audit": {
+          "open_criteria": [],
+          "require_criteria_audit": true,
+          "summary": {
+            "accepted": 0,
+            "deferred": 0,
+            "proposed": 0,
+            "rejected": 0,
+            "satisfied": 1
+          },
+          "total": 1
+        },
+        "final_decision_id": 25,
+        "final_observation_id": 15,
+        "finish": true,
+        "killed_manager": true,
+        "killed_worker": true,
+        "manager_decision": {
+          "allowed_decisions": [
+            "stop"
+          ],
+          "decision": null,
+          "decision_id": null,
+          "ok": false,
+          "warnings": [
+            "missing_decision_id"
+          ]
+        },
+        "manager_identity": {
+          "db_pane_id": null,
+          "db_session": "codex-codex-smoke-manager-smoke-20260519045229",
+          "live": true,
+          "live_pane_id": "%32",
+          "mismatches": [],
+          "role": "manager",
+          "session": "codex-smoke-manager-smoke-20260519045229"
+        },
+        "manager_session": "codex-smoke-manager-smoke-20260519045229",
+        "pre_stop_transcript_captures": [
+          {
+            "capture_id": 1,
+            "content_sha256": "f7995ad426b08551fceb63c0d433943bae26d9dfb9b630ec3852effbba5d8f99",
+            "history_lines": 120,
+            "line_count": 24,
+            "role": "worker",
+            "source": "finish_task_pre_stop",
+            "transcript_segment": {
+              "id": 1,
+              "kind": "excerpt",
+              "line_count": 23,
+              "retention_class": "hot"
+            }
+          },
+          {
+            "capture_id": 2,
+            "content_sha256": "d20dbcde856d24a057deeed98daee92bdd5e7afb4600a05dfe4bf5e394d5b499",
+            "history_lines": 120,
+            "line_count": 83,
+            "role": "manager",
+            "source": "finish_task_pre_stop",
+            "transcript_segment": {
+              "id": 2,
+              "kind": "excerpt",
+              "line_count": 40,
+              "retention_class": "hot"
+            }
+          }
+        ],
+        "reason": "live smoke complete",
+        "stop_manager": true,
+        "stop_worker": true,
+        "task": "codex-smoke-task-smoke-20260519045229",
+        "worker": "codex-smoke-worker-smoke-20260519045229",
+        "worker_identity": {
+          "db_pane_id": null,
+          "db_session": "codex-codex-smoke-worker-smoke-20260519045229",
+          "live": true,
+          "live_pane_id": "%31",
+          "mismatches": [],
+          "role": "worker",
+          "session": "codex-smoke-worker-smoke-20260519045229"
+        },
+        "worker_session": "codex-smoke-worker-smoke-20260519045229"
+      },
+      "state": "succeeded",
+      "task_id": "task-20d2844a-6a7e-4508-912a-2add63d4a3ba",
+      "type": "finish_task",
+      "updated_at": "2026-05-19T11:52:35Z",
+      "worker_id": null
+    }
+  ],
+  "events": [
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-19T11:52:30Z",
+      "id": 266,
+      "manager_id": null,
+      "payload": {
+        "goal": "Live smoke test worker-manager lifecycle",
+        "name": "codex-smoke-task-smoke-20260519045229",
+        "summary": "Current CLI live smoke"
+      },
+      "task_id": "task-20d2844a-6a7e-4508-912a-2add63d4a3ba",
+      "type": "task_created",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-19T11:52:30Z",
+      "id": 267,
+      "manager_id": null,
+      "payload": {
+        "acceptance_count": 1,
+        "guideline_count": 1,
+        "reference_count": 1,
+        "source": "pair",
+        "supervision_mode": "strict"
+      },
+      "task_id": "task-20d2844a-6a7e-4508-912a-2add63d4a3ba",
+      "type": "manager_config_recorded",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-19T11:52:35Z",
+      "id": 270,
+      "manager_id": null,
+      "payload": {
+        "binding_id": "binding-59c41769-e935-44be-b736-37d8c661cd95",
+        "manager": "codex-smoke-manager-smoke-20260519045229",
+        "task": "codex-smoke-task-smoke-20260519045229",
+        "worker": "codex-smoke-worker-smoke-20260519045229"
+      },
+      "task_id": "task-20d2844a-6a7e-4508-912a-2add63d4a3ba",
+      "type": "binding_created",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-19T11:52:35Z",
+      "id": 272,
+      "manager_id": null,
+      "payload": {
+        "created": true,
+        "criterion": "Live smoke reached current CLI criterion mutation path",
+        "criterion_id": 44,
+        "evidence": {
+          "command": "scripts/live-smoke",
+          "status": "running"
+        },
+        "proof": "Added by scripts/live-smoke",
+        "rationale": null,
+        "source": "manager_inferred",
+        "status": "accepted",
+        "task_id": "task-20d2844a-6a7e-4508-912a-2add63d4a3ba"
+      },
+      "task_id": "task-20d2844a-6a7e-4508-912a-2add63d4a3ba",
+      "type": "acceptance_criterion_added",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-05-19T11:52:35Z",
+      "id": 273,
+      "manager_id": null,
+      "payload": {
+        "criterion": "Live smoke reached current CLI criterion mutation path",
+        "criterion_id": 44,
+        "evidence": {
+          "command": "scripts/live-smoke criteria satisfy",
+          "status": "pass"
+        },
+        "previous_evidence": {
+          "command": "scripts/live-smoke",
+          "status": "running"
+        },
+        "previous_proof": "Added by scripts/live-smoke",
+        "previous_rationale": null,
+        "previous_status": "accepted",
+        "proof": "Current CLI smoke criterion satisfied",
+        "rationale": null,
+        "source": "manager_inferred",
+        "status": "satisfied",
+        "task_id": "task-20d2844a-6a7e-4508-912a-2add63d4a3ba"
+      },
+      "task_id": "task-20d2844a-6a7e-4508-912a-2add63d4a3ba",
+      "type": "acceptance_criterion_updated",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": "command-ce09da76-58fd-4115-961e-c67c6d6d035e",
+      "correlation_id": null,
+      "created_at": "2026-05-19T11:52:35Z",
+      "id": 274,
+      "manager_id": null,
+      "payload": {
+        "capture_transcript_before_stop": true,
+        "capture_transcript_lines": 120,
+        "capture_transcript_mode": "excerpt",
+        "final_audit": {
+          "open_criteria": [],
+          "require_criteria_audit": true,
+          "summary": {
+            "accepted": 0,
+            "deferred": 0,
+            "proposed": 0,
+            "rejected": 0,
+            "satisfied": 1
+          },
+          "total": 1
+        },
+        "final_decision_id": 25,
+        "final_observation_id": 15,
+        "finish": true,
+        "manager_decision": {
+          "allowed_decisions": [
+            "stop"
+          ],
+          "decision": null,
+          "decision_id": null,
+          "ok": false,
+          "warnings": [
+            "missing_decision_id"
+          ]
+        },
+        "message": null,
+        "reason": "live smoke complete",
+        "stop_manager": true,
+        "stop_worker": true
+      },
+      "task_id": "task-20d2844a-6a7e-4508-912a-2add63d4a3ba",
+      "type": "finish_task_intent",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": "command-ce09da76-58fd-4115-961e-c67c6d6d035e",
+      "correlation_id": null,
+      "created_at": "2026-05-19T11:52:35Z",
+      "id": 275,
+      "manager_id": null,
+      "payload": {
+        "open_criteria": [],
+        "require_criteria_audit": true,
+        "summary": {
+          "accepted": 0,
+          "deferred": 0,
+          "proposed": 0,
+          "rejected": 0,
+          "satisfied": 1
+        },
+        "total": 1
+      },
+      "task_id": "task-20d2844a-6a7e-4508-912a-2add63d4a3ba",
+      "type": "finish_task_criteria_audit",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": "command-ce09da76-58fd-4115-961e-c67c6d6d035e",
+      "correlation_id": null,
+      "created_at": "2026-05-19T11:52:35Z",
+      "id": 276,
+      "manager_id": null,
+      "payload": {
+        "db_pane_id": null,
+        "db_session": "codex-codex-smoke-manager-smoke-20260519045229",
+        "live": true,
+        "live_pane_id": "%32",
+        "mismatches": [],
+        "role": "manager",
+        "session": "codex-smoke-manager-smoke-20260519045229"
+      },
+      "task_id": "task-20d2844a-6a7e-4508-912a-2add63d4a3ba",
+      "type": "manager_identity_verified",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": "command-ce09da76-58fd-4115-961e-c67c6d6d035e",
+      "correlation_id": null,
+      "created_at": "2026-05-19T11:52:35Z",
+      "id": 277,
+      "manager_id": null,
+      "payload": {
+        "capture_id": 1,
+        "content_sha256": "f7995ad426b08551fceb63c0d433943bae26d9dfb9b630ec3852effbba5d8f99",
+        "history_lines": 120,
+        "source": "finish_task_pre_stop"
+      },
+      "task_id": "task-20d2844a-6a7e-4508-912a-2add63d4a3ba",
+      "type": "worker_terminal_captured",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": "command-ce09da76-58fd-4115-961e-c67c6d6d035e",
+      "correlation_id": null,
+      "created_at": "2026-05-19T11:52:35Z",
+      "id": 278,
+      "manager_id": null,
+      "payload": {
+        "capture_id": 2,
+        "content_sha256": "d20dbcde856d24a057deeed98daee92bdd5e7afb4600a05dfe4bf5e394d5b499",
+        "history_lines": 120,
+        "source": "finish_task_pre_stop"
+      },
+      "task_id": "task-20d2844a-6a7e-4508-912a-2add63d4a3ba",
+      "type": "manager_terminal_captured",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": "command-ce09da76-58fd-4115-961e-c67c6d6d035e",
+      "correlation_id": null,
+      "created_at": "2026-05-19T11:52:35Z",
+      "id": 279,
+      "manager_id": null,
+      "payload": {
+        "captures": [
+          {
+            "capture_id": 1,
+            "content_sha256": "f7995ad426b08551fceb63c0d433943bae26d9dfb9b630ec3852effbba5d8f99",
+            "history_lines": 120,
+            "line_count": 24,
+            "role": "worker",
+            "source": "finish_task_pre_stop",
+            "transcript_segment": {
+              "id": 1,
+              "kind": "excerpt",
+              "line_count": 23,
+              "retention_class": "hot"
+            }
+          },
+          {
+            "capture_id": 2,
+            "content_sha256": "d20dbcde856d24a057deeed98daee92bdd5e7afb4600a05dfe4bf5e394d5b499",
+            "history_lines": 120,
+            "line_count": 83,
+            "role": "manager",
+            "source": "finish_task_pre_stop",
+            "transcript_segment": {
+              "id": 2,
+              "kind": "excerpt",
+              "line_count": 40,
+              "retention_class": "hot"
+            }
+          }
+        ],
+        "lines": 120,
+        "mode": "excerpt"
+      },
+      "task_id": "task-20d2844a-6a7e-4508-912a-2add63d4a3ba",
+      "type": "finish_task_pre_stop_transcript_captured",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": "command-ce09da76-58fd-4115-961e-c67c6d6d035e",
+      "correlation_id": null,
+      "created_at": "2026-05-19T11:52:35Z",
+      "id": 280,
+      "manager_id": null,
+      "payload": {
+        "db_pane_id": null,
+        "db_session": "codex-codex-smoke-worker-smoke-20260519045229",
+        "live": true,
+        "live_pane_id": "%31",
+        "mismatches": [],
+        "role": "worker",
+        "session": "codex-smoke-worker-smoke-20260519045229"
+      },
+      "task_id": "task-20d2844a-6a7e-4508-912a-2add63d4a3ba",
+      "type": "worker_identity_verified",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": "command-ce09da76-58fd-4115-961e-c67c6d6d035e",
+      "correlation_id": null,
+      "created_at": "2026-05-19T11:52:35Z",
+      "id": 281,
+      "manager_id": null,
+      "payload": {
+        "command_id": "command-ce09da76-58fd-4115-961e-c67c6d6d035e",
+        "final_audit": {
+          "open_criteria": [],
+          "require_criteria_audit": true,
+          "summary": {
+            "accepted": 0,
+            "deferred": 0,
+            "proposed": 0,
+            "rejected": 0,
+            "satisfied": 1
+          },
+          "total": 1
+        },
+        "final_decision_id": 25,
+        "final_observation_id": 15,
+        "finish": true,
+        "killed_manager": true,
+        "killed_worker": true,
+        "manager_decision": {
+          "allowed_decisions": [
+            "stop"
+          ],
+          "decision": null,
+          "decision_id": null,
+          "ok": false,
+          "warnings": [
+            "missing_decision_id"
+          ]
+        },
+        "manager_identity": {
+          "db_pane_id": null,
+          "db_session": "codex-codex-smoke-manager-smoke-20260519045229",
+          "live": true,
+          "live_pane_id": "%32",
+          "mismatches": [],
+          "role": "manager",
+          "session": "codex-smoke-manager-smoke-20260519045229"
+        },
+        "manager_session": "codex-smoke-manager-smoke-20260519045229",
+        "pre_stop_transcript_captures": [
+          {
+            "capture_id": 1,
+            "content_sha256": "f7995ad426b08551fceb63c0d433943bae26d9dfb9b630ec3852effbba5d8f99",
+            "history_lines": 120,
+            "line_count": 24,
+            "role": "worker",
+            "source": "finish_task_pre_stop",
+            "transcript_segment": {
+              "id": 1,
+              "kind": "excerpt",
+              "line_count": 23,
+              "retention_class": "hot"
+            }
+          },
+          {
+            "capture_id": 2,
+            "content_sha256": "d20dbcde856d24a057deeed98daee92bdd5e7afb4600a05dfe4bf5e394d5b499",
+            "history_lines": 120,
+            "line_count": 83,
+            "role": "manager",
+            "source": "finish_task_pre_stop",
+            "transcript_segment": {
+              "id": 2,
+              "kind": "excerpt",
+              "line_count": 40,
+              "retention_class": "hot"
+            }
+          }
+        ],
+        "reason": "live smoke complete",
+        "stop_manager": true,
+        "stop_worker": true,
+        "task": "codex-smoke-task-smoke-20260519045229",
+        "worker": "codex-smoke-worker-smoke-20260519045229",
+        "worker_identity": {
+          "db_pane_id": null,
+          "db_session": "codex-codex-smoke-worker-smoke-20260519045229",
+          "live": true,
+          "live_pane_id": "%31",
+          "mismatches": [],
+          "role": "worker",
+          "session": "codex-smoke-worker-smoke-20260519045229"
+        },
+        "worker_session": "codex-smoke-worker-smoke-20260519045229"
+      },
+      "task_id": "task-20d2844a-6a7e-4508-912a-2add63d4a3ba",
+      "type": "finish_task_succeeded",
+      "worker_id": null
+    }
+  ],
+  "manager_cycles": [
+    {
+      "completed_at": "2026-05-19T11:52:35Z",
+      "decision": null,
+      "error": null,
+      "health": null,
+      "health_observation_id": null,
+      "id": 46,
+      "manager_capture_id": null,
+      "manager_id": null,
+      "started_at": "2026-05-19T11:52:35Z",
+      "state": "succeeded",
+      "status": {
+        "binding_id": "binding-59c41769-e935-44be-b736-37d8c661cd95",
+        "ingest": {
+          "new_events": 2,
+          "new_offset": 22285,
+          "skipped_lines": 0
+        },
+        "kind": "session_cycle",
+        "last_event_subtype": "task_started",
+        "last_state_event_at": "2026-05-19T11:52:32.545Z",
+        "manager_alive": true,
+        "manager_context": {
+          "acceptance_criteria": {
+            "deferred": [],
+            "open": [],
+            "proposed": [],
+            "rejected": [],
+            "satisfied": [],
+            "summary": {
+              "accepted": 0,
+              "deferred": 0,
+              "proposed": 0,
+              "rejected": 0,
+              "satisfied": 0
+            }
+          },
+          "criteria_negotiation": {
+            "needed": true,
+            "prompt": "Please propose 2-4 acceptance criteria for the current slice. Split them into must-have current-task criteria and follow-up criteria. Include the verification you expect for each.",
+            "reason": "no_criteria",
+            "suggested_actions": [
+              "Ask the worker to split must-have current-task criteria from follow-up criteria.",
+              "Record accepted current-task criteria with workerctl criteria codex-smoke-task-smoke-20260519045229 --add --criterion \"...\" --source worker_proposed --status accepted.",
+              "Record proposed current-task criteria with workerctl criteria codex-smoke-task-smoke-20260519045229 --add --criterion \"...\" --source worker_proposed --status proposed.",
+              "Record follow-up criteria with workerctl criteria codex-smoke-task-smoke-20260519045229 --add --criterion \"...\" --source worker_proposed --status deferred."
+            ]
+          },
+          "manager_config": {
+            "acceptance_criteria": [
+              "The worker remains status-only and no product files are edited."
+            ],
+            "created_at": "2026-05-19T11:52:30Z",
+            "guidelines": [
+              "Use workerctl cycle before deciding."
+            ],
+            "objective": "Verify live smoke lifecycle without editing product files.",
+            "permissions": {
+              "create_pr": false,
+              "merge_green_pr": false,
+              "worker_compact_clear": false
+            },
+            "reference_paths": [
+              "scripts/live-smoke"
+            ],
+            "supervision_mode": "strict",
+            "task_id": "task-20d2844a-6a7e-4508-912a-2add63d4a3ba",
+            "updated_at": "2026-05-19T11:52:30Z"
+          },
+          "worker_handoff": null
+        },
+        "manager_session": "codex-smoke-manager-smoke-20260519045229",
+        "notable_pane_pattern": null,
+        "pane_signal": {
+          "captured": true,
+          "classifier": null,
+          "degraded": false,
+          "notable_pattern": null,
+          "reason": null,
+          "status_age_seconds": 2
+        },
+        "staleness_seconds": 2.455,
+        "state": "busy",
+        "task": "codex-smoke-task-smoke-20260519045229",
+        "task_completed": false,
+        "worker_alive": true,
+        "worker_session": "codex-smoke-worker-smoke-20260519045229"
+      },
+      "task_id": "task-20d2844a-6a7e-4508-912a-2add63d4a3ba",
+      "worker_capture_id": null
+    }
+  ],
+  "manager_decisions": [
+    {
+      "created_at": "2026-05-19T11:52:35Z",
+      "decision": "stop",
+      "id": 25,
+      "manager_cycle_id": null,
+      "manager_id": null,
+      "payload": {
+        "command_id": "command-ce09da76-58fd-4115-961e-c67c6d6d035e",
+        "source": "finish_task"
+      },
+      "reason": "live smoke complete",
+      "task_id": "task-20d2844a-6a7e-4508-912a-2add63d4a3ba"
+    }
+  ],
+  "task": {
+    "created_at": "2026-05-19T11:52:30Z",
+    "goal": "Live smoke test worker-manager lifecycle",
+    "id": "task-20d2844a-6a7e-4508-912a-2add63d4a3ba",
+    "name": "codex-smoke-task-smoke-20260519045229",
+    "state": "done",
+    "summary": "Current CLI live smoke",
+    "updated_at": "2026-05-19T11:52:35Z"
+  },
+  "terminal_captures": [
+    {
+      "byte_count": 867,
+      "captured_at": "2026-05-19T11:52:35Z",
+      "classifier": {
+        "busy_wait": {
+          "pattern": "mcp_startup",
+          "reason": "terminal shows Codex waiting on MCP server startup",
+          "recommended_action": "inspect_or_interrupt"
+        },
+        "startup": [
+          "ready",
+          "Codex input prompt is visible"
+        ]
+      },
+      "command_id": "command-ce09da76-58fd-4115-961e-c67c6d6d035e",
+      "content": "\n\u256d\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u256e\n\u2502 >_ OpenAI Codex (v0.130.0)                   \u2502\n\u2502                                              \u2502\n\u2502 model:     gpt-5.5 medium   /model to change \u2502\n\u2502 directory: ~/Desktop/codex-terminal-manager  \u2502\n\u2570\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u256f\n\n  Tip: New Use /fast to enable our fastest inference with increased plan usage.\n\n\n\u203a Smoke test worker. Do not edit files. Wait for manager instructions and\n  report status only.\n\n\n\u2022 Starting MCP servers (2/3): posthog (3s \u2022 esc to interrupt)\n\n\n\u203a Summarize recent commits\n\n  gpt-5.5 medium \u00b7 ~/Desktop/codex-terminal-manager \u00b7 qa-live-smoke-readiness\n\n\n\n",
+      "content_path": null,
+      "content_sha256": "f7995ad426b08551fceb63c0d433943bae26d9dfb9b630ec3852effbba5d8f99",
+      "history_lines": 120,
+      "id": 1,
+      "line_count": 24,
+      "manager_id": null,
+      "role": "worker",
+      "source": "finish_task_pre_stop",
+      "task_id": "task-20d2844a-6a7e-4508-912a-2add63d4a3ba",
+      "tmux_pane_id": "%31",
+      "tmux_session": "codex-codex-smoke-worker-smoke-20260519045229",
+      "worker_id": null
+    },
+    {
+      "byte_count": 3859,
+      "captured_at": "2026-05-19T11:52:35Z",
+      "classifier": {
+        "busy_wait": {
+          "pattern": "mcp_startup",
+          "reason": "terminal shows Codex waiting on MCP server startup",
+          "recommended_action": "inspect_or_interrupt"
+        },
+        "startup": [
+          "ready",
+          "Codex input prompt is visible"
+        ]
+      },
+      "command_id": "command-ce09da76-58fd-4115-961e-c67c6d6d035e",
+      "content": "\n\n\u203a Run /review on my current changes\n\n  gpt-5.5 medium \u00b7 ~/Desktop/codex-terminal-manager\n\n\u256d\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u256e\n\u2502 >_ OpenAI Codex (v0.130.0)                   \u2502\n\u2502                                              \u2502\n\u2502 model:     gpt-5.5 medium   /model to change \u2502\n\u2502 directory: ~/Desktop/codex-terminal-manager  \u2502\n\u2570\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u256f\n\n  Tip: Try the Codex App. Run 'codex app' or visit\n  https://chatgpt.com/codex?app-landing-page=true\n\n\n\u203a You are a Codex manager session for workerctl.\n\n  Working directory: /Users/neonwatty/Desktop/codex-terminal-manager\n  Manager session name: codex-smoke-manager-smoke-20260519045229\n  Task: codex-smoke-task-smoke-20260519045229\n  Task goal: Live smoke test worker-manager lifecycle\n  Worker session: codex-smoke-worker-smoke-20260519045229\n\n  Your role is to supervise, not to implement the worker task.\n\n  Initial setup:\n  - Manager config has already been recorded for this task.\n  - Start with `scripts/workerctl cycle codex-smoke-task-smoke-20260519045229`\n  and inspect `manager_context.manager_config`.\n  - Ask setup questions only if the cycle output shows missing or unsuitable\n  manager config.\n\n  Supervision loop:\n  - Start observations with `scripts/workerctl cycle codex-smoke-task-smoke-\n  20260519045229`.\n  - Read `manager_context.manager_config` in cycle output before nudging.\n  - Treat acceptance criteria as living supervision state.\n  - Inspect `manager_context.acceptance_criteria` each cycle.\n  - Inspect `manager_context.criteria_negotiation`; use its prompt when needed\n  is true.\n  - Nudge the worker with `scripts/workerctl session-nudge codex-smoke-worker-\n  smoke-20260519045229 \"...\"`;\n    the legacy `nudge` command is only for old file-backed workers and should\n  not\n    be the first choice for session-bound pairs.\n  - If worker progress reveals new edge cases, tests, polish, or scope\n    boundaries, ask the worker to propose must-have vs follow-up criteria.\n  - After a worker proposes separated criteria, use `scripts/workerctl\n  criteria-plan`\n    to draft reviewed criteria commands, then run only the commands you agree\n  with.\n  - Record useful criteria with `scripts/workerctl criteria`.\n    Examples:\n    - `scripts/workerctl criteria codex-smoke-task-smoke-20260519045229 --add\n  --criterion \"...\" --source worker_proposed --status proposed`\n    - `scripts/workerctl criteria codex-smoke-task-smoke-20260519045229 --add\n  --criterion \"...\" --source manager_inferred --status accepted`\n    - `criterion_id=$(scripts/workerctl criteria codex-smoke-task-smoke-\n  20260519045229 --add --criterion \"...\" --source worker_proposed --status\n  proposed | python3 -c 'import json,sys; print(json.load(sys.stdin)\n  [\"affected_criterion\"][\"id\"])')`\n    - `scripts/workerctl criteria codex-smoke-task-smoke-20260519045229\n  --satisfy \"$criterion_id\" --evidence-json\n  '{\"command\":\"...\",\"status\":\"pass\"}'`\n  - Use `worker_proposed` for criteria that came from the worker.\n  - Use `manager_inferred` for criteria inferred from manager config, cycle\n    evidence, or the manager's own inspection; `manager_config` is not a valid\n    criteria source.\n  - Before finishing, compare worker receipts/verification against accepted\n  open criteria.\n  - Communicate with the worker only through workerctl session/task commands.\n  - Do not edit project files unless the user explicitly asks this manager\n    session to change workerctl itself.\n\n\n\u2022 Starting MCP servers (2/3): posthog (1s \u2022 esc to interrupt)\n\n\n\u203a Run /review on my current changes\n\n  gpt-5.5 medium \u00b7 ~/Desktop/codex-terminal-manager \u00b7 qa-live-smoke-readiness\n",
+      "content_path": null,
+      "content_sha256": "d20dbcde856d24a057deeed98daee92bdd5e7afb4600a05dfe4bf5e394d5b499",
+      "history_lines": 120,
+      "id": 2,
+      "line_count": 83,
+      "manager_id": null,
+      "role": "manager",
+      "source": "finish_task_pre_stop",
+      "task_id": "task-20d2844a-6a7e-4508-912a-2add63d4a3ba",
+      "tmux_pane_id": "%32",
+      "tmux_session": "codex-codex-smoke-manager-smoke-20260519045229",
+      "worker_id": null
+    }
+  ],
+  "transcript_segments": [
+    {
+      "byte_count": 866,
+      "captured_at": "2026-05-19T11:52:35Z",
+      "content_sha256": "f7995ad426b08551fceb63c0d433943bae26d9dfb9b630ec3852effbba5d8f99",
+      "created_at": "2026-05-19T11:52:35Z",
+      "id": 1,
+      "line_count": 23,
+      "previous_capture_id": null,
+      "redacted": false,
+      "retention_class": "hot",
+      "role": "worker",
+      "segment_end_line": 24,
+      "segment_kind": "excerpt",
+      "segment_start_line": 1,
+      "segment_text": "\n\u256d\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u256e\n\u2502 >_ OpenAI Codex (v0.130.0)                   \u2502\n\u2502                                              \u2502\n\u2502 model:     gpt-5.5 medium   /model to change \u2502\n\u2502 directory: ~/Desktop/codex-terminal-manager  \u2502\n\u2570\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u256f\n\n  Tip: New Use /fast to enable our fastest inference with increased plan usage.\n\n\n\u203a Smoke test worker. Do not edit files. Wait for manager instructions and\n  report status only.\n\n\n\u2022 Starting MCP servers (2/3): posthog (3s \u2022 esc to interrupt)\n\n\n\u203a Summarize recent commits\n\n  gpt-5.5 medium \u00b7 ~/Desktop/codex-terminal-manager \u00b7 qa-live-smoke-readiness\n\n\n",
+      "source_capture_id": 1,
+      "task_id": "task-20d2844a-6a7e-4508-912a-2add63d4a3ba"
+    },
+    {
+      "byte_count": 1968,
+      "captured_at": "2026-05-19T11:52:35Z",
+      "content_sha256": "d20dbcde856d24a057deeed98daee92bdd5e7afb4600a05dfe4bf5e394d5b499",
+      "created_at": "2026-05-19T11:52:35Z",
+      "id": 2,
+      "line_count": 40,
+      "previous_capture_id": null,
+      "redacted": false,
+      "retention_class": "hot",
+      "role": "manager",
+      "segment_end_line": 83,
+      "segment_kind": "excerpt",
+      "segment_start_line": 44,
+      "segment_text": "  smoke-20260519045229 \"...\"`;\n    the legacy `nudge` command is only for old file-backed workers and should\n  not\n    be the first choice for session-bound pairs.\n  - If worker progress reveals new edge cases, tests, polish, or scope\n    boundaries, ask the worker to propose must-have vs follow-up criteria.\n  - After a worker proposes separated criteria, use `scripts/workerctl\n  criteria-plan`\n    to draft reviewed criteria commands, then run only the commands you agree\n  with.\n  - Record useful criteria with `scripts/workerctl criteria`.\n    Examples:\n    - `scripts/workerctl criteria codex-smoke-task-smoke-20260519045229 --add\n  --criterion \"...\" --source worker_proposed --status proposed`\n    - `scripts/workerctl criteria codex-smoke-task-smoke-20260519045229 --add\n  --criterion \"...\" --source manager_inferred --status accepted`\n    - `criterion_id=$(scripts/workerctl criteria codex-smoke-task-smoke-\n  20260519045229 --add --criterion \"...\" --source worker_proposed --status\n  proposed | python3 -c 'import json,sys; print(json.load(sys.stdin)\n  [\"affected_criterion\"][\"id\"])')`\n    - `scripts/workerctl criteria codex-smoke-task-smoke-20260519045229\n  --satisfy \"$criterion_id\" --evidence-json\n  '{\"command\":\"...\",\"status\":\"pass\"}'`\n  - Use `worker_proposed` for criteria that came from the worker.\n  - Use `manager_inferred` for criteria inferred from manager config, cycle\n    evidence, or the manager's own inspection; `manager_config` is not a valid\n    criteria source.\n  - Before finishing, compare worker receipts/verification against accepted\n  open criteria.\n  - Communicate with the worker only through workerctl session/task commands.\n  - Do not edit project files unless the user explicitly asks this manager\n    session to change workerctl itself.\n\n\n\u2022 Starting MCP servers (2/3): posthog (1s \u2022 esc to interrupt)\n\n\n\u203a Run /review on my current changes\n\n  gpt-5.5 medium \u00b7 ~/Desktop/codex-terminal-manager \u00b7 qa-live-smoke-readiness",
+      "source_capture_id": 2,
+      "task_id": "task-20d2844a-6a7e-4508-912a-2add63d4a3ba"
+    }
+  ]
+}
