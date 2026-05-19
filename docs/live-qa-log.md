@@ -1,5 +1,42 @@
 # Live QA Log
 
+## 2026-05-19: Release Readiness Decision
+
+Decision:
+
+- Ready for release candidate: yes.
+- Ready to reduce manual QA dependence: yes for the covered workerctl
+  lifecycle; hosted live smoke remains manual because hosted runners may not
+  have `codex`.
+
+Evidence:
+
+- Unit tests: `python3 -m unittest discover -s tests -v` passed 351 tests.
+- ResourceWarning gate: `scripts/check-resource-warnings` passed 351 tests with
+  no `ResourceWarning` output.
+- Compile: `python3 -m py_compile scripts/workerctl
+  scripts/check-resource-warnings workerctl/*.py` passed.
+- Shell syntax: `bash -n scripts/live-smoke` and
+  `bash -n scripts/live-smoke-repeat` passed.
+- Repeat live smoke: `scripts/live-smoke-repeat 3` passed and wrote
+  `docs/live-qa-artifacts/2026-05-19-live-smoke-repeat-repeat-20260519060124/`.
+- Repeat summary: runs 1-3 all recorded `status: 0` and
+  `reconcile_clean: true`.
+- Focused manual QA: focused manual QA pass recorded in this log with evidence
+  under
+  `docs/live-qa-artifacts/2026-05-19-manual-qa-pass-manual-qa-20260519053320/`.
+- Cleanup: `scripts/workerctl sessions --state active` returned `[]`, and
+  `scripts/workerctl reconcile --stale-cycles-seconds 1` reported no dangling
+  bindings, dead PID sessions, or stuck tasks.
+
+Remaining risks:
+
+- Hosted GitHub live smoke remains manual and skips the live step when `codex`
+  is unavailable on the runner.
+- The ResourceWarning gate intentionally fails on any `ResourceWarning` text in
+  unittest output, so future tests that mention that string without emitting the
+  warning may need to keep that text out of successful output.
+
 ## 2026-05-19: ResourceWarning CI Gate
 
 Scenario:

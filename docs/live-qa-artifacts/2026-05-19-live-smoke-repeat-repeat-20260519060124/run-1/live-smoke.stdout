@@ -1,0 +1,5 @@
+artifact root: /Users/neonwatty/Desktop/codex-terminal-manager/docs/live-qa-artifacts/2026-05-19-live-smoke-current-cli-smoke-20260519060124
+smoke task: codex-smoke-task-smoke-20260519060124
+smoke worker: codex-smoke-worker-smoke-20260519060124
+smoke manager: codex-smoke-manager-smoke-20260519060124
+live smoke passed
