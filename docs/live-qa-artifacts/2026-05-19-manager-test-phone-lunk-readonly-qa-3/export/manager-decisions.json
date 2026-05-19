@@ -1,0 +1,28 @@
+[
+  {
+    "created_at": "2026-05-19T20:35:17Z",
+    "decision": "stop",
+    "id": 42,
+    "manager_cycle_id": null,
+    "manager_id": null,
+    "payload": {
+      "command_id": "command-0ca97859-7d78-49f4-837a-ff7c9c2a0f91",
+      "source": "finish_task"
+    },
+    "reason": "Read-only QA evidence complete: PR #1 remains open/unmerged; lint, test, build passed; dev-server HTTP smoke passed with browser-control blocker noted; camera/audio QA surfaces assessed from code, tests, and README.",
+    "task_id": "task-a6c66888-a5c7-4a53-a93a-70561318d739"
+  },
+  {
+    "created_at": "2026-05-19T20:35:37Z",
+    "decision": "stop",
+    "id": 43,
+    "manager_cycle_id": null,
+    "manager_id": null,
+    "payload": {
+      "command_id": "command-3b12de69-5f95-4f84-a5b5-faa8a32ee86a",
+      "source": "finish_task"
+    },
+    "reason": "Post-finish transcript evidence and cleanup for realistic QA drill 3.",
+    "task_id": "task-a6c66888-a5c7-4a53-a93a-70561318d739"
+  }
+]

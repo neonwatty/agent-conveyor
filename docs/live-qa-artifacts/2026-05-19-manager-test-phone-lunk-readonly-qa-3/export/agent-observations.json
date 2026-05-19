@@ -1,0 +1,76 @@
+[
+  {
+    "command_id": "command-0ca97859-7d78-49f4-837a-ff7c9c2a0f91",
+    "created_at": "2026-05-19T20:35:17Z",
+    "id": 62,
+    "manager_id": null,
+    "message": "Read-only QA evidence complete: PR #1 remains open/unmerged; lint, test, build passed; dev-server HTTP smoke passed with browser-control blocker noted; camera/audio QA surfaces assessed from code, tests, and README.",
+    "observation_type": "decision",
+    "payload": {
+      "decision": "stop",
+      "decision_id": 42,
+      "source": "finish_task"
+    },
+    "role": "manager",
+    "severity": "info",
+    "source_capture_id": null,
+    "task_id": "task-a6c66888-a5c7-4a53-a93a-70561318d739",
+    "worker_id": null
+  },
+  {
+    "command_id": "command-3b12de69-5f95-4f84-a5b5-faa8a32ee86a",
+    "created_at": "2026-05-19T20:35:37Z",
+    "id": 63,
+    "manager_id": null,
+    "message": "Post-finish transcript evidence and cleanup for realistic QA drill 3.",
+    "observation_type": "decision",
+    "payload": {
+      "decision": "stop",
+      "decision_id": 43,
+      "source": "finish_task"
+    },
+    "role": "manager",
+    "severity": "info",
+    "source_capture_id": null,
+    "task_id": "task-a6c66888-a5c7-4a53-a93a-70561318d739",
+    "worker_id": null
+  },
+  {
+    "command_id": "command-3b12de69-5f95-4f84-a5b5-faa8a32ee86a",
+    "created_at": "2026-05-19T20:35:37Z",
+    "id": 64,
+    "manager_id": null,
+    "message": "worker terminal captured",
+    "observation_type": "capture",
+    "payload": {
+      "content_sha256": "4f6cd1df9298cc4cd891ca4301be80bc70a9a2791b6db59762196ca9c39228af",
+      "history_lines": 220,
+      "source": "finish_task_pre_stop",
+      "transcript_segment_id": 31
+    },
+    "role": "worker",
+    "severity": "info",
+    "source_capture_id": 31,
+    "task_id": "task-a6c66888-a5c7-4a53-a93a-70561318d739",
+    "worker_id": null
+  },
+  {
+    "command_id": "command-3b12de69-5f95-4f84-a5b5-faa8a32ee86a",
+    "created_at": "2026-05-19T20:35:37Z",
+    "id": 65,
+    "manager_id": null,
+    "message": "manager terminal captured",
+    "observation_type": "capture",
+    "payload": {
+      "content_sha256": "bca32ca3fa19a1a2800641802a0205f054f1aea8a25d8ffd236f7a67c880208c",
+      "history_lines": 220,
+      "source": "finish_task_pre_stop",
+      "transcript_segment_id": 32
+    },
+    "role": "manager",
+    "severity": "info",
+    "source_capture_id": 32,
+    "task_id": "task-a6c66888-a5c7-4a53-a93a-70561318d739",
+    "worker_id": null
+  }
+]

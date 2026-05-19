@@ -1,0 +1,114 @@
+{
+  "ok": true,
+  "records": [
+    {
+      "allowed_decisions": [
+        "stop"
+      ],
+      "command": {
+        "created_at": "2026-05-19T20:35:17Z",
+        "id": "command-0ca97859-7d78-49f4-837a-ff7c9c2a0f91",
+        "state": "succeeded",
+        "type": "finish_task"
+      },
+      "effect": {
+        "dry_run": false,
+        "permission_check": null,
+        "send_text": null,
+        "sent": false,
+        "slash_command": null,
+        "worker_session": "manager-test-phone-readonly-worker-3"
+      },
+      "expected_failure": false,
+      "linked_decision": {
+        "created_at": "2026-05-19T20:35:17Z",
+        "decision": "stop",
+        "id": 42,
+        "manager_cycle_id": null,
+        "manager_id": null,
+        "payload": {
+          "command_id": "command-0ca97859-7d78-49f4-837a-ff7c9c2a0f91",
+          "source": "finish_task"
+        },
+        "reason": "Read-only QA evidence complete: PR #1 remains open/unmerged; lint, test, build passed; dev-server HTTP smoke passed with browser-control blocker noted; camera/audio QA surfaces assessed from code, tests, and README.",
+        "task_id": "task-a6c66888-a5c7-4a53-a93a-70561318d739"
+      },
+      "nearest_prior_decision": {
+        "created_at": "2026-05-19T20:35:17Z",
+        "decision": "stop",
+        "id": 42,
+        "manager_cycle_id": null,
+        "manager_id": null,
+        "payload": {
+          "command_id": "command-0ca97859-7d78-49f4-837a-ff7c9c2a0f91",
+          "source": "finish_task"
+        },
+        "reason": "Read-only QA evidence complete: PR #1 remains open/unmerged; lint, test, build passed; dev-server HTTP smoke passed with browser-control blocker noted; camera/audio QA surfaces assessed from code, tests, and README.",
+        "task_id": "task-a6c66888-a5c7-4a53-a93a-70561318d739"
+      },
+      "ok": true,
+      "warnings": []
+    },
+    {
+      "allowed_decisions": [
+        "stop"
+      ],
+      "command": {
+        "created_at": "2026-05-19T20:35:37Z",
+        "id": "command-3b12de69-5f95-4f84-a5b5-faa8a32ee86a",
+        "state": "succeeded",
+        "type": "finish_task"
+      },
+      "effect": {
+        "dry_run": false,
+        "permission_check": null,
+        "send_text": null,
+        "sent": false,
+        "slash_command": null,
+        "worker_session": "manager-test-phone-readonly-worker-3"
+      },
+      "expected_failure": false,
+      "linked_decision": {
+        "created_at": "2026-05-19T20:35:37Z",
+        "decision": "stop",
+        "id": 43,
+        "manager_cycle_id": null,
+        "manager_id": null,
+        "payload": {
+          "command_id": "command-3b12de69-5f95-4f84-a5b5-faa8a32ee86a",
+          "source": "finish_task"
+        },
+        "reason": "Post-finish transcript evidence and cleanup for realistic QA drill 3.",
+        "task_id": "task-a6c66888-a5c7-4a53-a93a-70561318d739"
+      },
+      "nearest_prior_decision": {
+        "created_at": "2026-05-19T20:35:37Z",
+        "decision": "stop",
+        "id": 43,
+        "manager_cycle_id": null,
+        "manager_id": null,
+        "payload": {
+          "command_id": "command-3b12de69-5f95-4f84-a5b5-faa8a32ee86a",
+          "source": "finish_task"
+        },
+        "reason": "Post-finish transcript evidence and cleanup for realistic QA drill 3.",
+        "task_id": "task-a6c66888-a5c7-4a53-a93a-70561318d739"
+      },
+      "ok": true,
+      "warnings": []
+    }
+  ],
+  "summary": {
+    "mutations": 2,
+    "with_warnings": 0
+  },
+  "task": {
+    "created_at": "2026-05-19T20:31:03Z",
+    "goal": "Realistic read-only QA drill for manager-test-app PR #1, focused on verifying the current app branch and producing evidence without merging.",
+    "id": "task-a6c66888-a5c7-4a53-a93a-70561318d739",
+    "name": "manager-test-phone-lunk-readonly-qa-20260519",
+    "state": "done",
+    "summary": "Third realistic manager/worker drill after post-finish transcript recovery fix.",
+    "updated_at": "2026-05-19T20:35:37Z"
+  }
+}

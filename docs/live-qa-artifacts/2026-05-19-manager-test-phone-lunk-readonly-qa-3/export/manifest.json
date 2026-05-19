@@ -1,0 +1,21 @@
+{
+  "created_at": "2026-05-19T20:35:52Z",
+  "files": [
+    "task-status.json",
+    "audit.json",
+    "acceptance-criteria.json",
+    "prompts.json",
+    "transcript-captures.json",
+    "terminal-captures.json",
+    "agent-observations.json",
+    "manager-cycles.json",
+    "manager-decisions.json",
+    "mutation-audit.json",
+    "replay.json",
+    "transcript-segments.json"
+  ],
+  "task": {
+    "id": "task-a6c66888-a5c7-4a53-a93a-70561318d739",
+    "name": "manager-test-phone-lunk-readonly-qa-20260519"
+  }
+}

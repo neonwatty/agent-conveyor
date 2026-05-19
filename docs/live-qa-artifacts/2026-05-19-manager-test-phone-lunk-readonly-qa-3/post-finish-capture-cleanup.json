@@ -1,0 +1,87 @@
+{
+  "already_done_followup": true,
+  "command_id": "command-3b12de69-5f95-4f84-a5b5-faa8a32ee86a",
+  "final_audit": {
+    "open_criteria": [],
+    "require_criteria_audit": true,
+    "summary": {
+      "accepted": 0,
+      "deferred": 1,
+      "proposed": 0,
+      "rejected": 0,
+      "satisfied": 5
+    },
+    "total": 6
+  },
+  "final_decision_id": 43,
+  "final_observation_id": 63,
+  "finish": true,
+  "killed_manager": true,
+  "killed_worker": true,
+  "manager_decision": {
+    "allowed_decisions": [
+      "stop"
+    ],
+    "decision": null,
+    "decision_id": null,
+    "ok": false,
+    "warnings": [
+      "missing_decision_id"
+    ]
+  },
+  "manager_identity": {
+    "db_pane_id": null,
+    "db_session": "codex-manager-test-phone-readonly-manager-3",
+    "live": true,
+    "live_pane_id": "%1",
+    "mismatches": [],
+    "role": "manager",
+    "session": "manager-test-phone-readonly-manager-3"
+  },
+  "manager_session": "manager-test-phone-readonly-manager-3",
+  "pre_stop_transcript_captures": [
+    {
+      "capture_id": 31,
+      "content_sha256": "4f6cd1df9298cc4cd891ca4301be80bc70a9a2791b6db59762196ca9c39228af",
+      "history_lines": 220,
+      "line_count": 243,
+      "role": "worker",
+      "source": "finish_task_pre_stop",
+      "transcript_segment": {
+        "id": 31,
+        "kind": "excerpt",
+        "line_count": 40,
+        "retention_class": "hot"
+      }
+    },
+    {
+      "capture_id": 32,
+      "content_sha256": "bca32ca3fa19a1a2800641802a0205f054f1aea8a25d8ffd236f7a67c880208c",
+      "history_lines": 220,
+      "line_count": 243,
+      "role": "manager",
+      "source": "finish_task_pre_stop",
+      "transcript_segment": {
+        "id": 32,
+        "kind": "excerpt",
+        "line_count": 40,
+        "retention_class": "hot"
+      }
+    }
+  ],
+  "reason": "Post-finish transcript evidence and cleanup for realistic QA drill 3.",
+  "stop_manager": true,
+  "stop_worker": true,
+  "task": "manager-test-phone-lunk-readonly-qa-20260519",
+  "worker": "manager-test-phone-readonly-worker-3",
+  "worker_identity": {
+    "db_pane_id": null,
+    "db_session": "codex-manager-test-phone-readonly-worker-3",
+    "live": true,
+    "live_pane_id": "%0",
+    "mismatches": [],
+    "role": "worker",
+    "session": "manager-test-phone-readonly-worker-3"
+  },
+  "worker_session": "manager-test-phone-readonly-worker-3"
+}
