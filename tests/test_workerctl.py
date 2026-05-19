@@ -824,6 +824,43 @@ class LiveSmokeScriptTests(unittest.TestCase):
         self.assert_script_uses_existing_workerctl_subcommands("live-smoke-repeat")
 
 
+class WarningGateScriptTests(unittest.TestCase):
+    def test_warning_gate_passes_clean_command(self):
+        proc = subprocess.run(
+            [str(ROOT / "scripts" / "check-resource-warnings"), "--", sys.executable, "-c", "print('clean')"],
+            cwd=ROOT,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("clean", proc.stdout)
+
+    def test_warning_gate_fails_on_finalizer_output(self):
+        code = "open('/dev/null')"
+        proc = subprocess.run(
+            [
+                str(ROOT / "scripts" / "check-resource-warnings"),
+                "--",
+                sys.executable,
+                "-W",
+                "always::ResourceWarning",
+                "-c",
+                code,
+            ],
+            cwd=ROOT,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("ResourceWarning detected", proc.stderr)
+
+
 class CliTests(unittest.TestCase):
     def run_workerctl(self, *args, via_shim=False):
         command = [str(WORKERCTL_SHIM_PATH), *args] if via_shim else [sys.executable, str(WORKERCTL_PATH), *args]
