@@ -15,6 +15,7 @@ from pathlib import Path
 from unittest import mock
 
 from workerctl import classify
+from workerctl import cli as worker_cli
 from workerctl import commands
 from workerctl import criteria_plan
 from workerctl import core as worker_core
@@ -745,6 +746,34 @@ class ClassifierTests(unittest.TestCase):
             recent_event_count=2,
         )
         self.assertEqual(result.get("pattern"), "long_running_interruptible")
+
+
+class LiveSmokeScriptTests(unittest.TestCase):
+    def test_live_smoke_uses_existing_workerctl_subcommands(self):
+        parser = worker_cli.build_parser()
+        subparser_action = next(
+            action for action in parser._actions if isinstance(action, argparse._SubParsersAction)
+        )
+        subcommands = set(subparser_action.choices)
+        script = (ROOT / "scripts" / "live-smoke").read_text()
+
+        used = set()
+        for line in script.splitlines():
+            stripped = line.strip()
+            if "WORKERCTL" not in stripped and "workerctl" not in stripped:
+                continue
+            parts = stripped.replace('"${WORKERCTL}"', "workerctl").replace('"$WORKERCTL"', "workerctl").split()
+            if "workerctl" not in parts:
+                continue
+            index = parts.index("workerctl")
+            if index + 1 < len(parts):
+                candidate = parts[index + 1]
+                if candidate and not candidate.startswith("-"):
+                    used.add(candidate)
+
+        self.assertTrue(used)
+        missing = sorted(command for command in used if command not in subcommands)
+        self.assertEqual([], missing)
 
 
 class CliTests(unittest.TestCase):
