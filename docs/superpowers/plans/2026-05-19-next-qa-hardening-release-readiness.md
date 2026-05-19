@@ -682,7 +682,7 @@ git commit -m "test: close database resources cleanly"
 - Modify: `.github/workflows/test.yml`
 - Modify: `README.md`
 
-- [ ] **Step 1: Update CI workflow**
+- [x] **Step 1: Update CI workflow**
 
 Modify `.github/workflows/test.yml` so the test job includes this step after the normal unittest step:
 
@@ -691,7 +691,7 @@ Modify `.github/workflows/test.yml` so the test job includes this step after the
         run: python3 -W error::ResourceWarning -m unittest discover -s tests -v
 ```
 
-- [ ] **Step 2: Update README QA gate**
+- [x] **Step 2: Update README QA gate**
 
 In `README.md`, update the deterministic gate block to:
 
@@ -701,7 +701,7 @@ python3 -W error::ResourceWarning -m unittest discover -s tests -v
 python3 -m py_compile scripts/workerctl workerctl/*.py
 ```
 
-- [ ] **Step 3: Run verification**
+- [x] **Step 3: Run verification**
 
 Run:
 
@@ -715,7 +715,7 @@ Expected:
 
 - All three commands pass.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add .github/workflows/test.yml README.md

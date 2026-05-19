@@ -572,11 +572,12 @@ Fast deterministic gate:
 
 ```bash
 python3 -m unittest discover -s tests -v
+python3 -W error::ResourceWarning -m unittest discover -s tests -v
 python3 -m py_compile scripts/workerctl workerctl/*.py
 ```
 
-GitHub Actions runs the same suite and a `py_compile` check on every push
-and pull request.
+GitHub Actions runs the same suite, the ResourceWarning-as-error suite, and a
+`py_compile` check on every push and pull request.
 
 Live local smoke gate:
 

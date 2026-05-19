@@ -1,5 +1,32 @@
 # Live QA Log
 
+## 2026-05-19: ResourceWarning CI Gate
+
+Scenario:
+
+- Task: Task 6 from
+  `docs/superpowers/plans/2026-05-19-next-qa-hardening-release-readiness.md`
+- Change: GitHub Actions now runs the unittest suite with
+  `ResourceWarning` promoted to an error.
+
+Validated:
+
+- The normal unittest suite still passes.
+- The ResourceWarning-as-error unittest gate passes.
+- The compile gate still passes.
+
+Verification:
+
+- `python3 -m unittest discover -s tests -v` passed 351 tests.
+- `python3 -W error::ResourceWarning -m unittest discover -s tests -v`
+  passed 351 tests.
+- `python3 -m py_compile scripts/workerctl workerctl/*.py` passed.
+
+Decision:
+
+- The earlier QA-readiness ResourceWarning risk is now resolved for CI: future
+  pushes and pull requests fail if the unittest suite emits a `ResourceWarning`.
+
 ## 2026-05-19: Focused Manual QA Pass
 
 Scenario:
