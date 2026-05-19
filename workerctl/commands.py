@@ -30,6 +30,7 @@ from workerctl.db import insert_terminal_capture
 from workerctl.db import insert_transcript_capture
 from workerctl.db import insert_transcript_segment
 from workerctl.db import latest_terminal_capture_for_role
+from workerctl.db import latest_session_binding_for_task
 from workerctl.db import list_tasks as list_db_tasks
 from workerctl.db import mark_manager_seen
 from workerctl.db import mark_worker_state, upsert_worker
@@ -124,6 +125,10 @@ def codex_arg_suffix(codex_args: list[str]) -> str:
     return " -- " + " ".join(sh_quote(arg) for arg in codex_args)
 
 
+def workerctl_cli() -> str:
+    return sh_quote(str(PROJECT_ROOT / "scripts" / "workerctl"))
+
+
 def raw_worker_start_prompt(session_name: str, cwd: Path, manager_codex_args: list[str] | None = None) -> str:
     manager_suffix = codex_arg_suffix(manager_codex_args or [])
     start_manager_template = f"workerctl start-manager --name <manager-name> --cwd {sh_quote(str(cwd))}{manager_suffix}"
@@ -185,15 +190,16 @@ def manager_bootstrap_prompt(
     task_line = task_name or "<unbound-task>"
     goal_line = task_goal or "No task goal supplied yet."
     worker_line = worker_name or "No worker session supplied yet."
+    workerctl = workerctl_cli()
     setup_command = (
-        f"scripts/workerctl manager-config {task_line} --questions"
+        f"{workerctl} manager-config {task_line} --questions"
         if task_name
-        else "scripts/workerctl manager-config <task> --questions"
+        else f"{workerctl} manager-config <task> --questions"
     )
     cycle_command = (
-        f"scripts/workerctl cycle {task_line}"
+        f"{workerctl} cycle {task_line}"
         if task_name
-        else "scripts/workerctl cycle <task>"
+        else f"{workerctl} cycle <task>"
     )
     if manager_config_seeded:
         initial_setup = f"""Initial setup:
@@ -204,7 +210,7 @@ def manager_bootstrap_prompt(
         initial_setup = f"""Initial setup:
 1. Run `{setup_command}`.
 2. Ask the user the returned setup questions in this manager Codex chat.
-3. Persist the answers with `scripts/workerctl manager-config`.
+3. Persist the answers with `{workerctl} manager-config`.
 4. Use `workerctl manager-config --interactive` only when a human is directly
    running workerctl in a terminal."""
 
@@ -226,19 +232,19 @@ Supervision loop:
 - Treat acceptance criteria as living supervision state.
 - Inspect `manager_context.acceptance_criteria` each cycle.
 - Inspect `manager_context.criteria_negotiation`; use its prompt when needed is true.
-- Nudge the worker with `scripts/workerctl session-nudge {worker_line} "..."`;
+- Nudge the worker with `{workerctl} session-nudge {worker_line} "..."`;
   the legacy `nudge` command is only for old file-backed workers and should not
   be the first choice for session-bound pairs.
 - If worker progress reveals new edge cases, tests, polish, or scope
   boundaries, ask the worker to propose must-have vs follow-up criteria.
-- After a worker proposes separated criteria, use `scripts/workerctl criteria-plan`
+- After a worker proposes separated criteria, use `{workerctl} criteria-plan`
   to draft reviewed criteria commands, then run only the commands you agree with.
-- Record useful criteria with `scripts/workerctl criteria`.
+- Record useful criteria with `{workerctl} criteria`.
   Examples:
-  - `scripts/workerctl criteria {task_line} --add --criterion "..." --source worker_proposed --status proposed`
-  - `scripts/workerctl criteria {task_line} --add --criterion "..." --source manager_inferred --status accepted`
-  - `criterion_id=$(scripts/workerctl criteria {task_line} --add --criterion "..." --source worker_proposed --status proposed | python3 -c 'import json,sys; print(json.load(sys.stdin)["affected_criterion"]["id"])')`
-  - `scripts/workerctl criteria {task_line} --satisfy "$criterion_id" --evidence-json '{{"command":"...","status":"pass"}}'`
+  - `{workerctl} criteria {task_line} --add --criterion "..." --source worker_proposed --status proposed`
+  - `{workerctl} criteria {task_line} --add --criterion "..." --source manager_inferred --status accepted`
+  - `criterion_id=$({workerctl} criteria {task_line} --add --criterion "..." --source worker_proposed --status proposed | python3 -c 'import json,sys; print(json.load(sys.stdin)["affected_criterion"]["id"])')`
+  - `{workerctl} criteria {task_line} --satisfy "$criterion_id" --evidence-json '{{"command":"...","status":"pass"}}'`
 - Use `worker_proposed` for criteria that came from the worker.
 - Use `manager_inferred` for criteria inferred from manager config, cycle
   evidence, or the manager's own inspection; `manager_config` is not a valid
@@ -2333,7 +2339,10 @@ def capture_task_terminal(
         try:
             session_binding = active_binding_for_task(conn, task_name=snapshot["name"])
         except WorkerError:
-            session_binding = None
+            try:
+                session_binding = latest_session_binding_for_task(conn, task_name=snapshot["name"])
+            except WorkerError:
+                session_binding = None
         worker_session = (
             dict(session_by_id(conn, session_id=session_binding["worker_session_id"]))
             if session_binding

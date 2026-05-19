@@ -3043,6 +3043,199 @@ Deferred follow-up criteria:
                 commands.run = original_commands_run
                 worker_identity.session_snapshot = original_session_snapshot
 
+    def test_transcript_capture_uses_latest_ended_session_binding_for_done_task(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                task_id = worker_db.create_task(conn, name="session-task", goal="Do task.")
+                worker_db.register_session(
+                    conn,
+                    name="session-worker",
+                    role="worker",
+                    codex_session_path="/tmp/worker.jsonl",
+                    codex_session_id="codex-worker",
+                    pid=111,
+                    cwd=str(ROOT),
+                    tmux_session="codex-session-worker",
+                    tmux_pane_id="%1",
+                )
+                worker_db.register_session(
+                    conn,
+                    name="session-manager",
+                    role="manager",
+                    codex_session_path="/tmp/manager.jsonl",
+                    codex_session_id="codex-manager",
+                    pid=222,
+                    cwd=str(ROOT),
+                    tmux_session="codex-session-manager",
+                    tmux_pane_id="%2",
+                )
+                worker_db.bind_sessions(
+                    conn,
+                    task_name="session-task",
+                    worker_session_name="session-worker",
+                    manager_session_name="session-manager",
+                )
+                worker_db.end_active_binding(conn, task_id=task_id)
+                worker_db.set_task_state(conn, task_id=task_id, state="done")
+                conn.commit()
+
+            original_commands_run = commands.run
+            original_session_snapshot = worker_identity.session_snapshot
+            try:
+                def fake_commands_run(argv, **kwargs):
+                    output = "worker evidence\ncomplete" if argv[4] == "codex-session-worker" else "manager summary\naccepted"
+                    return subprocess.CompletedProcess(argv, 0, output, "")
+
+                commands.run = fake_commands_run
+                worker_identity.session_snapshot = lambda session: {
+                    "live": True,
+                    "pane_id": "%2" if session == "codex-session-manager" else "%1",
+                    "session": session,
+                }
+                args = argparse.Namespace(
+                    json=True,
+                    lines=80,
+                    mode="segment",
+                    path=str(db_path),
+                    require_segment=True,
+                    role="all",
+                    task="session-task",
+                )
+
+                with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                    result = commands.command_transcript_capture(args)
+
+                payload = json.loads(stdout.getvalue())
+                self.assertEqual(result, 0)
+                self.assertEqual([capture["role"] for capture in payload["captures"]], ["worker", "manager"])
+                with worker_db.connect(db_path) as conn:
+                    segments = conn.execute(
+                        "select role, segment_text from transcript_segments where task_id = ? order by id",
+                        (task_id,),
+                    ).fetchall()
+                self.assertEqual([row["role"] for row in segments], ["worker", "manager"])
+                self.assertEqual(segments[0]["segment_text"], "worker evidence\ncomplete")
+                self.assertEqual(segments[1]["segment_text"], "manager summary\naccepted")
+            finally:
+                commands.run = original_commands_run
+                worker_identity.session_snapshot = original_session_snapshot
+
+    def test_finish_task_followup_captures_and_stops_done_session_task(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                task_id = worker_db.create_task(conn, name="session-task", goal="Do task.")
+                worker_db.register_session(
+                    conn,
+                    name="session-worker",
+                    role="worker",
+                    codex_session_path="/tmp/worker.jsonl",
+                    codex_session_id="codex-worker",
+                    pid=111,
+                    cwd=str(ROOT),
+                    tmux_session="codex-session-worker",
+                    tmux_pane_id="%1",
+                )
+                worker_db.register_session(
+                    conn,
+                    name="session-manager",
+                    role="manager",
+                    codex_session_path="/tmp/manager.jsonl",
+                    codex_session_id="codex-manager",
+                    pid=222,
+                    cwd=str(ROOT),
+                    tmux_session="codex-session-manager",
+                    tmux_pane_id="%2",
+                )
+                binding_id = worker_db.bind_sessions(
+                    conn,
+                    task_name="session-task",
+                    worker_session_name="session-worker",
+                    manager_session_name="session-manager",
+                )
+                worker_db.end_active_binding(conn, task_id=task_id)
+                worker_db.set_task_state(conn, task_id=task_id, state="done")
+                conn.commit()
+
+            original_lifecycle_run = lifecycle.run
+            original_commands_run = commands.run
+            original_session_snapshot = worker_identity.session_snapshot
+            try:
+                operation_order = []
+
+                def fake_lifecycle_run(argv, **kwargs):
+                    operation_order.append(("kill", argv[-1]))
+                    return subprocess.CompletedProcess(argv, 0, "", "")
+
+                def fake_commands_run(argv, **kwargs):
+                    operation_order.append(("capture", argv[4]))
+                    output = "worker evidence\ncomplete" if argv[4] == "codex-session-worker" else "manager summary\naccepted"
+                    return subprocess.CompletedProcess(argv, 0, output, "")
+
+                lifecycle.run = fake_lifecycle_run
+                commands.run = fake_commands_run
+                worker_identity.session_snapshot = lambda session: {
+                    "live": True,
+                    "pane_id": "%2" if session == "codex-session-manager" else "%1",
+                    "session": session,
+                }
+                args = argparse.Namespace(
+                    capture_transcript_before_stop=True,
+                    capture_transcript_lines=80,
+                    capture_transcript_mode="segment",
+                    decision_id=None,
+                    message=None,
+                    path=str(db_path),
+                    reason="post-finish evidence cleanup",
+                    require_criteria_audit=True,
+                    require_transcript_segment=True,
+                    stop_manager=True,
+                    stop_worker=True,
+                    strict_decisions=False,
+                    task="session-task",
+                )
+
+                with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                    result = lifecycle.command_finish_task(args)
+
+                payload = json.loads(stdout.getvalue())
+                self.assertEqual(result, 0)
+                self.assertTrue(payload["already_done_followup"])
+                self.assertEqual([capture["role"] for capture in payload["pre_stop_transcript_captures"]], ["worker", "manager"])
+                self.assertEqual(
+                    operation_order,
+                    [
+                        ("capture", "codex-session-worker"),
+                        ("capture", "codex-session-manager"),
+                        ("kill", "codex-session-manager"),
+                        ("kill", "codex-session-worker"),
+                    ],
+                )
+                with worker_db.connect(db_path) as conn:
+                    task = conn.execute("select state from tasks where id = ?", (task_id,)).fetchone()
+                    binding = conn.execute("select state, ended_at from bindings where id = ?", (binding_id,)).fetchone()
+                    sessions = {
+                        row["name"]: row["state"]
+                        for row in conn.execute("select name, state from sessions")
+                    }
+                    command = conn.execute(
+                        "select state, result_json from commands where type = 'finish_task' order by id desc limit 1"
+                    ).fetchone()
+                self.assertEqual(task["state"], "done")
+                self.assertEqual(binding["state"], "ended")
+                self.assertIsNotNone(binding["ended_at"])
+                self.assertEqual(sessions["session-worker"], "gone")
+                self.assertEqual(sessions["session-manager"], "gone")
+                self.assertEqual(command["state"], "succeeded")
+                self.assertTrue(json.loads(command["result_json"])["already_done_followup"])
+            finally:
+                lifecycle.run = original_lifecycle_run
+                commands.run = original_commands_run
+                worker_identity.session_snapshot = original_session_snapshot
+
     def test_stop_task_refuses_worker_pane_mismatch_before_kill(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "workerctl.db"
@@ -9111,27 +9304,28 @@ class ManagerBootstrapPromptTests(unittest.TestCase):
         self.assertIn("manager_context.acceptance_criteria", prompt)
         self.assertIn("manager_context.criteria_negotiation", prompt)
         self.assertIn("use its prompt when needed is true", prompt)
-        self.assertIn("scripts/workerctl session-nudge docs-worker", prompt)
+        workerctl = commands.workerctl_cli()
+        self.assertIn(f"{workerctl} session-nudge docs-worker", prompt)
         self.assertIn("legacy `nudge` command is only for old file-backed workers", prompt)
         self.assertIn("must-have vs follow-up criteria", prompt)
-        self.assertIn("Record useful criteria with `scripts/workerctl criteria`", prompt)
+        self.assertIn(f"Record useful criteria with `{workerctl} criteria`", prompt)
         self.assertIn("compare worker receipts/verification against accepted open criteria", prompt)
         self.assertIn(
-            'scripts/workerctl criteria docs-task --add --criterion "..." --source worker_proposed --status proposed',
+            f'{workerctl} criteria docs-task --add --criterion "..." --source worker_proposed --status proposed',
             prompt,
         )
         self.assertIn(
-            'scripts/workerctl criteria docs-task --add --criterion "..." --source manager_inferred --status accepted',
+            f'{workerctl} criteria docs-task --add --criterion "..." --source manager_inferred --status accepted',
             prompt,
         )
         self.assertIn("Use `manager_inferred` for criteria inferred from manager config", prompt)
         self.assertIn("`manager_config` is not a valid", prompt)
         self.assertIn(
-            """criterion_id=$(scripts/workerctl criteria docs-task --add --criterion "..." --source worker_proposed --status proposed | python3 -c 'import json,sys; print(json.load(sys.stdin)["affected_criterion"]["id"])')""",
+            f"""criterion_id=$({workerctl} criteria docs-task --add --criterion "..." --source worker_proposed --status proposed | python3 -c 'import json,sys; print(json.load(sys.stdin)["affected_criterion"]["id"])')""",
             prompt,
         )
         self.assertIn(
-            """scripts/workerctl criteria docs-task --satisfy "$criterion_id" --evidence-json '{"command":"...","status":"pass"}'""",
+            f"""{workerctl} criteria docs-task --satisfy "$criterion_id" --evidence-json '{{"command":"...","status":"pass"}}'""",
             prompt,
         )
         self.assertIn("affected_criterion", prompt)
@@ -9236,7 +9430,8 @@ class StartManagerTests(unittest.TestCase):
                     self.assertIn("acceptance criteria as living supervision state", codex_cmd)
                     self.assertIn("manager_context.acceptance_criteria", codex_cmd)
                     self.assertIn("must-have vs follow-up criteria", codex_cmd)
-                    self.assertIn("scripts/workerctl criteria", codex_cmd)
+                    self.assertIn(str(ROOT / "scripts" / "workerctl"), codex_cmd)
+                    self.assertIn("criteria", codex_cmd)
                     self.assertIn("compare worker receipts/verification against accepted open criteria", codex_cmd)
                     self.assertNotIn("Do not edit files. Wait for manager instruction.", codex_cmd)
 
@@ -10571,7 +10766,7 @@ class PairCommandTests(unittest.TestCase):
             self.assertIn("acceptance criteria as living supervision state", manager_spawn["initial_prompt"])
             self.assertIn("manager_context.acceptance_criteria", manager_spawn["initial_prompt"])
             self.assertIn("must-have vs follow-up criteria", manager_spawn["initial_prompt"])
-            self.assertIn("scripts/workerctl criteria", manager_spawn["initial_prompt"])
+            self.assertIn(f"{commands.workerctl_cli()} criteria", manager_spawn["initial_prompt"])
             self.assertIn(
                 "compare worker receipts/verification against accepted open criteria",
                 manager_spawn["initial_prompt"],
@@ -10646,7 +10841,10 @@ class PairCommandTests(unittest.TestCase):
             self.assertTrue(output["manager_config_seeded_by_pair"])
             manager_spawn = next(r for r in recorded if r["role"] == "manager")
             self.assertIn("Manager config has already been recorded for this task.", manager_spawn["initial_prompt"])
-            self.assertIn("Start with `scripts/workerctl cycle seeded-manager-task`", manager_spawn["initial_prompt"])
+            self.assertIn(
+                f"Start with `{commands.workerctl_cli()} cycle seeded-manager-task`",
+                manager_spawn["initial_prompt"],
+            )
             self.assertIn("Ask setup questions only if", manager_spawn["initial_prompt"])
             self.assertNotIn("Ask the user the returned setup questions", manager_spawn["initial_prompt"])
 
