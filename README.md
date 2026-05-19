@@ -568,18 +568,28 @@ CLI command writes to them. To resume work on a legacy task, call
 
 ## Tests
 
-Run the dependency-free test suite:
+Fast deterministic gate:
 
 ```bash
 python3 -m unittest discover -s tests -v
+python3 -m py_compile scripts/workerctl workerctl/*.py
 ```
 
 GitHub Actions runs the same suite and a `py_compile` check on every push
 and pull request.
 
-When `tmux`, `codex`, and `rg` are available, the optional live smoke test
-creates unique `codex-smoke-*` sessions and cleans them up on exit:
+Live local smoke gate:
 
 ```bash
 scripts/live-smoke
 ```
+
+The live smoke requires macOS, `tmux`, `codex`, and `rg`. It starts disposable
+Codex worker/manager sessions, exercises `pair`, `cycle`, `session-nudge`,
+criteria mutation, transcript capture before stop, replay, mutation audit, and
+export, then verifies cleanup with `sessions --state active` and `reconcile`.
+It writes evidence under `docs/live-qa-artifacts/` and should leave no active
+smoke sessions, tmux panes, dangling bindings, or stuck tasks.
+
+For the focused manual coverage pass, use
+[docs/manual-qa-checklist.md](docs/manual-qa-checklist.md).
