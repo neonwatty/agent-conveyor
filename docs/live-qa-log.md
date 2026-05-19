@@ -1,5 +1,57 @@
 # Live QA Log
 
+## 2026-05-19: Manager-Test App Read-Only QA Drill 3
+
+Decision:
+
+- Realistic manager/worker QA drill passed for the evidence system after
+  merging the post-finish transcript recovery fix. App PR #1 remains open and
+  still needs real browser camera/audio manual QA before release acceptance.
+
+Scenario:
+
+- Task: `manager-test-phone-lunk-readonly-qa-20260519`.
+- Worker: `manager-test-phone-readonly-worker-3`.
+- Manager: `manager-test-phone-readonly-manager-3`.
+- Target PR: `https://github.com/neonwatty/manager-test-app/pull/1`.
+- Artifact bundle:
+  `docs/live-qa-artifacts/2026-05-19-manager-test-phone-lunk-readonly-qa-3/`.
+
+Evidence:
+
+- Fix PR #83 (`Recover transcript capture after finished tasks`) merged first
+  at `e6197ed`; issue #81 was closed by that merge.
+- Manager bootstrap used the absolute
+  `/Users/neonwatty/Desktop/codex-terminal-manager/scripts/workerctl` path from
+  an app-repo cwd and avoided the previous relative-path failure.
+- Worker verified PR #1 remained `OPEN`, not draft, merge state `CLEAN`, and
+  unmerged on `feature/phone-lunk-alarm-refresh`.
+- Worker reported `npm run lint`, `npm run test` (8 tests), and
+  `npm run build` passed.
+- Worker performed a practical dev-server smoke fallback:
+  `http://127.0.0.1:5173/` returned HTTP 200 with the app shell and
+  `/src/main.tsx` returned HTTP 200 JavaScript. In-app browser automation was
+  unavailable, so real click-through remains manual.
+- Manager recorded five accepted criteria, one deferred follow-up, then
+  satisfied all accepted criteria from worker evidence. The deferred follow-up
+  is browser-level camera QA coverage.
+- The manager finished normally without stop flags. A follow-up
+  `finish-task --capture-transcript-before-stop --require-transcript-segment
+  --stop-manager --stop-worker` succeeded on the already-done task with
+  `already_done_followup: true`.
+- Post-finish transcript capture recorded non-empty 40-line excerpt segments
+  for both worker and manager, then killed both sessions.
+- `mutation-audit --json` reported `ok: true`, two linked `finish_task`
+  mutations, and zero warnings.
+- Cleanup returned active sessions `[]`; reconcile reported no dangling
+  bindings, dead PID sessions, or stuck tasks.
+
+Remaining Manual QA:
+
+- Real browser camera permission allow/deny prompts, live camera preview, and
+  audible alarm/mute behavior still need human confirmation before calling PR
+  #1 release-ready.
+
 ## 2026-05-19: Manager-Test App QA Slice 2
 
 Decision:

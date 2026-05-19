@@ -1,0 +1,145 @@
+{
+  "criteria": [
+    {
+      "created_at": "2026-05-19T20:32:28Z",
+      "criterion": "Camera permission/error path is user-recoverable.",
+      "evidence": {
+        "code": "src/App.tsx:92 startCamera handles missing getUserMedia, permission denial, no camera, success stream attach, and stop cleanup",
+        "readme": "README.md:65 manual QA requires allow/deny browser permission checks",
+        "remaining_manual_qa": "camera permission allow/deny prompts and live camera preview require real browser",
+        "source": "worker_final_receipt",
+        "status": "assessed_from_code_tests_readme"
+      },
+      "id": 69,
+      "proof": null,
+      "rationale": null,
+      "source": "worker_proposed",
+      "status": "satisfied",
+      "task_id": "task-a6c66888-a5c7-4a53-a93a-70561318d739",
+      "updated_at": "2026-05-19T20:34:55Z"
+    },
+    {
+      "created_at": "2026-05-19T20:32:37Z",
+      "criterion": "Audio alarm requires explicit enablement and respects mute.",
+      "evidence": {
+        "code": "src/App.tsx:145 enableAudioAlarm requires explicit Web Audio opt-in; muteAudioAlarm stops tone and sets muted; playAlarmTone only runs when audio is ready and mode is not silent",
+        "readme": "README.md:58 manual QA still needs audible confirmation for enable/mute behavior",
+        "remaining_manual_qa": "audible alarm and no-audio mute confirmation require real browser/audio",
+        "source": "worker_final_receipt",
+        "status": "assessed_from_code_tests_readme"
+      },
+      "id": 70,
+      "proof": null,
+      "rationale": null,
+      "source": "worker_proposed",
+      "status": "satisfied",
+      "task_id": "task-a6c66888-a5c7-4a53-a93a-70561318d739",
+      "updated_at": "2026-05-19T20:35:00Z"
+    },
+    {
+      "created_at": "2026-05-19T20:32:40Z",
+      "criterion": "Current slice passes baseline project checks.",
+      "evidence": {
+        "commands": [
+          {
+            "command": "npm run lint",
+            "details": "exit 0, no lint output",
+            "status": "pass"
+          },
+          {
+            "command": "npm run test",
+            "details": "exit 0, 1 test file, 8 tests passed",
+            "status": "pass"
+          },
+          {
+            "command": "npm run build",
+            "details": "exit 0, tsc -b && vite build completed",
+            "status": "pass"
+          }
+        ],
+        "source": "worker_final_receipt"
+      },
+      "id": 71,
+      "proof": null,
+      "rationale": null,
+      "source": "worker_proposed",
+      "status": "satisfied",
+      "task_id": "task-a6c66888-a5c7-4a53-a93a-70561318d739",
+      "updated_at": "2026-05-19T20:34:37Z"
+    },
+    {
+      "created_at": "2026-05-19T20:32:44Z",
+      "criterion": "Add browser-level camera QA coverage.",
+      "evidence": {},
+      "id": 72,
+      "proof": null,
+      "rationale": "Follow-up after this QA slice.",
+      "source": "worker_proposed",
+      "status": "deferred",
+      "task_id": "task-a6c66888-a5c7-4a53-a93a-70561318d739",
+      "updated_at": "2026-05-19T20:32:44Z"
+    },
+    {
+      "created_at": "2026-05-19T20:32:48Z",
+      "criterion": "Worker reports manager-test-app PR #1 URL/state and confirms it remains unmerged.",
+      "evidence": {
+        "branch": "feature/phone-lunk-alarm-refresh",
+        "mergeable": "MERGEABLE",
+        "mergedAt": null,
+        "pr": "https://github.com/neonwatty/manager-test-app/pull/1",
+        "source": "worker_final_receipt",
+        "state": "OPEN",
+        "unmerged_confirmed": true,
+        "working_tree": "clean"
+      },
+      "id": 73,
+      "proof": null,
+      "rationale": null,
+      "source": "manager_inferred",
+      "status": "satisfied",
+      "task_id": "task-a6c66888-a5c7-4a53-a93a-70561318d739",
+      "updated_at": "2026-05-19T20:34:43Z"
+    },
+    {
+      "created_at": "2026-05-19T20:32:52Z",
+      "criterion": "Worker reports a dev-server smoke result or an explicit blocker if not practical.",
+      "evidence": {
+        "blocker": "in-app Browser control tool unavailable after discovery",
+        "checks": [
+          {
+            "details": "title Phone Lunk Alarm Lab and root app mount present",
+            "status": "HTTP 200 OK",
+            "url": "http://127.0.0.1:5173/"
+          },
+          {
+            "details": "Content-Type text/javascript",
+            "status": "HTTP 200 OK",
+            "url": "http://127.0.0.1:5173/src/main.tsx"
+          }
+        ],
+        "dev_server": "npm run dev -- --host 127.0.0.1 --port 5173",
+        "server_stopped": true,
+        "source": "worker_final_receipt",
+        "status": "pass_with_fallback"
+      },
+      "id": 74,
+      "proof": null,
+      "rationale": null,
+      "source": "manager_inferred",
+      "status": "satisfied",
+      "task_id": "task-a6c66888-a5c7-4a53-a93a-70561318d739",
+      "updated_at": "2026-05-19T20:34:50Z"
+    }
+  ],
+  "summary": {
+    "accepted": 0,
+    "deferred": 1,
+    "proposed": 0,
+    "rejected": 0,
+    "satisfied": 5
+  },
+  "task": {
+    "id": "task-a6c66888-a5c7-4a53-a93a-70561318d739",
+    "name": "manager-test-phone-lunk-readonly-qa-20260519"
+  }
+}

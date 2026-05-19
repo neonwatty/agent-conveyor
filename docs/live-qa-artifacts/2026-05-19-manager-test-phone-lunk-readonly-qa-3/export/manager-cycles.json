@@ -1,0 +1,1778 @@
+[
+  {
+    "completed_at": "2026-05-19T20:31:15Z",
+    "decision": null,
+    "error": null,
+    "health": null,
+    "health_observation_id": null,
+    "id": 90,
+    "manager_capture_id": null,
+    "manager_id": null,
+    "started_at": "2026-05-19T20:31:15Z",
+    "state": "succeeded",
+    "status": {
+      "binding_id": "binding-c4757211-31a2-4626-b921-8072f0042f59",
+      "ingest": {
+        "new_events": 2,
+        "new_offset": 22282,
+        "skipped_lines": 0
+      },
+      "kind": "session_cycle",
+      "last_event_subtype": "task_started",
+      "last_state_event_at": "2026-05-19T20:31:06.495Z",
+      "manager_alive": true,
+      "manager_context": {
+        "acceptance_criteria": {
+          "deferred": [],
+          "open": [],
+          "proposed": [],
+          "rejected": [],
+          "satisfied": [],
+          "summary": {
+            "accepted": 0,
+            "deferred": 0,
+            "proposed": 0,
+            "rejected": 0,
+            "satisfied": 0
+          }
+        },
+        "criteria_negotiation": {
+          "needed": true,
+          "prompt": "Please propose 2-4 acceptance criteria for the current slice. Split them into must-have current-task criteria and follow-up criteria. Include the verification you expect for each.",
+          "reason": "no_criteria",
+          "suggested_actions": [
+            "Ask the worker to split must-have current-task criteria from follow-up criteria.",
+            "Record accepted current-task criteria with workerctl criteria manager-test-phone-lunk-readonly-qa-20260519 --add --criterion \"...\" --source worker_proposed --status accepted.",
+            "Record proposed current-task criteria with workerctl criteria manager-test-phone-lunk-readonly-qa-20260519 --add --criterion \"...\" --source worker_proposed --status proposed.",
+            "Record follow-up criteria with workerctl criteria manager-test-phone-lunk-readonly-qa-20260519 --add --criterion \"...\" --source worker_proposed --status deferred."
+          ]
+        },
+        "manager_config": {
+          "acceptance_criteria": [
+            "Worker reports manager-test-app PR #1 URL/state and confirms it remains unmerged.",
+            "Worker reports lint, test, and build results for the current app branch.",
+            "Worker reports a dev-server smoke result or an explicit blocker if not practical.",
+            "Worker assesses camera permission/error and audio alarm enable/mute QA surfaces from code or README.",
+            "Manager records accepted criteria and satisfies them with evidence before finish-task."
+          ],
+          "created_at": "2026-05-19T20:31:03Z",
+          "guidelines": [
+            "Use the absolute workerctl commands shown in your bootstrap prompt; the app repo cwd does not contain scripts/workerctl.",
+            "Keep this drill read-only for manager-test-app: no commits, pushes, or merges.",
+            "When satisfied, finish the workerctl task normally without stop flags; the operator will run post-finish transcript capture and cleanup to validate issue #81."
+          ],
+          "objective": "Supervise a read-only QA worker on manager-test-app PR #1, verify command evidence, record criteria, and finish only when evidence is sufficient. Do not merge PR #1.",
+          "permissions": {
+            "create_pr": false,
+            "merge_green_pr": false,
+            "worker_compact_clear": false
+          },
+          "reference_paths": [],
+          "supervision_mode": "strict",
+          "task_id": "task-a6c66888-a5c7-4a53-a93a-70561318d739",
+          "updated_at": "2026-05-19T20:31:03Z"
+        },
+        "worker_handoff": null
+      },
+      "manager_session": "manager-test-phone-readonly-manager-3",
+      "notable_pane_pattern": null,
+      "pane_signal": {
+        "captured": true,
+        "classifier": null,
+        "degraded": false,
+        "notable_pattern": null,
+        "reason": null,
+        "status_age_seconds": 8
+      },
+      "staleness_seconds": 8.505,
+      "state": "busy",
+      "task": "manager-test-phone-lunk-readonly-qa-20260519",
+      "task_completed": false,
+      "worker_alive": true,
+      "worker_session": "manager-test-phone-readonly-worker-3"
+    },
+    "task_id": "task-a6c66888-a5c7-4a53-a93a-70561318d739",
+    "worker_capture_id": null
+  },
+  {
+    "completed_at": "2026-05-19T20:31:33Z",
+    "decision": null,
+    "error": null,
+    "health": null,
+    "health_observation_id": null,
+    "id": 91,
+    "manager_capture_id": null,
+    "manager_id": null,
+    "started_at": "2026-05-19T20:31:33Z",
+    "state": "succeeded",
+    "status": {
+      "binding_id": "binding-c4757211-31a2-4626-b921-8072f0042f59",
+      "ingest": {
+        "new_events": 14,
+        "new_offset": 72097,
+        "skipped_lines": 0
+      },
+      "kind": "session_cycle",
+      "last_event_subtype": null,
+      "last_state_event_at": "2026-05-19T20:31:17.662Z",
+      "manager_alive": true,
+      "manager_context": {
+        "acceptance_criteria": {
+          "deferred": [],
+          "open": [],
+          "proposed": [],
+          "rejected": [],
+          "satisfied": [],
+          "summary": {
+            "accepted": 0,
+            "deferred": 0,
+            "proposed": 0,
+            "rejected": 0,
+            "satisfied": 0
+          }
+        },
+        "criteria_negotiation": {
+          "needed": true,
+          "prompt": "Please propose 2-4 acceptance criteria for the current slice. Split them into must-have current-task criteria and follow-up criteria. Include the verification you expect for each.",
+          "reason": "no_criteria",
+          "suggested_actions": [
+            "Ask the worker to split must-have current-task criteria from follow-up criteria.",
+            "Record accepted current-task criteria with workerctl criteria manager-test-phone-lunk-readonly-qa-20260519 --add --criterion \"...\" --source worker_proposed --status accepted.",
+            "Record proposed current-task criteria with workerctl criteria manager-test-phone-lunk-readonly-qa-20260519 --add --criterion \"...\" --source worker_proposed --status proposed.",
+            "Record follow-up criteria with workerctl criteria manager-test-phone-lunk-readonly-qa-20260519 --add --criterion \"...\" --source worker_proposed --status deferred."
+          ]
+        },
+        "manager_config": {
+          "acceptance_criteria": [
+            "Worker reports manager-test-app PR #1 URL/state and confirms it remains unmerged.",
+            "Worker reports lint, test, and build results for the current app branch.",
+            "Worker reports a dev-server smoke result or an explicit blocker if not practical.",
+            "Worker assesses camera permission/error and audio alarm enable/mute QA surfaces from code or README.",
+            "Manager records accepted criteria and satisfies them with evidence before finish-task."
+          ],
+          "created_at": "2026-05-19T20:31:03Z",
+          "guidelines": [
+            "Use the absolute workerctl commands shown in your bootstrap prompt; the app repo cwd does not contain scripts/workerctl.",
+            "Keep this drill read-only for manager-test-app: no commits, pushes, or merges.",
+            "When satisfied, finish the workerctl task normally without stop flags; the operator will run post-finish transcript capture and cleanup to validate issue #81."
+          ],
+          "objective": "Supervise a read-only QA worker on manager-test-app PR #1, verify command evidence, record criteria, and finish only when evidence is sufficient. Do not merge PR #1.",
+          "permissions": {
+            "create_pr": false,
+            "merge_green_pr": false,
+            "worker_compact_clear": false
+          },
+          "reference_paths": [],
+          "supervision_mode": "strict",
+          "task_id": "task-a6c66888-a5c7-4a53-a93a-70561318d739",
+          "updated_at": "2026-05-19T20:31:03Z"
+        },
+        "worker_handoff": null
+      },
+      "manager_session": "manager-test-phone-readonly-manager-3",
+      "notable_pane_pattern": null,
+      "pane_signal": {
+        "captured": true,
+        "classifier": null,
+        "degraded": false,
+        "notable_pattern": null,
+        "reason": null,
+        "status_age_seconds": 15
+      },
+      "staleness_seconds": 15.338,
+      "state": "busy",
+      "task": "manager-test-phone-lunk-readonly-qa-20260519",
+      "task_completed": false,
+      "worker_alive": true,
+      "worker_session": "manager-test-phone-readonly-worker-3"
+    },
+    "task_id": "task-a6c66888-a5c7-4a53-a93a-70561318d739",
+    "worker_capture_id": null
+  },
+  {
+    "completed_at": "2026-05-19T20:31:39Z",
+    "decision": null,
+    "error": null,
+    "health": null,
+    "health_observation_id": null,
+    "id": 92,
+    "manager_capture_id": null,
+    "manager_id": null,
+    "started_at": "2026-05-19T20:31:39Z",
+    "state": "succeeded",
+    "status": {
+      "binding_id": "binding-c4757211-31a2-4626-b921-8072f0042f59",
+      "ingest": {
+        "new_events": 16,
+        "new_offset": 97773,
+        "skipped_lines": 0
+      },
+      "kind": "session_cycle",
+      "last_event_subtype": null,
+      "last_state_event_at": "2026-05-19T20:31:17.662Z",
+      "manager_alive": true,
+      "manager_context": {
+        "acceptance_criteria": {
+          "deferred": [],
+          "open": [],
+          "proposed": [],
+          "rejected": [],
+          "satisfied": [],
+          "summary": {
+            "accepted": 0,
+            "deferred": 0,
+            "proposed": 0,
+            "rejected": 0,
+            "satisfied": 0
+          }
+        },
+        "criteria_negotiation": {
+          "needed": true,
+          "prompt": "Please propose 2-4 acceptance criteria for the current slice. Split them into must-have current-task criteria and follow-up criteria. Include the verification you expect for each.",
+          "reason": "no_criteria",
+          "suggested_actions": [
+            "Ask the worker to split must-have current-task criteria from follow-up criteria.",
+            "Record accepted current-task criteria with workerctl criteria manager-test-phone-lunk-readonly-qa-20260519 --add --criterion \"...\" --source worker_proposed --status accepted.",
+            "Record proposed current-task criteria with workerctl criteria manager-test-phone-lunk-readonly-qa-20260519 --add --criterion \"...\" --source worker_proposed --status proposed.",
+            "Record follow-up criteria with workerctl criteria manager-test-phone-lunk-readonly-qa-20260519 --add --criterion \"...\" --source worker_proposed --status deferred."
+          ]
+        },
+        "manager_config": {
+          "acceptance_criteria": [
+            "Worker reports manager-test-app PR #1 URL/state and confirms it remains unmerged.",
+            "Worker reports lint, test, and build results for the current app branch.",
+            "Worker reports a dev-server smoke result or an explicit blocker if not practical.",
+            "Worker assesses camera permission/error and audio alarm enable/mute QA surfaces from code or README.",
+            "Manager records accepted criteria and satisfies them with evidence before finish-task."
+          ],
+          "created_at": "2026-05-19T20:31:03Z",
+          "guidelines": [
+            "Use the absolute workerctl commands shown in your bootstrap prompt; the app repo cwd does not contain scripts/workerctl.",
+            "Keep this drill read-only for manager-test-app: no commits, pushes, or merges.",
+            "When satisfied, finish the workerctl task normally without stop flags; the operator will run post-finish transcript capture and cleanup to validate issue #81."
+          ],
+          "objective": "Supervise a read-only QA worker on manager-test-app PR #1, verify command evidence, record criteria, and finish only when evidence is sufficient. Do not merge PR #1.",
+          "permissions": {
+            "create_pr": false,
+            "merge_green_pr": false,
+            "worker_compact_clear": false
+          },
+          "reference_paths": [],
+          "supervision_mode": "strict",
+          "task_id": "task-a6c66888-a5c7-4a53-a93a-70561318d739",
+          "updated_at": "2026-05-19T20:31:03Z"
+        },
+        "worker_handoff": null
+      },
+      "manager_session": "manager-test-phone-readonly-manager-3",
+      "notable_pane_pattern": null,
+      "pane_signal": {
+        "captured": true,
+        "classifier": null,
+        "degraded": false,
+        "notable_pattern": null,
+        "reason": null,
+        "status_age_seconds": 21
+      },
+      "staleness_seconds": 21.338,
+      "state": "busy",
+      "task": "manager-test-phone-lunk-readonly-qa-20260519",
+      "task_completed": false,
+      "worker_alive": true,
+      "worker_session": "manager-test-phone-readonly-worker-3"
+    },
+    "task_id": "task-a6c66888-a5c7-4a53-a93a-70561318d739",
+    "worker_capture_id": null
+  },
+  {
+    "completed_at": "2026-05-19T20:31:46Z",
+    "decision": null,
+    "error": null,
+    "health": null,
+    "health_observation_id": null,
+    "id": 93,
+    "manager_capture_id": null,
+    "manager_id": null,
+    "started_at": "2026-05-19T20:31:46Z",
+    "state": "succeeded",
+    "status": {
+      "binding_id": "binding-c4757211-31a2-4626-b921-8072f0042f59",
+      "ingest": {
+        "new_events": 13,
+        "new_offset": 116837,
+        "skipped_lines": 0
+      },
+      "kind": "session_cycle",
+      "last_event_subtype": "user_message",
+      "last_state_event_at": "2026-05-19T20:31:45.240Z",
+      "manager_alive": true,
+      "manager_context": {
+        "acceptance_criteria": {
+          "deferred": [],
+          "open": [],
+          "proposed": [],
+          "rejected": [],
+          "satisfied": [],
+          "summary": {
+            "accepted": 0,
+            "deferred": 0,
+            "proposed": 0,
+            "rejected": 0,
+            "satisfied": 0
+          }
+        },
+        "criteria_negotiation": {
+          "needed": true,
+          "prompt": "Please propose 2-4 acceptance criteria for the current slice. Split them into must-have current-task criteria and follow-up criteria. Include the verification you expect for each.",
+          "reason": "no_criteria",
+          "suggested_actions": [
+            "Ask the worker to split must-have current-task criteria from follow-up criteria.",
+            "Record accepted current-task criteria with workerctl criteria manager-test-phone-lunk-readonly-qa-20260519 --add --criterion \"...\" --source worker_proposed --status accepted.",
+            "Record proposed current-task criteria with workerctl criteria manager-test-phone-lunk-readonly-qa-20260519 --add --criterion \"...\" --source worker_proposed --status proposed.",
+            "Record follow-up criteria with workerctl criteria manager-test-phone-lunk-readonly-qa-20260519 --add --criterion \"...\" --source worker_proposed --status deferred."
+          ]
+        },
+        "manager_config": {
+          "acceptance_criteria": [
+            "Worker reports manager-test-app PR #1 URL/state and confirms it remains unmerged.",
+            "Worker reports lint, test, and build results for the current app branch.",
+            "Worker reports a dev-server smoke result or an explicit blocker if not practical.",
+            "Worker assesses camera permission/error and audio alarm enable/mute QA surfaces from code or README.",
+            "Manager records accepted criteria and satisfies them with evidence before finish-task."
+          ],
+          "created_at": "2026-05-19T20:31:03Z",
+          "guidelines": [
+            "Use the absolute workerctl commands shown in your bootstrap prompt; the app repo cwd does not contain scripts/workerctl.",
+            "Keep this drill read-only for manager-test-app: no commits, pushes, or merges.",
+            "When satisfied, finish the workerctl task normally without stop flags; the operator will run post-finish transcript capture and cleanup to validate issue #81."
+          ],
+          "objective": "Supervise a read-only QA worker on manager-test-app PR #1, verify command evidence, record criteria, and finish only when evidence is sufficient. Do not merge PR #1.",
+          "permissions": {
+            "create_pr": false,
+            "merge_green_pr": false,
+            "worker_compact_clear": false
+          },
+          "reference_paths": [],
+          "supervision_mode": "strict",
+          "task_id": "task-a6c66888-a5c7-4a53-a93a-70561318d739",
+          "updated_at": "2026-05-19T20:31:03Z"
+        },
+        "worker_handoff": null
+      },
+      "manager_session": "manager-test-phone-readonly-manager-3",
+      "notable_pane_pattern": null,
+      "pane_signal": {
+        "captured": true,
+        "classifier": null,
+        "degraded": false,
+        "notable_pattern": null,
+        "reason": null,
+        "status_age_seconds": 0
+      },
+      "staleness_seconds": 0.76,
+      "state": "busy",
+      "task": "manager-test-phone-lunk-readonly-qa-20260519",
+      "task_completed": false,
+      "worker_alive": true,
+      "worker_session": "manager-test-phone-readonly-worker-3"
+    },
+    "task_id": "task-a6c66888-a5c7-4a53-a93a-70561318d739",
+    "worker_capture_id": null
+  },
+  {
+    "completed_at": "2026-05-19T20:31:59Z",
+    "decision": null,
+    "error": null,
+    "health": null,
+    "health_observation_id": null,
+    "id": 94,
+    "manager_capture_id": null,
+    "manager_id": null,
+    "started_at": "2026-05-19T20:31:59Z",
+    "state": "succeeded",
+    "status": {
+      "binding_id": "binding-c4757211-31a2-4626-b921-8072f0042f59",
+      "ingest": {
+        "new_events": 10,
+        "new_offset": 124890,
+        "skipped_lines": 0
+      },
+      "kind": "session_cycle",
+      "last_event_subtype": "task_complete",
+      "last_state_event_at": "2026-05-19T20:31:56.379Z",
+      "manager_alive": true,
+      "manager_context": {
+        "acceptance_criteria": {
+          "deferred": [],
+          "open": [],
+          "proposed": [],
+          "rejected": [],
+          "satisfied": [],
+          "summary": {
+            "accepted": 0,
+            "deferred": 0,
+            "proposed": 0,
+            "rejected": 0,
+            "satisfied": 0
+          }
+        },
+        "criteria_negotiation": {
+          "needed": true,
+          "prompt": "Please propose 2-4 acceptance criteria for the current slice. Split them into must-have current-task criteria and follow-up criteria. Include the verification you expect for each.",
+          "reason": "no_criteria",
+          "suggested_actions": [
+            "Ask the worker to split must-have current-task criteria from follow-up criteria.",
+            "Record accepted current-task criteria with workerctl criteria manager-test-phone-lunk-readonly-qa-20260519 --add --criterion \"...\" --source worker_proposed --status accepted.",
+            "Record proposed current-task criteria with workerctl criteria manager-test-phone-lunk-readonly-qa-20260519 --add --criterion \"...\" --source worker_proposed --status proposed.",
+            "Record follow-up criteria with workerctl criteria manager-test-phone-lunk-readonly-qa-20260519 --add --criterion \"...\" --source worker_proposed --status deferred."
+          ]
+        },
+        "manager_config": {
+          "acceptance_criteria": [
+            "Worker reports manager-test-app PR #1 URL/state and confirms it remains unmerged.",
+            "Worker reports lint, test, and build results for the current app branch.",
+            "Worker reports a dev-server smoke result or an explicit blocker if not practical.",
+            "Worker assesses camera permission/error and audio alarm enable/mute QA surfaces from code or README.",
+            "Manager records accepted criteria and satisfies them with evidence before finish-task."
+          ],
+          "created_at": "2026-05-19T20:31:03Z",
+          "guidelines": [
+            "Use the absolute workerctl commands shown in your bootstrap prompt; the app repo cwd does not contain scripts/workerctl.",
+            "Keep this drill read-only for manager-test-app: no commits, pushes, or merges.",
+            "When satisfied, finish the workerctl task normally without stop flags; the operator will run post-finish transcript capture and cleanup to validate issue #81."
+          ],
+          "objective": "Supervise a read-only QA worker on manager-test-app PR #1, verify command evidence, record criteria, and finish only when evidence is sufficient. Do not merge PR #1.",
+          "permissions": {
+            "create_pr": false,
+            "merge_green_pr": false,
+            "worker_compact_clear": false
+          },
+          "reference_paths": [],
+          "supervision_mode": "strict",
+          "task_id": "task-a6c66888-a5c7-4a53-a93a-70561318d739",
+          "updated_at": "2026-05-19T20:31:03Z"
+        },
+        "worker_handoff": null
+      },
+      "manager_session": "manager-test-phone-readonly-manager-3",
+      "notable_pane_pattern": null,
+      "pane_signal": {
+        "captured": true,
+        "classifier": null,
+        "degraded": false,
+        "notable_pattern": null,
+        "reason": null,
+        "status_age_seconds": 2
+      },
+      "staleness_seconds": 2.621,
+      "state": "idle",
+      "task": "manager-test-phone-lunk-readonly-qa-20260519",
+      "task_completed": true,
+      "worker_alive": true,
+      "worker_session": "manager-test-phone-readonly-worker-3"
+    },
+    "task_id": "task-a6c66888-a5c7-4a53-a93a-70561318d739",
+    "worker_capture_id": null
+  },
+  {
+    "completed_at": "2026-05-19T20:32:22Z",
+    "decision": null,
+    "error": null,
+    "health": null,
+    "health_observation_id": null,
+    "id": 95,
+    "manager_capture_id": null,
+    "manager_id": null,
+    "started_at": "2026-05-19T20:32:22Z",
+    "state": "succeeded",
+    "status": {
+      "binding_id": "binding-c4757211-31a2-4626-b921-8072f0042f59",
+      "ingest": {
+        "new_events": 0,
+        "new_offset": 124890,
+        "skipped_lines": 0
+      },
+      "kind": "session_cycle",
+      "last_event_subtype": "task_complete",
+      "last_state_event_at": "2026-05-19T20:31:56.379Z",
+      "manager_alive": true,
+      "manager_context": {
+        "acceptance_criteria": {
+          "deferred": [],
+          "open": [],
+          "proposed": [],
+          "rejected": [],
+          "satisfied": [],
+          "summary": {
+            "accepted": 0,
+            "deferred": 0,
+            "proposed": 0,
+            "rejected": 0,
+            "satisfied": 0
+          }
+        },
+        "criteria_negotiation": {
+          "needed": true,
+          "prompt": "Please propose 2-4 acceptance criteria for the current slice. Split them into must-have current-task criteria and follow-up criteria. Include the verification you expect for each.",
+          "reason": "no_criteria",
+          "suggested_actions": [
+            "Ask the worker to split must-have current-task criteria from follow-up criteria.",
+            "Record accepted current-task criteria with workerctl criteria manager-test-phone-lunk-readonly-qa-20260519 --add --criterion \"...\" --source worker_proposed --status accepted.",
+            "Record proposed current-task criteria with workerctl criteria manager-test-phone-lunk-readonly-qa-20260519 --add --criterion \"...\" --source worker_proposed --status proposed.",
+            "Record follow-up criteria with workerctl criteria manager-test-phone-lunk-readonly-qa-20260519 --add --criterion \"...\" --source worker_proposed --status deferred."
+          ]
+        },
+        "manager_config": {
+          "acceptance_criteria": [
+            "Worker reports manager-test-app PR #1 URL/state and confirms it remains unmerged.",
+            "Worker reports lint, test, and build results for the current app branch.",
+            "Worker reports a dev-server smoke result or an explicit blocker if not practical.",
+            "Worker assesses camera permission/error and audio alarm enable/mute QA surfaces from code or README.",
+            "Manager records accepted criteria and satisfies them with evidence before finish-task."
+          ],
+          "created_at": "2026-05-19T20:31:03Z",
+          "guidelines": [
+            "Use the absolute workerctl commands shown in your bootstrap prompt; the app repo cwd does not contain scripts/workerctl.",
+            "Keep this drill read-only for manager-test-app: no commits, pushes, or merges.",
+            "When satisfied, finish the workerctl task normally without stop flags; the operator will run post-finish transcript capture and cleanup to validate issue #81."
+          ],
+          "objective": "Supervise a read-only QA worker on manager-test-app PR #1, verify command evidence, record criteria, and finish only when evidence is sufficient. Do not merge PR #1.",
+          "permissions": {
+            "create_pr": false,
+            "merge_green_pr": false,
+            "worker_compact_clear": false
+          },
+          "reference_paths": [],
+          "supervision_mode": "strict",
+          "task_id": "task-a6c66888-a5c7-4a53-a93a-70561318d739",
+          "updated_at": "2026-05-19T20:31:03Z"
+        },
+        "worker_handoff": null
+      },
+      "manager_session": "manager-test-phone-readonly-manager-3",
+      "notable_pane_pattern": null,
+      "pane_signal": {
+        "captured": true,
+        "classifier": null,
+        "degraded": false,
+        "notable_pattern": null,
+        "reason": null,
+        "status_age_seconds": 25
+      },
+      "staleness_seconds": 25.621,
+      "state": "idle",
+      "task": "manager-test-phone-lunk-readonly-qa-20260519",
+      "task_completed": true,
+      "worker_alive": true,
+      "worker_session": "manager-test-phone-readonly-worker-3"
+    },
+    "task_id": "task-a6c66888-a5c7-4a53-a93a-70561318d739",
+    "worker_capture_id": null
+  },
+  {
+    "completed_at": "2026-05-19T20:33:01Z",
+    "decision": null,
+    "error": null,
+    "health": null,
+    "health_observation_id": null,
+    "id": 96,
+    "manager_capture_id": null,
+    "manager_id": null,
+    "started_at": "2026-05-19T20:33:01Z",
+    "state": "succeeded",
+    "status": {
+      "binding_id": "binding-c4757211-31a2-4626-b921-8072f0042f59",
+      "ingest": {
+        "new_events": 5,
+        "new_offset": 129367,
+        "skipped_lines": 0
+      },
+      "kind": "session_cycle",
+      "last_event_subtype": null,
+      "last_state_event_at": "2026-05-19T20:32:58.336Z",
+      "manager_alive": true,
+      "manager_context": {
+        "acceptance_criteria": {
+          "deferred": [
+            {
+              "created_at": "2026-05-19T20:32:44Z",
+              "criterion": "Add browser-level camera QA coverage.",
+              "evidence": {},
+              "id": 72,
+              "proof": null,
+              "rationale": "Follow-up after this QA slice.",
+              "source": "worker_proposed",
+              "status": "deferred",
+              "task_id": "task-a6c66888-a5c7-4a53-a93a-70561318d739",
+              "updated_at": "2026-05-19T20:32:44Z"
+            }
+          ],
+          "open": [
+            {
+              "created_at": "2026-05-19T20:32:28Z",
+              "criterion": "Camera permission/error path is user-recoverable.",
+              "evidence": {},
+              "id": 69,
+              "proof": null,
+              "rationale": null,
+              "source": "worker_proposed",
+              "status": "accepted",
+              "task_id": "task-a6c66888-a5c7-4a53-a93a-70561318d739",
+              "updated_at": "2026-05-19T20:32:28Z"
+            },
+            {
+              "created_at": "2026-05-19T20:32:37Z",
+              "criterion": "Audio alarm requires explicit enablement and respects mute.",
+              "evidence": {},
+              "id": 70,
+              "proof": null,
+              "rationale": null,
+              "source": "worker_proposed",
+              "status": "accepted",
+              "task_id": "task-a6c66888-a5c7-4a53-a93a-70561318d739",
+              "updated_at": "2026-05-19T20:32:37Z"
+            },
+            {
+              "created_at": "2026-05-19T20:32:40Z",
+              "criterion": "Current slice passes baseline project checks.",
+              "evidence": {},
+              "id": 71,
+              "proof": null,
+              "rationale": null,
+              "source": "worker_proposed",
+              "status": "accepted",
+              "task_id": "task-a6c66888-a5c7-4a53-a93a-70561318d739",
+              "updated_at": "2026-05-19T20:32:40Z"
+            },
+            {
+              "created_at": "2026-05-19T20:32:48Z",
+              "criterion": "Worker reports manager-test-app PR #1 URL/state and confirms it remains unmerged.",
+              "evidence": {},
+              "id": 73,
+              "proof": null,
+              "rationale": null,
+              "source": "manager_inferred",
+              "status": "accepted",
+              "task_id": "task-a6c66888-a5c7-4a53-a93a-70561318d739",
+              "updated_at": "2026-05-19T20:32:48Z"
+            },
+            {
+              "created_at": "2026-05-19T20:32:52Z",
+              "criterion": "Worker reports a dev-server smoke result or an explicit blocker if not practical.",
+              "evidence": {},
+              "id": 74,
+              "proof": null,
+              "rationale": null,
+              "source": "manager_inferred",
+              "status": "accepted",
+              "task_id": "task-a6c66888-a5c7-4a53-a93a-70561318d739",
+              "updated_at": "2026-05-19T20:32:52Z"
+            }
+          ],
+          "proposed": [],
+          "rejected": [],
+          "satisfied": [],
+          "summary": {
+            "accepted": 5,
+            "deferred": 1,
+            "proposed": 0,
+            "rejected": 0,
+            "satisfied": 0
+          }
+        },
+        "criteria_negotiation": {
+          "needed": false,
+          "prompt": null,
+          "reason": "active_criteria_present",
+          "suggested_actions": []
+        },
+        "manager_config": {
+          "acceptance_criteria": [
+            "Worker reports manager-test-app PR #1 URL/state and confirms it remains unmerged.",
+            "Worker reports lint, test, and build results for the current app branch.",
+            "Worker reports a dev-server smoke result or an explicit blocker if not practical.",
+            "Worker assesses camera permission/error and audio alarm enable/mute QA surfaces from code or README.",
+            "Manager records accepted criteria and satisfies them with evidence before finish-task."
+          ],
+          "created_at": "2026-05-19T20:31:03Z",
+          "guidelines": [
+            "Use the absolute workerctl commands shown in your bootstrap prompt; the app repo cwd does not contain scripts/workerctl.",
+            "Keep this drill read-only for manager-test-app: no commits, pushes, or merges.",
+            "When satisfied, finish the workerctl task normally without stop flags; the operator will run post-finish transcript capture and cleanup to validate issue #81."
+          ],
+          "objective": "Supervise a read-only QA worker on manager-test-app PR #1, verify command evidence, record criteria, and finish only when evidence is sufficient. Do not merge PR #1.",
+          "permissions": {
+            "create_pr": false,
+            "merge_green_pr": false,
+            "worker_compact_clear": false
+          },
+          "reference_paths": [],
+          "supervision_mode": "strict",
+          "task_id": "task-a6c66888-a5c7-4a53-a93a-70561318d739",
+          "updated_at": "2026-05-19T20:31:03Z"
+        },
+        "worker_handoff": null
+      },
+      "manager_session": "manager-test-phone-readonly-manager-3",
+      "notable_pane_pattern": null,
+      "pane_signal": {
+        "captured": true,
+        "classifier": null,
+        "degraded": false,
+        "notable_pattern": null,
+        "reason": null,
+        "status_age_seconds": 2
+      },
+      "staleness_seconds": 2.664,
+      "state": "busy",
+      "task": "manager-test-phone-lunk-readonly-qa-20260519",
+      "task_completed": false,
+      "worker_alive": true,
+      "worker_session": "manager-test-phone-readonly-worker-3"
+    },
+    "task_id": "task-a6c66888-a5c7-4a53-a93a-70561318d739",
+    "worker_capture_id": null
+  },
+  {
+    "completed_at": "2026-05-19T20:33:21Z",
+    "decision": null,
+    "error": null,
+    "health": null,
+    "health_observation_id": null,
+    "id": 97,
+    "manager_capture_id": null,
+    "manager_id": null,
+    "started_at": "2026-05-19T20:33:21Z",
+    "state": "succeeded",
+    "status": {
+      "binding_id": "binding-c4757211-31a2-4626-b921-8072f0042f59",
+      "ingest": {
+        "new_events": 30,
+        "new_offset": 143933,
+        "skipped_lines": 0
+      },
+      "kind": "session_cycle",
+      "last_event_subtype": null,
+      "last_state_event_at": "2026-05-19T20:32:58.336Z",
+      "manager_alive": true,
+      "manager_context": {
+        "acceptance_criteria": {
+          "deferred": [
+            {
+              "created_at": "2026-05-19T20:32:44Z",
+              "criterion": "Add browser-level camera QA coverage.",
+              "evidence": {},
+              "id": 72,
+              "proof": null,
+              "rationale": "Follow-up after this QA slice.",
+              "source": "worker_proposed",
+              "status": "deferred",
+              "task_id": "task-a6c66888-a5c7-4a53-a93a-70561318d739",
+              "updated_at": "2026-05-19T20:32:44Z"
+            }
+          ],
+          "open": [
+            {
+              "created_at": "2026-05-19T20:32:28Z",
+              "criterion": "Camera permission/error path is user-recoverable.",
+              "evidence": {},
+              "id": 69,
+              "proof": null,
+              "rationale": null,
+              "source": "worker_proposed",
+              "status": "accepted",
+              "task_id": "task-a6c66888-a5c7-4a53-a93a-70561318d739",
+              "updated_at": "2026-05-19T20:32:28Z"
+            },
+            {
+              "created_at": "2026-05-19T20:32:37Z",
+              "criterion": "Audio alarm requires explicit enablement and respects mute.",
+              "evidence": {},
+              "id": 70,
+              "proof": null,
+              "rationale": null,
+              "source": "worker_proposed",
+              "status": "accepted",
+              "task_id": "task-a6c66888-a5c7-4a53-a93a-70561318d739",
+              "updated_at": "2026-05-19T20:32:37Z"
+            },
+            {
+              "created_at": "2026-05-19T20:32:40Z",
+              "criterion": "Current slice passes baseline project checks.",
+              "evidence": {},
+              "id": 71,
+              "proof": null,
+              "rationale": null,
+              "source": "worker_proposed",
+              "status": "accepted",
+              "task_id": "task-a6c66888-a5c7-4a53-a93a-70561318d739",
+              "updated_at": "2026-05-19T20:32:40Z"
+            },
+            {
+              "created_at": "2026-05-19T20:32:48Z",
+              "criterion": "Worker reports manager-test-app PR #1 URL/state and confirms it remains unmerged.",
+              "evidence": {},
+              "id": 73,
+              "proof": null,
+              "rationale": null,
+              "source": "manager_inferred",
+              "status": "accepted",
+              "task_id": "task-a6c66888-a5c7-4a53-a93a-70561318d739",
+              "updated_at": "2026-05-19T20:32:48Z"
+            },
+            {
+              "created_at": "2026-05-19T20:32:52Z",
+              "criterion": "Worker reports a dev-server smoke result or an explicit blocker if not practical.",
+              "evidence": {},
+              "id": 74,
+              "proof": null,
+              "rationale": null,
+              "source": "manager_inferred",
+              "status": "accepted",
+              "task_id": "task-a6c66888-a5c7-4a53-a93a-70561318d739",
+              "updated_at": "2026-05-19T20:32:52Z"
+            }
+          ],
+          "proposed": [],
+          "rejected": [],
+          "satisfied": [],
+          "summary": {
+            "accepted": 5,
+            "deferred": 1,
+            "proposed": 0,
+            "rejected": 0,
+            "satisfied": 0
+          }
+        },
+        "criteria_negotiation": {
+          "needed": false,
+          "prompt": null,
+          "reason": "active_criteria_present",
+          "suggested_actions": []
+        },
+        "manager_config": {
+          "acceptance_criteria": [
+            "Worker reports manager-test-app PR #1 URL/state and confirms it remains unmerged.",
+            "Worker reports lint, test, and build results for the current app branch.",
+            "Worker reports a dev-server smoke result or an explicit blocker if not practical.",
+            "Worker assesses camera permission/error and audio alarm enable/mute QA surfaces from code or README.",
+            "Manager records accepted criteria and satisfies them with evidence before finish-task."
+          ],
+          "created_at": "2026-05-19T20:31:03Z",
+          "guidelines": [
+            "Use the absolute workerctl commands shown in your bootstrap prompt; the app repo cwd does not contain scripts/workerctl.",
+            "Keep this drill read-only for manager-test-app: no commits, pushes, or merges.",
+            "When satisfied, finish the workerctl task normally without stop flags; the operator will run post-finish transcript capture and cleanup to validate issue #81."
+          ],
+          "objective": "Supervise a read-only QA worker on manager-test-app PR #1, verify command evidence, record criteria, and finish only when evidence is sufficient. Do not merge PR #1.",
+          "permissions": {
+            "create_pr": false,
+            "merge_green_pr": false,
+            "worker_compact_clear": false
+          },
+          "reference_paths": [],
+          "supervision_mode": "strict",
+          "task_id": "task-a6c66888-a5c7-4a53-a93a-70561318d739",
+          "updated_at": "2026-05-19T20:31:03Z"
+        },
+        "worker_handoff": null
+      },
+      "manager_session": "manager-test-phone-readonly-manager-3",
+      "notable_pane_pattern": null,
+      "pane_signal": {
+        "captured": true,
+        "classifier": null,
+        "degraded": false,
+        "notable_pattern": null,
+        "reason": null,
+        "status_age_seconds": 22
+      },
+      "staleness_seconds": 22.664,
+      "state": "busy",
+      "task": "manager-test-phone-lunk-readonly-qa-20260519",
+      "task_completed": false,
+      "worker_alive": true,
+      "worker_session": "manager-test-phone-readonly-worker-3"
+    },
+    "task_id": "task-a6c66888-a5c7-4a53-a93a-70561318d739",
+    "worker_capture_id": null
+  },
+  {
+    "completed_at": "2026-05-19T20:33:25Z",
+    "decision": null,
+    "error": null,
+    "health": null,
+    "health_observation_id": null,
+    "id": 98,
+    "manager_capture_id": null,
+    "manager_id": null,
+    "started_at": "2026-05-19T20:33:25Z",
+    "state": "succeeded",
+    "status": {
+      "binding_id": "binding-c4757211-31a2-4626-b921-8072f0042f59",
+      "ingest": {
+        "new_events": 4,
+        "new_offset": 160640,
+        "skipped_lines": 0
+      },
+      "kind": "session_cycle",
+      "last_event_subtype": null,
+      "last_state_event_at": "2026-05-19T20:32:58.336Z",
+      "manager_alive": true,
+      "manager_context": {
+        "acceptance_criteria": {
+          "deferred": [
+            {
+              "created_at": "2026-05-19T20:32:44Z",
+              "criterion": "Add browser-level camera QA coverage.",
+              "evidence": {},
+              "id": 72,
+              "proof": null,
+              "rationale": "Follow-up after this QA slice.",
+              "source": "worker_proposed",
+              "status": "deferred",
+              "task_id": "task-a6c66888-a5c7-4a53-a93a-70561318d739",
+              "updated_at": "2026-05-19T20:32:44Z"
+            }
+          ],
+          "open": [
+            {
+              "created_at": "2026-05-19T20:32:28Z",
+              "criterion": "Camera permission/error path is user-recoverable.",
+              "evidence": {},
+              "id": 69,
+              "proof": null,
+              "rationale": null,
+              "source": "worker_proposed",
+              "status": "accepted",
+              "task_id": "task-a6c66888-a5c7-4a53-a93a-70561318d739",
+              "updated_at": "2026-05-19T20:32:28Z"
+            },
+            {
+              "created_at": "2026-05-19T20:32:37Z",
+              "criterion": "Audio alarm requires explicit enablement and respects mute.",
+              "evidence": {},
+              "id": 70,
+              "proof": null,
+              "rationale": null,
+              "source": "worker_proposed",
+              "status": "accepted",
+              "task_id": "task-a6c66888-a5c7-4a53-a93a-70561318d739",
+              "updated_at": "2026-05-19T20:32:37Z"
+            },
+            {
+              "created_at": "2026-05-19T20:32:40Z",
+              "criterion": "Current slice passes baseline project checks.",
+              "evidence": {},
+              "id": 71,
+              "proof": null,
+              "rationale": null,
+              "source": "worker_proposed",
+              "status": "accepted",
+              "task_id": "task-a6c66888-a5c7-4a53-a93a-70561318d739",
+              "updated_at": "2026-05-19T20:32:40Z"
+            },
+            {
+              "created_at": "2026-05-19T20:32:48Z",
+              "criterion": "Worker reports manager-test-app PR #1 URL/state and confirms it remains unmerged.",
+              "evidence": {},
+              "id": 73,
+              "proof": null,
+              "rationale": null,
+              "source": "manager_inferred",
+              "status": "accepted",
+              "task_id": "task-a6c66888-a5c7-4a53-a93a-70561318d739",
+              "updated_at": "2026-05-19T20:32:48Z"
+            },
+            {
+              "created_at": "2026-05-19T20:32:52Z",
+              "criterion": "Worker reports a dev-server smoke result or an explicit blocker if not practical.",
+              "evidence": {},
+              "id": 74,
+              "proof": null,
+              "rationale": null,
+              "source": "manager_inferred",
+              "status": "accepted",
+              "task_id": "task-a6c66888-a5c7-4a53-a93a-70561318d739",
+              "updated_at": "2026-05-19T20:32:52Z"
+            }
+          ],
+          "proposed": [],
+          "rejected": [],
+          "satisfied": [],
+          "summary": {
+            "accepted": 5,
+            "deferred": 1,
+            "proposed": 0,
+            "rejected": 0,
+            "satisfied": 0
+          }
+        },
+        "criteria_negotiation": {
+          "needed": false,
+          "prompt": null,
+          "reason": "active_criteria_present",
+          "suggested_actions": []
+        },
+        "manager_config": {
+          "acceptance_criteria": [
+            "Worker reports manager-test-app PR #1 URL/state and confirms it remains unmerged.",
+            "Worker reports lint, test, and build results for the current app branch.",
+            "Worker reports a dev-server smoke result or an explicit blocker if not practical.",
+            "Worker assesses camera permission/error and audio alarm enable/mute QA surfaces from code or README.",
+            "Manager records accepted criteria and satisfies them with evidence before finish-task."
+          ],
+          "created_at": "2026-05-19T20:31:03Z",
+          "guidelines": [
+            "Use the absolute workerctl commands shown in your bootstrap prompt; the app repo cwd does not contain scripts/workerctl.",
+            "Keep this drill read-only for manager-test-app: no commits, pushes, or merges.",
+            "When satisfied, finish the workerctl task normally without stop flags; the operator will run post-finish transcript capture and cleanup to validate issue #81."
+          ],
+          "objective": "Supervise a read-only QA worker on manager-test-app PR #1, verify command evidence, record criteria, and finish only when evidence is sufficient. Do not merge PR #1.",
+          "permissions": {
+            "create_pr": false,
+            "merge_green_pr": false,
+            "worker_compact_clear": false
+          },
+          "reference_paths": [],
+          "supervision_mode": "strict",
+          "task_id": "task-a6c66888-a5c7-4a53-a93a-70561318d739",
+          "updated_at": "2026-05-19T20:31:03Z"
+        },
+        "worker_handoff": null
+      },
+      "manager_session": "manager-test-phone-readonly-manager-3",
+      "notable_pane_pattern": null,
+      "pane_signal": {
+        "captured": true,
+        "classifier": null,
+        "degraded": false,
+        "notable_pattern": null,
+        "reason": null,
+        "status_age_seconds": 26
+      },
+      "staleness_seconds": 26.664,
+      "state": "busy",
+      "task": "manager-test-phone-lunk-readonly-qa-20260519",
+      "task_completed": false,
+      "worker_alive": true,
+      "worker_session": "manager-test-phone-readonly-worker-3"
+    },
+    "task_id": "task-a6c66888-a5c7-4a53-a93a-70561318d739",
+    "worker_capture_id": null
+  },
+  {
+    "completed_at": "2026-05-19T20:34:04Z",
+    "decision": null,
+    "error": null,
+    "health": null,
+    "health_observation_id": null,
+    "id": 99,
+    "manager_capture_id": null,
+    "manager_id": null,
+    "started_at": "2026-05-19T20:34:04Z",
+    "state": "succeeded",
+    "status": {
+      "binding_id": "binding-c4757211-31a2-4626-b921-8072f0042f59",
+      "ingest": {
+        "new_events": 40,
+        "new_offset": 265862,
+        "skipped_lines": 0
+      },
+      "kind": "session_cycle",
+      "last_event_subtype": "token_count",
+      "last_state_event_at": "2026-05-19T20:32:58.336Z",
+      "manager_alive": true,
+      "manager_context": {
+        "acceptance_criteria": {
+          "deferred": [
+            {
+              "created_at": "2026-05-19T20:32:44Z",
+              "criterion": "Add browser-level camera QA coverage.",
+              "evidence": {},
+              "id": 72,
+              "proof": null,
+              "rationale": "Follow-up after this QA slice.",
+              "source": "worker_proposed",
+              "status": "deferred",
+              "task_id": "task-a6c66888-a5c7-4a53-a93a-70561318d739",
+              "updated_at": "2026-05-19T20:32:44Z"
+            }
+          ],
+          "open": [
+            {
+              "created_at": "2026-05-19T20:32:28Z",
+              "criterion": "Camera permission/error path is user-recoverable.",
+              "evidence": {},
+              "id": 69,
+              "proof": null,
+              "rationale": null,
+              "source": "worker_proposed",
+              "status": "accepted",
+              "task_id": "task-a6c66888-a5c7-4a53-a93a-70561318d739",
+              "updated_at": "2026-05-19T20:32:28Z"
+            },
+            {
+              "created_at": "2026-05-19T20:32:37Z",
+              "criterion": "Audio alarm requires explicit enablement and respects mute.",
+              "evidence": {},
+              "id": 70,
+              "proof": null,
+              "rationale": null,
+              "source": "worker_proposed",
+              "status": "accepted",
+              "task_id": "task-a6c66888-a5c7-4a53-a93a-70561318d739",
+              "updated_at": "2026-05-19T20:32:37Z"
+            },
+            {
+              "created_at": "2026-05-19T20:32:40Z",
+              "criterion": "Current slice passes baseline project checks.",
+              "evidence": {},
+              "id": 71,
+              "proof": null,
+              "rationale": null,
+              "source": "worker_proposed",
+              "status": "accepted",
+              "task_id": "task-a6c66888-a5c7-4a53-a93a-70561318d739",
+              "updated_at": "2026-05-19T20:32:40Z"
+            },
+            {
+              "created_at": "2026-05-19T20:32:48Z",
+              "criterion": "Worker reports manager-test-app PR #1 URL/state and confirms it remains unmerged.",
+              "evidence": {},
+              "id": 73,
+              "proof": null,
+              "rationale": null,
+              "source": "manager_inferred",
+              "status": "accepted",
+              "task_id": "task-a6c66888-a5c7-4a53-a93a-70561318d739",
+              "updated_at": "2026-05-19T20:32:48Z"
+            },
+            {
+              "created_at": "2026-05-19T20:32:52Z",
+              "criterion": "Worker reports a dev-server smoke result or an explicit blocker if not practical.",
+              "evidence": {},
+              "id": 74,
+              "proof": null,
+              "rationale": null,
+              "source": "manager_inferred",
+              "status": "accepted",
+              "task_id": "task-a6c66888-a5c7-4a53-a93a-70561318d739",
+              "updated_at": "2026-05-19T20:32:52Z"
+            }
+          ],
+          "proposed": [],
+          "rejected": [],
+          "satisfied": [],
+          "summary": {
+            "accepted": 5,
+            "deferred": 1,
+            "proposed": 0,
+            "rejected": 0,
+            "satisfied": 0
+          }
+        },
+        "criteria_negotiation": {
+          "needed": false,
+          "prompt": null,
+          "reason": "active_criteria_present",
+          "suggested_actions": []
+        },
+        "manager_config": {
+          "acceptance_criteria": [
+            "Worker reports manager-test-app PR #1 URL/state and confirms it remains unmerged.",
+            "Worker reports lint, test, and build results for the current app branch.",
+            "Worker reports a dev-server smoke result or an explicit blocker if not practical.",
+            "Worker assesses camera permission/error and audio alarm enable/mute QA surfaces from code or README.",
+            "Manager records accepted criteria and satisfies them with evidence before finish-task."
+          ],
+          "created_at": "2026-05-19T20:31:03Z",
+          "guidelines": [
+            "Use the absolute workerctl commands shown in your bootstrap prompt; the app repo cwd does not contain scripts/workerctl.",
+            "Keep this drill read-only for manager-test-app: no commits, pushes, or merges.",
+            "When satisfied, finish the workerctl task normally without stop flags; the operator will run post-finish transcript capture and cleanup to validate issue #81."
+          ],
+          "objective": "Supervise a read-only QA worker on manager-test-app PR #1, verify command evidence, record criteria, and finish only when evidence is sufficient. Do not merge PR #1.",
+          "permissions": {
+            "create_pr": false,
+            "merge_green_pr": false,
+            "worker_compact_clear": false
+          },
+          "reference_paths": [],
+          "supervision_mode": "strict",
+          "task_id": "task-a6c66888-a5c7-4a53-a93a-70561318d739",
+          "updated_at": "2026-05-19T20:31:03Z"
+        },
+        "worker_handoff": null
+      },
+      "manager_session": "manager-test-phone-readonly-manager-3",
+      "notable_pane_pattern": null,
+      "pane_signal": {
+        "captured": true,
+        "classifier": null,
+        "degraded": false,
+        "notable_pattern": null,
+        "reason": null,
+        "status_age_seconds": 65
+      },
+      "staleness_seconds": 65.664,
+      "state": "busy",
+      "task": "manager-test-phone-lunk-readonly-qa-20260519",
+      "task_completed": false,
+      "worker_alive": true,
+      "worker_session": "manager-test-phone-readonly-worker-3"
+    },
+    "task_id": "task-a6c66888-a5c7-4a53-a93a-70561318d739",
+    "worker_capture_id": null
+  },
+  {
+    "completed_at": "2026-05-19T20:34:21Z",
+    "decision": null,
+    "error": null,
+    "health": null,
+    "health_observation_id": null,
+    "id": 100,
+    "manager_capture_id": null,
+    "manager_id": null,
+    "started_at": "2026-05-19T20:34:21Z",
+    "state": "succeeded",
+    "status": {
+      "binding_id": "binding-c4757211-31a2-4626-b921-8072f0042f59",
+      "ingest": {
+        "new_events": 5,
+        "new_offset": 275999,
+        "skipped_lines": 0
+      },
+      "kind": "session_cycle",
+      "last_event_subtype": "task_complete",
+      "last_state_event_at": "2026-05-19T20:34:17.128Z",
+      "manager_alive": true,
+      "manager_context": {
+        "acceptance_criteria": {
+          "deferred": [
+            {
+              "created_at": "2026-05-19T20:32:44Z",
+              "criterion": "Add browser-level camera QA coverage.",
+              "evidence": {},
+              "id": 72,
+              "proof": null,
+              "rationale": "Follow-up after this QA slice.",
+              "source": "worker_proposed",
+              "status": "deferred",
+              "task_id": "task-a6c66888-a5c7-4a53-a93a-70561318d739",
+              "updated_at": "2026-05-19T20:32:44Z"
+            }
+          ],
+          "open": [
+            {
+              "created_at": "2026-05-19T20:32:28Z",
+              "criterion": "Camera permission/error path is user-recoverable.",
+              "evidence": {},
+              "id": 69,
+              "proof": null,
+              "rationale": null,
+              "source": "worker_proposed",
+              "status": "accepted",
+              "task_id": "task-a6c66888-a5c7-4a53-a93a-70561318d739",
+              "updated_at": "2026-05-19T20:32:28Z"
+            },
+            {
+              "created_at": "2026-05-19T20:32:37Z",
+              "criterion": "Audio alarm requires explicit enablement and respects mute.",
+              "evidence": {},
+              "id": 70,
+              "proof": null,
+              "rationale": null,
+              "source": "worker_proposed",
+              "status": "accepted",
+              "task_id": "task-a6c66888-a5c7-4a53-a93a-70561318d739",
+              "updated_at": "2026-05-19T20:32:37Z"
+            },
+            {
+              "created_at": "2026-05-19T20:32:40Z",
+              "criterion": "Current slice passes baseline project checks.",
+              "evidence": {},
+              "id": 71,
+              "proof": null,
+              "rationale": null,
+              "source": "worker_proposed",
+              "status": "accepted",
+              "task_id": "task-a6c66888-a5c7-4a53-a93a-70561318d739",
+              "updated_at": "2026-05-19T20:32:40Z"
+            },
+            {
+              "created_at": "2026-05-19T20:32:48Z",
+              "criterion": "Worker reports manager-test-app PR #1 URL/state and confirms it remains unmerged.",
+              "evidence": {},
+              "id": 73,
+              "proof": null,
+              "rationale": null,
+              "source": "manager_inferred",
+              "status": "accepted",
+              "task_id": "task-a6c66888-a5c7-4a53-a93a-70561318d739",
+              "updated_at": "2026-05-19T20:32:48Z"
+            },
+            {
+              "created_at": "2026-05-19T20:32:52Z",
+              "criterion": "Worker reports a dev-server smoke result or an explicit blocker if not practical.",
+              "evidence": {},
+              "id": 74,
+              "proof": null,
+              "rationale": null,
+              "source": "manager_inferred",
+              "status": "accepted",
+              "task_id": "task-a6c66888-a5c7-4a53-a93a-70561318d739",
+              "updated_at": "2026-05-19T20:32:52Z"
+            }
+          ],
+          "proposed": [],
+          "rejected": [],
+          "satisfied": [],
+          "summary": {
+            "accepted": 5,
+            "deferred": 1,
+            "proposed": 0,
+            "rejected": 0,
+            "satisfied": 0
+          }
+        },
+        "criteria_negotiation": {
+          "needed": false,
+          "prompt": null,
+          "reason": "active_criteria_present",
+          "suggested_actions": []
+        },
+        "manager_config": {
+          "acceptance_criteria": [
+            "Worker reports manager-test-app PR #1 URL/state and confirms it remains unmerged.",
+            "Worker reports lint, test, and build results for the current app branch.",
+            "Worker reports a dev-server smoke result or an explicit blocker if not practical.",
+            "Worker assesses camera permission/error and audio alarm enable/mute QA surfaces from code or README.",
+            "Manager records accepted criteria and satisfies them with evidence before finish-task."
+          ],
+          "created_at": "2026-05-19T20:31:03Z",
+          "guidelines": [
+            "Use the absolute workerctl commands shown in your bootstrap prompt; the app repo cwd does not contain scripts/workerctl.",
+            "Keep this drill read-only for manager-test-app: no commits, pushes, or merges.",
+            "When satisfied, finish the workerctl task normally without stop flags; the operator will run post-finish transcript capture and cleanup to validate issue #81."
+          ],
+          "objective": "Supervise a read-only QA worker on manager-test-app PR #1, verify command evidence, record criteria, and finish only when evidence is sufficient. Do not merge PR #1.",
+          "permissions": {
+            "create_pr": false,
+            "merge_green_pr": false,
+            "worker_compact_clear": false
+          },
+          "reference_paths": [],
+          "supervision_mode": "strict",
+          "task_id": "task-a6c66888-a5c7-4a53-a93a-70561318d739",
+          "updated_at": "2026-05-19T20:31:03Z"
+        },
+        "worker_handoff": null
+      },
+      "manager_session": "manager-test-phone-readonly-manager-3",
+      "notable_pane_pattern": null,
+      "pane_signal": {
+        "captured": true,
+        "classifier": null,
+        "degraded": false,
+        "notable_pattern": null,
+        "reason": null,
+        "status_age_seconds": 3
+      },
+      "staleness_seconds": 3.872,
+      "state": "idle",
+      "task": "manager-test-phone-lunk-readonly-qa-20260519",
+      "task_completed": true,
+      "worker_alive": true,
+      "worker_session": "manager-test-phone-readonly-worker-3"
+    },
+    "task_id": "task-a6c66888-a5c7-4a53-a93a-70561318d739",
+    "worker_capture_id": null
+  },
+  {
+    "completed_at": "2026-05-19T20:34:30Z",
+    "decision": null,
+    "error": null,
+    "health": null,
+    "health_observation_id": null,
+    "id": 101,
+    "manager_capture_id": null,
+    "manager_id": null,
+    "started_at": "2026-05-19T20:34:30Z",
+    "state": "succeeded",
+    "status": {
+      "binding_id": "binding-c4757211-31a2-4626-b921-8072f0042f59",
+      "ingest": {
+        "new_events": 0,
+        "new_offset": 275999,
+        "skipped_lines": 0
+      },
+      "kind": "session_cycle",
+      "last_event_subtype": "task_complete",
+      "last_state_event_at": "2026-05-19T20:34:17.128Z",
+      "manager_alive": true,
+      "manager_context": {
+        "acceptance_criteria": {
+          "deferred": [
+            {
+              "created_at": "2026-05-19T20:32:44Z",
+              "criterion": "Add browser-level camera QA coverage.",
+              "evidence": {},
+              "id": 72,
+              "proof": null,
+              "rationale": "Follow-up after this QA slice.",
+              "source": "worker_proposed",
+              "status": "deferred",
+              "task_id": "task-a6c66888-a5c7-4a53-a93a-70561318d739",
+              "updated_at": "2026-05-19T20:32:44Z"
+            }
+          ],
+          "open": [
+            {
+              "created_at": "2026-05-19T20:32:28Z",
+              "criterion": "Camera permission/error path is user-recoverable.",
+              "evidence": {},
+              "id": 69,
+              "proof": null,
+              "rationale": null,
+              "source": "worker_proposed",
+              "status": "accepted",
+              "task_id": "task-a6c66888-a5c7-4a53-a93a-70561318d739",
+              "updated_at": "2026-05-19T20:32:28Z"
+            },
+            {
+              "created_at": "2026-05-19T20:32:37Z",
+              "criterion": "Audio alarm requires explicit enablement and respects mute.",
+              "evidence": {},
+              "id": 70,
+              "proof": null,
+              "rationale": null,
+              "source": "worker_proposed",
+              "status": "accepted",
+              "task_id": "task-a6c66888-a5c7-4a53-a93a-70561318d739",
+              "updated_at": "2026-05-19T20:32:37Z"
+            },
+            {
+              "created_at": "2026-05-19T20:32:40Z",
+              "criterion": "Current slice passes baseline project checks.",
+              "evidence": {},
+              "id": 71,
+              "proof": null,
+              "rationale": null,
+              "source": "worker_proposed",
+              "status": "accepted",
+              "task_id": "task-a6c66888-a5c7-4a53-a93a-70561318d739",
+              "updated_at": "2026-05-19T20:32:40Z"
+            },
+            {
+              "created_at": "2026-05-19T20:32:48Z",
+              "criterion": "Worker reports manager-test-app PR #1 URL/state and confirms it remains unmerged.",
+              "evidence": {},
+              "id": 73,
+              "proof": null,
+              "rationale": null,
+              "source": "manager_inferred",
+              "status": "accepted",
+              "task_id": "task-a6c66888-a5c7-4a53-a93a-70561318d739",
+              "updated_at": "2026-05-19T20:32:48Z"
+            },
+            {
+              "created_at": "2026-05-19T20:32:52Z",
+              "criterion": "Worker reports a dev-server smoke result or an explicit blocker if not practical.",
+              "evidence": {},
+              "id": 74,
+              "proof": null,
+              "rationale": null,
+              "source": "manager_inferred",
+              "status": "accepted",
+              "task_id": "task-a6c66888-a5c7-4a53-a93a-70561318d739",
+              "updated_at": "2026-05-19T20:32:52Z"
+            }
+          ],
+          "proposed": [],
+          "rejected": [],
+          "satisfied": [],
+          "summary": {
+            "accepted": 5,
+            "deferred": 1,
+            "proposed": 0,
+            "rejected": 0,
+            "satisfied": 0
+          }
+        },
+        "criteria_negotiation": {
+          "needed": false,
+          "prompt": null,
+          "reason": "active_criteria_present",
+          "suggested_actions": []
+        },
+        "manager_config": {
+          "acceptance_criteria": [
+            "Worker reports manager-test-app PR #1 URL/state and confirms it remains unmerged.",
+            "Worker reports lint, test, and build results for the current app branch.",
+            "Worker reports a dev-server smoke result or an explicit blocker if not practical.",
+            "Worker assesses camera permission/error and audio alarm enable/mute QA surfaces from code or README.",
+            "Manager records accepted criteria and satisfies them with evidence before finish-task."
+          ],
+          "created_at": "2026-05-19T20:31:03Z",
+          "guidelines": [
+            "Use the absolute workerctl commands shown in your bootstrap prompt; the app repo cwd does not contain scripts/workerctl.",
+            "Keep this drill read-only for manager-test-app: no commits, pushes, or merges.",
+            "When satisfied, finish the workerctl task normally without stop flags; the operator will run post-finish transcript capture and cleanup to validate issue #81."
+          ],
+          "objective": "Supervise a read-only QA worker on manager-test-app PR #1, verify command evidence, record criteria, and finish only when evidence is sufficient. Do not merge PR #1.",
+          "permissions": {
+            "create_pr": false,
+            "merge_green_pr": false,
+            "worker_compact_clear": false
+          },
+          "reference_paths": [],
+          "supervision_mode": "strict",
+          "task_id": "task-a6c66888-a5c7-4a53-a93a-70561318d739",
+          "updated_at": "2026-05-19T20:31:03Z"
+        },
+        "worker_handoff": null
+      },
+      "manager_session": "manager-test-phone-readonly-manager-3",
+      "notable_pane_pattern": null,
+      "pane_signal": {
+        "captured": true,
+        "classifier": null,
+        "degraded": false,
+        "notable_pattern": null,
+        "reason": null,
+        "status_age_seconds": 12
+      },
+      "staleness_seconds": 12.872,
+      "state": "idle",
+      "task": "manager-test-phone-lunk-readonly-qa-20260519",
+      "task_completed": true,
+      "worker_alive": true,
+      "worker_session": "manager-test-phone-readonly-worker-3"
+    },
+    "task_id": "task-a6c66888-a5c7-4a53-a93a-70561318d739",
+    "worker_capture_id": null
+  },
+  {
+    "completed_at": "2026-05-19T20:35:04Z",
+    "decision": null,
+    "error": null,
+    "health": null,
+    "health_observation_id": null,
+    "id": 102,
+    "manager_capture_id": null,
+    "manager_id": null,
+    "started_at": "2026-05-19T20:35:04Z",
+    "state": "succeeded",
+    "status": {
+      "binding_id": "binding-c4757211-31a2-4626-b921-8072f0042f59",
+      "ingest": {
+        "new_events": 0,
+        "new_offset": 275999,
+        "skipped_lines": 0
+      },
+      "kind": "session_cycle",
+      "last_event_subtype": "task_complete",
+      "last_state_event_at": "2026-05-19T20:34:17.128Z",
+      "manager_alive": true,
+      "manager_context": {
+        "acceptance_criteria": {
+          "deferred": [
+            {
+              "created_at": "2026-05-19T20:32:44Z",
+              "criterion": "Add browser-level camera QA coverage.",
+              "evidence": {},
+              "id": 72,
+              "proof": null,
+              "rationale": "Follow-up after this QA slice.",
+              "source": "worker_proposed",
+              "status": "deferred",
+              "task_id": "task-a6c66888-a5c7-4a53-a93a-70561318d739",
+              "updated_at": "2026-05-19T20:32:44Z"
+            }
+          ],
+          "open": [],
+          "proposed": [],
+          "rejected": [],
+          "satisfied": [
+            {
+              "created_at": "2026-05-19T20:32:28Z",
+              "criterion": "Camera permission/error path is user-recoverable.",
+              "evidence": {
+                "code": "src/App.tsx:92 startCamera handles missing getUserMedia, permission denial, no camera, success stream attach, and stop cleanup",
+                "readme": "README.md:65 manual QA requires allow/deny browser permission checks",
+                "remaining_manual_qa": "camera permission allow/deny prompts and live camera preview require real browser",
+                "source": "worker_final_receipt",
+                "status": "assessed_from_code_tests_readme"
+              },
+              "id": 69,
+              "proof": null,
+              "rationale": null,
+              "source": "worker_proposed",
+              "status": "satisfied",
+              "task_id": "task-a6c66888-a5c7-4a53-a93a-70561318d739",
+              "updated_at": "2026-05-19T20:34:55Z"
+            },
+            {
+              "created_at": "2026-05-19T20:32:37Z",
+              "criterion": "Audio alarm requires explicit enablement and respects mute.",
+              "evidence": {
+                "code": "src/App.tsx:145 enableAudioAlarm requires explicit Web Audio opt-in; muteAudioAlarm stops tone and sets muted; playAlarmTone only runs when audio is ready and mode is not silent",
+                "readme": "README.md:58 manual QA still needs audible confirmation for enable/mute behavior",
+                "remaining_manual_qa": "audible alarm and no-audio mute confirmation require real browser/audio",
+                "source": "worker_final_receipt",
+                "status": "assessed_from_code_tests_readme"
+              },
+              "id": 70,
+              "proof": null,
+              "rationale": null,
+              "source": "worker_proposed",
+              "status": "satisfied",
+              "task_id": "task-a6c66888-a5c7-4a53-a93a-70561318d739",
+              "updated_at": "2026-05-19T20:35:00Z"
+            },
+            {
+              "created_at": "2026-05-19T20:32:40Z",
+              "criterion": "Current slice passes baseline project checks.",
+              "evidence": {
+                "commands": [
+                  {
+                    "command": "npm run lint",
+                    "details": "exit 0, no lint output",
+                    "status": "pass"
+                  },
+                  {
+                    "command": "npm run test",
+                    "details": "exit 0, 1 test file, 8 tests passed",
+                    "status": "pass"
+                  },
+                  {
+                    "command": "npm run build",
+                    "details": "exit 0, tsc -b && vite build completed",
+                    "status": "pass"
+                  }
+                ],
+                "source": "worker_final_receipt"
+              },
+              "id": 71,
+              "proof": null,
+              "rationale": null,
+              "source": "worker_proposed",
+              "status": "satisfied",
+              "task_id": "task-a6c66888-a5c7-4a53-a93a-70561318d739",
+              "updated_at": "2026-05-19T20:34:37Z"
+            },
+            {
+              "created_at": "2026-05-19T20:32:48Z",
+              "criterion": "Worker reports manager-test-app PR #1 URL/state and confirms it remains unmerged.",
+              "evidence": {
+                "branch": "feature/phone-lunk-alarm-refresh",
+                "mergeable": "MERGEABLE",
+                "mergedAt": null,
+                "pr": "https://github.com/neonwatty/manager-test-app/pull/1",
+                "source": "worker_final_receipt",
+                "state": "OPEN",
+                "unmerged_confirmed": true,
+                "working_tree": "clean"
+              },
+              "id": 73,
+              "proof": null,
+              "rationale": null,
+              "source": "manager_inferred",
+              "status": "satisfied",
+              "task_id": "task-a6c66888-a5c7-4a53-a93a-70561318d739",
+              "updated_at": "2026-05-19T20:34:43Z"
+            },
+            {
+              "created_at": "2026-05-19T20:32:52Z",
+              "criterion": "Worker reports a dev-server smoke result or an explicit blocker if not practical.",
+              "evidence": {
+                "blocker": "in-app Browser control tool unavailable after discovery",
+                "checks": [
+                  {
+                    "details": "title Phone Lunk Alarm Lab and root app mount present",
+                    "status": "HTTP 200 OK",
+                    "url": "http://127.0.0.1:5173/"
+                  },
+                  {
+                    "details": "Content-Type text/javascript",
+                    "status": "HTTP 200 OK",
+                    "url": "http://127.0.0.1:5173/src/main.tsx"
+                  }
+                ],
+                "dev_server": "npm run dev -- --host 127.0.0.1 --port 5173",
+                "server_stopped": true,
+                "source": "worker_final_receipt",
+                "status": "pass_with_fallback"
+              },
+              "id": 74,
+              "proof": null,
+              "rationale": null,
+              "source": "manager_inferred",
+              "status": "satisfied",
+              "task_id": "task-a6c66888-a5c7-4a53-a93a-70561318d739",
+              "updated_at": "2026-05-19T20:34:50Z"
+            }
+          ],
+          "summary": {
+            "accepted": 0,
+            "deferred": 1,
+            "proposed": 0,
+            "rejected": 0,
+            "satisfied": 5
+          }
+        },
+        "criteria_negotiation": {
+          "needed": false,
+          "prompt": null,
+          "reason": "active_criteria_present",
+          "suggested_actions": []
+        },
+        "manager_config": {
+          "acceptance_criteria": [
+            "Worker reports manager-test-app PR #1 URL/state and confirms it remains unmerged.",
+            "Worker reports lint, test, and build results for the current app branch.",
+            "Worker reports a dev-server smoke result or an explicit blocker if not practical.",
+            "Worker assesses camera permission/error and audio alarm enable/mute QA surfaces from code or README.",
+            "Manager records accepted criteria and satisfies them with evidence before finish-task."
+          ],
+          "created_at": "2026-05-19T20:31:03Z",
+          "guidelines": [
+            "Use the absolute workerctl commands shown in your bootstrap prompt; the app repo cwd does not contain scripts/workerctl.",
+            "Keep this drill read-only for manager-test-app: no commits, pushes, or merges.",
+            "When satisfied, finish the workerctl task normally without stop flags; the operator will run post-finish transcript capture and cleanup to validate issue #81."
+          ],
+          "objective": "Supervise a read-only QA worker on manager-test-app PR #1, verify command evidence, record criteria, and finish only when evidence is sufficient. Do not merge PR #1.",
+          "permissions": {
+            "create_pr": false,
+            "merge_green_pr": false,
+            "worker_compact_clear": false
+          },
+          "reference_paths": [],
+          "supervision_mode": "strict",
+          "task_id": "task-a6c66888-a5c7-4a53-a93a-70561318d739",
+          "updated_at": "2026-05-19T20:31:03Z"
+        },
+        "worker_handoff": null
+      },
+      "manager_session": "manager-test-phone-readonly-manager-3",
+      "notable_pane_pattern": null,
+      "pane_signal": {
+        "captured": true,
+        "classifier": null,
+        "degraded": false,
+        "notable_pattern": null,
+        "reason": null,
+        "status_age_seconds": 46
+      },
+      "staleness_seconds": 46.872,
+      "state": "idle",
+      "task": "manager-test-phone-lunk-readonly-qa-20260519",
+      "task_completed": true,
+      "worker_alive": true,
+      "worker_session": "manager-test-phone-readonly-worker-3"
+    },
+    "task_id": "task-a6c66888-a5c7-4a53-a93a-70561318d739",
+    "worker_capture_id": null
+  }
+]
