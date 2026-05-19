@@ -1,5 +1,35 @@
 # Live QA Log
 
+## 2026-05-19: QA Readiness Decision
+
+Decision:
+
+- Ready for focused manual QA: yes.
+- Automated QA confidence: unit/regression coverage is green; live lifecycle
+  coverage passed once locally through the refreshed `scripts/live-smoke`.
+
+Evidence:
+
+- Unit tests: `python3 -m unittest discover -s tests -v` passed 347 tests.
+- Compile: `python3 -m py_compile scripts/workerctl workerctl/*.py` passed.
+- Shell syntax: `bash -n scripts/live-smoke` passed.
+- Live smoke: `scripts/live-smoke` passed and wrote
+  `docs/live-qa-artifacts/2026-05-19-live-smoke-current-cli-smoke-20260519045229/`.
+- Cleanup: `scripts/workerctl sessions --state active` returned `[]`.
+- Cleanup: `scripts/workerctl reconcile --stale-cycles-seconds 1` reported no
+  dangling bindings, dead PID sessions, or stuck tasks.
+
+Remaining risks:
+
+- Real Codex/tmux behavior still needs focused manual inspection until live
+  smoke is stable across repeated runs.
+- The unittest suite still emits non-fatal `ResourceWarning: unclosed database`
+  warnings under Python 3.14; this is test hygiene debt, not a current gate
+  failure.
+- The GitHub Actions live-smoke workflow is manual and skips the smoke step when
+  `codex` is unavailable on the runner, so local live smoke remains the
+  authoritative live lifecycle gate for now.
+
 ## 2026-05-19: Current CLI Live Smoke
 
 Scenario:
