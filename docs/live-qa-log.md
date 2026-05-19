@@ -1,5 +1,23 @@
 # Live QA Log
 
+## 2026-05-19: Repeat Live Smoke
+
+Scenario:
+
+- Script: `scripts/live-smoke-repeat 3`
+- Evidence bundle: `docs/live-qa-artifacts/2026-05-19-live-smoke-repeat-repeat-20260519052854/`
+
+Validated:
+
+- Three consecutive `scripts/live-smoke` runs passed.
+- Each run wrote an artifact root.
+- Each post-run `sessions --state active` check completed.
+- Each post-run `reconcile --stale-cycles-seconds 1` reported clean state.
+
+Decision:
+
+- Live smoke is repeatable enough to proceed to focused manual QA.
+
 ## 2026-05-19: QA Readiness Decision
 
 Decision:

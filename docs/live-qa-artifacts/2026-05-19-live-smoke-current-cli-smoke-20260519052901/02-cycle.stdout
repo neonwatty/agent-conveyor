@@ -1,0 +1,80 @@
+{
+  "binding_id": "binding-ffb9aab9-85e1-4560-84b4-5c4396416565",
+  "cycle_completed_at": "2026-05-19T12:29:07Z",
+  "cycle_id": 48,
+  "cycle_started_at": "2026-05-19T12:29:07Z",
+  "ingest": {
+    "new_events": 2,
+    "new_offset": 22285,
+    "skipped_lines": 0
+  },
+  "kind": "session_cycle",
+  "last_event_subtype": "task_started",
+  "last_state_event_at": "2026-05-19T12:29:03.975Z",
+  "manager_alive": true,
+  "manager_context": {
+    "acceptance_criteria": {
+      "deferred": [],
+      "open": [],
+      "proposed": [],
+      "rejected": [],
+      "satisfied": [],
+      "summary": {
+        "accepted": 0,
+        "deferred": 0,
+        "proposed": 0,
+        "rejected": 0,
+        "satisfied": 0
+      }
+    },
+    "criteria_negotiation": {
+      "needed": true,
+      "prompt": "Please propose 2-4 acceptance criteria for the current slice. Split them into must-have current-task criteria and follow-up criteria. Include the verification you expect for each.",
+      "reason": "no_criteria",
+      "suggested_actions": [
+        "Ask the worker to split must-have current-task criteria from follow-up criteria.",
+        "Record accepted current-task criteria with workerctl criteria codex-smoke-task-smoke-20260519052901 --add --criterion \"...\" --source worker_proposed --status accepted.",
+        "Record proposed current-task criteria with workerctl criteria codex-smoke-task-smoke-20260519052901 --add --criterion \"...\" --source worker_proposed --status proposed.",
+        "Record follow-up criteria with workerctl criteria codex-smoke-task-smoke-20260519052901 --add --criterion \"...\" --source worker_proposed --status deferred."
+      ]
+    },
+    "manager_config": {
+      "acceptance_criteria": [
+        "The worker remains status-only and no product files are edited."
+      ],
+      "created_at": "2026-05-19T12:29:02Z",
+      "guidelines": [
+        "Use workerctl cycle before deciding."
+      ],
+      "objective": "Verify live smoke lifecycle without editing product files.",
+      "permissions": {
+        "create_pr": false,
+        "merge_green_pr": false,
+        "worker_compact_clear": false
+      },
+      "reference_paths": [
+        "scripts/live-smoke"
+      ],
+      "supervision_mode": "strict",
+      "task_id": "task-94c57135-8361-4d39-8510-b79834ae684a",
+      "updated_at": "2026-05-19T12:29:02Z"
+    },
+    "worker_handoff": null
+  },
+  "manager_session": "codex-smoke-manager-smoke-20260519052901",
+  "notable_pane_pattern": null,
+  "pane_signal": {
+    "captured": true,
+    "classifier": null,
+    "degraded": false,
+    "notable_pattern": null,
+    "reason": null,
+    "status_age_seconds": 3
+  },
+  "staleness_seconds": 3.025,
+  "state": "busy",
+  "task": "codex-smoke-task-smoke-20260519052901",
+  "task_completed": false,
+  "worker_alive": true,
+  "worker_session": "codex-smoke-worker-smoke-20260519052901"
+}

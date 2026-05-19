@@ -1,0 +1,17 @@
+[
+  {
+    "created_at": "2026-05-19T12:29:15Z",
+    "criterion": "Live smoke reached current CLI criterion mutation path",
+    "evidence": {
+      "command": "scripts/live-smoke criteria satisfy",
+      "status": "pass"
+    },
+    "id": 47,
+    "proof": "Current CLI smoke criterion satisfied",
+    "rationale": null,
+    "source": "manager_inferred",
+    "status": "satisfied",
+    "task_id": "task-92d598a4-2b9f-4300-90bb-c46559619ecf",
+    "updated_at": "2026-05-19T12:29:15Z"
+  }
+]
