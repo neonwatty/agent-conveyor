@@ -1,0 +1,21 @@
+{
+  "created_at": "2026-05-19T12:34:29Z",
+  "files": [
+    "task-status.json",
+    "audit.json",
+    "acceptance-criteria.json",
+    "prompts.json",
+    "transcript-captures.json",
+    "terminal-captures.json",
+    "agent-observations.json",
+    "manager-cycles.json",
+    "manager-decisions.json",
+    "mutation-audit.json",
+    "replay.json",
+    "transcript-segments.json"
+  ],
+  "task": {
+    "id": "task-5c7a6e98-6592-43f0-811c-70344654981b",
+    "name": "manual-qa-task-20260519053350"
+  }
+}

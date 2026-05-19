@@ -1,6 +1,18 @@
 # Manual QA Checklist
 
-Run this after unit tests and `scripts/live-smoke` pass.
+Run this after unit tests and `scripts/live-smoke-repeat 3` pass.
+
+## Run Metadata
+
+- Date:
+- Operator:
+- Task:
+- Worker:
+- Manager:
+- Evidence bundle:
+- Result: pending
+
+## Checklist
 
 - [ ] `scripts/workerctl doctor` reports `ok: true`.
 - [ ] `scripts/workerctl db-doctor` reports schema health ok.
@@ -14,7 +26,8 @@ Run this after unit tests and `scripts/live-smoke` pass.
 - [ ] `scripts/workerctl finish-task <task> --require-criteria-audit` blocks when accepted criteria remain open.
 - [ ] `scripts/workerctl finish-task <task> --capture-transcript-before-stop --stop-manager --stop-worker` captures transcript and stops both sessions.
 - [ ] `scripts/workerctl transcript-show <task> --json` returns captured transcript records.
-- [ ] `scripts/workerctl replay <task> --json` includes cycle, criteria, finish, and transcript evidence.
+- [ ] `scripts/workerctl replay <task> --json` includes cycle, criteria, and finish evidence.
+- [ ] `scripts/workerctl replay <task> --json --format full-transcript` includes transcript segment evidence.
 - [ ] `scripts/workerctl export-task <task> --zip --include-transcripts` writes a manifest and zip.
 - [ ] `scripts/workerctl sessions --state active` has no disposable QA sessions after cleanup.
 - [ ] `scripts/workerctl reconcile --stale-cycles-seconds 1` reports no dangling bindings, dead PID sessions, or stuck tasks.

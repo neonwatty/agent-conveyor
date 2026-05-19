@@ -1,5 +1,54 @@
 # Live QA Log
 
+## 2026-05-19: Focused Manual QA Pass
+
+Scenario:
+
+- Checklist: `docs/manual-qa-checklist.md`
+- Evidence bundle:
+  `docs/live-qa-artifacts/2026-05-19-manual-qa-pass-manual-qa-20260519053320/`
+- Task: `manual-qa-task-20260519053350`
+- Worker: `manual-qa-worker-manual-qa-task-20260519053350`
+- Manager: `manual-qa-manager-manual-qa-task-20260519053350`
+
+Validated:
+
+- Preflight `doctor`, `db-doctor`, `sessions --state active`, and
+  `reconcile --stale-cycles-seconds 1` passed; sessions before the run were
+  empty and reconcile reported no dangling bindings, dead PID sessions, or
+  stuck tasks.
+- Disposable pair with seeded manager config was created.
+- `cycle` reported pane signal and manager context.
+- `session-nudge --dry-run` resolved the manual QA worker target.
+- Criteria add, blocked audited finish, criteria satisfy, criteria list,
+  final audited finish, transcript-show, default replay, transcript replay,
+  full-transcript replay, and export were exercised.
+- The blocked audited finish exited `1` before criteria satisfaction and
+  reported accepted criteria still open, so the intended blocked-finish
+  behavior was verified before final finish.
+- Final finish reported `killed_worker: true` and `killed_manager: true`.
+- Default replay showed lifecycle, criteria, finish, and observation evidence.
+  Transcript replay/full-transcript replay showed terminal capture and
+  transcript segment evidence.
+- Export wrote `manifest.json`, transcript artifacts, replay artifacts, and
+  `export.zip`.
+- Final cleanup left no sessions active and reconcile clean.
+
+Notes:
+
+- The separate `criteria --list` capture was run after satisfaction as
+  `10b-criteria-list-after-satisfy.*`; the planned command block did not include
+  a list command before satisfaction.
+- The initial default `replay --json` capture did not include transcript segment
+  entries, so supplemental `13b-replay-transcript.*` and
+  `13c-replay-full-transcript.*` captures were added.
+- `finish-task` recorded the expected missing-decision warning because this
+  operator-driven pass used `--reason` without a manager decision ID.
+
+Decision:
+
+- Focused manual QA passed.
+
 ## 2026-05-19: Repeat Live Smoke
 
 Scenario:

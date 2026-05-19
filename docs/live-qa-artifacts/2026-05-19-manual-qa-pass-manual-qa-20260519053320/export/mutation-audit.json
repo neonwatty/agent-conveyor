@@ -1,0 +1,90 @@
+{
+  "ok": true,
+  "records": [
+    {
+      "allowed_decisions": [
+        "stop"
+      ],
+      "command": {
+        "created_at": "2026-05-19T12:33:55Z",
+        "id": "command-7ff24e8e-87ad-498e-90b0-2767de1122d5",
+        "state": "failed",
+        "type": "finish_task"
+      },
+      "effect": {
+        "dry_run": false,
+        "permission_check": null,
+        "send_text": null,
+        "sent": false,
+        "slash_command": null,
+        "worker_session": null
+      },
+      "expected_failure": true,
+      "linked_decision": null,
+      "nearest_prior_decision": null,
+      "ok": true,
+      "warnings": []
+    },
+    {
+      "allowed_decisions": [
+        "stop"
+      ],
+      "command": {
+        "created_at": "2026-05-19T12:34:29Z",
+        "id": "command-c1c53336-27e9-42e6-b85b-b9d608bc9f27",
+        "state": "succeeded",
+        "type": "finish_task"
+      },
+      "effect": {
+        "dry_run": false,
+        "permission_check": null,
+        "send_text": null,
+        "sent": false,
+        "slash_command": null,
+        "worker_session": "manual-qa-worker-manual-qa-task-20260519053350"
+      },
+      "expected_failure": false,
+      "linked_decision": {
+        "created_at": "2026-05-19T12:34:29Z",
+        "decision": "stop",
+        "id": 29,
+        "manager_cycle_id": null,
+        "manager_id": null,
+        "payload": {
+          "command_id": "command-c1c53336-27e9-42e6-b85b-b9d608bc9f27",
+          "source": "finish_task"
+        },
+        "reason": "manual QA pass complete",
+        "task_id": "task-5c7a6e98-6592-43f0-811c-70344654981b"
+      },
+      "nearest_prior_decision": {
+        "created_at": "2026-05-19T12:34:29Z",
+        "decision": "stop",
+        "id": 29,
+        "manager_cycle_id": null,
+        "manager_id": null,
+        "payload": {
+          "command_id": "command-c1c53336-27e9-42e6-b85b-b9d608bc9f27",
+          "source": "finish_task"
+        },
+        "reason": "manual QA pass complete",
+        "task_id": "task-5c7a6e98-6592-43f0-811c-70344654981b"
+      },
+      "ok": true,
+      "warnings": []
+    }
+  ],
+  "summary": {
+    "mutations": 2,
+    "with_warnings": 0
+  },
+  "task": {
+    "created_at": "2026-05-19T12:33:50Z",
+    "goal": "Manual QA pass for current workerctl lifecycle",
+    "id": "task-5c7a6e98-6592-43f0-811c-70344654981b",
+    "name": "manual-qa-task-20260519053350",
+    "state": "done",
+    "summary": "Disposable focused manual QA run",
+    "updated_at": "2026-05-19T12:34:29Z"
+  }
+}

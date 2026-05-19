@@ -1,0 +1,79 @@
+{
+  "binding_id": "binding-4e27801a-4b22-46c0-b304-1252487687aa",
+  "cycle_completed_at": "2026-05-19T12:33:55Z",
+  "cycle_id": 50,
+  "cycle_started_at": "2026-05-19T12:33:55Z",
+  "ingest": {
+    "new_events": 2,
+    "new_offset": 22285,
+    "skipped_lines": 0
+  },
+  "kind": "session_cycle",
+  "last_event_subtype": "task_started",
+  "last_state_event_at": "2026-05-19T12:33:52.525Z",
+  "manager_alive": true,
+  "manager_context": {
+    "acceptance_criteria": {
+      "deferred": [],
+      "open": [],
+      "proposed": [],
+      "rejected": [],
+      "satisfied": [],
+      "summary": {
+        "accepted": 0,
+        "deferred": 0,
+        "proposed": 0,
+        "rejected": 0,
+        "satisfied": 0
+      }
+    },
+    "criteria_negotiation": {
+      "needed": true,
+      "prompt": "Please propose 2-4 acceptance criteria for the current slice. Split them into must-have current-task criteria and follow-up criteria. Include the verification you expect for each.",
+      "reason": "no_criteria",
+      "suggested_actions": [
+        "Ask the worker to split must-have current-task criteria from follow-up criteria.",
+        "Record accepted current-task criteria with workerctl criteria manual-qa-task-20260519053350 --add --criterion \"...\" --source worker_proposed --status accepted.",
+        "Record proposed current-task criteria with workerctl criteria manual-qa-task-20260519053350 --add --criterion \"...\" --source worker_proposed --status proposed.",
+        "Record follow-up criteria with workerctl criteria manual-qa-task-20260519053350 --add --criterion \"...\" --source worker_proposed --status deferred."
+      ]
+    },
+    "manager_config": {
+      "acceptance_criteria": [
+        "No product source files are edited.",
+        "Finish captures transcript before stopping both sessions."
+      ],
+      "created_at": "2026-05-19T12:33:50Z",
+      "guidelines": [],
+      "objective": "Run a focused manual QA pass without product edits.",
+      "permissions": {
+        "create_pr": false,
+        "merge_green_pr": false,
+        "worker_compact_clear": false
+      },
+      "reference_paths": [
+        "docs/manual-qa-checklist.md"
+      ],
+      "supervision_mode": "strict",
+      "task_id": "task-5c7a6e98-6592-43f0-811c-70344654981b",
+      "updated_at": "2026-05-19T12:33:50Z"
+    },
+    "worker_handoff": null
+  },
+  "manager_session": "manual-qa-manager-manual-qa-task-20260519053350",
+  "notable_pane_pattern": null,
+  "pane_signal": {
+    "captured": true,
+    "classifier": null,
+    "degraded": false,
+    "notable_pattern": null,
+    "reason": null,
+    "status_age_seconds": 2
+  },
+  "staleness_seconds": 2.475,
+  "state": "busy",
+  "task": "manual-qa-task-20260519053350",
+  "task_completed": false,
+  "worker_alive": true,
+  "worker_session": "manual-qa-worker-manual-qa-task-20260519053350"
+}

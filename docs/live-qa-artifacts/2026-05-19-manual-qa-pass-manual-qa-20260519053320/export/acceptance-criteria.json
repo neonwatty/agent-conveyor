@@ -1,0 +1,17 @@
+[
+  {
+    "created_at": "2026-05-19T12:33:55Z",
+    "criterion": "Manual QA criterion can be recorded and satisfied",
+    "evidence": {
+      "command": "manual QA criteria satisfy",
+      "status": "pass"
+    },
+    "id": 48,
+    "proof": "Manual QA criterion satisfied",
+    "rationale": null,
+    "source": "manager_inferred",
+    "status": "satisfied",
+    "task_id": "task-5c7a6e98-6592-43f0-811c-70344654981b",
+    "updated_at": "2026-05-19T12:33:55Z"
+  }
+]
