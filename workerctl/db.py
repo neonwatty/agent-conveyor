@@ -12,7 +12,7 @@ from workerctl.core import now_iso
 from workerctl.state import state_root
 
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 REQUIRED_TABLES = {
     "acceptance_criteria",
     "agent_observations",
@@ -27,10 +27,13 @@ REQUIRED_TABLES = {
     "manager_decisions",
     "managers",
     "prompts",
+    "runs",
     "schema_migrations",
     "sessions",
     "statuses",
     "tasks",
+    "telemetry_events",
+    "telemetry_events_fts",
     "terminal_captures",
     "transcript_captures",
     "transcript_segments",
@@ -45,12 +48,18 @@ REQUIRED_INDEXES = {
     "events_task_id",
     "manager_configs_task_id",
     "one_active_binding_per_task",
+    "one_active_run_per_task",
     "one_active_binding_per_manager_session",
     "one_active_binding_per_worker_session",
     "one_active_binding_per_worker",
     "one_active_manager_per_task",
     "agent_observations_task_id",
     "statuses_worker_id",
+    "runs_task_status",
+    "telemetry_events_actor_timestamp",
+    "telemetry_events_run_timestamp",
+    "telemetry_events_task_timestamp",
+    "telemetry_events_type_timestamp",
     "terminal_captures_task_role",
     "transcript_captures_worker_id",
     "transcript_segments_task_role",
@@ -62,6 +71,8 @@ REQUIRED_TRIGGERS = {
 }
 ACCEPTANCE_CRITERION_STATUSES = {"proposed", "accepted", "satisfied", "deferred", "rejected"}
 ACCEPTANCE_CRITERION_SOURCES = {"user_requested", "manager_inferred", "worker_proposed", "final_audit"}
+TELEMETRY_ACTORS = {"manager", "operator", "system", "worker", "workerctl"}
+TELEMETRY_SEVERITIES = {"debug", "error", "info", "warning"}
 _PRESERVE_FIELD = object()
 
 
@@ -315,6 +326,40 @@ def migrate(conn: sqlite3.Connection, from_version: int) -> None:
           updated_at text not null
         );
 
+        create table if not exists runs(
+          id text primary key,
+          task_id text not null references tasks(id),
+          name text not null,
+          purpose text,
+          status text not null check (status in ('active','finished','failed','abandoned')),
+          started_at text not null,
+          ended_at text,
+          metadata_json text not null check (json_valid(metadata_json))
+        );
+
+        create table if not exists telemetry_events(
+          id text primary key,
+          run_id text references runs(id),
+          task_id text references tasks(id),
+          timestamp text not null,
+          actor text not null check (actor in ('manager','worker','operator','workerctl','system')),
+          event_type text not null,
+          severity text not null check (severity in ('debug','info','warning','error')),
+          summary text not null,
+          correlation_json text not null check (json_valid(correlation_json)),
+          attributes_json text not null check (json_valid(attributes_json))
+        );
+
+        create virtual table if not exists telemetry_events_fts using fts5(
+          event_id unindexed,
+          task_id unindexed,
+          run_id unindexed,
+          actor unindexed,
+          event_type unindexed,
+          summary,
+          attributes
+        );
+
         create table if not exists manager_decisions(
           id integer primary key autoincrement,
           task_id text not null references tasks(id),
@@ -400,6 +445,25 @@ def migrate(conn: sqlite3.Connection, from_version: int) -> None:
         create unique index if not exists one_active_manager_per_task
         on managers(task_id)
         where state in ('starting', 'ready', 'stopping');
+
+        create unique index if not exists one_active_run_per_task
+        on runs(task_id)
+        where status = 'active';
+
+        create index if not exists runs_task_status
+        on runs(task_id, status, started_at);
+
+        create index if not exists telemetry_events_run_timestamp
+        on telemetry_events(run_id, timestamp, id);
+
+        create index if not exists telemetry_events_task_timestamp
+        on telemetry_events(task_id, timestamp, id);
+
+        create index if not exists telemetry_events_type_timestamp
+        on telemetry_events(event_type, timestamp, id);
+
+        create index if not exists telemetry_events_actor_timestamp
+        on telemetry_events(actor, timestamp, id);
 
         create index if not exists events_task_id
         on events(task_id, id);
@@ -1994,6 +2058,274 @@ def manager_config(conn: sqlite3.Connection, *, task_id: str) -> dict[str, Any] 
         "task_id": row["task_id"],
         "updated_at": row["updated_at"],
     }
+
+
+def _metadata_json(metadata: dict[str, Any] | None, *, field: str) -> str:
+    if metadata is None:
+        metadata = {}
+    if not isinstance(metadata, dict):
+        raise WorkerError(f"{field} must be a JSON object")
+    return json.dumps(metadata, sort_keys=True)
+
+
+def _validate_telemetry_actor(actor: str) -> None:
+    if actor not in TELEMETRY_ACTORS:
+        allowed = ", ".join(sorted(TELEMETRY_ACTORS))
+        raise WorkerError(f"invalid telemetry actor: {actor!r}; expected one of: {allowed}")
+
+
+def _validate_telemetry_severity(severity: str) -> None:
+    if severity not in TELEMETRY_SEVERITIES:
+        allowed = ", ".join(sorted(TELEMETRY_SEVERITIES))
+        raise WorkerError(f"invalid telemetry severity: {severity!r}; expected one of: {allowed}")
+
+
+def _task_exists(conn: sqlite3.Connection, *, task_id: str) -> bool:
+    return conn.execute("select 1 from tasks where id = ?", (task_id,)).fetchone() is not None
+
+
+def _run_from_row(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "ended_at": row["ended_at"],
+        "id": row["id"],
+        "metadata": json.loads(row["metadata_json"]),
+        "name": row["name"],
+        "purpose": row["purpose"],
+        "started_at": row["started_at"],
+        "status": row["status"],
+        "task_id": row["task_id"],
+    }
+
+
+def _telemetry_event_from_row(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "actor": row["actor"],
+        "attributes": json.loads(row["attributes_json"]),
+        "correlation": json.loads(row["correlation_json"]),
+        "event_type": row["event_type"],
+        "id": row["id"],
+        "run_id": row["run_id"],
+        "severity": row["severity"],
+        "summary": row["summary"],
+        "task_id": row["task_id"],
+        "timestamp": row["timestamp"],
+    }
+
+
+def run_row(conn: sqlite3.Connection, *, run: str) -> dict[str, Any]:
+    row = conn.execute(
+        """
+        select id, task_id, name, purpose, status, started_at, ended_at, metadata_json
+        from runs
+        where id = ? or name = ?
+        order by started_at desc, id desc
+        limit 1
+        """,
+        (run, run),
+    ).fetchone()
+    if row is None:
+        raise WorkerError(f"Unknown run: {run}")
+    return _run_from_row(row)
+
+
+def active_run_for_task(conn: sqlite3.Connection, *, task_id: str) -> dict[str, Any] | None:
+    row = conn.execute(
+        """
+        select id, task_id, name, purpose, status, started_at, ended_at, metadata_json
+        from runs
+        where task_id = ? and status = 'active'
+        order by started_at desc, id desc
+        limit 1
+        """,
+        (task_id,),
+    ).fetchone()
+    return _run_from_row(row) if row is not None else None
+
+
+def create_run(
+    conn: sqlite3.Connection,
+    *,
+    task_id: str,
+    name: str | None = None,
+    purpose: str | None = None,
+    metadata: dict[str, Any] | None = None,
+    run_id: str | None = None,
+    timestamp: str | None = None,
+) -> str:
+    task = conn.execute(
+        "select id, name, goal from tasks where id = ?",
+        (task_id,),
+    ).fetchone()
+    if task is None:
+        raise WorkerError(f"Unknown task id: {task_id}")
+    existing = active_run_for_task(conn, task_id=task_id)
+    if existing is not None:
+        raise WorkerError(f"task {task['name']!r} already has active run {existing['id']!r}")
+    now = timestamp or now_iso()
+    new_run_id = run_id or f"run-{uuid.uuid4()}"
+    run_name = name or f"{task['name']}-{now.replace(':', '').replace('.', '-')}"
+    conn.execute(
+        """
+        insert into runs(id, task_id, name, purpose, status, started_at, metadata_json)
+        values (?, ?, ?, ?, 'active', ?, ?)
+        """,
+        (
+            new_run_id,
+            task_id,
+            run_name,
+            purpose,
+            now,
+            _metadata_json(metadata, field="run metadata"),
+        ),
+    )
+    return new_run_id
+
+
+def finish_run(
+    conn: sqlite3.Connection,
+    *,
+    run: str,
+    status: str = "finished",
+    timestamp: str | None = None,
+) -> dict[str, Any]:
+    if status not in {"finished", "failed", "abandoned"}:
+        raise WorkerError("run finish status must be one of: finished, failed, abandoned")
+    current = run_row(conn, run=run)
+    now = timestamp or now_iso()
+    conn.execute(
+        """
+        update runs
+        set status = ?, ended_at = ?
+        where id = ?
+        """,
+        (status, now, current["id"]),
+    )
+    return run_row(conn, run=current["id"])
+
+
+def list_runs(
+    conn: sqlite3.Connection,
+    *,
+    task_id: str | None = None,
+    status: str | None = None,
+) -> list[dict[str, Any]]:
+    clauses: list[str] = []
+    params: list[Any] = []
+    if task_id is not None:
+        clauses.append("runs.task_id = ?")
+        params.append(task_id)
+    if status is not None:
+        clauses.append("runs.status = ?")
+        params.append(status)
+    where = f"where {' and '.join(clauses)}" if clauses else ""
+    rows = conn.execute(
+        f"""
+        select runs.id, runs.task_id, runs.name, runs.purpose, runs.status,
+               runs.started_at, runs.ended_at, runs.metadata_json
+        from runs
+        {where}
+        order by runs.started_at desc, runs.id desc
+        """,
+        params,
+    ).fetchall()
+    return [_run_from_row(row) for row in rows]
+
+
+def emit_telemetry_event(
+    conn: sqlite3.Connection,
+    *,
+    actor: str,
+    event_type: str,
+    summary: str,
+    severity: str = "info",
+    run_id: str | None = None,
+    task_id: str | None = None,
+    correlation: dict[str, Any] | None = None,
+    attributes: dict[str, Any] | None = None,
+    event_id: str | None = None,
+    timestamp: str | None = None,
+) -> str:
+    _validate_telemetry_actor(actor)
+    _validate_telemetry_severity(severity)
+    correlation_json = _metadata_json(correlation, field="telemetry correlation")
+    attributes_json = _metadata_json(attributes, field="telemetry attributes")
+    if run_id is not None:
+        run = run_row(conn, run=run_id)
+        if task_id is not None and task_id != run["task_id"]:
+            raise WorkerError(
+                f"telemetry event task_id {task_id!r} does not match run {run['id']!r} task_id {run['task_id']!r}"
+            )
+        task_id = run["task_id"]
+        run_id = run["id"]
+    elif task_id is not None:
+        if not _task_exists(conn, task_id=task_id):
+            raise WorkerError(f"Unknown task id: {task_id}")
+        active = active_run_for_task(conn, task_id=task_id)
+        if active is not None:
+            run_id = active["id"]
+    new_event_id = event_id or f"telemetry-{uuid.uuid4()}"
+    conn.execute(
+        """
+        insert into telemetry_events(
+          id, run_id, task_id, timestamp, actor, event_type, severity,
+          summary, correlation_json, attributes_json
+        )
+        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            new_event_id,
+            run_id,
+            task_id,
+            timestamp or now_iso(),
+            actor,
+            event_type,
+            severity,
+            summary,
+            correlation_json,
+            attributes_json,
+        ),
+    )
+    conn.execute(
+        """
+        insert into telemetry_events_fts(
+          event_id, task_id, run_id, actor, event_type, summary, attributes
+        )
+        values (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (new_event_id, task_id, run_id, actor, event_type, summary, attributes_json),
+    )
+    return new_event_id
+
+
+def telemetry_events(
+    conn: sqlite3.Connection,
+    *,
+    run_id: str | None = None,
+    task_id: str | None = None,
+    limit: int = 100,
+) -> list[dict[str, Any]]:
+    clauses: list[str] = []
+    params: list[Any] = []
+    if run_id is not None:
+        clauses.append("run_id = ?")
+        params.append(run_id)
+    if task_id is not None:
+        clauses.append("task_id = ?")
+        params.append(task_id)
+    where = f"where {' and '.join(clauses)}" if clauses else ""
+    params.append(limit)
+    rows = conn.execute(
+        f"""
+        select id, run_id, task_id, timestamp, actor, event_type, severity,
+               summary, correlation_json, attributes_json
+        from telemetry_events
+        {where}
+        order by timestamp, rowid
+        limit ?
+        """,
+        params,
+    ).fetchall()
+    return [_telemetry_event_from_row(row) for row in rows]
 
 
 def create_manager(

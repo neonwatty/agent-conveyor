@@ -49,6 +49,7 @@ from workerctl.commands import (
     command_register_worker,
     command_request_worker_compact,
     command_register_manager,
+    command_runs,
     command_start_worker,
     command_start_manager,
     command_deregister,
@@ -318,6 +319,27 @@ def build_parser() -> argparse.ArgumentParser:
     handoff.add_argument("--payload-json", help="Optional structured JSON object to store with the handoff.")
     handoff.add_argument("--path", help="Override the workerctl database path.")
     handoff.set_defaults(func=command_handoff)
+
+    runs = subparsers.add_parser(
+        "runs",
+        help="Create, list, show, or finish local telemetry runs for QA and manager/worker drills.",
+    )
+    run_action = runs.add_mutually_exclusive_group(required=True)
+    run_action.add_argument("--create", metavar="TASK", help="Create an active run for a task name or ID.")
+    run_action.add_argument("--list", action="store_true", help="List runs.")
+    run_action.add_argument("--show", metavar="RUN", help="Show one run by ID or name.")
+    run_action.add_argument("--finish", metavar="RUN", help="Finish one active run by ID or name.")
+    runs.add_argument("--name", help="Optional run name when creating.")
+    runs.add_argument("--purpose", help="Optional purpose text when creating.")
+    runs.add_argument(
+        "--status",
+        choices=("active", "finished", "failed", "abandoned"),
+        help="Filter list output, or set finish status.",
+    )
+    runs.add_argument("--task", help="Filter --list output by task name or ID.")
+    runs.add_argument("--metadata-json", help="Optional JSON object stored with a created run.")
+    runs.add_argument("--path", help="Override the workerctl database path.")
+    runs.set_defaults(func=command_runs)
 
     manager_config = subparsers.add_parser(
         "manager-config",
