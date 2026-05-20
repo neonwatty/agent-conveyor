@@ -68,7 +68,7 @@ visual_board:
     url: "http://goalbuddy.localhost:41740/local-telemetry-platform/"
     command: "node /Users/neonwatty/.codex/plugins/cache/goalbuddy/goalbuddy/0.3.7/skills/goalbuddy/surfaces/local-goal-board/scripts/local-goal-board.mjs --goal /Users/neonwatty/goalbuddy-boards/local-telemetry-platform --host goalbuddy.localhost --port 41740"
 
-active_task: T008
+active_task: T009
 
 tasks:
   - id: T001
@@ -280,7 +280,7 @@ tasks:
   - id: T008
     type: worker
     assignee: Worker
-    status: active
+    status: done
     reasoning_hint: medium
     objective: "Add local telemetry export and report artifacts for QA evidence bundles."
     allowed_files:
@@ -291,12 +291,23 @@ tasks:
       - "tests/test_workerctl.py"
     verify:
       - "python3 -m unittest tests.test_workerctl.CliTests tests.test_workerctl.AcceptanceCriteriaReplayExportTests -v"
-    receipt: null
+    receipt:
+      result: done
+      summary: "Added telemetry events, telemetry summary, and Markdown telemetry report artifacts to `workerctl export-task`, including manifest and zip coverage."
+      evidence:
+        - "workerctl/export.py"
+        - "tests/test_workerctl.py"
+        - "docs/goals/local-telemetry-platform/notes/T008-worker-receipt.md"
+      verification:
+        - "/opt/homebrew/bin/python3.13 -m unittest tests.test_workerctl.CliTests tests.test_workerctl.AcceptanceCriteriaReplayExportTests -v"
+        - "/opt/homebrew/bin/python3.13 -m unittest discover -s tests -v"
+        - "/opt/homebrew/bin/python3.13 -m py_compile workerctl/cli.py workerctl/commands.py workerctl/export.py workerctl/db.py"
+        - "git diff --check"
 
   - id: T009
     type: worker
     assignee: Worker
-    status: queued
+    status: active
     reasoning_hint: medium
     objective: "Document the telemetry workflow and realistic QA drill playbook."
     allowed_files:
@@ -367,9 +378,9 @@ checks:
   dirty_fingerprint: unknown
   last_verification:
     result: pass
-    task: T007
+    task: T008
     commands:
-      - "/opt/homebrew/bin/python3.13 -m unittest tests.test_workerctl.CliTests -v"
+      - "/opt/homebrew/bin/python3.13 -m unittest tests.test_workerctl.CliTests tests.test_workerctl.AcceptanceCriteriaReplayExportTests -v"
       - "/opt/homebrew/bin/python3.13 -m unittest discover -s tests -v"
-      - "/opt/homebrew/bin/python3.13 -m py_compile workerctl/db.py workerctl/commands.py workerctl/cli.py"
+      - "/opt/homebrew/bin/python3.13 -m py_compile workerctl/cli.py workerctl/commands.py workerctl/export.py workerctl/db.py"
       - "git diff --check"

@@ -9,14 +9,43 @@ from workerctl.audit import mutation_audit_result
 from workerctl.core import now_iso
 from workerctl.db import connect as connect_db
 from workerctl.db import initialize_database
+from workerctl.db import query_telemetry_events
 from workerctl.db import task_audit
 from workerctl.db import task_status_snapshot
+from workerctl.db import telemetry_summary
 from workerctl.replay import replay_entries
 from workerctl.state import state_root, write_json
 
 
 def task_artifact_dir(task_id: str) -> Path:
     return state_root() / "artifacts" / "tasks" / task_id
+
+
+def telemetry_report_markdown(
+    *,
+    task: dict,
+    summary: dict,
+    events: list[dict],
+) -> str:
+    lines = [
+        f"# Telemetry Report: {task['name']}",
+        "",
+        f"- Task ID: `{task['id']}`",
+        f"- Total events: {summary['total']}",
+        f"- First event: {summary['first_timestamp']}",
+        f"- Last event: {summary['last_timestamp']}",
+        "",
+        "## Event Types",
+    ]
+    for event_type, count in sorted(summary["by_event_type"].items()):
+        lines.append(f"- `{event_type}`: {count}")
+    lines.extend(["", "## Timeline"])
+    for event in events:
+        lines.append(
+            f"- {event['timestamp']} `{event['actor']}` `{event['event_type']}` "
+            f"[{event['severity']}]: {event['summary']}"
+        )
+    return "\n".join(lines) + "\n"
 
 
 def command_export_task(args: argparse.Namespace) -> int:
@@ -58,6 +87,8 @@ def command_export_task(args: argparse.Namespace) -> int:
             """,
             (snapshot["id"],),
         ).fetchall()
+        telemetry_events = query_telemetry_events(conn, task_id=snapshot["id"], limit=10000)
+        telemetry_counts = telemetry_summary(telemetry_events)
     export_root = Path(args.output).expanduser().resolve() if args.output else task_artifact_dir(snapshot["id"]) / "export"
     export_root.mkdir(parents=True, exist_ok=True)
     prompts = [
@@ -100,6 +131,11 @@ def command_export_task(args: argparse.Namespace) -> int:
     write_json(export_root / "manager-decisions.json", audit.get("manager_decisions", []))
     write_json(export_root / "mutation-audit.json", mutation_audit)
     write_json(export_root / "replay.json", replay)
+    write_json(export_root / "telemetry-events.json", telemetry_events)
+    write_json(export_root / "telemetry-summary.json", telemetry_counts)
+    (export_root / "telemetry-report.md").write_text(
+        telemetry_report_markdown(task=audit["task"], summary=telemetry_counts, events=telemetry_events)
+    )
     manifest = {
         "created_at": now_iso(),
         "files": [
@@ -114,6 +150,9 @@ def command_export_task(args: argparse.Namespace) -> int:
             "manager-decisions.json",
             "mutation-audit.json",
             "replay.json",
+            "telemetry-events.json",
+            "telemetry-summary.json",
+            "telemetry-report.md",
         ],
         "task": {"id": snapshot["id"], "name": snapshot["name"]},
     }
