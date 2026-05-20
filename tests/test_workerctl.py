@@ -114,6 +114,125 @@ class DatabaseTests(unittest.TestCase):
             self.assertEqual(version, worker_db.SCHEMA_VERSION)
             self.assertEqual(user_version, worker_db.SCHEMA_VERSION)
 
+            tables = {
+                row["name"]
+                for row in conn.execute("select name from sqlite_master where type = 'table'")
+            }
+            indexes = {
+                row["name"]
+                for row in conn.execute("select name from sqlite_master where type = 'index'")
+            }
+            self.assertIn("runs", tables)
+            self.assertIn("telemetry_events", tables)
+            self.assertIn("telemetry_events_fts", tables)
+            self.assertIn("one_active_run_per_task", indexes)
+            self.assertIn("telemetry_events_run_timestamp", indexes)
+
+    def test_run_helpers_create_list_finish_and_enforce_one_active_run_per_task(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            task_id = worker_db.create_task(conn, name="qa-task", goal="Run QA.")
+            run_id = worker_db.create_run(
+                conn,
+                task_id=task_id,
+                name="qa-drill-1",
+                purpose="Exercise manager and worker.",
+                metadata={"source": "test"},
+            )
+
+            run = worker_db.run_row(conn, run=run_id)
+            self.assertEqual(run["name"], "qa-drill-1")
+            self.assertEqual(run["status"], "active")
+            self.assertEqual(run["metadata"], {"source": "test"})
+            self.assertEqual(worker_db.active_run_for_task(conn, task_id=task_id)["id"], run_id)
+            self.assertEqual([row["id"] for row in worker_db.list_runs(conn, task_id=task_id)], [run_id])
+
+            with self.assertRaisesRegex(WorkerError, "already has active run"):
+                worker_db.create_run(conn, task_id=task_id, name="qa-drill-2")
+
+            finished = worker_db.finish_run(conn, run=run_id, status="finished")
+            self.assertEqual(finished["status"], "finished")
+            self.assertIsNotNone(finished["ended_at"])
+            self.assertIsNone(worker_db.active_run_for_task(conn, task_id=task_id))
+
+    def test_telemetry_event_helpers_attach_active_run_and_index_search_text(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            task_id = worker_db.create_task(conn, name="telemetry-task", goal="Observe QA.")
+            run_id = worker_db.create_run(conn, task_id=task_id, name="telemetry-run")
+
+            event_id = worker_db.emit_telemetry_event(
+                conn,
+                task_id=task_id,
+                actor="manager",
+                event_type="manager_nudge",
+                severity="info",
+                summary="Manager nudged worker after stale output.",
+                correlation={"cycle_id": 7},
+                attributes={"reason": "stale output"},
+            )
+
+            events = worker_db.telemetry_events(conn, run_id=run_id)
+            self.assertEqual(len(events), 1)
+            self.assertEqual(events[0]["id"], event_id)
+            self.assertEqual(events[0]["run_id"], run_id)
+            self.assertEqual(events[0]["correlation"], {"cycle_id": 7})
+            self.assertEqual(events[0]["attributes"], {"reason": "stale output"})
+            search = conn.execute(
+                """
+                select event_id
+                from telemetry_events_fts
+                where telemetry_events_fts match 'stale'
+                """
+            ).fetchone()
+            self.assertEqual(search["event_id"], event_id)
+
+    def test_telemetry_event_helpers_validate_inputs_before_insert(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            task_id = worker_db.create_task(conn, name="telemetry-validation", goal="Validate telemetry.")
+            other_task_id = worker_db.create_task(conn, name="other-task", goal="Other task.")
+            run_id = worker_db.create_run(conn, task_id=task_id, name="validation-run")
+
+            invalid_cases = [
+                (
+                    {"task_id": task_id, "actor": "human", "summary": "Bad actor."},
+                    "invalid telemetry actor",
+                ),
+                (
+                    {"task_id": task_id, "actor": "workerctl", "severity": "fatal", "summary": "Bad severity."},
+                    "invalid telemetry severity",
+                ),
+                (
+                    {"task_id": task_id, "actor": "workerctl", "summary": "Bad correlation.", "correlation": []},
+                    "telemetry correlation must be a JSON object",
+                ),
+                (
+                    {"task_id": task_id, "actor": "workerctl", "summary": "Bad attributes.", "attributes": []},
+                    "telemetry attributes must be a JSON object",
+                ),
+                (
+                    {"task_id": "missing-task", "actor": "workerctl", "summary": "Missing task."},
+                    "Unknown task id",
+                ),
+                (
+                    {"run_id": "missing-run", "actor": "workerctl", "summary": "Missing run."},
+                    "Unknown run",
+                ),
+                (
+                    {"run_id": run_id, "task_id": other_task_id, "actor": "workerctl", "summary": "Mismatch."},
+                    "does not match run",
+                ),
+            ]
+
+            for kwargs, message in invalid_cases:
+                with self.subTest(message=message):
+                    with self.assertRaisesRegex(WorkerError, message):
+                        worker_db.emit_telemetry_event(conn, event_type="validation_failed", **kwargs)
+
+            self.assertEqual(conn.execute("select count(*) from telemetry_events").fetchone()[0], 0)
+            self.assertEqual(conn.execute("select count(*) from telemetry_events_fts").fetchone()[0], 0)
+
     def test_database_refuses_newer_user_version(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "workerctl.db"
@@ -926,6 +1045,68 @@ class CliTests(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stderr)
         data = json.loads(proc.stdout)
         self.assertIsInstance(data, list)
+
+    def test_runs_cli_create_show_list_and_finish(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            create_task = self.run_workerctl(
+                "tasks",
+                "--create",
+                "cli-qa-task",
+                "--goal",
+                "Run a realistic QA drill.",
+                "--path",
+                str(db_path),
+            )
+            self.assertEqual(create_task.returncode, 0, create_task.stderr)
+
+            create_run = self.run_workerctl(
+                "runs",
+                "--create",
+                "cli-qa-task",
+                "--name",
+                "cli-run-1",
+                "--purpose",
+                "Exercise manager/worker telemetry.",
+                "--metadata-json",
+                '{"source":"cli-test"}',
+                "--path",
+                str(db_path),
+            )
+            self.assertEqual(create_run.returncode, 0, create_run.stderr)
+            created = json.loads(create_run.stdout)
+            self.assertEqual(created["name"], "cli-run-1")
+            self.assertEqual(created["status"], "active")
+            self.assertEqual(created["metadata"], {"source": "cli-test"})
+
+            listed = self.run_workerctl(
+                "runs",
+                "--list",
+                "--task",
+                "cli-qa-task",
+                "--status",
+                "active",
+                "--path",
+                str(db_path),
+            )
+            self.assertEqual(listed.returncode, 0, listed.stderr)
+            self.assertEqual([row["id"] for row in json.loads(listed.stdout)], [created["id"]])
+
+            shown = self.run_workerctl("runs", "--show", "cli-run-1", "--path", str(db_path))
+            self.assertEqual(shown.returncode, 0, shown.stderr)
+            self.assertEqual(json.loads(shown.stdout)["id"], created["id"])
+
+            finished = self.run_workerctl(
+                "runs",
+                "--finish",
+                "cli-run-1",
+                "--status",
+                "failed",
+                "--path",
+                str(db_path),
+            )
+            self.assertEqual(finished.returncode, 0, finished.stderr)
+            self.assertEqual(json.loads(finished.stdout)["status"], "failed")
 
     def test_list_json_reports_tmux_permission_error_without_failing(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -10610,6 +10791,8 @@ class PairCommandTests(unittest.TestCase):
                 with contextlib.redirect_stdout(stdout_capture):
                     result = commands.command_pair(args)
             self.assertEqual(result, 0)
+            output = json.loads(stdout_capture.getvalue())
+            self.assertIn("run_id", output)
 
             # Verify task was created
             conn = worker_db.connect(db_path)
@@ -10617,6 +10800,27 @@ class PairCommandTests(unittest.TestCase):
                 task_row = worker_db.task_row(conn, task="new-pair-task")
                 self.assertEqual(task_row["name"], "new-pair-task")
                 self.assertEqual(task_row["goal"], "Build a thing")
+                run = worker_db.run_row(conn, run=output["run_id"])
+                self.assertEqual(run["task_id"], task_row["id"])
+                self.assertEqual(run["status"], "active")
+                self.assertEqual(run["metadata"]["source"], "pair")
+                self.assertEqual(run["metadata"]["worker"], "w1")
+                self.assertEqual(run["metadata"]["manager"], "m1")
+                telemetry = worker_db.telemetry_events(conn, task_id=task_row["id"])
+                event_types = [event["event_type"] for event in telemetry]
+                self.assertEqual(
+                    event_types,
+                    [
+                        "pair_started",
+                        "pair_task_resolved",
+                        "pair_worker_spawned",
+                        "pair_manager_spawned",
+                        "pair_binding_created",
+                        "pair_run_created",
+                    ],
+                )
+                self.assertEqual(telemetry[-1]["run_id"], output["run_id"])
+                self.assertEqual(telemetry[-1]["correlation"]["binding_id"], output["binding_id"])
             finally:
                 conn.close()
 
@@ -10702,6 +10906,69 @@ class PairCommandTests(unittest.TestCase):
             with self.assertRaises(WorkerError) as ctx:
                 commands.command_pair(args)
             self.assertIn("--task-goal", str(ctx.exception))
+
+    def test_pair_emits_failure_telemetry_after_partial_spawn(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = self._setup_db(tmpdir)
+            args = argparse.Namespace(
+                task="failure-task",
+                worker_name="w1",
+                manager_name="m1",
+                cwd=tmpdir,
+                task_prompt=None,
+                task_goal="Exercise failure telemetry",
+                task_summary=None,
+                sandbox="danger-full-access",
+                ask_for_approval="never",
+                timeout_seconds=30,
+                path=str(db_path),
+            )
+
+            def fake_spawn(*, name, role, **kwargs):
+                if role == "manager":
+                    raise WorkerError("manager spawn failed")
+                conn = worker_db.connect(db_path)
+                worker_db.initialize_database(conn)
+                try:
+                    session_id = worker_db.register_session(
+                        conn,
+                        name=name,
+                        role=role,
+                        codex_session_path=f"/tmp/{name}.jsonl",
+                        codex_session_id=f"codex-id-{name}",
+                        pid=10000 + hash(name) % 1000,
+                        cwd=kwargs.get("cwd", "/tmp"),
+                        tmux_session=f"codex-{name}",
+                    )
+                    conn.commit()
+                finally:
+                    conn.close()
+                return {
+                    "name": name,
+                    "role": role,
+                    "session_id": session_id,
+                    "pid": 10000 + hash(name) % 1000,
+                    "tmux_session": f"codex-{name}",
+                    "codex_session_path": f"/tmp/{name}.jsonl",
+                    "codex_session_id": f"codex-id-{name}",
+                    "cwd": kwargs.get("cwd", "/tmp"),
+                }
+
+            with mock.patch.object(commands, "_spawn_codex_and_register", side_effect=fake_spawn):
+                with self.assertRaisesRegex(WorkerError, "manager spawn failed"):
+                    commands.command_pair(args)
+
+            conn = worker_db.connect(db_path)
+            try:
+                task_row = worker_db.task_row(conn, task="failure-task")
+                telemetry = worker_db.telemetry_events(conn, task_id=task_row["id"])
+            finally:
+                conn.close()
+            event_types = [event["event_type"] for event in telemetry]
+            self.assertEqual(event_types[-2:], ["pair_worker_spawned", "pair_failed"])
+            self.assertEqual(telemetry[-1]["severity"], "error")
+            self.assertTrue(telemetry[-1]["attributes"]["worker_spawned"])
+            self.assertFalse(telemetry[-1]["attributes"]["manager_spawned"])
 
     def test_pair_passes_task_prompt_to_worker_only(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -10837,6 +11104,7 @@ class PairCommandTests(unittest.TestCase):
 
             self.assertEqual(result, 0)
             output = json.loads(stdout_capture.getvalue())
+            self.assertTrue(output["run_id"].startswith("run-"))
             self.assertTrue(output["manager_config_seeded"])
             self.assertTrue(output["manager_config_seeded_by_pair"])
             manager_spawn = next(r for r in recorded if r["role"] == "manager")

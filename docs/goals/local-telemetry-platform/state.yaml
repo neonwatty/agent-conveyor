@@ -68,7 +68,7 @@ visual_board:
     url: "http://goalbuddy.localhost:41740/local-telemetry-platform/"
     command: "node /Users/neonwatty/.codex/plugins/cache/goalbuddy/goalbuddy/0.3.7/skills/goalbuddy/surfaces/local-goal-board/scripts/local-goal-board.mjs --goal /Users/neonwatty/goalbuddy-boards/local-telemetry-platform --host goalbuddy.localhost --port 41740"
 
-active_task: T003
+active_task: T005
 
 tasks:
   - id: T001
@@ -145,7 +145,7 @@ tasks:
   - id: T003
     type: worker
     assignee: Worker
-    status: active
+    status: done
     reasoning_hint: medium
     objective: "Harden telemetry foundation helpers and validation required by later emitters."
     allowed_files:
@@ -157,12 +157,21 @@ tasks:
     stop_if:
       - "Need files outside allowed_files."
       - "Verification fails twice."
-    receipt: null
+    receipt:
+      result: done
+      summary: "Hardened telemetry DB helpers and validation: run lifecycle helpers, active-run lookup, event insertion validation, run/task mismatch checks, and FTS indexing."
+      evidence:
+        - "workerctl/db.py"
+        - "tests/test_workerctl.py"
+        - "docs/goals/local-telemetry-platform/notes/T003-worker-receipt.md"
+      verification:
+        - "/opt/homebrew/bin/python3.13 -m unittest tests.test_workerctl.DatabaseTests tests.test_workerctl.CliTests.test_runs_cli_create_show_list_and_finish tests.test_workerctl.PairCommandTests -v"
+        - "/opt/homebrew/bin/python3.13 -m py_compile workerctl/db.py workerctl/commands.py workerctl/cli.py"
 
   - id: T004
     type: worker
     assignee: Worker
-    status: queued
+    status: done
     reasoning_hint: medium
     objective: "Instrument run and pair lifecycle telemetry."
     allowed_files:
@@ -171,12 +180,23 @@ tasks:
       - "tests/test_workerctl.py"
     verify:
       - "python3 -m unittest tests.test_workerctl.PairCommandTests -v"
-    receipt: null
+    receipt:
+      result: done
+      summary: "Instrumented run and pair lifecycle telemetry, including pair start, task resolution, manager config seeding, spawns, binding creation, run creation, and partial-spawn failure."
+      evidence:
+        - "workerctl/commands.py"
+        - "workerctl/cli.py"
+        - "workerctl/db.py"
+        - "tests/test_workerctl.py"
+        - "docs/goals/local-telemetry-platform/notes/T004-worker-receipt.md"
+      verification:
+        - "/opt/homebrew/bin/python3.13 -m unittest tests.test_workerctl.DatabaseTests tests.test_workerctl.CliTests.test_runs_cli_create_show_list_and_finish tests.test_workerctl.PairCommandTests -v"
+        - "/opt/homebrew/bin/python3.13 -m py_compile workerctl/db.py workerctl/commands.py workerctl/cli.py"
 
   - id: T005
     type: worker
     assignee: Worker
-    status: queued
+    status: active
     reasoning_hint: medium
     objective: "Instrument manager cycles, decisions, command lifecycle, nudges, interrupts, and compact/clear requests."
     allowed_files:
@@ -307,6 +327,8 @@ tasks:
 checks:
   dirty_fingerprint: unknown
   last_verification:
-    result: unknown
-    task: null
-    commands: []
+    result: pass
+    task: T004
+    commands:
+      - "/opt/homebrew/bin/python3.13 -m unittest tests.test_workerctl.DatabaseTests tests.test_workerctl.CliTests.test_runs_cli_create_show_list_and_finish tests.test_workerctl.PairCommandTests -v"
+      - "/opt/homebrew/bin/python3.13 -m py_compile workerctl/db.py workerctl/commands.py workerctl/cli.py"

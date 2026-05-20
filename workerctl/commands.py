@@ -32,11 +32,16 @@ from workerctl.db import insert_transcript_segment
 from workerctl.db import latest_terminal_capture_for_role
 from workerctl.db import latest_session_binding_for_task
 from workerctl.db import list_tasks as list_db_tasks
+from workerctl.db import list_runs as list_db_runs
 from workerctl.db import mark_manager_seen
 from workerctl.db import mark_worker_state, upsert_worker
+from workerctl.db import create_run as create_db_run
+from workerctl.db import finish_run as finish_db_run
+from workerctl.db import run_row as db_run_row
 from workerctl.db import session_by_id
 from workerctl.db import set_worker_pane_id
 from workerctl.db import task_audit
+from workerctl.db import task_row as db_task_row
 from workerctl.db import task_status_snapshot
 from workerctl import identity
 from workerctl.state import (
@@ -1389,6 +1394,40 @@ def _json_arg(value: str | None, *, flag: str) -> dict[str, Any]:
     if not isinstance(parsed, dict):
         raise WorkerError(f"{flag} must be a JSON object")
     return parsed
+
+
+def command_runs(args: argparse.Namespace) -> int:
+    db_path = Path(args.path).expanduser().resolve() if args.path else None
+    with connect_db(db_path) as conn:
+        initialize_database(conn)
+        if args.create:
+            task = db_task_row(conn, task=args.create)
+            run_id = create_db_run(
+                conn,
+                task_id=task["id"],
+                name=args.name,
+                purpose=args.purpose,
+                metadata=_json_arg(args.metadata_json, flag="--metadata-json"),
+            )
+            conn.commit()
+            result = db_run_row(conn, run=run_id)
+            print(json.dumps(result, indent=2, sort_keys=True))
+            return 0
+        if args.show:
+            result = db_run_row(conn, run=args.show)
+            print(json.dumps(result, indent=2, sort_keys=True))
+            return 0
+        if args.finish:
+            result = finish_db_run(conn, run=args.finish, status=args.status or "finished")
+            conn.commit()
+            print(json.dumps(result, indent=2, sort_keys=True))
+            return 0
+        task_id = None
+        if args.task:
+            task_id = db_task_row(conn, task=args.task)["id"]
+        runs = list_db_runs(conn, task_id=task_id, status=args.status)
+    print(json.dumps(runs, indent=2, sort_keys=True))
+    return 0
 
 
 def _acceptance_criteria_summary(criteria: list[dict[str, Any]]) -> dict[str, int]:
@@ -3308,6 +3347,47 @@ def command_pair(args: argparse.Namespace) -> int:
     from workerctl import db as worker_db
 
     db_path = Path(args.path).expanduser().resolve() if hasattr(args, 'path') and args.path else None
+    task_id = None
+    task_created = False
+    manager_config_seeded = False
+    manager_config_seeded_by_pair = False
+    run_id = None
+    binding_id = None
+    worker_info = None
+    manager_info = None
+
+    def record_pair_telemetry(
+        event_type: str,
+        summary: str,
+        *,
+        severity: str = "info",
+        extra_correlation: dict[str, Any] | None = None,
+        attributes: dict[str, Any] | None = None,
+    ) -> None:
+        if task_id is None:
+            return
+        correlation = {
+            "binding_id": binding_id,
+            "manager": args.manager_name,
+            "source": "pair",
+            "task": args.task,
+            "worker": args.worker_name,
+        }
+        if extra_correlation:
+            correlation.update(extra_correlation)
+        with worker_db.connect(db_path) as telemetry_conn:
+            worker_db.initialize_database(telemetry_conn)
+            worker_db.emit_telemetry_event(
+                telemetry_conn,
+                actor="workerctl",
+                event_type=event_type,
+                severity=severity,
+                summary=summary,
+                run_id=run_id,
+                task_id=task_id,
+                correlation=correlation,
+                attributes=attributes or {},
+            )
 
     # 1. Task lookup/create
     conn = worker_db.connect(db_path)
@@ -3319,7 +3399,6 @@ def command_pair(args: argparse.Namespace) -> int:
         except WorkerError:
             pass
 
-        task_created = False
         if task_row is None:
             if not args.task_goal:
                 raise WorkerError(
@@ -3336,9 +3415,40 @@ def command_pair(args: argparse.Namespace) -> int:
             conn.commit()
         else:
             task_id = task_row["id"]
+        worker_db.emit_telemetry_event(
+            conn,
+            actor="workerctl",
+            event_type="pair_started",
+            summary=f"Started pair setup for task {args.task}.",
+            task_id=task_id,
+            correlation={
+                "manager": args.manager_name,
+                "source": "pair",
+                "task": args.task,
+                "worker": args.worker_name,
+            },
+            attributes={
+                "cwd": args.cwd,
+                "task_created": task_created,
+                "task_goal_provided": bool(args.task_goal),
+            },
+        )
+        worker_db.emit_telemetry_event(
+            conn,
+            actor="workerctl",
+            event_type="pair_task_resolved",
+            summary=f"{'Created' if task_created else 'Resolved'} task {args.task}.",
+            task_id=task_id,
+            correlation={
+                "manager": args.manager_name,
+                "source": "pair",
+                "task": args.task,
+                "worker": args.worker_name,
+            },
+            attributes={"created": task_created},
+        )
 
         existing_manager_config = worker_db.manager_config(conn, task_id=task_id)
-        manager_config_seeded_by_pair = False
         if pair_manager_config_requested(args):
             permissions = normalize_manager_permissions(
                 existing_manager_config["permissions"] if existing_manager_config else None
@@ -3385,8 +3495,28 @@ def command_pair(args: argparse.Namespace) -> int:
                     "supervision_mode": existing_manager_config["supervision_mode"],
                 },
             )
+            worker_db.emit_telemetry_event(
+                conn,
+                actor="workerctl",
+                event_type="pair_manager_config_seeded",
+                summary=f"Seeded manager config for task {args.task}.",
+                task_id=task_id,
+                correlation={
+                    "manager": args.manager_name,
+                    "source": "pair",
+                    "task": args.task,
+                    "worker": args.worker_name,
+                },
+                attributes={
+                    "acceptance_count": len(existing_manager_config["acceptance_criteria"]),
+                    "guideline_count": len(existing_manager_config["guidelines"]),
+                    "reference_count": len(existing_manager_config["reference_paths"]),
+                    "supervision_mode": existing_manager_config["supervision_mode"],
+                },
+            )
             conn.commit()
         manager_config_seeded = existing_manager_config is not None
+        conn.commit()
     finally:
         conn.close()
 
@@ -3405,6 +3535,17 @@ def command_pair(args: argparse.Namespace) -> int:
             sandbox=sandbox,
             ask_for_approval=ask_for_approval,
             timeout_seconds=args.timeout_seconds,
+        )
+        record_pair_telemetry(
+            "pair_worker_spawned",
+            f"Spawned worker session {args.worker_name}.",
+            extra_correlation={"worker_session_id": worker_info.get("session_id")},
+            attributes={
+                "codex_session_id": worker_info.get("codex_session_id"),
+                "codex_session_path": worker_info.get("codex_session_path"),
+                "pid": worker_info.get("pid"),
+                "tmux_session": worker_info.get("tmux_session"),
+            },
         )
 
         # 3. Manager spawn
@@ -3425,6 +3566,17 @@ def command_pair(args: argparse.Namespace) -> int:
             ask_for_approval=ask_for_approval,
             timeout_seconds=args.timeout_seconds,
         )
+        record_pair_telemetry(
+            "pair_manager_spawned",
+            f"Spawned manager session {args.manager_name}.",
+            extra_correlation={"manager_session_id": manager_info.get("session_id")},
+            attributes={
+                "codex_session_id": manager_info.get("codex_session_id"),
+                "codex_session_path": manager_info.get("codex_session_path"),
+                "pid": manager_info.get("pid"),
+                "tmux_session": manager_info.get("tmux_session"),
+            },
+        )
 
         # 4. Bind
         conn = worker_db.connect(db_path)
@@ -3444,6 +3596,63 @@ def command_pair(args: argparse.Namespace) -> int:
                     "worker": args.worker_name, "manager": args.manager_name,
                 },
             )
+            worker_db.emit_telemetry_event(
+                conn,
+                actor="workerctl",
+                event_type="pair_binding_created",
+                summary=f"Bound worker {args.worker_name} and manager {args.manager_name}.",
+                task_id=task_id,
+                correlation={
+                    "binding_id": binding_id,
+                    "manager": args.manager_name,
+                    "source": "pair",
+                    "task": args.task,
+                    "worker": args.worker_name,
+                },
+                attributes={
+                    "manager_session_id": manager_info.get("session_id"),
+                    "worker_session_id": worker_info.get("session_id"),
+                },
+            )
+            run_id = worker_db.create_run(
+                conn,
+                task_id=task_id,
+                purpose=args.task_goal if task_created else task_row["goal"],
+                metadata={
+                    "binding_id": binding_id,
+                    "manager": args.manager_name,
+                    "manager_config_seeded": manager_config_seeded,
+                    "manager_config_seeded_by_pair": manager_config_seeded_by_pair,
+                    "source": "pair",
+                    "worker": args.worker_name,
+                },
+            )
+            worker_db.insert_event(
+                conn,
+                "run_created",
+                actor="workerctl",
+                task_id=task_id,
+                payload={"run_id": run_id, "source": "pair"},
+            )
+            worker_db.emit_telemetry_event(
+                conn,
+                actor="workerctl",
+                event_type="pair_run_created",
+                summary=f"Created active telemetry run for pair task {args.task}.",
+                run_id=run_id,
+                task_id=task_id,
+                correlation={
+                    "binding_id": binding_id,
+                    "manager": args.manager_name,
+                    "source": "pair",
+                    "task": args.task,
+                    "worker": args.worker_name,
+                },
+                attributes={
+                    "manager_config_seeded": manager_config_seeded,
+                    "manager_config_seeded_by_pair": manager_config_seeded_by_pair,
+                },
+            )
             conn.commit()
         finally:
             conn.close()
@@ -3453,12 +3662,29 @@ def command_pair(args: argparse.Namespace) -> int:
             "worker": worker_info,
             "manager": manager_info,
             "binding_id": binding_id,
+            "run_id": run_id,
             "manager_config_seeded": manager_config_seeded,
             "manager_config_seeded_by_pair": manager_config_seeded_by_pair,
         }
         print(json.dumps(result, indent=2, sort_keys=True))
         return 0
-    except Exception:
+    except Exception as exc:
+        try:
+            record_pair_telemetry(
+                "pair_failed",
+                f"Pair setup failed for task {args.task}.",
+                severity="error",
+                attributes={
+                    "binding_created": binding_id is not None,
+                    "error": str(exc),
+                    "error_type": type(exc).__name__,
+                    "manager_spawned": manager_info is not None,
+                    "run_created": run_id is not None,
+                    "worker_spawned": worker_info is not None,
+                },
+            )
+        except Exception:
+            pass
         # If binding or manager spawn fails, worker is left registered.
         # User can clean up with `workerctl deregister`.
         raise
