@@ -28,6 +28,9 @@ Run this after unit tests and `scripts/live-smoke-repeat 3` pass.
 - [ ] `scripts/workerctl transcript-show <task> --json` returns captured transcript records.
 - [ ] `scripts/workerctl replay <task> --json` includes cycle, criteria, and finish evidence.
 - [ ] `scripts/workerctl replay <task> --json --format full-transcript` includes transcript segment evidence.
+- [ ] `scripts/workerctl telemetry --summary --run <run_id>` reports local telemetry counts for the run.
+- [ ] `scripts/workerctl telemetry --run <run_id>` prints the telemetry timeline.
+- [ ] `scripts/workerctl telemetry --search manager --run <run_id>` finds manager-linked telemetry events.
 - [ ] `scripts/workerctl export-task <task> --zip --include-transcripts` writes a manifest and zip.
 - [ ] `scripts/workerctl sessions --state active` has no disposable QA sessions after cleanup.
 - [ ] `scripts/workerctl reconcile --stale-cycles-seconds 1` reports no dangling bindings, dead PID sessions, or stuck tasks.
