@@ -68,6 +68,7 @@ from workerctl.commands import (
     command_stop,
     command_tail,
     command_tasks,
+    command_telemetry,
     command_transcript_capture,
     command_transcript_prune,
     command_transcript_show,
@@ -340,6 +341,22 @@ def build_parser() -> argparse.ArgumentParser:
     runs.add_argument("--metadata-json", help="Optional JSON object stored with a created run.")
     runs.add_argument("--path", help="Override the workerctl database path.")
     runs.set_defaults(func=command_runs)
+
+    telemetry = subparsers.add_parser(
+        "telemetry",
+        help="Query local structured telemetry events by run, task, search, or summary.",
+    )
+    telemetry.add_argument("--run", help="Filter by run name or ID.")
+    telemetry.add_argument("--task", help="Filter by task name or ID.")
+    telemetry.add_argument("--actor", choices=("manager", "worker", "workerctl"), help="Filter by telemetry actor.")
+    telemetry.add_argument("--event-type", help="Filter by telemetry event type.")
+    telemetry.add_argument("--severity", choices=("debug", "info", "warning", "error"), help="Filter by severity.")
+    telemetry.add_argument("--search", help="Full-text search over event type, summary, and attributes.")
+    telemetry.add_argument("--summary", action="store_true", help="Print aggregate telemetry counts.")
+    telemetry.add_argument("--json", action="store_true", help="Print JSON instead of text timeline output.")
+    telemetry.add_argument("--limit", type=int, default=100, help="Maximum telemetry events to inspect.")
+    telemetry.add_argument("--path", help="Override the workerctl database path.")
+    telemetry.set_defaults(func=command_telemetry)
 
     manager_config = subparsers.add_parser(
         "manager-config",
