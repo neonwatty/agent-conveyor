@@ -68,7 +68,7 @@ visual_board:
     url: "http://goalbuddy.localhost:41740/local-telemetry-platform/"
     command: "node /Users/neonwatty/.codex/plugins/cache/goalbuddy/goalbuddy/0.3.7/skills/goalbuddy/surfaces/local-goal-board/scripts/local-goal-board.mjs --goal /Users/neonwatty/goalbuddy-boards/local-telemetry-platform --host goalbuddy.localhost --port 41740"
 
-active_task: T011
+active_task: T999
 
 tasks:
   - id: T001
@@ -370,7 +370,7 @@ tasks:
   - id: T011
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Audit the complete telemetry package against the oracle and identify any required final fixes before completion."
     inputs:
@@ -383,12 +383,28 @@ tasks:
       - "complete | not_complete"
       - "full_outcome_complete: true | false"
       - "Oracle evidence map."
-    receipt: null
+    receipt:
+      result: complete
+      full_outcome_complete: true
+      summary: "Audited T001-T010 against the oracle. No follow-up Worker fixes are required before final release-readiness audit."
+      evidence:
+        - "docs/live-qa-artifacts/2026-05-20-local-telemetry-drill/export/telemetry-summary.json"
+        - "docs/live-qa-artifacts/2026-05-20-local-telemetry-drill/export/telemetry-report.md"
+        - "docs/live-qa-artifacts/2026-05-20-local-telemetry-drill/summary.md"
+        - "docs/goals/local-telemetry-platform/notes/T011-judge-receipt.md"
+      verification:
+        - "/opt/homebrew/bin/python3.13 -m unittest discover -s tests -v"
+        - "scripts/workerctl telemetry --summary --run run-1b863f70-d6ff-4463-982d-40d4be24efe9"
+        - "scripts/workerctl telemetry --run run-1b863f70-d6ff-4463-982d-40d4be24efe9"
+        - "scripts/workerctl telemetry --search manager --run run-1b863f70-d6ff-4463-982d-40d4be24efe9"
+        - "scripts/workerctl sessions --state active"
+        - "scripts/workerctl reconcile --stale-cycles-seconds 1"
+        - "git diff --check"
 
   - id: T999
     type: judge
     assignee: Judge
-    status: queued
+    status: active
     reasoning_hint: high
     objective: "Final release-readiness audit after any T011 fixes."
     inputs:
@@ -408,8 +424,9 @@ checks:
   dirty_fingerprint: unknown
   last_verification:
     result: pass
-    task: T010
+    task: T011
     commands:
+      - "/opt/homebrew/bin/python3.13 -m unittest discover -s tests -v"
       - "scripts/workerctl telemetry --summary --run run-1b863f70-d6ff-4463-982d-40d4be24efe9"
       - "scripts/workerctl telemetry --run run-1b863f70-d6ff-4463-982d-40d4be24efe9"
       - "scripts/workerctl telemetry --search manager --run run-1b863f70-d6ff-4463-982d-40d4be24efe9"
