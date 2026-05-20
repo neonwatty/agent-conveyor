@@ -43,6 +43,8 @@ from workerctl.db import set_worker_pane_id
 from workerctl.db import task_audit
 from workerctl.db import task_row as db_task_row
 from workerctl.db import task_status_snapshot
+from workerctl.db import query_telemetry_events
+from workerctl.db import telemetry_summary
 from workerctl import identity
 from workerctl.state import (
     append_event,
@@ -1427,6 +1429,50 @@ def command_runs(args: argparse.Namespace) -> int:
             task_id = db_task_row(conn, task=args.task)["id"]
         runs = list_db_runs(conn, task_id=task_id, status=args.status)
     print(json.dumps(runs, indent=2, sort_keys=True))
+    return 0
+
+
+def command_telemetry(args: argparse.Namespace) -> int:
+    db_path = Path(args.path).expanduser().resolve() if args.path else None
+    with connect_db(db_path) as conn:
+        initialize_database(conn)
+        run_id = None
+        task_id = None
+        if args.run:
+            run_id = db_run_row(conn, run=args.run)["id"]
+        if args.task:
+            task_id = db_task_row(conn, task=args.task)["id"]
+        events = query_telemetry_events(
+            conn,
+            run_id=run_id,
+            task_id=task_id,
+            actor=args.actor,
+            event_type=args.event_type,
+            severity=args.severity,
+            search=args.search,
+            limit=args.limit,
+        )
+    if args.summary:
+        result = telemetry_summary(events)
+        if args.json:
+            print(json.dumps(result, indent=2, sort_keys=True))
+        else:
+            print(f"total: {result['total']}")
+            print(f"first_timestamp: {result['first_timestamp']}")
+            print(f"last_timestamp: {result['last_timestamp']}")
+            for label in ("by_actor", "by_event_type", "by_severity"):
+                print(f"{label}:")
+                for key, value in sorted(result[label].items()):
+                    print(f"  {key}: {value}")
+        return 0
+    if args.json:
+        print(json.dumps(events, indent=2, sort_keys=True))
+        return 0
+    for event in events:
+        print(
+            f"{event['timestamp']} {event['actor']} {event['event_type']} "
+            f"[{event['severity']}] {event['summary']}"
+        )
     return 0
 
 

@@ -2530,6 +2530,88 @@ def telemetry_events(
     return [_telemetry_event_from_row(row) for row in rows]
 
 
+def query_telemetry_events(
+    conn: sqlite3.Connection,
+    *,
+    run_id: str | None = None,
+    task_id: str | None = None,
+    actor: str | None = None,
+    event_type: str | None = None,
+    severity: str | None = None,
+    search: str | None = None,
+    limit: int = 100,
+) -> list[dict[str, Any]]:
+    clauses: list[str] = []
+    params: list[Any] = []
+    from_sql = "telemetry_events te"
+    if search:
+        from_sql = "telemetry_events te join telemetry_events_fts fts on fts.event_id = te.id"
+        clauses.append("telemetry_events_fts match ?")
+        params.append(search)
+    if run_id is not None:
+        clauses.append("te.run_id = ?")
+        params.append(run_id)
+    if task_id is not None:
+        clauses.append("te.task_id = ?")
+        params.append(task_id)
+    if actor is not None:
+        _validate_telemetry_actor(actor)
+        clauses.append("te.actor = ?")
+        params.append(actor)
+    if event_type is not None:
+        clauses.append("te.event_type = ?")
+        params.append(event_type)
+    if severity is not None:
+        _validate_telemetry_severity(severity)
+        clauses.append("te.severity = ?")
+        params.append(severity)
+    where = f"where {' and '.join(clauses)}" if clauses else ""
+    params.append(limit)
+    rows = conn.execute(
+        f"""
+        select te.id, te.run_id, te.task_id, te.timestamp, te.actor,
+               te.event_type, te.severity, te.summary,
+               te.correlation_json, te.attributes_json
+        from {from_sql}
+        {where}
+        order by te.timestamp, te.rowid
+        limit ?
+        """,
+        params,
+    ).fetchall()
+    return [_telemetry_event_from_row(row) for row in rows]
+
+
+def telemetry_summary(events: list[dict[str, Any]]) -> dict[str, Any]:
+    summary: dict[str, Any] = {
+        "by_actor": {},
+        "by_event_type": {},
+        "by_severity": {},
+        "first_timestamp": None,
+        "last_timestamp": None,
+        "run_id": None,
+        "task_id": None,
+        "total": len(events),
+    }
+    if events:
+        summary["first_timestamp"] = events[0]["timestamp"]
+        summary["last_timestamp"] = events[-1]["timestamp"]
+        run_ids = {event["run_id"] for event in events if event["run_id"] is not None}
+        task_ids = {event["task_id"] for event in events if event["task_id"] is not None}
+        summary["run_id"] = next(iter(run_ids)) if len(run_ids) == 1 else None
+        summary["task_id"] = next(iter(task_ids)) if len(task_ids) == 1 else None
+    for event in events:
+        for key, field in (
+            ("by_actor", "actor"),
+            ("by_event_type", "event_type"),
+            ("by_severity", "severity"),
+        ):
+            value = event[field]
+            bucket = summary[key]
+            bucket[value] = bucket.get(value, 0) + 1
+    return summary
+
+
 def create_manager(
     conn: sqlite3.Connection,
     *,

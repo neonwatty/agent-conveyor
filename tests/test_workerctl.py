@@ -1115,6 +1115,130 @@ class CliTests(unittest.TestCase):
             self.assertEqual(finished.returncode, 0, finished.stderr)
             self.assertEqual(json.loads(finished.stdout)["status"], "failed")
 
+    def test_telemetry_cli_outputs_run_events_and_search_results(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                task_id = worker_db.create_task(conn, name="telemetry-cli-task", goal="Inspect telemetry.")
+                run_id = worker_db.create_run(conn, task_id=task_id, name="telemetry-cli-run")
+                first_event = worker_db.emit_telemetry_event(
+                    conn,
+                    actor="manager",
+                    event_type="manager_cycle_succeeded",
+                    run_id=run_id,
+                    summary="Manager observed idle worker.",
+                    correlation={"cycle_id": 1},
+                    attributes={"state": "idle"},
+                    timestamp="2026-05-20T10:00:00Z",
+                )
+                worker_db.emit_telemetry_event(
+                    conn,
+                    actor="workerctl",
+                    event_type="command_succeeded",
+                    run_id=run_id,
+                    summary="Nudge command succeeded.",
+                    correlation={"command_id": "cmd-1"},
+                    attributes={"command_type": "session_nudge"},
+                    timestamp="2026-05-20T10:01:00Z",
+                )
+
+            timeline = self.run_workerctl(
+                "telemetry",
+                "--run",
+                "telemetry-cli-run",
+                "--json",
+                "--path",
+                str(db_path),
+            )
+            self.assertEqual(timeline.returncode, 0, timeline.stderr)
+            events = json.loads(timeline.stdout)
+            self.assertEqual([event["event_type"] for event in events], ["manager_cycle_succeeded", "command_succeeded"])
+            self.assertEqual(events[0]["id"], first_event)
+            self.assertEqual(events[0]["correlation"], {"cycle_id": 1})
+            self.assertEqual(events[0]["attributes"], {"state": "idle"})
+
+            search = self.run_workerctl(
+                "telemetry",
+                "--run",
+                run_id,
+                "--search",
+                "idle",
+                "--json",
+                "--path",
+                str(db_path),
+            )
+            self.assertEqual(search.returncode, 0, search.stderr)
+            search_events = json.loads(search.stdout)
+            self.assertEqual([event["event_type"] for event in search_events], ["manager_cycle_succeeded"])
+
+    def test_telemetry_cli_summary_counts_events(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                task_id = worker_db.create_task(conn, name="telemetry-summary-task", goal="Summarize telemetry.")
+                run_id = worker_db.create_run(conn, task_id=task_id, name="telemetry-summary-run")
+                worker_db.emit_telemetry_event(
+                    conn,
+                    actor="manager",
+                    event_type="manager_cycle_started",
+                    run_id=run_id,
+                    summary="Manager cycle started.",
+                    timestamp="2026-05-20T11:00:00Z",
+                )
+                worker_db.emit_telemetry_event(
+                    conn,
+                    actor="workerctl",
+                    event_type="command_failed",
+                    severity="error",
+                    run_id=run_id,
+                    summary="Command failed.",
+                    attributes={"reason": "tmux denied"},
+                    timestamp="2026-05-20T11:01:00Z",
+                )
+
+            proc = self.run_workerctl(
+                "telemetry",
+                "--summary",
+                "--run",
+                "telemetry-summary-run",
+                "--json",
+                "--path",
+                str(db_path),
+            )
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            summary = json.loads(proc.stdout)
+            self.assertEqual(summary["total"], 2)
+            self.assertEqual(summary["run_id"], run_id)
+            self.assertEqual(summary["task_id"], task_id)
+            self.assertEqual(summary["by_actor"], {"manager": 1, "workerctl": 1})
+            self.assertEqual(summary["by_severity"], {"error": 1, "info": 1})
+            self.assertEqual(summary["by_event_type"]["command_failed"], 1)
+
+    def test_telemetry_cli_text_timeline_is_legible(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                task_id = worker_db.create_task(conn, name="telemetry-text-task", goal="Read telemetry.")
+                run_id = worker_db.create_run(conn, task_id=task_id, name="telemetry-text-run")
+                worker_db.emit_telemetry_event(
+                    conn,
+                    actor="worker",
+                    event_type="worker_handoff_recorded",
+                    run_id=run_id,
+                    summary="Worker handed off implementation notes.",
+                    timestamp="2026-05-20T12:00:00Z",
+                )
+
+            proc = self.run_workerctl("telemetry", "--run", run_id, "--path", str(db_path))
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("2026-05-20T12:00:00Z worker worker_handoff_recorded", proc.stdout)
+            self.assertIn("Worker handed off implementation notes.", proc.stdout)
+
     def test_list_json_reports_tmux_permission_error_without_failing(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             state_dir = Path(tmpdir) / "state"
