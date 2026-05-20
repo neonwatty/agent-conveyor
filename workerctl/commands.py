@@ -65,6 +65,7 @@ from workerctl.state import (
     write_worker_contract,
 )
 from workerctl.lifecycle import manager_liveness_warnings, reconcile_rows
+from workerctl.output_safety import redact_audit, redact_capture_result, redact_payload, redact_transcript_segments
 from workerctl.tmux import (
     capture_output,
     capture_tmux_target,
@@ -825,8 +826,21 @@ def command_list(args: argparse.Namespace) -> int:
 def command_capture(args: argparse.Namespace) -> int:
     config = _worker_config_or_session(args.name)
     output = _capture_output_for_config(args.name, config, args.lines)
-    if output:
-        print(output)
+    if getattr(args, "include_content", False):
+        if output:
+            print(output)
+        return 0
+    capture_meta = load_json(capture_meta_path(args.name), {})
+    summary = {
+        "byte_count": len(output.encode()),
+        "content_redacted": True,
+        "history_lines": args.lines,
+        "line_count": len(output.splitlines()),
+        "name": args.name,
+        "sha256": capture_meta.get("sha256"),
+        "transcript_path": str(transcript_path(args.name)),
+    }
+    print(json.dumps(summary, indent=2, sort_keys=True))
     return 0
 
 
@@ -2829,6 +2843,8 @@ def command_transcript_capture(args: argparse.Namespace) -> int:
             )
     result = {"captures": captures, "mode": args.mode, "role": args.role, "task": args.task}
     if args.json:
+        if not getattr(args, "include_content", False):
+            result = redact_capture_result(result)
         print(json.dumps(result, indent=2, sort_keys=True))
     else:
         for capture in captures:
@@ -2845,14 +2861,18 @@ def command_transcript_show(args: argparse.Namespace) -> int:
     db_path = Path(args.path).expanduser().resolve() if args.path else None
     result = task_transcript_segments(db_path, task=args.task, role=args.role, limit=args.limit)
     if args.json:
+        if not getattr(args, "include_content", False):
+            result = redact_transcript_segments(result)
         print(json.dumps(result, indent=2, sort_keys=True))
         return 0
     for segment in result["segments"]:
         timestamp = segment["captured_at"].split("T", 1)[-1].replace("Z", "")
         print(f"--- {segment['role']} transcript segment {segment['id']} {timestamp} ({segment['segment_kind']}) ---")
         text = segment.get("segment_text")
-        if text:
+        if text and getattr(args, "include_content", False):
             print(text)
+        elif text:
+            print(f"[content redacted: {len(text.splitlines())} lines, {len(text.encode())} bytes]")
         else:
             print("[metadata only]")
     return 0
@@ -2907,6 +2927,8 @@ def command_audit(args: argparse.Namespace) -> int:
         initialize_database(conn)
         audit = task_audit(conn, task=args.task)
     if args.json:
+        if not getattr(args, "include_content", False):
+            audit = redact_audit(audit)
         print(json.dumps(audit, indent=2, sort_keys=True))
         return 0
     print(f"{audit['task']['name']}\t{audit['task']['state']}\t{audit['task']['goal']}")
@@ -3933,7 +3955,11 @@ def command_tail(args: argparse.Namespace) -> int:
             "type": r["type"],
             "subtype": r["subtype"],
             "byte_offset": r["byte_offset"],
-            "payload": json.loads(r["payload_json"]),
+            "payload": (
+                json.loads(r["payload_json"])
+                if getattr(args, "include_content", False)
+                else redact_payload(json.loads(r["payload_json"]))
+            ),
         }
         for r in rows
     ]

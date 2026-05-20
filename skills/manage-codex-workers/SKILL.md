@@ -302,12 +302,15 @@ scripts/workerctl divergences my-task --limit 20
 scripts/workerctl audit my-task
 scripts/workerctl replay my-task
 scripts/workerctl replay my-task --format transcript --limit 40
-scripts/workerctl replay my-task --format full-transcript --limit 40
+scripts/workerctl replay my-task --format full-transcript --include-content --limit 40 > /tmp/my-task-full-transcript.txt
 ```
 
 - `tail` prints recent ingested rollout events for a session.
 - `divergences` lists cycles where the shadow pane signal flagged a notable
   pattern (trust prompt, rate-limit prompt, approval prompt, ...).
+- Raw transcript/log content should not be printed inside an active Codex
+  terminal. Prefer compact/timeline/transcript summaries; redirect any command
+  using `--include-content` to a file.
 - `audit` lists `events` rows for the task; cycle observations show up via
   `replay` and the `manager_cycles` table.
 - `replay` reconstructs the task chronologically. Use `--format compact` for

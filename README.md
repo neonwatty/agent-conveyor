@@ -327,8 +327,10 @@ tmux attach -t codex-live-test
 - `ingest <session>` — Pull new events from a session's rollout JSONL into
   the `codex_events` table. Tracks a byte offset, so subsequent runs only
   pick up new events.
-- `tail <session> [--limit N] [--subtype T]` — Print the most recent events
-  for a session, newest first. Filter by `event_msg` subtype.
+- `tail <session> [--limit N] [--subtype T] [--include-content]` — Print the
+  most recent events for a session, newest first. Text payload fields are
+  redacted by default; use `--include-content` only when stdout is redirected
+  or verbatim text is intentionally needed.
 - `divergences <task> [--limit N]` — Cycles whose shadow pane signal flagged
   a notable pattern (trust prompt, rate-limit prompt, approval prompt, etc.).
   Useful for auditing the shadow signal against the JSON state.
@@ -346,10 +348,13 @@ tmux attach -t codex-live-test
 ### Audit
 
 - `audit <task>` — Events history for a task. Lists `events`-table rows only.
+  `audit --json` redacts stored terminal/transcript content unless
+  `--include-content` is passed.
 - `replay <task> [--format compact|timeline|transcript|full-transcript]
-  [--role all|worker|manager] [--limit N]` — Render a chronological,
-  human-readable reconstruction of the task. Cycle entries include
-  `[pane pattern: <pattern_id>]` when the shadow signal flagged something.
+  [--role all|worker|manager] [--limit N] [--include-content]` — Render a
+  chronological, human-readable reconstruction of the task. Cycle entries
+  include `[pane pattern: <pattern_id>]` when the shadow signal flagged
+  something. `full-transcript` is blocked unless `--include-content` is passed.
 - `mutation-audit <task>` — Manager decisions and their consequences.
 - `events <name>` — Worker events log.
 - `commands [--task T] [--type T] [--state S]` — Durable side-effect commands
@@ -376,8 +381,11 @@ tmux attach -t codex-live-test
   preserving metadata.
 - `transcript-prune <task> [--keep-latest N]` — Same, scoped to a task.
 - `transcript-capture <task> [--role R] [--mode M]` — Capture deduplicated
-  transcript segments.
-- `transcript-show <task> [--role R]` — Show stored transcript segments.
+  transcript segments. JSON output redacts raw captured terminal output by
+  default.
+- `transcript-show <task> [--role R] [--include-content]` — Show stored
+  transcript segment metadata. Segment text is redacted unless
+  `--include-content` is passed.
 - `qa-plan <self-management|emergent-criteria|tmux-errors>` — Print a
   repeatable manual QA checklist.
 - `import-compat` — Dry-run or import existing `.codex-workers/<worker>/`
@@ -430,7 +438,9 @@ debugging.
 - `list` — List known workers.
 - `status <name>` — Print worker status as JSON.
 - `idle-check <name>` — Classify worker freshness and recommend an action.
-- `capture <name>` — Capture recent terminal output.
+- `capture <name> [--include-content]` — Capture recent terminal output.
+  Default output is metadata only; pass `--include-content` only when verbatim
+  pane text is intentionally needed.
 - `nudge <name> "<text>"` — Legacy worker-directory nudge. For managed
   session pairs, prefer `session-nudge <name> "<text>"`; `nudge` falls back to
   session-name delivery when no legacy worker directory exists.
