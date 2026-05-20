@@ -1285,7 +1285,23 @@ def insert_transcript_capture(
             "hot",
         ),
     )
-    return int(cursor.lastrowid)
+    capture_id = int(cursor.lastrowid)
+    emit_telemetry_event(
+        conn,
+        actor="workerctl",
+        event_type="transcript_capture_recorded",
+        summary="Recorded transcript capture metadata.",
+        correlation={"capture_id": capture_id, "worker_id": worker_id},
+        attributes={
+            "byte_count": len(content.encode()),
+            "changed": changed,
+            "history_lines": history_lines,
+            "line_count": len(content.splitlines()),
+            "retention_class": "hot",
+        },
+        timestamp=captured_at,
+    )
+    return capture_id
 
 
 def insert_terminal_capture(
@@ -1334,7 +1350,33 @@ def insert_terminal_capture(
             source,
         ),
     )
-    return int(cursor.lastrowid)
+    capture_id = int(cursor.lastrowid)
+    emit_telemetry_event(
+        conn,
+        actor="workerctl",
+        event_type="terminal_capture_recorded",
+        task_id=task_id,
+        summary=f"Recorded {role} terminal capture.",
+        correlation={
+            "capture_id": capture_id,
+            "command_id": command_id,
+            "manager_id": manager_id,
+            "role": role,
+            "source": source,
+            "worker_id": worker_id,
+        },
+        attributes={
+            "byte_count": len(content.encode()),
+            "classifier": classifier or {},
+            "content_path": content_path,
+            "history_lines": history_lines,
+            "line_count": len(content.splitlines()),
+            "tmux_pane_id": tmux_pane_id,
+            "tmux_session": tmux_session,
+        },
+        timestamp=timestamp,
+    )
+    return capture_id
 
 
 def latest_terminal_capture_for_role(
@@ -1404,7 +1446,30 @@ def insert_transcript_segment(
             row_timestamp,
         ),
     )
-    return int(cursor.lastrowid)
+    segment_id = int(cursor.lastrowid)
+    emit_telemetry_event(
+        conn,
+        actor="workerctl",
+        event_type="transcript_segment_recorded",
+        task_id=task_id,
+        summary=f"Recorded {role} transcript segment.",
+        correlation={
+            "previous_capture_id": previous_capture_id,
+            "role": role,
+            "segment_id": segment_id,
+            "source_capture_id": source_capture_id,
+        },
+        attributes={
+            "byte_count": len((segment_text or "").encode()),
+            "line_count": len((segment_text or "").splitlines()),
+            "retention_class": retention_class,
+            "segment_end_line": segment_end_line,
+            "segment_kind": segment_kind,
+            "segment_start_line": segment_start_line,
+        },
+        timestamp=row_timestamp,
+    )
+    return segment_id
 
 
 def insert_agent_observation(
@@ -1738,7 +1803,23 @@ def insert_acceptance_criterion(
             now,
         ),
     )
-    return int(cursor.lastrowid)
+    criterion_id = int(cursor.lastrowid)
+    emit_telemetry_event(
+        conn,
+        actor="workerctl",
+        event_type="acceptance_criterion_added",
+        task_id=task_id,
+        summary="Added acceptance criterion.",
+        correlation={"criterion_id": criterion_id, "source": source},
+        attributes={
+            "criterion": criterion,
+            "has_evidence": bool(evidence),
+            "has_proof": proof is not None,
+            "status": status,
+        },
+        timestamp=now,
+    )
+    return criterion_id
 
 
 def acceptance_criteria_for_task(
@@ -1824,7 +1905,23 @@ def update_acceptance_criterion(
         """,
         (criterion_id,),
     ).fetchone()
-    return _acceptance_criterion_from_row(row)
+    updated = _acceptance_criterion_from_row(row)
+    emit_telemetry_event(
+        conn,
+        actor="workerctl",
+        event_type="acceptance_criterion_updated",
+        task_id=updated["task_id"],
+        summary="Updated acceptance criterion.",
+        correlation={"criterion_id": criterion_id, "source": updated["source"]},
+        attributes={
+            "criterion": updated["criterion"],
+            "has_evidence": bool(updated["evidence"]),
+            "has_proof": updated["proof"] is not None,
+            "previous_status": existing["status"],
+            "status": updated["status"],
+        },
+    )
+    return updated
 
 
 def worker_row(conn: sqlite3.Connection, *, worker: str) -> sqlite3.Row:
@@ -2042,7 +2139,22 @@ def insert_worker_handoff(
             timestamp or now_iso(),
         ),
     )
-    return int(cursor.lastrowid)
+    handoff_id = int(cursor.lastrowid)
+    emit_telemetry_event(
+        conn,
+        actor="worker",
+        event_type="worker_handoff_recorded",
+        task_id=task_id,
+        summary="Recorded worker handoff.",
+        correlation={"handoff_id": handoff_id, "worker_session_id": worker_session_id},
+        attributes={
+            "next_step_count": len(next_steps or []),
+            "payload_keys": sorted((payload or {}).keys()),
+            "summary_length": len(summary),
+        },
+        timestamp=timestamp,
+    )
+    return handoff_id
 
 
 def latest_worker_handoff(conn: sqlite3.Connection, *, task_id: str) -> dict[str, Any] | None:
@@ -2278,6 +2390,17 @@ def finish_run(
         where id = ?
         """,
         (status, now, current["id"]),
+    )
+    emit_telemetry_event(
+        conn,
+        actor="workerctl",
+        event_type="run_finished",
+        severity="error" if status == "failed" else "info",
+        run_id=current["id"],
+        summary=f"Run {current['name']} marked {status}.",
+        correlation={"run_id": current["id"], "run_name": current["name"]},
+        attributes={"status": status},
+        timestamp=now,
     )
     return run_row(conn, run=current["id"])
 

@@ -216,6 +216,22 @@ def ingest_session(
     if new_offset != start_offset:
         worker_db.set_session_ingest_offset(conn, session_id=session_id, offset=new_offset)
     worker_db.bump_session_heartbeat(conn, session_id=session_id, timestamp=timestamp)
+    task_id = _active_task_id_for_session(conn, session_id=session_id)
+    worker_db.emit_telemetry_event(
+        conn,
+        actor="workerctl",
+        event_type="codex_events_ingested",
+        task_id=task_id,
+        summary=f"Ingested Codex events for session {session_name}.",
+        correlation={"session": session_name, "session_id": session_id},
+        attributes={
+            "new_events": new_events,
+            "new_offset": new_offset,
+            "skipped_lines": skipped_lines,
+            "start_offset": start_offset,
+        },
+        timestamp=timestamp,
+    )
     conn.commit()
 
     return {
@@ -223,6 +239,21 @@ def ingest_session(
         "new_offset": new_offset,
         "skipped_lines": skipped_lines,
     }
+
+
+def _active_task_id_for_session(conn: sqlite3.Connection, *, session_id: str) -> str | None:
+    row = conn.execute(
+        """
+        select task_id
+        from bindings
+        where state in ('active', 'ending')
+          and (worker_session_id = ? or manager_session_id = ?)
+        order by id desc
+        limit 1
+        """,
+        (session_id, session_id),
+    ).fetchone()
+    return row["task_id"] if row is not None else None
 
 
 def last_state_event_timestamp(conn: sqlite3.Connection, *, session_id: str) -> str | None:

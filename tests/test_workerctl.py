@@ -2250,11 +2250,25 @@ Deferred follow-up criteria:
 
                 with worker_db.connect(db_path) as conn:
                     segments = conn.execute("select segment_kind, segment_text from transcript_segments order by id").fetchall()
+                    task_id = worker_db.task_row(conn, task="task-a")["id"]
+                    telemetry = worker_db.telemetry_events(conn, task_id=task_id)
                 self.assertEqual(len(segments), 2)
                 self.assertEqual(segments[0]["segment_kind"], "reset")
                 self.assertEqual(segments[0]["segment_text"], "line one\nline two")
                 self.assertEqual(segments[1]["segment_kind"], "segment")
                 self.assertEqual(segments[1]["segment_text"], "line three")
+                terminal_events = [
+                    event for event in telemetry
+                    if event["event_type"] == "terminal_capture_recorded"
+                ]
+                segment_events = [
+                    event for event in telemetry
+                    if event["event_type"] == "transcript_segment_recorded"
+                ]
+                self.assertEqual(len(terminal_events), 3)
+                self.assertEqual(len(segment_events), 2)
+                self.assertEqual(segment_events[-1]["attributes"]["line_count"], 1)
+                self.assertEqual(segment_events[-1]["attributes"]["segment_kind"], "segment")
 
                 show_args = argparse.Namespace(json=False, limit=None, path=str(db_path), role="worker", task="task-a")
                 with contextlib.redirect_stdout(io.StringIO()) as stdout:
@@ -2769,6 +2783,7 @@ Deferred follow-up criteria:
                     state="active",
                 )
                 task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
+                run_id = worker_db.create_run(conn, task_id=task_id, name="task-a-run")
                 worker_db.bind_task_worker(conn, task="task-a", worker="worker-a", binding_id="binding-1")
                 manager_id = worker_db.create_manager(
                     conn,
@@ -2825,6 +2840,8 @@ Deferred follow-up criteria:
                     command = conn.execute("select state from commands where type = 'finish_task'").fetchone()
                     decision = conn.execute("select decision, reason from manager_decisions").fetchone()
                     event = conn.execute("select type from events where type = 'finish_task_succeeded'").fetchone()
+                    run = worker_db.run_row(conn, run=run_id)
+                    telemetry = worker_db.telemetry_events(conn, task_id=task_id)
                 self.assertEqual(task["state"], "done")
                 self.assertEqual(binding["state"], "ended")
                 self.assertIsNotNone(binding["ended_at"])
@@ -2834,6 +2851,10 @@ Deferred follow-up criteria:
                 self.assertEqual(decision["decision"], "stop")
                 self.assertEqual(decision["reason"], "work is complete")
                 self.assertEqual(event["type"], "finish_task_succeeded")
+                self.assertEqual(run["status"], "finished")
+                telemetry_types = [event["event_type"] for event in telemetry]
+                self.assertIn("run_finished", telemetry_types)
+                self.assertIn("task_finished", telemetry_types)
                 self.assertEqual(run_calls, [])
             finally:
                 lifecycle.manager_session_exists = original_manager_session_exists
@@ -3881,6 +3902,14 @@ Deferred follow-up criteria:
                     self.assertEqual(captures[0]["line_count"], 2)
                     self.assertEqual(captures[1]["capture_kind"], "metadata_only")
                     self.assertIsNone(captures[1]["content"])
+                    telemetry = worker_db.telemetry_events(conn)
+                    capture_events = [
+                        event for event in telemetry
+                        if event["event_type"] == "transcript_capture_recorded"
+                    ]
+                    self.assertEqual(len(capture_events), 2)
+                    self.assertTrue(capture_events[0]["attributes"]["changed"])
+                    self.assertFalse(capture_events[1]["attributes"]["changed"])
             finally:
                 worker_tmux.connect_db = original_connect_db
                 worker_tmux.session_exists = original_session_exists
@@ -6343,6 +6372,14 @@ class IngestCliTests(unittest.TestCase):
                 "(select id from sessions where name='w')"
             ).fetchone()[0]
             self.assertEqual(count, 2)
+            telemetry = worker_db.telemetry_events(conn)
+            ingest_events = [
+                event for event in telemetry
+                if event["event_type"] == "codex_events_ingested"
+            ]
+            self.assertEqual(len(ingest_events), 1)
+            self.assertEqual(ingest_events[0]["correlation"]["session"], "w")
+            self.assertEqual(ingest_events[0]["attributes"]["new_events"], 2)
 
     def test_cli_tail_prints_events(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -6364,6 +6401,14 @@ class IngestCliTests(unittest.TestCase):
             self.assertEqual(len(event_msgs), 2)
             self.assertEqual(event_msgs[0]["subtype"], "task_complete")
             self.assertEqual(event_msgs[1]["subtype"], "task_started")
+            conn = worker_db.connect(state_dir / "workerctl.db")
+            self.addCleanup(conn.close)
+            tail_events = [
+                event for event in worker_db.telemetry_events(conn)
+                if event["event_type"] == "codex_events_tail_read"
+            ]
+            self.assertEqual(len(tail_events), 1)
+            self.assertEqual(tail_events[0]["attributes"]["returned_count"], len(events))
 
     def test_cli_tail_respects_limit(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -10307,6 +10352,18 @@ class AcceptanceCriteriaCliTests(unittest.TestCase):
             self.assertEqual(event_payload["rationale"], "The command needs CLI coverage.")
             self.assertEqual(event_payload["evidence"], {"phase": "red"})
             self.assertTrue(event_payload["created"])
+            conn = worker_db.connect(db_path)
+            try:
+                telemetry = worker_db.telemetry_events(conn, task_id=task_id)
+            finally:
+                conn.close()
+            added_events = [
+                event for event in telemetry
+                if event["event_type"] == "acceptance_criterion_added"
+            ]
+            self.assertEqual(len(added_events), 1)
+            self.assertEqual(added_events[0]["correlation"]["criterion_id"], added["criteria"][0]["id"])
+            self.assertEqual(added_events[0]["attributes"]["status"], "proposed")
 
     def test_duplicate_add_preserves_one_row_and_does_not_emit_second_added_event(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -10478,6 +10535,20 @@ class AcceptanceCriteriaCliTests(unittest.TestCase):
             self.assertEqual(by_status["deferred"]["rationale"], "Out of scope")
             self.assertEqual(by_status["deferred"]["evidence"], {})
             self.assertEqual(by_status["rejected"]["evidence"], {"reason": "duplicate"})
+            conn = worker_db.connect(db_path)
+            try:
+                telemetry = worker_db.telemetry_events(conn, task_id=task_id)
+                updated_events = [
+                    event for event in telemetry
+                    if event["event_type"] == "acceptance_criterion_updated"
+                ]
+            finally:
+                conn.close()
+            self.assertEqual(len(updated_events), 4)
+            self.assertEqual(
+                [event["attributes"]["status"] for event in updated_events],
+                ["accepted", "satisfied", "deferred", "rejected"],
+            )
 
     def test_invalid_status_source_and_evidence_json_fail(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -11238,6 +11309,19 @@ class PairCommandTests(unittest.TestCase):
             self.assertEqual(payload["summary"], "Worker finished discovery.")
             self.assertEqual(payload["next_steps"], ["Implement command"])
             self.assertEqual(payload["payload"], {"branch": "feature"})
+            conn = worker_db.connect(db_path)
+            try:
+                task = worker_db.task_row(conn, task="handoff-task")
+                telemetry = worker_db.telemetry_events(conn, task_id=task["id"])
+            finally:
+                conn.close()
+            handoff_events = [
+                event for event in telemetry
+                if event["event_type"] == "worker_handoff_recorded"
+            ]
+            self.assertEqual(len(handoff_events), 1)
+            self.assertEqual(handoff_events[0]["attributes"]["next_step_count"], 1)
+            self.assertEqual(handoff_events[0]["attributes"]["payload_keys"], ["branch"])
 
     def test_manager_config_command_records_policy(self):
         with tempfile.TemporaryDirectory() as tmpdir:

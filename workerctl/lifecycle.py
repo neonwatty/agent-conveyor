@@ -10,14 +10,17 @@ from workerctl.constants import DEFAULT_HISTORY_LINES, PROJECT_ROOT, RECOMMENDED
 from workerctl.core import WorkerError, age_seconds, now_iso, raise_for_tmux_permission_failure, run, sh_quote
 from workerctl.db import active_manager
 from workerctl.db import active_binding_for_task
+from workerctl.db import active_run_for_task
 from workerctl.db import assess_manager_decision
 from workerctl.db import acceptance_criteria_for_task
 from workerctl.db import connect as connect_db
 from workerctl.db import create_command as create_db_command
 from workerctl.db import end_active_binding
 from workerctl.db import finish_command as finish_db_command
+from workerctl.db import finish_run as finish_db_run
 from workerctl.db import insert_agent_observation
 from workerctl.db import insert_event as insert_db_event
+from workerctl.db import emit_telemetry_event
 from workerctl.db import insert_manager_decision
 from workerctl.db import initialize_database
 from workerctl.db import latest_session_binding_for_task
@@ -559,6 +562,15 @@ def _stop_or_finish_task(args: argparse.Namespace, *, finish: bool) -> int:
                 )
             end_active_binding(conn, task_id=snapshot["id"])
             set_task_state(conn, task_id=snapshot["id"], state="done")
+            active_run = active_run_for_task(conn, task_id=snapshot["id"])
+            finished_run = None
+            if active_run is not None:
+                finished_run = finish_db_run(
+                    conn,
+                    run=active_run["id"],
+                    status="finished" if finish else "abandoned",
+                    timestamp=stopped_at,
+                )
             finish_db_command(conn, command_id=command_id, state="succeeded", result=result)
             insert_db_event(
                 conn,
@@ -569,6 +581,27 @@ def _stop_or_finish_task(args: argparse.Namespace, *, finish: bool) -> int:
                 worker_id=worker["id"] if worker else None,
                 manager_id=manager["id"] if manager else None,
                 payload=result,
+            )
+            emit_telemetry_event(
+                conn,
+                actor="workerctl",
+                event_type="task_finished" if finish else "task_stopped",
+                task_id=snapshot["id"],
+                summary=f"{'Finished' if finish else 'Stopped'} task {snapshot['name']}.",
+                correlation={
+                    "command_id": command_id,
+                    "run_id": finished_run["id"] if finished_run else None,
+                },
+                attributes={
+                    "already_done_followup": already_done_followup,
+                    "killed_manager": result["killed_manager"],
+                    "killed_worker": result["killed_worker"],
+                    "reason": final_reason,
+                    "run_status": finished_run["status"] if finished_run else None,
+                    "stop_manager": stop_manager,
+                    "stop_worker": args.stop_worker,
+                },
+                timestamp=stopped_at,
             )
             conn.commit()
     except Exception as exc:

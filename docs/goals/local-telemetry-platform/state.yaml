@@ -68,7 +68,7 @@ visual_board:
     url: "http://goalbuddy.localhost:41740/local-telemetry-platform/"
     command: "node /Users/neonwatty/.codex/plugins/cache/goalbuddy/goalbuddy/0.3.7/skills/goalbuddy/surfaces/local-goal-board/scripts/local-goal-board.mjs --goal /Users/neonwatty/goalbuddy-boards/local-telemetry-platform --host goalbuddy.localhost --port 41740"
 
-active_task: T006
+active_task: T007
 
 tasks:
   - id: T001
@@ -177,7 +177,6 @@ tasks:
     allowed_files:
       - "workerctl/commands.py"
       - "workerctl/db.py"
-      - "workerctl/supervise_cycle.py"
       - "tests/test_workerctl.py"
     verify:
       - "python3 -m unittest tests.test_workerctl.PairCommandTests -v"
@@ -203,6 +202,7 @@ tasks:
     allowed_files:
       - "workerctl/commands.py"
       - "workerctl/db.py"
+      - "workerctl/supervise_cycle.py"
       - "tests/test_workerctl.py"
     verify:
       - "python3 -m unittest tests.test_workerctl.SuperviseCycleTests tests.test_workerctl.PairCommandTests tests.test_workerctl.SessionActionCliTests -v"
@@ -223,7 +223,7 @@ tasks:
   - id: T006
     type: worker
     assignee: Worker
-    status: active
+    status: done
     reasoning_hint: medium
     objective: "Instrument captures, transcript segments, ingest/tail, handoffs, criteria changes, task finish, and run finish."
     allowed_files:
@@ -234,12 +234,25 @@ tasks:
       - "tests/test_workerctl.py"
     verify:
       - "python3 -m unittest tests.test_workerctl.CliTests tests.test_workerctl.IngestCliTests tests.test_workerctl.AcceptanceCriteriaCliTests -v"
-    receipt: null
+    receipt:
+      result: done
+      summary: "Instrumented evidence and lifecycle telemetry for captures, transcript segments, Codex event ingest/tail reads, worker handoffs, acceptance criterion changes, task finish/stop, and run finish."
+      evidence:
+        - "workerctl/db.py"
+        - "workerctl/commands.py"
+        - "workerctl/ingest.py"
+        - "workerctl/lifecycle.py"
+        - "tests/test_workerctl.py"
+        - "docs/goals/local-telemetry-platform/notes/T006-worker-receipt.md"
+      verification:
+        - "/opt/homebrew/bin/python3.13 -m unittest tests.test_workerctl.CliTests tests.test_workerctl.IngestCliTests tests.test_workerctl.AcceptanceCriteriaCliTests -v"
+        - "/opt/homebrew/bin/python3.13 -m unittest discover -s tests -v"
+        - "git diff --check"
 
   - id: T007
     type: worker
     assignee: Worker
-    status: queued
+    status: active
     reasoning_hint: medium
     objective: "Add telemetry timeline, search, summary, and raw event query commands."
     allowed_files:
@@ -341,8 +354,8 @@ checks:
   dirty_fingerprint: unknown
   last_verification:
     result: pass
-    task: T005
+    task: T006
     commands:
-      - "/opt/homebrew/bin/python3.13 -m unittest tests.test_workerctl.SuperviseCycleTests tests.test_workerctl.PairCommandTests tests.test_workerctl.SessionActionCliTests -v"
-      - "/opt/homebrew/bin/python3.13 -m py_compile workerctl/db.py workerctl/commands.py workerctl/supervise_cycle.py"
+      - "/opt/homebrew/bin/python3.13 -m unittest tests.test_workerctl.CliTests tests.test_workerctl.IngestCliTests tests.test_workerctl.AcceptanceCriteriaCliTests -v"
       - "/opt/homebrew/bin/python3.13 -m unittest discover -s tests -v"
+      - "git diff --check"
