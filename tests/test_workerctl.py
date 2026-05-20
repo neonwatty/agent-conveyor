@@ -747,6 +747,13 @@ class DatabaseTests(unittest.TestCase):
             self.assertEqual(row["state"], "succeeded")
             self.assertEqual(json.loads(row["payload_json"]), {"message": "status"})
             self.assertEqual(json.loads(row["result_json"]), {"sent": True})
+            telemetry = worker_db.telemetry_events(conn)
+            self.assertEqual(
+                [event["event_type"] for event in telemetry],
+                ["command_created", "command_attempted", "command_succeeded"],
+            )
+            self.assertEqual(telemetry[0]["correlation"]["command_id"], command_id)
+            self.assertEqual(telemetry[-1]["attributes"]["result"], {"sent": True})
 
     def test_reserve_nudge_budget_enforces_limit(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -6812,6 +6819,16 @@ class SessionActionCliTests(unittest.TestCase):
             self.assertEqual(payload["text"], "hello there")
             self.assertEqual(payload["dry_run"], True)
             self.assertIn("codex-w", payload["target"])
+            conn = worker_db.connect(state_dir / "workerctl.db")
+            self.addCleanup(conn.close)
+            telemetry = worker_db.telemetry_events(conn)
+            nudge_events = [
+                event for event in telemetry
+                if event["event_type"] == "session_nudge_succeeded"
+            ]
+            self.assertEqual(len(nudge_events), 1)
+            self.assertEqual(nudge_events[0]["correlation"]["session"], "w")
+            self.assertEqual(nudge_events[0]["attributes"]["text_length"], len("hello there"))
 
     def test_legacy_nudge_falls_back_to_registered_session_name(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -6972,6 +6989,14 @@ class SessionActionCliTests(unittest.TestCase):
             payload = json.loads(row["payload_json"])
             self.assertEqual(payload["success"], False)
             self.assertIn("error", payload)
+            telemetry = worker_db.telemetry_events(conn)
+            failed = [
+                event for event in telemetry
+                if event["event_type"] == "session_nudge_failed"
+            ]
+            self.assertEqual(len(failed), 1)
+            self.assertEqual(failed[0]["severity"], "error")
+            self.assertIn("error", failed[0]["attributes"])
 
     def test_session_nudge_attaches_rollback_error_when_rollback_fails(self):
         """When the inner conn.rollback() also fails, the audit event must
@@ -7188,6 +7213,17 @@ class SuperviseCycleTests(unittest.TestCase):
             status = json.loads(row["status_json"])
             self.assertEqual(status["state"], "idle")
             self.assertEqual(status["worker_session"], "w")
+            telemetry = worker_db.telemetry_events(conn, task_id="task-1")
+            cycle_events = [
+                event for event in telemetry
+                if event["event_type"].startswith("manager_cycle_")
+            ]
+            self.assertEqual(
+                [event["event_type"] for event in cycle_events],
+                ["manager_cycle_started", "manager_cycle_succeeded"],
+            )
+            self.assertEqual(cycle_events[-1]["correlation"]["cycle_id"], result["cycle_id"])
+            self.assertEqual(cycle_events[-1]["attributes"]["state"], "idle")
 
     def test_run_cycle_unknown_task_raises(self):
         from workerctl import supervise_cycle
@@ -7273,6 +7309,17 @@ class SuperviseCycleTests(unittest.TestCase):
             status = json.loads(row["status_json"])
             self.assertEqual(status["kind"], "session_cycle")
             self.assertEqual(status["worker_session"], "w")
+            telemetry = worker_db.telemetry_events(conn, task_id="task-1")
+            cycle_events = [
+                event for event in telemetry
+                if event["event_type"].startswith("manager_cycle_")
+            ]
+            self.assertEqual(
+                [event["event_type"] for event in cycle_events],
+                ["manager_cycle_started", "manager_cycle_failed"],
+            )
+            self.assertEqual(cycle_events[-1]["severity"], "error")
+            self.assertEqual(cycle_events[-1]["attributes"]["error_type"], "IngestError")
 
     def test_run_cycle_succeeded_row_has_kind_discriminator(self):
         from workerctl import supervise_cycle
@@ -11686,6 +11733,14 @@ class PairCommandTests(unittest.TestCase):
                 events = [row for row in audit["events"] if row["type"] == "manager_decision_recorded"]
                 self.assertEqual(len(events), 1)
                 self.assertEqual(events[0]["payload"]["decision_id"], payload["id"])
+                telemetry = worker_db.telemetry_events(conn, task_id=decisions[0]["task_id"])
+                decision_events = [
+                    event for event in telemetry
+                    if event["event_type"] == "manager_decision_recorded"
+                ]
+                self.assertEqual(len(decision_events), 1)
+                self.assertEqual(decision_events[0]["correlation"]["decision_id"], payload["id"])
+                self.assertEqual(decision_events[0]["attributes"]["decision"], "nudge")
             finally:
                 conn.close()
 
@@ -11814,6 +11869,18 @@ class PairCommandTests(unittest.TestCase):
                 events = [row["type"] for row in audit["events"]]
                 self.assertIn("worker_compact_requested", events)
                 self.assertIn("worker_compact_request_succeeded", events)
+                telemetry = worker_db.telemetry_events(conn, task_id=task_id)
+                telemetry_types = [event["event_type"] for event in telemetry]
+                self.assertIn("manager_permission_checked", telemetry_types)
+                self.assertIn("command_created", telemetry_types)
+                self.assertIn("command_attempted", telemetry_types)
+                self.assertIn("command_succeeded", telemetry_types)
+                command_event = next(
+                    event for event in telemetry
+                    if event["event_type"] == "command_succeeded"
+                )
+                self.assertEqual(command_event["correlation"]["command_id"], command["id"])
+                self.assertEqual(command_event["attributes"]["result"]["worker_session"], "compact-worker")
             finally:
                 conn.close()
 
