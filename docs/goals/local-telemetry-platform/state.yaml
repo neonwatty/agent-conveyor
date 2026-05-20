@@ -1,0 +1,312 @@
+# GoalBuddy v2 state.yaml
+# Recovery handoff copy created after the Desktop worktree became unreadable.
+# If the original worktree is restored, reconcile this board before continuing.
+
+version: 2
+
+goal:
+  title: "Local Telemetry Platform"
+  slug: "local-telemetry-platform"
+  kind: existing_plan
+  tranche: "Complete the local-only telemetry package for realistic manager/worker QA."
+  status: active
+  oracle:
+    signal: "A recorded realistic manager/worker run has a local telemetry report and export bundle that reconstructs the run end-to-end: pair creation, run identity, manager cycles, decisions, commands, nudges/interruption attempts, captures, transcript segments, handoffs, task completion, errors, durations, and search results, with all verification commands passing."
+    cadence: "after each Worker package and at final audit"
+    final_proof: "Full verification passes; telemetry report/export from a realistic drill is committed as evidence; final Judge/PM audit records full_outcome_complete: true."
+  intake:
+    original_request: "Let's make a plan to implement the entire thing. I want to do this all in one Goal Buddy Prep Board."
+    interpreted_outcome: "Implement the complete local-only telemetry platform for manager/worker QA, including instrumentation, query/report/export surfaces, docs, and a realistic evidence-backed drill."
+    input_shape: existing_plan
+    audience: "Jeremy and future operators reviewing manager/worker pairs"
+    authority: approved
+    proof_type: test
+    completion_proof: "Full test/RC verification passes, telemetry commands can reconstruct a realistic manager/worker run, documentation explains the workflow, and a final QA drill artifact proves the event timeline is usable after the fact."
+    likely_misfire: "Stopping after schema or generic logging exists, without instrumenting real control points or proving a realistic run can be analyzed."
+    blind_spots_considered:
+      - "Over-instrumenting noisy events instead of emitting useful structured milestones."
+      - "Missing correlation IDs needed to connect run, task, binding, manager cycle, command, and sessions."
+      - "Breaking replay/export compatibility while adding telemetry."
+      - "Introducing non-local telemetry services despite the local-only requirement."
+      - "Shipping reports that summarize vaguely but do not support postmortem debugging."
+      - "Skipping a realistic manager/worker drill."
+    existing_plan_facts:
+      - "SQLite remains the only database for this phase."
+      - "Telemetry must not leave this machine."
+      - "Current foundation includes runs, telemetry_events, FTS search, workerctl runs, and automatic run_id creation from workerctl pair."
+      - "Remaining work must cover instrumentation, query/report commands, export/evidence bundles, documentation, and realistic drill proof."
+
+rules:
+  pm_owns_state: true
+  one_active_task: true
+  max_write_workers: 1
+  no_implementation_without_worker_or_pm_task: true
+  no_completion_without_judge_or_pm_audit: true
+  planning_is_not_completion: true
+  queued_required_worker_blocks_completion: true
+  continuous_until_full_outcome: true
+  missing_input_or_credentials_do_not_stop_goal: true
+  preserve_and_validate_existing_plan: true
+  intake_misfire_must_be_audited: true
+  goal_pressure_requires_oracle: true
+  no_completion_on_weak_proof: true
+  slice_policy:
+    max_consecutive_tiny_tasks: 2
+    prefer_vertical_slices: true
+    judge_picks_largest_safe_slice: true
+    worker_completes_whole_slice: true
+
+agents:
+  scout: installed
+  worker: installed
+  judge: installed
+
+visual_board:
+  selected: local
+  local:
+    status: live
+    url: "http://goalbuddy.localhost:41740/local-telemetry-platform/"
+    command: "node /Users/neonwatty/.codex/plugins/cache/goalbuddy/goalbuddy/0.3.7/skills/goalbuddy/surfaces/local-goal-board/scripts/local-goal-board.mjs --goal /Users/neonwatty/goalbuddy-boards/local-telemetry-platform --host goalbuddy.localhost --port 41740"
+
+active_task: T003
+
+tasks:
+  - id: T001
+    type: scout
+    assignee: Scout
+    status: done
+    reasoning_hint: low
+    objective: "Map the current telemetry foundation and every real control point that should emit structured local telemetry."
+    inputs:
+      - "workerctl/db.py"
+      - "workerctl/commands.py"
+      - "workerctl/cli.py"
+      - "workerctl/replay.py"
+      - "workerctl/export.py"
+      - "workerctl/ingest.py"
+      - "tests/test_workerctl.py"
+    constraints:
+      - "Read-only."
+      - "Do not edit implementation files."
+      - "Preserve the local-only SQLite constraint."
+    expected_output:
+      - "Current foundation summary."
+      - "Event taxonomy table."
+      - "Instrumentation matrix."
+      - "Recommended first Worker slice."
+    receipt:
+      result: done
+      summary: "Mapped the telemetry foundation, event taxonomy, instrumentation matrix, noise/privacy risks, and recommended first Worker slice. Local implementation is blocked because the canonical repo under Desktop is unreadable to CLI tools with Operation not permitted; receipt is recorded in notes/T001-scout-receipt.md in this accessible visual-board copy."
+      evidence:
+        - "GitHub repository neonwatty/codex-terminal-manager main branch"
+        - "workerctl/db.py durable table/schema evidence from GitHub"
+        - "workerctl/commands.py pair, criteria, capture, transcript, registration evidence from GitHub"
+        - "workerctl/lifecycle.py finish/stop/task decision evidence from GitHub"
+        - "workerctl/ingest.py Codex rollout ingest evidence from GitHub"
+        - "workerctl/export.py export bundle evidence from GitHub"
+        - "workerctl/replay.py existing timeline evidence from GitHub"
+        - "notes/T001-scout-receipt.md"
+      blocker: "Local path /Users/neonwatty/Desktop/codex-terminal-manager is currently unreadable to command-line tools: git, ls, cat, find, cp, and xattr fail with Operation not permitted."
+      recommended_next_task: T002
+
+  - id: T002
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Validate the Scout taxonomy and choose the largest safe first implementation slice."
+    inputs:
+      - "T001 receipt"
+      - "docs/goals/local-telemetry-platform/goal.md"
+    constraints:
+      - "Do not implement."
+      - "Reject taxonomy entries that are vague, noisy, or lack correlation IDs."
+    expected_output:
+      - "Decision."
+      - "Exact first Worker objective."
+      - "allowed_files."
+      - "verify commands."
+    receipt:
+      result: done
+      decision: accepted_with_blocker
+      summary: "Accepted the Scout taxonomy with adjustments: prioritize milestone events, summarize Codex ingest rather than duplicating every rollout event, keep terminal text out of telemetry attributes, attach active run ids opportunistically, and start with T003 foundation hardening. Implementation remains blocked until the canonical repo path is readable."
+      evidence:
+        - "notes/T001-scout-receipt.md"
+        - "notes/T002-judge-receipt.md"
+      first_worker_objective: "Harden telemetry foundation helpers and validation required by later emitters."
+      allowed_files:
+        - "workerctl/db.py"
+        - "tests/test_workerctl.py"
+      verify:
+        - "python3 -m unittest tests.test_workerctl.DatabaseTests.test_run_helpers_create_list_finish_and_enforce_one_active_run_per_task tests.test_workerctl.DatabaseTests.test_telemetry_event_helpers_attach_active_run_and_index_search_text -v"
+        - "python3 -m py_compile workerctl/db.py"
+      blocker: "Canonical repo path /Users/neonwatty/Desktop/codex-terminal-manager remains unreadable to command-line tools with Operation not permitted."
+
+  - id: T003
+    type: worker
+    assignee: Worker
+    status: active
+    reasoning_hint: medium
+    objective: "Harden telemetry foundation helpers and validation required by later emitters."
+    allowed_files:
+      - "workerctl/db.py"
+      - "tests/test_workerctl.py"
+    verify:
+      - "python3 -m unittest tests.test_workerctl.DatabaseTests -v"
+      - "python3 -m py_compile workerctl/db.py"
+    stop_if:
+      - "Need files outside allowed_files."
+      - "Verification fails twice."
+    receipt: null
+
+  - id: T004
+    type: worker
+    assignee: Worker
+    status: queued
+    reasoning_hint: medium
+    objective: "Instrument run and pair lifecycle telemetry."
+    allowed_files:
+      - "workerctl/commands.py"
+      - "workerctl/db.py"
+      - "tests/test_workerctl.py"
+    verify:
+      - "python3 -m unittest tests.test_workerctl.PairCommandTests -v"
+    receipt: null
+
+  - id: T005
+    type: worker
+    assignee: Worker
+    status: queued
+    reasoning_hint: medium
+    objective: "Instrument manager cycles, decisions, command lifecycle, nudges, interrupts, and compact/clear requests."
+    allowed_files:
+      - "workerctl/commands.py"
+      - "workerctl/db.py"
+      - "tests/test_workerctl.py"
+    verify:
+      - "python3 -m unittest tests.test_workerctl.SuperviseCycleTests tests.test_workerctl.PairCommandTests tests.test_workerctl.SessionActionCliTests -v"
+    receipt: null
+
+  - id: T006
+    type: worker
+    assignee: Worker
+    status: queued
+    reasoning_hint: medium
+    objective: "Instrument captures, transcript segments, ingest/tail, handoffs, criteria changes, task finish, and run finish."
+    allowed_files:
+      - "workerctl/commands.py"
+      - "workerctl/db.py"
+      - "workerctl/ingest.py"
+      - "workerctl/lifecycle.py"
+      - "tests/test_workerctl.py"
+    verify:
+      - "python3 -m unittest tests.test_workerctl.CliTests tests.test_workerctl.IngestCliTests tests.test_workerctl.AcceptanceCriteriaCliTests -v"
+    receipt: null
+
+  - id: T007
+    type: worker
+    assignee: Worker
+    status: queued
+    reasoning_hint: medium
+    objective: "Add telemetry timeline, search, summary, and raw event query commands."
+    allowed_files:
+      - "workerctl/cli.py"
+      - "workerctl/commands.py"
+      - "workerctl/db.py"
+      - "tests/test_workerctl.py"
+    verify:
+      - "python3 -m unittest tests.test_workerctl.CliTests -v"
+    receipt: null
+
+  - id: T008
+    type: worker
+    assignee: Worker
+    status: queued
+    reasoning_hint: medium
+    objective: "Add local telemetry export and report artifacts for QA evidence bundles."
+    allowed_files:
+      - "workerctl/cli.py"
+      - "workerctl/commands.py"
+      - "workerctl/export.py"
+      - "workerctl/db.py"
+      - "tests/test_workerctl.py"
+    verify:
+      - "python3 -m unittest tests.test_workerctl.CliTests tests.test_workerctl.AcceptanceCriteriaReplayExportTests -v"
+    receipt: null
+
+  - id: T009
+    type: worker
+    assignee: Worker
+    status: queued
+    reasoning_hint: medium
+    objective: "Document the telemetry workflow and realistic QA drill playbook."
+    allowed_files:
+      - "docs/**/*.md"
+      - "README.md"
+      - "tests/test_workerctl.py"
+    verify:
+      - "git diff --check"
+    receipt: null
+
+  - id: T010
+    type: worker
+    assignee: Worker
+    status: queued
+    reasoning_hint: medium
+    objective: "Run one realistic manager/worker telemetry drill and commit durable evidence artifacts."
+    allowed_files:
+      - "docs/live-qa-log.md"
+      - "docs/live-qa-artifacts/**"
+      - "docs/goals/local-telemetry-platform/**"
+    verify:
+      - "scripts/workerctl telemetry --summary --run <run_id>"
+      - "scripts/workerctl telemetry --run <run_id>"
+      - "scripts/workerctl telemetry --search manager --run <run_id>"
+      - "scripts/workerctl sessions --state active"
+      - "scripts/workerctl reconcile --stale-cycles-seconds 1"
+      - "git diff --check"
+    receipt: null
+
+  - id: T011
+    type: judge
+    assignee: Judge
+    status: queued
+    reasoning_hint: high
+    objective: "Audit the complete telemetry package against the oracle and identify any required final fixes before completion."
+    inputs:
+      - "Receipts from T001-T010"
+      - "Telemetry drill artifacts"
+      - "Full verification output"
+    constraints:
+      - "Read-only unless PM creates a follow-up Worker task."
+    expected_output:
+      - "complete | not_complete"
+      - "full_outcome_complete: true | false"
+      - "Oracle evidence map."
+    receipt: null
+
+  - id: T999
+    type: judge
+    assignee: Judge
+    status: queued
+    reasoning_hint: high
+    objective: "Final release-readiness audit after any T011 fixes."
+    inputs:
+      - "All receipts"
+      - "Latest verification output"
+      - "Current git diff"
+    constraints:
+      - "Do not implement."
+      - "Reject completion if queued required Worker work remains."
+    expected_output:
+      - "complete | not_complete"
+      - "full_outcome_complete: true | false"
+      - "Final evidence links."
+    receipt: null
+
+checks:
+  dirty_fingerprint: unknown
+  last_verification:
+    result: unknown
+    task: null
+    commands: []
