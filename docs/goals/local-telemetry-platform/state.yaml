@@ -9,7 +9,7 @@ goal:
   slug: "local-telemetry-platform"
   kind: existing_plan
   tranche: "Complete the local-only telemetry package for realistic manager/worker QA."
-  status: active
+  status: complete
   oracle:
     signal: "A recorded realistic manager/worker run has a local telemetry report and export bundle that reconstructs the run end-to-end: pair creation, run identity, manager cycles, decisions, commands, nudges/interruption attempts, captures, transcript segments, handoffs, task completion, errors, durations, and search results, with all verification commands passing."
     cadence: "after each Worker package and at final audit"
@@ -68,7 +68,7 @@ visual_board:
     url: "http://goalbuddy.localhost:41740/local-telemetry-platform/"
     command: "node /Users/neonwatty/.codex/plugins/cache/goalbuddy/goalbuddy/0.3.7/skills/goalbuddy/surfaces/local-goal-board/scripts/local-goal-board.mjs --goal /Users/neonwatty/goalbuddy-boards/local-telemetry-platform --host goalbuddy.localhost --port 41740"
 
-active_task: T999
+active_task: null
 
 tasks:
   - id: T001
@@ -404,7 +404,7 @@ tasks:
   - id: T999
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Final release-readiness audit after any T011 fixes."
     inputs:
@@ -418,18 +418,29 @@ tasks:
       - "complete | not_complete"
       - "full_outcome_complete: true | false"
       - "Final evidence links."
-    receipt: null
+    receipt:
+      result: complete
+      full_outcome_complete: true
+      summary: "Final release-readiness audit passed. All required Worker tasks are done, T011 found no required fixes, latest verification is green, and the live telemetry evidence bundle is committed."
+      evidence:
+        - "docs/goals/local-telemetry-platform/notes/T999-final-audit-receipt.md"
+        - "docs/goals/local-telemetry-platform/notes/T011-judge-receipt.md"
+        - "docs/live-qa-artifacts/2026-05-20-local-telemetry-drill/summary.md"
+        - "docs/live-qa-artifacts/2026-05-20-local-telemetry-drill/export/telemetry-report.md"
+        - "docs/live-qa-artifacts/2026-05-20-local-telemetry-drill/export.zip"
+      verification:
+        - "/opt/homebrew/bin/python3.13 -m unittest discover -s tests -v"
+        - "scripts/workerctl sessions --state active"
+        - "scripts/workerctl reconcile --stale-cycles-seconds 1"
+        - "git diff --check"
 
 checks:
   dirty_fingerprint: unknown
   last_verification:
     result: pass
-    task: T011
+    task: T999
     commands:
       - "/opt/homebrew/bin/python3.13 -m unittest discover -s tests -v"
-      - "scripts/workerctl telemetry --summary --run run-1b863f70-d6ff-4463-982d-40d4be24efe9"
-      - "scripts/workerctl telemetry --run run-1b863f70-d6ff-4463-982d-40d4be24efe9"
-      - "scripts/workerctl telemetry --search manager --run run-1b863f70-d6ff-4463-982d-40d4be24efe9"
       - "scripts/workerctl sessions --state active"
       - "scripts/workerctl reconcile --stale-cycles-seconds 1"
       - "git diff --check"
