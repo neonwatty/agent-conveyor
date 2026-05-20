@@ -9772,6 +9772,21 @@ class ManagerBootstrapPromptTests(unittest.TestCase):
             self.assertIn('"deferred": [...]', document)
             self.assertIn('"rejected": [...]', document)
 
+    def test_docs_include_local_telemetry_workflow(self):
+        readme = (ROOT / "README.md").read_text()
+        checklist = (ROOT / "docs" / "manual-qa-checklist.md").read_text()
+        workflow = (ROOT / "docs" / "local-telemetry-workflow.md").read_text()
+
+        self.assertIn("telemetry [--run RUN]", readme)
+        self.assertIn("docs/local-telemetry-workflow.md", readme)
+        for document in (checklist, workflow):
+            self.assertIn("scripts/workerctl telemetry --summary --run <run_id>", document)
+            self.assertIn("scripts/workerctl telemetry --run <run_id>", document)
+            self.assertIn("scripts/workerctl telemetry --search manager --run <run_id>", document)
+            self.assertIn("scripts/workerctl export-task <task> --zip --include-transcripts", document)
+        self.assertIn("telemetry-events.json", workflow)
+        self.assertIn("telemetry-report.md", workflow)
+
 
 class StartManagerTests(unittest.TestCase):
     """Tests for `workerctl start-manager` — the spawn-and-register convenience for managers."""

@@ -68,7 +68,7 @@ visual_board:
     url: "http://goalbuddy.localhost:41740/local-telemetry-platform/"
     command: "node /Users/neonwatty/.codex/plugins/cache/goalbuddy/goalbuddy/0.3.7/skills/goalbuddy/surfaces/local-goal-board/scripts/local-goal-board.mjs --goal /Users/neonwatty/goalbuddy-boards/local-telemetry-platform --host goalbuddy.localhost --port 41740"
 
-active_task: T009
+active_task: T010
 
 tasks:
   - id: T001
@@ -307,7 +307,7 @@ tasks:
   - id: T009
     type: worker
     assignee: Worker
-    status: active
+    status: done
     reasoning_hint: medium
     objective: "Document the telemetry workflow and realistic QA drill playbook."
     allowed_files:
@@ -316,12 +316,24 @@ tasks:
       - "tests/test_workerctl.py"
     verify:
       - "git diff --check"
-    receipt: null
+    receipt:
+      result: done
+      summary: "Documented the local telemetry workflow, README command reference, and manual QA checklist, with a docs drift test for required telemetry commands and export artifacts."
+      evidence:
+        - "README.md"
+        - "docs/local-telemetry-workflow.md"
+        - "docs/manual-qa-checklist.md"
+        - "tests/test_workerctl.py"
+        - "docs/goals/local-telemetry-platform/notes/T009-worker-receipt.md"
+      verification:
+        - "/opt/homebrew/bin/python3.13 -m unittest tests.test_workerctl.ManagerBootstrapPromptTests -v"
+        - "/opt/homebrew/bin/python3.13 -m unittest discover -s tests -v"
+        - "git diff --check"
 
   - id: T010
     type: worker
     assignee: Worker
-    status: queued
+    status: active
     reasoning_hint: medium
     objective: "Run one realistic manager/worker telemetry drill and commit durable evidence artifacts."
     allowed_files:
@@ -378,9 +390,8 @@ checks:
   dirty_fingerprint: unknown
   last_verification:
     result: pass
-    task: T008
+    task: T009
     commands:
-      - "/opt/homebrew/bin/python3.13 -m unittest tests.test_workerctl.CliTests tests.test_workerctl.AcceptanceCriteriaReplayExportTests -v"
+      - "/opt/homebrew/bin/python3.13 -m unittest tests.test_workerctl.ManagerBootstrapPromptTests -v"
       - "/opt/homebrew/bin/python3.13 -m unittest discover -s tests -v"
-      - "/opt/homebrew/bin/python3.13 -m py_compile workerctl/cli.py workerctl/commands.py workerctl/export.py workerctl/db.py"
       - "git diff --check"

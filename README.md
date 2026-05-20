@@ -354,8 +354,13 @@ tmux attach -t codex-live-test
 - `events <name>` — Worker events log.
 - `commands [--task T] [--type T] [--state S]` — Durable side-effect commands
   log.
+- `telemetry [--run RUN] [--task TASK] [--search QUERY] [--summary] [--json]`
+  — Query local structured telemetry events, search them with SQLite FTS, or
+  print aggregate counts for a run/task.
 - `export-task <task> [--zip]` — Dump task status, audit, prompts, and
-  transcript metadata into an export bundle.
+  transcript metadata into an export bundle. Exports include
+  `telemetry-events.json`, `telemetry-summary.json`, and
+  `telemetry-report.md`; see `docs/local-telemetry-workflow.md`.
 
 ### Administration
 
