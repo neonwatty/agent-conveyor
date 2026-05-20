@@ -3865,6 +3865,19 @@ def command_tail(args: argparse.Namespace) -> int:
         rows = worker_db.latest_codex_events_for_session(
             conn, session_id=session["id"], limit=args.limit, subtype=args.subtype,
         )
+        worker_db.emit_telemetry_event(
+            conn,
+            actor="workerctl",
+            event_type="codex_events_tail_read",
+            summary=f"Read recent Codex events for session {args.name}.",
+            correlation={"session": args.name, "session_id": session["id"]},
+            attributes={
+                "limit": args.limit,
+                "returned_count": len(rows),
+                "subtype": args.subtype,
+            },
+        )
+        conn.commit()
     finally:
         conn.close()
     events = [
