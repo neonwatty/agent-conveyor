@@ -68,7 +68,7 @@ visual_board:
     url: "http://goalbuddy.localhost:41740/local-telemetry-platform/"
     command: "node /Users/neonwatty/.codex/plugins/cache/goalbuddy/goalbuddy/0.3.7/skills/goalbuddy/surfaces/local-goal-board/scripts/local-goal-board.mjs --goal /Users/neonwatty/goalbuddy-boards/local-telemetry-platform --host goalbuddy.localhost --port 41740"
 
-active_task: T010
+active_task: T011
 
 tasks:
   - id: T001
@@ -333,7 +333,7 @@ tasks:
   - id: T010
     type: worker
     assignee: Worker
-    status: active
+    status: done
     reasoning_hint: medium
     objective: "Run one realistic manager/worker telemetry drill and commit durable evidence artifacts."
     allowed_files:
@@ -347,12 +347,30 @@ tasks:
       - "scripts/workerctl sessions --state active"
       - "scripts/workerctl reconcile --stale-cycles-seconds 1"
       - "git diff --check"
-    receipt: null
+    receipt:
+      result: done
+      summary: "Ran a disposable manager/worker local telemetry drill and committed durable evidence artifacts proving telemetry can reconstruct pair creation, run identity, cycles, decisions, commands, nudges, captures, transcript segments, criteria changes, task finish, run finish, export, and cleanup."
+      evidence:
+        - "docs/live-qa-artifacts/2026-05-20-local-telemetry-drill/summary.md"
+        - "docs/live-qa-artifacts/2026-05-20-local-telemetry-drill/commands/21-telemetry-summary.txt"
+        - "docs/live-qa-artifacts/2026-05-20-local-telemetry-drill/commands/24-telemetry-events.json"
+        - "docs/live-qa-artifacts/2026-05-20-local-telemetry-drill/commands/26-telemetry-search-manager.json"
+        - "docs/live-qa-artifacts/2026-05-20-local-telemetry-drill/export/telemetry-report.md"
+        - "docs/live-qa-artifacts/2026-05-20-local-telemetry-drill/export.zip"
+        - "docs/live-qa-log.md"
+        - "docs/goals/local-telemetry-platform/notes/T010-worker-receipt.md"
+      verification:
+        - "scripts/workerctl telemetry --summary --run run-1b863f70-d6ff-4463-982d-40d4be24efe9"
+        - "scripts/workerctl telemetry --run run-1b863f70-d6ff-4463-982d-40d4be24efe9"
+        - "scripts/workerctl telemetry --search manager --run run-1b863f70-d6ff-4463-982d-40d4be24efe9"
+        - "scripts/workerctl sessions --state active"
+        - "scripts/workerctl reconcile --stale-cycles-seconds 1"
+        - "git diff --check"
 
   - id: T011
     type: judge
     assignee: Judge
-    status: queued
+    status: active
     reasoning_hint: high
     objective: "Audit the complete telemetry package against the oracle and identify any required final fixes before completion."
     inputs:
@@ -390,8 +408,11 @@ checks:
   dirty_fingerprint: unknown
   last_verification:
     result: pass
-    task: T009
+    task: T010
     commands:
-      - "/opt/homebrew/bin/python3.13 -m unittest tests.test_workerctl.ManagerBootstrapPromptTests -v"
-      - "/opt/homebrew/bin/python3.13 -m unittest discover -s tests -v"
+      - "scripts/workerctl telemetry --summary --run run-1b863f70-d6ff-4463-982d-40d4be24efe9"
+      - "scripts/workerctl telemetry --run run-1b863f70-d6ff-4463-982d-40d4be24efe9"
+      - "scripts/workerctl telemetry --search manager --run run-1b863f70-d6ff-4463-982d-40d4be24efe9"
+      - "scripts/workerctl sessions --state active"
+      - "scripts/workerctl reconcile --stale-cycles-seconds 1"
       - "git diff --check"

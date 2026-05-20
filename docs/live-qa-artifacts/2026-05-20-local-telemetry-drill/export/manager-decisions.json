@@ -1,0 +1,43 @@
+[
+  {
+    "created_at": "2026-05-20T21:21:06Z",
+    "decision": "inspect",
+    "id": 44,
+    "manager_cycle_id": 110,
+    "manager_id": null,
+    "payload": {
+      "decision": "accept",
+      "deferred": "future lightweight smoke check for telemetry export contents",
+      "postmortem_evidence": "sufficient: telemetry summary/events, replay, export manifest/report, transcript capture, saved command artifacts",
+      "worker_changed_files": "receipt says no; git status only shows untracked drill artifact directory"
+    },
+    "reason": "Accept current local telemetry drill slice: worker receipt matches requested workflow/artifacts, accepted criteria are satisfied from durable evidence, and follow-up smoke coverage is deferred.",
+    "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c"
+  },
+  {
+    "created_at": "2026-05-20T21:21:34Z",
+    "decision": "stop",
+    "id": 45,
+    "manager_cycle_id": null,
+    "manager_id": null,
+    "payload": {
+      "command_id": "command-a18a25e0-4846-4343-8bf6-dd70d9a8ef64",
+      "source": "finish_task"
+    },
+    "reason": "T010 local telemetry drill accepted by manager decision 44; durable telemetry/replay/export evidence captured.",
+    "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c"
+  },
+  {
+    "created_at": "2026-05-20T21:21:43Z",
+    "decision": "stop",
+    "id": 46,
+    "manager_cycle_id": null,
+    "manager_id": null,
+    "payload": {
+      "command_id": "command-4698edea-5ea3-4552-8329-7d4611db1e4d",
+      "source": "finish_task"
+    },
+    "reason": "T010 local telemetry drill accepted by manager decision 44; durable telemetry/replay/export evidence captured.",
+    "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c"
+  }
+]

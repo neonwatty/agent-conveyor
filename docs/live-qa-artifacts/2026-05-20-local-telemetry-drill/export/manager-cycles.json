@@ -1,0 +1,916 @@
+[
+  {
+    "completed_at": "2026-05-20T21:18:25Z",
+    "decision": null,
+    "error": null,
+    "health": null,
+    "health_observation_id": null,
+    "id": 103,
+    "manager_capture_id": null,
+    "manager_id": null,
+    "started_at": "2026-05-20T21:18:25Z",
+    "state": "succeeded",
+    "status": {
+      "binding_id": "binding-e78a7a93-c29b-4920-b96f-d989e071c4c4",
+      "ingest": {
+        "new_events": 20,
+        "new_offset": 103309,
+        "skipped_lines": 0
+      },
+      "kind": "session_cycle",
+      "last_event_subtype": null,
+      "last_state_event_at": "2026-05-20T21:18:13.141Z",
+      "manager_alive": true,
+      "manager_context": {
+        "acceptance_criteria": {
+          "deferred": [],
+          "open": [],
+          "proposed": [],
+          "rejected": [],
+          "satisfied": [],
+          "summary": {
+            "accepted": 0,
+            "deferred": 0,
+            "proposed": 0,
+            "rejected": 0,
+            "satisfied": 0
+          }
+        },
+        "criteria_negotiation": {
+          "needed": true,
+          "prompt": "Please propose 2-4 acceptance criteria for the current slice. Split them into must-have current-task criteria and follow-up criteria. Include the verification you expect for each.",
+          "reason": "no_criteria",
+          "suggested_actions": [
+            "Ask the worker to split must-have current-task criteria from follow-up criteria.",
+            "Record accepted current-task criteria with workerctl criteria local-telemetry-drill-20260520 --add --criterion \"...\" --source worker_proposed --status accepted.",
+            "Record proposed current-task criteria with workerctl criteria local-telemetry-drill-20260520 --add --criterion \"...\" --source worker_proposed --status proposed.",
+            "Record follow-up criteria with workerctl criteria local-telemetry-drill-20260520 --add --criterion \"...\" --source worker_proposed --status deferred."
+          ]
+        },
+        "manager_config": {
+          "acceptance_criteria": [],
+          "created_at": "2026-05-20T21:18:05Z",
+          "guidelines": [],
+          "objective": "You are the manager in a disposable local telemetry drill.\n\nDo not edit files. Supervise the worker by evidence only. Use the durable workerctl surfaces available in manager context. Your job is to make one defensible decision after inspecting worker status/evidence, then leave a concise final note.\n\nAcceptance:\n- Use durable evidence, not raw Codex logs.\n- Mention whether the worker changed files.\n- Mention whether telemetry/replay/export should be sufficient for postmortem review.",
+          "permissions": {
+            "create_pr": false,
+            "merge_green_pr": false,
+            "worker_compact_clear": false
+          },
+          "reference_paths": [
+            "docs/local-telemetry-workflow.md",
+            "docs/manual-qa-checklist.md"
+          ],
+          "supervision_mode": "strict",
+          "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+          "updated_at": "2026-05-20T21:18:05Z"
+        },
+        "worker_handoff": null
+      },
+      "manager_session": "telemetry-drill-manager-20260520",
+      "notable_pane_pattern": null,
+      "pane_signal": {
+        "captured": true,
+        "classifier": null,
+        "degraded": false,
+        "notable_pattern": null,
+        "reason": null,
+        "status_age_seconds": 11
+      },
+      "staleness_seconds": 11.859,
+      "state": "busy",
+      "task": "local-telemetry-drill-20260520",
+      "task_completed": false,
+      "worker_alive": true,
+      "worker_session": "telemetry-drill-worker-20260520"
+    },
+    "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+    "worker_capture_id": null
+  },
+  {
+    "completed_at": "2026-05-20T21:18:31Z",
+    "decision": null,
+    "error": null,
+    "health": null,
+    "health_observation_id": null,
+    "id": 104,
+    "manager_capture_id": null,
+    "manager_id": null,
+    "started_at": "2026-05-20T21:18:31Z",
+    "state": "succeeded",
+    "status": {
+      "binding_id": "binding-e78a7a93-c29b-4920-b96f-d989e071c4c4",
+      "ingest": {
+        "new_events": 6,
+        "new_offset": 113775,
+        "skipped_lines": 0
+      },
+      "kind": "session_cycle",
+      "last_event_subtype": null,
+      "last_state_event_at": "2026-05-20T21:18:13.141Z",
+      "manager_alive": true,
+      "manager_context": {
+        "acceptance_criteria": {
+          "deferred": [],
+          "open": [],
+          "proposed": [],
+          "rejected": [],
+          "satisfied": [],
+          "summary": {
+            "accepted": 0,
+            "deferred": 0,
+            "proposed": 0,
+            "rejected": 0,
+            "satisfied": 0
+          }
+        },
+        "criteria_negotiation": {
+          "needed": true,
+          "prompt": "Please propose 2-4 acceptance criteria for the current slice. Split them into must-have current-task criteria and follow-up criteria. Include the verification you expect for each.",
+          "reason": "no_criteria",
+          "suggested_actions": [
+            "Ask the worker to split must-have current-task criteria from follow-up criteria.",
+            "Record accepted current-task criteria with workerctl criteria local-telemetry-drill-20260520 --add --criterion \"...\" --source worker_proposed --status accepted.",
+            "Record proposed current-task criteria with workerctl criteria local-telemetry-drill-20260520 --add --criterion \"...\" --source worker_proposed --status proposed.",
+            "Record follow-up criteria with workerctl criteria local-telemetry-drill-20260520 --add --criterion \"...\" --source worker_proposed --status deferred."
+          ]
+        },
+        "manager_config": {
+          "acceptance_criteria": [],
+          "created_at": "2026-05-20T21:18:05Z",
+          "guidelines": [],
+          "objective": "You are the manager in a disposable local telemetry drill.\n\nDo not edit files. Supervise the worker by evidence only. Use the durable workerctl surfaces available in manager context. Your job is to make one defensible decision after inspecting worker status/evidence, then leave a concise final note.\n\nAcceptance:\n- Use durable evidence, not raw Codex logs.\n- Mention whether the worker changed files.\n- Mention whether telemetry/replay/export should be sufficient for postmortem review.",
+          "permissions": {
+            "create_pr": false,
+            "merge_green_pr": false,
+            "worker_compact_clear": false
+          },
+          "reference_paths": [
+            "docs/local-telemetry-workflow.md",
+            "docs/manual-qa-checklist.md"
+          ],
+          "supervision_mode": "strict",
+          "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+          "updated_at": "2026-05-20T21:18:05Z"
+        },
+        "worker_handoff": null
+      },
+      "manager_session": "telemetry-drill-manager-20260520",
+      "notable_pane_pattern": null,
+      "pane_signal": {
+        "captured": true,
+        "classifier": null,
+        "degraded": false,
+        "notable_pattern": null,
+        "reason": null,
+        "status_age_seconds": 17
+      },
+      "staleness_seconds": 17.859,
+      "state": "busy",
+      "task": "local-telemetry-drill-20260520",
+      "task_completed": false,
+      "worker_alive": true,
+      "worker_session": "telemetry-drill-worker-20260520"
+    },
+    "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+    "worker_capture_id": null
+  },
+  {
+    "completed_at": "2026-05-20T21:18:42Z",
+    "decision": null,
+    "error": null,
+    "health": null,
+    "health_observation_id": null,
+    "id": 105,
+    "manager_capture_id": null,
+    "manager_id": null,
+    "started_at": "2026-05-20T21:18:42Z",
+    "state": "succeeded",
+    "status": {
+      "binding_id": "binding-e78a7a93-c29b-4920-b96f-d989e071c4c4",
+      "ingest": {
+        "new_events": 8,
+        "new_offset": 121010,
+        "skipped_lines": 0
+      },
+      "kind": "session_cycle",
+      "last_event_subtype": "user_message",
+      "last_state_event_at": "2026-05-20T21:18:38.328Z",
+      "manager_alive": true,
+      "manager_context": {
+        "acceptance_criteria": {
+          "deferred": [],
+          "open": [],
+          "proposed": [],
+          "rejected": [],
+          "satisfied": [],
+          "summary": {
+            "accepted": 0,
+            "deferred": 0,
+            "proposed": 0,
+            "rejected": 0,
+            "satisfied": 0
+          }
+        },
+        "criteria_negotiation": {
+          "needed": true,
+          "prompt": "Please propose 2-4 acceptance criteria for the current slice. Split them into must-have current-task criteria and follow-up criteria. Include the verification you expect for each.",
+          "reason": "no_criteria",
+          "suggested_actions": [
+            "Ask the worker to split must-have current-task criteria from follow-up criteria.",
+            "Record accepted current-task criteria with workerctl criteria local-telemetry-drill-20260520 --add --criterion \"...\" --source worker_proposed --status accepted.",
+            "Record proposed current-task criteria with workerctl criteria local-telemetry-drill-20260520 --add --criterion \"...\" --source worker_proposed --status proposed.",
+            "Record follow-up criteria with workerctl criteria local-telemetry-drill-20260520 --add --criterion \"...\" --source worker_proposed --status deferred."
+          ]
+        },
+        "manager_config": {
+          "acceptance_criteria": [],
+          "created_at": "2026-05-20T21:18:05Z",
+          "guidelines": [],
+          "objective": "You are the manager in a disposable local telemetry drill.\n\nDo not edit files. Supervise the worker by evidence only. Use the durable workerctl surfaces available in manager context. Your job is to make one defensible decision after inspecting worker status/evidence, then leave a concise final note.\n\nAcceptance:\n- Use durable evidence, not raw Codex logs.\n- Mention whether the worker changed files.\n- Mention whether telemetry/replay/export should be sufficient for postmortem review.",
+          "permissions": {
+            "create_pr": false,
+            "merge_green_pr": false,
+            "worker_compact_clear": false
+          },
+          "reference_paths": [
+            "docs/local-telemetry-workflow.md",
+            "docs/manual-qa-checklist.md"
+          ],
+          "supervision_mode": "strict",
+          "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+          "updated_at": "2026-05-20T21:18:05Z"
+        },
+        "worker_handoff": null
+      },
+      "manager_session": "telemetry-drill-manager-20260520",
+      "notable_pane_pattern": null,
+      "pane_signal": {
+        "captured": true,
+        "classifier": null,
+        "degraded": false,
+        "notable_pattern": null,
+        "reason": null,
+        "status_age_seconds": 3
+      },
+      "staleness_seconds": 3.672,
+      "state": "busy",
+      "task": "local-telemetry-drill-20260520",
+      "task_completed": false,
+      "worker_alive": true,
+      "worker_session": "telemetry-drill-worker-20260520"
+    },
+    "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+    "worker_capture_id": null
+  },
+  {
+    "completed_at": "2026-05-20T21:18:56Z",
+    "decision": null,
+    "error": null,
+    "health": null,
+    "health_observation_id": null,
+    "id": 106,
+    "manager_capture_id": null,
+    "manager_id": null,
+    "started_at": "2026-05-20T21:18:56Z",
+    "state": "succeeded",
+    "status": {
+      "binding_id": "binding-e78a7a93-c29b-4920-b96f-d989e071c4c4",
+      "ingest": {
+        "new_events": 4,
+        "new_offset": 125526,
+        "skipped_lines": 0
+      },
+      "kind": "session_cycle",
+      "last_event_subtype": "task_complete",
+      "last_state_event_at": "2026-05-20T21:18:43.775Z",
+      "manager_alive": true,
+      "manager_context": {
+        "acceptance_criteria": {
+          "deferred": [],
+          "open": [],
+          "proposed": [],
+          "rejected": [],
+          "satisfied": [],
+          "summary": {
+            "accepted": 0,
+            "deferred": 0,
+            "proposed": 0,
+            "rejected": 0,
+            "satisfied": 0
+          }
+        },
+        "criteria_negotiation": {
+          "needed": true,
+          "prompt": "Please propose 2-4 acceptance criteria for the current slice. Split them into must-have current-task criteria and follow-up criteria. Include the verification you expect for each.",
+          "reason": "no_criteria",
+          "suggested_actions": [
+            "Ask the worker to split must-have current-task criteria from follow-up criteria.",
+            "Record accepted current-task criteria with workerctl criteria local-telemetry-drill-20260520 --add --criterion \"...\" --source worker_proposed --status accepted.",
+            "Record proposed current-task criteria with workerctl criteria local-telemetry-drill-20260520 --add --criterion \"...\" --source worker_proposed --status proposed.",
+            "Record follow-up criteria with workerctl criteria local-telemetry-drill-20260520 --add --criterion \"...\" --source worker_proposed --status deferred."
+          ]
+        },
+        "manager_config": {
+          "acceptance_criteria": [],
+          "created_at": "2026-05-20T21:18:05Z",
+          "guidelines": [],
+          "objective": "You are the manager in a disposable local telemetry drill.\n\nDo not edit files. Supervise the worker by evidence only. Use the durable workerctl surfaces available in manager context. Your job is to make one defensible decision after inspecting worker status/evidence, then leave a concise final note.\n\nAcceptance:\n- Use durable evidence, not raw Codex logs.\n- Mention whether the worker changed files.\n- Mention whether telemetry/replay/export should be sufficient for postmortem review.",
+          "permissions": {
+            "create_pr": false,
+            "merge_green_pr": false,
+            "worker_compact_clear": false
+          },
+          "reference_paths": [
+            "docs/local-telemetry-workflow.md",
+            "docs/manual-qa-checklist.md"
+          ],
+          "supervision_mode": "strict",
+          "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+          "updated_at": "2026-05-20T21:18:05Z"
+        },
+        "worker_handoff": null
+      },
+      "manager_session": "telemetry-drill-manager-20260520",
+      "notable_pane_pattern": null,
+      "pane_signal": {
+        "captured": true,
+        "classifier": null,
+        "degraded": false,
+        "notable_pattern": null,
+        "reason": null,
+        "status_age_seconds": 12
+      },
+      "staleness_seconds": 12.225,
+      "state": "idle",
+      "task": "local-telemetry-drill-20260520",
+      "task_completed": true,
+      "worker_alive": true,
+      "worker_session": "telemetry-drill-worker-20260520"
+    },
+    "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+    "worker_capture_id": null
+  },
+  {
+    "completed_at": "2026-05-20T21:18:56Z",
+    "decision": null,
+    "error": null,
+    "health": null,
+    "health_observation_id": null,
+    "id": 107,
+    "manager_capture_id": null,
+    "manager_id": null,
+    "started_at": "2026-05-20T21:18:56Z",
+    "state": "succeeded",
+    "status": {
+      "binding_id": "binding-e78a7a93-c29b-4920-b96f-d989e071c4c4",
+      "ingest": {
+        "new_events": 0,
+        "new_offset": 125526,
+        "skipped_lines": 0
+      },
+      "kind": "session_cycle",
+      "last_event_subtype": "task_complete",
+      "last_state_event_at": "2026-05-20T21:18:43.775Z",
+      "manager_alive": true,
+      "manager_context": {
+        "acceptance_criteria": {
+          "deferred": [],
+          "open": [],
+          "proposed": [],
+          "rejected": [],
+          "satisfied": [],
+          "summary": {
+            "accepted": 0,
+            "deferred": 0,
+            "proposed": 0,
+            "rejected": 0,
+            "satisfied": 0
+          }
+        },
+        "criteria_negotiation": {
+          "needed": true,
+          "prompt": "Please propose 2-4 acceptance criteria for the current slice. Split them into must-have current-task criteria and follow-up criteria. Include the verification you expect for each.",
+          "reason": "no_criteria",
+          "suggested_actions": [
+            "Ask the worker to split must-have current-task criteria from follow-up criteria.",
+            "Record accepted current-task criteria with workerctl criteria local-telemetry-drill-20260520 --add --criterion \"...\" --source worker_proposed --status accepted.",
+            "Record proposed current-task criteria with workerctl criteria local-telemetry-drill-20260520 --add --criterion \"...\" --source worker_proposed --status proposed.",
+            "Record follow-up criteria with workerctl criteria local-telemetry-drill-20260520 --add --criterion \"...\" --source worker_proposed --status deferred."
+          ]
+        },
+        "manager_config": {
+          "acceptance_criteria": [],
+          "created_at": "2026-05-20T21:18:05Z",
+          "guidelines": [],
+          "objective": "You are the manager in a disposable local telemetry drill.\n\nDo not edit files. Supervise the worker by evidence only. Use the durable workerctl surfaces available in manager context. Your job is to make one defensible decision after inspecting worker status/evidence, then leave a concise final note.\n\nAcceptance:\n- Use durable evidence, not raw Codex logs.\n- Mention whether the worker changed files.\n- Mention whether telemetry/replay/export should be sufficient for postmortem review.",
+          "permissions": {
+            "create_pr": false,
+            "merge_green_pr": false,
+            "worker_compact_clear": false
+          },
+          "reference_paths": [
+            "docs/local-telemetry-workflow.md",
+            "docs/manual-qa-checklist.md"
+          ],
+          "supervision_mode": "strict",
+          "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+          "updated_at": "2026-05-20T21:18:05Z"
+        },
+        "worker_handoff": null
+      },
+      "manager_session": "telemetry-drill-manager-20260520",
+      "notable_pane_pattern": null,
+      "pane_signal": {
+        "captured": true,
+        "classifier": null,
+        "degraded": false,
+        "notable_pattern": null,
+        "reason": null,
+        "status_age_seconds": 12
+      },
+      "staleness_seconds": 12.225,
+      "state": "idle",
+      "task": "local-telemetry-drill-20260520",
+      "task_completed": true,
+      "worker_alive": true,
+      "worker_session": "telemetry-drill-worker-20260520"
+    },
+    "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+    "worker_capture_id": null
+  },
+  {
+    "completed_at": "2026-05-20T21:19:14Z",
+    "decision": null,
+    "error": null,
+    "health": null,
+    "health_observation_id": null,
+    "id": 108,
+    "manager_capture_id": null,
+    "manager_id": null,
+    "started_at": "2026-05-20T21:19:14Z",
+    "state": "succeeded",
+    "status": {
+      "binding_id": "binding-e78a7a93-c29b-4920-b96f-d989e071c4c4",
+      "ingest": {
+        "new_events": 0,
+        "new_offset": 125526,
+        "skipped_lines": 0
+      },
+      "kind": "session_cycle",
+      "last_event_subtype": "task_complete",
+      "last_state_event_at": "2026-05-20T21:18:43.775Z",
+      "manager_alive": true,
+      "manager_context": {
+        "acceptance_criteria": {
+          "deferred": [],
+          "open": [],
+          "proposed": [],
+          "rejected": [],
+          "satisfied": [],
+          "summary": {
+            "accepted": 0,
+            "deferred": 0,
+            "proposed": 0,
+            "rejected": 0,
+            "satisfied": 0
+          }
+        },
+        "criteria_negotiation": {
+          "needed": true,
+          "prompt": "Please propose 2-4 acceptance criteria for the current slice. Split them into must-have current-task criteria and follow-up criteria. Include the verification you expect for each.",
+          "reason": "no_criteria",
+          "suggested_actions": [
+            "Ask the worker to split must-have current-task criteria from follow-up criteria.",
+            "Record accepted current-task criteria with workerctl criteria local-telemetry-drill-20260520 --add --criterion \"...\" --source worker_proposed --status accepted.",
+            "Record proposed current-task criteria with workerctl criteria local-telemetry-drill-20260520 --add --criterion \"...\" --source worker_proposed --status proposed.",
+            "Record follow-up criteria with workerctl criteria local-telemetry-drill-20260520 --add --criterion \"...\" --source worker_proposed --status deferred."
+          ]
+        },
+        "manager_config": {
+          "acceptance_criteria": [],
+          "created_at": "2026-05-20T21:18:05Z",
+          "guidelines": [],
+          "objective": "You are the manager in a disposable local telemetry drill.\n\nDo not edit files. Supervise the worker by evidence only. Use the durable workerctl surfaces available in manager context. Your job is to make one defensible decision after inspecting worker status/evidence, then leave a concise final note.\n\nAcceptance:\n- Use durable evidence, not raw Codex logs.\n- Mention whether the worker changed files.\n- Mention whether telemetry/replay/export should be sufficient for postmortem review.",
+          "permissions": {
+            "create_pr": false,
+            "merge_green_pr": false,
+            "worker_compact_clear": false
+          },
+          "reference_paths": [
+            "docs/local-telemetry-workflow.md",
+            "docs/manual-qa-checklist.md"
+          ],
+          "supervision_mode": "strict",
+          "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+          "updated_at": "2026-05-20T21:18:05Z"
+        },
+        "worker_handoff": null
+      },
+      "manager_session": "telemetry-drill-manager-20260520",
+      "notable_pane_pattern": null,
+      "pane_signal": {
+        "captured": true,
+        "classifier": null,
+        "degraded": false,
+        "notable_pattern": null,
+        "reason": null,
+        "status_age_seconds": 30
+      },
+      "staleness_seconds": 30.225,
+      "state": "idle",
+      "task": "local-telemetry-drill-20260520",
+      "task_completed": true,
+      "worker_alive": true,
+      "worker_session": "telemetry-drill-worker-20260520"
+    },
+    "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+    "worker_capture_id": null
+  },
+  {
+    "completed_at": "2026-05-20T21:20:13Z",
+    "decision": null,
+    "error": null,
+    "health": null,
+    "health_observation_id": null,
+    "id": 109,
+    "manager_capture_id": null,
+    "manager_id": null,
+    "started_at": "2026-05-20T21:20:13Z",
+    "state": "succeeded",
+    "status": {
+      "binding_id": "binding-e78a7a93-c29b-4920-b96f-d989e071c4c4",
+      "ingest": {
+        "new_events": 0,
+        "new_offset": 125526,
+        "skipped_lines": 0
+      },
+      "kind": "session_cycle",
+      "last_event_subtype": "task_complete",
+      "last_state_event_at": "2026-05-20T21:18:43.775Z",
+      "manager_alive": true,
+      "manager_context": {
+        "acceptance_criteria": {
+          "deferred": [
+            {
+              "created_at": "2026-05-20T21:19:28Z",
+              "criterion": "Add a future lightweight smoke check for telemetry export contents.",
+              "evidence": {
+                "reason": "outside this live drill",
+                "source": "worker follow-up criterion"
+              },
+              "id": 78,
+              "proof": null,
+              "rationale": null,
+              "source": "worker_proposed",
+              "status": "deferred",
+              "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+              "updated_at": "2026-05-20T21:19:28Z"
+            },
+            {
+              "created_at": "2026-05-20T21:19:55Z",
+              "criterion": "Add a lightweight automated smoke check for telemetry export contents. Verification: run the smoke script/test and confirm it creates an export bundle containing the three telemetry artifacts plus manifest entries for each.",
+              "evidence": {},
+              "id": 81,
+              "proof": null,
+              "rationale": "Follow-up after this QA slice.",
+              "source": "worker_proposed",
+              "status": "deferred",
+              "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+              "updated_at": "2026-05-20T21:19:55Z"
+            }
+          ],
+          "open": [
+            {
+              "created_at": "2026-05-20T21:19:27Z",
+              "criterion": "docs/local-telemetry-workflow.md remains the canonical workflow reference and lists telemetry summary, timeline, search, export, sessions, and reconcile commands.",
+              "evidence": {
+                "capture": "commands/05-transcript-capture-worker.json",
+                "source": "worker receipt"
+              },
+              "id": 75,
+              "proof": null,
+              "rationale": null,
+              "source": "worker_proposed",
+              "status": "accepted",
+              "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+              "updated_at": "2026-05-20T21:19:27Z"
+            },
+            {
+              "created_at": "2026-05-20T21:19:27Z",
+              "criterion": "export-task includes telemetry-events.json, telemetry-summary.json, and telemetry-report.md by default.",
+              "evidence": {
+                "capture": "commands/05-transcript-capture-worker.json",
+                "source": "worker receipt"
+              },
+              "id": 76,
+              "proof": null,
+              "rationale": null,
+              "source": "worker_proposed",
+              "status": "accepted",
+              "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+              "updated_at": "2026-05-20T21:19:27Z"
+            },
+            {
+              "created_at": "2026-05-20T21:19:28Z",
+              "criterion": "The worker receipt is inspection-only and no product files were changed by the worker.",
+              "evidence": {
+                "capture": "commands/05-transcript-capture-worker.json",
+                "source": "worker receipt"
+              },
+              "id": 77,
+              "proof": null,
+              "rationale": null,
+              "source": "worker_proposed",
+              "status": "accepted",
+              "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+              "updated_at": "2026-05-20T21:19:28Z"
+            },
+            {
+              "created_at": "2026-05-20T21:19:55Z",
+              "criterion": "docs/local-telemetry-workflow.md remains the canonical workflow reference. Verification: inspect the doc and confirm it lists telemetry --summary, timeline, --search manager, export-task --zip --include-transcripts, sessions --state active, and reconcile --stale-cycles-seconds 1.",
+              "evidence": {},
+              "id": 79,
+              "proof": null,
+              "rationale": null,
+              "source": "worker_proposed",
+              "status": "accepted",
+              "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+              "updated_at": "2026-05-20T21:19:55Z"
+            },
+            {
+              "created_at": "2026-05-20T21:19:55Z",
+              "criterion": "export-task includes the three telemetry artifacts by default. Verification: inspect workerctl/export.py or run a disposable export and confirm telemetry-events.json, telemetry-summary.json, and telemetry-report.md are written and listed in manifest.json.",
+              "evidence": {},
+              "id": 80,
+              "proof": null,
+              "rationale": null,
+              "source": "worker_proposed",
+              "status": "accepted",
+              "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+              "updated_at": "2026-05-20T21:19:55Z"
+            },
+            {
+              "created_at": "2026-05-20T21:19:55Z",
+              "criterion": "The drill receipt is inspection-only. Verification: run git status --short and confirm no files were changed by the worker; any pre-existing untracked drill artifact directory is explicitly called out.",
+              "evidence": {},
+              "id": 82,
+              "proof": null,
+              "rationale": null,
+              "source": "worker_proposed",
+              "status": "accepted",
+              "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+              "updated_at": "2026-05-20T21:19:55Z"
+            }
+          ],
+          "proposed": [],
+          "rejected": [],
+          "satisfied": [],
+          "summary": {
+            "accepted": 6,
+            "deferred": 2,
+            "proposed": 0,
+            "rejected": 0,
+            "satisfied": 0
+          }
+        },
+        "criteria_negotiation": {
+          "needed": false,
+          "prompt": null,
+          "reason": "active_criteria_present",
+          "suggested_actions": []
+        },
+        "manager_config": {
+          "acceptance_criteria": [],
+          "created_at": "2026-05-20T21:18:05Z",
+          "guidelines": [],
+          "objective": "You are the manager in a disposable local telemetry drill.\n\nDo not edit files. Supervise the worker by evidence only. Use the durable workerctl surfaces available in manager context. Your job is to make one defensible decision after inspecting worker status/evidence, then leave a concise final note.\n\nAcceptance:\n- Use durable evidence, not raw Codex logs.\n- Mention whether the worker changed files.\n- Mention whether telemetry/replay/export should be sufficient for postmortem review.",
+          "permissions": {
+            "create_pr": false,
+            "merge_green_pr": false,
+            "worker_compact_clear": false
+          },
+          "reference_paths": [
+            "docs/local-telemetry-workflow.md",
+            "docs/manual-qa-checklist.md"
+          ],
+          "supervision_mode": "strict",
+          "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+          "updated_at": "2026-05-20T21:18:05Z"
+        },
+        "worker_handoff": null
+      },
+      "manager_session": "telemetry-drill-manager-20260520",
+      "notable_pane_pattern": null,
+      "pane_signal": {
+        "captured": true,
+        "classifier": null,
+        "degraded": false,
+        "notable_pattern": null,
+        "reason": null,
+        "status_age_seconds": 89
+      },
+      "staleness_seconds": 89.225,
+      "state": "idle",
+      "task": "local-telemetry-drill-20260520",
+      "task_completed": true,
+      "worker_alive": true,
+      "worker_session": "telemetry-drill-worker-20260520"
+    },
+    "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+    "worker_capture_id": null
+  },
+  {
+    "completed_at": "2026-05-20T21:20:23Z",
+    "decision": null,
+    "error": null,
+    "health": null,
+    "health_observation_id": null,
+    "id": 110,
+    "manager_capture_id": null,
+    "manager_id": null,
+    "started_at": "2026-05-20T21:20:23Z",
+    "state": "succeeded",
+    "status": {
+      "binding_id": "binding-e78a7a93-c29b-4920-b96f-d989e071c4c4",
+      "ingest": {
+        "new_events": 0,
+        "new_offset": 125526,
+        "skipped_lines": 0
+      },
+      "kind": "session_cycle",
+      "last_event_subtype": "task_complete",
+      "last_state_event_at": "2026-05-20T21:18:43.775Z",
+      "manager_alive": true,
+      "manager_context": {
+        "acceptance_criteria": {
+          "deferred": [
+            {
+              "created_at": "2026-05-20T21:19:28Z",
+              "criterion": "Add a future lightweight smoke check for telemetry export contents.",
+              "evidence": {
+                "reason": "outside this live drill",
+                "source": "worker follow-up criterion"
+              },
+              "id": 78,
+              "proof": null,
+              "rationale": null,
+              "source": "worker_proposed",
+              "status": "deferred",
+              "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+              "updated_at": "2026-05-20T21:19:28Z"
+            },
+            {
+              "created_at": "2026-05-20T21:19:55Z",
+              "criterion": "Add a lightweight automated smoke check for telemetry export contents. Verification: run the smoke script/test and confirm it creates an export bundle containing the three telemetry artifacts plus manifest entries for each.",
+              "evidence": {},
+              "id": 81,
+              "proof": null,
+              "rationale": "Follow-up after this QA slice.",
+              "source": "worker_proposed",
+              "status": "deferred",
+              "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+              "updated_at": "2026-05-20T21:19:55Z"
+            }
+          ],
+          "open": [
+            {
+              "created_at": "2026-05-20T21:19:27Z",
+              "criterion": "docs/local-telemetry-workflow.md remains the canonical workflow reference and lists telemetry summary, timeline, search, export, sessions, and reconcile commands.",
+              "evidence": {
+                "capture": "commands/05-transcript-capture-worker.json",
+                "source": "worker receipt"
+              },
+              "id": 75,
+              "proof": null,
+              "rationale": null,
+              "source": "worker_proposed",
+              "status": "accepted",
+              "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+              "updated_at": "2026-05-20T21:19:27Z"
+            },
+            {
+              "created_at": "2026-05-20T21:19:27Z",
+              "criterion": "export-task includes telemetry-events.json, telemetry-summary.json, and telemetry-report.md by default.",
+              "evidence": {
+                "capture": "commands/05-transcript-capture-worker.json",
+                "source": "worker receipt"
+              },
+              "id": 76,
+              "proof": null,
+              "rationale": null,
+              "source": "worker_proposed",
+              "status": "accepted",
+              "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+              "updated_at": "2026-05-20T21:19:27Z"
+            },
+            {
+              "created_at": "2026-05-20T21:19:28Z",
+              "criterion": "The worker receipt is inspection-only and no product files were changed by the worker.",
+              "evidence": {
+                "capture": "commands/05-transcript-capture-worker.json",
+                "source": "worker receipt"
+              },
+              "id": 77,
+              "proof": null,
+              "rationale": null,
+              "source": "worker_proposed",
+              "status": "accepted",
+              "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+              "updated_at": "2026-05-20T21:19:28Z"
+            },
+            {
+              "created_at": "2026-05-20T21:19:55Z",
+              "criterion": "docs/local-telemetry-workflow.md remains the canonical workflow reference. Verification: inspect the doc and confirm it lists telemetry --summary, timeline, --search manager, export-task --zip --include-transcripts, sessions --state active, and reconcile --stale-cycles-seconds 1.",
+              "evidence": {},
+              "id": 79,
+              "proof": null,
+              "rationale": null,
+              "source": "worker_proposed",
+              "status": "accepted",
+              "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+              "updated_at": "2026-05-20T21:19:55Z"
+            },
+            {
+              "created_at": "2026-05-20T21:19:55Z",
+              "criterion": "export-task includes the three telemetry artifacts by default. Verification: inspect workerctl/export.py or run a disposable export and confirm telemetry-events.json, telemetry-summary.json, and telemetry-report.md are written and listed in manifest.json.",
+              "evidence": {},
+              "id": 80,
+              "proof": null,
+              "rationale": null,
+              "source": "worker_proposed",
+              "status": "accepted",
+              "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+              "updated_at": "2026-05-20T21:19:55Z"
+            },
+            {
+              "created_at": "2026-05-20T21:19:55Z",
+              "criterion": "The drill receipt is inspection-only. Verification: run git status --short and confirm no files were changed by the worker; any pre-existing untracked drill artifact directory is explicitly called out.",
+              "evidence": {},
+              "id": 82,
+              "proof": null,
+              "rationale": null,
+              "source": "worker_proposed",
+              "status": "accepted",
+              "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+              "updated_at": "2026-05-20T21:19:55Z"
+            }
+          ],
+          "proposed": [],
+          "rejected": [],
+          "satisfied": [],
+          "summary": {
+            "accepted": 6,
+            "deferred": 2,
+            "proposed": 0,
+            "rejected": 0,
+            "satisfied": 0
+          }
+        },
+        "criteria_negotiation": {
+          "needed": false,
+          "prompt": null,
+          "reason": "active_criteria_present",
+          "suggested_actions": []
+        },
+        "manager_config": {
+          "acceptance_criteria": [],
+          "created_at": "2026-05-20T21:18:05Z",
+          "guidelines": [],
+          "objective": "You are the manager in a disposable local telemetry drill.\n\nDo not edit files. Supervise the worker by evidence only. Use the durable workerctl surfaces available in manager context. Your job is to make one defensible decision after inspecting worker status/evidence, then leave a concise final note.\n\nAcceptance:\n- Use durable evidence, not raw Codex logs.\n- Mention whether the worker changed files.\n- Mention whether telemetry/replay/export should be sufficient for postmortem review.",
+          "permissions": {
+            "create_pr": false,
+            "merge_green_pr": false,
+            "worker_compact_clear": false
+          },
+          "reference_paths": [
+            "docs/local-telemetry-workflow.md",
+            "docs/manual-qa-checklist.md"
+          ],
+          "supervision_mode": "strict",
+          "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+          "updated_at": "2026-05-20T21:18:05Z"
+        },
+        "worker_handoff": null
+      },
+      "manager_session": "telemetry-drill-manager-20260520",
+      "notable_pane_pattern": null,
+      "pane_signal": {
+        "captured": true,
+        "classifier": null,
+        "degraded": false,
+        "notable_pattern": null,
+        "reason": null,
+        "status_age_seconds": 99
+      },
+      "staleness_seconds": 99.225,
+      "state": "idle",
+      "task": "local-telemetry-drill-20260520",
+      "task_completed": true,
+      "worker_alive": true,
+      "worker_session": "telemetry-drill-worker-20260520"
+    },
+    "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+    "worker_capture_id": null
+  }
+]

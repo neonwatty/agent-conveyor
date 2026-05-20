@@ -1,0 +1,123 @@
+
+╭────────────────────────────────────────────────╮
+│ >_ OpenAI Codex (v0.132.0)                     │
+│                                                │
+│ model:       gpt-5.5 medium   /model to change │
+│ directory:   ~/Desktop/codex-terminal-manager  │
+│ permissions: YOLO mode                         │
+╰────────────────────────────────────────────────╯
+
+  Tip: New Use /fast to enable our fastest inference with increased plan usage.
+
+
+› You are the worker in a disposable local telemetry drill for codex-terminal-
+  manager.
+
+  Do not edit files. Do not commit. Inspect the repository only enough to
+  produce a concise receipt.
+
+  Task:
+  - Confirm the local telemetry workflow commands that should be used after
+  this drill.
+  - Mention the expected export artifacts: telemetry-events.json, telemetry-
+  summary.json, telemetry-report.md.
+  - End with a short "Worker receipt" section and say whether you changed any
+  files.
+
+
+⚠ Skill descriptions were shortened to fit the 2% skills context budget. Codex
+  can still see every skill, but some descriptions are shorter. Disable unused
+  skills or plugins to leave more room for the rest.
+
+• I’ll inspect the repo commands without touching files, then return a short
+  receipt with the telemetry workflow and artifact names.
+
+• Ran pwd && rg -n "telemetry|telemetry-events|telemetry-summary|
+  │ telemetry-report|export" -S .
+  └ /Users/neonwatty/Desktop/codex-terminal-manager
+    ./skills/manage-codex-workers/SKILL.md:399:criteria negotiation, audited
+    … +1324 lines (ctrl + t to view transcript)
+    live-qa-artifacts/2026-05-19-live-smoke-current-cli-smoke-20260519052901/
+    export",
+
+────────────────────────────────────────────────────────────────────────────────
+
+• The repo has a dedicated docs/local-telemetry-workflow.md, and the CLI/export
+  implementation confirms the same artifact names. I’m reading those exact
+  sections now so the receipt matches the supported workflow.
+
+• Explored
+  └ Read local-telemetry-workflow.md, README.md, export.py
+
+• Ran git status --short
+  └ ?? docs/live-qa-artifacts/2026-05-20-local-telemetry-drill/
+
+────────────────────────────────────────────────────────────────────────────────
+
+• Confirmed from docs/local-telemetry-workflow.md, README.md, and workerctl/
+  export.py.
+
+  Use these local telemetry workflow commands after the drill:
+
+  scripts/workerctl telemetry --summary --run <run_id>
+  scripts/workerctl telemetry --run <run_id>
+  scripts/workerctl telemetry --search manager --run <run_id>
+  scripts/workerctl export-task <task> --zip --include-transcripts
+  scripts/workerctl sessions --state active
+  scripts/workerctl reconcile --stale-cycles-seconds 1
+
+  For durable JSON evidence, use:
+
+  scripts/workerctl telemetry --summary --run <run_id> --json > telemetry-
+  summary.json
+  scripts/workerctl telemetry --run <run_id> --json > telemetry-events.json
+
+  Expected export artifacts are included by export-task by default:
+
+  - telemetry-events.json
+  - telemetry-summary.json
+  - telemetry-report.md
+
+  Worker Receipt
+
+  Inspected only: docs/local-telemetry-workflow.md, README.md, workerctl/
+  export.py, and git status --short.
+
+  Changed files: no. I did not edit or commit anything. Current status showed an
+  existing untracked directory: docs/live-qa-artifacts/2026-05-20-local-
+  telemetry-drill/.
+
+────────────────────────────────────────────────────────────────────────────────
+
+
+› Please propose 2-4 acceptance criteria for the current slice. Split them into
+  must-have current-task criteria and follow-up criteria. Include the
+  verification you expect for each.
+
+
+• Must-have current-task criteria:
+
+  1. docs/local-telemetry-workflow.md remains the canonical workflow reference.
+     Verification: inspect the doc and confirm it lists telemetry --summary,
+     timeline, --search manager, export-task --zip --include-transcripts,
+     sessions --state active, and reconcile --stale-cycles-seconds 1.
+  2. export-task includes the three telemetry artifacts by default.
+     Verification: inspect workerctl/export.py or run a disposable export and
+     confirm telemetry-events.json, telemetry-summary.json, and telemetry-
+     report.md are written and listed in manifest.json.
+  3. The drill receipt is inspection-only.
+     Verification: run git status --short and confirm no files were changed by
+     the worker; any pre-existing untracked drill artifact directory is
+     explicitly called out.
+
+  Follow-up criteria:
+
+  1. Add a lightweight automated smoke check for telemetry export contents.
+     Verification: run the smoke script/test and confirm it creates an export
+     bundle containing the three telemetry artifacts plus manifest entries for
+     each.
+
+
+› Explain this codebase
+
+  gpt-5.5 medium · ~/Desktop/codex-terminal-manager · codex/issue-86-t010-telem…

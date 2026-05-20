@@ -1,0 +1,156 @@
+{
+  "affected_criterion": {
+    "created_at": "2026-05-20T21:19:55Z",
+    "criterion": "docs/local-telemetry-workflow.md remains the canonical workflow reference. Verification: inspect the doc and confirm it lists telemetry --summary, timeline, --search manager, export-task --zip --include-transcripts, sessions --state active, and reconcile --stale-cycles-seconds 1.",
+    "evidence": {
+      "artifact_root": "docs/live-qa-artifacts/2026-05-20-local-telemetry-drill",
+      "criteria_list": "commands/14-criteria-list-before-satisfy.json",
+      "status": "pass",
+      "worker_capture": "worker-capture.txt",
+      "worker_transcript": "commands/05-transcript-capture-worker.json"
+    },
+    "id": 79,
+    "proof": null,
+    "rationale": null,
+    "source": "worker_proposed",
+    "status": "satisfied",
+    "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+    "updated_at": "2026-05-20T21:20:24Z"
+  },
+  "criteria": [
+    {
+      "created_at": "2026-05-20T21:19:27Z",
+      "criterion": "docs/local-telemetry-workflow.md remains the canonical workflow reference and lists telemetry summary, timeline, search, export, sessions, and reconcile commands.",
+      "evidence": {
+        "artifact_root": "docs/live-qa-artifacts/2026-05-20-local-telemetry-drill",
+        "criteria_list": "commands/14-criteria-list-before-satisfy.json",
+        "status": "pass",
+        "worker_capture": "worker-capture.txt",
+        "worker_transcript": "commands/05-transcript-capture-worker.json"
+      },
+      "id": 75,
+      "proof": null,
+      "rationale": null,
+      "source": "worker_proposed",
+      "status": "satisfied",
+      "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+      "updated_at": "2026-05-20T21:20:24Z"
+    },
+    {
+      "created_at": "2026-05-20T21:19:27Z",
+      "criterion": "export-task includes telemetry-events.json, telemetry-summary.json, and telemetry-report.md by default.",
+      "evidence": {
+        "artifact_root": "docs/live-qa-artifacts/2026-05-20-local-telemetry-drill",
+        "criteria_list": "commands/14-criteria-list-before-satisfy.json",
+        "status": "pass",
+        "worker_capture": "worker-capture.txt",
+        "worker_transcript": "commands/05-transcript-capture-worker.json"
+      },
+      "id": 76,
+      "proof": null,
+      "rationale": null,
+      "source": "worker_proposed",
+      "status": "satisfied",
+      "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+      "updated_at": "2026-05-20T21:20:24Z"
+    },
+    {
+      "created_at": "2026-05-20T21:19:28Z",
+      "criterion": "The worker receipt is inspection-only and no product files were changed by the worker.",
+      "evidence": {
+        "artifact_root": "docs/live-qa-artifacts/2026-05-20-local-telemetry-drill",
+        "criteria_list": "commands/14-criteria-list-before-satisfy.json",
+        "status": "pass",
+        "worker_capture": "worker-capture.txt",
+        "worker_transcript": "commands/05-transcript-capture-worker.json"
+      },
+      "id": 77,
+      "proof": null,
+      "rationale": null,
+      "source": "worker_proposed",
+      "status": "satisfied",
+      "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+      "updated_at": "2026-05-20T21:20:24Z"
+    },
+    {
+      "created_at": "2026-05-20T21:19:28Z",
+      "criterion": "Add a future lightweight smoke check for telemetry export contents.",
+      "evidence": {
+        "reason": "outside this live drill",
+        "source": "worker follow-up criterion"
+      },
+      "id": 78,
+      "proof": null,
+      "rationale": null,
+      "source": "worker_proposed",
+      "status": "deferred",
+      "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+      "updated_at": "2026-05-20T21:19:28Z"
+    },
+    {
+      "created_at": "2026-05-20T21:19:55Z",
+      "criterion": "docs/local-telemetry-workflow.md remains the canonical workflow reference. Verification: inspect the doc and confirm it lists telemetry --summary, timeline, --search manager, export-task --zip --include-transcripts, sessions --state active, and reconcile --stale-cycles-seconds 1.",
+      "evidence": {
+        "artifact_root": "docs/live-qa-artifacts/2026-05-20-local-telemetry-drill",
+        "criteria_list": "commands/14-criteria-list-before-satisfy.json",
+        "status": "pass",
+        "worker_capture": "worker-capture.txt",
+        "worker_transcript": "commands/05-transcript-capture-worker.json"
+      },
+      "id": 79,
+      "proof": null,
+      "rationale": null,
+      "source": "worker_proposed",
+      "status": "satisfied",
+      "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+      "updated_at": "2026-05-20T21:20:24Z"
+    },
+    {
+      "created_at": "2026-05-20T21:19:55Z",
+      "criterion": "export-task includes the three telemetry artifacts by default. Verification: inspect workerctl/export.py or run a disposable export and confirm telemetry-events.json, telemetry-summary.json, and telemetry-report.md are written and listed in manifest.json.",
+      "evidence": {},
+      "id": 80,
+      "proof": null,
+      "rationale": null,
+      "source": "worker_proposed",
+      "status": "accepted",
+      "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+      "updated_at": "2026-05-20T21:19:55Z"
+    },
+    {
+      "created_at": "2026-05-20T21:19:55Z",
+      "criterion": "Add a lightweight automated smoke check for telemetry export contents. Verification: run the smoke script/test and confirm it creates an export bundle containing the three telemetry artifacts plus manifest entries for each.",
+      "evidence": {},
+      "id": 81,
+      "proof": null,
+      "rationale": "Follow-up after this QA slice.",
+      "source": "worker_proposed",
+      "status": "deferred",
+      "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+      "updated_at": "2026-05-20T21:19:55Z"
+    },
+    {
+      "created_at": "2026-05-20T21:19:55Z",
+      "criterion": "The drill receipt is inspection-only. Verification: run git status --short and confirm no files were changed by the worker; any pre-existing untracked drill artifact directory is explicitly called out.",
+      "evidence": {},
+      "id": 82,
+      "proof": null,
+      "rationale": null,
+      "source": "worker_proposed",
+      "status": "accepted",
+      "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+      "updated_at": "2026-05-20T21:19:55Z"
+    }
+  ],
+  "summary": {
+    "accepted": 2,
+    "deferred": 2,
+    "proposed": 0,
+    "rejected": 0,
+    "satisfied": 4
+  },
+  "task": {
+    "id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+    "name": "local-telemetry-drill-20260520"
+  }
+}

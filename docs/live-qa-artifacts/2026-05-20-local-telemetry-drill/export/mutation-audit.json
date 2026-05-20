@@ -1,0 +1,113 @@
+{
+  "ok": false,
+  "records": [
+    {
+      "allowed_decisions": [
+        "stop"
+      ],
+      "command": {
+        "created_at": "2026-05-20T21:21:34Z",
+        "id": "command-a18a25e0-4846-4343-8bf6-dd70d9a8ef64",
+        "state": "failed",
+        "type": "finish_task"
+      },
+      "effect": {
+        "dry_run": false,
+        "permission_check": null,
+        "send_text": null,
+        "sent": false,
+        "slash_command": null,
+        "worker_session": "telemetry-drill-worker-20260520"
+      },
+      "expected_failure": false,
+      "linked_decision": {
+        "created_at": "2026-05-20T21:21:06Z",
+        "decision": "inspect",
+        "id": 44,
+        "manager_cycle_id": 110,
+        "manager_id": null,
+        "reason": "Accept current local telemetry drill slice: worker receipt matches requested workflow/artifacts, accepted criteria are satisfied from durable evidence, and follow-up smoke coverage is deferred.",
+        "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c"
+      },
+      "nearest_prior_decision": {
+        "created_at": "2026-05-20T21:21:34Z",
+        "decision": "stop",
+        "id": 45,
+        "manager_cycle_id": null,
+        "manager_id": null,
+        "payload": {
+          "command_id": "command-a18a25e0-4846-4343-8bf6-dd70d9a8ef64",
+          "source": "finish_task"
+        },
+        "reason": "T010 local telemetry drill accepted by manager decision 44; durable telemetry/replay/export evidence captured.",
+        "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c"
+      },
+      "ok": false,
+      "warnings": [
+        "decision_mismatch",
+        "linked_decision_incompatible"
+      ]
+    },
+    {
+      "allowed_decisions": [
+        "stop"
+      ],
+      "command": {
+        "created_at": "2026-05-20T21:21:43Z",
+        "id": "command-4698edea-5ea3-4552-8329-7d4611db1e4d",
+        "state": "succeeded",
+        "type": "finish_task"
+      },
+      "effect": {
+        "dry_run": false,
+        "permission_check": null,
+        "send_text": null,
+        "sent": false,
+        "slash_command": null,
+        "worker_session": "telemetry-drill-worker-20260520"
+      },
+      "expected_failure": false,
+      "linked_decision": {
+        "created_at": "2026-05-20T21:21:43Z",
+        "decision": "stop",
+        "id": 46,
+        "manager_cycle_id": null,
+        "manager_id": null,
+        "payload": {
+          "command_id": "command-4698edea-5ea3-4552-8329-7d4611db1e4d",
+          "source": "finish_task"
+        },
+        "reason": "T010 local telemetry drill accepted by manager decision 44; durable telemetry/replay/export evidence captured.",
+        "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c"
+      },
+      "nearest_prior_decision": {
+        "created_at": "2026-05-20T21:21:43Z",
+        "decision": "stop",
+        "id": 46,
+        "manager_cycle_id": null,
+        "manager_id": null,
+        "payload": {
+          "command_id": "command-4698edea-5ea3-4552-8329-7d4611db1e4d",
+          "source": "finish_task"
+        },
+        "reason": "T010 local telemetry drill accepted by manager decision 44; durable telemetry/replay/export evidence captured.",
+        "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c"
+      },
+      "ok": true,
+      "warnings": []
+    }
+  ],
+  "summary": {
+    "mutations": 2,
+    "with_warnings": 1
+  },
+  "task": {
+    "created_at": "2026-05-20T21:18:05Z",
+    "goal": "Disposable realistic manager/worker telemetry drill for issue 86.",
+    "id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+    "name": "local-telemetry-drill-20260520",
+    "state": "done",
+    "summary": "Run local telemetry drill and capture evidence artifacts.",
+    "updated_at": "2026-05-20T21:21:43Z"
+  }
+}

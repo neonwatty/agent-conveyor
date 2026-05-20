@@ -1,0 +1,163 @@
+• I’ll close this as a manager decision from durable artifacts only: the
+  transcript capture receipt, criteria state, saved command outputs, replay/
+  export surfaces, and telemetry. I’m recording the worker-proposed criteria
+  first so the final decision has an auditable criteria list.
+
+• Ran /Users/neonwatty/Desktop/codex-terminal-manager/scripts/workerctl criteria
+  │ local-telemetry-drill-20260520 --add --criterion "docs/
+  │ local-telemetry-workflow.md remains the canonical workflow reference.
+  │ … +4 lines
+  └ {
+      "affected_criterion": {
+    … +99 lines (ctrl + t to view transcript)
+      }
+    }
+
+• Ran /Users/neonwatty/Desktop/codex-terminal-manager/scripts/workerctl criteria
+  │ local-telemetry-drill-20260520 --add --criterion "export-task includes the
+  │ three telemetry artifacts by default. Verification: inspect workerctl/
+  │ … +3 lines
+  └ {
+      "affected_criterion": {
+    … +110 lines (ctrl + t to view transcript)
+      }
+    }
+
+• Ran /Users/neonwatty/Desktop/codex-terminal-manager/scripts/workerctl criteria
+  │ local-telemetry-drill-20260520 --add --criterion "Add a lightweight
+  │ automated smoke check for telemetry export contents. Verification: run the
+  │ … +4 lines
+  └ {
+      "affected_criterion": {
+    … +122 lines (ctrl + t to view transcript)
+      }
+    }
+
+• Ran /Users/neonwatty/Desktop/codex-terminal-manager/scripts/workerctl criteria
+  │ local-telemetry-drill-20260520 --add --criterion "The drill receipt is
+  │ inspection-only. Verification: run git status --short and confirm no files
+  │ … +3 lines
+  └ {
+      "affected_criterion": {
+    … +133 lines (ctrl + t to view transcript)
+      }
+    }
+
+────────────────────────────────────────────────────────────────────────────────
+
+• The criteria list already had a cleaner earlier set with evidence, and my
+  duplicate adds landed as separate entries. I’m going to base the final
+  decision on the durable criteria list as-is, then satisfy the accepted
+  criteria with the durable receipt/command evidence rather than asking the
+  worker for more.
+
+• Ran /Users/neonwatty/Desktop/codex-terminal-manager/scripts/workerctl criteria
+  │ local-telemetry-drill-20260520
+  └ usage: workerctl criteria [-h] (--list | --add | --accept ID | --satisfy ID
+    |
+    … +5 lines (ctrl + t to view transcript)
+    workerctl criteria: error: one of the arguments --list --add --accept
+    --satisfy --defer --reject is required
+
+• Ran /Users/neonwatty/Desktop/codex-terminal-manager/scripts/workerctl
+  │ telemetry --summary --run run-1b863f70-d6ff-4463-982d-40d4be24efe9 --json
+  └ {
+      "by_actor": {
+    … +20 lines (ctrl + t to view transcript)
+      "total": 31
+    }
+
+• Ran /Users/neonwatty/Desktop/codex-terminal-manager/scripts/workerctl --help |
+  │ sed -n '1,220p'
+  └ usage: workerctl [-h]
+
+    … +111 lines (ctrl + t to view transcript)
+    options:
+      -h, --help            show this help message and exit
+
+• Ran /Users/neonwatty/Desktop/codex-terminal-manager/scripts/workerctl
+  │ telemetry --run run-1b863f70-d6ff-4463-982d-40d4be24efe9 --json
+  └ [
+      {
+    … +682 lines (ctrl + t to view transcript)
+      }
+    ]
+
+• Ran /Users/neonwatty/Desktop/codex-terminal-manager/scripts/workerctl commands
+  │ local-telemetry-drill-20260520
+  └ usage: workerctl [-h]
+
+    … +8 lines (ctrl + t to view transcript)
+    open-manager,stop} ...
+    workerctl: error: unrecognized arguments: local-telemetry-drill-20260520
+
+• Ran /Users/neonwatty/Desktop/codex-terminal-manager/scripts/workerctl criteria
+  │ local-telemetry-drill-20260520 --list
+  └ {
+      "criteria": [
+    … +121 lines (ctrl + t to view transcript)
+      }
+    }
+
+• Ran /Users/neonwatty/Desktop/codex-terminal-manager/scripts/workerctl replay
+  │ local-telemetry-drill-20260520
+  └ Task: local-telemetry-drill-20260520
+    State: candidate
+    … +27 lines (ctrl + t to view transcript)
+    21:20:13  manager          observed session telemetry-drill-worker-20260520
+    state idle (staleness 89.2s)
+
+• Ran /Users/neonwatty/Desktop/codex-terminal-manager/scripts/workerctl
+  │ export-task --help
+  └ usage: workerctl export-task [-h] [--output OUTPUT] [--zip]
+                                 [--include-transcripts]
+    … +15 lines (ctrl + t to view transcript)
+                            full-transcript replay.
+      --path PATH           Override the workerctl database path.
+
+• Ran /Users/neonwatty/Desktop/codex-terminal-manager/scripts/workerctl commands
+  │ --help
+  └ usage: workerctl commands [-h] [--task TASK]
+                              [--state {pending,attempted,succeeded,failed}]
+    … +12 lines (ctrl + t to view transcript)
+      --json                Print commands as JSON.
+      --path PATH           Override the workerctl database path.
+
+• Ran /Users/neonwatty/Desktop/codex-terminal-manager/scripts/workerctl
+  │ export-task local-telemetry-drill-20260520 --output /tmp/
+  │ local-telemetry-drill-20260520-export --zip --include-transcripts
+  └ {
+      "archive": "/private/tmp/local-telemetry-drill-20260520-export.zip",
+      "export_dir": "/private/tmp/local-telemetry-drill-20260520-export",
+      "task": "local-telemetry-drill-20260520"
+    }
+
+• Ran /Users/neonwatty/Desktop/codex-terminal-manager/scripts/workerctl cycle
+  │ local-telemetry-drill-20260520
+  └ {
+      "binding_id": "binding-e78a7a93-c29b-4920-b96f-d989e071c4c4",
+    … +178 lines (ctrl + t to view transcript)
+      "worker_session": "telemetry-drill-worker-20260520"
+    }
+
+────────────────────────────────────────────────────────────────────────────────
+
+• The replay shows the worker reached idle/task-complete and the criteria state
+  now has accepted current-task criteria plus deferred future smoke coverage. I
+  also generated an export bundle under /tmp to verify the exported postmortem
+  artifacts. Next I’m checking the export manifest and command registry.
+
+• Explored
+  └ List local-telemetry-drill-20260520-export
+    Read manifest.json, telemetry-report.md
+
+• Ran /Users/neonwatty/Desktop/codex-terminal-manager/scripts/workerctl commands
+  │ --task local-telemetry-drill-20260520 --json
+  └ []
+
+◦ Working (2m 22s • esc to interrupt)
+
+
+› Explain this codebase
+
+  gpt-5.5 medium · ~/Desktop/codex-terminal-manager · codex/issue-86-t010-telem…

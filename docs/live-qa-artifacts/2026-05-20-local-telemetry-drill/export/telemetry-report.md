@@ -1,0 +1,104 @@
+# Telemetry Report: local-telemetry-drill-20260520
+
+- Task ID: `task-85db9869-d6cc-4ecc-a576-615dcef33b6c`
+- Total events: 72
+- First event: 2026-05-20T21:18:05Z
+- Last event: 2026-05-20T21:21:43Z
+
+## Event Types
+- `acceptance_criterion_added`: 8
+- `acceptance_criterion_updated`: 12
+- `codex_events_ingested`: 8
+- `command_attempted`: 2
+- `command_created`: 2
+- `command_failed`: 1
+- `command_succeeded`: 1
+- `manager_cycle_started`: 8
+- `manager_cycle_succeeded`: 8
+- `manager_decision_recorded`: 3
+- `pair_binding_created`: 1
+- `pair_manager_config_seeded`: 1
+- `pair_manager_spawned`: 1
+- `pair_run_created`: 1
+- `pair_started`: 1
+- `pair_task_resolved`: 1
+- `pair_worker_spawned`: 1
+- `run_finished`: 1
+- `session_nudge_succeeded`: 2
+- `task_finished`: 1
+- `terminal_capture_recorded`: 5
+- `transcript_segment_recorded`: 3
+
+## Timeline
+- 2026-05-20T21:18:05Z `workerctl` `pair_started` [info]: Started pair setup for task local-telemetry-drill-20260520.
+- 2026-05-20T21:18:05Z `workerctl` `pair_task_resolved` [info]: Created task local-telemetry-drill-20260520.
+- 2026-05-20T21:18:05Z `workerctl` `pair_manager_config_seeded` [info]: Seeded manager config for task local-telemetry-drill-20260520.
+- 2026-05-20T21:18:09Z `workerctl` `pair_worker_spawned` [info]: Spawned worker session telemetry-drill-worker-20260520.
+- 2026-05-20T21:18:11Z `workerctl` `pair_manager_spawned` [info]: Spawned manager session telemetry-drill-manager-20260520.
+- 2026-05-20T21:18:11Z `workerctl` `pair_binding_created` [info]: Bound worker telemetry-drill-worker-20260520 and manager telemetry-drill-manager-20260520.
+- 2026-05-20T21:18:11Z `workerctl` `pair_run_created` [info]: Created active telemetry run for pair task local-telemetry-drill-20260520.
+- 2026-05-20T21:18:25Z `manager` `manager_cycle_started` [info]: Started manager cycle for task local-telemetry-drill-20260520.
+- 2026-05-20T21:18:25Z `workerctl` `codex_events_ingested` [info]: Ingested Codex events for session telemetry-drill-worker-20260520.
+- 2026-05-20T21:18:25Z `manager` `manager_cycle_succeeded` [info]: Manager cycle succeeded for task local-telemetry-drill-20260520.
+- 2026-05-20T21:18:31Z `manager` `manager_cycle_started` [info]: Started manager cycle for task local-telemetry-drill-20260520.
+- 2026-05-20T21:18:31Z `workerctl` `codex_events_ingested` [info]: Ingested Codex events for session telemetry-drill-worker-20260520.
+- 2026-05-20T21:18:31Z `manager` `manager_cycle_succeeded` [info]: Manager cycle succeeded for task local-telemetry-drill-20260520.
+- 2026-05-20T21:18:38Z `workerctl` `session_nudge_succeeded` [info]: Nudged session telemetry-drill-worker-20260520.
+- 2026-05-20T21:18:42Z `manager` `manager_cycle_started` [info]: Started manager cycle for task local-telemetry-drill-20260520.
+- 2026-05-20T21:18:42Z `workerctl` `codex_events_ingested` [info]: Ingested Codex events for session telemetry-drill-worker-20260520.
+- 2026-05-20T21:18:42Z `manager` `manager_cycle_succeeded` [info]: Manager cycle succeeded for task local-telemetry-drill-20260520.
+- 2026-05-20T21:18:56Z `manager` `manager_cycle_started` [info]: Started manager cycle for task local-telemetry-drill-20260520.
+- 2026-05-20T21:18:56Z `workerctl` `codex_events_ingested` [info]: Ingested Codex events for session telemetry-drill-worker-20260520.
+- 2026-05-20T21:18:56Z `manager` `manager_cycle_succeeded` [info]: Manager cycle succeeded for task local-telemetry-drill-20260520.
+- 2026-05-20T21:18:56Z `manager` `manager_cycle_started` [info]: Started manager cycle for task local-telemetry-drill-20260520.
+- 2026-05-20T21:18:56Z `workerctl` `codex_events_ingested` [info]: Ingested Codex events for session telemetry-drill-worker-20260520.
+- 2026-05-20T21:18:56Z `manager` `manager_cycle_succeeded` [info]: Manager cycle succeeded for task local-telemetry-drill-20260520.
+- 2026-05-20T21:19:14Z `manager` `manager_cycle_started` [info]: Started manager cycle for task local-telemetry-drill-20260520.
+- 2026-05-20T21:19:14Z `workerctl` `codex_events_ingested` [info]: Ingested Codex events for session telemetry-drill-worker-20260520.
+- 2026-05-20T21:19:14Z `manager` `manager_cycle_succeeded` [info]: Manager cycle succeeded for task local-telemetry-drill-20260520.
+- 2026-05-20T21:19:14Z `workerctl` `terminal_capture_recorded` [info]: Recorded worker terminal capture.
+- 2026-05-20T21:19:14Z `workerctl` `transcript_segment_recorded` [info]: Recorded worker transcript segment.
+- 2026-05-20T21:19:27Z `workerctl` `acceptance_criterion_added` [info]: Added acceptance criterion.
+- 2026-05-20T21:19:27Z `workerctl` `acceptance_criterion_added` [info]: Added acceptance criterion.
+- 2026-05-20T21:19:28Z `workerctl` `acceptance_criterion_added` [info]: Added acceptance criterion.
+- 2026-05-20T21:19:28Z `workerctl` `acceptance_criterion_added` [info]: Added acceptance criterion.
+- 2026-05-20T21:19:37Z `workerctl` `session_nudge_succeeded` [info]: Nudged session telemetry-drill-manager-20260520.
+- 2026-05-20T21:19:55Z `workerctl` `acceptance_criterion_added` [info]: Added acceptance criterion.
+- 2026-05-20T21:19:55Z `workerctl` `acceptance_criterion_added` [info]: Added acceptance criterion.
+- 2026-05-20T21:19:55Z `workerctl` `acceptance_criterion_added` [info]: Added acceptance criterion.
+- 2026-05-20T21:19:55Z `workerctl` `acceptance_criterion_added` [info]: Added acceptance criterion.
+- 2026-05-20T21:20:13Z `manager` `manager_cycle_started` [info]: Started manager cycle for task local-telemetry-drill-20260520.
+- 2026-05-20T21:20:13Z `workerctl` `codex_events_ingested` [info]: Ingested Codex events for session telemetry-drill-worker-20260520.
+- 2026-05-20T21:20:13Z `manager` `manager_cycle_succeeded` [info]: Manager cycle succeeded for task local-telemetry-drill-20260520.
+- 2026-05-20T21:20:23Z `manager` `manager_cycle_started` [info]: Started manager cycle for task local-telemetry-drill-20260520.
+- 2026-05-20T21:20:23Z `workerctl` `codex_events_ingested` [info]: Ingested Codex events for session telemetry-drill-worker-20260520.
+- 2026-05-20T21:20:23Z `manager` `manager_cycle_succeeded` [info]: Manager cycle succeeded for task local-telemetry-drill-20260520.
+- 2026-05-20T21:20:24Z `workerctl` `acceptance_criterion_updated` [info]: Updated acceptance criterion.
+- 2026-05-20T21:20:24Z `workerctl` `acceptance_criterion_updated` [info]: Updated acceptance criterion.
+- 2026-05-20T21:20:24Z `workerctl` `acceptance_criterion_updated` [info]: Updated acceptance criterion.
+- 2026-05-20T21:20:24Z `workerctl` `acceptance_criterion_updated` [info]: Updated acceptance criterion.
+- 2026-05-20T21:20:24Z `workerctl` `acceptance_criterion_updated` [info]: Updated acceptance criterion.
+- 2026-05-20T21:20:24Z `workerctl` `acceptance_criterion_updated` [info]: Updated acceptance criterion.
+- 2026-05-20T21:20:33Z `workerctl` `terminal_capture_recorded` [info]: Recorded manager terminal capture.
+- 2026-05-20T21:20:33Z `workerctl` `transcript_segment_recorded` [info]: Recorded manager transcript segment.
+- 2026-05-20T21:20:53Z `workerctl` `acceptance_criterion_updated` [info]: Updated acceptance criterion.
+- 2026-05-20T21:20:53Z `workerctl` `acceptance_criterion_updated` [info]: Updated acceptance criterion.
+- 2026-05-20T21:20:53Z `workerctl` `acceptance_criterion_updated` [info]: Updated acceptance criterion.
+- 2026-05-20T21:20:53Z `workerctl` `acceptance_criterion_updated` [info]: Updated acceptance criterion.
+- 2026-05-20T21:20:53Z `workerctl` `acceptance_criterion_updated` [info]: Updated acceptance criterion.
+- 2026-05-20T21:20:53Z `workerctl` `acceptance_criterion_updated` [info]: Updated acceptance criterion.
+- 2026-05-20T21:21:06Z `workerctl` `manager_decision_recorded` [info]: Recorded manager decision inspect.
+- 2026-05-20T21:21:25Z `workerctl` `terminal_capture_recorded` [info]: Recorded manager terminal capture.
+- 2026-05-20T21:21:25Z `workerctl` `transcript_segment_recorded` [info]: Recorded manager transcript segment.
+- 2026-05-20T21:21:34Z `workerctl` `command_created` [info]: Created command finish_task.
+- 2026-05-20T21:21:34Z `workerctl` `manager_decision_recorded` [info]: Recorded manager decision stop.
+- 2026-05-20T21:21:34Z `workerctl` `command_attempted` [info]: Attempted command finish_task.
+- 2026-05-20T21:21:34Z `workerctl` `terminal_capture_recorded` [info]: Recorded worker terminal capture.
+- 2026-05-20T21:21:34Z `workerctl` `terminal_capture_recorded` [info]: Recorded manager terminal capture.
+- 2026-05-20T21:21:34Z `workerctl` `command_failed` [error]: Command finish_task failed.
+- 2026-05-20T21:21:43Z `workerctl` `command_created` [info]: Created command finish_task.
+- 2026-05-20T21:21:43Z `workerctl` `manager_decision_recorded` [info]: Recorded manager decision stop.
+- 2026-05-20T21:21:43Z `workerctl` `command_attempted` [info]: Attempted command finish_task.
+- 2026-05-20T21:21:43Z `workerctl` `run_finished` [info]: Run local-telemetry-drill-20260520-2026-05-20T211811Z marked finished.
+- 2026-05-20T21:21:43Z `workerctl` `command_succeeded` [info]: Command finish_task succeeded.
+- 2026-05-20T21:21:43Z `workerctl` `task_finished` [info]: Finished task local-telemetry-drill-20260520.

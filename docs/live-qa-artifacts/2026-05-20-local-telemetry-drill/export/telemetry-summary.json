@@ -1,0 +1,39 @@
+{
+  "by_actor": {
+    "manager": 16,
+    "workerctl": 56
+  },
+  "by_event_type": {
+    "acceptance_criterion_added": 8,
+    "acceptance_criterion_updated": 12,
+    "codex_events_ingested": 8,
+    "command_attempted": 2,
+    "command_created": 2,
+    "command_failed": 1,
+    "command_succeeded": 1,
+    "manager_cycle_started": 8,
+    "manager_cycle_succeeded": 8,
+    "manager_decision_recorded": 3,
+    "pair_binding_created": 1,
+    "pair_manager_config_seeded": 1,
+    "pair_manager_spawned": 1,
+    "pair_run_created": 1,
+    "pair_started": 1,
+    "pair_task_resolved": 1,
+    "pair_worker_spawned": 1,
+    "run_finished": 1,
+    "session_nudge_succeeded": 2,
+    "task_finished": 1,
+    "terminal_capture_recorded": 5,
+    "transcript_segment_recorded": 3
+  },
+  "by_severity": {
+    "error": 1,
+    "info": 71
+  },
+  "first_timestamp": "2026-05-20T21:18:05Z",
+  "last_timestamp": "2026-05-20T21:21:43Z",
+  "run_id": "run-1b863f70-d6ff-4463-982d-40d4be24efe9",
+  "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+  "total": 72
+}

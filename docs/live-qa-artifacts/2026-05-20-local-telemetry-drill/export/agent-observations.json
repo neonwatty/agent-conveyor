@@ -1,0 +1,133 @@
+[
+  {
+    "command_id": null,
+    "created_at": "2026-05-20T21:19:14Z",
+    "id": 66,
+    "manager_id": null,
+    "message": "worker terminal captured",
+    "observation_type": "capture",
+    "payload": {
+      "content_sha256": "956b896de5f6953f83af55e52c2613fffcbbaaa65eaf51fa983d3df5266cc613",
+      "history_lines": 160,
+      "source": "transcript_capture",
+      "transcript_segment_id": 33
+    },
+    "role": "worker",
+    "severity": "info",
+    "source_capture_id": 33,
+    "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+    "worker_id": null
+  },
+  {
+    "command_id": null,
+    "created_at": "2026-05-20T21:20:33Z",
+    "id": 67,
+    "manager_id": null,
+    "message": "manager terminal captured",
+    "observation_type": "capture",
+    "payload": {
+      "content_sha256": "6faf5b163a59a8990a90e2cf069498197219053c8d8f2bbf6123bd06f542f689",
+      "history_lines": 180,
+      "source": "transcript_capture",
+      "transcript_segment_id": 34
+    },
+    "role": "manager",
+    "severity": "info",
+    "source_capture_id": 34,
+    "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+    "worker_id": null
+  },
+  {
+    "command_id": null,
+    "created_at": "2026-05-20T21:21:25Z",
+    "id": 68,
+    "manager_id": null,
+    "message": "manager terminal captured",
+    "observation_type": "capture",
+    "payload": {
+      "content_sha256": "2e2e7b6962d6afd11f30c7a7fd137061b95ab187537f052a9b27eba420aabcab",
+      "history_lines": 220,
+      "source": "transcript_capture",
+      "transcript_segment_id": 35
+    },
+    "role": "manager",
+    "severity": "info",
+    "source_capture_id": 35,
+    "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+    "worker_id": null
+  },
+  {
+    "command_id": "command-a18a25e0-4846-4343-8bf6-dd70d9a8ef64",
+    "created_at": "2026-05-20T21:21:34Z",
+    "id": 69,
+    "manager_id": null,
+    "message": "T010 local telemetry drill accepted by manager decision 44; durable telemetry/replay/export evidence captured.",
+    "observation_type": "decision",
+    "payload": {
+      "decision": "stop",
+      "decision_id": 45,
+      "source": "finish_task"
+    },
+    "role": "manager",
+    "severity": "info",
+    "source_capture_id": null,
+    "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+    "worker_id": null
+  },
+  {
+    "command_id": "command-a18a25e0-4846-4343-8bf6-dd70d9a8ef64",
+    "created_at": "2026-05-20T21:21:34Z",
+    "id": 70,
+    "manager_id": null,
+    "message": "worker terminal captured",
+    "observation_type": "capture",
+    "payload": {
+      "content_sha256": "956b896de5f6953f83af55e52c2613fffcbbaaa65eaf51fa983d3df5266cc613",
+      "history_lines": 220,
+      "source": "finish_task_pre_stop",
+      "transcript_segment_id": null
+    },
+    "role": "worker",
+    "severity": "info",
+    "source_capture_id": 36,
+    "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+    "worker_id": null
+  },
+  {
+    "command_id": "command-a18a25e0-4846-4343-8bf6-dd70d9a8ef64",
+    "created_at": "2026-05-20T21:21:34Z",
+    "id": 71,
+    "manager_id": null,
+    "message": "manager terminal captured",
+    "observation_type": "capture",
+    "payload": {
+      "content_sha256": "2e2e7b6962d6afd11f30c7a7fd137061b95ab187537f052a9b27eba420aabcab",
+      "history_lines": 220,
+      "source": "finish_task_pre_stop",
+      "transcript_segment_id": null
+    },
+    "role": "manager",
+    "severity": "info",
+    "source_capture_id": 37,
+    "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+    "worker_id": null
+  },
+  {
+    "command_id": "command-4698edea-5ea3-4552-8329-7d4611db1e4d",
+    "created_at": "2026-05-20T21:21:43Z",
+    "id": 72,
+    "manager_id": null,
+    "message": "T010 local telemetry drill accepted by manager decision 44; durable telemetry/replay/export evidence captured.",
+    "observation_type": "decision",
+    "payload": {
+      "decision": "stop",
+      "decision_id": 46,
+      "source": "finish_task"
+    },
+    "role": "manager",
+    "severity": "info",
+    "source_capture_id": null,
+    "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+    "worker_id": null
+  }
+]

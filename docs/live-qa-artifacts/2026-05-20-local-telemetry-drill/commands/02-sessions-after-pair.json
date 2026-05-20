@@ -1,0 +1,34 @@
+[
+  {
+    "codex_session_id": "019e4740-c4f4-7050-9021-2d8a492445b2",
+    "codex_session_path": "/Users/neonwatty/.codex/sessions/2026/05/20/rollout-2026-05-20T14-18-07-019e4740-c4f4-7050-9021-2d8a492445b2.jsonl",
+    "cwd": "/Users/neonwatty/Desktop/codex-terminal-manager",
+    "id": "session-551cb20e-f172-432d-bba9-621481326721",
+    "identity_token": "session-token-7923b75d-db54-4c27-85d9-879b676d92dc",
+    "last_heartbeat_at": "2026-05-20T21:18:09Z",
+    "last_ingest_offset": null,
+    "name": "telemetry-drill-worker-20260520",
+    "pid": 99194,
+    "registered_at": "2026-05-20T21:18:09Z",
+    "role": "worker",
+    "state": "active",
+    "tmux_pane_id": null,
+    "tmux_session": "codex-telemetry-drill-worker-20260520"
+  },
+  {
+    "codex_session_id": "019e4740-d17a-7b82-bb23-46d042b1a78a",
+    "codex_session_path": "/Users/neonwatty/.codex/sessions/2026/05/20/rollout-2026-05-20T14-18-10-019e4740-d17a-7b82-bb23-46d042b1a78a.jsonl",
+    "cwd": "/Users/neonwatty/Desktop/codex-terminal-manager",
+    "id": "session-9785fd0d-44ce-4b2c-b430-605ae46d2bdb",
+    "identity_token": "session-token-4129ae43-29a0-4ce5-b940-0a9f5fba16af",
+    "last_heartbeat_at": "2026-05-20T21:18:11Z",
+    "last_ingest_offset": null,
+    "name": "telemetry-drill-manager-20260520",
+    "pid": 913,
+    "registered_at": "2026-05-20T21:18:11Z",
+    "role": "manager",
+    "state": "active",
+    "tmux_pane_id": null,
+    "tmux_session": "codex-telemetry-drill-manager-20260520"
+  }
+]

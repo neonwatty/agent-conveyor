@@ -1,0 +1,754 @@
+{
+  "entries": [
+    {
+      "actor": "manager",
+      "details": {
+        "cycle_id": 103,
+        "manager_capture_id": null,
+        "state": "succeeded",
+        "worker_capture_id": null
+      },
+      "kind": "observe",
+      "source": "manager_cycles",
+      "source_id": 103,
+      "summary": "observed session telemetry-drill-worker-20260520 state busy (staleness 11.9s)",
+      "timestamp": "2026-05-20T21:18:25Z"
+    },
+    {
+      "actor": "manager",
+      "details": {
+        "cycle_id": 104,
+        "manager_capture_id": null,
+        "state": "succeeded",
+        "worker_capture_id": null
+      },
+      "kind": "observe",
+      "source": "manager_cycles",
+      "source_id": 104,
+      "summary": "observed session telemetry-drill-worker-20260520 state busy (staleness 17.9s)",
+      "timestamp": "2026-05-20T21:18:31Z"
+    },
+    {
+      "actor": "manager",
+      "details": {
+        "cycle_id": 105,
+        "manager_capture_id": null,
+        "state": "succeeded",
+        "worker_capture_id": null
+      },
+      "kind": "observe",
+      "source": "manager_cycles",
+      "source_id": 105,
+      "summary": "observed session telemetry-drill-worker-20260520 state busy (staleness 3.7s)",
+      "timestamp": "2026-05-20T21:18:42Z"
+    },
+    {
+      "actor": "manager",
+      "details": {
+        "cycle_id": 106,
+        "manager_capture_id": null,
+        "state": "succeeded",
+        "worker_capture_id": null
+      },
+      "kind": "observe",
+      "source": "manager_cycles",
+      "source_id": 106,
+      "summary": "observed session telemetry-drill-worker-20260520 state idle (staleness 12.2s)",
+      "timestamp": "2026-05-20T21:18:56Z"
+    },
+    {
+      "actor": "manager",
+      "details": {
+        "cycle_id": 107,
+        "manager_capture_id": null,
+        "state": "succeeded",
+        "worker_capture_id": null
+      },
+      "kind": "observe",
+      "source": "manager_cycles",
+      "source_id": 107,
+      "summary": "observed session telemetry-drill-worker-20260520 state idle (staleness 12.2s)",
+      "timestamp": "2026-05-20T21:18:56Z"
+    },
+    {
+      "actor": "manager",
+      "details": {
+        "cycle_id": 108,
+        "manager_capture_id": null,
+        "state": "succeeded",
+        "worker_capture_id": null
+      },
+      "kind": "observe",
+      "source": "manager_cycles",
+      "source_id": 108,
+      "summary": "observed session telemetry-drill-worker-20260520 state idle (staleness 30.2s)",
+      "timestamp": "2026-05-20T21:19:14Z"
+    },
+    {
+      "actor": "workerctl",
+      "details": {
+        "created": true,
+        "criterion": "docs/local-telemetry-workflow.md remains the canonical workflow reference and lists telemetry summary, timeline, search, export, sessions, and reconcile commands.",
+        "criterion_id": 75,
+        "event_type": "acceptance_criterion_added",
+        "evidence": {
+          "capture": "commands/05-transcript-capture-worker.json",
+          "source": "worker receipt"
+        },
+        "proof": null,
+        "rationale": null,
+        "source": "worker_proposed",
+        "status": "accepted",
+        "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c"
+      },
+      "kind": "acceptance_criterion",
+      "source": "events",
+      "source_id": 596,
+      "summary": "accepted criterion #75: docs/local-telemetry-workflow.md remains the canonical workflow reference and lists telemetry summary, timeline, search, export, sessions, and reconcile commands.",
+      "timestamp": "2026-05-20T21:19:27Z"
+    },
+    {
+      "actor": "workerctl",
+      "details": {
+        "created": true,
+        "criterion": "export-task includes telemetry-events.json, telemetry-summary.json, and telemetry-report.md by default.",
+        "criterion_id": 76,
+        "event_type": "acceptance_criterion_added",
+        "evidence": {
+          "capture": "commands/05-transcript-capture-worker.json",
+          "source": "worker receipt"
+        },
+        "proof": null,
+        "rationale": null,
+        "source": "worker_proposed",
+        "status": "accepted",
+        "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c"
+      },
+      "kind": "acceptance_criterion",
+      "source": "events",
+      "source_id": 597,
+      "summary": "accepted criterion #76: export-task includes telemetry-events.json, telemetry-summary.json, and telemetry-report.md by default.",
+      "timestamp": "2026-05-20T21:19:27Z"
+    },
+    {
+      "actor": "workerctl",
+      "details": {
+        "created": true,
+        "criterion": "The worker receipt is inspection-only and no product files were changed by the worker.",
+        "criterion_id": 77,
+        "event_type": "acceptance_criterion_added",
+        "evidence": {
+          "capture": "commands/05-transcript-capture-worker.json",
+          "source": "worker receipt"
+        },
+        "proof": null,
+        "rationale": null,
+        "source": "worker_proposed",
+        "status": "accepted",
+        "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c"
+      },
+      "kind": "acceptance_criterion",
+      "source": "events",
+      "source_id": 598,
+      "summary": "accepted criterion #77: The worker receipt is inspection-only and no product files were changed by the worker.",
+      "timestamp": "2026-05-20T21:19:28Z"
+    },
+    {
+      "actor": "workerctl",
+      "details": {
+        "created": true,
+        "criterion": "Add a future lightweight smoke check for telemetry export contents.",
+        "criterion_id": 78,
+        "event_type": "acceptance_criterion_added",
+        "evidence": {
+          "reason": "outside this live drill",
+          "source": "worker follow-up criterion"
+        },
+        "proof": null,
+        "rationale": null,
+        "source": "worker_proposed",
+        "status": "deferred",
+        "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c"
+      },
+      "kind": "acceptance_criterion",
+      "source": "events",
+      "source_id": 599,
+      "summary": "deferred criterion #78: Add a future lightweight smoke check for telemetry export contents.",
+      "timestamp": "2026-05-20T21:19:28Z"
+    },
+    {
+      "actor": "workerctl",
+      "details": {
+        "created": true,
+        "criterion": "docs/local-telemetry-workflow.md remains the canonical workflow reference. Verification: inspect the doc and confirm it lists telemetry --summary, timeline, --search manager, export-task --zip --include-transcripts, sessions --state active, and reconcile --stale-cycles-seconds 1.",
+        "criterion_id": 79,
+        "event_type": "acceptance_criterion_added",
+        "evidence": {},
+        "proof": null,
+        "rationale": null,
+        "source": "worker_proposed",
+        "status": "accepted",
+        "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c"
+      },
+      "kind": "acceptance_criterion",
+      "source": "events",
+      "source_id": 601,
+      "summary": "accepted criterion #79: docs/local-telemetry-workflow.md remains the canonical workflow reference. Verification: inspect the doc and confirm it lists telemetry --summary, timeline, --search manager, export-task --zip --include-transcripts, ses...",
+      "timestamp": "2026-05-20T21:19:55Z"
+    },
+    {
+      "actor": "workerctl",
+      "details": {
+        "created": true,
+        "criterion": "export-task includes the three telemetry artifacts by default. Verification: inspect workerctl/export.py or run a disposable export and confirm telemetry-events.json, telemetry-summary.json, and telemetry-report.md are written and listed in manifest.json.",
+        "criterion_id": 80,
+        "event_type": "acceptance_criterion_added",
+        "evidence": {},
+        "proof": null,
+        "rationale": null,
+        "source": "worker_proposed",
+        "status": "accepted",
+        "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c"
+      },
+      "kind": "acceptance_criterion",
+      "source": "events",
+      "source_id": 602,
+      "summary": "accepted criterion #80: export-task includes the three telemetry artifacts by default. Verification: inspect workerctl/export.py or run a disposable export and confirm telemetry-events.json, telemetry-summary.json, and telemetry-report.md are...",
+      "timestamp": "2026-05-20T21:19:55Z"
+    },
+    {
+      "actor": "workerctl",
+      "details": {
+        "created": true,
+        "criterion": "Add a lightweight automated smoke check for telemetry export contents. Verification: run the smoke script/test and confirm it creates an export bundle containing the three telemetry artifacts plus manifest entries for each.",
+        "criterion_id": 81,
+        "event_type": "acceptance_criterion_added",
+        "evidence": {},
+        "proof": null,
+        "rationale": "Follow-up after this QA slice.",
+        "source": "worker_proposed",
+        "status": "deferred",
+        "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c"
+      },
+      "kind": "acceptance_criterion",
+      "source": "events",
+      "source_id": 603,
+      "summary": "deferred criterion #81: Follow-up after this QA slice.",
+      "timestamp": "2026-05-20T21:19:55Z"
+    },
+    {
+      "actor": "workerctl",
+      "details": {
+        "created": true,
+        "criterion": "The drill receipt is inspection-only. Verification: run git status --short and confirm no files were changed by the worker; any pre-existing untracked drill artifact directory is explicitly called out.",
+        "criterion_id": 82,
+        "event_type": "acceptance_criterion_added",
+        "evidence": {},
+        "proof": null,
+        "rationale": null,
+        "source": "worker_proposed",
+        "status": "accepted",
+        "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c"
+      },
+      "kind": "acceptance_criterion",
+      "source": "events",
+      "source_id": 604,
+      "summary": "accepted criterion #82: The drill receipt is inspection-only. Verification: run git status --short and confirm no files were changed by the worker; any pre-existing untracked drill artifact directory is explicitly called out.",
+      "timestamp": "2026-05-20T21:19:55Z"
+    },
+    {
+      "actor": "manager",
+      "details": {
+        "cycle_id": 109,
+        "manager_capture_id": null,
+        "state": "succeeded",
+        "worker_capture_id": null
+      },
+      "kind": "observe",
+      "source": "manager_cycles",
+      "source_id": 109,
+      "summary": "observed session telemetry-drill-worker-20260520 state idle (staleness 89.2s)",
+      "timestamp": "2026-05-20T21:20:13Z"
+    },
+    {
+      "actor": "manager",
+      "details": {
+        "cycle_id": 110,
+        "manager_capture_id": null,
+        "state": "succeeded",
+        "worker_capture_id": null
+      },
+      "kind": "observe",
+      "source": "manager_cycles",
+      "source_id": 110,
+      "summary": "observed session telemetry-drill-worker-20260520 state idle (staleness 99.2s)",
+      "timestamp": "2026-05-20T21:20:23Z"
+    },
+    {
+      "actor": "workerctl",
+      "details": {
+        "criterion": "docs/local-telemetry-workflow.md remains the canonical workflow reference and lists telemetry summary, timeline, search, export, sessions, and reconcile commands.",
+        "criterion_id": 75,
+        "event_type": "acceptance_criterion_updated",
+        "evidence": {
+          "artifact_root": "docs/live-qa-artifacts/2026-05-20-local-telemetry-drill",
+          "criteria_list": "commands/14-criteria-list-before-satisfy.json",
+          "status": "pass",
+          "worker_capture": "worker-capture.txt",
+          "worker_transcript": "commands/05-transcript-capture-worker.json"
+        },
+        "previous_evidence": {
+          "capture": "commands/05-transcript-capture-worker.json",
+          "source": "worker receipt"
+        },
+        "previous_proof": null,
+        "previous_rationale": null,
+        "previous_status": "accepted",
+        "proof": null,
+        "rationale": null,
+        "source": "worker_proposed",
+        "status": "satisfied",
+        "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c"
+      },
+      "kind": "acceptance_criterion",
+      "source": "events",
+      "source_id": 605,
+      "summary": "satisfied criterion #75 (accepted -> satisfied): proof recorded",
+      "timestamp": "2026-05-20T21:20:24Z"
+    },
+    {
+      "actor": "workerctl",
+      "details": {
+        "criterion": "export-task includes telemetry-events.json, telemetry-summary.json, and telemetry-report.md by default.",
+        "criterion_id": 76,
+        "event_type": "acceptance_criterion_updated",
+        "evidence": {
+          "artifact_root": "docs/live-qa-artifacts/2026-05-20-local-telemetry-drill",
+          "criteria_list": "commands/14-criteria-list-before-satisfy.json",
+          "status": "pass",
+          "worker_capture": "worker-capture.txt",
+          "worker_transcript": "commands/05-transcript-capture-worker.json"
+        },
+        "previous_evidence": {
+          "capture": "commands/05-transcript-capture-worker.json",
+          "source": "worker receipt"
+        },
+        "previous_proof": null,
+        "previous_rationale": null,
+        "previous_status": "accepted",
+        "proof": null,
+        "rationale": null,
+        "source": "worker_proposed",
+        "status": "satisfied",
+        "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c"
+      },
+      "kind": "acceptance_criterion",
+      "source": "events",
+      "source_id": 606,
+      "summary": "satisfied criterion #76 (accepted -> satisfied): proof recorded",
+      "timestamp": "2026-05-20T21:20:24Z"
+    },
+    {
+      "actor": "workerctl",
+      "details": {
+        "criterion": "The worker receipt is inspection-only and no product files were changed by the worker.",
+        "criterion_id": 77,
+        "event_type": "acceptance_criterion_updated",
+        "evidence": {
+          "artifact_root": "docs/live-qa-artifacts/2026-05-20-local-telemetry-drill",
+          "criteria_list": "commands/14-criteria-list-before-satisfy.json",
+          "status": "pass",
+          "worker_capture": "worker-capture.txt",
+          "worker_transcript": "commands/05-transcript-capture-worker.json"
+        },
+        "previous_evidence": {
+          "capture": "commands/05-transcript-capture-worker.json",
+          "source": "worker receipt"
+        },
+        "previous_proof": null,
+        "previous_rationale": null,
+        "previous_status": "accepted",
+        "proof": null,
+        "rationale": null,
+        "source": "worker_proposed",
+        "status": "satisfied",
+        "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c"
+      },
+      "kind": "acceptance_criterion",
+      "source": "events",
+      "source_id": 607,
+      "summary": "satisfied criterion #77 (accepted -> satisfied): proof recorded",
+      "timestamp": "2026-05-20T21:20:24Z"
+    },
+    {
+      "actor": "workerctl",
+      "details": {
+        "criterion": "docs/local-telemetry-workflow.md remains the canonical workflow reference. Verification: inspect the doc and confirm it lists telemetry --summary, timeline, --search manager, export-task --zip --include-transcripts, sessions --state active, and reconcile --stale-cycles-seconds 1.",
+        "criterion_id": 79,
+        "event_type": "acceptance_criterion_updated",
+        "evidence": {
+          "artifact_root": "docs/live-qa-artifacts/2026-05-20-local-telemetry-drill",
+          "criteria_list": "commands/14-criteria-list-before-satisfy.json",
+          "status": "pass",
+          "worker_capture": "worker-capture.txt",
+          "worker_transcript": "commands/05-transcript-capture-worker.json"
+        },
+        "previous_evidence": {},
+        "previous_proof": null,
+        "previous_rationale": null,
+        "previous_status": "accepted",
+        "proof": null,
+        "rationale": null,
+        "source": "worker_proposed",
+        "status": "satisfied",
+        "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c"
+      },
+      "kind": "acceptance_criterion",
+      "source": "events",
+      "source_id": 608,
+      "summary": "satisfied criterion #79 (accepted -> satisfied): proof recorded",
+      "timestamp": "2026-05-20T21:20:24Z"
+    },
+    {
+      "actor": "workerctl",
+      "details": {
+        "criterion": "export-task includes the three telemetry artifacts by default. Verification: inspect workerctl/export.py or run a disposable export and confirm telemetry-events.json, telemetry-summary.json, and telemetry-report.md are written and listed in manifest.json.",
+        "criterion_id": 80,
+        "event_type": "acceptance_criterion_updated",
+        "evidence": {
+          "artifact_root": "docs/live-qa-artifacts/2026-05-20-local-telemetry-drill",
+          "criteria_list": "commands/14-criteria-list-before-satisfy.json",
+          "status": "pass",
+          "worker_capture": "worker-capture.txt",
+          "worker_transcript": "commands/05-transcript-capture-worker.json"
+        },
+        "previous_evidence": {},
+        "previous_proof": null,
+        "previous_rationale": null,
+        "previous_status": "accepted",
+        "proof": null,
+        "rationale": null,
+        "source": "worker_proposed",
+        "status": "satisfied",
+        "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c"
+      },
+      "kind": "acceptance_criterion",
+      "source": "events",
+      "source_id": 609,
+      "summary": "satisfied criterion #80 (accepted -> satisfied): proof recorded",
+      "timestamp": "2026-05-20T21:20:24Z"
+    },
+    {
+      "actor": "workerctl",
+      "details": {
+        "criterion": "The drill receipt is inspection-only. Verification: run git status --short and confirm no files were changed by the worker; any pre-existing untracked drill artifact directory is explicitly called out.",
+        "criterion_id": 82,
+        "event_type": "acceptance_criterion_updated",
+        "evidence": {
+          "artifact_root": "docs/live-qa-artifacts/2026-05-20-local-telemetry-drill",
+          "criteria_list": "commands/14-criteria-list-before-satisfy.json",
+          "status": "pass",
+          "worker_capture": "worker-capture.txt",
+          "worker_transcript": "commands/05-transcript-capture-worker.json"
+        },
+        "previous_evidence": {},
+        "previous_proof": null,
+        "previous_rationale": null,
+        "previous_status": "accepted",
+        "proof": null,
+        "rationale": null,
+        "source": "worker_proposed",
+        "status": "satisfied",
+        "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c"
+      },
+      "kind": "acceptance_criterion",
+      "source": "events",
+      "source_id": 610,
+      "summary": "satisfied criterion #82 (accepted -> satisfied): proof recorded",
+      "timestamp": "2026-05-20T21:20:24Z"
+    },
+    {
+      "actor": "workerctl",
+      "details": {
+        "criterion": "docs/local-telemetry-workflow.md remains the canonical workflow reference and lists telemetry summary, timeline, search, export, sessions, and reconcile commands.",
+        "criterion_id": 75,
+        "event_type": "acceptance_criterion_updated",
+        "evidence": {
+          "export_manifest": "/private/tmp/local-telemetry-drill-20260520-export/manifest.json",
+          "git_status": "?? docs/live-qa-artifacts/2026-05-20-local-telemetry-drill/",
+          "receipt": "docs/live-qa-artifacts/2026-05-20-local-telemetry-drill/commands/05-transcript-capture-worker.json",
+          "replay": "workerctl replay local-telemetry-drill-20260520",
+          "telemetry": "workerctl telemetry --summary --run run-1b863f70-d6ff-4463-982d-40d4be24efe9 --json"
+        },
+        "previous_evidence": {
+          "artifact_root": "docs/live-qa-artifacts/2026-05-20-local-telemetry-drill",
+          "criteria_list": "commands/14-criteria-list-before-satisfy.json",
+          "status": "pass",
+          "worker_capture": "worker-capture.txt",
+          "worker_transcript": "commands/05-transcript-capture-worker.json"
+        },
+        "previous_proof": null,
+        "previous_rationale": null,
+        "previous_status": "satisfied",
+        "proof": null,
+        "rationale": null,
+        "source": "worker_proposed",
+        "status": "satisfied",
+        "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c"
+      },
+      "kind": "acceptance_criterion",
+      "source": "events",
+      "source_id": 612,
+      "summary": "satisfied criterion #75 (satisfied -> satisfied): proof recorded",
+      "timestamp": "2026-05-20T21:20:53Z"
+    },
+    {
+      "actor": "workerctl",
+      "details": {
+        "criterion": "export-task includes telemetry-events.json, telemetry-summary.json, and telemetry-report.md by default.",
+        "criterion_id": 76,
+        "event_type": "acceptance_criterion_updated",
+        "evidence": {
+          "export_manifest": "/private/tmp/local-telemetry-drill-20260520-export/manifest.json",
+          "git_status": "?? docs/live-qa-artifacts/2026-05-20-local-telemetry-drill/",
+          "receipt": "docs/live-qa-artifacts/2026-05-20-local-telemetry-drill/commands/05-transcript-capture-worker.json",
+          "replay": "workerctl replay local-telemetry-drill-20260520",
+          "telemetry": "workerctl telemetry --summary --run run-1b863f70-d6ff-4463-982d-40d4be24efe9 --json"
+        },
+        "previous_evidence": {
+          "artifact_root": "docs/live-qa-artifacts/2026-05-20-local-telemetry-drill",
+          "criteria_list": "commands/14-criteria-list-before-satisfy.json",
+          "status": "pass",
+          "worker_capture": "worker-capture.txt",
+          "worker_transcript": "commands/05-transcript-capture-worker.json"
+        },
+        "previous_proof": null,
+        "previous_rationale": null,
+        "previous_status": "satisfied",
+        "proof": null,
+        "rationale": null,
+        "source": "worker_proposed",
+        "status": "satisfied",
+        "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c"
+      },
+      "kind": "acceptance_criterion",
+      "source": "events",
+      "source_id": 613,
+      "summary": "satisfied criterion #76 (satisfied -> satisfied): proof recorded",
+      "timestamp": "2026-05-20T21:20:53Z"
+    },
+    {
+      "actor": "workerctl",
+      "details": {
+        "criterion": "The worker receipt is inspection-only and no product files were changed by the worker.",
+        "criterion_id": 77,
+        "event_type": "acceptance_criterion_updated",
+        "evidence": {
+          "export_manifest": "/private/tmp/local-telemetry-drill-20260520-export/manifest.json",
+          "git_status": "?? docs/live-qa-artifacts/2026-05-20-local-telemetry-drill/",
+          "receipt": "docs/live-qa-artifacts/2026-05-20-local-telemetry-drill/commands/05-transcript-capture-worker.json",
+          "replay": "workerctl replay local-telemetry-drill-20260520",
+          "telemetry": "workerctl telemetry --summary --run run-1b863f70-d6ff-4463-982d-40d4be24efe9 --json"
+        },
+        "previous_evidence": {
+          "artifact_root": "docs/live-qa-artifacts/2026-05-20-local-telemetry-drill",
+          "criteria_list": "commands/14-criteria-list-before-satisfy.json",
+          "status": "pass",
+          "worker_capture": "worker-capture.txt",
+          "worker_transcript": "commands/05-transcript-capture-worker.json"
+        },
+        "previous_proof": null,
+        "previous_rationale": null,
+        "previous_status": "satisfied",
+        "proof": null,
+        "rationale": null,
+        "source": "worker_proposed",
+        "status": "satisfied",
+        "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c"
+      },
+      "kind": "acceptance_criterion",
+      "source": "events",
+      "source_id": 614,
+      "summary": "satisfied criterion #77 (satisfied -> satisfied): proof recorded",
+      "timestamp": "2026-05-20T21:20:53Z"
+    },
+    {
+      "actor": "workerctl",
+      "details": {
+        "criterion": "docs/local-telemetry-workflow.md remains the canonical workflow reference. Verification: inspect the doc and confirm it lists telemetry --summary, timeline, --search manager, export-task --zip --include-transcripts, sessions --state active, and reconcile --stale-cycles-seconds 1.",
+        "criterion_id": 79,
+        "event_type": "acceptance_criterion_updated",
+        "evidence": {
+          "export_manifest": "/private/tmp/local-telemetry-drill-20260520-export/manifest.json",
+          "git_status": "?? docs/live-qa-artifacts/2026-05-20-local-telemetry-drill/",
+          "receipt": "docs/live-qa-artifacts/2026-05-20-local-telemetry-drill/commands/05-transcript-capture-worker.json",
+          "replay": "workerctl replay local-telemetry-drill-20260520",
+          "telemetry": "workerctl telemetry --summary --run run-1b863f70-d6ff-4463-982d-40d4be24efe9 --json"
+        },
+        "previous_evidence": {
+          "artifact_root": "docs/live-qa-artifacts/2026-05-20-local-telemetry-drill",
+          "criteria_list": "commands/14-criteria-list-before-satisfy.json",
+          "status": "pass",
+          "worker_capture": "worker-capture.txt",
+          "worker_transcript": "commands/05-transcript-capture-worker.json"
+        },
+        "previous_proof": null,
+        "previous_rationale": null,
+        "previous_status": "satisfied",
+        "proof": null,
+        "rationale": null,
+        "source": "worker_proposed",
+        "status": "satisfied",
+        "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c"
+      },
+      "kind": "acceptance_criterion",
+      "source": "events",
+      "source_id": 615,
+      "summary": "satisfied criterion #79 (satisfied -> satisfied): proof recorded",
+      "timestamp": "2026-05-20T21:20:53Z"
+    },
+    {
+      "actor": "workerctl",
+      "details": {
+        "criterion": "export-task includes the three telemetry artifacts by default. Verification: inspect workerctl/export.py or run a disposable export and confirm telemetry-events.json, telemetry-summary.json, and telemetry-report.md are written and listed in manifest.json.",
+        "criterion_id": 80,
+        "event_type": "acceptance_criterion_updated",
+        "evidence": {
+          "export_manifest": "/private/tmp/local-telemetry-drill-20260520-export/manifest.json",
+          "git_status": "?? docs/live-qa-artifacts/2026-05-20-local-telemetry-drill/",
+          "receipt": "docs/live-qa-artifacts/2026-05-20-local-telemetry-drill/commands/05-transcript-capture-worker.json",
+          "replay": "workerctl replay local-telemetry-drill-20260520",
+          "telemetry": "workerctl telemetry --summary --run run-1b863f70-d6ff-4463-982d-40d4be24efe9 --json"
+        },
+        "previous_evidence": {
+          "artifact_root": "docs/live-qa-artifacts/2026-05-20-local-telemetry-drill",
+          "criteria_list": "commands/14-criteria-list-before-satisfy.json",
+          "status": "pass",
+          "worker_capture": "worker-capture.txt",
+          "worker_transcript": "commands/05-transcript-capture-worker.json"
+        },
+        "previous_proof": null,
+        "previous_rationale": null,
+        "previous_status": "satisfied",
+        "proof": null,
+        "rationale": null,
+        "source": "worker_proposed",
+        "status": "satisfied",
+        "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c"
+      },
+      "kind": "acceptance_criterion",
+      "source": "events",
+      "source_id": 616,
+      "summary": "satisfied criterion #80 (satisfied -> satisfied): proof recorded",
+      "timestamp": "2026-05-20T21:20:53Z"
+    },
+    {
+      "actor": "workerctl",
+      "details": {
+        "criterion": "The drill receipt is inspection-only. Verification: run git status --short and confirm no files were changed by the worker; any pre-existing untracked drill artifact directory is explicitly called out.",
+        "criterion_id": 82,
+        "event_type": "acceptance_criterion_updated",
+        "evidence": {
+          "export_manifest": "/private/tmp/local-telemetry-drill-20260520-export/manifest.json",
+          "git_status": "?? docs/live-qa-artifacts/2026-05-20-local-telemetry-drill/",
+          "receipt": "docs/live-qa-artifacts/2026-05-20-local-telemetry-drill/commands/05-transcript-capture-worker.json",
+          "replay": "workerctl replay local-telemetry-drill-20260520",
+          "telemetry": "workerctl telemetry --summary --run run-1b863f70-d6ff-4463-982d-40d4be24efe9 --json"
+        },
+        "previous_evidence": {
+          "artifact_root": "docs/live-qa-artifacts/2026-05-20-local-telemetry-drill",
+          "criteria_list": "commands/14-criteria-list-before-satisfy.json",
+          "status": "pass",
+          "worker_capture": "worker-capture.txt",
+          "worker_transcript": "commands/05-transcript-capture-worker.json"
+        },
+        "previous_proof": null,
+        "previous_rationale": null,
+        "previous_status": "satisfied",
+        "proof": null,
+        "rationale": null,
+        "source": "worker_proposed",
+        "status": "satisfied",
+        "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c"
+      },
+      "kind": "acceptance_criterion",
+      "source": "events",
+      "source_id": 617,
+      "summary": "satisfied criterion #82 (satisfied -> satisfied): proof recorded",
+      "timestamp": "2026-05-20T21:20:53Z"
+    },
+    {
+      "actor": "manager",
+      "details": {
+        "decision": "inspect",
+        "manager_cycle_id": 110
+      },
+      "kind": "decision",
+      "source": "manager_decisions",
+      "source_id": 44,
+      "summary": "decision inspect: Accept current local telemetry drill slice: worker receipt matches requested workflow/artifacts, accepted criteria are satisfied from durable evidence, and follow-up smoke coverage is deferred.",
+      "timestamp": "2026-05-20T21:21:06Z"
+    },
+    {
+      "actor": "manager",
+      "details": {
+        "command_id": "command-a18a25e0-4846-4343-8bf6-dd70d9a8ef64",
+        "state": "failed",
+        "type": "finish_task"
+      },
+      "kind": "finish",
+      "source": "commands",
+      "source_id": "command-a18a25e0-4846-4343-8bf6-dd70d9a8ef64",
+      "summary": "finished task: T010 local telemetry drill accepted by manager decision 44; durable telemetry/replay/export evidence captured. (manager left open)",
+      "timestamp": "2026-05-20T21:21:34Z"
+    },
+    {
+      "actor": "manager",
+      "details": {
+        "decision": "stop",
+        "manager_cycle_id": null
+      },
+      "kind": "decision",
+      "source": "manager_decisions",
+      "source_id": 45,
+      "summary": "decision stop: T010 local telemetry drill accepted by manager decision 44; durable telemetry/replay/export evidence captured.",
+      "timestamp": "2026-05-20T21:21:34Z"
+    },
+    {
+      "actor": "manager",
+      "details": {
+        "command_id": "command-4698edea-5ea3-4552-8329-7d4611db1e4d",
+        "state": "succeeded",
+        "type": "finish_task"
+      },
+      "kind": "finish",
+      "source": "commands",
+      "source_id": "command-4698edea-5ea3-4552-8329-7d4611db1e4d",
+      "summary": "finished task: T010 local telemetry drill accepted by manager decision 44; durable telemetry/replay/export evidence captured. (manager stopped)",
+      "timestamp": "2026-05-20T21:21:43Z"
+    },
+    {
+      "actor": "manager",
+      "details": {
+        "decision": "stop",
+        "manager_cycle_id": null
+      },
+      "kind": "decision",
+      "source": "manager_decisions",
+      "source_id": 46,
+      "summary": "decision stop: T010 local telemetry drill accepted by manager decision 44; durable telemetry/replay/export evidence captured.",
+      "timestamp": "2026-05-20T21:21:43Z"
+    }
+  ],
+  "mode": "timeline",
+  "role": "all",
+  "task": {
+    "created_at": "2026-05-20T21:18:05Z",
+    "goal": "Disposable realistic manager/worker telemetry drill for issue 86.",
+    "id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+    "name": "local-telemetry-drill-20260520",
+    "state": "done",
+    "summary": "Run local telemetry drill and capture evidence artifacts.",
+    "updated_at": "2026-05-20T21:21:43Z"
+  }
+}

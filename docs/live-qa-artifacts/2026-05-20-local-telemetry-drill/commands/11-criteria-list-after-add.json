@@ -1,0 +1,75 @@
+{
+  "criteria": [
+    {
+      "created_at": "2026-05-20T21:19:27Z",
+      "criterion": "docs/local-telemetry-workflow.md remains the canonical workflow reference and lists telemetry summary, timeline, search, export, sessions, and reconcile commands.",
+      "evidence": {
+        "capture": "commands/05-transcript-capture-worker.json",
+        "source": "worker receipt"
+      },
+      "id": 75,
+      "proof": null,
+      "rationale": null,
+      "source": "worker_proposed",
+      "status": "accepted",
+      "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+      "updated_at": "2026-05-20T21:19:27Z"
+    },
+    {
+      "created_at": "2026-05-20T21:19:27Z",
+      "criterion": "export-task includes telemetry-events.json, telemetry-summary.json, and telemetry-report.md by default.",
+      "evidence": {
+        "capture": "commands/05-transcript-capture-worker.json",
+        "source": "worker receipt"
+      },
+      "id": 76,
+      "proof": null,
+      "rationale": null,
+      "source": "worker_proposed",
+      "status": "accepted",
+      "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+      "updated_at": "2026-05-20T21:19:27Z"
+    },
+    {
+      "created_at": "2026-05-20T21:19:28Z",
+      "criterion": "The worker receipt is inspection-only and no product files were changed by the worker.",
+      "evidence": {
+        "capture": "commands/05-transcript-capture-worker.json",
+        "source": "worker receipt"
+      },
+      "id": 77,
+      "proof": null,
+      "rationale": null,
+      "source": "worker_proposed",
+      "status": "accepted",
+      "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+      "updated_at": "2026-05-20T21:19:28Z"
+    },
+    {
+      "created_at": "2026-05-20T21:19:28Z",
+      "criterion": "Add a future lightweight smoke check for telemetry export contents.",
+      "evidence": {
+        "reason": "outside this live drill",
+        "source": "worker follow-up criterion"
+      },
+      "id": 78,
+      "proof": null,
+      "rationale": null,
+      "source": "worker_proposed",
+      "status": "deferred",
+      "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+      "updated_at": "2026-05-20T21:19:28Z"
+    }
+  ],
+  "summary": {
+    "accepted": 3,
+    "deferred": 1,
+    "proposed": 0,
+    "rejected": 0,
+    "satisfied": 0
+  },
+  "task": {
+    "id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+    "name": "local-telemetry-drill-20260520"
+  }
+}
