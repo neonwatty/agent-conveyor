@@ -1,0 +1,24 @@
+total: 64
+first_timestamp: 2026-05-20T21:18:11Z
+last_timestamp: 2026-05-20T21:21:43Z
+by_actor:
+  manager: 16
+  workerctl: 48
+by_event_type:
+  acceptance_criterion_added: 8
+  acceptance_criterion_updated: 12
+  codex_events_ingested: 8
+  command_attempted: 2
+  command_created: 2
+  command_failed: 1
+  manager_cycle_started: 8
+  manager_cycle_succeeded: 8
+  manager_decision_recorded: 3
+  pair_run_created: 1
+  run_finished: 1
+  session_nudge_succeeded: 2
+  terminal_capture_recorded: 5
+  transcript_segment_recorded: 3
+by_severity:
+  error: 1
+  info: 63

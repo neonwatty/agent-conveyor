@@ -1162,3 +1162,10 @@ Result:
 - Follow-up candidates: document or encode `manager_inferred` as the expected
   source for manager-config-derived criteria, and use the pre-stop transcript
   capture option in the next seeded-pair smoke.
+# 2026-05-20 Local Telemetry Drill
+
+- Task: `local-telemetry-drill-20260520`
+- Run: `run-1b863f70-d6ff-4463-982d-40d4be24efe9`
+- Artifact root: `docs/live-qa-artifacts/2026-05-20-local-telemetry-drill/`
+- Result: pass. Worker and manager sessions completed the drill, telemetry/replay/export evidence reconstructed the run, accepted criteria were satisfied, deferred follow-up remained scoped out, and cleanup was clean.
+- Verification: `scripts/workerctl telemetry --summary --run run-1b863f70-d6ff-4463-982d-40d4be24efe9`, `scripts/workerctl telemetry --run run-1b863f70-d6ff-4463-982d-40d4be24efe9`, `scripts/workerctl telemetry --search manager --run run-1b863f70-d6ff-4463-982d-40d4be24efe9`, `scripts/workerctl sessions --state active`, `scripts/workerctl reconcile --stale-cycles-seconds 1`, and `git diff --check`.

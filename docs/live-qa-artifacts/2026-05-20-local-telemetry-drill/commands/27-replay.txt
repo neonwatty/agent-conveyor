@@ -1,0 +1,42 @@
+Task: local-telemetry-drill-20260520
+State: done
+Mode: timeline
+
+Finished:
+- finished task: T010 local telemetry drill accepted by manager decision 44; durable telemetry/replay/export evidence captured. (manager stopped)
+- Review: workerctl replay <task> --format compact
+- Audit: workerctl mutation-audit <task> --json
+
+21:18:25  manager          observed session telemetry-drill-worker-20260520 state busy (staleness 11.9s)
+21:18:31  manager          observed session telemetry-drill-worker-20260520 state busy (staleness 17.9s)
+21:18:42  manager          observed session telemetry-drill-worker-20260520 state busy (staleness 3.7s)
+21:18:56  manager          observed session telemetry-drill-worker-20260520 state idle (staleness 12.2s)
+21:18:56  manager          observed session telemetry-drill-worker-20260520 state idle (staleness 12.2s)
+21:19:14  manager          observed session telemetry-drill-worker-20260520 state idle (staleness 30.2s)
+21:19:27  workerctl        accepted criterion #75: docs/local-telemetry-workflow.md remains the canonical workflow reference and lists telemetry summary, timeline, search, export, sessions, and reconcile commands.
+21:19:27  workerctl        accepted criterion #76: export-task includes telemetry-events.json, telemetry-summary.json, and telemetry-report.md by default.
+21:19:28  workerctl        accepted criterion #77: The worker receipt is inspection-only and no product files were changed by the worker.
+21:19:28  workerctl        deferred criterion #78: Add a future lightweight smoke check for telemetry export contents.
+21:19:55  workerctl        accepted criterion #79: docs/local-telemetry-workflow.md remains the canonical workflow reference. Verification: inspect the doc and confirm it lists telemetry --summary, timeline, --search manager, export-task --zip --include-transcripts, ses...
+21:19:55  workerctl        accepted criterion #80: export-task includes the three telemetry artifacts by default. Verification: inspect workerctl/export.py or run a disposable export and confirm telemetry-events.json, telemetry-summary.json, and telemetry-report.md are...
+21:19:55  workerctl        deferred criterion #81: Follow-up after this QA slice.
+21:19:55  workerctl        accepted criterion #82: The drill receipt is inspection-only. Verification: run git status --short and confirm no files were changed by the worker; any pre-existing untracked drill artifact directory is explicitly called out.
+21:20:13  manager          observed session telemetry-drill-worker-20260520 state idle (staleness 89.2s)
+21:20:23  manager          observed session telemetry-drill-worker-20260520 state idle (staleness 99.2s)
+21:20:24  workerctl        satisfied criterion #75 (accepted -> satisfied): proof recorded
+21:20:24  workerctl        satisfied criterion #76 (accepted -> satisfied): proof recorded
+21:20:24  workerctl        satisfied criterion #77 (accepted -> satisfied): proof recorded
+21:20:24  workerctl        satisfied criterion #79 (accepted -> satisfied): proof recorded
+21:20:24  workerctl        satisfied criterion #80 (accepted -> satisfied): proof recorded
+21:20:24  workerctl        satisfied criterion #82 (accepted -> satisfied): proof recorded
+21:20:53  workerctl        satisfied criterion #75 (satisfied -> satisfied): proof recorded
+21:20:53  workerctl        satisfied criterion #76 (satisfied -> satisfied): proof recorded
+21:20:53  workerctl        satisfied criterion #77 (satisfied -> satisfied): proof recorded
+21:20:53  workerctl        satisfied criterion #79 (satisfied -> satisfied): proof recorded
+21:20:53  workerctl        satisfied criterion #80 (satisfied -> satisfied): proof recorded
+21:20:53  workerctl        satisfied criterion #82 (satisfied -> satisfied): proof recorded
+21:21:06  manager          decision inspect: Accept current local telemetry drill slice: worker receipt matches requested workflow/artifacts, accepted criteria are satisfied from durable evidence, and follow-up smoke coverage is deferred.
+21:21:34  manager          finished task: T010 local telemetry drill accepted by manager decision 44; durable telemetry/replay/export evidence captured. (manager left open)
+21:21:34  manager          decision stop: T010 local telemetry drill accepted by manager decision 44; durable telemetry/replay/export evidence captured.
+21:21:43  manager          finished task: T010 local telemetry drill accepted by manager decision 44; durable telemetry/replay/export evidence captured. (manager stopped)
+21:21:43  manager          decision stop: T010 local telemetry drill accepted by manager decision 44; durable telemetry/replay/export evidence captured.

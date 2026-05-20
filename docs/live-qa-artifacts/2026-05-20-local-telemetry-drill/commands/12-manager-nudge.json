@@ -1,0 +1,7 @@
+{
+  "dry_run": false,
+  "session": "telemetry-drill-manager-20260520",
+  "target": "codex-telemetry-drill-manager-20260520",
+  "text": "Worker completed. Use durable evidence only: inspect worker receipt in transcript capture, criteria list, replay, commands, and telemetry. Make one final decision for local-telemetry-drill-20260520: accept or request follow-up. Mention whether worker changed files and whether telemetry/replay/export are sufficient for postmortem review.",
+  "time": "2026-05-20T21:19:37Z"
+}

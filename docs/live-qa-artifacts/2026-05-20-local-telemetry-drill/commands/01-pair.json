@@ -1,0 +1,31 @@
+{
+  "binding_id": "binding-e78a7a93-c29b-4920-b96f-d989e071c4c4",
+  "manager": {
+    "codex_session_id": "019e4740-d17a-7b82-bb23-46d042b1a78a",
+    "codex_session_path": "/Users/neonwatty/.codex/sessions/2026/05/20/rollout-2026-05-20T14-18-10-019e4740-d17a-7b82-bb23-46d042b1a78a.jsonl",
+    "cwd": "/Users/neonwatty/Desktop/codex-terminal-manager",
+    "name": "telemetry-drill-manager-20260520",
+    "pid": 913,
+    "role": "manager",
+    "session_id": "session-9785fd0d-44ce-4b2c-b430-605ae46d2bdb",
+    "tmux_session": "codex-telemetry-drill-manager-20260520"
+  },
+  "manager_config_seeded": true,
+  "manager_config_seeded_by_pair": true,
+  "run_id": "run-1b863f70-d6ff-4463-982d-40d4be24efe9",
+  "task": {
+    "created": true,
+    "id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+    "name": "local-telemetry-drill-20260520"
+  },
+  "worker": {
+    "codex_session_id": "019e4740-c4f4-7050-9021-2d8a492445b2",
+    "codex_session_path": "/Users/neonwatty/.codex/sessions/2026/05/20/rollout-2026-05-20T14-18-07-019e4740-c4f4-7050-9021-2d8a492445b2.jsonl",
+    "cwd": "/Users/neonwatty/Desktop/codex-terminal-manager",
+    "name": "telemetry-drill-worker-20260520",
+    "pid": 99194,
+    "role": "worker",
+    "session_id": "session-551cb20e-f172-432d-bba9-621481326721",
+    "tmux_session": "codex-telemetry-drill-worker-20260520"
+  }
+}

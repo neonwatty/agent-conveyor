@@ -1,0 +1,804 @@
+[
+  {
+    "actor": "workerctl",
+    "attributes": {
+      "manager_config_seeded": true,
+      "manager_config_seeded_by_pair": true
+    },
+    "correlation": {
+      "binding_id": "binding-e78a7a93-c29b-4920-b96f-d989e071c4c4",
+      "manager": "telemetry-drill-manager-20260520",
+      "source": "pair",
+      "task": "local-telemetry-drill-20260520",
+      "worker": "telemetry-drill-worker-20260520"
+    },
+    "event_type": "pair_run_created",
+    "id": "telemetry-9fba5a51-5c37-49a4-b80e-a6363a97c7d4",
+    "run_id": "run-1b863f70-d6ff-4463-982d-40d4be24efe9",
+    "severity": "info",
+    "summary": "Created active telemetry run for pair task local-telemetry-drill-20260520.",
+    "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+    "timestamp": "2026-05-20T21:18:11Z"
+  },
+  {
+    "actor": "manager",
+    "attributes": {
+      "busy_wait_seconds": 90
+    },
+    "correlation": {
+      "binding_id": "binding-e78a7a93-c29b-4920-b96f-d989e071c4c4",
+      "manager_session": "telemetry-drill-manager-20260520",
+      "worker_session": "telemetry-drill-worker-20260520"
+    },
+    "event_type": "manager_cycle_started",
+    "id": "telemetry-c47b2c0c-4598-4d17-b737-2f83d2980efc",
+    "run_id": "run-1b863f70-d6ff-4463-982d-40d4be24efe9",
+    "severity": "info",
+    "summary": "Started manager cycle for task local-telemetry-drill-20260520.",
+    "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+    "timestamp": "2026-05-20T21:18:25Z"
+  },
+  {
+    "actor": "manager",
+    "attributes": {
+      "ingest": {
+        "new_events": 20,
+        "new_offset": 103309,
+        "skipped_lines": 0
+      },
+      "last_event_subtype": null,
+      "manager_alive": true,
+      "notable_pane_pattern": null,
+      "state": "busy",
+      "task_completed": false,
+      "worker_alive": true
+    },
+    "correlation": {
+      "binding_id": "binding-e78a7a93-c29b-4920-b96f-d989e071c4c4",
+      "cycle_id": 103,
+      "manager_session": "telemetry-drill-manager-20260520",
+      "worker_session": "telemetry-drill-worker-20260520"
+    },
+    "event_type": "manager_cycle_succeeded",
+    "id": "telemetry-99f20900-fc45-4639-a98b-aba34a24d8c7",
+    "run_id": "run-1b863f70-d6ff-4463-982d-40d4be24efe9",
+    "severity": "info",
+    "summary": "Manager cycle succeeded for task local-telemetry-drill-20260520.",
+    "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+    "timestamp": "2026-05-20T21:18:25Z"
+  },
+  {
+    "actor": "manager",
+    "attributes": {
+      "busy_wait_seconds": 90
+    },
+    "correlation": {
+      "binding_id": "binding-e78a7a93-c29b-4920-b96f-d989e071c4c4",
+      "manager_session": "telemetry-drill-manager-20260520",
+      "worker_session": "telemetry-drill-worker-20260520"
+    },
+    "event_type": "manager_cycle_started",
+    "id": "telemetry-fe28823d-ed38-4240-a0eb-d64966ec3d61",
+    "run_id": "run-1b863f70-d6ff-4463-982d-40d4be24efe9",
+    "severity": "info",
+    "summary": "Started manager cycle for task local-telemetry-drill-20260520.",
+    "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+    "timestamp": "2026-05-20T21:18:31Z"
+  },
+  {
+    "actor": "manager",
+    "attributes": {
+      "ingest": {
+        "new_events": 6,
+        "new_offset": 113775,
+        "skipped_lines": 0
+      },
+      "last_event_subtype": null,
+      "manager_alive": true,
+      "notable_pane_pattern": null,
+      "state": "busy",
+      "task_completed": false,
+      "worker_alive": true
+    },
+    "correlation": {
+      "binding_id": "binding-e78a7a93-c29b-4920-b96f-d989e071c4c4",
+      "cycle_id": 104,
+      "manager_session": "telemetry-drill-manager-20260520",
+      "worker_session": "telemetry-drill-worker-20260520"
+    },
+    "event_type": "manager_cycle_succeeded",
+    "id": "telemetry-a841fe05-1ae5-4944-9926-08c1b3d4f859",
+    "run_id": "run-1b863f70-d6ff-4463-982d-40d4be24efe9",
+    "severity": "info",
+    "summary": "Manager cycle succeeded for task local-telemetry-drill-20260520.",
+    "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+    "timestamp": "2026-05-20T21:18:31Z"
+  },
+  {
+    "actor": "manager",
+    "attributes": {
+      "busy_wait_seconds": 90
+    },
+    "correlation": {
+      "binding_id": "binding-e78a7a93-c29b-4920-b96f-d989e071c4c4",
+      "manager_session": "telemetry-drill-manager-20260520",
+      "worker_session": "telemetry-drill-worker-20260520"
+    },
+    "event_type": "manager_cycle_started",
+    "id": "telemetry-d460c77d-57d7-413c-a1aa-1b7fe22b03fd",
+    "run_id": "run-1b863f70-d6ff-4463-982d-40d4be24efe9",
+    "severity": "info",
+    "summary": "Started manager cycle for task local-telemetry-drill-20260520.",
+    "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+    "timestamp": "2026-05-20T21:18:42Z"
+  },
+  {
+    "actor": "manager",
+    "attributes": {
+      "ingest": {
+        "new_events": 8,
+        "new_offset": 121010,
+        "skipped_lines": 0
+      },
+      "last_event_subtype": "user_message",
+      "manager_alive": true,
+      "notable_pane_pattern": null,
+      "state": "busy",
+      "task_completed": false,
+      "worker_alive": true
+    },
+    "correlation": {
+      "binding_id": "binding-e78a7a93-c29b-4920-b96f-d989e071c4c4",
+      "cycle_id": 105,
+      "manager_session": "telemetry-drill-manager-20260520",
+      "worker_session": "telemetry-drill-worker-20260520"
+    },
+    "event_type": "manager_cycle_succeeded",
+    "id": "telemetry-6fa1422f-6310-4d20-83a9-f090ff922155",
+    "run_id": "run-1b863f70-d6ff-4463-982d-40d4be24efe9",
+    "severity": "info",
+    "summary": "Manager cycle succeeded for task local-telemetry-drill-20260520.",
+    "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+    "timestamp": "2026-05-20T21:18:42Z"
+  },
+  {
+    "actor": "manager",
+    "attributes": {
+      "busy_wait_seconds": 90
+    },
+    "correlation": {
+      "binding_id": "binding-e78a7a93-c29b-4920-b96f-d989e071c4c4",
+      "manager_session": "telemetry-drill-manager-20260520",
+      "worker_session": "telemetry-drill-worker-20260520"
+    },
+    "event_type": "manager_cycle_started",
+    "id": "telemetry-daae5c39-176a-4437-8b21-520db8f72b5d",
+    "run_id": "run-1b863f70-d6ff-4463-982d-40d4be24efe9",
+    "severity": "info",
+    "summary": "Started manager cycle for task local-telemetry-drill-20260520.",
+    "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+    "timestamp": "2026-05-20T21:18:56Z"
+  },
+  {
+    "actor": "manager",
+    "attributes": {
+      "ingest": {
+        "new_events": 4,
+        "new_offset": 125526,
+        "skipped_lines": 0
+      },
+      "last_event_subtype": "task_complete",
+      "manager_alive": true,
+      "notable_pane_pattern": null,
+      "state": "idle",
+      "task_completed": true,
+      "worker_alive": true
+    },
+    "correlation": {
+      "binding_id": "binding-e78a7a93-c29b-4920-b96f-d989e071c4c4",
+      "cycle_id": 106,
+      "manager_session": "telemetry-drill-manager-20260520",
+      "worker_session": "telemetry-drill-worker-20260520"
+    },
+    "event_type": "manager_cycle_succeeded",
+    "id": "telemetry-0f2a8c15-5ec2-4654-b2f9-1d7c5de1f95a",
+    "run_id": "run-1b863f70-d6ff-4463-982d-40d4be24efe9",
+    "severity": "info",
+    "summary": "Manager cycle succeeded for task local-telemetry-drill-20260520.",
+    "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+    "timestamp": "2026-05-20T21:18:56Z"
+  },
+  {
+    "actor": "manager",
+    "attributes": {
+      "busy_wait_seconds": 90
+    },
+    "correlation": {
+      "binding_id": "binding-e78a7a93-c29b-4920-b96f-d989e071c4c4",
+      "manager_session": "telemetry-drill-manager-20260520",
+      "worker_session": "telemetry-drill-worker-20260520"
+    },
+    "event_type": "manager_cycle_started",
+    "id": "telemetry-049470f9-def4-4eeb-9efb-10c74abf56cc",
+    "run_id": "run-1b863f70-d6ff-4463-982d-40d4be24efe9",
+    "severity": "info",
+    "summary": "Started manager cycle for task local-telemetry-drill-20260520.",
+    "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+    "timestamp": "2026-05-20T21:18:56Z"
+  },
+  {
+    "actor": "manager",
+    "attributes": {
+      "ingest": {
+        "new_events": 0,
+        "new_offset": 125526,
+        "skipped_lines": 0
+      },
+      "last_event_subtype": "task_complete",
+      "manager_alive": true,
+      "notable_pane_pattern": null,
+      "state": "idle",
+      "task_completed": true,
+      "worker_alive": true
+    },
+    "correlation": {
+      "binding_id": "binding-e78a7a93-c29b-4920-b96f-d989e071c4c4",
+      "cycle_id": 107,
+      "manager_session": "telemetry-drill-manager-20260520",
+      "worker_session": "telemetry-drill-worker-20260520"
+    },
+    "event_type": "manager_cycle_succeeded",
+    "id": "telemetry-51c4aaff-5f43-4859-87e3-d985c4f7e504",
+    "run_id": "run-1b863f70-d6ff-4463-982d-40d4be24efe9",
+    "severity": "info",
+    "summary": "Manager cycle succeeded for task local-telemetry-drill-20260520.",
+    "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+    "timestamp": "2026-05-20T21:18:56Z"
+  },
+  {
+    "actor": "manager",
+    "attributes": {
+      "busy_wait_seconds": 90
+    },
+    "correlation": {
+      "binding_id": "binding-e78a7a93-c29b-4920-b96f-d989e071c4c4",
+      "manager_session": "telemetry-drill-manager-20260520",
+      "worker_session": "telemetry-drill-worker-20260520"
+    },
+    "event_type": "manager_cycle_started",
+    "id": "telemetry-cd910354-6e7d-4ea6-a36d-7d256cdf7a74",
+    "run_id": "run-1b863f70-d6ff-4463-982d-40d4be24efe9",
+    "severity": "info",
+    "summary": "Started manager cycle for task local-telemetry-drill-20260520.",
+    "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+    "timestamp": "2026-05-20T21:19:14Z"
+  },
+  {
+    "actor": "manager",
+    "attributes": {
+      "ingest": {
+        "new_events": 0,
+        "new_offset": 125526,
+        "skipped_lines": 0
+      },
+      "last_event_subtype": "task_complete",
+      "manager_alive": true,
+      "notable_pane_pattern": null,
+      "state": "idle",
+      "task_completed": true,
+      "worker_alive": true
+    },
+    "correlation": {
+      "binding_id": "binding-e78a7a93-c29b-4920-b96f-d989e071c4c4",
+      "cycle_id": 108,
+      "manager_session": "telemetry-drill-manager-20260520",
+      "worker_session": "telemetry-drill-worker-20260520"
+    },
+    "event_type": "manager_cycle_succeeded",
+    "id": "telemetry-1cf7e3ec-3d17-4c9a-83f6-c8da16e20aea",
+    "run_id": "run-1b863f70-d6ff-4463-982d-40d4be24efe9",
+    "severity": "info",
+    "summary": "Manager cycle succeeded for task local-telemetry-drill-20260520.",
+    "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+    "timestamp": "2026-05-20T21:19:14Z"
+  },
+  {
+    "actor": "workerctl",
+    "attributes": {
+      "dry_run": false,
+      "success": true,
+      "text_length": 338
+    },
+    "correlation": {
+      "binding_id": "binding-e78a7a93-c29b-4920-b96f-d989e071c4c4",
+      "dry_run": false,
+      "role": "manager",
+      "session": "telemetry-drill-manager-20260520",
+      "session_id": "session-9785fd0d-44ce-4b2c-b430-605ae46d2bdb"
+    },
+    "event_type": "session_nudge_succeeded",
+    "id": "telemetry-a372c384-5d62-477f-8d52-29f0dce4cab0",
+    "run_id": "run-1b863f70-d6ff-4463-982d-40d4be24efe9",
+    "severity": "info",
+    "summary": "Nudged session telemetry-drill-manager-20260520.",
+    "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+    "timestamp": "2026-05-20T21:19:37Z"
+  },
+  {
+    "actor": "workerctl",
+    "attributes": {
+      "criterion": "docs/local-telemetry-workflow.md remains the canonical workflow reference. Verification: inspect the doc and confirm it lists telemetry --summary, timeline, --search manager, export-task --zip --include-transcripts, sessions --state active, and reconcile --stale-cycles-seconds 1.",
+      "has_evidence": false,
+      "has_proof": false,
+      "status": "accepted"
+    },
+    "correlation": {
+      "criterion_id": 79,
+      "source": "worker_proposed"
+    },
+    "event_type": "acceptance_criterion_added",
+    "id": "telemetry-f1991db5-a7c1-47d6-972a-d2b09344a91d",
+    "run_id": "run-1b863f70-d6ff-4463-982d-40d4be24efe9",
+    "severity": "info",
+    "summary": "Added acceptance criterion.",
+    "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+    "timestamp": "2026-05-20T21:19:55Z"
+  },
+  {
+    "actor": "manager",
+    "attributes": {
+      "busy_wait_seconds": 90
+    },
+    "correlation": {
+      "binding_id": "binding-e78a7a93-c29b-4920-b96f-d989e071c4c4",
+      "manager_session": "telemetry-drill-manager-20260520",
+      "worker_session": "telemetry-drill-worker-20260520"
+    },
+    "event_type": "manager_cycle_started",
+    "id": "telemetry-78d67da6-f43f-4483-a55c-c1cb239c10f3",
+    "run_id": "run-1b863f70-d6ff-4463-982d-40d4be24efe9",
+    "severity": "info",
+    "summary": "Started manager cycle for task local-telemetry-drill-20260520.",
+    "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+    "timestamp": "2026-05-20T21:20:13Z"
+  },
+  {
+    "actor": "manager",
+    "attributes": {
+      "ingest": {
+        "new_events": 0,
+        "new_offset": 125526,
+        "skipped_lines": 0
+      },
+      "last_event_subtype": "task_complete",
+      "manager_alive": true,
+      "notable_pane_pattern": null,
+      "state": "idle",
+      "task_completed": true,
+      "worker_alive": true
+    },
+    "correlation": {
+      "binding_id": "binding-e78a7a93-c29b-4920-b96f-d989e071c4c4",
+      "cycle_id": 109,
+      "manager_session": "telemetry-drill-manager-20260520",
+      "worker_session": "telemetry-drill-worker-20260520"
+    },
+    "event_type": "manager_cycle_succeeded",
+    "id": "telemetry-b8b41838-ec2d-4ff9-acad-9b266d5249d1",
+    "run_id": "run-1b863f70-d6ff-4463-982d-40d4be24efe9",
+    "severity": "info",
+    "summary": "Manager cycle succeeded for task local-telemetry-drill-20260520.",
+    "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+    "timestamp": "2026-05-20T21:20:13Z"
+  },
+  {
+    "actor": "manager",
+    "attributes": {
+      "busy_wait_seconds": 90
+    },
+    "correlation": {
+      "binding_id": "binding-e78a7a93-c29b-4920-b96f-d989e071c4c4",
+      "manager_session": "telemetry-drill-manager-20260520",
+      "worker_session": "telemetry-drill-worker-20260520"
+    },
+    "event_type": "manager_cycle_started",
+    "id": "telemetry-048d19ff-ddf8-488b-a133-a091460202b5",
+    "run_id": "run-1b863f70-d6ff-4463-982d-40d4be24efe9",
+    "severity": "info",
+    "summary": "Started manager cycle for task local-telemetry-drill-20260520.",
+    "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+    "timestamp": "2026-05-20T21:20:23Z"
+  },
+  {
+    "actor": "manager",
+    "attributes": {
+      "ingest": {
+        "new_events": 0,
+        "new_offset": 125526,
+        "skipped_lines": 0
+      },
+      "last_event_subtype": "task_complete",
+      "manager_alive": true,
+      "notable_pane_pattern": null,
+      "state": "idle",
+      "task_completed": true,
+      "worker_alive": true
+    },
+    "correlation": {
+      "binding_id": "binding-e78a7a93-c29b-4920-b96f-d989e071c4c4",
+      "cycle_id": 110,
+      "manager_session": "telemetry-drill-manager-20260520",
+      "worker_session": "telemetry-drill-worker-20260520"
+    },
+    "event_type": "manager_cycle_succeeded",
+    "id": "telemetry-73ae375f-67d3-4f83-bdeb-b74fe15e6ebc",
+    "run_id": "run-1b863f70-d6ff-4463-982d-40d4be24efe9",
+    "severity": "info",
+    "summary": "Manager cycle succeeded for task local-telemetry-drill-20260520.",
+    "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+    "timestamp": "2026-05-20T21:20:23Z"
+  },
+  {
+    "actor": "workerctl",
+    "attributes": {
+      "criterion": "docs/local-telemetry-workflow.md remains the canonical workflow reference. Verification: inspect the doc and confirm it lists telemetry --summary, timeline, --search manager, export-task --zip --include-transcripts, sessions --state active, and reconcile --stale-cycles-seconds 1.",
+      "has_evidence": true,
+      "has_proof": false,
+      "previous_status": "accepted",
+      "status": "satisfied"
+    },
+    "correlation": {
+      "criterion_id": 79,
+      "source": "worker_proposed"
+    },
+    "event_type": "acceptance_criterion_updated",
+    "id": "telemetry-93d430b4-9103-47c2-a423-3b8f6cc4db29",
+    "run_id": "run-1b863f70-d6ff-4463-982d-40d4be24efe9",
+    "severity": "info",
+    "summary": "Updated acceptance criterion.",
+    "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+    "timestamp": "2026-05-20T21:20:24Z"
+  },
+  {
+    "actor": "workerctl",
+    "attributes": {
+      "byte_count": 8682,
+      "classifier": {
+        "busy_wait": {
+          "pattern": "long_running_interruptible",
+          "reason": "terminal shows an interruptible Codex operation while status.json is stale",
+          "recommended_action": "inspect_or_interrupt"
+        },
+        "startup": [
+          "working",
+          "Codex is already working"
+        ]
+      },
+      "content_path": null,
+      "history_lines": 180,
+      "line_count": 203,
+      "tmux_pane_id": "%1",
+      "tmux_session": "codex-telemetry-drill-manager-20260520"
+    },
+    "correlation": {
+      "capture_id": 34,
+      "command_id": null,
+      "manager_id": null,
+      "role": "manager",
+      "source": "transcript_capture",
+      "worker_id": null
+    },
+    "event_type": "terminal_capture_recorded",
+    "id": "telemetry-b99ed375-36a0-44d8-9ae9-8e1773ad6c16",
+    "run_id": "run-1b863f70-d6ff-4463-982d-40d4be24efe9",
+    "severity": "info",
+    "summary": "Recorded manager terminal capture.",
+    "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+    "timestamp": "2026-05-20T21:20:33Z"
+  },
+  {
+    "actor": "workerctl",
+    "attributes": {
+      "byte_count": 8682,
+      "line_count": 203,
+      "retention_class": "hot",
+      "segment_end_line": 203,
+      "segment_kind": "reset",
+      "segment_start_line": 1
+    },
+    "correlation": {
+      "previous_capture_id": null,
+      "role": "manager",
+      "segment_id": 34,
+      "source_capture_id": 34
+    },
+    "event_type": "transcript_segment_recorded",
+    "id": "telemetry-b584c2a8-06f7-4c14-a1b7-ad00629da0f4",
+    "run_id": "run-1b863f70-d6ff-4463-982d-40d4be24efe9",
+    "severity": "info",
+    "summary": "Recorded manager transcript segment.",
+    "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+    "timestamp": "2026-05-20T21:20:33Z"
+  },
+  {
+    "actor": "workerctl",
+    "attributes": {
+      "criterion": "docs/local-telemetry-workflow.md remains the canonical workflow reference. Verification: inspect the doc and confirm it lists telemetry --summary, timeline, --search manager, export-task --zip --include-transcripts, sessions --state active, and reconcile --stale-cycles-seconds 1.",
+      "has_evidence": true,
+      "has_proof": false,
+      "previous_status": "satisfied",
+      "status": "satisfied"
+    },
+    "correlation": {
+      "criterion_id": 79,
+      "source": "worker_proposed"
+    },
+    "event_type": "acceptance_criterion_updated",
+    "id": "telemetry-48894886-5db8-4784-b962-fad1daa47bcc",
+    "run_id": "run-1b863f70-d6ff-4463-982d-40d4be24efe9",
+    "severity": "info",
+    "summary": "Updated acceptance criterion.",
+    "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+    "timestamp": "2026-05-20T21:20:53Z"
+  },
+  {
+    "actor": "workerctl",
+    "attributes": {
+      "decision": "inspect",
+      "payload": {
+        "decision": "accept",
+        "deferred": "future lightweight smoke check for telemetry export contents",
+        "postmortem_evidence": "sufficient: telemetry summary/events, replay, export manifest/report, transcript capture, saved command artifacts",
+        "worker_changed_files": "receipt says no; git status only shows untracked drill artifact directory"
+      },
+      "reason": "Accept current local telemetry drill slice: worker receipt matches requested workflow/artifacts, accepted criteria are satisfied from durable evidence, and follow-up smoke coverage is deferred."
+    },
+    "correlation": {
+      "decision_id": 44,
+      "manager_cycle_id": 110,
+      "manager_id": null
+    },
+    "event_type": "manager_decision_recorded",
+    "id": "telemetry-f469d707-e728-4e21-b844-9a42ee450d78",
+    "run_id": "run-1b863f70-d6ff-4463-982d-40d4be24efe9",
+    "severity": "info",
+    "summary": "Recorded manager decision inspect.",
+    "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+    "timestamp": "2026-05-20T21:21:06Z"
+  },
+  {
+    "actor": "workerctl",
+    "attributes": {
+      "byte_count": 10694,
+      "classifier": {
+        "busy_wait": null,
+        "startup": [
+          "error",
+          "terminal output contains an error-like message"
+        ]
+      },
+      "content_path": null,
+      "history_lines": 220,
+      "line_count": 243,
+      "tmux_pane_id": "%1",
+      "tmux_session": "codex-telemetry-drill-manager-20260520"
+    },
+    "correlation": {
+      "capture_id": 35,
+      "command_id": null,
+      "manager_id": null,
+      "role": "manager",
+      "source": "transcript_capture",
+      "worker_id": null
+    },
+    "event_type": "terminal_capture_recorded",
+    "id": "telemetry-2473de87-6d78-44c8-92db-872f1a488fa3",
+    "run_id": "run-1b863f70-d6ff-4463-982d-40d4be24efe9",
+    "severity": "info",
+    "summary": "Recorded manager terminal capture.",
+    "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+    "timestamp": "2026-05-20T21:21:25Z"
+  },
+  {
+    "actor": "workerctl",
+    "attributes": {
+      "byte_count": 10694,
+      "line_count": 243,
+      "retention_class": "hot",
+      "segment_end_line": 243,
+      "segment_kind": "reset",
+      "segment_start_line": 1
+    },
+    "correlation": {
+      "previous_capture_id": 34,
+      "role": "manager",
+      "segment_id": 35,
+      "source_capture_id": 35
+    },
+    "event_type": "transcript_segment_recorded",
+    "id": "telemetry-ad3068db-4ff9-478a-b699-452f5e706408",
+    "run_id": "run-1b863f70-d6ff-4463-982d-40d4be24efe9",
+    "severity": "info",
+    "summary": "Recorded manager transcript segment.",
+    "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+    "timestamp": "2026-05-20T21:21:25Z"
+  },
+  {
+    "actor": "workerctl",
+    "attributes": {
+      "idempotency_key": "command-a18a25e0-4846-4343-8bf6-dd70d9a8ef64",
+      "manager_id": null,
+      "state": "pending",
+      "worker_id": null
+    },
+    "correlation": {
+      "command_id": "command-a18a25e0-4846-4343-8bf6-dd70d9a8ef64",
+      "command_type": "finish_task"
+    },
+    "event_type": "command_created",
+    "id": "telemetry-ed66ba2b-1e2a-4a50-9bd4-37f94ee16571",
+    "run_id": "run-1b863f70-d6ff-4463-982d-40d4be24efe9",
+    "severity": "info",
+    "summary": "Created command finish_task.",
+    "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+    "timestamp": "2026-05-20T21:21:34Z"
+  },
+  {
+    "actor": "workerctl",
+    "attributes": {
+      "decision": "stop",
+      "payload": {
+        "command_id": "command-a18a25e0-4846-4343-8bf6-dd70d9a8ef64",
+        "source": "finish_task"
+      },
+      "reason": "T010 local telemetry drill accepted by manager decision 44; durable telemetry/replay/export evidence captured."
+    },
+    "correlation": {
+      "decision_id": 45,
+      "manager_cycle_id": null,
+      "manager_id": null
+    },
+    "event_type": "manager_decision_recorded",
+    "id": "telemetry-538d92ae-c5ad-472f-9d47-217c1e054467",
+    "run_id": "run-1b863f70-d6ff-4463-982d-40d4be24efe9",
+    "severity": "info",
+    "summary": "Recorded manager decision stop.",
+    "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+    "timestamp": "2026-05-20T21:21:34Z"
+  },
+  {
+    "actor": "workerctl",
+    "attributes": {
+      "manager_id": null,
+      "state": "attempted",
+      "worker_id": null
+    },
+    "correlation": {
+      "command_id": "command-a18a25e0-4846-4343-8bf6-dd70d9a8ef64",
+      "command_type": "finish_task"
+    },
+    "event_type": "command_attempted",
+    "id": "telemetry-75b110dd-d571-4b4e-80a9-88cfd71f1871",
+    "run_id": "run-1b863f70-d6ff-4463-982d-40d4be24efe9",
+    "severity": "info",
+    "summary": "Attempted command finish_task.",
+    "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+    "timestamp": "2026-05-20T21:21:34Z"
+  },
+  {
+    "actor": "workerctl",
+    "attributes": {
+      "byte_count": 10694,
+      "classifier": {
+        "busy_wait": null,
+        "startup": [
+          "error",
+          "terminal output contains an error-like message"
+        ]
+      },
+      "content_path": null,
+      "history_lines": 220,
+      "line_count": 243,
+      "tmux_pane_id": "%1",
+      "tmux_session": "codex-telemetry-drill-manager-20260520"
+    },
+    "correlation": {
+      "capture_id": 37,
+      "command_id": "command-a18a25e0-4846-4343-8bf6-dd70d9a8ef64",
+      "manager_id": null,
+      "role": "manager",
+      "source": "finish_task_pre_stop",
+      "worker_id": null
+    },
+    "event_type": "terminal_capture_recorded",
+    "id": "telemetry-d2226c34-6442-45e3-9cae-95a62ce0d433",
+    "run_id": "run-1b863f70-d6ff-4463-982d-40d4be24efe9",
+    "severity": "info",
+    "summary": "Recorded manager terminal capture.",
+    "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+    "timestamp": "2026-05-20T21:21:34Z"
+  },
+  {
+    "actor": "workerctl",
+    "attributes": {
+      "error": "no non-empty transcript segment captured for role(s): worker, manager",
+      "manager_id": null,
+      "result": {},
+      "state": "failed",
+      "worker_id": null
+    },
+    "correlation": {
+      "command_id": "command-a18a25e0-4846-4343-8bf6-dd70d9a8ef64",
+      "command_type": "finish_task"
+    },
+    "event_type": "command_failed",
+    "id": "telemetry-5eccdb54-8aa9-41c4-adf9-6f302e567ab4",
+    "run_id": "run-1b863f70-d6ff-4463-982d-40d4be24efe9",
+    "severity": "error",
+    "summary": "Command finish_task failed.",
+    "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+    "timestamp": "2026-05-20T21:21:34Z"
+  },
+  {
+    "actor": "workerctl",
+    "attributes": {
+      "idempotency_key": "command-4698edea-5ea3-4552-8329-7d4611db1e4d",
+      "manager_id": null,
+      "state": "pending",
+      "worker_id": null
+    },
+    "correlation": {
+      "command_id": "command-4698edea-5ea3-4552-8329-7d4611db1e4d",
+      "command_type": "finish_task"
+    },
+    "event_type": "command_created",
+    "id": "telemetry-2690e2a9-c3a7-49e5-acc1-33c5dfb9d72d",
+    "run_id": "run-1b863f70-d6ff-4463-982d-40d4be24efe9",
+    "severity": "info",
+    "summary": "Created command finish_task.",
+    "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+    "timestamp": "2026-05-20T21:21:43Z"
+  },
+  {
+    "actor": "workerctl",
+    "attributes": {
+      "decision": "stop",
+      "payload": {
+        "command_id": "command-4698edea-5ea3-4552-8329-7d4611db1e4d",
+        "source": "finish_task"
+      },
+      "reason": "T010 local telemetry drill accepted by manager decision 44; durable telemetry/replay/export evidence captured."
+    },
+    "correlation": {
+      "decision_id": 46,
+      "manager_cycle_id": null,
+      "manager_id": null
+    },
+    "event_type": "manager_decision_recorded",
+    "id": "telemetry-f22a203d-d2b8-4dcf-b89b-da738a0b79fa",
+    "run_id": "run-1b863f70-d6ff-4463-982d-40d4be24efe9",
+    "severity": "info",
+    "summary": "Recorded manager decision stop.",
+    "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+    "timestamp": "2026-05-20T21:21:43Z"
+  },
+  {
+    "actor": "workerctl",
+    "attributes": {
+      "manager_id": null,
+      "state": "attempted",
+      "worker_id": null
+    },
+    "correlation": {
+      "command_id": "command-4698edea-5ea3-4552-8329-7d4611db1e4d",
+      "command_type": "finish_task"
+    },
+    "event_type": "command_attempted",
+    "id": "telemetry-981c76ee-f20d-430d-bf1a-7743287adb93",
+    "run_id": "run-1b863f70-d6ff-4463-982d-40d4be24efe9",
+    "severity": "info",
+    "summary": "Attempted command finish_task.",
+    "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+    "timestamp": "2026-05-20T21:21:43Z"
+  }
+]

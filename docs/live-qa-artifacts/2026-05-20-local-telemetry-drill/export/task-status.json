@@ -1,0 +1,36 @@
+{
+  "budget": null,
+  "created_at": "2026-05-20T21:18:05Z",
+  "goal": "Disposable realistic manager/worker telemetry drill for issue 86.",
+  "id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+  "integrity": {
+    "issues": [],
+    "ok": true
+  },
+  "manager": null,
+  "manager_config": {
+    "acceptance_criteria": [],
+    "created_at": "2026-05-20T21:18:05Z",
+    "guidelines": [],
+    "objective": "You are the manager in a disposable local telemetry drill.\n\nDo not edit files. Supervise the worker by evidence only. Use the durable workerctl surfaces available in manager context. Your job is to make one defensible decision after inspecting worker status/evidence, then leave a concise final note.\n\nAcceptance:\n- Use durable evidence, not raw Codex logs.\n- Mention whether the worker changed files.\n- Mention whether telemetry/replay/export should be sufficient for postmortem review.",
+    "permissions": {
+      "create_pr": false,
+      "merge_green_pr": false,
+      "worker_compact_clear": false
+    },
+    "reference_paths": [
+      "docs/local-telemetry-workflow.md",
+      "docs/manual-qa-checklist.md"
+    ],
+    "supervision_mode": "strict",
+    "task_id": "task-85db9869-d6cc-4ecc-a576-615dcef33b6c",
+    "updated_at": "2026-05-20T21:18:05Z"
+  },
+  "name": "local-telemetry-drill-20260520",
+  "state": "done",
+  "summary": "Run local telemetry drill and capture evidence artifacts.",
+  "updated_at": "2026-05-20T21:21:43Z",
+  "worker": null,
+  "worker_handoff": null,
+  "worker_status": null
+}
