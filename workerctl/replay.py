@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from workerctl.core import WorkerError
 from workerctl.db import connect as connect_db
 from workerctl.db import initialize_database
 from workerctl.db import task_audit
@@ -379,6 +380,12 @@ def render_replay_text(result: dict[str, Any]) -> str:
 
 
 def command_replay(args: argparse.Namespace) -> int:
+    if args.format == "full-transcript" and not getattr(args, "include_content", False):
+        raise WorkerError(
+            "full-transcript replay prints stored terminal content; rerun with "
+            "--include-content only when stdout is redirected or you intentionally "
+            "want verbatim transcript output."
+        )
     db_path = Path(args.path).expanduser().resolve() if args.path else None
     result = replay_result(db_path, task=args.task, role=args.role, mode=args.format, limit=args.limit)
     if args.json:

@@ -2363,7 +2363,15 @@ Deferred follow-up criteria:
             try:
                 commands.capture_output = lambda name, lines: next(outputs)
                 worker_identity.verify_worker_binding_identity = lambda binding: {"live": True, "live_pane_id": "%1", "mismatches": []}
-                args = argparse.Namespace(json=True, lines=80, mode="segment", path=str(db_path), role="worker", task="task-a")
+                args = argparse.Namespace(
+                    include_content=False,
+                    json=True,
+                    lines=80,
+                    mode="segment",
+                    path=str(db_path),
+                    role="worker",
+                    task="task-a",
+                )
 
                 with contextlib.redirect_stdout(io.StringIO()):
                     self.assertEqual(commands.command_transcript_capture(args), 0)
@@ -2394,7 +2402,14 @@ Deferred follow-up criteria:
                 self.assertEqual(segment_events[-1]["attributes"]["line_count"], 1)
                 self.assertEqual(segment_events[-1]["attributes"]["segment_kind"], "segment")
 
-                show_args = argparse.Namespace(json=False, limit=None, path=str(db_path), role="worker", task="task-a")
+                show_args = argparse.Namespace(
+                    include_content=True,
+                    json=False,
+                    limit=None,
+                    path=str(db_path),
+                    role="worker",
+                    task="task-a",
+                )
                 with contextlib.redirect_stdout(io.StringIO()) as stdout:
                     self.assertEqual(commands.command_transcript_show(show_args), 0)
                 self.assertIn("line three", stdout.getvalue())
@@ -2435,6 +2450,7 @@ Deferred follow-up criteria:
                 commands.capture_output = lambda name, lines: ""
                 worker_identity.verify_worker_binding_identity = lambda binding: {"live": True, "live_pane_id": "%1", "mismatches": []}
                 args = argparse.Namespace(
+                    include_content=False,
                     json=True,
                     lines=80,
                     mode="segment",
@@ -2485,9 +2501,67 @@ Deferred follow-up criteria:
 
             proc = self.run_workerctl("replay", "task-a", "--format", "full-transcript", "--path", str(db_path))
 
+            self.assertNotEqual(proc.returncode, 0)
+            self.assertIn("--include-content", proc.stderr)
+
+            proc = self.run_workerctl(
+                "replay",
+                "task-a",
+                "--format",
+                "full-transcript",
+                "--include-content",
+                "--path",
+                str(db_path),
+            )
+
             self.assertEqual(proc.returncode, 0, proc.stderr)
             self.assertIn("worker transcript segment", proc.stdout)
             self.assertIn("worker transcript line", proc.stdout)
+
+    def test_transcript_capture_json_redacts_raw_output_by_default(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                worker_db.upsert_worker(
+                    conn,
+                    name="worker-a",
+                    cwd=str(ROOT),
+                    tmux_session="codex-worker-a",
+                    identity_token="token-worker-a",
+                    tmux_pane_id="%1",
+                    state="active",
+                )
+                worker_db.create_task(conn, name="task-a", goal="Do task A.")
+                worker_db.bind_task_worker(conn, task="task-a", worker="worker-a", binding_id="binding-1")
+                conn.commit()
+
+            original_capture_output = commands.capture_output
+            original_verify_worker = worker_identity.verify_worker_binding_identity
+            try:
+                commands.capture_output = lambda name, lines: "secret historical terminal output"
+                worker_identity.verify_worker_binding_identity = lambda binding: {"live": True, "live_pane_id": "%1", "mismatches": []}
+                args = argparse.Namespace(
+                    include_content=False,
+                    json=True,
+                    lines=80,
+                    mode="segment",
+                    path=str(db_path),
+                    require_segment=False,
+                    role="worker",
+                    task="task-a",
+                )
+
+                with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                    self.assertEqual(commands.command_transcript_capture(args), 0)
+
+                payload = json.loads(stdout.getvalue())
+                capture = payload["captures"][0]["capture"]
+                self.assertNotIn("output", capture)
+                self.assertEqual(capture["output_redacted"], True)
+            finally:
+                commands.capture_output = original_capture_output
+                worker_identity.verify_worker_binding_identity = original_verify_worker
 
     def test_mutation_audit_accepts_finish_task_final_decision(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -2749,6 +2823,61 @@ Deferred follow-up criteria:
             self.assertEqual(audit["commands"][0]["id"], command_id)
             self.assertIn("task_created", [event["type"] for event in audit["events"]])
             self.assertIn("task_nudge_intent", [event["type"] for event in audit["events"]])
+
+    def test_audit_json_redacts_capture_content_by_default(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
+                capture_id = worker_db.insert_terminal_capture(
+                    conn,
+                    task_id=task_id,
+                    role="worker",
+                    tmux_session="codex-worker-a",
+                    content_sha256="sha-1",
+                    content="secret captured terminal",
+                    history_lines=20,
+                    source="test",
+                    classifier={},
+                    timestamp="2026-05-11T10:00:00Z",
+                )
+                worker_db.insert_transcript_segment(
+                    conn,
+                    task_id=task_id,
+                    role="worker",
+                    source_capture_id=capture_id,
+                    previous_capture_id=None,
+                    content_sha256="sha-1",
+                    segment_text="secret transcript segment",
+                    segment_start_line=1,
+                    segment_end_line=1,
+                    segment_kind="reset",
+                    timestamp="2026-05-11T10:00:00Z",
+                )
+                conn.commit()
+
+            proc = self.run_workerctl("audit", "task-a", "--json", "--path", str(db_path))
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            payload = json.loads(proc.stdout)
+            self.assertNotIn("secret captured terminal", proc.stdout)
+            self.assertNotIn("secret transcript segment", proc.stdout)
+            self.assertEqual(payload["terminal_captures"][0]["content_redacted"], True)
+            self.assertEqual(payload["transcript_segments"][0]["segment_text_redacted"], True)
+
+            proc = self.run_workerctl(
+                "audit",
+                "task-a",
+                "--json",
+                "--include-content",
+                "--path",
+                str(db_path),
+            )
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("secret captured terminal", proc.stdout)
+            self.assertIn("secret transcript segment", proc.stdout)
 
     def test_task_status_flags_managed_without_active_worker_binding(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -6536,7 +6665,7 @@ class IngestCliTests(unittest.TestCase):
             rollout, state_dir, env = self._setup_with_rollout(tmpdir, events=[
                 {"timestamp": "2026-05-11T14:32:11Z",
                  "type": "event_msg",
-                 "payload": {"type": "task_started", "turn_id": "t1"}},
+                 "payload": {"type": "task_started", "turn_id": "t1", "message": "secret prompt text"}},
                 {"timestamp": "2026-05-11T14:32:12Z",
                  "type": "event_msg",
                  "payload": {"type": "task_complete", "duration_ms": 1000}},
@@ -6551,6 +6680,9 @@ class IngestCliTests(unittest.TestCase):
             self.assertEqual(len(event_msgs), 2)
             self.assertEqual(event_msgs[0]["subtype"], "task_complete")
             self.assertEqual(event_msgs[1]["subtype"], "task_started")
+            self.assertNotIn("secret prompt text", proc.stdout)
+            self.assertEqual(event_msgs[1]["payload"]["message_redacted"], True)
+
             conn = worker_db.connect(state_dir / "workerctl.db")
             self.addCleanup(conn.close)
             tail_events = [
@@ -6559,6 +6691,10 @@ class IngestCliTests(unittest.TestCase):
             ]
             self.assertEqual(len(tail_events), 1)
             self.assertEqual(tail_events[0]["attributes"]["returned_count"], len(events))
+
+            proc = self.run_cli("tail", "w", "--include-content", env_extra=env)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("secret prompt text", proc.stdout)
 
     def test_cli_tail_respects_limit(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -9988,16 +10124,29 @@ class SessionLookupFallbackTests(unittest.TestCase):
 
     def test_capture_uses_sessions_table_tmux_session_when_legacy_worker_missing(self):
         calls = self._patch_tmux("session fallback output")
-        args = argparse.Namespace(name="session-worker", lines=42)
+        args = argparse.Namespace(include_content=False, name="session-worker", lines=42)
+
+        with contextlib.redirect_stdout(io.StringIO()) as stdout:
+            result = commands.command_capture(args)
+
+        self.assertEqual(result, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["name"], "session-worker")
+        self.assertEqual(payload["content_redacted"], True)
+        self.assertNotIn("session fallback output", stdout.getvalue())
+        self.assertEqual(calls["has_session_targets"], ["custom-tmux"])
+        self.assertEqual(calls["capture_targets"], [("custom-tmux", 42)])
+        self.assertEqual(transcript_path("session-worker").read_text(), "session fallback output\n")
+
+    def test_capture_can_print_content_when_explicitly_requested(self):
+        self._patch_tmux("session fallback output")
+        args = argparse.Namespace(include_content=True, name="session-worker", lines=42)
 
         with contextlib.redirect_stdout(io.StringIO()) as stdout:
             result = commands.command_capture(args)
 
         self.assertEqual(result, 0)
         self.assertEqual(stdout.getvalue().strip(), "session fallback output")
-        self.assertEqual(calls["has_session_targets"], ["custom-tmux"])
-        self.assertEqual(calls["capture_targets"], [("custom-tmux", 42)])
-        self.assertEqual(transcript_path("session-worker").read_text(), "session fallback output\n")
 
     def test_status_resolves_sessions_table_tmux_session(self):
         calls = self._patch_tmux()

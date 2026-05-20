@@ -25,9 +25,10 @@ Run this after unit tests and `scripts/live-smoke-repeat 3` pass.
 - [ ] `scripts/workerctl criteria <task> --satisfy <criterion-id> --evidence-json '{"command":"manual QA","status":"pass"}'` records satisfaction evidence.
 - [ ] `scripts/workerctl finish-task <task> --require-criteria-audit` blocks when accepted criteria remain open.
 - [ ] `scripts/workerctl finish-task <task> --capture-transcript-before-stop --require-transcript-segment --stop-manager --stop-worker` captures non-empty transcript segments and stops both sessions.
-- [ ] `scripts/workerctl transcript-show <task> --json` returns captured transcript records.
+- [ ] `scripts/workerctl transcript-show <task> --json` returns captured transcript metadata with segment text redacted.
 - [ ] `scripts/workerctl replay <task> --json` includes cycle, criteria, and finish evidence.
-- [ ] `scripts/workerctl replay <task> --json --format full-transcript` includes transcript segment evidence.
+- [ ] `scripts/workerctl replay <task> --json --format full-transcript` fails unless `--include-content` is passed.
+- [ ] `scripts/workerctl replay <task> --json --format full-transcript --include-content > /tmp/workerctl-full-transcript.json` includes transcript segment evidence without dumping it into the active Codex terminal.
 - [ ] `scripts/workerctl telemetry --summary --run <run_id>` reports local telemetry counts for the run.
 - [ ] `scripts/workerctl telemetry --run <run_id>` prints the telemetry timeline.
 - [ ] `scripts/workerctl telemetry --search manager --run <run_id>` finds manager-linked telemetry events.

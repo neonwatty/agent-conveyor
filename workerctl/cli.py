@@ -686,6 +686,11 @@ def build_parser() -> argparse.ArgumentParser:
     tail.add_argument("name", help="Session name.")
     tail.add_argument("--limit", type=int, default=50, help="Max events to print.")
     tail.add_argument("--subtype", default=None, help="Filter by event_msg subtype.")
+    tail.add_argument(
+        "--include-content",
+        action="store_true",
+        help="Print raw payload text fields. Use only with intentional stdout capture.",
+    )
     tail.set_defaults(func=command_tail)
 
     session_nudge = subparsers.add_parser(
@@ -854,6 +859,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Fail if capture does not create a non-empty transcript segment.",
     )
     transcript_capture.add_argument("--json", action="store_true")
+    transcript_capture.add_argument(
+        "--include-content",
+        action="store_true",
+        help="Include raw captured terminal output in JSON. Use only with intentional stdout capture.",
+    )
     transcript_capture.add_argument("--path", help="Override the workerctl database path.")
     transcript_capture.set_defaults(func=command_transcript_capture)
 
@@ -862,6 +872,11 @@ def build_parser() -> argparse.ArgumentParser:
     transcript_show.add_argument("--role", choices=("all", "worker", "manager"), default="all")
     transcript_show.add_argument("--limit", type=int)
     transcript_show.add_argument("--json", action="store_true")
+    transcript_show.add_argument(
+        "--include-content",
+        action="store_true",
+        help="Print raw transcript segment text. Use only with intentional stdout capture.",
+    )
     transcript_show.add_argument("--path", help="Override the workerctl database path.")
     transcript_show.set_defaults(func=command_transcript_show)
 
@@ -875,6 +890,11 @@ def build_parser() -> argparse.ArgumentParser:
     audit = subparsers.add_parser("audit", help="Print SQLite audit history for a task.")
     audit.add_argument("task", help="Task name or ID.")
     audit.add_argument("--json", action="store_true", help="Print audit records as JSON.")
+    audit.add_argument(
+        "--include-content",
+        action="store_true",
+        help="Include raw terminal capture and transcript text in JSON output.",
+    )
     audit.add_argument("--path", help="Override the workerctl database path.")
     audit.set_defaults(func=command_audit)
 
@@ -890,6 +910,11 @@ def build_parser() -> argparse.ArgumentParser:
     replay.add_argument("--format", choices=("compact", "timeline", "transcript", "full-transcript"), default="timeline")
     replay.add_argument("--role", choices=("all", "worker", "manager"), default="all")
     replay.add_argument("--limit", type=int, help="Print only the last N replay entries.")
+    replay.add_argument(
+        "--include-content",
+        action="store_true",
+        help="Allow full-transcript mode to print raw transcript text.",
+    )
     replay.add_argument("--path", help="Override the workerctl database path.")
     replay.set_defaults(func=command_replay)
 
@@ -909,6 +934,11 @@ def build_parser() -> argparse.ArgumentParser:
     capture = subparsers.add_parser("capture", help="Capture recent worker terminal output.")
     capture.add_argument("name")
     capture.add_argument("--lines", type=int, default=DEFAULT_HISTORY_LINES)
+    capture.add_argument(
+        "--include-content",
+        action="store_true",
+        help="Print captured terminal output verbatim. Default prints metadata only.",
+    )
     capture.set_defaults(func=command_capture)
 
     status = subparsers.add_parser("status", help="Print worker status as JSON.")
