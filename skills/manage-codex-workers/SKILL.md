@@ -92,6 +92,76 @@ scripts/workerctl sessions --role manager
 
 ## Create A Task And Bind
 
+For a fresh supervised worker/manager pair, prefer `pair` over manually
+starting and binding sessions:
+
+```bash
+scripts/workerctl pair \
+  --task <task-slug> \
+  --worker-name <worker-name> \
+  --manager-name <manager-name> \
+  --cwd <target-repo> \
+  --codex-profile yolo \
+  --manager-mode strict \
+  --task-goal "<one-line goal>" \
+  --task-prompt "<worker prompt>" \
+  --manager-objective "<manager objective>" \
+  --manager-acceptance "<finish criterion>"
+```
+
+Use this for external dogfood runs. Keep the control repo as the command cwd,
+but set `--cwd` to the downstream project:
+
+```bash
+cd /Users/neonwatty/Desktop/codex-terminal-manager
+export DOGFOOD_CWD="/path/to/external/project"
+export TASK="external-dogfood-$(date +%Y%m%d)"
+export WORKER="dogfood-worker-$(date +%Y%m%d)"
+export MANAGER="dogfood-manager-$(date +%Y%m%d)"
+
+scripts/workerctl pair \
+  --task "$TASK" \
+  --worker-name "$WORKER" \
+  --manager-name "$MANAGER" \
+  --cwd "$DOGFOOD_CWD" \
+  --codex-profile yolo \
+  --manager-mode strict \
+  --task-goal "Complete one small real task in the external project." \
+  --task-prompt "Pick one small, concrete improvement. Keep changes scoped. Run verification. Report files changed and commands run." \
+  --manager-objective "Supervise the worker, request acceptance criteria and evidence, and finish only when verified." \
+  --manager-acceptance "The task is complete, verified, and summarized with files changed and commands run."
+```
+
+During external dogfood, review telemetry every few cycles:
+
+```bash
+scripts/workerctl cycle "$TASK"
+scripts/workerctl criteria "$TASK" --list
+scripts/workerctl telemetry --summary --task "$TASK"
+scripts/workerctl telemetry --task "$TASK"
+scripts/workerctl telemetry --search manager --task "$TASK"
+scripts/workerctl replay "$TASK"
+```
+
+Finish and export evidence:
+
+```bash
+scripts/workerctl finish-task "$TASK" \
+  --capture-transcript-before-stop \
+  --require-transcript-segment \
+  --require-criteria-audit \
+  --stop-manager \
+  --stop-worker
+
+scripts/workerctl export-task "$TASK" \
+  --output "/tmp/$TASK-export" \
+  --zip \
+  --include-transcripts
+
+scripts/workerctl sessions --state active
+scripts/workerctl reconcile --stale-cycles-seconds 1
+```
+
 ```bash
 scripts/workerctl tasks --create my-task --goal "Refactor auth"
 scripts/workerctl handoff my-task \
