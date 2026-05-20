@@ -3646,6 +3646,7 @@ Deferred follow-up criteria:
                     state="active",
                 )
                 task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
+                run_id = worker_db.create_run(conn, task_id=task_id, name="export-run")
                 worker_db.bind_task_worker(conn, task="task-a", worker="worker-a", binding_id="binding-1")
                 capture_id = worker_db.insert_terminal_capture(
                     conn,
@@ -3680,6 +3681,16 @@ Deferred follow-up criteria:
                     source_snapshot={"worker": "worker-a"},
                     policy={"max_nudges": 1},
                 )
+                worker_db.emit_telemetry_event(
+                    conn,
+                    actor="manager",
+                    event_type="manager_cycle_succeeded",
+                    run_id=run_id,
+                    summary="Manager accepted worker evidence.",
+                    correlation={"cycle_id": 7},
+                    attributes={"state": "idle"},
+                    timestamp="2026-05-20T13:00:00Z",
+                )
                 conn.commit()
 
             proc = self.run_workerctl(
@@ -3704,6 +3715,9 @@ Deferred follow-up criteria:
             self.assertTrue((output / "manager-decisions.json").exists())
             self.assertTrue((output / "mutation-audit.json").exists())
             self.assertTrue((output / "replay.json").exists())
+            self.assertTrue((output / "telemetry-events.json").exists())
+            self.assertTrue((output / "telemetry-summary.json").exists())
+            self.assertTrue((output / "telemetry-report.md").exists())
             self.assertTrue((output / "transcript-segments.json").exists())
             self.assertTrue((output / "replay-full-transcript.json").exists())
             self.assertTrue((output / "transcripts" / "worker.txt").exists())
@@ -3713,6 +3727,18 @@ Deferred follow-up criteria:
             self.assertEqual(mutation_audit["summary"]["mutations"], 0)
             replay = json.loads((output / "replay.json").read_text())
             self.assertEqual(replay["task"]["name"], "task-a")
+            telemetry_events = json.loads((output / "telemetry-events.json").read_text())
+            telemetry_summary = json.loads((output / "telemetry-summary.json").read_text())
+            telemetry_report = (output / "telemetry-report.md").read_text()
+            self.assertIn("manager_cycle_succeeded", [event["event_type"] for event in telemetry_events])
+            self.assertEqual(telemetry_summary["by_event_type"]["manager_cycle_succeeded"], 1)
+            self.assertIn("# Telemetry Report: task-a", telemetry_report)
+            self.assertIn("manager_cycle_succeeded", telemetry_report)
+            with zipfile.ZipFile(output.with_suffix(".zip")) as archive:
+                names = set(archive.namelist())
+            self.assertIn("telemetry-events.json", names)
+            self.assertIn("telemetry-summary.json", names)
+            self.assertIn("telemetry-report.md", names)
             self.assertIn("worker transcript", (output / "transcripts" / "worker.txt").read_text())
 
     def test_task_scoped_read_commands_are_listed_in_help(self):
