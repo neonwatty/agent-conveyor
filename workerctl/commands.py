@@ -1961,6 +1961,20 @@ def command_manager_permission(args: argparse.Namespace) -> int:
             task_id=task["id"],
             payload=result,
         )
+        worker_db.emit_telemetry_event(
+            conn,
+            actor="manager",
+            event_type="manager_permission_checked",
+            task_id=task["id"],
+            severity="info" if allowed else "warning",
+            summary=f"Checked manager permission {args.action}.",
+            correlation={"action": args.action, "handoff_id": result["handoff_id"]},
+            attributes={
+                "allowed": allowed,
+                "reasons": reasons,
+                "require_handoff": args.require_handoff,
+            },
+        )
         conn.commit()
     print(json.dumps(result, indent=2, sort_keys=True))
     if args.require and not allowed:
@@ -2029,6 +2043,25 @@ def command_request_worker_compact(args: argparse.Namespace) -> int:
             payload={
                 **permission_check,
                 "source": "request_worker_compact",
+            },
+        )
+        worker_db.emit_telemetry_event(
+            conn,
+            actor="manager",
+            event_type="manager_permission_checked",
+            task_id=task["id"],
+            severity="info" if permission_allowed else "warning",
+            summary="Checked manager permission worker_compact_clear.",
+            correlation={
+                "action": "worker_compact_clear",
+                "binding_id": binding["binding_id"],
+                "handoff_id": handoff["id"] if handoff else None,
+                "source": "request_worker_compact",
+            },
+            attributes={
+                "allowed": permission_allowed,
+                "reasons": permission_reasons,
+                "worker_session": binding["worker_session_name"],
             },
         )
         slash_command = worker_compact_slash_command(args)
@@ -3907,6 +3940,7 @@ def command_session_nudge(args: argparse.Namespace) -> int:
     conn = worker_db.connect()
     worker_db.initialize_database(conn)
     try:
+        telemetry_context = _session_action_telemetry_context(conn, session_name=args.name)
         try:
             result = worker_tmux.send_text_to_session(
                 conn, session_name=args.name, text=args.text, dry_run=args.dry_run,
@@ -3918,6 +3952,23 @@ def command_session_nudge(args: argparse.Namespace) -> int:
                     "dry_run": args.dry_run,
                     "text_length": len(args.text),
                     "success": True,
+                },
+            )
+            worker_db.emit_telemetry_event(
+                conn,
+                actor="workerctl",
+                event_type="session_nudge_succeeded",
+                task_id=telemetry_context["task_id"],
+                summary=f"Nudged session {args.name}.",
+                correlation={
+                    **telemetry_context["correlation"],
+                    "dry_run": args.dry_run,
+                    "session": args.name,
+                },
+                attributes={
+                    "dry_run": args.dry_run,
+                    "success": True,
+                    "text_length": len(args.text),
                 },
             )
             conn.commit()
@@ -3937,6 +3988,27 @@ def command_session_nudge(args: argparse.Namespace) -> int:
                     "error": str(exc),
                     "error_type": type(exc).__name__,
                     "rollback_error": rollback_error,
+                },
+            )
+            worker_db.emit_telemetry_event(
+                conn,
+                actor="workerctl",
+                event_type="session_nudge_failed",
+                severity="error",
+                task_id=telemetry_context["task_id"],
+                summary=f"Failed to nudge session {args.name}.",
+                correlation={
+                    **telemetry_context["correlation"],
+                    "dry_run": args.dry_run,
+                    "session": args.name,
+                },
+                attributes={
+                    "dry_run": args.dry_run,
+                    "error": str(exc),
+                    "error_type": type(exc).__name__,
+                    "rollback_error": rollback_error,
+                    "success": False,
+                    "text_length": len(args.text),
                 },
             )
             conn.commit()
@@ -3954,6 +4026,7 @@ def command_session_interrupt(args: argparse.Namespace) -> int:
     conn = worker_db.connect()
     worker_db.initialize_database(conn)
     try:
+        telemetry_context = _session_action_telemetry_context(conn, session_name=args.name)
         try:
             result = worker_tmux.interrupt_session(
                 conn, session_name=args.name, key=args.key,
@@ -3964,6 +4037,24 @@ def command_session_interrupt(args: argparse.Namespace) -> int:
                 payload={
                     "session": args.name,
                     "key": args.key,
+                    "dry_run": args.dry_run,
+                    "followup_length": len(args.followup) if args.followup else 0,
+                    "success": True,
+                },
+            )
+            worker_db.emit_telemetry_event(
+                conn,
+                actor="workerctl",
+                event_type="session_interrupt_succeeded",
+                task_id=telemetry_context["task_id"],
+                summary=f"Interrupted session {args.name}.",
+                correlation={
+                    **telemetry_context["correlation"],
+                    "dry_run": args.dry_run,
+                    "key": args.key,
+                    "session": args.name,
+                },
+                attributes={
                     "dry_run": args.dry_run,
                     "followup_length": len(args.followup) if args.followup else 0,
                     "success": True,
@@ -3989,12 +4080,64 @@ def command_session_interrupt(args: argparse.Namespace) -> int:
                     "rollback_error": rollback_error,
                 },
             )
+            worker_db.emit_telemetry_event(
+                conn,
+                actor="workerctl",
+                event_type="session_interrupt_failed",
+                severity="error",
+                task_id=telemetry_context["task_id"],
+                summary=f"Failed to interrupt session {args.name}.",
+                correlation={
+                    **telemetry_context["correlation"],
+                    "dry_run": args.dry_run,
+                    "key": args.key,
+                    "session": args.name,
+                },
+                attributes={
+                    "dry_run": args.dry_run,
+                    "error": str(exc),
+                    "error_type": type(exc).__name__,
+                    "followup_length": len(args.followup) if args.followup else 0,
+                    "rollback_error": rollback_error,
+                    "success": False,
+                },
+            )
             conn.commit()
             raise
     finally:
         conn.close()
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0
+
+
+def _session_action_telemetry_context(conn: Any, *, session_name: str) -> dict[str, Any]:
+    row = conn.execute(
+        """
+        select sessions.id as session_id, sessions.role, bindings.id as binding_id,
+               bindings.task_id
+        from sessions
+        left join bindings
+          on bindings.state in ('active', 'ending')
+         and (bindings.worker_session_id = sessions.id or bindings.manager_session_id = sessions.id)
+        where sessions.name = ?
+        order by bindings.id desc
+        limit 1
+        """,
+        (session_name,),
+    ).fetchone()
+    if row is None:
+        return {
+            "task_id": None,
+            "correlation": {"binding_id": None, "role": None, "session_id": None},
+        }
+    return {
+        "task_id": row["task_id"],
+        "correlation": {
+            "binding_id": row["binding_id"],
+            "role": row["role"],
+            "session_id": row["session_id"],
+        },
+    }
 
 
 def command_cycle(args: argparse.Namespace) -> int:
