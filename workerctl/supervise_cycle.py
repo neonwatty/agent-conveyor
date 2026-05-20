@@ -130,6 +130,21 @@ def run_cycle(
     # once the nested `ingest` and `pane_signal` shapes stabilize.
     started_at = now or now_iso()
     binding = worker_db.active_binding_for_task(conn, task_name=task_name)
+    worker_db.emit_telemetry_event(
+        conn,
+        actor="manager",
+        event_type="manager_cycle_started",
+        task_id=binding["task_id"],
+        timestamp=started_at,
+        summary=f"Started manager cycle for task {task_name}.",
+        correlation={
+            "binding_id": binding["binding_id"],
+            "manager_session": binding["manager_session_name"],
+            "worker_session": binding["worker_session_name"],
+        },
+        attributes={"busy_wait_seconds": busy_wait_seconds},
+    )
+    conn.commit()
 
     try:
         ingest_result = worker_ingest.ingest_session(
@@ -203,6 +218,24 @@ def run_cycle(
                     str(exc),
                 ),
             )
+            worker_db.emit_telemetry_event(
+                conn,
+                actor="manager",
+                event_type="manager_cycle_failed",
+                severity="error",
+                task_id=binding["task_id"],
+                summary=f"Manager cycle failed for task {task_name}.",
+                correlation={
+                    "binding_id": binding["binding_id"],
+                    "manager_session": binding["manager_session_name"],
+                    "worker_session": binding["worker_session_name"],
+                },
+                attributes={
+                    "error": str(exc),
+                    "error_type": type(exc).__name__,
+                    "status": failure_status,
+                },
+            )
             conn.commit()
         except sqlite3.Error as audit_exc:
             print(
@@ -272,6 +305,28 @@ def run_cycle(
         ),
     )
     cycle_id = int(cursor.lastrowid)
+    worker_db.emit_telemetry_event(
+        conn,
+        actor="manager",
+        event_type="manager_cycle_succeeded",
+        task_id=binding["task_id"],
+        summary=f"Manager cycle succeeded for task {task_name}.",
+        correlation={
+            "binding_id": binding["binding_id"],
+            "cycle_id": cycle_id,
+            "manager_session": binding["manager_session_name"],
+            "worker_session": binding["worker_session_name"],
+        },
+        attributes={
+            "ingest": ingest_result,
+            "last_event_subtype": last_subtype,
+            "notable_pane_pattern": notable_pane_pattern,
+            "state": state,
+            "task_completed": last_subtype == "task_complete",
+            "worker_alive": status_payload["worker_alive"],
+            "manager_alive": status_payload["manager_alive"],
+        },
+    )
     conn.commit()
 
     return {

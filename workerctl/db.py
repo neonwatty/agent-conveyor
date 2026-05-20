@@ -851,6 +851,20 @@ def create_command(
             json.dumps(payload, sort_keys=True),
         ),
     )
+    emit_telemetry_event(
+        conn,
+        actor="workerctl",
+        event_type="command_created",
+        task_id=task_id,
+        summary=f"Created command {command_type}.",
+        correlation={"command_id": command_id, "command_type": command_type},
+        attributes={
+            "idempotency_key": key,
+            "manager_id": manager_id,
+            "state": "pending",
+            "worker_id": worker_id,
+        },
+    )
     return command_id
 
 
@@ -863,6 +877,28 @@ def mark_command_attempted(conn: sqlite3.Connection, *, command_id: str, timesta
         """,
         (timestamp or now_iso(), command_id),
     )
+    row = conn.execute(
+        """
+        select task_id, worker_id, manager_id, type, state
+        from commands
+        where id = ?
+        """,
+        (command_id,),
+    ).fetchone()
+    if row is not None:
+        emit_telemetry_event(
+            conn,
+            actor="workerctl",
+            event_type="command_attempted",
+            task_id=row["task_id"],
+            summary=f"Attempted command {row['type']}.",
+            correlation={"command_id": command_id, "command_type": row["type"]},
+            attributes={
+                "manager_id": row["manager_id"],
+                "state": row["state"],
+                "worker_id": row["worker_id"],
+            },
+        )
 
 
 def finish_command(
@@ -890,6 +926,31 @@ def finish_command(
             command_id,
         ),
     )
+    row = conn.execute(
+        """
+        select task_id, worker_id, manager_id, type, state
+        from commands
+        where id = ?
+        """,
+        (command_id,),
+    ).fetchone()
+    if row is not None:
+        emit_telemetry_event(
+            conn,
+            actor="workerctl",
+            event_type=f"command_{state}",
+            severity="error" if state == "failed" else "info",
+            task_id=row["task_id"],
+            summary=f"Command {row['type']} {state}.",
+            correlation={"command_id": command_id, "command_type": row["type"]},
+            attributes={
+                "error": error,
+                "manager_id": row["manager_id"],
+                "result": result or {},
+                "state": row["state"],
+                "worker_id": row["worker_id"],
+            },
+        )
 
 
 def upsert_worker(
@@ -1468,7 +1529,25 @@ def insert_manager_decision(
             json.dumps(payload or {}, sort_keys=True),
         ),
     )
-    return int(cursor.lastrowid)
+    decision_id = int(cursor.lastrowid)
+    emit_telemetry_event(
+        conn,
+        actor="manager" if manager_id else "workerctl",
+        event_type="manager_decision_recorded",
+        task_id=task_id,
+        summary=f"Recorded manager decision {decision}.",
+        correlation={
+            "decision_id": decision_id,
+            "manager_cycle_id": manager_cycle_id,
+            "manager_id": manager_id,
+        },
+        attributes={
+            "decision": decision,
+            "payload": payload or {},
+            "reason": reason,
+        },
+    )
+    return decision_id
 
 
 def _parse_iso(value: str | None) -> datetime | None:
