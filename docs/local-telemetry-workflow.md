@@ -36,7 +36,7 @@ For repeatable QA or scripted checks, inspect the launch command without startin
 scripts/workerctl dashboard --task <task> --dry-run --json
 ```
 
-The TypeScript backend shells out to `workerctl` JSON commands for task state and attaches interactive terminal panes to registered tmux sessions with a WebSocket PTY bridge. The cockpit includes bind setup and action receipts for cycle, nudge, interrupt, finish, and export, without returning raw transcript content in diagnostics JSON by default.
+The TypeScript backend shells out to `workerctl` JSON commands for task state and attaches interactive terminal panes to registered tmux sessions with a WebSocket PTY bridge. The cockpit can create a task, start a worker/manager pair through `workerctl pair`, auto-attach both terminals, bind existing sessions, and show action receipts for cycle, nudge, interrupt, finish, and export, without returning raw transcript content in diagnostics JSON by default.
 
 Use `--json` when saving durable evidence:
 

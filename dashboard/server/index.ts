@@ -126,6 +126,79 @@ async function main(): Promise<void> {
       next(error);
     }
   });
+  app.post("/api/actions/create-task", async (request, response, next) => {
+    try {
+      response.json(await runWorkerctlReceipt({
+        command: "create-task",
+        task: String(request.body.task || ""),
+        taskGoal: String(request.body.taskGoal || ""),
+        taskSummary: request.body.taskSummary ? String(request.body.taskSummary) : undefined,
+        workerctlPath: options.workerctlPath,
+        dbPath: options.dbPath,
+      }));
+    } catch (error) {
+      next(error);
+    }
+  });
+  app.post("/api/actions/start-worker", async (request, response, next) => {
+    try {
+      response.json(await runWorkerctlReceipt({
+        askForApproval: request.body.askForApproval ? String(request.body.askForApproval) : undefined,
+        command: "start-worker",
+        cwd: request.body.cwd ? String(request.body.cwd) : undefined,
+        sandbox: request.body.sandbox ? String(request.body.sandbox) : undefined,
+        taskPrompt: request.body.taskPrompt ? String(request.body.taskPrompt) : undefined,
+        timeoutSeconds: request.body.timeoutSeconds ? Number(request.body.timeoutSeconds) : undefined,
+        workerName: String(request.body.workerName || ""),
+        workerctlPath: options.workerctlPath,
+        dbPath: options.dbPath,
+      }));
+    } catch (error) {
+      next(error);
+    }
+  });
+  app.post("/api/actions/start-manager", async (request, response, next) => {
+    try {
+      response.json(await runWorkerctlReceipt({
+        askForApproval: request.body.askForApproval ? String(request.body.askForApproval) : undefined,
+        command: "start-manager",
+        cwd: request.body.cwd ? String(request.body.cwd) : undefined,
+        managerName: String(request.body.managerName || ""),
+        sandbox: request.body.sandbox ? String(request.body.sandbox) : undefined,
+        timeoutSeconds: request.body.timeoutSeconds ? Number(request.body.timeoutSeconds) : undefined,
+        workerctlPath: options.workerctlPath,
+        dbPath: options.dbPath,
+      }));
+    } catch (error) {
+      next(error);
+    }
+  });
+  app.post("/api/actions/start-pair", async (request, response, next) => {
+    try {
+      response.json(await runWorkerctlReceipt({
+        askForApproval: request.body.askForApproval ? String(request.body.askForApproval) : undefined,
+        command: "pair",
+        cwd: request.body.cwd ? String(request.body.cwd) : undefined,
+        managerAcceptance: Array.isArray(request.body.managerAcceptance) ? request.body.managerAcceptance.map(String).filter(Boolean) : undefined,
+        managerGuideline: Array.isArray(request.body.managerGuideline) ? request.body.managerGuideline.map(String).filter(Boolean) : undefined,
+        managerMode: ["light", "guided", "strict"].includes(String(request.body.managerMode)) ? request.body.managerMode : undefined,
+        managerName: String(request.body.managerName || ""),
+        managerObjective: request.body.managerObjective ? String(request.body.managerObjective) : undefined,
+        managerReference: Array.isArray(request.body.managerReference) ? request.body.managerReference.map(String).filter(Boolean) : undefined,
+        sandbox: request.body.sandbox ? String(request.body.sandbox) : undefined,
+        task: String(request.body.task || ""),
+        taskGoal: request.body.taskGoal ? String(request.body.taskGoal) : undefined,
+        taskPrompt: request.body.taskPrompt ? String(request.body.taskPrompt) : undefined,
+        taskSummary: request.body.taskSummary ? String(request.body.taskSummary) : undefined,
+        timeoutSeconds: request.body.timeoutSeconds ? Number(request.body.timeoutSeconds) : undefined,
+        workerName: String(request.body.workerName || ""),
+        workerctlPath: options.workerctlPath,
+        dbPath: options.dbPath,
+      }));
+    } catch (error) {
+      next(error);
+    }
+  });
   app.post("/api/actions/nudge", async (request, response, next) => {
     try {
       response.json(await runWorkerctlReceipt({

@@ -14,7 +14,9 @@ body {
 }
 
 button,
-input {
+input,
+select,
+textarea {
   font: inherit;
 }
 
@@ -50,11 +52,17 @@ input {
   gap: 5px;
 }
 
-.topbar input {
+input,
+select,
+textarea {
   border: 1px solid #b8c2bd;
   border-radius: 6px;
-  height: 34px;
   padding: 0 10px;
+}
+
+input,
+select {
+  height: 34px;
 }
 
 button {
@@ -222,15 +230,11 @@ button:disabled {
   gap: 4px;
 }
 
-select,
 textarea {
   background: white;
-  border: 1px solid #c8d2cd;
-  border-radius: 6px;
   color: #17201d;
-  font: inherit;
   min-height: 34px;
-  padding: 7px 8px;
+  padding: 7px 10px;
 }
 
 textarea {
@@ -263,4 +267,20 @@ textarea {
 .receipts span {
   color: #59665f;
   overflow-wrap: anywhere;
+}
+
+.bootstrap-grid {
+  border-bottom: 1px solid #d8dfda;
+  padding-bottom: 12px;
+}
+
+.button-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 1fr 1fr;
+}
+
+.primary-action {
+  background: #0f5d48;
+  grid-column: 1 / -1;
 }

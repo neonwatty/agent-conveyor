@@ -21,6 +21,14 @@ type SessionRow = { name: string; role: "worker" | "manager"; state?: string; tm
 type TaskRow = { name: string; state?: string; goal?: string };
 type Receipt = { command: string[]; exitCode: number | null; stdout: string; stderr: string; json?: unknown };
 
+function safeName(value: string) {
+  return value.trim().toLowerCase().replace(/[^a-z0-9_.:+-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48);
+}
+
+function jsonRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
 function TerminalPane({ title, session }: { title: string; session?: string | null }) {
   const ref = useRef<HTMLDivElement>(null);
 
@@ -72,9 +80,17 @@ function App() {
   const [tasks, setTasks] = useState<TaskRow[]>([]);
   const [worker, setWorker] = useState("");
   const [manager, setManager] = useState("");
+  const [newTask, setNewTask] = useState("");
+  const [taskGoal, setTaskGoal] = useState("");
+  const [taskPrompt, setTaskPrompt] = useState("");
+  const [workerName, setWorkerName] = useState("");
+  const [managerName, setManagerName] = useState("");
+  const [cwd, setCwd] = useState("");
+  const [managerMode, setManagerMode] = useState<"light" | "guided" | "strict">("guided");
   const [nudge, setNudge] = useState("");
   const [receipts, setReceipts] = useState<Receipt[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
   async function loadSetup() {
     const [tasksResponse, sessionsResponse] = await Promise.all([
@@ -101,19 +117,94 @@ function App() {
 
   async function action(endpoint: string, body: Record<string, unknown>, reload = true) {
     setError(null);
-    const response = await fetch(`/api/actions/${endpoint}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    const receipt = await response.json();
-    setReceipts((current) => [receipt, ...current].slice(0, 6));
-    if (!response.ok || receipt.exitCode !== 0) {
-      setError(receipt.stderr || receipt.error || `${endpoint} failed`);
-      return;
+    setBusy(true);
+    try {
+      const response = await fetch(`/api/actions/${endpoint}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const receipt = await response.json();
+      setReceipts((current) => [receipt, ...current].slice(0, 8));
+      if (!response.ok || receipt.exitCode !== 0) {
+        setError(receipt.stderr || receipt.error || `${endpoint} failed`);
+        return receipt;
+      }
+      if (reload) {
+        await refresh(String(body.task || task));
+      }
+      return receipt;
+    } finally {
+      setBusy(false);
     }
-    if (reload) {
-      await refresh(String(body.task || task));
+  }
+
+  async function createTask() {
+    const selectedTask = safeName(newTask || task);
+    const receipt = await action("create-task", { task: selectedTask, taskGoal, taskSummary: taskGoal }, false);
+    if (receipt?.exitCode === 0) {
+      setTask(selectedTask);
+      await loadSetup();
+      await refresh(selectedTask).catch(() => undefined);
+    }
+  }
+
+  async function startWorker() {
+    const selectedWorker = workerName || `${safeName(task || newTask)}-worker`;
+    const receipt = await action("start-worker", {
+      cwd,
+      taskPrompt: taskPrompt || taskGoal || task,
+      timeoutSeconds: 60,
+      workerName: selectedWorker,
+    }, false);
+    if (receipt?.exitCode === 0) {
+      setWorker(selectedWorker);
+      await loadSetup();
+    }
+  }
+
+  async function startManager() {
+    const selectedManager = managerName || `${safeName(task || newTask)}-manager`;
+    const receipt = await action("start-manager", {
+      cwd,
+      managerName: selectedManager,
+      timeoutSeconds: 60,
+    }, false);
+    if (receipt?.exitCode === 0) {
+      setManager(selectedManager);
+      await loadSetup();
+    }
+  }
+
+  async function startPair() {
+    const selectedTask = safeName(newTask || task);
+    const selectedWorker = workerName || `${selectedTask}-worker`;
+    const selectedManager = managerName || `${selectedTask}-manager`;
+    const receipt = await action("start-pair", {
+      cwd,
+      managerAcceptance: ["Worker and manager terminals attach in the dashboard."],
+      managerMode,
+      managerName: selectedManager,
+      managerObjective: taskGoal || `Supervise ${selectedTask}.`,
+      task: selectedTask,
+      taskGoal: taskGoal || taskPrompt || selectedTask,
+      taskPrompt: taskPrompt || taskGoal || selectedTask,
+      timeoutSeconds: 60,
+      workerName: selectedWorker,
+    }, false);
+    if (receipt?.exitCode === 0) {
+      const payload = jsonRecord(receipt.json);
+      const taskPayload = jsonRecord(payload.task);
+      const workerPayload = jsonRecord(payload.worker);
+      const managerPayload = jsonRecord(payload.manager);
+      const returnedTask = String(taskPayload.name || selectedTask);
+      const returnedWorker = String(workerPayload.name || selectedWorker);
+      const returnedManager = String(managerPayload.name || selectedManager);
+      setTask(returnedTask);
+      setWorker(returnedWorker);
+      setManager(returnedManager);
+      await loadSetup();
+      await refresh(returnedTask);
     }
   }
 
@@ -169,6 +260,51 @@ function App() {
           <section>
             <h3>Telemetry</h3>
             <p>{snapshot?.telemetry?.summary.total ?? 0} events, {snapshot?.commands?.unfinished_count ?? 0} unfinished commands, {snapshot?.commands?.failed_count ?? 0} failed commands.</p>
+          </section>
+          <section>
+            <h3>Bootstrap</h3>
+            <div className="form-grid bootstrap-grid">
+              <label>Task
+                <input value={newTask} onChange={(event) => {
+                  const value = safeName(event.target.value);
+                  setNewTask(value);
+                  if (!workerName) {
+                    setWorkerName(value ? `${value}-worker` : "");
+                  }
+                  if (!managerName) {
+                    setManagerName(value ? `${value}-manager` : "");
+                  }
+                }} placeholder={task || "task-name"} />
+              </label>
+              <label>Goal
+                <textarea value={taskGoal} onChange={(event) => setTaskGoal(event.target.value)} placeholder="Task goal" />
+              </label>
+              <label>Worker prompt
+                <textarea value={taskPrompt} onChange={(event) => setTaskPrompt(event.target.value)} placeholder="Initial worker prompt" />
+              </label>
+              <label>Worker
+                <input value={workerName} onChange={(event) => setWorkerName(safeName(event.target.value))} placeholder={`${safeName(newTask || task) || "task"}-worker`} />
+              </label>
+              <label>Manager
+                <input value={managerName} onChange={(event) => setManagerName(safeName(event.target.value))} placeholder={`${safeName(newTask || task) || "task"}-manager`} />
+              </label>
+              <label>CWD
+                <input value={cwd} onChange={(event) => setCwd(event.target.value)} placeholder="dashboard server cwd" />
+              </label>
+              <label>Manager mode
+                <select value={managerMode} onChange={(event) => setManagerMode(event.target.value as "light" | "guided" | "strict")}>
+                  <option value="guided">guided</option>
+                  <option value="light">light</option>
+                  <option value="strict">strict</option>
+                </select>
+              </label>
+              <div className="button-grid">
+                <button disabled={busy} onClick={() => createTask().catch((err: Error) => setError(err.message))}>Create Task</button>
+                <button disabled={busy} onClick={() => startWorker().catch((err: Error) => setError(err.message))}>Start Worker</button>
+                <button disabled={busy} onClick={() => startManager().catch((err: Error) => setError(err.message))}>Start Manager</button>
+                <button disabled={busy} className="primary-action" onClick={() => startPair().catch((err: Error) => setError(err.message))}>Start Pair</button>
+              </div>
+            </div>
           </section>
           <section>
             <h3>Attach & Bind</h3>

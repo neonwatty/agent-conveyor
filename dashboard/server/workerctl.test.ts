@@ -75,6 +75,113 @@ test("builds bind action arguments", () => {
   ]);
 });
 
+test("builds task creation arguments", () => {
+  const args = buildWorkerctlArgs({
+    command: "create-task",
+    task: "dashboard-task",
+    taskGoal: "Supervise from dashboard.",
+    taskSummary: "Dashboard QA",
+    workerctlPath: "scripts/workerctl",
+  });
+
+  assert.deepEqual(args, [
+    "scripts/workerctl",
+    "tasks",
+    "--create",
+    "dashboard-task",
+    "--goal",
+    "Supervise from dashboard.",
+    "--summary",
+    "Dashboard QA",
+  ]);
+});
+
+test("builds start-worker and start-manager arguments", () => {
+  assert.deepEqual(
+    buildWorkerctlArgs({
+      askForApproval: "never",
+      command: "start-worker",
+      cwd: "/repo",
+      sandbox: "danger-full-access",
+      taskPrompt: "Implement the slice.",
+      timeoutSeconds: 20,
+      workerName: "dash-worker",
+      workerctlPath: "scripts/workerctl",
+    }),
+    [
+      "scripts/workerctl",
+      "start-worker",
+      "--name",
+      "dash-worker",
+      "--cwd",
+      "/repo",
+      "--sandbox",
+      "danger-full-access",
+      "--ask-for-approval",
+      "never",
+      "--timeout-seconds",
+      "20",
+      "--task",
+      "Implement the slice.",
+    ],
+  );
+
+  assert.deepEqual(
+    buildWorkerctlArgs({
+      command: "start-manager",
+      dbPath: "/tmp/workerctl.db",
+      managerName: "dash-manager",
+      workerctlPath: "scripts/workerctl",
+    }),
+    ["scripts/workerctl", "start-manager", "--name", "dash-manager"],
+  );
+});
+
+test("builds pair bootstrap arguments", () => {
+  const args = buildWorkerctlArgs({
+    command: "pair",
+    cwd: "/repo",
+    managerAcceptance: ["Both terminals attach"],
+    managerGuideline: ["Keep receipts visible"],
+    managerMode: "guided",
+    managerName: "dash-manager",
+    managerObjective: "Supervise dashboard bootstrap",
+    managerReference: ["README.md"],
+    task: "dashboard-task",
+    taskGoal: "Exercise the browser bootstrap flow.",
+    taskPrompt: "Start work from dashboard.",
+    workerName: "dash-worker",
+    workerctlPath: "scripts/workerctl",
+  });
+
+  assert.deepEqual(args, [
+    "scripts/workerctl",
+    "pair",
+    "--task",
+    "dashboard-task",
+    "--worker-name",
+    "dash-worker",
+    "--manager-name",
+    "dash-manager",
+    "--cwd",
+    "/repo",
+    "--task-prompt",
+    "Start work from dashboard.",
+    "--task-goal",
+    "Exercise the browser bootstrap flow.",
+    "--manager-mode",
+    "guided",
+    "--manager-objective",
+    "Supervise dashboard bootstrap",
+    "--manager-guideline",
+    "Keep receipts visible",
+    "--manager-acceptance",
+    "Both terminals attach",
+    "--manager-reference",
+    "README.md",
+  ]);
+});
+
 test("builds session nudge dry-run arguments", () => {
   const args = buildWorkerctlArgs({
     command: "nudge",
