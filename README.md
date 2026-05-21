@@ -305,8 +305,10 @@ tmux attach -t codex-live-test
   local live supervision cockpit. The dashboard binds to loopback by default,
   uses the TypeScript backend to shell out to `workerctl` JSON commands, and
   attaches interactive terminals to tmux-backed worker/manager sessions through
-  a WebSocket PTY bridge. It includes attach/bind controls and audited action
-  receipts for cycle, nudge, interrupt, finish, and export. Use
+  a WebSocket PTY bridge. It includes browser bootstrap controls for creating a
+  task, starting a worker/manager pair with `workerctl pair`, auto-attaching the
+  terminals, attach/bind controls, and audited action receipts for cycle,
+  nudge, interrupt, finish, and export. Use
   `--dry-run --json` to inspect the launch command.
 - `cycle <task> [--busy-wait-seconds N]` — One observation cycle. Idempotent. Runs `ingest`, computes
   worker state from the JSON event stream, captures the tmux pane as a shadow

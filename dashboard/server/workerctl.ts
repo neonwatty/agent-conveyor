@@ -3,12 +3,16 @@ import { spawn } from "node:child_process";
 export type DashboardCommand =
   | "bind"
   | "cycle"
+  | "create-task"
   | "export"
   | "finish"
   | "interrupt"
   | "nudge"
+  | "pair"
   | "sessions"
   | "snapshot"
+  | "start-manager"
+  | "start-worker"
   | "tasks";
 
 export interface ServerOptions {
@@ -28,16 +32,30 @@ export interface PartialServerOptions {
 }
 
 export interface WorkerctlCommandOptions {
+  askForApproval?: string;
   command: DashboardCommand;
+  cwd?: string;
   dryRun?: boolean;
   followup?: string;
   key?: string;
   manager?: string;
+  managerAcceptance?: string[];
+  managerGuideline?: string[];
+  managerMode?: "light" | "guided" | "strict";
+  managerName?: string;
+  managerObjective?: string;
+  managerReference?: string[];
   requireCriteriaAudit?: boolean;
+  sandbox?: string;
   session?: string;
   task?: string;
+  taskGoal?: string;
+  taskPrompt?: string;
+  taskSummary?: string;
   text?: string;
+  timeoutSeconds?: number;
   worker?: string;
+  workerName?: string;
   workerctlPath: string;
   dbPath?: string;
   zip?: boolean;
@@ -64,6 +82,12 @@ export function buildWorkerctlArgs(options: WorkerctlCommandOptions): string[] {
     args.push("sessions");
   } else if (options.command === "tasks") {
     args.push("tasks", "--json");
+  } else if (options.command === "create-task") {
+    requireFields(options, ["task", "taskGoal"]);
+    args.push("tasks", "--create", options.task!, "--goal", options.taskGoal!);
+    if (options.taskSummary) {
+      args.push("--summary", options.taskSummary);
+    }
   } else if (options.command === "cycle") {
     if (!options.task) {
       throw new Error("Cycle command requires a task.");
@@ -99,6 +123,45 @@ export function buildWorkerctlArgs(options: WorkerctlCommandOptions): string[] {
     if (options.zip) {
       args.push("--zip");
     }
+  } else if (options.command === "start-worker") {
+    requireFields(options, ["workerName"]);
+    args.push("start-worker", "--name", options.workerName!);
+    appendCodexStartArgs(args, options);
+    if (options.taskPrompt) {
+      args.push("--task", options.taskPrompt);
+    }
+  } else if (options.command === "start-manager") {
+    requireFields(options, ["managerName"]);
+    args.push("start-manager", "--name", options.managerName!);
+    appendCodexStartArgs(args, options);
+  } else if (options.command === "pair") {
+    requireFields(options, ["task", "workerName", "managerName"]);
+    args.push("pair", "--task", options.task!, "--worker-name", options.workerName!, "--manager-name", options.managerName!);
+    appendCodexStartArgs(args, options);
+    if (options.taskPrompt) {
+      args.push("--task-prompt", options.taskPrompt);
+    }
+    if (options.taskGoal) {
+      args.push("--task-goal", options.taskGoal);
+    }
+    if (options.taskSummary) {
+      args.push("--task-summary", options.taskSummary);
+    }
+    if (options.managerMode) {
+      args.push("--manager-mode", options.managerMode);
+    }
+    if (options.managerObjective) {
+      args.push("--manager-objective", options.managerObjective);
+    }
+    for (const guideline of options.managerGuideline ?? []) {
+      args.push("--manager-guideline", guideline);
+    }
+    for (const acceptance of options.managerAcceptance ?? []) {
+      args.push("--manager-acceptance", acceptance);
+    }
+    for (const reference of options.managerReference ?? []) {
+      args.push("--manager-reference", reference);
+    }
   }
   if (options.dbPath && commandSupportsPath(options.command)) {
     args.push("--path", options.dbPath);
@@ -107,7 +170,34 @@ export function buildWorkerctlArgs(options: WorkerctlCommandOptions): string[] {
 }
 
 function commandSupportsPath(command: DashboardCommand): boolean {
-  return ["bind", "cycle", "export", "finish", "interrupt", "nudge", "sessions", "snapshot", "tasks"].includes(command);
+  return [
+    "bind",
+    "create-task",
+    "cycle",
+    "export",
+    "finish",
+    "interrupt",
+    "nudge",
+    "pair",
+    "sessions",
+    "snapshot",
+    "tasks",
+  ].includes(command);
+}
+
+function appendCodexStartArgs(args: string[], options: WorkerctlCommandOptions): void {
+  if (options.cwd) {
+    args.push("--cwd", options.cwd);
+  }
+  if (options.sandbox) {
+    args.push("--sandbox", options.sandbox);
+  }
+  if (options.askForApproval) {
+    args.push("--ask-for-approval", options.askForApproval);
+  }
+  if (options.timeoutSeconds) {
+    args.push("--timeout-seconds", String(options.timeoutSeconds));
+  }
 }
 
 function requireFields(options: WorkerctlCommandOptions, fields: Array<keyof WorkerctlCommandOptions>): void {
