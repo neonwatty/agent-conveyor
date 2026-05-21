@@ -52,6 +52,53 @@ row, and returns structured JSON. The manager reads that JSON and decides.
    be registered as a worker. A non-tmux session can still be registered as a
    manager.
 
+## Preferred Manual Handoff Workflow
+
+When the user wants to hand off an already-open Codex session, do not start
+with a long `pair` command. Use the skill in each session:
+
+1. In the intended worker session, ask Codex:
+   ```text
+   Use the manage-codex-workers skill.
+
+   Register this current Codex session as a worker.
+
+   Worker name: <worker-name>
+   Task name: <task-name>
+   Working directory: <target-repo>
+
+   After registration, wait for the manager. Do not start work until the
+   manager has created or bound the task and provided acceptance criteria.
+   ```
+2. In a separate manager session, ask Codex:
+   ```text
+   Use the manage-codex-workers skill.
+
+   Register this current Codex session as manager <manager-name>.
+
+   Bind it to worker <worker-name> for task <task-name> in <target-repo>.
+   Configure strict supervision. The goal is: <goal>.
+
+   Run cycles, inspect criteria and telemetry, nudge only when useful, require
+   evidence, and finish/export the task when done.
+   ```
+3. The manager session should then drive the loop with:
+   ```bash
+   scripts/workerctl cycle <task-name>
+   scripts/workerctl criteria <task-name> --list
+   scripts/workerctl telemetry --summary --task <task-name>
+   scripts/workerctl telemetry --task <task-name>
+   scripts/workerctl replay <task-name>
+   ```
+
+The skill should translate those prompts into explicit `workerctl` commands.
+For the worker, run `doctor-self`; if supported, register the current session
+with `register-worker`. For the manager, register the current session with
+`register-manager`, create/configure the task if needed, then `bind`.
+
+This is the ergonomic manual workflow. Use `pair` only when the user wants
+workerctl to spawn both sessions in one automated command.
+
 ## Register Sessions
 
 Register an already-running Codex worker (rollout JSONL is auto-discovered
@@ -92,8 +139,8 @@ scripts/workerctl sessions --role manager
 
 ## Create A Task And Bind
 
-For a fresh supervised worker/manager pair, prefer `pair` over manually
-starting and binding sessions:
+For automated bootstrap of a fresh supervised worker/manager pair, use `pair`
+instead of manually starting and binding sessions:
 
 ```bash
 scripts/workerctl pair \
