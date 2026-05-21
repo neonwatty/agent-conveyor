@@ -3,3 +3,6 @@
 __pycache__/
 *.pyc
 .venv/
+node_modules/
+dashboard/dist/
+docs/goals/*/.goalbuddy-board/

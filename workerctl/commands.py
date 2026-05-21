@@ -13,6 +13,7 @@ import time
 import uuid
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlencode
 
 from workerctl.classify import classify_busy_wait, classify_startup_output
 from workerctl.audit import mutation_audit_result
@@ -35,6 +36,7 @@ from workerctl.db import list_tasks as list_db_tasks
 from workerctl.db import list_runs as list_db_runs
 from workerctl.db import mark_manager_seen
 from workerctl.db import mark_worker_state, upsert_worker
+from workerctl.db import active_run_for_task
 from workerctl.db import create_run as create_db_run
 from workerctl.db import finish_run as finish_db_run
 from workerctl.db import run_row as db_run_row
@@ -90,6 +92,48 @@ def stop_command(name: str) -> str:
 
 def cli_path_prefix() -> str:
     return f"PATH={sh_quote(str(PROJECT_ROOT / 'bin'))}:$PATH"
+
+
+def dashboard_launch_payload(args: argparse.Namespace) -> dict[str, Any]:
+    query = urlencode({"task": args.task}) if args.task else ""
+    url = f"http://{args.host}:{args.port}/"
+    if query:
+        url = f"{url}?{query}"
+    command = [
+        "npm",
+        "run",
+        "dashboard",
+        "--",
+        "--host",
+        args.host,
+        "--port",
+        str(args.port),
+        "--workerctl-path",
+        args.workerctl_path,
+    ]
+    if args.task:
+        command.extend(["--task", args.task])
+    if args.db_path:
+        command.extend(["--db-path", args.db_path])
+    return {
+        "command": command,
+        "host": args.host,
+        "port": args.port,
+        "task": args.task,
+        "url": url,
+    }
+
+
+def command_dashboard(args: argparse.Namespace) -> int:
+    payload = dashboard_launch_payload(args)
+    if args.dry_run:
+        if args.json:
+            print(json.dumps(payload, indent=2, sort_keys=True))
+        else:
+            print(" ".join(sh_quote(part) for part in payload["command"]))
+            print(payload["url"])
+        return 0
+    return subprocess.run(payload["command"], cwd=PROJECT_ROOT, check=False).returncode
 
 
 def resolve_codex_startup_options(
@@ -1446,10 +1490,278 @@ def command_runs(args: argparse.Namespace) -> int:
     return 0
 
 
+def _session_snapshot_for_dashboard(row: Any | None) -> dict[str, Any] | None:
+    if row is None:
+        return None
+    pid = row["pid"]
+    alive = None if pid is None else _pid_is_alive(int(pid))
+    return {
+        "alive": alive,
+        "codex_session_id": row["codex_session_id"],
+        "cwd": row["cwd"],
+        "id": row["id"],
+        "last_heartbeat_at": row["last_heartbeat_at"],
+        "name": row["name"],
+        "pid": pid,
+        "role": row["role"],
+        "state": row["state"],
+        "tmux_pane_id": row["tmux_pane_id"],
+        "tmux_session": row["tmux_session"],
+    }
+
+
+def _latest_cycle_snapshot(conn: Any, *, task_id: str) -> dict[str, Any] | None:
+    row = conn.execute(
+        """
+        select id, task_id, started_at, completed_at, state, status_json, health_json, decision, error
+        from manager_cycles
+        where task_id = ?
+        order by id desc
+        limit 1
+        """,
+        (task_id,),
+    ).fetchone()
+    if row is None:
+        return None
+    status = json.loads(row["status_json"]) if row["status_json"] else {}
+    health = json.loads(row["health_json"]) if row["health_json"] else {}
+    ingest = status.get("ingest") if isinstance(status, dict) else None
+    return {
+        "completed_at": row["completed_at"],
+        "decision": row["decision"],
+        "error": row["error"],
+        "health": health,
+        "id": row["id"],
+        "ingest": ingest or {},
+        "notable_pane_pattern": status.get("notable_pane_pattern") if isinstance(status, dict) else None,
+        "started_at": row["started_at"],
+        "state": row["state"],
+        "status": status,
+        "staleness_seconds": status.get("staleness_seconds") if isinstance(status, dict) else None,
+        "task_id": row["task_id"],
+        "worker_state": status.get("state") if isinstance(status, dict) else None,
+    }
+
+
+def _recent_commands_snapshot(conn: Any, *, task_id: str, limit: int) -> dict[str, Any]:
+    rows = conn.execute(
+        """
+        select id, type, state, created_at, updated_at, task_id, worker_id, manager_id,
+               payload_json, result_json, error
+        from commands
+        where task_id = ?
+        order by created_at desc, id desc
+        limit ?
+        """,
+        (task_id, limit),
+    ).fetchall()
+    recent = [
+        {
+            "created_at": row["created_at"],
+            "error": row["error"],
+            "id": row["id"],
+            "manager_id": row["manager_id"],
+            "payload": json.loads(row["payload_json"]),
+            "result": json.loads(row["result_json"]) if row["result_json"] else None,
+            "state": row["state"],
+            "task_id": row["task_id"],
+            "type": row["type"],
+            "updated_at": row["updated_at"],
+            "worker_id": row["worker_id"],
+        }
+        for row in rows
+    ]
+    counts = conn.execute(
+        """
+        select
+          sum(case when state in ('pending', 'attempted') then 1 else 0 end) as unfinished_count,
+          sum(case when state = 'failed' then 1 else 0 end) as failed_count
+        from commands
+        where task_id = ?
+        """,
+        (task_id,),
+    ).fetchone()
+    return {
+        "failed_count": int(counts["failed_count"] or 0),
+        "recent": recent,
+        "unfinished_count": int(counts["unfinished_count"] or 0),
+    }
+
+
+def _task_reconcile_diagnostics(report: dict[str, Any], *, task_id: str, task_name: str) -> dict[str, Any]:
+    dangling = [
+        item for item in report["dangling_bindings"]
+        if item.get("task_id") == task_id or item.get("task_name") == task_name
+    ]
+    stuck = [
+        item for item in report["stuck_tasks"]
+        if item.get("task_name") == task_name
+    ]
+    return {
+        "dangling_bindings": dangling,
+        "dead_pid_sessions": report["dead_pid_sessions"],
+        "schema_ok": bool(report["schema_health"].get("ok")),
+        "stuck_tasks": stuck,
+    }
+
+
+def _dashboard_alerts(
+    *,
+    task_snapshot: dict[str, Any],
+    worker: dict[str, Any] | None,
+    manager: dict[str, Any] | None,
+    latest_cycle: dict[str, Any] | None,
+    criteria_summary: dict[str, int],
+    commands: dict[str, Any],
+    diagnostics: dict[str, Any],
+    telemetry_counts: dict[str, Any],
+) -> list[dict[str, Any]]:
+    alerts: list[dict[str, Any]] = []
+    for issue in task_snapshot["integrity"]["issues"]:
+        alerts.append({"severity": "error", "type": "integrity_issue", "message": issue})
+    for role, session in (("worker", worker), ("manager", manager)):
+        if session and session["alive"] is False:
+            alerts.append({
+                "message": f"{role} session pid is not alive: {session['name']}",
+                "severity": "error",
+                "type": "dead_pid_session",
+            })
+    if latest_cycle and latest_cycle["state"] == "failed":
+        alerts.append({
+            "message": latest_cycle.get("error") or "Latest manager cycle failed.",
+            "severity": "error",
+            "type": "latest_cycle_failed",
+        })
+    if latest_cycle and latest_cycle.get("notable_pane_pattern"):
+        alerts.append({
+            "message": f"Pane pattern detected: {latest_cycle['notable_pane_pattern']}",
+            "severity": "warning",
+            "type": "notable_pane_pattern",
+        })
+    if criteria_summary.get("accepted", 0):
+        alerts.append({
+            "message": f"{criteria_summary['accepted']} accepted criteria remain open.",
+            "severity": "warning",
+            "type": "open_accepted_criteria",
+        })
+    if commands["unfinished_count"]:
+        alerts.append({
+            "message": f"{commands['unfinished_count']} commands are unfinished.",
+            "severity": "warning",
+            "type": "unfinished_commands",
+        })
+    if commands["failed_count"]:
+        alerts.append({
+            "message": f"{commands['failed_count']} commands failed.",
+            "severity": "error",
+            "type": "failed_commands",
+        })
+    if telemetry_counts["by_severity"].get("error", 0):
+        alerts.append({
+            "message": f"{telemetry_counts['by_severity']['error']} telemetry error events recorded.",
+            "severity": "error",
+            "type": "telemetry_errors",
+        })
+    if diagnostics["dangling_bindings"]:
+        alerts.append({"message": "Task has dangling binding drift.", "severity": "error", "type": "dangling_binding"})
+    if diagnostics["stuck_tasks"]:
+        alerts.append({"message": "Task has stale manager cycles.", "severity": "warning", "type": "stuck_task"})
+    if not diagnostics["schema_ok"]:
+        alerts.append({"message": "Database schema health is not OK.", "severity": "error", "type": "schema_health"})
+    return alerts
+
+
+def telemetry_snapshot(conn: Any, *, task: str, limit: int = 10) -> dict[str, Any]:
+    from workerctl import db as worker_db
+
+    task_snapshot = task_status_snapshot(conn, task=task)
+    task_id = task_snapshot["id"]
+    task_row = db_task_row(conn, task=task)
+    try:
+        binding = active_binding_for_task(conn, task_name=task_snapshot["name"])
+    except WorkerError:
+        binding = None
+
+    worker = manager = None
+    if binding is not None:
+        worker = _session_snapshot_for_dashboard(session_by_id(conn, session_id=binding["worker_session_id"]))
+        manager = _session_snapshot_for_dashboard(session_by_id(conn, session_id=binding["manager_session_id"]))
+
+    criteria_rows = worker_db.acceptance_criteria_for_task(conn, task_id=task_id)
+    criteria_summary = _acceptance_criteria_summary(criteria_rows)
+    open_accepted = [row for row in criteria_rows if row["status"] == "accepted"]
+    telemetry_events = query_telemetry_events(conn, task_id=task_id, limit=10000)
+    telemetry_counts = telemetry_summary(telemetry_events)
+    recent_telemetry = query_telemetry_events(conn, task_id=task_id, limit=limit)
+    commands = _recent_commands_snapshot(conn, task_id=task_id, limit=limit)
+    reconcile_report = collect_reconcile_report(conn)
+    diagnostics = _task_reconcile_diagnostics(
+        reconcile_report,
+        task_id=task_id,
+        task_name=task_snapshot["name"],
+    )
+    latest_cycle = _latest_cycle_snapshot(conn, task_id=task_id)
+    run = active_run_for_task(conn, task_id=task_id)
+    task_info = {
+        "created_at": task_row["created_at"],
+        "goal": task_row["goal"],
+        "id": task_row["id"],
+        "integrity": task_snapshot["integrity"],
+        "name": task_row["name"],
+        "state": task_row["state"],
+        "summary": task_row["summary"],
+        "updated_at": task_row["updated_at"],
+    }
+    return {
+        "alerts": _dashboard_alerts(
+            task_snapshot=task_snapshot,
+            worker=worker,
+            manager=manager,
+            latest_cycle=latest_cycle,
+            criteria_summary=criteria_summary,
+            commands=commands,
+            diagnostics=diagnostics,
+            telemetry_counts=telemetry_counts,
+        ),
+        "binding": {
+            "created_at": binding["created_at"],
+            "id": binding["binding_id"],
+            "manager_session_id": binding["manager_session_id"],
+            "manager_session_name": binding["manager_session_name"],
+            "state": binding["state"],
+            "task_id": binding["task_id"],
+            "worker_session_id": binding["worker_session_id"],
+            "worker_session_name": binding["worker_session_name"],
+        } if binding is not None else None,
+        "commands": commands,
+        "criteria": {
+            "open_accepted": open_accepted,
+            "open_blocker_count": len(open_accepted),
+            "summary": criteria_summary,
+        },
+        "diagnostics": diagnostics,
+        "latest_cycle": latest_cycle,
+        "manager": manager,
+        "run": run,
+        "task": task_info,
+        "telemetry": {
+            "recent": recent_telemetry,
+            "summary": telemetry_counts,
+        },
+        "worker": worker,
+    }
+
+
 def command_telemetry(args: argparse.Namespace) -> int:
     db_path = Path(args.path).expanduser().resolve() if args.path else None
     with connect_db(db_path) as conn:
         initialize_database(conn)
+        if getattr(args, "view", None) == "snapshot":
+            if not args.task:
+                raise WorkerError("telemetry snapshot requires --task")
+            result = telemetry_snapshot(conn, task=args.task, limit=args.limit)
+            print(json.dumps(result, indent=2, sort_keys=True, default=str))
+            return 0
         run_id = None
         task_id = None
         if args.run:
@@ -3970,7 +4282,8 @@ def command_tail(args: argparse.Namespace) -> int:
 def command_bind(args: argparse.Namespace) -> int:
     from workerctl import db as worker_db
 
-    conn = worker_db.connect()
+    db_path = Path(args.path).expanduser().resolve() if getattr(args, "path", None) else None
+    conn = worker_db.connect(db_path)
     worker_db.initialize_database(conn)
     try:
         binding_id = worker_db.bind_sessions(
@@ -4022,7 +4335,8 @@ def command_session_nudge(args: argparse.Namespace) -> int:
     from workerctl import db as worker_db
     from workerctl import tmux as worker_tmux
 
-    conn = worker_db.connect()
+    db_path = Path(args.path).expanduser().resolve() if getattr(args, "path", None) else None
+    conn = worker_db.connect(db_path)
     worker_db.initialize_database(conn)
     try:
         telemetry_context = _session_action_telemetry_context(conn, session_name=args.name)
@@ -4108,7 +4422,8 @@ def command_session_interrupt(args: argparse.Namespace) -> int:
     from workerctl import db as worker_db
     from workerctl import tmux as worker_tmux
 
-    conn = worker_db.connect()
+    db_path = Path(args.path).expanduser().resolve() if getattr(args, "path", None) else None
+    conn = worker_db.connect(db_path)
     worker_db.initialize_database(conn)
     try:
         telemetry_context = _session_action_telemetry_context(conn, session_name=args.name)
@@ -4235,7 +4550,8 @@ def command_cycle(args: argparse.Namespace) -> int:
     from workerctl import db as worker_db
     from workerctl import supervise_cycle
 
-    conn = worker_db.connect()
+    db_path = Path(args.path).expanduser().resolve() if args.path else None
+    conn = worker_db.connect(db_path)
     worker_db.initialize_database(conn)
     try:
         result = supervise_cycle.run_cycle(

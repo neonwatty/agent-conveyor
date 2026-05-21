@@ -1007,6 +1007,40 @@ class CliTests(unittest.TestCase):
             check=False,
         )
 
+    def test_dashboard_help_includes_loopback_defaults(self):
+        proc = self.run_workerctl("dashboard", "--help")
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("--host", proc.stdout)
+        self.assertIn("127.0.0.1", proc.stdout)
+        self.assertIn("--port", proc.stdout)
+        self.assertIn("--dry-run", proc.stdout)
+
+    def test_dashboard_dry_run_outputs_launch_command(self):
+        proc = self.run_workerctl(
+            "dashboard",
+            "--task",
+            "snapshot-task",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            "8797",
+            "--dry-run",
+            "--json",
+        )
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        payload = json.loads(proc.stdout)
+        self.assertEqual(payload["url"], "http://127.0.0.1:8797/?task=snapshot-task")
+        self.assertEqual(payload["host"], "127.0.0.1")
+        self.assertEqual(payload["port"], 8797)
+        self.assertEqual(payload["task"], "snapshot-task")
+        self.assertIn("npm", payload["command"][0])
+        self.assertIn("--host", payload["command"])
+        self.assertIn("127.0.0.1", payload["command"])
+        self.assertIn("--task", payload["command"])
+        self.assertIn("snapshot-task", payload["command"])
+
     def test_classify_cli_outputs_json(self):
         proc = self.run_workerctl(
             "classify",
@@ -1238,6 +1272,219 @@ class CliTests(unittest.TestCase):
             self.assertEqual(proc.returncode, 0, proc.stderr)
             self.assertIn("2026-05-20T12:00:00Z worker worker_handoff_recorded", proc.stdout)
             self.assertIn("Worker handed off implementation notes.", proc.stdout)
+
+    def test_telemetry_snapshot_outputs_task_overview(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                task_id = worker_db.create_task(conn, name="snapshot-task", goal="Inspect dashboard state.")
+                worker_db.register_session(
+                    conn,
+                    name="snapshot-worker",
+                    role="worker",
+                    codex_session_path="/worker-rollout.jsonl",
+                    codex_session_id="worker-codex-id",
+                    pid=os.getpid(),
+                    cwd="/repo",
+                    tmux_session="codex-snapshot-worker",
+                    tmux_pane_id="%1",
+                )
+                worker_db.register_session(
+                    conn,
+                    name="snapshot-manager",
+                    role="manager",
+                    codex_session_path="/manager-rollout.jsonl",
+                    codex_session_id="manager-codex-id",
+                    pid=os.getpid(),
+                    cwd="/repo",
+                    tmux_session="codex-snapshot-manager",
+                    tmux_pane_id="%2",
+                )
+                binding_id = worker_db.bind_sessions(
+                    conn,
+                    task_name="snapshot-task",
+                    worker_session_name="snapshot-worker",
+                    manager_session_name="snapshot-manager",
+                )
+                run_id = worker_db.create_run(conn, task_id=task_id, name="snapshot-run")
+                worker_db.insert_acceptance_criterion(
+                    conn,
+                    task_id=task_id,
+                    criterion="Verification passes.",
+                    status="accepted",
+                    source="manager_inferred",
+                )
+                conn.execute(
+                    """
+                    insert into manager_cycles(
+                      task_id, started_at, completed_at, state, status_json, health_json
+                    )
+                    values (?, ?, ?, 'succeeded', ?, '{}')
+                    """,
+                    (
+                        task_id,
+                        "2026-05-21T10:00:00Z",
+                        "2026-05-21T10:00:05Z",
+                        json.dumps({
+                            "kind": "session_cycle",
+                            "state": "idle",
+                            "staleness_seconds": 4.2,
+                            "notable_pane_pattern": None,
+                            "ingest": {"new_events": 3},
+                        }),
+                    ),
+                )
+                command_id = worker_db.create_command(
+                    conn,
+                    command_type="task_nudge",
+                    payload={"message": "status"},
+                    task_id=task_id,
+                )
+                worker_db.mark_command_attempted(conn, command_id=command_id)
+                worker_db.finish_command(conn, command_id=command_id, state="succeeded", result={"sent": True})
+                worker_db.emit_telemetry_event(
+                    conn,
+                    actor="manager",
+                    event_type="manager_cycle_succeeded",
+                    run_id=run_id,
+                    summary="Manager observed idle worker.",
+                    correlation={"cycle_id": 1},
+                    attributes={"state": "idle"},
+                    timestamp="2026-05-21T10:00:05Z",
+                )
+                conn.commit()
+
+            proc = self.run_workerctl(
+                "telemetry",
+                "snapshot",
+                "--task",
+                "snapshot-task",
+                "--json",
+                "--path",
+                str(db_path),
+            )
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            snapshot = json.loads(proc.stdout)
+            self.assertEqual(snapshot["task"]["name"], "snapshot-task")
+            self.assertEqual(snapshot["binding"]["id"], binding_id)
+            self.assertEqual(snapshot["worker"]["name"], "snapshot-worker")
+            self.assertEqual(snapshot["worker"]["tmux_session"], "codex-snapshot-worker")
+            self.assertEqual(snapshot["manager"]["name"], "snapshot-manager")
+            self.assertEqual(snapshot["run"]["id"], run_id)
+            self.assertEqual(snapshot["latest_cycle"]["state"], "succeeded")
+            self.assertEqual(snapshot["latest_cycle"]["status"]["state"], "idle")
+            self.assertEqual(snapshot["latest_cycle"]["ingest"]["new_events"], 3)
+            self.assertEqual(snapshot["criteria"]["summary"]["accepted"], 1)
+            self.assertEqual(snapshot["criteria"]["open_blocker_count"], 1)
+            self.assertGreaterEqual(snapshot["telemetry"]["summary"]["total"], 1)
+            self.assertIn(
+                "manager_cycle_succeeded",
+                [event["event_type"] for event in snapshot["telemetry"]["recent"]],
+            )
+            self.assertEqual(snapshot["commands"]["recent"][0]["state"], "succeeded")
+            self.assertEqual(snapshot["diagnostics"]["schema_ok"], True)
+            self.assertIn("open_accepted_criteria", [alert["type"] for alert in snapshot["alerts"]])
+
+    def test_telemetry_snapshot_reports_alerts(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                task_id = worker_db.create_task(conn, name="alert-task", goal="Find alerts.")
+                worker_db.register_session(
+                    conn,
+                    name="dead-worker",
+                    role="worker",
+                    codex_session_path="/worker-rollout.jsonl",
+                    codex_session_id="worker-codex-id",
+                    pid=99999999,
+                    cwd="/repo",
+                    tmux_session="codex-dead-worker",
+                    tmux_pane_id="%1",
+                )
+                worker_db.register_session(
+                    conn,
+                    name="alert-manager",
+                    role="manager",
+                    codex_session_path="/manager-rollout.jsonl",
+                    codex_session_id="manager-codex-id",
+                    pid=os.getpid(),
+                    cwd="/repo",
+                    tmux_session="codex-alert-manager",
+                    tmux_pane_id="%2",
+                )
+                worker_db.bind_sessions(
+                    conn,
+                    task_name="alert-task",
+                    worker_session_name="dead-worker",
+                    manager_session_name="alert-manager",
+                )
+                conn.execute(
+                    """
+                    insert into manager_cycles(
+                      task_id, started_at, completed_at, state, status_json, health_json, error
+                    )
+                    values (?, ?, ?, 'failed', ?, '{}', 'boom')
+                    """,
+                    (
+                        task_id,
+                        "2026-05-21T10:00:00Z",
+                        "2026-05-21T10:00:05Z",
+                        json.dumps({"kind": "session_cycle", "error_type": "RuntimeError"}),
+                    ),
+                )
+                worker_db.create_command(
+                    conn,
+                    command_type="task_interrupt",
+                    payload={"key": "C-c"},
+                    task_id=task_id,
+                )
+                failed_command_id = worker_db.create_command(
+                    conn,
+                    command_type="task_nudge",
+                    payload={"message": "status"},
+                    task_id=task_id,
+                )
+                worker_db.finish_command(
+                    conn,
+                    command_id=failed_command_id,
+                    state="failed",
+                    error="tmux denied",
+                )
+                worker_db.emit_telemetry_event(
+                    conn,
+                    actor="workerctl",
+                    event_type="command_failed",
+                    severity="error",
+                    task_id=task_id,
+                    summary="Interrupt command failed.",
+                    timestamp="2026-05-21T10:00:06Z",
+                )
+                conn.commit()
+
+            proc = self.run_workerctl(
+                "telemetry",
+                "snapshot",
+                "--task",
+                "alert-task",
+                "--json",
+                "--path",
+                str(db_path),
+            )
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            snapshot = json.loads(proc.stdout)
+            alert_types = {alert["type"] for alert in snapshot["alerts"]}
+            self.assertIn("dead_pid_session", alert_types)
+            self.assertIn("latest_cycle_failed", alert_types)
+            self.assertIn("failed_commands", alert_types)
+            self.assertIn("unfinished_commands", alert_types)
+            self.assertEqual(snapshot["worker"]["alive"], False)
+            self.assertEqual(snapshot["commands"]["unfinished_count"], 1)
+            self.assertEqual(snapshot["commands"]["failed_count"], 1)
+            self.assertGreaterEqual(snapshot["telemetry"]["summary"]["by_severity"]["error"], 1)
 
     def test_list_json_reports_tmux_permission_error_without_failing(self):
         with tempfile.TemporaryDirectory() as tmpdir:

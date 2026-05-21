@@ -28,6 +28,7 @@ from workerctl.commands import (
     command_criteria,
     command_criteria_plan,
     command_cycle,
+    command_dashboard,
     command_db_doctor,
     command_divergences,
     command_doctor,
@@ -213,6 +214,23 @@ def build_parser() -> argparse.ArgumentParser:
     start_test.add_argument("--stop-after", action="store_true", help="Stop the worker after verification.")
     start_test.set_defaults(func=command_start_test)
 
+    dashboard = subparsers.add_parser(
+        "dashboard",
+        help="Launch the local live supervision dashboard.",
+    )
+    dashboard.add_argument("--task", help="Preselect a task in the dashboard.")
+    dashboard.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help="Loopback host to bind the dashboard server. Default: 127.0.0.1.",
+    )
+    dashboard.add_argument("--port", type=int, default=8797, help="Dashboard port. Default: 8797.")
+    dashboard.add_argument("--workerctl-path", default="scripts/workerctl", help="workerctl executable for the dashboard backend.")
+    dashboard.add_argument("--db-path", help="Optional workerctl database path passed to dashboard commands.")
+    dashboard.add_argument("--dry-run", action="store_true", help="Print the launch command without starting the dashboard.")
+    dashboard.add_argument("--json", action="store_true", help="Print JSON for --dry-run output.")
+    dashboard.set_defaults(func=command_dashboard)
+
     doctor = subparsers.add_parser("doctor", help="Check local dependencies and worker state.")
     doctor.add_argument("--cwd", default=str(INVOCATION_CWD), help="Target worker cwd to check.")
     doctor.set_defaults(func=command_doctor)
@@ -345,6 +363,12 @@ def build_parser() -> argparse.ArgumentParser:
     telemetry = subparsers.add_parser(
         "telemetry",
         help="Query local structured telemetry events by run, task, search, or summary.",
+    )
+    telemetry.add_argument(
+        "view",
+        nargs="?",
+        choices=("snapshot",),
+        help="Optional telemetry view. Use 'snapshot' for a task-scoped dashboard overview.",
     )
     telemetry.add_argument("--run", help="Filter by run name or ID.")
     telemetry.add_argument("--task", help="Filter by task name or ID.")
@@ -663,6 +687,7 @@ def build_parser() -> argparse.ArgumentParser:
     bind.add_argument("--task", required=True, help="Task name.")
     bind.add_argument("--worker", required=True, help="Worker session name.")
     bind.add_argument("--manager", required=True, help="Manager session name.")
+    bind.add_argument("--path", help="Override the workerctl database path.")
     bind.set_defaults(func=command_bind)
 
     unbind = subparsers.add_parser(
@@ -700,6 +725,7 @@ def build_parser() -> argparse.ArgumentParser:
     session_nudge.add_argument("name", help="Session name.")
     session_nudge.add_argument("text", help="Text to send.")
     session_nudge.add_argument("--dry-run", action="store_true", help="Resolve target without sending.")
+    session_nudge.add_argument("--path", help="Override the workerctl database path.")
     session_nudge.set_defaults(func=command_session_nudge)
 
     session_interrupt = subparsers.add_parser(
@@ -710,6 +736,7 @@ def build_parser() -> argparse.ArgumentParser:
     session_interrupt.add_argument("--key", default="C-c", help="Key chord (tmux format).")
     session_interrupt.add_argument("--followup", default=None, help="Optional text to send after the interrupt.")
     session_interrupt.add_argument("--dry-run", action="store_true", help="Resolve target without sending.")
+    session_interrupt.add_argument("--path", help="Override the workerctl database path.")
     session_interrupt.set_defaults(func=command_session_interrupt)
 
     request_worker_compact = subparsers.add_parser(
@@ -749,6 +776,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--busy-wait-seconds", type=int, default=DEFAULT_BUSY_WAIT_SECONDS,
         help="Seconds the pane signal classifier waits before flagging a stuck-busy pane (default: %(default)s).",
     )
+    cycle.add_argument("--path", help="Override the workerctl database path.")
     cycle.set_defaults(func=command_cycle)
 
     divergences = subparsers.add_parser(

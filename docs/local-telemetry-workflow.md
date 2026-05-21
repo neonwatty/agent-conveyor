@@ -12,6 +12,32 @@ scripts/workerctl telemetry --run <run_id>
 scripts/workerctl telemetry --search manager --run <run_id>
 ```
 
+## Inspect A Task For Dashboard Supervision
+
+Use the task-scoped snapshot when you need the same aggregate state the local dashboard cockpit consumes:
+
+```bash
+scripts/workerctl telemetry snapshot --task <task> --json
+```
+
+The snapshot includes task, binding, worker/manager session, active run, latest cycle, acceptance criteria, recent telemetry, recent command receipts, diagnostics, and alert summaries. It does not include raw transcript content.
+
+## Launch The Local Dashboard
+
+The dashboard is a loopback-only supervision cockpit for a single task:
+
+```bash
+scripts/workerctl dashboard --task <task>
+```
+
+For repeatable QA or scripted checks, inspect the launch command without starting the server:
+
+```bash
+scripts/workerctl dashboard --task <task> --dry-run --json
+```
+
+The TypeScript backend shells out to `workerctl` JSON commands for task state and attaches interactive terminal panes to registered tmux sessions with a WebSocket PTY bridge. The cockpit includes bind setup and action receipts for cycle, nudge, interrupt, finish, and export, without returning raw transcript content in diagnostics JSON by default.
+
 Use `--json` when saving durable evidence:
 
 ```bash
