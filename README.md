@@ -301,6 +301,13 @@ tmux attach -t codex-live-test
 
 ### Observation
 
+- `dashboard [--task T] [--host 127.0.0.1] [--port 8797]` — Launch the
+  local live supervision cockpit. The dashboard binds to loopback by default,
+  uses the TypeScript backend to shell out to `workerctl` JSON commands, and
+  attaches interactive terminals to tmux-backed worker/manager sessions through
+  a WebSocket PTY bridge. It includes attach/bind controls and audited action
+  receipts for cycle, nudge, interrupt, finish, and export. Use
+  `--dry-run --json` to inspect the launch command.
 - `cycle <task> [--busy-wait-seconds N]` — One observation cycle. Idempotent. Runs `ingest`, computes
   worker state from the JSON event stream, captures the tmux pane as a shadow
   signal, writes a `manager_cycles` row, and returns a JSON dict the manager
@@ -361,7 +368,8 @@ tmux attach -t codex-live-test
   log.
 - `telemetry [--run RUN] [--task TASK] [--search QUERY] [--summary] [--json]`
   — Query local structured telemetry events, search them with SQLite FTS, or
-  print aggregate counts for a run/task.
+  print aggregate counts for a run/task. `telemetry snapshot --task <task>
+  --json` prints the task-scoped dashboard overview contract.
 - `export-task <task> [--zip]` — Dump task status, audit, prompts, and
   transcript metadata into an export bundle. Exports include
   `telemetry-events.json`, `telemetry-summary.json`, and

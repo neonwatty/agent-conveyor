@@ -1,0 +1,475 @@
+# GoalBuddy v2 state.yaml
+
+version: 2
+
+goal:
+  title: "Live Supervision Dashboard"
+  slug: "live-supervision-dashboard"
+  kind: existing_plan
+  tranche: "Build the first usable local workerctl dashboard cockpit for attach-first manager/worker supervision."
+  status: done
+  oracle:
+    signal: "A local dashboard walkthrough demonstrates one selected worker/manager task with interactive terminals, attach/bind setup, telemetry snapshot overview, criteria/telemetry/replay diagnostics, audited action receipts, finish/export, and clean reconcile output."
+    cadence: "after each Worker package and at final audit"
+    final_proof: "Dashboard walkthrough receipt plus tests for snapshot CLI, dashboard command orchestration, terminal attach behavior, and cleanup/reconcile checks."
+  intake:
+    original_request: "Think out and organize a serious debugging dashboard for worker/manager supervision."
+    interpreted_outcome: "A local-first workerctl dashboard cockpit exists and is useful for live supervision and debugging."
+    input_shape: existing_plan
+    audience: "repo owner/operator supervising Codex worker and manager sessions"
+    authority: approved
+    proof_type: demo
+    completion_proof: "Launchable dashboard demo with a real or disposable worker/manager task, verified actions, telemetry visibility, export evidence, and clean cleanup."
+    likely_misfire: "Building a web terminal wrapper that does not improve supervision, telemetry review, or auditability."
+    blind_spots_considered:
+      - "Terminal security and loopback-only binding."
+      - "Raw transcript/log amplification."
+      - "PTY lifecycle and tmux attach/detach behavior."
+      - "Stable JSON contracts for dashboard state."
+      - "Avoiding duplicated control-plane logic in TypeScript."
+      - "Manager sessions may not always be tmux-backed."
+      - "Dashboard dependency installation and doctor checks."
+    existing_plan_facts:
+      - "Live supervision cockpit is the primary screen."
+      - "Attach-first workflow is the default."
+      - "Single-task focused cockpit."
+      - "Fully interactive worker and manager terminals side by side."
+      - "Use xterm.js plus TypeScript WebSocket PTY bridge."
+      - "Implement inside this repo as workerctl dashboard."
+      - "Use TypeScript frontend and TypeScript backend."
+      - "TypeScript backend shells out to stable workerctl JSON commands for v1."
+      - "Terminals attach to existing tmux sessions via node-pty running tmux attach."
+      - "Desktop layout: worker terminal, manager terminal, diagnostics rail."
+      - "Overview rail depends on workerctl telemetry snapshot --json --task <task>."
+      - "V1 includes attach/bind setup and action controls for cycle, nudge, interrupt, finish, and export."
+      - "Dashboard shows copy-paste registration prompts; it does not register the browser as the current Codex session."
+
+rules:
+  pm_owns_state: true
+  one_active_task: true
+  max_write_workers: 1
+  no_implementation_without_worker_or_pm_task: true
+  no_completion_without_judge_or_pm_audit: true
+  planning_is_not_completion: true
+  queued_required_worker_blocks_completion: true
+  continuous_until_full_outcome: true
+  missing_input_or_credentials_do_not_stop_goal: true
+  preserve_and_validate_existing_plan: true
+  intake_misfire_must_be_audited: true
+  goal_pressure_requires_oracle: true
+  no_completion_on_weak_proof: true
+  slice_policy:
+    max_consecutive_tiny_tasks: 2
+    prefer_vertical_slices: true
+    judge_picks_largest_safe_slice: true
+    worker_completes_whole_slice: true
+
+agents:
+  scout: installed
+  worker: installed
+  judge: installed
+
+visual_board:
+  selected: local
+  local:
+    status: live
+    url: "http://goalbuddy.localhost:41737/live-supervision-dashboard/"
+    command: "npx goalbuddy board /Users/neonwatty/Desktop/codex-terminal-manager/docs/goals/live-supervision-dashboard --host goalbuddy.localhost --port 41737"
+
+active_task: null
+
+tasks:
+  - id: T001
+    type: scout
+    assignee: Scout
+    status: done
+    reasoning_hint: default
+    objective: "Map current workerctl CLI contracts, JSON gaps, dashboard-adjacent code paths, and verification commands needed for the dashboard."
+    inputs:
+      - "README.md"
+      - "workerctl/cli.py"
+      - "workerctl/commands.py"
+      - "workerctl/db.py"
+      - "workerctl/lifecycle.py"
+      - "workerctl/supervise_cycle.py"
+      - "workerctl/export.py"
+      - "tests/test_workerctl.py"
+      - "docs/local-telemetry-workflow.md"
+      - "skills/manage-codex-workers/SKILL.md"
+    constraints:
+      - "Read-only."
+      - "Do not implement."
+      - "Identify stable JSON commands the dashboard can shell out to and missing commands/options."
+    expected_output:
+      - "Dashboard data-source map."
+      - "Missing CLI JSON contracts."
+      - "Verification commands."
+      - "Risks and recommended first implementation slice."
+    receipt:
+      result: done
+      note: "notes/T001-scout-cli-contract-map.md"
+      summary: "Mapped the existing workerctl JSON surfaces and found the key dashboard gap: a task-scoped telemetry snapshot contract for the Overview rail."
+      evidence:
+        - "workerctl/cli.py"
+        - "workerctl/commands.py"
+        - "workerctl/db.py"
+        - "workerctl/replay.py"
+        - "workerctl/export.py"
+        - "tests/test_workerctl.py"
+        - "docs/goals/live-supervision-dashboard/notes/T001-scout-cli-contract-map.md"
+      recommended_next:
+        - "Implement workerctl telemetry snapshot --task <task> --json."
+
+  - id: T002
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Validate the dashboard architecture and choose the largest safe first Worker package."
+    inputs:
+      - "T001 receipt"
+      - "Goal oracle"
+      - "Existing plan facts"
+    constraints:
+      - "Do not implement."
+      - "Preserve the attach-first xterm.js TypeScript dashboard plan unless Scout evidence shows a concrete blocker."
+      - "Pick a Worker package with explicit allowed_files, verify commands, and stop conditions."
+    expected_output:
+      - "Decision."
+      - "Exact Worker objective."
+      - "allowed_files."
+      - "verify."
+      - "stop_if."
+      - "Deferred tasks if needed."
+    receipt:
+      result: done
+      decision: "approved"
+      full_outcome_complete: false
+      summary: "Approved the first Worker package: implement the task-scoped telemetry snapshot CLI contract before dashboard frontend/backend work."
+      rationale: "The dashboard Overview rail needs a stable aggregate JSON shape. Existing commands expose pieces, but composing them in TypeScript would make the dashboard more brittle and duplicate health logic."
+      selected_worker_task: T003
+      allowed_files:
+        - "workerctl/cli.py"
+        - "workerctl/commands.py"
+        - "tests/test_workerctl.py"
+        - "README.md"
+        - "docs/local-telemetry-workflow.md"
+        - "docs/goals/live-supervision-dashboard/state.yaml"
+        - "docs/goals/live-supervision-dashboard/notes/"
+      verify:
+        - "/opt/homebrew/bin/python3.13 -m unittest tests.test_workerctl.CliTests.test_telemetry_snapshot_outputs_task_overview tests.test_workerctl.CliTests.test_telemetry_snapshot_reports_alerts -v"
+        - "/opt/homebrew/bin/python3.13 -m unittest discover -s tests -v"
+        - "git diff --check"
+
+  - id: T003
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: default
+    objective: "Implement workerctl telemetry snapshot --task <task> --json as the stable Overview rail contract for the dashboard."
+    allowed_files:
+      - "workerctl/cli.py"
+      - "workerctl/commands.py"
+      - "tests/test_workerctl.py"
+      - "README.md"
+      - "docs/local-telemetry-workflow.md"
+      - "docs/goals/live-supervision-dashboard/state.yaml"
+      - "docs/goals/live-supervision-dashboard/notes/"
+    verify:
+      - "/opt/homebrew/bin/python3.13 -m unittest tests.test_workerctl.CliTests.test_telemetry_snapshot_outputs_task_overview tests.test_workerctl.CliTests.test_telemetry_snapshot_reports_alerts -v"
+      - "/opt/homebrew/bin/python3.13 -m unittest discover -s tests -v"
+      - "git diff --check"
+    stop_if:
+      - "Need files outside allowed_files."
+      - "Dashboard architecture needs a user decision not already captured."
+      - "Verification fails twice with different root causes."
+      - "Implementation would require network services or non-local binding by default."
+    receipt:
+      result: done
+      changed_files:
+        - "workerctl/cli.py"
+        - "workerctl/commands.py"
+        - "tests/test_workerctl.py"
+        - "README.md"
+        - "docs/local-telemetry-workflow.md"
+        - "docs/goals/live-supervision-dashboard/state.yaml"
+      commands:
+        - cmd: "/opt/homebrew/bin/python3.13 -m unittest tests.test_workerctl.CliTests.test_telemetry_snapshot_outputs_task_overview tests.test_workerctl.CliTests.test_telemetry_snapshot_reports_alerts -v"
+          status: pass
+        - cmd: "/opt/homebrew/bin/python3.13 -m py_compile workerctl/cli.py workerctl/commands.py"
+          status: pass
+        - cmd: "scripts/workerctl telemetry --summary --json --path /tmp/nonexistent-workerctl-dashboard-test.db"
+          status: pass
+        - cmd: "/opt/homebrew/bin/python3.13 -m unittest tests.test_workerctl.ManagerBootstrapPromptTests.test_docs_include_local_telemetry_workflow tests.test_workerctl.CliTests.test_telemetry_snapshot_outputs_task_overview tests.test_workerctl.CliTests.test_telemetry_snapshot_reports_alerts -v"
+          status: pass
+        - cmd: "/opt/homebrew/bin/python3.13 -m unittest discover -s tests -v"
+          status: pass
+        - cmd: "git diff --check"
+          status: pass
+      summary: "Added a task-scoped telemetry snapshot CLI view for the dashboard Overview rail, including session/binding/run/cycle/criteria/commands/diagnostics/alerts JSON."
+
+  - id: T004
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: default
+    objective: "Implement a loopback TypeScript dashboard shell and workerctl dashboard launcher with xterm-compatible PTY attach endpoints and read-only task overview data."
+    allowed_files:
+      - "workerctl/cli.py"
+      - "workerctl/commands.py"
+      - "tests/test_workerctl.py"
+      - "dashboard/client/main.tsx"
+      - "dashboard/client/styles.css"
+      - "dashboard/index.html"
+      - "dashboard/scripts/run-tests.mjs"
+      - "dashboard/server/index.ts"
+      - "dashboard/server/workerctl.test.ts"
+      - "dashboard/server/workerctl.ts"
+      - "dashboard/tsconfig.json"
+      - "dashboard/vite.config.ts"
+      - ".gitignore"
+      - "package.json"
+      - "package-lock.json"
+      - "tsconfig.json"
+      - "README.md"
+      - "docs/local-telemetry-workflow.md"
+      - "docs/goals/live-supervision-dashboard/state.yaml"
+      - "docs/goals/live-supervision-dashboard/notes/"
+    verify:
+      - "npm test -- --runInBand"
+      - "npm run build"
+      - "/opt/homebrew/bin/python3.13 -m unittest tests.test_workerctl.CliTests.test_dashboard_help_includes_loopback_defaults tests.test_workerctl.CliTests.test_dashboard_dry_run_outputs_launch_command -v"
+      - "/opt/homebrew/bin/python3.13 -m unittest discover -s tests -v"
+      - "git diff --check"
+    stop_if:
+      - "Need files outside allowed_files."
+      - "node-pty cannot be installed or built locally."
+      - "Implementation would bind non-loopback by default."
+      - "Dashboard would need raw transcript/log content in HTTP responses by default."
+    receipt:
+      result: done
+      changed_files:
+        - ".gitignore"
+        - "README.md"
+        - "docs/local-telemetry-workflow.md"
+        - "dashboard/client/main.tsx"
+        - "dashboard/client/styles.css"
+        - "dashboard/index.html"
+        - "dashboard/scripts/run-tests.mjs"
+        - "dashboard/server/index.ts"
+        - "dashboard/server/workerctl.test.ts"
+        - "dashboard/server/workerctl.ts"
+        - "dashboard/tsconfig.json"
+        - "dashboard/vite.config.ts"
+        - "package-lock.json"
+        - "package.json"
+        - "tests/test_workerctl.py"
+        - "workerctl/cli.py"
+        - "workerctl/commands.py"
+        - "docs/goals/live-supervision-dashboard/state.yaml"
+      commands:
+        - cmd: "npm test -- --runInBand"
+          status: pass
+        - cmd: "npm run build"
+          status: pass
+        - cmd: "/opt/homebrew/bin/python3.13 -m unittest tests.test_workerctl.CliTests.test_dashboard_help_includes_loopback_defaults tests.test_workerctl.CliTests.test_dashboard_dry_run_outputs_launch_command -v"
+          status: pass
+        - cmd: "/opt/homebrew/bin/python3.13 -m py_compile workerctl/cli.py workerctl/commands.py"
+          status: pass
+        - cmd: "/opt/homebrew/bin/python3.13 -m unittest discover -s tests -v"
+          status: pass
+        - cmd: "git diff --check"
+          status: pass
+        - cmd: "npx playwright screenshot --viewport-size=1440,900 http://127.0.0.1:8797 /tmp/workerctl-dashboard-smoke.png"
+          status: pass
+      browser_smoke:
+        url: "http://127.0.0.1:8797/"
+        screenshot: "/tmp/workerctl-dashboard-smoke.png"
+        concept: "/Users/neonwatty/.codex/generated_images/019e467b-b52c-7731-b3fc-848d0360fe8c/ig_05322397cb5eb5b0016a0f5489be948195b6b5d583146dc4ad.png"
+      summary: "Added workerctl dashboard launcher plus TypeScript Express/Vite/xterm cockpit shell with loopback defaults, snapshot overview API, and tmux PTY WebSocket attach endpoints."
+
+  - id: T005
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: default
+    objective: "Add dashboard attach/bind setup and audited action receipts for cycle, nudge, interrupt, finish, and export without exposing raw transcript content by default."
+    allowed_files:
+      - "dashboard/client/main.tsx"
+      - "dashboard/client/styles.css"
+      - "dashboard/server/index.ts"
+      - "dashboard/server/workerctl.test.ts"
+      - "dashboard/server/workerctl.ts"
+      - "package.json"
+      - "package-lock.json"
+      - "workerctl/cli.py"
+      - "workerctl/commands.py"
+      - "tests/test_workerctl.py"
+      - "README.md"
+      - "docs/local-telemetry-workflow.md"
+      - "docs/goals/live-supervision-dashboard/state.yaml"
+      - "docs/goals/live-supervision-dashboard/notes/"
+    verify:
+      - "npm test -- --runInBand"
+      - "npm run build"
+      - "/opt/homebrew/bin/python3.13 -m unittest discover -s tests -v"
+      - "git diff --check"
+    stop_if:
+      - "Need auth, non-loopback serving, or browser current-session registration."
+      - "Mutating action cannot produce a visible command receipt."
+      - "Implementation would return raw transcript content in HTTP JSON by default."
+    receipt:
+      result: done
+      changed_files:
+        - "README.md"
+        - "docs/local-telemetry-workflow.md"
+        - "dashboard/client/main.tsx"
+        - "dashboard/client/styles.css"
+        - "dashboard/server/index.ts"
+        - "dashboard/server/workerctl.test.ts"
+        - "dashboard/server/workerctl.ts"
+        - "tests/test_workerctl.py"
+        - "workerctl/cli.py"
+        - "workerctl/commands.py"
+        - "docs/goals/live-supervision-dashboard/state.yaml"
+      commands:
+        - cmd: "npm test -- --runInBand"
+          status: pass
+        - cmd: "npm run build"
+          status: pass
+        - cmd: "/opt/homebrew/bin/python3.13 -m py_compile workerctl/cli.py workerctl/commands.py"
+          status: pass
+        - cmd: "/opt/homebrew/bin/python3.13 -m unittest tests.test_workerctl.StartWorkerTests tests.test_workerctl.StartManagerTests tests.test_workerctl.SessionActionCliTests tests.test_workerctl.BindCommandTests.test_cli_bind_creates_binding -v"
+          status: pass
+        - cmd: "/opt/homebrew/bin/python3.13 -m unittest discover -s tests -v"
+          status: pass
+        - cmd: "git diff --check"
+          status: pass
+        - cmd: "npx playwright screenshot --viewport-size=1440,900 http://127.0.0.1:8797 /tmp/workerctl-dashboard-actions-smoke.png"
+          status: pass
+      browser_smoke:
+        url: "http://127.0.0.1:8797/"
+        screenshot: "/tmp/workerctl-dashboard-actions-smoke.png"
+      summary: "Added attach/bind selection plus action endpoints and visible receipts for cycle, nudge, interrupt, finish, and export."
+
+  - id: T010
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: default
+    objective: "Run a dashboard dogfood walkthrough and capture evidence against the oracle."
+    allowed_files:
+      - "docs/goals/live-supervision-dashboard/state.yaml"
+      - "docs/goals/live-supervision-dashboard/notes/"
+      - "docs/goals/live-supervision-dashboard/notes/T010-dogfood-preflight.md"
+      - "docs/goals/live-supervision-dashboard/notes/T010-dogfood-receipt.md"
+      - "docs/live-qa-artifacts/"
+      - "docs/live-qa-artifacts/dashboard-dogfood.spec.js"
+      - "dashboard/server/index.ts"
+      - "package.json"
+      - "package-lock.json"
+    verify:
+      - "scripts/workerctl dashboard --task <task> --dry-run --json"
+      - "npx playwright screenshot --viewport-size=1440,900 http://127.0.0.1:8797 /tmp/workerctl-dashboard-dogfood.png"
+      - "scripts/workerctl reconcile"
+      - "git diff --check"
+    stop_if:
+      - "Dashboard cannot launch locally."
+      - "No safe disposable or external task is available for dogfood."
+      - "Cleanup or reconcile reports unsafe drift."
+    receipt:
+      result: done
+      changed_files:
+        - "dashboard/server/index.ts"
+        - "docs/live-qa-artifacts/dashboard-dogfood.spec.js"
+        - "docs/goals/live-supervision-dashboard/notes/T010-dogfood-preflight.md"
+        - "docs/goals/live-supervision-dashboard/notes/T010-dogfood-receipt.md"
+        - "docs/goals/live-supervision-dashboard/state.yaml"
+        - "package.json"
+        - "package-lock.json"
+      commands:
+        - cmd: "scripts/workerctl dashboard --task dashboard-dogfood-final2-20260521 --dry-run --json"
+          status: pass
+        - cmd: "npx playwright test docs/live-qa-artifacts/dashboard-dogfood.spec.js --reporter=line"
+          status: pass
+        - cmd: "scripts/workerctl telemetry snapshot --task dashboard-dogfood-final2-20260521 --json"
+          status: pass
+        - cmd: "scripts/workerctl reconcile"
+          status: pass
+      artifacts:
+        - "/tmp/workerctl-dashboard-dogfood.png"
+        - "/tmp/dashboard-dogfood-final2-snapshot-before.json"
+        - "/tmp/dashboard-dogfood-final2-snapshot-after.json"
+      note: "notes/T010-dogfood-receipt.md"
+      summary: "Completed a disposable dashboard walkthrough against a live worker/manager pair, verified xterm.js tmux attach, action receipts, finish/export, telemetry snapshot, and clean reconcile."
+
+  - id: T999
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Audit whether the dashboard tranche satisfies the original owner outcome."
+    inputs:
+      - "All done task receipts"
+      - "Dashboard dogfood evidence"
+      - "Last verification"
+      - "Current dirty diff"
+    constraints:
+      - "Do not implement."
+      - "Reject completion if the dashboard is only a static page or terminal wrapper without supervision diagnostics."
+      - "Reject completion if required Worker work remains queued or active."
+      - "Reject completion if no launchable local dashboard walkthrough exists."
+    expected_output:
+      - "complete | not_complete"
+      - "full_outcome_complete: true | false"
+      - "Evidence map to oracle."
+      - "Next task if not complete."
+    receipt:
+      result: done
+      decision: complete
+      full_outcome_complete: true
+      evidence_map:
+        - oracle_item: "local dashboard walkthrough"
+          evidence: "npx playwright test docs/live-qa-artifacts/dashboard-dogfood.spec.js --reporter=line passed against http://127.0.0.1:8797/?task=dashboard-dogfood-final2-20260521."
+        - oracle_item: "selected worker/manager task"
+          evidence: "Disposable task dashboard-dogfood-final2-20260521 loaded and showed bound worker dashboard-dogfood-final2-worker plus manager dashboard-dogfood-final2-manager."
+        - oracle_item: "interactive terminals"
+          evidence: "Screenshot /tmp/workerctl-dashboard-dogfood.png shows xterm panes attached to tmux and rendering live shell content; Playwright asserted both terminal readiness strings."
+        - oracle_item: "attach/bind setup"
+          evidence: "Dashboard showed worker/manager selectors and the disposable task was bound through workerctl bind."
+        - oracle_item: "telemetry snapshot overview and diagnostics"
+          evidence: "Pre/post snapshots showed alerts none, telemetry counts, criteria summary, command counts, and diagnostics clean."
+        - oracle_item: "audited action receipts"
+          evidence: "Playwright asserted visible receipts for cycle, session-nudge, export-task, and finish-task."
+        - oracle_item: "finish/export and clean reconcile"
+          evidence: "Finish succeeded with --require-criteria-audit; final reconcile reported no dangling bindings, dead PID sessions, or stuck tasks."
+      residual_risks:
+        - "The dashboard is a local v1 cockpit and shells out to workerctl JSON commands; richer history and packaged auth controls remain future work."
+        - "The dogfood used disposable tmux sessions rather than long-running real Codex sessions, by design, to keep cleanup safe and deterministic."
+      commands:
+        - cmd: "npx playwright test docs/live-qa-artifacts/dashboard-dogfood.spec.js --reporter=line"
+          status: pass
+        - cmd: "npm test -- --runInBand"
+          status: pass
+        - cmd: "npm run build"
+          status: pass
+        - cmd: "/opt/homebrew/bin/python3.13 -m unittest discover -s tests -v"
+          status: pass
+        - cmd: "node /Users/neonwatty/.codex/plugins/cache/goalbuddy/goalbuddy/0.3.7/skills/goalbuddy/scripts/check-goal-state.mjs docs/goals/live-supervision-dashboard/state.yaml"
+          status: pass
+        - cmd: "git diff --check"
+          status: pass
+      summary: "The tranche satisfies the oracle for a first usable local workerctl dashboard cockpit."
+
+checks:
+  dirty_fingerprint: unknown
+  last_verification:
+    result: pass
+    task: T999
+    commands:
+      - "npx playwright test docs/live-qa-artifacts/dashboard-dogfood.spec.js --reporter=line"
+      - "npm test -- --runInBand"
+      - "npm run build"
+      - "/opt/homebrew/bin/python3.13 -m unittest discover -s tests -v"
+      - "node /Users/neonwatty/.codex/plugins/cache/goalbuddy/goalbuddy/0.3.7/skills/goalbuddy/scripts/check-goal-state.mjs docs/goals/live-supervision-dashboard/state.yaml"
+      - "git diff --check"
