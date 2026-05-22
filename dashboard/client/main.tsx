@@ -66,6 +66,11 @@ function derivedManagerName(taskName: string) {
   return `${safeName(taskName) || "dashboard-task"}-manager`;
 }
 
+function setupCodeFromTask(taskName: string) {
+  const safeTask = safeName(taskName) || "dashboard-task";
+  return safeTask.startsWith("dashboard-") ? safeTask.slice("dashboard-".length) : safeTask;
+}
+
 function formatTime(value?: string) {
   if (!value) {
     return "";
@@ -113,27 +118,31 @@ function buildActivity(snapshot: Snapshot | null, receipts: Receipt[]): Activity
   return items.slice(0, 30);
 }
 
-function buildSetupPrompt(role: "manager" | "worker", params: { cwd: string; managerName: string; task: string; taskGoal: string; workerName: string }) {
+function buildSetupPrompt(role: "manager" | "worker", params: { cwd: string; setupCode: string; taskGoal: string }) {
   if (role === "worker") {
     return [
       "Use the manage-codex-workers skill.",
       "",
-      "Register this current Codex session as a worker.",
+      "Register this current Codex session as the worker for this dashboard setup.",
       "",
-      `Worker name: ${params.workerName}`,
-      `Task name: ${params.task}`,
+      `Dashboard setup code: ${params.setupCode}`,
       `Working directory: ${params.cwd}`,
       "",
-      "After registration, wait for the manager. Do not start work until the manager has created or bound the task and provided acceptance criteria.",
+      "Let the skill derive the task and session names from the setup code. Do not ask me to type generated worker, manager, or task names.",
+      "",
+      "After registration, wait for the manager. Do not start work until the manager has bound the task and provided acceptance criteria.",
     ].join("\n");
   }
   return [
     "Use the manage-codex-workers skill.",
     "",
-    `Register this current Codex session as manager ${params.managerName}.`,
+    "Register this current Codex session as the manager for this dashboard setup.",
     "",
-    `Bind it to worker ${params.workerName} for task ${params.task} in ${params.cwd}.`,
-    `Configure strict supervision. The goal is: ${params.taskGoal}`,
+    `Dashboard setup code: ${params.setupCode}`,
+    `Working directory: ${params.cwd}`,
+    `Goal: ${params.taskGoal}`,
+    "",
+    "Let the skill derive the task and session names from the setup code, find the matching worker, create/configure the task if needed, and bind the worker and manager.",
     "",
     "Run cycles, inspect criteria and telemetry, nudge only when useful, require evidence, and finish/export the task when done.",
   ].join("\n");
@@ -343,9 +352,12 @@ function App() {
   const setupTask = safeName(newTask || task || defaultTask);
   const setupParams = {
     cwd: targetCwd,
-    managerName: managerName || derivedManagerName(setupTask),
-    task: setupTask,
+    setupCode: setupCodeFromTask(setupTask),
     taskGoal,
+  };
+  const commandParams = {
+    cwd: targetCwd,
+    managerName: managerName || derivedManagerName(setupTask),
     workerName: workerName || derivedWorkerName(setupTask),
   };
   const workerHealth = paneHealth("worker", snapshot, selectedWorker, sessions);
@@ -397,18 +409,12 @@ function App() {
               <label>Working directory
                 <input value={targetCwd} onChange={(event) => setTargetCwd(event.target.value)} />
               </label>
-              <label>Worker name
-                <input value={workerName} onChange={(event) => setWorkerName(safeName(event.target.value))} />
-              </label>
-              <label>Manager name
-                <input value={managerName} onChange={(event) => setManagerName(safeName(event.target.value))} />
-              </label>
               <SetupSnippet label="Worker setup" text={buildSetupPrompt("worker", setupParams)} />
               <SetupSnippet label="Manager setup" text={buildSetupPrompt("manager", setupParams)} />
               <details className="command-skeletons">
-                <summary>Command skeletons</summary>
-                <SetupSnippet label="Worker command" text={buildRegisterCommand("worker", setupParams)} />
-                <SetupSnippet label="Manager command" text={buildRegisterCommand("manager", setupParams)} />
+                <summary>Debug command skeletons</summary>
+                <SetupSnippet label="Worker command" text={buildRegisterCommand("worker", commandParams)} />
+                <SetupSnippet label="Manager command" text={buildRegisterCommand("manager", commandParams)} />
               </details>
             </div>
           </section>

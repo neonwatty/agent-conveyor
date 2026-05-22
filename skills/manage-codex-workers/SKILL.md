@@ -61,11 +61,13 @@ with a long `pair` command. Use the skill in each session:
    ```text
    Use the manage-codex-workers skill.
 
-   Register this current Codex session as a worker.
+   Register this current Codex session as the worker for this dashboard setup.
 
-   Worker name: <worker-name>
-   Task name: <task-name>
+   Dashboard setup code: <setup-code>
    Working directory: <target-repo>
+
+   Let the skill derive the task and session names from the setup code. Do not
+   ask me to type generated worker, manager, or task names.
 
    After registration, wait for the manager. Do not start work until the
    manager has created or bound the task and provided acceptance criteria.
@@ -74,10 +76,15 @@ with a long `pair` command. Use the skill in each session:
    ```text
    Use the manage-codex-workers skill.
 
-   Register this current Codex session as manager <manager-name>.
+   Register this current Codex session as the manager for this dashboard setup.
 
-   Bind it to worker <worker-name> for task <task-name> in <target-repo>.
-   Configure strict supervision. The goal is: <goal>.
+   Dashboard setup code: <setup-code>
+   Working directory: <target-repo>
+   Goal: <goal>
+
+   Let the skill derive the task and session names from the setup code, find
+   the matching worker, create/configure the task if needed, and bind the
+   worker and manager.
 
    Run cycles, inspect criteria and telemetry, nudge only when useful, require
    evidence, and finish/export the task when done.
@@ -95,6 +102,24 @@ The skill should translate those prompts into explicit `workerctl` commands.
 For the worker, run `doctor-self`; if supported, register the current session
 with `register-worker`. For the manager, register the current session with
 `register-manager`, create/configure the task if needed, then `bind`.
+
+When the prompt includes a dashboard setup code, derive names without asking the
+user:
+
+```text
+task:    dashboard-<setup-code>
+worker:  dashboard-<setup-code>-worker
+manager: dashboard-<setup-code>-manager
+```
+
+If there is already a registered worker for the derived worker name, reuse it
+when binding the manager. If the derived name collides with an active unrelated
+session, append a short suffix yourself and continue; do not ask the user to
+invent names.
+
+If the prompt has no setup code and no explicit names, choose concise names from
+the task goal or current date yourself. Ask the user only when the target repo or
+goal is missing or ambiguous.
 
 This is the ergonomic manual workflow. Use `pair` only when the user wants
 workerctl to spawn both sessions in one automated command.
@@ -483,9 +508,16 @@ etc.) run `scripts/workerctl db-doctor --live`.
 
 ## Natural-Language Command Mapping
 
-- "register this Codex session as a worker": `workerctl doctor-self` then
-  `workerctl register-worker --name <NAME> --pid <PID> --cwd <CWD> --tmux-session <SESSION>`.
-- "register a manager": `workerctl register-manager --name <NAME> --pid <PID> --cwd <CWD>`.
+- "register this Codex session as the worker for dashboard setup <CODE>":
+  derive `dashboard-<CODE>-worker`, run `workerctl doctor-self`, then
+  `workerctl register-worker --name dashboard-<CODE>-worker --pid <PID> --cwd <CWD> --tmux-session <SESSION>`.
+- "register this session as the manager for dashboard setup <CODE>":
+  derive `dashboard-<CODE>-manager`, run
+  `workerctl register-manager --name dashboard-<CODE>-manager --pid <PID> --cwd <CWD>`.
+- "register this Codex session as a worker": choose a concise worker name if
+  none was provided, then run `workerctl doctor-self` and `register-worker`.
+- "register a manager": choose a concise manager name if none was provided,
+  then run `workerctl register-manager`.
 - "create a task and bind these sessions":
   `workerctl tasks --create <TASK> --goal "<goal>"` then
   `workerctl bind --task <TASK> --worker <W> --manager <M>`.

@@ -37,8 +37,10 @@ test("dashboard can bind manual sessions, attach terminals, and show activity", 
   await bootstrap.getByLabel("Goal").fill("Verify browser-created dashboard pair.");
   await expect(page.getByText("Worker setup")).toBeVisible();
   await expect(page.getByText("Manager setup")).toBeVisible();
-  await expect(page.locator(".setup-snippet").filter({ hasText: "Worker setup" }).locator("textarea")).toHaveValue(/Register this current Codex session as a worker./);
-  await expect(page.locator(".setup-snippet").filter({ hasText: "Manager setup" }).locator("textarea")).toHaveValue(/Register this current Codex session as manager dashboard-bootstrap-dogfood-manager./);
+  await expect(page.locator(".setup-snippet").filter({ hasText: "Worker setup" }).locator("textarea")).toHaveValue(/Register this current Codex session as the worker for this dashboard setup./);
+  await expect(page.locator(".setup-snippet").filter({ hasText: "Worker setup" }).locator("textarea")).toHaveValue(/Dashboard setup code: bootstrap-dogfood/);
+  await expect(page.locator(".setup-snippet").filter({ hasText: "Manager setup" }).locator("textarea")).toHaveValue(/Register this current Codex session as the manager for this dashboard setup./);
+  await expect(page.locator(".setup-snippet").filter({ hasText: "Manager setup" }).locator("textarea")).toHaveValue(/Let the skill derive the task and session names from the setup code/);
   await page.getByRole("button", { name: "Create Task Only" }).click();
   await bootstrap.getByLabel("Registered worker").selectOption("dashboard-bootstrap-worker");
   await bootstrap.getByLabel("Registered manager").selectOption("dashboard-bootstrap-manager");
