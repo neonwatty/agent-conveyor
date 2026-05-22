@@ -2547,7 +2547,7 @@ def query_telemetry_events(
     if search:
         from_sql = "telemetry_events te join telemetry_events_fts fts on fts.event_id = te.id"
         clauses.append("telemetry_events_fts match ?")
-        params.append(search)
+        params.append(_telemetry_fts_query(search))
     if run_id is not None:
         clauses.append("te.run_id = ?")
         params.append(run_id)
@@ -2580,6 +2580,10 @@ def query_telemetry_events(
         params,
     ).fetchall()
     return [_telemetry_event_from_row(row) for row in rows]
+
+
+def _telemetry_fts_query(search: str) -> str:
+    return " ".join(f'"{term.replace(chr(34), chr(34) + chr(34))}"' for term in search.split())
 
 
 def telemetry_summary(events: list[dict[str, Any]]) -> dict[str, Any]:

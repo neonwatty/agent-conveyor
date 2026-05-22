@@ -186,6 +186,8 @@ class DatabaseTests(unittest.TestCase):
                 """
             ).fetchone()
             self.assertEqual(search["event_id"], event_id)
+            hyphen_search = worker_db.query_telemetry_events(conn, search="stale-output")
+            self.assertEqual([event["id"] for event in hyphen_search], [event_id])
 
     def test_telemetry_event_helpers_validate_inputs_before_insert(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -5830,6 +5832,51 @@ class RegisterCommandsTests(unittest.TestCase):
             rows = json.loads(proc.stdout)
             names = {r["name"] for r in rows}
             self.assertEqual(names, {"w", "m"})
+
+    def test_cli_discover_searches_tasks_sessions_and_suggests_bind(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            rollout = Path(tmpdir) / "r.jsonl"
+            rollout.write_text(json.dumps({
+                "type": "session_meta",
+                "payload": {"id": "u1", "cwd": str(ROOT), "originator": "codex-tui"},
+            }) + "\n")
+            state_dir = Path(tmpdir) / "state"
+            state_dir.mkdir()
+            env = {"WORKERCTL_STATE_ROOT": str(state_dir)}
+
+            self.run_cli("tasks", "--create", "dashboard-search-demo", "--goal", "Investigate dashboard discovery", env_extra=env)
+            self.run_cli("register-worker", "--name", "dashboard-search-worker", "--codex-session", str(rollout),
+                         "--pid", "1", "--cwd", str(ROOT), "--tmux-session", "codex-dashboard-search-worker", env_extra=env)
+            self.run_cli("register-manager", "--name", "dashboard-search-manager", "--codex-session", str(rollout),
+                         "--pid", "2", "--cwd", str(ROOT), env_extra=env)
+
+            proc = self.run_cli("discover", "dashboard-search", env_extra=env)
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            payload = json.loads(proc.stdout)
+            self.assertEqual([task["name"] for task in payload["tasks"]], ["dashboard-search-demo"])
+            self.assertEqual(
+                {session["name"] for session in payload["sessions"]},
+                {"dashboard-search-worker", "dashboard-search-manager"},
+            )
+            bind = [item for item in payload["suggestions"] if item["kind"] == "bind"][0]
+            self.assertEqual(bind["task"], "dashboard-search-demo")
+            self.assertEqual(bind["worker"], "dashboard-search-worker")
+            self.assertEqual(bind["manager"], "dashboard-search-manager")
+            self.assertIn("workerctl bind", bind["command"])
+
+    def test_cli_search_alias_matches_discover(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_dir = Path(tmpdir) / "state"
+            state_dir.mkdir()
+            env = {"WORKERCTL_STATE_ROOT": str(state_dir)}
+            self.run_cli("tasks", "--create", "alias-demo", "--goal", "Search alias", env_extra=env)
+
+            proc = self.run_cli("search", "alias", env_extra=env)
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            payload = json.loads(proc.stdout)
+            self.assertEqual([task["name"] for task in payload["tasks"]], ["alias-demo"])
 
     def test_cli_deregister_marks_gone(self):
         with tempfile.TemporaryDirectory() as tmpdir:

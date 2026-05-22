@@ -54,6 +54,7 @@ from workerctl.commands import (
     command_start_worker,
     command_start_manager,
     command_deregister,
+    command_discover,
     command_sessions,
     command_bind,
     command_ingest,
@@ -679,6 +680,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Include Phase 1 backfill rows (pid IS NULL) — legacy workers/managers.",
     )
     sessions.set_defaults(func=command_sessions)
+
+    discover = subparsers.add_parser(
+        "discover",
+        aliases=("search",),
+        help="Search tasks, sessions, bindings, and telemetry for conversational worker/manager setup.",
+    )
+    discover.add_argument("query", nargs="?", default="", help="Text to search across tasks, sessions, and telemetry.")
+    discover.add_argument("--all", action="store_true", help="Include done tasks and gone sessions.")
+    discover.add_argument("--limit", type=int, default=10, help="Maximum matches per section.")
+    discover.add_argument("--path", help="Override the workerctl database path.")
+    discover.set_defaults(func=command_discover)
 
     bind = subparsers.add_parser(
         "bind",
