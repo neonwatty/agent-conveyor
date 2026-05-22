@@ -6,6 +6,10 @@ import {
   buildWorkerctlArgs,
   normalizeServerOptions,
 } from "./workerctl.ts";
+import {
+  encodeTerminalResizeMessage,
+  parseTerminalControlMessage,
+} from "./terminal.ts";
 
 test("normalizes loopback dashboard server defaults", () => {
   const options = normalizeServerOptions({});
@@ -52,6 +56,20 @@ test("rejects unsafe terminal session names before spawning a PTY", () => {
     () => buildPtyAttachArgs({ session: "bad; rm -rf /" }),
     /Unsafe tmux session name/,
   );
+});
+
+test("parses dashboard terminal resize control messages", () => {
+  assert.deepEqual(parseTerminalControlMessage(encodeTerminalResizeMessage(83, 31)), {
+    cols: 83,
+    rows: 31,
+    type: "resize",
+  });
+});
+
+test("leaves ordinary terminal input untouched by control parsing", () => {
+  assert.equal(parseTerminalControlMessage("ls -la\r"), null);
+  assert.equal(parseTerminalControlMessage(JSON.stringify({ type: "resize", cols: 83, rows: 31 })), null);
+  assert.equal(parseTerminalControlMessage(encodeTerminalResizeMessage(1, 31)), null);
 });
 
 test("builds bind action arguments", () => {

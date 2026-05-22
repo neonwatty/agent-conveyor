@@ -21,6 +21,10 @@ type SessionRow = { name: string; role: "worker" | "manager"; state?: string; tm
 type TaskRow = { name: string; state?: string; goal?: string };
 type Receipt = { command: string[]; exitCode: number | null; stdout: string; stderr: string; json?: unknown };
 
+function terminalResizeMessage(cols: number, rows: number) {
+  return JSON.stringify({ marker: "dashboard-terminal-control", type: "resize", cols, rows });
+}
+
 function safeName(value: string) {
   return value.trim().toLowerCase().replace(/[^a-z0-9_.:+-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48);
 }
@@ -58,10 +62,19 @@ function TerminalPane({ title, session }: { title: string; session?: string | nu
     const socket = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/pty?session=${encodeURIComponent(session)}`);
     socket.onmessage = (event) => terminal.write(event.data);
     terminal.onData((data) => socket.readyState === WebSocket.OPEN && socket.send(data));
-    const resize = () => fit.fit();
+    const resize = () => {
+      fit.fit();
+      if (socket.readyState === WebSocket.OPEN) {
+        socket.send(terminalResizeMessage(terminal.cols, terminal.rows));
+      }
+    };
+    socket.addEventListener("open", resize);
+    const observer = new ResizeObserver(resize);
+    observer.observe(ref.current);
     window.addEventListener("resize", resize);
     return () => {
       window.removeEventListener("resize", resize);
+      observer.disconnect();
       socket.close();
       terminal.dispose();
     };

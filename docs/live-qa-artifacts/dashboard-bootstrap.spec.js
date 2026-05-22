@@ -35,7 +35,7 @@ test("dashboard can bootstrap a task pair and attach terminals", async ({ page }
   await bootstrap.getByLabel("Manager", { exact: true }).fill("dashboard-bootstrap-manager");
   await bootstrap.getByRole("button", { name: "Start & Attach Pair" }).click();
 
-  await expect(page.getByText("dashboard-bootstrap-dogfood")).toBeVisible({ timeout: 10000 });
+  await expect(page.getByRole("heading", { name: "dashboard-bootstrap-dogfood" })).toBeVisible({ timeout: 10000 });
   await expect(page.locator(".terminal-panel").filter({ hasText: "Worker" }).getByText("codex-dashboard-bootstrap-worker")).toBeVisible();
   await expect(page.locator(".terminal-panel").filter({ hasText: "Manager" }).getByText("codex-dashboard-bootstrap-manager")).toBeVisible();
   await expect(page.locator(".terminal-panel").filter({ hasText: "Worker" }).getByText(/worker dashboard-bootstrap-worker terminal ready/)).toBeVisible();
