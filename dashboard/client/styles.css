@@ -83,7 +83,7 @@ button:disabled {
 .workspace {
   display: grid;
   gap: 14px;
-  grid-template-columns: minmax(360px, 1fr) minmax(360px, 1fr) 340px;
+  grid-template-columns: minmax(360px, 1fr) minmax(360px, 1fr) 380px;
   height: calc(100vh - 88px);
 }
 
@@ -326,5 +326,80 @@ textarea {
 }
 
 .compact-actions {
-  grid-template-columns: 1fr;
+  grid-template-columns: 1fr 1fr;
+}
+
+.activity-rail {
+  display: flex;
+  flex-direction: column;
+}
+
+.config-list {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+}
+
+.config-list div {
+  border: 1px solid #d8dfdb;
+  border-radius: 6px;
+  padding: 7px 8px;
+}
+
+.config-list dt {
+  color: #68756f;
+  font-size: 11px;
+}
+
+.config-list dd {
+  color: #26332f;
+  font-size: 12px;
+  line-height: 1.35;
+  margin: 3px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.activity-list {
+  display: grid;
+  gap: 7px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.activity-list li {
+  background: #f2f6f3;
+  border: 1px solid #d7dfda;
+  border-left: 3px solid #74867e;
+  border-radius: 6px;
+  display: grid;
+  gap: 3px;
+  padding: 7px 8px;
+}
+
+.activity-list li[data-severity="error"] {
+  border-left-color: #b8403d;
+}
+
+.activity-list li[data-severity="warning"] {
+  border-left-color: #b5812c;
+}
+
+.activity-list time {
+  color: #76837d;
+  font-size: 11px;
+  min-height: 13px;
+}
+
+.activity-list strong {
+  color: #26332f;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.activity-list span {
+  color: #59665f;
+  font-size: 12px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
 }

@@ -8,18 +8,46 @@ import "./styles.css";
 type Snapshot = {
   alerts?: Array<{ message: string; severity: string; type: string }>;
   binding?: { manager_session_name: string; worker_session_name: string } | null;
-  commands?: { failed_count: number; unfinished_count: number };
-  criteria?: { open_blocker_count: number; summary: Record<string, number> };
-  latest_cycle?: { state: string; worker_state?: string; notable_pane_pattern?: string | null } | null;
-  manager?: { alive: boolean | null; name: string; tmux_session?: string | null } | null;
+  commands?: { failed_count: number; recent?: Array<Record<string, unknown>>; unfinished_count: number };
+  criteria?: {
+    open_accepted?: Array<{ criterion: string; id: number | string; status: string }>;
+    open_blocker_count: number;
+    summary: Record<string, number>;
+  };
+  latest_cycle?: {
+    completed_at?: string;
+    started_at?: string;
+    state: string;
+    status?: {
+      last_event_subtype?: string | null;
+      manager_context?: {
+        manager_config?: {
+          acceptance_criteria?: string[];
+          guidelines?: string[];
+          objective?: string;
+          reference_paths?: string[];
+          supervision_mode?: string;
+        };
+      };
+      state?: string;
+      task_completed?: boolean;
+    };
+    worker_state?: string;
+    notable_pane_pattern?: string | null;
+  } | null;
+  manager?: { alive: boolean | null; name: string; state?: string; tmux_session?: string | null } | null;
   task?: { name: string; state: string; goal: string };
-  telemetry?: { summary: { total: number; by_severity: Record<string, number> } };
-  worker?: { alive: boolean | null; name: string; tmux_session?: string | null } | null;
+  telemetry?: {
+    recent?: Array<{ actor?: string; event_type?: string; severity?: string; summary?: string; timestamp?: string }>;
+    summary: { total: number; by_severity: Record<string, number> };
+  };
+  worker?: { alive: boolean | null; name: string; state?: string; tmux_session?: string | null } | null;
 };
 
 type SessionRow = { name: string; role: "worker" | "manager"; state?: string; tmux_session?: string | null };
 type TaskRow = { name: string; state?: string; goal?: string };
 type Receipt = { command: string[]; exitCode: number | null; stdout: string; stderr: string; json?: unknown };
+type ActivityItem = { detail?: string; key: string; severity?: string; time?: string; title: string };
 
 function terminalResizeMessage(cols: number, rows: number) {
   return JSON.stringify({ marker: "dashboard-terminal-control", type: "resize", cols, rows });
@@ -29,16 +57,51 @@ function safeName(value: string) {
   return value.trim().toLowerCase().replace(/[^a-z0-9_.:+-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48);
 }
 
-function derivedWorkerName(taskName: string) {
-  return `${safeName(taskName) || "dashboard-task"}-worker`;
+function formatTime(value?: string) {
+  if (!value) {
+    return "";
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+  return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
-function derivedManagerName(taskName: string) {
-  return `${safeName(taskName) || "dashboard-task"}-manager`;
+function receiptTitle(receipt: Receipt) {
+  return receipt.command.slice(1).join(" ") || receipt.command.join(" ");
 }
 
-function jsonRecord(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+function buildActivity(snapshot: Snapshot | null, receipts: Receipt[]): ActivityItem[] {
+  const items: ActivityItem[] = [];
+  for (const receipt of receipts) {
+    items.push({
+      detail: receipt.stderr || receipt.stdout || undefined,
+      key: `receipt-${receipt.command.join(" ")}-${items.length}`,
+      severity: receipt.exitCode === 0 ? "info" : "error",
+      title: `${receipt.exitCode === 0 ? "Command ok" : "Command failed"}: ${receiptTitle(receipt)}`,
+    });
+  }
+  for (const event of snapshot?.telemetry?.recent ?? []) {
+    items.push({
+      detail: event.summary,
+      key: `telemetry-${event.timestamp}-${event.event_type}-${items.length}`,
+      severity: event.severity,
+      time: event.timestamp,
+      title: [event.actor, event.event_type].filter(Boolean).join(" / ") || "Telemetry event",
+    });
+  }
+  for (const command of snapshot?.commands?.recent ?? []) {
+    const type = String(command.type || command.command || "command");
+    const state = String(command.state || command.status || "");
+    items.push({
+      key: `command-${type}-${command.created_at || items.length}`,
+      severity: state === "failed" ? "error" : "info",
+      time: typeof command.created_at === "string" ? command.created_at : undefined,
+      title: [type, state].filter(Boolean).join(" "),
+    });
+  }
+  return items.slice(0, 30);
 }
 
 function TerminalPane({ title, session }: { title: string; session?: string | null }) {
@@ -104,11 +167,6 @@ function App() {
   const [manager, setManager] = useState("");
   const [newTask, setNewTask] = useState(initialTask || defaultTask);
   const [taskGoal, setTaskGoal] = useState("Manual dashboard supervision experiment.");
-  const [taskPrompt, setTaskPrompt] = useState("Please inspect this repository and report one safe next improvement for the dashboard. Do not edit files.");
-  const [workerName, setWorkerName] = useState(derivedWorkerName(initialTask || defaultTask));
-  const [managerName, setManagerName] = useState(derivedManagerName(initialTask || defaultTask));
-  const [cwd, setCwd] = useState("");
-  const [managerMode, setManagerMode] = useState<"light" | "guided" | "strict">("guided");
   const [nudge, setNudge] = useState("");
   const [receipts, setReceipts] = useState<Receipt[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -165,15 +223,8 @@ function App() {
   }
 
   function updateBootstrapTask(rawValue: string) {
-    const previousTask = newTask;
     const value = safeName(rawValue);
     setNewTask(value);
-    if (!workerName || workerName === derivedWorkerName(previousTask)) {
-      setWorkerName(derivedWorkerName(value));
-    }
-    if (!managerName || managerName === derivedManagerName(previousTask)) {
-      setManagerName(derivedManagerName(value));
-    }
   }
 
   async function createTask() {
@@ -183,65 +234,6 @@ function App() {
       setTask(selectedTask);
       await loadSetup();
       await refresh(selectedTask).catch(() => undefined);
-    }
-  }
-
-  async function startWorker() {
-    const selectedWorker = workerName || `${safeName(task || newTask)}-worker`;
-    const receipt = await action("start-worker", {
-      cwd,
-      taskPrompt: taskPrompt || taskGoal || task,
-      timeoutSeconds: 60,
-      workerName: selectedWorker,
-    }, false);
-    if (receipt?.exitCode === 0) {
-      setWorker(selectedWorker);
-      await loadSetup();
-    }
-  }
-
-  async function startManager() {
-    const selectedManager = managerName || `${safeName(task || newTask)}-manager`;
-    const receipt = await action("start-manager", {
-      cwd,
-      managerName: selectedManager,
-      timeoutSeconds: 60,
-    }, false);
-    if (receipt?.exitCode === 0) {
-      setManager(selectedManager);
-      await loadSetup();
-    }
-  }
-
-  async function startPair() {
-    const selectedTask = safeName(newTask || task);
-    const selectedWorker = workerName || `${selectedTask}-worker`;
-    const selectedManager = managerName || `${selectedTask}-manager`;
-    const receipt = await action("start-pair", {
-      cwd,
-      managerAcceptance: ["Worker and manager terminals attach in the dashboard."],
-      managerMode,
-      managerName: selectedManager,
-      managerObjective: taskGoal || `Supervise ${selectedTask}.`,
-      task: selectedTask,
-      taskGoal: taskGoal || taskPrompt || selectedTask,
-      taskPrompt: taskPrompt || taskGoal || selectedTask,
-      timeoutSeconds: 60,
-      workerName: selectedWorker,
-    }, false);
-    if (receipt?.exitCode === 0) {
-      const payload = jsonRecord(receipt.json);
-      const taskPayload = jsonRecord(payload.task);
-      const workerPayload = jsonRecord(payload.worker);
-      const managerPayload = jsonRecord(payload.manager);
-      const returnedTask = String(taskPayload.name || selectedTask);
-      const returnedWorker = String(workerPayload.name || selectedWorker);
-      const returnedManager = String(managerPayload.name || selectedManager);
-      setTask(returnedTask);
-      setWorker(returnedWorker);
-      setManager(returnedManager);
-      await loadSetup();
-      await refresh(returnedTask);
     }
   }
 
@@ -256,7 +248,10 @@ function App() {
   const managerSession = snapshot?.manager?.tmux_session;
   const workerOptions = sessions.filter((session) => session.role === "worker");
   const managerOptions = sessions.filter((session) => session.role === "manager");
-  const startingPair = busyAction === "start-pair";
+  const activity = buildActivity(snapshot, receipts);
+  const managerConfig = snapshot?.latest_cycle?.status?.manager_context?.manager_config;
+  const selectedWorker = worker || snapshot?.worker?.name || "";
+  const selectedManager = manager || snapshot?.manager?.name || "";
 
   return (
     <main className="app-shell">
@@ -273,18 +268,17 @@ function App() {
           {tasks.map((item) => <option key={item.name} value={item.name} />)}
         </datalist>
         <button onClick={() => refresh().catch((err: Error) => setError(err.message))}>Refresh</button>
-        <button className="primary-action" disabled={busy} onClick={() => startPair().catch((err: Error) => setError(err.message))}>{startingPair ? "Starting Pair..." : "Start & Attach Pair"}</button>
       </header>
       <section className="workspace">
         <TerminalPane title="Worker" session={workerSession} />
         <TerminalPane title="Manager" session={managerSession} />
-        <aside className="rail">
+        <aside className="rail activity-rail">
           <h2>{snapshot?.task?.name || "No task loaded"}</h2>
           <p className="goal">{snapshot?.task?.goal || error || "Load a task to inspect dashboard telemetry."}</p>
           {busyAction ? (
             <div className="status-callout" data-state="busy">
-              <strong>{startingPair ? "Starting worker and manager..." : "Running command..."}</strong>
-              <span>{startingPair ? "workerctl pair is creating tmux sessions, waiting for Codex session metadata, binding the pair, then attaching both panes." : busyAction}</span>
+              <strong>Running command...</strong>
+              <span>{busyAction}</span>
             </div>
           ) : null}
           {error ? (
@@ -294,7 +288,7 @@ function App() {
             </div>
           ) : null}
           <section className="bootstrap-card">
-            <h3>Start and attach terminals</h3>
+            <h3>Manual session binding</h3>
             <div className="form-grid bootstrap-grid">
               <label>Task
                 <input value={newTask} onChange={(event) => updateBootstrapTask(event.target.value)} placeholder={task || "task-name"} />
@@ -302,30 +296,21 @@ function App() {
               <label>Goal
                 <textarea value={taskGoal} onChange={(event) => setTaskGoal(event.target.value)} placeholder="Task goal" />
               </label>
-              <label>Worker prompt
-                <textarea value={taskPrompt} onChange={(event) => setTaskPrompt(event.target.value)} placeholder="Initial worker prompt" />
-              </label>
               <label>Worker
-                <input value={workerName} onChange={(event) => setWorkerName(safeName(event.target.value))} placeholder={derivedWorkerName(newTask || task)} />
-              </label>
-              <label>Manager
-                <input value={managerName} onChange={(event) => setManagerName(safeName(event.target.value))} placeholder={derivedManagerName(newTask || task)} />
-              </label>
-              <label>CWD
-                <input value={cwd} onChange={(event) => setCwd(event.target.value)} placeholder="dashboard server cwd" />
-              </label>
-              <label>Manager mode
-                <select value={managerMode} onChange={(event) => setManagerMode(event.target.value as "light" | "guided" | "strict")}>
-                  <option value="guided">guided</option>
-                  <option value="light">light</option>
-                  <option value="strict">strict</option>
+                <select value={selectedWorker} onChange={(event) => setWorker(event.target.value)}>
+                  <option value="">Select worker</option>
+                  {workerOptions.map((item) => <option key={item.name} value={item.name}>{item.name}</option>)}
                 </select>
               </label>
-              <button disabled={busy} className="primary-action start-pair-button" onClick={() => startPair().catch((err: Error) => setError(err.message))}>{startingPair ? "Starting Pair..." : "Start & Attach Pair"}</button>
+              <label>Manager
+                <select value={selectedManager} onChange={(event) => setManager(event.target.value)}>
+                  <option value="">Select manager</option>
+                  {managerOptions.map((item) => <option key={item.name} value={item.name}>{item.name}</option>)}
+                </select>
+              </label>
               <div className="button-grid compact-actions">
                 <button disabled={busy} onClick={() => createTask().catch((err: Error) => setError(err.message))}>Create Task Only</button>
-                <button disabled={busy} onClick={() => startWorker().catch((err: Error) => setError(err.message))}>Start Worker Only</button>
-                <button disabled={busy} onClick={() => startManager().catch((err: Error) => setError(err.message))}>Start Manager Only</button>
+                <button disabled={busy || !task || !selectedWorker || !selectedManager} onClick={() => action("bind", { task, worker: selectedWorker, manager: selectedManager })}>Bind Selected Sessions</button>
               </div>
             </div>
           </section>
@@ -349,22 +334,13 @@ function App() {
             <p>{snapshot?.telemetry?.summary.total ?? 0} events, {snapshot?.commands?.unfinished_count ?? 0} unfinished commands, {snapshot?.commands?.failed_count ?? 0} failed commands.</p>
           </section>
           <section>
-            <h3>Attach & Bind</h3>
-            <div className="form-grid">
-              <label>Worker
-                <select value={worker || snapshot?.worker?.name || ""} onChange={(event) => setWorker(event.target.value)}>
-                  <option value="">Select worker</option>
-                  {workerOptions.map((item) => <option key={item.name} value={item.name}>{item.name}</option>)}
-                </select>
-              </label>
-              <label>Manager
-                <select value={manager || snapshot?.manager?.name || ""} onChange={(event) => setManager(event.target.value)}>
-                  <option value="">Select manager</option>
-                  {managerOptions.map((item) => <option key={item.name} value={item.name}>{item.name}</option>)}
-                </select>
-              </label>
-              <button onClick={() => action("bind", { task, worker: worker || snapshot?.worker?.name, manager: manager || snapshot?.manager?.name })}>Bind</button>
-            </div>
+            <h3>Manager config</h3>
+            <dl className="config-list">
+              <div><dt>Mode</dt><dd>{managerConfig?.supervision_mode || "none"}</dd></div>
+              <div><dt>Objective</dt><dd>{managerConfig?.objective || "none"}</dd></div>
+              <div><dt>Acceptance</dt><dd>{managerConfig?.acceptance_criteria?.length ?? 0}</dd></div>
+              <div><dt>Guidelines</dt><dd>{managerConfig?.guidelines?.length ?? 0}</dd></div>
+            </dl>
           </section>
           <section className="actions">
             <button onClick={() => action("cycle", { task })}>Cycle</button>
@@ -378,15 +354,17 @@ function App() {
             <button onClick={() => action("nudge", { session: snapshot?.worker?.name, text: nudge })}>Send</button>
           </section>
           <section>
-            <h3>Receipts</h3>
-            <ul className="receipts">
-              {receipts.map((receipt, index) => (
-                <li key={`${receipt.command.join(" ")}-${index}`}>
-                  <strong>{receipt.exitCode === 0 ? "ok" : "failed"}</strong>
-                  <span>{receipt.command.slice(1).join(" ")}</span>
+            <h3>Activity replay</h3>
+            <ol className="activity-list">
+              {activity.map((item) => (
+                <li key={item.key} data-severity={item.severity}>
+                  <time>{formatTime(item.time)}</time>
+                  <strong>{item.title}</strong>
+                  {item.detail ? <span>{item.detail}</span> : null}
                 </li>
               ))}
-            </ul>
+              {activity.length === 0 ? <li><strong>No activity yet</strong></li> : null}
+            </ol>
           </section>
         </aside>
       </section>
