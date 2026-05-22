@@ -52,6 +52,23 @@ row, and returns structured JSON. The manager reads that JSON and decides.
    be registered as a worker. A non-tmux session can still be registered as a
    manager.
 
+## Discovery For Q&A
+
+When the user asks which worker, manager, task, or binding to connect, search
+the control plane first and present likely choices instead of asking for
+generated names:
+
+```bash
+scripts/workerctl discover <query>
+scripts/workerctl search <query>
+```
+
+Use an empty query to list active candidates. Add `--all` only when the user is
+looking for completed tasks or gone sessions. The JSON output includes
+`tasks`, `sessions`, `bindings`, `telemetry`, and `suggestions`; use
+`suggestions` to offer concise next steps such as a `workerctl bind` command or
+the prompt to register a missing worker or manager.
+
 ## Preferred Manual Handoff Workflow
 
 When the user wants to hand off an already-open Codex session, do not start

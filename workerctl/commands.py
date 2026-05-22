@@ -4210,6 +4210,112 @@ def command_sessions(args: argparse.Namespace) -> int:
     return 0
 
 
+def _matches_query(value: Any, query: str) -> bool:
+    if not query:
+        return True
+    if value is None:
+        return False
+    if isinstance(value, (dict, list, tuple)):
+        haystack = json.dumps(value, sort_keys=True, default=str)
+    else:
+        haystack = str(value)
+    return query.lower() in haystack.lower()
+
+
+def _row_matches_query(row: dict[str, Any], query: str, fields: list[str]) -> bool:
+    return any(_matches_query(row.get(field), query) for field in fields)
+
+
+def _active_bindings(conn: Any) -> list[dict[str, Any]]:
+    rows = conn.execute(
+        """
+        select bindings.id, bindings.state, bindings.created_at,
+               tasks.name as task_name, tasks.goal as task_goal,
+               ws.name as worker_name, ws.state as worker_state, ws.tmux_session as worker_tmux_session,
+               ms.name as manager_name, ms.state as manager_state, ms.tmux_session as manager_tmux_session
+        from bindings
+        join tasks on tasks.id = bindings.task_id
+        left join sessions ws on ws.id = bindings.worker_session_id
+        left join sessions ms on ms.id = bindings.manager_session_id
+        where bindings.state in ('active', 'ending')
+        order by bindings.created_at desc
+        """
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def _discover_suggestions(tasks: list[dict[str, Any]], sessions: list[dict[str, Any]], bindings: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    suggestions: list[dict[str, Any]] = []
+    active_bound_tasks = {binding["task_name"] for binding in bindings if binding.get("task_name")}
+    workers = [session for session in sessions if session.get("role") == "worker" and session.get("state") == "active"]
+    managers = [session for session in sessions if session.get("role") == "manager" and session.get("state") == "active"]
+    for task in tasks:
+        if task.get("state") not in {"candidate", "managed", "paused"}:
+            continue
+        if task.get("name") in active_bound_tasks:
+            continue
+        if workers and managers:
+            suggestions.append({
+                "command": (
+                    f"workerctl bind --task {sh_quote(str(task['name']))} "
+                    f"--worker {sh_quote(str(workers[0]['name']))} "
+                    f"--manager {sh_quote(str(managers[0]['name']))}"
+                ),
+                "kind": "bind",
+                "manager": managers[0]["name"],
+                "task": task["name"],
+                "worker": workers[0]["name"],
+            })
+            break
+    if not workers:
+        suggestions.append({
+            "kind": "register-worker",
+            "prompt": "Open the intended worker Codex session and ask it to use the manage-codex-workers skill to register as the worker for this dashboard setup.",
+        })
+    if not managers:
+        suggestions.append({
+            "kind": "register-manager",
+            "prompt": "Open the intended manager Codex session and ask it to use the manage-codex-workers skill to register as the manager for this dashboard setup.",
+        })
+    return suggestions
+
+
+def command_discover(args: argparse.Namespace) -> int:
+    from workerctl import db as worker_db
+
+    query = args.query.strip()
+    db_path = Path(args.path).expanduser().resolve() if args.path else None
+    with worker_db.connect(db_path) as conn:
+        worker_db.initialize_database(conn)
+        tasks = worker_db.list_tasks(conn, active_only=not args.all)
+        sessions = worker_db.list_sessions(conn, state="all" if args.all else "active")
+        bindings = _active_bindings(conn)
+        telemetry = worker_db.query_telemetry_events(conn, search=query or None, limit=args.limit) if query else []
+
+    matched_tasks = [
+        task for task in tasks
+        if _row_matches_query(task, query, ["name", "goal", "summary", "state"])
+    ][:args.limit]
+    matched_sessions = [
+        session for session in sessions
+        if _row_matches_query(session, query, ["name", "role", "state", "cwd", "tmux_session", "codex_session_id"])
+    ][:args.limit]
+    matched_bindings = [
+        binding for binding in bindings
+        if _row_matches_query(binding, query, ["task_name", "task_goal", "worker_name", "manager_name", "state"])
+    ][:args.limit]
+    payload = {
+        "bindings": matched_bindings,
+        "query": query,
+        "sessions": matched_sessions,
+        "suggestions": _discover_suggestions(matched_tasks, matched_sessions, matched_bindings),
+        "tasks": matched_tasks,
+        "telemetry": telemetry[:args.limit],
+    }
+    print(json.dumps(payload, indent=2, sort_keys=True, default=str))
+    return 0
+
+
 def command_ingest(args: argparse.Namespace) -> int:
     from workerctl import db as worker_db
     from workerctl import ingest as worker_ingest

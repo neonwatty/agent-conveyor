@@ -210,6 +210,18 @@ tmux attach -t codex-live-test
   workerctl sessions --state all        # active, gone, and legacy rows
   ```
 - `tasks [--create NAME --goal G --summary S]` — List or create tasks.
+- `discover [QUERY] [--all] [--limit N]` / `search [QUERY]` — Search tasks,
+  registered sessions, active bindings, and recent telemetry in one JSON result.
+  Use this for conversational setup when a manager or Codex session needs to
+  present likely worker/manager/task connection options instead of asking the
+  user for generated names:
+  ```bash
+  workerctl discover dashboard
+  workerctl search "auth refactor"
+  ```
+  The output includes `tasks`, `sessions`, `bindings`, `telemetry`, and
+  `suggestions`; suggestions may include a ready-to-run `workerctl bind`
+  command or next-step prompts to register the missing worker or manager.
 - `handoff <task> --summary S [--next-step N ...] [--payload-json JSON]` —
   Persist a compact worker handoff for the task. Use this when a worker is
   becoming managed or before a long context transition so the manager can read
