@@ -48,6 +48,7 @@ type SessionRow = { name: string; role: "worker" | "manager"; state?: string; tm
 type TaskRow = { name: string; state?: string; goal?: string };
 type Receipt = { command: string[]; exitCode: number | null; stdout: string; stderr: string; json?: unknown };
 type ActivityItem = { detail?: string; key: string; severity?: string; time?: string; title: string };
+type PaneHealth = { detail: string; state: "attached" | "missing" | "pending" | "warning"; title: string };
 
 function terminalResizeMessage(cols: number, rows: number) {
   return JSON.stringify({ marker: "dashboard-terminal-control", type: "resize", cols, rows });
@@ -55,6 +56,14 @@ function terminalResizeMessage(cols: number, rows: number) {
 
 function safeName(value: string) {
   return value.trim().toLowerCase().replace(/[^a-z0-9_.:+-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48);
+}
+
+function derivedWorkerName(taskName: string) {
+  return `${safeName(taskName) || "dashboard-task"}-worker`;
+}
+
+function derivedManagerName(taskName: string) {
+  return `${safeName(taskName) || "dashboard-task"}-manager`;
 }
 
 function formatTime(value?: string) {
@@ -104,7 +113,75 @@ function buildActivity(snapshot: Snapshot | null, receipts: Receipt[]): Activity
   return items.slice(0, 30);
 }
 
-function TerminalPane({ title, session }: { title: string; session?: string | null }) {
+function buildSetupPrompt(role: "manager" | "worker", params: { cwd: string; managerName: string; task: string; taskGoal: string; workerName: string }) {
+  if (role === "worker") {
+    return [
+      "Use the manage-codex-workers skill.",
+      "",
+      "Register this current Codex session as a worker.",
+      "",
+      `Worker name: ${params.workerName}`,
+      `Task name: ${params.task}`,
+      `Working directory: ${params.cwd}`,
+      "",
+      "After registration, wait for the manager. Do not start work until the manager has created or bound the task and provided acceptance criteria.",
+    ].join("\n");
+  }
+  return [
+    "Use the manage-codex-workers skill.",
+    "",
+    `Register this current Codex session as manager ${params.managerName}.`,
+    "",
+    `Bind it to worker ${params.workerName} for task ${params.task} in ${params.cwd}.`,
+    `Configure strict supervision. The goal is: ${params.taskGoal}`,
+    "",
+    "Run cycles, inspect criteria and telemetry, nudge only when useful, require evidence, and finish/export the task when done.",
+  ].join("\n");
+}
+
+function buildRegisterCommand(role: "manager" | "worker", params: { cwd: string; managerName: string; workerName: string }) {
+  const command = role === "worker" ? "register-worker" : "register-manager";
+  const name = role === "worker" ? params.workerName : params.managerName;
+  return [
+    "scripts/workerctl doctor-self",
+    `scripts/workerctl ${command} --name ${name} --pid <current-codex-pid> --cwd ${params.cwd} --tmux-session <current-tmux-session>`,
+  ].join("\n");
+}
+
+function paneHealth(role: "manager" | "worker", snapshot: Snapshot | null, selectedName: string, sessions: SessionRow[]): PaneHealth {
+  const session = role === "worker" ? snapshot?.worker : snapshot?.manager;
+  const selected = sessions.find((item) => item.name === selectedName);
+  if (session?.tmux_session) {
+    return { detail: session.tmux_session, state: "attached", title: "Attached" };
+  }
+  if (session?.alive === false) {
+    return { detail: session.name, state: "missing", title: "Dead session" };
+  }
+  if (selected?.tmux_session) {
+    return { detail: "Select Bind to attach this registered session.", state: "pending", title: "Ready to bind" };
+  }
+  if (selectedName) {
+    return { detail: "Registered session has no tmux session recorded.", state: "warning", title: "No tmux" };
+  }
+  return { detail: "Register and bind a session to attach this pane.", state: "missing", title: "Not attached" };
+}
+
+function SetupSnippet({ label, text }: { label: string; text: string }) {
+  async function copy() {
+    await navigator.clipboard.writeText(text);
+  }
+  return (
+    <div className="setup-snippet">
+      <div>
+        <strong>{label}</strong>
+        <button type="button" onClick={() => copy().catch(() => undefined)}>Copy</button>
+      </div>
+      <textarea readOnly value={text} />
+    </div>
+  );
+}
+
+function TerminalPane({ health, title, session }: { health: PaneHealth; title: string; session?: string | null }) {
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -147,10 +224,11 @@ function TerminalPane({ title, session }: { title: string; session?: string | nu
     <section className="terminal-panel">
       <header>
         <span>{title}</span>
-        <strong>{session || "No tmux session"}</strong>
+        <strong>{session || health.title}</strong>
+        <em data-state={health.state}>{health.title}</em>
       </header>
       <div ref={ref} className="terminal-host">
-        {!session ? <div className="empty-terminal">Use Start & Attach Pair to create a tmux-backed session and attach this pane automatically.</div> : null}
+        {!session ? <div className="empty-terminal">{health.detail}</div> : null}
       </div>
     </section>
   );
@@ -167,6 +245,9 @@ function App() {
   const [manager, setManager] = useState("");
   const [newTask, setNewTask] = useState(initialTask || defaultTask);
   const [taskGoal, setTaskGoal] = useState("Manual dashboard supervision experiment.");
+  const [targetCwd, setTargetCwd] = useState("/Users/neonwatty/Desktop/codex-terminal-manager");
+  const [workerName, setWorkerName] = useState(derivedWorkerName(initialTask || defaultTask));
+  const [managerName, setManagerName] = useState(derivedManagerName(initialTask || defaultTask));
   const [nudge, setNudge] = useState("");
   const [receipts, setReceipts] = useState<Receipt[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -223,8 +304,15 @@ function App() {
   }
 
   function updateBootstrapTask(rawValue: string) {
+    const previousTask = newTask;
     const value = safeName(rawValue);
     setNewTask(value);
+    if (!workerName || workerName === derivedWorkerName(previousTask)) {
+      setWorkerName(derivedWorkerName(value));
+    }
+    if (!managerName || managerName === derivedManagerName(previousTask)) {
+      setManagerName(derivedManagerName(value));
+    }
   }
 
   async function createTask() {
@@ -252,6 +340,16 @@ function App() {
   const managerConfig = snapshot?.latest_cycle?.status?.manager_context?.manager_config;
   const selectedWorker = worker || snapshot?.worker?.name || "";
   const selectedManager = manager || snapshot?.manager?.name || "";
+  const setupTask = safeName(newTask || task || defaultTask);
+  const setupParams = {
+    cwd: targetCwd,
+    managerName: managerName || derivedManagerName(setupTask),
+    task: setupTask,
+    taskGoal,
+    workerName: workerName || derivedWorkerName(setupTask),
+  };
+  const workerHealth = paneHealth("worker", snapshot, selectedWorker, sessions);
+  const managerHealth = paneHealth("manager", snapshot, selectedManager, sessions);
 
   return (
     <main className="app-shell">
@@ -270,8 +368,8 @@ function App() {
         <button onClick={() => refresh().catch((err: Error) => setError(err.message))}>Refresh</button>
       </header>
       <section className="workspace">
-        <TerminalPane title="Worker" session={workerSession} />
-        <TerminalPane title="Manager" session={managerSession} />
+        <TerminalPane health={workerHealth} title="Worker" session={workerSession} />
+        <TerminalPane health={managerHealth} title="Manager" session={managerSession} />
         <aside className="rail activity-rail">
           <h2>{snapshot?.task?.name || "No task loaded"}</h2>
           <p className="goal">{snapshot?.task?.goal || error || "Load a task to inspect dashboard telemetry."}</p>
@@ -288,7 +386,7 @@ function App() {
             </div>
           ) : null}
           <section className="bootstrap-card">
-            <h3>Manual session binding</h3>
+            <h3>Manual setup</h3>
             <div className="form-grid bootstrap-grid">
               <label>Task
                 <input value={newTask} onChange={(event) => updateBootstrapTask(event.target.value)} placeholder={task || "task-name"} />
@@ -296,13 +394,34 @@ function App() {
               <label>Goal
                 <textarea value={taskGoal} onChange={(event) => setTaskGoal(event.target.value)} placeholder="Task goal" />
               </label>
-              <label>Worker
+              <label>Working directory
+                <input value={targetCwd} onChange={(event) => setTargetCwd(event.target.value)} />
+              </label>
+              <label>Worker name
+                <input value={workerName} onChange={(event) => setWorkerName(safeName(event.target.value))} />
+              </label>
+              <label>Manager name
+                <input value={managerName} onChange={(event) => setManagerName(safeName(event.target.value))} />
+              </label>
+              <SetupSnippet label="Worker setup" text={buildSetupPrompt("worker", setupParams)} />
+              <SetupSnippet label="Manager setup" text={buildSetupPrompt("manager", setupParams)} />
+              <details className="command-skeletons">
+                <summary>Command skeletons</summary>
+                <SetupSnippet label="Worker command" text={buildRegisterCommand("worker", setupParams)} />
+                <SetupSnippet label="Manager command" text={buildRegisterCommand("manager", setupParams)} />
+              </details>
+            </div>
+          </section>
+          <section className="bootstrap-card">
+            <h3>Manual session binding</h3>
+            <div className="form-grid bootstrap-grid">
+              <label>Registered worker
                 <select value={selectedWorker} onChange={(event) => setWorker(event.target.value)}>
                   <option value="">Select worker</option>
                   {workerOptions.map((item) => <option key={item.name} value={item.name}>{item.name}</option>)}
                 </select>
               </label>
-              <label>Manager
+              <label>Registered manager
                 <select value={selectedManager} onChange={(event) => setManager(event.target.value)}>
                   <option value="">Select manager</option>
                   {managerOptions.map((item) => <option key={item.name} value={item.name}>{item.name}</option>)}

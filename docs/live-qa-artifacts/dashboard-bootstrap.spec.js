@@ -21,8 +21,8 @@ test("dashboard shows progress while binding sessions", async ({ page }) => {
   await bootstrap.getByLabel("Task").fill("delayed-ui-test");
   await bootstrap.getByLabel("Goal").fill("Delayed bind test.");
   await page.getByRole("button", { name: "Create Task Only" }).click();
-  await bootstrap.getByLabel("Worker").selectOption("dashboard-bootstrap-worker");
-  await bootstrap.getByLabel("Manager").selectOption("dashboard-bootstrap-manager");
+  await bootstrap.getByLabel("Registered worker").selectOption("dashboard-bootstrap-worker");
+  await bootstrap.getByLabel("Registered manager").selectOption("dashboard-bootstrap-manager");
   await page.getByRole("button", { name: "Bind Selected Sessions" }).click();
 
   await expect(page.getByText("Running command...")).toBeVisible();
@@ -35,12 +35,18 @@ test("dashboard can bind manual sessions, attach terminals, and show activity", 
   const bootstrap = page.locator(".bootstrap-grid");
   await bootstrap.getByLabel("Task").fill("dashboard-bootstrap-dogfood");
   await bootstrap.getByLabel("Goal").fill("Verify browser-created dashboard pair.");
+  await expect(page.getByText("Worker setup")).toBeVisible();
+  await expect(page.getByText("Manager setup")).toBeVisible();
+  await expect(page.locator(".setup-snippet").filter({ hasText: "Worker setup" }).locator("textarea")).toHaveValue(/Register this current Codex session as a worker./);
+  await expect(page.locator(".setup-snippet").filter({ hasText: "Manager setup" }).locator("textarea")).toHaveValue(/Register this current Codex session as manager dashboard-bootstrap-dogfood-manager./);
   await page.getByRole("button", { name: "Create Task Only" }).click();
-  await bootstrap.getByLabel("Worker").selectOption("dashboard-bootstrap-worker");
-  await bootstrap.getByLabel("Manager").selectOption("dashboard-bootstrap-manager");
+  await bootstrap.getByLabel("Registered worker").selectOption("dashboard-bootstrap-worker");
+  await bootstrap.getByLabel("Registered manager").selectOption("dashboard-bootstrap-manager");
   await page.getByRole("button", { name: "Bind Selected Sessions" }).click();
 
   await expect(page.getByRole("heading", { name: "dashboard-bootstrap-dogfood" })).toBeVisible({ timeout: 10000 });
+  await expect(page.locator(".terminal-panel").filter({ hasText: "Worker" }).getByText("Attached")).toBeVisible();
+  await expect(page.locator(".terminal-panel").filter({ hasText: "Manager" }).getByText("Attached")).toBeVisible();
   await expect(page.locator(".terminal-panel").filter({ hasText: "Worker" }).getByText("codex-dashboard-bootstrap-worker")).toBeVisible();
   await expect(page.locator(".terminal-panel").filter({ hasText: "Manager" }).getByText("codex-dashboard-bootstrap-manager")).toBeVisible();
   await expect(page.locator(".terminal-panel").filter({ hasText: "Worker" }).getByText(/worker dashboard-bootstrap-worker terminal ready/)).toBeVisible();
