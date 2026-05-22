@@ -9,10 +9,14 @@ import {
   buildPtyAttachArgs,
   normalizeServerOptions,
   runWorkerctlJson,
-  runWorkerctlReceipt,
   type PartialServerOptions,
 } from "./workerctl.ts";
 import { parseTerminalControlMessage } from "./terminal.ts";
+
+const DASHBOARD_TERMINALS = [
+  { id: "a", label: "Terminal A", tmuxSession: "workerctl-dashboard-a" },
+  { id: "b", label: "Terminal B", tmuxSession: "workerctl-dashboard-b" },
+] as const;
 
 function resolveExecutable(name: string): string {
   const result = spawnSync("/bin/sh", ["-lc", `command -v ${name}`], { encoding: "utf8" });
@@ -23,6 +27,28 @@ function disableTmuxStatus(session: string): void {
   spawnSync(resolveExecutable("tmux"), ["set-option", "-t", session, "status", "off"], { stdio: "ignore" });
 }
 
+function shellEnvironment(): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+  delete env.npm_config_prefix;
+  return env;
+}
+
+function resetDashboardShells(cwd: string): void {
+  const tmux = resolveExecutable("tmux");
+  const shell = process.env.SHELL || "/bin/zsh";
+  for (const terminal of DASHBOARD_TERMINALS) {
+    spawnSync(tmux, ["kill-session", "-t", terminal.tmuxSession], { stdio: "ignore" });
+    const result = spawnSync(tmux, ["new-session", "-d", "-s", terminal.tmuxSession, "-c", cwd, "env", "-u", "npm_config_prefix", shell], {
+      encoding: "utf8",
+      env: shellEnvironment(),
+    });
+    if (result.status !== 0) {
+      throw new Error(result.stderr || `Failed to create tmux session ${terminal.tmuxSession}`);
+    }
+    disableTmuxStatus(terminal.tmuxSession);
+  }
+}
+
 type TerminalProcess = {
   kill: () => void;
   onData: (callback: (data: string) => void) => void;
@@ -30,6 +56,174 @@ type TerminalProcess = {
   resize: (cols: number, rows: number) => void;
   write: (data: string) => void;
 };
+
+type DiscoverResult = {
+  bindings?: Array<Record<string, unknown>>;
+  sessions?: Array<Record<string, unknown>>;
+};
+
+type SnapshotResult = {
+  alerts?: Array<{ message?: string; severity?: string; type?: string }>;
+  latest_cycle?: { state?: string } | null;
+  task?: { goal?: string; name?: string; state?: string } | null;
+  telemetry?: {
+    recent?: Array<{
+      actor?: string;
+      attributes?: Record<string, unknown>;
+      correlation?: Record<string, unknown>;
+      event_type?: string;
+      severity?: string;
+      summary?: string;
+      timestamp?: string;
+    }>;
+  };
+};
+
+function isDashboardSession(session: Record<string, unknown>): boolean {
+  return DASHBOARD_TERMINALS.some((terminal) => terminal.tmuxSession === session.tmux_session);
+}
+
+function sessionAlive(session: Record<string, unknown>): boolean | null {
+  const pid = Number(session.pid);
+  if (!Number.isFinite(pid) || pid <= 0) {
+    return null;
+  }
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function findDashboardBinding(discovered: DiscoverResult, sessions: Array<Record<string, unknown>>): Record<string, unknown> | null {
+  const names = new Set(sessions.map((session) => String(session.name)));
+  for (const binding of discovered.bindings || []) {
+    if (names.has(String(binding.worker_name)) || names.has(String(binding.manager_name))) {
+      return binding;
+    }
+    if (
+      DASHBOARD_TERMINALS.some((terminal) => terminal.tmuxSession === binding.worker_tmux_session)
+      || DASHBOARD_TERMINALS.some((terminal) => terminal.tmuxSession === binding.manager_tmux_session)
+    ) {
+      return binding;
+    }
+  }
+  return null;
+}
+
+function terminalState(terminal: (typeof DASHBOARD_TERMINALS)[number], sessions: Array<Record<string, unknown>>) {
+  const session = sessions.find((item) => item.tmux_session === terminal.tmuxSession);
+  const registeredRole = session?.role === "worker" || session?.role === "manager" ? session.role : null;
+  return {
+    id: terminal.id,
+    label: terminal.label,
+    registered_session: session && registeredRole ? {
+      alive: sessionAlive(session),
+      name: String(session.name),
+      role: registeredRole,
+      state: session.state ? String(session.state) : undefined,
+    } : null,
+    role: registeredRole || "shell",
+    tmux_session: terminal.tmuxSession,
+  };
+}
+
+function interpretedTimeline({
+  binding,
+  snapshot,
+  terminals,
+}: {
+  binding: Record<string, unknown> | null;
+  snapshot: SnapshotResult | null;
+  terminals: ReturnType<typeof terminalState>[];
+}) {
+  const items: Array<Record<string, unknown>> = [];
+  const now = new Date().toISOString();
+  for (const terminal of DASHBOARD_TERMINALS) {
+    items.push({
+      key: `shell-${terminal.id}`,
+      time: now,
+      title: `${terminal.label} shell ready`,
+      detail: terminal.tmuxSession,
+      severity: "info",
+    });
+  }
+  for (const terminal of terminals) {
+    if (terminal.registered_session) {
+      items.push({
+        key: `registered-${terminal.id}-${terminal.registered_session.name}`,
+        time: now,
+        title: `${terminal.label} registered as ${terminal.registered_session.role}`,
+        detail: terminal.registered_session.name,
+        severity: terminal.registered_session.alive === false ? "warning" : "info",
+      });
+    }
+  }
+  if (binding) {
+    items.push({
+      key: `binding-${binding.id || binding.task_name}`,
+      time: String(binding.created_at || now),
+      title: "Worker and manager bound",
+      detail: [binding.task_name, binding.worker_name, binding.manager_name].filter(Boolean).join(" / "),
+      severity: "info",
+    });
+  }
+  for (const alert of snapshot?.alerts || []) {
+    items.push({
+      key: `alert-${alert.type}-${alert.message}`,
+      title: alert.type || "Alert",
+      detail: alert.message,
+      severity: alert.severity || "warning",
+    });
+  }
+  for (const event of snapshot?.telemetry?.recent || []) {
+    items.push({
+      key: `telemetry-${event.timestamp}-${event.actor}-${event.event_type}-${event.summary}`,
+      time: event.timestamp,
+      title: [event.actor, event.event_type].filter(Boolean).join(" / ") || "Telemetry event",
+      detail: event.summary,
+      severity: event.severity,
+      raw: event,
+    });
+  }
+  return items.slice(0, 40);
+}
+
+async function dashboardObservation(options: ReturnType<typeof normalizeServerOptions>) {
+  const discovered = await runWorkerctlJson({
+    command: "discover",
+    includeAll: true,
+    limit: 100,
+    workerctlPath: options.workerctlPath,
+    dbPath: options.dbPath,
+  }) as DiscoverResult;
+  const sessions = (discovered.sessions || []).filter(isDashboardSession);
+  const terminals = DASHBOARD_TERMINALS.map((terminal) => terminalState(terminal, sessions));
+  const binding = findDashboardBinding(discovered, sessions);
+  let snapshot: SnapshotResult | null = null;
+  const taskName = binding?.task_name ? String(binding.task_name) : "";
+  if (taskName) {
+    try {
+      snapshot = await runWorkerctlJson({
+        command: "snapshot",
+        task: taskName,
+        workerctlPath: options.workerctlPath,
+        dbPath: options.dbPath,
+      }) as SnapshotResult;
+    } catch {
+      snapshot = null;
+    }
+  }
+  return {
+    binding,
+    latest_cycle: snapshot?.latest_cycle || null,
+    polled_at: new Date().toISOString(),
+    task: snapshot?.task || (taskName ? { name: taskName } : null),
+    terminals,
+    timeline: interpretedTimeline({ binding, snapshot, terminals }),
+  };
+}
 
 function spawnScriptTmuxAttach(session: string): TerminalProcess {
   const child: ChildProcessWithoutNullStreams = spawn(
@@ -81,206 +275,22 @@ function parseArgs(argv: string[]): PartialServerOptions {
 
 async function main(): Promise<void> {
   const options = normalizeServerOptions(parseArgs(process.argv.slice(2)));
+  resetDashboardShells(process.cwd());
   const app = express();
   const server = http.createServer(app);
   const sockets = new WebSocketServer({ noServer: true });
 
   app.use(express.json());
   app.get("/api/config", (_request, response) => {
-    response.json({ host: options.host, port: options.port, task: options.task ?? null });
+    response.json({
+      host: options.host,
+      port: options.port,
+      terminals: DASHBOARD_TERMINALS,
+    });
   });
-  app.get("/api/tasks", async (_request, response, next) => {
+  app.get("/api/observation", async (_request, response, next) => {
     try {
-      response.json(await runWorkerctlJson({ command: "tasks", workerctlPath: options.workerctlPath, dbPath: options.dbPath }));
-    } catch (error) {
-      next(error);
-    }
-  });
-  app.get("/api/sessions", async (_request, response, next) => {
-    try {
-      if (options.dbPath) {
-        const discovered = await runWorkerctlJson({
-          command: "discover",
-          limit: 100,
-          workerctlPath: options.workerctlPath,
-          dbPath: options.dbPath,
-        }) as { sessions?: unknown[] };
-        response.json(discovered.sessions || []);
-        return;
-      }
-      response.json(await runWorkerctlJson({ command: "sessions", workerctlPath: options.workerctlPath }));
-    } catch (error) {
-      next(error);
-    }
-  });
-  app.get("/api/discover", async (request, response, next) => {
-    try {
-      response.json(await runWorkerctlJson({
-        command: "discover",
-        includeAll: request.query.all === "true",
-        limit: request.query.limit ? Number(request.query.limit) : undefined,
-        task: String(request.query.query || ""),
-        workerctlPath: options.workerctlPath,
-        dbPath: options.dbPath,
-      }));
-    } catch (error) {
-      next(error);
-    }
-  });
-  app.get("/api/snapshot", async (request, response, next) => {
-    try {
-      const task = String(request.query.task || options.task || "");
-      response.json(await runWorkerctlJson({ command: "snapshot", task, workerctlPath: options.workerctlPath, dbPath: options.dbPath }));
-    } catch (error) {
-      next(error);
-    }
-  });
-  app.post("/api/actions/cycle", async (request, response, next) => {
-    try {
-      const task = String(request.body.task || options.task || "");
-      response.json(await runWorkerctlReceipt({ command: "cycle", task, workerctlPath: options.workerctlPath, dbPath: options.dbPath }));
-    } catch (error) {
-      next(error);
-    }
-  });
-  app.post("/api/actions/bind", async (request, response, next) => {
-    try {
-      response.json(await runWorkerctlReceipt({
-        command: "bind",
-        manager: String(request.body.manager || ""),
-        task: String(request.body.task || options.task || ""),
-        worker: String(request.body.worker || ""),
-        workerctlPath: options.workerctlPath,
-        dbPath: options.dbPath,
-      }));
-    } catch (error) {
-      next(error);
-    }
-  });
-  app.post("/api/actions/create-task", async (request, response, next) => {
-    try {
-      response.json(await runWorkerctlReceipt({
-        command: "create-task",
-        task: String(request.body.task || ""),
-        taskGoal: String(request.body.taskGoal || ""),
-        taskSummary: request.body.taskSummary ? String(request.body.taskSummary) : undefined,
-        workerctlPath: options.workerctlPath,
-        dbPath: options.dbPath,
-      }));
-    } catch (error) {
-      next(error);
-    }
-  });
-  app.post("/api/actions/start-worker", async (request, response, next) => {
-    try {
-      response.json(await runWorkerctlReceipt({
-        askForApproval: request.body.askForApproval ? String(request.body.askForApproval) : undefined,
-        command: "start-worker",
-        cwd: request.body.cwd ? String(request.body.cwd) : undefined,
-        sandbox: request.body.sandbox ? String(request.body.sandbox) : undefined,
-        taskPrompt: request.body.taskPrompt ? String(request.body.taskPrompt) : undefined,
-        timeoutSeconds: request.body.timeoutSeconds ? Number(request.body.timeoutSeconds) : undefined,
-        workerName: String(request.body.workerName || ""),
-        workerctlPath: options.workerctlPath,
-        dbPath: options.dbPath,
-      }));
-    } catch (error) {
-      next(error);
-    }
-  });
-  app.post("/api/actions/start-manager", async (request, response, next) => {
-    try {
-      response.json(await runWorkerctlReceipt({
-        askForApproval: request.body.askForApproval ? String(request.body.askForApproval) : undefined,
-        command: "start-manager",
-        cwd: request.body.cwd ? String(request.body.cwd) : undefined,
-        managerName: String(request.body.managerName || ""),
-        sandbox: request.body.sandbox ? String(request.body.sandbox) : undefined,
-        timeoutSeconds: request.body.timeoutSeconds ? Number(request.body.timeoutSeconds) : undefined,
-        workerctlPath: options.workerctlPath,
-        dbPath: options.dbPath,
-      }));
-    } catch (error) {
-      next(error);
-    }
-  });
-  app.post("/api/actions/start-pair", async (request, response, next) => {
-    try {
-      response.json(await runWorkerctlReceipt({
-        askForApproval: request.body.askForApproval ? String(request.body.askForApproval) : undefined,
-        command: "pair",
-        cwd: request.body.cwd ? String(request.body.cwd) : undefined,
-        managerAcceptance: Array.isArray(request.body.managerAcceptance) ? request.body.managerAcceptance.map(String).filter(Boolean) : undefined,
-        managerGuideline: Array.isArray(request.body.managerGuideline) ? request.body.managerGuideline.map(String).filter(Boolean) : undefined,
-        managerMode: ["light", "guided", "strict"].includes(String(request.body.managerMode)) ? request.body.managerMode : undefined,
-        managerName: String(request.body.managerName || ""),
-        managerObjective: request.body.managerObjective ? String(request.body.managerObjective) : undefined,
-        managerReference: Array.isArray(request.body.managerReference) ? request.body.managerReference.map(String).filter(Boolean) : undefined,
-        sandbox: request.body.sandbox ? String(request.body.sandbox) : undefined,
-        task: String(request.body.task || ""),
-        taskGoal: request.body.taskGoal ? String(request.body.taskGoal) : undefined,
-        taskPrompt: request.body.taskPrompt ? String(request.body.taskPrompt) : undefined,
-        taskSummary: request.body.taskSummary ? String(request.body.taskSummary) : undefined,
-        timeoutSeconds: request.body.timeoutSeconds ? Number(request.body.timeoutSeconds) : undefined,
-        workerName: String(request.body.workerName || ""),
-        workerctlPath: options.workerctlPath,
-        dbPath: options.dbPath,
-      }));
-    } catch (error) {
-      next(error);
-    }
-  });
-  app.post("/api/actions/nudge", async (request, response, next) => {
-    try {
-      response.json(await runWorkerctlReceipt({
-        command: "nudge",
-        dryRun: Boolean(request.body.dryRun),
-        session: String(request.body.session || ""),
-        text: String(request.body.text || ""),
-        workerctlPath: options.workerctlPath,
-        dbPath: options.dbPath,
-      }));
-    } catch (error) {
-      next(error);
-    }
-  });
-  app.post("/api/actions/interrupt", async (request, response, next) => {
-    try {
-      response.json(await runWorkerctlReceipt({
-        command: "interrupt",
-        dryRun: Boolean(request.body.dryRun),
-        followup: request.body.followup ? String(request.body.followup) : undefined,
-        key: request.body.key ? String(request.body.key) : undefined,
-        session: String(request.body.session || ""),
-        workerctlPath: options.workerctlPath,
-        dbPath: options.dbPath,
-      }));
-    } catch (error) {
-      next(error);
-    }
-  });
-  app.post("/api/actions/finish", async (request, response, next) => {
-    try {
-      response.json(await runWorkerctlReceipt({
-        command: "finish",
-        requireCriteriaAudit: Boolean(request.body.requireCriteriaAudit),
-        task: String(request.body.task || options.task || ""),
-        workerctlPath: options.workerctlPath,
-        dbPath: options.dbPath,
-      }));
-    } catch (error) {
-      next(error);
-    }
-  });
-  app.post("/api/actions/export", async (request, response, next) => {
-    try {
-      response.json(await runWorkerctlReceipt({
-        command: "export",
-        task: String(request.body.task || options.task || ""),
-        workerctlPath: options.workerctlPath,
-        dbPath: options.dbPath,
-        zip: Boolean(request.body.zip),
-      }));
+      response.json(await dashboardObservation(options));
     } catch (error) {
       next(error);
     }
@@ -298,6 +308,11 @@ async function main(): Promise<void> {
 
   sockets.on("connection", (ws: WebSocket, _request: http.IncomingMessage, url: URL) => {
     const session = url.searchParams.get("session") || "";
+    if (!DASHBOARD_TERMINALS.some((terminal) => terminal.tmuxSession === session)) {
+      ws.send(`Dashboard only attaches ${DASHBOARD_TERMINALS.map((terminal) => terminal.tmuxSession).join(" or ")}.\r\n`);
+      ws.close();
+      return;
+    }
     const [, ...args] = buildPtyAttachArgs({ session });
     disableTmuxStatus(session);
     let term: TerminalProcess;
