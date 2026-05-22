@@ -38,11 +38,31 @@ test("builds task snapshot workerctl arguments without shell interpolation", () 
 
 test("builds session list arguments using the existing JSON default", () => {
   const args = buildWorkerctlArgs({
+    dbPath: "/tmp/workerctl.db",
     command: "sessions",
     workerctlPath: "scripts/workerctl",
   });
 
   assert.deepEqual(args, ["scripts/workerctl", "sessions"]);
+});
+
+test("builds discovery arguments for dashboard search", () => {
+  const args = buildWorkerctlArgs({
+    command: "discover",
+    includeAll: true,
+    limit: 5,
+    task: "dashboard-debug",
+    workerctlPath: "scripts/workerctl",
+  });
+
+  assert.deepEqual(args, [
+    "scripts/workerctl",
+    "discover",
+    "dashboard-debug",
+    "--all",
+    "--limit",
+    "5",
+  ]);
 });
 
 test("builds tmux attach arguments for a registered session", () => {

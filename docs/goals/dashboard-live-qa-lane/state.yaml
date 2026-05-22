@@ -1,0 +1,278 @@
+# GoalBuddy v2 state.yaml
+
+version: 2
+
+goal:
+  title: "Dashboard Live QA Lane"
+  slug: "dashboard-live-qa-lane"
+  kind: existing_plan
+  tranche: "Build a live dashboard QA lane for worker/manager supervision."
+  status: done
+  oracle:
+    signal: "A local dashboard walkthrough shows a selected worker/manager task where connection state and activity update without manual refresh, discovery returns likely worker/manager/task options, a suggested bind can be executed explicitly, terminals still attach correctly, and telemetry/commands/cycles visibly update after dashboard actions."
+    cadence: "after each Worker package and at final audit"
+    final_proof: "Local tests plus Playwright/manual dashboard verification covering polling, activity updates, discovery, suggested bind, and preserved terminal attach behavior."
+  intake:
+    original_request: "Plan and execute a live tail visualization in the dashboard for worker/manager QA."
+    interpreted_outcome: "The dashboard becomes a live QA surface that shows connection state, activity, telemetry, commands, discovery, and suggested binding actions."
+    input_shape: existing_plan
+    audience: "repo owner/operator manually QAing worker/manager supervision flows"
+    authority: approved
+    proof_type: demo
+    completion_proof: "A browser-tested dashboard session proves live updates and discovery/bind workflow against a real or disposable task."
+    likely_misfire: "Adding static widgets that still require manual refresh and do not clarify whether worker and manager are connected and progressing."
+    blind_spots_considered:
+      - "Polling load and stale data."
+      - "Dashboard row jumpiness while activity updates."
+      - "Discovery ambiguity when multiple candidates match."
+      - "Mutating bind action safety."
+      - "Terminal attach regressions."
+      - "Telemetry noise hiding useful operator signals."
+      - "Raw transcript/log amplification."
+    existing_plan_facts:
+      - "Use the existing dashboard and telemetry snapshot endpoint first."
+      - "Add client polling before deeper backend streaming changes."
+      - "Make activity replay live, deduplicated, and compact."
+      - "Add connection state for task, worker, manager, binding, and latest cycle."
+      - "Expose workerctl discover/search through the dashboard."
+      - "Present suggested binding actions but require explicit user click."
+      - "Verify with dashboard tests and Playwright/manual QA."
+
+rules:
+  pm_owns_state: true
+  one_active_task: true
+  max_write_workers: 1
+  no_implementation_without_worker_or_pm_task: true
+  no_completion_without_judge_or_pm_audit: true
+  planning_is_not_completion: true
+  queued_required_worker_blocks_completion: true
+  continuous_until_full_outcome: true
+  preserve_and_validate_existing_plan: true
+  intake_misfire_must_be_audited: true
+  goal_pressure_requires_oracle: true
+  no_completion_on_weak_proof: true
+  slice_policy:
+    max_consecutive_tiny_tasks: 2
+    prefer_vertical_slices: true
+    judge_picks_largest_safe_slice: true
+    worker_completes_whole_slice: true
+
+agents:
+  scout: installed
+  worker: installed
+  judge: installed
+
+visual_board:
+  selected: local
+  local:
+    status: live
+    url: "http://goalbuddy.localhost:41737/dashboard-live-qa-lane/"
+    command: "npx goalbuddy board /Users/neonwatty/Desktop/codex-terminal-manager/docs/goals/dashboard-live-qa-lane --host goalbuddy.localhost --port 41737"
+
+active_task: null
+
+tasks:
+  - id: T001
+    type: scout
+    assignee: Scout
+    status: done
+    reasoning_hint: default
+    objective: "Map the current dashboard snapshot, activity rail, terminal attach, and workerctl discover surfaces needed for the live QA lane."
+    inputs:
+      - "docs/goals/dashboard-live-qa-lane/goal.md"
+      - "dashboard/client/main.tsx"
+      - "dashboard/client/styles.css"
+      - "dashboard/server/index.ts"
+      - "dashboard/server/workerctl.ts"
+      - "dashboard/server/workerctl.test.ts"
+      - "workerctl/cli.py"
+      - "workerctl/commands.py"
+      - "tests/test_workerctl.py"
+      - "README.md"
+    constraints:
+      - "Read-only."
+      - "Do not implement."
+      - "Identify the smallest useful live QA vertical slice and any missing backend contract."
+    expected_output:
+      - "Current dashboard data-flow map."
+      - "Polling/discovery integration gaps."
+      - "Recommended Worker package with allowed files and verification commands."
+    receipt:
+      result: done
+      note: "notes/T001-scout-map.md"
+      summary: "Mapped current dashboard data flow, terminal attach behavior, telemetry snapshot use, and workerctl discover/search gaps. Recommended one vertical slice adding polling, dashboard discovery, suggestion rendering, and explicit bind-from-suggestion."
+      evidence:
+        - "dashboard/client/main.tsx"
+        - "dashboard/server/index.ts"
+        - "dashboard/server/workerctl.ts"
+        - "workerctl/commands.py"
+        - "workerctl/cli.py"
+        - "docs/goals/dashboard-live-qa-lane/notes/T001-scout-map.md"
+
+  - id: T002
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Validate the Scout map and choose the largest safe first Worker package."
+    inputs:
+      - "T001 receipt"
+      - "Goal oracle"
+      - "Existing plan facts"
+    constraints:
+      - "Do not implement."
+      - "Prefer a vertical slice that produces immediate manual QA value."
+      - "Preserve existing terminal attach behavior."
+    expected_output:
+      - "Decision."
+      - "Exact Worker objective."
+      - "allowed_files."
+      - "verify commands."
+      - "stop_if conditions."
+    receipt:
+      result: done
+      decision: approved
+      full_outcome_complete: false
+      note: "notes/T002-judge-decision.md"
+      summary: "Approved one dashboard-only vertical slice: typed discover command and endpoint, non-overlapping polling, stable live activity, discovery results, and explicit bind-from-suggestion while preserving terminal attach."
+      selected_worker_task: T003
+      allowed_files:
+        - "dashboard/client/main.tsx"
+        - "dashboard/client/styles.css"
+        - "dashboard/server/index.ts"
+        - "dashboard/server/workerctl.ts"
+        - "dashboard/server/workerctl.test.ts"
+        - "docs/goals/dashboard-live-qa-lane/state.yaml"
+        - "docs/goals/dashboard-live-qa-lane/notes/"
+      verify:
+        - "npm test -- --runInBand"
+        - "npm run build"
+        - "/opt/homebrew/bin/python3.13 -m unittest tests.test_workerctl.RegisterCommandsTests tests.test_workerctl.CliTests -v"
+        - "git diff --check"
+        - "Playwright/manual dashboard verification against a local dashboard server covering polling, discovery, explicit bind-from-suggestion, live activity update, and unchanged worker/manager terminal attach"
+
+  - id: T003
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: default
+    objective: "Implement one reversible dashboard live QA vertical slice: add a typed dashboard discover command and /api/discover endpoint using existing workerctl JSON output, add non-overlapping client polling for setup and snapshot data, render stable deduped live activity plus discovery results and suggestions, and let the operator bind from a suggestion only via an explicit button that reuses the existing bind action while preserving current terminal attach behavior."
+    allowed_files:
+      - "dashboard/client/main.tsx"
+      - "dashboard/client/styles.css"
+      - "dashboard/server/index.ts"
+      - "dashboard/server/workerctl.ts"
+      - "dashboard/server/workerctl.test.ts"
+      - "tests/test_workerctl.py"
+      - "workerctl/cli.py"
+      - "workerctl/commands.py"
+      - "README.md"
+      - "docs/goals/dashboard-live-qa-lane/state.yaml"
+      - "docs/goals/dashboard-live-qa-lane/notes/"
+    verify:
+      - "npm test -- --runInBand"
+      - "npm run build"
+      - "/opt/homebrew/bin/python3.13 -m unittest tests.test_workerctl.RegisterCommandsTests tests.test_workerctl.CliTests -v"
+      - "git diff --check"
+      - "Playwright/manual dashboard verification against a local dashboard server."
+    stop_if:
+      - "Need files outside allowed_files."
+      - "Polling or discovery requires a new user-facing contract decision."
+      - "Terminal attach behavior regresses."
+      - "Implementation would expose raw transcript/log content by default."
+    receipt:
+      result: done
+      note: "notes/T003-worker-receipt.md"
+      changed_files:
+        - "dashboard/client/main.tsx"
+        - "dashboard/client/styles.css"
+        - "dashboard/server/index.ts"
+        - "dashboard/server/workerctl.ts"
+        - "dashboard/server/workerctl.test.ts"
+        - "docs/goals/dashboard-live-qa-lane/state.yaml"
+      commands:
+        - cmd: "npm test -- --runInBand"
+          status: pass
+        - cmd: "npm run build"
+          status: pass
+        - cmd: "/opt/homebrew/bin/python3.13 -m unittest tests.test_workerctl.RegisterCommandsTests tests.test_workerctl.CliTests -v"
+          status: pass
+        - cmd: "git diff --check"
+          status: pass
+        - cmd: "Playwright disposable DB dashboard verification"
+          status: pass
+        - cmd: "Playwright tmux-backed dashboard verification"
+          status: pass
+      summary: "Added live polling, connection state, dashboard discovery, explicit bind-from-suggestion, stable live activity, dashboard DB sessions handling, and safer WebSocket upgrade/HMR handling."
+
+  - id: T004
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: default
+    objective: "Implement dashboard discovery and explicit suggested bind UX if not fully covered by T003."
+    allowed_files:
+      - "dashboard/client/main.tsx"
+      - "dashboard/client/styles.css"
+      - "dashboard/server/index.ts"
+      - "dashboard/server/workerctl.ts"
+      - "dashboard/server/workerctl.test.ts"
+      - "tests/test_workerctl.py"
+      - "README.md"
+      - "docs/goals/dashboard-live-qa-lane/state.yaml"
+      - "docs/goals/dashboard-live-qa-lane/notes/"
+    verify:
+      - "npm test -- --runInBand"
+      - "npm run build"
+      - "Playwright/manual dashboard verification for discover, candidate selection, and explicit bind."
+      - "git diff --check"
+    stop_if:
+      - "Need files outside allowed_files."
+      - "Discovery results are ambiguous and require a product decision."
+      - "Bind can happen without explicit user action."
+    receipt:
+      result: done
+      summary: "T004 was covered by T003: dashboard discovery and explicit suggested bind UX were implemented in the first approved vertical slice."
+      changed_files:
+        - "dashboard/client/main.tsx"
+        - "dashboard/client/styles.css"
+        - "dashboard/server/index.ts"
+        - "dashboard/server/workerctl.ts"
+        - "dashboard/server/workerctl.test.ts"
+        - "docs/goals/dashboard-live-qa-lane/state.yaml"
+      commands:
+        - cmd: "npm test -- --runInBand"
+          status: pass
+        - cmd: "npm run build"
+          status: pass
+        - cmd: "Playwright disposable DB dashboard verification"
+          status: pass
+        - cmd: "Playwright tmux-backed dashboard verification"
+          status: pass
+
+  - id: T005
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Final audit: compare implementation receipts and verification against the live QA lane oracle."
+    constraints:
+      - "Do not mark complete unless browser/manual proof covers the full oracle."
+      - "Call out any remaining telemetry, UX, or dashboard reliability gaps."
+    expected_output:
+      - "full_outcome_complete boolean."
+      - "Evidence map."
+      - "Residual risks or follow-up tasks."
+    receipt:
+      result: done
+      decision: complete
+      full_outcome_complete: true
+      note: "notes/T005-final-audit.md"
+      summary: "Final audit finds the T003/T004 receipts and verification satisfy the dashboard live QA lane oracle."
+      evidence:
+        - "npm test -- --runInBand"
+        - "npm run build"
+        - "/opt/homebrew/bin/python3.13 -m unittest tests.test_workerctl.RegisterCommandsTests tests.test_workerctl.CliTests -v"
+        - "git diff --check"
+        - "Playwright disposable DB dashboard verification"
+        - "Playwright tmux-backed dashboard verification"

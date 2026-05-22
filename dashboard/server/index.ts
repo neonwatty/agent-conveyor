@@ -98,7 +98,31 @@ async function main(): Promise<void> {
   });
   app.get("/api/sessions", async (_request, response, next) => {
     try {
-      response.json(await runWorkerctlJson({ command: "sessions", workerctlPath: options.workerctlPath, dbPath: options.dbPath }));
+      if (options.dbPath) {
+        const discovered = await runWorkerctlJson({
+          command: "discover",
+          limit: 100,
+          workerctlPath: options.workerctlPath,
+          dbPath: options.dbPath,
+        }) as { sessions?: unknown[] };
+        response.json(discovered.sessions || []);
+        return;
+      }
+      response.json(await runWorkerctlJson({ command: "sessions", workerctlPath: options.workerctlPath }));
+    } catch (error) {
+      next(error);
+    }
+  });
+  app.get("/api/discover", async (request, response, next) => {
+    try {
+      response.json(await runWorkerctlJson({
+        command: "discover",
+        includeAll: request.query.all === "true",
+        limit: request.query.limit ? Number(request.query.limit) : undefined,
+        task: String(request.query.query || ""),
+        workerctlPath: options.workerctlPath,
+        dbPath: options.dbPath,
+      }));
     } catch (error) {
       next(error);
     }
@@ -265,7 +289,6 @@ async function main(): Promise<void> {
   server.on("upgrade", (request, socket, head) => {
     const url = new URL(request.url || "/", `http://${request.headers.host}`);
     if (url.pathname !== "/pty") {
-      socket.destroy();
       return;
     }
     sockets.handleUpgrade(request, socket, head, (ws: WebSocket) => {
@@ -318,7 +341,7 @@ async function main(): Promise<void> {
 
   const vite = await createViteServer({
     root: "dashboard",
-    server: { middlewareMode: true },
+    server: { hmr: { server }, middlewareMode: true },
     appType: "spa",
   });
   app.use(vite.middlewares);
