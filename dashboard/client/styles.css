@@ -29,7 +29,7 @@ textarea {
   align-items: center;
   display: grid;
   gap: 16px;
-  grid-template-columns: 1fr 320px auto;
+  grid-template-columns: 1fr 300px auto auto;
   margin-bottom: 14px;
 }
 
@@ -151,6 +151,35 @@ button:disabled {
   margin: 8px 0 14px;
 }
 
+.status-callout {
+  border: 1px solid #cfd9d3;
+  border-radius: 6px;
+  display: grid;
+  font-size: 12px;
+  gap: 4px;
+  line-height: 1.35;
+  margin-bottom: 12px;
+  padding: 9px 10px;
+}
+
+.status-callout strong,
+.status-callout span {
+  display: block;
+}
+
+.status-callout[data-state="busy"] {
+  background: #edf5f1;
+  border-color: #9fc6b7;
+  color: #174739;
+}
+
+.status-callout[data-state="error"] {
+  background: #fff0ef;
+  border-color: #d6938d;
+  color: #7a2722;
+  overflow-wrap: anywhere;
+}
+
 .stat-grid {
   display: grid;
   gap: 8px;
@@ -179,6 +208,10 @@ button:disabled {
 .rail h3 {
   font-size: 13px;
   margin: 16px 0 8px;
+}
+
+.bootstrap-card h3 {
+  margin-top: 0;
 }
 
 .alerts {
@@ -271,7 +304,8 @@ textarea {
 
 .bootstrap-grid {
   border-bottom: 1px solid #d8dfda;
-  padding-bottom: 12px;
+  margin-bottom: 14px;
+  padding-bottom: 14px;
 }
 
 .button-grid {
@@ -282,5 +316,15 @@ textarea {
 
 .primary-action {
   background: #0f5d48;
+}
+
+.start-pair-button {
+  font-size: 15px;
+  font-weight: 700;
+  height: 40px;
   grid-column: 1 / -1;
+}
+
+.compact-actions {
+  grid-template-columns: 1fr;
 }
