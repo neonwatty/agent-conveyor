@@ -49,6 +49,23 @@ type TaskRow = { name: string; state?: string; goal?: string };
 type Receipt = { command: string[]; exitCode: number | null; stdout: string; stderr: string; json?: unknown };
 type ActivityItem = { detail?: string; key: string; severity?: string; time?: string; title: string };
 type PaneHealth = { detail: string; state: "attached" | "missing" | "pending" | "warning"; title: string };
+type DiscoverSuggestion = {
+  command?: string;
+  kind: string;
+  manager?: string;
+  prompt?: string;
+  task?: string;
+  worker?: string;
+};
+type DiscoverPayload = {
+  bindings: Array<Record<string, unknown>>;
+  query: string;
+  sessions: SessionRow[];
+  suggestions: DiscoverSuggestion[];
+  tasks: TaskRow[];
+  telemetry: Array<{ actor?: string; event_type?: string; severity?: string; summary?: string; timestamp?: string }>;
+};
+type PollState = "idle" | "live" | "error";
 
 function terminalResizeMessage(cols: number, rows: number) {
   return JSON.stringify({ marker: "dashboard-terminal-control", type: "resize", cols, rows });
@@ -88,18 +105,26 @@ function receiptTitle(receipt: Receipt) {
 
 function buildActivity(snapshot: Snapshot | null, receipts: Receipt[]): ActivityItem[] {
   const items: ActivityItem[] = [];
+  const seen = new Set<string>();
+  function push(item: ActivityItem) {
+    if (seen.has(item.key)) {
+      return;
+    }
+    seen.add(item.key);
+    items.push(item);
+  }
   for (const receipt of receipts) {
-    items.push({
+    push({
       detail: receipt.stderr || receipt.stdout || undefined,
-      key: `receipt-${receipt.command.join(" ")}-${items.length}`,
+      key: `receipt-${receipt.command.join(" ")}-${receipt.exitCode}-${receipt.stdout.length}-${receipt.stderr.length}`,
       severity: receipt.exitCode === 0 ? "info" : "error",
       title: `${receipt.exitCode === 0 ? "Command ok" : "Command failed"}: ${receiptTitle(receipt)}`,
     });
   }
   for (const event of snapshot?.telemetry?.recent ?? []) {
-    items.push({
+    push({
       detail: event.summary,
-      key: `telemetry-${event.timestamp}-${event.event_type}-${items.length}`,
+      key: `telemetry-${event.timestamp}-${event.actor}-${event.event_type}-${event.summary}`,
       severity: event.severity,
       time: event.timestamp,
       title: [event.actor, event.event_type].filter(Boolean).join(" / ") || "Telemetry event",
@@ -108,14 +133,24 @@ function buildActivity(snapshot: Snapshot | null, receipts: Receipt[]): Activity
   for (const command of snapshot?.commands?.recent ?? []) {
     const type = String(command.type || command.command || "command");
     const state = String(command.state || command.status || "");
-    items.push({
-      key: `command-${type}-${command.created_at || items.length}`,
+    push({
+      key: `command-${type}-${state}-${command.created_at || ""}-${command.id || ""}`,
       severity: state === "failed" ? "error" : "info",
       time: typeof command.created_at === "string" ? command.created_at : undefined,
       title: [type, state].filter(Boolean).join(" "),
     });
   }
   return items.slice(0, 30);
+}
+
+function connectionState(snapshot: Snapshot | null) {
+  return [
+    ["Task", snapshot?.task?.state || "none"],
+    ["Binding", snapshot?.binding ? "active" : "none"],
+    ["Worker", snapshot?.worker?.alive === false ? "dead" : snapshot?.worker ? "attached" : "missing"],
+    ["Manager", snapshot?.manager?.alive === false ? "dead" : snapshot?.manager ? "attached" : "missing"],
+    ["Cycle", snapshot?.latest_cycle?.state || "none"],
+  ];
 }
 
 function buildSetupPrompt(role: "manager" | "worker", params: { cwd: string; setupCode: string; taskGoal: string }) {
@@ -246,12 +281,15 @@ function TerminalPane({ health, title, session }: { health: PaneHealth; title: s
 function App() {
   const initialTask = useMemo(() => new URLSearchParams(location.search).get("task") || "", []);
   const defaultTask = useMemo(() => `dashboard-${new Date().toISOString().slice(0, 16).replace(/[-:T]/g, "")}`, []);
+  const pollInFlight = useRef(false);
   const [task, setTask] = useState(initialTask);
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [sessions, setSessions] = useState<SessionRow[]>([]);
   const [tasks, setTasks] = useState<TaskRow[]>([]);
   const [worker, setWorker] = useState("");
   const [manager, setManager] = useState("");
+  const [discoverQuery, setDiscoverQuery] = useState(initialTask || defaultTask);
+  const [discoverResult, setDiscoverResult] = useState<DiscoverPayload | null>(null);
   const [newTask, setNewTask] = useState(initialTask || defaultTask);
   const [taskGoal, setTaskGoal] = useState("Manual dashboard supervision experiment.");
   const [targetCwd, setTargetCwd] = useState("/Users/neonwatty/Desktop/codex-terminal-manager");
@@ -260,6 +298,9 @@ function App() {
   const [nudge, setNudge] = useState("");
   const [receipts, setReceipts] = useState<Receipt[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [lastRefreshAt, setLastRefreshAt] = useState<string | null>(null);
+  const [pollError, setPollError] = useState<string | null>(null);
+  const [pollState, setPollState] = useState<PollState>("idle");
   const [busy, setBusy] = useState(false);
   const [busyAction, setBusyAction] = useState<string | null>(null);
 
@@ -268,22 +309,42 @@ function App() {
       fetch("/api/tasks"),
       fetch("/api/sessions"),
     ]);
+    if (!tasksResponse.ok || !sessionsResponse.ok) {
+      throw new Error("Failed to load tasks or sessions.");
+    }
     setTasks(await tasksResponse.json());
     setSessions(await sessionsResponse.json());
   }
 
-  async function refresh(selectedTask = task) {
+  async function refresh(selectedTask = task, options: { silent?: boolean } = {}) {
     if (!selectedTask) {
-      setError("Select a task to load diagnostics.");
+      if (!options.silent) {
+        setError("Select a task to load diagnostics.");
+      }
       return;
     }
-    setError(null);
+    if (!options.silent) {
+      setError(null);
+    }
     const response = await fetch(`/api/snapshot?task=${encodeURIComponent(selectedTask)}`);
     if (!response.ok) {
       const body = await response.json().catch(() => ({}));
       throw new Error(body.error || response.statusText);
     }
     setSnapshot(await response.json());
+    setLastRefreshAt(new Date().toISOString());
+    setPollError(null);
+  }
+
+  async function discover(query = discoverQuery) {
+    const response = await fetch(`/api/discover?query=${encodeURIComponent(query)}&limit=8`);
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(body.error || response.statusText);
+    }
+    const result = await response.json();
+    setDiscoverResult(result);
+    return result as DiscoverPayload;
   }
 
   async function action(endpoint: string, body: Record<string, unknown>, reload = true) {
@@ -316,6 +377,9 @@ function App() {
     const previousTask = newTask;
     const value = safeName(rawValue);
     setNewTask(value);
+    if (!discoverQuery || discoverQuery === previousTask) {
+      setDiscoverQuery(value);
+    }
     if (!workerName || workerName === derivedWorkerName(previousTask)) {
       setWorkerName(derivedWorkerName(value));
     }
@@ -329,8 +393,27 @@ function App() {
     const receipt = await action("create-task", { task: selectedTask, taskGoal, taskSummary: taskGoal }, false);
     if (receipt?.exitCode === 0) {
       setTask(selectedTask);
+      setDiscoverQuery(selectedTask);
       await loadSetup();
       await refresh(selectedTask).catch(() => undefined);
+    }
+  }
+
+  async function bindSuggestion(suggestion: DiscoverSuggestion) {
+    if (!suggestion.task || !suggestion.worker || !suggestion.manager) {
+      return;
+    }
+    setTask(suggestion.task);
+    setWorker(suggestion.worker);
+    setManager(suggestion.manager);
+    const receipt = await action("bind", {
+      manager: suggestion.manager,
+      task: suggestion.task,
+      worker: suggestion.worker,
+    });
+    if (receipt?.exitCode === 0) {
+      await loadSetup();
+      await refresh(suggestion.task).catch(() => undefined);
     }
   }
 
@@ -341,11 +424,47 @@ function App() {
     }
   }, []);
 
+  useEffect(() => {
+    if (!task) {
+      return;
+    }
+    let cancelled = false;
+    async function poll() {
+      if (busy || pollInFlight.current) {
+        return;
+      }
+      pollInFlight.current = true;
+      setPollState("live");
+      try {
+        await Promise.all([loadSetup(), refresh(task, { silent: true })]);
+        if (!cancelled) {
+          setPollState("idle");
+          setPollError(null);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setPollState("error");
+          setPollError(err instanceof Error ? err.message : String(err));
+        }
+      } finally {
+        pollInFlight.current = false;
+      }
+    }
+    const interval = window.setInterval(() => {
+      void poll();
+    }, 2000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [busy, task]);
+
   const workerSession = snapshot?.worker?.tmux_session;
   const managerSession = snapshot?.manager?.tmux_session;
   const workerOptions = sessions.filter((session) => session.role === "worker");
   const managerOptions = sessions.filter((session) => session.role === "manager");
   const activity = buildActivity(snapshot, receipts);
+  const bindSuggestions = (discoverResult?.suggestions || []).filter((suggestion) => suggestion.kind === "bind" && suggestion.task && suggestion.worker && suggestion.manager);
   const managerConfig = snapshot?.latest_cycle?.status?.manager_context?.manager_config;
   const selectedWorker = worker || snapshot?.worker?.name || "";
   const selectedManager = manager || snapshot?.manager?.name || "";
@@ -397,6 +516,10 @@ function App() {
               <span>{error}</span>
             </div>
           ) : null}
+          <div className="live-status" data-state={pollState}>
+            <strong>{pollState === "live" ? "Updating" : pollState === "error" ? "Update error" : "Live QA lane"}</strong>
+            <span>{pollError || (lastRefreshAt ? `Last refresh ${formatTime(lastRefreshAt)}` : "Waiting for a selected task")}</span>
+          </div>
           <section className="bootstrap-card">
             <h3>Manual setup</h3>
             <div className="form-grid bootstrap-grid">
@@ -439,6 +562,68 @@ function App() {
               </div>
             </div>
           </section>
+          <section className="bootstrap-card">
+            <h3>Discovery</h3>
+            <div className="form-grid discovery-grid">
+              <label>Search task, worker, manager, telemetry
+                <input value={discoverQuery} onChange={(event) => setDiscoverQuery(event.target.value)} placeholder="dashboard setup code or task name" />
+              </label>
+              <button disabled={busy} onClick={() => discover().catch((err: Error) => setError(err.message))}>Discover</button>
+            </div>
+            {discoverResult ? (
+              <div className="discovery-results">
+                {bindSuggestions.length > 0 ? (
+                  <div className="suggestion-list">
+                    {bindSuggestions.map((suggestion) => (
+                      <button
+                        key={`${suggestion.task}-${suggestion.worker}-${suggestion.manager}`}
+                        disabled={busy}
+                        onClick={() => bindSuggestion(suggestion).catch((err: Error) => setError(err.message))}
+                      >
+                        Bind {suggestion.worker} to {suggestion.manager}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+                <div className="discovery-columns">
+                  <div>
+                    <strong>Tasks</strong>
+                    {(discoverResult.tasks || []).slice(0, 4).map((item) => (
+                      <button key={item.name} type="button" onClick={() => { setTask(item.name); setNewTask(item.name); }}>{item.name}</button>
+                    ))}
+                    {discoverResult.tasks.length === 0 ? <span>No task matches</span> : null}
+                  </div>
+                  <div>
+                    <strong>Sessions</strong>
+                    {(discoverResult.sessions || []).slice(0, 6).map((item) => (
+                      <button
+                        key={item.name}
+                        type="button"
+                        onClick={() => item.role === "worker" ? setWorker(item.name) : setManager(item.name)}
+                      >
+                        {item.role}: {item.name}
+                      </button>
+                    ))}
+                    {discoverResult.sessions.length === 0 ? <span>No session matches</span> : null}
+                  </div>
+                </div>
+                {(discoverResult.suggestions || []).filter((item) => item.kind !== "bind").slice(0, 2).map((suggestion) => (
+                  <p className="suggestion-text" key={`${suggestion.kind}-${suggestion.prompt}`}>{suggestion.prompt || suggestion.kind}</p>
+                ))}
+              </div>
+            ) : null}
+          </section>
+          <section>
+            <h3>Connection</h3>
+            <dl className="connection-list">
+              {connectionState(snapshot).map(([label, value]) => (
+                <div key={label}>
+                  <dt>{label}</dt>
+                  <dd>{value}</dd>
+                </div>
+              ))}
+            </dl>
+          </section>
           <div className="stat-grid">
             <div><span>Worker</span><strong>{snapshot?.worker?.alive === false ? "dead" : snapshot?.worker ? "seen" : "missing"}</strong></div>
             <div><span>Manager</span><strong>{snapshot?.manager?.alive === false ? "dead" : snapshot?.manager ? "seen" : "missing"}</strong></div>
@@ -479,7 +664,7 @@ function App() {
             <button onClick={() => action("nudge", { session: snapshot?.worker?.name, text: nudge })}>Send</button>
           </section>
           <section>
-            <h3>Activity replay</h3>
+            <h3>Live activity</h3>
             <ol className="activity-list">
               {activity.map((item) => (
                 <li key={item.key} data-severity={item.severity}>

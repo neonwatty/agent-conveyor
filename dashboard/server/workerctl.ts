@@ -4,6 +4,7 @@ export type DashboardCommand =
   | "bind"
   | "cycle"
   | "create-task"
+  | "discover"
   | "export"
   | "finish"
   | "interrupt"
@@ -37,7 +38,9 @@ export interface WorkerctlCommandOptions {
   cwd?: string;
   dryRun?: boolean;
   followup?: string;
+  includeAll?: boolean;
   key?: string;
+  limit?: number;
   manager?: string;
   managerAcceptance?: string[];
   managerGuideline?: string[];
@@ -82,6 +85,17 @@ export function buildWorkerctlArgs(options: WorkerctlCommandOptions): string[] {
     args.push("sessions");
   } else if (options.command === "tasks") {
     args.push("tasks", "--json");
+  } else if (options.command === "discover") {
+    args.push("discover");
+    if (options.task) {
+      args.push(options.task);
+    }
+    if (options.includeAll) {
+      args.push("--all");
+    }
+    if (options.limit) {
+      args.push("--limit", String(options.limit));
+    }
   } else if (options.command === "create-task") {
     requireFields(options, ["task", "taskGoal"]);
     args.push("tasks", "--create", options.task!, "--goal", options.taskGoal!);
@@ -174,12 +188,12 @@ function commandSupportsPath(command: DashboardCommand): boolean {
     "bind",
     "create-task",
     "cycle",
+    "discover",
     "export",
     "finish",
     "interrupt",
     "nudge",
     "pair",
-    "sessions",
     "snapshot",
     "tasks",
   ].includes(command);

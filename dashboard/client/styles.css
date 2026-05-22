@@ -213,6 +213,39 @@ button:disabled {
   overflow-wrap: anywhere;
 }
 
+.live-status {
+  border: 1px solid #d4ddd8;
+  border-radius: 6px;
+  display: grid;
+  font-size: 12px;
+  gap: 3px;
+  margin-bottom: 12px;
+  padding: 8px 10px;
+}
+
+.live-status strong,
+.live-status span {
+  display: block;
+}
+
+.live-status strong {
+  color: #23302c;
+}
+
+.live-status span {
+  color: #66736e;
+}
+
+.live-status[data-state="live"] {
+  background: #edf5f1;
+  border-color: #9fc6b7;
+}
+
+.live-status[data-state="error"] {
+  background: #fff0ef;
+  border-color: #d6938d;
+}
+
 .stat-grid {
   display: grid;
   gap: 8px;
@@ -362,6 +395,79 @@ textarea {
   grid-template-columns: 1fr 1fr;
 }
 
+.discovery-grid {
+  grid-template-columns: 1fr auto;
+}
+
+.discovery-grid label {
+  min-width: 0;
+}
+
+.discovery-grid button {
+  align-self: end;
+}
+
+.discovery-results {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.suggestion-list {
+  display: grid;
+  gap: 6px;
+}
+
+.suggestion-list button {
+  background: #0f5d48;
+  height: auto;
+  line-height: 1.25;
+  min-height: 34px;
+  overflow-wrap: anywhere;
+  padding: 8px 10px;
+  text-align: left;
+}
+
+.discovery-columns {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 1fr 1fr;
+}
+
+.discovery-columns div {
+  border: 1px solid #d8dfdb;
+  border-radius: 6px;
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: 7px;
+}
+
+.discovery-columns strong {
+  color: #68756f;
+  font-size: 11px;
+}
+
+.discovery-columns button {
+  background: #edf3ef;
+  color: #22302c;
+  height: auto;
+  line-height: 1.25;
+  min-height: 28px;
+  overflow-wrap: anywhere;
+  padding: 6px 7px;
+  text-align: left;
+}
+
+.discovery-columns span,
+.suggestion-text {
+  color: #59665f;
+  font-size: 12px;
+  line-height: 1.35;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
 .setup-snippet {
   border: 1px solid #d8dfdb;
   border-radius: 6px;
@@ -420,6 +526,32 @@ textarea {
   display: grid;
   gap: 7px;
   margin: 0;
+}
+
+.connection-list {
+  display: grid;
+  gap: 7px;
+  grid-template-columns: 1fr 1fr;
+  margin: 0 0 16px;
+}
+
+.connection-list div {
+  border: 1px solid #d8dfdb;
+  border-radius: 6px;
+  padding: 7px 8px;
+}
+
+.connection-list dt {
+  color: #68756f;
+  font-size: 11px;
+}
+
+.connection-list dd {
+  color: #26332f;
+  font-size: 12px;
+  font-weight: 700;
+  margin: 3px 0 0;
+  overflow-wrap: anywhere;
 }
 
 .config-list div {
