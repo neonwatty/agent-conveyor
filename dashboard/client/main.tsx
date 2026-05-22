@@ -542,7 +542,8 @@ function App() {
             </div>
           </section>
           <section className="bootstrap-card">
-            <h3>Manual session binding</h3>
+            <h3>Attach sessions</h3>
+            <p className="section-help">Select a registered worker and manager, then attach them to the current task. The terminal panes connect after the task is bound.</p>
             <div className="form-grid bootstrap-grid">
               <label>Registered worker
                 <select value={selectedWorker} onChange={(event) => setWorker(event.target.value)}>
@@ -558,7 +559,7 @@ function App() {
               </label>
               <div className="button-grid compact-actions">
                 <button disabled={busy} onClick={() => createTask().catch((err: Error) => setError(err.message))}>Create Task Only</button>
-                <button disabled={busy || !task || !selectedWorker || !selectedManager} onClick={() => action("bind", { task, worker: selectedWorker, manager: selectedManager })}>Bind Selected Sessions</button>
+                <button disabled={busy || !task || !selectedWorker || !selectedManager} onClick={() => action("bind", { task, worker: selectedWorker, manager: selectedManager })}>Attach Selected Sessions</button>
               </div>
             </div>
           </section>
@@ -580,7 +581,7 @@ function App() {
                         disabled={busy}
                         onClick={() => bindSuggestion(suggestion).catch((err: Error) => setError(err.message))}
                       >
-                        Bind {suggestion.worker} to {suggestion.manager}
+                        Attach {suggestion.worker} to {suggestion.manager}
                       </button>
                     ))}
                   </div>

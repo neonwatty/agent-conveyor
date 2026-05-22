@@ -184,6 +184,13 @@ button:disabled {
   margin: 8px 0 14px;
 }
 
+.section-help {
+  color: #5c6964;
+  font-size: 12px;
+  line-height: 1.4;
+  margin: -2px 0 10px;
+}
+
 .status-callout {
   border: 1px solid #cfd9d3;
   border-radius: 6px;
