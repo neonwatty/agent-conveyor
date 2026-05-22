@@ -3604,7 +3604,8 @@ def _spawn_codex_and_register(
     # Build the codex command. An initial prompt opens Codex's rollout metadata
     # reliably and gives manager sessions setup context without assigning them
     # the worker task.
-    codex_args: list[str] = ["codex"]
+    codex_executable = shutil.which("codex") or "codex"
+    codex_args: list[str] = [codex_executable]
     if sandbox:
         codex_args += ["--sandbox", sandbox]
     if ask_for_approval:

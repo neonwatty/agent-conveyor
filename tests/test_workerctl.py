@@ -9907,9 +9907,11 @@ class StartWorkerTests(unittest.TestCase):
                 orig_run = worker_tmux.run
                 orig_session_exists = worker_tmux.session_exists
                 orig_discover = worker_commands._discover_codex_session_in_tmux
+                orig_which = worker_commands.shutil.which
                 worker_tmux.run = fake_run
                 worker_tmux.session_exists = fake_session_exists
                 worker_commands._discover_codex_session_in_tmux = fake_discover
+                worker_commands.shutil.which = lambda name: "/opt/test/bin/codex" if name == "codex" else None
                 try:
                     args = argparse.Namespace(
                         name="auto-foo", cwd="/repo", task=None,
@@ -9925,6 +9927,7 @@ class StartWorkerTests(unittest.TestCase):
                     tmux_cmds = [c for c in spawned if len(c) > 1 and c[1] == "new-session"]
                     self.assertEqual(len(tmux_cmds), 1)
                     self.assertIn("codex-auto-foo", tmux_cmds[0])
+                    self.assertIn("/opt/test/bin/codex", tmux_cmds[0][-1])
 
                     # Confirm a session was registered.
                     conn = worker_db.connect(state_dir / "workerctl.db")
@@ -9941,6 +9944,7 @@ class StartWorkerTests(unittest.TestCase):
                     worker_tmux.run = orig_run
                     worker_tmux.session_exists = orig_session_exists
                     worker_commands._discover_codex_session_in_tmux = orig_discover
+                    worker_commands.shutil.which = orig_which
             finally:
                 os.environ.pop("WORKERCTL_STATE_ROOT", None)
 

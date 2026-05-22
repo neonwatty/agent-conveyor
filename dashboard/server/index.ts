@@ -12,16 +12,22 @@ import {
   runWorkerctlReceipt,
   type PartialServerOptions,
 } from "./workerctl.ts";
+import { parseTerminalControlMessage } from "./terminal.ts";
 
 function resolveExecutable(name: string): string {
   const result = spawnSync("/bin/sh", ["-lc", `command -v ${name}`], { encoding: "utf8" });
   return result.status === 0 && result.stdout.trim() ? result.stdout.trim() : name;
 }
 
+function disableTmuxStatus(session: string): void {
+  spawnSync(resolveExecutable("tmux"), ["set-option", "-t", session, "status", "off"], { stdio: "ignore" });
+}
+
 type TerminalProcess = {
   kill: () => void;
   onData: (callback: (data: string) => void) => void;
   onExit: (callback: () => void) => void;
+  resize: (cols: number, rows: number) => void;
   write: (data: string) => void;
 };
 
@@ -43,6 +49,7 @@ function spawnScriptTmuxAttach(session: string): TerminalProcess {
       child.on("close", callback);
       child.on("exit", callback);
     },
+    resize: () => undefined,
     write: (data) => child.stdin.write(data),
   };
 }
@@ -269,6 +276,7 @@ async function main(): Promise<void> {
   sockets.on("connection", (ws: WebSocket, _request: http.IncomingMessage, url: URL) => {
     const session = url.searchParams.get("session") || "";
     const [, ...args] = buildPtyAttachArgs({ session });
+    disableTmuxStatus(session);
     let term: TerminalProcess;
     try {
       const ptyTerm = pty.spawn(resolveExecutable("tmux"), args, {
@@ -282,6 +290,7 @@ async function main(): Promise<void> {
         kill: () => ptyTerm.kill(),
         onData: (callback) => ptyTerm.onData(callback),
         onExit: (callback) => ptyTerm.onExit(callback),
+        resize: (cols, rows) => ptyTerm.resize(cols, rows),
         write: (data) => ptyTerm.write(data),
       };
     } catch (error) {
@@ -295,7 +304,15 @@ async function main(): Promise<void> {
     }
     term.onData((data) => ws.send(data));
     term.onExit(() => ws.close());
-    ws.on("message", (message: RawData) => term.write(message.toString()));
+    ws.on("message", (message: RawData) => {
+      const text = message.toString();
+      const control = parseTerminalControlMessage(text);
+      if (control) {
+        term.resize(control.cols, control.rows);
+        return;
+      }
+      term.write(text);
+    });
     ws.on("close", () => term.kill());
   });
 

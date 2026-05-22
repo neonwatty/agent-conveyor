@@ -21,8 +21,20 @@ type SessionRow = { name: string; role: "worker" | "manager"; state?: string; tm
 type TaskRow = { name: string; state?: string; goal?: string };
 type Receipt = { command: string[]; exitCode: number | null; stdout: string; stderr: string; json?: unknown };
 
+function terminalResizeMessage(cols: number, rows: number) {
+  return JSON.stringify({ marker: "dashboard-terminal-control", type: "resize", cols, rows });
+}
+
 function safeName(value: string) {
   return value.trim().toLowerCase().replace(/[^a-z0-9_.:+-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48);
+}
+
+function derivedWorkerName(taskName: string) {
+  return `${safeName(taskName) || "dashboard-task"}-worker`;
+}
+
+function derivedManagerName(taskName: string) {
+  return `${safeName(taskName) || "dashboard-task"}-manager`;
 }
 
 function jsonRecord(value: unknown): Record<string, unknown> {
@@ -50,10 +62,19 @@ function TerminalPane({ title, session }: { title: string; session?: string | nu
     const socket = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/pty?session=${encodeURIComponent(session)}`);
     socket.onmessage = (event) => terminal.write(event.data);
     terminal.onData((data) => socket.readyState === WebSocket.OPEN && socket.send(data));
-    const resize = () => fit.fit();
+    const resize = () => {
+      fit.fit();
+      if (socket.readyState === WebSocket.OPEN) {
+        socket.send(terminalResizeMessage(terminal.cols, terminal.rows));
+      }
+    };
+    socket.addEventListener("open", resize);
+    const observer = new ResizeObserver(resize);
+    observer.observe(ref.current);
     window.addEventListener("resize", resize);
     return () => {
       window.removeEventListener("resize", resize);
+      observer.disconnect();
       socket.close();
       terminal.dispose();
     };
@@ -66,7 +87,7 @@ function TerminalPane({ title, session }: { title: string; session?: string | nu
         <strong>{session || "No tmux session"}</strong>
       </header>
       <div ref={ref} className="terminal-host">
-        {!session ? <div className="empty-terminal">Attach a tmux-backed session to enable the terminal.</div> : null}
+        {!session ? <div className="empty-terminal">Use Start & Attach Pair to create a tmux-backed session and attach this pane automatically.</div> : null}
       </div>
     </section>
   );
@@ -74,23 +95,25 @@ function TerminalPane({ title, session }: { title: string; session?: string | nu
 
 function App() {
   const initialTask = useMemo(() => new URLSearchParams(location.search).get("task") || "", []);
+  const defaultTask = useMemo(() => `dashboard-${new Date().toISOString().slice(0, 16).replace(/[-:T]/g, "")}`, []);
   const [task, setTask] = useState(initialTask);
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [sessions, setSessions] = useState<SessionRow[]>([]);
   const [tasks, setTasks] = useState<TaskRow[]>([]);
   const [worker, setWorker] = useState("");
   const [manager, setManager] = useState("");
-  const [newTask, setNewTask] = useState("");
-  const [taskGoal, setTaskGoal] = useState("");
-  const [taskPrompt, setTaskPrompt] = useState("");
-  const [workerName, setWorkerName] = useState("");
-  const [managerName, setManagerName] = useState("");
+  const [newTask, setNewTask] = useState(initialTask || defaultTask);
+  const [taskGoal, setTaskGoal] = useState("Manual dashboard supervision experiment.");
+  const [taskPrompt, setTaskPrompt] = useState("Please inspect this repository and report one safe next improvement for the dashboard. Do not edit files.");
+  const [workerName, setWorkerName] = useState(derivedWorkerName(initialTask || defaultTask));
+  const [managerName, setManagerName] = useState(derivedManagerName(initialTask || defaultTask));
   const [cwd, setCwd] = useState("");
   const [managerMode, setManagerMode] = useState<"light" | "guided" | "strict">("guided");
   const [nudge, setNudge] = useState("");
   const [receipts, setReceipts] = useState<Receipt[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [busyAction, setBusyAction] = useState<string | null>(null);
 
   async function loadSetup() {
     const [tasksResponse, sessionsResponse] = await Promise.all([
@@ -118,6 +141,7 @@ function App() {
   async function action(endpoint: string, body: Record<string, unknown>, reload = true) {
     setError(null);
     setBusy(true);
+    setBusyAction(endpoint);
     try {
       const response = await fetch(`/api/actions/${endpoint}`, {
         method: "POST",
@@ -136,6 +160,19 @@ function App() {
       return receipt;
     } finally {
       setBusy(false);
+      setBusyAction(null);
+    }
+  }
+
+  function updateBootstrapTask(rawValue: string) {
+    const previousTask = newTask;
+    const value = safeName(rawValue);
+    setNewTask(value);
+    if (!workerName || workerName === derivedWorkerName(previousTask)) {
+      setWorkerName(derivedWorkerName(value));
+    }
+    if (!managerName || managerName === derivedManagerName(previousTask)) {
+      setManagerName(derivedManagerName(value));
     }
   }
 
@@ -219,6 +256,7 @@ function App() {
   const managerSession = snapshot?.manager?.tmux_session;
   const workerOptions = sessions.filter((session) => session.role === "worker");
   const managerOptions = sessions.filter((session) => session.role === "manager");
+  const startingPair = busyAction === "start-pair";
 
   return (
     <main className="app-shell">
@@ -235,6 +273,7 @@ function App() {
           {tasks.map((item) => <option key={item.name} value={item.name} />)}
         </datalist>
         <button onClick={() => refresh().catch((err: Error) => setError(err.message))}>Refresh</button>
+        <button className="primary-action" disabled={busy} onClick={() => startPair().catch((err: Error) => setError(err.message))}>{startingPair ? "Starting Pair..." : "Start & Attach Pair"}</button>
       </header>
       <section className="workspace">
         <TerminalPane title="Worker" session={workerSession} />
@@ -242,6 +281,54 @@ function App() {
         <aside className="rail">
           <h2>{snapshot?.task?.name || "No task loaded"}</h2>
           <p className="goal">{snapshot?.task?.goal || error || "Load a task to inspect dashboard telemetry."}</p>
+          {busyAction ? (
+            <div className="status-callout" data-state="busy">
+              <strong>{startingPair ? "Starting worker and manager..." : "Running command..."}</strong>
+              <span>{startingPair ? "workerctl pair is creating tmux sessions, waiting for Codex session metadata, binding the pair, then attaching both panes." : busyAction}</span>
+            </div>
+          ) : null}
+          {error ? (
+            <div className="status-callout" data-state="error">
+              <strong>Action failed</strong>
+              <span>{error}</span>
+            </div>
+          ) : null}
+          <section className="bootstrap-card">
+            <h3>Start and attach terminals</h3>
+            <div className="form-grid bootstrap-grid">
+              <label>Task
+                <input value={newTask} onChange={(event) => updateBootstrapTask(event.target.value)} placeholder={task || "task-name"} />
+              </label>
+              <label>Goal
+                <textarea value={taskGoal} onChange={(event) => setTaskGoal(event.target.value)} placeholder="Task goal" />
+              </label>
+              <label>Worker prompt
+                <textarea value={taskPrompt} onChange={(event) => setTaskPrompt(event.target.value)} placeholder="Initial worker prompt" />
+              </label>
+              <label>Worker
+                <input value={workerName} onChange={(event) => setWorkerName(safeName(event.target.value))} placeholder={derivedWorkerName(newTask || task)} />
+              </label>
+              <label>Manager
+                <input value={managerName} onChange={(event) => setManagerName(safeName(event.target.value))} placeholder={derivedManagerName(newTask || task)} />
+              </label>
+              <label>CWD
+                <input value={cwd} onChange={(event) => setCwd(event.target.value)} placeholder="dashboard server cwd" />
+              </label>
+              <label>Manager mode
+                <select value={managerMode} onChange={(event) => setManagerMode(event.target.value as "light" | "guided" | "strict")}>
+                  <option value="guided">guided</option>
+                  <option value="light">light</option>
+                  <option value="strict">strict</option>
+                </select>
+              </label>
+              <button disabled={busy} className="primary-action start-pair-button" onClick={() => startPair().catch((err: Error) => setError(err.message))}>{startingPair ? "Starting Pair..." : "Start & Attach Pair"}</button>
+              <div className="button-grid compact-actions">
+                <button disabled={busy} onClick={() => createTask().catch((err: Error) => setError(err.message))}>Create Task Only</button>
+                <button disabled={busy} onClick={() => startWorker().catch((err: Error) => setError(err.message))}>Start Worker Only</button>
+                <button disabled={busy} onClick={() => startManager().catch((err: Error) => setError(err.message))}>Start Manager Only</button>
+              </div>
+            </div>
+          </section>
           <div className="stat-grid">
             <div><span>Worker</span><strong>{snapshot?.worker?.alive === false ? "dead" : snapshot?.worker ? "seen" : "missing"}</strong></div>
             <div><span>Manager</span><strong>{snapshot?.manager?.alive === false ? "dead" : snapshot?.manager ? "seen" : "missing"}</strong></div>
@@ -260,51 +347,6 @@ function App() {
           <section>
             <h3>Telemetry</h3>
             <p>{snapshot?.telemetry?.summary.total ?? 0} events, {snapshot?.commands?.unfinished_count ?? 0} unfinished commands, {snapshot?.commands?.failed_count ?? 0} failed commands.</p>
-          </section>
-          <section>
-            <h3>Bootstrap</h3>
-            <div className="form-grid bootstrap-grid">
-              <label>Task
-                <input value={newTask} onChange={(event) => {
-                  const value = safeName(event.target.value);
-                  setNewTask(value);
-                  if (!workerName) {
-                    setWorkerName(value ? `${value}-worker` : "");
-                  }
-                  if (!managerName) {
-                    setManagerName(value ? `${value}-manager` : "");
-                  }
-                }} placeholder={task || "task-name"} />
-              </label>
-              <label>Goal
-                <textarea value={taskGoal} onChange={(event) => setTaskGoal(event.target.value)} placeholder="Task goal" />
-              </label>
-              <label>Worker prompt
-                <textarea value={taskPrompt} onChange={(event) => setTaskPrompt(event.target.value)} placeholder="Initial worker prompt" />
-              </label>
-              <label>Worker
-                <input value={workerName} onChange={(event) => setWorkerName(safeName(event.target.value))} placeholder={`${safeName(newTask || task) || "task"}-worker`} />
-              </label>
-              <label>Manager
-                <input value={managerName} onChange={(event) => setManagerName(safeName(event.target.value))} placeholder={`${safeName(newTask || task) || "task"}-manager`} />
-              </label>
-              <label>CWD
-                <input value={cwd} onChange={(event) => setCwd(event.target.value)} placeholder="dashboard server cwd" />
-              </label>
-              <label>Manager mode
-                <select value={managerMode} onChange={(event) => setManagerMode(event.target.value as "light" | "guided" | "strict")}>
-                  <option value="guided">guided</option>
-                  <option value="light">light</option>
-                  <option value="strict">strict</option>
-                </select>
-              </label>
-              <div className="button-grid">
-                <button disabled={busy} onClick={() => createTask().catch((err: Error) => setError(err.message))}>Create Task</button>
-                <button disabled={busy} onClick={() => startWorker().catch((err: Error) => setError(err.message))}>Start Worker</button>
-                <button disabled={busy} onClick={() => startManager().catch((err: Error) => setError(err.message))}>Start Manager</button>
-                <button disabled={busy} className="primary-action" onClick={() => startPair().catch((err: Error) => setError(err.message))}>Start Pair</button>
-              </div>
-            </div>
           </section>
           <section>
             <h3>Attach & Bind</h3>
