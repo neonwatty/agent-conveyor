@@ -1,0 +1,260 @@
+# GoalBuddy v2 state.yaml
+# Board truth lives here. goal.md is the editable charter; notes/ holds long receipts only.
+
+version: 2
+
+goal:
+  title: "Continuation Reviewer Hard Isolation"
+  slug: "continuation-reviewer-hard-isolation"
+  kind: specific
+  tranche: "Implement issue #130 by adding an enforced isolation boundary for continuation-reviewer execution."
+  status: done
+  oracle:
+    signal: "Source, tests, docs, and final audit prove continuation-reviewer uses an enforced sandbox or equivalent isolation, not just restricted context metadata."
+    cadence: "after Scout/Judge design, after Worker implementation, and at final audit"
+    final_proof: "A final Judge/PM receipt maps every #130 acceptance criterion to evidence; full verification is green; issue #130 is updated or closed; full_outcome_complete is true."
+  intake:
+    original_request: "Next is #130: hard isolation for continuation-reviewer ... do this"
+    interpreted_outcome: "Prepare and execute a safe GoalBuddy workstream for real continuation-reviewer hard isolation."
+    input_shape: specific
+    audience: "workerctl operators, manager/worker pair users, and future continuation-review workflows"
+    authority: requested
+    proof_type: test
+    completion_proof: "Issue #130 acceptance criteria are implemented or explicitly superseded with evidence, tests prove artifacts are inaccessible outside allowed context, docs are precise, verification passes, and final audit accepts completion."
+    likely_misfire: "Renaming restricted-context subprocess execution as hard isolation without an enforced boundary."
+    blind_spots_considered:
+      - "Sandbox mechanisms may be platform-specific or unavailable in CI."
+      - "Subprocess environment, cwd, inherited descriptors, or filesystem paths may leak manager/private context."
+      - "Tests must prove denial of access, not merely absence of data in stdin."
+      - "Failure-to-stop routing must remain intact under sandbox failures."
+      - "Telemetry must stay redacted."
+      - "Reviewer command compatibility and ergonomics may constrain sandbox choices."
+    existing_plan_facts:
+      - "GitHub issue #130 is open."
+      - "Current continuation-reviewer already has restricted stdin context, session separation metadata, permission checks, structured telemetry, and failure-to-stop routing."
+      - "Dispatch gap closure T007/T008 deliberately deferred true hard isolation rather than documenting fake sandbox guarantees."
+
+rules:
+  pm_owns_state: true
+  one_active_task: true
+  max_write_workers: 1
+  no_implementation_without_worker_or_pm_task: true
+  no_completion_without_judge_or_pm_audit: true
+  planning_is_not_completion: true
+  queued_required_worker_blocks_completion: true
+  continuous_until_full_outcome: true
+  missing_input_or_credentials_do_not_stop_goal: true
+  goal_pressure_requires_oracle: true
+  no_completion_on_weak_proof: true
+  slice_policy:
+    prefer_vertical_slices: true
+    judge_picks_largest_safe_slice: true
+    worker_completes_whole_slice: true
+
+agents:
+  scout: installed
+  worker: installed
+  judge: installed
+
+visual_board:
+  selected: local
+  local:
+    status: pending
+    url: "http://goalbuddy.localhost:41737/continuation-reviewer-hard-isolation/"
+    command: "npx goalbuddy board /Users/neonwatty/Desktop/codex-terminal-manager/docs/goals/continuation-reviewer-hard-isolation"
+
+active_task: null
+
+tasks:
+  - id: T001
+    type: scout
+    assignee: Scout
+    status: done
+    reasoning_hint: low
+    objective: "Map the current continuation-reviewer execution path and realistic hard-isolation mechanisms before implementation."
+    inputs:
+      - "GitHub issue #130"
+      - "Current continuation-reviewer command and tests"
+      - "Current docs around restricted context, telemetry, and continuation review"
+      - "Local/CI platform constraints visible from repo config"
+    constraints:
+      - "Read-only."
+      - "Do not edit implementation files."
+      - "Do not choose implementation by preference; compare enforceability, portability, CI testability, and blast radius."
+      - "Identify exact source/test/doc surfaces with file/function names."
+    expected_output:
+      - "Current execution path and existing guarantees."
+      - "Concrete leak paths: cwd, environment, filesystem, inherited context, stdout/stderr, telemetry, temp files."
+      - "Candidate isolation mechanisms with pros/cons and CI feasibility."
+      - "Smallest safe Worker slice recommendation with allowed_files, tests, and stop_if."
+    receipt:
+      result: done
+      note: "notes/T001-scout-isolation-map.md"
+      summary: "Mapped current continuation-reviewer subprocess path, leak surfaces, and viable isolation mechanisms. Recommended macOS sandbox-exec targeted deny profile as the smallest enforceable CI-testable slice."
+      recommendation:
+        mechanism: "macOS sandbox-exec targeted filesystem denial with sanitized cwd/env"
+        allowed_files:
+          - "workerctl/commands.py"
+          - "workerctl/cli.py"
+          - "tests/test_workerctl.py"
+          - "README.md"
+          - "docs/goals/continuation-reviewer-hard-isolation/notes"
+      evidence:
+        - "command_continuation_reviewer currently uses subprocess.run with cwd=PROJECT_ROOT and inherited environment."
+        - "README currently states continuation-reviewer is not a hard process or filesystem sandbox."
+        - "CI runs on macos-latest."
+        - "Local sandbox-exec is present and denies realpath file reads in a temp probe."
+
+  - id: T002
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Choose the isolation boundary and implementation package from T001."
+    inputs:
+      - "T001 Scout receipt"
+      - "Issue #130 acceptance criteria"
+      - "Goal oracle and non-negotiable constraints"
+    constraints:
+      - "Read-only."
+      - "Do not implement."
+      - "Reject fake isolation that only changes docs or metadata."
+      - "Reject designs that weaken failure-to-stop routing or telemetry redaction."
+    expected_output:
+      - "approved | revise | defer"
+      - "Chosen isolation mechanism and rationale."
+      - "Worker objective, allowed_files, verify commands, and stop_if conditions."
+      - "Explicit deferred follow-up text if full hard isolation cannot be safely implemented."
+    receipt:
+      result: done
+      note: "notes/T002-judge-isolation-selection.md"
+      decision: approved
+      summary: "Approved macOS sandbox-exec targeted filesystem denial plus sanitized cwd/env as the minimal enforceable continuation-reviewer isolation boundary."
+      approved_worker:
+        objective: "Wrap continuation-reviewer command execution with sandbox-exec denial of bound worker/manager rollout files and the workerctl DB, preserving failure-to-stop and redacted telemetry."
+        allowed_files:
+          - "workerctl/commands.py"
+          - "workerctl/cli.py"
+          - "tests/test_workerctl.py"
+          - "README.md"
+          - "docs/goals/continuation-reviewer-hard-isolation/notes"
+        verify:
+          - "python3 -m unittest tests.test_workerctl.PairCommandTests.test_continuation_reviewer_runner_records_isolated_review tests.test_workerctl.PairCommandTests.test_continuation_reviewer_runner_failure_records_stop tests.test_workerctl.PairCommandTests.test_continuation_subagent_failure_records_stop_without_silent_approval -v"
+          - "python3 -m unittest tests.test_workerctl -v"
+          - "python3 -m py_compile workerctl/*.py"
+          - "git diff --check"
+
+  - id: T003
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "Implement the Judge-approved minimal hard-isolation mechanism for continuation-reviewer execution."
+    allowed_files:
+      - "workerctl/commands.py"
+      - "workerctl/cli.py"
+      - "tests/test_workerctl.py"
+      - "README.md"
+      - "docs/goals/continuation-reviewer-hard-isolation/notes"
+    verify:
+      - "python3 -m unittest tests.test_workerctl.PairCommandTests.test_continuation_reviewer_runner_records_isolated_review tests.test_workerctl.PairCommandTests.test_continuation_reviewer_runner_failure_records_stop tests.test_workerctl.PairCommandTests.test_continuation_subagent_failure_records_stop_without_silent_approval -v"
+      - "python3 -m unittest tests.test_workerctl -v"
+      - "python3 -m py_compile workerctl/*.py"
+      - "git diff --check"
+    stop_if:
+      - "T002 has not approved an implementation mechanism."
+      - "Isolation requires files outside allowed_files."
+      - "The mechanism cannot be tested in CI or local deterministic tests."
+      - "Reviewer failures no longer produce verdict=stop."
+      - "Telemetry or audit surfaces would expose raw payloads, prompts, transcripts, stdout/stderr, or manager-private content."
+    expected_output:
+      - "Hard-isolated reviewer execution path."
+      - "Focused tests proving denied access to manager/session artifacts except allowed context."
+      - "Failure-path tests proving sandbox failures still route to stop/operator review."
+      - "Docs update with exact guarantees and limitations."
+    receipt:
+      result: done
+      note: "notes/T003-worker-hard-isolation.md"
+      summary: "Implemented macOS sandbox-exec hard-isolation wrapper for continuation-reviewer, denying bound rollout/database reads, stripping cwd/env, redacting failure stdout/stderr, and preserving failure-to-stop routing."
+      changed_files:
+        - "workerctl/commands.py"
+        - "tests/test_workerctl.py"
+        - "README.md"
+      commands:
+        - command: "python3 -m unittest tests.test_workerctl.PairCommandTests.test_continuation_reviewer_runner_records_isolated_review tests.test_workerctl.PairCommandTests.test_continuation_reviewer_runner_failure_records_stop tests.test_workerctl.PairCommandTests.test_continuation_reviewer_runner_sandbox_denies_bound_artifacts tests.test_workerctl.PairCommandTests.test_continuation_subagent_failure_records_stop_without_silent_approval -v"
+          status: pass
+        - command: "python3 -m unittest tests.test_workerctl -v"
+          status: pass
+        - command: "python3 -m py_compile workerctl/*.py"
+          status: pass
+        - command: "git diff --check"
+          status: pass
+        - command: "./scripts/rc-check"
+          status: pass
+
+  - id: T998
+    type: pm
+    assignee: PM
+    status: done
+    reasoning_hint: default
+    objective: "Update or close GitHub issue #130 only after implementation evidence and verification are present."
+    inputs:
+      - "Done receipts for T001-T003"
+      - "GitHub issue #130"
+      - "Latest verification output"
+    constraints:
+      - "Do not close #130 without direct evidence for every acceptance criterion."
+      - "If full hard isolation is blocked, comment with exact blocker and follow-up state instead of closing."
+    expected_output:
+      - "Issue comment or closure for #130 with verification summary."
+      - "Receipt linking issue hygiene to local verification."
+    receipt:
+      result: done
+      note: "notes/T998-issue-hygiene.md"
+      summary: "Opened PR #132 linked with Closes #130 and commented on issue #130 with implementation and verification evidence."
+      external_artifacts:
+        pr: "https://github.com/neonwatty/codex-terminal-manager/pull/132"
+        issue_comment: "https://github.com/neonwatty/codex-terminal-manager/issues/130#issuecomment-4526754725"
+
+  - id: T999
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Final audit: decide whether #130 hard isolation is complete."
+    inputs:
+      - "All task receipts"
+      - "Issue hygiene receipt"
+      - "Current diff"
+      - "Latest verification commands"
+      - "Goal oracle"
+    constraints:
+      - "Read-only."
+      - "Reject completion if any required Worker task is queued or active."
+      - "Reject completion if isolation is only restricted stdin/context metadata."
+      - "Reject completion if denial tests are missing or indirect."
+      - "Reject completion if failure-to-stop routing or telemetry redaction is unverified."
+    expected_output:
+      - "complete | not_complete"
+      - "full_outcome_complete: true | false"
+      - "Acceptance-criterion evidence matrix."
+      - "Missing evidence and next task if not complete."
+    receipt:
+      result: done
+      note: "notes/T999-final-audit.md"
+      decision: complete
+      full_outcome_complete: true
+      summary: "Final audit accepted #130 completion: enforced macOS sandbox-exec isolation, direct denial tests, failure-to-stop routing, docs, local verification, CI checks, and PR/issue hygiene are all present."
+      merge_recommendation: "Merge PR #132; issue #130 should close through linked Closes automation after merge."
+
+checks:
+  dirty_fingerprint: unknown
+  last_verification:
+    result: passed
+    task: T003
+    commands:
+      - "python3 -m unittest tests.test_workerctl.PairCommandTests.test_continuation_reviewer_runner_records_isolated_review tests.test_workerctl.PairCommandTests.test_continuation_reviewer_runner_failure_records_stop tests.test_workerctl.PairCommandTests.test_continuation_reviewer_runner_sandbox_denies_bound_artifacts tests.test_workerctl.PairCommandTests.test_continuation_subagent_failure_records_stop_without_silent_approval -v"
+      - "python3 -m unittest tests.test_workerctl -v"
+      - "python3 -m py_compile workerctl/*.py"
+      - "git diff --check"
+      - "./scripts/rc-check"
