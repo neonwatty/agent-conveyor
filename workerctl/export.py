@@ -128,6 +128,7 @@ def command_export_task(args: argparse.Namespace) -> int:
         write_json(export_root / "replay-full-transcript.json", full_replay)
     write_json(export_root / "agent-observations.json", audit.get("agent_observations", []))
     write_json(export_root / "manager-cycles.json", audit.get("manager_cycles", []))
+    write_json(export_root / "manager-cycle-spans.json", audit.get("manager_cycle_spans", []))
     write_json(export_root / "manager-decisions.json", audit.get("manager_decisions", []))
     write_json(export_root / "mutation-audit.json", mutation_audit)
     write_json(export_root / "replay.json", replay)
@@ -147,6 +148,7 @@ def command_export_task(args: argparse.Namespace) -> int:
             "terminal-captures.json",
             "agent-observations.json",
             "manager-cycles.json",
+            "manager-cycle-spans.json",
             "manager-decisions.json",
             "mutation-audit.json",
             "replay.json",

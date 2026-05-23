@@ -427,6 +427,36 @@ def replay_entries(audit: dict[str, Any], *, role: str = "all", mode: str = "tim
                 }
             )
 
+        for span in audit.get("manager_cycle_spans", []):
+            if role not in {"all", "manager"}:
+                continue
+            suffix = ""
+            if span.get("error_type"):
+                suffix = f" ({span['error_type']})"
+            entries.append(
+                {
+                    "actor": "manager",
+                    "details": {
+                        "attributes": span.get("attributes") or {},
+                        "command_id": span.get("command_id"),
+                        "duration_ms": span.get("duration_ms"),
+                        "error_type": span.get("error_type"),
+                        "manager_cycle_id": span.get("manager_cycle_id"),
+                        "manager_decision_id": span.get("manager_decision_id"),
+                        "run_id": span.get("run_id"),
+                        "state": span.get("state"),
+                    },
+                    "kind": "manager_cycle_span",
+                    "source": "manager_cycle_spans",
+                    "source_id": span["id"],
+                    "summary": (
+                        f"cycle #{span['manager_cycle_id']} phase {span['phase']} "
+                        f"{span['state']} in {span['duration_ms']:.1f}ms{suffix}"
+                    ),
+                    "timestamp": span.get("completed_at") or span["started_at"],
+                }
+            )
+
     if include_captures:
         for capture in audit.get("terminal_captures", []):
             capture_role = capture["role"]
