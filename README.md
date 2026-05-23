@@ -439,6 +439,16 @@ tmux attach -t codex-live-test
   — Query local structured telemetry events, search them with SQLite FTS, or
   print aggregate counts for a run/task. `telemetry snapshot --task <task>
   --json` prints the task-scoped dashboard overview contract.
+- `telemetry task <task> --json` — Print a task-scoped telemetry triage view:
+  recent cycle history, last successful cycle, worker/manager liveness,
+  decisions, commands, failed cycles/commands, ingest skipped/error summaries,
+  pane capture failures and notable patterns, open criteria counts, telemetry
+  counts, and retained storage counts. Raw transcript, pane, prompt, criterion,
+  command payload, and command result bodies are not included.
+- `telemetry failures --json` — Print an operator failure triage view across
+  tasks: recent failed cycles, failed commands, ingest errors/skipped lines,
+  pane capture failures, open accepted criteria, active task/session health, and
+  retained storage counts without raw transcript or prompt content.
 - `telemetry metrics --window 24h --json` — Print bounded JSON rollups for
   local telemetry and related tables: active tasks/sessions, cycle and command
   success/failure counts, ingest/skipped-line totals, criteria counts,

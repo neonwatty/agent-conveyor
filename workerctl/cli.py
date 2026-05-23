@@ -427,9 +427,10 @@ def build_parser() -> argparse.ArgumentParser:
     telemetry.add_argument(
         "view",
         nargs="?",
-        choices=("metrics", "snapshot", "check"),
-        help="Optional telemetry view. Use 'metrics' for bounded rollups, 'snapshot' for operator or task state, or 'check' for threshold health.",
+        choices=("metrics", "snapshot", "check", "task", "failures"),
+        help="Optional telemetry view. Use 'task' for task health, 'failures' for failure triage, 'metrics' for bounded rollups, 'snapshot' for operator or task state, or 'check' for threshold health.",
     )
+    telemetry.add_argument("view_task", nargs="?", help="Task name or ID for 'telemetry task'.")
     telemetry.add_argument("--run", help="Filter by run name or ID.")
     telemetry.add_argument("--task", help="Filter by task name or ID.")
     telemetry.add_argument("--actor", choices=("dispatch", "manager", "operator", "system", "worker", "workerctl"), help="Filter by telemetry actor.")
