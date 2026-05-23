@@ -1,5 +1,6 @@
 import http from "node:http";
 import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { pathToFileURL } from "node:url";
 import express from "express";
 import { WebSocket, WebSocketServer, type RawData } from "ws";
 import { createServer as createViteServer } from "vite";
@@ -218,7 +219,7 @@ function commandLabel(command: AuditCommand | undefined, commandId: string | und
   return id ? `${type} ${id}` : type;
 }
 
-function dispatchChainEntries(audit: AuditResult | null) {
+export function dispatchChainEntries(audit: AuditResult | null) {
   const commandsById = new Map((audit?.commands || []).map((command) => [String(command.id), command]));
   const attemptsByCommand = new Map<string, AuditCommandAttempt[]>();
   for (const attempt of audit?.command_attempts || []) {
@@ -534,7 +535,9 @@ async function main(): Promise<void> {
   });
 }
 
-main().catch((error) => {
-  console.error(error);
-  process.exit(1);
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });
+}

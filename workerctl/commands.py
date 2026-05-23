@@ -1908,12 +1908,25 @@ def _safe_command_view(row: Any) -> dict[str, Any]:
     }
 
 
-def _commands_view(conn: Any, *, task_id: str | None = None, only_failed: bool = False, limit: int) -> dict[str, Any]:
+def _commands_view(
+    conn: Any,
+    *,
+    task_id: str | None = None,
+    only_failed: bool = False,
+    limit: int,
+    updated_since: str | None = None,
+    active_only: bool = False,
+) -> dict[str, Any]:
     filters: list[str] = []
     params: list[Any] = []
     if task_id is not None:
         filters.append("task_id = ?")
         params.append(task_id)
+    if updated_since is not None:
+        filters.append("updated_at >= ?")
+        params.append(updated_since)
+    if active_only:
+        filters.append("task_id in (select id from tasks where state in ('candidate', 'managed', 'paused'))")
     if only_failed:
         filters.append("state = 'failed'")
     where = f"where {' and '.join(filters)}" if filters else ""
@@ -1973,18 +1986,38 @@ def _decisions_view(conn: Any, *, task_id: str, limit: int) -> dict[str, Any]:
     }
 
 
-def _ingest_view(conn: Any, *, task_id: str | None = None, limit: int) -> dict[str, Any]:
-    task_filter = "and task_id = ?" if task_id is not None else ""
-    task_params = [task_id] if task_id is not None else []
+def _ingest_view(
+    conn: Any,
+    *,
+    task_id: str | None = None,
+    run_id: str | None = None,
+    limit: int,
+    updated_since: str | None = None,
+    active_only: bool = False,
+) -> dict[str, Any]:
+    filters: list[str] = []
+    params: list[Any] = []
+    if task_id is not None:
+        filters.append("task_id = ?")
+        params.append(task_id)
+    if run_id is not None:
+        filters.append("run_id = ?")
+        params.append(run_id)
+    if updated_since is not None:
+        filters.append("timestamp >= ?")
+        params.append(updated_since)
+    if active_only:
+        filters.append("task_id in (select id from tasks where state in ('candidate', 'managed', 'paused'))")
+    filter_sql = (" and " + " and ".join(filters)) if filters else ""
     skipped_row = conn.execute(
         f"""
         select
           sum(coalesce(json_extract(attributes_json, '$.new_events'), 0)) as new_events,
           sum(coalesce(json_extract(attributes_json, '$.skipped_lines'), 0)) as skipped_lines
         from telemetry_events
-        where event_type = 'codex_events_ingested' {task_filter}
+        where event_type = 'codex_events_ingested' {filter_sql}
         """,
-        task_params,
+        params,
     ).fetchone()
     skipped_events = conn.execute(
         f"""
@@ -1993,11 +2026,11 @@ def _ingest_view(conn: Any, *, task_id: str | None = None, limit: int) -> dict[s
         from telemetry_events
         where event_type = 'codex_events_ingested'
           and coalesce(json_extract(attributes_json, '$.skipped_lines'), 0) > 0
-          {task_filter}
+          {filter_sql}
         order by timestamp desc, id desc
         limit ?
         """,
-        [*task_params, limit],
+        [*params, limit],
     ).fetchall()
     error_events = conn.execute(
         f"""
@@ -2006,28 +2039,38 @@ def _ingest_view(conn: Any, *, task_id: str | None = None, limit: int) -> dict[s
         from telemetry_events
         where (event_type like '%ingest%' or event_type = 'codex_events_ingested')
           and severity in ('warning', 'error')
-          {task_filter}
+          {filter_sql}
         order by timestamp desc, id desc
         limit ?
         """,
-        [*task_params, limit],
+        [*params, limit],
     ).fetchall()
+    cycle_filters: list[str] = ["mc.state = 'failed'"]
+    cycle_params: list[Any] = []
+    if task_id is not None:
+        cycle_filters.append("mc.task_id = ?")
+        cycle_params.append(task_id)
+    if updated_since is not None:
+        cycle_filters.append("coalesce(mc.completed_at, mc.started_at) >= ?")
+        cycle_params.append(updated_since)
+    if active_only:
+        cycle_filters.append("mc.task_id in (select id from tasks where state in ('candidate', 'managed', 'paused'))")
+    cycle_where = " and ".join(cycle_filters)
     cycle_errors = conn.execute(
         f"""
         select mc.id, mc.task_id, t.name as task_name, mc.started_at, mc.completed_at,
                mc.state, mc.error, mc.status_json
         from manager_cycles mc
         left join tasks t on t.id = mc.task_id
-        where mc.state = 'failed'
+        where {cycle_where}
           and (
             mc.error like '%Ingest%'
             or json_extract(mc.status_json, '$.error_type') like '%Ingest%'
           )
-          {"and mc.task_id = ?" if task_id is not None else ""}
         order by coalesce(mc.completed_at, mc.started_at) desc, mc.id desc
         limit ?
         """,
-        [*task_params, limit],
+        [*cycle_params, limit],
     ).fetchall()
 
     def event_summary(row: Any) -> dict[str, Any]:
@@ -2192,31 +2235,123 @@ def telemetry_task_view(conn: Any, *, task: str, limit: int = 10, stale_cycle_se
     }
 
 
-def telemetry_failures_view(conn: Any, *, limit: int = 25, stale_cycle_seconds: float = 3600.0) -> dict[str, Any]:
+def _failure_window_start(window: str | None) -> tuple[str | None, dict[str, Any] | None]:
+    if window is None:
+        return None, None
+    seconds, label = _metrics_parse_window(window)
+    end = datetime.now(timezone.utc)
+    start = end - timedelta(seconds=seconds)
+    return _metrics_iso(start), {
+        "end": _metrics_iso(end),
+        "label": label,
+        "seconds": seconds,
+        "start": _metrics_iso(start),
+    }
+
+
+def _open_criteria_failure_view(
+    conn: Any,
+    *,
+    task_id: str | None = None,
+    active_only: bool = False,
+    limit: int,
+) -> dict[str, Any]:
+    filters: list[str] = []
+    params: list[Any] = []
+    row_filters: list[str] = []
+    if task_id is not None:
+        filters.append("task_id = ?")
+        row_filters.append("ac.task_id = ?")
+        params.append(task_id)
+    if active_only:
+        filters.append("task_id in (select id from tasks where state in ('candidate', 'managed', 'paused'))")
+        row_filters.append("ac.task_id in (select id from tasks where state in ('candidate', 'managed', 'paused'))")
+    where = f"where {' and '.join(filters)}" if filters else ""
+    counts = conn.execute(
+        f"""
+        select status, count(*) as count
+        from acceptance_criteria
+        {where}
+        group by status
+        """,
+        params,
+    ).fetchall()
+    row_filters = [*row_filters, "ac.status = 'accepted'"]
+    row_where = f"where {' and '.join(row_filters)}"
+    rows = conn.execute(
+        f"""
+        select ac.id, ac.task_id, t.name as task_name, ac.status, ac.source, ac.created_at, ac.updated_at
+        from acceptance_criteria ac
+        left join tasks t on t.id = ac.task_id
+        {row_where}
+        order by ac.updated_at desc, ac.id desc
+        limit ?
+        """,
+        [*params, limit],
+    ).fetchall()
+    by_status = {row["status"]: int(row["count"]) for row in counts}
+    return {
+        "by_status": by_status,
+        "open_accepted": [dict(row) for row in rows],
+        "open_accepted_count": int(by_status.get("accepted", 0)),
+    }
+
+
+def telemetry_failures_view(
+    conn: Any,
+    *,
+    limit: int = 25,
+    stale_cycle_seconds: float = 3600.0,
+    task_id: str | None = None,
+    run_id: str | None = None,
+    active_only: bool = False,
+    window: str | None = None,
+) -> dict[str, Any]:
+    updated_since, window_info = _failure_window_start(window)
     operator = telemetry_operator_snapshot(conn, stale_cycle_seconds=stale_cycle_seconds, limit=limit)
+    cycle_filters = ["mc.state = 'failed'"]
+    cycle_params: list[Any] = []
+    pane_filters = ["json_extract(mc.status_json, '$.pane_signal.captured') = 0"]
+    pane_params: list[Any] = []
+    if task_id is not None:
+        cycle_filters.append("mc.task_id = ?")
+        cycle_params.append(task_id)
+        pane_filters.append("mc.task_id = ?")
+        pane_params.append(task_id)
+    if updated_since is not None:
+        cycle_filters.append("coalesce(mc.completed_at, mc.started_at) >= ?")
+        cycle_params.append(updated_since)
+        pane_filters.append("coalesce(mc.completed_at, mc.started_at) >= ?")
+        pane_params.append(updated_since)
+    if active_only:
+        active_filter = "mc.task_id in (select id from tasks where state in ('candidate', 'managed', 'paused'))"
+        cycle_filters.append(active_filter)
+        pane_filters.append(active_filter)
+    cycle_where = " and ".join(cycle_filters)
+    pane_where = " and ".join(pane_filters)
     failed_cycle_rows = conn.execute(
-        """
+        f"""
         select mc.id, mc.task_id, t.name as task_name, mc.manager_id, mc.started_at,
                mc.completed_at, mc.state, mc.status_json, mc.health_json, mc.decision, mc.error
         from manager_cycles mc
         left join tasks t on t.id = mc.task_id
-        where mc.state = 'failed'
+        where {cycle_where}
         order by coalesce(mc.completed_at, mc.started_at) desc, mc.id desc
         limit ?
         """,
-        (limit,),
+        [*cycle_params, limit],
     ).fetchall()
     pane_rows = conn.execute(
-        """
+        f"""
         select mc.id, mc.task_id, t.name as task_name, mc.manager_id, mc.started_at,
                mc.completed_at, mc.state, mc.status_json, mc.health_json, mc.decision, mc.error
         from manager_cycles mc
         left join tasks t on t.id = mc.task_id
-        where json_extract(mc.status_json, '$.pane_signal.captured') = 0
+        where {pane_where}
         order by coalesce(mc.completed_at, mc.started_at) desc, mc.id desc
         limit ?
         """,
-        (limit,),
+        [*pane_params, limit],
     ).fetchall()
     failed_cycles = []
     for row in failed_cycle_rows:
@@ -2228,22 +2363,75 @@ def telemetry_failures_view(conn: Any, *, limit: int = 25, stale_cycle_seconds: 
         item = _cycle_view_from_row(row)
         item["task_name"] = row["task_name"]
         pane_failures.append(item)
+    failed_commands = _commands_view(
+        conn,
+        task_id=task_id,
+        only_failed=True,
+        limit=limit,
+        updated_since=updated_since,
+        active_only=active_only,
+    )["recent"]
+    ingest = _ingest_view(
+        conn,
+        task_id=task_id,
+        run_id=run_id,
+        limit=limit,
+        updated_since=updated_since,
+        active_only=active_only,
+    )
+    open_criteria = _open_criteria_failure_view(
+        conn,
+        task_id=task_id,
+        active_only=active_only,
+        limit=limit,
+    )
+    alerts: list[dict[str, Any]] = []
+    if failed_cycles:
+        alerts.append({"message": f"{len(failed_cycles)} manager cycles failed.", "severity": "error", "type": "failed_cycles"})
+    if failed_commands:
+        alerts.append({"message": f"{len(failed_commands)} commands failed.", "severity": "error", "type": "failed_commands"})
+    if ingest["error_count"]:
+        alerts.append({"message": f"{ingest['error_count']} ingest errors or warnings were recorded.", "severity": "error", "type": "ingest_errors"})
+    if pane_failures:
+        alerts.append({"message": f"{len(pane_failures)} pane captures failed.", "severity": "warning", "type": "pane_capture_failures"})
+    if open_criteria["open_accepted_count"]:
+        alerts.append({"message": f"{open_criteria['open_accepted_count']} open accepted criteria remain.", "severity": "warning", "type": "open_accepted_criteria"})
     return {
-        "alerts": operator["alerts"],
-        "failed_commands": _commands_view(conn, only_failed=True, limit=limit)["recent"],
+        "alerts": alerts,
+        "failed_commands": failed_commands,
         "failed_cycles": failed_cycles,
-        "ingest": _ingest_view(conn, limit=limit),
+        "filters": {
+            "active_only": active_only,
+            "run_id": run_id,
+            "task_id": task_id,
+            "window": window_info,
+        },
+        "ingest": ingest,
         "operator": {
-            "checks": operator["checks"],
-            "commands": operator["commands"],
-            "cycles": operator["cycles"],
+            "checks": {
+                "ok": not alerts,
+                "thresholds": operator["checks"]["thresholds"],
+            },
+            "commands": _commands_view(
+                conn,
+                task_id=task_id,
+                limit=limit,
+                updated_since=updated_since,
+                active_only=active_only,
+            ),
+            "cycles": {
+                "recent_failed": failed_cycles,
+                "recent_failed_count": len(failed_cycles),
+                "stale": [] if (task_id is not None or active_only or updated_since is not None) else operator["cycles"]["stale"],
+                "stale_count": 0 if (task_id is not None or active_only or updated_since is not None) else operator["cycles"]["stale_count"],
+            },
             "sessions": operator["sessions"],
             "tasks": operator["tasks"],
         },
-        "open_criteria": operator["criteria"],
+        "open_criteria": open_criteria,
         "pane_capture_failures": pane_failures,
         "schema_version": 1,
-        "storage": _storage_counts(conn),
+        "storage": _storage_counts(conn, task_id=task_id),
     }
 
 
@@ -2801,7 +2989,7 @@ def command_telemetry(args: argparse.Namespace) -> int:
             result = _telemetry_metrics(
                 conn,
                 db_path=db_path or default_db_path(),
-                window=args.window,
+                window=args.window or "24h",
                 run_id=run_id,
                 task_id=task_id,
             )
@@ -2868,10 +3056,22 @@ def command_telemetry(args: argparse.Namespace) -> int:
                     print(f"{alert['severity']}: {alert['type']}: {alert['message']}")
             return 0
         if getattr(args, "view", None) == "failures":
+            run_id = None
+            task_id = db_task_row(conn, task=args.task)["id"] if args.task else None
+            if args.run:
+                run = db_run_row(conn, run=args.run)
+                run_id = run["id"]
+                if task_id is not None and task_id != run["task_id"]:
+                    raise WorkerError("--run and --task refer to different tasks")
+                task_id = run["task_id"]
             result = telemetry_failures_view(
                 conn,
                 limit=args.limit,
                 stale_cycle_seconds=args.stale_cycle_seconds,
+                task_id=task_id,
+                run_id=run_id,
+                active_only=args.active_only,
+                window=args.window,
             )
             if args.json:
                 print(json.dumps(result, indent=2, sort_keys=True, default=str))
@@ -3332,7 +3532,7 @@ def _validate_continuation_review_payload(payload: dict[str, Any]) -> dict[str, 
     if not manager_session:
         raise WorkerError("continuation review requires subagent_run.manager_session_id")
     if reviewer_session == manager_session:
-        raise WorkerError("reviewer subagent session must be isolated from manager session")
+        raise WorkerError("reviewer subagent session must be distinct from manager session")
     if subagent_run.get("manager_rollout_access") is not False:
         raise WorkerError("reviewer subagent must record manager_rollout_access=false")
     payload["subagent_run"] = subagent_run
@@ -3384,6 +3584,37 @@ def _record_continuation_review(
             "review_id": review_id,
             "verdict": verdict,
             "worker_continuation_id": worker["id"],
+        },
+    )
+    worker_db.emit_telemetry_event(
+        conn,
+        actor="workerctl",
+        event_type="continuation_review_recorded",
+        severity="warning" if verdict == "stop" or operator_routing_required else "info",
+        task_id=task["id"],
+        summary=f"Continuation review recorded with verdict {verdict}.",
+        correlation={
+            "correlation_id": correlation_id,
+            "manager_continuation_id": manager["id"],
+            "review_id": review_id,
+            "worker_continuation_id": worker["id"],
+        },
+        attributes={
+            "agreement": agreement,
+            "allowed_context": sorted(str(item) for item in subagent_run.get("allowed_context", [])),
+            "has_addendum": bool(payload.get("addendum")),
+            "has_rationale": bool(payload.get("rationale")),
+            "manager_rollout_access": subagent_run.get("manager_rollout_access"),
+            "manager_session_id": subagent_run.get("manager_session_id"),
+            "nudge_on_completion": nudge_mode,
+            "operator_routing_required": operator_routing_required,
+            "payload_redacted": True,
+            "reviewer_duration_ms": subagent_run.get("duration_ms"),
+            "reviewer_returncode": subagent_run.get("returncode"),
+            "reviewer_session_distinct": subagent_run.get("reviewer_session_id") != subagent_run.get("manager_session_id"),
+            "reviewer_session_id": subagent_run.get("reviewer_session_id"),
+            "reviewer_status": subagent_run.get("status"),
+            "verdict": verdict,
         },
     )
     conn.commit()
@@ -3570,7 +3801,7 @@ def command_continuation_reviewer(args: argparse.Namespace) -> int:
 
     db_path = Path(args.path).expanduser().resolve() if getattr(args, "path", None) else None
     if args.reviewer_session_id == args.manager_session_id:
-        raise WorkerError("reviewer subagent session must be isolated from manager session")
+        raise WorkerError("reviewer subagent session must be distinct from manager session")
     with worker_db.connect(db_path) as conn:
         worker_db.initialize_database(conn)
         task = worker_db.task_row(conn, task=args.task)
@@ -4035,6 +4266,7 @@ def _dispatch_once_pass(
     dispatcher_id: str,
     db_path: Path | None,
     dry_run: bool,
+    lease_seconds: int,
 ) -> list[dict[str, Any]]:
     processed: list[dict[str, Any]] = []
     with worker_db.connect(db_path) as conn:
@@ -4073,6 +4305,7 @@ def _dispatch_once_pass(
                         conn,
                         dispatcher_id=dispatcher_id,
                         command_types=command_types,
+                        lease_seconds=lease_seconds,
                     )
                     if claimed is None:
                         break
@@ -4266,6 +4499,7 @@ def command_dispatch(args: argparse.Namespace) -> int:
     watch = bool(getattr(args, "watch", False))
     interval = max(0.0, float(getattr(args, "interval", 2.0) or 0.0))
     watch_iterations = getattr(args, "watch_iterations", None)
+    lease_seconds = max(1, int(getattr(args, "lease_seconds", 60) or 60))
     processed: list[dict[str, Any]] = []
     iterations = 0
     try:
@@ -4279,6 +4513,7 @@ def command_dispatch(args: argparse.Namespace) -> int:
                 dispatcher_id=dispatcher_id,
                 db_path=db_path,
                 dry_run=dry_run,
+                lease_seconds=lease_seconds,
             )
             processed.extend(batch)
             if watch:
@@ -5346,6 +5581,36 @@ def command_commands(args: argparse.Namespace) -> int:
             """,
             params,
         ).fetchall()
+        attempts_by_command: dict[str, list[dict[str, Any]]] = {}
+        if args.attempts and rows:
+            command_ids = [row["id"] for row in rows]
+            placeholders = ",".join("?" for _ in command_ids)
+            attempt_rows = conn.execute(
+                f"""
+                select id, command_id, correlation_id, dispatcher_id, started_at,
+                       finished_at, state, result_json, error, side_effect_started,
+                       side_effect_completed
+                from command_attempts
+                where command_id in ({placeholders})
+                order by command_id, id
+                """,
+                command_ids,
+            ).fetchall()
+            for attempt in attempt_rows:
+                attempts_by_command.setdefault(attempt["command_id"], []).append(
+                    {
+                        "correlation_id": attempt["correlation_id"],
+                        "dispatcher_id": attempt["dispatcher_id"],
+                        "error": attempt["error"],
+                        "finished_at": attempt["finished_at"],
+                        "id": attempt["id"],
+                        "result": json.loads(attempt["result_json"]) if attempt["result_json"] else None,
+                        "side_effect_completed": bool(attempt["side_effect_completed"]),
+                        "side_effect_started": bool(attempt["side_effect_started"]),
+                        "started_at": attempt["started_at"],
+                        "state": attempt["state"],
+                    }
+                )
     records = [
         {
             "created_at": row["created_at"],
@@ -5368,6 +5633,7 @@ def command_commands(args: argparse.Namespace) -> int:
             "type": row["type"],
             "updated_at": row["updated_at"],
             "worker_id": row["worker_id"],
+            **({"attempt_history": attempts_by_command.get(row["id"], [])} if args.attempts else {}),
         }
         for row in rows
     ]
@@ -5375,7 +5641,12 @@ def command_commands(args: argparse.Namespace) -> int:
         print(json.dumps(records, indent=2, sort_keys=True))
         return 0
     for record in records:
-        print(f"{record['id']}\t{record['state']}\t{record['type']}\t{record['task_name'] or '-'}")
+        suffix = ""
+        if args.attempts:
+            history = record.get("attempt_history") or []
+            last_state = history[-1]["state"] if history else "-"
+            suffix = f"\tattempt_history={len(history)}\tlast_attempt={last_state}"
+        print(f"{record['id']}\t{record['state']}\t{record['type']}\t{record['task_name'] or '-'}{suffix}")
     return 0
 
 
@@ -6430,6 +6701,7 @@ def command_pair(args: argparse.Namespace) -> int:
     task_created = False
     manager_config_seeded = False
     manager_config_seeded_by_pair = False
+    manager_acceptance_criteria_seeded: list[int] = []
     run_id = None
     binding_id = None
     worker_info = None
@@ -6617,7 +6889,23 @@ def command_pair(args: argparse.Namespace) -> int:
                     "supervision_mode": existing_manager_config["supervision_mode"],
                 },
             )
-            conn.commit()
+        if existing_manager_config is not None:
+            manager_acceptance_criteria_seeded = worker_db.seed_manager_acceptance_criteria(
+                conn,
+                task_id=task_id,
+                criteria=existing_manager_config["acceptance_criteria"],
+            )
+            if manager_acceptance_criteria_seeded:
+                worker_db.insert_event(
+                    conn,
+                    "manager_acceptance_criteria_seeded",
+                    actor="workerctl",
+                    task_id=task_id,
+                    payload={
+                        "criterion_ids": manager_acceptance_criteria_seeded,
+                        "source": "manager_config",
+                    },
+                )
         manager_config_seeded = existing_manager_config is not None
         conn.commit()
     finally:
@@ -6755,6 +7043,7 @@ def command_pair(args: argparse.Namespace) -> int:
                 attributes={
                     "manager_config_seeded": manager_config_seeded,
                     "manager_config_seeded_by_pair": manager_config_seeded_by_pair,
+                    "manager_acceptance_criteria_seeded": len(manager_acceptance_criteria_seeded),
                 },
             )
             conn.commit()
@@ -6769,6 +7058,7 @@ def command_pair(args: argparse.Namespace) -> int:
             "run_id": run_id,
             "manager_config_seeded": manager_config_seeded,
             "manager_config_seeded_by_pair": manager_config_seeded_by_pair,
+            "manager_acceptance_criteria_seeded": len(manager_acceptance_criteria_seeded),
         }
         print(json.dumps(result, indent=2, sort_keys=True))
         return 0
