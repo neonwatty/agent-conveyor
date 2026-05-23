@@ -246,6 +246,8 @@ def build_parser() -> argparse.ArgumentParser:
     dispatch_mode.add_argument("--watch", action="store_true", help="Continuously poll for dispatch work.")
     dispatch.add_argument("--limit", type=int, default=10, help="Maximum unrouted signals to process in one pass.")
     dispatch.add_argument("--interval", type=float, default=2.0, help="Seconds between dispatch passes in --watch mode.")
+    dispatch.add_argument("--watch-iterations", type=int, help="Stop --watch after this many polling iterations.")
+    dispatch.add_argument("--lease-seconds", type=int, default=60, help="Seconds before an attempted command claim can be recovered.")
     dispatch.add_argument("--dispatcher-id", default="dispatch-local", help="Stable id for this dispatcher process.")
     dispatch.add_argument(
         "--type",
@@ -438,7 +440,8 @@ def build_parser() -> argparse.ArgumentParser:
     telemetry.add_argument("--severity", choices=("debug", "info", "warning", "error"), help="Filter by severity.")
     telemetry.add_argument("--search", help="Full-text search over event type, summary, and attributes.")
     telemetry.add_argument("--summary", action="store_true", help="Print aggregate telemetry counts.")
-    telemetry.add_argument("--window", default="24h", help="Metrics lookback window, e.g. 30m, 24h, 7d. Default: 24h.")
+    telemetry.add_argument("--window", help="Lookback window, e.g. 30m, 24h, 7d. Metrics default: 24h.")
+    telemetry.add_argument("--active-only", action="store_true", help="For telemetry failures, show only failures for active tasks.")
     telemetry.add_argument("--json", action="store_true", help="Print JSON instead of text timeline output.")
     telemetry.add_argument("--limit", type=int, default=100, help="Maximum telemetry events to inspect.")
     telemetry.add_argument("--stale-cycle-seconds", type=float, default=3600.0, help="Flag active tasks whose latest manager cycle is older than this threshold.")
@@ -574,7 +577,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     continuation_reviewer = subparsers.add_parser(
         "continuation-reviewer",
-        help="Run an isolated read-only continuation reviewer and persist its verdict.",
+        help="Run an independent restricted-context continuation reviewer and persist its verdict.",
     )
     continuation_reviewer.add_argument("task", help="Task name or ID.")
     continuation_reviewer.add_argument("--correlation-id", required=True, help="Continuation turn correlation id to review.")
@@ -969,6 +972,7 @@ def build_parser() -> argparse.ArgumentParser:
     commands.add_argument("--type", help="Filter by command type.")
     commands.add_argument("--worker", help="Filter by worker ID.")
     commands.add_argument("--manager", help="Filter by manager ID.")
+    commands.add_argument("--attempts", action="store_true", help="Include command attempt history.")
     commands.add_argument("--json", action="store_true", help="Print commands as JSON.")
     commands.add_argument("--path", help="Override the workerctl database path.")
     commands.set_defaults(func=command_commands)

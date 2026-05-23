@@ -1,0 +1,663 @@
+# GoalBuddy v2 state.yaml
+# Board truth lives here. goal.md is the editable charter; notes/ holds long receipts only.
+
+version: 2
+
+goal:
+  title: "Dispatch Gap Closure"
+  slug: "dispatch-gap-closure"
+  kind: audit
+  tranche: "Close the post-rollout dispatch gaps from issues #127, #128, #129 and the named rough edges found by the code and issue audits."
+  status: done
+  oracle:
+    signal: "Focused tests, docs, issue receipts, and final source-backed audit prove every named gap is fixed or deliberately deferred with a concrete follow-up artifact."
+    cadence: "after each Worker package and at final audit"
+    final_proof: "A final Judge/PM receipt maps #127/#128/#129 and each named rough edge to passing tests, changed files, docs, or explicit follow-up issues; full verification is green; full_outcome_complete is true."
+  intake:
+    original_request: "make a detailed plan using $goalbuddy:goal-prep based on your gap findings"
+    interpreted_outcome: "Prepare a GoalBuddy execution board that turns the dispatch gap audit into safe, parallelizable implementation work."
+    input_shape: audit
+    audience: "workerctl operators, manager/worker pair users, and future GoalBuddy-driven supervision runs"
+    authority: requested
+    proof_type: test
+    completion_proof: "Issues #127, #128, and #129 are fixed or superseded, rough edges are implemented or tracked, verification passes, and a final audit ties evidence to every gap finding."
+    likely_misfire: "Treating the old dispatch issue closure as sufficient while the dogfood follow-ups and operator-facing rough edges remain open."
+    blind_spots_considered:
+      - "Dispatch could accidentally become a decision maker instead of a mechanical router."
+      - "Telemetry failure scoping might hide important historical failures or overfit to one dogfood workflow."
+      - "Pane classifier fixes could suppress genuine approval prompts."
+      - "Acceptance criteria seeding could duplicate or overwrite user-authored ledger entries."
+      - "Unbounded dispatch watch mode could keep long-running shells alive during verification."
+      - "Continuation-review hard isolation may be larger than a safe local tranche."
+      - "Dashboard correlation grouping may belong in a separate UI workstream if the current app surface is not ready."
+    existing_plan_facts:
+      - "Core dispatch-related issues #113, #114, #115, #116, #117, and #122 are closed."
+      - "Related PRs #118, #119, #121, #123, #124, #125, and #126 were merged."
+      - "Open dogfood follow-up issues are #127, #128, and #129."
+      - "#127: telemetry failures view needs recency or active-task scoping for operator triage."
+      - "#128: pane classifier can falsely report approval_prompt from historical transcript text."
+      - "#129: pair should seed acceptance criteria ledger from manager acceptance config."
+      - "Additional code-audit rough edges: public dispatch --watch lacks a bounded iteration flag; command lease duration is not CLI tunable; command_enqueue_notify_manager returns a duplicate command_type key; workerctl commands does not show attempt history directly; continuation-review evidence is stored as an events row rather than structured telemetry; continuation-review isolation is by convention/context/metadata rather than hard sandbox; README says dashboard grouping by correlation chains is still a follow-up."
+
+rules:
+  pm_owns_state: true
+  one_active_task: true
+  max_write_workers: 1
+  no_implementation_without_worker_or_pm_task: true
+  no_completion_without_judge_or_pm_audit: true
+  planning_is_not_completion: true
+  queued_required_worker_blocks_completion: true
+  continuous_until_full_outcome: true
+  missing_input_or_credentials_do_not_stop_goal: true
+  preserve_and_validate_existing_plan: true
+  intake_misfire_must_be_audited: true
+  goal_pressure_requires_oracle: true
+  no_completion_on_weak_proof: true
+  slice_policy:
+    max_consecutive_tiny_tasks: 2
+    prefer_vertical_slices: true
+    judge_picks_largest_safe_slice: true
+    worker_completes_whole_slice: true
+
+agents:
+  scout: installed
+  worker: installed
+  judge: installed
+
+visual_board:
+  selected: local
+  local:
+    status: live
+    url: "http://goalbuddy.localhost:41737/dispatch-gap-closure/"
+    command: "npx goalbuddy board /Users/neonwatty/Desktop/codex-terminal-manager/docs/goals/dispatch-gap-closure"
+
+active_task: null
+
+tasks:
+  - id: T001
+    type: scout
+    assignee: Scout
+    status: done
+    reasoning_hint: low
+    objective: "Reconcile the dispatch gap findings against current repo state and issues #127, #128, and #129 before any implementation."
+    inputs:
+      - "GitHub issues #127, #128, and #129"
+      - "Previous issue audit finding: #113/#114/#115/#116/#117/#122 closed"
+      - "Previous code audit rough edges listed in goal.intake.existing_plan_facts"
+      - "workerctl CLI, command queue, pane classifier, telemetry, acceptance ledger, continuation review, replay/audit/dashboard surfaces"
+      - "tests/test_workerctl.py and any existing targeted test files"
+    constraints:
+      - "Read-only."
+      - "Do not edit implementation files."
+      - "Prefer exact file/function/test evidence."
+      - "Do not reopen already-closed dispatch work unless evidence shows the acceptance criteria are actually missing."
+    expected_output:
+      - "Gap matrix: issue or rough edge, current behavior, missing behavior, likely files, existing tests, proposed verification."
+      - "Parallelization map with disjoint write scopes and dependencies."
+      - "Risk notes for classifier precision, acceptance-ledger idempotency, dispatch no-judgment boundary, and continuation-review isolation."
+      - "Candidate first Worker packages with allowed_files and verify commands."
+    receipt:
+      result: done
+      note: "notes/T001-scout-map.md"
+      summary: "Reconciled current repo state and live issues #127, #128, and #129. All three issues remain open with evidenced gaps; bounded dispatch watch is partially implemented internally but not public; correlation chains exist but grouping remains incomplete."
+      evidence:
+        - "#127 open: telemetry failures need recency, task, run, active-only, or equivalent scoping."
+        - "#128 open: classifier can falsely report approval_prompt from historical transcript text."
+        - "#129 open: pair stores manager acceptance config but does not seed acceptance_criteria ledger rows."
+        - "workerctl/classify.py scans full output for broad approval substrings."
+        - "workerctl/supervise_cycle.py criteria negotiation reads active acceptance_criteria rows."
+        - "workerctl/db.py has acceptance_criteria unique task/source/criterion index."
+        - "workerctl/commands.py supports internal watch_iterations, while workerctl/cli.py exposes --watch/--interval only."
+        - "workerctl/db.py has correlation_chains; dashboard/replay grouping still needs scoped follow-up."
+      contradictions:
+        - "T004 allowed_files referenced missing workerctl/panes.py; classifier surfaces are workerctl/classify.py and workerctl/shadow_state.py."
+        - "Duplicate notify-manager result key was not reproduced in the inspected output path."
+      spawned_tasks:
+        - T002
+
+  - id: T002
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Review T001 and choose the largest safe parallelizable work plan while preserving one active Worker at a time in this board."
+    inputs:
+      - "T001 receipt"
+      - "Goal oracle and non-negotiable constraints"
+    constraints:
+      - "Read-only."
+      - "Do not implement."
+      - "Separate truly independent work packages by write scope so subagents can run safely when the operator asks for parallel execution."
+      - "Reject packages that let Dispatch make judgments."
+      - "Reject completion unless all named gaps are represented by Worker tasks, explicit deferrals, or issue-hygiene tasks."
+    expected_output:
+      - "approved | revise"
+      - "Ordered Worker/Scout/Judge task activation plan."
+      - "Parallel lanes and disjoint write scopes."
+      - "First Worker objective, allowed_files, verify commands, and stop_if conditions."
+      - "Risks that require Judge review before implementation."
+    receipt:
+      result: done
+      note: "notes/T002-judge-selection.md"
+      decision: "approved"
+      full_outcome_complete: false
+      summary: "Approved T003 as the first Worker slice. Do not parallelize queued Worker tasks as-is because their write scopes overlap; narrow T004 before parallel classifier work."
+      ordered_activation_plan:
+        - "T003"
+        - "T004"
+        - "T005"
+        - "T006"
+        - "T007"
+        - "T008 if approved"
+        - "T009"
+        - "T010 if bounded"
+        - "T998"
+        - "T999"
+      first_worker_objective: "Implement #129 by seeding acceptance_criteria from manager acceptance config at pair start without overwriting user-authored criteria."
+      first_worker_allowed_files:
+        - "workerctl/cli.py"
+        - "workerctl/commands.py"
+        - "workerctl/db.py"
+        - "workerctl/supervise_cycle.py"
+        - "tests/test_workerctl.py"
+        - "README.md"
+      verify:
+        - "python3 -m unittest tests.test_workerctl -v"
+        - "python3 -m py_compile workerctl/*.py"
+        - "git diff --check"
+      stop_if:
+        - "Ledger semantics are ambiguous."
+        - "User-authored criteria would be overwritten."
+        - "Files outside allowed_files are needed."
+        - "Verification fails twice with unrelated failures."
+      risks:
+        - "T006 duplicate notify-manager result-key cleanup needs reproduction or no-op verification."
+        - "T007 must decide continuation-review scope before T008."
+        - "T009 must scout correlation grouping before T010."
+
+  - id: T003
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "Implement #129: seed the acceptance criteria ledger from manager acceptance configuration when pair starts, without overwriting user-authored criteria."
+    allowed_files:
+      - "workerctl/cli.py"
+      - "workerctl/commands.py"
+      - "workerctl/db.py"
+      - "workerctl/supervise_cycle.py"
+      - "tests/test_workerctl.py"
+      - "README.md"
+    verify:
+      - "python3 -m unittest tests.test_workerctl -v"
+      - "python3 -m py_compile workerctl/*.py"
+      - "git diff --check"
+    stop_if:
+      - "Criteria ledger semantics are ambiguous between append, replace, and merge."
+      - "Existing user-authored criteria would be overwritten."
+      - "Need files outside allowed_files."
+      - "Verification fails twice with unrelated failures."
+    expected_output:
+      - "Config-to-ledger seeding behavior."
+      - "Idempotency and no-overwrite regression tests."
+      - "Docs or CLI help update if user-facing flags/options change."
+    receipt:
+      result: done
+      note: "notes/T003-worker-acceptance-ledger.md"
+      changed_files:
+        - "workerctl/db.py"
+        - "workerctl/commands.py"
+        - "tests/test_workerctl.py"
+        - "README.md"
+      summary: "Implemented #129. Pair now seeds accepted manager_inferred acceptance_criteria rows from manager acceptance config, skips duplicates and existing task criteria under any source, reports seeded count, and documents the behavior."
+      commands:
+        - cmd: "python3 -m unittest tests.test_workerctl.PairCommandTests.test_pair_seeds_manager_config_before_manager_spawn tests.test_workerctl.PairCommandTests.test_pair_manager_acceptance_seed_preserves_existing_user_criteria tests.test_workerctl.AcceptanceCriteriaDbTests -v"
+          status: pass
+        - cmd: "python3 -m py_compile workerctl/*.py"
+          status: pass
+        - cmd: "python3 -m unittest tests.test_workerctl -v"
+          status: pass
+          summary: "429 tests"
+        - cmd: "git diff --check"
+          status: pass
+
+  - id: T004
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "Implement #128: make pane classification avoid historical-transcript false positives while preserving detection of active approval prompts."
+    allowed_files:
+      - "workerctl/commands.py"
+      - "workerctl/classify.py"
+      - "workerctl/shadow_state.py"
+      - "tests/test_workerctl.py"
+      - "tests/fixtures"
+    verify:
+      - "python3 -m unittest tests.test_workerctl -v"
+      - "python3 -m py_compile workerctl/*.py"
+      - "git diff --check"
+    stop_if:
+      - "The classifier implementation lives outside the expected surfaces and needs a different allowed_files set."
+      - "No reliable fixture can distinguish active prompt text from transcript history."
+      - "Need files outside allowed_files."
+      - "Verification fails twice with unrelated failures."
+    expected_output:
+      - "Classifier logic or extraction-window change."
+      - "Regression fixture for historical transcript mention of approval_prompt."
+      - "Positive regression fixture for a real active approval prompt."
+    receipt:
+      result: done
+      note: "notes/T004-worker-classifier.md"
+      changed_files:
+        - "workerctl/classify.py"
+        - "tests/test_workerctl.py"
+      summary: "Implemented #128. Approval prompt detection now focuses on the current bottom pane region with active approval markers, ignores historical/audit tokens, and preserves positive active approval detection."
+      commands:
+        - cmd: "python3 -m unittest tests.test_workerctl.ClassifierTests tests.test_workerctl.ShadowStateTests -v"
+          status: pass
+          summary: "20 tests"
+        - cmd: "python3 -m py_compile workerctl/*.py"
+          status: pass
+        - cmd: "python3 -m unittest tests.test_workerctl -v"
+          status: pass
+          summary: "431 tests"
+        - cmd: "git diff --check"
+          status: pass
+
+  - id: T005
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "Implement #127: add operator-useful scoping to telemetry failures, such as recency, active task/session, run id, or equivalent filters supported by current data."
+    allowed_files:
+      - "workerctl/cli.py"
+      - "workerctl/commands.py"
+      - "workerctl/db.py"
+      - "workerctl/telemetry.py"
+      - "tests/test_workerctl.py"
+      - "README.md"
+    verify:
+      - "python3 -m unittest tests.test_workerctl -v"
+      - "python3 -m py_compile workerctl/*.py"
+      - "git diff --check"
+    stop_if:
+      - "The existing telemetry schema cannot support active-task or recency scoping without a migration."
+      - "Filtering would silently hide failures by default instead of making scope explicit."
+      - "Need files outside allowed_files."
+      - "Verification fails twice with unrelated failures."
+    expected_output:
+      - "Telemetry failures filter implementation."
+      - "CLI help/docs for the new scope options."
+      - "Regression tests covering scoped and unscoped output."
+    receipt:
+      result: done
+      note: "notes/T005-worker-telemetry-failures.md"
+      changed_files:
+        - "workerctl/cli.py"
+        - "workerctl/commands.py"
+        - "tests/test_workerctl.py"
+        - "README.md"
+      summary: "Implemented #127. telemetry failures now supports explicit --task, --run, --active-only, and --window scoping while preserving broad unscoped defaults and redaction."
+      commands:
+        - cmd: "python3 -m unittest tests.test_workerctl.CliTests.test_telemetry_failures_view_rolls_up_failed_cycles_commands_ingest_and_storage tests.test_workerctl.CliTests.test_telemetry_failures_view_scopes_by_window_and_active_tasks -v"
+          status: pass
+        - cmd: "python3 -m py_compile workerctl/*.py"
+          status: pass
+        - cmd: "python3 -m unittest tests.test_workerctl -v"
+          status: pass
+          summary: "432 tests"
+        - cmd: "git diff --check"
+          status: pass
+
+  - id: T006
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "Implement local dispatch CLI and command-observability polish that has low coupling: bounded watch runs, duplicate result-key cleanup, and attempt-history visibility."
+    allowed_files:
+      - "workerctl/cli.py"
+      - "workerctl/commands.py"
+      - "workerctl/db.py"
+      - "tests/test_workerctl.py"
+      - "README.md"
+    verify:
+      - "python3 -m unittest tests.test_workerctl -v"
+      - "python3 -m py_compile workerctl/*.py"
+      - "git diff --check"
+    stop_if:
+      - "Lease tuning conflicts with the command claiming model and needs Judge review."
+      - "Attempt-history display requires broad schema or output redesign."
+      - "Need files outside allowed_files."
+      - "Verification fails twice with unrelated failures."
+    expected_output:
+      - "Public bounded dispatch watch option or equivalent safe test/operator control."
+      - "Cleanup for duplicate notify-manager result key."
+      - "Command attempt visibility through CLI JSON/text or a documented reason for deferral."
+      - "Regression tests for bounded watch and attempt visibility."
+    receipt:
+      result: done
+      note: "notes/T006-worker-dispatch-cli-polish.md"
+      changed_files:
+        - "workerctl/cli.py"
+        - "workerctl/commands.py"
+        - "tests/test_workerctl.py"
+        - "README.md"
+      summary: "Exposed dispatch --watch-iterations and added commands --attempts for command_attempts history. Lease tuning was left for Judge review; duplicate notify-manager result key was not reproducible."
+      commands:
+        - cmd: "python3 -m unittest tests.test_workerctl.DispatchTests.test_dispatch_cli_help_exposes_watch_iterations tests.test_workerctl.DispatchTests.test_dispatch_watch_runs_bounded_passes_with_limit_and_interval tests.test_workerctl.CliTests.test_commands_cli_can_include_attempt_history tests.test_workerctl.CliTests.test_commands_cli_lists_durable_commands -v"
+          status: pass
+        - cmd: "python3 -m py_compile workerctl/*.py"
+          status: pass
+        - cmd: "python3 -m unittest tests.test_workerctl -v"
+          status: pass
+          summary: "434 tests"
+        - cmd: "git diff --check"
+          status: pass
+
+  - id: T007
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Decide the safe scope for continuation-review improvements: structured telemetry now, hard isolation now, or explicit follow-up."
+    inputs:
+      - "T001 receipt"
+      - "Current continuation-review implementation evidence"
+      - "Security and dispatch no-judgment constraints"
+    constraints:
+      - "Read-only."
+      - "Do not implement."
+      - "Do not approve fake isolation that is only naming/context convention."
+      - "Prefer implementing structured evidence now if it is local and low risk."
+    expected_output:
+      - "Decision: implement now | split | defer."
+      - "Worker objective if implementation is approved."
+      - "allowed_files, verify commands, and stop_if."
+      - "Follow-up issue text if hard isolation is deferred."
+    receipt:
+      result: done
+      note: "notes/T007-judge-continuation-review.md"
+      decision: "approved_split"
+      full_outcome_complete: false
+      summary: "Approved T008 for structured continuation-review telemetry and wording cleanup. Deferred hard isolation to a concrete follow-up because current reviewer execution lacks OS/process/filesystem sandbox evidence."
+      approved_t008:
+        objective: "Emit structured telemetry for continuation reviews using existing telemetry_events, preserve redaction, expose enough attributes for audit/triage, and update CLI/README wording so continuation-reviewer is described as independent restricted-context review rather than hard isolation."
+        allowed_files:
+          - "workerctl/commands.py"
+          - "workerctl/cli.py"
+          - "tests/test_workerctl.py"
+          - "README.md"
+          - "docs/goals/dispatch-gap-closure/notes"
+        verify:
+          - "python3 -m unittest tests.test_workerctl.DatabaseTests.test_continuations_and_reviews_round_trip_through_audit tests.test_workerctl.CliTests.test_continuation_cli_enforces_ordering_review_isolation_and_divergent_routing tests.test_workerctl.CliTests.test_continuation_reviewer_runner_records_isolated_review tests.test_workerctl.CliTests.test_continuation_reviewer_runner_failure_records_stop -v"
+          - "python3 -m unittest tests.test_workerctl -v"
+          - "python3 -m py_compile workerctl/*.py"
+          - "git diff --check"
+      follow_up_issue:
+        title: "Implement hard isolation for continuation reviewer execution"
+        body: "Continuation-reviewer currently enforces independent session metadata, manager_rollout_access=false, permission checks, and restricted stdin context, but the reviewer command still runs as a normal subprocess in the project environment. Implement real hard isolation before documenting sandbox guarantees. Acceptance criteria: reviewer execution uses an enforced sandbox or equivalent process/filesystem/environment isolation; tests prove manager rollout/session artifacts are inaccessible except through allowed context; failures route to stop/operator review; docs distinguish metadata isolation from hard isolation."
+
+  - id: T008
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "Emit structured telemetry for continuation reviews using existing telemetry_events, preserve redaction, expose enough attributes for audit/triage, update wording to restricted-context review, and record the approved hard-isolation follow-up."
+    allowed_files:
+      - "workerctl/commands.py"
+      - "workerctl/cli.py"
+      - "tests/test_workerctl.py"
+      - "README.md"
+      - "docs/goals/dispatch-gap-closure/notes"
+    verify:
+      - "python3 -m unittest tests.test_workerctl.DatabaseTests.test_continuations_and_reviews_round_trip_through_audit tests.test_workerctl.CliTests.test_continuation_cli_enforces_ordering_review_isolation_and_divergent_routing tests.test_workerctl.CliTests.test_continuation_reviewer_runner_records_isolated_review tests.test_workerctl.CliTests.test_continuation_reviewer_runner_failure_records_stop -v"
+      - "python3 -m unittest tests.test_workerctl -v"
+      - "python3 -m py_compile workerctl/*.py"
+      - "git diff --check"
+    stop_if:
+      - "T007 has not approved an implementation scope."
+      - "Structured telemetry requires a schema migration or files outside allowed_files."
+      - "Telemetry would store raw continuation payloads, rationale bodies, stdout/stderr content, prompts, or transcript text."
+      - "Implementation starts adding sandbox/process/filesystem isolation instead of recording the approved follow-up."
+      - "Wording continues to claim hard isolation without an enforced sandbox primitive."
+      - "Hard isolation requires sandboxing or process controls not already present in the repo."
+      - "Need files outside allowed_files."
+      - "Verification fails twice with unrelated failures."
+    expected_output:
+      - "Structured telemetry/audit evidence for continuation review, if approved."
+      - "Tests for evidence visibility."
+      - "Follow-up receipt for hard isolation if deferred."
+    receipt:
+      result: done
+      note: "notes/T008-worker-continuation-telemetry.md"
+      changed_files:
+        - "workerctl/commands.py"
+        - "workerctl/cli.py"
+        - "tests/test_workerctl.py"
+        - "README.md"
+      summary: "Continuation reviews now emit structured telemetry without raw proposal, rationale, stdout/stderr, prompt, or transcript content. CLI/README wording now describes restricted-context review and does not claim hard sandbox isolation."
+      commands:
+        - cmd: "python3 -m unittest tests.test_workerctl.DatabaseTests.test_continuations_and_reviews_round_trip_through_audit tests.test_workerctl.PairCommandTests.test_continuation_cli_enforces_ordering_review_isolation_and_divergent_routing tests.test_workerctl.PairCommandTests.test_continuation_reviewer_runner_records_isolated_review tests.test_workerctl.PairCommandTests.test_continuation_reviewer_runner_failure_records_stop -v"
+          status: pass
+          summary: "4 tests"
+        - cmd: "python3 -m py_compile workerctl/*.py"
+          status: pass
+        - cmd: "git diff --check"
+          status: pass
+        - cmd: "python3 -m unittest tests.test_workerctl -v"
+          status: pass
+          summary: "434 tests"
+
+  - id: T009
+    type: scout
+    assignee: Scout
+    status: done
+    reasoning_hint: low
+    objective: "Map dashboard/replay correlation-chain grouping: determine whether a small local implementation is ready or whether it needs a separate UI tranche."
+    inputs:
+      - "Current replay, audit, telemetry, and dashboard-related files"
+      - "README dashboard grouping follow-up note"
+      - "Dispatch correlation_id and command-attempt data surfaces"
+    constraints:
+      - "Read-only."
+      - "Do not edit implementation files."
+      - "Prefer exact surfaces and smallest useful grouping behavior."
+    expected_output:
+      - "Current correlation-chain visibility."
+      - "Smallest implementable grouping slice, if any."
+      - "Files and tests needed."
+      - "Decision recommendation: implement now or create follow-up issue."
+    receipt:
+      result: done
+      note: "notes/T009-scout-correlation-grouping.md"
+      summary: "Correlation-chain grouping already exists in replay/audit and dashboard API/client. Remaining gap is stale README wording and missing focused dashboard server test coverage."
+      recommendation: "Implement a small dashboard test/docs closure now rather than creating a follow-up issue."
+
+  - id: T010
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "Close dashboard correlation-grouping evidence gap from T009: add focused dashboard server coverage for dispatch chain grouping and update README wording to reflect existing grouping behavior."
+    allowed_files:
+      - "dashboard/server/index.ts"
+      - "dashboard/server/workerctl.test.ts"
+      - "README.md"
+      - "docs/goals/dispatch-gap-closure/notes"
+    verify:
+      - "npm test"
+      - "npm run build"
+      - "python3 -m unittest tests.test_workerctl.DispatchTests.test_replay_exposes_dispatch_correlation_chain -v"
+      - "git diff --check"
+    stop_if:
+      - "Dashboard grouping is not actually present in the current server/client surfaces."
+      - "Testing dispatchChainEntries requires a broad dashboard server refactor."
+      - "Need files outside allowed_files."
+      - "Verification fails twice with unrelated failures."
+    expected_output:
+      - "Focused dashboard server test for dispatch correlation-chain grouping."
+      - "README wording that no longer calls existing dashboard grouping a follow-up."
+    receipt:
+      result: done
+      note: "notes/T010-worker-dashboard-correlation-grouping.md"
+      changed_files:
+        - "dashboard/server/index.ts"
+        - "dashboard/server/workerctl.test.ts"
+        - "README.md"
+      summary: "Added focused dashboard server coverage for dispatch correlation-chain grouping and updated README to state grouping exists for bound-task dispatch chains."
+      commands:
+        - cmd: "npm test"
+          status: pass
+          summary: "17 tests"
+        - cmd: "npm run build"
+          status: pass
+        - cmd: "python3 -m unittest tests.test_workerctl.DispatchTests.test_replay_exposes_dispatch_correlation_chain -v"
+          status: pass
+        - cmd: "git diff --check"
+          status: pass
+
+  - id: T998
+    type: pm
+    assignee: PM
+    status: done
+    reasoning_hint: default
+    objective: "Update or close issues #127, #128, and #129, and create any approved follow-up issues for deferred rough edges."
+    inputs:
+      - "Done receipts for T003-T010"
+      - "GitHub issues #127, #128, and #129"
+      - "Final verification output"
+    constraints:
+      - "Do not close an issue without evidence mapped to its acceptance criteria."
+      - "Do not create follow-up issues for work that was actually completed."
+      - "Mention test commands and relevant PR/commit references in issue comments."
+    expected_output:
+      - "Issue comments or closures for #127, #128, and #129."
+      - "New follow-up issues only for explicitly deferred rough edges."
+      - "Receipt linking issue hygiene to local verification."
+    receipt:
+      result: done
+      note: "notes/T998-pm-issue-hygiene.md"
+      summary: "Closed #127, #128, and #129 with evidence comments; created #130 for deferred hard continuation-review isolation."
+      issues_closed:
+        - "https://github.com/neonwatty/codex-terminal-manager/issues/127"
+        - "https://github.com/neonwatty/codex-terminal-manager/issues/128"
+        - "https://github.com/neonwatty/codex-terminal-manager/issues/129"
+      follow_up_issues_created:
+        - "https://github.com/neonwatty/codex-terminal-manager/issues/130"
+      commands:
+        - cmd: "python3 -m unittest tests.test_workerctl -v"
+          status: pass
+          summary: "434 tests at issue-hygiene time; 435 after T011 lease test"
+        - cmd: "npm test"
+          status: pass
+          summary: "17 tests"
+        - cmd: "npm run build"
+          status: pass
+        - cmd: "python3 -m py_compile workerctl/*.py"
+          status: pass
+        - cmd: "git diff --check"
+          status: pass
+
+  - id: T011
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "Close the command lease-duration rough edge identified by final Judge audit: implement a bounded dispatch lease CLI tunable or record an explicit follow-up disposition."
+    allowed_files:
+      - "workerctl/cli.py"
+      - "workerctl/commands.py"
+      - "tests/test_workerctl.py"
+      - "README.md"
+      - "docs/goals/dispatch-gap-closure/notes"
+    verify:
+      - "python3 -m unittest tests.test_workerctl.DispatchTests.test_dispatch_cli_help_exposes_watch_iterations tests.test_workerctl.DispatchTests.test_dispatch_cli_lease_seconds_controls_command_claim_expiry tests.test_workerctl.DispatchTests.test_dispatch_recovers_stale_claim_without_side_effect_by_requeueing -v"
+      - "python3 -m unittest tests.test_workerctl -v"
+      - "npm test"
+      - "npm run build"
+      - "python3 -m py_compile workerctl/*.py"
+      - "git diff --check"
+    stop_if:
+      - "Lease tuning requires schema changes or changes to stale-claim recovery semantics."
+      - "Dispatch starts making task success, merge, or criteria decisions."
+      - "Need files outside allowed_files."
+      - "Verification fails twice with unrelated failures."
+    expected_output:
+      - "Dispatch CLI lease duration option or explicit follow-up issue."
+      - "Focused tests proving the configured lease is used for command claims."
+    receipt:
+      result: done
+      note: "notes/T011-worker-dispatch-lease-tuning.md"
+      changed_files:
+        - "workerctl/cli.py"
+        - "workerctl/commands.py"
+        - "tests/test_workerctl.py"
+        - "README.md"
+      summary: "Implemented dispatch --lease-seconds and verified it controls command claim expiry through existing DB lease support."
+      commands:
+        - cmd: "python3 -m unittest tests.test_workerctl.DispatchTests.test_dispatch_cli_help_exposes_watch_iterations tests.test_workerctl.DispatchTests.test_dispatch_cli_lease_seconds_controls_command_claim_expiry tests.test_workerctl.DispatchTests.test_dispatch_recovers_stale_claim_without_side_effect_by_requeueing -v"
+          status: pass
+          summary: "3 tests"
+        - cmd: "python3 -m unittest tests.test_workerctl -v"
+          status: pass
+          summary: "435 tests"
+        - cmd: "npm test"
+          status: pass
+          summary: "17 tests"
+        - cmd: "npm run build"
+          status: pass
+        - cmd: "python3 -m py_compile workerctl/*.py"
+          status: pass
+        - cmd: "git diff --check"
+          status: pass
+
+  - id: T999
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Final audit: decide whether all dispatch-gap findings are completed, superseded, or explicitly deferred with adequate evidence."
+    inputs:
+      - "All done task receipts"
+      - "Issue hygiene receipt"
+      - "Current dirty diff"
+      - "Latest verification commands"
+      - "Goal oracle"
+    constraints:
+      - "Read-only."
+      - "Do not implement."
+      - "Reject completion if any required Worker task is still queued or active."
+      - "Reject completion if #127, #128, or #129 lacks evidence."
+      - "Reject completion if a deferred rough edge lacks a concrete follow-up artifact."
+      - "Reject completion if tests were skipped without a recorded reason."
+    expected_output:
+      - "complete | not_complete"
+      - "full_outcome_complete: true | false"
+      - "Gap-by-gap evidence matrix."
+      - "Missing evidence and next task if not complete."
+    receipt:
+      result: done
+      note: "notes/T999-judge-final-audit.md"
+      decision: "complete"
+      full_outcome_complete: true
+      summary: "All named dispatch gaps are implemented, superseded, or deferred with concrete follow-up evidence. No required Worker tasks remain."
+      evidence:
+        - "#127, #128, and #129 are closed with evidence comments."
+        - "#130 is open for deferred hard continuation-review isolation."
+        - "T011 implemented dispatch --lease-seconds after the first final audit found lease tuning lacked disposition."
+        - "Final verification passed: Python 435 tests, npm 17 tests, dashboard build, py_compile, git diff --check."
+
+checks:
+  dirty_fingerprint: unknown
+  last_verification:
+    result: pass
+    task: T011
+    commands:
+      - "python3 -m unittest tests.test_workerctl -v"
+      - "npm test"
+      - "npm run build"
+      - "python3 -m py_compile workerctl/*.py"
+      - "git diff --check"

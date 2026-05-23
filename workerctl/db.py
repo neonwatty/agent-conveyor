@@ -3088,6 +3088,45 @@ def insert_acceptance_criterion(
     return criterion_id
 
 
+def seed_manager_acceptance_criteria(
+    conn: sqlite3.Connection,
+    *,
+    task_id: str,
+    criteria: list[str] | tuple[str, ...] | None,
+) -> list[int]:
+    """Seed accepted ledger criteria from manager config without changing existing rows."""
+    inserted: list[int] = []
+    seen: set[str] = set()
+    for raw in criteria or []:
+        criterion = raw.strip() if isinstance(raw, str) else ""
+        if not criterion or criterion in seen:
+            continue
+        seen.add(criterion)
+        existing = conn.execute(
+            """
+            select id
+            from acceptance_criteria
+            where task_id = ? and criterion = ?
+            limit 1
+            """,
+            (task_id, criterion),
+        ).fetchone()
+        if existing is not None:
+            continue
+        inserted.append(
+            insert_acceptance_criterion(
+                conn,
+                task_id=task_id,
+                criterion=criterion,
+                status="accepted",
+                source="manager_inferred",
+                rationale="Seeded from manager acceptance configuration.",
+                evidence={"source": "manager_config"},
+            )
+        )
+    return inserted
+
+
 def acceptance_criteria_for_task(
     conn: sqlite3.Connection,
     *,

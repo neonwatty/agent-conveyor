@@ -7,6 +7,9 @@ import {
   normalizeServerOptions,
 } from "./workerctl.ts";
 import {
+  dispatchChainEntries,
+} from "./index.ts";
+import {
   encodeTerminalResizeMessage,
   parseTerminalControlMessage,
 } from "./terminal.ts";
@@ -51,6 +54,90 @@ test("builds task audit workerctl arguments", () => {
     "--json",
     "--path",
     "/tmp/workerctl.db",
+  ]);
+});
+
+test("groups dispatch correlation chains with command attempts for dashboard display", () => {
+  const chains = dispatchChainEntries({
+    command_attempts: [
+      {
+        command_id: "cmd-1",
+        dispatcher_id: "dispatcher-a",
+        error: "tmux failed after paste",
+        id: 7,
+        side_effect_completed: false,
+        side_effect_started: true,
+        state: "failed",
+      },
+      {
+        command_id: "cmd-2",
+        dispatcher_id: "dispatcher-b",
+        id: 8,
+        side_effect_completed: true,
+        side_effect_started: true,
+        state: "succeeded",
+      },
+    ],
+    commands: [
+      {
+        correlation_id: "corr-1",
+        created_at: "2026-05-23T10:00:00Z",
+        id: "cmd-1",
+        state: "failed",
+        type: "notify_manager",
+      },
+      {
+        correlation_id: "corr-2",
+        created_at: "2026-05-23T10:01:00Z",
+        id: "cmd-2",
+        state: "succeeded",
+        type: "nudge_worker",
+      },
+    ],
+    correlation_chains: [
+      {
+        attempt_ids: [7],
+        command_id: "cmd-1",
+        command_state: "failed",
+        command_type: "notify_manager",
+        correlation_id: "corr-1",
+        manager_cycle_id: 11,
+        manager_decision_id: 12,
+        routed_notification_ids: [21, 22],
+      },
+      {
+        attempt_ids: [8],
+        command_id: "cmd-2",
+        command_state: "succeeded",
+        command_type: "nudge_worker",
+        correlation_id: "corr-2",
+        manager_cycle_id: null,
+        manager_decision_id: null,
+        routed_notification_ids: [],
+      },
+    ],
+    routed_notifications: [],
+  });
+
+  assert.equal(chains.length, 2);
+  assert.equal(chains[0].command_id, "cmd-2");
+  assert.equal(chains[0].summary, "nudge_worker cmd-2");
+  assert.equal(chains[0].side_effect_risk, false);
+  assert.equal(chains[1].command_id, "cmd-1");
+  assert.equal(chains[1].correlation_id, "corr-1");
+  assert.equal(chains[1].manager_cycle_id, 11);
+  assert.equal(chains[1].manager_decision_id, 12);
+  assert.equal(chains[1].notification_count, 2);
+  assert.equal(chains[1].side_effect_risk, true);
+  assert.deepEqual(chains[1].attempts, [
+    {
+      dispatcher_id: "dispatcher-a",
+      error: "tmux failed after paste",
+      id: 7,
+      side_effect_completed: false,
+      side_effect_started: true,
+      state: "failed",
+    },
   ]);
 });
 

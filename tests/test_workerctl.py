@@ -1688,6 +1688,60 @@ class DispatchTests(unittest.TestCase):
             self.assertEqual([event["attributes"]["processed_count"] for event in heartbeats], [1, 1])
             self.assertEqual(sent, ["first", "second"])
 
+    def test_dispatch_cli_help_exposes_watch_iterations(self):
+        proc = subprocess.run(
+            [sys.executable, "-m", "workerctl", "dispatch", "--help"],
+            capture_output=True,
+            text=True,
+            cwd=str(ROOT),
+        )
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("--watch-iterations", proc.stdout)
+        self.assertIn("--lease-seconds", proc.stdout)
+
+    def test_dispatch_cli_lease_seconds_controls_command_claim_expiry(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn, db_path = self.open_db(tmpdir)
+            self.setup_bound_task(conn)
+            command_id = worker_db.create_command(
+                conn,
+                command_type="nudge_worker",
+                task_id="task-dispatch",
+                payload={"message": "lease check"},
+            )
+            conn.commit()
+
+            def fake_send(conn, *, session_name, text, dry_run=False, side_effect_audit=None):
+                if side_effect_audit is not None:
+                    side_effect_audit["side_effect_started"] = True
+                    side_effect_audit["side_effect_completed"] = True
+                return {"target": session_name}
+
+            args = argparse.Namespace(
+                dispatcher_id="dispatch-lease",
+                dry_run=False,
+                interval=0,
+                json=True,
+                lease_seconds=17,
+                limit=1,
+                once=True,
+                path=str(db_path),
+                type="nudge_worker",
+                watch=False,
+            )
+            with mock.patch.object(worker_tmux, "send_text_to_session", side_effect=fake_send):
+                with contextlib.redirect_stdout(io.StringIO()):
+                    commands.command_dispatch(args)
+
+            command_row = conn.execute(
+                "select claimed_at, claim_expires_at from commands where id = ?",
+                (command_id,),
+            ).fetchone()
+            claimed_at = datetime.fromisoformat(command_row["claimed_at"].replace("Z", "+00:00"))
+            claim_expires_at = datetime.fromisoformat(command_row["claim_expires_at"].replace("Z", "+00:00"))
+            self.assertEqual((claim_expires_at - claimed_at).total_seconds(), 17)
+
     def test_dispatch_recovers_stale_claim_without_side_effect_by_requeueing(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             conn, db_path = self.open_db(tmpdir)
@@ -1877,6 +1931,41 @@ class ClassifierTests(unittest.TestCase):
 
         self.assertIsNotNone(result)
         self.assertEqual(result["pattern"], "plan_prompt")
+
+    def test_busy_wait_ignores_historical_approval_prompt_transcript_text(self):
+        result = classify.classify_busy_wait(
+            "\n".join(
+                [
+                    "Earlier cycle summary:",
+                    "notable_pane_pattern: approval_prompt",
+                    "recommended_action: inspect_or_approve",
+                    "The worker is continuing normal implementation now.",
+                    "No active prompt is waiting at the bottom of the pane.",
+                ]
+            ),
+            status_age=120,
+            busy_wait_seconds=60,
+        )
+
+        self.assertIsNone(result)
+
+    def test_busy_wait_detects_active_approval_prompt(self):
+        result = classify.classify_busy_wait(
+            "\n".join(
+                [
+                    "Command requires approval before continuing.",
+                    "Allow command to run?",
+                    "1. Yes, allow",
+                    "2. No, deny",
+                ]
+            ),
+            status_age=120,
+            busy_wait_seconds=60,
+        )
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result["pattern"], "approval_prompt")
+        self.assertEqual(result["recommended_action"], "inspect_or_approve")
 
     def test_classifier_suppresses_long_running_interruptible_with_recent_events(self):
         # status_age high (would normally trigger long_running_interruptible),
@@ -2973,6 +3062,11 @@ class CliTests(unittest.TestCase):
             with worker_db.connect(db_path) as conn:
                 worker_db.initialize_database(conn)
                 task_id = worker_db.create_task(conn, name="failure-view-task", goal="Inspect failures.")
+                other_task_id = worker_db.create_task(conn, name="other-failure-task", goal="Old unrelated failure.")
+                conn.execute(
+                    "update tasks set state = 'done', updated_at = ? where id = ?",
+                    ("2026-05-20T09:00:00Z", other_task_id),
+                )
                 failed_cycle = worker_db.create_manager_cycle(
                     conn,
                     task_id=task_id,
@@ -3004,6 +3098,34 @@ class CliTests(unittest.TestCase):
                     state="failed",
                     error="send failed",
                     timestamp="2026-05-21T10:01:05Z",
+                )
+                other_cycle = worker_db.create_manager_cycle(
+                    conn,
+                    task_id=other_task_id,
+                    manager_id=None,
+                    timestamp="2026-05-20T10:00:00Z",
+                )
+                worker_db.finish_manager_cycle(
+                    conn,
+                    cycle_id=other_cycle,
+                    state="failed",
+                    status={"error_type": "RuntimeError", "kind": "session_cycle"},
+                    error="old unrelated boom",
+                    timestamp="2026-05-20T10:00:05Z",
+                )
+                other_command_id = worker_db.create_command(
+                    conn,
+                    command_type="notify_manager",
+                    payload={"message": "old unrelated secret payload"},
+                    task_id=other_task_id,
+                    timestamp="2026-05-20T10:01:00Z",
+                )
+                worker_db.finish_command(
+                    conn,
+                    command_id=other_command_id,
+                    state="failed",
+                    error="old unrelated send failed",
+                    timestamp="2026-05-20T10:01:05Z",
                 )
                 worker_db.emit_telemetry_event(
                     conn,
@@ -3068,8 +3190,106 @@ class CliTests(unittest.TestCase):
             self.assertIn("failed_commands", alert_types)
             self.assertIn("open_accepted_criteria", alert_types)
             self.assertNotIn("secret failure payload", proc.stdout)
+            self.assertNotIn("old unrelated secret payload", proc.stdout)
             self.assertNotIn("Open failure criterion text", proc.stdout)
             self.assertNotIn("failure pane content", proc.stdout)
+
+            scoped = self.run_workerctl(
+                "telemetry",
+                "failures",
+                "--task",
+                "failure-view-task",
+                "--active-only",
+                "--json",
+                "--limit",
+                "10",
+                "--path",
+                str(db_path),
+            )
+
+            self.assertEqual(scoped.returncode, 0, scoped.stderr)
+            scoped_view = json.loads(scoped.stdout)
+            self.assertEqual(scoped_view["filters"]["task_id"], task_id)
+            self.assertTrue(scoped_view["filters"]["active_only"])
+            self.assertEqual([row["id"] for row in scoped_view["failed_cycles"]], [failed_cycle])
+            self.assertEqual([row["id"] for row in scoped_view["failed_commands"]], [command_id])
+            self.assertNotIn("other-failure-task", scoped.stdout)
+
+    def test_telemetry_failures_view_scopes_by_window_and_active_tasks(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            now = datetime.now(timezone.utc).replace(microsecond=0)
+            recent = now - timedelta(minutes=30)
+            old = now - timedelta(days=10)
+
+            def iso(value):
+                return value.isoformat().replace("+00:00", "Z")
+
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                recent_task_id = worker_db.create_task(conn, name="recent-failure-task", goal="Recent failure.")
+                old_task_id = worker_db.create_task(conn, name="old-failure-task", goal="Old failure.")
+                conn.execute(
+                    "update tasks set state = 'done', updated_at = ? where id = ?",
+                    (iso(old), old_task_id),
+                )
+                recent_cycle = worker_db.create_manager_cycle(
+                    conn,
+                    task_id=recent_task_id,
+                    manager_id=None,
+                    timestamp=iso(recent),
+                )
+                worker_db.finish_manager_cycle(
+                    conn,
+                    cycle_id=recent_cycle,
+                    state="failed",
+                    status={"error_type": "RuntimeError", "kind": "session_cycle"},
+                    error="recent boom",
+                    timestamp=iso(recent + timedelta(seconds=5)),
+                )
+                old_cycle = worker_db.create_manager_cycle(
+                    conn,
+                    task_id=old_task_id,
+                    manager_id=None,
+                    timestamp=iso(old),
+                )
+                worker_db.finish_manager_cycle(
+                    conn,
+                    cycle_id=old_cycle,
+                    state="failed",
+                    status={"error_type": "RuntimeError", "kind": "session_cycle"},
+                    error="old boom",
+                    timestamp=iso(old + timedelta(seconds=5)),
+                )
+                conn.commit()
+
+            windowed = self.run_workerctl(
+                "telemetry",
+                "failures",
+                "--window",
+                "2h",
+                "--json",
+                "--path",
+                str(db_path),
+            )
+
+            self.assertEqual(windowed.returncode, 0, windowed.stderr)
+            windowed_view = json.loads(windowed.stdout)
+            self.assertEqual(windowed_view["filters"]["window"]["label"], "2h")
+            self.assertEqual([row["id"] for row in windowed_view["failed_cycles"]], [recent_cycle])
+
+            active = self.run_workerctl(
+                "telemetry",
+                "failures",
+                "--active-only",
+                "--json",
+                "--path",
+                str(db_path),
+            )
+
+            self.assertEqual(active.returncode, 0, active.stderr)
+            active_view = json.loads(active.stdout)
+            self.assertEqual([row["id"] for row in active_view["failed_cycles"]], [recent_cycle])
 
     def test_telemetry_operator_snapshot_empty_db_is_healthy(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -4179,6 +4399,55 @@ Deferred follow-up criteria:
             self.assertEqual(records[0]["id"], command_id)
             self.assertEqual(records[0]["type"], "task_nudge")
             self.assertEqual(records[0]["task_name"], "task-a")
+
+    def test_commands_cli_can_include_attempt_history(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                task_id = worker_db.create_task(conn, name="task-a", goal="Do task A.")
+                command_id = worker_db.create_command(
+                    conn,
+                    command_type="notify_manager",
+                    payload={"message": "status"},
+                    task_id=task_id,
+                    timestamp="2026-05-23T10:00:00Z",
+                )
+                claimed = worker_db.claim_next_dispatch_command(
+                    conn,
+                    dispatcher_id="dispatch-test",
+                    command_types=["notify_manager"],
+                    timestamp="2026-05-23T10:00:01Z",
+                )
+                worker_db.finish_command_attempt(
+                    conn,
+                    attempt_id=claimed["attempt"]["id"],
+                    state="failed",
+                    error="tmux send failed",
+                    side_effect_started=True,
+                    timestamp="2026-05-23T10:00:02Z",
+                )
+                conn.commit()
+
+            proc = self.run_workerctl(
+                "commands",
+                "--task",
+                "task-a",
+                "--attempts",
+                "--json",
+                "--path",
+                str(db_path),
+            )
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            records = json.loads(proc.stdout)
+            self.assertEqual(records[0]["id"], command_id)
+            self.assertEqual(len(records[0]["attempt_history"]), 1)
+            attempt = records[0]["attempt_history"][0]
+            self.assertEqual(attempt["dispatcher_id"], "dispatch-test")
+            self.assertEqual(attempt["state"], "failed")
+            self.assertEqual(attempt["error"], "tmux send failed")
+            self.assertTrue(attempt["side_effect_started"])
 
     def test_commands_cli_filters_by_type_and_state(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -13775,6 +14044,8 @@ class PairCommandTests(unittest.TestCase):
 
             def recorder(*, name, role, task=None, initial_prompt=None, **kwargs):
                 recorded.append({"name": name, "role": role, "task": task, "initial_prompt": initial_prompt})
+                rollout_path = Path(tmpdir) / f"{name}.jsonl"
+                rollout_path.write_text("", encoding="utf8")
                 conn = worker_db.connect(db_path)
                 worker_db.initialize_database(conn)
                 try:
@@ -13782,7 +14053,7 @@ class PairCommandTests(unittest.TestCase):
                         conn,
                         name=name,
                         role=role,
-                        codex_session_path=f"/tmp/{name}.jsonl",
+                        codex_session_path=str(rollout_path),
                         codex_session_id=f"codex-id-{name}",
                         pid=10000 + hash(name) % 1000,
                         cwd=kwargs.get("cwd", "/tmp"),
@@ -13798,7 +14069,7 @@ class PairCommandTests(unittest.TestCase):
                     "session_id": session_id,
                     "pid": 10000 + hash(name) % 1000,
                     "tmux_session": f"codex-{name}",
-                    "codex_session_path": f"/tmp/{name}.jsonl",
+                    "codex_session_path": str(rollout_path),
                     "codex_session_id": f"codex-id-{name}",
                     "cwd": kwargs.get("cwd", "/tmp"),
                 }
@@ -13836,6 +14107,7 @@ class PairCommandTests(unittest.TestCase):
             self.assertTrue(output["run_id"].startswith("run-"))
             self.assertTrue(output["manager_config_seeded"])
             self.assertTrue(output["manager_config_seeded_by_pair"])
+            self.assertEqual(output["manager_acceptance_criteria_seeded"], 1)
             manager_spawn = next(r for r in recorded if r["role"] == "manager")
             self.assertIn("Manager config has already been recorded for this task.", manager_spawn["initial_prompt"])
             self.assertIn(
@@ -13849,6 +14121,7 @@ class PairCommandTests(unittest.TestCase):
             try:
                 task_row = worker_db.task_row(conn, task="seeded-manager-task")
                 config = worker_db.manager_config(conn, task_id=task_row["id"])
+                criteria = worker_db.acceptance_criteria_for_task(conn, task_id=task_row["id"])
                 event = conn.execute(
                     "select payload_json from events where type='manager_config_recorded' and task_id = ?",
                     (task_row["id"],),
@@ -13859,12 +14132,142 @@ class PairCommandTests(unittest.TestCase):
             self.assertEqual(config["objective"], "Drive the worker from seeded criteria.")
             self.assertEqual(config["guidelines"], ["Use session-nudge first."])
             self.assertEqual(config["acceptance_criteria"], ["Worker receipt is verified."])
+            self.assertEqual(len(criteria), 1)
+            self.assertEqual(criteria[0]["criterion"], "Worker receipt is verified.")
+            self.assertEqual(criteria[0]["status"], "accepted")
+            self.assertEqual(criteria[0]["source"], "manager_inferred")
+            self.assertEqual(criteria[0]["rationale"], "Seeded from manager acceptance configuration.")
+            self.assertEqual(criteria[0]["evidence"], {"source": "manager_config"})
             self.assertEqual(config["reference_paths"], ["docs/live-qa-log.md"])
             self.assertEqual(config["permissions"]["worker_session"], ["clear", "compact"])
             self.assertTrue(config["require_acks"])
             self.assertIn("manager-ack seeded-manager-task --from-stdin", manager_spawn["initial_prompt"])
             self.assertIsNotNone(event)
             self.assertEqual(json.loads(event["payload_json"])["source"], "pair")
+
+            from workerctl import supervise_cycle
+
+            conn = worker_db.connect(db_path)
+            try:
+                binding = worker_db.active_binding_for_task(conn, task_name="seeded-manager-task")
+                worker_db.insert_task_acknowledgement(
+                    conn,
+                    task_id=binding["task_id"],
+                    binding_id=binding["binding_id"],
+                    role="worker",
+                    payload={"ready_to_start": True},
+                )
+                worker_db.insert_task_acknowledgement(
+                    conn,
+                    task_id=binding["task_id"],
+                    binding_id=binding["binding_id"],
+                    role="manager",
+                    payload={"ready_to_supervise": True},
+                )
+                conn.commit()
+                cycle = supervise_cycle.run_cycle(
+                    conn,
+                    task_name="seeded-manager-task",
+                    now="2026-05-23T12:00:00Z",
+                )
+            finally:
+                conn.close()
+            negotiation = cycle["manager_context"]["criteria_negotiation"]
+            self.assertFalse(negotiation["needed"])
+            self.assertEqual(negotiation["reason"], "active_criteria_present")
+
+    def test_pair_manager_acceptance_seed_preserves_existing_user_criteria(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = self._setup_db(tmpdir)
+            conn = worker_db.connect(db_path)
+            try:
+                task_id = worker_db.create_task(
+                    conn,
+                    name="existing-criteria-task",
+                    goal="Do not overwrite criteria.",
+                )
+                worker_db.insert_acceptance_criterion(
+                    conn,
+                    task_id=task_id,
+                    criterion="Worker receipt is verified.",
+                    status="proposed",
+                    source="user_requested",
+                    rationale="User-authored row must remain untouched.",
+                    evidence={"source": "user"},
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            def recorder(*, name, role, **kwargs):
+                conn = worker_db.connect(db_path)
+                worker_db.initialize_database(conn)
+                try:
+                    session_id = worker_db.register_session(
+                        conn,
+                        name=name,
+                        role=role,
+                        codex_session_path=f"/tmp/{name}.jsonl",
+                        codex_session_id=f"codex-id-{name}",
+                        pid=10000 + hash(name) % 1000,
+                        cwd=kwargs.get("cwd", "/tmp"),
+                        tmux_session=f"codex-{name}",
+                    )
+                    conn.commit()
+                finally:
+                    conn.close()
+                return {
+                    "name": name,
+                    "role": role,
+                    "session_id": session_id,
+                    "pid": 10000 + hash(name) % 1000,
+                    "tmux_session": f"codex-{name}",
+                    "codex_session_path": f"/tmp/{name}.jsonl",
+                    "codex_session_id": f"codex-id-{name}",
+                    "cwd": kwargs.get("cwd", "/tmp"),
+                }
+
+            args = argparse.Namespace(
+                task="existing-criteria-task",
+                worker_name="w1",
+                manager_name="m1",
+                cwd=tmpdir,
+                task_prompt="Do the worker part",
+                task_goal=None,
+                task_summary=None,
+                manager_mode=None,
+                manager_objective=None,
+                manager_guideline=[],
+                manager_acceptance=["Worker receipt is verified."],
+                manager_reference=[],
+                manager_allow_pr=False,
+                manager_allow_merge_green=False,
+                manager_allow_worker_compact_clear=False,
+                manager_require_acks=False,
+                manager_permissions_json=None,
+                sandbox="danger-full-access",
+                ask_for_approval="never",
+                timeout_seconds=30,
+                path=str(db_path),
+            )
+            with mock.patch.object(commands, "_spawn_codex_and_register", side_effect=recorder):
+                stdout_capture = io.StringIO()
+                with contextlib.redirect_stdout(stdout_capture):
+                    result = commands.command_pair(args)
+
+            self.assertEqual(result, 0)
+            output = json.loads(stdout_capture.getvalue())
+            self.assertEqual(output["manager_acceptance_criteria_seeded"], 0)
+            conn = worker_db.connect(db_path)
+            try:
+                rows = worker_db.acceptance_criteria_for_task(conn, task_id=task_id)
+            finally:
+                conn.close()
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["criterion"], "Worker receipt is verified.")
+            self.assertEqual(rows[0]["status"], "proposed")
+            self.assertEqual(rows[0]["source"], "user_requested")
+            self.assertEqual(rows[0]["rationale"], "User-authored row must remain untouched.")
 
     def test_pair_subparser_exists(self):
         proc = subprocess.run(
@@ -14121,7 +14524,7 @@ class PairCommandTests(unittest.TestCase):
                 cwd=str(ROOT),
             )
             self.assertNotEqual(bad_review.returncode, 0)
-            self.assertIn("reviewer subagent session must be isolated", bad_review.stderr)
+            self.assertIn("reviewer subagent session must be distinct", bad_review.stderr)
 
             review_proc = subprocess.run(
                 [
@@ -14160,6 +14563,30 @@ class PairCommandTests(unittest.TestCase):
             self.assertTrue(review["operator_routing_required"])
             self.assertEqual(review["agreement"], "divergent")
             self.assertEqual(review["verdict"], "stop")
+            conn = worker_db.connect(db_path)
+            try:
+                telemetry = worker_db.query_telemetry_events(
+                    conn,
+                    task_id=task_id,
+                    event_type="continuation_review_recorded",
+                    limit=10,
+                )
+            finally:
+                conn.close()
+            self.assertEqual(len(telemetry), 1)
+            self.assertEqual(telemetry[0]["severity"], "warning")
+            self.assertEqual(telemetry[0]["correlation"]["correlation_id"], "corr-cli")
+            self.assertEqual(telemetry[0]["correlation"]["review_id"], review["id"])
+            self.assertEqual(telemetry[0]["attributes"]["agreement"], "divergent")
+            self.assertEqual(telemetry[0]["attributes"]["verdict"], "stop")
+            self.assertTrue(telemetry[0]["attributes"]["operator_routing_required"])
+            self.assertTrue(telemetry[0]["attributes"]["payload_redacted"])
+            self.assertTrue(telemetry[0]["attributes"]["has_addendum"])
+            self.assertTrue(telemetry[0]["attributes"]["has_rationale"])
+            self.assertTrue(telemetry[0]["attributes"]["reviewer_session_distinct"])
+            telemetry_json = json.dumps(telemetry[0], sort_keys=True)
+            self.assertNotIn("Worker and manager propose incompatible next steps.", telemetry_json)
+            self.assertNotIn("Ask the operator before proceeding.", telemetry_json)
 
             allowed_read = subprocess.run(
                 [
@@ -14360,6 +14787,27 @@ class PairCommandTests(unittest.TestCase):
             self.assertEqual(review["subagent_run"]["reviewer_session_id"], "reviewer-session")
             self.assertEqual(review["subagent_run"]["manager_session_id"], "manager-session")
             self.assertIn("worker_continuation", review["subagent_run"]["allowed_context"])
+            conn = worker_db.connect(db_path)
+            try:
+                telemetry = worker_db.query_telemetry_events(
+                    conn,
+                    task_id=task_id,
+                    event_type="continuation_review_recorded",
+                    limit=10,
+                )
+            finally:
+                conn.close()
+            self.assertEqual(len(telemetry), 1)
+            self.assertEqual(telemetry[0]["severity"], "info")
+            self.assertEqual(telemetry[0]["attributes"]["reviewer_status"], "succeeded")
+            self.assertEqual(telemetry[0]["attributes"]["reviewer_returncode"], 0)
+            self.assertEqual(telemetry[0]["attributes"]["manager_rollout_access"], False)
+            self.assertIn("worker_continuation", telemetry[0]["attributes"]["allowed_context"])
+            telemetry_json = json.dumps(telemetry[0], sort_keys=True)
+            self.assertNotIn("run focused tests", telemetry_json)
+            self.assertNotIn("run full tests", telemetry_json)
+            self.assertNotIn("Prefer full verification.", telemetry_json)
+            self.assertNotIn("Allowed context reviewed.", telemetry_json)
 
             replay_proc = subprocess.run(
                 [

@@ -192,7 +192,8 @@ tmux attach -t codex-live-test
   `--manager-acceptance`, `--manager-reference`, or manager permission flags),
   `pair` records that config before launching the manager and the bootstrap tells
   the manager to start supervising with `cycle` instead of asking setup
-  questions first.
+  questions first. Manager acceptance entries are also seeded into the living
+  acceptance criteria ledger when they do not already exist for the task.
   If the manager or bind fails after the worker is spawned, the worker remains
   registered and can be cleaned up with `workerctl deregister`.
 - `register-worker --name N [--pid P | --codex-session PATH] [--cwd D] [--tmux-session S]` —
@@ -303,7 +304,7 @@ tmux attach -t codex-live-test
   proposal.
 - `continuation <task> --review --from-stdin [--correlation-id ID]` — Record a
   structured reviewer verdict over the paired continuation proposals. This
-  requires `context.spawn_reviewer` permission and reviewer-isolation metadata
+  requires `context.spawn_reviewer` permission and reviewer separation metadata
   (`subagent_run.reviewer_session_id` distinct from the manager and
   `manager_rollout_access=false`). Divergent reviews are routed for operator
   attention unless `--nudge-on-completion auto-proceed` is configured.
@@ -399,13 +400,16 @@ tmux attach -t codex-live-test
   Useful for auditing the shadow signal against the JSON state.
 - `dispatch [--once|--watch] [--limit N] [--interval SECONDS]
   [--dispatcher-id ID] [--type notify_manager|nudge_worker|worker_task_complete]
-  [--dry-run] [--json]` — Run Dispatch, the mechanical routing/actuation role.
+  [--watch-iterations N] [--lease-seconds N] [--dry-run] [--json]` — Run
+  Dispatch, the mechanical routing/actuation role.
   `worker_task_complete` routing reads from `codex_events`, records
   deduplicated `routed_notifications` keyed by the source event, and notifies
   the bound manager without deciding task success. Explicit `notify_manager`
   and `nudge_worker` command rows are atomically claimed, executed, and recorded
   through `command_attempts` with conservative side-effect metadata. `--watch`
-  repeats polling with heartbeat telemetry; `--once` performs one pass.
+  repeats polling with heartbeat telemetry; `--watch-iterations` bounds a watch
+  run for scripts and verification; `--lease-seconds` tunes command claim
+  recovery; `--once` performs one pass.
 
 ### Actuation
 
@@ -429,8 +433,9 @@ tmux attach -t codex-live-test
   something. `full-transcript` is blocked unless `--include-content` is passed.
 - `mutation-audit <task>` — Manager decisions and their consequences.
 - `events <name>` — Worker events log.
-- `commands [--task T] [--type T] [--state S]` — Durable side-effect commands
-  log.
+- `commands [--task T] [--type T] [--state S] [--attempts]` — Durable
+  side-effect commands log. Use `--attempts` to include per-dispatcher attempt
+  history.
 - `epilogue <task> --step run-tools|draft-pr|subagent-review|record-handoff
   [--json] [--correlation-id ID]` — Run one configured epilogue step and record
   its durable state. Use `--list` or `--status` to inspect configured steps and
@@ -448,7 +453,9 @@ tmux attach -t codex-live-test
 - `telemetry failures --json` — Print an operator failure triage view across
   tasks: recent failed cycles, failed commands, ingest errors/skipped lines,
   pane capture failures, open accepted criteria, active task/session health, and
-  retained storage counts without raw transcript or prompt content.
+  retained storage counts without raw transcript or prompt content. Use `--task`,
+  `--run`, `--active-only`, or `--window 2h` to narrow the failure view for
+  recency or active-task triage.
 - `telemetry metrics --window 24h --json` — Print bounded JSON rollups for
   local telemetry and related tables: active tasks/sessions, cycle and command
   success/failure counts, ingest/skipped-line totals, criteria counts,
@@ -657,10 +664,13 @@ Current dispatch state:
   invalid-payload failure before side effects, and conservative tmux
   side-effect started/completed flags.
 - `dispatch --watch` continuously repeats the same mechanical polling loop with
-  dispatcher identity and heartbeat telemetry.
+  dispatcher identity and heartbeat telemetry; `--watch-iterations N` bounds the
+  run and `--lease-seconds N` controls when attempted command claims become
+  recoverable.
 - Replay/audit surfaces include routed notifications, command attempts, and
-  correlation chains where the data exists. Dashboard grouping for dispatch
-  correlation chains is intentionally tracked as a focused follow-up.
+  correlation chains where the data exists. The dashboard groups bound-task
+  dispatch correlation chains with command state, attempt counts, notification
+  counts, decision/cycle ids, and side-effect risk.
 
 The adjacent completion-contract surfaces are separate from Dispatch:
 
@@ -669,8 +679,9 @@ The adjacent completion-contract surfaces are separate from Dispatch:
 - Epilogues are named post-completion steps that can gate `finish-task`.
 - Continuations persist worker-first and manager-independent "what's next"
   proposals plus a recorded reviewer verdict. The CLI enforces ordering,
-  redaction, permission checks, reviewer-isolation metadata, and can run an
-  isolated reviewer command through `continuation-reviewer`.
+  redaction, permission checks, reviewer separation metadata, and can run an
+  independent restricted-context reviewer command through
+  `continuation-reviewer`. This is not a hard process or filesystem sandbox.
 
 ## Schema
 
