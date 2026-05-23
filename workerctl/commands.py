@@ -3554,9 +3554,11 @@ def _record_continuation_review(
     agreement = payload["agreement"]
     verdict = payload["verdict"]
     nudge_mode = clean_nudge_on_completion((config or {}).get("nudge_on_completion") if config else None)
-    operator_routing_required = agreement == "divergent" and nudge_mode != "auto-proceed"
+    payload_subagent_run = payload["subagent_run"]
+    reviewer_failed = verdict == "stop" and payload_subagent_run.get("status") == "failed"
+    operator_routing_required = reviewer_failed or (agreement == "divergent" and nudge_mode != "auto-proceed")
     subagent_run = {
-        **payload["subagent_run"],
+        **payload_subagent_run,
         "operator_routing_required": operator_routing_required,
         "nudge_on_completion": nudge_mode,
     }
@@ -3610,6 +3612,7 @@ def _record_continuation_review(
             "nudge_on_completion": nudge_mode,
             "operator_routing_required": operator_routing_required,
             "payload_redacted": True,
+            "reviewer_failure_routing_forced": reviewer_failed,
             "reviewer_duration_ms": subagent_run.get("duration_ms"),
             "reviewer_returncode": subagent_run.get("returncode"),
             "reviewer_session_distinct": subagent_run.get("reviewer_session_id") != subagent_run.get("manager_session_id"),
