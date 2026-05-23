@@ -8,7 +8,7 @@ goal:
   slug: "continuation-reviewer-gap-hardening"
   kind: specific
   tranche: "Cover the remaining continuation-reviewer hard-isolation behavior and QA gaps found after PR #132."
-  status: active
+  status: done
   oracle:
     signal: "A final Judge audit maps each independent audit gap to implemented/tested, deliberately out of scope, or separately tracked follow-up, with full local verification green."
     cadence: "after Scout evidence, after Judge scope decision, after Worker implementation, after issue/PR hygiene"
@@ -67,7 +67,7 @@ visual_board:
     url: "http://goalbuddy.localhost:41737/continuation-reviewer-gap-hardening/"
     command: "npx goalbuddy board /Users/neonwatty/Desktop/codex-terminal-manager/docs/goals/continuation-reviewer-gap-hardening"
 
-active_task: T005
+active_task: null
 
 tasks:
   - id: T001
@@ -212,7 +212,7 @@ tasks:
   - id: T005
     type: pm
     assignee: PM
-    status: active
+    status: done
     reasoning_hint: default
     objective: "Perform issue/PR hygiene for the completed hardening work and any deliberately deferred broader containment scope."
     inputs:
@@ -226,12 +226,18 @@ tasks:
     expected_output:
       - "PR or issue links as needed."
       - "Receipt explaining what was published, deferred, or intentionally left local."
-    receipt: null
+    receipt:
+      result: done
+      note: "notes/T005-issue-pr-hygiene.md"
+      summary: "Opened PR #134 for the hardening patch and issue #133 for broader .codex-workers containment scope. Did not reopen #130."
+      external_artifacts:
+        pr: "https://github.com/neonwatty/codex-terminal-manager/pull/134"
+        issue: "https://github.com/neonwatty/codex-terminal-manager/issues/133"
 
   - id: T999
     type: judge
     assignee: Judge
-    status: queued
+    status: done
     reasoning_hint: high
     objective: "Final audit: decide whether all continuation-reviewer hardening gaps from the independent audits are covered."
     inputs:
@@ -250,7 +256,12 @@ tasks:
       - "full_outcome_complete: true | false"
       - "Gap-by-gap evidence matrix."
       - "Missing evidence and next task if not complete."
-    receipt: null
+    receipt:
+      result: done
+      note: "notes/T999-final-audit.md"
+      decision: complete
+      full_outcome_complete: true
+      summary: "All continuation-reviewer gap-hardening items are either implemented/tested or deliberately scoped to follow-up issue #133. Local verification and PR #134 checks passed."
 
 checks:
   dirty_fingerprint: unknown
