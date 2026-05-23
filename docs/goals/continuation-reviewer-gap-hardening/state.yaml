@@ -1,0 +1,276 @@
+# GoalBuddy v2 state.yaml
+# Board truth lives here. goal.md is the editable charter; notes/ holds long receipts only.
+
+version: 2
+
+goal:
+  title: "Continuation Reviewer Gap Hardening"
+  slug: "continuation-reviewer-gap-hardening"
+  kind: specific
+  tranche: "Cover the remaining continuation-reviewer hard-isolation behavior and QA gaps found after PR #132."
+  status: done
+  oracle:
+    signal: "A final Judge audit maps each independent audit gap to implemented/tested, deliberately out of scope, or separately tracked follow-up, with full local verification green."
+    cadence: "after Scout evidence, after Judge scope decision, after Worker implementation, after issue/PR hygiene"
+    final_proof: "Final audit receipt says full_outcome_complete=true and verification includes focused tests, full workerctl unittest suite, py_compile, diff check, and rc-check."
+  intake:
+    original_request: "make a detailed plan with $goalbuddy:goal-prep to cover all these gaps"
+    interpreted_outcome: "Prepare a GoalBuddy execution board to harden continuation-reviewer isolation and QA based on independent audit findings."
+    input_shape: existing_plan
+    audience: "workerctl maintainers and operators relying on continuation-reviewer isolation after Dispatch routes completion work"
+    authority: requested
+    proof_type: test
+    completion_proof: "All audit gaps are fixed with tests or explicitly scoped/tracked; verification is green; final Judge accepts completion."
+    likely_misfire: "Treating #130 closure as enough and only adding superficial tests, or broadening sandbox scope without a deliberate session-artifact decision."
+    blind_spots_considered:
+      - "Reviewer automation failure may not require operator routing when nudge_on_completion is auto-proceed."
+      - "sandbox-exec unavailable/setup-failure branches are implemented but not covered."
+      - "Timeout and invalid JSON paths are documented but not directly tested."
+      - "Temporary cwd and stripped environment are claimed but not directly proven by tests."
+      - "DB -wal and -shm sidecar denial is implemented but not directly proven."
+      - "The phrase session artifacts may or may not include broader .codex-workers transcript/capture files."
+      - "Follow-up issue/PR hygiene must not incorrectly reopen #130 if this is hardening rather than the original acceptance."
+    existing_plan_facts:
+      - "PR #132 merged on 2026-05-23 and closed #130."
+      - "Independent audits agreed #130 is substantially satisfied for the core promise."
+      - "Implementation/GitHub audit found no required follow-up issue for #130 itself."
+      - "QA audit found missing tests for sandbox setup failure, invalid JSON, timeout, cwd/env proof, and DB sidecars."
+      - "Implementation audit found a behavioral edge: reviewer automation failures with nudge_on_completion=auto-proceed can record verdict=stop without operator_routing_required=true."
+      - "Implementation audit found a scope question: current denial covers bound rollout files and DB, not every .codex-workers transcript/capture artifact."
+
+rules:
+  pm_owns_state: true
+  one_active_task: true
+  max_write_workers: 1
+  no_implementation_without_worker_or_pm_task: true
+  no_completion_without_judge_or_pm_audit: true
+  planning_is_not_completion: true
+  queued_required_worker_blocks_completion: true
+  continuous_until_full_outcome: true
+  missing_input_or_credentials_do_not_stop_goal: true
+  goal_pressure_requires_oracle: true
+  no_completion_on_weak_proof: true
+  slice_policy:
+    prefer_vertical_slices: true
+    judge_picks_largest_safe_slice: true
+    worker_completes_whole_slice: true
+
+agents:
+  scout: installed
+  worker: installed
+  judge: installed
+
+visual_board:
+  selected: local
+  local:
+    status: pending
+    url: "http://goalbuddy.localhost:41737/continuation-reviewer-gap-hardening/"
+    command: "npx goalbuddy board /Users/neonwatty/Desktop/codex-terminal-manager/docs/goals/continuation-reviewer-gap-hardening"
+
+active_task: null
+
+tasks:
+  - id: T001
+    type: scout
+    assignee: Scout
+    status: done
+    reasoning_hint: low
+    objective: "Validate the independent audit gaps against current main and produce exact source/test/doc surfaces for the hardening tranche."
+    inputs:
+      - "Issue #130 and PR #132 are already closed/merged."
+      - "Independent audit findings preserved in goal.intake.existing_plan_facts."
+      - "Current repo main."
+    constraints:
+      - "Read-only."
+      - "Do not edit implementation or board files."
+      - "Confirm exact behavior from source/tests, not from prior chat summaries."
+      - "Treat every proposed gap as suspect until verified against current main."
+    expected_output:
+      - "Gap matrix with confirmed | disproven | ambiguous."
+      - "Exact file/function/test references for each confirmed gap."
+      - "Recommended grouping for the largest safe Worker slice."
+      - "Any stop_if conditions for implementation."
+    receipt:
+      result: done
+      note: "notes/T001-scout-gap-validation.md"
+      summary: "Confirmed the auto-proceed operator-routing bug, missing sandbox setup/invalid JSON/timeout tests, missing cwd/env proof, missing DB sidecar proof, and the broader .codex-workers artifact question as a scope decision."
+      evidence:
+        - "workerctl/commands.py::_record_continuation_review"
+        - "workerctl/commands.py::_run_continuation_reviewer_command"
+        - "workerctl/commands.py::_continuation_reviewer_denied_paths"
+        - "tests/test_workerctl.py::PairCommandTests"
+        - "README.md continuation-reviewer docs"
+
+  - id: T002
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Decide the required scope for this tranche, including whether broader .codex-workers artifacts are in scope."
+    inputs:
+      - "T001 Scout receipt"
+      - "Original issue #130 acceptance criteria"
+      - "Independent audit findings"
+      - "Goal oracle"
+    constraints:
+      - "Read-only."
+      - "Do not implement."
+      - "Separate must-fix behavior from QA proof from optional hardening."
+      - "Do not expand scope beyond continuation-reviewer unless required by evidence."
+    expected_output:
+      - "approved | revise | split"
+      - "Decision on auto-proceed failure routing."
+      - "Decision on broader .codex-workers artifact denial."
+      - "Worker package(s) with allowed_files, verify commands, and stop_if."
+      - "Any follow-up issue text if a gap is deliberately out of scope."
+    receipt:
+      result: done
+      note: "notes/T002-judge-scope-decision.md"
+      decision: approved
+      summary: "Approved one consolidated Worker package for failure routing and missing QA proofs. Broader .codex-workers artifact denial is out of scope for this implementation tranche and should become a follow-up issue."
+      full_outcome_complete: false
+
+  - id: T003
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "Implement the Judge-approved hardening slice for reviewer failure routing, missing failure-path QA, cwd/env proof, and DB sidecar proof."
+    allowed_files:
+      - "workerctl/commands.py"
+      - "tests/test_workerctl.py"
+      - "README.md"
+      - "docs/goals/continuation-reviewer-gap-hardening/notes"
+    verify:
+      - "python3 -m unittest tests.test_workerctl.PairCommandTests -v"
+      - "python3 -m unittest tests.test_workerctl -v"
+      - "python3 -m py_compile workerctl/*.py"
+      - "git diff --check"
+      - "./scripts/rc-check"
+    stop_if:
+      - "T002 has not approved the exact Worker package."
+      - "Fix requires files outside allowed_files."
+      - "Reviewer failures can still produce verdict=stop without operator routing when automation failed."
+      - "Any failure path leaks raw stdout, stderr, rollout content, DB content, prompts, transcripts, or secrets."
+      - "Focused tests cannot deterministically exercise the behavior."
+    expected_output:
+      - "Auto-proceed reviewer automation failure behavior fixed or proven safe per Judge decision."
+      - "Tests for missing sandbox setup, invalid JSON, timeout, and failure routing branches."
+      - "Tests proving temp cwd, stripped environment, and DB sidecar denial."
+      - "Docs updated only if behavior/guarantees change."
+    receipt:
+      result: done
+      note: "notes/T003-worker-hardening.md"
+      summary: "Fixed reviewer automation failure routing under auto-proceed and added tests for missing sandbox setup, invalid JSON, timeout, temp cwd/stripped env, and DB sidecar denial."
+      changed_files:
+        - "workerctl/commands.py"
+        - "tests/test_workerctl.py"
+      commands:
+        - command: "python3 -m unittest tests.test_workerctl.PairCommandTests -v"
+          status: pass
+        - command: "python3 -m unittest tests.test_workerctl -v"
+          status: pass
+        - command: "python3 -m py_compile workerctl/*.py"
+          status: pass
+        - command: "git diff --check"
+          status: pass
+        - command: "./scripts/rc-check"
+          status: pass
+
+  - id: T004
+    type: worker
+    assignee: Worker
+    status: blocked
+    reasoning_hint: medium
+    objective: "Implement the Judge-approved isolation-proof QA slice for cwd/env isolation, DB sidecars, and any scoped artifact-denial expansion."
+    allowed_files:
+      - "workerctl/commands.py"
+      - "tests/test_workerctl.py"
+      - "README.md"
+      - "docs/goals/continuation-reviewer-gap-hardening/notes"
+    verify:
+      - "python3 -m unittest tests.test_workerctl.PairCommandTests.test_continuation_reviewer_runner_records_isolated_review tests.test_workerctl.PairCommandTests.test_continuation_reviewer_runner_sandbox_denies_bound_artifacts -v"
+      - "python3 -m unittest tests.test_workerctl.PairCommandTests -v"
+      - "python3 -m unittest tests.test_workerctl -v"
+      - "python3 -m py_compile workerctl/*.py"
+      - "git diff --check"
+    stop_if:
+      - "T002 has not decided whether broader .codex-workers artifacts are in scope."
+      - "Isolation proof requires nondeterministic local machine state."
+      - "The test would require reading or storing real rollout, prompt, transcript, DB, or secret content."
+      - "Broader denial breaks normal reviewer command execution without a Judge-approved design change."
+    expected_output:
+      - "Tests proving temp cwd and stripped environment."
+      - "Tests proving DB -wal and -shm denial when sidecars exist."
+      - "If approved, tests and implementation for broader artifact denial."
+      - "Updated docs if the hard-isolation guarantee expands or is explicitly limited."
+    receipt:
+      result: blocked
+      summary: "Superseded by T003 for cwd/env and DB sidecar proof. Broader .codex-workers artifact denial is intentionally deferred to PM issue hygiene as a separate containment scope decision."
+      blocker: "Out of scope for this implementation tranche per T002 Judge decision."
+
+  - id: T005
+    type: pm
+    assignee: PM
+    status: done
+    reasoning_hint: default
+    objective: "Perform issue/PR hygiene for the completed hardening work and any deliberately deferred broader containment scope."
+    inputs:
+      - "Done receipts for T001-T004"
+      - "Current GitHub issue and PR state"
+      - "Any T002 follow-up issue recommendation"
+    constraints:
+      - "Do not reopen #130 unless Judge says the original issue closure was materially wrong."
+      - "If broader containment is out of scope, create or comment a follow-up issue only when it is actionable."
+      - "Record links to PRs/issues in the receipt."
+    expected_output:
+      - "PR or issue links as needed."
+      - "Receipt explaining what was published, deferred, or intentionally left local."
+    receipt:
+      result: done
+      note: "notes/T005-issue-pr-hygiene.md"
+      summary: "Opened PR #134 for the hardening patch and issue #133 for broader .codex-workers containment scope. Did not reopen #130."
+      external_artifacts:
+        pr: "https://github.com/neonwatty/codex-terminal-manager/pull/134"
+        issue: "https://github.com/neonwatty/codex-terminal-manager/issues/133"
+
+  - id: T999
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Final audit: decide whether all continuation-reviewer hardening gaps from the independent audits are covered."
+    inputs:
+      - "All done task receipts"
+      - "Current diff"
+      - "Latest verification output"
+      - "Goal oracle"
+    constraints:
+      - "Read-only."
+      - "Reject completion if any required Worker remains queued or active."
+      - "Reject completion if auto-proceed reviewer automation failure can bypass operator review."
+      - "Reject completion if documented guarantees lack direct tests or deliberate scope decisions."
+      - "Reject completion if raw sensitive content can leak through review output, telemetry, or failure metadata."
+    expected_output:
+      - "complete | not_complete"
+      - "full_outcome_complete: true | false"
+      - "Gap-by-gap evidence matrix."
+      - "Missing evidence and next task if not complete."
+    receipt:
+      result: done
+      note: "notes/T999-final-audit.md"
+      decision: complete
+      full_outcome_complete: true
+      summary: "All continuation-reviewer gap-hardening items are either implemented/tested or deliberately scoped to follow-up issue #133. Local verification and PR #134 checks passed."
+
+checks:
+  dirty_fingerprint: unknown
+  last_verification:
+    result: passed
+    task: T003
+    commands:
+      - "python3 -m unittest tests.test_workerctl.PairCommandTests -v"
+      - "python3 -m unittest tests.test_workerctl -v"
+      - "python3 -m py_compile workerctl/*.py"
+      - "git diff --check"
+      - "./scripts/rc-check"

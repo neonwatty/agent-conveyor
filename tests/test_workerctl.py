@@ -13763,6 +13763,63 @@ class PairCommandTests(unittest.TestCase):
         )
         return {"worker_rollout": worker_rollout, "manager_rollout": manager_rollout}
 
+    def _create_continuation_reviewer_task(
+        self,
+        conn,
+        *,
+        task_name,
+        correlation_id,
+        nudge_on_completion="ask-operator",
+    ):
+        task_id = worker_db.create_task(conn, name=task_name, goal="Review next step.")
+        worker_db.upsert_manager_config(
+            conn,
+            task_id=task_id,
+            supervision_mode="guided",
+            permissions={"context": ["spawn_reviewer"]},
+            nudge_on_completion=nudge_on_completion,
+        )
+        worker_db.insert_task_continuation(
+            conn,
+            task_id=task_id,
+            proposer="worker",
+            payload={"next": "continue"},
+            correlation_id=correlation_id,
+        )
+        worker_db.insert_task_continuation(
+            conn,
+            task_id=task_id,
+            proposer="manager",
+            payload={"next": "stop"},
+            correlation_id=correlation_id,
+        )
+        return task_id
+
+    def _run_continuation_reviewer_direct(
+        self,
+        *,
+        db_path,
+        task_name,
+        correlation_id,
+        reviewer_command,
+        timeout=5,
+    ):
+        args = argparse.Namespace(
+            correlation_id=correlation_id,
+            dry_run=False,
+            manager_session_id="manager-session",
+            path=str(db_path),
+            reviewer_command=reviewer_command,
+            reviewer_session_id="reviewer-session",
+            task=task_name,
+            timeout=timeout,
+        )
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            result = commands.command_continuation_reviewer(args)
+        self.assertEqual(result, 0)
+        return json.loads(stdout.getvalue())
+
     def test_pair_creates_task_when_goal_provided_and_task_missing(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = self._setup_db(tmpdir)
@@ -14931,6 +14988,144 @@ class PairCommandTests(unittest.TestCase):
             self.assertTrue(review["subagent_run"]["stderr_redacted"])
             self.assertIn("reviewer command exited 7", review["rationale"])
 
+    def test_continuation_reviewer_runner_failure_routes_operator_under_auto_proceed(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = self._setup_db(tmpdir)
+            conn = worker_db.connect(db_path)
+            try:
+                task_id = self._create_continuation_reviewer_task(
+                    conn,
+                    task_name="continuation-runner-auto-proceed-fail-task",
+                    correlation_id="corr-runner-auto-proceed-fail",
+                    nudge_on_completion="auto-proceed",
+                )
+                self._bind_continuation_sessions(
+                    conn,
+                    task_name="continuation-runner-auto-proceed-fail-task",
+                    tmpdir=tmpdir,
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            review = self._run_continuation_reviewer_direct(
+                db_path=db_path,
+                task_name="continuation-runner-auto-proceed-fail-task",
+                correlation_id="corr-runner-auto-proceed-fail",
+                reviewer_command=[sys.executable, "-c", "import sys; sys.stderr.write('secret stderr'); sys.exit(7)"],
+            )
+
+            self.assertEqual(review["agreement"], "divergent")
+            self.assertEqual(review["verdict"], "stop")
+            self.assertTrue(review["operator_routing_required"])
+            self.assertEqual(review["subagent_run"]["nudge_on_completion"], "auto-proceed")
+            self.assertEqual(review["subagent_run"]["status"], "failed")
+            self.assertTrue(review["subagent_run"]["stderr_redacted"])
+            self.assertNotIn("secret stderr", json.dumps(review, sort_keys=True))
+            conn = worker_db.connect(db_path)
+            try:
+                telemetry = worker_db.query_telemetry_events(
+                    conn,
+                    task_id=task_id,
+                    event_type="continuation_review_recorded",
+                    limit=10,
+                )
+            finally:
+                conn.close()
+            self.assertEqual(telemetry[0]["severity"], "warning")
+            self.assertTrue(telemetry[0]["attributes"]["operator_routing_required"])
+            self.assertTrue(telemetry[0]["attributes"]["reviewer_failure_routing_forced"])
+
+    def test_continuation_reviewer_runner_missing_sandbox_records_stop(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = self._setup_db(tmpdir)
+            conn = worker_db.connect(db_path)
+            try:
+                self._create_continuation_reviewer_task(
+                    conn,
+                    task_name="continuation-runner-no-sandbox-task",
+                    correlation_id="corr-runner-no-sandbox",
+                )
+                self._bind_continuation_sessions(conn, task_name="continuation-runner-no-sandbox-task", tmpdir=tmpdir)
+                conn.commit()
+            finally:
+                conn.close()
+
+            with mock.patch("workerctl.commands.shutil.which", return_value=None):
+                review = self._run_continuation_reviewer_direct(
+                    db_path=db_path,
+                    task_name="continuation-runner-no-sandbox-task",
+                    correlation_id="corr-runner-no-sandbox",
+                    reviewer_command=[sys.executable, "-c", "print('would have run')"],
+                )
+
+            self.assertEqual(review["agreement"], "divergent")
+            self.assertEqual(review["verdict"], "stop")
+            self.assertTrue(review["operator_routing_required"])
+            self.assertEqual(review["subagent_run"]["status"], "failed")
+            self.assertFalse(review["subagent_run"]["sandbox"]["enabled"])
+            self.assertEqual(review["subagent_run"]["sandbox"]["setup_error"], "sandbox-exec not available")
+            self.assertIn("sandbox-exec not available", review["rationale"])
+
+    def test_continuation_reviewer_runner_invalid_json_records_stop(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = self._setup_db(tmpdir)
+            conn = worker_db.connect(db_path)
+            try:
+                self._create_continuation_reviewer_task(
+                    conn,
+                    task_name="continuation-runner-invalid-json-task",
+                    correlation_id="corr-runner-invalid-json",
+                )
+                self._bind_continuation_sessions(conn, task_name="continuation-runner-invalid-json-task", tmpdir=tmpdir)
+                conn.commit()
+            finally:
+                conn.close()
+
+            review = self._run_continuation_reviewer_direct(
+                db_path=db_path,
+                task_name="continuation-runner-invalid-json-task",
+                correlation_id="corr-runner-invalid-json",
+                reviewer_command=[sys.executable, "-c", "print('not json')"],
+            )
+
+            self.assertEqual(review["agreement"], "divergent")
+            self.assertEqual(review["verdict"], "stop")
+            self.assertTrue(review["operator_routing_required"])
+            self.assertEqual(review["subagent_run"]["status"], "failed")
+            self.assertTrue(review["subagent_run"]["stdout_redacted"])
+            self.assertNotIn("not json", json.dumps(review, sort_keys=True))
+
+    def test_continuation_reviewer_runner_timeout_records_stop(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = self._setup_db(tmpdir)
+            conn = worker_db.connect(db_path)
+            try:
+                self._create_continuation_reviewer_task(
+                    conn,
+                    task_name="continuation-runner-timeout-task",
+                    correlation_id="corr-runner-timeout",
+                )
+                self._bind_continuation_sessions(conn, task_name="continuation-runner-timeout-task", tmpdir=tmpdir)
+                conn.commit()
+            finally:
+                conn.close()
+
+            review = self._run_continuation_reviewer_direct(
+                db_path=db_path,
+                task_name="continuation-runner-timeout-task",
+                correlation_id="corr-runner-timeout",
+                reviewer_command=[sys.executable, "-c", "import time; time.sleep(2)"],
+                timeout=0.05,
+            )
+
+            self.assertEqual(review["agreement"], "divergent")
+            self.assertEqual(review["verdict"], "stop")
+            self.assertTrue(review["operator_routing_required"])
+            self.assertEqual(review["subagent_run"]["status"], "failed")
+            self.assertTrue(review["subagent_run"]["sandbox"]["enabled"])
+            self.assertIn("timed out", review["rationale"])
+
     def test_continuation_reviewer_runner_sandbox_denies_bound_artifacts(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = self._setup_db(tmpdir)
@@ -14959,46 +15154,50 @@ class PairCommandTests(unittest.TestCase):
                     correlation_id="corr-sandbox",
                 )
                 artifacts = self._bind_continuation_sessions(conn, task_name="continuation-sandbox-task", tmpdir=tmpdir)
+                wal_path = Path(f"{db_path}-wal")
+                shm_path = Path(f"{db_path}-shm")
                 conn.commit()
+                self.assertTrue(wal_path.exists())
+                self.assertTrue(shm_path.exists())
+
+                reviewer_code = (
+                    "from pathlib import Path; import json; "
+                    f"paths=[{str(artifacts['manager_rollout'])!r},{str(artifacts['worker_rollout'])!r},{str(db_path)!r},{str(wal_path)!r},{str(shm_path)!r}]; "
+                    "leaks=[]; denied=0\n"
+                    "for p in paths:\n"
+                    "    try:\n"
+                    "        leaks.append(Path(p).read_bytes()[:80].decode('utf-8', 'ignore'))\n"
+                    "    except Exception:\n"
+                    "        denied += 1\n"
+                    "payload={'agreement':'divergent','verdict':'stop','rationale':f'denied {denied} artifact reads'} if not leaks else {'agreement':'match','verdict':'proceed','rationale':'|'.join(leaks)}\n"
+                    "print(json.dumps(payload))"
+                )
+                proc = subprocess.run(
+                    [
+                        sys.executable,
+                        "-m",
+                        "workerctl",
+                        "continuation-reviewer",
+                        "continuation-sandbox-task",
+                        "--correlation-id",
+                        "corr-sandbox",
+                        "--reviewer-session-id",
+                        "reviewer-session",
+                        "--manager-session-id",
+                        "manager-session",
+                        "--path",
+                        str(db_path),
+                        "--reviewer-command",
+                        sys.executable,
+                        "-c",
+                        reviewer_code,
+                    ],
+                    capture_output=True,
+                    text=True,
+                    cwd=str(ROOT),
+                )
             finally:
                 conn.close()
-
-            reviewer_code = (
-                "from pathlib import Path; import json; "
-                f"paths=[{str(artifacts['manager_rollout'])!r},{str(artifacts['worker_rollout'])!r},{str(db_path)!r}]; "
-                "leaks=[]; denied=0\n"
-                "for p in paths:\n"
-                "    try:\n"
-                "        leaks.append(Path(p).read_bytes()[:80].decode('utf-8', 'ignore'))\n"
-                "    except Exception:\n"
-                "        denied += 1\n"
-                "payload={'agreement':'divergent','verdict':'stop','rationale':f'denied {denied} artifact reads'} if not leaks else {'agreement':'match','verdict':'proceed','rationale':'|'.join(leaks)}\n"
-                "print(json.dumps(payload))"
-            )
-            proc = subprocess.run(
-                [
-                    sys.executable,
-                    "-m",
-                    "workerctl",
-                    "continuation-reviewer",
-                    "continuation-sandbox-task",
-                    "--correlation-id",
-                    "corr-sandbox",
-                    "--reviewer-session-id",
-                    "reviewer-session",
-                    "--manager-session-id",
-                    "manager-session",
-                    "--path",
-                    str(db_path),
-                    "--reviewer-command",
-                    sys.executable,
-                    "-c",
-                    reviewer_code,
-                ],
-                capture_output=True,
-                text=True,
-                cwd=str(ROOT),
-            )
 
             self.assertEqual(proc.returncode, 0, proc.stderr)
             output = proc.stdout + proc.stderr
@@ -15007,12 +15206,47 @@ class PairCommandTests(unittest.TestCase):
             review = json.loads(proc.stdout)
             self.assertEqual(review["agreement"], "divergent")
             self.assertEqual(review["verdict"], "stop")
-            self.assertEqual(review["rationale"], "denied 3 artifact reads")
+            self.assertEqual(review["rationale"], "denied 5 artifact reads")
             self.assertEqual(review["subagent_run"]["status"], "succeeded")
             self.assertTrue(review["subagent_run"]["sandbox"]["enabled"])
-            self.assertGreaterEqual(review["subagent_run"]["sandbox"]["denied_path_count"], 3)
+            self.assertGreaterEqual(review["subagent_run"]["sandbox"]["denied_path_count"], 5)
             self.assertNotIn("MANAGER_ROLLOUT_SECRET", json.dumps(review, sort_keys=True))
             self.assertNotIn("WORKER_ROLLOUT_SECRET", json.dumps(review, sort_keys=True))
+
+    def test_continuation_reviewer_runner_uses_temp_cwd_and_stripped_env(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = self._setup_db(tmpdir)
+            conn = worker_db.connect(db_path)
+            try:
+                self._create_continuation_reviewer_task(
+                    conn,
+                    task_name="continuation-runner-env-task",
+                    correlation_id="corr-runner-env",
+                )
+                self._bind_continuation_sessions(conn, task_name="continuation-runner-env-task", tmpdir=tmpdir)
+                conn.commit()
+            finally:
+                conn.close()
+
+            secret_key = "CTM_REVIEWER_SECRET_SHOULD_NOT_LEAK"
+            reviewer_code = (
+                "import json, os; "
+                f"ok=os.getcwd()!={str(ROOT)!r} and {secret_key!r} not in os.environ; "
+                "print(json.dumps({'agreement':'match' if ok else 'divergent','verdict':'proceed' if ok else 'stop','rationale':'isolated cwd and env' if ok else 'cwd/env leak'}))"
+            )
+            with mock.patch.dict(os.environ, {secret_key: "ENV_SECRET"}, clear=False):
+                review = self._run_continuation_reviewer_direct(
+                    db_path=db_path,
+                    task_name="continuation-runner-env-task",
+                    correlation_id="corr-runner-env",
+                    reviewer_command=[sys.executable, "-c", reviewer_code],
+                )
+
+            self.assertEqual(review["agreement"], "match")
+            self.assertEqual(review["verdict"], "proceed")
+            self.assertEqual(review["rationale"], "isolated cwd and env")
+            self.assertFalse(review["operator_routing_required"])
+            self.assertNotIn("ENV_SECRET", json.dumps(review, sort_keys=True))
 
     def test_continuation_subagent_failure_records_stop_without_silent_approval(self):
         with tempfile.TemporaryDirectory() as tmpdir:
