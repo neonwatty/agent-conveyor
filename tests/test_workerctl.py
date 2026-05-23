@@ -126,8 +126,11 @@ class DatabaseTests(unittest.TestCase):
             self.assertIn("runs", tables)
             self.assertIn("telemetry_events", tables)
             self.assertIn("telemetry_events_fts", tables)
+            self.assertIn("command_attempts", tables)
             self.assertIn("one_active_run_per_task", indexes)
             self.assertIn("telemetry_events_run_timestamp", indexes)
+            self.assertIn("commands_claimable", indexes)
+            self.assertIn("command_attempts_command_id", indexes)
 
     def test_run_helpers_create_list_finish_and_enforce_one_active_run_per_task(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -155,6 +158,89 @@ class DatabaseTests(unittest.TestCase):
             self.assertEqual(finished["status"], "finished")
             self.assertIsNotNone(finished["ended_at"])
             self.assertIsNone(worker_db.active_run_for_task(conn, task_id=task_id))
+
+    def test_command_claiming_creates_attempt_and_prevents_double_claim(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "workerctl.db"
+            conn_a = worker_db.connect(path)
+            worker_db.initialize_database(conn_a)
+            self.addCleanup(conn_a.close)
+            self.insert_task(conn_a, "task-claim", "claim-task")
+            command_id = worker_db.create_command(
+                conn_a,
+                command_type="notify_manager",
+                task_id="task-claim",
+                payload={"message": "check worker"},
+                correlation_id="corr-command",
+                timestamp="2000-01-01T00:00:00Z",
+            )
+            conn_a.commit()
+            conn_b = worker_db.connect(path)
+            worker_db.initialize_database(conn_b)
+            self.addCleanup(conn_b.close)
+
+            claimed = worker_db.claim_next_dispatch_command(
+                conn_a,
+                dispatcher_id="dispatch-a",
+                command_types=["notify_manager"],
+                timestamp="2026-05-23T10:01:00Z",
+                lease_seconds=30,
+            )
+            conn_a.commit()
+            second = worker_db.claim_next_dispatch_command(
+                conn_b,
+                dispatcher_id="dispatch-b",
+                command_types=["notify_manager"],
+                timestamp="2026-05-23T10:01:01Z",
+            )
+
+            self.assertIsNotNone(claimed)
+            self.assertEqual(claimed["command"]["id"], command_id)
+            self.assertEqual(claimed["command"]["state"], "attempted")
+            self.assertEqual(claimed["command"]["claimed_by"], "dispatch-a")
+            self.assertEqual(claimed["command"]["correlation_id"], "corr-command")
+            self.assertEqual(claimed["attempt"]["state"], "running")
+            self.assertIsNone(second)
+
+            audit = worker_db.task_audit(conn_a, task="claim-task")
+            self.assertEqual(audit["command_attempts"][0]["command_id"], command_id)
+            self.assertEqual(audit["command_attempts"][0]["dispatcher_id"], "dispatch-a")
+
+    def test_command_attempt_finish_records_side_effect_flags_and_replay(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self.insert_task(conn, "task-attempt", "attempt-task")
+            command_id = worker_db.create_command(
+                conn,
+                command_type="notify_manager",
+                task_id="task-attempt",
+                payload={"message": "hello"},
+            )
+            claimed = worker_db.claim_next_dispatch_command(
+                conn,
+                dispatcher_id="dispatch-a",
+                command_types=["notify_manager"],
+                timestamp="2026-05-23T10:01:00Z",
+            )
+            worker_db.finish_command_attempt(
+                conn,
+                attempt_id=claimed["attempt"]["id"],
+                state="abandoned",
+                result={"reason": "deferred"},
+                error="deferred",
+                side_effect_started=False,
+                side_effect_completed=False,
+                timestamp="2026-05-23T10:01:01Z",
+            )
+            conn.commit()
+
+            row = conn.execute("select state, error from commands where id = ?", (command_id,)).fetchone()
+            self.assertEqual(row["state"], "failed")
+            self.assertEqual(row["error"], "deferred")
+            audit = worker_db.task_audit(conn, task="attempt-task")
+            self.assertEqual(audit["command_attempts"][0]["state"], "abandoned")
+            entries = replay.replay_entries(audit)
+            self.assertTrue(any(entry["source"] == "command_attempts" for entry in entries))
 
     def test_telemetry_event_helpers_attach_active_run_and_index_search_text(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1114,6 +1200,407 @@ class DispatchTests(unittest.TestCase):
             payload = json.loads(stdout.getvalue())
             self.assertEqual(payload["processed"][0]["state"], "planned")
             self.assertEqual(worker_db.routed_notifications(conn, task_id="task-dispatch"), [])
+            send.assert_not_called()
+
+    def test_dispatch_dry_run_plans_pending_command_rows_without_claiming(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn, db_path = self.open_db(tmpdir)
+            self.setup_bound_task(conn)
+            command_id = worker_db.create_command(
+                conn,
+                command_type="notify_manager",
+                task_id="task-dispatch",
+                payload={"message": "inspect"},
+                correlation_id="corr-dispatch-command",
+            )
+            conn.commit()
+
+            args = argparse.Namespace(
+                dispatcher_id="dispatch-test",
+                dry_run=True,
+                json=True,
+                limit=10,
+                once=True,
+                path=str(db_path),
+                type="notify_manager",
+                watch=False,
+            )
+            with mock.patch.object(worker_tmux, "send_text_to_session") as send:
+                with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                    commands.command_dispatch(args)
+
+            payload = json.loads(stdout.getvalue())
+            command_row = conn.execute("select state, claimed_by from commands where id = ?", (command_id,)).fetchone()
+            self.assertEqual(payload["processed_count"], 1)
+            self.assertEqual(payload["processed"][0]["command_id"], command_id)
+            self.assertEqual(payload["processed"][0]["state"], "planned")
+            self.assertEqual(command_row["state"], "pending")
+            self.assertIsNone(command_row["claimed_by"])
+            self.assertEqual(conn.execute("select count(*) from command_attempts").fetchone()[0], 0)
+            send.assert_not_called()
+
+    def test_dispatch_once_executes_pending_notify_manager_command(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn, db_path = self.open_db(tmpdir)
+            self.setup_bound_task(conn)
+            command_id = worker_db.create_command(
+                conn,
+                command_type="notify_manager",
+                task_id="task-dispatch",
+                payload={"message": "inspect"},
+            )
+            conn.commit()
+
+            args = argparse.Namespace(
+                dispatcher_id="dispatch-test",
+                dry_run=False,
+                json=True,
+                limit=10,
+                once=True,
+                path=str(db_path),
+                type="notify_manager",
+                watch=False,
+            )
+
+            def fake_send(conn, *, session_name, text, dry_run=False, side_effect_audit=None):
+                if side_effect_audit is not None:
+                    side_effect_audit["side_effect_started"] = True
+                    side_effect_audit["side_effect_completed"] = True
+                return {
+                    "dry_run": dry_run,
+                    "session": session_name,
+                    "side_effect_completed": True,
+                    "side_effect_started": True,
+                    "target": "tmux-manager:0.0",
+                    "text": text,
+                }
+
+            with mock.patch.object(worker_tmux, "send_text_to_session", side_effect=fake_send) as send:
+                with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                    commands.command_dispatch(args)
+
+            payload = json.loads(stdout.getvalue())
+            command_row = conn.execute(
+                "select state, claimed_by, attempts from commands where id = ?",
+                (command_id,),
+            ).fetchone()
+            attempt_row = conn.execute(
+                "select command_id, dispatcher_id, state, side_effect_started, side_effect_completed from command_attempts"
+            ).fetchone()
+            notification = worker_db.routed_notifications(conn, task_id="task-dispatch")[0]
+            self.assertEqual(payload["processed_count"], 1)
+            self.assertEqual(payload["processed"][0]["state"], "delivered")
+            self.assertEqual(command_row["state"], "succeeded")
+            self.assertEqual(command_row["claimed_by"], "dispatch-test")
+            self.assertEqual(command_row["attempts"], 1)
+            self.assertEqual(attempt_row["command_id"], command_id)
+            self.assertEqual(attempt_row["dispatcher_id"], "dispatch-test")
+            self.assertEqual(attempt_row["state"], "succeeded")
+            self.assertEqual(attempt_row["side_effect_started"], 1)
+            self.assertEqual(attempt_row["side_effect_completed"], 1)
+            self.assertEqual(notification["command_id"], command_id)
+            self.assertEqual(notification["state"], "delivered")
+            self.assertEqual(notification["signal_type"], "notify_manager")
+            send.assert_called_once()
+
+    def test_dispatch_once_fails_invalid_command_payload_before_tmux_send(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn, db_path = self.open_db(tmpdir)
+            self.setup_bound_task(conn)
+            command_id = worker_db.create_command(
+                conn,
+                command_type="nudge_worker",
+                task_id="task-dispatch",
+                payload={"message": ""},
+            )
+            conn.commit()
+
+            args = argparse.Namespace(
+                dispatcher_id="dispatch-test",
+                dry_run=False,
+                json=True,
+                limit=10,
+                once=True,
+                path=str(db_path),
+                type="nudge_worker",
+                watch=False,
+            )
+            with mock.patch.object(worker_tmux, "send_text_to_session") as send:
+                with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                    commands.command_dispatch(args)
+
+            payload = json.loads(stdout.getvalue())
+            command_row = conn.execute("select state, error from commands where id = ?", (command_id,)).fetchone()
+            attempt_row = conn.execute(
+                "select state, side_effect_started, side_effect_completed from command_attempts"
+            ).fetchone()
+            self.assertEqual(payload["processed"][0]["state"], "failed")
+            self.assertIn("requires non-empty", payload["processed"][0]["error"])
+            self.assertEqual(command_row["state"], "failed")
+            self.assertIn("requires non-empty", command_row["error"])
+            self.assertEqual(attempt_row["state"], "failed")
+            self.assertEqual(attempt_row["side_effect_started"], 0)
+            self.assertEqual(attempt_row["side_effect_completed"], 0)
+            self.assertEqual(worker_db.routed_notifications(conn, task_id="task-dispatch"), [])
+            send.assert_not_called()
+
+    def test_dispatch_once_records_started_side_effect_when_tmux_fails_after_paste_begins(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn, db_path = self.open_db(tmpdir)
+            self.setup_bound_task(conn)
+            worker_db.create_command(
+                conn,
+                command_type="nudge_worker",
+                task_id="task-dispatch",
+                payload={"text": "please continue"},
+            )
+            conn.commit()
+
+            def fake_send(conn, *, session_name, text, dry_run=False, side_effect_audit=None):
+                if side_effect_audit is not None:
+                    side_effect_audit["side_effect_started"] = True
+                    side_effect_audit["side_effect_completed"] = False
+                raise WorkerError("tmux paste failed")
+
+            args = argparse.Namespace(
+                dispatcher_id="dispatch-test",
+                dry_run=False,
+                json=True,
+                limit=10,
+                once=True,
+                path=str(db_path),
+                type="nudge_worker",
+                watch=False,
+            )
+            with mock.patch.object(worker_tmux, "send_text_to_session", side_effect=fake_send):
+                with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                    commands.command_dispatch(args)
+
+            payload = json.loads(stdout.getvalue())
+            attempt_row = conn.execute(
+                "select state, side_effect_started, side_effect_completed from command_attempts"
+            ).fetchone()
+            notification = worker_db.routed_notifications(conn, task_id="task-dispatch")[0]
+            self.assertEqual(payload["processed"][0]["state"], "failed")
+            self.assertEqual(payload["processed"][0]["side_effect_started"], True)
+            self.assertEqual(attempt_row["state"], "failed")
+            self.assertEqual(attempt_row["side_effect_started"], 1)
+            self.assertEqual(attempt_row["side_effect_completed"], 0)
+            self.assertEqual(notification["state"], "failed")
+
+    def test_replay_exposes_dispatch_correlation_chain(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn, db_path = self.open_db(tmpdir)
+            self.setup_bound_task(conn)
+            conn.execute(
+                """
+                insert into manager_cycles(task_id, started_at, completed_at, state, status_json)
+                values ('task-dispatch', '2026-05-23T10:00:00Z', '2026-05-23T10:00:01Z', 'succeeded', '{}')
+                """
+            )
+            cycle_id = conn.execute("select id from manager_cycles").fetchone()["id"]
+            decision_id = worker_db.insert_manager_decision(
+                conn,
+                task_id="task-dispatch",
+                manager_id=None,
+                manager_cycle_id=cycle_id,
+                decision="nudge",
+                reason="worker is stale",
+            )
+            command_id = worker_db.create_command(
+                conn,
+                command_type="notify_manager",
+                task_id="task-dispatch",
+                payload={
+                    "manager_decision": {"decision_id": decision_id},
+                    "message": "inspect worker",
+                },
+                correlation_id="corr-chain",
+            )
+            conn.commit()
+
+            def fake_send(conn, *, session_name, text, dry_run=False, side_effect_audit=None):
+                if side_effect_audit is not None:
+                    side_effect_audit["side_effect_started"] = True
+                    side_effect_audit["side_effect_completed"] = True
+                return {"target": "tmux-manager:0.0"}
+
+            args = argparse.Namespace(
+                dispatcher_id="dispatch-test",
+                dry_run=False,
+                json=True,
+                limit=10,
+                once=True,
+                path=str(db_path),
+                type="notify_manager",
+                watch=False,
+            )
+            with mock.patch.object(worker_tmux, "send_text_to_session", side_effect=fake_send):
+                with contextlib.redirect_stdout(io.StringIO()):
+                    commands.command_dispatch(args)
+
+            audit = worker_db.task_audit(conn, task="dispatch-task")
+            chain = audit["correlation_chains"][0]
+            self.assertEqual(chain["command_id"], command_id)
+            self.assertEqual(chain["correlation_id"], "corr-chain")
+            self.assertEqual(chain["manager_decision_id"], decision_id)
+            self.assertEqual(chain["manager_cycle_id"], cycle_id)
+            self.assertEqual(len(chain["attempt_ids"]), 1)
+            self.assertEqual(len(chain["routed_notification_ids"]), 1)
+            entries = replay.replay_entries(audit)
+            self.assertTrue(any(entry["source"] == "correlation_chains" for entry in entries))
+            self.assertTrue(any(entry["source"] == "routed_notifications" for entry in entries))
+
+    def test_dispatch_watch_runs_bounded_passes_with_limit_and_interval(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn, db_path = self.open_db(tmpdir)
+            self.setup_bound_task(conn)
+            first = worker_db.create_command(
+                conn,
+                command_type="notify_manager",
+                task_id="task-dispatch",
+                payload={"message": "first"},
+                timestamp="2026-05-23T10:00:00Z",
+            )
+            second = worker_db.create_command(
+                conn,
+                command_type="notify_manager",
+                task_id="task-dispatch",
+                payload={"message": "second"},
+                timestamp="2026-05-23T10:00:01Z",
+            )
+            conn.commit()
+
+            sent = []
+
+            def fake_send(conn, *, session_name, text, dry_run=False, side_effect_audit=None):
+                sent.append(text)
+                if side_effect_audit is not None:
+                    side_effect_audit["side_effect_started"] = True
+                    side_effect_audit["side_effect_completed"] = True
+                return {"target": "tmux-manager:0.0"}
+
+            args = argparse.Namespace(
+                dispatcher_id="dispatch-watch",
+                dry_run=False,
+                interval=0,
+                json=True,
+                limit=1,
+                once=False,
+                path=str(db_path),
+                type="notify_manager",
+                watch=True,
+                watch_iterations=2,
+            )
+            with mock.patch.object(worker_tmux, "send_text_to_session", side_effect=fake_send):
+                with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                    commands.command_dispatch(args)
+
+            payload = json.loads(stdout.getvalue())
+            states = {
+                row["id"]: row["state"]
+                for row in conn.execute("select id, state from commands where id in (?, ?)", (first, second))
+            }
+            heartbeats = [
+                event for event in worker_db.telemetry_events(conn)
+                if event["event_type"] == "dispatch_watch_heartbeat"
+            ]
+            self.assertEqual(payload["watch"], True)
+            self.assertEqual(payload["iterations"], 2)
+            self.assertEqual(payload["processed_count"], 2)
+            self.assertEqual(states, {first: "succeeded", second: "succeeded"})
+            self.assertEqual([event["correlation"]["iteration"] for event in heartbeats], [1, 2])
+            self.assertEqual([event["attributes"]["processed_count"] for event in heartbeats], [1, 1])
+            self.assertEqual(sent, ["first", "second"])
+
+    def test_dispatch_recovers_stale_claim_without_side_effect_by_requeueing(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn, db_path = self.open_db(tmpdir)
+            self.setup_bound_task(conn)
+            command_id = worker_db.create_command(
+                conn,
+                command_type="notify_manager",
+                task_id="task-dispatch",
+                payload={"message": "retry me"},
+                max_attempts=2,
+            )
+            claimed = worker_db.claim_next_dispatch_command(
+                conn,
+                dispatcher_id="stale-dispatch",
+                command_types=["notify_manager"],
+                timestamp="2026-05-23T10:00:00Z",
+                lease_seconds=1,
+            )
+            conn.commit()
+
+            args = argparse.Namespace(
+                dispatcher_id="dispatch-recover",
+                dry_run=False,
+                interval=0,
+                json=True,
+                limit=1,
+                once=True,
+                path=str(db_path),
+                type="notify_manager",
+                watch=False,
+            )
+            with mock.patch.object(worker_tmux, "send_text_to_session") as send:
+                with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                    commands.command_dispatch(args)
+
+            payload = json.loads(stdout.getvalue())
+            command_row = conn.execute("select state, claimed_by from commands where id = ?", (command_id,)).fetchone()
+            attempt_row = conn.execute("select state, error from command_attempts where id = ?", (claimed["attempt"]["id"],)).fetchone()
+            self.assertEqual(payload["processed"][0]["state"], "requeued")
+            self.assertEqual(command_row["state"], "pending")
+            self.assertIsNone(command_row["claimed_by"])
+            self.assertEqual(attempt_row["state"], "abandoned")
+            self.assertIn("before side effect", attempt_row["error"])
+            send.assert_not_called()
+
+    def test_dispatch_does_not_retry_stale_claim_after_side_effect_started(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn, db_path = self.open_db(tmpdir)
+            self.setup_bound_task(conn)
+            command_id = worker_db.create_command(
+                conn,
+                command_type="notify_manager",
+                task_id="task-dispatch",
+                payload={"message": "do not retry blindly"},
+            )
+            claimed = worker_db.claim_next_dispatch_command(
+                conn,
+                dispatcher_id="stale-dispatch",
+                command_types=["notify_manager"],
+                timestamp="2026-05-23T10:00:00Z",
+                lease_seconds=1,
+            )
+            worker_db.mark_command_attempt_side_effect_started(conn, attempt_id=claimed["attempt"]["id"])
+            conn.commit()
+
+            args = argparse.Namespace(
+                dispatcher_id="dispatch-recover",
+                dry_run=False,
+                interval=0,
+                json=True,
+                limit=10,
+                once=True,
+                path=str(db_path),
+                type="notify_manager",
+                watch=False,
+            )
+            with mock.patch.object(worker_tmux, "send_text_to_session") as send:
+                with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                    commands.command_dispatch(args)
+
+            payload = json.loads(stdout.getvalue())
+            command_row = conn.execute("select state, error from commands where id = ?", (command_id,)).fetchone()
+            attempt_row = conn.execute("select state, error, side_effect_started from command_attempts where id = ?", (claimed["attempt"]["id"],)).fetchone()
+            self.assertEqual(payload["processed"][0]["state"], "failed")
+            self.assertEqual(command_row["state"], "failed")
+            self.assertIn("manual review", command_row["error"])
+            self.assertEqual(attempt_row["state"], "failed")
+            self.assertEqual(attempt_row["side_effect_started"], 1)
             send.assert_not_called()
 
     def test_dispatch_ignores_unbound_completion_events(self):

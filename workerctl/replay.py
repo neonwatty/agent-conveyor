@@ -176,6 +176,82 @@ def replay_entries(audit: dict[str, Any], *, role: str = "all", mode: str = "tim
             }
         )
 
+    for attempt in audit.get("command_attempts", []):
+        if role != "all" and role != "manager":
+            continue
+        details = {
+            "attempt_id": attempt["id"],
+            "command_id": attempt["command_id"],
+            "correlation_id": attempt["correlation_id"],
+            "dispatcher_id": attempt["dispatcher_id"],
+            "side_effect_completed": attempt["side_effect_completed"],
+            "side_effect_started": attempt["side_effect_started"],
+            "state": attempt["state"],
+        }
+        entries.append(
+            {
+                "actor": "dispatch",
+                "details": details,
+                "kind": "command_attempt",
+                "source": "command_attempts",
+                "source_id": attempt["id"],
+                "summary": f"dispatch attempt {attempt['state']}: {attempt['command_id']}",
+                "timestamp": attempt["started_at"],
+            }
+        )
+
+    for notification in audit.get("routed_notifications", []):
+        if role != "all" and role != "manager":
+            continue
+        entries.append(
+            {
+                "actor": "dispatch",
+                "details": {
+                    "command_id": notification.get("command_id"),
+                    "correlation_id": notification["correlation_id"],
+                    "notification_id": notification["id"],
+                    "signal_type": notification["signal_type"],
+                    "state": notification["state"],
+                },
+                "kind": "routed_notification",
+                "source": "routed_notifications",
+                "source_id": notification["id"],
+                "summary": f"dispatch notification {notification['signal_type']}: {notification['state']}",
+                "timestamp": notification.get("delivered_at") or notification["created_at"],
+            }
+        )
+
+    for chain in audit.get("correlation_chains", []):
+        if role != "all" and role != "manager":
+            continue
+        parts = [chain["command_type"], chain["command_state"]]
+        if chain.get("manager_decision_id") is not None:
+            parts.append(f"decision #{chain['manager_decision_id']}")
+        if chain.get("manager_cycle_id") is not None:
+            parts.append(f"cycle #{chain['manager_cycle_id']}")
+        if chain.get("attempt_ids"):
+            parts.append(f"{len(chain['attempt_ids'])} attempt(s)")
+        if chain.get("routed_notification_ids"):
+            parts.append(f"{len(chain['routed_notification_ids'])} notification(s)")
+        entries.append(
+            {
+                "actor": "dispatch",
+                "details": chain,
+                "kind": "correlation_chain",
+                "source": "correlation_chains",
+                "source_id": chain["command_id"],
+                "summary": " -> ".join(parts),
+                "timestamp": next(
+                    (
+                        command["created_at"]
+                        for command in audit.get("commands", [])
+                        if command["id"] == chain["command_id"]
+                    ),
+                    audit["task"]["created_at"],
+                ),
+            }
+        )
+
     for decision in audit.get("manager_decisions", []):
         if role not in {"all", "manager"}:
             continue

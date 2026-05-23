@@ -2364,24 +2364,226 @@ def _dispatch_completion_message(*, worker_name: str, task_name: str) -> str:
     )
 
 
-def command_dispatch(args: argparse.Namespace) -> int:
-    from workerctl import db as worker_db
-    from workerctl import tmux as worker_tmux
+def _dispatch_command_types(dispatch_type: str | None) -> list[str]:
+    if dispatch_type == "worker_task_complete":
+        return []
+    if dispatch_type in {"notify_manager", "nudge_worker"}:
+        return [dispatch_type]
+    return ["notify_manager", "nudge_worker"]
 
-    if getattr(args, "once", False) and getattr(args, "watch", False):
-        raise WorkerError("dispatch accepts either --once or --watch, not both")
-    if getattr(args, "watch", False):
-        raise WorkerError("dispatch --watch is not implemented in this tranche")
-    if getattr(args, "type", None) not in {None, "notify_manager", "worker_task_complete"}:
-        raise WorkerError("dispatch --type currently supports only notify_manager")
-    limit = max(1, int(getattr(args, "limit", 10) or 10))
-    dispatcher_id = getattr(args, "dispatcher_id", None) or "dispatch-local"
-    db_path = Path(args.path).expanduser().resolve() if getattr(args, "path", None) else None
-    dry_run = bool(getattr(args, "dry_run", False))
+
+def _dispatch_command_text(command: dict[str, Any]) -> str:
+    payload = command.get("payload") or {}
+    text = payload.get("message", payload.get("text"))
+    if not isinstance(text, str) or not text.strip():
+        raise WorkerError(f"{command['type']} command requires non-empty payload.message or payload.text")
+    return text
+
+
+def _dispatch_command_route(conn, command: dict[str, Any]) -> dict[str, Any]:
+    if not command.get("task_id"):
+        raise WorkerError(f"{command['type']} command requires task_id for active binding resolution")
+    binding = active_binding_for_task(conn, task_name=command["task_id"])
+    if command["type"] == "notify_manager":
+        return {
+            **binding,
+            "signal_type": "notify_manager",
+            "source_session_id": binding["worker_session_id"],
+            "source_session_name": binding["worker_session_name"],
+            "target_session_id": binding["manager_session_id"],
+            "target_session_name": binding["manager_session_name"],
+        }
+    if command["type"] == "nudge_worker":
+        return {
+            **binding,
+            "signal_type": "nudge_worker",
+            "source_session_id": binding["manager_session_id"],
+            "source_session_name": binding["manager_session_name"],
+            "target_session_id": binding["worker_session_id"],
+            "target_session_name": binding["worker_session_name"],
+        }
+    raise WorkerError(f"unsupported dispatch command type: {command['type']}")
+
+
+def _execute_dispatch_command(conn, *, worker_db, worker_tmux, command: dict[str, Any], attempt: dict[str, Any], dispatcher_id: str) -> dict[str, Any]:
+    notification_id = None
+    side_effect_audit = {"side_effect_completed": False, "side_effect_started": False}
+    base_result = {
+        "attempt_id": attempt["id"],
+        "command_id": command["id"],
+        "command_type": command["type"],
+        "correlation_id": command["correlation_id"],
+        "dispatcher_id": dispatcher_id,
+        "dry_run": False,
+    }
+    try:
+        text = _dispatch_command_text(command)
+        route = _dispatch_command_route(conn, command)
+        payload = {
+            "command_id": command["id"],
+            "command_type": command["type"],
+            "dispatcher_id": dispatcher_id,
+            "message": text,
+            "source_session": route["source_session_name"],
+            "target_session": route["target_session_name"],
+            "task_id": command["task_id"],
+        }
+        notification_id = worker_db.insert_routed_notification(
+            conn,
+            task_id=command["task_id"],
+            binding_id=route["binding_id"],
+            correlation_id=command["correlation_id"],
+            source_session_id=route["source_session_id"],
+            target_session_id=route["target_session_id"],
+            signal_type=route["signal_type"],
+            source_event_id=None,
+            source_event_timestamp=None,
+            dedupe_key=f"{route['binding_id']}:{command['type']}:{command['id']}",
+            command_id=command["id"],
+            payload=payload,
+        )
+        worker_db.emit_telemetry_event(
+            conn,
+            actor="dispatch",
+            event_type="dispatch_command_attempted",
+            task_id=command["task_id"],
+            summary=f"Dispatch is executing command {command['type']}.",
+            correlation={
+                "attempt_id": attempt["id"],
+                "command_id": command["id"],
+                "command_type": command["type"],
+                "correlation_id": command["correlation_id"],
+                "dispatcher_id": dispatcher_id,
+                "routed_notification_id": notification_id,
+            },
+            attributes={
+                "source_session": route["source_session_name"],
+                "target_session": route["target_session_name"],
+            },
+        )
+        worker_db.mark_command_attempt_side_effect_started(conn, attempt_id=attempt["id"])
+        side_effect_audit["side_effect_started"] = True
+        send_result = worker_tmux.send_text_to_session(
+            conn,
+            session_name=route["target_session_name"],
+            text=text,
+            dry_run=False,
+            side_effect_audit=side_effect_audit,
+        )
+        result = {
+            **base_result,
+            "notification_id": notification_id,
+            "send_result": send_result,
+            "side_effect_completed": side_effect_audit["side_effect_completed"],
+            "side_effect_started": side_effect_audit["side_effect_started"],
+            "state": "delivered",
+            "target_session": route["target_session_name"],
+        }
+        worker_db.finish_routed_notification(conn, notification_id=notification_id, state="delivered")
+        worker_db.finish_command_attempt(
+            conn,
+            attempt_id=attempt["id"],
+            state="succeeded",
+            result=result,
+            side_effect_started=side_effect_audit["side_effect_started"],
+            side_effect_completed=side_effect_audit["side_effect_completed"],
+        )
+        return result
+    except Exception as exc:
+        if notification_id is not None:
+            worker_db.finish_routed_notification(
+                conn,
+                notification_id=notification_id,
+                state="failed",
+                error=str(exc),
+            )
+        result = {
+            **base_result,
+            "error": str(exc),
+            "error_type": type(exc).__name__,
+            "notification_id": notification_id,
+            "side_effect_completed": side_effect_audit["side_effect_completed"],
+            "side_effect_started": side_effect_audit["side_effect_started"],
+            "state": "failed",
+        }
+        worker_db.finish_command_attempt(
+            conn,
+            attempt_id=attempt["id"],
+            state="failed",
+            result=result,
+            error=str(exc),
+            side_effect_started=side_effect_audit["side_effect_started"],
+            side_effect_completed=side_effect_audit["side_effect_completed"],
+        )
+        return result
+
+
+def _dispatch_once_pass(
+    args: argparse.Namespace,
+    *,
+    worker_db,
+    worker_tmux,
+    limit: int,
+    dispatcher_id: str,
+    db_path: Path | None,
+    dry_run: bool,
+) -> list[dict[str, Any]]:
     processed: list[dict[str, Any]] = []
     with worker_db.connect(db_path) as conn:
         worker_db.initialize_database(conn)
-        rows = worker_db.unrouted_worker_completion_events(conn, limit=limit)
+        command_types = _dispatch_command_types(getattr(args, "type", None))
+        remaining = limit
+        if command_types:
+            if dry_run:
+                for command in worker_db.claimable_dispatch_commands(
+                    conn,
+                    command_types=command_types,
+                    limit=remaining,
+                ):
+                    processed.append(
+                        {
+                            "command_id": command["id"],
+                            "command_type": command["type"],
+                            "correlation_id": command["correlation_id"],
+                            "dry_run": True,
+                            "state": "planned",
+                            "task": command["task_id"],
+                        }
+                    )
+                remaining = max(0, limit - len(processed))
+            else:
+                recovered = worker_db.recover_stale_dispatch_claims(
+                    conn,
+                    dispatcher_id=dispatcher_id,
+                    command_types=command_types,
+                    limit=remaining,
+                )
+                processed.extend(recovered)
+                remaining = max(0, remaining - len(recovered))
+                while remaining > 0:
+                    claimed = worker_db.claim_next_dispatch_command(
+                        conn,
+                        dispatcher_id=dispatcher_id,
+                        command_types=command_types,
+                    )
+                    if claimed is None:
+                        break
+                    command = claimed["command"]
+                    attempt = claimed["attempt"]
+                    processed.append(
+                        _execute_dispatch_command(
+                            conn,
+                            worker_db=worker_db,
+                            worker_tmux=worker_tmux,
+                            command=command,
+                            attempt=attempt,
+                            dispatcher_id=dispatcher_id,
+                        )
+                    )
+                    remaining -= 1
+        rows = []
+        if remaining > 0 and getattr(args, "type", None) in {None, "worker_task_complete"}:
+            rows = worker_db.unrouted_worker_completion_events(conn, limit=remaining)
         for row in rows:
             dedupe_key = (
                 f"{row['binding_id']}:worker_task_complete:"
@@ -2516,16 +2718,89 @@ def command_dispatch(args: argparse.Namespace) -> int:
                 result.update({"error": str(exc), "notification_id": notification_id, "state": "failed"})
             processed.append(result)
         conn.commit()
+    return processed
+
+
+def _emit_dispatch_watch_heartbeat(
+    *,
+    worker_db,
+    db_path: Path | None,
+    dispatcher_id: str,
+    iteration: int,
+    processed_count: int,
+    dry_run: bool,
+) -> None:
+    with worker_db.connect(db_path) as conn:
+        worker_db.initialize_database(conn)
+        worker_db.emit_telemetry_event(
+            conn,
+            actor="dispatch",
+            event_type="dispatch_watch_heartbeat",
+            summary=f"Dispatch watch heartbeat {iteration}.",
+            correlation={"dispatcher_id": dispatcher_id, "iteration": iteration},
+            attributes={"dry_run": dry_run, "processed_count": processed_count},
+        )
+        conn.commit()
+
+
+def command_dispatch(args: argparse.Namespace) -> int:
+    from workerctl import db as worker_db
+    from workerctl import tmux as worker_tmux
+
+    if getattr(args, "once", False) and getattr(args, "watch", False):
+        raise WorkerError("dispatch accepts either --once or --watch, not both")
+    if getattr(args, "type", None) not in {None, "notify_manager", "nudge_worker", "worker_task_complete"}:
+        raise WorkerError("dispatch --type supports notify_manager, nudge_worker, and worker_task_complete")
+    limit = max(1, int(getattr(args, "limit", 10) or 10))
+    dispatcher_id = getattr(args, "dispatcher_id", None) or "dispatch-local"
+    db_path = Path(args.path).expanduser().resolve() if getattr(args, "path", None) else None
+    dry_run = bool(getattr(args, "dry_run", False))
+    watch = bool(getattr(args, "watch", False))
+    interval = max(0.0, float(getattr(args, "interval", 2.0) or 0.0))
+    watch_iterations = getattr(args, "watch_iterations", None)
+    processed: list[dict[str, Any]] = []
+    iterations = 0
+    try:
+        while True:
+            iterations += 1
+            batch = _dispatch_once_pass(
+                args,
+                worker_db=worker_db,
+                worker_tmux=worker_tmux,
+                limit=limit,
+                dispatcher_id=dispatcher_id,
+                db_path=db_path,
+                dry_run=dry_run,
+            )
+            processed.extend(batch)
+            if watch:
+                _emit_dispatch_watch_heartbeat(
+                    worker_db=worker_db,
+                    db_path=db_path,
+                    dispatcher_id=dispatcher_id,
+                    iteration=iterations,
+                    processed_count=len(batch),
+                    dry_run=dry_run,
+                )
+            if not watch:
+                break
+            if watch_iterations is not None and iterations >= int(watch_iterations):
+                break
+            time.sleep(interval)
+    except KeyboardInterrupt:
+        pass
     output = {
         "dispatcher_id": dispatcher_id,
         "dry_run": dry_run,
+        "iterations": iterations,
         "processed": processed,
         "processed_count": len(processed),
+        "watch": watch,
     }
     if getattr(args, "json", False):
         print(json.dumps(output, indent=2, sort_keys=True))
     else:
-        print(f"dispatch processed {len(processed)} notification(s)")
+        print(f"dispatch processed {len(processed)} item(s)")
     return 0
 
 
@@ -3551,8 +3826,10 @@ def command_commands(args: argparse.Namespace) -> int:
             f"""
             select commands.id, commands.type, commands.state, commands.created_at,
                    commands.updated_at, commands.task_id, tasks.name as task_name,
-                   commands.worker_id, commands.manager_id, commands.payload_json,
-                   commands.result_json, commands.error
+                   commands.worker_id, commands.manager_id, commands.correlation_id,
+                   commands.available_at, commands.claimed_by, commands.claimed_at,
+                   commands.claim_expires_at, commands.attempts, commands.max_attempts,
+                   commands.payload_json, commands.result_json, commands.error
             from commands
             left join tasks on tasks.id = commands.task_id
             {where}
@@ -3565,7 +3842,14 @@ def command_commands(args: argparse.Namespace) -> int:
             "created_at": row["created_at"],
             "error": row["error"],
             "id": row["id"],
+            "attempts": row["attempts"],
+            "available_at": row["available_at"],
+            "claim_expires_at": row["claim_expires_at"],
+            "claimed_at": row["claimed_at"],
+            "claimed_by": row["claimed_by"],
+            "correlation_id": row["correlation_id"],
             "manager_id": row["manager_id"],
+            "max_attempts": row["max_attempts"],
             "payload": json.loads(row["payload_json"]),
             "result": json.loads(row["result_json"]) if row["result_json"] else None,
             "state": row["state"],
