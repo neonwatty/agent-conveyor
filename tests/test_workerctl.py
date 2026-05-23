@@ -13483,6 +13483,174 @@ class PairCommandTests(unittest.TestCase):
             self.assertEqual(review["agreement"], "match")
             self.assertEqual(review["verdict"], "proceed")
 
+    def test_continuation_reviewer_runner_records_isolated_review(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = self._setup_db(tmpdir)
+            conn = worker_db.connect(db_path)
+            try:
+                task_id = worker_db.create_task(conn, name="continuation-runner-task", goal="Review next step.")
+                worker_db.upsert_manager_config(
+                    conn,
+                    task_id=task_id,
+                    supervision_mode="guided",
+                    permissions={"context": ["spawn_reviewer"]},
+                    nudge_on_completion="auto-review",
+                    tools=["pytest"],
+                )
+                worker_db.insert_acceptance_criterion(
+                    conn,
+                    task_id=task_id,
+                    criterion="Reviewer sees accepted criteria.",
+                    status="accepted",
+                    source="manager_inferred",
+                )
+                worker_db.insert_task_continuation(
+                    conn,
+                    task_id=task_id,
+                    proposer="worker",
+                    payload={"next": "run focused tests"},
+                    correlation_id="corr-runner",
+                )
+                worker_db.insert_task_continuation(
+                    conn,
+                    task_id=task_id,
+                    proposer="manager",
+                    payload={"next": "run full tests"},
+                    correlation_id="corr-runner",
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            reviewer_code = (
+                "import json, sys; "
+                "ctx=json.load(sys.stdin); "
+                "assert ctx['constraints']['manager_rollout_access'] is False; "
+                "assert 'manager_rollout' not in ctx; "
+                "assert 'manager_cycles' not in ctx; "
+                "assert ctx['acceptance_criteria']; "
+                "assert ctx['worker_continuation']['payload']['next']=='run focused tests'; "
+                "print(json.dumps({'agreement':'compatible','verdict':'amend','addendum':'Prefer full verification.','rationale':'Allowed context reviewed.'}))"
+            )
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "workerctl",
+                    "continuation-reviewer",
+                    "continuation-runner-task",
+                    "--correlation-id",
+                    "corr-runner",
+                    "--reviewer-session-id",
+                    "reviewer-session",
+                    "--manager-session-id",
+                    "manager-session",
+                    "--path",
+                    str(db_path),
+                    "--reviewer-command",
+                    sys.executable,
+                    "-c",
+                    reviewer_code,
+                ],
+                capture_output=True,
+                text=True,
+                cwd=str(ROOT),
+            )
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            review = json.loads(proc.stdout)
+            self.assertEqual(review["agreement"], "compatible")
+            self.assertEqual(review["verdict"], "amend")
+            self.assertFalse(review["operator_routing_required"])
+            self.assertEqual(review["subagent_run"]["manager_rollout_access"], False)
+            self.assertEqual(review["subagent_run"]["reviewer_session_id"], "reviewer-session")
+            self.assertEqual(review["subagent_run"]["manager_session_id"], "manager-session")
+            self.assertIn("worker_continuation", review["subagent_run"]["allowed_context"])
+
+            replay_proc = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "workerctl",
+                    "replay",
+                    "continuation-runner-task",
+                    "--json",
+                    "--path",
+                    str(db_path),
+                ],
+                capture_output=True,
+                text=True,
+                cwd=str(ROOT),
+            )
+            self.assertEqual(replay_proc.returncode, 0, replay_proc.stderr)
+            replay = json.loads(replay_proc.stdout)
+            self.assertIn("continuation_review", [entry["kind"] for entry in replay["entries"]])
+
+    def test_continuation_reviewer_runner_failure_records_stop(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = self._setup_db(tmpdir)
+            conn = worker_db.connect(db_path)
+            try:
+                task_id = worker_db.create_task(conn, name="continuation-runner-fail-task", goal="Review next step.")
+                worker_db.upsert_manager_config(
+                    conn,
+                    task_id=task_id,
+                    supervision_mode="guided",
+                    permissions={"context": ["spawn_reviewer"]},
+                    nudge_on_completion="ask-operator",
+                )
+                worker_db.insert_task_continuation(
+                    conn,
+                    task_id=task_id,
+                    proposer="worker",
+                    payload={"next": "continue"},
+                    correlation_id="corr-runner-fail",
+                )
+                worker_db.insert_task_continuation(
+                    conn,
+                    task_id=task_id,
+                    proposer="manager",
+                    payload={"next": "stop"},
+                    correlation_id="corr-runner-fail",
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "workerctl",
+                    "continuation-reviewer",
+                    "continuation-runner-fail-task",
+                    "--correlation-id",
+                    "corr-runner-fail",
+                    "--reviewer-session-id",
+                    "reviewer-session",
+                    "--manager-session-id",
+                    "manager-session",
+                    "--path",
+                    str(db_path),
+                    "--reviewer-command",
+                    sys.executable,
+                    "-c",
+                    "import sys; sys.stderr.write('review failed'); sys.exit(7)",
+                ],
+                capture_output=True,
+                text=True,
+                cwd=str(ROOT),
+            )
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            review = json.loads(proc.stdout)
+            self.assertEqual(review["agreement"], "divergent")
+            self.assertEqual(review["verdict"], "stop")
+            self.assertTrue(review["operator_routing_required"])
+            self.assertEqual(review["subagent_run"]["status"], "failed")
+            self.assertEqual(review["subagent_run"]["returncode"], 7)
+            self.assertIn("reviewer command exited 7", review["rationale"])
+
     def test_continuation_subagent_failure_records_stop_without_silent_approval(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = self._setup_db(tmpdir)

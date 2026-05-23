@@ -25,6 +25,7 @@ from workerctl.commands import (
     command_compact_worker,
     command_commands,
     command_continuation,
+    command_continuation_reviewer,
     command_create,
     command_criteria,
     command_criteria_plan,
@@ -563,6 +564,25 @@ def build_parser() -> argparse.ArgumentParser:
     continuation.add_argument("--include-payload", action="store_true", help="Include proposal payloads when allowed for the selected role.")
     continuation.add_argument("--path", help="Override the workerctl database path.")
     continuation.set_defaults(func=command_continuation)
+
+    continuation_reviewer = subparsers.add_parser(
+        "continuation-reviewer",
+        help="Run an isolated read-only continuation reviewer and persist its verdict.",
+    )
+    continuation_reviewer.add_argument("task", help="Task name or ID.")
+    continuation_reviewer.add_argument("--correlation-id", required=True, help="Continuation turn correlation id to review.")
+    continuation_reviewer.add_argument("--reviewer-session-id", required=True, help="Opaque id for the independent reviewer session.")
+    continuation_reviewer.add_argument("--manager-session-id", required=True, help="Opaque id for the manager session being reviewed.")
+    continuation_reviewer.add_argument("--timeout", type=float, default=120.0, help="Seconds to wait for the reviewer command.")
+    continuation_reviewer.add_argument("--dry-run", action="store_true", help="Print the allowed reviewer context without running a command.")
+    continuation_reviewer.add_argument("--json", action="store_true", help="Accepted for consistency; output is always JSON.")
+    continuation_reviewer.add_argument("--path", help="Override the workerctl database path.")
+    continuation_reviewer.add_argument(
+        "--reviewer-command",
+        nargs=argparse.REMAINDER,
+        help="Command to run as the reviewer. Must be last; receives allowed context JSON on stdin.",
+    )
+    continuation_reviewer.set_defaults(func=command_continuation_reviewer)
 
     record_decision = subparsers.add_parser(
         "record-decision",
