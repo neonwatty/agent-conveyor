@@ -427,8 +427,8 @@ def build_parser() -> argparse.ArgumentParser:
     telemetry.add_argument(
         "view",
         nargs="?",
-        choices=("snapshot",),
-        help="Optional telemetry view. Use 'snapshot' for a task-scoped dashboard overview.",
+        choices=("metrics", "snapshot", "check"),
+        help="Optional telemetry view. Use 'metrics' for bounded rollups, 'snapshot' for operator or task state, or 'check' for threshold health.",
     )
     telemetry.add_argument("--run", help="Filter by run name or ID.")
     telemetry.add_argument("--task", help="Filter by task name or ID.")
@@ -437,8 +437,14 @@ def build_parser() -> argparse.ArgumentParser:
     telemetry.add_argument("--severity", choices=("debug", "info", "warning", "error"), help="Filter by severity.")
     telemetry.add_argument("--search", help="Full-text search over event type, summary, and attributes.")
     telemetry.add_argument("--summary", action="store_true", help="Print aggregate telemetry counts.")
+    telemetry.add_argument("--window", default="24h", help="Metrics lookback window, e.g. 30m, 24h, 7d. Default: 24h.")
     telemetry.add_argument("--json", action="store_true", help="Print JSON instead of text timeline output.")
     telemetry.add_argument("--limit", type=int, default=100, help="Maximum telemetry events to inspect.")
+    telemetry.add_argument("--stale-cycle-seconds", type=float, default=3600.0, help="Flag active tasks whose latest manager cycle is older than this threshold.")
+    telemetry.add_argument("--worker-staleness-seconds", type=float, default=3600.0, help="Flag active sessions whose last heartbeat is older than this threshold.")
+    telemetry.add_argument("--max-unfinished-commands", type=int, default=0, help="Maximum allowed pending or attempted commands for telemetry check.")
+    telemetry.add_argument("--max-open-criteria", type=int, default=0, help="Maximum allowed open accepted criteria for telemetry check.")
+    telemetry.add_argument("--max-storage-bytes", type=int, help="Maximum allowed local workerctl storage bytes for telemetry check.")
     telemetry.add_argument("--path", help="Override the workerctl database path.")
     telemetry.set_defaults(func=command_telemetry)
 

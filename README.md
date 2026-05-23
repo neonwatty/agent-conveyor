@@ -439,6 +439,10 @@ tmux attach -t codex-live-test
   — Query local structured telemetry events, search them with SQLite FTS, or
   print aggregate counts for a run/task. `telemetry snapshot --task <task>
   --json` prints the task-scoped dashboard overview contract.
+- `telemetry metrics --window 24h --json` — Print bounded JSON rollups for
+  local telemetry and related tables: active tasks/sessions, cycle and command
+  success/failure counts, ingest/skipped-line totals, criteria counts,
+  reconcile drift counts, export counts, and retained capture/transcript bytes.
 - `export-task <task> [--zip]` — Dump task status, audit, prompts, and
   transcript metadata into an export bundle. Exports include
   `telemetry-events.json`, `telemetry-summary.json`, and

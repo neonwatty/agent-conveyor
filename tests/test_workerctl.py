@@ -12,6 +12,7 @@ import tempfile
 import time
 import unittest
 import zipfile
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest import mock
 
@@ -2287,6 +2288,249 @@ class CliTests(unittest.TestCase):
             self.assertEqual(summary["by_severity"], {"error": 1, "info": 1})
             self.assertEqual(summary["by_event_type"]["command_failed"], 1)
 
+    def test_telemetry_metrics_empty_db_outputs_bounded_json(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+
+            proc = self.run_workerctl(
+                "telemetry",
+                "metrics",
+                "--window",
+                "24h",
+                "--json",
+                "--path",
+                str(db_path),
+            )
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            metrics = json.loads(proc.stdout)
+            self.assertEqual(metrics["schema_version"], 1)
+            self.assertEqual(metrics["window"]["label"], "24h")
+            self.assertEqual(metrics["window"]["seconds"], 86400)
+            self.assertEqual(metrics["counters"]["telemetry_events"]["total"], 0)
+            self.assertEqual(metrics["counters"]["ingest"]["skipped_lines"], 0)
+            self.assertEqual(metrics["gauges"]["active_tasks"], 0)
+            self.assertEqual(metrics["gauges"]["storage_bytes"]["total_retained"], 0)
+            self.assertIsNone(metrics["rollups"]["cycle_success_rate"])
+
+    def test_telemetry_metrics_rolls_up_windowed_counts_commands_and_storage(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            now_dt = datetime.now(timezone.utc).replace(microsecond=0)
+            now = now_dt.isoformat().replace("+00:00", "Z")
+            old = (now_dt - timedelta(hours=3)).isoformat().replace("+00:00", "Z")
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                task_id = worker_db.create_task(conn, name="metrics-task", goal="Inspect metrics.")
+                run_id = worker_db.create_run(conn, task_id=task_id, name="metrics-run")
+                worker_id = worker_db.upsert_worker(
+                    conn,
+                    name="metrics-worker",
+                    cwd=str(ROOT),
+                    tmux_session="codex-metrics-worker",
+                    state="active",
+                    timestamp=now,
+                )
+                conn.execute(
+                    """
+                    insert into bindings(id, task_id, worker_id, state, created_at)
+                    values ('binding-metrics', ?, ?, 'active', ?)
+                    """,
+                    (task_id, worker_id, now),
+                )
+                conn.execute(
+                    """
+                    insert into sessions(id, name, role, identity_token, cwd, registered_at, state)
+                    values ('metrics-session-worker', 'metrics-session-worker', 'worker', 'token-w', ?, ?, 'active')
+                    """,
+                    (str(ROOT), now),
+                )
+                conn.execute(
+                    """
+                    insert into sessions(id, name, role, identity_token, cwd, registered_at, state)
+                    values ('metrics-session-manager', 'metrics-session-manager', 'manager', 'token-m', ?, ?, 'active')
+                    """,
+                    (str(ROOT), now),
+                )
+                worker_db.emit_telemetry_event(
+                    conn,
+                    actor="workerctl",
+                    event_type="codex_events_ingested",
+                    run_id=run_id,
+                    summary="Ingested events.",
+                    attributes={"new_events": 5, "skipped_lines": 2},
+                    timestamp=now,
+                )
+                worker_db.emit_telemetry_event(
+                    conn,
+                    actor="workerctl",
+                    event_type="codex_events_ingested",
+                    run_id=run_id,
+                    summary="Old ingest event.",
+                    attributes={"new_events": 100, "skipped_lines": 50},
+                    timestamp=old,
+                )
+                worker_db.emit_telemetry_event(
+                    conn,
+                    actor="workerctl",
+                    event_type="task_exported",
+                    run_id=run_id,
+                    summary="Exported task bundle.",
+                    timestamp=now,
+                )
+                conn.execute(
+                    """
+                    insert into manager_cycles(task_id, started_at, completed_at, state, status_json)
+                    values (?, ?, ?, 'succeeded', ?)
+                    """,
+                    (task_id, now, now, json.dumps({"pane_signal": {"captured": True}})),
+                )
+                conn.execute(
+                    """
+                    insert into manager_cycles(task_id, started_at, completed_at, state, status_json, error)
+                    values (?, ?, ?, 'failed', ?, 'tmux capture failed')
+                    """,
+                    (task_id, now, now, json.dumps({"pane_signal": {"captured": False}})),
+                )
+                conn.execute(
+                    """
+                    insert into manager_cycles(task_id, started_at, completed_at, state, status_json)
+                    values (?, ?, ?, 'succeeded', ?)
+                    """,
+                    (task_id, old, old, json.dumps({"pane_signal": {"captured": True}})),
+                )
+                worker_db.insert_acceptance_criterion(
+                    conn,
+                    task_id=task_id,
+                    criterion="Metrics JSON is stable",
+                    status="accepted",
+                    source="user_requested",
+                )
+                worker_db.insert_acceptance_criterion(
+                    conn,
+                    task_id=task_id,
+                    criterion="Rollups include storage",
+                    status="satisfied",
+                    source="manager_inferred",
+                )
+                conn.execute(
+                    """
+                    insert into commands(
+                      id, idempotency_key, created_at, updated_at, task_id, type, state,
+                      payload_json
+                    )
+                    values
+                      ('cmd-metrics-1', 'cmd-metrics-1', ?, ?, ?, 'notify_manager', 'succeeded', '{}'),
+                      ('cmd-metrics-2', 'cmd-metrics-2', ?, ?, ?, 'notify_manager', 'failed', '{}'),
+                      ('cmd-metrics-old', 'cmd-metrics-old', ?, ?, ?, 'notify_manager', 'succeeded', '{}')
+                    """,
+                    (now, now, task_id, now, now, task_id, old, old, task_id),
+                )
+                conn.execute(
+                    """
+                    insert into command_attempts(
+                      command_id, correlation_id, dispatcher_id, started_at, finished_at, state
+                    )
+                    values
+                      ('cmd-metrics-1', 'corr-1', 'dispatch', ?, ?, 'succeeded'),
+                      ('cmd-metrics-2', 'corr-2', 'dispatch', ?, ?, 'failed'),
+                      ('cmd-metrics-old', 'corr-old', 'dispatch', ?, ?, 'succeeded')
+                    """,
+                    (now, now, now, now, old, old),
+                )
+                capture_id = worker_db.insert_terminal_capture(
+                    conn,
+                    task_id=task_id,
+                    role="worker",
+                    tmux_session="codex-metrics-worker",
+                    content_sha256="sha-terminal",
+                    content="abc",
+                    history_lines=10,
+                    source="test",
+                    worker_id=worker_id,
+                    timestamp=now,
+                )
+                worker_db.insert_transcript_segment(
+                    conn,
+                    task_id=task_id,
+                    role="worker",
+                    source_capture_id=capture_id,
+                    previous_capture_id=None,
+                    content_sha256="sha-segment",
+                    segment_text="abcdef",
+                    segment_start_line=1,
+                    segment_end_line=1,
+                    segment_kind="segment",
+                    timestamp=now,
+                )
+                worker_db.insert_transcript_capture(
+                    conn,
+                    worker_id=worker_id,
+                    sha256="sha-transcript",
+                    content="abcd",
+                    captured_at=now,
+                    changed_at=now,
+                    history_lines=10,
+                    changed=True,
+                )
+                conn.commit()
+
+            proc = self.run_workerctl(
+                "telemetry",
+                "metrics",
+                "--window",
+                "1h",
+                "--task",
+                "metrics-task",
+                "--json",
+                "--path",
+                str(db_path),
+            )
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            metrics = json.loads(proc.stdout)
+            self.assertEqual(metrics["filters"]["task_id"], task_id)
+            self.assertEqual(metrics["counters"]["ingest"]["new_events"], 5)
+            self.assertEqual(metrics["counters"]["ingest"]["skipped_lines"], 2)
+            self.assertEqual(metrics["counters"]["cycles"]["succeeded"], 1)
+            self.assertEqual(metrics["counters"]["cycles"]["failed"], 1)
+            self.assertEqual(metrics["counters"]["pane_capture"], {"failed": 1, "succeeded": 1, "unknown": 0})
+            self.assertEqual(metrics["counters"]["exports"]["total"], 1)
+            self.assertEqual(metrics["rollups"]["cycle_success_rate"], 0.5)
+            self.assertEqual(metrics["rollups"]["commands_by_type"]["notify_manager"]["succeeded"], 1)
+            self.assertEqual(metrics["rollups"]["commands_by_type"]["notify_manager"]["failed"], 1)
+            self.assertEqual(metrics["rollups"]["command_attempts_by_type"]["notify_manager"]["succeeded"], 1)
+            self.assertEqual(metrics["rollups"]["command_attempts_by_type"]["notify_manager"]["failed"], 1)
+            self.assertEqual(metrics["gauges"]["criteria"]["by_status"]["accepted"], 1)
+            self.assertEqual(metrics["gauges"]["criteria"]["by_status"]["satisfied"], 1)
+            self.assertGreaterEqual(metrics["gauges"]["active_sessions"]["by_role"]["worker"], 1)
+            self.assertEqual(metrics["gauges"]["active_sessions"]["by_role"]["manager"], 1)
+            self.assertEqual(metrics["gauges"]["storage_bytes"]["terminal_captures"], 3)
+            self.assertEqual(metrics["gauges"]["storage_bytes"]["transcript_segments"], 6)
+            self.assertEqual(metrics["gauges"]["storage_bytes"]["transcript_captures"], 4)
+            self.assertEqual(metrics["gauges"]["storage_bytes"]["total_retained"], 13)
+
+    def test_telemetry_metrics_rejects_invalid_window(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+
+            proc = self.run_workerctl(
+                "telemetry",
+                "metrics",
+                "--window",
+                "yesterday",
+                "--json",
+                "--path",
+                str(db_path),
+            )
+
+            self.assertNotEqual(proc.returncode, 0)
+            self.assertIn("--window must be a positive duration", proc.stderr)
+
     def test_telemetry_cli_text_timeline_is_legible(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "workerctl.db"
@@ -2521,6 +2765,194 @@ class CliTests(unittest.TestCase):
             self.assertEqual(snapshot["commands"]["unfinished_count"], 1)
             self.assertEqual(snapshot["commands"]["failed_count"], 1)
             self.assertGreaterEqual(snapshot["telemetry"]["summary"]["by_severity"]["error"], 1)
+
+    def test_telemetry_operator_snapshot_empty_db_is_healthy(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+
+            proc = self.run_workerctl(
+                "telemetry",
+                "snapshot",
+                "--json",
+                "--path",
+                str(db_path),
+            )
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            snapshot = json.loads(proc.stdout)
+            self.assertEqual(snapshot["tasks"]["active_count"], 0)
+            self.assertEqual(snapshot["sessions"]["active_count"], 0)
+            self.assertEqual(snapshot["commands"]["unfinished_count"], 0)
+            self.assertEqual(snapshot["criteria"]["open_accepted_count"], 0)
+            self.assertEqual(snapshot["alerts"], [])
+            self.assertTrue(snapshot["checks"]["ok"])
+
+            check = self.run_workerctl(
+                "telemetry",
+                "check",
+                "--json",
+                "--path",
+                str(db_path),
+            )
+            self.assertEqual(check.returncode, 0, check.stderr)
+            self.assertTrue(json.loads(check.stdout)["checks"]["ok"])
+
+    def test_telemetry_check_reports_threshold_and_reconcile_failures(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                stale_task_id = worker_db.create_task(conn, name="stale-task", goal="Expose stale cycles.")
+                drift_task_id = worker_db.create_task(conn, name="drift-task", goal="Expose binding drift.")
+
+                worker_db.register_session(
+                    conn,
+                    name="stale-worker",
+                    role="worker",
+                    codex_session_path="/worker-rollout.jsonl",
+                    codex_session_id="stale-worker-codex",
+                    pid=os.getpid(),
+                    cwd="/repo",
+                    tmux_session="codex-stale-worker",
+                    tmux_pane_id="%1",
+                )
+                worker_db.register_session(
+                    conn,
+                    name="stale-manager",
+                    role="manager",
+                    codex_session_path="/manager-rollout.jsonl",
+                    codex_session_id="stale-manager-codex",
+                    pid=os.getpid(),
+                    cwd="/repo",
+                    tmux_session="codex-stale-manager",
+                    tmux_pane_id="%2",
+                )
+                worker_db.bind_sessions(
+                    conn,
+                    task_name="stale-task",
+                    worker_session_name="stale-worker",
+                    manager_session_name="stale-manager",
+                )
+                conn.execute(
+                    """
+                    insert into manager_cycles(task_id, started_at, completed_at, state, status_json)
+                    values (?, '2026-05-20T10:00:00Z', '2026-05-20T10:00:05Z', 'succeeded', '{}')
+                    """,
+                    (stale_task_id,),
+                )
+
+                worker_db.register_session(
+                    conn,
+                    name="drift-worker",
+                    role="worker",
+                    codex_session_path="/drift-worker-rollout.jsonl",
+                    codex_session_id="drift-worker-codex",
+                    pid=os.getpid(),
+                    cwd="/repo",
+                    tmux_session="codex-drift-worker",
+                    tmux_pane_id="%3",
+                )
+                worker_db.register_session(
+                    conn,
+                    name="drift-manager",
+                    role="manager",
+                    codex_session_path="/drift-manager-rollout.jsonl",
+                    codex_session_id="drift-manager-codex",
+                    pid=os.getpid(),
+                    cwd="/repo",
+                    tmux_session="codex-drift-manager",
+                    tmux_pane_id="%4",
+                )
+                worker_db.bind_sessions(
+                    conn,
+                    task_name="drift-task",
+                    worker_session_name="drift-worker",
+                    manager_session_name="drift-manager",
+                )
+                conn.execute("update sessions set state = 'gone' where name = 'drift-worker'")
+
+                worker_db.register_session(
+                    conn,
+                    name="dead-worker",
+                    role="worker",
+                    codex_session_path="/dead-worker-rollout.jsonl",
+                    codex_session_id="dead-worker-codex",
+                    pid=99999999,
+                    cwd="/repo",
+                    tmux_session="codex-dead-worker",
+                    tmux_pane_id="%5",
+                )
+                conn.execute(
+                    "update sessions set last_heartbeat_at = '2026-05-20T10:00:00Z' where name = 'dead-worker'"
+                )
+
+                worker_db.insert_acceptance_criterion(
+                    conn,
+                    task_id=stale_task_id,
+                    criterion="Do the thing.",
+                    status="accepted",
+                    source="manager_inferred",
+                )
+                worker_db.create_command(
+                    conn,
+                    command_type="task_nudge",
+                    payload={"message": "status"},
+                    task_id=stale_task_id,
+                )
+                failed_command_id = worker_db.create_command(
+                    conn,
+                    command_type="task_interrupt",
+                    payload={"key": "C-c"},
+                    task_id=stale_task_id,
+                )
+                worker_db.finish_command(conn, command_id=failed_command_id, state="failed", error="tmux denied")
+                conn.execute(
+                    """
+                    insert into manager_cycles(task_id, started_at, completed_at, state, status_json, error)
+                    values (?, '2026-05-21T10:00:00Z', '2026-05-21T10:00:05Z', 'failed', '{}', 'boom')
+                    """,
+                    (drift_task_id,),
+                )
+                conn.commit()
+
+            proc = self.run_workerctl(
+                "telemetry",
+                "check",
+                "--json",
+                "--stale-cycle-seconds",
+                "1",
+                "--worker-staleness-seconds",
+                "1",
+                "--max-unfinished-commands",
+                "0",
+                "--max-open-criteria",
+                "0",
+                "--max-storage-bytes",
+                "1",
+                "--path",
+                str(db_path),
+            )
+
+            self.assertEqual(proc.returncode, 1)
+            payload = json.loads(proc.stdout)
+            alert_types = {alert["type"] for alert in payload["alerts"]}
+            self.assertIn("stale_cycles", alert_types)
+            self.assertIn("dead_pid_sessions", alert_types)
+            self.assertIn("stale_sessions", alert_types)
+            self.assertIn("unfinished_commands", alert_types)
+            self.assertIn("open_accepted_criteria", alert_types)
+            self.assertIn("reconcile_drift", alert_types)
+            self.assertIn("failed_cycles", alert_types)
+            self.assertIn("failed_commands", alert_types)
+            self.assertIn("storage_bytes", alert_types)
+            self.assertEqual(payload["commands"]["unfinished_count"], 1)
+            self.assertEqual(payload["criteria"]["open_accepted_count"], 1)
+            self.assertEqual(payload["sessions"]["dead_pid_count"], 1)
+            self.assertEqual(payload["cycles"]["stale_count"], 2)
+            serialized = json.dumps(payload)
+            self.assertNotIn("Do the thing.", serialized)
 
     def test_list_json_reports_tmux_permission_error_without_failing(self):
         with tempfile.TemporaryDirectory() as tmpdir:
