@@ -21,7 +21,8 @@ body {
 .workspace {
   display: grid;
   gap: 14px;
-  grid-template-columns: minmax(360px, 1fr) minmax(360px, 1fr) 380px;
+  grid-template-columns: minmax(680px, 1fr) 380px;
+  grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
   height: calc(100vh - 28px);
 }
 
@@ -37,6 +38,16 @@ body {
   display: grid;
   grid-template-rows: 44px 1fr;
   overflow: hidden;
+}
+
+.terminal-panel:first-child {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.terminal-panel:nth-child(2) {
+  grid-column: 1;
+  grid-row: 2;
 }
 
 .terminal-panel header {
@@ -104,6 +115,8 @@ body {
 .observation-rail {
   display: grid;
   gap: 14px;
+  grid-column: 2;
+  grid-row: 1 / span 2;
   grid-template-rows: auto auto minmax(0, 1fr);
   overflow: hidden;
   padding: 14px;
