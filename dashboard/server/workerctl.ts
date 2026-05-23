@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 
 export type DashboardCommand =
+  | "audit"
   | "bind"
   | "cycle"
   | "create-task"
@@ -81,6 +82,14 @@ export function buildWorkerctlArgs(options: WorkerctlCommandOptions): string[] {
       throw new Error("Snapshot command requires a task.");
     }
     args.push("telemetry", "snapshot", "--task", options.task, "--json");
+    if (options.limit) {
+      args.push("--limit", String(options.limit));
+    }
+  } else if (options.command === "audit") {
+    if (!options.task) {
+      throw new Error("Audit command requires a task.");
+    }
+    args.push("audit", options.task, "--json");
   } else if (options.command === "sessions") {
     args.push("sessions");
   } else if (options.command === "tasks") {
@@ -189,6 +198,7 @@ function commandSupportsPath(command: DashboardCommand): boolean {
     "create-task",
     "cycle",
     "discover",
+    "audit",
     "export",
     "finish",
     "interrupt",

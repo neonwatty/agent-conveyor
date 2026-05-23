@@ -36,6 +36,24 @@ test("builds task snapshot workerctl arguments without shell interpolation", () 
   ]);
 });
 
+test("builds task audit workerctl arguments", () => {
+  const args = buildWorkerctlArgs({
+    command: "audit",
+    dbPath: "/tmp/workerctl.db",
+    task: "snapshot-task",
+    workerctlPath: "scripts/workerctl",
+  });
+
+  assert.deepEqual(args, [
+    "scripts/workerctl",
+    "audit",
+    "snapshot-task",
+    "--json",
+    "--path",
+    "/tmp/workerctl.db",
+  ]);
+});
+
 test("builds session list arguments using the existing JSON default", () => {
   const args = buildWorkerctlArgs({
     dbPath: "/tmp/workerctl.db",

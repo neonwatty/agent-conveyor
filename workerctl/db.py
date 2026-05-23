@@ -12,7 +12,7 @@ from workerctl.core import now_iso
 from workerctl.state import state_root
 
 
-SCHEMA_VERSION = 16
+SCHEMA_VERSION = 17
 REQUIRED_TABLES = {
     "acceptance_criteria",
     "agent_observations",
@@ -508,6 +508,7 @@ def migrate(conn: sqlite3.Connection, from_version: int) -> None:
           claim_expires_at text,
           attempts integer not null default 0 check (attempts >= 0),
           max_attempts integer not null default 1 check (max_attempts > 0),
+          required_permission text,
           payload_json text not null check (json_valid(payload_json)),
           result_json text check (result_json is null or json_valid(result_json)),
           error text
@@ -650,9 +651,6 @@ def migrate(conn: sqlite3.Connection, from_version: int) -> None:
         create index if not exists commands_task_state_created
         on commands(task_id, state, created_at);
 
-        create index if not exists commands_claimable
-        on commands(state, type, available_at, created_at, id);
-
         create index if not exists command_attempts_command_id
         on command_attempts(command_id, id);
 
@@ -709,6 +707,7 @@ def migrate(conn: sqlite3.Connection, from_version: int) -> None:
     migrate_to_v14_epilogues(conn)
     migrate_to_v15_continuations(conn)
     migrate_to_v16_dispatch_command_attempts(conn)
+    migrate_to_v17_command_required_permission(conn)
     sync_worker_ids_to_config_files(conn)
     conn.execute(
         "insert or ignore into schema_migrations(version, applied_at) values (?, ?)",
@@ -1108,6 +1107,11 @@ def migrate_to_v16_dispatch_command_attempts(conn: sqlite3.Connection) -> None:
     )
 
 
+def migrate_to_v17_command_required_permission(conn: sqlite3.Connection) -> None:
+    """Add optional manager permission metadata to queued commands. Idempotent."""
+    _add_column_if_missing(conn, "commands", "required_permission", "text")
+
+
 def sync_worker_ids_to_config_files(conn: sqlite3.Connection) -> None:
     database_path = conn.execute("PRAGMA database_list").fetchone()["file"]
     if Path(database_path).resolve() != default_db_path().resolve():
@@ -1227,6 +1231,7 @@ def _command_record(row: sqlite3.Row) -> dict[str, Any]:
         "manager_id": row["manager_id"],
         "max_attempts": row["max_attempts"],
         "payload": json.loads(row["payload_json"]),
+        "required_permission": row["required_permission"],
         "result": json.loads(row["result_json"]) if row["result_json"] else None,
         "state": row["state"],
         "task_id": row["task_id"],
@@ -1340,8 +1345,11 @@ def create_command(
     correlation_id: str | None = None,
     available_at: str | None = None,
     max_attempts: int = 1,
+    required_permission: str | None = None,
     timestamp: str | None = None,
 ) -> str:
+    if required_permission is not None and not required_permission.strip():
+        raise ValueError("required_permission must be non-empty when provided")
     command_id = f"command-{uuid.uuid4()}"
     now = timestamp or now_iso()
     key = idempotency_key or command_id
@@ -1350,9 +1358,9 @@ def create_command(
         insert into commands(
           id, idempotency_key, created_at, updated_at, task_id, worker_id,
           manager_id, correlation_id, type, state, available_at, max_attempts,
-          payload_json
+          required_permission, payload_json
         )
-        values (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)
+        values (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)
         """,
         (
             command_id,
@@ -1366,6 +1374,7 @@ def create_command(
             command_type,
             available_at,
             max_attempts,
+            required_permission,
             json.dumps(payload, sort_keys=True),
         ),
     )
@@ -1379,11 +1388,70 @@ def create_command(
         attributes={
             "idempotency_key": key,
             "manager_id": manager_id,
+            "required_permission": required_permission,
             "state": "pending",
             "worker_id": worker_id,
         },
     )
     return command_id
+
+
+def enqueue_notify_manager(
+    conn: sqlite3.Connection,
+    *,
+    task_id: str,
+    message: str,
+    required_permission: str | None = None,
+    idempotency_key: str | None = None,
+    correlation_id: str | None = None,
+    available_at: str | None = None,
+    max_attempts: int = 1,
+    timestamp: str | None = None,
+    payload: dict[str, Any] | None = None,
+) -> str:
+    if not message.strip():
+        raise ValueError("notify_manager message must be non-empty")
+    return create_command(
+        conn,
+        command_type="notify_manager",
+        task_id=task_id,
+        payload={**(payload or {}), "message": message},
+        idempotency_key=idempotency_key,
+        correlation_id=correlation_id,
+        available_at=available_at,
+        max_attempts=max_attempts,
+        required_permission=required_permission,
+        timestamp=timestamp,
+    )
+
+
+def enqueue_nudge_worker(
+    conn: sqlite3.Connection,
+    *,
+    task_id: str,
+    message: str,
+    required_permission: str | None = None,
+    idempotency_key: str | None = None,
+    correlation_id: str | None = None,
+    available_at: str | None = None,
+    max_attempts: int = 1,
+    timestamp: str | None = None,
+    payload: dict[str, Any] | None = None,
+) -> str:
+    if not message.strip():
+        raise ValueError("nudge_worker message must be non-empty")
+    return create_command(
+        conn,
+        command_type="nudge_worker",
+        task_id=task_id,
+        payload={**(payload or {}), "message": message},
+        idempotency_key=idempotency_key,
+        correlation_id=correlation_id,
+        available_at=available_at,
+        max_attempts=max_attempts,
+        required_permission=required_permission,
+        timestamp=timestamp,
+    )
 
 
 def mark_command_attempted(conn: sqlite3.Connection, *, command_id: str, timestamp: str | None = None) -> None:
@@ -1465,7 +1533,7 @@ def claim_next_dispatch_command(
         returning id, idempotency_key, created_at, updated_at, task_id, worker_id,
                   manager_id, correlation_id, type, state, available_at, claimed_by,
                   claimed_at, claim_expires_at, attempts, max_attempts, payload_json,
-                  result_json, error
+                  required_permission, result_json, error
         """,
         (now, correlation_id, dispatcher_id, now, claim_expires_at, *command_types, now),
     ).fetchone()
@@ -1754,7 +1822,7 @@ def claimable_dispatch_commands(
         select id, idempotency_key, created_at, updated_at, task_id, worker_id,
                manager_id, correlation_id, type, state, available_at, claimed_by,
                claimed_at, claim_expires_at, attempts, max_attempts, payload_json,
-               result_json, error
+               required_permission, result_json, error
         from commands
         where state = 'pending'
           and type in ({placeholders})
@@ -4509,7 +4577,7 @@ def task_audit(conn: sqlite3.Connection, *, task: str) -> dict[str, Any]:
         select id, idempotency_key, created_at, updated_at, task_id, worker_id,
                manager_id, correlation_id, type, state, available_at, claimed_by,
                claimed_at, claim_expires_at, attempts, max_attempts, payload_json,
-               result_json, error
+               required_permission, result_json, error
         from commands
         where task_id = ?
         order by created_at, id

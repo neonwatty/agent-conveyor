@@ -35,13 +35,59 @@ type TimelineItem = {
   time?: string;
   title: string;
 };
+type DispatchChain = {
+  attempts: Array<{
+    dispatcher_id?: string | null;
+    error?: string | null;
+    id?: number;
+    side_effect_completed: boolean;
+    side_effect_started: boolean;
+    state?: string;
+  }>;
+  command_id?: string;
+  command_state?: string;
+  command_type?: string;
+  correlation_id?: string | null;
+  key: string;
+  manager_cycle_id?: number | null;
+  manager_decision_id?: number | null;
+  notification_count: number;
+  side_effect_risk: boolean;
+  summary: string;
+  time?: string;
+};
+type DispatchHealth = {
+  failed_count: number;
+  heartbeat?: {
+    dispatcher_id?: string;
+    dry_run?: boolean;
+    iteration?: number;
+    processed_count?: number;
+    stale: boolean;
+    stale_seconds?: number | null;
+    timestamp?: string;
+  } | null;
+  queued_count: number;
+  side_effect_risk_count: number;
+  stale_claim_count: number;
+};
 type Observation = {
+  audit?: {
+    command_attempts: unknown[];
+    commands: unknown[];
+    correlation_chains: unknown[];
+    routed_notifications: unknown[];
+  } | null;
   binding?: {
     manager_name?: string;
     state?: string;
     task_name?: string;
     worker_name?: string;
   } | null;
+  dispatch?: {
+    chains: DispatchChain[];
+    health: DispatchHealth;
+  };
   latest_cycle?: { state?: string } | null;
   polled_at: string;
   task?: { goal?: string; name?: string; state?: string } | null;
@@ -65,6 +111,16 @@ function formatTime(value?: string) {
   return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
+function formatAge(seconds?: number | null) {
+  if (seconds === null || seconds === undefined) {
+    return "unknown";
+  }
+  if (seconds < 60) {
+    return `${seconds}s`;
+  }
+  return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+}
+
 function roleLabel(terminal: TerminalState) {
   const session = terminal.registered_session;
   if (!session) {
@@ -72,6 +128,57 @@ function roleLabel(terminal: TerminalState) {
   }
   const health = session.alive === false ? "dead" : session.state || "registered";
   return `${session.role}: ${session.name} (${health})`;
+}
+
+function DispatchPanel({ observation }: { observation: Observation | null }) {
+  const health = observation?.dispatch?.health;
+  const chains = observation?.dispatch?.chains || [];
+  const heartbeat = health?.heartbeat;
+  const chips = [
+    ["Queued", String(health?.queued_count ?? 0), (health?.queued_count ?? 0) > 0 ? "warning" : "ok"],
+    ["Failed", String(health?.failed_count ?? 0), (health?.failed_count ?? 0) > 0 ? "error" : "ok"],
+    ["Stale", String(health?.stale_claim_count ?? 0), (health?.stale_claim_count ?? 0) > 0 ? "warning" : "ok"],
+    ["Risk", String(health?.side_effect_risk_count ?? 0), (health?.side_effect_risk_count ?? 0) > 0 ? "error" : "ok"],
+  ];
+  return (
+    <section className="dispatch-section">
+      <h2>Dispatch</h2>
+      <div className="dispatch-health">
+        {chips.map(([label, value, state]) => (
+          <div key={label} data-state={state}>
+            <span>{label}</span>
+            <strong>{value}</strong>
+          </div>
+        ))}
+      </div>
+      <div className="dispatch-heartbeat" data-state={heartbeat?.stale ? "warning" : "ok"}>
+        <span>Heartbeat</span>
+        <strong>{heartbeat?.timestamp ? `${formatTime(heartbeat.timestamp)} (${formatAge(heartbeat.stale_seconds)} ago)` : "none"}</strong>
+        {heartbeat?.dispatcher_id ? <em>{heartbeat.dispatcher_id}</em> : null}
+      </div>
+      <ol className="dispatch-chain-list">
+        {chains.map((chain) => (
+          <li key={chain.key} data-risk={chain.side_effect_risk || undefined}>
+            <div>
+              <time>{formatTime(chain.time)}</time>
+              <strong>{chain.command_type || "command"}</strong>
+              <span>{chain.command_state || "unknown"}</span>
+            </div>
+            <p>{chain.correlation_id || chain.command_id || chain.summary}</p>
+            <small>
+              {[
+                chain.manager_cycle_id ? `cycle #${chain.manager_cycle_id}` : null,
+                chain.manager_decision_id ? `decision #${chain.manager_decision_id}` : null,
+                `${chain.attempts.length} attempt${chain.attempts.length === 1 ? "" : "s"}`,
+                `${chain.notification_count} notification${chain.notification_count === 1 ? "" : "s"}`,
+              ].filter(Boolean).join(" / ")}
+            </small>
+          </li>
+        ))}
+        {chains.length === 0 ? <li><strong>No dispatch chains for the bound task</strong></li> : null}
+      </ol>
+    </section>
+  );
 }
 
 function TerminalPane({ terminal }: { terminal: TerminalState }) {
@@ -229,6 +336,7 @@ function App() {
             <p data-state={pollState}>{pollError || (observation ? `Updated ${formatTime(observation.polled_at)}` : "Starting dashboard shells")}</p>
           </header>
           <StatePanel observation={observation} />
+          <DispatchPanel observation={observation} />
           <Timeline items={observation?.timeline || []} />
         </aside>
       </section>

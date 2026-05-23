@@ -35,6 +35,8 @@ from workerctl.commands import (
     command_divergences,
     command_doctor,
     command_doctor_self,
+    command_enqueue_notify_manager,
+    command_enqueue_nudge_worker,
     command_epilogue,
     command_events,
     command_idle_check,
@@ -254,6 +256,24 @@ def build_parser() -> argparse.ArgumentParser:
     dispatch.add_argument("--path", help="Override the workerctl database path.")
     dispatch.set_defaults(func=command_dispatch)
 
+    enqueue_notify = subparsers.add_parser("enqueue-notify-manager", help="Queue a notify_manager command for Dispatch.")
+    enqueue_notify.add_argument("task", help="Task name or ID.")
+    enqueue_notify.add_argument("--message", required=True, help="Message Dispatch should deliver to the bound manager.")
+    enqueue_notify.add_argument("--required-permission", help="Manager permission required before Dispatch may send.")
+    enqueue_notify.add_argument("--idempotency-key", help="Optional idempotency key for this queued command.")
+    enqueue_notify.add_argument("--json", action="store_true", help="Print JSON output.")
+    enqueue_notify.add_argument("--path", help="Override the workerctl database path.")
+    enqueue_notify.set_defaults(func=command_enqueue_notify_manager)
+
+    enqueue_nudge = subparsers.add_parser("enqueue-nudge-worker", help="Queue a nudge_worker command for Dispatch.")
+    enqueue_nudge.add_argument("task", help="Task name or ID.")
+    enqueue_nudge.add_argument("--message", required=True, help="Message Dispatch should deliver to the bound worker.")
+    enqueue_nudge.add_argument("--required-permission", help="Manager permission required before Dispatch may send.")
+    enqueue_nudge.add_argument("--idempotency-key", help="Optional idempotency key for this queued command.")
+    enqueue_nudge.add_argument("--json", action="store_true", help="Print JSON output.")
+    enqueue_nudge.add_argument("--path", help="Override the workerctl database path.")
+    enqueue_nudge.set_defaults(func=command_enqueue_nudge_worker)
+
     doctor = subparsers.add_parser("doctor", help="Check local dependencies and worker state.")
     doctor.add_argument("--cwd", default=str(INVOCATION_CWD), help="Target worker cwd to check.")
     doctor.set_defaults(func=command_doctor)
@@ -411,7 +431,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     telemetry.add_argument("--run", help="Filter by run name or ID.")
     telemetry.add_argument("--task", help="Filter by task name or ID.")
-    telemetry.add_argument("--actor", choices=("manager", "worker", "workerctl"), help="Filter by telemetry actor.")
+    telemetry.add_argument("--actor", choices=("dispatch", "manager", "operator", "system", "worker", "workerctl"), help="Filter by telemetry actor.")
     telemetry.add_argument("--event-type", help="Filter by telemetry event type.")
     telemetry.add_argument("--severity", choices=("debug", "info", "warning", "error"), help="Filter by severity.")
     telemetry.add_argument("--search", help="Full-text search over event type, summary, and attributes.")
