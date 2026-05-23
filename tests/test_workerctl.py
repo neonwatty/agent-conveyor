@@ -1982,6 +1982,16 @@ class CliTests(unittest.TestCase):
                     attributes={"command_type": "session_nudge"},
                     timestamp="2026-05-20T10:01:00Z",
                 )
+                worker_db.emit_telemetry_event(
+                    conn,
+                    actor="dispatch",
+                    event_type="dispatch_watch_heartbeat",
+                    run_id=run_id,
+                    summary="Dispatch watch heartbeat.",
+                    correlation={"dispatcher_id": "dispatch-local"},
+                    attributes={"iteration": 1},
+                    timestamp="2026-05-20T10:02:00Z",
+                )
 
             timeline = self.run_workerctl(
                 "telemetry",
@@ -1993,7 +2003,7 @@ class CliTests(unittest.TestCase):
             )
             self.assertEqual(timeline.returncode, 0, timeline.stderr)
             events = json.loads(timeline.stdout)
-            self.assertEqual([event["event_type"] for event in events], ["manager_cycle_succeeded", "command_succeeded"])
+            self.assertEqual([event["event_type"] for event in events], ["manager_cycle_succeeded", "command_succeeded", "dispatch_watch_heartbeat"])
             self.assertEqual(events[0]["id"], first_event)
             self.assertEqual(events[0]["correlation"], {"cycle_id": 1})
             self.assertEqual(events[0]["attributes"], {"state": "idle"})
@@ -2011,6 +2021,20 @@ class CliTests(unittest.TestCase):
             self.assertEqual(search.returncode, 0, search.stderr)
             search_events = json.loads(search.stdout)
             self.assertEqual([event["event_type"] for event in search_events], ["manager_cycle_succeeded"])
+
+            dispatch = self.run_workerctl(
+                "telemetry",
+                "--run",
+                run_id,
+                "--actor",
+                "dispatch",
+                "--json",
+                "--path",
+                str(db_path),
+            )
+            self.assertEqual(dispatch.returncode, 0, dispatch.stderr)
+            dispatch_events = json.loads(dispatch.stdout)
+            self.assertEqual([event["event_type"] for event in dispatch_events], ["dispatch_watch_heartbeat"])
 
     def test_telemetry_cli_summary_counts_events(self):
         with tempfile.TemporaryDirectory() as tmpdir:

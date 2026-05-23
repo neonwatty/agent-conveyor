@@ -411,7 +411,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     telemetry.add_argument("--run", help="Filter by run name or ID.")
     telemetry.add_argument("--task", help="Filter by task name or ID.")
-    telemetry.add_argument("--actor", choices=("manager", "worker", "workerctl"), help="Filter by telemetry actor.")
+    telemetry.add_argument("--actor", choices=("dispatch", "manager", "operator", "system", "worker", "workerctl"), help="Filter by telemetry actor.")
     telemetry.add_argument("--event-type", help="Filter by telemetry event type.")
     telemetry.add_argument("--severity", choices=("debug", "info", "warning", "error"), help="Filter by severity.")
     telemetry.add_argument("--search", help="Full-text search over event type, summary, and attributes.")
