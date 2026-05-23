@@ -24,15 +24,18 @@ from workerctl.commands import (
     command_classify,
     command_compact_worker,
     command_commands,
+    command_continuation,
     command_create,
     command_criteria,
     command_criteria_plan,
     command_cycle,
     command_dashboard,
     command_db_doctor,
+    command_dispatch,
     command_divergences,
     command_doctor,
     command_doctor_self,
+    command_epilogue,
     command_events,
     command_idle_check,
     command_interrupt,
@@ -60,6 +63,7 @@ from workerctl.commands import (
     command_ingest,
     command_unbind,
     command_handoff,
+    command_manager_ack,
     command_manager_config,
     command_manager_permission,
     command_session_nudge,
@@ -75,6 +79,7 @@ from workerctl.commands import (
     command_transcript_prune,
     command_transcript_show,
     command_update_status,
+    command_worker_ack,
 )
 from workerctl.core import WorkerError
 from workerctl.codex_session import CodexSessionError
@@ -232,6 +237,18 @@ def build_parser() -> argparse.ArgumentParser:
     dashboard.add_argument("--json", action="store_true", help="Print JSON for --dry-run output.")
     dashboard.set_defaults(func=command_dashboard)
 
+    dispatch = subparsers.add_parser("dispatch", help="Route mechanical session events and dispatch queued side effects.")
+    dispatch_mode = dispatch.add_mutually_exclusive_group()
+    dispatch_mode.add_argument("--once", action="store_true", help="Run one dispatch polling pass.")
+    dispatch_mode.add_argument("--watch", action="store_true", help="Continuously poll for dispatch work.")
+    dispatch.add_argument("--limit", type=int, default=10, help="Maximum unrouted signals to process in one pass.")
+    dispatch.add_argument("--dispatcher-id", default="dispatch-local", help="Stable id for this dispatcher process.")
+    dispatch.add_argument("--type", choices=("notify_manager", "worker_task_complete"), help="Restrict dispatch work by type.")
+    dispatch.add_argument("--dry-run", action="store_true", help="Report planned dispatch work without writing or sending.")
+    dispatch.add_argument("--json", action="store_true", help="Print dispatch results as JSON.")
+    dispatch.add_argument("--path", help="Override the workerctl database path.")
+    dispatch.set_defaults(func=command_dispatch)
+
     doctor = subparsers.add_parser("doctor", help="Check local dependencies and worker state.")
     doctor.add_argument("--cwd", default=str(INVOCATION_CWD), help="Target worker cwd to check.")
     doctor.set_defaults(func=command_doctor)
@@ -340,6 +357,22 @@ def build_parser() -> argparse.ArgumentParser:
     handoff.add_argument("--path", help="Override the workerctl database path.")
     handoff.set_defaults(func=command_handoff)
 
+    worker_ack = subparsers.add_parser("worker-ack", help="Record or read the worker acknowledgement for a task.")
+    worker_ack.add_argument("task", help="Task name or ID.")
+    worker_ack.add_argument("--from-stdin", action="store_true", help="Read acknowledgement JSON object from stdin and persist it.")
+    worker_ack.add_argument("--json", action="store_true", help="Read the latest acknowledgement as JSON.")
+    worker_ack.add_argument("--correlation-id", help="Optional correlation id linking the acknowledgement to a decision or request.")
+    worker_ack.add_argument("--path", help="Override the workerctl database path.")
+    worker_ack.set_defaults(func=command_worker_ack)
+
+    manager_ack = subparsers.add_parser("manager-ack", help="Record or read the manager acknowledgement for a task.")
+    manager_ack.add_argument("task", help="Task name or ID.")
+    manager_ack.add_argument("--from-stdin", action="store_true", help="Read acknowledgement JSON object from stdin and persist it.")
+    manager_ack.add_argument("--json", action="store_true", help="Read the latest acknowledgement as JSON.")
+    manager_ack.add_argument("--correlation-id", help="Optional correlation id linking the acknowledgement to a decision or request.")
+    manager_ack.add_argument("--path", help="Override the workerctl database path.")
+    manager_ack.set_defaults(func=command_manager_ack)
+
     runs = subparsers.add_parser(
         "runs",
         help="Create, list, show, or finish local telemetry runs for QA and manager/worker drills.",
@@ -423,6 +456,36 @@ def build_parser() -> argparse.ArgumentParser:
         default=[],
         help="Planning, PRD, mockup, or other reference path/URL. May be repeated.",
     )
+    manager_config.add_argument(
+        "--permit",
+        action="append",
+        default=[],
+        metavar="CATEGORY.ACTION",
+        help="Grant a categorized manager permission such as repo.open_pr or verification.run_pytest. May be repeated.",
+    )
+    manager_config.add_argument(
+        "--tool",
+        action="append",
+        default=[],
+        help="Verification or context tool the manager should expect. May be repeated.",
+    )
+    manager_config.add_argument(
+        "--epilogue",
+        action="append",
+        default=[],
+        choices=("run-tools", "draft-pr", "subagent-review", "record-handoff"),
+        help="Built-in epilogue step required before finish. May be repeated.",
+    )
+    manager_config.add_argument(
+        "--nudge-on-completion",
+        choices=("off", "ask-operator", "auto-review", "auto-proceed"),
+        help="Continuation-review behavior after worker completion.",
+    )
+    manager_config.add_argument(
+        "--require-acks",
+        action="store_true",
+        help="Require both worker and manager acknowledgements before cycle proceeds.",
+    )
     manager_config.add_argument("--allow-pr", action="store_true", help="Allow the manager to instruct the worker to create a PR.")
     manager_config.add_argument("--allow-merge-green", action="store_true", help="Allow the manager to instruct merging a green PR.")
     manager_config.add_argument(
@@ -439,11 +502,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="Check and audit whether manager config allows a high-level action.",
     )
     manager_permission.add_argument("task", help="Task name or ID.")
-    manager_permission.add_argument(
-        "action",
-        choices=("create_pr", "merge_green_pr", "worker_compact_clear"),
-        help="High-level action to check against manager config.",
-    )
+    manager_permission.add_argument("action", help="Permission to check, such as repo.open_pr, or category to list.")
+    manager_permission.add_argument("--list", action="store_true", help="List granted permissions in the named category.")
     manager_permission.add_argument(
         "--require-handoff",
         action="store_true",
@@ -456,6 +516,28 @@ def build_parser() -> argparse.ArgumentParser:
     )
     manager_permission.add_argument("--path", help="Override the workerctl database path.")
     manager_permission.set_defaults(func=command_manager_permission)
+
+    epilogue = subparsers.add_parser("epilogue", help="Run or inspect configured task epilogue steps.")
+    epilogue.add_argument("task", help="Task name or ID.")
+    epilogue.add_argument("--step", choices=("run-tools", "draft-pr", "subagent-review", "record-handoff"), help="Built-in epilogue step to run.")
+    epilogue.add_argument("--list", action="store_true", help="List configured epilogue steps and latest run state.")
+    epilogue.add_argument("--status", action="store_true", help="Print pass/fail/pending status for configured epilogue steps.")
+    epilogue.add_argument("--json", action="store_true", help="Print JSON output.")
+    epilogue.add_argument("--correlation-id", help="Optional correlation id for the epilogue run.")
+    epilogue.add_argument("--path", help="Override the workerctl database path.")
+    epilogue.set_defaults(func=command_epilogue)
+
+    continuation = subparsers.add_parser("continuation", help="Submit, list, or review independent task continuation proposals.")
+    continuation.add_argument("task", help="Task name or ID.")
+    continuation.add_argument("--submit", choices=("worker", "manager"), help="Submit a worker or manager continuation proposal from stdin.")
+    continuation.add_argument("--review", action="store_true", help="Record a structured reviewer verdict from stdin.")
+    continuation.add_argument("--list", action="store_true", help="List continuation proposals and reviews.")
+    continuation.add_argument("--from-stdin", action="store_true", help="Read a JSON object from stdin.")
+    continuation.add_argument("--correlation-id", help="Shared correlation id for a worker/manager continuation turn.")
+    continuation.add_argument("--as-role", choices=("all", "worker", "manager", "reviewer"), default="all", help="Role perspective for list redaction.")
+    continuation.add_argument("--include-payload", action="store_true", help="Include proposal payloads when allowed for the selected role.")
+    continuation.add_argument("--path", help="Override the workerctl database path.")
+    continuation.set_defaults(func=command_continuation)
 
     record_decision = subparsers.add_parser(
         "record-decision",
@@ -603,6 +685,36 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         default=[],
         help="Seed a manager reference path or URL before launch. May be repeated.",
+    )
+    pair.add_argument(
+        "--manager-permit",
+        action="append",
+        default=[],
+        metavar="CATEGORY.ACTION",
+        help="Grant a categorized manager permission in the seeded config. May be repeated.",
+    )
+    pair.add_argument(
+        "--manager-tool",
+        action="append",
+        default=[],
+        help="Verification or context tool in the seeded manager config. May be repeated.",
+    )
+    pair.add_argument(
+        "--manager-epilogue",
+        action="append",
+        default=[],
+        choices=("run-tools", "draft-pr", "subagent-review", "record-handoff"),
+        help="Seed a built-in manager epilogue step. May be repeated.",
+    )
+    pair.add_argument(
+        "--manager-nudge-on-completion",
+        choices=("off", "ask-operator", "auto-review", "auto-proceed"),
+        help="Seed continuation-review behavior for worker completion.",
+    )
+    pair.add_argument(
+        "--manager-require-acks",
+        action="store_true",
+        help="Seed manager config so cycle requires both worker and manager acknowledgements.",
     )
     pair.add_argument(
         "--manager-allow-pr",
@@ -867,6 +979,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="Fail before finishing if any accepted acceptance criteria remain open.",
     )
     finish_task.add_argument(
+        "--require-acks",
+        action="store_true",
+        help="Fail before finishing if the worker or manager acknowledgement is missing.",
+    )
+    finish_task.add_argument(
+        "--require-epilogue",
+        action="store_true",
+        help="Fail before finishing if configured epilogue steps are not succeeded.",
+    )
+    finish_task.add_argument(
         "--reason",
         default="Task finished by operator.",
         help="Reason recorded as the final manager decision.",
@@ -948,7 +1070,7 @@ def build_parser() -> argparse.ArgumentParser:
     replay.add_argument("task", help="Task name or ID.")
     replay.add_argument("--json", action="store_true", help="Print stable JSON output.")
     replay.add_argument("--format", choices=("compact", "timeline", "transcript", "full-transcript"), default="timeline")
-    replay.add_argument("--role", choices=("all", "worker", "manager"), default="all")
+    replay.add_argument("--role", choices=("all", "worker", "manager", "reviewer", "workerctl"), default="all")
     replay.add_argument("--limit", type=int, help="Print only the last N replay entries.")
     replay.add_argument(
         "--include-content",

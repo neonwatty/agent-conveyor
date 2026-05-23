@@ -24,6 +24,7 @@ from workerctl import db as worker_db
 from workerctl import importer
 from workerctl import identity as worker_identity
 from workerctl import lifecycle
+from workerctl import replay
 from workerctl import tmux as worker_tmux
 from workerctl.core import WorkerError
 from workerctl.state import (
@@ -493,6 +494,46 @@ class DatabaseTests(unittest.TestCase):
             self.assertEqual(handoff["next_steps"], ["Run tests", "Fill error handling"])
             self.assertEqual(handoff["payload"], {"branch": "feature/parser"})
 
+    def test_task_acknowledgements_revision_and_latest_round_trip(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            task_id = worker_db.create_task(conn, name="ack-task", goal="Do ack.")
+
+            first = worker_db.insert_task_acknowledgement(
+                conn,
+                task_id=task_id,
+                role="worker",
+                payload={"ready_to_start": True},
+                correlation_id="corr-1",
+                timestamp="2026-05-23T10:00:00Z",
+            )
+            second = worker_db.insert_task_acknowledgement(
+                conn,
+                task_id=task_id,
+                role="worker",
+                payload={"ready_to_start": True, "revision_note": "updated"},
+                correlation_id="corr-2",
+                timestamp="2026-05-23T10:01:00Z",
+            )
+            manager_ack = worker_db.insert_task_acknowledgement(
+                conn,
+                task_id=task_id,
+                role="manager",
+                payload={"ready_to_supervise": True},
+                timestamp="2026-05-23T10:02:00Z",
+            )
+            conn.commit()
+
+            latest_worker = worker_db.latest_task_acknowledgement(conn, task_id=task_id, role="worker")
+            latest = worker_db.latest_task_acknowledgements(conn, task_id=task_id)
+
+            self.assertNotEqual(first, second)
+            self.assertEqual(latest_worker["revision"], 2)
+            self.assertEqual(latest_worker["payload"]["revision_note"], "updated")
+            self.assertEqual(latest_worker["correlation_id"], "corr-2")
+            self.assertEqual(latest["worker"]["id"], second)
+            self.assertEqual(latest["manager"]["id"], manager_ack)
+
     def test_manager_config_round_trips(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             conn = self.open_db(tmpdir)
@@ -507,6 +548,7 @@ class DatabaseTests(unittest.TestCase):
                 acceptance_criteria=["Tests pass"],
                 reference_paths=["docs/prd.md"],
                 permissions={"create_pr": True, "merge_green_pr": False},
+                tools=["pytest"],
                 timestamp="2026-05-08T10:00:00Z",
             )
             conn.commit()
@@ -517,7 +559,55 @@ class DatabaseTests(unittest.TestCase):
             self.assertEqual(config["guidelines"], ["Nudge only when stale"])
             self.assertEqual(config["acceptance_criteria"], ["Tests pass"])
             self.assertEqual(config["reference_paths"], ["docs/prd.md"])
-            self.assertEqual(config["permissions"]["create_pr"], True)
+            self.assertEqual(config["permissions"]["repo"], ["open_pr"])
+            self.assertFalse(config["require_acks"])
+            self.assertEqual(config["nudge_on_completion"], "ask-operator")
+            self.assertEqual(config["tools"], ["pytest"])
+
+    def test_continuations_and_reviews_round_trip_through_audit(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            task_id = worker_db.create_task(conn, name="continuation-db-task", goal="Decide next.")
+            worker_id = worker_db.insert_task_continuation(
+                conn,
+                task_id=task_id,
+                proposer="worker",
+                payload={"next": "ship"},
+                correlation_id="corr-cont",
+                timestamp="2026-05-23T10:01:00Z",
+            )
+            manager_id = worker_db.insert_task_continuation(
+                conn,
+                task_id=task_id,
+                proposer="manager",
+                payload={"next": "ship after tests"},
+                correlation_id="corr-cont",
+                timestamp="2026-05-23T10:02:00Z",
+            )
+            review_id = worker_db.insert_continuation_review(
+                conn,
+                task_id=task_id,
+                worker_continuation_id=worker_id,
+                manager_continuation_id=manager_id,
+                agreement="compatible",
+                verdict="proceed",
+                addendum="Run final tests.",
+                rationale="Both proposals align.",
+                subagent_run={
+                    "manager_rollout_access": False,
+                    "manager_session_id": "manager-session",
+                    "reviewer_session_id": "reviewer-session",
+                },
+                correlation_id="corr-cont",
+                timestamp="2026-05-23T10:03:00Z",
+            )
+            conn.commit()
+
+            audit = worker_db.task_audit(conn, task="continuation-db-task")
+            self.assertEqual([row["proposer"] for row in audit["task_continuations"]], ["worker", "manager"])
+            self.assertEqual(audit["task_continuations"][0]["payload"], {"next": "ship"})
+            self.assertEqual(audit["continuation_reviews"][0]["id"], review_id)
+            self.assertEqual(audit["continuation_reviews"][0]["agreement"], "compatible")
 
     def test_create_and_list_tasks(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -831,6 +921,233 @@ class DatabaseTests(unittest.TestCase):
             self.assertEqual(audit["commands"][0]["id"], command_id)
             self.assertEqual(audit["commands"][0]["result"], {"sent": True})
             self.assertEqual(audit["events"][0]["type"], "task_nudge_succeeded")
+
+    def test_task_audit_returns_acknowledgements(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self.insert_task(conn, "task-1", "task-a")
+            worker_db.insert_task_acknowledgement(
+                conn,
+                task_id="task-1",
+                role="worker",
+                payload={"ready_to_start": True},
+                timestamp="2026-05-23T10:00:00Z",
+            )
+            conn.commit()
+
+            audit = worker_db.task_audit(conn, task="task-a")
+
+            self.assertEqual(audit["task_acknowledgements"][0]["role"], "worker")
+            self.assertEqual(audit["task_acknowledgements"][0]["payload"], {"ready_to_start": True})
+            entries = replay.replay_entries(audit)
+            self.assertTrue(
+                any(entry["source"] == "task_acknowledgements" for entry in entries)
+            )
+
+    def test_task_audit_returns_epilogue_runs(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self.insert_task(conn, "task-1", "task-a")
+            worker_db.insert_epilogue_run(
+                conn,
+                task_id="task-1",
+                step_name="draft-pr",
+                state="succeeded",
+                result={"summary": "ready"},
+                correlation_id="corr-epilogue",
+                started_at="2026-05-23T11:00:00Z",
+                finished_at="2026-05-23T11:00:01Z",
+            )
+            conn.commit()
+
+            audit = worker_db.task_audit(conn, task="task-a")
+
+            self.assertEqual(audit["epilogue_runs"][0]["step_name"], "draft-pr")
+            self.assertEqual(audit["epilogue_runs"][0]["result"], {"summary": "ready"})
+            entries = replay.replay_entries(audit)
+            self.assertTrue(any(entry["source"] == "epilogue_runs" for entry in entries))
+
+class DispatchTests(unittest.TestCase):
+    def open_db(self, tmpdir):
+        path = Path(tmpdir) / "workerctl.db"
+        conn = worker_db.connect(path)
+        worker_db.initialize_database(conn)
+        self.addCleanup(conn.close)
+        return conn, path
+
+    def setup_bound_task(self, conn):
+        now = "2026-05-23T10:00:00Z"
+        conn.execute(
+            "insert into tasks(id, name, goal, state, created_at, updated_at) "
+            "values ('task-dispatch', 'dispatch-task', 'Route completion.', 'managed', ?, ?)",
+            (now, now),
+        )
+        worker_id = worker_db.register_session(
+            conn,
+            name="worker-session",
+            role="worker",
+            codex_session_path="/tmp/worker.jsonl",
+            codex_session_id="codex-worker",
+            pid=11,
+            cwd="/repo",
+            tmux_session="tmux-worker",
+        )
+        manager_id = worker_db.register_session(
+            conn,
+            name="manager-session",
+            role="manager",
+            codex_session_path="/tmp/manager.jsonl",
+            codex_session_id="codex-manager",
+            pid=12,
+            cwd="/repo",
+            tmux_session="tmux-manager",
+        )
+        worker_db.bind_sessions(
+            conn,
+            task_name="dispatch-task",
+            worker_session_name="worker-session",
+            manager_session_name="manager-session",
+        )
+        conn.commit()
+        return worker_id, manager_id
+
+    def insert_completion(self, conn, session_id, *, offset=1, timestamp="2026-05-23T10:01:00Z"):
+        return worker_db.insert_codex_event(
+            conn,
+            session_id=session_id,
+            timestamp=timestamp,
+            event_type="message",
+            subtype="task_complete",
+            payload={"msg": "done"},
+            byte_offset=offset,
+        )
+
+    def test_dispatch_once_routes_worker_completion_to_bound_manager(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn, db_path = self.open_db(tmpdir)
+            worker_id, _manager_id = self.setup_bound_task(conn)
+            event_id = self.insert_completion(conn, worker_id)
+            conn.commit()
+
+            sent = []
+
+            def fake_send(conn, *, session_name, text, dry_run=False):
+                sent.append({"session_name": session_name, "text": text, "dry_run": dry_run})
+                return {"target": "tmux-manager:0.0"}
+
+            args = argparse.Namespace(
+                dispatcher_id="dispatch-test",
+                dry_run=False,
+                json=True,
+                limit=10,
+                once=True,
+                path=str(db_path),
+                type=None,
+                watch=False,
+            )
+            with mock.patch.object(worker_tmux, "send_text_to_session", side_effect=fake_send):
+                with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                    result = commands.command_dispatch(args)
+
+            payload = json.loads(stdout.getvalue())
+            notifications = worker_db.routed_notifications(conn, task_id="task-dispatch")
+            telemetry = worker_db.telemetry_events(conn, task_id="task-dispatch")
+
+            self.assertEqual(result, 0)
+            self.assertEqual(payload["processed_count"], 1)
+            self.assertEqual(sent[0]["session_name"], "manager-session")
+            self.assertIn("appears to have completed a turn", sent[0]["text"])
+            self.assertEqual(notifications[0]["state"], "delivered")
+            self.assertEqual(notifications[0]["source_event_id"], event_id)
+            self.assertIn(str(event_id), notifications[0]["dedupe_key"])
+            self.assertTrue(notifications[0]["correlation_id"].startswith("dispatch-"))
+            self.assertIn("dispatch_signal_detected", [event["event_type"] for event in telemetry])
+            self.assertIn("dispatch_signal_routed", [event["event_type"] for event in telemetry])
+
+    def test_dispatch_dedupe_uses_source_event_so_consecutive_completions_route(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn, db_path = self.open_db(tmpdir)
+            worker_id, _manager_id = self.setup_bound_task(conn)
+            first = self.insert_completion(conn, worker_id, offset=1, timestamp="2026-05-23T10:01:00Z")
+            second = self.insert_completion(conn, worker_id, offset=2, timestamp="2026-05-23T10:02:00Z")
+            conn.commit()
+
+            args = argparse.Namespace(
+                dispatcher_id="dispatch-test",
+                dry_run=False,
+                json=True,
+                limit=10,
+                once=True,
+                path=str(db_path),
+                type=None,
+                watch=False,
+            )
+            with mock.patch.object(worker_tmux, "send_text_to_session", return_value={"target": "tmux-manager:0.0"}):
+                with contextlib.redirect_stdout(io.StringIO()):
+                    commands.command_dispatch(args)
+                    commands.command_dispatch(args)
+
+            notifications = worker_db.routed_notifications(conn, task_id="task-dispatch")
+            self.assertEqual([row["source_event_id"] for row in notifications], [first, second])
+
+    def test_dispatch_dry_run_does_not_write_or_send(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn, db_path = self.open_db(tmpdir)
+            worker_id, _manager_id = self.setup_bound_task(conn)
+            self.insert_completion(conn, worker_id)
+            conn.commit()
+
+            args = argparse.Namespace(
+                dispatcher_id="dispatch-test",
+                dry_run=True,
+                json=True,
+                limit=10,
+                once=True,
+                path=str(db_path),
+                type=None,
+                watch=False,
+            )
+            with mock.patch.object(worker_tmux, "send_text_to_session") as send:
+                with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                    commands.command_dispatch(args)
+
+            payload = json.loads(stdout.getvalue())
+            self.assertEqual(payload["processed"][0]["state"], "planned")
+            self.assertEqual(worker_db.routed_notifications(conn, task_id="task-dispatch"), [])
+            send.assert_not_called()
+
+    def test_dispatch_ignores_unbound_completion_events(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn, db_path = self.open_db(tmpdir)
+            session_id = worker_db.register_session(
+                conn,
+                name="loose-worker",
+                role="worker",
+                codex_session_path="/tmp/loose.jsonl",
+                codex_session_id="codex-loose",
+                pid=99,
+                cwd="/repo",
+            )
+            self.insert_completion(conn, session_id)
+            conn.commit()
+
+            args = argparse.Namespace(
+                dispatcher_id="dispatch-test",
+                dry_run=False,
+                json=True,
+                limit=10,
+                once=True,
+                path=str(db_path),
+                type=None,
+                watch=False,
+            )
+            with mock.patch.object(worker_tmux, "send_text_to_session") as send:
+                with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                    commands.command_dispatch(args)
+
+            payload = json.loads(stdout.getvalue())
+            self.assertEqual(payload["processed_count"], 0)
+            send.assert_not_called()
 
 
 class ContractTests(unittest.TestCase):
@@ -4455,13 +4772,15 @@ class CriteriaFinalAuditTests(unittest.TestCase):
             conn.commit()
         return task_id
 
-    def _finish_args(self, db_path, *, task="criteria-final-task", require_criteria_audit=True):
+    def _finish_args(self, db_path, *, task="criteria-final-task", require_criteria_audit=True, require_acks=False, require_epilogue=False):
         return argparse.Namespace(
             decision_id=None,
             message=None,
             path=str(db_path),
             reason="final criteria audit passed",
+            require_acks=require_acks,
             require_criteria_audit=require_criteria_audit,
+            require_epilogue=require_epilogue,
             stop_manager=False,
             stop_worker=False,
             strict_decisions=False,
@@ -4529,6 +4848,96 @@ class CriteriaFinalAuditTests(unittest.TestCase):
             with worker_db.connect(db_path) as conn:
                 task = conn.execute("select state from tasks where id = ?", (task_id,)).fetchone()
             self.assertEqual(task["state"], "done")
+
+    def test_finish_task_require_acks_fails_when_ack_missing(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            task_id = self._create_task(db_path)
+
+            with self.assertRaises(WorkerError) as raised:
+                lifecycle.command_finish_task(
+                    self._finish_args(db_path, require_criteria_audit=False, require_acks=True)
+                )
+
+            self.assertIn("missing required acknowledgement", str(raised.exception))
+            with worker_db.connect(db_path) as conn:
+                task = conn.execute("select state from tasks where id = ?", (task_id,)).fetchone()
+                command = conn.execute(
+                    "select state, result_json, error from commands where type = 'finish_task'"
+                ).fetchone()
+            self.assertEqual(task["state"], "managed")
+            self.assertEqual(command["state"], "failed")
+            result = json.loads(command["result_json"])
+            self.assertEqual(result["failure_stage"], "final_ack_audit")
+            self.assertEqual(result["final_ack_audit"]["missing"], ["worker", "manager"])
+
+    def test_finish_task_require_acks_succeeds_when_both_exist(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            task_id = self._create_task(db_path)
+            with worker_db.connect(db_path) as conn:
+                worker_db.insert_task_acknowledgement(
+                    conn,
+                    task_id=task_id,
+                    role="worker",
+                    payload={"ready_to_start": True},
+                )
+                worker_db.insert_task_acknowledgement(
+                    conn,
+                    task_id=task_id,
+                    role="manager",
+                    payload={"ready_to_supervise": True},
+                )
+                conn.commit()
+
+            with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                result = lifecycle.command_finish_task(
+                    self._finish_args(db_path, require_criteria_audit=False, require_acks=True)
+                )
+
+            payload = json.loads(stdout.getvalue())
+            self.assertEqual(result, 0)
+            self.assertTrue(payload["final_ack_audit"]["require_acks"])
+            self.assertEqual(payload["final_ack_audit"]["missing"], [])
+
+    def test_finish_task_require_epilogue_fails_until_configured_steps_succeed(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            task_id = self._create_task(db_path)
+            with worker_db.connect(db_path) as conn:
+                worker_db.upsert_manager_config(
+                    conn,
+                    task_id=task_id,
+                    supervision_mode="guided",
+                    epilogues=["draft-pr"],
+                )
+                conn.commit()
+
+            with self.assertRaises(WorkerError) as raised:
+                lifecycle.command_finish_task(
+                    self._finish_args(db_path, require_criteria_audit=False, require_epilogue=True)
+                )
+
+            self.assertIn("incomplete required epilogue", str(raised.exception))
+            with worker_db.connect(db_path) as conn:
+                worker_db.insert_epilogue_run(
+                    conn,
+                    task_id=task_id,
+                    step_name="draft-pr",
+                    state="succeeded",
+                    result={"summary": "ready"},
+                )
+                conn.commit()
+
+            with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                result = lifecycle.command_finish_task(
+                    self._finish_args(db_path, require_criteria_audit=False, require_epilogue=True)
+                )
+
+            payload = json.loads(stdout.getvalue())
+            self.assertEqual(result, 0)
+            self.assertTrue(payload["final_epilogue_audit"]["require_epilogue"])
+            self.assertEqual(payload["final_epilogue_audit"]["missing_or_incomplete"], [])
 
     def test_finish_task_criteria_audit_failure_lists_open_ids_and_text(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -7814,6 +8223,74 @@ class SuperviseCycleTests(unittest.TestCase):
             self.assertAlmostEqual(result["staleness_seconds"], 4.0, places=0)
             self.assertIn("cycle_id", result)
 
+    def test_run_cycle_includes_latest_acknowledgements(self):
+        from workerctl import supervise_cycle
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self._setup_bound_task(conn, tmpdir, [
+                {"type": "session_meta", "payload": {"id": "u-w", "cwd": "/r"}},
+            ])
+            task = worker_db.task_row(conn, task="t")
+            worker_db.insert_task_acknowledgement(
+                conn,
+                task_id=task["id"],
+                role="worker",
+                payload={"ready_to_start": True},
+            )
+            worker_db.insert_task_acknowledgement(
+                conn,
+                task_id=task["id"],
+                role="manager",
+                payload={"ready_to_supervise": True},
+            )
+            conn.commit()
+
+            result = supervise_cycle.run_cycle(
+                conn, task_name="t", now="2026-05-11T14:32:15Z",
+            )
+
+            self.assertEqual(result["manager_context"]["worker_ack"]["payload"]["ready_to_start"], True)
+            self.assertEqual(result["manager_context"]["manager_ack"]["payload"]["ready_to_supervise"], True)
+
+    def test_run_cycle_requires_acknowledgements_when_manager_configured(self):
+        from workerctl import supervise_cycle
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self._setup_bound_task(conn, tmpdir, [
+                {"type": "session_meta", "payload": {"id": "u-w", "cwd": "/r"}},
+            ])
+            task = worker_db.task_row(conn, task="t")
+            worker_db.upsert_manager_config(
+                conn,
+                task_id=task["id"],
+                supervision_mode="guided",
+                require_acks=True,
+            )
+            conn.commit()
+
+            with self.assertRaises(WorkerError) as raised:
+                supervise_cycle.run_cycle(conn, task_name="t", now="2026-05-11T14:32:15Z")
+
+            self.assertIn("cycle requires acknowledgement", str(raised.exception))
+            worker_db.insert_task_acknowledgement(
+                conn,
+                task_id=task["id"],
+                role="worker",
+                payload={"ready_to_start": True},
+            )
+            worker_db.insert_task_acknowledgement(
+                conn,
+                task_id=task["id"],
+                role="manager",
+                payload={"ready_to_supervise": True},
+            )
+            conn.commit()
+
+            result = supervise_cycle.run_cycle(conn, task_name="t", now="2026-05-11T14:32:16Z")
+            self.assertTrue(result["manager_context"]["manager_config"]["require_acks"])
+
     def test_run_cycle_records_manager_cycle_row(self):
         from workerctl import supervise_cycle
 
@@ -10148,6 +10625,12 @@ class StartWorkerTests(unittest.TestCase):
 
 
 class ManagerBootstrapPromptTests(unittest.TestCase):
+    def test_raw_worker_prompt_instructs_worker_ack(self):
+        prompt = commands.raw_worker_start_prompt("raw-worker", Path("/repo"))
+
+        self.assertIn("workerctl worker-ack <task-name> --from-stdin", prompt)
+        self.assertIn("before editing files", prompt)
+
     def test_prompt_includes_living_criteria_guidance_and_runnable_examples(self):
         prompt = commands.manager_bootstrap_prompt(
             manager_name="docs-mgr",
@@ -10164,6 +10647,9 @@ class ManagerBootstrapPromptTests(unittest.TestCase):
         workerctl = commands.workerctl_cli()
         self.assertIn(f"{workerctl} session-nudge docs-worker", prompt)
         self.assertIn("legacy `nudge` command is only for old file-backed workers", prompt)
+        self.assertIn(f"{workerctl} manager-ack docs-task --from-stdin", prompt)
+        self.assertIn(f"{workerctl} worker-ack docs-task --json", prompt)
+        self.assertIn("Before your first cycle", prompt)
         self.assertIn("must-have vs follow-up criteria", prompt)
         self.assertIn(f"Record useful criteria with `{workerctl} criteria`", prompt)
         self.assertIn("compare worker receipts/verification against accepted open criteria", prompt)
@@ -11755,7 +12241,8 @@ class PairCommandTests(unittest.TestCase):
                     commands.command_pair(args)
             worker_spawn = next(r for r in recorded if r["role"] == "worker")
             manager_spawn = next(r for r in recorded if r["role"] == "manager")
-            self.assertEqual(worker_spawn["task"], "Do the thing")
+            self.assertIn("Do the thing", worker_spawn["task"])
+            self.assertIn("workerctl worker-ack prompt-task --from-stdin", worker_spawn["task"])
             self.assertIsNone(manager_spawn["task"])
             self.assertIn("manager-config prompt-task --questions", manager_spawn["initial_prompt"])
             self.assertIn("Task goal: Build a thing", manager_spawn["initial_prompt"])
@@ -11821,6 +12308,7 @@ class PairCommandTests(unittest.TestCase):
                 manager_allow_pr=False,
                 manager_allow_merge_green=False,
                 manager_allow_worker_compact_clear=True,
+                manager_require_acks=True,
                 manager_permissions_json=None,
                 sandbox="danger-full-access",
                 ask_for_approval="never",
@@ -11861,7 +12349,9 @@ class PairCommandTests(unittest.TestCase):
             self.assertEqual(config["guidelines"], ["Use session-nudge first."])
             self.assertEqual(config["acceptance_criteria"], ["Worker receipt is verified."])
             self.assertEqual(config["reference_paths"], ["docs/live-qa-log.md"])
-            self.assertTrue(config["permissions"]["worker_compact_clear"])
+            self.assertEqual(config["permissions"]["worker_session"], ["clear", "compact"])
+            self.assertTrue(config["require_acks"])
+            self.assertIn("manager-ack seeded-manager-task --from-stdin", manager_spawn["initial_prompt"])
             self.assertIsNotNone(event)
             self.assertEqual(json.loads(event["payload_json"])["source"], "pair")
 
@@ -11935,6 +12425,581 @@ class PairCommandTests(unittest.TestCase):
             self.assertEqual(handoff_events[0]["attributes"]["next_step_count"], 1)
             self.assertEqual(handoff_events[0]["attributes"]["payload_keys"], ["branch"])
 
+    def test_ack_commands_record_and_read_latest_json(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = self._setup_db(tmpdir)
+            conn = worker_db.connect(db_path)
+            try:
+                worker_db.create_task(conn, name="ack-cli-task", goal="Do ack.")
+                conn.commit()
+            finally:
+                conn.close()
+
+            worker_proc = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "workerctl",
+                    "worker-ack",
+                    "ack-cli-task",
+                    "--from-stdin",
+                    "--correlation-id",
+                    "corr-worker",
+                    "--path",
+                    str(db_path),
+                ],
+                input=json.dumps({"goal_restatement": "Do ack.", "ready_to_start": True}),
+                capture_output=True,
+                text=True,
+                cwd=str(ROOT),
+            )
+            self.assertEqual(worker_proc.returncode, 0, worker_proc.stderr)
+            worker_ack = json.loads(worker_proc.stdout)
+            self.assertEqual(worker_ack["role"], "worker")
+            self.assertEqual(worker_ack["revision"], 1)
+            self.assertEqual(worker_ack["correlation_id"], "corr-worker")
+
+            manager_proc = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "workerctl",
+                    "manager-ack",
+                    "ack-cli-task",
+                    "--from-stdin",
+                    "--path",
+                    str(db_path),
+                ],
+                input=json.dumps({"ready_to_supervise": True}),
+                capture_output=True,
+                text=True,
+                cwd=str(ROOT),
+            )
+            self.assertEqual(manager_proc.returncode, 0, manager_proc.stderr)
+
+            read_proc = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "workerctl",
+                    "worker-ack",
+                    "ack-cli-task",
+                    "--json",
+                    "--path",
+                    str(db_path),
+                ],
+                capture_output=True,
+                text=True,
+                cwd=str(ROOT),
+            )
+            self.assertEqual(read_proc.returncode, 0, read_proc.stderr)
+            self.assertEqual(json.loads(read_proc.stdout)["id"], worker_ack["id"])
+
+    def test_continuation_cli_enforces_ordering_review_isolation_and_divergent_routing(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = self._setup_db(tmpdir)
+            conn = worker_db.connect(db_path)
+            try:
+                task_id = worker_db.create_task(conn, name="continuation-cli-task", goal="Choose next.")
+                worker_db.upsert_manager_config(
+                    conn,
+                    task_id=task_id,
+                    supervision_mode="guided",
+                    permissions={"context": ["spawn_reviewer"]},
+                    nudge_on_completion="ask-operator",
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            worker_proc = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "workerctl",
+                    "continuation",
+                    "continuation-cli-task",
+                    "--submit",
+                    "worker",
+                    "--from-stdin",
+                    "--correlation-id",
+                    "corr-cli",
+                    "--path",
+                    str(db_path),
+                ],
+                input=json.dumps({"next": "ship"}),
+                capture_output=True,
+                text=True,
+                cwd=str(ROOT),
+            )
+            self.assertEqual(worker_proc.returncode, 0, worker_proc.stderr)
+
+            forbidden_read = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "workerctl",
+                    "continuation",
+                    "continuation-cli-task",
+                    "--list",
+                    "--include-payload",
+                    "--as-role",
+                    "manager",
+                    "--correlation-id",
+                    "corr-cli",
+                    "--path",
+                    str(db_path),
+                ],
+                capture_output=True,
+                text=True,
+                cwd=str(ROOT),
+            )
+            self.assertNotEqual(forbidden_read.returncode, 0)
+            self.assertIn("manager cannot read worker continuation payload", forbidden_read.stderr)
+
+            manager_proc = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "workerctl",
+                    "continuation",
+                    "continuation-cli-task",
+                    "--submit",
+                    "manager",
+                    "--from-stdin",
+                    "--correlation-id",
+                    "corr-cli",
+                    "--path",
+                    str(db_path),
+                ],
+                input=json.dumps({"next": "stop and ask"}),
+                capture_output=True,
+                text=True,
+                cwd=str(ROOT),
+            )
+            self.assertEqual(manager_proc.returncode, 0, manager_proc.stderr)
+
+            bad_review = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "workerctl",
+                    "continuation",
+                    "continuation-cli-task",
+                    "--review",
+                    "--from-stdin",
+                    "--correlation-id",
+                    "corr-cli",
+                    "--path",
+                    str(db_path),
+                ],
+                input=json.dumps(
+                    {
+                        "agreement": "divergent",
+                        "verdict": "stop",
+                        "rationale": "Reviewer is not isolated.",
+                        "subagent_run": {
+                            "manager_rollout_access": True,
+                            "manager_session_id": "same",
+                            "reviewer_session_id": "same",
+                        },
+                    }
+                ),
+                capture_output=True,
+                text=True,
+                cwd=str(ROOT),
+            )
+            self.assertNotEqual(bad_review.returncode, 0)
+            self.assertIn("reviewer subagent session must be isolated", bad_review.stderr)
+
+            review_proc = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "workerctl",
+                    "continuation",
+                    "continuation-cli-task",
+                    "--review",
+                    "--from-stdin",
+                    "--correlation-id",
+                    "corr-cli",
+                    "--path",
+                    str(db_path),
+                ],
+                input=json.dumps(
+                    {
+                        "agreement": "divergent",
+                        "verdict": "stop",
+                        "addendum": "Ask the operator before proceeding.",
+                        "rationale": "Worker and manager propose incompatible next steps.",
+                        "subagent_run": {
+                            "manager_rollout_access": False,
+                            "manager_session_id": "manager-session",
+                            "reviewer_session_id": "reviewer-session",
+                            "status": "succeeded",
+                        },
+                    }
+                ),
+                capture_output=True,
+                text=True,
+                cwd=str(ROOT),
+            )
+            self.assertEqual(review_proc.returncode, 0, review_proc.stderr)
+            review = json.loads(review_proc.stdout)
+            self.assertTrue(review["operator_routing_required"])
+            self.assertEqual(review["agreement"], "divergent")
+            self.assertEqual(review["verdict"], "stop")
+
+            allowed_read = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "workerctl",
+                    "continuation",
+                    "continuation-cli-task",
+                    "--list",
+                    "--include-payload",
+                    "--as-role",
+                    "manager",
+                    "--correlation-id",
+                    "corr-cli",
+                    "--path",
+                    str(db_path),
+                ],
+                capture_output=True,
+                text=True,
+                cwd=str(ROOT),
+            )
+            self.assertEqual(allowed_read.returncode, 0, allowed_read.stderr)
+            listed = json.loads(allowed_read.stdout)
+            self.assertEqual(len(listed["continuations"]), 2)
+            self.assertEqual(listed["continuations"][0]["payload"], {"next": "ship"})
+
+            replay_proc = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "workerctl",
+                    "replay",
+                    "continuation-cli-task",
+                    "--json",
+                    "--path",
+                    str(db_path),
+                ],
+                capture_output=True,
+                text=True,
+                cwd=str(ROOT),
+            )
+            self.assertEqual(replay_proc.returncode, 0, replay_proc.stderr)
+            replay = json.loads(replay_proc.stdout)
+            kinds = [entry["kind"] for entry in replay["entries"]]
+            self.assertIn("continuation", kinds)
+            self.assertIn("continuation_review", kinds)
+            review_entry = next(entry for entry in replay["entries"] if entry["kind"] == "continuation_review")
+            self.assertTrue(review_entry["details"]["operator_routing_required"])
+
+    def test_continuation_matching_review_can_proceed_without_operator_route(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = self._setup_db(tmpdir)
+            conn = worker_db.connect(db_path)
+            try:
+                task_id = worker_db.create_task(conn, name="continuation-match-task", goal="Choose next.")
+                worker_db.upsert_manager_config(
+                    conn,
+                    task_id=task_id,
+                    supervision_mode="guided",
+                    permissions={"context": ["spawn_reviewer"]},
+                    nudge_on_completion="auto-review",
+                )
+                worker_db.insert_task_continuation(
+                    conn,
+                    task_id=task_id,
+                    proposer="worker",
+                    payload={"next": "run tests"},
+                    correlation_id="corr-match",
+                )
+                worker_db.insert_task_continuation(
+                    conn,
+                    task_id=task_id,
+                    proposer="manager",
+                    payload={"next": "run tests"},
+                    correlation_id="corr-match",
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "workerctl",
+                    "continuation",
+                    "continuation-match-task",
+                    "--review",
+                    "--from-stdin",
+                    "--correlation-id",
+                    "corr-match",
+                    "--path",
+                    str(db_path),
+                ],
+                input=json.dumps(
+                    {
+                        "agreement": "match",
+                        "verdict": "proceed",
+                        "rationale": "Both proposals require the same next step.",
+                        "subagent_run": {
+                            "manager_rollout_access": False,
+                            "manager_session_id": "manager-session",
+                            "reviewer_session_id": "reviewer-session",
+                            "status": "succeeded",
+                        },
+                    }
+                ),
+                capture_output=True,
+                text=True,
+                cwd=str(ROOT),
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            review = json.loads(proc.stdout)
+            self.assertFalse(review["operator_routing_required"])
+            self.assertEqual(review["agreement"], "match")
+            self.assertEqual(review["verdict"], "proceed")
+
+    def test_continuation_subagent_failure_records_stop_without_silent_approval(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = self._setup_db(tmpdir)
+            conn = worker_db.connect(db_path)
+            try:
+                task_id = worker_db.create_task(conn, name="continuation-failure-task", goal="Choose next.")
+                worker_db.upsert_manager_config(
+                    conn,
+                    task_id=task_id,
+                    supervision_mode="guided",
+                    permissions={"context": ["spawn_reviewer"]},
+                    nudge_on_completion="auto-review",
+                )
+                worker_db.insert_task_continuation(
+                    conn,
+                    task_id=task_id,
+                    proposer="worker",
+                    payload={"next": "ship"},
+                    correlation_id="corr-fail",
+                )
+                worker_db.insert_task_continuation(
+                    conn,
+                    task_id=task_id,
+                    proposer="manager",
+                    payload={"next": "ship"},
+                    correlation_id="corr-fail",
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "workerctl",
+                    "continuation",
+                    "continuation-failure-task",
+                    "--review",
+                    "--from-stdin",
+                    "--correlation-id",
+                    "corr-fail",
+                    "--path",
+                    str(db_path),
+                ],
+                input=json.dumps(
+                    {
+                        "agreement": "divergent",
+                        "verdict": "stop",
+                        "rationale": "Reviewer subagent failed before producing a safe proceed verdict.",
+                        "subagent_run": {
+                            "error": "subagent unavailable",
+                            "manager_rollout_access": False,
+                            "manager_session_id": "manager-session",
+                            "reviewer_session_id": "reviewer-session",
+                            "status": "failed",
+                        },
+                    }
+                ),
+                capture_output=True,
+                text=True,
+                cwd=str(ROOT),
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            review = json.loads(proc.stdout)
+            self.assertEqual(review["verdict"], "stop")
+            self.assertEqual(review["subagent_run"]["status"], "failed")
+
+    def test_manager_config_nudge_on_completion_persists(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = self._setup_db(tmpdir)
+            conn = worker_db.connect(db_path)
+            try:
+                worker_db.create_task(conn, name="nudge-config-task", goal="Configure.")
+                conn.commit()
+            finally:
+                conn.close()
+
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "workerctl",
+                    "manager-config",
+                    "nudge-config-task",
+                    "--mode",
+                    "guided",
+                    "--nudge-on-completion",
+                    "auto-review",
+                    "--path",
+                    str(db_path),
+                ],
+                capture_output=True,
+                text=True,
+                cwd=str(ROOT),
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            config = json.loads(proc.stdout)
+            self.assertEqual(config["nudge_on_completion"], "auto-review")
+
+    def test_epilogue_commands_run_builtins_and_report_status(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = self._setup_db(tmpdir)
+            conn = worker_db.connect(db_path)
+            try:
+                task_id = worker_db.create_task(conn, name="epilogue-task", goal="Do epilogue.")
+                worker_db.upsert_manager_config(
+                    conn,
+                    task_id=task_id,
+                    supervision_mode="guided",
+                    tools=["python3"],
+                    epilogues=["run-tools", "draft-pr", "subagent-review", "record-handoff"],
+                )
+                worker_db.insert_worker_handoff(
+                    conn,
+                    task_id=task_id,
+                    summary="Ready for final review.",
+                    next_steps=["Run epilogue."],
+                )
+                worker_continuation_id = worker_db.insert_task_continuation(
+                    conn,
+                    task_id=task_id,
+                    proposer="worker",
+                    payload={"next": "finish"},
+                    correlation_id="corr-epilogue",
+                )
+                manager_continuation_id = worker_db.insert_task_continuation(
+                    conn,
+                    task_id=task_id,
+                    proposer="manager",
+                    payload={"next": "finish after epilogue"},
+                    correlation_id="corr-epilogue",
+                )
+                worker_db.insert_continuation_review(
+                    conn,
+                    task_id=task_id,
+                    worker_continuation_id=worker_continuation_id,
+                    manager_continuation_id=manager_continuation_id,
+                    agreement="compatible",
+                    verdict="proceed",
+                    addendum=None,
+                    rationale="Both proposals agree on finishing.",
+                    subagent_run={
+                        "manager_rollout_access": False,
+                        "manager_session_id": "manager-session",
+                        "reviewer_session_id": "reviewer-session",
+                    },
+                    correlation_id="corr-epilogue",
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            for step in ("run-tools", "draft-pr", "subagent-review", "record-handoff"):
+                proc = subprocess.run(
+                    [
+                        sys.executable,
+                        "-m",
+                        "workerctl",
+                        "epilogue",
+                        "epilogue-task",
+                        "--step",
+                        step,
+                        "--json",
+                        "--path",
+                        str(db_path),
+                    ],
+                    capture_output=True,
+                    text=True,
+                    cwd=str(ROOT),
+                )
+                self.assertEqual(proc.returncode, 0, proc.stderr)
+
+            status_proc = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "workerctl",
+                    "epilogue",
+                    "epilogue-task",
+                    "--status",
+                    "--path",
+                    str(db_path),
+                ],
+                capture_output=True,
+                text=True,
+                cwd=str(ROOT),
+            )
+            self.assertEqual(status_proc.returncode, 0, status_proc.stderr)
+            status_payload = json.loads(status_proc.stdout)
+            self.assertTrue(status_payload["status"]["ok"])
+            self.assertEqual(status_payload["status"]["missing_or_incomplete"], [])
+
+    def test_epilogue_run_tools_fails_for_missing_configured_tool(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = self._setup_db(tmpdir)
+            conn = worker_db.connect(db_path)
+            try:
+                task_id = worker_db.create_task(conn, name="epilogue-missing-tool", goal="Do epilogue.")
+                worker_db.upsert_manager_config(
+                    conn,
+                    task_id=task_id,
+                    supervision_mode="guided",
+                    tools=["definitely-not-a-workerctl-tool"],
+                    epilogues=["run-tools"],
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "workerctl",
+                    "epilogue",
+                    "epilogue-missing-tool",
+                    "--step",
+                    "run-tools",
+                    "--json",
+                    "--path",
+                    str(db_path),
+                ],
+                capture_output=True,
+                text=True,
+                cwd=str(ROOT),
+            )
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            payload = json.loads(proc.stdout)
+            latest = payload["status"]["steps"][0]["latest_run"]
+            self.assertEqual(latest["state"], "failed")
+            self.assertIn("configured tool not found", latest["error"])
+
     def test_manager_config_command_records_policy(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = self._setup_db(tmpdir)
@@ -11964,6 +13029,13 @@ class PairCommandTests(unittest.TestCase):
                     "docs/plan.md",
                     "--allow-pr",
                     "--allow-worker-compact-clear",
+                    "--permit",
+                    "verification.run_pytest",
+                    "--tool",
+                    "pytest",
+                    "--epilogue",
+                    "draft-pr",
+                    "--require-acks",
                     "--path",
                     str(db_path),
                 ],
@@ -11979,8 +13051,11 @@ class PairCommandTests(unittest.TestCase):
             self.assertEqual(payload["guidelines"], ["Nudge only when stale"])
             self.assertEqual(payload["acceptance_criteria"], ["Tests pass"])
             self.assertEqual(payload["reference_paths"], ["docs/plan.md"])
-            self.assertTrue(payload["permissions"]["create_pr"])
-            self.assertTrue(payload["permissions"]["worker_compact_clear"])
+            self.assertEqual(payload["permissions"]["repo"], ["open_pr"])
+            self.assertEqual(payload["permissions"]["verification"], ["run_pytest"])
+            self.assertEqual(payload["permissions"]["worker_session"], ["clear", "compact"])
+            self.assertEqual(payload["epilogues"], ["draft-pr"])
+            self.assertEqual(payload["tools"], ["pytest"])
 
     def test_manager_config_permissions_json_normalizes_allow_aliases(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -12020,9 +13095,11 @@ class PairCommandTests(unittest.TestCase):
             self.assertEqual(
                 payload["permissions"],
                 {
-                    "create_pr": True,
-                    "merge_green_pr": True,
-                    "worker_compact_clear": True,
+                    "communication": [],
+                    "context": [],
+                    "repo": ["merge_green_pr", "open_pr"],
+                    "verification": [],
+                    "worker_session": ["clear", "compact"],
                 },
             )
 
@@ -12080,7 +13157,120 @@ class PairCommandTests(unittest.TestCase):
 
             self.assertEqual(proc.returncode, 0, proc.stderr)
             payload = json.loads(proc.stdout)
-            self.assertFalse(payload["permissions"]["worker_compact_clear"])
+            self.assertEqual(payload["permissions"]["worker_session"], [])
+
+    def test_manager_config_accepts_permit_and_tool_taxonomy(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = self._setup_db(tmpdir)
+            conn = worker_db.connect(db_path)
+            try:
+                worker_db.create_task(conn, name="taxonomy-config-task", goal="Do config.")
+                conn.commit()
+            finally:
+                conn.close()
+
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "workerctl",
+                    "manager-config",
+                    "taxonomy-config-task",
+                    "--permit",
+                    "repo.open_pr",
+                    "--permit",
+                    "verification.run_pytest",
+                    "--tool",
+                    "pytest",
+                    "--epilogue",
+                    "run-tools",
+                    "--require-acks",
+                    "--path",
+                    str(db_path),
+                ],
+                capture_output=True,
+                text=True,
+                cwd=str(ROOT),
+            )
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            payload = json.loads(proc.stdout)
+            self.assertEqual(payload["permissions"]["repo"], ["open_pr"])
+            self.assertEqual(payload["permissions"]["verification"], ["run_pytest"])
+            self.assertTrue(payload["require_acks"])
+            self.assertEqual(payload["epilogues"], ["run-tools"])
+            self.assertEqual(payload["tools"], ["pytest"])
+
+            allowed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "workerctl",
+                    "manager-permission",
+                    "taxonomy-config-task",
+                    "repo.open_pr",
+                    "--require",
+                    "--path",
+                    str(db_path),
+                ],
+                capture_output=True,
+                text=True,
+                cwd=str(ROOT),
+            )
+            self.assertEqual(allowed.returncode, 0, allowed.stderr)
+            self.assertTrue(json.loads(allowed.stdout)["allowed"])
+
+            listed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "workerctl",
+                    "manager-permission",
+                    "taxonomy-config-task",
+                    "verification",
+                    "--list",
+                    "--path",
+                    str(db_path),
+                ],
+                capture_output=True,
+                text=True,
+                cwd=str(ROOT),
+            )
+            self.assertEqual(listed.returncode, 0, listed.stderr)
+            self.assertEqual(json.loads(listed.stdout)["listed_permissions"], ["run_pytest"])
+
+    def test_manager_config_permissions_json_warns_on_unknown_keys(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = self._setup_db(tmpdir)
+            conn = worker_db.connect(db_path)
+            try:
+                worker_db.create_task(conn, name="unknown-permission-task", goal="Do config.")
+                conn.commit()
+            finally:
+                conn.close()
+
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "workerctl",
+                    "manager-config",
+                    "unknown-permission-task",
+                    "--permissions-json",
+                    json.dumps({"repo": ["open_pr", "force_push"], "mystery": True}),
+                    "--path",
+                    str(db_path),
+                ],
+                capture_output=True,
+                text=True,
+                cwd=str(ROOT),
+            )
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            payload = json.loads(proc.stdout)
+            self.assertEqual(payload["permissions"]["repo"], ["open_pr"])
+            self.assertIn("unknown permission repo.force_push", payload["warnings"])
+            self.assertIn("unknown permission key 'mystery'", payload["warnings"])
 
     def test_manager_config_questions_prints_setup_schema(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -12114,6 +13304,9 @@ class PairCommandTests(unittest.TestCase):
             question_ids = {question["id"] for question in payload["questions"]}
             self.assertIn("supervision_mode", question_ids)
             self.assertIn("permissions", question_ids)
+            self.assertIn("require_acks", question_ids)
+            self.assertIn("epilogues", question_ids)
+            self.assertIn("tools", question_ids)
 
             conn = worker_db.connect(db_path)
             try:
@@ -12142,6 +13335,10 @@ class PairCommandTests(unittest.TestCase):
                     "yes",
                     "no",
                     "yes",
+                    "pytest",
+                    "draft-pr",
+                    "auto-review",
+                    "yes",
                     "",
                 ]
             )
@@ -12169,9 +13366,10 @@ class PairCommandTests(unittest.TestCase):
             self.assertEqual(payload["guidelines"], ["Nudge only when stale", "Keep scope fixed"])
             self.assertEqual(payload["acceptance_criteria"], ["Tests pass", "PR opened"])
             self.assertEqual(payload["reference_paths"], ["docs/plan.md", "https://example.test/mockup"])
-            self.assertTrue(payload["permissions"]["create_pr"])
-            self.assertFalse(payload["permissions"]["merge_green_pr"])
-            self.assertTrue(payload["permissions"]["worker_compact_clear"])
+            self.assertEqual(payload["permissions"]["repo"], ["open_pr"])
+            self.assertEqual(payload["permissions"]["worker_session"], ["clear", "compact"])
+            self.assertEqual(payload["epilogues"], ["draft-pr"])
+            self.assertTrue(payload["require_acks"])
 
     def test_manager_config_interactive_can_clear_existing_permissions(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -12204,6 +13402,10 @@ class PairCommandTests(unittest.TestCase):
                     "no",
                     "no",
                     "",
+                    "",
+                    "",
+                    "",
+                    "",
                 ]
             )
             proc = subprocess.run(
@@ -12225,9 +13427,8 @@ class PairCommandTests(unittest.TestCase):
 
             self.assertEqual(proc.returncode, 0, proc.stderr)
             payload = json.loads(proc.stdout[proc.stdout.index("{"):])
-            self.assertFalse(payload["permissions"]["create_pr"])
-            self.assertFalse(payload["permissions"]["merge_green_pr"])
-            self.assertFalse(payload["permissions"]["worker_compact_clear"])
+            self.assertEqual(payload["permissions"]["repo"], [])
+            self.assertEqual(payload["permissions"]["worker_session"], [])
 
     def test_manager_permission_checks_saved_policy(self):
         with tempfile.TemporaryDirectory() as tmpdir:

@@ -191,6 +191,91 @@ def replay_entries(audit: dict[str, Any], *, role: str = "all", mode: str = "tim
             }
         )
 
+    for ack in audit.get("task_acknowledgements", []):
+        ack_role = ack["role"]
+        if role != "all" and role != ack_role:
+            continue
+        entries.append(
+            {
+                "actor": ack_role,
+                "details": {
+                    "ack_id": ack["id"],
+                    "binding_id": ack.get("binding_id"),
+                    "correlation_id": ack.get("correlation_id"),
+                    "revision": ack["revision"],
+                    "role": ack_role,
+                },
+                "kind": "acknowledgement",
+                "source": "task_acknowledgements",
+                "source_id": ack["id"],
+                "summary": f"{ack_role} acknowledged task contract (revision {ack['revision']})",
+                "timestamp": ack["created_at"],
+            }
+        )
+
+    for continuation in audit.get("task_continuations", []):
+        proposer = continuation["proposer"]
+        if role != "all" and role != proposer:
+            continue
+        entries.append(
+            {
+                "actor": proposer,
+                "details": {
+                    "continuation_id": continuation["id"],
+                    "correlation_id": continuation["correlation_id"],
+                    "payload_keys": sorted((continuation.get("payload") or {}).keys()),
+                    "revision": continuation["revision"],
+                },
+                "kind": "continuation",
+                "source": "task_continuations",
+                "source_id": continuation["id"],
+                "summary": f"{proposer} proposed continuation (revision {continuation['revision']})",
+                "timestamp": continuation["created_at"],
+            }
+        )
+
+    for review in audit.get("continuation_reviews", []):
+        if role not in {"all", "manager", "reviewer", "workerctl"}:
+            continue
+        entries.append(
+            {
+                "actor": "reviewer",
+                "details": {
+                    "agreement": review["agreement"],
+                    "correlation_id": review["correlation_id"],
+                    "manager_continuation_id": review["manager_continuation_id"],
+                    "operator_routing_required": review["subagent_run"].get("operator_routing_required", False),
+                    "verdict": review["verdict"],
+                    "worker_continuation_id": review["worker_continuation_id"],
+                },
+                "kind": "continuation_review",
+                "source": "continuation_reviews",
+                "source_id": review["id"],
+                "summary": f"continuation review {review['agreement']} -> {review['verdict']}",
+                "timestamp": review["created_at"],
+            }
+        )
+
+    for run in audit.get("epilogue_runs", []):
+        if role not in {"all", "manager", "workerctl"}:
+            continue
+        entries.append(
+            {
+                "actor": "manager",
+                "details": {
+                    "correlation_id": run.get("correlation_id"),
+                    "error": run.get("error"),
+                    "state": run["state"],
+                    "step_name": run["step_name"],
+                },
+                "kind": "epilogue",
+                "source": "epilogue_runs",
+                "source_id": run["id"],
+                "summary": f"epilogue {run['step_name']}: {run['state']}",
+                "timestamp": run.get("finished_at") or run["started_at"],
+            }
+        )
+
     for event in audit.get("events", []):
         if role not in {"all", "manager"}:
             continue

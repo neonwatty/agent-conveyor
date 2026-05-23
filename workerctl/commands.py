@@ -213,6 +213,14 @@ The supported manager/worker setup is session-based:
 
    workerctl manager-config <task-name> --questions
 
+6. After the task is bound and before editing files for the task, record your
+   acknowledgement:
+
+   workerctl worker-ack <task-name> --from-stdin
+
+   The JSON should restate the goal, list proposed must-have/follow-up
+   criteria, expected tools, open questions, and ready_to_start.
+
 Required fields:
 - worker name
 - manager name
@@ -238,6 +246,7 @@ def manager_bootstrap_prompt(
     task_goal: str | None = None,
     worker_name: str | None = None,
     manager_config_seeded: bool = False,
+    manager_config: dict[str, Any] | None = None,
 ) -> str:
     task_line = task_name or "<unbound-task>"
     goal_line = task_goal or "No task goal supplied yet."
@@ -253,18 +262,40 @@ def manager_bootstrap_prompt(
         if task_name
         else f"{workerctl} cycle <task>"
     )
+    manager_ack_command = (
+        f"{workerctl} manager-ack {task_line} --from-stdin"
+        if task_name
+        else f"{workerctl} manager-ack <task> --from-stdin"
+    )
+    worker_ack_command = (
+        f"{workerctl} worker-ack {task_line} --json"
+        if task_name
+        else f"{workerctl} worker-ack <task> --json"
+    )
+    ack_setup = f"""
+Acknowledgement:
+- Before your first cycle, record the supervision contract you are committing to with `{manager_ack_command}`.
+- Before nudging or finishing, inspect the worker acknowledgement with `{worker_ack_command}` when available."""
     if manager_config_seeded:
+        permission_summary = (
+            "\n" + manager_permission_display(manager_config)
+            if manager_config
+            else ""
+        )
+        tool_summary = ""
+        if manager_config and manager_config.get("tools"):
+            tool_summary = "\nExpected tools: " + ", ".join(manager_config["tools"]) + "."
         initial_setup = f"""Initial setup:
 - Manager config has already been recorded for this task.
 - Start with `{cycle_command}` and inspect `manager_context.manager_config`.
-- Ask setup questions only if the cycle output shows missing or unsuitable manager config."""
+- Ask setup questions only if the cycle output shows missing or unsuitable manager config.{permission_summary}{tool_summary}{ack_setup}"""
     else:
         initial_setup = f"""Initial setup:
 1. Run `{setup_command}`.
 2. Ask the user the returned setup questions in this manager Codex chat.
 3. Persist the answers with `{workerctl} manager-config`.
 4. Use `workerctl manager-config --interactive` only when a human is directly
-   running workerctl in a terminal."""
+   running workerctl in a terminal.{ack_setup}"""
 
     return f"""You are a Codex manager session for workerctl.
 
@@ -2061,9 +2092,591 @@ def command_handoff(args: argparse.Namespace) -> int:
     return 0
 
 
+def _ack_payload_from_args(args: argparse.Namespace) -> dict[str, Any] | None:
+    if getattr(args, "from_stdin", False):
+        try:
+            payload = json.loads(sys.stdin.read())
+        except json.JSONDecodeError as exc:
+            raise WorkerError(f"--from-stdin requires a JSON object: {exc}") from exc
+        if not isinstance(payload, dict):
+            raise WorkerError("--from-stdin requires a JSON object")
+        return payload
+    return None
+
+
+def command_task_ack(args: argparse.Namespace, *, role: str) -> int:
+    from workerctl import db as worker_db
+
+    db_path = Path(args.path).expanduser().resolve() if args.path else None
+    with worker_db.connect(db_path) as conn:
+        worker_db.initialize_database(conn)
+        task = worker_db.task_row(conn, task=args.task)
+        if getattr(args, "json", False) and not getattr(args, "from_stdin", False):
+            ack = worker_db.latest_task_acknowledgement(conn, task_id=task["id"], role=role)
+            print(json.dumps(ack, indent=2, sort_keys=True))
+            return 0
+        payload = _ack_payload_from_args(args)
+        if payload is None:
+            raise WorkerError(f"{role}-ack requires --from-stdin to write or --json to read")
+        binding_id = None
+        try:
+            binding = worker_db.active_binding_for_task(conn, task_name=task["name"])
+            binding_id = binding["binding_id"]
+        except WorkerError:
+            binding_id = None
+        ack_id = worker_db.insert_task_acknowledgement(
+            conn,
+            task_id=task["id"],
+            binding_id=binding_id,
+            role=role,
+            payload=payload,
+            correlation_id=getattr(args, "correlation_id", None),
+        )
+        worker_db.insert_event(
+            conn,
+            f"{role}_ack_recorded",
+            actor=role,
+            task_id=task["id"],
+            correlation_id=getattr(args, "correlation_id", None),
+            payload={
+                "ack_id": ack_id,
+                "binding_id": binding_id,
+                "payload_keys": sorted(payload),
+                "role": role,
+            },
+        )
+        conn.commit()
+        ack = worker_db.latest_task_acknowledgement(conn, task_id=task["id"], role=role)
+    print(json.dumps(ack, indent=2, sort_keys=True))
+    return 0
+
+
+def command_worker_ack(args: argparse.Namespace) -> int:
+    return command_task_ack(args, role="worker")
+
+
+def command_manager_ack(args: argparse.Namespace) -> int:
+    return command_task_ack(args, role="manager")
+
+
+def _continuation_payload_from_stdin(args: argparse.Namespace) -> dict[str, Any]:
+    if not getattr(args, "from_stdin", False):
+        raise WorkerError("continuation requires --from-stdin for --submit or --review")
+    try:
+        payload = json.loads(sys.stdin.read())
+    except json.JSONDecodeError as exc:
+        raise WorkerError(f"--from-stdin requires a JSON object: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise WorkerError("--from-stdin requires a JSON object")
+    return payload
+
+
+def _redact_continuation_payloads(
+    rows: list[dict[str, Any]],
+    *,
+    as_role: str,
+    include_payload: bool,
+    correlation_id: str | None,
+) -> list[dict[str, Any]]:
+    manager_proposals = {
+        row["correlation_id"]
+        for row in rows
+        if row["proposer"] == "manager"
+    }
+    redacted = []
+    for row in rows:
+        item = dict(row)
+        may_include = include_payload
+        if (
+            include_payload
+            and as_role == "manager"
+            and row["proposer"] == "worker"
+            and row["correlation_id"] not in manager_proposals
+        ):
+            if correlation_id:
+                raise WorkerError("manager cannot read worker continuation payload before submitting manager continuation")
+            may_include = False
+        if not may_include:
+            item.pop("payload", None)
+            item["payload_redacted"] = True
+        redacted.append(item)
+    return redacted
+
+
+def _continuation_pair(conn, *, task_id: str, correlation_id: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    from workerctl import db as worker_db
+
+    worker = worker_db.latest_task_continuation(conn, task_id=task_id, proposer="worker", correlation_id=correlation_id)
+    manager = worker_db.latest_task_continuation(conn, task_id=task_id, proposer="manager", correlation_id=correlation_id)
+    if worker is None or manager is None:
+        missing = []
+        if worker is None:
+            missing.append("worker")
+        if manager is None:
+            missing.append("manager")
+        raise WorkerError(f"continuation review requires {', '.join(missing)} proposal(s) for correlation_id {correlation_id}")
+    return worker, manager
+
+
+def _review_payload_from_args(args: argparse.Namespace) -> dict[str, Any]:
+    payload = _continuation_payload_from_stdin(args)
+    required = {"agreement", "verdict", "rationale", "subagent_run"}
+    missing = sorted(required - set(payload))
+    if missing:
+        raise WorkerError(f"continuation review payload missing required field(s): {', '.join(missing)}")
+    if not isinstance(payload["subagent_run"], dict):
+        raise WorkerError("continuation review subagent_run must be a JSON object")
+    subagent_run = dict(payload["subagent_run"])
+    reviewer_session = subagent_run.get("reviewer_session_id")
+    manager_session = subagent_run.get("manager_session_id")
+    if not reviewer_session:
+        raise WorkerError("continuation review requires subagent_run.reviewer_session_id")
+    if not manager_session:
+        raise WorkerError("continuation review requires subagent_run.manager_session_id")
+    if reviewer_session == manager_session:
+        raise WorkerError("reviewer subagent session must be isolated from manager session")
+    if subagent_run.get("manager_rollout_access") is not False:
+        raise WorkerError("reviewer subagent must record manager_rollout_access=false")
+    payload["subagent_run"] = subagent_run
+    return payload
+
+
+def command_continuation(args: argparse.Namespace) -> int:
+    from workerctl import db as worker_db
+
+    operations = [
+        bool(getattr(args, "submit", None)),
+        bool(getattr(args, "review", False)),
+        bool(getattr(args, "list", False)),
+    ]
+    if sum(1 for enabled in operations if enabled) != 1:
+        raise WorkerError("continuation requires exactly one of --submit, --review, or --list")
+    db_path = Path(args.path).expanduser().resolve() if getattr(args, "path", None) else None
+    with worker_db.connect(db_path) as conn:
+        worker_db.initialize_database(conn)
+        task = worker_db.task_row(conn, task=args.task)
+        config = worker_db.manager_config(conn, task_id=task["id"])
+        if getattr(args, "list", False):
+            rows = worker_db.task_continuations(conn, task_id=task["id"], correlation_id=getattr(args, "correlation_id", None))
+            output = {
+                "continuations": _redact_continuation_payloads(
+                    rows,
+                    as_role=getattr(args, "as_role", "all"),
+                    include_payload=bool(getattr(args, "include_payload", False)),
+                    correlation_id=getattr(args, "correlation_id", None),
+                ),
+                "reviews": worker_db.continuation_reviews(conn, task_id=task["id"]),
+                "task": {"id": task["id"], "name": task["name"]},
+            }
+            print(json.dumps(output, indent=2, sort_keys=True))
+            return 0
+
+        if getattr(args, "submit", None):
+            proposer = args.submit
+            payload = _continuation_payload_from_stdin(args)
+            if proposer == "worker":
+                correlation_id = getattr(args, "correlation_id", None) or f"continuation-{uuid.uuid4()}"
+            else:
+                correlation_id = getattr(args, "correlation_id", None)
+                if not correlation_id:
+                    raise WorkerError("manager continuation requires --correlation-id from the worker proposal turn")
+                if worker_db.latest_task_continuation(conn, task_id=task["id"], proposer="worker", correlation_id=correlation_id) is None:
+                    raise WorkerError("manager continuation requires an existing worker continuation for the same correlation_id")
+            continuation_id = worker_db.insert_task_continuation(
+                conn,
+                task_id=task["id"],
+                proposer=proposer,
+                payload=payload,
+                correlation_id=correlation_id,
+            )
+            worker_db.insert_event(
+                conn,
+                "task_continuation_recorded",
+                actor=proposer,
+                task_id=task["id"],
+                correlation_id=correlation_id,
+                payload={
+                    "continuation_id": continuation_id,
+                    "payload_keys": sorted(payload),
+                    "proposer": proposer,
+                },
+            )
+            conn.commit()
+            row = worker_db.latest_task_continuation(conn, task_id=task["id"], proposer=proposer, correlation_id=correlation_id)
+            print(json.dumps(row, indent=2, sort_keys=True))
+            return 0
+
+        correlation_id = getattr(args, "correlation_id", None)
+        if not correlation_id:
+            raise WorkerError("continuation --review requires --correlation-id")
+        if not manager_permission_allowed(config, "context.spawn_reviewer"):
+            raise WorkerError("continuation review requires manager permission context.spawn_reviewer")
+        worker, manager = _continuation_pair(conn, task_id=task["id"], correlation_id=correlation_id)
+        payload = _review_payload_from_args(args)
+        agreement = payload["agreement"]
+        verdict = payload["verdict"]
+        nudge_mode = clean_nudge_on_completion((config or {}).get("nudge_on_completion") if config else None)
+        operator_routing_required = agreement == "divergent" and nudge_mode != "auto-proceed"
+        subagent_run = {
+            **payload["subagent_run"],
+            "operator_routing_required": operator_routing_required,
+            "nudge_on_completion": nudge_mode,
+        }
+        review_id = worker_db.insert_continuation_review(
+            conn,
+            task_id=task["id"],
+            worker_continuation_id=worker["id"],
+            manager_continuation_id=manager["id"],
+            agreement=agreement,
+            verdict=verdict,
+            addendum=payload.get("addendum"),
+            rationale=payload["rationale"],
+            subagent_run=subagent_run,
+            correlation_id=correlation_id,
+        )
+        worker_db.insert_event(
+            conn,
+            "continuation_review_recorded",
+            actor="workerctl",
+            task_id=task["id"],
+            correlation_id=correlation_id,
+            payload={
+                "agreement": agreement,
+                "manager_continuation_id": manager["id"],
+                "operator_routing_required": operator_routing_required,
+                "review_id": review_id,
+                "verdict": verdict,
+                "worker_continuation_id": worker["id"],
+            },
+        )
+        conn.commit()
+        output = worker_db.continuation_reviews(conn, task_id=task["id"])[-1]
+        output["operator_routing_required"] = operator_routing_required
+        print(json.dumps(output, indent=2, sort_keys=True))
+        return 0
+
+
+def _dispatch_completion_message(*, worker_name: str, task_name: str) -> str:
+    return (
+        f"Worker {worker_name} appears to have completed a turn for task {task_name}. "
+        "Run/inspect workerctl cycle, review evidence and acceptance criteria, then decide "
+        "whether to finish, request fixes, or continue observing."
+    )
+
+
+def command_dispatch(args: argparse.Namespace) -> int:
+    from workerctl import db as worker_db
+    from workerctl import tmux as worker_tmux
+
+    if getattr(args, "once", False) and getattr(args, "watch", False):
+        raise WorkerError("dispatch accepts either --once or --watch, not both")
+    if getattr(args, "watch", False):
+        raise WorkerError("dispatch --watch is not implemented in this tranche")
+    if getattr(args, "type", None) not in {None, "notify_manager", "worker_task_complete"}:
+        raise WorkerError("dispatch --type currently supports only notify_manager")
+    limit = max(1, int(getattr(args, "limit", 10) or 10))
+    dispatcher_id = getattr(args, "dispatcher_id", None) or "dispatch-local"
+    db_path = Path(args.path).expanduser().resolve() if getattr(args, "path", None) else None
+    dry_run = bool(getattr(args, "dry_run", False))
+    processed: list[dict[str, Any]] = []
+    with worker_db.connect(db_path) as conn:
+        worker_db.initialize_database(conn)
+        rows = worker_db.unrouted_worker_completion_events(conn, limit=limit)
+        for row in rows:
+            dedupe_key = (
+                f"{row['binding_id']}:worker_task_complete:"
+                f"{row['source_session_id']}:{row['source_event_id']}"
+            )
+            correlation_id = f"dispatch-{uuid.uuid4()}"
+            message = _dispatch_completion_message(
+                worker_name=row["worker_session_name"],
+                task_name=row["task_name"],
+            )
+            payload = {
+                "dispatcher_id": dispatcher_id,
+                "message": message,
+                "signal": "worker_task_complete",
+                "source_event_id": row["source_event_id"],
+                "source_session": row["worker_session_name"],
+                "target_session": row["manager_session_name"],
+                "task": row["task_name"],
+            }
+            result = {
+                "binding_id": row["binding_id"],
+                "correlation_id": correlation_id,
+                "dedupe_key": dedupe_key,
+                "dry_run": dry_run,
+                "signal_type": "worker_task_complete",
+                "source_event_id": row["source_event_id"],
+                "target_session": row["manager_session_name"],
+                "task": row["task_name"],
+            }
+            if dry_run:
+                result["state"] = "planned"
+                processed.append(result)
+                continue
+            worker_db.emit_telemetry_event(
+                conn,
+                actor="dispatch",
+                event_type="dispatch_signal_detected",
+                task_id=row["task_id"],
+                summary=f"Dispatch detected worker completion for {row['task_name']}.",
+                correlation={
+                    "binding_id": row["binding_id"],
+                    "correlation_id": correlation_id,
+                    "dispatcher_id": dispatcher_id,
+                    "source_event_id": row["source_event_id"],
+                    "signal_type": "worker_task_complete",
+                },
+                attributes={
+                    "source_session": row["worker_session_name"],
+                    "target_session": row["manager_session_name"],
+                },
+            )
+            try:
+                notification_id = worker_db.insert_routed_notification(
+                    conn,
+                    task_id=row["task_id"],
+                    binding_id=row["binding_id"],
+                    correlation_id=correlation_id,
+                    source_session_id=row["source_session_id"],
+                    target_session_id=row["target_session_id"],
+                    signal_type="worker_task_complete",
+                    source_event_id=row["source_event_id"],
+                    source_event_timestamp=row["source_event_timestamp"],
+                    dedupe_key=dedupe_key,
+                    payload=payload,
+                )
+            except Exception as exc:
+                if "UNIQUE constraint failed" in str(exc):
+                    result["state"] = "suppressed"
+                    processed.append(result)
+                    continue
+                raise
+            try:
+                send_result = worker_tmux.send_text_to_session(
+                    conn,
+                    session_name=row["manager_session_name"],
+                    text=message,
+                    dry_run=False,
+                )
+                worker_db.finish_routed_notification(
+                    conn,
+                    notification_id=notification_id,
+                    state="delivered",
+                )
+                worker_db.emit_telemetry_event(
+                    conn,
+                    actor="dispatch",
+                    event_type="dispatch_signal_routed",
+                    task_id=row["task_id"],
+                    summary=f"Dispatch notified manager {row['manager_session_name']}.",
+                    correlation={
+                        "binding_id": row["binding_id"],
+                        "correlation_id": correlation_id,
+                        "dispatcher_id": dispatcher_id,
+                        "routed_notification_id": notification_id,
+                        "source_event_id": row["source_event_id"],
+                        "signal_type": "worker_task_complete",
+                    },
+                    attributes={
+                        "target": send_result.get("target"),
+                        "target_session": row["manager_session_name"],
+                    },
+                )
+                result.update({"notification_id": notification_id, "state": "delivered"})
+            except Exception as exc:
+                worker_db.finish_routed_notification(
+                    conn,
+                    notification_id=notification_id,
+                    state="failed",
+                    error=str(exc),
+                )
+                worker_db.emit_telemetry_event(
+                    conn,
+                    actor="dispatch",
+                    event_type="dispatch_signal_failed",
+                    severity="error",
+                    task_id=row["task_id"],
+                    summary=f"Dispatch failed to notify manager {row['manager_session_name']}.",
+                    correlation={
+                        "binding_id": row["binding_id"],
+                        "correlation_id": correlation_id,
+                        "dispatcher_id": dispatcher_id,
+                        "routed_notification_id": notification_id,
+                        "source_event_id": row["source_event_id"],
+                        "signal_type": "worker_task_complete",
+                    },
+                    attributes={
+                        "error": str(exc),
+                        "error_type": type(exc).__name__,
+                        "target_session": row["manager_session_name"],
+                    },
+                )
+                result.update({"error": str(exc), "notification_id": notification_id, "state": "failed"})
+            processed.append(result)
+        conn.commit()
+    output = {
+        "dispatcher_id": dispatcher_id,
+        "dry_run": dry_run,
+        "processed": processed,
+        "processed_count": len(processed),
+    }
+    if getattr(args, "json", False):
+        print(json.dumps(output, indent=2, sort_keys=True))
+    else:
+        print(f"dispatch processed {len(processed)} notification(s)")
+    return 0
+
+
+def _epilogue_status_payload(conn, *, task_id: str, config: dict[str, Any] | None) -> dict[str, Any]:
+    steps = clean_epilogue_steps((config or {}).get("epilogues") or [])
+    return {
+        "configured_steps": steps,
+        "runs": worker_db_epilogue_runs(conn, task_id=task_id),
+        "status": worker_db_epilogue_status(conn, task_id=task_id, required_steps=steps),
+    }
+
+
+def worker_db_epilogue_runs(conn, *, task_id: str) -> list[dict[str, Any]]:
+    from workerctl import db as worker_db
+
+    return worker_db.epilogue_runs(conn, task_id=task_id)
+
+
+def worker_db_epilogue_status(conn, *, task_id: str, required_steps: list[str]) -> dict[str, Any]:
+    from workerctl import db as worker_db
+
+    return worker_db.epilogue_status(conn, task_id=task_id, required_steps=required_steps)
+
+
+def _run_epilogue_step(conn, *, task: dict[str, Any], config: dict[str, Any] | None, step: str) -> tuple[str, dict[str, Any] | None, str | None]:
+    if step == "run-tools":
+        tools = clean_manager_tools((config or {}).get("tools") or [])
+        results = []
+        for tool in tools:
+            executable = shutil.which(tool)
+            if executable is None:
+                return "failed", {"tools": results}, f"configured tool not found: {tool}"
+            proc = subprocess.run([executable, "--version"], capture_output=True, text=True, cwd=str(PROJECT_ROOT), timeout=30)
+            results.append(
+                {
+                    "returncode": proc.returncode,
+                    "stderr": proc.stderr[-1000:],
+                    "stdout": proc.stdout[-1000:],
+                    "tool": tool,
+                }
+            )
+            if proc.returncode != 0:
+                return "failed", {"tools": results}, f"configured tool failed version check: {tool}"
+        return "succeeded", {"tools": results, "tool_count": len(tools)}, None
+    if step == "draft-pr":
+        audit = worker_db_task_audit(conn, task=task["name"])
+        result = {
+            "acceptance_criteria_count": len(audit.get("acceptance_criteria", [])),
+            "command_count": len(audit.get("commands", [])),
+            "event_count": len(audit.get("events", [])),
+            "summary": f"Task {task['name']} epilogue draft ready from audit data.",
+        }
+        return "succeeded", result, None
+    if step == "subagent-review":
+        from workerctl import db as worker_db
+
+        reviews = worker_db.continuation_reviews(conn, task_id=task["id"])
+        if not reviews:
+            return "failed", None, "subagent-review requires a recorded continuation review"
+        latest = reviews[-1]
+        return (
+            "succeeded",
+            {
+                "agreement": latest["agreement"],
+                "continuation_review_id": latest["id"],
+                "operator_routing_required": latest["subagent_run"].get("operator_routing_required", False),
+                "verdict": latest["verdict"],
+            },
+            None,
+        )
+    if step == "record-handoff":
+        from workerctl import db as worker_db
+
+        handoff = worker_db.latest_worker_handoff(conn, task_id=task["id"])
+        if handoff is None:
+            return "failed", None, "record-handoff requires an existing worker handoff"
+        return "succeeded", {"handoff_id": handoff["id"], "summary": handoff["summary"]}, None
+    raise WorkerError(f"unknown epilogue step: {step}")
+
+
+def worker_db_task_audit(conn, *, task: str) -> dict[str, Any]:
+    from workerctl import db as worker_db
+
+    return worker_db.task_audit(conn, task=task)
+
+
+def command_epilogue(args: argparse.Namespace) -> int:
+    from workerctl import db as worker_db
+
+    if not (getattr(args, "list", False) or getattr(args, "status", False) or getattr(args, "step", None)):
+        raise WorkerError("epilogue requires --list, --status, or --step")
+    db_path = Path(args.path).expanduser().resolve() if getattr(args, "path", None) else None
+    with worker_db.connect(db_path) as conn:
+        worker_db.initialize_database(conn)
+        task = worker_db.task_row(conn, task=args.task)
+        config = worker_db.manager_config(conn, task_id=task["id"])
+        configured_steps = clean_epilogue_steps((config or {}).get("epilogues") or [])
+        if getattr(args, "step", None):
+            step = args.step
+            if step not in configured_steps:
+                raise WorkerError(f"epilogue step {step!r} is not configured for task {task['name']}")
+            correlation_id = getattr(args, "correlation_id", None) or f"epilogue-{uuid.uuid4()}"
+            state, result, error = _run_epilogue_step(conn, task=dict(task), config=config, step=step)
+            run_id = worker_db.insert_epilogue_run(
+                conn,
+                task_id=task["id"],
+                step_name=step,
+                state=state,
+                result=result,
+                error=error,
+                correlation_id=correlation_id,
+            )
+            worker_db.insert_event(
+                conn,
+                "epilogue_step_recorded",
+                actor="workerctl",
+                correlation_id=correlation_id,
+                task_id=task["id"],
+                payload={"epilogue_run_id": run_id, "state": state, "step_name": step},
+            )
+            conn.commit()
+        payload = {
+            "configured_steps": configured_steps,
+            "runs": worker_db.epilogue_runs(conn, task_id=task["id"]),
+            "status": worker_db.epilogue_status(conn, task_id=task["id"], required_steps=configured_steps),
+            "task": {"id": task["id"], "name": task["name"]},
+        }
+    if getattr(args, "json", False) or getattr(args, "status", False) or getattr(args, "list", False):
+        print(json.dumps(payload, indent=2, sort_keys=True))
+    else:
+        print(f"epilogue {args.step}: {payload['status']['steps']}")
+    return 0
+
+
+def worker_ack_task_prompt(task_name: str | None, task_prompt: str | None) -> str | None:
+    if task_prompt is None:
+        return None
+    task_ref = task_name or "<task>"
+    return f"""{task_prompt}
+
+Before editing files or running implementation work, acknowledge the task contract:
+
+workerctl worker-ack {task_ref} --from-stdin
+
+Use a JSON object with goal_restatement, proposed_criteria, expected_tools,
+open_questions, and ready_to_start."""
+
+
 def manager_config_questions(existing: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     existing = existing or {}
-    permissions = existing.get("permissions") or {}
+    permissions = normalize_manager_permissions(existing.get("permissions") or {})
     return [
         {
             "id": "supervision_mode",
@@ -2103,14 +2716,41 @@ def manager_config_questions(existing: dict[str, Any] | None = None) -> list[dic
         },
         {
             "id": "permissions",
-            "kind": "booleans",
-            "default": {
-                "create_pr": bool(permissions.get("create_pr", False)),
-                "merge_green_pr": bool(permissions.get("merge_green_pr", False)),
-                "worker_compact_clear": bool(permissions.get("worker_compact_clear", False)),
-            },
+            "kind": "categorized_permissions",
+            "default": permissions,
             "question": "Which high-level actions may the manager instruct the worker to do?",
-            "choices": ["create_pr", "merge_green_pr", "worker_compact_clear"],
+            "choices": {
+                category: sorted(actions)
+                for category, actions in MANAGER_PERMISSION_TAXONOMY.items()
+            },
+        },
+        {
+            "id": "tools",
+            "kind": "list",
+            "default": existing.get("tools") or [],
+            "question": "Which verification or context tools should the manager expect?",
+            "help": "Examples: pytest, playwright, xcodebuild, cargo, gh.",
+        },
+        {
+            "id": "epilogues",
+            "kind": "choice_list",
+            "default": existing.get("epilogues") or [],
+            "question": "Which built-in epilogue steps should be required before finish?",
+            "choices": sorted(EPILOGUE_STEPS),
+        },
+        {
+            "id": "nudge_on_completion",
+            "kind": "choice",
+            "default": existing.get("nudge_on_completion") if existing else "ask-operator",
+            "question": "What should happen when worker completion creates continuation proposals?",
+            "choices": sorted(NUDGE_ON_COMPLETION_MODES),
+        },
+        {
+            "id": "require_acks",
+            "kind": "boolean",
+            "default": bool(existing.get("require_acks", False)),
+            "question": "Should cycle fail closed until both worker and manager acknowledgements exist?",
+            "help": "Use this when the task contract must be acknowledged before manager cycles begin.",
         },
     ]
 
@@ -2154,54 +2794,237 @@ def _apply_interactive_manager_config(args: argparse.Namespace, existing: dict[s
         answer = input(f"{question['question']} (comma-separated) [{default_text}]: ").strip()
         setattr(args, attr, _split_interactive_list(answer) if answer else list(default_values))
 
-    permission_defaults = questions["permissions"]["default"]
+    permission_defaults = flatten_manager_permissions(questions["permissions"]["default"])
     permissions = {
-        "create_pr": _interactive_bool("Allow manager to instruct worker to create a PR?", default=permission_defaults["create_pr"]),
-        "merge_green_pr": _interactive_bool("Allow manager to instruct merging a green PR?", default=permission_defaults["merge_green_pr"]),
+        "create_pr": _interactive_bool("Allow manager to instruct worker to create a PR?", default="repo.open_pr" in permission_defaults),
+        "merge_green_pr": _interactive_bool("Allow manager to instruct merging a green PR?", default="repo.merge_green_pr" in permission_defaults),
         "worker_compact_clear": _interactive_bool(
             "Allow manager to instruct worker compact/clear after a saved handoff?",
-            default=permission_defaults["worker_compact_clear"],
+            default={"worker_session.compact", "worker_session.clear"}.issubset(permission_defaults),
         ),
     }
     args.allow_pr = permissions["create_pr"]
     args.allow_merge_green = permissions["merge_green_pr"]
     args.allow_worker_compact_clear = permissions["worker_compact_clear"]
     args.permissions_json = json.dumps(permissions, sort_keys=True)
+    tools_question = questions["tools"]
+    tools_default = tools_question["default"]
+    tools_text = ", ".join(tools_default)
+    tools_answer = input(f"{tools_question['question']} (comma-separated) [{tools_text}]: ").strip()
+    args.tool = _split_interactive_list(tools_answer) if tools_answer else list(tools_default)
+    epilogues_question = questions["epilogues"]
+    epilogues_default = epilogues_question["default"]
+    epilogues_text = ", ".join(epilogues_default)
+    epilogues_answer = input(f"{epilogues_question['question']} (comma-separated) [{epilogues_text}]: ").strip()
+    args.epilogue = clean_epilogue_steps(_split_interactive_list(epilogues_answer) if epilogues_answer else list(epilogues_default))
+    nudge_question = questions["nudge_on_completion"]
+    nudge_default = nudge_question["default"]
+    nudge_answer = input(f"{nudge_question['question']} [{nudge_default}]: ").strip()
+    args.nudge_on_completion = clean_nudge_on_completion(nudge_answer or nudge_default)
+    args.require_acks = _interactive_bool(
+        questions["require_acks"]["question"],
+        default=questions["require_acks"]["default"],
+    )
 
+
+MANAGER_PERMISSION_TAXONOMY = {
+    "repo": {"open_pr", "push_branch", "merge_green_pr"},
+    "verification": {"run_playwright", "run_xcodebuild", "run_pytest", "run_cargo"},
+    "context": {"spawn_reviewer", "fetch_prs", "fetch_issues"},
+    "communication": {"comment_on_pr", "notify_operator"},
+    "worker_session": {"compact", "clear", "interrupt", "stop"},
+}
 
 MANAGER_PERMISSION_ACTIONS = {
-    "create_pr",
-    "merge_green_pr",
-    "worker_compact_clear",
+    f"{category}.{action}"
+    for category, actions in MANAGER_PERMISSION_TAXONOMY.items()
+    for action in actions
 }
 
 MANAGER_PERMISSION_ALIASES = {
-    "allow_pr": "create_pr",
-    "allow_merge_green": "merge_green_pr",
-    "allow_worker_compact_clear": "worker_compact_clear",
+    "allow_pr": "repo.open_pr",
+    "create_pr": "repo.open_pr",
+    "allow_merge_green": "repo.merge_green_pr",
+    "merge_green_pr": "repo.merge_green_pr",
+    "allow_worker_compact_clear": ["worker_session.compact", "worker_session.clear"],
+    "worker_compact_clear": ["worker_session.compact", "worker_session.clear"],
 }
 
+EPILOGUE_STEPS = {"run-tools", "draft-pr", "subagent-review", "record-handoff"}
+NUDGE_ON_COMPLETION_MODES = {"off", "ask-operator", "auto-review", "auto-proceed"}
 
-def normalize_manager_permissions(permissions: dict[str, Any] | None) -> dict[str, bool]:
-    normalized = {
-        "create_pr": False,
-        "merge_green_pr": False,
-        "worker_compact_clear": False,
+
+def empty_manager_permissions() -> dict[str, list[str]]:
+    return {category: [] for category in MANAGER_PERMISSION_TAXONOMY}
+
+
+def _canonical_permission_names(name: str) -> list[str]:
+    alias = MANAGER_PERMISSION_ALIASES.get(name, name)
+    if isinstance(alias, list):
+        return alias
+    return [alias]
+
+
+def _grant_manager_permission(normalized: dict[str, list[str]], name: str) -> bool:
+    granted = False
+    for canonical in _canonical_permission_names(name):
+        if "." not in canonical:
+            continue
+        category, action = canonical.split(".", 1)
+        if action in MANAGER_PERMISSION_TAXONOMY.get(category, set()):
+            bucket = normalized.setdefault(category, [])
+            if action not in bucket:
+                bucket.append(action)
+                bucket.sort()
+            granted = True
+    return granted
+
+
+def flatten_manager_permissions(permissions: dict[str, Any] | None) -> set[str]:
+    normalized = normalize_manager_permissions(permissions)
+    return {
+        f"{category}.{action}"
+        for category, actions in normalized.items()
+        for action in actions
     }
+
+
+def manager_permission_warnings(permissions: dict[str, Any] | None) -> list[str]:
+    warnings: list[str] = []
     for key, value in (permissions or {}).items():
-        canonical = MANAGER_PERMISSION_ALIASES.get(key, key)
-        if canonical in normalized:
-            normalized[canonical] = bool(value)
+        if key in MANAGER_PERMISSION_ALIASES:
+            continue
+        if key in MANAGER_PERMISSION_TAXONOMY:
+            if not isinstance(value, list):
+                warnings.append(f"permission category {key!r} must be a list")
+                continue
+            for action in value:
+                if action not in MANAGER_PERMISSION_TAXONOMY[key]:
+                    warnings.append(f"unknown permission {key}.{action}")
+            continue
+        if "." in key and _canonical_permission_names(key)[0] in MANAGER_PERMISSION_ACTIONS:
+            continue
+        warnings.append(f"unknown permission key {key!r}")
+    return warnings
+
+
+def normalize_manager_permissions(permissions: dict[str, Any] | None) -> dict[str, list[str]]:
+    normalized = empty_manager_permissions()
+    for key, value in (permissions or {}).items():
+        if key in MANAGER_PERMISSION_TAXONOMY and isinstance(value, list):
+            for action in value:
+                if action in MANAGER_PERMISSION_TAXONOMY[key]:
+                    _grant_manager_permission(normalized, f"{key}.{action}")
+            continue
+        if bool(value):
+            _grant_manager_permission(normalized, key)
     return normalized
 
 
-def normalize_manager_permission_overrides(permissions: dict[str, Any] | None) -> dict[str, bool]:
-    normalized: dict[str, bool] = {}
+def normalize_manager_permission_overrides(permissions: dict[str, Any] | None) -> dict[str, list[str]]:
+    normalized = empty_manager_permissions()
     for key, value in (permissions or {}).items():
-        canonical = MANAGER_PERMISSION_ALIASES.get(key, key)
-        if canonical in MANAGER_PERMISSION_ACTIONS:
-            normalized[canonical] = bool(value)
+        if key in MANAGER_PERMISSION_TAXONOMY and isinstance(value, list):
+            for action in value:
+                if action in MANAGER_PERMISSION_TAXONOMY[key]:
+                    _grant_manager_permission(normalized, f"{key}.{action}")
+            continue
+        if bool(value):
+            _grant_manager_permission(normalized, key)
     return normalized
+
+
+def merge_manager_permissions(base: dict[str, list[str]], overrides: dict[str, list[str]]) -> dict[str, list[str]]:
+    merged = {category: list(actions) for category, actions in base.items()}
+    for category, actions in overrides.items():
+        for action in actions:
+            _grant_manager_permission(merged, f"{category}.{action}")
+    return merged
+
+
+def _revoke_manager_permission(normalized: dict[str, list[str]], name: str) -> None:
+    for canonical in _canonical_permission_names(name):
+        if "." not in canonical:
+            continue
+        category, action = canonical.split(".", 1)
+        if action in normalized.get(category, []):
+            normalized[category].remove(action)
+
+
+def apply_manager_permission_overrides(base: dict[str, list[str]], overrides: dict[str, Any] | None) -> dict[str, list[str]]:
+    updated = {category: list(actions) for category, actions in base.items()}
+    for key, value in (overrides or {}).items():
+        if key in MANAGER_PERMISSION_TAXONOMY:
+            if isinstance(value, list):
+                updated[key] = sorted(
+                    action for action in value
+                    if action in MANAGER_PERMISSION_TAXONOMY[key]
+                )
+            continue
+        if bool(value):
+            _grant_manager_permission(updated, key)
+        else:
+            _revoke_manager_permission(updated, key)
+    return updated
+
+
+def add_manager_permission_flags(permissions: dict[str, list[str]], flags: list[str]) -> dict[str, list[str]]:
+    updated = {category: list(actions) for category, actions in permissions.items()}
+    for flag in flags:
+        _grant_manager_permission(updated, flag)
+    return updated
+
+
+def clean_manager_tools(values: list[str] | None) -> list[str]:
+    seen = set()
+    tools: list[str] = []
+    for value in values or []:
+        tool = value.strip()
+        if tool and tool not in seen:
+            seen.add(tool)
+            tools.append(tool)
+    return tools
+
+
+def clean_epilogue_steps(values: list[str] | None) -> list[str]:
+    seen = set()
+    steps: list[str] = []
+    for value in values or []:
+        step = value.strip()
+        if not step:
+            continue
+        if step not in EPILOGUE_STEPS:
+            raise WorkerError(f"unknown epilogue step: {step}")
+        if step not in seen:
+            seen.add(step)
+            steps.append(step)
+    return steps
+
+
+def clean_nudge_on_completion(value: str | None) -> str:
+    mode = value or "ask-operator"
+    if mode not in NUDGE_ON_COMPLETION_MODES:
+        raise WorkerError("--nudge-on-completion must be one of: off, ask-operator, auto-review, auto-proceed")
+    return mode
+
+
+def manager_permission_allowed(config: dict[str, Any] | None, action: str) -> bool:
+    if not config:
+        return False
+    return all(
+        permission in flatten_manager_permissions(config.get("permissions"))
+        for permission in _canonical_permission_names(action)
+    )
+
+
+def manager_permission_display(config: dict[str, Any] | None) -> str:
+    permissions = normalize_manager_permissions(config.get("permissions") if config else None)
+    granted = sorted(flatten_manager_permissions(permissions))
+    all_permissions = sorted(MANAGER_PERMISSION_ACTIONS)
+    denied = [permission for permission in all_permissions if permission not in granted]
+    granted_text = ", ".join(granted) if granted else "none"
+    denied_text = ", ".join(denied) if denied else "none"
+    return f"You may: {granted_text}.\nYou may NOT: {denied_text}."
 
 
 MANAGER_DECISIONS = {
@@ -2297,8 +3120,6 @@ def record_manager_decision(
 def command_manager_permission(args: argparse.Namespace) -> int:
     from workerctl import db as worker_db
 
-    if args.action not in MANAGER_PERMISSION_ACTIONS:
-        raise WorkerError(f"unknown manager permission action: {args.action}")
     db_path = Path(args.path).expanduser().resolve() if args.path else None
     with worker_db.connect(db_path) as conn:
         worker_db.initialize_database(conn)
@@ -2307,14 +3128,27 @@ def command_manager_permission(args: argparse.Namespace) -> int:
         handoff = worker_db.latest_worker_handoff(conn, task_id=task["id"])
         reasons: list[str] = []
         allowed = False
+        listed_permissions: list[str] | None = None
         if config is None:
             reasons.append("missing_manager_config")
         else:
-            config["permissions"] = normalize_manager_permissions(config["permissions"])
-            allowed = bool(config["permissions"].get(args.action, False))
-            if not allowed:
-                reasons.append("permission_not_enabled")
-        if args.require_handoff and handoff is None:
+            config["permissions"] = normalize_manager_permissions(config.get("permissions"))
+            if getattr(args, "list", False):
+                if args.action not in MANAGER_PERMISSION_TAXONOMY:
+                    raise WorkerError(f"--list expects a permission category, got: {args.action}")
+                listed_permissions = list(config["permissions"].get(args.action, []))
+                allowed = True
+            else:
+                unknown = [
+                    permission for permission in _canonical_permission_names(args.action)
+                    if permission not in MANAGER_PERMISSION_ACTIONS
+                ]
+                if unknown:
+                    raise WorkerError(f"unknown manager permission action: {args.action}")
+                allowed = manager_permission_allowed(config, args.action)
+                if not allowed:
+                    reasons.append("permission_not_enabled")
+        if not getattr(args, "list", False) and args.require_handoff and handoff is None:
             allowed = False
             reasons.append("missing_worker_handoff")
         result = {
@@ -2322,6 +3156,7 @@ def command_manager_permission(args: argparse.Namespace) -> int:
             "allowed": allowed,
             "config": config,
             "handoff_id": handoff["id"] if handoff else None,
+            "listed_permissions": listed_permissions,
             "require_handoff": args.require_handoff,
             "reasons": reasons,
             "task": {"id": task["id"], "name": task["name"]},
@@ -2393,7 +3228,7 @@ def command_request_worker_compact(args: argparse.Namespace) -> int:
             allowed_decisions={"nudge"},
         )
         permission_reasons: list[str] = []
-        permission_allowed = bool(config and config["permissions"].get("worker_compact_clear", False))
+        permission_allowed = manager_permission_allowed(config, "worker_compact_clear")
         if config is None:
             permission_reasons.append("missing_manager_config")
         elif not permission_allowed:
@@ -2616,21 +3451,41 @@ def command_manager_config(args: argparse.Namespace) -> int:
                 args.guideline,
                 args.acceptance,
                 args.reference,
+                getattr(args, "permit", []),
+                getattr(args, "tool", []),
+                getattr(args, "epilogue", []),
+                getattr(args, "nudge_on_completion", None) is not None,
+                getattr(args, "require_acks", False),
                 args.permissions_json,
                 args.allow_pr,
                 args.allow_merge_green,
                 args.allow_worker_compact_clear,
             ]
         )
+        permission_warnings: list[str] = []
         if mutating or existing is None:
             permissions = normalize_manager_permissions(existing["permissions"] if existing else None)
-            if args.allow_pr:
-                permissions["create_pr"] = True
-            if args.allow_merge_green:
-                permissions["merge_green_pr"] = True
-            if args.allow_worker_compact_clear:
-                permissions["worker_compact_clear"] = True
-            permissions.update(normalize_manager_permission_overrides(_json_arg(args.permissions_json, flag="--permissions-json")))
+            permissions = add_manager_permission_flags(
+                permissions,
+                [
+                    flag for flag, enabled in (
+                        ("create_pr", args.allow_pr),
+                        ("merge_green_pr", args.allow_merge_green),
+                        ("worker_compact_clear", args.allow_worker_compact_clear),
+                    )
+                    if enabled
+                ],
+            )
+            permissions = add_manager_permission_flags(permissions, getattr(args, "permit", []))
+            permissions_json = _json_arg(args.permissions_json, flag="--permissions-json")
+            permission_warnings = manager_permission_warnings(permissions_json)
+            permissions = apply_manager_permission_overrides(permissions, permissions_json)
+            tools = clean_manager_tools(getattr(args, "tool", []) or (existing["tools"] if existing else []))
+            epilogues = clean_epilogue_steps(getattr(args, "epilogue", []) or (existing["epilogues"] if existing else []))
+            nudge_on_completion = clean_nudge_on_completion(
+                getattr(args, "nudge_on_completion", None)
+                or (existing["nudge_on_completion"] if existing else "ask-operator")
+            )
             worker_db.upsert_manager_config(
                 conn,
                 task_id=task["id"],
@@ -2640,6 +3495,10 @@ def command_manager_config(args: argparse.Namespace) -> int:
                 acceptance_criteria=args.acceptance or (existing["acceptance_criteria"] if existing else []),
                 reference_paths=args.reference or (existing["reference_paths"] if existing else []),
                 permissions=permissions,
+                tools=tools,
+                epilogues=epilogues,
+                nudge_on_completion=nudge_on_completion,
+                require_acks=bool(getattr(args, "require_acks", False) or (existing["require_acks"] if existing else False)),
             )
             worker_db.insert_event(
                 conn,
@@ -2648,13 +3507,20 @@ def command_manager_config(args: argparse.Namespace) -> int:
                 task_id=task["id"],
                 payload={
                     "acceptance_count": len(args.acceptance),
+                    "epilogue_count": len(epilogues),
                     "guideline_count": len(args.guideline),
+                    "permission_warnings": permission_warnings,
                     "reference_count": len(args.reference),
+                    "require_acks": bool(getattr(args, "require_acks", False) or (existing["require_acks"] if existing else False)),
+                    "nudge_on_completion": nudge_on_completion,
                     "supervision_mode": args.mode or (existing["supervision_mode"] if existing else "guided"),
+                    "tool_count": len(tools),
                 },
             )
             conn.commit()
         config = worker_db.manager_config(conn, task_id=task["id"])
+        if permission_warnings:
+            config = {**config, "warnings": permission_warnings}
     print(json.dumps(config, indent=2, sort_keys=True))
     return 0
 
@@ -3744,6 +4610,11 @@ def pair_manager_config_requested(args: argparse.Namespace) -> bool:
             bool(getattr(args, "manager_guideline", None)),
             bool(getattr(args, "manager_acceptance", None)),
             bool(getattr(args, "manager_reference", None)),
+            bool(getattr(args, "manager_permit", None)),
+            bool(getattr(args, "manager_tool", None)),
+            bool(getattr(args, "manager_epilogue", None)),
+            getattr(args, "manager_nudge_on_completion", None) is not None,
+            bool(getattr(args, "manager_require_acks", False)),
             getattr(args, "manager_permissions_json", None) is not None,
             bool(getattr(args, "manager_allow_pr", False)),
             bool(getattr(args, "manager_allow_merge_green", False)),
@@ -3867,16 +4738,31 @@ def command_pair(args: argparse.Namespace) -> int:
             permissions = normalize_manager_permissions(
                 existing_manager_config["permissions"] if existing_manager_config else None
             )
-            if getattr(args, "manager_allow_pr", False):
-                permissions["create_pr"] = True
-            if getattr(args, "manager_allow_merge_green", False):
-                permissions["merge_green_pr"] = True
-            if getattr(args, "manager_allow_worker_compact_clear", False):
-                permissions["worker_compact_clear"] = True
-            permissions.update(
-                normalize_manager_permission_overrides(
-                    _json_arg(getattr(args, "manager_permissions_json", None), flag="--manager-permissions-json")
-                )
+            permissions = add_manager_permission_flags(
+                permissions,
+                [
+                    flag for flag, enabled in (
+                        ("create_pr", getattr(args, "manager_allow_pr", False)),
+                        ("merge_green_pr", getattr(args, "manager_allow_merge_green", False)),
+                        ("worker_compact_clear", getattr(args, "manager_allow_worker_compact_clear", False)),
+                    )
+                    if enabled
+                ],
+            )
+            permissions = add_manager_permission_flags(permissions, getattr(args, "manager_permit", None) or [])
+            permissions = apply_manager_permission_overrides(
+                permissions,
+                _json_arg(getattr(args, "manager_permissions_json", None), flag="--manager-permissions-json"),
+            )
+            tools = clean_manager_tools(
+                getattr(args, "manager_tool", None) or (existing_manager_config["tools"] if existing_manager_config else [])
+            )
+            epilogues = clean_epilogue_steps(
+                getattr(args, "manager_epilogue", None) or (existing_manager_config["epilogues"] if existing_manager_config else [])
+            )
+            nudge_on_completion = clean_nudge_on_completion(
+                getattr(args, "manager_nudge_on_completion", None)
+                or (existing_manager_config["nudge_on_completion"] if existing_manager_config else "ask-operator")
             )
             worker_db.upsert_manager_config(
                 conn,
@@ -3893,6 +4779,13 @@ def command_pair(args: argparse.Namespace) -> int:
                 reference_paths=getattr(args, "manager_reference", None)
                 or (existing_manager_config["reference_paths"] if existing_manager_config else []),
                 permissions=permissions,
+                tools=tools,
+                epilogues=epilogues,
+                nudge_on_completion=nudge_on_completion,
+                require_acks=bool(
+                    getattr(args, "manager_require_acks", False)
+                    or (existing_manager_config["require_acks"] if existing_manager_config else False)
+                ),
             )
             existing_manager_config = worker_db.manager_config(conn, task_id=task_id)
             manager_config_seeded_by_pair = True
@@ -3905,6 +4798,7 @@ def command_pair(args: argparse.Namespace) -> int:
                     "acceptance_count": len(existing_manager_config["acceptance_criteria"]),
                     "guideline_count": len(existing_manager_config["guidelines"]),
                     "reference_count": len(existing_manager_config["reference_paths"]),
+                    "nudge_on_completion": existing_manager_config["nudge_on_completion"],
                     "source": "pair",
                     "supervision_mode": existing_manager_config["supervision_mode"],
                 },
@@ -3925,6 +4819,7 @@ def command_pair(args: argparse.Namespace) -> int:
                     "acceptance_count": len(existing_manager_config["acceptance_criteria"]),
                     "guideline_count": len(existing_manager_config["guidelines"]),
                     "reference_count": len(existing_manager_config["reference_paths"]),
+                    "nudge_on_completion": existing_manager_config["nudge_on_completion"],
                     "supervision_mode": existing_manager_config["supervision_mode"],
                 },
             )
@@ -3945,7 +4840,7 @@ def command_pair(args: argparse.Namespace) -> int:
             name=args.worker_name,
             role="worker",
             cwd=args.cwd,
-            task=args.task_prompt,
+            task=worker_ack_task_prompt(args.task, args.task_prompt),
             sandbox=sandbox,
             ask_for_approval=ask_for_approval,
             timeout_seconds=args.timeout_seconds,
@@ -3975,6 +4870,7 @@ def command_pair(args: argparse.Namespace) -> int:
                 task_goal=args.task_goal if task_created else task_row["goal"],
                 worker_name=args.worker_name,
                 manager_config_seeded=manager_config_seeded,
+                manager_config=existing_manager_config,
             ),
             sandbox=sandbox,
             ask_for_approval=ask_for_approval,

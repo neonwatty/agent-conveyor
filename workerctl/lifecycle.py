@@ -24,6 +24,9 @@ from workerctl.db import emit_telemetry_event
 from workerctl.db import insert_manager_decision
 from workerctl.db import initialize_database
 from workerctl.db import latest_session_binding_for_task
+from workerctl.db import manager_config
+from workerctl.db import epilogue_status
+from workerctl.db import latest_task_acknowledgement
 from workerctl.db import mark_manager_seen
 from workerctl.db import mark_command_attempted
 from workerctl.db import mark_worker_state
@@ -115,6 +118,46 @@ def _final_criteria_audit_error(final_audit: dict[str, Any], *, task_name: str) 
         f"Task {task_name} has accepted acceptance criteria still open; "
         f"satisfy, defer, or reject them before finishing: {details}"
     )
+
+
+def _final_ack_audit(conn, *, task_id: str, require_acks: bool) -> dict[str, Any]:
+    worker_ack = latest_task_acknowledgement(conn, task_id=task_id, role="worker")
+    manager_ack = latest_task_acknowledgement(conn, task_id=task_id, role="manager")
+    missing = [
+        role for role, ack in (("worker", worker_ack), ("manager", manager_ack))
+        if ack is None
+    ]
+    return {
+        "manager_ack_id": manager_ack["id"] if manager_ack else None,
+        "missing": missing,
+        "ok": not missing,
+        "require_acks": require_acks,
+        "worker_ack_id": worker_ack["id"] if worker_ack else None,
+    }
+
+
+def _final_ack_audit_error(final_ack_audit: dict[str, Any], *, task_name: str) -> str | None:
+    if final_ack_audit["ok"]:
+        return None
+    missing = ", ".join(final_ack_audit["missing"])
+    return f"Task {task_name} is missing required acknowledgement(s): {missing}"
+
+
+def _final_epilogue_audit(conn, *, task_id: str, require_epilogue: bool) -> dict[str, Any]:
+    config = manager_config(conn, task_id=task_id)
+    required_steps = list((config or {}).get("epilogues") or [])
+    status = epilogue_status(conn, task_id=task_id, required_steps=required_steps)
+    return {
+        **status,
+        "require_epilogue": require_epilogue,
+    }
+
+
+def _final_epilogue_audit_error(final_epilogue_audit: dict[str, Any], *, task_name: str) -> str | None:
+    if final_epilogue_audit["ok"]:
+        return None
+    missing = ", ".join(final_epilogue_audit["missing_or_incomplete"])
+    return f"Task {task_name} has incomplete required epilogue step(s): {missing}"
 
 
 def _resolve_session_binding(conn, *, task_name: str, include_ended: bool = False) -> dict[str, Any] | None:
@@ -258,10 +301,22 @@ def _stop_or_finish_task(args: argparse.Namespace, *, finish: bool) -> int:
         if snapshot["state"] in {"done", "failed"} and not already_done_followup:
             raise WorkerError(f"Task {snapshot['name']} is already {snapshot['state']}")
         require_criteria_audit = bool(getattr(args, "require_criteria_audit", False)) if finish else False
+        require_acks = bool(getattr(args, "require_acks", False)) if finish else False
+        require_epilogue = bool(getattr(args, "require_epilogue", False)) if finish else False
         final_audit = _final_criteria_audit(
             conn,
             task_id=snapshot["id"],
             require_criteria_audit=require_criteria_audit,
+        )
+        final_ack_audit = _final_ack_audit(
+            conn,
+            task_id=snapshot["id"],
+            require_acks=require_acks,
+        )
+        final_epilogue_audit = _final_epilogue_audit(
+            conn,
+            task_id=snapshot["id"],
+            require_epilogue=require_epilogue,
         )
         if require_criteria_audit:
             audit_error = _final_criteria_audit_error(final_audit, task_name=snapshot["name"])
@@ -305,6 +360,90 @@ def _stop_or_finish_task(args: argparse.Namespace, *, finish: bool) -> int:
                 )
                 conn.commit()
                 raise WorkerError(audit_error)
+        if require_acks:
+            ack_audit_error = _final_ack_audit_error(final_ack_audit, task_name=snapshot["name"])
+            if ack_audit_error is not None:
+                command_id = create_db_command(
+                    conn,
+                    command_type=command_type,
+                    task_id=snapshot["id"],
+                    worker_id=snapshot["worker"]["id"] if snapshot["worker"] else None,
+                    payload={
+                        "expected_failure": True,
+                        "failure_stage": "final_ack_audit",
+                        "final_ack_audit": final_ack_audit,
+                        "finish": finish,
+                        "message": args.message,
+                        "reason": final_reason,
+                        "capture_transcript_before_stop": capture_transcript_before_stop,
+                        "stop_manager": stop_manager,
+                        "stop_worker": args.stop_worker,
+                        "task": snapshot["name"],
+                    },
+                )
+                mark_command_attempted(conn, command_id=command_id)
+                result = {
+                    "command_id": command_id,
+                    "expected_failure": True,
+                    "failure_stage": "final_ack_audit",
+                    "final_ack_audit": final_ack_audit,
+                    "finish": finish,
+                    "task": snapshot["name"],
+                }
+                finish_db_command(conn, command_id=command_id, state="failed", result=result, error=ack_audit_error)
+                insert_db_event(
+                    conn,
+                    f"{event_prefix}_failed",
+                    actor="workerctl",
+                    command_id=command_id,
+                    task_id=snapshot["id"],
+                    worker_id=snapshot["worker"]["id"] if snapshot["worker"] else None,
+                    payload={**result, "error": ack_audit_error, "error_type": "WorkerError"},
+                )
+                conn.commit()
+                raise WorkerError(ack_audit_error)
+        if require_epilogue:
+            epilogue_audit_error = _final_epilogue_audit_error(final_epilogue_audit, task_name=snapshot["name"])
+            if epilogue_audit_error is not None:
+                command_id = create_db_command(
+                    conn,
+                    command_type=command_type,
+                    task_id=snapshot["id"],
+                    worker_id=snapshot["worker"]["id"] if snapshot["worker"] else None,
+                    payload={
+                        "expected_failure": True,
+                        "failure_stage": "final_epilogue_audit",
+                        "final_epilogue_audit": final_epilogue_audit,
+                        "finish": finish,
+                        "message": args.message,
+                        "reason": final_reason,
+                        "capture_transcript_before_stop": capture_transcript_before_stop,
+                        "stop_manager": stop_manager,
+                        "stop_worker": args.stop_worker,
+                        "task": snapshot["name"],
+                    },
+                )
+                mark_command_attempted(conn, command_id=command_id)
+                result = {
+                    "command_id": command_id,
+                    "expected_failure": True,
+                    "failure_stage": "final_epilogue_audit",
+                    "final_epilogue_audit": final_epilogue_audit,
+                    "finish": finish,
+                    "task": snapshot["name"],
+                }
+                finish_db_command(conn, command_id=command_id, state="failed", result=result, error=epilogue_audit_error)
+                insert_db_event(
+                    conn,
+                    f"{event_prefix}_failed",
+                    actor="workerctl",
+                    command_id=command_id,
+                    task_id=snapshot["id"],
+                    worker_id=snapshot["worker"]["id"] if snapshot["worker"] else None,
+                    payload={**result, "error": epilogue_audit_error, "error_type": "WorkerError"},
+                )
+                conn.commit()
+                raise WorkerError(epilogue_audit_error)
         manager = active_manager(conn, task=snapshot["id"])
         worker = snapshot["worker"]
         session_binding = _resolve_session_binding(
@@ -334,6 +473,8 @@ def _stop_or_finish_task(args: argparse.Namespace, *, finish: bool) -> int:
             payload={
                 "finish": finish,
                 **({"final_audit": final_audit} if finish else {}),
+                **({"final_ack_audit": final_ack_audit} if finish else {}),
+                **({"final_epilogue_audit": final_epilogue_audit} if finish else {}),
                 "capture_transcript_before_stop": capture_transcript_before_stop,
                 "capture_transcript_lines": capture_transcript_lines,
                 "capture_transcript_mode": capture_transcript_mode,
@@ -383,6 +524,8 @@ def _stop_or_finish_task(args: argparse.Namespace, *, finish: bool) -> int:
             payload={
                 "finish": finish,
                 **({"final_audit": final_audit} if finish else {}),
+                **({"final_ack_audit": final_ack_audit} if finish else {}),
+                **({"final_epilogue_audit": final_epilogue_audit} if finish else {}),
                 "final_decision_id": final_decision_id,
                 "final_observation_id": final_observation_id,
                 "manager_decision": decision_check,
@@ -400,6 +543,8 @@ def _stop_or_finish_task(args: argparse.Namespace, *, finish: bool) -> int:
     result = {
         "command_id": command_id,
         **({"final_audit": final_audit} if finish else {}),
+        **({"final_ack_audit": final_ack_audit} if finish else {}),
+        **({"final_epilogue_audit": final_epilogue_audit} if finish else {}),
         "final_decision_id": final_decision_id,
         "final_observation_id": final_observation_id,
         "finish": finish,
