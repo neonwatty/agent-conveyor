@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import argparse
 import contextlib
 import io
@@ -2765,6 +2767,306 @@ class CliTests(unittest.TestCase):
             self.assertEqual(snapshot["commands"]["unfinished_count"], 1)
             self.assertEqual(snapshot["commands"]["failed_count"], 1)
             self.assertGreaterEqual(snapshot["telemetry"]["summary"]["by_severity"]["error"], 1)
+
+    def test_telemetry_task_view_reports_failure_triage_without_raw_payloads(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                task_id = worker_db.create_task(conn, name="task-view-task", goal="Inspect task telemetry.")
+                worker_db.register_session(
+                    conn,
+                    name="task-view-worker",
+                    role="worker",
+                    codex_session_path="/worker-rollout.jsonl",
+                    codex_session_id="worker-codex-id",
+                    pid=os.getpid(),
+                    cwd="/repo",
+                    tmux_session="codex-task-view-worker",
+                    tmux_pane_id="%1",
+                )
+                worker_db.register_session(
+                    conn,
+                    name="task-view-manager",
+                    role="manager",
+                    codex_session_path="/manager-rollout.jsonl",
+                    codex_session_id="manager-codex-id",
+                    pid=os.getpid(),
+                    cwd="/repo",
+                    tmux_session="codex-task-view-manager",
+                    tmux_pane_id="%2",
+                )
+                worker_db.bind_sessions(
+                    conn,
+                    task_name="task-view-task",
+                    worker_session_name="task-view-worker",
+                    manager_session_name="task-view-manager",
+                    timestamp="2020-01-01T00:00:00Z",
+                )
+                ok_cycle = worker_db.create_manager_cycle(
+                    conn,
+                    task_id=task_id,
+                    manager_id=None,
+                    timestamp="2020-01-01T00:00:00Z",
+                )
+                worker_db.finish_manager_cycle(
+                    conn,
+                    cycle_id=ok_cycle,
+                    state="succeeded",
+                    status={
+                        "ingest": {"new_events": 3, "skipped_lines": 0},
+                        "kind": "session_cycle",
+                        "notable_pane_pattern": None,
+                        "pane_signal": {"captured": True, "notable_pattern": None},
+                        "staleness_seconds": 5,
+                        "state": "idle",
+                    },
+                    timestamp="2020-01-01T00:00:05Z",
+                )
+                failed_cycle = worker_db.create_manager_cycle(
+                    conn,
+                    task_id=task_id,
+                    manager_id=None,
+                    timestamp="2020-01-01T00:01:00Z",
+                )
+                worker_db.finish_manager_cycle(
+                    conn,
+                    cycle_id=failed_cycle,
+                    state="failed",
+                    status={
+                        "error_type": "IngestError",
+                        "kind": "session_cycle",
+                        "pane_signal": {
+                            "captured": False,
+                            "notable_pattern": "trust_prompt",
+                            "reason": "capture denied",
+                        },
+                    },
+                    error="IngestError: rollout unavailable",
+                    timestamp="2020-01-01T00:01:05Z",
+                )
+                worker_db.insert_manager_decision(
+                    conn,
+                    task_id=task_id,
+                    manager_id=None,
+                    manager_cycle_id=ok_cycle,
+                    decision="wait",
+                    reason="worker healthy",
+                    payload={"raw_prompt": "do not expose this prompt"},
+                    timestamp="2020-01-01T00:00:06Z",
+                )
+                command_id = worker_db.create_command(
+                    conn,
+                    command_type="task_nudge",
+                    payload={"message": "secret nudge body"},
+                    task_id=task_id,
+                    timestamp="2020-01-01T00:02:00Z",
+                )
+                worker_db.finish_command(
+                    conn,
+                    command_id=command_id,
+                    state="failed",
+                    result={"transcript": "secret transcript"},
+                    error="tmux denied",
+                    timestamp="2020-01-01T00:02:05Z",
+                )
+                worker_db.emit_telemetry_event(
+                    conn,
+                    actor="workerctl",
+                    event_type="codex_events_ingested",
+                    task_id=task_id,
+                    summary="Ingest skipped malformed rollout lines.",
+                    attributes={"new_events": 1, "skipped_lines": 2},
+                    timestamp="2020-01-01T00:03:00Z",
+                )
+                worker_db.emit_telemetry_event(
+                    conn,
+                    actor="workerctl",
+                    event_type="codex_ingest_failed",
+                    severity="error",
+                    task_id=task_id,
+                    summary="Ingest failed.",
+                    attributes={"error": "rollout missing"},
+                    timestamp="2020-01-01T00:03:05Z",
+                )
+                worker_db.insert_acceptance_criterion(
+                    conn,
+                    task_id=task_id,
+                    criterion="Do not expose this criterion text",
+                    status="accepted",
+                    source="manager_inferred",
+                )
+                capture_id = worker_db.insert_terminal_capture(
+                    conn,
+                    task_id=task_id,
+                    role="worker",
+                    tmux_session="codex-task-view-worker",
+                    content_sha256="sha-terminal",
+                    content="raw pane text should stay out",
+                    history_lines=10,
+                    source="test",
+                    timestamp="2020-01-01T00:04:00Z",
+                )
+                worker_db.insert_transcript_segment(
+                    conn,
+                    task_id=task_id,
+                    role="worker",
+                    source_capture_id=capture_id,
+                    previous_capture_id=None,
+                    content_sha256="sha-segment",
+                    segment_text="raw transcript segment",
+                    segment_start_line=1,
+                    segment_end_line=1,
+                    segment_kind="segment",
+                    timestamp="2020-01-01T00:04:01Z",
+                )
+                conn.commit()
+
+            proc = self.run_workerctl(
+                "telemetry",
+                "task",
+                "task-view-task",
+                "--json",
+                "--limit",
+                "10",
+                "--path",
+                str(db_path),
+            )
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            view = json.loads(proc.stdout)
+            self.assertTrue(view["liveness"]["worker_alive"])
+            self.assertTrue(view["liveness"]["manager_alive"])
+            self.assertTrue(view["liveness"]["latest_cycle_stale"])
+            self.assertEqual(view["cycles"]["last_successful"]["id"], ok_cycle)
+            self.assertEqual(view["cycles"]["failed"][0]["id"], failed_cycle)
+            self.assertEqual(view["cycles"]["pane_capture_failures"][0]["pane_signal"]["notable_pattern"], "trust_prompt")
+            self.assertEqual(view["commands"]["failed_count"], 1)
+            self.assertEqual(view["failed_commands"][0]["payload_keys"], ["message"])
+            self.assertEqual(view["failed_commands"][0]["result_keys"], ["transcript"])
+            self.assertEqual(view["ingest"]["skipped_lines"], 2)
+            self.assertEqual(view["ingest"]["error_count"], 2)
+            self.assertEqual(view["criteria"]["summary"]["accepted"], 1)
+            self.assertEqual(view["criteria"]["open_count"], 1)
+            self.assertEqual(view["storage"]["terminal_captures"]["count"], 1)
+            self.assertEqual(view["storage"]["transcript_segments"]["count"], 1)
+            alert_types = {alert["type"] for alert in view["alerts"]}
+            self.assertIn("stale_cycle", alert_types)
+            self.assertIn("latest_cycle_failed", alert_types)
+            self.assertIn("failed_commands", alert_types)
+            self.assertIn("ingest_skipped_lines", alert_types)
+            self.assertIn("ingest_errors", alert_types)
+            self.assertIn("open_accepted_criteria", alert_types)
+            self.assertNotIn("secret nudge body", proc.stdout)
+            self.assertNotIn("secret transcript", proc.stdout)
+            self.assertNotIn("do not expose this prompt", proc.stdout)
+            self.assertNotIn("Do not expose this criterion text", proc.stdout)
+            self.assertNotIn("raw transcript segment", proc.stdout)
+            self.assertNotIn("raw pane text", proc.stdout)
+
+    def test_telemetry_failures_view_rolls_up_failed_cycles_commands_ingest_and_storage(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                task_id = worker_db.create_task(conn, name="failure-view-task", goal="Inspect failures.")
+                failed_cycle = worker_db.create_manager_cycle(
+                    conn,
+                    task_id=task_id,
+                    manager_id=None,
+                    timestamp="2026-05-21T10:00:00Z",
+                )
+                worker_db.finish_manager_cycle(
+                    conn,
+                    cycle_id=failed_cycle,
+                    state="failed",
+                    status={
+                        "error_type": "RuntimeError",
+                        "kind": "session_cycle",
+                        "pane_signal": {"captured": False, "notable_pattern": "enter_to_confirm"},
+                    },
+                    error="boom",
+                    timestamp="2026-05-21T10:00:05Z",
+                )
+                command_id = worker_db.create_command(
+                    conn,
+                    command_type="notify_manager",
+                    payload={"message": "secret failure payload"},
+                    task_id=task_id,
+                    timestamp="2026-05-21T10:01:00Z",
+                )
+                worker_db.finish_command(
+                    conn,
+                    command_id=command_id,
+                    state="failed",
+                    error="send failed",
+                    timestamp="2026-05-21T10:01:05Z",
+                )
+                worker_db.emit_telemetry_event(
+                    conn,
+                    actor="workerctl",
+                    event_type="codex_events_ingested",
+                    task_id=task_id,
+                    summary="Skipped lines.",
+                    attributes={"new_events": 0, "skipped_lines": 4},
+                    timestamp="2026-05-21T10:02:00Z",
+                )
+                worker_db.emit_telemetry_event(
+                    conn,
+                    actor="workerctl",
+                    event_type="codex_ingest_failed",
+                    severity="error",
+                    task_id=task_id,
+                    summary="Ingest failed.",
+                    attributes={"error": "bad jsonl"},
+                    timestamp="2026-05-21T10:02:05Z",
+                )
+                worker_db.insert_acceptance_criterion(
+                    conn,
+                    task_id=task_id,
+                    criterion="Open failure criterion text",
+                    status="accepted",
+                    source="user_requested",
+                )
+                worker_db.insert_terminal_capture(
+                    conn,
+                    task_id=task_id,
+                    role="worker",
+                    tmux_session="codex-failure-worker",
+                    content_sha256="sha-failure",
+                    content="failure pane content",
+                    history_lines=5,
+                    source="test",
+                    timestamp="2026-05-21T10:03:00Z",
+                )
+                conn.commit()
+
+            proc = self.run_workerctl(
+                "telemetry",
+                "failures",
+                "--json",
+                "--limit",
+                "10",
+                "--path",
+                str(db_path),
+            )
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            view = json.loads(proc.stdout)
+            self.assertEqual(view["failed_cycles"][0]["id"], failed_cycle)
+            self.assertEqual(view["failed_commands"][0]["id"], command_id)
+            self.assertEqual(view["ingest"]["skipped_lines"], 4)
+            self.assertEqual(view["ingest"]["error_count"], 1)
+            self.assertEqual(view["pane_capture_failures"][0]["pane_signal"]["notable_pattern"], "enter_to_confirm")
+            self.assertEqual(view["open_criteria"]["open_accepted_count"], 1)
+            self.assertEqual(view["storage"]["terminal_captures"]["count"], 1)
+            alert_types = {alert["type"] for alert in view["alerts"]}
+            self.assertIn("failed_cycles", alert_types)
+            self.assertIn("failed_commands", alert_types)
+            self.assertIn("open_accepted_criteria", alert_types)
+            self.assertNotIn("secret failure payload", proc.stdout)
+            self.assertNotIn("Open failure criterion text", proc.stdout)
+            self.assertNotIn("failure pane content", proc.stdout)
 
     def test_telemetry_operator_snapshot_empty_db_is_healthy(self):
         with tempfile.TemporaryDirectory() as tmpdir:

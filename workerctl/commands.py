@@ -1784,6 +1784,469 @@ def telemetry_snapshot(conn: Any, *, task: str, limit: int = 10) -> dict[str, An
     }
 
 
+def _cycle_view_from_row(row: Any) -> dict[str, Any]:
+    status = json.loads(row["status_json"]) if row["status_json"] else {}
+    health = json.loads(row["health_json"]) if row["health_json"] else {}
+    pane_signal = status.get("pane_signal") if isinstance(status, dict) else None
+    if isinstance(pane_signal, dict):
+        pane = {
+            "captured": pane_signal.get("captured"),
+            "notable_pattern": pane_signal.get("notable_pattern"),
+            "reason": pane_signal.get("reason"),
+            "staleness_seconds": pane_signal.get("staleness_seconds"),
+        }
+    else:
+        pane = None
+    ingest = status.get("ingest") if isinstance(status, dict) else None
+    return {
+        "completed_at": row["completed_at"],
+        "decision": row["decision"],
+        "error": row["error"],
+        "health": health,
+        "id": row["id"],
+        "ingest": ingest or {},
+        "manager_id": row["manager_id"],
+        "notable_pane_pattern": status.get("notable_pane_pattern") if isinstance(status, dict) else None,
+        "pane_signal": pane,
+        "started_at": row["started_at"],
+        "state": row["state"],
+        "staleness_seconds": status.get("staleness_seconds") if isinstance(status, dict) else None,
+        "task_id": row["task_id"],
+        "worker_state": status.get("state") if isinstance(status, dict) else None,
+    }
+
+
+def _cycle_history_view(conn: Any, *, task_id: str, limit: int) -> dict[str, Any]:
+    rows = conn.execute(
+        """
+        select id, task_id, manager_id, started_at, completed_at, state,
+               status_json, health_json, decision, error
+        from manager_cycles
+        where task_id = ?
+        order by id desc
+        limit ?
+        """,
+        (task_id, limit),
+    ).fetchall()
+    history = [_cycle_view_from_row(row) for row in rows]
+    last_success_row = conn.execute(
+        """
+        select id, task_id, manager_id, started_at, completed_at, state,
+               status_json, health_json, decision, error
+        from manager_cycles
+        where task_id = ? and state = 'succeeded'
+        order by id desc
+        limit 1
+        """,
+        (task_id,),
+    ).fetchone()
+    failed_rows = conn.execute(
+        """
+        select id, task_id, manager_id, started_at, completed_at, state,
+               status_json, health_json, decision, error
+        from manager_cycles
+        where task_id = ? and state = 'failed'
+        order by id desc
+        limit ?
+        """,
+        (task_id, limit),
+    ).fetchall()
+    pane_failure_rows = conn.execute(
+        """
+        select id, task_id, manager_id, started_at, completed_at, state,
+               status_json, health_json, decision, error
+        from manager_cycles
+        where task_id = ?
+          and json_extract(status_json, '$.pane_signal.captured') = 0
+        order by id desc
+        limit ?
+        """,
+        (task_id, limit),
+    ).fetchall()
+    counts = conn.execute(
+        """
+        select state, count(*) as count
+        from manager_cycles
+        where task_id = ?
+        group by state
+        """,
+        (task_id,),
+    ).fetchall()
+    return {
+        "counts_by_state": {row["state"]: int(row["count"]) for row in counts},
+        "failed": [_cycle_view_from_row(row) for row in failed_rows],
+        "failed_count": int(sum(row["count"] for row in counts if row["state"] == "failed")),
+        "history": history,
+        "last_successful": _cycle_view_from_row(last_success_row) if last_success_row else None,
+        "pane_capture_failures": [_cycle_view_from_row(row) for row in pane_failure_rows],
+        "pane_capture_failure_count": len(pane_failure_rows),
+        "total": int(sum(row["count"] for row in counts)),
+    }
+
+
+def _safe_command_view(row: Any) -> dict[str, Any]:
+    result = json.loads(row["result_json"]) if row["result_json"] else None
+    payload = json.loads(row["payload_json"]) if row["payload_json"] else {}
+    return {
+        "attempts": row["attempts"],
+        "available_at": row["available_at"],
+        "claimed_by": row["claimed_by"],
+        "correlation_id": row["correlation_id"],
+        "created_at": row["created_at"],
+        "error": row["error"],
+        "id": row["id"],
+        "manager_id": row["manager_id"],
+        "max_attempts": row["max_attempts"],
+        "payload_keys": sorted(payload) if isinstance(payload, dict) else [],
+        "required_permission": row["required_permission"],
+        "result_keys": sorted(result) if isinstance(result, dict) else [],
+        "state": row["state"],
+        "task_id": row["task_id"],
+        "type": row["type"],
+        "updated_at": row["updated_at"],
+        "worker_id": row["worker_id"],
+    }
+
+
+def _commands_view(conn: Any, *, task_id: str | None = None, only_failed: bool = False, limit: int) -> dict[str, Any]:
+    filters: list[str] = []
+    params: list[Any] = []
+    if task_id is not None:
+        filters.append("task_id = ?")
+        params.append(task_id)
+    if only_failed:
+        filters.append("state = 'failed'")
+    where = f"where {' and '.join(filters)}" if filters else ""
+    rows = conn.execute(
+        f"""
+        select id, idempotency_key, created_at, updated_at, task_id, worker_id,
+               manager_id, correlation_id, type, state, available_at, claimed_by,
+               claimed_at, claim_expires_at, attempts, max_attempts, payload_json,
+               required_permission, result_json, error
+        from commands
+        {where}
+        order by updated_at desc, created_at desc, id desc
+        limit ?
+        """,
+        [*params, limit],
+    ).fetchall()
+    count_filters = list(filters)
+    count_params = list(params)
+    count_where = f"where {' and '.join(count_filters)}" if count_filters else ""
+    counts = conn.execute(
+        f"select state, count(*) as count from commands {count_where} group by state",
+        count_params,
+    ).fetchall()
+    return {
+        "counts_by_state": {row["state"]: int(row["count"]) for row in counts},
+        "failed_count": int(sum(row["count"] for row in counts if row["state"] == "failed")),
+        "recent": [_safe_command_view(row) for row in rows],
+        "total": int(sum(row["count"] for row in counts)),
+    }
+
+
+def _decisions_view(conn: Any, *, task_id: str, limit: int) -> dict[str, Any]:
+    rows = conn.execute(
+        """
+        select id, task_id, manager_id, manager_cycle_id, decision, reason, created_at, payload_json
+        from manager_decisions
+        where task_id = ?
+        order by created_at desc, id desc
+        limit ?
+        """,
+        (task_id, limit),
+    ).fetchall()
+    return {
+        "recent": [
+            {
+                "created_at": row["created_at"],
+                "decision": row["decision"],
+                "id": row["id"],
+                "manager_cycle_id": row["manager_cycle_id"],
+                "manager_id": row["manager_id"],
+                "payload_keys": sorted(json.loads(row["payload_json"])),
+                "reason": row["reason"],
+                "task_id": row["task_id"],
+            }
+            for row in rows
+        ],
+    }
+
+
+def _ingest_view(conn: Any, *, task_id: str | None = None, limit: int) -> dict[str, Any]:
+    task_filter = "and task_id = ?" if task_id is not None else ""
+    task_params = [task_id] if task_id is not None else []
+    skipped_row = conn.execute(
+        f"""
+        select
+          sum(coalesce(json_extract(attributes_json, '$.new_events'), 0)) as new_events,
+          sum(coalesce(json_extract(attributes_json, '$.skipped_lines'), 0)) as skipped_lines
+        from telemetry_events
+        where event_type = 'codex_events_ingested' {task_filter}
+        """,
+        task_params,
+    ).fetchone()
+    skipped_events = conn.execute(
+        f"""
+        select id, run_id, task_id, timestamp, actor, event_type, severity,
+               summary, correlation_json, attributes_json
+        from telemetry_events
+        where event_type = 'codex_events_ingested'
+          and coalesce(json_extract(attributes_json, '$.skipped_lines'), 0) > 0
+          {task_filter}
+        order by timestamp desc, id desc
+        limit ?
+        """,
+        [*task_params, limit],
+    ).fetchall()
+    error_events = conn.execute(
+        f"""
+        select id, run_id, task_id, timestamp, actor, event_type, severity,
+               summary, correlation_json, attributes_json
+        from telemetry_events
+        where (event_type like '%ingest%' or event_type = 'codex_events_ingested')
+          and severity in ('warning', 'error')
+          {task_filter}
+        order by timestamp desc, id desc
+        limit ?
+        """,
+        [*task_params, limit],
+    ).fetchall()
+    cycle_errors = conn.execute(
+        f"""
+        select mc.id, mc.task_id, t.name as task_name, mc.started_at, mc.completed_at,
+               mc.state, mc.error, mc.status_json
+        from manager_cycles mc
+        left join tasks t on t.id = mc.task_id
+        where mc.state = 'failed'
+          and (
+            mc.error like '%Ingest%'
+            or json_extract(mc.status_json, '$.error_type') like '%Ingest%'
+          )
+          {"and mc.task_id = ?" if task_id is not None else ""}
+        order by coalesce(mc.completed_at, mc.started_at) desc, mc.id desc
+        limit ?
+        """,
+        [*task_params, limit],
+    ).fetchall()
+
+    def event_summary(row: Any) -> dict[str, Any]:
+        attributes = json.loads(row["attributes_json"]) if row["attributes_json"] else {}
+        return {
+            "attributes": {
+                key: attributes.get(key)
+                for key in ("new_events", "skipped_lines", "error", "reason")
+                if key in attributes
+            },
+            "event_type": row["event_type"],
+            "id": row["id"],
+            "run_id": row["run_id"],
+            "severity": row["severity"],
+            "summary": row["summary"],
+            "task_id": row["task_id"],
+            "timestamp": row["timestamp"],
+        }
+
+    return {
+        "cycle_errors": [
+            {
+                "completed_at": row["completed_at"],
+                "error": row["error"],
+                "id": row["id"],
+                "started_at": row["started_at"],
+                "state": row["state"],
+                "task_id": row["task_id"],
+                "task_name": row["task_name"],
+            }
+            for row in cycle_errors
+        ],
+        "error_count": len(error_events) + len(cycle_errors),
+        "recent_errors": [event_summary(row) for row in error_events],
+        "recent_skipped": [event_summary(row) for row in skipped_events],
+        "skipped_lines": _metrics_sum_row(skipped_row, "skipped_lines"),
+        "new_events": _metrics_sum_row(skipped_row, "new_events"),
+    }
+
+
+def _criteria_view(conn: Any, *, task_id: str, limit: int) -> dict[str, Any]:
+    from workerctl import db as worker_db
+
+    rows = worker_db.acceptance_criteria_for_task(conn, task_id=task_id)
+    summary = _acceptance_criteria_summary(rows)
+    open_rows = [row for row in rows if row["status"] in ("proposed", "accepted")]
+    return {
+        "open": [
+            {
+                "created_at": row["created_at"],
+                "id": row["id"],
+                "proof": row["proof"],
+                "source": row["source"],
+                "status": row["status"],
+                "updated_at": row["updated_at"],
+            }
+            for row in open_rows[:limit]
+        ],
+        "open_count": len(open_rows),
+        "summary": summary,
+        "total": len(rows),
+    }
+
+
+def _storage_counts(conn: Any, *, task_id: str | None = None) -> dict[str, Any]:
+    task_filter = "where task_id = ?" if task_id is not None else ""
+    task_params = [task_id] if task_id is not None else []
+    terminal = conn.execute(
+        f"select count(*) as count, sum(byte_count) as bytes from terminal_captures {task_filter}",
+        task_params,
+    ).fetchone()
+    segments = conn.execute(
+        f"select count(*) as count, sum(byte_count) as bytes from transcript_segments {task_filter}",
+        task_params,
+    ).fetchone()
+    transcript_sql = "select count(*) as count, sum(byte_count) as bytes from transcript_captures"
+    transcript_params: list[Any] = []
+    if task_id is not None:
+        transcript_sql = """
+            select count(distinct transcript_captures.id) as count,
+                   sum(transcript_captures.byte_count) as bytes
+            from transcript_captures
+            join bindings on bindings.worker_id = transcript_captures.worker_id
+            where bindings.task_id = ?
+        """
+        transcript_params.append(task_id)
+    transcript = conn.execute(transcript_sql, transcript_params).fetchone()
+    terminal_bytes = _metrics_sum_row(terminal, "bytes")
+    segment_bytes = _metrics_sum_row(segments, "bytes")
+    transcript_bytes = _metrics_sum_row(transcript, "bytes")
+    return {
+        "database_file": _database_file_size(conn),
+        "terminal_captures": {"bytes": terminal_bytes, "count": int(terminal["count"] or 0)},
+        "transcript_captures": {"bytes": transcript_bytes, "count": int(transcript["count"] or 0)},
+        "transcript_segments": {"bytes": segment_bytes, "count": int(segments["count"] or 0)},
+        "total_retained": terminal_bytes + segment_bytes + transcript_bytes,
+    }
+
+
+def telemetry_task_view(conn: Any, *, task: str, limit: int = 10, stale_cycle_seconds: float = 3600.0) -> dict[str, Any]:
+    snapshot = telemetry_snapshot(conn, task=task, limit=limit)
+    task_id = snapshot["task"]["id"]
+    cycles = _cycle_history_view(conn, task_id=task_id, limit=limit)
+    commands = _commands_view(conn, task_id=task_id, limit=limit)
+    failed_commands = _commands_view(conn, task_id=task_id, only_failed=True, limit=limit)
+    ingest = _ingest_view(conn, task_id=task_id, limit=limit)
+    latest_cycle = cycles["history"][0] if cycles["history"] else None
+    latest_cycle_age = age_seconds(latest_cycle["completed_at"] or latest_cycle["started_at"]) if latest_cycle else None
+    liveness = {
+        "latest_cycle_age_seconds": latest_cycle_age,
+        "latest_cycle_stale": latest_cycle_age is not None and latest_cycle_age > stale_cycle_seconds,
+        "manager_alive": snapshot["manager"]["alive"] if snapshot.get("manager") else None,
+        "worker_alive": snapshot["worker"]["alive"] if snapshot.get("worker") else None,
+    }
+    alerts = list(snapshot["alerts"])
+    if liveness["latest_cycle_stale"]:
+        alerts.append({
+            "message": f"Latest manager cycle is older than {stale_cycle_seconds} seconds.",
+            "severity": "warning",
+            "type": "stale_cycle",
+        })
+    if ingest["skipped_lines"]:
+        alerts.append({
+            "message": f"{ingest['skipped_lines']} ingest lines were skipped.",
+            "severity": "warning",
+            "type": "ingest_skipped_lines",
+        })
+    if ingest["error_count"]:
+        alerts.append({
+            "message": f"{ingest['error_count']} ingest errors or warnings were recorded.",
+            "severity": "error",
+            "type": "ingest_errors",
+        })
+    recent_telemetry = [
+        {
+            "actor": event["actor"],
+            "event_type": event["event_type"],
+            "id": event["id"],
+            "run_id": event["run_id"],
+            "severity": event["severity"],
+            "summary": event["summary"],
+            "timestamp": event["timestamp"],
+        }
+        for event in snapshot["telemetry"]["recent"]
+    ]
+    return {
+        "alerts": alerts,
+        "commands": commands,
+        "criteria": _criteria_view(conn, task_id=task_id, limit=limit),
+        "cycles": cycles,
+        "decisions": _decisions_view(conn, task_id=task_id, limit=limit),
+        "failed_commands": failed_commands["recent"],
+        "ingest": ingest,
+        "liveness": liveness,
+        "schema_version": 1,
+        "storage": _storage_counts(conn, task_id=task_id),
+        "task": snapshot["task"],
+        "telemetry": {
+            "recent": recent_telemetry,
+            "summary": snapshot["telemetry"]["summary"],
+        },
+    }
+
+
+def telemetry_failures_view(conn: Any, *, limit: int = 25, stale_cycle_seconds: float = 3600.0) -> dict[str, Any]:
+    operator = telemetry_operator_snapshot(conn, stale_cycle_seconds=stale_cycle_seconds, limit=limit)
+    failed_cycle_rows = conn.execute(
+        """
+        select mc.id, mc.task_id, t.name as task_name, mc.manager_id, mc.started_at,
+               mc.completed_at, mc.state, mc.status_json, mc.health_json, mc.decision, mc.error
+        from manager_cycles mc
+        left join tasks t on t.id = mc.task_id
+        where mc.state = 'failed'
+        order by coalesce(mc.completed_at, mc.started_at) desc, mc.id desc
+        limit ?
+        """,
+        (limit,),
+    ).fetchall()
+    pane_rows = conn.execute(
+        """
+        select mc.id, mc.task_id, t.name as task_name, mc.manager_id, mc.started_at,
+               mc.completed_at, mc.state, mc.status_json, mc.health_json, mc.decision, mc.error
+        from manager_cycles mc
+        left join tasks t on t.id = mc.task_id
+        where json_extract(mc.status_json, '$.pane_signal.captured') = 0
+        order by coalesce(mc.completed_at, mc.started_at) desc, mc.id desc
+        limit ?
+        """,
+        (limit,),
+    ).fetchall()
+    failed_cycles = []
+    for row in failed_cycle_rows:
+        item = _cycle_view_from_row(row)
+        item["task_name"] = row["task_name"]
+        failed_cycles.append(item)
+    pane_failures = []
+    for row in pane_rows:
+        item = _cycle_view_from_row(row)
+        item["task_name"] = row["task_name"]
+        pane_failures.append(item)
+    return {
+        "alerts": operator["alerts"],
+        "failed_commands": _commands_view(conn, only_failed=True, limit=limit)["recent"],
+        "failed_cycles": failed_cycles,
+        "ingest": _ingest_view(conn, limit=limit),
+        "operator": {
+            "checks": operator["checks"],
+            "commands": operator["commands"],
+            "cycles": operator["cycles"],
+            "sessions": operator["sessions"],
+            "tasks": operator["tasks"],
+        },
+        "open_criteria": operator["criteria"],
+        "pane_capture_failures": pane_failures,
+        "schema_version": 1,
+        "storage": _storage_counts(conn),
+    }
+
+
 def _database_file_size(conn: Any) -> int:
     row = conn.execute("pragma database_list").fetchone()
     if not row:
@@ -2383,6 +2846,43 @@ def command_telemetry(args: argparse.Namespace) -> int:
                 for alert in result["alerts"]:
                     print(f"{alert['severity']}: {alert['type']}: {alert['message']}")
             return 0 if result["checks"]["ok"] else 1
+        if getattr(args, "view", None) == "task":
+            task = args.view_task or args.task
+            if not task:
+                raise WorkerError("telemetry task requires a task name or ID")
+            result = telemetry_task_view(
+                conn,
+                task=task,
+                limit=args.limit,
+                stale_cycle_seconds=args.stale_cycle_seconds,
+            )
+            if args.json:
+                print(json.dumps(result, indent=2, sort_keys=True, default=str))
+            else:
+                print(f"task: {result['task']['name']}")
+                print(f"worker_alive: {result['liveness']['worker_alive']}")
+                print(f"manager_alive: {result['liveness']['manager_alive']}")
+                print(f"cycles: {result['cycles']['counts_by_state']}")
+                print(f"failed_commands: {len(result['failed_commands'])}")
+                for alert in result["alerts"]:
+                    print(f"{alert['severity']}: {alert['type']}: {alert['message']}")
+            return 0
+        if getattr(args, "view", None) == "failures":
+            result = telemetry_failures_view(
+                conn,
+                limit=args.limit,
+                stale_cycle_seconds=args.stale_cycle_seconds,
+            )
+            if args.json:
+                print(json.dumps(result, indent=2, sort_keys=True, default=str))
+            else:
+                print(f"failed_cycles: {len(result['failed_cycles'])}")
+                print(f"failed_commands: {len(result['failed_commands'])}")
+                print(f"ingest_errors: {result['ingest']['error_count']}")
+                print(f"pane_capture_failures: {len(result['pane_capture_failures'])}")
+                for alert in result["alerts"]:
+                    print(f"{alert['severity']}: {alert['type']}: {alert['message']}")
+            return 0
         run_id = None
         task_id = None
         if args.run:
