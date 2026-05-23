@@ -2220,12 +2220,20 @@ def _continuation_pair(conn, *, task_id: str, correlation_id: str) -> tuple[dict
 
 def _review_payload_from_args(args: argparse.Namespace) -> dict[str, Any]:
     payload = _continuation_payload_from_stdin(args)
+    return _validate_continuation_review_payload(payload)
+
+
+def _validate_continuation_review_payload(payload: dict[str, Any]) -> dict[str, Any]:
     required = {"agreement", "verdict", "rationale", "subagent_run"}
     missing = sorted(required - set(payload))
     if missing:
         raise WorkerError(f"continuation review payload missing required field(s): {', '.join(missing)}")
     if not isinstance(payload["subagent_run"], dict):
         raise WorkerError("continuation review subagent_run must be a JSON object")
+    if payload["agreement"] not in {"match", "compatible", "divergent"}:
+        raise WorkerError("continuation review agreement must be match, compatible, or divergent")
+    if payload["verdict"] not in {"proceed", "amend", "stop"}:
+        raise WorkerError("continuation review verdict must be proceed, amend, or stop")
     subagent_run = dict(payload["subagent_run"])
     reviewer_session = subagent_run.get("reviewer_session_id")
     manager_session = subagent_run.get("manager_session_id")
@@ -2239,6 +2247,346 @@ def _review_payload_from_args(args: argparse.Namespace) -> dict[str, Any]:
         raise WorkerError("reviewer subagent must record manager_rollout_access=false")
     payload["subagent_run"] = subagent_run
     return payload
+
+
+def _record_continuation_review(
+    conn,
+    *,
+    worker_db,
+    task: dict[str, Any],
+    config: dict[str, Any] | None,
+    correlation_id: str,
+    worker: dict[str, Any],
+    manager: dict[str, Any],
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    agreement = payload["agreement"]
+    verdict = payload["verdict"]
+    nudge_mode = clean_nudge_on_completion((config or {}).get("nudge_on_completion") if config else None)
+    operator_routing_required = agreement == "divergent" and nudge_mode != "auto-proceed"
+    subagent_run = {
+        **payload["subagent_run"],
+        "operator_routing_required": operator_routing_required,
+        "nudge_on_completion": nudge_mode,
+    }
+    review_id = worker_db.insert_continuation_review(
+        conn,
+        task_id=task["id"],
+        worker_continuation_id=worker["id"],
+        manager_continuation_id=manager["id"],
+        agreement=agreement,
+        verdict=verdict,
+        addendum=payload.get("addendum"),
+        rationale=payload["rationale"],
+        subagent_run=subagent_run,
+        correlation_id=correlation_id,
+    )
+    worker_db.insert_event(
+        conn,
+        "continuation_review_recorded",
+        actor="workerctl",
+        task_id=task["id"],
+        correlation_id=correlation_id,
+        payload={
+            "agreement": agreement,
+            "manager_continuation_id": manager["id"],
+            "operator_routing_required": operator_routing_required,
+            "review_id": review_id,
+            "verdict": verdict,
+            "worker_continuation_id": worker["id"],
+        },
+    )
+    conn.commit()
+    output = worker_db.continuation_reviews(conn, task_id=task["id"])[-1]
+    output["operator_routing_required"] = operator_routing_required
+    return output
+
+
+def _git_context() -> dict[str, Any]:
+    result = {
+        "branch_diff_name_only": "",
+        "branch_diff_stat": "",
+        "error": None,
+        "working_tree_diff_name_only": "",
+        "working_tree_diff_stat": "",
+    }
+    try:
+        stat = subprocess.run(
+            ["git", "diff", "--stat", "main...HEAD"],
+            cwd=str(PROJECT_ROOT),
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        names = subprocess.run(
+            ["git", "diff", "--name-only", "main...HEAD"],
+            cwd=str(PROJECT_ROOT),
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        work_stat = subprocess.run(
+            ["git", "diff", "--stat", "HEAD"],
+            cwd=str(PROJECT_ROOT),
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        work_names = subprocess.run(
+            ["git", "diff", "--name-only", "HEAD"],
+            cwd=str(PROJECT_ROOT),
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
+        result["error"] = str(exc)
+        return result
+    result["branch_diff_stat"] = stat.stdout[-5000:] if stat.returncode == 0 else ""
+    result["branch_diff_name_only"] = names.stdout[-5000:] if names.returncode == 0 else ""
+    result["working_tree_diff_stat"] = work_stat.stdout[-5000:] if work_stat.returncode == 0 else ""
+    result["working_tree_diff_name_only"] = work_names.stdout[-5000:] if work_names.returncode == 0 else ""
+    if stat.returncode != 0 or names.returncode != 0 or work_stat.returncode != 0 or work_names.returncode != 0:
+        result["error"] = (stat.stderr or names.stderr or work_stat.stderr or work_names.stderr or "git diff failed")[-1000:]
+    return result
+
+
+def _recent_pr_context(limit: int = 5) -> list[dict[str, Any]]:
+    gh = shutil.which("gh")
+    if gh is None:
+        return []
+    try:
+        proc = subprocess.run(
+            [
+                gh,
+                "pr",
+                "list",
+                "--state",
+                "all",
+                "--limit",
+                str(limit),
+                "--json",
+                "number,title,state,mergedAt,url",
+            ],
+            cwd=str(PROJECT_ROOT),
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return []
+    if proc.returncode != 0:
+        return []
+    try:
+        data = json.loads(proc.stdout)
+    except json.JSONDecodeError:
+        return []
+    return data if isinstance(data, list) else []
+
+
+def _continuation_reviewer_context(
+    conn,
+    *,
+    worker_db,
+    task: dict[str, Any],
+    config: dict[str, Any] | None,
+    worker: dict[str, Any],
+    manager: dict[str, Any],
+    correlation_id: str,
+) -> dict[str, Any]:
+    return {
+        "allowed_context": [
+            "task",
+            "correlation_id",
+            "worker_continuation",
+            "manager_continuation",
+            "acceptance_criteria",
+            "manager_config_summary",
+            "diff",
+            "recent_pull_requests",
+            "constraints",
+        ],
+        "acceptance_criteria": worker_db.acceptance_criteria_for_task(conn, task_id=task["id"]),
+        "constraints": {
+            "manager_rollout_access": False,
+            "read_only": True,
+            "return_json_schema": {
+                "agreement": "match | compatible | divergent",
+                "verdict": "proceed | amend | stop",
+                "addendum": "optional string",
+                "rationale": "string",
+            },
+        },
+        "correlation_id": correlation_id,
+        "diff": _git_context(),
+        "manager_config_summary": {
+            "acceptance_criteria": (config or {}).get("acceptance_criteria") or [],
+            "epilogues": (config or {}).get("epilogues") or [],
+            "nudge_on_completion": (config or {}).get("nudge_on_completion") if config else None,
+            "permissions": (config or {}).get("permissions") or {},
+            "tools": (config or {}).get("tools") or [],
+        },
+        "manager_continuation": {
+            "created_at": manager["created_at"],
+            "id": manager["id"],
+            "payload": manager["payload"],
+            "revision": manager["revision"],
+        },
+        "recent_pull_requests": _recent_pr_context(),
+        "task": {
+            "goal": task["goal"],
+            "id": task["id"],
+            "name": task["name"],
+            "state": task["state"],
+        },
+        "worker_continuation": {
+            "created_at": worker["created_at"],
+            "id": worker["id"],
+            "payload": worker["payload"],
+            "revision": worker["revision"],
+        },
+    }
+
+
+def _reviewer_failure_payload(
+    *,
+    command_result: dict[str, Any],
+    manager_session_id: str,
+    reviewer_session_id: str,
+    runner: str,
+) -> dict[str, Any]:
+    error = command_result.get("error") or "reviewer command did not return a valid review"
+    return {
+        "agreement": "divergent",
+        "verdict": "stop",
+        "addendum": "Reviewer automation failed; do not proceed without operator review.",
+        "rationale": error,
+        "subagent_run": {
+            "duration_ms": command_result.get("duration_ms"),
+            "error": error,
+            "manager_rollout_access": False,
+            "manager_session_id": manager_session_id,
+            "returncode": command_result.get("returncode"),
+            "reviewer_session_id": reviewer_session_id,
+            "runner": runner,
+            "status": "failed",
+            "stderr": command_result.get("stderr", ""),
+        },
+    }
+
+
+def command_continuation_reviewer(args: argparse.Namespace) -> int:
+    from workerctl import db as worker_db
+
+    db_path = Path(args.path).expanduser().resolve() if getattr(args, "path", None) else None
+    if args.reviewer_session_id == args.manager_session_id:
+        raise WorkerError("reviewer subagent session must be isolated from manager session")
+    with worker_db.connect(db_path) as conn:
+        worker_db.initialize_database(conn)
+        task = worker_db.task_row(conn, task=args.task)
+        config = worker_db.manager_config(conn, task_id=task["id"])
+        if not manager_permission_allowed(config, "context.spawn_reviewer"):
+            raise WorkerError("continuation reviewer requires manager permission context.spawn_reviewer")
+        worker, manager = _continuation_pair(conn, task_id=task["id"], correlation_id=args.correlation_id)
+        context = _continuation_reviewer_context(
+            conn,
+            worker_db=worker_db,
+            task=task,
+            config=config,
+            worker=worker,
+            manager=manager,
+            correlation_id=args.correlation_id,
+        )
+        if getattr(args, "dry_run", False):
+            print(json.dumps({"context": context, "reviewer_command": args.reviewer_command}, indent=2, sort_keys=True))
+            return 0
+        reviewer_command = list(args.reviewer_command or [])
+        if reviewer_command and reviewer_command[0] == "--":
+            reviewer_command = reviewer_command[1:]
+        if not reviewer_command:
+            raise WorkerError("continuation-reviewer requires --reviewer-command unless --dry-run is used")
+        started = time.monotonic()
+        try:
+            proc = subprocess.run(
+                reviewer_command,
+                cwd=str(PROJECT_ROOT),
+                input=json.dumps(context, sort_keys=True),
+                capture_output=True,
+                text=True,
+                timeout=args.timeout,
+            )
+            command_result = {
+                "duration_ms": int((time.monotonic() - started) * 1000),
+                "error": None if proc.returncode == 0 else f"reviewer command exited {proc.returncode}",
+                "returncode": proc.returncode,
+                "stderr": proc.stderr[-2000:],
+                "stdout": proc.stdout[-10000:],
+            }
+        except FileNotFoundError as exc:
+            command_result = {
+                "duration_ms": int((time.monotonic() - started) * 1000),
+                "error": str(exc),
+                "returncode": None,
+                "stderr": "",
+                "stdout": "",
+            }
+        except subprocess.TimeoutExpired as exc:
+            command_result = {
+                "duration_ms": int((time.monotonic() - started) * 1000),
+                "error": f"reviewer command timed out after {args.timeout:g}s",
+                "returncode": None,
+                "stderr": (exc.stderr or "")[-2000:] if isinstance(exc.stderr, str) else "",
+                "stdout": (exc.stdout or "")[-10000:] if isinstance(exc.stdout, str) else "",
+            }
+        runner = " ".join(sh_quote(part) for part in reviewer_command)
+        if command_result["error"] is None:
+            try:
+                raw_payload = json.loads(command_result["stdout"])
+                if not isinstance(raw_payload, dict):
+                    raise ValueError("reviewer output must be a JSON object")
+                raw_payload["subagent_run"] = {
+                    **(raw_payload.get("subagent_run") if isinstance(raw_payload.get("subagent_run"), dict) else {}),
+                    "allowed_context": context["allowed_context"],
+                    "duration_ms": command_result["duration_ms"],
+                    "manager_rollout_access": False,
+                    "manager_session_id": args.manager_session_id,
+                    "returncode": command_result["returncode"],
+                    "reviewer_session_id": args.reviewer_session_id,
+                    "runner": runner,
+                    "status": "succeeded",
+                }
+                payload = _validate_continuation_review_payload(raw_payload)
+            except (json.JSONDecodeError, ValueError, WorkerError) as exc:
+                command_result["error"] = str(exc)
+                payload = _validate_continuation_review_payload(
+                    _reviewer_failure_payload(
+                        command_result=command_result,
+                        manager_session_id=args.manager_session_id,
+                        reviewer_session_id=args.reviewer_session_id,
+                        runner=runner,
+                    )
+                )
+        else:
+            payload = _validate_continuation_review_payload(
+                _reviewer_failure_payload(
+                    command_result=command_result,
+                    manager_session_id=args.manager_session_id,
+                    reviewer_session_id=args.reviewer_session_id,
+                    runner=runner,
+                )
+            )
+        output = _record_continuation_review(
+            conn,
+            worker_db=worker_db,
+            task=task,
+            config=config,
+            correlation_id=args.correlation_id,
+            worker=worker,
+            manager=manager,
+            payload=payload,
+        )
+        print(json.dumps(output, indent=2, sort_keys=True))
+        return 0
 
 
 def command_continuation(args: argparse.Namespace) -> int:
@@ -2313,45 +2661,16 @@ def command_continuation(args: argparse.Namespace) -> int:
             raise WorkerError("continuation review requires manager permission context.spawn_reviewer")
         worker, manager = _continuation_pair(conn, task_id=task["id"], correlation_id=correlation_id)
         payload = _review_payload_from_args(args)
-        agreement = payload["agreement"]
-        verdict = payload["verdict"]
-        nudge_mode = clean_nudge_on_completion((config or {}).get("nudge_on_completion") if config else None)
-        operator_routing_required = agreement == "divergent" and nudge_mode != "auto-proceed"
-        subagent_run = {
-            **payload["subagent_run"],
-            "operator_routing_required": operator_routing_required,
-            "nudge_on_completion": nudge_mode,
-        }
-        review_id = worker_db.insert_continuation_review(
+        output = _record_continuation_review(
             conn,
-            task_id=task["id"],
-            worker_continuation_id=worker["id"],
-            manager_continuation_id=manager["id"],
-            agreement=agreement,
-            verdict=verdict,
-            addendum=payload.get("addendum"),
-            rationale=payload["rationale"],
-            subagent_run=subagent_run,
+            worker_db=worker_db,
+            task=task,
+            config=config,
             correlation_id=correlation_id,
+            worker=worker,
+            manager=manager,
+            payload=payload,
         )
-        worker_db.insert_event(
-            conn,
-            "continuation_review_recorded",
-            actor="workerctl",
-            task_id=task["id"],
-            correlation_id=correlation_id,
-            payload={
-                "agreement": agreement,
-                "manager_continuation_id": manager["id"],
-                "operator_routing_required": operator_routing_required,
-                "review_id": review_id,
-                "verdict": verdict,
-                "worker_continuation_id": worker["id"],
-            },
-        )
-        conn.commit()
-        output = worker_db.continuation_reviews(conn, task_id=task["id"])[-1]
-        output["operator_routing_required"] = operator_routing_required
         print(json.dumps(output, indent=2, sort_keys=True))
         return 0
 

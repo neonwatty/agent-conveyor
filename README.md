@@ -307,6 +307,14 @@ tmux attach -t codex-live-test
   (`subagent_run.reviewer_session_id` distinct from the manager and
   `manager_rollout_access=false`). Divergent reviews are routed for operator
   attention unless `--nudge-on-completion auto-proceed` is configured.
+- `continuation-reviewer <task> --correlation-id ID --reviewer-session-id ID
+  --manager-session-id ID --reviewer-command ...` — Run a reviewer command with
+  the allowed read-only context on stdin, capture reviewer metadata, and persist
+  the structured review. The context includes paired proposals, acceptance
+  criteria, manager config summary, diff metadata, and recent PR metadata; it
+  does not include manager rollout context. Reviewer command failures, timeouts,
+  or invalid JSON are recorded as `verdict=stop`, not silent approvals. Use
+  `--dry-run` to inspect the exact context without running the command.
 - `continuation <task> --list [--as-role all|worker|manager|reviewer]
   [--include-payload]` — List continuation proposals and reviews with
   role-aware payload redaction.
@@ -647,8 +655,8 @@ The adjacent completion-contract surfaces are separate from Dispatch:
 - Epilogues are named post-completion steps that can gate `finish-task`.
 - Continuations persist worker-first and manager-independent "what's next"
   proposals plus a recorded reviewer verdict. The CLI enforces ordering,
-  redaction, permission checks, and reviewer-isolation metadata; it does not
-  spawn the independent reviewer session itself.
+  redaction, permission checks, reviewer-isolation metadata, and can run an
+  isolated reviewer command through `continuation-reviewer`.
 
 ## Schema
 
