@@ -242,8 +242,13 @@ def build_parser() -> argparse.ArgumentParser:
     dispatch_mode.add_argument("--once", action="store_true", help="Run one dispatch polling pass.")
     dispatch_mode.add_argument("--watch", action="store_true", help="Continuously poll for dispatch work.")
     dispatch.add_argument("--limit", type=int, default=10, help="Maximum unrouted signals to process in one pass.")
+    dispatch.add_argument("--interval", type=float, default=2.0, help="Seconds between dispatch passes in --watch mode.")
     dispatch.add_argument("--dispatcher-id", default="dispatch-local", help="Stable id for this dispatcher process.")
-    dispatch.add_argument("--type", choices=("notify_manager", "worker_task_complete"), help="Restrict dispatch work by type.")
+    dispatch.add_argument(
+        "--type",
+        choices=("notify_manager", "nudge_worker", "worker_task_complete"),
+        help="Restrict dispatch work by type.",
+    )
     dispatch.add_argument("--dry-run", action="store_true", help="Report planned dispatch work without writing or sending.")
     dispatch.add_argument("--json", action="store_true", help="Print dispatch results as JSON.")
     dispatch.add_argument("--path", help="Override the workerctl database path.")

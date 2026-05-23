@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -12,13 +12,14 @@ from workerctl.core import now_iso
 from workerctl.state import state_root
 
 
-SCHEMA_VERSION = 15
+SCHEMA_VERSION = 16
 REQUIRED_TABLES = {
     "acceptance_criteria",
     "agent_observations",
     "bindings",
     "budgets",
     "codex_events",
+    "command_attempts",
     "commands",
     "continuation_reviews",
     "data_migrations",
@@ -49,7 +50,10 @@ REQUIRED_INDEXES = {
     "acceptance_criteria_task_source_criterion",
     "acceptance_criteria_task_status",
     "codex_events_session_id",
+    "command_attempts_command_id",
+    "command_attempts_correlation_id",
     "commands_task_state_created",
+    "commands_claimable",
     "continuation_reviews_task",
     "events_task_id",
     "epilogue_runs_task_step",
@@ -495,11 +499,32 @@ def migrate(conn: sqlite3.Connection, from_version: int) -> None:
           task_id text references tasks(id),
           worker_id text references workers(id),
           manager_id text references managers(id),
+          correlation_id text,
           type text not null,
           state text not null check (state in ('pending','attempted','succeeded','failed')),
+          available_at text,
+          claimed_by text,
+          claimed_at text,
+          claim_expires_at text,
+          attempts integer not null default 0 check (attempts >= 0),
+          max_attempts integer not null default 1 check (max_attempts > 0),
           payload_json text not null check (json_valid(payload_json)),
           result_json text check (result_json is null or json_valid(result_json)),
           error text
+        );
+
+        create table if not exists command_attempts(
+          id integer primary key autoincrement,
+          command_id text not null references commands(id),
+          correlation_id text not null,
+          dispatcher_id text not null,
+          started_at text not null,
+          finished_at text,
+          state text not null check (state in ('running','succeeded','failed','abandoned')),
+          result_json text check (result_json is null or json_valid(result_json)),
+          error text,
+          side_effect_started integer not null default 0 check (side_effect_started in (0, 1)),
+          side_effect_completed integer not null default 0 check (side_effect_completed in (0, 1))
         );
 
         create table if not exists events(
@@ -625,6 +650,15 @@ def migrate(conn: sqlite3.Connection, from_version: int) -> None:
         create index if not exists commands_task_state_created
         on commands(task_id, state, created_at);
 
+        create index if not exists commands_claimable
+        on commands(state, type, available_at, created_at, id);
+
+        create index if not exists command_attempts_command_id
+        on command_attempts(command_id, id);
+
+        create index if not exists command_attempts_correlation_id
+        on command_attempts(correlation_id);
+
         create index if not exists statuses_worker_id
         on statuses(worker_id, id);
 
@@ -674,6 +708,7 @@ def migrate(conn: sqlite3.Connection, from_version: int) -> None:
     migrate_to_v13_routed_notifications(conn)
     migrate_to_v14_epilogues(conn)
     migrate_to_v15_continuations(conn)
+    migrate_to_v16_dispatch_command_attempts(conn)
     sync_worker_ids_to_config_files(conn)
     conn.execute(
         "insert or ignore into schema_migrations(version, applied_at) values (?, ?)",
@@ -1020,6 +1055,59 @@ def migrate_to_v15_continuations(conn: sqlite3.Connection) -> None:
     )
 
 
+def _add_column_if_missing(conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:
+    existing_cols = {row["name"] for row in conn.execute(f"pragma table_info({table})")}
+    if column not in existing_cols:
+        conn.execute(f"alter table {table} add column {column} {definition}")
+
+
+def migrate_to_v16_dispatch_command_attempts(conn: sqlite3.Connection) -> None:
+    """Add Dispatch command lease metadata and durable attempt rows. Idempotent."""
+    _add_column_if_missing(conn, "commands", "correlation_id", "text")
+    _add_column_if_missing(conn, "commands", "available_at", "text")
+    _add_column_if_missing(conn, "commands", "claimed_by", "text")
+    _add_column_if_missing(conn, "commands", "claimed_at", "text")
+    _add_column_if_missing(conn, "commands", "claim_expires_at", "text")
+    _add_column_if_missing(
+        conn,
+        "commands",
+        "attempts",
+        "integer not null default 0 check (attempts >= 0)",
+    )
+    _add_column_if_missing(
+        conn,
+        "commands",
+        "max_attempts",
+        "integer not null default 1 check (max_attempts > 0)",
+    )
+    conn.executescript(
+        """
+        create table if not exists command_attempts(
+          id integer primary key autoincrement,
+          command_id text not null references commands(id),
+          correlation_id text not null,
+          dispatcher_id text not null,
+          started_at text not null,
+          finished_at text,
+          state text not null check (state in ('running','succeeded','failed','abandoned')),
+          result_json text check (result_json is null or json_valid(result_json)),
+          error text,
+          side_effect_started integer not null default 0 check (side_effect_started in (0, 1)),
+          side_effect_completed integer not null default 0 check (side_effect_completed in (0, 1))
+        );
+
+        create index if not exists commands_claimable
+        on commands(state, type, available_at, created_at, id);
+
+        create index if not exists command_attempts_command_id
+        on command_attempts(command_id, id);
+
+        create index if not exists command_attempts_correlation_id
+        on command_attempts(correlation_id);
+        """
+    )
+
+
 def sync_worker_ids_to_config_files(conn: sqlite3.Connection) -> None:
     database_path = conn.execute("PRAGMA database_list").fetchone()["file"]
     if Path(database_path).resolve() != default_db_path().resolve():
@@ -1124,6 +1212,122 @@ def insert_event(
     return int(cursor.lastrowid)
 
 
+def _command_record(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "attempts": row["attempts"],
+        "available_at": row["available_at"],
+        "claim_expires_at": row["claim_expires_at"],
+        "claimed_at": row["claimed_at"],
+        "claimed_by": row["claimed_by"],
+        "correlation_id": row["correlation_id"],
+        "created_at": row["created_at"],
+        "error": row["error"],
+        "id": row["id"],
+        "idempotency_key": row["idempotency_key"],
+        "manager_id": row["manager_id"],
+        "max_attempts": row["max_attempts"],
+        "payload": json.loads(row["payload_json"]),
+        "result": json.loads(row["result_json"]) if row["result_json"] else None,
+        "state": row["state"],
+        "task_id": row["task_id"],
+        "type": row["type"],
+        "updated_at": row["updated_at"],
+        "worker_id": row["worker_id"],
+    }
+
+
+def _command_attempt_record(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "command_id": row["command_id"],
+        "correlation_id": row["correlation_id"],
+        "dispatcher_id": row["dispatcher_id"],
+        "error": row["error"],
+        "finished_at": row["finished_at"],
+        "id": row["id"],
+        "result": json.loads(row["result_json"]) if row["result_json"] else None,
+        "side_effect_completed": bool(row["side_effect_completed"]),
+        "side_effect_started": bool(row["side_effect_started"]),
+        "started_at": row["started_at"],
+        "state": row["state"],
+    }
+
+
+def _routed_notification_record(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "binding_id": row["binding_id"],
+        "command_id": row["command_id"],
+        "correlation_id": row["correlation_id"],
+        "created_at": row["created_at"],
+        "dedupe_key": row["dedupe_key"],
+        "delivered_at": row["delivered_at"],
+        "error": row["error"],
+        "id": row["id"],
+        "payload": json.loads(row["payload_json"]),
+        "signal_type": row["signal_type"],
+        "source_event_id": row["source_event_id"],
+        "source_event_timestamp": row["source_event_timestamp"],
+        "source_session_id": row["source_session_id"],
+        "state": row["state"],
+        "target_session_id": row["target_session_id"],
+        "task_id": row["task_id"],
+    }
+
+
+def _command_manager_decision_id(command: dict[str, Any]) -> int | None:
+    for root in (command.get("payload") or {}, command.get("result") or {}):
+        manager_decision = root.get("manager_decision") if isinstance(root, dict) else None
+        if not isinstance(manager_decision, dict):
+            continue
+        decision_id = manager_decision.get("decision_id") or manager_decision.get("id")
+        if isinstance(decision_id, int):
+            return decision_id
+        if isinstance(decision_id, str) and decision_id.isdigit():
+            return int(decision_id)
+    return None
+
+
+def _build_correlation_chains(
+    *,
+    commands: list[dict[str, Any]],
+    command_attempts: list[dict[str, Any]],
+    routed_notifications: list[dict[str, Any]],
+    manager_decisions: list[dict[str, Any]],
+    manager_cycles: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    decisions_by_id = {decision["id"]: decision for decision in manager_decisions}
+    cycles_by_id = {cycle["id"]: cycle for cycle in manager_cycles}
+    attempts_by_command: dict[str, list[dict[str, Any]]] = {}
+    for attempt in command_attempts:
+        attempts_by_command.setdefault(attempt["command_id"], []).append(attempt)
+    notifications_by_command: dict[str, list[dict[str, Any]]] = {}
+    for notification in routed_notifications:
+        command_id = notification.get("command_id")
+        if command_id:
+            notifications_by_command.setdefault(command_id, []).append(notification)
+    chains: list[dict[str, Any]] = []
+    for command in commands:
+        decision_id = _command_manager_decision_id(command)
+        decision = decisions_by_id.get(decision_id) if decision_id is not None else None
+        cycle = cycles_by_id.get(decision["manager_cycle_id"]) if decision and decision.get("manager_cycle_id") else None
+        attempts = attempts_by_command.get(command["id"], [])
+        notifications = notifications_by_command.get(command["id"], [])
+        if not (decision or attempts or notifications or command.get("correlation_id")):
+            continue
+        chains.append(
+            {
+                "attempt_ids": [attempt["id"] for attempt in attempts],
+                "command_id": command["id"],
+                "command_state": command["state"],
+                "command_type": command["type"],
+                "correlation_id": command.get("correlation_id"),
+                "manager_cycle_id": cycle["id"] if cycle else None,
+                "manager_decision_id": decision["id"] if decision else None,
+                "routed_notification_ids": [notification["id"] for notification in notifications],
+            }
+        )
+    return chains
+
+
 def create_command(
     conn: sqlite3.Connection,
     *,
@@ -1133,6 +1337,9 @@ def create_command(
     task_id: str | None = None,
     worker_id: str | None = None,
     manager_id: str | None = None,
+    correlation_id: str | None = None,
+    available_at: str | None = None,
+    max_attempts: int = 1,
     timestamp: str | None = None,
 ) -> str:
     command_id = f"command-{uuid.uuid4()}"
@@ -1142,9 +1349,10 @@ def create_command(
         """
         insert into commands(
           id, idempotency_key, created_at, updated_at, task_id, worker_id,
-          manager_id, type, state, payload_json
+          manager_id, correlation_id, type, state, available_at, max_attempts,
+          payload_json
         )
-        values (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
+        values (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)
         """,
         (
             command_id,
@@ -1154,7 +1362,10 @@ def create_command(
             task_id,
             worker_id,
             manager_id,
+            correlation_id,
             command_type,
+            available_at,
+            max_attempts,
             json.dumps(payload, sort_keys=True),
         ),
     )
@@ -1164,7 +1375,7 @@ def create_command(
         event_type="command_created",
         task_id=task_id,
         summary=f"Created command {command_type}.",
-        correlation={"command_id": command_id, "command_type": command_type},
+        correlation={"command_id": command_id, "command_type": command_type, "correlation_id": correlation_id},
         attributes={
             "idempotency_key": key,
             "manager_id": manager_id,
@@ -1206,6 +1417,355 @@ def mark_command_attempted(conn: sqlite3.Connection, *, command_id: str, timesta
                 "worker_id": row["worker_id"],
             },
         )
+
+
+def _parse_timestamp(value: str) -> datetime:
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+
+def _iso_after(value: str, seconds: int) -> str:
+    return (_parse_timestamp(value) + timedelta(seconds=seconds)).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def claim_next_dispatch_command(
+    conn: sqlite3.Connection,
+    *,
+    dispatcher_id: str,
+    command_types: list[str] | tuple[str, ...],
+    timestamp: str | None = None,
+    lease_seconds: int = 60,
+) -> dict[str, Any] | None:
+    if not command_types:
+        raise ValueError("command_types must not be empty")
+    now = timestamp or now_iso()
+    claim_expires_at = _iso_after(now, max(1, lease_seconds))
+    correlation_id = f"dispatch-{uuid.uuid4()}"
+    placeholders = ", ".join("?" for _ in command_types)
+    row = conn.execute(
+        f"""
+        update commands
+        set state = 'attempted',
+            updated_at = ?,
+            correlation_id = coalesce(correlation_id, ?),
+            claimed_by = ?,
+            claimed_at = ?,
+            claim_expires_at = ?,
+            attempts = attempts + 1
+        where id = (
+          select id
+          from commands
+          where state = 'pending'
+            and type in ({placeholders})
+            and (available_at is null or available_at <= ?)
+            and attempts < max_attempts
+          order by created_at, id
+          limit 1
+        )
+          and state = 'pending'
+        returning id, idempotency_key, created_at, updated_at, task_id, worker_id,
+                  manager_id, correlation_id, type, state, available_at, claimed_by,
+                  claimed_at, claim_expires_at, attempts, max_attempts, payload_json,
+                  result_json, error
+        """,
+        (now, correlation_id, dispatcher_id, now, claim_expires_at, *command_types, now),
+    ).fetchone()
+    if row is None:
+        return None
+    attempt_cursor = conn.execute(
+        """
+        insert into command_attempts(
+          command_id, correlation_id, dispatcher_id, started_at, state
+        )
+        values (?, ?, ?, ?, 'running')
+        """,
+        (row["id"], row["correlation_id"], dispatcher_id, now),
+    )
+    emit_telemetry_event(
+        conn,
+        actor="dispatch",
+        event_type="dispatch_command_claimed",
+        task_id=row["task_id"],
+        summary=f"Dispatch claimed command {row['type']}.",
+        correlation={
+            "attempt_id": attempt_cursor.lastrowid,
+            "command_id": row["id"],
+            "command_type": row["type"],
+            "correlation_id": row["correlation_id"],
+            "dispatcher_id": dispatcher_id,
+        },
+        attributes={
+            "attempts": row["attempts"],
+            "claim_expires_at": row["claim_expires_at"],
+            "manager_id": row["manager_id"],
+            "worker_id": row["worker_id"],
+        },
+    )
+    return {
+        "attempt": {
+            "id": int(attempt_cursor.lastrowid),
+            "command_id": row["id"],
+            "correlation_id": row["correlation_id"],
+            "dispatcher_id": dispatcher_id,
+            "started_at": now,
+            "state": "running",
+        },
+        "command": _command_record(row),
+    }
+
+
+def finish_command_attempt(
+    conn: sqlite3.Connection,
+    *,
+    attempt_id: int,
+    state: str,
+    result: dict[str, Any] | None = None,
+    error: str | None = None,
+    side_effect_started: bool = False,
+    side_effect_completed: bool = False,
+    timestamp: str | None = None,
+) -> dict[str, Any]:
+    if state not in {"succeeded", "failed", "abandoned"}:
+        raise ValueError(f"invalid command attempt finish state: {state}")
+    now = timestamp or now_iso()
+    conn.execute(
+        """
+        update command_attempts
+        set state = ?, finished_at = ?, result_json = ?, error = ?,
+            side_effect_started = ?, side_effect_completed = ?
+        where id = ? and state = 'running'
+        """,
+        (
+            state,
+            now,
+            json.dumps(result, sort_keys=True) if result is not None else None,
+            error,
+            1 if side_effect_started else 0,
+            1 if side_effect_completed else 0,
+            attempt_id,
+        ),
+    )
+    attempt = conn.execute(
+        """
+        select command_attempts.id, command_attempts.command_id,
+               command_attempts.correlation_id, command_attempts.dispatcher_id,
+               command_attempts.started_at, command_attempts.finished_at,
+               command_attempts.state, command_attempts.result_json,
+               command_attempts.error, command_attempts.side_effect_started,
+               command_attempts.side_effect_completed,
+               commands.task_id, commands.worker_id, commands.manager_id,
+               commands.type as command_type
+        from command_attempts
+        join commands on commands.id = command_attempts.command_id
+        where command_attempts.id = ?
+        """,
+        (attempt_id,),
+    ).fetchone()
+    if attempt is None:
+        raise WorkerError(f"Unknown command attempt: {attempt_id}")
+    command_state = "succeeded" if state == "succeeded" else "failed"
+    conn.execute(
+        """
+        update commands
+        set state = ?, updated_at = ?, result_json = ?, error = ?
+        where id = ?
+        """,
+        (
+            command_state,
+            now,
+            json.dumps(result, sort_keys=True) if result is not None else None,
+            error,
+            attempt["command_id"],
+        ),
+    )
+    event_type = {
+        "succeeded": "dispatch_command_succeeded",
+        "failed": "dispatch_command_failed",
+        "abandoned": "dispatch_command_abandoned",
+    }[state]
+    emit_telemetry_event(
+        conn,
+        actor="dispatch",
+        event_type=event_type,
+        severity="error" if state == "failed" else "warning" if state == "abandoned" else "info",
+        task_id=attempt["task_id"],
+        summary=f"Dispatch command {attempt['command_type']} {state}.",
+        correlation={
+            "attempt_id": attempt_id,
+            "command_id": attempt["command_id"],
+            "command_type": attempt["command_type"],
+            "correlation_id": attempt["correlation_id"],
+            "dispatcher_id": attempt["dispatcher_id"],
+        },
+        attributes={
+            "error": error,
+            "manager_id": attempt["manager_id"],
+            "result": result or {},
+            "side_effect_completed": side_effect_completed,
+            "side_effect_started": side_effect_started,
+            "worker_id": attempt["worker_id"],
+        },
+    )
+    return _command_attempt_record(attempt)
+
+
+def mark_command_attempt_side_effect_started(
+    conn: sqlite3.Connection,
+    *,
+    attempt_id: int,
+) -> None:
+    conn.execute(
+        """
+        update command_attempts
+        set side_effect_started = 1
+        where id = ? and state = 'running'
+        """,
+        (attempt_id,),
+    )
+
+
+def recover_stale_dispatch_claims(
+    conn: sqlite3.Connection,
+    *,
+    dispatcher_id: str,
+    command_types: list[str] | tuple[str, ...],
+    timestamp: str | None = None,
+    limit: int = 10,
+) -> list[dict[str, Any]]:
+    if not command_types:
+        raise ValueError("command_types must not be empty")
+    now = timestamp or now_iso()
+    placeholders = ", ".join("?" for _ in command_types)
+    rows = conn.execute(
+        f"""
+        select id, task_id, type, correlation_id, attempts, max_attempts
+        from commands
+        where state = 'attempted'
+          and type in ({placeholders})
+          and claim_expires_at is not null
+          and claim_expires_at <= ?
+        order by claim_expires_at, created_at, id
+        limit ?
+        """,
+        (*command_types, now, max(1, limit)),
+    ).fetchall()
+    recovered: list[dict[str, Any]] = []
+    for command in rows:
+        attempt = conn.execute(
+            """
+            select id, side_effect_started
+            from command_attempts
+            where command_id = ? and state = 'running'
+            order by id desc
+            limit 1
+            """,
+            (command["id"],),
+        ).fetchone()
+        side_effect_started = bool(attempt["side_effect_started"]) if attempt is not None else False
+        if side_effect_started:
+            error = "stale dispatch claim expired after side effect started; manual review required"
+            if attempt is not None:
+                conn.execute(
+                    """
+                    update command_attempts
+                    set state = 'failed', finished_at = ?, error = ?
+                    where id = ?
+                    """,
+                    (now, error, attempt["id"]),
+                )
+            conn.execute(
+                """
+                update commands
+                set state = 'failed', updated_at = ?, error = ?,
+                    claimed_by = null, claimed_at = null, claim_expires_at = null
+                where id = ?
+                """,
+                (now, error, command["id"]),
+            )
+            state = "failed"
+            event_type = "dispatch_command_failed"
+        else:
+            error = "stale dispatch claim abandoned before side effect started"
+            next_state = "pending" if command["attempts"] < command["max_attempts"] else "failed"
+            if attempt is not None:
+                conn.execute(
+                    """
+                    update command_attempts
+                    set state = 'abandoned', finished_at = ?, error = ?
+                    where id = ?
+                    """,
+                    (now, error, attempt["id"]),
+                )
+            conn.execute(
+                """
+                update commands
+                set state = ?, updated_at = ?, error = ?,
+                    claimed_by = null, claimed_at = null, claim_expires_at = null
+                where id = ?
+                """,
+                (next_state, now, None if next_state == "pending" else error, command["id"]),
+            )
+            state = "requeued" if next_state == "pending" else "failed"
+            event_type = "dispatch_command_abandoned"
+        emit_telemetry_event(
+            conn,
+            actor="dispatch",
+            event_type=event_type,
+            severity="error" if state == "failed" else "warning",
+            task_id=command["task_id"],
+            summary=f"Recovered stale dispatch claim for {command['type']}.",
+            correlation={
+                "attempt_id": attempt["id"] if attempt is not None else None,
+                "command_id": command["id"],
+                "command_type": command["type"],
+                "correlation_id": command["correlation_id"],
+                "dispatcher_id": dispatcher_id,
+            },
+            attributes={
+                "recovery_state": state,
+                "side_effect_started": side_effect_started,
+            },
+        )
+        recovered.append(
+            {
+                "attempt_id": attempt["id"] if attempt is not None else None,
+                "command_id": command["id"],
+                "command_type": command["type"],
+                "error": error,
+                "side_effect_started": side_effect_started,
+                "state": state,
+            }
+        )
+    return recovered
+
+
+def claimable_dispatch_commands(
+    conn: sqlite3.Connection,
+    *,
+    command_types: list[str] | tuple[str, ...],
+    limit: int = 10,
+    timestamp: str | None = None,
+) -> list[dict[str, Any]]:
+    if not command_types:
+        raise ValueError("command_types must not be empty")
+    now = timestamp or now_iso()
+    placeholders = ", ".join("?" for _ in command_types)
+    rows = conn.execute(
+        f"""
+        select id, idempotency_key, created_at, updated_at, task_id, worker_id,
+               manager_id, correlation_id, type, state, available_at, claimed_by,
+               claimed_at, claim_expires_at, attempts, max_attempts, payload_json,
+               result_json, error
+        from commands
+        where state = 'pending'
+          and type in ({placeholders})
+          and (available_at is null or available_at <= ?)
+          and attempts < max_attempts
+        order by created_at, id
+        limit ?
+        """,
+        (*command_types, now, max(1, limit)),
+    ).fetchall()
+    return [_command_record(row) for row in rows]
 
 
 def finish_command(
@@ -3947,8 +4507,36 @@ def task_audit(conn: sqlite3.Connection, *, task: str) -> dict[str, Any]:
     command_rows = conn.execute(
         """
         select id, idempotency_key, created_at, updated_at, task_id, worker_id,
-               manager_id, type, state, payload_json, result_json, error
+               manager_id, correlation_id, type, state, available_at, claimed_by,
+               claimed_at, claim_expires_at, attempts, max_attempts, payload_json,
+               result_json, error
         from commands
+        where task_id = ?
+        order by created_at, id
+        """,
+        (task_row["id"],),
+    ).fetchall()
+    command_attempt_rows = conn.execute(
+        """
+        select command_attempts.id, command_attempts.command_id,
+               command_attempts.correlation_id, command_attempts.dispatcher_id,
+               command_attempts.started_at, command_attempts.finished_at,
+               command_attempts.state, command_attempts.result_json,
+               command_attempts.error, command_attempts.side_effect_started,
+               command_attempts.side_effect_completed
+        from command_attempts
+        join commands on commands.id = command_attempts.command_id
+        where commands.task_id = ?
+        order by command_attempts.started_at, command_attempts.id
+        """,
+        (task_row["id"],),
+    ).fetchall()
+    routed_notification_rows = conn.execute(
+        """
+        select id, task_id, binding_id, correlation_id, source_session_id,
+               target_session_id, signal_type, source_event_id, source_event_timestamp,
+               dedupe_key, command_id, created_at, delivered_at, state, payload_json, error
+        from routed_notifications
         where task_id = ?
         order by created_at, id
         """,
@@ -4023,6 +4611,40 @@ def task_audit(conn: sqlite3.Connection, *, task: str) -> dict[str, Any]:
     continuation_review_rows = continuation_reviews(conn, task_id=task_row["id"])
     epilogue_rows = epilogue_runs(conn, task_id=task_row["id"])
     criteria = acceptance_criteria_for_task(conn, task_id=task_row["id"])
+    command_records = [_command_record(row) for row in command_rows]
+    command_attempt_records = [_command_attempt_record(row) for row in command_attempt_rows]
+    routed_notification_records = [_routed_notification_record(row) for row in routed_notification_rows]
+    manager_cycle_records = [
+        {
+            "completed_at": row["completed_at"],
+            "decision": row["decision"],
+            "error": row["error"],
+            "health": json.loads(row["health_json"]) if row["health_json"] else None,
+            "health_observation_id": row["health_observation_id"],
+            "id": row["id"],
+            "manager_capture_id": row["manager_capture_id"],
+            "manager_id": row["manager_id"],
+            "started_at": row["started_at"],
+            "state": row["state"],
+            "status": json.loads(row["status_json"]) if row["status_json"] else None,
+            "task_id": row["task_id"],
+            "worker_capture_id": row["worker_capture_id"],
+        }
+        for row in cycle_rows
+    ]
+    manager_decision_records = [
+        {
+            "created_at": row["created_at"],
+            "decision": row["decision"],
+            "id": row["id"],
+            "manager_cycle_id": row["manager_cycle_id"],
+            "manager_id": row["manager_id"],
+            "payload": json.loads(row["payload_json"]),
+            "reason": row["reason"],
+            "task_id": row["task_id"],
+        }
+        for row in decision_rows
+    ]
     return {
         "acceptance_criteria": criteria,
         "continuation_reviews": continuation_review_rows,
@@ -4041,23 +4663,15 @@ def task_audit(conn: sqlite3.Connection, *, task: str) -> dict[str, Any]:
             }
             for row in acknowledgement_rows
         ],
-        "commands": [
-            {
-                "created_at": row["created_at"],
-                "error": row["error"],
-                "id": row["id"],
-                "idempotency_key": row["idempotency_key"],
-                "manager_id": row["manager_id"],
-                "payload": json.loads(row["payload_json"]),
-                "result": json.loads(row["result_json"]) if row["result_json"] else None,
-                "state": row["state"],
-                "task_id": row["task_id"],
-                "type": row["type"],
-                "updated_at": row["updated_at"],
-                "worker_id": row["worker_id"],
-            }
-            for row in command_rows
-        ],
+        "commands": command_records,
+        "command_attempts": command_attempt_records,
+        "correlation_chains": _build_correlation_chains(
+            commands=command_records,
+            command_attempts=command_attempt_records,
+            routed_notifications=routed_notification_records,
+            manager_decisions=manager_decision_records,
+            manager_cycles=manager_cycle_records,
+        ),
         "agent_observations": [
             {
                 "command_id": row["command_id"],
@@ -4090,37 +4704,9 @@ def task_audit(conn: sqlite3.Connection, *, task: str) -> dict[str, Any]:
             }
             for row in event_rows
         ],
-        "manager_cycles": [
-            {
-                "completed_at": row["completed_at"],
-                "decision": row["decision"],
-                "error": row["error"],
-                "health": json.loads(row["health_json"]) if row["health_json"] else None,
-                "health_observation_id": row["health_observation_id"],
-                "id": row["id"],
-                "manager_capture_id": row["manager_capture_id"],
-                "manager_id": row["manager_id"],
-                "started_at": row["started_at"],
-                "state": row["state"],
-                "status": json.loads(row["status_json"]) if row["status_json"] else None,
-                "task_id": row["task_id"],
-                "worker_capture_id": row["worker_capture_id"],
-            }
-            for row in cycle_rows
-        ],
-        "manager_decisions": [
-            {
-                "created_at": row["created_at"],
-                "decision": row["decision"],
-                "id": row["id"],
-                "manager_cycle_id": row["manager_cycle_id"],
-                "manager_id": row["manager_id"],
-                "payload": json.loads(row["payload_json"]),
-                "reason": row["reason"],
-                "task_id": row["task_id"],
-            }
-            for row in decision_rows
-        ],
+        "manager_cycles": manager_cycle_records,
+        "manager_decisions": manager_decision_records,
+        "routed_notifications": routed_notification_records,
         "task": {
             "created_at": task_row["created_at"],
             "goal": task_row["goal"],

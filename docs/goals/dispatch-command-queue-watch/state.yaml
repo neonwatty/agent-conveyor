@@ -1,0 +1,479 @@
+# GoalBuddy v2 state.yaml
+# Board truth lives here. goal.md is the editable charter; notes/ holds long receipts only.
+
+version: 2
+
+goal:
+  title: "Dispatch Command Queue Watch"
+  slug: "dispatch-command-queue-watch"
+  kind: existing_plan
+  tranche: "Implement #113 Phase 2+ command queue/watch behavior after PR #118 landed Dispatch Phase 1 and the supervision-control foundations."
+  status: complete
+  oracle:
+    signal: "Focused tests plus final audit prove Dispatch can atomically claim and execute queued notify/nudge commands in once/watch modes with durable attempts, correlation_id replay visibility, and no judgment behavior."
+    cadence: "after each Worker package and at final audit"
+    final_proof: "A final audit maps deferred #113 acceptance criteria to schema helpers, CLI behavior, replay/dashboard visibility, and passing verification."
+  intake:
+    original_request: "plan it out with $goalbuddy:goal-prep"
+    interpreted_outcome: "Prepare a GoalBuddy execution board for the deferred #113 Dispatch command queue/watch tranche."
+    input_shape: existing_plan
+    audience: "workerctl operators, managers, workers, Dispatch, and dashboard users"
+    authority: requested
+    proof_type: test
+    completion_proof: "Dispatch queue/watch phases are implemented or explicitly split with receipts, tests pass, and final audit confirms safety boundaries."
+    likely_misfire: "Shipping a polling loop or tmux send path without atomic claim safety, durable attempts, invalid-payload no-side-effect guarantees, or correlation-chain visibility."
+    blind_spots_considered:
+      - "Tmux sends are not naturally idempotent; retry behavior must be conservative."
+      - "Two dispatchers must not execute the same command."
+      - "Watch mode can hide lifecycle bugs unless one-shot command execution is stable first."
+      - "Dashboard grouping should follow DB/replay semantics, not invent separate truth."
+      - "Dispatch must remain mechanical and must not decide completion or notify human operators."
+      - "An unrelated dirty file exists at dashboard/client/styles.css and should be resolved or avoided before dashboard work."
+    existing_plan_facts:
+      - "PR #118 merged Dispatch Phase 1 completion routing and the #114-#117 foundations."
+      - "The follow-up note is docs/goals/dispatch-supervision-control-plane/notes/T998-dispatch-follow-up.md."
+      - "Deferred #113 criteria include command row processing, atomic command claiming, command attempts, dispatch --watch, invalid payload handling, stale claim recovery, replay correlation chains, and dashboard observation grouping."
+      - "Start with schema/claiming and fake/no-side-effect executor tests before tmux side effects."
+      - "Keep direct nudge/session commands available during migration."
+
+rules:
+  pm_owns_state: true
+  one_active_task: true
+  max_write_workers: 1
+  no_implementation_without_worker_or_pm_task: true
+  no_completion_without_judge_or_pm_audit: true
+  planning_is_not_completion: true
+  queued_required_worker_blocks_completion: true
+  continuous_until_full_outcome: true
+  preserve_and_validate_existing_plan: true
+  goal_pressure_requires_oracle: true
+  no_completion_on_weak_proof: true
+  slice_policy:
+    max_consecutive_tiny_tasks: 2
+    prefer_vertical_slices: true
+    judge_picks_largest_safe_slice: true
+    worker_completes_whole_slice: true
+
+agents:
+  scout: installed
+  worker: installed
+  judge: installed
+
+visual_board:
+  selected: local
+  local:
+    status: live
+    url: "http://goalbuddy.localhost:41737/dispatch-command-queue-watch/"
+    command: "npx goalbuddy board /Users/neonwatty/Desktop/codex-terminal-manager/docs/goals/dispatch-command-queue-watch"
+
+active_task: null
+
+tasks:
+  - id: T001
+    type: scout
+    assignee: Scout
+    status: done
+    reasoning_hint: low
+    objective: "Map the current merged command/dispatch surfaces and identify the exact schema helpers, CLI handlers, tests, replay, telemetry, and dashboard files needed for #113 Phase 2+."
+    inputs:
+      - "Merged PR #118 state"
+      - "docs/goals/dispatch-supervision-control-plane/notes/T998-dispatch-follow-up.md"
+      - "GitHub issue #113 acceptance criteria"
+      - "workerctl command lifecycle, dispatch, replay, telemetry, lifecycle, tmux, and dashboard observation surfaces"
+      - "tests/test_workerctl.py"
+    constraints:
+      - "Read-only."
+      - "Do not edit implementation files."
+      - "Do not touch dashboard/client/styles.css; it is pre-existing unrelated dirty work."
+      - "Prefer exact file/function/test evidence."
+    expected_output:
+      - "Surface map for command claiming, attempt recording, dispatch execution, replay, telemetry, and dashboard visibility."
+      - "Compatibility risks with existing direct commands."
+      - "Recommended first Worker package with allowed_files, verify commands, and stop_if conditions."
+    receipt:
+      result: done
+      note: "notes/T001-scout-map.md"
+      summary: "Mapped the merged command/dispatch surfaces. Current commands lack correlation_id, claim/lease fields, command_attempts, stale-claim helpers, and dispatch command processing. Dispatch only routes worker task_complete signals and rejects --watch. Recommended first Worker package is additive queue foundations plus no-side-effect command claiming."
+      evidence:
+        - "workerctl/db.py: commands schema, create_command, mark_command_attempted, finish_command, routed_notifications, task_audit"
+        - "workerctl/commands.py: command_dispatch only handles completion signals and rejects --watch"
+        - "workerctl/cli.py: dispatch flags exist but no interval/watch implementation"
+        - "workerctl/replay.py: commands render, command_attempts absent"
+        - "workerctl/tmux.py: send_text_to_session side effects are non-idempotent once paste begins"
+        - "dashboard/server/index.ts and dashboard/server/workerctl.ts: observation timeline currently comes from telemetry snapshot/discover, no dispatch command surface"
+        - "tests/test_workerctl.py: DispatchTests, command lifecycle tests, commands CLI tests, session tmux tests, mutation audit tests"
+      spawned_tasks:
+        - T002
+
+  - id: T002
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Validate the Scout map and choose the largest safe first Worker slice for #113 Phase 2+."
+    inputs:
+      - "T001 receipt"
+      - "Goal charter constraints"
+      - "#113 deferred acceptance criteria"
+    constraints:
+      - "Read-only."
+      - "Do not implement."
+      - "Prefer proving atomic claim semantics before tmux side effects."
+      - "Reject any slice that lets Dispatch make task success or next-action decisions."
+    expected_output:
+      - "approved | split | defer"
+      - "Exact first Worker objective."
+      - "allowed_files."
+      - "verify commands."
+      - "stop_if conditions."
+      - "Deferred tasks or risk notes."
+    receipt:
+      result: done
+      decision: "approved"
+      full_outcome_complete: false
+      rationale: "The first safe useful slice is additive command queue foundations plus a no-side-effect dispatch command-claim path. This proves the highest-risk invariant, atomic claim safety, before introducing tmux sends or watch loops. It preserves existing direct command lifecycle behavior by adding nullable columns/table and new helpers instead of changing existing command states."
+      worker_objective: "Implement #113 Phase 2 queue foundations: commands.correlation_id and additive lease metadata, command_attempts, atomic claim helper, attempt start/finish helpers, task_audit/replay visibility, and dispatch --once command claiming in dry-run/no-side-effect mode for explicit command rows."
+      allowed_files:
+        - "workerctl/db.py"
+        - "workerctl/commands.py"
+        - "workerctl/cli.py"
+        - "workerctl/replay.py"
+        - "tests/test_workerctl.py"
+        - "docs/goals/dispatch-command-queue-watch/state.yaml"
+      verify:
+        - "python3 -m unittest tests.test_workerctl -v"
+        - "python3 -m py_compile workerctl/*.py"
+      stop_if:
+        - "Atomic claim semantics cannot be implemented additively."
+        - "Existing direct command lifecycle tests require destructive state changes."
+        - "Tmux side effects are needed before claim/attempt tests pass."
+        - "Need files outside allowed_files."
+        - "Verification fails twice with unrelated failures."
+      deferred:
+        - "Actual notify_manager/nudge_worker tmux execution remains T004."
+        - "Watch mode remains T006."
+        - "Dashboard observation remains gated by T007."
+
+  - id: T003
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "Implement #113 Phase 2 queue foundations: commands.correlation_id and additive lease metadata, command_attempts, atomic claim helper, attempt start/finish helpers, task_audit/replay visibility, and dispatch --once command claiming in dry-run/no-side-effect mode for explicit command rows."
+    allowed_files:
+      - "workerctl/db.py"
+      - "workerctl/commands.py"
+      - "workerctl/cli.py"
+      - "workerctl/replay.py"
+      - "tests/test_workerctl.py"
+      - "docs/goals/dispatch-command-queue-watch/state.yaml"
+    verify:
+      - "python3 -m unittest tests.test_workerctl -v"
+      - "python3 -m py_compile workerctl/*.py"
+    stop_if:
+      - "T002 does not approve this Worker package."
+      - "Atomic claim semantics cannot be implemented additively."
+      - "Need tmux side effects before fake/no-side-effect claim tests pass."
+      - "Need files outside allowed_files."
+      - "Verification fails twice with unrelated failures."
+    receipt:
+      result: done
+      full_outcome_complete: false
+      summary: "Implemented additive Dispatch command queue foundations: schema v16 adds command correlation/lease metadata and durable command_attempts; DB helpers atomically claim one eligible command, record attempts, finish attempts with side-effect flags, and expose attempts through task_audit/replay. dispatch --once now plans explicit notify_manager/nudge_worker command rows in --dry-run and can claim/abandon them without invoking tmux, proving no-side-effect command claiming before real execution."
+      changed_files:
+        - "workerctl/db.py"
+        - "workerctl/commands.py"
+        - "workerctl/cli.py"
+        - "workerctl/replay.py"
+        - "tests/test_workerctl.py"
+      evidence:
+        - "SCHEMA_VERSION 16 with command_attempts table, commands_claimable index, command_attempts indexes, and additive commands columns."
+        - "claim_next_dispatch_command uses a single UPDATE ... RETURNING statement guarded by state='pending' and attempts < max_attempts."
+        - "finish_command_attempt records succeeded/failed/abandoned attempts with side_effect_started and side_effect_completed booleans."
+        - "task_audit and replay_entries include command_attempts."
+        - "dispatch --type now accepts notify_manager, nudge_worker, and worker_task_complete; explicit command rows are planned in dry-run and claimed/abandoned without tmux in non-dry mode."
+      verify:
+        - "python3 -m unittest tests.test_workerctl.DispatchTests tests.test_workerctl.DatabaseTests -v"
+        - "python3 -m unittest tests.test_workerctl -v"
+        - "python3 -m py_compile workerctl/*.py"
+      deferred:
+        - "Real notify_manager/nudge_worker tmux execution remains T004."
+        - "Stale claim recovery and watch mode remain later tasks."
+        - "Dashboard observation remains gated by T007."
+
+  - id: T004
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "Implement narrow Dispatch command execution for notify_manager and nudge_worker through workerctl dispatch --once, with payload validation, conservative side-effect audit, and failure telemetry."
+    allowed_files:
+      - "workerctl/db.py"
+      - "workerctl/commands.py"
+      - "workerctl/cli.py"
+      - "workerctl/tmux.py"
+      - "workerctl/replay.py"
+      - "tests/test_workerctl.py"
+      - "docs/goals/dispatch-command-queue-watch/state.yaml"
+    verify:
+      - "python3 -m unittest tests.test_workerctl -v"
+      - "python3 -m py_compile workerctl/*.py"
+    stop_if:
+      - "T003 is not done."
+      - "Invalid payloads cannot be failed before side effects."
+      - "Tmux side-effect started/completed state cannot be represented."
+      - "Need files outside allowed_files."
+      - "Verification fails twice with unrelated failures."
+    receipt:
+      result: done
+      full_outcome_complete: false
+      summary: "Implemented real Dispatch execution for notify_manager and nudge_worker command rows. dispatch --once now claims eligible commands, validates payload.message/payload.text before tmux, resolves the active session binding mechanically, writes a routed_notifications row linked by command_id/correlation_id, sends the text to the manager or worker session, and finishes command_attempts with succeeded/failed plus conservative side_effect_started/side_effect_completed flags."
+      changed_files:
+        - "workerctl/commands.py"
+        - "workerctl/tmux.py"
+        - "tests/test_workerctl.py"
+        - "docs/goals/dispatch-command-queue-watch/state.yaml"
+      evidence:
+        - "_execute_dispatch_command validates command payload before target send and records failed attempts without tmux calls for invalid payloads."
+        - "notify_manager targets the bound manager session; nudge_worker targets the bound worker session."
+        - "send_text_to_session accepts a side_effect_audit dict and records when paste/submit side effects may have started or completed."
+        - "routed_notifications rows include command_id and signal_type notify_manager/nudge_worker."
+        - "DispatchTests cover successful notify_manager execution, invalid nudge_worker failure before tmux, and tmux failure after side-effect start."
+      verify:
+        - "python3 -m unittest tests.test_workerctl.DispatchTests tests.test_workerctl.SessionTmuxTests -v"
+        - "python3 -m unittest tests.test_workerctl -v"
+        - "python3 -m py_compile workerctl/*.py"
+      deferred:
+        - "Correlation-chain rendering remains T005."
+        - "Watch mode remains T006."
+
+  - id: T005
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "Implement replay and telemetry correlation-chain visibility for manager_decision -> command -> command_attempt -> routed_notification -> manager_cycle where data exists."
+    allowed_files:
+      - "workerctl/db.py"
+      - "workerctl/replay.py"
+      - "workerctl/commands.py"
+      - "tests/test_workerctl.py"
+      - "docs/goals/dispatch-command-queue-watch/state.yaml"
+    verify:
+      - "python3 -m unittest tests.test_workerctl -v"
+      - "python3 -m py_compile workerctl/*.py"
+    stop_if:
+      - "T003/T004 are not done."
+      - "Correlation IDs are missing from required prior rows."
+      - "Replay would imply Dispatch made a manager decision."
+      - "Need files outside allowed_files."
+      - "Verification fails twice with unrelated failures."
+    receipt:
+      result: done
+      full_outcome_complete: false
+      summary: "Implemented replay/audit correlation-chain visibility for Dispatch command processing. task_audit now includes routed_notifications and derived correlation_chains, linking manager_decision -> manager_cycle where command payload/result carries manager_decision.decision_id, command -> command_attempts, and command -> routed_notifications through command_id/correlation_id. replay now emits routed_notification and correlation_chain entries without implying Dispatch made manager decisions."
+      changed_files:
+        - "workerctl/db.py"
+        - "workerctl/replay.py"
+        - "tests/test_workerctl.py"
+        - "docs/goals/dispatch-command-queue-watch/state.yaml"
+      evidence:
+        - "task_audit returns routed_notifications and correlation_chains."
+        - "correlation_chains include command_id/type/state, correlation_id, attempt_ids, routed_notification_ids, manager_decision_id, and manager_cycle_id where available."
+        - "replay_entries renders routed_notifications and correlation_chains as dispatch/audit entries."
+        - "DispatchTests.test_replay_exposes_dispatch_correlation_chain proves the chain across manager_cycle, manager_decision, command, command_attempt, and routed_notification."
+      verify:
+        - "python3 -m unittest tests.test_workerctl.DispatchTests tests.test_workerctl.DatabaseTests tests.test_workerctl.CliTests.test_replay_json_outputs_stable_entries tests.test_workerctl.CliTests.test_replay_outputs_chronological_text -v"
+        - "python3 -m unittest tests.test_workerctl -v"
+        - "python3 -m py_compile workerctl/*.py"
+      deferred:
+        - "Watch mode remains T006."
+        - "Dashboard observation remains gated by T007."
+
+  - id: T006
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "Implement workerctl dispatch --watch with interval, dispatcher identity/heartbeat, shutdown behavior, --limit/--type support, and tests using bounded watch iterations."
+    allowed_files:
+      - "workerctl/cli.py"
+      - "workerctl/commands.py"
+      - "workerctl/db.py"
+      - "tests/test_workerctl.py"
+      - "docs/goals/dispatch-command-queue-watch/state.yaml"
+    verify:
+      - "python3 -m unittest tests.test_workerctl -v"
+      - "python3 -m py_compile workerctl/*.py"
+    stop_if:
+      - "T003/T004 are not done."
+      - "Watch mode cannot be tested without a bounded iteration hook."
+      - "Shutdown behavior is ambiguous."
+      - "Need files outside allowed_files."
+      - "Verification fails twice with unrelated failures."
+    receipt:
+      result: done
+      full_outcome_complete: false
+      summary: "Implemented workerctl dispatch --watch as a bounded-testable loop around the verified one-pass dispatcher. Watch mode supports --interval, --limit per pass, --type filtering, dispatcher identity, KeyboardInterrupt shutdown, JSON output with iteration counts, and persistent dispatch_watch_heartbeat telemetry per pass."
+      changed_files:
+        - "workerctl/cli.py"
+        - "workerctl/commands.py"
+        - "tests/test_workerctl.py"
+        - "docs/goals/dispatch-command-queue-watch/state.yaml"
+      evidence:
+        - "workerctl dispatch now accepts --interval with --watch."
+        - "command_dispatch no longer rejects --watch; it loops one-pass dispatch work until interrupted or an internal watch_iterations test bound is reached."
+        - "dispatch_watch_heartbeat telemetry records dispatcher_id, iteration, dry_run, and per-pass processed_count."
+        - "DispatchTests.test_dispatch_watch_runs_bounded_passes_with_limit_and_interval proves two bounded watch passes process two commands with --limit 1 and record heartbeat telemetry."
+      verify:
+        - "python3 -m unittest tests.test_workerctl.DispatchTests -v"
+        - "python3 -m unittest tests.test_workerctl -v"
+        - "python3 -m py_compile workerctl/*.py"
+      deferred:
+        - "Dashboard observation decision remains T007."
+
+  - id: T007
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Decide whether dashboard observation grouping belongs in this tranche now that DB/replay semantics exist, or should be split into a follow-up PR."
+    inputs:
+      - "T003-T006 receipts"
+      - "Current dashboard dirty state"
+      - "#113 dashboard acceptance criteria"
+    constraints:
+      - "Read-only."
+      - "Do not implement."
+      - "Do not touch dashboard/client/styles.css unless the dirty file is resolved or explicitly included."
+    expected_output:
+      - "continue_now | defer_follow_up"
+      - "Rationale."
+      - "If continue_now: exact dashboard Worker package with allowed_files/verify/stop_if."
+      - "If defer_follow_up: follow-up note text."
+    receipt:
+      result: done
+      decision: "defer_follow_up"
+      full_outcome_complete: false
+      rationale: "The core DB/replay/telemetry contract is now stable enough for dashboard work, but dashboard/client/styles.css was dirty before this goal and dashboard UI changes would mix unrelated CSS ownership into the Dispatch tranche. Defer dashboard observation grouping to a focused follow-up PR that consumes task_audit correlation_chains and routed_notifications."
+      note: "notes/T007-dashboard-follow-up.md"
+      follow_up_summary: "Add dashboard server/client visibility for queued commands, command attempts, routed notifications, watch heartbeats, failures, side-effect risk, and correlation grouping after resolving or isolating the pre-existing dashboard/client/styles.css changes."
+
+  - id: T008
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "If T007 approves, add dashboard observation visibility for queued commands, attempts, failures, stale claims, and correlation grouping."
+    allowed_files:
+      - "dashboard/client"
+      - "workerctl/db.py"
+      - "workerctl/commands.py"
+      - "tests/test_workerctl.py"
+      - "docs/goals/dispatch-command-queue-watch/state.yaml"
+    verify:
+      - "python3 -m unittest tests.test_workerctl -v"
+      - "python3 -m py_compile workerctl/*.py"
+      - "npm test -- --runInBand || true"
+    stop_if:
+      - "T007 chose defer_follow_up."
+      - "dashboard/client/styles.css still contains unrelated unowned dirty changes."
+      - "Dashboard data contract is unclear."
+      - "Need files outside allowed_files."
+      - "Verification fails twice with unrelated failures."
+    receipt:
+      result: deferred
+      full_outcome_complete: false
+      reason: "T007 chose defer_follow_up because dashboard/client/styles.css contains unrelated unowned dirty changes and dashboard UI should be split into a focused follow-up."
+      note: "notes/T007-dashboard-follow-up.md"
+
+  - id: T009
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "Implement stale Dispatch claim recovery without blind retries after possible tmux side effects."
+    allowed_files:
+      - "workerctl/db.py"
+      - "workerctl/commands.py"
+      - "tests/test_workerctl.py"
+      - "docs/goals/dispatch-command-queue-watch/state.yaml"
+    verify:
+      - "python3 -m unittest tests.test_workerctl -v"
+      - "python3 -m py_compile workerctl/*.py"
+    stop_if:
+      - "Cannot distinguish stale attempts with recorded side_effect_started from no-side-effect stale attempts."
+      - "Recovery would retry a command after side_effect_started is true."
+      - "Need files outside allowed_files."
+      - "Verification fails twice with unrelated failures."
+    receipt:
+      result: done
+      full_outcome_complete: false
+      summary: "Implemented stale Dispatch claim recovery. dispatch now recovers expired attempted commands before claiming new work: attempts with no recorded side_effect_started are abandoned and requeued when max_attempts allows, while attempts with side_effect_started are failed for manual review and never retried blindly. Dispatch execution marks side_effect_started before tmux send begins so a crashed dispatcher leaves conservative retry evidence."
+      changed_files:
+        - "workerctl/db.py"
+        - "workerctl/commands.py"
+        - "tests/test_workerctl.py"
+        - "docs/goals/dispatch-command-queue-watch/state.yaml"
+      evidence:
+        - "recover_stale_dispatch_claims requeues stale claims only when side_effect_started is false and attempts < max_attempts."
+        - "recover_stale_dispatch_claims fails stale claims for manual review when side_effect_started is true."
+        - "_execute_dispatch_command calls mark_command_attempt_side_effect_started before invoking tmux send."
+        - "DispatchTests cover stale no-side-effect requeue and stale side-effect-started no-retry behavior."
+      verify:
+        - "python3 -m unittest tests.test_workerctl.DispatchTests -v"
+        - "python3 -m unittest tests.test_workerctl -v"
+        - "python3 -m py_compile workerctl/*.py"
+
+  - id: T999
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Final audit: prove whether #113 command queue/watch tranche is complete or identify exact remaining safe work."
+    inputs:
+      - "All done task receipts"
+      - "All blocked/deferred task receipts"
+      - "Last verification"
+      - "Current dirty diff"
+      - "#113 acceptance criteria"
+    constraints:
+      - "Read-only."
+      - "Reject completion if required Worker work is still queued or active."
+      - "Reject completion if Dispatch writes manager decisions or task completion state."
+      - "Reject completion if atomic claim safety or invalid-payload no-side-effect behavior is unproven."
+    expected_output:
+      - "complete | not_complete"
+      - "full_outcome_complete: true | false"
+      - "Acceptance mapping."
+      - "Verification summary."
+      - "Missing evidence."
+      - "Next task if not complete."
+    receipt:
+      result: complete
+      full_outcome_complete: true
+      dashboard_deferred_follow_up: true
+      summary: "Final audit accepts the Dispatch command queue/watch tranche as complete for this GoalBuddy run. Core #113 Phase 2+ behavior is implemented and verified: additive command queue schema, atomic command claiming, durable command_attempts, notify_manager/nudge_worker execution through Dispatch, invalid-payload no-side-effect failure, conservative tmux side-effect audit, stale claim recovery without blind retries, dispatch --watch with interval/limit/type and heartbeat telemetry, replay/audit routed notifications, and correlation-chain visibility. Dashboard UI grouping is explicitly split to a follow-up note because of pre-existing unowned dashboard/client/styles.css dirtiness."
+      requirement_evidence:
+        - "Atomic claim safety: claim_next_dispatch_command uses guarded UPDATE ... RETURNING and DispatchTests cover no double-claim behavior."
+        - "Durable attempts: command_attempts schema, finish helpers, task_audit, replay, and tests cover running/succeeded/failed/abandoned attempt state."
+        - "notify_manager/nudge_worker execution: _execute_dispatch_command validates payloads, resolves active session binding, writes routed_notifications, sends via tmux, and finishes attempts."
+        - "Invalid payload safety: DispatchTests prove invalid nudge_worker payload fails before send_text_to_session is called."
+        - "Tmux side-effect audit: send_text_to_session supports side_effect_audit and execution marks side_effect_started before send; stale recovery refuses blind retry when true."
+        - "Stale claim recovery: recover_stale_dispatch_claims requeues no-side-effect stale claims and fails side-effect-started stale claims for manual review."
+        - "Watch mode: dispatch --watch supports --interval, --limit, --type, KeyboardInterrupt shutdown, bounded test iterations, and dispatch_watch_heartbeat telemetry."
+        - "Replay/correlation visibility: task_audit returns routed_notifications and correlation_chains; replay renders command_attempts, routed_notifications, and correlation_chains."
+        - "Dispatch remains mechanical: implementation only claims commands, validates payloads, sends text to bound sessions, records telemetry/audit rows, and does not insert manager decisions or update task completion state."
+        - "Dashboard follow-up: notes/T007-dashboard-follow-up.md records deferred dashboard observation grouping and the dirty CSS reason."
+      verification:
+        - "python3 -m unittest tests.test_workerctl -v passed: 413 tests."
+        - "python3 -m py_compile workerctl/*.py passed."
+      residual_follow_up:
+        - "Dashboard server/client grouping for command attempts, watch heartbeats, failures, side-effect risk, and correlation chains should be done in a follow-up after resolving or isolating dashboard/client/styles.css."
+
+checks:
+  dirty_fingerprint: "pre-existing dirty file before prep: dashboard/client/styles.css"
+  last_verification:
+    result: unknown
+    task: null
+    commands: []
