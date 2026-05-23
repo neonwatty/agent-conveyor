@@ -1,0 +1,665 @@
+# GoalBuddy v2 state.yaml
+# Board truth lives here. goal.md is the editable charter; notes/ holds long receipts only.
+
+version: 2
+
+goal:
+  title: "Dispatch Supervision Control Plane"
+  slug: "dispatch-supervision-control-plane"
+  kind: existing_plan
+  tranche: "Implement issues #113-#117 in dependency order: permissions, acks, dispatch completion routing, epilogues, dual continuation review, and later dispatch queue/watch phases."
+  status: active
+  oracle:
+    signal: "Focused tests and final audit prove the accepted issue acceptance criteria are implemented without violating Dispatch's no-judgment boundary."
+    cadence: "after each Worker package and at final audit"
+    final_proof: "A final Judge/PM receipt maps issue #113-#117 acceptance criteria to passing tests, implemented CLI/schema behavior, and replay/audit visibility."
+  intake:
+    original_request: "Pull the related issues around #113 and make a detailed GoalBuddy plan for implementation."
+    interpreted_outcome: "Prepare and execute a sequenced implementation board for the dispatch-related supervision control plane issues."
+    input_shape: existing_plan
+    audience: "workerctl operators, managers, workers, and future GoalBuddy-driven supervision runs"
+    authority: requested
+    proof_type: test
+    completion_proof: "Issues #113-#117 are implemented or explicitly split/deferred with receipts, tests pass, and final audit confirms safety boundaries."
+    likely_misfire: "Completing a plan or a broad Dispatch skeleton while leaving the actual permission, ack, routing, epilogue, and review behavior unimplemented or untested."
+    blind_spots_considered:
+      - "Dispatch could accidentally become a decision maker instead of a mechanical router."
+      - "Full queue/watch implementation could pull in non-idempotent tmux side effects before completion routing is stable."
+      - "Flat manager permissions must remain backwards compatible while the taxonomy lands."
+      - "Subagent review can be anchored or self-reviewing unless worker/manager proposals and reviewer isolation are enforced."
+      - "Epilogue plugin generalization would distract from the named built-in step model."
+      - "Correlation IDs need to be added early or replay/dashboard chains become disconnected."
+    existing_plan_facts:
+      - "#113 adds Dispatch for mechanical event routing and command actuation; Phase 1 should route worker task_complete from codex_events."
+      - "#114 adds worker-ack and manager-ack records."
+      - "#115 adds categorized manager permissions and repeatable tool declarations."
+      - "#116 adds named epilogue steps gated before finish-task."
+      - "#117 adds dual independent what's-next proposals and a reviewer subagent diff."
+      - "Preferred sequencing from implementation discussion: #115, #114, #113 Phase 1, #116 minimal, #117, then later #113 queue/watch phases."
+      - "Keep the role name dispatch."
+      - "Do not route to human operators through Dispatch."
+
+rules:
+  pm_owns_state: true
+  one_active_task: true
+  max_write_workers: 1
+  no_implementation_without_worker_or_pm_task: true
+  no_completion_without_judge_or_pm_audit: true
+  planning_is_not_completion: true
+  queued_required_worker_blocks_completion: true
+  continuous_until_full_outcome: true
+  missing_input_or_credentials_do_not_stop_goal: true
+  preserve_and_validate_existing_plan: true
+  intake_misfire_must_be_audited: true
+  goal_pressure_requires_oracle: true
+  no_completion_on_weak_proof: true
+  slice_policy:
+    max_consecutive_tiny_tasks: 2
+    prefer_vertical_slices: true
+    judge_picks_largest_safe_slice: true
+    worker_completes_whole_slice: true
+
+agents:
+  scout: installed
+  worker: installed
+  judge: installed
+
+visual_board:
+  selected: local
+  local:
+    status: live
+    url: "http://goalbuddy.localhost:41737/dispatch-supervision-control-plane/"
+    command: "npx goalbuddy board /Users/neonwatty/Desktop/codex-terminal-manager/docs/goals/dispatch-supervision-control-plane"
+
+active_task: null
+
+tasks:
+  - id: T001
+    type: scout
+    assignee: Scout
+    status: done
+    reasoning_hint: low
+    objective: "Map the current code surfaces for issues #113-#117 and identify exact files, helpers, migrations, tests, and compatibility risks before writes."
+    inputs:
+      - "GitHub issues #113-#117"
+      - "workerctl CLI parser and command handlers"
+      - "workerctl DB schema and migrations"
+      - "cycle, replay, audit, telemetry, and tmux send paths"
+      - "tests/test_workerctl.py"
+    constraints:
+      - "Read-only."
+      - "Do not edit implementation files."
+      - "Preserve the issue sequencing facts; verify them against code instead of rediscovering the product plan."
+      - "Prefer exact file/function/test evidence."
+    expected_output:
+      - "Implementation surface map for each issue."
+      - "Existing test clusters to extend."
+      - "Migration/versioning risks."
+      - "Recommended first Worker package with candidate allowed_files and verify commands."
+    receipt:
+      result: done
+      note: "notes/T001-scout-map.md"
+      summary: "Mapped implementation surfaces for #113-#117. #115 is the best first Worker package because permissions are already centralized in manager_configs.permissions_json and related CLI/tests."
+      evidence:
+        - "workerctl/db.py: manager_configs, commands, codex_events, telemetry_events, task audit helpers"
+        - "workerctl/commands.py: manager-config, pair seeding, permission normalization, command lifecycle"
+        - "workerctl/cli.py: manager-config, manager-permission, finish-task, commands"
+        - "workerctl/supervise_cycle.py: manager_context and codex_events-derived task_completed"
+        - "workerctl/replay.py and workerctl/audit.py: current replay/audit surfaces"
+        - "tests/test_workerctl.py: manager config, permission, command lifecycle, telemetry snapshot clusters"
+      spawned_tasks:
+        - T002
+
+  - id: T002
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Validate the issue sequencing and choose the first safe Worker package."
+    inputs:
+      - "T001 receipt"
+      - "Goal charter sequencing and non-negotiable constraints"
+    constraints:
+      - "Read-only."
+      - "Do not implement."
+      - "Prefer the largest safe useful slice, not the smallest possible helper."
+      - "Reject any first package that forces Dispatch command actuation before permissions and ack foundations are understood."
+    expected_output:
+      - "approved | revise"
+      - "First Worker objective."
+      - "allowed_files."
+      - "verify commands."
+      - "stop_if conditions."
+      - "Deferred tasks or risk notes."
+    receipt:
+      result: done
+      decision: "approved"
+      full_outcome_complete: false
+      rationale: "#115 is the correct first Worker package. It is useful, bounded, reversible, and unlocks #116/#117 permission/tool dependencies without forcing Dispatch side effects. The current schema already centralizes permissions in manager_configs.permissions_json, and existing manager-config tests provide coverage anchors."
+      first_worker_objective: "Implement categorized manager permissions and tool declarations for #115 while preserving legacy flat permission behavior."
+      allowed_files:
+        - "workerctl/cli.py"
+        - "workerctl/commands.py"
+        - "workerctl/db.py"
+        - "workerctl/supervise_cycle.py"
+        - "tests/test_workerctl.py"
+        - "docs/goals/dispatch-supervision-control-plane/state.yaml"
+      verify:
+        - "python3 -m unittest tests.test_workerctl -v"
+        - "python3 -m py_compile workerctl/*.py"
+      stop_if:
+        - "The schema requires a destructive migration or breaks existing manager_configs rows."
+        - "Legacy flat permission keys cannot round-trip through existing commands."
+        - "Need files outside allowed_files."
+        - "Verification fails twice with unrelated failures."
+      deferred:
+        - "#114 acks remain queued after #115."
+        - "#113 Dispatch routing remains queued until config foundations are in place."
+        - "#116/#117 remain dependent on #115 tools/permissions."
+
+  - id: T003
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "Implement categorized manager permissions and tool declarations for #115 while preserving legacy flat permission behavior."
+    allowed_files:
+      - "workerctl/cli.py"
+      - "workerctl/commands.py"
+      - "workerctl/db.py"
+      - "workerctl/supervise_cycle.py"
+      - "tests/test_workerctl.py"
+      - "docs/goals/dispatch-supervision-control-plane/state.yaml"
+    verify:
+      - "python3 -m unittest tests.test_workerctl -v"
+      - "python3 -m py_compile workerctl/*.py"
+    stop_if:
+      - "The schema requires a destructive migration or breaks existing manager_configs rows."
+      - "Legacy flat permission keys cannot round-trip through existing commands."
+      - "Need files outside allowed_files."
+      - "Verification fails twice with unrelated failures."
+    receipt:
+      result: done
+      changed_files:
+        - "workerctl/cli.py"
+        - "workerctl/commands.py"
+        - "workerctl/db.py"
+        - "tests/test_workerctl.py"
+      commands:
+        - cmd: "python3 -m py_compile workerctl/*.py"
+          status: pass
+        - cmd: "python3 -m unittest tests.test_workerctl.DatabaseTests.test_manager_config_round_trips tests.test_workerctl.PairCommandTests.test_manager_config_command_records_policy tests.test_workerctl.PairCommandTests.test_manager_config_permissions_json_normalizes_allow_aliases tests.test_workerctl.PairCommandTests.test_manager_config_permissions_json_alias_can_clear_existing_permission tests.test_workerctl.PairCommandTests.test_manager_config_accepts_permit_and_tool_taxonomy tests.test_workerctl.PairCommandTests.test_manager_config_permissions_json_warns_on_unknown_keys tests.test_workerctl.PairCommandTests.test_manager_permission_checks_saved_policy tests.test_workerctl.PairCommandTests.test_manager_permission_can_require_handoff -v"
+          status: pass
+        - cmd: "python3 -m unittest tests.test_workerctl.PairCommandTests.test_pair_seeds_manager_config_before_manager_spawn tests.test_workerctl.ManagerBootstrapPromptTests.test_prompt_includes_living_criteria_guidance_and_runnable_examples tests.test_workerctl.SuperviseCycleTests tests.test_workerctl.CycleCliTests -v"
+          status: pass
+        - cmd: "python3 -m unittest tests.test_workerctl.DatabaseTests -v"
+          status: pass
+        - cmd: "python3 -m unittest tests.test_workerctl -v"
+          status: pass
+      summary: "Implemented #115 categorized manager permissions and manager tools. Added --permit/--tool on manager-config, --manager-permit/--manager-tool on pair, category/action checks and category listing for manager-permission, legacy flat alias normalization/clearing, unknown-key warnings, tools_json migration, structured cycle-visible permissions, and seeded-manager bootstrap permission rendering."
+
+  - id: T004
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "Implement worker-ack and manager-ack records for #114, including CLI read/write, latest ack in cycle context, and replay/audit visibility."
+    allowed_files:
+      - "workerctl/cli.py"
+      - "workerctl/commands.py"
+      - "workerctl/db.py"
+      - "workerctl/replay.py"
+      - "workerctl/audit.py"
+      - "workerctl/lifecycle.py"
+      - "workerctl/supervise_cycle.py"
+      - "tests/test_workerctl.py"
+      - "docs/goals/dispatch-supervision-control-plane/state.yaml"
+    verify:
+      - "python3 -m unittest tests.test_workerctl -v"
+      - "python3 -m py_compile workerctl/*.py"
+    stop_if:
+      - "Bootstrap prompt changes require broader wording decisions not captured in #114."
+      - "Ack revision semantics conflict with existing task/binding identity model."
+      - "Need files outside allowed_files."
+      - "Verification fails twice with unrelated failures."
+    receipt:
+      result: done
+      changed_files:
+        - "workerctl/cli.py"
+        - "workerctl/commands.py"
+        - "workerctl/db.py"
+        - "workerctl/lifecycle.py"
+        - "workerctl/replay.py"
+        - "workerctl/supervise_cycle.py"
+        - "tests/test_workerctl.py"
+      commands:
+        - cmd: "python3 -m py_compile workerctl/*.py"
+          status: pass
+        - cmd: "python3 -m unittest tests.test_workerctl.DatabaseTests.test_task_acknowledgements_revision_and_latest_round_trip tests.test_workerctl.DatabaseTests.test_task_audit_returns_acknowledgements tests.test_workerctl.PairCommandTests.test_ack_commands_record_and_read_latest_json tests.test_workerctl.SuperviseCycleTests.test_run_cycle_includes_latest_acknowledgements tests.test_workerctl.CriteriaFinalAuditTests.test_finish_task_require_acks_fails_when_ack_missing tests.test_workerctl.CriteriaFinalAuditTests.test_finish_task_require_acks_succeeds_when_both_exist -v"
+          status: pass
+        - cmd: "python3 -m unittest tests.test_workerctl.DatabaseTests -v"
+          status: pass
+        - cmd: "python3 -m unittest tests.test_workerctl.PairCommandTests tests.test_workerctl.SuperviseCycleTests tests.test_workerctl.CriteriaFinalAuditTests -v"
+          status: pass
+        - cmd: "python3 -m unittest tests.test_workerctl -v"
+          status: pass
+      summary: "Implemented #114 worker/manager acknowledgement records. Added task_acknowledgements schema, revisioned latest-ack helpers, worker-ack/manager-ack CLI read/write, ack events with correlation_id, latest worker_ack/manager_ack in cycle manager_context, task_audit/replay visibility, and optional finish-task --require-acks final gating."
+
+  - id: T005
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Audit the #115 and #114 foundation before Dispatch routing begins."
+    inputs:
+      - "T003 receipt"
+      - "T004 receipt"
+      - "Current tests and diff"
+      - "#113 Phase 1 requirements"
+    constraints:
+      - "Read-only."
+      - "Do not implement."
+      - "Reject moving to Dispatch if permissions or acks are only partially wired into cycle/config surfaces."
+    expected_output:
+      - "foundation_ready: true | false"
+      - "missing evidence."
+      - "Dispatch Phase 1 Worker allowed_files, verify, and stop_if."
+    receipt:
+      result: done
+      foundation_ready: false
+      full_outcome_complete: false
+      decision: "revise_before_dispatch"
+      rationale: "#115 is ready and #114 persistence/context/audit surfaces are green, but #114's issue acceptance also requires bootstrap prompts instructing both sides to acknowledge before work/cycle and a configured first-cycle ack gate. Dispatch Phase 1 should wait until this narrow gap is closed because completion routing will wake managers into the cycle surface."
+      evidence:
+        - "Issue #115 acceptance is covered by manager-config --permit/--tool, manager-permission taxonomy checks, legacy alias tests, bootstrap permission rendering, and cycle manager_config permissions."
+        - "Issue #114 persistence is covered by task_acknowledgements, worker-ack/manager-ack CLI, revision tests, cycle worker_ack/manager_ack context, task_audit/replay visibility, and finish-task --require-acks."
+        - "Search evidence showed worker/bootstrap prompt text does not yet mention worker-ack or manager-ack, and no configured first-cycle gate exists."
+        - "python3 -m unittest tests.test_workerctl -v passed 388 tests after T004."
+      missing_evidence:
+        - "Bootstrap prompts instruct worker and manager to write acknowledgement records before file edits / first cycle."
+        - "A manager-config option or equivalent persisted configuration requires both acks before cycle when enabled."
+      spawned_tasks:
+        - T004B
+
+  - id: T004B
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "Close #114 bootstrap/config gaps: prompt worker and manager to ack before work/cycle, add a persisted require-acks manager config option, and fail first cycle closed when configured acks are missing."
+    allowed_files:
+      - "workerctl/cli.py"
+      - "workerctl/commands.py"
+      - "workerctl/db.py"
+      - "workerctl/supervise_cycle.py"
+      - "tests/test_workerctl.py"
+      - "docs/goals/dispatch-supervision-control-plane/state.yaml"
+    verify:
+      - "python3 -m unittest tests.test_workerctl.ManagerBootstrapPromptTests tests.test_workerctl.PairCommandTests tests.test_workerctl.SuperviseCycleTests tests.test_workerctl.DatabaseTests -v"
+      - "python3 -m unittest tests.test_workerctl -v"
+      - "python3 -m py_compile workerctl/*.py"
+    stop_if:
+      - "First-cycle ack gating requires changing lifecycle semantics outside manager_config/cycle."
+      - "The prompt changes require broader copy decisions unrelated to #114."
+      - "Need files outside allowed_files."
+      - "Verification fails twice with unrelated failures."
+    receipt:
+      result: done
+      changed_files:
+        - "workerctl/cli.py"
+        - "workerctl/commands.py"
+        - "workerctl/db.py"
+        - "workerctl/supervise_cycle.py"
+        - "tests/test_workerctl.py"
+      commands:
+        - cmd: "python3 -m py_compile workerctl/*.py"
+          status: pass
+        - cmd: "python3 -m unittest tests.test_workerctl.ManagerBootstrapPromptTests tests.test_workerctl.PairCommandTests.test_manager_config_accepts_permit_and_tool_taxonomy tests.test_workerctl.PairCommandTests.test_manager_config_questions_prints_setup_schema tests.test_workerctl.PairCommandTests.test_manager_config_interactive_records_answers_from_stdin tests.test_workerctl.PairCommandTests.test_manager_config_interactive_can_clear_existing_permissions tests.test_workerctl.PairCommandTests.test_pair_passes_task_prompt_to_worker_only tests.test_workerctl.PairCommandTests.test_pair_seeds_manager_config_before_manager_spawn tests.test_workerctl.SuperviseCycleTests.test_run_cycle_includes_latest_acknowledgements tests.test_workerctl.SuperviseCycleTests.test_run_cycle_requires_acknowledgements_when_manager_configured tests.test_workerctl.DatabaseTests.test_manager_config_round_trips -v"
+          status: pass
+        - cmd: "python3 -m unittest tests.test_workerctl.ManagerBootstrapPromptTests tests.test_workerctl.PairCommandTests tests.test_workerctl.SuperviseCycleTests tests.test_workerctl.DatabaseTests -v"
+          status: pass
+        - cmd: "python3 -m unittest tests.test_workerctl -v"
+          status: pass
+      summary: "Closed the remaining #114 foundation gap. Added raw worker and manager bootstrap acknowledgement instructions, pair worker task prompt ack guidance, manager-config --require-acks and pair --manager-require-acks persisted in manager_configs.require_acks, manager-config question/interactive support, and cycle fail-closed behavior when configured acks are missing. Dispatch Phase 1 can now rely on acknowledged cycle/config surfaces."
+
+  - id: T006
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "Implement #113 Phase 1: worker completion routing from codex_events to bound manager notification with routed_notifications, dedupe, telemetry, correlation_id, and workerctl dispatch --once."
+    allowed_files:
+      - "workerctl/cli.py"
+      - "workerctl/commands.py"
+      - "workerctl/db.py"
+      - "workerctl/ingest.py"
+      - "workerctl/supervise_cycle.py"
+      - "workerctl/tmux.py"
+      - "tests/test_workerctl.py"
+      - "docs/goals/dispatch-supervision-control-plane/state.yaml"
+    verify:
+      - "python3 -m unittest tests.test_workerctl -v"
+      - "python3 -m py_compile workerctl/*.py"
+    stop_if:
+      - "Implementation needs arbitrary command actuation, watch mode, or nudge migration to satisfy Phase 1."
+      - "Dispatch would write manager_decisions, criteria status, or terminal task state."
+      - "Cannot dedupe on codex_events.id or equivalent source event identity."
+      - "Need files outside allowed_files."
+      - "Verification fails twice with unrelated failures."
+    receipt:
+      result: done
+      changed_files:
+        - "workerctl/cli.py"
+        - "workerctl/commands.py"
+        - "workerctl/db.py"
+        - "tests/test_workerctl.py"
+      commands:
+        - cmd: "python3 -m py_compile workerctl/*.py"
+          status: pass
+        - cmd: "python3 -m unittest tests.test_workerctl.DispatchTests -v"
+          status: pass
+        - cmd: "python3 -m unittest tests.test_workerctl.DispatchTests tests.test_workerctl.DatabaseTests tests.test_workerctl.CliTests.test_task_scoped_read_commands_are_listed_in_help -v"
+          status: pass
+        - cmd: "python3 -m unittest tests.test_workerctl -v"
+          status: pass
+      summary: "Implemented #113 Phase 1 worker completion routing. Added routed_notifications schema with dedupe on source codex_events.id, dispatch telemetry actor support and migration, workerctl dispatch --once/--dry-run/--json, mechanical notification delivery to the bound manager session, correlation_id threading on routed_notifications and telemetry, unbound-event suppression, and tests proving consecutive task_complete events both route while duplicate dispatch passes do not."
+
+  - id: T007
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "Implement #116 minimal epilogue framework: manager-config --epilogue, epilogue_runs, workerctl epilogue status/list/run for supported built-ins, and finish-task --require-epilogue gating."
+    allowed_files:
+      - "workerctl/cli.py"
+      - "workerctl/commands.py"
+      - "workerctl/db.py"
+      - "workerctl/replay.py"
+      - "workerctl/audit.py"
+      - "workerctl/lifecycle.py"
+      - "tests/test_workerctl.py"
+      - "docs/goals/dispatch-supervision-control-plane/state.yaml"
+    verify:
+      - "python3 -m unittest tests.test_workerctl -v"
+      - "python3 -m py_compile workerctl/*.py"
+    stop_if:
+      - "The implementation starts building a generalized plugin framework."
+      - "run-tools cannot be safely implemented from manager_config.tools yet; block that step or scope it explicitly instead of faking success."
+      - "Need files outside allowed_files."
+      - "Verification fails twice with unrelated failures."
+    receipt:
+      result: done
+      changed_files:
+        - "workerctl/cli.py"
+        - "workerctl/commands.py"
+        - "workerctl/db.py"
+        - "workerctl/lifecycle.py"
+        - "workerctl/replay.py"
+        - "tests/test_workerctl.py"
+      commands:
+        - cmd: "python3 -m py_compile workerctl/*.py"
+          status: pass
+        - cmd: "python3 -m unittest tests.test_workerctl.DatabaseTests.test_task_audit_returns_epilogue_runs tests.test_workerctl.PairCommandTests.test_epilogue_commands_run_builtins_and_report_status tests.test_workerctl.PairCommandTests.test_epilogue_run_tools_fails_for_missing_configured_tool tests.test_workerctl.PairCommandTests.test_manager_config_command_records_policy tests.test_workerctl.PairCommandTests.test_manager_config_accepts_permit_and_tool_taxonomy tests.test_workerctl.PairCommandTests.test_manager_config_questions_prints_setup_schema tests.test_workerctl.PairCommandTests.test_manager_config_interactive_records_answers_from_stdin tests.test_workerctl.CriteriaFinalAuditTests.test_finish_task_require_epilogue_fails_until_configured_steps_succeed -v"
+          status: pass
+        - cmd: "python3 -m unittest tests.test_workerctl.DatabaseTests tests.test_workerctl.PairCommandTests tests.test_workerctl.CriteriaFinalAuditTests tests.test_workerctl.CliTests.test_replay_json_outputs_stable_entries tests.test_workerctl.CliTests.test_replay_outputs_chronological_text -v"
+          status: pass
+        - cmd: "python3 -m unittest tests.test_workerctl -v"
+          status: pass
+      summary: "Implemented #116 minimal named epilogue framework without a plugin system. Added manager-config --epilogue and pair seeding support, manager_configs.epilogues_json, epilogue_runs, workerctl epilogue --step/--list/--status/--json, built-in run-tools/draft-pr/subagent-review/record-handoff run records, finish-task --require-epilogue gating, and audit/replay visibility. run-tools executes configured tool version checks and records failure for unavailable tools instead of faking success."
+
+  - id: T008
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Review whether #117 is ready for implementation or needs to be split after #115/#116/#113 Phase 1."
+    inputs:
+      - "T003-T007 receipts"
+      - "#117 acceptance criteria"
+      - "Current subagent and permission surfaces"
+    constraints:
+      - "Read-only."
+      - "Do not implement."
+      - "Require reviewer isolation and ordering enforcement before approving the Worker package."
+    expected_output:
+      - "approved | split | defer"
+      - "If approved: exact Worker objective, allowed_files, verify, stop_if."
+      - "If split/defer: concrete follow-up tasks and blocked rationale."
+    receipt:
+      result: done
+      decision: "approved"
+      rationale: "#117 is ready for a bounded implementation slice because #115 provides context.spawn_reviewer permission vocabulary, #116 provides the subagent-review epilogue surface, and #113 Phase 1 provides routed completion signals. The Worker must not auto-proceed on divergent results and must represent reviewer isolation in durable data/tests instead of letting the manager review itself."
+      worker_objective: "Implement #117 dual continuation review persistence and CLI: configured nudge_on_completion, worker-first continuation submissions, manager proposal ordering lock, review result recording with reviewer isolation metadata, and replay/audit visibility."
+      allowed_files:
+        - "workerctl/cli.py"
+        - "workerctl/commands.py"
+        - "workerctl/db.py"
+        - "workerctl/replay.py"
+        - "workerctl/audit.py"
+        - "tests/test_workerctl.py"
+        - "docs/goals/dispatch-supervision-control-plane/state.yaml"
+      verify:
+        - "python3 -m unittest tests.test_workerctl -v"
+        - "python3 -m py_compile workerctl/*.py"
+      stop_if:
+        - "Reviewer isolation cannot be represented or tested locally."
+        - "Manager can read worker proposal before writing its own proposal."
+        - "Divergent outcomes auto-proceed without explicit auto-proceed configuration."
+        - "Need files outside allowed_files."
+        - "Verification fails twice with unrelated failures."
+      deferred:
+        - "Actually spawning a live Codex/Claude reviewer process can remain a later command-actuation enhancement if the persistence and isolation contract are in place."
+
+  - id: T009
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "Implement the approved #117 dual continuation review slice: task_continuations, continuation_reviews, ordering enforcement, reviewer isolation contract, and replay visibility."
+    allowed_files:
+      - "workerctl/cli.py"
+      - "workerctl/commands.py"
+      - "workerctl/db.py"
+      - "workerctl/replay.py"
+      - "workerctl/audit.py"
+      - "tests/test_workerctl.py"
+      - "docs/goals/dispatch-supervision-control-plane/state.yaml"
+    verify:
+      - "python3 -m unittest tests.test_workerctl -v"
+      - "python3 -m py_compile workerctl/*.py"
+    stop_if:
+      - "T008 did not approve this Worker package."
+      - "Reviewer subagent isolation cannot be represented or tested locally."
+      - "Manager can read worker proposal before writing its own proposal."
+      - "Divergent outcomes would auto-proceed without explicit auto-proceed configuration."
+      - "Need files outside allowed_files."
+      - "Verification fails twice with unrelated failures."
+    receipt:
+      result: done
+      changed_files:
+        - "workerctl/cli.py"
+        - "workerctl/commands.py"
+        - "workerctl/db.py"
+        - "workerctl/replay.py"
+        - "tests/test_workerctl.py"
+      commands:
+        - cmd: "python3 -m unittest tests.test_workerctl.DatabaseTests.test_manager_config_round_trips tests.test_workerctl.DatabaseTests.test_continuations_and_reviews_round_trip_through_audit tests.test_workerctl.PairCommandTests.test_continuation_cli_enforces_ordering_review_isolation_and_divergent_routing tests.test_workerctl.PairCommandTests.test_manager_config_nudge_on_completion_persists tests.test_workerctl.PairCommandTests.test_epilogue_commands_run_builtins_and_report_status -v"
+          status: pass
+        - cmd: "python3 -m unittest tests.test_workerctl.DatabaseTests tests.test_workerctl.PairCommandTests.test_manager_config_command_records_policy tests.test_workerctl.PairCommandTests.test_manager_config_permissions_json_normalizes_allow_aliases tests.test_workerctl.PairCommandTests.test_manager_config_permissions_json_alias_can_clear_existing_permission tests.test_workerctl.PairCommandTests.test_manager_config_accepts_permit_and_tool_taxonomy tests.test_workerctl.PairCommandTests.test_manager_config_permissions_json_warns_on_unknown_keys tests.test_workerctl.PairCommandTests.test_manager_permission_checks_saved_policy tests.test_workerctl.PairCommandTests.test_pair_seeds_manager_config_before_manager_spawn tests.test_workerctl.PairCommandTests.test_epilogue_commands_run_builtins_and_report_status tests.test_workerctl.PairCommandTests.test_epilogue_run_tools_fails_for_missing_configured_tool tests.test_workerctl.PairCommandTests.test_continuation_cli_enforces_ordering_review_isolation_and_divergent_routing tests.test_workerctl.PairCommandTests.test_continuation_matching_review_can_proceed_without_operator_route tests.test_workerctl.PairCommandTests.test_continuation_subagent_failure_records_stop_without_silent_approval tests.test_workerctl.PairCommandTests.test_manager_config_nudge_on_completion_persists -v"
+          status: pass
+        - cmd: "python3 -m unittest tests.test_workerctl -v"
+          status: pass
+        - cmd: "python3 -m py_compile workerctl/*.py"
+          status: pass
+      summary: "Implemented the #117 dual continuation review slice. Added task_continuations and continuation_reviews persistence, manager_configs.nudge_on_completion with CLI/pair/interactive support, workerctl continuation submit/list/review, worker-first correlation flow, manager-side payload redaction until a manager proposal exists, context.spawn_reviewer permission gating, reviewer isolation metadata validation, divergent operator-routing metadata, matching proceed and subagent-failure stop behavior, subagent-review epilogue backed by recorded reviews instead of a placeholder, and audit/replay visibility."
+
+  - id: T010
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Decide whether to continue into #113 command claiming/watch/nudge migration in this tranche or open/record a follow-up tranche."
+    inputs:
+      - "T006 receipt"
+      - "T007-T009 receipts if completed"
+      - "#113 later phase acceptance criteria"
+      - "Current command table and tmux execution risks"
+    constraints:
+      - "Read-only."
+      - "Do not implement."
+      - "Prefer deferring non-idempotent side-effect migration unless the foundation has real queue pressure and tests."
+    expected_output:
+      - "continue_now | defer_follow_up"
+      - "Rationale."
+      - "If continue_now: exact Worker package for atomic command claims and limited notify/nudge actuation."
+      - "If defer_follow_up: follow-up issue/task text."
+    receipt:
+      result: done
+      decision: "defer_follow_up"
+      full_outcome_complete: false
+      rationale: "#113 Phase 2+ should not continue in this tranche. Phase 1 completion routing is implemented and verified, and the adjacent #114-#117 foundations now create the intended wake-up/review surfaces. The remaining command queue/watch work introduces atomic command claiming, leases, retry semantics for non-idempotent tmux sends, command_attempt audit history, dispatcher heartbeat/watch lifecycle, and dashboard grouping. That is a coherent follow-up tranche, not a safe add-on after the current package."
+      evidence:
+        - "#113 acceptance criteria still include explicit pending command row processing, watch mode, atomic multi-dispatch claim safety, attempt/result metadata, invalid payload handling, stale claim recovery, and dashboard observation."
+        - "Current implementation intentionally rejects dispatch --watch and does not process command rows."
+        - "Existing command_attempted helpers are command lifecycle markers, not atomic dispatch leases or attempt history."
+        - "Full tests are passing for the implemented tranche: python3 -m unittest tests.test_workerctl -v; python3 -m py_compile workerctl/*.py."
+      follow_up_tranche:
+        title: "#113 Dispatch command queue/watch phases"
+        scope:
+          - "Add additive command claim/lease metadata or command_attempts table with correlation_id."
+          - "Implement atomic command claiming safe across multiple dispatch processes."
+          - "Process explicit notify_manager/nudge_worker command rows through dispatch --once."
+          - "Add conservative side-effect started/completed result metadata and invalid-payload failure handling."
+          - "Implement dispatch --watch with dispatcher identity/heartbeat and shutdown behavior."
+          - "Add replay/dashboard grouping by correlation_id for manager_decision -> command -> attempt -> routed_notification -> next cycle."
+        non_goals:
+          - "Dispatch must still not decide task success, acceptance criteria, next actions, or human-operator notifications."
+
+  - id: T011
+    type: worker
+    assignee: Worker
+    status: deferred
+    reasoning_hint: medium
+    objective: "If T010 approves, implement the next #113 queue slice: atomic command claiming, command_attempts or additive lease fields, conservative result recording, and limited notify_manager/nudge_worker actuation."
+    allowed_files:
+      - "workerctl/cli.py"
+      - "workerctl/commands.py"
+      - "workerctl/db.py"
+      - "workerctl/tmux.py"
+      - "tests/test_workerctl.py"
+      - "docs/goals/dispatch-supervision-control-plane/state.yaml"
+    verify:
+      - "python3 -m unittest tests.test_workerctl -v"
+      - "python3 -m py_compile workerctl/*.py"
+    stop_if:
+      - "T010 chose defer_follow_up."
+      - "Atomic claim semantics cannot be implemented additively."
+      - "Side-effect retry behavior is ambiguous after tmux send begins."
+      - "Need files outside allowed_files."
+      - "Verification fails twice with unrelated failures."
+    receipt:
+      result: deferred
+      reason: "T010 chose defer_follow_up for #113 Phase 2+ queue/watch command actuation. T998 recorded the follow-up tranche text instead of treating this conditional Worker package as required for the current goal."
+
+  - id: T998
+    type: pm
+    assignee: PM
+    status: done
+    reasoning_hint: medium
+    objective: "Update docs or GitHub issue handoff notes if implementation deliberately narrows, splits, or defers any acceptance criteria from #113-#117."
+    inputs:
+      - "All completed and blocked receipts"
+      - "Any Judge defer/split decisions"
+      - "Current GitHub issue state"
+    constraints:
+      - "Only edit goal control files or approved documentation/issue handoff artifacts."
+      - "Do not claim implementation completeness for deferred criteria."
+    expected_output:
+      - "Recorded follow-up decisions."
+      - "Links or text for issue comments if needed."
+      - "Board updated with any blocked/deferred rationale."
+    receipt:
+      result: done
+      note: "notes/T998-dispatch-follow-up.md"
+      summary: "Recorded the explicit #113 Phase 2+ deferral and follow-up tranche text. The open #113 criteria for command queue processing, atomic claiming, watch mode, invalid payload handling, retry/attempt metadata, replay correlation-chain reconstruction, and dashboard visibility remain deferred rather than claimed complete in this tranche."
+
+  - id: T999
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Final audit: prove whether the dispatch supervision control plane tranche satisfies issues #113-#117 or identify the exact remaining safe work."
+    inputs:
+      - "All done task receipts"
+      - "All blocked task receipts"
+      - "Last verification"
+      - "Current dirty diff"
+      - "Issues #113-#117 acceptance criteria"
+    constraints:
+      - "Read-only."
+      - "Reject completion if required Worker work is still queued or active."
+      - "Reject completion if Dispatch writes decisions or terminal task state."
+      - "Reject completion if compatibility behavior is untested."
+      - "Reject completion if deferred issue criteria are not explicitly recorded."
+    expected_output:
+      - "complete | not_complete"
+      - "full_outcome_complete: true | false"
+      - "Issue-by-issue acceptance mapping."
+      - "Verification summary."
+      - "Missing evidence."
+      - "Next task if not complete."
+    receipt:
+      result: done
+      decision: "complete"
+      full_outcome_complete: true
+      issue_mapping:
+        "#113":
+          result: "partially_implemented_with_explicit_follow_up"
+          evidence:
+            - "Phase 1 completion routing is implemented: workerctl dispatch --once consumes bound worker codex_events task_complete rows, dedupes on source codex_events.id, records routed_notifications and dispatch telemetry with correlation_id, and mechanically notifies the bound manager."
+            - "Tests cover completion routing, consecutive task_complete events, dry-run non-mutation, and unbound-event suppression."
+            - "Later #113 acceptance criteria for command row processing, dispatch --watch, atomic claiming, attempt/result history, invalid-payload failure, stale-claim recovery, and dashboard grouping are explicitly deferred by T010/T998."
+            - "Dispatch still does not decide task success, acceptance criteria, next actions, or human-operator routing."
+        "#114":
+          result: "implemented"
+          evidence:
+            - "task_acknowledgements table, worker-ack and manager-ack CLI, revision history, latest ack helpers, cycle manager_context.worker_ack/manager_ack, replay/audit visibility, bootstrap prompt instructions, manager-config require_acks, cycle fail-closed, and finish-task --require-acks are implemented."
+            - "Tests cover write/read, revision history, cycle exposure, prompt instructions, configured cycle blocking, and finish gating."
+        "#115":
+          result: "implemented"
+          evidence:
+            - "manager-config supports categorized --permit and repeatable --tool, structured permissions_json/tools_json, legacy flat aliases, unknown-key warnings, manager-permission require/list checks, prompt rendering, and cycle manager_config exposure."
+            - "Tests cover aliasing, unknown-key warning, category lookup, denied/granted checks, bootstrap prompt rendering, and pair seeding."
+        "#116":
+          result: "implemented_for_named_builtin_framework"
+          evidence:
+            - "manager-config and pair support repeatable epilogues, epilogue_runs persists step state, workerctl epilogue runs/list/status supported built-ins, finish-task --require-epilogue fails closed, and replay/audit surfaces epilogue rows."
+            - "The subagent-review step now requires a recorded continuation review instead of a placeholder success."
+            - "Tests cover built-in happy path, missing tool failure, required epilogue finish blocking, and persisted audit/replay state."
+        "#117":
+          result: "implemented_for_persistence_and_cli_contract"
+          evidence:
+            - "task_continuations and continuation_reviews persist proposals/reviews with shared correlation_id."
+            - "workerctl continuation enforces worker-first flow, blocks manager payload reads before manager submission, records reviewer isolation metadata, requires context.spawn_reviewer for review, stores structured match/compatible/divergent verdicts, and marks divergent reviews as operator-routed unless auto-proceed is configured."
+            - "manager-config --nudge-on-completion and pair/interactive config support off/ask-operator/auto-review/auto-proceed with ask-operator default."
+            - "Replay exposes continuation and continuation_review entries; subagent failure can be recorded as stop without silent approval."
+            - "Tests cover ordering enforcement, divergent routing, matching proceed, subagent failure stop, reviewer isolation, manager-rollout access rejection, config persistence, and replay visibility."
+      verification:
+        - cmd: "python3 -m unittest tests.test_workerctl -v"
+          status: pass
+          result: "403 tests OK"
+        - cmd: "python3 -m py_compile workerctl/*.py"
+          status: pass
+      residual_risk:
+        - "GitHub issues remain open; this goal records local implementation and explicit deferral, not issue closure."
+        - "dashboard/client/styles.css is a pre-existing unrelated dirty file and was not evaluated as part of this goal."
+        - "Live reviewer process spawning and #113 command queue/watch phases are deferred follow-up work, not silently claimed complete."
+
+checks:
+  dirty_fingerprint: "pre-existing dirty file noted before prep: dashboard/client/styles.css"
+  last_verification:
+    result: pass
+    task: T009
+    commands:
+      - "python3 -m unittest tests.test_workerctl -v"
+      - "python3 -m py_compile workerctl/*.py"

@@ -12,7 +12,7 @@ from workerctl.core import now_iso
 from workerctl.state import state_root
 
 
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 15
 REQUIRED_TABLES = {
     "acceptance_criteria",
     "agent_observations",
@@ -20,18 +20,23 @@ REQUIRED_TABLES = {
     "budgets",
     "codex_events",
     "commands",
+    "continuation_reviews",
     "data_migrations",
+    "epilogue_runs",
     "events",
     "manager_configs",
     "manager_cycles",
     "manager_decisions",
     "managers",
     "prompts",
+    "routed_notifications",
     "runs",
     "schema_migrations",
     "sessions",
     "statuses",
     "tasks",
+    "task_acknowledgements",
+    "task_continuations",
     "telemetry_events",
     "telemetry_events_fts",
     "terminal_captures",
@@ -45,7 +50,9 @@ REQUIRED_INDEXES = {
     "acceptance_criteria_task_status",
     "codex_events_session_id",
     "commands_task_state_created",
+    "continuation_reviews_task",
     "events_task_id",
+    "epilogue_runs_task_step",
     "manager_configs_task_id",
     "one_active_binding_per_task",
     "one_active_run_per_task",
@@ -55,7 +62,11 @@ REQUIRED_INDEXES = {
     "one_active_manager_per_task",
     "agent_observations_task_id",
     "statuses_worker_id",
+    "task_acknowledgements_task_role_revision",
+    "task_continuations_task_role_revision",
     "runs_task_status",
+    "routed_notifications_dedupe_key",
+    "routed_notifications_source_event",
     "telemetry_events_actor_timestamp",
     "telemetry_events_run_timestamp",
     "telemetry_events_task_timestamp",
@@ -71,9 +82,24 @@ REQUIRED_TRIGGERS = {
 }
 ACCEPTANCE_CRITERION_STATUSES = {"proposed", "accepted", "satisfied", "deferred", "rejected"}
 ACCEPTANCE_CRITERION_SOURCES = {"user_requested", "manager_inferred", "worker_proposed", "final_audit"}
-TELEMETRY_ACTORS = {"manager", "operator", "system", "worker", "workerctl"}
+TELEMETRY_ACTORS = {"dispatch", "manager", "operator", "system", "worker", "workerctl"}
 TELEMETRY_SEVERITIES = {"debug", "error", "info", "warning"}
 _PRESERVE_FIELD = object()
+_MANAGER_PERMISSION_TAXONOMY = {
+    "repo": {"open_pr", "push_branch", "merge_green_pr"},
+    "verification": {"run_playwright", "run_xcodebuild", "run_pytest", "run_cargo"},
+    "context": {"spawn_reviewer", "fetch_prs", "fetch_issues"},
+    "communication": {"comment_on_pr", "notify_operator"},
+    "worker_session": {"compact", "clear", "interrupt", "stop"},
+}
+_MANAGER_PERMISSION_ALIASES = {
+    "allow_pr": "repo.open_pr",
+    "create_pr": "repo.open_pr",
+    "allow_merge_green": "repo.merge_green_pr",
+    "merge_green_pr": "repo.merge_green_pr",
+    "allow_worker_compact_clear": ["worker_session.compact", "worker_session.clear"],
+    "worker_compact_clear": ["worker_session.compact", "worker_session.clear"],
+}
 
 
 class _ClosingConnection(sqlite3.Connection):
@@ -86,6 +112,37 @@ class _ClosingConnection(sqlite3.Connection):
 
 def default_db_path() -> Path:
     return state_root() / "workerctl.db"
+
+
+def _empty_manager_permissions() -> dict[str, list[str]]:
+    return {category: [] for category in _MANAGER_PERMISSION_TAXONOMY}
+
+
+def _grant_manager_permission(normalized: dict[str, list[str]], name: str) -> None:
+    aliases = _MANAGER_PERMISSION_ALIASES.get(name, name)
+    names = aliases if isinstance(aliases, list) else [aliases]
+    for canonical in names:
+        if "." not in canonical:
+            continue
+        category, action = canonical.split(".", 1)
+        if action in _MANAGER_PERMISSION_TAXONOMY.get(category, set()):
+            bucket = normalized.setdefault(category, [])
+            if action not in bucket:
+                bucket.append(action)
+                bucket.sort()
+
+
+def normalize_manager_permissions_json(permissions: dict[str, Any] | None) -> dict[str, list[str]]:
+    normalized = _empty_manager_permissions()
+    for key, value in (permissions or {}).items():
+        if key in _MANAGER_PERMISSION_TAXONOMY and isinstance(value, list):
+            for action in value:
+                if action in _MANAGER_PERMISSION_TAXONOMY[key]:
+                    _grant_manager_permission(normalized, f"{key}.{action}")
+            continue
+        if bool(value):
+            _grant_manager_permission(normalized, key)
+    return normalized
 
 
 def connect(path: Path | None = None) -> sqlite3.Connection:
@@ -314,6 +371,41 @@ def migrate(conn: sqlite3.Connection, from_version: int) -> None:
           created_at text not null
         );
 
+        create table if not exists task_acknowledgements(
+          id integer primary key autoincrement,
+          task_id text not null references tasks(id),
+          binding_id text references bindings(id),
+          role text not null check (role in ('worker','manager')),
+          payload_json text not null check (json_valid(payload_json)),
+          revision integer not null check (revision > 0),
+          created_at text not null,
+          correlation_id text
+        );
+
+        create table if not exists task_continuations(
+          id integer primary key autoincrement,
+          task_id text not null references tasks(id),
+          proposer text not null check (proposer in ('worker','manager')),
+          payload_json text not null check (json_valid(payload_json)),
+          revision integer not null check (revision > 0),
+          created_at text not null,
+          correlation_id text not null
+        );
+
+        create table if not exists continuation_reviews(
+          id integer primary key autoincrement,
+          task_id text not null references tasks(id),
+          worker_continuation_id integer not null references task_continuations(id),
+          manager_continuation_id integer not null references task_continuations(id),
+          agreement text not null check (agreement in ('match','compatible','divergent')),
+          verdict text not null check (verdict in ('proceed','amend','stop')),
+          addendum text,
+          rationale text not null,
+          subagent_run_json text not null check (json_valid(subagent_run_json)),
+          created_at text not null,
+          correlation_id text not null
+        );
+
         create table if not exists manager_configs(
           task_id text primary key references tasks(id),
           supervision_mode text not null check (supervision_mode in ('light','guided','strict')),
@@ -322,8 +414,24 @@ def migrate(conn: sqlite3.Connection, from_version: int) -> None:
           acceptance_criteria_json text not null check (json_valid(acceptance_criteria_json)),
           reference_paths_json text not null check (json_valid(reference_paths_json)),
           permissions_json text not null check (json_valid(permissions_json)),
+          tools_json text not null default '[]' check (json_valid(tools_json)),
+          epilogues_json text not null default '[]' check (json_valid(epilogues_json)),
+          nudge_on_completion text not null default 'ask-operator' check (nudge_on_completion in ('off','ask-operator','auto-review','auto-proceed')),
+          require_acks integer not null default 0 check (require_acks in (0, 1)),
           created_at text not null,
           updated_at text not null
+        );
+
+        create table if not exists epilogue_runs(
+          id integer primary key autoincrement,
+          task_id text not null references tasks(id),
+          step_name text not null,
+          state text not null check (state in ('pending','running','succeeded','failed','skipped')),
+          started_at text not null,
+          finished_at text,
+          result_json text check (result_json is null or json_valid(result_json)),
+          error text,
+          correlation_id text
         );
 
         create table if not exists runs(
@@ -342,7 +450,7 @@ def migrate(conn: sqlite3.Connection, from_version: int) -> None:
           run_id text references runs(id),
           task_id text references tasks(id),
           timestamp text not null,
-          actor text not null check (actor in ('manager','worker','operator','workerctl','system')),
+          actor text not null check (actor in ('dispatch','manager','worker','operator','workerctl','system')),
           event_type text not null,
           severity text not null check (severity in ('debug','info','warning','error')),
           summary text not null,
@@ -405,6 +513,25 @@ def migrate(conn: sqlite3.Connection, from_version: int) -> None:
           manager_id text references managers(id),
           type text not null,
           payload_json text not null check (json_valid(payload_json))
+        );
+
+        create table if not exists routed_notifications(
+          id integer primary key autoincrement,
+          task_id text not null references tasks(id),
+          binding_id text not null references bindings(id),
+          correlation_id text not null,
+          source_session_id text not null references sessions(id),
+          target_session_id text not null references sessions(id),
+          signal_type text not null,
+          source_event_id integer references codex_events(id),
+          source_event_timestamp text,
+          dedupe_key text not null unique,
+          command_id text references commands(id),
+          created_at text not null,
+          delivered_at text,
+          state text not null check (state in ('pending','delivered','failed','suppressed')),
+          payload_json text not null check (json_valid(payload_json)),
+          error text
         );
 
         create table if not exists codex_events(
@@ -471,6 +598,24 @@ def migrate(conn: sqlite3.Connection, from_version: int) -> None:
         create index if not exists worker_handoffs_task_id
         on worker_handoffs(task_id, id);
 
+        create index if not exists task_acknowledgements_task_role_revision
+        on task_acknowledgements(task_id, role, revision desc, id desc);
+
+        create index if not exists task_continuations_task_role_revision
+        on task_continuations(task_id, proposer, revision desc, id desc);
+
+        create index if not exists continuation_reviews_task
+        on continuation_reviews(task_id, id);
+
+        create index if not exists epilogue_runs_task_step
+        on epilogue_runs(task_id, step_name, id);
+
+        create unique index if not exists routed_notifications_dedupe_key
+        on routed_notifications(dedupe_key);
+
+        create index if not exists routed_notifications_source_event
+        on routed_notifications(source_event_id);
+
         create index if not exists manager_configs_task_id
         on manager_configs(task_id);
 
@@ -524,6 +669,11 @@ def migrate(conn: sqlite3.Connection, from_version: int) -> None:
     migrate_to_v5_sessions(conn)
     # Phase 2 invariant repair. Always runs; the inner check makes it idempotent.
     migrate_to_v6_codex_events(conn)
+    migrate_to_v10_manager_config_tools(conn)
+    migrate_to_v12_manager_config_require_acks(conn)
+    migrate_to_v13_routed_notifications(conn)
+    migrate_to_v14_epilogues(conn)
+    migrate_to_v15_continuations(conn)
     sync_worker_ids_to_config_files(conn)
     conn.execute(
         "insert or ignore into schema_migrations(version, applied_at) values (?, ?)",
@@ -711,6 +861,163 @@ def migrate_to_v6_codex_events(conn: sqlite3.Connection) -> None:
     existing_cols = {row["name"] for row in conn.execute("pragma table_info(sessions)")}
     if "last_ingest_offset" not in existing_cols:
         conn.execute("alter table sessions add column last_ingest_offset integer")
+
+
+def migrate_to_v10_manager_config_tools(conn: sqlite3.Connection) -> None:
+    """Add `tools_json` to manager_configs if missing. Idempotent."""
+    existing_cols = {row["name"] for row in conn.execute("pragma table_info(manager_configs)")}
+    if "tools_json" not in existing_cols:
+        conn.execute("alter table manager_configs add column tools_json text not null default '[]' check (json_valid(tools_json))")
+
+
+def migrate_to_v12_manager_config_require_acks(conn: sqlite3.Connection) -> None:
+    """Add `require_acks` to manager_configs if missing. Idempotent."""
+    existing_cols = {row["name"] for row in conn.execute("pragma table_info(manager_configs)")}
+    if "require_acks" not in existing_cols:
+        conn.execute("alter table manager_configs add column require_acks integer not null default 0 check (require_acks in (0, 1))")
+
+
+def migrate_to_v13_routed_notifications(conn: sqlite3.Connection) -> None:
+    """Add the Dispatch routed notification table and indexes. Idempotent."""
+    telemetry_schema = conn.execute(
+        "select sql from sqlite_master where type = 'table' and name = 'telemetry_events'"
+    ).fetchone()
+    if telemetry_schema is not None and "'dispatch'" not in (telemetry_schema["sql"] or ""):
+        conn.executescript(
+            """
+            create table telemetry_events_v13(
+              id text primary key,
+              run_id text references runs(id),
+              task_id text references tasks(id),
+              timestamp text not null,
+              actor text not null check (actor in ('dispatch','manager','worker','operator','workerctl','system')),
+              event_type text not null,
+              severity text not null check (severity in ('debug','info','warning','error')),
+              summary text not null,
+              correlation_json text not null check (json_valid(correlation_json)),
+              attributes_json text not null check (json_valid(attributes_json))
+            );
+
+            insert into telemetry_events_v13(
+              id, run_id, task_id, timestamp, actor, event_type, severity,
+              summary, correlation_json, attributes_json
+            )
+            select id, run_id, task_id, timestamp, actor, event_type, severity,
+                   summary, correlation_json, attributes_json
+            from telemetry_events;
+
+            drop table telemetry_events;
+            alter table telemetry_events_v13 rename to telemetry_events;
+
+            create index if not exists telemetry_events_run_timestamp
+            on telemetry_events(run_id, timestamp, id);
+
+            create index if not exists telemetry_events_task_timestamp
+            on telemetry_events(task_id, timestamp, id);
+
+            create index if not exists telemetry_events_type_timestamp
+            on telemetry_events(event_type, timestamp, id);
+
+            create index if not exists telemetry_events_actor_timestamp
+            on telemetry_events(actor, timestamp, id);
+            """
+        )
+    conn.executescript(
+        """
+        create table if not exists routed_notifications(
+          id integer primary key autoincrement,
+          task_id text not null references tasks(id),
+          binding_id text not null references bindings(id),
+          correlation_id text not null,
+          source_session_id text not null references sessions(id),
+          target_session_id text not null references sessions(id),
+          signal_type text not null,
+          source_event_id integer references codex_events(id),
+          source_event_timestamp text,
+          dedupe_key text not null unique,
+          command_id text references commands(id),
+          created_at text not null,
+          delivered_at text,
+          state text not null check (state in ('pending','delivered','failed','suppressed')),
+          payload_json text not null check (json_valid(payload_json)),
+          error text
+        );
+
+        create unique index if not exists routed_notifications_dedupe_key
+        on routed_notifications(dedupe_key);
+
+        create index if not exists routed_notifications_source_event
+        on routed_notifications(source_event_id);
+        """
+    )
+
+
+def migrate_to_v14_epilogues(conn: sqlite3.Connection) -> None:
+    """Add manager epilogue configuration and durable epilogue run rows."""
+    existing_cols = {row["name"] for row in conn.execute("pragma table_info(manager_configs)")}
+    if "epilogues_json" not in existing_cols:
+        conn.execute("alter table manager_configs add column epilogues_json text not null default '[]' check (json_valid(epilogues_json))")
+    conn.executescript(
+        """
+        create table if not exists epilogue_runs(
+          id integer primary key autoincrement,
+          task_id text not null references tasks(id),
+          step_name text not null,
+          state text not null check (state in ('pending','running','succeeded','failed','skipped')),
+          started_at text not null,
+          finished_at text,
+          result_json text check (result_json is null or json_valid(result_json)),
+          error text,
+          correlation_id text
+        );
+
+        create index if not exists epilogue_runs_task_step
+        on epilogue_runs(task_id, step_name, id);
+        """
+    )
+
+
+def migrate_to_v15_continuations(conn: sqlite3.Connection) -> None:
+    """Add continuation proposal/review tables and nudge-on-completion config."""
+    existing_cols = {row["name"] for row in conn.execute("pragma table_info(manager_configs)")}
+    if "nudge_on_completion" not in existing_cols:
+        conn.execute(
+            "alter table manager_configs add column nudge_on_completion text not null default 'ask-operator' "
+            "check (nudge_on_completion in ('off','ask-operator','auto-review','auto-proceed'))"
+        )
+    conn.executescript(
+        """
+        create table if not exists task_continuations(
+          id integer primary key autoincrement,
+          task_id text not null references tasks(id),
+          proposer text not null check (proposer in ('worker','manager')),
+          payload_json text not null check (json_valid(payload_json)),
+          revision integer not null check (revision > 0),
+          created_at text not null,
+          correlation_id text not null
+        );
+
+        create table if not exists continuation_reviews(
+          id integer primary key autoincrement,
+          task_id text not null references tasks(id),
+          worker_continuation_id integer not null references task_continuations(id),
+          manager_continuation_id integer not null references task_continuations(id),
+          agreement text not null check (agreement in ('match','compatible','divergent')),
+          verdict text not null check (verdict in ('proceed','amend','stop')),
+          addendum text,
+          rationale text not null,
+          subagent_run_json text not null check (json_valid(subagent_run_json)),
+          created_at text not null,
+          correlation_id text not null
+        );
+
+        create index if not exists task_continuations_task_role_revision
+        on task_continuations(task_id, proposer, revision desc, id desc);
+
+        create index if not exists continuation_reviews_task
+        on continuation_reviews(task_id, id);
+        """
+    )
 
 
 def sync_worker_ids_to_config_files(conn: sqlite3.Connection) -> None:
@@ -1202,6 +1509,142 @@ def latest_codex_event_subtype(
         (session_id,),
     ).fetchone()
     return row["subtype"] if row else None
+
+
+def unrouted_worker_completion_events(conn: sqlite3.Connection, *, limit: int = 10) -> list[sqlite3.Row]:
+    """Return bound worker task_complete events that Dispatch has not routed."""
+    return list(
+        conn.execute(
+            """
+            select
+              ce.id as source_event_id,
+              ce.timestamp as source_event_timestamp,
+              ce.session_id as source_session_id,
+              ce.payload_json as source_payload_json,
+              b.id as binding_id,
+              b.task_id as task_id,
+              b.manager_session_id as target_session_id,
+              ws.name as worker_session_name,
+              ms.name as manager_session_name,
+              t.name as task_name
+            from codex_events ce
+            join bindings b on b.worker_session_id = ce.session_id
+            join sessions ws on ws.id = b.worker_session_id
+            join sessions ms on ms.id = b.manager_session_id
+            join tasks t on t.id = b.task_id
+            left join routed_notifications rn on rn.source_event_id = ce.id
+            where ce.subtype = 'task_complete'
+              and b.state in ('active', 'ending')
+              and rn.id is null
+            order by ce.id asc
+            limit ?
+            """,
+            (limit,),
+        )
+    )
+
+
+def insert_routed_notification(
+    conn: sqlite3.Connection,
+    *,
+    task_id: str,
+    binding_id: str,
+    correlation_id: str,
+    source_session_id: str,
+    target_session_id: str,
+    signal_type: str,
+    source_event_id: int | None,
+    source_event_timestamp: str | None,
+    dedupe_key: str,
+    payload: dict[str, Any],
+    command_id: str | None = None,
+    state: str = "pending",
+    timestamp: str | None = None,
+) -> int:
+    if state not in {"pending", "delivered", "failed", "suppressed"}:
+        raise WorkerError(f"invalid routed notification state: {state}")
+    cursor = conn.execute(
+        """
+        insert into routed_notifications(
+          task_id, binding_id, correlation_id, source_session_id, target_session_id,
+          signal_type, source_event_id, source_event_timestamp, dedupe_key, command_id,
+          created_at, state, payload_json
+        )
+        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            task_id,
+            binding_id,
+            correlation_id,
+            source_session_id,
+            target_session_id,
+            signal_type,
+            source_event_id,
+            source_event_timestamp,
+            dedupe_key,
+            command_id,
+            timestamp or now_iso(),
+            state,
+            json.dumps(payload, sort_keys=True),
+        ),
+    )
+    return int(cursor.lastrowid)
+
+
+def finish_routed_notification(
+    conn: sqlite3.Connection,
+    *,
+    notification_id: int,
+    state: str,
+    error: str | None = None,
+    timestamp: str | None = None,
+) -> None:
+    if state not in {"delivered", "failed", "suppressed"}:
+        raise WorkerError(f"invalid routed notification finish state: {state}")
+    delivered_at = (timestamp or now_iso()) if state == "delivered" else None
+    conn.execute(
+        """
+        update routed_notifications
+        set state = ?, delivered_at = ?, error = ?
+        where id = ?
+        """,
+        (state, delivered_at, error, notification_id),
+    )
+
+
+def routed_notifications(conn: sqlite3.Connection, *, task_id: str | None = None) -> list[dict[str, Any]]:
+    query = """
+        select id, task_id, binding_id, correlation_id, source_session_id,
+               target_session_id, signal_type, source_event_id, source_event_timestamp,
+               dedupe_key, command_id, created_at, delivered_at, state, payload_json, error
+        from routed_notifications
+    """
+    params: list[Any] = []
+    if task_id is not None:
+        query += " where task_id = ?"
+        params.append(task_id)
+    query += " order by id"
+    return [
+        {
+            "binding_id": row["binding_id"],
+            "command_id": row["command_id"],
+            "correlation_id": row["correlation_id"],
+            "created_at": row["created_at"],
+            "dedupe_key": row["dedupe_key"],
+            "delivered_at": row["delivered_at"],
+            "error": row["error"],
+            "id": row["id"],
+            "payload": json.loads(row["payload_json"]),
+            "signal_type": row["signal_type"],
+            "source_event_id": row["source_event_id"],
+            "source_event_timestamp": row["source_event_timestamp"],
+            "source_session_id": row["source_session_id"],
+            "state": row["state"],
+            "target_session_id": row["target_session_id"],
+            "task_id": row["task_id"],
+        }
+        for row in conn.execute(query, tuple(params))
+    ]
 
 
 def set_session_ingest_offset(
@@ -2181,6 +2624,325 @@ def latest_worker_handoff(conn: sqlite3.Connection, *, task_id: str) -> dict[str
     }
 
 
+def insert_task_acknowledgement(
+    conn: sqlite3.Connection,
+    *,
+    task_id: str,
+    role: str,
+    payload: dict[str, Any],
+    binding_id: str | None = None,
+    correlation_id: str | None = None,
+    timestamp: str | None = None,
+) -> int:
+    if role not in {"worker", "manager"}:
+        raise WorkerError("ack role must be one of: worker, manager")
+    if not isinstance(payload, dict):
+        raise WorkerError("ack payload must be a JSON object")
+    row = conn.execute(
+        """
+        select max(revision) as revision
+        from task_acknowledgements
+        where task_id = ? and role = ?
+        """,
+        (task_id, role),
+    ).fetchone()
+    revision = int(row["revision"] or 0) + 1
+    cursor = conn.execute(
+        """
+        insert into task_acknowledgements(
+          task_id, binding_id, role, payload_json, revision, created_at, correlation_id
+        )
+        values (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            task_id,
+            binding_id,
+            role,
+            json.dumps(payload, sort_keys=True),
+            revision,
+            timestamp or now_iso(),
+            correlation_id,
+        ),
+    )
+    return int(cursor.lastrowid)
+
+
+def latest_task_acknowledgement(
+    conn: sqlite3.Connection,
+    *,
+    task_id: str,
+    role: str,
+) -> dict[str, Any] | None:
+    row = conn.execute(
+        """
+        select id, task_id, binding_id, role, payload_json, revision, created_at, correlation_id
+        from task_acknowledgements
+        where task_id = ? and role = ?
+        order by revision desc, id desc
+        limit 1
+        """,
+        (task_id, role),
+    ).fetchone()
+    if row is None:
+        return None
+    return {
+        "binding_id": row["binding_id"],
+        "correlation_id": row["correlation_id"],
+        "created_at": row["created_at"],
+        "id": row["id"],
+        "payload": json.loads(row["payload_json"]),
+        "revision": row["revision"],
+        "role": row["role"],
+        "task_id": row["task_id"],
+    }
+
+
+def latest_task_acknowledgements(conn: sqlite3.Connection, *, task_id: str) -> dict[str, Any]:
+    return {
+        "worker": latest_task_acknowledgement(conn, task_id=task_id, role="worker"),
+        "manager": latest_task_acknowledgement(conn, task_id=task_id, role="manager"),
+    }
+
+
+def insert_epilogue_run(
+    conn: sqlite3.Connection,
+    *,
+    task_id: str,
+    step_name: str,
+    state: str,
+    result: dict[str, Any] | None = None,
+    error: str | None = None,
+    correlation_id: str | None = None,
+    started_at: str | None = None,
+    finished_at: str | None = None,
+) -> int:
+    if state not in {"pending", "running", "succeeded", "failed", "skipped"}:
+        raise WorkerError(f"invalid epilogue state: {state}")
+    start = started_at or now_iso()
+    finish = finished_at if finished_at is not None else (now_iso() if state in {"succeeded", "failed", "skipped"} else None)
+    cursor = conn.execute(
+        """
+        insert into epilogue_runs(
+          task_id, step_name, state, started_at, finished_at, result_json, error, correlation_id
+        )
+        values (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            task_id,
+            step_name,
+            state,
+            start,
+            finish,
+            json.dumps(result, sort_keys=True) if result is not None else None,
+            error,
+            correlation_id,
+        ),
+    )
+    return int(cursor.lastrowid)
+
+
+def epilogue_runs(conn: sqlite3.Connection, *, task_id: str) -> list[dict[str, Any]]:
+    rows = conn.execute(
+        """
+        select id, task_id, step_name, state, started_at, finished_at, result_json, error, correlation_id
+        from epilogue_runs
+        where task_id = ?
+        order by id
+        """,
+        (task_id,),
+    ).fetchall()
+    return [
+        {
+            "correlation_id": row["correlation_id"],
+            "error": row["error"],
+            "finished_at": row["finished_at"],
+            "id": row["id"],
+            "result": json.loads(row["result_json"]) if row["result_json"] else None,
+            "started_at": row["started_at"],
+            "state": row["state"],
+            "step_name": row["step_name"],
+            "task_id": row["task_id"],
+        }
+        for row in rows
+    ]
+
+
+def latest_epilogue_runs_by_step(conn: sqlite3.Connection, *, task_id: str) -> dict[str, dict[str, Any]]:
+    latest: dict[str, dict[str, Any]] = {}
+    for row in epilogue_runs(conn, task_id=task_id):
+        latest[row["step_name"]] = row
+    return latest
+
+
+def epilogue_status(conn: sqlite3.Connection, *, task_id: str, required_steps: list[str]) -> dict[str, Any]:
+    latest = latest_epilogue_runs_by_step(conn, task_id=task_id)
+    steps = []
+    for step in required_steps:
+        run = latest.get(step)
+        steps.append(
+            {
+                "latest_run": run,
+                "ok": bool(run and run["state"] == "succeeded"),
+                "state": run["state"] if run else "pending",
+                "step_name": step,
+            }
+        )
+    missing_or_incomplete = [step["step_name"] for step in steps if not step["ok"]]
+    return {
+        "missing_or_incomplete": missing_or_incomplete,
+        "ok": not missing_or_incomplete,
+        "required_steps": required_steps,
+        "steps": steps,
+    }
+
+
+def insert_task_continuation(
+    conn: sqlite3.Connection,
+    *,
+    task_id: str,
+    proposer: str,
+    payload: dict[str, Any],
+    correlation_id: str,
+    timestamp: str | None = None,
+) -> int:
+    if proposer not in {"worker", "manager"}:
+        raise WorkerError("continuation proposer must be worker or manager")
+    if not isinstance(payload, dict):
+        raise WorkerError("continuation payload must be a JSON object")
+    row = conn.execute(
+        "select max(revision) as revision from task_continuations where task_id = ? and proposer = ?",
+        (task_id, proposer),
+    ).fetchone()
+    revision = int(row["revision"] or 0) + 1
+    cursor = conn.execute(
+        """
+        insert into task_continuations(
+          task_id, proposer, payload_json, revision, created_at, correlation_id
+        )
+        values (?, ?, ?, ?, ?, ?)
+        """,
+        (
+            task_id,
+            proposer,
+            json.dumps(payload, sort_keys=True),
+            revision,
+            timestamp or now_iso(),
+            correlation_id,
+        ),
+    )
+    return int(cursor.lastrowid)
+
+
+def task_continuations(conn: sqlite3.Connection, *, task_id: str, correlation_id: str | None = None) -> list[dict[str, Any]]:
+    query = """
+        select id, task_id, proposer, payload_json, revision, created_at, correlation_id
+        from task_continuations
+        where task_id = ?
+    """
+    params: list[Any] = [task_id]
+    if correlation_id is not None:
+        query += " and correlation_id = ?"
+        params.append(correlation_id)
+    query += " order by id"
+    return [
+        {
+            "correlation_id": row["correlation_id"],
+            "created_at": row["created_at"],
+            "id": row["id"],
+            "payload": json.loads(row["payload_json"]),
+            "proposer": row["proposer"],
+            "revision": row["revision"],
+            "task_id": row["task_id"],
+        }
+        for row in conn.execute(query, tuple(params))
+    ]
+
+
+def latest_task_continuation(
+    conn: sqlite3.Connection,
+    *,
+    task_id: str,
+    proposer: str,
+    correlation_id: str | None = None,
+) -> dict[str, Any] | None:
+    rows = task_continuations(conn, task_id=task_id, correlation_id=correlation_id)
+    for row in reversed(rows):
+        if row["proposer"] == proposer:
+            return row
+    return None
+
+
+def insert_continuation_review(
+    conn: sqlite3.Connection,
+    *,
+    task_id: str,
+    worker_continuation_id: int,
+    manager_continuation_id: int,
+    agreement: str,
+    verdict: str,
+    addendum: str | None,
+    rationale: str,
+    subagent_run: dict[str, Any],
+    correlation_id: str,
+    timestamp: str | None = None,
+) -> int:
+    if agreement not in {"match", "compatible", "divergent"}:
+        raise WorkerError("review agreement must be match, compatible, or divergent")
+    if verdict not in {"proceed", "amend", "stop"}:
+        raise WorkerError("review verdict must be proceed, amend, or stop")
+    cursor = conn.execute(
+        """
+        insert into continuation_reviews(
+          task_id, worker_continuation_id, manager_continuation_id, agreement,
+          verdict, addendum, rationale, subagent_run_json, created_at, correlation_id
+        )
+        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            task_id,
+            worker_continuation_id,
+            manager_continuation_id,
+            agreement,
+            verdict,
+            addendum,
+            rationale,
+            json.dumps(subagent_run, sort_keys=True),
+            timestamp or now_iso(),
+            correlation_id,
+        ),
+    )
+    return int(cursor.lastrowid)
+
+
+def continuation_reviews(conn: sqlite3.Connection, *, task_id: str) -> list[dict[str, Any]]:
+    return [
+        {
+            "addendum": row["addendum"],
+            "agreement": row["agreement"],
+            "correlation_id": row["correlation_id"],
+            "created_at": row["created_at"],
+            "id": row["id"],
+            "manager_continuation_id": row["manager_continuation_id"],
+            "rationale": row["rationale"],
+            "subagent_run": json.loads(row["subagent_run_json"]),
+            "task_id": row["task_id"],
+            "verdict": row["verdict"],
+            "worker_continuation_id": row["worker_continuation_id"],
+        }
+        for row in conn.execute(
+            """
+            select id, task_id, worker_continuation_id, manager_continuation_id,
+                   agreement, verdict, addendum, rationale, subagent_run_json,
+                   created_at, correlation_id
+            from continuation_reviews
+            where task_id = ?
+            order by id
+            """,
+            (task_id,),
+        )
+    ]
+
+
 def upsert_manager_config(
     conn: sqlite3.Connection,
     *,
@@ -2191,17 +2953,23 @@ def upsert_manager_config(
     acceptance_criteria: list[str] | None = None,
     reference_paths: list[str] | None = None,
     permissions: dict[str, Any] | None = None,
+    tools: list[str] | None = None,
+    epilogues: list[str] | None = None,
+    nudge_on_completion: str = "ask-operator",
+    require_acks: bool = False,
     timestamp: str | None = None,
 ) -> None:
+    if nudge_on_completion not in {"off", "ask-operator", "auto-review", "auto-proceed"}:
+        raise WorkerError("nudge_on_completion must be off, ask-operator, auto-review, or auto-proceed")
     now = timestamp or now_iso()
     conn.execute(
         """
         insert into manager_configs(
           task_id, supervision_mode, objective, guidelines_json,
-          acceptance_criteria_json, reference_paths_json, permissions_json,
+          acceptance_criteria_json, reference_paths_json, permissions_json, tools_json, epilogues_json, nudge_on_completion, require_acks,
           created_at, updated_at
         )
-        values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         on conflict(task_id) do update set
           supervision_mode = excluded.supervision_mode,
           objective = excluded.objective,
@@ -2209,6 +2977,10 @@ def upsert_manager_config(
           acceptance_criteria_json = excluded.acceptance_criteria_json,
           reference_paths_json = excluded.reference_paths_json,
           permissions_json = excluded.permissions_json,
+          tools_json = excluded.tools_json,
+          epilogues_json = excluded.epilogues_json,
+          nudge_on_completion = excluded.nudge_on_completion,
+          require_acks = excluded.require_acks,
           updated_at = excluded.updated_at
         """,
         (
@@ -2218,7 +2990,11 @@ def upsert_manager_config(
             json.dumps(guidelines or [], sort_keys=True),
             json.dumps(acceptance_criteria or [], sort_keys=True),
             json.dumps(reference_paths or [], sort_keys=True),
-            json.dumps(permissions or {}, sort_keys=True),
+            json.dumps(normalize_manager_permissions_json(permissions), sort_keys=True),
+            json.dumps(tools or [], sort_keys=True),
+            json.dumps(epilogues or [], sort_keys=True),
+            nudge_on_completion,
+            1 if require_acks else 0,
             now,
             now,
         ),
@@ -2229,7 +3005,7 @@ def manager_config(conn: sqlite3.Connection, *, task_id: str) -> dict[str, Any] 
     row = conn.execute(
         """
         select task_id, supervision_mode, objective, guidelines_json,
-               acceptance_criteria_json, reference_paths_json, permissions_json,
+               acceptance_criteria_json, reference_paths_json, permissions_json, tools_json, epilogues_json, nudge_on_completion, require_acks,
                created_at, updated_at
         from manager_configs
         where task_id = ?
@@ -2241,12 +3017,16 @@ def manager_config(conn: sqlite3.Connection, *, task_id: str) -> dict[str, Any] 
     return {
         "acceptance_criteria": json.loads(row["acceptance_criteria_json"]),
         "created_at": row["created_at"],
+        "epilogues": json.loads(row["epilogues_json"]),
         "guidelines": json.loads(row["guidelines_json"]),
+        "nudge_on_completion": row["nudge_on_completion"],
         "objective": row["objective"],
-        "permissions": json.loads(row["permissions_json"]),
+        "permissions": normalize_manager_permissions_json(json.loads(row["permissions_json"])),
         "reference_paths": json.loads(row["reference_paths_json"]),
+        "require_acks": bool(row["require_acks"]),
         "supervision_mode": row["supervision_mode"],
         "task_id": row["task_id"],
+        "tools": json.loads(row["tools_json"]),
         "updated_at": row["updated_at"],
     }
 
@@ -3230,9 +4010,37 @@ def task_audit(conn: sqlite3.Connection, *, task: str) -> dict[str, Any]:
         """,
         (task_row["id"],),
     ).fetchall()
+    acknowledgement_rows = conn.execute(
+        """
+        select id, task_id, binding_id, role, payload_json, revision, created_at, correlation_id
+        from task_acknowledgements
+        where task_id = ?
+        order by created_at, id
+        """,
+        (task_row["id"],),
+    ).fetchall()
+    continuation_rows = task_continuations(conn, task_id=task_row["id"])
+    continuation_review_rows = continuation_reviews(conn, task_id=task_row["id"])
+    epilogue_rows = epilogue_runs(conn, task_id=task_row["id"])
     criteria = acceptance_criteria_for_task(conn, task_id=task_row["id"])
     return {
         "acceptance_criteria": criteria,
+        "continuation_reviews": continuation_review_rows,
+        "task_continuations": continuation_rows,
+        "epilogue_runs": epilogue_rows,
+        "task_acknowledgements": [
+            {
+                "binding_id": row["binding_id"],
+                "correlation_id": row["correlation_id"],
+                "created_at": row["created_at"],
+                "id": row["id"],
+                "payload": json.loads(row["payload_json"]),
+                "revision": row["revision"],
+                "role": row["role"],
+                "task_id": row["task_id"],
+            }
+            for row in acknowledgement_rows
+        ],
         "commands": [
             {
                 "created_at": row["created_at"],

@@ -263,8 +263,27 @@ def run_cycle(
         conn, session_id=binding["worker_session_id"]
     )
     criteria_context = _acceptance_criteria_context(conn, task_id=binding["task_id"])
+    manager_config = worker_db.manager_config(conn, task_id=binding["task_id"])
+    worker_ack = worker_db.latest_task_acknowledgement(
+        conn, task_id=binding["task_id"], role="worker"
+    )
+    manager_ack = worker_db.latest_task_acknowledgement(
+        conn, task_id=binding["task_id"], role="manager"
+    )
+    if manager_config and manager_config.get("require_acks") and (worker_ack is None or manager_ack is None):
+        missing = [
+            role
+            for role, ack in (("worker", worker_ack), ("manager", manager_ack))
+            if ack is None
+        ]
+        raise WorkerError(
+            "cycle requires acknowledgement(s) before first observation: "
+            + ", ".join(missing)
+        )
     manager_context = {
-        "manager_config": worker_db.manager_config(conn, task_id=binding["task_id"]),
+        "manager_config": manager_config,
+        "worker_ack": worker_ack,
+        "manager_ack": manager_ack,
         "worker_handoff": worker_db.latest_worker_handoff(conn, task_id=binding["task_id"]),
         "acceptance_criteria": criteria_context,
         "criteria_negotiation": _criteria_negotiation_context(
