@@ -8,7 +8,7 @@ goal:
   slug: "continuation-reviewer-hard-isolation"
   kind: specific
   tranche: "Implement issue #130 by adding an enforced isolation boundary for continuation-reviewer execution."
-  status: active
+  status: done
   oracle:
     signal: "Source, tests, docs, and final audit prove continuation-reviewer uses an enforced sandbox or equivalent isolation, not just restricted context metadata."
     cadence: "after Scout/Judge design, after Worker implementation, and at final audit"
@@ -63,7 +63,7 @@ visual_board:
     url: "http://goalbuddy.localhost:41737/continuation-reviewer-hard-isolation/"
     command: "npx goalbuddy board /Users/neonwatty/Desktop/codex-terminal-manager/docs/goals/continuation-reviewer-hard-isolation"
 
-active_task: T998
+active_task: null
 
 tasks:
   - id: T001
@@ -195,7 +195,7 @@ tasks:
   - id: T998
     type: pm
     assignee: PM
-    status: active
+    status: done
     reasoning_hint: default
     objective: "Update or close GitHub issue #130 only after implementation evidence and verification are present."
     inputs:
@@ -208,12 +208,18 @@ tasks:
     expected_output:
       - "Issue comment or closure for #130 with verification summary."
       - "Receipt linking issue hygiene to local verification."
-    receipt: null
+    receipt:
+      result: done
+      note: "notes/T998-issue-hygiene.md"
+      summary: "Opened PR #132 linked with Closes #130 and commented on issue #130 with implementation and verification evidence."
+      external_artifacts:
+        pr: "https://github.com/neonwatty/codex-terminal-manager/pull/132"
+        issue_comment: "https://github.com/neonwatty/codex-terminal-manager/issues/130#issuecomment-4526754725"
 
   - id: T999
     type: judge
     assignee: Judge
-    status: queued
+    status: done
     reasoning_hint: high
     objective: "Final audit: decide whether #130 hard isolation is complete."
     inputs:
@@ -233,7 +239,13 @@ tasks:
       - "full_outcome_complete: true | false"
       - "Acceptance-criterion evidence matrix."
       - "Missing evidence and next task if not complete."
-    receipt: null
+    receipt:
+      result: done
+      note: "notes/T999-final-audit.md"
+      decision: complete
+      full_outcome_complete: true
+      summary: "Final audit accepted #130 completion: enforced macOS sandbox-exec isolation, direct denial tests, failure-to-stop routing, docs, local verification, CI checks, and PR/issue hygiene are all present."
+      merge_recommendation: "Merge PR #132; issue #130 should close through linked Closes automation after merge."
 
 checks:
   dirty_fingerprint: unknown
