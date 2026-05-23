@@ -11,6 +11,7 @@ import subprocess
 import sys
 import time
 import uuid
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
@@ -1783,16 +1784,605 @@ def telemetry_snapshot(conn: Any, *, task: str, limit: int = 10) -> dict[str, An
     }
 
 
+def _database_file_size(conn: Any) -> int:
+    row = conn.execute("pragma database_list").fetchone()
+    if not row:
+        return 0
+    path = row["file"] if "file" in row.keys() else row[2]
+    if not path:
+        return 0
+    db_path = Path(path)
+    return db_path.stat().st_size if db_path.exists() else 0
+
+
+def _active_task_summaries(conn: Any) -> list[dict[str, Any]]:
+    rows = conn.execute(
+        """
+        select id, name, state, summary, created_at, updated_at
+        from tasks
+        where state in ('candidate', 'managed', 'paused')
+        order by updated_at desc, name
+        """
+    ).fetchall()
+    return [
+        {
+            "created_at": row["created_at"],
+            "id": row["id"],
+            "name": row["name"],
+            "state": row["state"],
+            "summary": row["summary"],
+            "updated_at": row["updated_at"],
+        }
+        for row in rows
+    ]
+
+
+def _active_session_summaries(conn: Any, *, worker_staleness_seconds: float) -> dict[str, Any]:
+    sessions = []
+    stale = []
+    for row in conn.execute(
+        """
+        select id, name, role, pid, cwd, tmux_session, tmux_pane_id, last_heartbeat_at, registered_at
+        from sessions
+        where state = 'active'
+        order by role, name
+        """
+    ):
+        heartbeat_age = age_seconds(row["last_heartbeat_at"])
+        item = {
+            "cwd": row["cwd"],
+            "heartbeat_age_seconds": heartbeat_age,
+            "id": row["id"],
+            "last_heartbeat_at": row["last_heartbeat_at"],
+            "name": row["name"],
+            "pid": row["pid"],
+            "registered_at": row["registered_at"],
+            "role": row["role"],
+            "tmux_pane_id": row["tmux_pane_id"],
+            "tmux_session": row["tmux_session"],
+        }
+        sessions.append(item)
+        if heartbeat_age is not None and heartbeat_age > worker_staleness_seconds:
+            stale.append(item)
+    return {
+        "active": sessions,
+        "active_count": len(sessions),
+        "stale": stale,
+        "stale_count": len(stale),
+    }
+
+
+def _operator_commands_snapshot(conn: Any, *, limit: int) -> dict[str, Any]:
+    counts = conn.execute(
+        """
+        select
+          sum(case when state in ('pending', 'attempted') then 1 else 0 end) as unfinished_count,
+          sum(case when state = 'failed' then 1 else 0 end) as failed_count
+        from commands
+        """
+    ).fetchone()
+    failed = conn.execute(
+        """
+        select c.id, c.task_id, t.name as task_name, c.type, c.state, c.created_at, c.updated_at,
+               c.claimed_by, c.attempts, c.error
+        from commands c
+        left join tasks t on t.id = c.task_id
+        where c.state = 'failed'
+        order by c.updated_at desc, c.created_at desc
+        limit ?
+        """,
+        (limit,),
+    ).fetchall()
+    unfinished = conn.execute(
+        """
+        select c.id, c.task_id, t.name as task_name, c.type, c.state, c.created_at, c.updated_at,
+               c.claimed_by, c.attempts
+        from commands c
+        left join tasks t on t.id = c.task_id
+        where c.state in ('pending', 'attempted')
+        order by c.updated_at desc, c.created_at desc
+        limit ?
+        """,
+        (limit,),
+    ).fetchall()
+    return {
+        "failed_count": int(counts["failed_count"] or 0),
+        "recent_failed": [dict(row) for row in failed],
+        "recent_unfinished": [dict(row) for row in unfinished],
+        "unfinished_count": int(counts["unfinished_count"] or 0),
+    }
+
+
+def _operator_cycles_snapshot(conn: Any, *, stale_cycles_seconds: float, limit: int) -> dict[str, Any]:
+    report = collect_reconcile_report(conn, stale_cycles_seconds=stale_cycles_seconds)
+    failed = conn.execute(
+        """
+        select mc.id, mc.task_id, t.name as task_name, mc.started_at, mc.completed_at,
+               mc.state, mc.decision, mc.error
+        from manager_cycles mc
+        left join tasks t on t.id = mc.task_id
+        where mc.state = 'failed'
+        order by coalesce(mc.completed_at, mc.started_at) desc, mc.id desc
+        limit ?
+        """,
+        (limit,),
+    ).fetchall()
+    return {
+        "recent_failed": [dict(row) for row in failed],
+        "recent_failed_count": len(failed),
+        "stale": report["stuck_tasks"],
+        "stale_count": len(report["stuck_tasks"]),
+    }
+
+
+def _operator_criteria_snapshot(conn: Any, *, limit: int) -> dict[str, Any]:
+    rows = conn.execute(
+        """
+        select ac.id, ac.task_id, t.name as task_name, ac.status, ac.source, ac.created_at, ac.updated_at
+        from acceptance_criteria ac
+        left join tasks t on t.id = ac.task_id
+        where ac.status = 'accepted'
+        order by ac.updated_at desc, ac.id desc
+        limit ?
+        """,
+        (limit,),
+    ).fetchall()
+    counts = conn.execute(
+        """
+        select status, count(*) as count
+        from acceptance_criteria
+        group by status
+        """
+    ).fetchall()
+    by_status = {row["status"]: int(row["count"]) for row in counts}
+    return {
+        "by_status": by_status,
+        "open_accepted": [dict(row) for row in rows],
+        "open_accepted_count": int(by_status.get("accepted", 0)),
+    }
+
+
+def telemetry_operator_snapshot(
+    conn: Any,
+    *,
+    stale_cycle_seconds: float = 3600.0,
+    worker_staleness_seconds: float = 3600.0,
+    max_unfinished_commands: int = 0,
+    max_open_criteria: int = 0,
+    max_storage_bytes: int | None = None,
+    limit: int = 10,
+) -> dict[str, Any]:
+    report = collect_reconcile_report(conn, stale_cycles_seconds=stale_cycle_seconds)
+    tasks = _active_task_summaries(conn)
+    sessions = _active_session_summaries(conn, worker_staleness_seconds=worker_staleness_seconds)
+    cycles = _operator_cycles_snapshot(conn, stale_cycles_seconds=stale_cycle_seconds, limit=limit)
+    commands = _operator_commands_snapshot(conn, limit=limit)
+    criteria = _operator_criteria_snapshot(conn, limit=limit)
+    database_bytes = _database_file_size(conn)
+    storage = {
+        "database_bytes": database_bytes,
+        "total_bytes": database_bytes,
+    }
+    thresholds = {
+        "max_open_criteria": max_open_criteria,
+        "max_storage_bytes": max_storage_bytes,
+        "max_unfinished_commands": max_unfinished_commands,
+        "stale_cycle_seconds": stale_cycle_seconds,
+        "worker_staleness_seconds": worker_staleness_seconds,
+    }
+
+    alerts: list[dict[str, Any]] = []
+    if not report["schema_health"].get("ok"):
+        alerts.append({"message": "Database schema health is not OK.", "severity": "error", "type": "schema_health"})
+    if report["dead_pid_sessions"]:
+        alerts.append({
+            "message": f"{len(report['dead_pid_sessions'])} active sessions have dead or missing pids.",
+            "severity": "error",
+            "type": "dead_pid_sessions",
+        })
+    if report["dangling_bindings"]:
+        alerts.append({
+            "message": f"{len(report['dangling_bindings'])} bindings reference gone sessions.",
+            "severity": "error",
+            "type": "reconcile_drift",
+        })
+    if cycles["stale_count"]:
+        alerts.append({
+            "message": f"{cycles['stale_count']} active tasks have stale manager cycles.",
+            "severity": "warning",
+            "type": "stale_cycles",
+        })
+    if sessions["stale_count"]:
+        alerts.append({
+            "message": f"{sessions['stale_count']} active sessions have stale heartbeats.",
+            "severity": "warning",
+            "type": "stale_sessions",
+        })
+    if commands["unfinished_count"] > max_unfinished_commands:
+        alerts.append({
+            "message": f"{commands['unfinished_count']} unfinished commands exceeds threshold {max_unfinished_commands}.",
+            "severity": "warning",
+            "type": "unfinished_commands",
+        })
+    if criteria["open_accepted_count"] > max_open_criteria:
+        alerts.append({
+            "message": f"{criteria['open_accepted_count']} open accepted criteria exceeds threshold {max_open_criteria}.",
+            "severity": "warning",
+            "type": "open_accepted_criteria",
+        })
+    if max_storage_bytes is not None and storage["total_bytes"] > max_storage_bytes:
+        alerts.append({
+            "message": f"{storage['total_bytes']} storage bytes exceeds threshold {max_storage_bytes}.",
+            "severity": "warning",
+            "type": "storage_bytes",
+        })
+    if cycles["recent_failed"]:
+        alerts.append({
+            "message": f"{len(cycles['recent_failed'])} recent manager cycles failed.",
+            "severity": "error",
+            "type": "failed_cycles",
+        })
+    if commands["failed_count"]:
+        alerts.append({
+            "message": f"{commands['failed_count']} commands failed.",
+            "severity": "error",
+            "type": "failed_commands",
+        })
+
+    return {
+        "alerts": alerts,
+        "checks": {
+            "ok": not alerts,
+            "thresholds": thresholds,
+        },
+        "commands": commands,
+        "criteria": criteria,
+        "cycles": cycles,
+        "reconcile": {
+            "dangling_bindings": report["dangling_bindings"],
+            "dead_pid_sessions": report["dead_pid_sessions"],
+            "schema_health": report["schema_health"],
+            "stuck_tasks": report["stuck_tasks"],
+        },
+        "sessions": {
+            **sessions,
+            "dead_pid_count": len(report["dead_pid_sessions"]),
+            "dead_pid_sessions": report["dead_pid_sessions"],
+        },
+        "storage": storage,
+        "tasks": {
+            "active": tasks,
+            "active_count": len(tasks),
+        },
+    }
+
+
+_TELEMETRY_METRICS_WINDOW_RE = re.compile(r"^(?P<count>[1-9][0-9]*)(?P<unit>[smhdw])$")
+_METRICS_CRITERIA_STATUSES = ("proposed", "accepted", "satisfied", "deferred", "rejected")
+_METRICS_COMMAND_STATES = ("pending", "attempted", "succeeded", "failed")
+_METRICS_ATTEMPT_STATES = ("running", "succeeded", "failed", "abandoned")
+
+
+def _metrics_parse_window(window: str) -> tuple[int, str]:
+    value = (window or "").strip().lower()
+    match = _TELEMETRY_METRICS_WINDOW_RE.match(value)
+    if not match:
+        raise WorkerError("--window must be a positive duration like 30m, 24h, or 7d")
+    count = int(match.group("count"))
+    unit = match.group("unit")
+    return count * {"s": 1, "m": 60, "h": 3600, "d": 86400, "w": 604800}[unit], value
+
+
+def _metrics_iso(dt: datetime) -> str:
+    return dt.astimezone(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _metrics_count_rows(rows: Any, *, keys: tuple[str, ...]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for row in rows:
+        cursor = result
+        for key in keys[:-1]:
+            label = row[key] or "unknown"
+            cursor = cursor.setdefault(label, {})
+        label = row[keys[-1]] or "unknown"
+        cursor[label] = int(row["count"])
+    return result
+
+
+def _metrics_sum_row(row: Any, key: str) -> int:
+    value = row[key] if row is not None else None
+    return int(value or 0)
+
+
+def _telemetry_metrics(
+    conn: Any,
+    *,
+    db_path: Path,
+    window: str,
+    run_id: str | None = None,
+    task_id: str | None = None,
+) -> dict[str, Any]:
+    seconds, window_label = _metrics_parse_window(window)
+    end = datetime.now(timezone.utc)
+    start = end - timedelta(seconds=seconds)
+    start_iso = _metrics_iso(start)
+    end_iso = _metrics_iso(end)
+
+    event_filters = ["timestamp >= ?", "timestamp <= ?"]
+    event_params: list[Any] = [start_iso, end_iso]
+    row_filters: list[str] = []
+    row_params: list[Any] = []
+    if run_id is not None:
+        event_filters.append("run_id = ?")
+        event_params.append(run_id)
+    if task_id is not None:
+        event_filters.append("task_id = ?")
+        event_params.append(task_id)
+        row_filters.append("task_id = ?")
+        row_params.append(task_id)
+    event_where = " and ".join(event_filters)
+    row_where = (" and " + " and ".join(row_filters)) if row_filters else ""
+
+    telemetry_rows = conn.execute(
+        f"""
+        select actor, event_type, severity, count(*) as count
+        from telemetry_events
+        where {event_where}
+        group by actor, event_type, severity
+        """,
+        event_params,
+    ).fetchall()
+    telemetry_by_actor = _metrics_count_rows(
+        conn.execute(f"select actor, count(*) as count from telemetry_events where {event_where} group by actor", event_params).fetchall(),
+        keys=("actor",),
+    )
+    telemetry_by_event_type = _metrics_count_rows(
+        conn.execute(f"select event_type, count(*) as count from telemetry_events where {event_where} group by event_type", event_params).fetchall(),
+        keys=("event_type",),
+    )
+    telemetry_by_severity = _metrics_count_rows(
+        conn.execute(f"select severity, count(*) as count from telemetry_events where {event_where} group by severity", event_params).fetchall(),
+        keys=("severity",),
+    )
+
+    cycle_rows = conn.execute(
+        f"""
+        select state, count(*) as count
+        from manager_cycles
+        where started_at >= ? and started_at <= ?{row_where}
+        group by state
+        """,
+        [start_iso, end_iso, *row_params],
+    ).fetchall()
+    cycles_by_state = {row["state"]: int(row["count"]) for row in cycle_rows}
+    cycle_success = cycles_by_state.get("succeeded", 0)
+    cycle_failure = cycles_by_state.get("failed", 0)
+    cycle_finished = cycle_success + cycle_failure
+
+    commands_by_type: dict[str, dict[str, Any]] = {}
+    for row in conn.execute(
+        f"""
+        select type, state, count(*) as count
+        from commands
+        where created_at >= ? and created_at <= ?{row_where}
+        group by type, state
+        """,
+        [start_iso, end_iso, *row_params],
+    ).fetchall():
+        bucket = commands_by_type.setdefault(row["type"], {state: 0 for state in _METRICS_COMMAND_STATES})
+        bucket[row["state"]] = int(row["count"])
+
+    command_attempts_by_type: dict[str, dict[str, Any]] = {}
+    for row in conn.execute(
+        f"""
+        select commands.type, command_attempts.state, count(*) as count
+        from command_attempts
+        join commands on commands.id = command_attempts.command_id
+        where command_attempts.started_at >= ? and command_attempts.started_at <= ?{row_where}
+        group by commands.type, command_attempts.state
+        """,
+        [start_iso, end_iso, *row_params],
+    ).fetchall():
+        bucket = command_attempts_by_type.setdefault(row["type"], {state: 0 for state in _METRICS_ATTEMPT_STATES})
+        bucket[row["state"]] = int(row["count"])
+
+    ingest_row = conn.execute(
+        f"""
+        select
+          sum(coalesce(json_extract(attributes_json, '$.new_events'), 0)) as new_events,
+          sum(coalesce(json_extract(attributes_json, '$.skipped_lines'), 0)) as skipped_lines
+        from telemetry_events
+        where {event_where} and event_type = 'codex_events_ingested'
+        """,
+        event_params,
+    ).fetchone()
+    pane_capture = {"succeeded": 0, "failed": 0, "unknown": 0}
+    for row in conn.execute(
+        f"""
+        select
+          case json_extract(status_json, '$.pane_signal.captured')
+            when 1 then 'succeeded'
+            when 0 then 'failed'
+            else 'unknown'
+          end as state,
+          count(*) as count
+        from manager_cycles
+        where started_at >= ? and started_at <= ?{row_where}
+        group by state
+        """,
+        [start_iso, end_iso, *row_params],
+    ).fetchall():
+        pane_capture[row["state"]] = int(row["count"])
+
+    criteria_clause = "where task_id = ?" if task_id is not None else ""
+    criteria_params = [task_id] if task_id is not None else []
+    criteria_counts = {status: 0 for status in _METRICS_CRITERIA_STATUSES}
+    for row in conn.execute(
+        f"select status, count(*) as count from acceptance_criteria {criteria_clause} group by status",
+        criteria_params,
+    ).fetchall():
+        criteria_counts[row["status"]] = int(row["count"])
+
+    storage_filters = "where task_id = ?" if task_id is not None else ""
+    storage_params = [task_id] if task_id is not None else []
+    terminal_bytes = _metrics_sum_row(conn.execute(f"select sum(byte_count) as bytes from terminal_captures {storage_filters}", storage_params).fetchone(), "bytes")
+    segment_bytes = _metrics_sum_row(conn.execute(f"select sum(byte_count) as bytes from transcript_segments {storage_filters}", storage_params).fetchone(), "bytes")
+    transcript_capture_sql = "select sum(byte_count) as bytes from transcript_captures"
+    transcript_capture_params: list[Any] = []
+    if task_id is not None:
+        transcript_capture_sql = """
+            select sum(transcript_captures.byte_count) as bytes
+            from transcript_captures
+            join bindings on bindings.worker_id = transcript_captures.worker_id
+            where bindings.task_id = ?
+        """
+        transcript_capture_params.append(task_id)
+    transcript_capture_bytes = _metrics_sum_row(conn.execute(transcript_capture_sql, transcript_capture_params).fetchone(), "bytes")
+
+    try:
+        database_file_bytes = db_path.stat().st_size
+    except OSError:
+        database_file_bytes = 0
+    reconcile = collect_reconcile_report(conn)
+    active_task_clause = "where state in ('candidate', 'managed', 'paused')"
+    active_task_params: list[Any] = []
+    if task_id is not None:
+        active_task_clause += " and id = ?"
+        active_task_params.append(task_id)
+    active_tasks = int(conn.execute(f"select count(*) from tasks {active_task_clause}", active_task_params).fetchone()[0])
+    active_sessions_by_role = {
+        row["role"]: int(row["count"])
+        for row in conn.execute("select role, count(*) as count from sessions where state = 'active' group by role").fetchall()
+    }
+    export_count = int(
+        conn.execute(
+            f"""
+            select count(*)
+            from telemetry_events
+            where {event_where}
+              and (event_type like 'export_%' or event_type like '%_exported')
+            """,
+            event_params,
+        ).fetchone()[0]
+    )
+
+    return {
+        "schema_version": 1,
+        "generated_at": end_iso,
+        "filters": {"run_id": run_id, "task_id": task_id},
+        "window": {"end": end_iso, "label": window_label, "seconds": seconds, "start": start_iso},
+        "counters": {
+            "cycles": {
+                "failed": cycle_failure,
+                "started": cycles_by_state.get("started", 0),
+                "succeeded": cycle_success,
+                "total": sum(cycles_by_state.values()),
+            },
+            "exports": {"total": export_count},
+            "ingest": {
+                "new_events": _metrics_sum_row(ingest_row, "new_events"),
+                "skipped_lines": _metrics_sum_row(ingest_row, "skipped_lines"),
+            },
+            "pane_capture": pane_capture,
+            "telemetry_events": {
+                "by_actor": telemetry_by_actor,
+                "by_actor_event_type_severity": _metrics_count_rows(telemetry_rows, keys=("actor", "event_type", "severity")),
+                "by_event_type": telemetry_by_event_type,
+                "by_severity": telemetry_by_severity,
+                "total": sum(telemetry_by_actor.values()),
+            },
+        },
+        "gauges": {
+            "active_sessions": {
+                "by_role": {
+                    "manager": active_sessions_by_role.get("manager", 0),
+                    "worker": active_sessions_by_role.get("worker", 0),
+                },
+                "total": sum(active_sessions_by_role.values()),
+            },
+            "active_tasks": active_tasks,
+            "criteria": {
+                "by_status": criteria_counts,
+                "open": criteria_counts["proposed"] + criteria_counts["accepted"],
+                "total": sum(criteria_counts.values()),
+            },
+            "reconcile": {
+                "dangling_bindings": len(reconcile["dangling_bindings"]),
+                "dead_pid_sessions": len(reconcile["dead_pid_sessions"]),
+                "stuck_tasks": len(reconcile["stuck_tasks"]),
+                "total_drift": len(reconcile["dangling_bindings"]) + len(reconcile["dead_pid_sessions"]) + len(reconcile["stuck_tasks"]),
+            },
+            "storage_bytes": {
+                "database_file": database_file_bytes,
+                "terminal_captures": terminal_bytes,
+                "transcript_captures": transcript_capture_bytes,
+                "transcript_segments": segment_bytes,
+                "total_retained": terminal_bytes + transcript_capture_bytes + segment_bytes,
+            },
+        },
+        "rollups": {
+            "command_attempts_by_type": command_attempts_by_type,
+            "commands_by_type": commands_by_type,
+            "cycle_success_rate": (cycle_success / cycle_finished) if cycle_finished else None,
+        },
+    }
+
+
 def command_telemetry(args: argparse.Namespace) -> int:
     db_path = Path(args.path).expanduser().resolve() if args.path else None
     with connect_db(db_path) as conn:
         initialize_database(conn)
+        if getattr(args, "view", None) == "metrics":
+            run_id = db_run_row(conn, run=args.run)["id"] if args.run else None
+            task_id = db_task_row(conn, task=args.task)["id"] if args.task else None
+            result = _telemetry_metrics(
+                conn,
+                db_path=db_path or default_db_path(),
+                window=args.window,
+                run_id=run_id,
+                task_id=task_id,
+            )
+            if args.json:
+                print(json.dumps(result, indent=2, sort_keys=True))
+            else:
+                print(f"window: {result['window']['label']}")
+                print(f"telemetry_events: {result['counters']['telemetry_events']['total']}")
+                print(f"cycle_success_rate: {result['rollups']['cycle_success_rate']}")
+                print(f"skipped_ingest_lines: {result['counters']['ingest']['skipped_lines']}")
+            return 0
         if getattr(args, "view", None) == "snapshot":
-            if not args.task:
-                raise WorkerError("telemetry snapshot requires --task")
-            result = telemetry_snapshot(conn, task=args.task, limit=args.limit)
+            if args.task:
+                result = telemetry_snapshot(conn, task=args.task, limit=args.limit)
+            else:
+                result = telemetry_operator_snapshot(
+                    conn,
+                    stale_cycle_seconds=args.stale_cycle_seconds,
+                    worker_staleness_seconds=args.worker_staleness_seconds,
+                    max_unfinished_commands=args.max_unfinished_commands,
+                    max_open_criteria=args.max_open_criteria,
+                    max_storage_bytes=args.max_storage_bytes,
+                    limit=args.limit,
+                )
             print(json.dumps(result, indent=2, sort_keys=True, default=str))
             return 0
+        if getattr(args, "view", None) == "check":
+            result = telemetry_operator_snapshot(
+                conn,
+                stale_cycle_seconds=args.stale_cycle_seconds,
+                worker_staleness_seconds=args.worker_staleness_seconds,
+                max_unfinished_commands=args.max_unfinished_commands,
+                max_open_criteria=args.max_open_criteria,
+                max_storage_bytes=args.max_storage_bytes,
+                limit=args.limit,
+            )
+            if args.json:
+                print(json.dumps(result, indent=2, sort_keys=True, default=str))
+            else:
+                status = "healthy" if result["checks"]["ok"] else "unhealthy"
+                print(f"telemetry check: {status}")
+                for alert in result["alerts"]:
+                    print(f"{alert['severity']}: {alert['type']}: {alert['message']}")
+            return 0 if result["checks"]["ok"] else 1
         run_id = None
         task_id = None
         if args.run:
