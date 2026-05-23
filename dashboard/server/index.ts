@@ -64,7 +64,12 @@ type DiscoverResult = {
 
 type SnapshotResult = {
   alerts?: Array<{ message?: string; severity?: string; type?: string }>;
+  commands?: {
+    failed_count?: number;
+    unfinished_count?: number;
+  };
   latest_cycle?: { state?: string } | null;
+  manager?: { last_heartbeat_at?: string | null } | null;
   task?: { goal?: string; name?: string; state?: string } | null;
   telemetry?: {
     recent?: Array<{
@@ -77,6 +82,52 @@ type SnapshotResult = {
       timestamp?: string;
     }>;
   };
+  worker?: { last_heartbeat_at?: string | null } | null;
+};
+
+type AuditCommand = {
+  available_at?: string | null;
+  claim_expires_at?: string | null;
+  claimed_at?: string | null;
+  claimed_by?: string | null;
+  correlation_id?: string | null;
+  created_at?: string;
+  error?: string | null;
+  id?: string;
+  state?: string;
+  type?: string;
+  updated_at?: string;
+};
+
+type AuditCommandAttempt = {
+  command_id?: string;
+  correlation_id?: string | null;
+  dispatcher_id?: string | null;
+  error?: string | null;
+  finished_at?: string | null;
+  id?: number;
+  side_effect_completed?: boolean;
+  side_effect_started?: boolean;
+  started_at?: string;
+  state?: string;
+};
+
+type AuditCorrelationChain = {
+  attempt_ids?: number[];
+  command_id?: string;
+  command_state?: string;
+  command_type?: string;
+  correlation_id?: string | null;
+  manager_cycle_id?: number | null;
+  manager_decision_id?: number | null;
+  routed_notification_ids?: number[];
+};
+
+type AuditResult = {
+  command_attempts?: AuditCommandAttempt[];
+  commands?: AuditCommand[];
+  correlation_chains?: AuditCorrelationChain[];
+  routed_notifications?: Array<Record<string, unknown>>;
 };
 
 function isDashboardSession(session: Record<string, unknown>): boolean {
@@ -126,6 +177,97 @@ function terminalState(terminal: (typeof DASHBOARD_TERMINALS)[number], sessions:
     } : null,
     role: registeredRole || "shell",
     tmux_session: terminal.tmuxSession,
+  };
+}
+
+function isExpiredTimestamp(value: unknown, now: number): boolean {
+  if (typeof value !== "string" || !value) {
+    return false;
+  }
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) && timestamp < now;
+}
+
+function latestDispatchHeartbeat(snapshot: SnapshotResult | null) {
+  const heartbeats = (snapshot?.telemetry?.recent || [])
+    .filter((event) => event.event_type === "dispatch_watch_heartbeat")
+    .sort((left, right) => Date.parse(String(right.timestamp || "")) - Date.parse(String(left.timestamp || "")));
+  const heartbeat = heartbeats[0];
+  if (!heartbeat) {
+    return null;
+  }
+  const timestamp = heartbeat.timestamp || "";
+  const parsedTimestamp = Date.parse(timestamp);
+  const ageSeconds = Number.isFinite(parsedTimestamp)
+    ? Math.max(0, Math.round((Date.now() - parsedTimestamp) / 1000))
+    : null;
+  return {
+    dispatcher_id: typeof heartbeat.correlation?.dispatcher_id === "string" ? heartbeat.correlation.dispatcher_id : undefined,
+    dry_run: typeof heartbeat.attributes?.dry_run === "boolean" ? heartbeat.attributes.dry_run : undefined,
+    iteration: typeof heartbeat.correlation?.iteration === "number" ? heartbeat.correlation.iteration : undefined,
+    processed_count: typeof heartbeat.attributes?.processed_count === "number" ? heartbeat.attributes.processed_count : undefined,
+    stale: ageSeconds === null ? false : ageSeconds > 30,
+    stale_seconds: ageSeconds,
+    timestamp,
+  };
+}
+
+function commandLabel(command: AuditCommand | undefined, commandId: string | undefined): string {
+  const type = command?.type || "command";
+  const id = command?.id || commandId || "";
+  return id ? `${type} ${id}` : type;
+}
+
+function dispatchChainEntries(audit: AuditResult | null) {
+  const commandsById = new Map((audit?.commands || []).map((command) => [String(command.id), command]));
+  const attemptsByCommand = new Map<string, AuditCommandAttempt[]>();
+  for (const attempt of audit?.command_attempts || []) {
+    if (attempt.command_id) {
+      attemptsByCommand.set(attempt.command_id, [...(attemptsByCommand.get(attempt.command_id) || []), attempt]);
+    }
+  }
+  return (audit?.correlation_chains || []).slice(-12).reverse().map((chain) => {
+    const command = chain.command_id ? commandsById.get(chain.command_id) : undefined;
+    const attempts = chain.command_id ? attemptsByCommand.get(chain.command_id) || [] : [];
+    const riskyAttempts = attempts.filter((attempt) => attempt.side_effect_started && !attempt.side_effect_completed);
+    return {
+      attempts: attempts.map((attempt) => ({
+        dispatcher_id: attempt.dispatcher_id,
+        error: attempt.error,
+        id: attempt.id,
+        side_effect_completed: Boolean(attempt.side_effect_completed),
+        side_effect_started: Boolean(attempt.side_effect_started),
+        state: attempt.state,
+      })),
+      command_id: chain.command_id,
+      command_state: chain.command_state || command?.state,
+      command_type: chain.command_type || command?.type,
+      correlation_id: chain.correlation_id || command?.correlation_id,
+      key: `chain-${chain.command_id || chain.correlation_id}`,
+      manager_cycle_id: chain.manager_cycle_id,
+      manager_decision_id: chain.manager_decision_id,
+      notification_count: chain.routed_notification_ids?.length || 0,
+      side_effect_risk: riskyAttempts.length > 0,
+      summary: commandLabel(command, chain.command_id),
+      time: command?.created_at,
+    };
+  });
+}
+
+function dispatchHealth(snapshot: SnapshotResult | null, audit: AuditResult | null) {
+  const now = Date.now();
+  const commands = audit?.commands || [];
+  const attempts = audit?.command_attempts || [];
+  const queued = commands.filter((command) => command.state === "pending" || command.state === "attempted");
+  const failed = commands.filter((command) => command.state === "failed");
+  const stale = queued.filter((command) => isExpiredTimestamp(command.claim_expires_at, now));
+  const sideEffectRisk = attempts.filter((attempt) => attempt.side_effect_started && !attempt.side_effect_completed);
+  return {
+    failed_count: commands.length ? failed.length : snapshot?.commands?.failed_count || 0,
+    heartbeat: latestDispatchHeartbeat(snapshot),
+    queued_count: commands.length ? queued.length : snapshot?.commands?.unfinished_count || 0,
+    side_effect_risk_count: sideEffectRisk.length,
+    stale_claim_count: stale.length,
   };
 }
 
@@ -202,11 +344,13 @@ async function dashboardObservation(options: ReturnType<typeof normalizeServerOp
   const terminals = DASHBOARD_TERMINALS.map((terminal) => terminalState(terminal, sessions));
   const binding = findDashboardBinding(discovered, sessions);
   let snapshot: SnapshotResult | null = null;
+  let audit: AuditResult | null = null;
   const taskName = binding?.task_name ? String(binding.task_name) : "";
   if (taskName) {
     try {
       snapshot = await runWorkerctlJson({
         command: "snapshot",
+        limit: 25,
         task: taskName,
         workerctlPath: options.workerctlPath,
         dbPath: options.dbPath,
@@ -214,9 +358,29 @@ async function dashboardObservation(options: ReturnType<typeof normalizeServerOp
     } catch {
       snapshot = null;
     }
+    try {
+      audit = await runWorkerctlJson({
+        command: "audit",
+        task: taskName,
+        workerctlPath: options.workerctlPath,
+        dbPath: options.dbPath,
+      }) as AuditResult;
+    } catch {
+      audit = null;
+    }
   }
   return {
+    audit: audit ? {
+      command_attempts: audit.command_attempts || [],
+      commands: audit.commands || [],
+      correlation_chains: audit.correlation_chains || [],
+      routed_notifications: audit.routed_notifications || [],
+    } : null,
     binding,
+    dispatch: {
+      chains: dispatchChainEntries(audit),
+      health: dispatchHealth(snapshot, audit),
+    },
     latest_cycle: snapshot?.latest_cycle || null,
     polled_at: new Date().toISOString(),
     task: snapshot?.task || (taskName ? { name: taskName } : null),

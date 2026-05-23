@@ -8,7 +8,7 @@ goal:
   slug: "dispatch-supervision-control-plane"
   kind: existing_plan
   tranche: "Implement issues #113-#117 in dependency order: permissions, acks, dispatch completion routing, epilogues, dual continuation review, and later dispatch queue/watch phases."
-  status: active
+  status: complete
   oracle:
     signal: "Focused tests and final audit prove the accepted issue acceptance criteria are implemented without violating Dispatch's no-judgment boundary."
     cadence: "after each Worker package and at final audit"
@@ -36,6 +36,7 @@ goal:
       - "#116 adds named epilogue steps gated before finish-task."
       - "#117 adds dual independent what's-next proposals and a reviewer subagent diff."
       - "Preferred sequencing from implementation discussion: #115, #114, #113 Phase 1, #116 minimal, #117, then later #113 queue/watch phases."
+      - "Later #113 queue/watch phases landed in the separate dispatch-command-queue-watch tranche; dashboard correlation-chain grouping remains split to that tranche's T007 follow-up note."
       - "Keep the role name dispatch."
       - "Do not route to human operators through Dispatch."
 

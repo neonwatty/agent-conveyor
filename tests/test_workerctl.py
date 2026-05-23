@@ -132,6 +132,46 @@ class DatabaseTests(unittest.TestCase):
             self.assertIn("commands_claimable", indexes)
             self.assertIn("command_attempts_command_id", indexes)
 
+    def test_database_migrates_pre_dispatch_command_schema(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "workerctl.db"
+            conn = sqlite3.connect(path)
+            conn.executescript(
+                """
+                create table commands(
+                  id text primary key,
+                  idempotency_key text unique not null,
+                  created_at text not null,
+                  updated_at text not null,
+                  task_id text,
+                  worker_id text,
+                  manager_id text,
+                  type text not null,
+                  state text not null,
+                  payload_json text not null check (json_valid(payload_json)),
+                  result_json text check (result_json is null or json_valid(result_json)),
+                  error text
+                );
+                pragma user_version = 15;
+                """
+            )
+            conn.close()
+
+            conn = worker_db.connect(path)
+            self.addCleanup(conn.close)
+            worker_db.initialize_database(conn)
+            columns = {row["name"] for row in conn.execute("pragma table_info(commands)")}
+            indexes = {
+                row["name"]
+                for row in conn.execute("select name from sqlite_master where type = 'index'")
+            }
+
+            self.assertIn("available_at", columns)
+            self.assertIn("claim_expires_at", columns)
+            self.assertIn("required_permission", columns)
+            self.assertIn("commands_claimable", indexes)
+            self.assertEqual(conn.execute("PRAGMA user_version").fetchone()[0], worker_db.SCHEMA_VERSION)
+
     def test_run_helpers_create_list_finish_and_enforce_one_active_run_per_task(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             conn = self.open_db(tmpdir)
@@ -205,6 +245,37 @@ class DatabaseTests(unittest.TestCase):
             audit = worker_db.task_audit(conn_a, task="claim-task")
             self.assertEqual(audit["command_attempts"][0]["command_id"], command_id)
             self.assertEqual(audit["command_attempts"][0]["dispatcher_id"], "dispatch-a")
+
+    def test_enqueue_helpers_record_required_permission_metadata(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self.insert_task(conn, "task-enqueue", "enqueue-task")
+
+            notify_id = worker_db.enqueue_notify_manager(
+                conn,
+                task_id="task-enqueue",
+                message="inspect worker",
+                required_permission="communication.notify_operator",
+            )
+            nudge_id = worker_db.enqueue_nudge_worker(
+                conn,
+                task_id="task-enqueue",
+                message="please continue",
+                required_permission="worker_session.interrupt",
+            )
+            conn.commit()
+
+            commands_rows = worker_db.claimable_dispatch_commands(
+                conn,
+                command_types=["notify_manager", "nudge_worker"],
+            )
+            by_id = {row["id"]: row for row in commands_rows}
+            self.assertEqual(by_id[notify_id]["type"], "notify_manager")
+            self.assertEqual(by_id[notify_id]["payload"]["message"], "inspect worker")
+            self.assertEqual(by_id[notify_id]["required_permission"], "communication.notify_operator")
+            self.assertEqual(by_id[nudge_id]["type"], "nudge_worker")
+            self.assertEqual(by_id[nudge_id]["payload"]["message"], "please continue")
+            self.assertEqual(by_id[nudge_id]["required_permission"], "worker_session.interrupt")
 
     def test_command_attempt_finish_records_side_effect_flags_and_replay(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1303,6 +1374,104 @@ class DispatchTests(unittest.TestCase):
             self.assertEqual(notification["signal_type"], "notify_manager")
             send.assert_called_once()
 
+    def test_dispatch_honors_required_permission_before_sending(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn, db_path = self.open_db(tmpdir)
+            self.setup_bound_task(conn)
+            worker_db.upsert_manager_config(
+                conn,
+                task_id="task-dispatch",
+                supervision_mode="guided",
+                permissions={"communication": []},
+            )
+            command_id = worker_db.enqueue_notify_manager(
+                conn,
+                task_id="task-dispatch",
+                message="inspect",
+                required_permission="communication.notify_operator",
+            )
+            conn.commit()
+
+            args = argparse.Namespace(
+                dispatcher_id="dispatch-test",
+                dry_run=False,
+                json=True,
+                limit=10,
+                once=True,
+                path=str(db_path),
+                type="notify_manager",
+                watch=False,
+            )
+            with mock.patch.object(worker_tmux, "send_text_to_session") as send:
+                with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                    commands.command_dispatch(args)
+
+            payload = json.loads(stdout.getvalue())
+            command_row = conn.execute(
+                "select state, error from commands where id = ?",
+                (command_id,),
+            ).fetchone()
+            attempt_row = conn.execute(
+                "select state, side_effect_started, side_effect_completed from command_attempts"
+            ).fetchone()
+            notifications = worker_db.routed_notifications(conn, task_id="task-dispatch")
+            self.assertEqual(payload["processed"][0]["state"], "failed")
+            self.assertIn("communication.notify_operator", payload["processed"][0]["error"])
+            self.assertEqual(command_row["state"], "failed")
+            self.assertIn("communication.notify_operator", command_row["error"])
+            self.assertEqual(attempt_row["state"], "failed")
+            self.assertEqual(attempt_row["side_effect_started"], 0)
+            self.assertEqual(attempt_row["side_effect_completed"], 0)
+            self.assertEqual(notifications, [])
+            send.assert_not_called()
+
+    def test_dispatch_required_permission_allows_configured_command(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn, db_path = self.open_db(tmpdir)
+            self.setup_bound_task(conn)
+            worker_db.upsert_manager_config(
+                conn,
+                task_id="task-dispatch",
+                supervision_mode="guided",
+                permissions={"communication": ["notify_operator"]},
+            )
+            command_id = worker_db.enqueue_notify_manager(
+                conn,
+                task_id="task-dispatch",
+                message="inspect",
+                required_permission="communication.notify_operator",
+            )
+            conn.commit()
+
+            def fake_send(conn, *, session_name, text, dry_run=False, side_effect_audit=None):
+                if side_effect_audit is not None:
+                    side_effect_audit["side_effect_started"] = True
+                    side_effect_audit["side_effect_completed"] = True
+                return {"target": "tmux-manager:0.0"}
+
+            args = argparse.Namespace(
+                dispatcher_id="dispatch-test",
+                dry_run=False,
+                json=True,
+                limit=10,
+                once=True,
+                path=str(db_path),
+                type="notify_manager",
+                watch=False,
+            )
+            with mock.patch.object(worker_tmux, "send_text_to_session", side_effect=fake_send) as send:
+                with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                    commands.command_dispatch(args)
+
+            payload = json.loads(stdout.getvalue())
+            command_row = conn.execute("select state from commands where id = ?", (command_id,)).fetchone()
+            notification = worker_db.routed_notifications(conn, task_id="task-dispatch")[0]
+            self.assertEqual(payload["processed"][0]["state"], "delivered")
+            self.assertTrue(payload["processed"][0]["permission_check"]["allowed"])
+            self.assertEqual(command_row["state"], "succeeded")
+            self.assertEqual(notification["payload"]["permission_check"]["required_permission"], "communication.notify_operator")
+            send.assert_called_once()
+
     def test_dispatch_once_fails_invalid_command_payload_before_tmux_send(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             conn, db_path = self.open_db(tmpdir)
@@ -1846,6 +2015,43 @@ class CliTests(unittest.TestCase):
         self.assertIn("127.0.0.1", payload["command"])
         self.assertIn("--task", payload["command"])
         self.assertIn("snapshot-task", payload["command"])
+
+    def test_enqueue_dispatch_commands_cli_records_required_permission(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                task_id = worker_db.create_task(conn, name="enqueue-cli-task", goal="Queue dispatch work.")
+
+            proc = self.run_workerctl(
+                "enqueue-notify-manager",
+                "enqueue-cli-task",
+                "--message",
+                "inspect worker",
+                "--required-permission",
+                "communication.notify_operator",
+                "--json",
+                "--path",
+                str(db_path),
+            )
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            payload = json.loads(proc.stdout)
+            self.assertEqual(payload["command_type"], "notify_manager")
+            self.assertEqual(payload["required_permission"], "communication.notify_operator")
+            with worker_db.connect(db_path) as conn:
+                command = conn.execute(
+                    """
+                    select task_id, type, required_permission, payload_json
+                    from commands
+                    where id = ?
+                    """,
+                    (payload["command_id"],),
+                ).fetchone()
+            self.assertEqual(command["task_id"], task_id)
+            self.assertEqual(command["type"], "notify_manager")
+            self.assertEqual(command["required_permission"], "communication.notify_operator")
+            self.assertEqual(json.loads(command["payload_json"])["message"], "inspect worker")
 
     def test_classify_cli_outputs_json(self):
         proc = self.run_workerctl(

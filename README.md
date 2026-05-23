@@ -228,19 +228,28 @@ tmux attach -t codex-live-test
   progress and likely next steps from SQLite.
 - `manager-config <task> [--mode light|guided|strict] [--objective O]
   [--guideline G ...] [--acceptance A ...] [--reference R ...]
+  [--permit CATEGORY.ACTION ...] [--tool TOOL ...]
+  [--epilogue STEP ...] [--nudge-on-completion MODE] [--require-acks]
   [--allow-pr] [--allow-merge-green] [--allow-worker-compact-clear]` —
   Persist the manager's supervision contract: what to check against, how
   structured the loop should be, acceptance criteria, source references, and
-  high-level permissions. With no recorded config it creates the default guided
-  config; with no mutating flags after that it prints the current config.
+  categorized permissions. With no recorded config it creates the default
+  guided config; with no mutating flags after that it prints the current config.
   Use `--questions` from a manager Codex session to get a stable JSON question
   schema to ask the user in chat, then save the answers with noninteractive
   flags. Use `--interactive` only as a terminal fallback when a human is
   running `workerctl` directly.
-  `--permissions-json` uses canonical keys `create_pr`, `merge_green_pr`, and
-  `worker_compact_clear`; legacy-style `allow_pr`, `allow_merge_green`, and
-  `allow_worker_compact_clear` aliases are normalized to those canonical keys
-  when saved.
+  `--permit` grants taxonomy permissions such as `repo.open_pr`,
+  `verification.run_pytest`, `context.spawn_reviewer`,
+  `communication.notify_operator`, or `worker_session.compact`. Use `--tool`
+  to record expected verification/context tools, `--epilogue` for required
+  built-in finish steps (`run-tools`, `draft-pr`, `subagent-review`,
+  `record-handoff`), `--nudge-on-completion` for continuation review behavior
+  (`off`, `ask-operator`, `auto-review`, `auto-proceed`), and `--require-acks`
+  when `cycle`/`finish-task` should fail closed until both sides acknowledge.
+  Legacy flat flags and `--permissions-json` keys (`create_pr`,
+  `merge_green_pr`, `worker_compact_clear`, plus older `allow_*` aliases) are
+  still accepted and normalized into the categorized taxonomy.
 - `criteria <task>` — Track emergent acceptance criteria discovered during
   supervision. Managers should add useful proposed criteria, accept must-have
   items, defer follow-ups, and mark criteria satisfied only when worker
@@ -276,11 +285,31 @@ tmux attach -t codex-live-test
   ```bash
   scripts/workerctl criteria-plan my-task --from-worker-response response.md --json
   ```
-- `manager-permission <task> <create_pr|merge_green_pr|worker_compact_clear>
+- `manager-permission <task> <CATEGORY.ACTION|CATEGORY> [--list]
   [--require] [--require-handoff]` — Check and audit whether the saved manager
-  config allows a high-level action. Use `--require` when a manager command
-  should fail closed. Use `--require-handoff` before worker compact/clear style
-  instructions so visible context is persisted first.
+  config allows a categorized action, or list granted actions in a category.
+  Use `--require` when a manager command should fail closed. Use
+  `--require-handoff` before worker compact/clear style instructions so visible
+  context is persisted first.
+- `worker-ack <task> --from-stdin|--json [--correlation-id ID]` /
+  `manager-ack <task> --from-stdin|--json [--correlation-id ID]` — Persist or
+  read the latest structured acknowledgement from the worker or manager. Acks
+  are revisioned and exposed to `cycle`, `replay`, and `audit` so startup
+  contract drift can be distinguished from later drift.
+- `continuation <task> --submit worker|manager --from-stdin
+  [--correlation-id ID]` — Record independent worker/manager "what's next"
+  proposals for a completion turn. The worker proposal must be written first,
+  and manager-side reads are redacted until the manager submits its own
+  proposal.
+- `continuation <task> --review --from-stdin [--correlation-id ID]` — Record a
+  structured reviewer verdict over the paired continuation proposals. This
+  requires `context.spawn_reviewer` permission and reviewer-isolation metadata
+  (`subagent_run.reviewer_session_id` distinct from the manager and
+  `manager_rollout_access=false`). Divergent reviews are routed for operator
+  attention unless `--nudge-on-completion auto-proceed` is configured.
+- `continuation <task> --list [--as-role all|worker|manager|reviewer]
+  [--include-payload]` — List continuation proposals and reviews with
+  role-aware payload redaction.
 - `record-decision <task> <wait|nudge|interrupt|escalate|stop|inspect>
   --reason R [--cycle-id N] [--payload-json JSON]` — Persist a manager
   decision and print its id. Use this before strict mutating commands that
@@ -299,12 +328,15 @@ tmux attach -t codex-live-test
   and `sent: false`.
 - `bind --task T --worker W --manager M` — Create the task binding.
 - `unbind --task T` — End the active binding for a task.
-- `finish-task <task> [--reason R] [--require-criteria-audit] [--stop-manager]
-  [--stop-worker] [--capture-transcript-before-stop]` — Mark a task done.
+- `finish-task <task> [--reason R] [--require-criteria-audit]
+  [--require-acks] [--require-epilogue] [--stop-manager] [--stop-worker]
+  [--capture-transcript-before-stop]` — Mark a task done.
   Leaves the manager terminal open by default for review. With
   `--require-criteria-audit`, fails before finishing if any acceptance criteria
   for the task are still `accepted`; `proposed`, `satisfied`, `deferred`, and
-  `rejected` criteria do not block. With `--capture-transcript-before-stop`,
+  `rejected` criteria do not block. With `--require-acks`, fails if worker or
+  manager acknowledgement is missing. With `--require-epilogue`, fails if any
+  configured epilogue step is not succeeded. With `--capture-transcript-before-stop`,
   captures transcript segments for any worker/manager sessions being stopped
   before killing tmux sessions; capture failure fails before stop side effects.
 - `stop-task <task> [--reason R] [--stop-worker]` — Force-stop a task's
@@ -329,10 +361,12 @@ tmux attach -t codex-live-test
   - `worker_alive` / `manager_alive` — booleans computed by probing the registered session pids (`os.kill(pid, 0)`). `False` when the session's pid is `NULL` (legacy backfill) or the process has exited — useful for detecting silently-dead workers between cycles.
   - `last_event_subtype` — the subtype of the most recent `codex_events` row for the worker, or `null` if no events exist.
   - `task_completed` — `true` iff `last_event_subtype` is `"task_complete"`. Disambiguates "worker finished cleanly" from "worker idle but never started."
-  - `manager_context` — the latest `manager-config`, `handoff`, and
-    `acceptance_criteria` records for the task, so each manager loop can
-    reference the saved objective, living acceptance criteria, permissions,
-    worker progress, and next steps. `manager_context.acceptance_criteria`
+  - `manager_context` — the latest `manager-config`, worker/manager
+    acknowledgements, `handoff`, and `acceptance_criteria` records for the
+    task, so each manager loop can reference the saved objective, living
+    acceptance criteria, categorized permissions, expected tools, acked
+    contract, worker progress, and next steps.
+    `manager_context.acceptance_criteria`
     groups criteria by status, includes summary counts, and exposes `open` as
     accepted criteria that still need proof before finishing.
     `manager_context.criteria_negotiation` is advisory: when `needed` is true,
@@ -355,6 +389,15 @@ tmux attach -t codex-live-test
 - `divergences <task> [--limit N]` — Cycles whose shadow pane signal flagged
   a notable pattern (trust prompt, rate-limit prompt, approval prompt, etc.).
   Useful for auditing the shadow signal against the JSON state.
+- `dispatch [--once|--watch] [--limit N] [--interval SECONDS]
+  [--dispatcher-id ID] [--type notify_manager|nudge_worker|worker_task_complete]
+  [--dry-run] [--json]` — Run Dispatch, the mechanical routing/actuation role.
+  `worker_task_complete` routing reads from `codex_events`, records
+  deduplicated `routed_notifications` keyed by the source event, and notifies
+  the bound manager without deciding task success. Explicit `notify_manager`
+  and `nudge_worker` command rows are atomically claimed, executed, and recorded
+  through `command_attempts` with conservative side-effect metadata. `--watch`
+  repeats polling with heartbeat telemetry; `--once` performs one pass.
 
 ### Actuation
 
@@ -380,6 +423,10 @@ tmux attach -t codex-live-test
 - `events <name>` — Worker events log.
 - `commands [--task T] [--type T] [--state S]` — Durable side-effect commands
   log.
+- `epilogue <task> --step run-tools|draft-pr|subagent-review|record-handoff
+  [--json] [--correlation-id ID]` — Run one configured epilogue step and record
+  its durable state. Use `--list` or `--status` to inspect configured steps and
+  latest run results.
 - `telemetry [--run RUN] [--task TASK] [--search QUERY] [--summary] [--json]`
   — Query local structured telemetry events, search them with SQLite FTS, or
   print aggregate counts for a run/task. `telemetry snapshot --task <task>
@@ -570,6 +617,39 @@ Three quality-of-life additions following Phase 6 dogfood:
 
 - **Recent event suppression for `long_running_interruptible`** — the classifier now weighs `recent_event_count` (from `ingest.new_events`) alongside `status_age_seconds`. When a worker is actively emitting events (>= 10/cycle), the `long_running_interruptible` flag is suppressed—the worker is healthy despite stale status.json. This stops false positives on long-running tools (e.g. test suites, large file reads) that stay busy but quiet on status updates.
 
+## Dispatch and completion contracts
+
+Dispatch is the mechanical role between workers and managers. It routes facts
+and executes queued side effects; it does not decide whether work is correct,
+finish tasks, satisfy criteria, choose strategy, merge PRs, or route to human
+operators.
+
+Current dispatch state:
+
+- `dispatch --once` routes bound worker `task_complete` signals from
+  `codex_events`, not the pane classifier.
+- Routed completion notifications are deduplicated by source event id, recorded
+  in `routed_notifications`, and threaded with `correlation_id`.
+- Explicit `notify_manager` and `nudge_worker` command rows can be processed by
+  Dispatch with atomic claim/lease metadata, durable `command_attempts`,
+  invalid-payload failure before side effects, and conservative tmux
+  side-effect started/completed flags.
+- `dispatch --watch` continuously repeats the same mechanical polling loop with
+  dispatcher identity and heartbeat telemetry.
+- Replay/audit surfaces include routed notifications, command attempts, and
+  correlation chains where the data exists. Dashboard grouping for dispatch
+  correlation chains is intentionally tracked as a focused follow-up.
+
+The adjacent completion-contract surfaces are separate from Dispatch:
+
+- Worker and manager acknowledgements persist the startup contract and can gate
+  `cycle`/`finish-task`.
+- Epilogues are named post-completion steps that can gate `finish-task`.
+- Continuations persist worker-first and manager-independent "what's next"
+  proposals plus a recorded reviewer verdict. The CLI enforces ordering,
+  redaction, permission checks, and reviewer-isolation metadata; it does not
+  spawn the independent reviewer session itself.
+
 ## Schema
 
 SQLite database at `.codex-workers/workerctl.db`. Key tables:
@@ -582,7 +662,18 @@ SQLite database at `.codex-workers/workerctl.db`. Key tables:
   payload as `status_json`.
 - `events` — Actuation audit log (`session_nudged`, `session_interrupted`,
   etc.).
-- `commands` — Durable side-effect command log.
+- `commands` — Durable side-effect command log, including Dispatch claim/lease
+  metadata for queued command execution.
+- `command_attempts` — Per-dispatcher command execution attempts with
+  side-effect started/completed flags and result/error payloads.
+- `routed_notifications` — Mechanical worker/manager routed facts and command
+  delivery records, deduped and linked by `correlation_id`.
+- `task_acknowledgements` — Revisioned worker/manager startup contract
+  acknowledgements.
+- `epilogue_runs` — Durable state for configured post-completion epilogue
+  steps.
+- `task_continuations` / `continuation_reviews` — Worker/manager continuation
+  proposals and reviewer verdicts for "what's next" review flows.
 - `workers`, `managers` — Legacy tables retained for read-only history.
 
 `workerctl db-doctor` reports schema health. `workerctl reconcile` reports

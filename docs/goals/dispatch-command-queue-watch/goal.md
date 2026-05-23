@@ -2,7 +2,7 @@
 
 ## Objective
 
-Implement the deferred #113 Dispatch command queue/watch tranche: atomic command claiming, durable attempt history, `notify_manager` and `nudge_worker` command execution through Dispatch, watch mode, failure visibility, and replay/dashboard correlation-chain surfaces.
+Implement the deferred #113 Dispatch command queue/watch tranche: atomic command claiming, durable attempt history, `notify_manager` and `nudge_worker` command execution through Dispatch, watch mode, failure visibility, and replay correlation-chain surfaces. Dashboard correlation-chain grouping is split to `notes/T007-dashboard-follow-up.md`.
 
 ## Original Request
 
@@ -14,8 +14,8 @@ Implement the deferred #113 Dispatch command queue/watch tranche: atomic command
 - Audience: `workerctl` operators, managers, workers, and dashboard users.
 - Authority: `requested`
 - Proof type: `test`
-- Completion proof: Dispatch can safely process explicit queued commands in `--once` and `--watch` modes with atomic claiming, conservative tmux side-effect audit, replay/telemetry visibility, and no Dispatch judgment behavior.
-- Goal oracle: a final Judge/PM audit maps #113 deferred acceptance criteria to implemented schema, CLI behavior, command execution semantics, replay/dashboard visibility, and passing tests.
+- Completion proof: Dispatch can safely process explicit queued commands in `--once` and `--watch` modes with atomic claiming, conservative tmux side-effect audit, replay/telemetry visibility, and no Dispatch judgment behavior. Dashboard grouping is an explicit follow-up.
+- Goal oracle: a final Judge/PM audit maps #113 deferred acceptance criteria to implemented schema, CLI behavior, command execution semantics, replay visibility, dashboard follow-up scope, and passing tests.
 - Likely misfire: implementing a simple polling loop or direct tmux send path while leaving atomic claim safety, side-effect ambiguity, invalid-payload failure, or correlation-chain audit unproven.
 - Blind spots considered: non-idempotent tmux sends, double-claim races, stale leases, direct nudge compatibility, dashboard grouping scope, and Dispatch accidentally becoming a decision maker or human notifier.
 - Existing plan facts: the prior tranche merged as PR #118 and explicitly deferred #113 command row processing, atomic command claiming, command attempts, `dispatch --watch`, invalid payload handling, stale claim recovery, replay correlation chains, and dashboard observation grouping.
@@ -24,7 +24,7 @@ Implement the deferred #113 Dispatch command queue/watch tranche: atomic command
 
 The oracle for this goal is:
 
-`A final audit proves that workerctl Dispatch mechanically claims and executes queued notify/nudge commands safely in one-shot and watch modes, records durable attempts and failures with correlation_id, exposes the chain in replay/dashboard surfaces, and still does not decide task success or route to human operators.`
+`A final audit proves that workerctl Dispatch mechanically claims and executes queued notify/nudge commands safely in one-shot and watch modes, records durable attempts and failures with correlation_id, exposes the chain in replay, records the dashboard grouping follow-up, and still does not decide task success or route to human operators.`
 
 ## Goal Kind
 

@@ -2372,6 +2372,67 @@ def _dispatch_command_types(dispatch_type: str | None) -> list[str]:
     return ["notify_manager", "nudge_worker"]
 
 
+def _print_enqueue_result(args: argparse.Namespace, result: dict[str, Any]) -> None:
+    if getattr(args, "json", False):
+        print(json.dumps(result, indent=2, sort_keys=True))
+    else:
+        print(f"queued {result['command_type']} command {result['command_id']}")
+
+
+def command_enqueue_notify_manager(args: argparse.Namespace) -> int:
+    from workerctl import db as worker_db
+
+    db_path = Path(args.path).expanduser().resolve() if getattr(args, "path", None) else None
+    with worker_db.connect(db_path) as conn:
+        worker_db.initialize_database(conn)
+        task = worker_db.task_row(conn, task=args.task)
+        command_id = worker_db.enqueue_notify_manager(
+            conn,
+            task_id=task["id"],
+            message=args.message,
+            required_permission=getattr(args, "required_permission", None),
+            idempotency_key=getattr(args, "idempotency_key", None),
+        )
+        conn.commit()
+    _print_enqueue_result(
+        args,
+        {
+            "command_id": command_id,
+            "command_type": "notify_manager",
+            "required_permission": getattr(args, "required_permission", None),
+            "task": args.task,
+        },
+    )
+    return 0
+
+
+def command_enqueue_nudge_worker(args: argparse.Namespace) -> int:
+    from workerctl import db as worker_db
+
+    db_path = Path(args.path).expanduser().resolve() if getattr(args, "path", None) else None
+    with worker_db.connect(db_path) as conn:
+        worker_db.initialize_database(conn)
+        task = worker_db.task_row(conn, task=args.task)
+        command_id = worker_db.enqueue_nudge_worker(
+            conn,
+            task_id=task["id"],
+            message=args.message,
+            required_permission=getattr(args, "required_permission", None),
+            idempotency_key=getattr(args, "idempotency_key", None),
+        )
+        conn.commit()
+    _print_enqueue_result(
+        args,
+        {
+            "command_id": command_id,
+            "command_type": "nudge_worker",
+            "required_permission": getattr(args, "required_permission", None),
+            "task": args.task,
+        },
+    )
+    return 0
+
+
 def _dispatch_command_text(command: dict[str, Any]) -> str:
     payload = command.get("payload") or {}
     text = payload.get("message", payload.get("text"))
@@ -2405,6 +2466,39 @@ def _dispatch_command_route(conn, command: dict[str, Any]) -> dict[str, Any]:
     raise WorkerError(f"unsupported dispatch command type: {command['type']}")
 
 
+def _dispatch_required_permission_check(conn, *, worker_db, command: dict[str, Any]) -> dict[str, Any] | None:
+    required_permission = command.get("required_permission")
+    if not required_permission:
+        return None
+    if not command.get("task_id"):
+        raise WorkerError(f"{command['type']} command requires task_id for permission check")
+    config = worker_db.manager_config(conn, task_id=command["task_id"])
+    allowed = manager_permission_allowed(config, required_permission)
+    permission_check = {
+        "allowed": allowed,
+        "configured": config is not None,
+        "required_permission": required_permission,
+    }
+    worker_db.emit_telemetry_event(
+        conn,
+        actor="dispatch",
+        event_type="dispatch_command_permission_checked",
+        severity="info" if allowed else "warning",
+        task_id=command["task_id"],
+        summary=f"Dispatch checked manager permission {required_permission}.",
+        correlation={
+            "command_id": command["id"],
+            "command_type": command["type"],
+            "correlation_id": command["correlation_id"],
+            "required_permission": required_permission,
+        },
+        attributes=permission_check,
+    )
+    if not allowed:
+        raise WorkerError(f"manager permission required for dispatch command: {required_permission}")
+    return permission_check
+
+
 def _execute_dispatch_command(conn, *, worker_db, worker_tmux, command: dict[str, Any], attempt: dict[str, Any], dispatcher_id: str) -> dict[str, Any]:
     notification_id = None
     side_effect_audit = {"side_effect_completed": False, "side_effect_started": False}
@@ -2419,11 +2513,13 @@ def _execute_dispatch_command(conn, *, worker_db, worker_tmux, command: dict[str
     try:
         text = _dispatch_command_text(command)
         route = _dispatch_command_route(conn, command)
+        permission_check = _dispatch_required_permission_check(conn, worker_db=worker_db, command=command)
         payload = {
             "command_id": command["id"],
             "command_type": command["type"],
             "dispatcher_id": dispatcher_id,
             "message": text,
+            "permission_check": permission_check,
             "source_session": route["source_session_name"],
             "target_session": route["target_session_name"],
             "task_id": command["task_id"],
@@ -2457,6 +2553,7 @@ def _execute_dispatch_command(conn, *, worker_db, worker_tmux, command: dict[str
                 "routed_notification_id": notification_id,
             },
             attributes={
+                "permission_check": permission_check,
                 "source_session": route["source_session_name"],
                 "target_session": route["target_session_name"],
             },
@@ -2473,6 +2570,7 @@ def _execute_dispatch_command(conn, *, worker_db, worker_tmux, command: dict[str
         result = {
             **base_result,
             "notification_id": notification_id,
+            "permission_check": permission_check,
             "send_result": send_result,
             "side_effect_completed": side_effect_audit["side_effect_completed"],
             "side_effect_started": side_effect_audit["side_effect_started"],
@@ -2502,6 +2600,7 @@ def _execute_dispatch_command(conn, *, worker_db, worker_tmux, command: dict[str
             "error": str(exc),
             "error_type": type(exc).__name__,
             "notification_id": notification_id,
+            "required_permission": command.get("required_permission"),
             "side_effect_completed": side_effect_audit["side_effect_completed"],
             "side_effect_started": side_effect_audit["side_effect_started"],
             "state": "failed",
@@ -3829,7 +3928,8 @@ def command_commands(args: argparse.Namespace) -> int:
                    commands.worker_id, commands.manager_id, commands.correlation_id,
                    commands.available_at, commands.claimed_by, commands.claimed_at,
                    commands.claim_expires_at, commands.attempts, commands.max_attempts,
-                   commands.payload_json, commands.result_json, commands.error
+                   commands.required_permission, commands.payload_json, commands.result_json,
+                   commands.error
             from commands
             left join tasks on tasks.id = commands.task_id
             {where}
@@ -3851,6 +3951,7 @@ def command_commands(args: argparse.Namespace) -> int:
             "manager_id": row["manager_id"],
             "max_attempts": row["max_attempts"],
             "payload": json.loads(row["payload_json"]),
+            "required_permission": row["required_permission"],
             "result": json.loads(row["result_json"]) if row["result_json"] else None,
             "state": row["state"],
             "task_id": row["task_id"],

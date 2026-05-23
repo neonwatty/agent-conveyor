@@ -1,5 +1,26 @@
 # T998 Dispatch Follow-Up Handoff
 
+## Current Status
+
+This handoff was written at the end of the #118 tranche. The core follow-up
+listed below has since been implemented by the #119 Dispatch command
+queue/watch tranche:
+
+- `dispatch --once` processes explicit `notify_manager` and `nudge_worker`
+  command rows.
+- Command claiming is atomic and records durable `command_attempts`.
+- Invalid payloads fail before side effects.
+- Dispatch records dispatcher identity, timestamps, errors, result metadata,
+  side-effect started/completed flags, and `correlation_id`.
+- `dispatch --watch` runs the same mechanical loop continuously with heartbeat
+  telemetry.
+- Replay/task audit surfaces expose command attempts, routed notifications, and
+  correlation chains where the data exists.
+
+The remaining known follow-up is dashboard observation grouping for queued
+commands, attempts, routed notifications, failures, and correlation chains. See
+`docs/goals/dispatch-command-queue-watch/notes/T007-dashboard-follow-up.md`.
+
 ## Decision
 
 T010 chose `defer_follow_up` for #113 Phase 2+.
