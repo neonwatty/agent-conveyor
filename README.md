@@ -313,9 +313,13 @@ tmux attach -t codex-live-test
   the allowed read-only context on stdin, capture reviewer metadata, and persist
   the structured review. The context includes paired proposals, acceptance
   criteria, manager config summary, diff metadata, and recent PR metadata; it
-  does not include manager rollout context. Reviewer command failures, timeouts,
-  or invalid JSON are recorded as `verdict=stop`, not silent approvals. Use
-  `--dry-run` to inspect the exact context without running the command.
+  does not include manager rollout context. Reviewer commands run from an
+  isolated temporary cwd with a stripped environment and, on macOS, through
+  `sandbox-exec` with read access denied to the bound worker/manager rollout
+  files and active workerctl database. Sandbox setup failures, reviewer command
+  failures, timeouts, or invalid JSON are recorded as `verdict=stop`, not silent
+  approvals. Use `--dry-run` to inspect the exact context without running the
+  command.
 - `continuation <task> --list [--as-role all|worker|manager|reviewer]
   [--include-payload]` — List continuation proposals and reviews with
   role-aware payload redaction.
@@ -681,7 +685,9 @@ The adjacent completion-contract surfaces are separate from Dispatch:
   proposals plus a recorded reviewer verdict. The CLI enforces ordering,
   redaction, permission checks, reviewer separation metadata, and can run an
   independent restricted-context reviewer command through
-  `continuation-reviewer`. This is not a hard process or filesystem sandbox.
+  `continuation-reviewer`. Reviewer execution is additionally isolated with a
+  temporary cwd, stripped environment, and macOS `sandbox-exec` denial of bound
+  rollout/database reads.
 
 ## Schema
 

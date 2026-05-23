@@ -9,6 +9,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -3769,12 +3770,149 @@ def _continuation_reviewer_context(
     }
 
 
+def _sandbox_string(value: str) -> str:
+    return value.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _real_path_label(path: Path) -> tuple[str, bool]:
+    resolved = os.path.realpath(str(path.expanduser()))
+    return resolved, Path(resolved).is_dir()
+
+
+def _continuation_reviewer_denied_paths(
+    conn,
+    *,
+    worker_db,
+    task: dict[str, Any],
+    db_path: Path | None,
+) -> list[tuple[str, bool]]:
+    binding = worker_db.active_binding_for_task(conn, task_name=task["name"])
+    denied: list[Path] = []
+    for key in ("worker_session_id", "manager_session_id"):
+        session = worker_db.session_by_id(conn, session_id=binding[key])
+        if session is not None and session["codex_session_path"]:
+            denied.append(Path(str(session["codex_session_path"])))
+    active_db_path = db_path if db_path is not None else worker_db.default_db_path()
+    denied.extend([active_db_path, Path(f"{active_db_path}-wal"), Path(f"{active_db_path}-shm")])
+
+    resolved: list[tuple[str, bool]] = []
+    seen: set[str] = set()
+    for path in denied:
+        label, is_dir = _real_path_label(path)
+        if label not in seen:
+            seen.add(label)
+            resolved.append((label, is_dir))
+    return resolved
+
+
+def _continuation_reviewer_sandbox_profile(denied_paths: list[tuple[str, bool]]) -> str:
+    lines = ["(version 1)", "(allow default)"]
+    for path, is_dir in denied_paths:
+        rule = "subpath" if is_dir else "literal"
+        lines.append(f'(deny file-read* ({rule} "{_sandbox_string(path)}"))')
+    return "\n".join(lines) + "\n"
+
+
+def _continuation_reviewer_env() -> dict[str, str]:
+    allowed = {"LANG", "LC_ALL", "LC_CTYPE", "PATH", "TMPDIR", "PYTHONIOENCODING"}
+    return {key: value for key, value in os.environ.items() if key in allowed}
+
+
+def _reviewer_runner_label(reviewer_command: list[str]) -> str:
+    if not reviewer_command:
+        return ""
+    return sh_quote(reviewer_command[0])
+
+
+def _run_continuation_reviewer_command(
+    *,
+    reviewer_command: list[str],
+    context: dict[str, Any],
+    timeout: float,
+    denied_paths: list[tuple[str, bool]],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    started = time.monotonic()
+    sandbox_exec = shutil.which("sandbox-exec")
+    sandbox = {
+        "denied_path_count": len(denied_paths),
+        "enabled": False,
+        "engine": "sandbox-exec",
+        "profile": "deny-bound-session-and-db-read",
+    }
+    if sandbox_exec is None:
+        sandbox["setup_error"] = "sandbox-exec not available"
+        return (
+            {
+                "duration_ms": int((time.monotonic() - started) * 1000),
+                "error": "sandbox-exec not available",
+                "returncode": None,
+                "stderr": "",
+                "stdout": "",
+            },
+            sandbox,
+        )
+
+    try:
+        with tempfile.TemporaryDirectory(prefix="workerctl-reviewer-") as tmpdir:
+            sandbox_profile = Path(tmpdir) / "reviewer.sb"
+            sandbox_profile.write_text(_continuation_reviewer_sandbox_profile(denied_paths), encoding="utf-8")
+            proc = subprocess.run(
+                [sandbox_exec, "-f", str(sandbox_profile), *reviewer_command],
+                cwd=tmpdir,
+                env=_continuation_reviewer_env(),
+                input=json.dumps(context, sort_keys=True),
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+            )
+            sandbox["enabled"] = True
+            return (
+                {
+                    "duration_ms": int((time.monotonic() - started) * 1000),
+                    "error": None if proc.returncode == 0 else f"reviewer command exited {proc.returncode}",
+                    "returncode": proc.returncode,
+                    "stderr": proc.stderr[-2000:],
+                    "stdout": proc.stdout[-10000:],
+                },
+                sandbox,
+            )
+    except FileNotFoundError as exc:
+        sandbox["setup_error"] = str(exc)
+        command_result = {
+            "duration_ms": int((time.monotonic() - started) * 1000),
+            "error": str(exc),
+            "returncode": None,
+            "stderr": "",
+            "stdout": "",
+        }
+    except subprocess.TimeoutExpired as exc:
+        sandbox["enabled"] = True
+        command_result = {
+            "duration_ms": int((time.monotonic() - started) * 1000),
+            "error": f"reviewer command timed out after {timeout:g}s",
+            "returncode": None,
+            "stderr": (exc.stderr or "")[-2000:] if isinstance(exc.stderr, str) else "",
+            "stdout": (exc.stdout or "")[-10000:] if isinstance(exc.stdout, str) else "",
+        }
+    except OSError as exc:
+        sandbox["setup_error"] = str(exc)
+        command_result = {
+            "duration_ms": int((time.monotonic() - started) * 1000),
+            "error": str(exc),
+            "returncode": None,
+            "stderr": "",
+            "stdout": "",
+        }
+    return command_result, sandbox
+
+
 def _reviewer_failure_payload(
     *,
     command_result: dict[str, Any],
     manager_session_id: str,
     reviewer_session_id: str,
     runner: str,
+    sandbox: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     error = command_result.get("error") or "reviewer command did not return a valid review"
     return {
@@ -3790,8 +3928,11 @@ def _reviewer_failure_payload(
             "returncode": command_result.get("returncode"),
             "reviewer_session_id": reviewer_session_id,
             "runner": runner,
+            "runner_arg_count": command_result.get("runner_arg_count"),
+            "sandbox": sandbox or {},
             "status": "failed",
-            "stderr": command_result.get("stderr", ""),
+            "stderr_redacted": bool(command_result.get("stderr")),
+            "stdout_redacted": bool(command_result.get("stdout")),
         },
     }
 
@@ -3826,40 +3967,31 @@ def command_continuation_reviewer(args: argparse.Namespace) -> int:
             reviewer_command = reviewer_command[1:]
         if not reviewer_command:
             raise WorkerError("continuation-reviewer requires --reviewer-command unless --dry-run is used")
-        started = time.monotonic()
+        runner = _reviewer_runner_label(reviewer_command)
         try:
-            proc = subprocess.run(
-                reviewer_command,
-                cwd=str(PROJECT_ROOT),
-                input=json.dumps(context, sort_keys=True),
-                capture_output=True,
-                text=True,
+            denied_paths = _continuation_reviewer_denied_paths(conn, worker_db=worker_db, task=task, db_path=db_path)
+            command_result, sandbox = _run_continuation_reviewer_command(
+                reviewer_command=reviewer_command,
+                context=context,
                 timeout=args.timeout,
+                denied_paths=denied_paths,
             )
-            command_result = {
-                "duration_ms": int((time.monotonic() - started) * 1000),
-                "error": None if proc.returncode == 0 else f"reviewer command exited {proc.returncode}",
-                "returncode": proc.returncode,
-                "stderr": proc.stderr[-2000:],
-                "stdout": proc.stdout[-10000:],
+        except WorkerError as exc:
+            sandbox = {
+                "denied_path_count": 0,
+                "enabled": False,
+                "engine": "sandbox-exec",
+                "profile": "deny-bound-session-and-db-read",
+                "setup_error": str(exc),
             }
-        except FileNotFoundError as exc:
             command_result = {
-                "duration_ms": int((time.monotonic() - started) * 1000),
+                "duration_ms": 0,
                 "error": str(exc),
                 "returncode": None,
                 "stderr": "",
                 "stdout": "",
             }
-        except subprocess.TimeoutExpired as exc:
-            command_result = {
-                "duration_ms": int((time.monotonic() - started) * 1000),
-                "error": f"reviewer command timed out after {args.timeout:g}s",
-                "returncode": None,
-                "stderr": (exc.stderr or "")[-2000:] if isinstance(exc.stderr, str) else "",
-                "stdout": (exc.stdout or "")[-10000:] if isinstance(exc.stdout, str) else "",
-            }
-        runner = " ".join(sh_quote(part) for part in reviewer_command)
+        command_result["runner_arg_count"] = len(reviewer_command)
         if command_result["error"] is None:
             try:
                 raw_payload = json.loads(command_result["stdout"])
@@ -3874,6 +4006,8 @@ def command_continuation_reviewer(args: argparse.Namespace) -> int:
                     "returncode": command_result["returncode"],
                     "reviewer_session_id": args.reviewer_session_id,
                     "runner": runner,
+                    "runner_arg_count": len(reviewer_command),
+                    "sandbox": sandbox,
                     "status": "succeeded",
                 }
                 payload = _validate_continuation_review_payload(raw_payload)
@@ -3885,6 +4019,7 @@ def command_continuation_reviewer(args: argparse.Namespace) -> int:
                         manager_session_id=args.manager_session_id,
                         reviewer_session_id=args.reviewer_session_id,
                         runner=runner,
+                        sandbox=sandbox,
                     )
                 )
         else:
@@ -3894,6 +4029,7 @@ def command_continuation_reviewer(args: argparse.Namespace) -> int:
                     manager_session_id=args.manager_session_id,
                     reviewer_session_id=args.reviewer_session_id,
                     runner=runner,
+                    sandbox=sandbox,
                 )
             )
         output = _record_continuation_review(
