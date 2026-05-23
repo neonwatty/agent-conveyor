@@ -130,10 +130,13 @@ class DatabaseTests(unittest.TestCase):
             self.assertIn("telemetry_events", tables)
             self.assertIn("telemetry_events_fts", tables)
             self.assertIn("command_attempts", tables)
+            self.assertIn("manager_cycle_spans", tables)
             self.assertIn("one_active_run_per_task", indexes)
             self.assertIn("telemetry_events_run_timestamp", indexes)
             self.assertIn("commands_claimable", indexes)
             self.assertIn("command_attempts_command_id", indexes)
+            self.assertIn("manager_cycle_spans_cycle_phase", indexes)
+            self.assertIn("manager_cycle_spans_task", indexes)
 
     def test_database_migrates_pre_dispatch_command_schema(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -9778,6 +9781,46 @@ class SuperviseCycleTests(unittest.TestCase):
             self.assertEqual(cycle_events[-1]["correlation"]["cycle_id"], result["cycle_id"])
             self.assertEqual(cycle_events[-1]["attributes"]["state"], "idle")
 
+    def test_run_cycle_records_sanitized_phase_spans(self):
+        from workerctl import supervise_cycle
+        from workerctl import replay as worker_replay
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self._setup_bound_task(conn, tmpdir, [
+                {"type": "session_meta", "payload": {"id": "u-w", "cwd": "/r"}},
+                {"timestamp": "2026-05-11T14:32:11Z",
+                 "type": "event_msg",
+                 "payload": {"type": "task_started", "turn_id": "t1"}},
+            ])
+
+            result = supervise_cycle.run_cycle(
+                conn, task_name="t", now="2026-05-11T14:32:15Z",
+            )
+            spans = worker_db.manager_cycle_spans(conn, manager_cycle_id=result["cycle_id"])
+            phases = [span["phase"] for span in spans]
+            self.assertEqual(
+                phases,
+                [
+                    "resolve_active_binding",
+                    "ingest_rollout",
+                    "infer_worker_state",
+                    "capture_pane_signal",
+                    "classify_pane_signal",
+                    "load_manager_context",
+                    "persist_cycle_row",
+                ],
+            )
+            self.assertTrue(all(span["task_id"] == "task-1" for span in spans))
+            self.assertTrue(all(span["duration_ms"] >= 0 for span in spans))
+            joined_attributes = json.dumps([span["attributes"] for span in spans], sort_keys=True)
+            self.assertNotIn("task_started", joined_attributes)
+            self.assertNotIn("turn_id", joined_attributes)
+            audit = worker_db.task_audit(conn, task="t")
+            self.assertEqual(len(audit["manager_cycle_spans"]), len(spans))
+            replay_entries = worker_replay.replay_entries(audit, role="all", mode="timeline")
+            self.assertIn("manager_cycle_span", [entry["kind"] for entry in replay_entries])
+
     def test_run_cycle_unknown_task_raises(self):
         from workerctl import supervise_cycle
 
@@ -9873,6 +9916,13 @@ class SuperviseCycleTests(unittest.TestCase):
             )
             self.assertEqual(cycle_events[-1]["severity"], "error")
             self.assertEqual(cycle_events[-1]["attributes"]["error_type"], "IngestError")
+            self.assertEqual(cycle_events[-1]["attributes"]["failure_phase"], "ingest_rollout")
+            self.assertNotIn("does-not-exist", json.dumps(cycle_events[-1]["attributes"]))
+            spans = worker_db.manager_cycle_spans(conn, task_id="task-1")
+            self.assertEqual(spans[-1]["phase"], "ingest_rollout")
+            self.assertEqual(spans[-1]["state"], "failed")
+            self.assertEqual(spans[-1]["error_type"], "IngestError")
+            self.assertNotIn("does-not-exist", json.dumps(spans[-1]["attributes"]))
 
     def test_run_cycle_succeeded_row_has_kind_discriminator(self):
         from workerctl import supervise_cycle
@@ -10100,6 +10150,13 @@ class SuperviseCycleTests(unittest.TestCase):
             self.assertTrue(result["pane_signal"]["degraded"])
             self.assertIn("tmux server went away", result["pane_signal"]["reason"])
             self.assertIsNone(result["notable_pane_pattern"])
+            capture_span = next(
+                span for span in worker_db.manager_cycle_spans(conn, manager_cycle_id=result["cycle_id"])
+                if span["phase"] == "capture_pane_signal"
+            )
+            self.assertEqual(capture_span["state"], "degraded")
+            self.assertTrue(capture_span["attributes"]["degraded"])
+            self.assertNotIn("tmux server went away", json.dumps(capture_span["attributes"]))
 
     def test_replay_renders_session_cycle_with_pane_pattern(self):
         """When a successful cycle has a notable_pane_pattern, the replay summary
@@ -13390,8 +13447,11 @@ class AcceptanceCriteriaReplayExportTests(unittest.TestCase):
             self.assertEqual({row["id"] for row in criteria}, {ids["proposed_id"], ids["deferred_id"]})
             manifest = json.loads((output / "manifest.json").read_text())
             self.assertIn("acceptance-criteria.json", manifest["files"])
+            self.assertIn("manager-cycle-spans.json", manifest["files"])
+            self.assertTrue((output / "manager-cycle-spans.json").exists())
             with zipfile.ZipFile(output.with_suffix(".zip")) as archive:
                 self.assertIn("acceptance-criteria.json", archive.namelist())
+                self.assertIn("manager-cycle-spans.json", archive.namelist())
 
 
 class PairCommandTests(unittest.TestCase):
@@ -15336,10 +15396,17 @@ class PairCommandTests(unittest.TestCase):
                     task_id=task_id,
                     summary="Ready to compact.",
                 )
+                cycle_id = worker_db.create_manager_cycle(
+                    conn,
+                    task_id=task_id,
+                    manager_id=None,
+                    timestamp="2026-05-20T00:00:00Z",
+                )
                 decision_id = worker_db.insert_manager_decision(
                     conn,
                     task_id=task_id,
                     manager_id=None,
+                    manager_cycle_id=cycle_id,
                     decision="nudge",
                     reason="Request worker compaction after handoff.",
                 )
@@ -15397,6 +15464,11 @@ class PairCommandTests(unittest.TestCase):
                 )
                 self.assertEqual(command_event["correlation"]["command_id"], command["id"])
                 self.assertEqual(command_event["attributes"]["result"]["worker_session"], "compact-worker")
+                spans = worker_db.manager_cycle_spans(conn, manager_cycle_id=cycle_id)
+                side_effect_span = next(span for span in spans if span["phase"] == "side_effect_command")
+                self.assertEqual(side_effect_span["command_id"], command["id"])
+                self.assertEqual(side_effect_span["manager_decision_id"], decision_id)
+                self.assertEqual(side_effect_span["attributes"]["command_type"], "request_worker_compact")
             finally:
                 conn.close()
 

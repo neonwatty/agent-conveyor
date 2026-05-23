@@ -12,7 +12,7 @@ from workerctl.core import now_iso
 from workerctl.state import state_root
 
 
-SCHEMA_VERSION = 17
+SCHEMA_VERSION = 18
 REQUIRED_TABLES = {
     "acceptance_criteria",
     "agent_observations",
@@ -27,6 +27,7 @@ REQUIRED_TABLES = {
     "events",
     "manager_configs",
     "manager_cycles",
+    "manager_cycle_spans",
     "manager_decisions",
     "managers",
     "prompts",
@@ -58,6 +59,8 @@ REQUIRED_INDEXES = {
     "events_task_id",
     "epilogue_runs_task_step",
     "manager_configs_task_id",
+    "manager_cycle_spans_cycle_phase",
+    "manager_cycle_spans_task",
     "one_active_binding_per_task",
     "one_active_run_per_task",
     "one_active_binding_per_manager_session",
@@ -365,6 +368,22 @@ def migrate(conn: sqlite3.Connection, from_version: int) -> None:
           error text
         );
 
+        create table if not exists manager_cycle_spans(
+          id integer primary key autoincrement,
+          manager_cycle_id integer not null references manager_cycles(id),
+          task_id text not null references tasks(id),
+          run_id text references runs(id),
+          phase text not null,
+          started_at text not null,
+          completed_at text not null,
+          duration_ms real not null check (duration_ms >= 0),
+          state text not null check (state in ('succeeded','failed','degraded')),
+          attributes_json text not null check (json_valid(attributes_json)),
+          error_type text,
+          manager_decision_id integer references manager_decisions(id),
+          command_id text references commands(id)
+        );
+
         create table if not exists worker_handoffs(
           id integer primary key autoincrement,
           task_id text not null references tasks(id),
@@ -645,6 +664,12 @@ def migrate(conn: sqlite3.Connection, from_version: int) -> None:
         create index if not exists manager_configs_task_id
         on manager_configs(task_id);
 
+        create index if not exists manager_cycle_spans_cycle_phase
+        on manager_cycle_spans(manager_cycle_id, phase, id);
+
+        create index if not exists manager_cycle_spans_task
+        on manager_cycle_spans(task_id, id);
+
         create index if not exists codex_events_session_id
         on codex_events(session_id, id);
 
@@ -708,6 +733,7 @@ def migrate(conn: sqlite3.Connection, from_version: int) -> None:
     migrate_to_v15_continuations(conn)
     migrate_to_v16_dispatch_command_attempts(conn)
     migrate_to_v17_command_required_permission(conn)
+    migrate_to_v18_manager_cycle_spans(conn)
     sync_worker_ids_to_config_files(conn)
     conn.execute(
         "insert or ignore into schema_migrations(version, applied_at) values (?, ?)",
@@ -1112,6 +1138,35 @@ def migrate_to_v17_command_required_permission(conn: sqlite3.Connection) -> None
     _add_column_if_missing(conn, "commands", "required_permission", "text")
 
 
+def migrate_to_v18_manager_cycle_spans(conn: sqlite3.Connection) -> None:
+    """Add trace-style phase spans for manager supervision cycles."""
+    conn.executescript(
+        """
+        create table if not exists manager_cycle_spans(
+          id integer primary key autoincrement,
+          manager_cycle_id integer not null references manager_cycles(id),
+          task_id text not null references tasks(id),
+          run_id text references runs(id),
+          phase text not null,
+          started_at text not null,
+          completed_at text not null,
+          duration_ms real not null check (duration_ms >= 0),
+          state text not null check (state in ('succeeded','failed','degraded')),
+          attributes_json text not null check (json_valid(attributes_json)),
+          error_type text,
+          manager_decision_id integer references manager_decisions(id),
+          command_id text references commands(id)
+        );
+
+        create index if not exists manager_cycle_spans_cycle_phase
+        on manager_cycle_spans(manager_cycle_id, phase, id);
+
+        create index if not exists manager_cycle_spans_task
+        on manager_cycle_spans(task_id, id);
+        """
+    )
+
+
 def sync_worker_ids_to_config_files(conn: sqlite3.Connection) -> None:
     database_path = conn.execute("PRAGMA database_list").fetchone()["file"]
     if Path(database_path).resolve() != default_db_path().resolve():
@@ -1283,7 +1338,10 @@ def _command_manager_decision_id(command: dict[str, Any]) -> int | None:
         manager_decision = root.get("manager_decision") if isinstance(root, dict) else None
         if not isinstance(manager_decision, dict):
             continue
-        decision_id = manager_decision.get("decision_id") or manager_decision.get("id")
+        decision_record = manager_decision.get("decision")
+        if not isinstance(decision_record, dict):
+            decision_record = manager_decision
+        decision_id = manager_decision.get("decision_id") or decision_record.get("id")
         if isinstance(decision_id, int):
             return decision_id
         if isinstance(decision_id, str) and decision_id.isdigit():
@@ -1393,6 +1451,31 @@ def create_command(
             "worker_id": worker_id,
         },
     )
+    manager_decision = payload.get("manager_decision") if isinstance(payload, dict) else None
+    if isinstance(manager_decision, dict):
+        decision_record = manager_decision.get("decision")
+        if not isinstance(decision_record, dict):
+            decision_record = manager_decision
+        cycle_id = decision_record.get("manager_cycle_id")
+        decision_id = manager_decision.get("decision_id") or decision_record.get("id")
+        if isinstance(cycle_id, str) and cycle_id.isdigit():
+            cycle_id = int(cycle_id)
+        if isinstance(decision_id, str) and decision_id.isdigit():
+            decision_id = int(decision_id)
+        if isinstance(cycle_id, int) and task_id is not None:
+            insert_manager_cycle_span(
+                conn,
+                manager_cycle_id=cycle_id,
+                task_id=task_id,
+                phase="side_effect_command",
+                started_at=now,
+                completed_at=now,
+                duration_ms=0.0,
+                state="succeeded",
+                attributes={"command_type": command_type, "side_effect": True},
+                manager_decision_id=decision_id if isinstance(decision_id, int) else None,
+                command_id=command_id,
+            )
     return command_id
 
 
@@ -2637,6 +2720,105 @@ def finish_manager_cycle(
     )
 
 
+def _manager_cycle_span_from_row(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "attributes": json.loads(row["attributes_json"]),
+        "command_id": row["command_id"],
+        "completed_at": row["completed_at"],
+        "duration_ms": row["duration_ms"],
+        "error_type": row["error_type"],
+        "id": row["id"],
+        "manager_cycle_id": row["manager_cycle_id"],
+        "manager_decision_id": row["manager_decision_id"],
+        "phase": row["phase"],
+        "run_id": row["run_id"],
+        "started_at": row["started_at"],
+        "state": row["state"],
+        "task_id": row["task_id"],
+    }
+
+
+def insert_manager_cycle_span(
+    conn: sqlite3.Connection,
+    *,
+    manager_cycle_id: int,
+    task_id: str,
+    phase: str,
+    started_at: str,
+    completed_at: str,
+    duration_ms: float,
+    state: str = "succeeded",
+    attributes: dict[str, Any] | None = None,
+    error_type: str | None = None,
+    manager_decision_id: int | None = None,
+    command_id: str | None = None,
+    run_id: str | None = _PRESERVE_FIELD,
+) -> int:
+    if not phase or not phase.strip():
+        raise ValueError("phase must be non-empty")
+    if state not in {"succeeded", "failed", "degraded"}:
+        raise ValueError("manager cycle span state must be succeeded, failed, or degraded")
+    if duration_ms < 0:
+        raise ValueError("duration_ms must be non-negative")
+    if run_id is _PRESERVE_FIELD:
+        active = active_run_for_task(conn, task_id=task_id)
+        run_id = active["id"] if active is not None else None
+    cursor = conn.execute(
+        """
+        insert into manager_cycle_spans(
+          manager_cycle_id, task_id, run_id, phase, started_at, completed_at,
+          duration_ms, state, attributes_json, error_type, manager_decision_id,
+          command_id
+        )
+        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            manager_cycle_id,
+            task_id,
+            run_id,
+            phase,
+            started_at,
+            completed_at,
+            duration_ms,
+            state,
+            json.dumps(attributes or {}, sort_keys=True, default=str),
+            error_type,
+            manager_decision_id,
+            command_id,
+        ),
+    )
+    return int(cursor.lastrowid)
+
+
+def manager_cycle_spans(
+    conn: sqlite3.Connection,
+    *,
+    task_id: str | None = None,
+    manager_cycle_id: int | None = None,
+) -> list[dict[str, Any]]:
+    clauses: list[str] = []
+    params: list[Any] = []
+    if task_id is not None:
+        clauses.append("task_id = ?")
+        params.append(task_id)
+    if manager_cycle_id is not None:
+        clauses.append("manager_cycle_id = ?")
+        params.append(manager_cycle_id)
+    where = f"where {' and '.join(clauses)}" if clauses else ""
+    rows = conn.execute(
+        f"""
+        select id, manager_cycle_id, task_id, run_id, phase, started_at,
+               completed_at, duration_ms, state, attributes_json, error_type,
+               manager_decision_id, command_id
+        from manager_cycle_spans
+        {where}
+        order by manager_cycle_id, id
+        """,
+        params,
+    ).fetchall()
+    return [_manager_cycle_span_from_row(row) for row in rows]
+
+
 def insert_manager_decision(
     conn: sqlite3.Connection,
     *,
@@ -2683,6 +2865,19 @@ def insert_manager_decision(
             "reason": reason,
         },
     )
+    if manager_cycle_id is not None:
+        insert_manager_cycle_span(
+            conn,
+            manager_cycle_id=manager_cycle_id,
+            task_id=task_id,
+            phase="manager_decision",
+            started_at=timestamp or now_iso(),
+            completed_at=timestamp or now_iso(),
+            duration_ms=0.0,
+            state="succeeded",
+            attributes={"decision": decision},
+            manager_decision_id=decision_id,
+        )
     return decision_id
 
 
@@ -4656,6 +4851,17 @@ def task_audit(conn: sqlite3.Connection, *, task: str) -> dict[str, Any]:
         """,
         (task_row["id"],),
     ).fetchall()
+    span_rows = conn.execute(
+        """
+        select id, manager_cycle_id, task_id, run_id, phase, started_at,
+               completed_at, duration_ms, state, attributes_json, error_type,
+               manager_decision_id, command_id
+        from manager_cycle_spans
+        where task_id = ?
+        order by manager_cycle_id, id
+        """,
+        (task_row["id"],),
+    ).fetchall()
     decision_rows = conn.execute(
         """
         select id, task_id, manager_id, manager_cycle_id, decision, reason,
@@ -4700,6 +4906,7 @@ def task_audit(conn: sqlite3.Connection, *, task: str) -> dict[str, Any]:
         }
         for row in cycle_rows
     ]
+    manager_cycle_span_records = [_manager_cycle_span_from_row(row) for row in span_rows]
     manager_decision_records = [
         {
             "created_at": row["created_at"],
@@ -4773,6 +4980,7 @@ def task_audit(conn: sqlite3.Connection, *, task: str) -> dict[str, Any]:
             for row in event_rows
         ],
         "manager_cycles": manager_cycle_records,
+        "manager_cycle_spans": manager_cycle_span_records,
         "manager_decisions": manager_decision_records,
         "routed_notifications": routed_notification_records,
         "task": {
