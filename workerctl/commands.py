@@ -3777,9 +3777,9 @@ def _sandbox_string(value: str) -> str:
     return value.replace("\\", "\\\\").replace('"', '\\"')
 
 
-def _real_path_label(path: Path) -> tuple[str, bool]:
+def _real_path_label(path: Path, *, force_dir: bool = False) -> tuple[str, bool]:
     resolved = os.path.realpath(str(path.expanduser()))
-    return resolved, Path(resolved).is_dir()
+    return resolved, force_dir or Path(resolved).is_dir()
 
 
 def _continuation_reviewer_denied_paths(
@@ -3805,6 +3805,9 @@ def _continuation_reviewer_denied_paths(
         if label not in seen:
             seen.add(label)
             resolved.append((label, is_dir))
+    state_label, state_is_dir = _real_path_label(state_root(), force_dir=True)
+    if state_label not in seen:
+        resolved.append((state_label, state_is_dir))
     return resolved
 
 
@@ -3840,7 +3843,7 @@ def _run_continuation_reviewer_command(
         "denied_path_count": len(denied_paths),
         "enabled": False,
         "engine": "sandbox-exec",
-        "profile": "deny-bound-session-and-db-read",
+        "profile": "deny-state-root-bound-session-and-db-read",
     }
     if sandbox_exec is None:
         sandbox["setup_error"] = "sandbox-exec not available"
@@ -3984,7 +3987,7 @@ def command_continuation_reviewer(args: argparse.Namespace) -> int:
                 "denied_path_count": 0,
                 "enabled": False,
                 "engine": "sandbox-exec",
-                "profile": "deny-bound-session-and-db-read",
+                "profile": "deny-state-root-bound-session-and-db-read",
                 "setup_error": str(exc),
             }
             command_result = {
