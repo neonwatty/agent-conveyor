@@ -166,6 +166,7 @@ test("groups dispatch correlation chains with command attempts for dashboard dis
   assert.equal(chains[1].manager_decision_id, 12);
   assert.equal(chains[1].notification_count, 2);
   assert.equal(chains[1].side_effect_risk, true);
+  assert.equal(chains[1].error, "tmux failed after paste");
   assert.deepEqual(chains[1].attempts, [
     {
       dispatcher_id: "dispatcher-a",

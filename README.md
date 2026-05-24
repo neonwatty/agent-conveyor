@@ -430,11 +430,11 @@ tmux attach -t codex-live-test
   repeats polling with heartbeat telemetry; `--watch-iterations` bounds a watch
   run for scripts and verification; `--lease-seconds` tunes command claim
   recovery; `--once` performs one pass.
-- `enqueue-notify-manager <task> --message "..." [--required-permission P]
-  [--idempotency-key K] [--json]` — Queue a `notify_manager` command row for
+- `enqueue-notify-manager <task> --message "..." [--correlation-id C]
+  [--required-permission P] [--idempotency-key K] [--json]` — Queue a `notify_manager` command row for
   Dispatch to claim and deliver to the bound manager.
-- `enqueue-nudge-worker <task> --message "..." [--required-permission P]
-  [--idempotency-key K] [--json]` — Queue a `nudge_worker` command row for
+- `enqueue-nudge-worker <task> --message "..." [--correlation-id C]
+  [--required-permission P] [--idempotency-key K] [--json]` — Queue a `nudge_worker` command row for
   Dispatch to claim and deliver to the bound worker.
 
 ### Actuation

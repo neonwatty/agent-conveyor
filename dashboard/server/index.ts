@@ -285,6 +285,7 @@ export function dispatchChainEntries(audit: AuditResult | null) {
       command_state: chain.command_state || command?.state || (typeof primaryNotification?.state === "string" ? primaryNotification.state : undefined),
       command_type: chain.command_type || command?.type || (typeof primaryNotification?.signal_type === "string" ? primaryNotification.signal_type : undefined),
       correlation_id: chain.correlation_id || command?.correlation_id || (typeof primaryNotification?.correlation_id === "string" ? primaryNotification.correlation_id : undefined),
+      error: attempts.find((attempt) => attempt.error)?.error || command?.error || (typeof primaryNotification?.error === "string" ? primaryNotification.error : undefined),
       key: `chain-${chain.command_id || chain.correlation_id || chain.routed_notification_ids?.join("-")}`,
       manager_cycle_id: chain.manager_cycle_id,
       manager_decision_id: chain.manager_decision_id,

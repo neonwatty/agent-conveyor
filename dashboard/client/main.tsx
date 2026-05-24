@@ -48,6 +48,7 @@ type DispatchChain = {
   command_state?: string;
   command_type?: string;
   correlation_id?: string | null;
+  error?: string | null;
   key: string;
   manager_cycle_id?: number | null;
   manager_decision_id?: number | null;
@@ -184,7 +185,7 @@ function DispatchPanel({ observation }: { observation: Observation | null }) {
               <strong>{chain.command_type || "command"}</strong>
               <span>{chain.command_state || "unknown"}</span>
             </div>
-            <p>{chain.summary || chain.command_id || chain.correlation_id}</p>
+            <p>{chain.error ? `${chain.summary || chain.command_id || chain.correlation_id}: ${chain.error}` : chain.summary || chain.command_id || chain.correlation_id}</p>
             <small>
               {[
                 chain.manager_cycle_id ? `cycle #${chain.manager_cycle_id}` : null,

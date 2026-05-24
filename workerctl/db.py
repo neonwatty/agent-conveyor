@@ -1482,11 +1482,15 @@ def _build_correlation_chains(
     for command in commands:
         decision_id = _command_manager_decision_id(command)
         decision = decisions_by_id.get(decision_id) if decision_id is not None else None
-        cycle = cycles_by_id.get(decision["manager_cycle_id"]) if decision and decision.get("manager_cycle_id") else None
+        decision_cycle = cycles_by_id.get(decision["manager_cycle_id"]) if decision and decision.get("manager_cycle_id") else None
         attempts = attempts_by_command.get(command["id"], [])
         notifications = notifications_by_command.get(command["id"], [])
         if not (decision or attempts or notifications or command.get("correlation_id")):
             continue
+        consumed_cycle = next(
+            (cycle for notification in notifications if (cycle := _next_manager_cycle_for_notification(notification, manager_cycles))),
+            None,
+        )
         chains.append(
             {
                 "attempt_ids": [attempt["id"] for attempt in attempts],
@@ -1495,7 +1499,8 @@ def _build_correlation_chains(
                 "command_type": command["type"],
                 "correlation_id": command.get("correlation_id"),
                 "created_at": command["created_at"],
-                "manager_cycle_id": cycle["id"] if cycle else None,
+                "manager_cycle_id": consumed_cycle["id"] if consumed_cycle else (decision_cycle["id"] if decision_cycle else None),
+                "manager_decision_cycle_id": decision_cycle["id"] if decision_cycle else None,
                 "manager_decision_id": decision["id"] if decision else None,
                 "routed_notification_ids": [notification["id"] for notification in notifications],
             }
@@ -1539,6 +1544,7 @@ def create_command(
 ) -> str:
     required_permission = _validate_required_permission(required_permission)
     command_id = f"command-{uuid.uuid4()}"
+    correlation_id = correlation_id or f"dispatch-{uuid.uuid4()}"
     now = timestamp or now_iso()
     key = idempotency_key or command_id
     conn.execute(
@@ -2411,18 +2417,22 @@ def insert_routed_notification(
     payload: dict[str, Any],
     command_id: str | None = None,
     state: str = "pending",
+    claimed_by: str | None = None,
+    claimed_at: str | None = None,
+    claim_expires_at: str | None = None,
     timestamp: str | None = None,
 ) -> int:
     if state not in {"pending", "delivered", "failed", "suppressed"}:
         raise WorkerError(f"invalid routed notification state: {state}")
+    created_at = timestamp or now_iso()
     cursor = conn.execute(
         """
         insert into routed_notifications(
           task_id, binding_id, correlation_id, source_session_id, target_session_id,
           signal_type, source_event_id, source_event_timestamp, dedupe_key, command_id,
-          created_at, state, payload_json
+          created_at, state, payload_json, claimed_by, claimed_at, claim_expires_at
         )
-        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             task_id,
@@ -2435,9 +2445,12 @@ def insert_routed_notification(
             source_event_timestamp,
             dedupe_key,
             command_id,
-            timestamp or now_iso(),
+            created_at,
             state,
             json.dumps(payload, sort_keys=True),
+            claimed_by,
+            claimed_at or (created_at if claimed_by else None),
+            claim_expires_at,
         ),
     )
     return int(cursor.lastrowid)
@@ -2469,14 +2482,31 @@ def mark_routed_notification_side_effect_started(
     conn: sqlite3.Connection,
     *,
     notification_id: int,
+    claimed_by: str | None = None,
+    claim_expires_at: str | None = None,
+    timestamp: str | None = None,
 ) -> None:
+    if claimed_by is None and claim_expires_at is None:
+        conn.execute(
+            """
+            update routed_notifications
+            set side_effect_started = 1
+            where id = ?
+            """,
+            (notification_id,),
+        )
+        return
+    now = timestamp or now_iso()
     conn.execute(
         """
         update routed_notifications
-        set side_effect_started = 1
+        set side_effect_started = 1,
+            claimed_by = coalesce(?, claimed_by),
+            claimed_at = coalesce(claimed_at, ?),
+            claim_expires_at = coalesce(?, claim_expires_at)
         where id = ?
         """,
-        (notification_id,),
+        (claimed_by, now, claim_expires_at, notification_id),
     )
 
 
