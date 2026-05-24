@@ -280,7 +280,15 @@ export function dispatchChainEntries(audit: AuditResult | null) {
     .slice(0, 12);
 }
 
-export function dispatchHealth(snapshot: SnapshotResult | null, audit: AuditResult | null) {
+export function dashboardTaskName(options: Pick<ReturnType<typeof normalizeServerOptions>, "task">, binding: Record<string, unknown> | null): string {
+  return options.task || (binding?.task_name ? String(binding.task_name) : "");
+}
+
+export function dispatchHealth(
+  snapshot: SnapshotResult | null,
+  audit: AuditResult | null,
+  suppressedTelemetry?: Array<Record<string, unknown>>,
+) {
   const now = Date.now();
   const commands = audit?.commands || [];
   const attempts = audit?.command_attempts || [];
@@ -288,7 +296,7 @@ export function dispatchHealth(snapshot: SnapshotResult | null, audit: AuditResu
   const failed = commands.filter((command) => command.state === "failed");
   const stale = queued.filter((command) => isExpiredTimestamp(command.claim_expires_at, now));
   const sideEffectRisk = attempts.filter((attempt) => attempt.side_effect_started && !attempt.side_effect_completed);
-  const suppressedSignals = (snapshot?.telemetry?.recent || [])
+  const suppressedSignals = (suppressedTelemetry || snapshot?.telemetry?.recent || [])
     .filter((event) => event.actor === "dispatch" && event.event_type === "dispatch_signal_suppressed");
   return {
     failed_count: commands.length ? failed.length : snapshot?.commands?.failed_count || 0,
@@ -374,7 +382,8 @@ async function dashboardObservation(options: ReturnType<typeof normalizeServerOp
   const binding = findDashboardBinding(discovered, sessions);
   let snapshot: SnapshotResult | null = null;
   let audit: AuditResult | null = null;
-  const taskName = binding?.task_name ? String(binding.task_name) : "";
+  let suppressedTelemetry: Array<Record<string, unknown>> = [];
+  const taskName = dashboardTaskName(options, binding);
   if (taskName) {
     try {
       snapshot = await runWorkerctlJson({
@@ -397,6 +406,19 @@ async function dashboardObservation(options: ReturnType<typeof normalizeServerOp
     } catch {
       audit = null;
     }
+    try {
+      suppressedTelemetry = await runWorkerctlJson({
+        command: "telemetry",
+        limit: 1000,
+        task: taskName,
+        telemetryActor: "dispatch",
+        telemetryEventType: "dispatch_signal_suppressed",
+        workerctlPath: options.workerctlPath,
+        dbPath: options.dbPath,
+      }) as Array<Record<string, unknown>>;
+    } catch {
+      suppressedTelemetry = [];
+    }
   }
   return {
     audit: audit ? {
@@ -408,7 +430,7 @@ async function dashboardObservation(options: ReturnType<typeof normalizeServerOp
     binding,
     dispatch: {
       chains: dispatchChainEntries(audit),
-      health: dispatchHealth(snapshot, audit),
+      health: dispatchHealth(snapshot, audit, suppressedTelemetry),
     },
     latest_cycle: snapshot?.latest_cycle || null,
     polled_at: new Date().toISOString(),

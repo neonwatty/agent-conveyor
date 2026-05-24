@@ -15,6 +15,7 @@ export type DashboardCommand =
   | "snapshot"
   | "start-manager"
   | "start-worker"
+  | "telemetry"
   | "tasks";
 
 export interface ServerOptions {
@@ -49,6 +50,8 @@ export interface WorkerctlCommandOptions {
   managerName?: string;
   managerObjective?: string;
   managerReference?: string[];
+  telemetryActor?: "dispatch" | "manager" | "operator" | "system" | "worker" | "workerctl";
+  telemetryEventType?: string;
   requireCriteriaAudit?: boolean;
   sandbox?: string;
   session?: string;
@@ -85,6 +88,21 @@ export function buildWorkerctlArgs(options: WorkerctlCommandOptions): string[] {
     if (options.limit) {
       args.push("--limit", String(options.limit));
     }
+  } else if (options.command === "telemetry") {
+    args.push("telemetry");
+    if (options.task) {
+      args.push("--task", options.task);
+    }
+    if (options.telemetryActor) {
+      args.push("--actor", options.telemetryActor);
+    }
+    if (options.telemetryEventType) {
+      args.push("--event-type", options.telemetryEventType);
+    }
+    if (options.limit) {
+      args.push("--limit", String(options.limit));
+    }
+    args.push("--json");
   } else if (options.command === "audit") {
     if (!options.task) {
       throw new Error("Audit command requires a task.");
@@ -205,6 +223,7 @@ function commandSupportsPath(command: DashboardCommand): boolean {
     "nudge",
     "pair",
     "snapshot",
+    "telemetry",
     "tasks",
   ].includes(command);
 }

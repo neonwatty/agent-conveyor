@@ -157,7 +157,16 @@ function DispatchPanel({ observation }: { observation: Observation | null }) {
       <div className="dispatch-heartbeat" data-state={heartbeat?.stale ? "warning" : "ok"}>
         <span>Heartbeat</span>
         <strong>{heartbeat?.timestamp ? `${formatTime(heartbeat.timestamp)} (${formatAge(heartbeat.stale_seconds)} ago)` : "none"}</strong>
-        {heartbeat?.dispatcher_id ? <em>{heartbeat.dispatcher_id}</em> : null}
+        {heartbeat ? (
+          <em>
+            {[
+              heartbeat.dispatcher_id,
+              typeof heartbeat.iteration === "number" ? `iteration ${heartbeat.iteration}` : null,
+              typeof heartbeat.processed_count === "number" ? `${heartbeat.processed_count} processed` : null,
+              typeof heartbeat.dry_run === "boolean" ? (heartbeat.dry_run ? "dry run" : "live") : null,
+            ].filter(Boolean).join(" / ")}
+          </em>
+        ) : null}
       </div>
       <ol className="dispatch-chain-list">
         {chains.map((chain) => (
