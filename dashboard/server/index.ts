@@ -115,13 +115,15 @@ type AuditCommandAttempt = {
 
 type AuditCorrelationChain = {
   attempt_ids?: number[];
-  command_id?: string;
+  command_id?: string | null;
   command_state?: string;
   command_type?: string;
   correlation_id?: string | null;
   manager_cycle_id?: number | null;
   manager_decision_id?: number | null;
   routed_notification_ids?: number[];
+  signal_type?: string;
+  source_event_id?: number | null;
 };
 
 type AuditResult = {
@@ -219,8 +221,14 @@ function commandLabel(command: AuditCommand | undefined, commandId: string | und
   return id ? `${type} ${id}` : type;
 }
 
+function notificationLabel(notification: Record<string, unknown> | undefined, fallbackType: string | undefined): string {
+  const signalType = String(notification?.signal_type || fallbackType || "notification");
+  return notification?.id ? `${signalType} notification #${notification.id}` : signalType;
+}
+
 export function dispatchChainEntries(audit: AuditResult | null) {
   const commandsById = new Map((audit?.commands || []).map((command) => [String(command.id), command]));
+  const notificationsById = new Map((audit?.routed_notifications || []).map((notification) => [Number(notification.id), notification]));
   const attemptsByCommand = new Map<string, AuditCommandAttempt[]>();
   for (const attempt of audit?.command_attempts || []) {
     if (attempt.command_id) {
@@ -230,6 +238,10 @@ export function dispatchChainEntries(audit: AuditResult | null) {
   return (audit?.correlation_chains || []).slice(-12).reverse().map((chain) => {
     const command = chain.command_id ? commandsById.get(chain.command_id) : undefined;
     const attempts = chain.command_id ? attemptsByCommand.get(chain.command_id) || [] : [];
+    const notifications = (chain.routed_notification_ids || [])
+      .map((id) => notificationsById.get(Number(id)))
+      .filter((notification) => notification !== undefined);
+    const primaryNotification = notifications[0];
     const riskyAttempts = attempts.filter((attempt) => attempt.side_effect_started && !attempt.side_effect_completed);
     return {
       attempts: attempts.map((attempt) => ({
@@ -241,16 +253,16 @@ export function dispatchChainEntries(audit: AuditResult | null) {
         state: attempt.state,
       })),
       command_id: chain.command_id,
-      command_state: chain.command_state || command?.state,
-      command_type: chain.command_type || command?.type,
-      correlation_id: chain.correlation_id || command?.correlation_id,
+      command_state: chain.command_state || command?.state || (typeof primaryNotification?.state === "string" ? primaryNotification.state : undefined),
+      command_type: chain.command_type || command?.type || (typeof primaryNotification?.signal_type === "string" ? primaryNotification.signal_type : undefined),
+      correlation_id: chain.correlation_id || command?.correlation_id || (typeof primaryNotification?.correlation_id === "string" ? primaryNotification.correlation_id : undefined),
       key: `chain-${chain.command_id || chain.correlation_id}`,
       manager_cycle_id: chain.manager_cycle_id,
       manager_decision_id: chain.manager_decision_id,
       notification_count: chain.routed_notification_ids?.length || 0,
       side_effect_risk: riskyAttempts.length > 0,
-      summary: commandLabel(command, chain.command_id),
-      time: command?.created_at,
+      summary: command ? commandLabel(command, chain.command_id || undefined) : notificationLabel(primaryNotification, chain.signal_type || chain.command_type),
+      time: command?.created_at || (typeof primaryNotification?.created_at === "string" ? primaryNotification.created_at : undefined),
     };
   });
 }

@@ -1227,6 +1227,68 @@ class DispatchTests(unittest.TestCase):
             self.assertIn("dispatch_signal_detected", [event["event_type"] for event in telemetry])
             self.assertIn("dispatch_signal_routed", [event["event_type"] for event in telemetry])
 
+    def test_dispatch_completion_notification_has_correlation_chain(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn, db_path = self.open_db(tmpdir)
+            worker_id, _manager_id = self.setup_bound_task(conn)
+            event_id = self.insert_completion(conn, worker_id)
+            conn.commit()
+
+            args = argparse.Namespace(
+                dispatcher_id="dispatch-test",
+                dry_run=False,
+                json=True,
+                limit=10,
+                once=True,
+                path=str(db_path),
+                type=None,
+                watch=False,
+            )
+            with mock.patch.object(worker_tmux, "send_text_to_session", return_value={"target": "tmux-manager:0.0"}):
+                with contextlib.redirect_stdout(io.StringIO()):
+                    commands.command_dispatch(args)
+
+            audit = worker_db.task_audit(conn, task="dispatch-task")
+            chain = audit["correlation_chains"][0]
+            notification = worker_db.routed_notifications(conn, task_id="task-dispatch")[0]
+            self.assertIsNone(chain["command_id"])
+            self.assertEqual(chain["correlation_id"], notification["correlation_id"])
+            self.assertEqual(chain["signal_type"], "worker_task_complete")
+            self.assertEqual(chain["source_event_id"], event_id)
+            self.assertEqual(chain["routed_notification_ids"], [notification["id"]])
+
+    def test_dispatch_duplicate_completion_race_emits_suppressed_telemetry(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn, db_path = self.open_db(tmpdir)
+            worker_id, _manager_id = self.setup_bound_task(conn)
+            self.insert_completion(conn, worker_id)
+            conn.commit()
+
+            args = argparse.Namespace(
+                dispatcher_id="dispatch-test",
+                dry_run=False,
+                json=True,
+                limit=10,
+                once=True,
+                path=str(db_path),
+                type=None,
+                watch=False,
+            )
+            with mock.patch.object(
+                worker_db,
+                "insert_routed_notification",
+                side_effect=Exception("UNIQUE constraint failed: routed_notifications.dedupe_key"),
+            ):
+                with mock.patch.object(worker_tmux, "send_text_to_session") as send:
+                    with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                        commands.command_dispatch(args)
+
+            payload = json.loads(stdout.getvalue())
+            telemetry = worker_db.telemetry_events(conn, task_id="task-dispatch")
+            self.assertEqual(payload["processed"][0]["state"], "suppressed")
+            self.assertIn("dispatch_signal_suppressed", [event["event_type"] for event in telemetry])
+            send.assert_not_called()
+
     def test_dispatch_dedupe_uses_source_event_so_consecutive_completions_route(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             conn, db_path = self.open_db(tmpdir)

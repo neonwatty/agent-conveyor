@@ -141,6 +141,44 @@ test("groups dispatch correlation chains with command attempts for dashboard dis
   ]);
 });
 
+test("groups completion-only dispatch notifications for dashboard display", () => {
+  const chains = dispatchChainEntries({
+    command_attempts: [],
+    commands: [],
+    correlation_chains: [
+      {
+        command_id: null,
+        command_state: "delivered",
+        command_type: "worker_task_complete",
+        correlation_id: "dispatch-completion",
+        manager_cycle_id: null,
+        manager_decision_id: null,
+        routed_notification_ids: [31],
+        signal_type: "worker_task_complete",
+        source_event_id: 17,
+      },
+    ],
+    routed_notifications: [
+      {
+        correlation_id: "dispatch-completion",
+        created_at: "2026-05-23T10:02:00Z",
+        id: 31,
+        signal_type: "worker_task_complete",
+        state: "delivered",
+      },
+    ],
+  });
+
+  assert.equal(chains.length, 1);
+  assert.equal(chains[0].command_id, null);
+  assert.equal(chains[0].command_type, "worker_task_complete");
+  assert.equal(chains[0].command_state, "delivered");
+  assert.equal(chains[0].correlation_id, "dispatch-completion");
+  assert.equal(chains[0].notification_count, 1);
+  assert.equal(chains[0].summary, "worker_task_complete notification #31");
+  assert.equal(chains[0].time, "2026-05-23T10:02:00Z");
+});
+
 test("builds session list arguments using the existing JSON default", () => {
   const args = buildWorkerctlArgs({
     dbPath: "/tmp/workerctl.db",
