@@ -92,6 +92,15 @@ The `export` line makes `workerctl` available in the current shell.
 `workerctl db-doctor` initializes and checks the SQLite control-plane
 database.
 
+When supervising worker/manager pairs, run Dispatch in a separate shell so
+worker completion is routed to the bound manager mechanically:
+
+```bash
+workerctl dispatch --watch --dispatcher-id dispatch-local
+```
+
+Use `workerctl qa-plan dispatch-completion` for a bounded verification flow.
+
 ## Quickstart
 
 The fastest way to start a worker and register it is a single command:
@@ -107,6 +116,9 @@ workerctl register-manager --name foo-mgr --pid $MGR_PID --cwd "$PWD"
 # Create a task and bind the pair to it.
 workerctl tasks --create my-task --goal "Refactor auth"
 workerctl bind --task my-task --worker foo --manager foo-mgr
+
+# Start Dispatch in another shell so worker completion wakes the manager.
+workerctl dispatch --watch --dispatcher-id dispatch-local
 
 # One observation cycle. Returns JSON.
 workerctl cycle my-task
@@ -418,6 +430,12 @@ tmux attach -t codex-live-test
   repeats polling with heartbeat telemetry; `--watch-iterations` bounds a watch
   run for scripts and verification; `--lease-seconds` tunes command claim
   recovery; `--once` performs one pass.
+- `enqueue-notify-manager <task> --message "..." [--required-permission P]
+  [--idempotency-key K] [--json]` — Queue a `notify_manager` command row for
+  Dispatch to claim and deliver to the bound manager.
+- `enqueue-nudge-worker <task> --message "..." [--required-permission P]
+  [--idempotency-key K] [--json]` — Queue a `nudge_worker` command row for
+  Dispatch to claim and deliver to the bound worker.
 
 ### Actuation
 

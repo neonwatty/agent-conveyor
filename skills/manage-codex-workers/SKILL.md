@@ -30,6 +30,17 @@ The manager Codex drives the supervision loop by calling
 captures the worker's tmux pane as a shadow signal, persists a `manager_cycles`
 row, and returns structured JSON. The manager reads that JSON and decides.
 
+Dispatch is the separate mechanical router. When supervising a pair, keep
+Dispatch running in another shell with:
+
+```bash
+scripts/workerctl dispatch --watch --dispatcher-id dispatch-local
+```
+
+Dispatch wakes the bound manager on worker completion and executes queued
+`notify_manager` / `nudge_worker` commands. It does not decide whether the task
+is correct or finished.
+
 ## Preflight
 
 1. Work from the control repo:
@@ -114,6 +125,10 @@ with a long `pair` command. Use the skill in each session:
    scripts/workerctl telemetry --task <task-name>
    scripts/workerctl replay <task-name>
    ```
+   Keep `scripts/workerctl dispatch --watch --dispatcher-id dispatch-local`
+   running in a separate shell while the pair is active, or run a bounded
+   verification pass with `scripts/workerctl dispatch --watch --watch-iterations
+   2 --dry-run --json`.
 
 The skill should translate those prompts into explicit `workerctl` commands.
 For the worker, run `doctor-self`; if supported, register the current session

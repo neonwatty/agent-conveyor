@@ -282,6 +282,51 @@ test("counts suppressed dispatch signals in health", () => {
   assert.equal(health.suppressed_signal_count, 1);
 });
 
+test("marks missing dispatch heartbeat as not observed", () => {
+  const health = dispatchHealth({ telemetry: { recent: [] } }, null);
+
+  assert.equal(health.heartbeat.state, "not_observed");
+  assert.equal(health.heartbeat.stale, true);
+  assert.equal(health.heartbeat.timestamp, "");
+});
+
+test("marks stale dispatch heartbeat explicitly", () => {
+  const health = dispatchHealth({
+    telemetry: {
+      recent: [
+        {
+          actor: "dispatch",
+          event_type: "dispatch_watch_heartbeat",
+          timestamp: "2000-01-01T00:00:00Z",
+          correlation: { dispatcher_id: "dispatch-old", iteration: 3 },
+          attributes: { dry_run: false, processed_count: 0 },
+        },
+      ],
+    },
+  }, null);
+
+  assert.equal(health.heartbeat.state, "stale");
+  assert.equal(health.heartbeat.dispatcher_id, "dispatch-old");
+});
+
+test("uses durable dispatch heartbeat when snapshot recent events omit it", () => {
+  const health = dispatchHealth({ telemetry: { recent: [] } }, null, [], [
+    {
+      actor: "dispatch",
+      event_type: "dispatch_watch_heartbeat",
+      timestamp: new Date().toISOString(),
+      correlation: { dispatcher_id: "dispatch-live", iteration: 4 },
+      attributes: { dry_run: true, processed_count: 2 },
+    },
+  ]);
+
+  assert.equal(health.heartbeat.state, "active");
+  assert.equal(health.heartbeat.dispatcher_id, "dispatch-live");
+  assert.equal(health.heartbeat.iteration, 4);
+  assert.equal(health.heartbeat.processed_count, 2);
+  assert.equal(health.heartbeat.dry_run, true);
+});
+
 test("counts durable suppressed dispatch telemetry outside snapshot recent events", () => {
   const health = dispatchHealth({
     telemetry: {

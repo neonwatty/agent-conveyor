@@ -233,13 +233,6 @@ def run_cycle(
         },
         attributes={"busy_wait_seconds": busy_wait_seconds, "cycle_id": cycle_id},
     )
-    consumed_notifications = worker_db.consume_routed_notifications_for_cycle(
-        conn,
-        task_id=binding["task_id"],
-        binding_id=binding["binding_id"],
-        manager_cycle_id=cycle_id,
-        timestamp=started_at,
-    )
     spans.flush(conn)
     conn.commit()
 
@@ -369,6 +362,13 @@ def run_cycle(
                 "cycle requires current acknowledgement(s) before first observation: "
                 + ", ".join(stale)
             )
+        consumed_notifications = worker_db.consume_routed_notifications_for_cycle(
+            conn,
+            task_id=binding["task_id"],
+            binding_id=binding["binding_id"],
+            manager_cycle_id=cycle_id,
+            timestamp=started_at,
+        )
         manager_context = {
             "manager_config": manager_config,
             "worker_ack": worker_ack,

@@ -12,7 +12,7 @@ from workerctl.core import now_iso
 from workerctl.state import state_root
 
 
-SCHEMA_VERSION = 19
+SCHEMA_VERSION = 20
 REQUIRED_TABLES = {
     "acceptance_criteria",
     "agent_observations",
@@ -73,6 +73,7 @@ REQUIRED_INDEXES = {
     "task_continuations_task_role_revision",
     "runs_task_status",
     "routed_notifications_dedupe_key",
+    "routed_notifications_claimable",
     "routed_notifications_source_event",
     "telemetry_events_actor_timestamp",
     "telemetry_events_run_timestamp",
@@ -603,6 +604,11 @@ def migrate(conn: sqlite3.Connection, from_version: int) -> None:
           consumed_manager_cycle_id integer references manager_cycles(id),
           consumed_at text,
           state text not null check (state in ('pending','delivered','failed','suppressed')),
+          claimed_by text,
+          claimed_at text,
+          claim_expires_at text,
+          side_effect_started integer not null default 0 check (side_effect_started in (0, 1)),
+          side_effect_completed integer not null default 0 check (side_effect_completed in (0, 1)),
           payload_json text not null check (json_valid(payload_json)),
           error text
         );
@@ -692,6 +698,9 @@ def migrate(conn: sqlite3.Connection, from_version: int) -> None:
         create index if not exists routed_notifications_consumed_cycle
         on routed_notifications(consumed_manager_cycle_id);
 
+        create index if not exists routed_notifications_claimable
+        on routed_notifications(state, signal_type, side_effect_started, claim_expires_at, created_at);
+
         create index if not exists manager_configs_task_id
         on manager_configs(task_id);
 
@@ -766,6 +775,7 @@ def migrate(conn: sqlite3.Connection, from_version: int) -> None:
     migrate_to_v17_command_required_permission(conn)
     migrate_to_v18_manager_cycle_spans(conn)
     migrate_to_v19_dispatch_consumption_and_ack_revisions(conn)
+    migrate_to_v20_routed_notification_claims(conn)
     sync_worker_ids_to_config_files(conn)
     conn.execute(
         "insert or ignore into schema_migrations(version, applied_at) values (?, ?)",
@@ -1218,6 +1228,31 @@ def migrate_to_v19_dispatch_consumption_and_ack_revisions(conn: sqlite3.Connecti
     )
 
 
+def migrate_to_v20_routed_notification_claims(conn: sqlite3.Connection) -> None:
+    """Track completion notification delivery claims and side-effect risk."""
+    _add_column_if_missing(conn, "routed_notifications", "claimed_by", "text")
+    _add_column_if_missing(conn, "routed_notifications", "claimed_at", "text")
+    _add_column_if_missing(conn, "routed_notifications", "claim_expires_at", "text")
+    _add_column_if_missing(
+        conn,
+        "routed_notifications",
+        "side_effect_started",
+        "integer not null default 0 check (side_effect_started in (0, 1))",
+    )
+    _add_column_if_missing(
+        conn,
+        "routed_notifications",
+        "side_effect_completed",
+        "integer not null default 0 check (side_effect_completed in (0, 1))",
+    )
+    conn.execute(
+        """
+        create index if not exists routed_notifications_claimable
+        on routed_notifications(state, signal_type, side_effect_started, claim_expires_at, created_at)
+        """
+    )
+
+
 def sync_worker_ids_to_config_files(conn: sqlite3.Connection) -> None:
     database_path = conn.execute("PRAGMA database_list").fetchone()["file"]
     if Path(database_path).resolve() != default_db_path().resolve():
@@ -1366,6 +1401,9 @@ def _command_attempt_record(row: sqlite3.Row) -> dict[str, Any]:
 def _routed_notification_record(row: sqlite3.Row) -> dict[str, Any]:
     return {
         "binding_id": row["binding_id"],
+        "claimed_at": row["claimed_at"],
+        "claimed_by": row["claimed_by"],
+        "claim_expires_at": row["claim_expires_at"],
         "command_id": row["command_id"],
         "correlation_id": row["correlation_id"],
         "created_at": row["created_at"],
@@ -1376,6 +1414,8 @@ def _routed_notification_record(row: sqlite3.Row) -> dict[str, Any]:
         "error": row["error"],
         "id": row["id"],
         "payload": json.loads(row["payload_json"]),
+        "side_effect_completed": bool(row["side_effect_completed"]),
+        "side_effect_started": bool(row["side_effect_started"]),
         "signal_type": row["signal_type"],
         "source_event_id": row["source_event_id"],
         "source_event_timestamp": row["source_event_timestamp"],
@@ -2414,14 +2454,176 @@ def finish_routed_notification(
     if state not in {"delivered", "failed", "suppressed"}:
         raise WorkerError(f"invalid routed notification finish state: {state}")
     delivered_at = (timestamp or now_iso()) if state == "delivered" else None
+    side_effect_completed = 1 if state == "delivered" else 0
     conn.execute(
         """
         update routed_notifications
-        set state = ?, delivered_at = ?, error = ?
+        set state = ?, delivered_at = ?, error = ?, side_effect_completed = ?
         where id = ?
         """,
-        (state, delivered_at, error, notification_id),
+        (state, delivered_at, error, side_effect_completed, notification_id),
     )
+
+
+def mark_routed_notification_side_effect_started(
+    conn: sqlite3.Connection,
+    *,
+    notification_id: int,
+) -> None:
+    conn.execute(
+        """
+        update routed_notifications
+        set side_effect_started = 1
+        where id = ?
+        """,
+        (notification_id,),
+    )
+
+
+def defer_routed_notification_before_side_effect(
+    conn: sqlite3.Connection,
+    *,
+    notification_id: int,
+    error: str,
+) -> None:
+    conn.execute(
+        """
+        update routed_notifications
+        set state = 'pending',
+            error = ?,
+            claimed_by = null,
+            claimed_at = null,
+            claim_expires_at = null,
+            side_effect_started = 0,
+            side_effect_completed = 0
+        where id = ?
+        """,
+        (error, notification_id),
+    )
+
+
+def claim_pending_routed_completion_notifications(
+    conn: sqlite3.Connection,
+    *,
+    dispatcher_id: str,
+    lease_seconds: int,
+    limit: int = 10,
+    timestamp: str | None = None,
+) -> list[sqlite3.Row]:
+    """Claim stale pending completion notifications that never started sending."""
+    now = timestamp or now_iso()
+    expires_at = (datetime.now(timezone.utc) + timedelta(seconds=lease_seconds)).isoformat().replace("+00:00", "Z")
+    candidate_rows = conn.execute(
+        """
+        select id
+        from routed_notifications
+        where state = 'pending'
+          and signal_type = 'worker_task_complete'
+          and side_effect_started = 0
+          and (claim_expires_at is null or claim_expires_at <= ?)
+        order by created_at, id
+        limit ?
+        """,
+        (now, limit),
+    ).fetchall()
+    claimed_ids: list[int] = []
+    for row in candidate_rows:
+        cursor = conn.execute(
+            """
+            update routed_notifications
+            set claimed_by = ?, claimed_at = ?, claim_expires_at = ?
+            where id = ?
+              and state = 'pending'
+              and side_effect_started = 0
+              and (claim_expires_at is null or claim_expires_at <= ?)
+            """,
+            (dispatcher_id, now, expires_at, row["id"], now),
+        )
+        if cursor.rowcount:
+            claimed_ids.append(int(row["id"]))
+    if not claimed_ids:
+        return []
+    placeholders = ",".join("?" for _ in claimed_ids)
+    return list(
+        conn.execute(
+            f"""
+            select
+              rn.id as notification_id,
+              rn.task_id as task_id,
+              rn.binding_id as binding_id,
+              rn.correlation_id as correlation_id,
+              rn.source_session_id as source_session_id,
+              rn.target_session_id as target_session_id,
+              rn.signal_type as signal_type,
+              rn.source_event_id as source_event_id,
+              rn.source_event_timestamp as source_event_timestamp,
+              rn.dedupe_key as dedupe_key,
+              rn.payload_json as notification_payload_json,
+              ws.name as worker_session_name,
+              ms.name as manager_session_name,
+              t.name as task_name
+            from routed_notifications rn
+            join sessions ws on ws.id = rn.source_session_id
+            join sessions ms on ms.id = rn.target_session_id
+            join tasks t on t.id = rn.task_id
+            where rn.id in ({placeholders})
+            order by rn.created_at, rn.id
+            """,
+            claimed_ids,
+        )
+    )
+
+
+def fail_stale_started_routed_notifications(
+    conn: sqlite3.Connection,
+    *,
+    limit: int = 10,
+    timestamp: str | None = None,
+) -> list[dict[str, Any]]:
+    """Fail pending completion notifications whose tmux send may have started."""
+    now = timestamp or now_iso()
+    rows = conn.execute(
+        """
+        select id, task_id, binding_id, correlation_id, source_event_id, signal_type,
+               claimed_by, claim_expires_at
+        from routed_notifications
+        where state = 'pending'
+          and signal_type = 'worker_task_complete'
+          and side_effect_started = 1
+          and side_effect_completed = 0
+          and claim_expires_at is not null
+          and claim_expires_at <= ?
+        order by claim_expires_at, id
+        limit ?
+        """,
+        (now, limit),
+    ).fetchall()
+    failed: list[dict[str, Any]] = []
+    for row in rows:
+        error = "stale pending completion notification had started side effect; not retrying automatically"
+        conn.execute(
+            """
+            update routed_notifications
+            set state = 'failed', error = ?
+            where id = ? and state = 'pending'
+            """,
+            (error, row["id"]),
+        )
+        failed.append(
+            {
+                "binding_id": row["binding_id"],
+                "claim_expires_at": row["claim_expires_at"],
+                "claimed_by": row["claimed_by"],
+                "correlation_id": row["correlation_id"],
+                "error": error,
+                "notification_id": row["id"],
+                "signal_type": row["signal_type"],
+                "source_event_id": row["source_event_id"],
+                "state": "failed",
+                "task_id": row["task_id"],
+            }
+        )
+    return failed
 
 
 def consume_routed_notifications_for_cycle(
@@ -2452,7 +2654,8 @@ def routed_notifications(conn: sqlite3.Connection, *, task_id: str | None = None
         select id, task_id, binding_id, correlation_id, source_session_id,
                target_session_id, signal_type, source_event_id, source_event_timestamp,
                dedupe_key, command_id, created_at, delivered_at, consumed_manager_cycle_id,
-               consumed_at, state, payload_json, error
+               consumed_at, state, claimed_by, claimed_at, claim_expires_at,
+               side_effect_started, side_effect_completed, payload_json, error
         from routed_notifications
     """
     params: list[Any] = []
@@ -2463,6 +2666,9 @@ def routed_notifications(conn: sqlite3.Connection, *, task_id: str | None = None
     return [
         {
             "binding_id": row["binding_id"],
+            "claimed_at": row["claimed_at"],
+            "claimed_by": row["claimed_by"],
+            "claim_expires_at": row["claim_expires_at"],
             "command_id": row["command_id"],
             "correlation_id": row["correlation_id"],
             "created_at": row["created_at"],
@@ -2473,6 +2679,8 @@ def routed_notifications(conn: sqlite3.Connection, *, task_id: str | None = None
             "error": row["error"],
             "id": row["id"],
             "payload": json.loads(row["payload_json"]),
+            "side_effect_completed": bool(row["side_effect_completed"]),
+            "side_effect_started": bool(row["side_effect_started"]),
             "signal_type": row["signal_type"],
             "source_event_id": row["source_event_id"],
             "source_event_timestamp": row["source_event_timestamp"],
@@ -4998,7 +5206,8 @@ def task_audit(conn: sqlite3.Connection, *, task: str) -> dict[str, Any]:
         select id, task_id, binding_id, correlation_id, source_session_id,
                target_session_id, signal_type, source_event_id, source_event_timestamp,
                dedupe_key, command_id, created_at, delivered_at, consumed_manager_cycle_id,
-               consumed_at, state, payload_json, error
+               consumed_at, state, claimed_by, claimed_at, claim_expires_at,
+               side_effect_started, side_effect_completed, payload_json, error
         from routed_notifications
         where task_id = ?
         order by created_at, id

@@ -265,10 +265,10 @@ def send_text_to_session(
     buffer_name = f"workerctl-session-{session_name}"
     try:
         run(["tmux", "set-buffer", "-b", buffer_name, text])
+        run(["tmux", "paste-buffer", "-b", buffer_name, "-t", target])
         result["side_effect_started"] = True
         if side_effect_audit is not None:
             side_effect_audit["side_effect_started"] = True
-        run(["tmux", "paste-buffer", "-b", buffer_name, "-t", target])
         time.sleep(PASTE_SUBMIT_DELAY_SECONDS)
         run(["tmux", "send-keys", "-t", target, SUBMIT_KEY])
         result["side_effect_completed"] = True

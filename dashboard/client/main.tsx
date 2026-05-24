@@ -66,6 +66,7 @@ type DispatchHealth = {
     processed_count?: number;
     stale: boolean;
     stale_seconds?: number | null;
+    state?: "active" | "not_observed" | "stale";
     timestamp?: string;
   } | null;
   queued_count: number;
@@ -136,6 +137,12 @@ function DispatchPanel({ observation }: { observation: Observation | null }) {
   const health = observation?.dispatch?.health;
   const chains = observation?.dispatch?.chains || [];
   const heartbeat = health?.heartbeat;
+  const heartbeatState = heartbeat?.state || (heartbeat?.stale ? "stale" : "not_observed");
+  const heartbeatLabel = heartbeatState === "active"
+    ? "active"
+    : heartbeatState === "stale"
+      ? "stale"
+      : "not observed";
   const chips = [
     ["Queued", String(health?.queued_count ?? 0), (health?.queued_count ?? 0) > 0 ? "warning" : "ok"],
     ["Failed", String(health?.failed_count ?? 0), (health?.failed_count ?? 0) > 0 ? "error" : "ok"],
@@ -154,12 +161,13 @@ function DispatchPanel({ observation }: { observation: Observation | null }) {
           </div>
         ))}
       </div>
-      <div className="dispatch-heartbeat" data-state={heartbeat?.stale ? "warning" : "ok"}>
+      <div className="dispatch-heartbeat" data-state={heartbeatState === "active" ? "ok" : "warning"}>
         <span>Heartbeat</span>
-        <strong>{heartbeat?.timestamp ? `${formatTime(heartbeat.timestamp)} (${formatAge(heartbeat.stale_seconds)} ago)` : "none"}</strong>
+        <strong>{heartbeat?.timestamp ? `${formatTime(heartbeat.timestamp)} (${formatAge(heartbeat.stale_seconds)} ago)` : heartbeatLabel}</strong>
         {heartbeat ? (
           <em>
             {[
+              heartbeatLabel,
               heartbeat.dispatcher_id,
               typeof heartbeat.iteration === "number" ? `iteration ${heartbeat.iteration}` : null,
               typeof heartbeat.processed_count === "number" ? `${heartbeat.processed_count} processed` : null,

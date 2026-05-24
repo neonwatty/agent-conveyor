@@ -36,6 +36,12 @@ scripts/check-resource-warnings
 echo "== py_compile =="
 python3 -m py_compile scripts/workerctl scripts/check-resource-warnings workerctl/*.py
 
+echo "== dashboard tests =="
+npm test -- --runInBand
+
+echo "== dashboard build =="
+npm run build
+
 echo "== shell syntax =="
 bash -n scripts/live-smoke
 bash -n scripts/live-smoke-repeat
