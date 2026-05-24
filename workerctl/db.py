@@ -1349,6 +1349,19 @@ def _command_manager_decision_id(command: dict[str, Any]) -> int | None:
     return None
 
 
+def _next_manager_cycle_for_notification(
+    notification: dict[str, Any],
+    manager_cycles: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    created_at = notification.get("created_at") or ""
+    candidates = []
+    for cycle in manager_cycles:
+        if (cycle.get("started_at") or "") < created_at:
+            continue
+        candidates.append(cycle)
+    return min(candidates, key=lambda cycle: (cycle.get("started_at") or "", cycle.get("id") or 0)) if candidates else None
+
+
 def _build_correlation_chains(
     *,
     commands: list[dict[str, Any]],
@@ -1358,6 +1371,11 @@ def _build_correlation_chains(
     manager_cycles: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     decisions_by_id = {decision["id"]: decision for decision in manager_decisions}
+    decisions_by_cycle: dict[int, list[dict[str, Any]]] = {}
+    for decision in manager_decisions:
+        cycle_id = decision.get("manager_cycle_id")
+        if cycle_id is not None:
+            decisions_by_cycle.setdefault(cycle_id, []).append(decision)
     cycles_by_id = {cycle["id"]: cycle for cycle in manager_cycles}
     attempts_by_command: dict[str, list[dict[str, Any]]] = {}
     for attempt in command_attempts:
@@ -1386,12 +1404,16 @@ def _build_correlation_chains(
                 "command_state": command["state"],
                 "command_type": command["type"],
                 "correlation_id": command.get("correlation_id"),
+                "created_at": command["created_at"],
                 "manager_cycle_id": cycle["id"] if cycle else None,
                 "manager_decision_id": decision["id"] if decision else None,
                 "routed_notification_ids": [notification["id"] for notification in notifications],
             }
         )
     for notification in notifications_without_command:
+        cycle = _next_manager_cycle_for_notification(notification, manager_cycles)
+        cycle_decisions = decisions_by_cycle.get(cycle["id"], []) if cycle else []
+        decision = cycle_decisions[0] if cycle_decisions else None
         chains.append(
             {
                 "attempt_ids": [],
@@ -1399,14 +1421,15 @@ def _build_correlation_chains(
                 "command_state": notification["state"],
                 "command_type": notification["signal_type"],
                 "correlation_id": notification["correlation_id"],
-                "manager_cycle_id": None,
-                "manager_decision_id": None,
+                "created_at": notification["created_at"],
+                "manager_cycle_id": cycle["id"] if cycle else None,
+                "manager_decision_id": decision["id"] if decision else None,
                 "routed_notification_ids": [notification["id"]],
                 "signal_type": notification["signal_type"],
                 "source_event_id": notification["source_event_id"],
             }
         )
-    return chains
+    return sorted(chains, key=lambda chain: (chain.get("created_at") or "", str(chain.get("command_id") or "")))
 
 
 def create_command(

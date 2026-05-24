@@ -44,7 +44,7 @@ type DispatchChain = {
     side_effect_started: boolean;
     state?: string;
   }>;
-  command_id?: string;
+  command_id?: string | null;
   command_state?: string;
   command_type?: string;
   correlation_id?: string | null;
@@ -53,6 +53,7 @@ type DispatchChain = {
   manager_decision_id?: number | null;
   notification_count: number;
   side_effect_risk: boolean;
+  source_event_id?: number | null;
   summary: string;
   time?: string;
 };
@@ -70,6 +71,7 @@ type DispatchHealth = {
   queued_count: number;
   side_effect_risk_count: number;
   stale_claim_count: number;
+  suppressed_signal_count: number;
 };
 type Observation = {
   audit?: {
@@ -139,6 +141,7 @@ function DispatchPanel({ observation }: { observation: Observation | null }) {
     ["Failed", String(health?.failed_count ?? 0), (health?.failed_count ?? 0) > 0 ? "error" : "ok"],
     ["Stale", String(health?.stale_claim_count ?? 0), (health?.stale_claim_count ?? 0) > 0 ? "warning" : "ok"],
     ["Risk", String(health?.side_effect_risk_count ?? 0), (health?.side_effect_risk_count ?? 0) > 0 ? "error" : "ok"],
+    ["Suppressed", String(health?.suppressed_signal_count ?? 0), (health?.suppressed_signal_count ?? 0) > 0 ? "warning" : "ok"],
   ];
   return (
     <section className="dispatch-section">
@@ -164,11 +167,13 @@ function DispatchPanel({ observation }: { observation: Observation | null }) {
               <strong>{chain.command_type || "command"}</strong>
               <span>{chain.command_state || "unknown"}</span>
             </div>
-            <p>{chain.correlation_id || chain.command_id || chain.summary}</p>
+            <p>{chain.summary || chain.command_id || chain.correlation_id}</p>
             <small>
               {[
                 chain.manager_cycle_id ? `cycle #${chain.manager_cycle_id}` : null,
                 chain.manager_decision_id ? `decision #${chain.manager_decision_id}` : null,
+                chain.source_event_id ? `source event #${chain.source_event_id}` : null,
+                chain.correlation_id ? `correlation ${chain.correlation_id}` : null,
                 `${chain.attempts.length} attempt${chain.attempts.length === 1 ? "" : "s"}`,
                 `${chain.notification_count} notification${chain.notification_count === 1 ? "" : "s"}`,
               ].filter(Boolean).join(" / ")}

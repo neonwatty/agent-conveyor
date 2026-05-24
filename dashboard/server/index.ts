@@ -119,6 +119,7 @@ type AuditCorrelationChain = {
   command_state?: string;
   command_type?: string;
   correlation_id?: string | null;
+  created_at?: string;
   manager_cycle_id?: number | null;
   manager_decision_id?: number | null;
   routed_notification_ids?: number[];
@@ -226,6 +227,14 @@ function notificationLabel(notification: Record<string, unknown> | undefined, fa
   return notification?.id ? `${signalType} notification #${notification.id}` : signalType;
 }
 
+function chainTimestamp(value: unknown): number {
+  if (typeof value !== "string" || !value) {
+    return 0;
+  }
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
 export function dispatchChainEntries(audit: AuditResult | null) {
   const commandsById = new Map((audit?.commands || []).map((command) => [String(command.id), command]));
   const notificationsById = new Map((audit?.routed_notifications || []).map((notification) => [Number(notification.id), notification]));
@@ -235,7 +244,7 @@ export function dispatchChainEntries(audit: AuditResult | null) {
       attemptsByCommand.set(attempt.command_id, [...(attemptsByCommand.get(attempt.command_id) || []), attempt]);
     }
   }
-  return (audit?.correlation_chains || []).slice(-12).reverse().map((chain) => {
+  const entries = (audit?.correlation_chains || []).map((chain) => {
     const command = chain.command_id ? commandsById.get(chain.command_id) : undefined;
     const attempts = chain.command_id ? attemptsByCommand.get(chain.command_id) || [] : [];
     const notifications = (chain.routed_notification_ids || [])
@@ -256,18 +265,22 @@ export function dispatchChainEntries(audit: AuditResult | null) {
       command_state: chain.command_state || command?.state || (typeof primaryNotification?.state === "string" ? primaryNotification.state : undefined),
       command_type: chain.command_type || command?.type || (typeof primaryNotification?.signal_type === "string" ? primaryNotification.signal_type : undefined),
       correlation_id: chain.correlation_id || command?.correlation_id || (typeof primaryNotification?.correlation_id === "string" ? primaryNotification.correlation_id : undefined),
-      key: `chain-${chain.command_id || chain.correlation_id}`,
+      key: `chain-${chain.command_id || chain.correlation_id || chain.routed_notification_ids?.join("-")}`,
       manager_cycle_id: chain.manager_cycle_id,
       manager_decision_id: chain.manager_decision_id,
       notification_count: chain.routed_notification_ids?.length || 0,
       side_effect_risk: riskyAttempts.length > 0,
+      source_event_id: chain.source_event_id,
       summary: command ? commandLabel(command, chain.command_id || undefined) : notificationLabel(primaryNotification, chain.signal_type || chain.command_type),
-      time: command?.created_at || (typeof primaryNotification?.created_at === "string" ? primaryNotification.created_at : undefined),
+      time: chain.created_at || command?.created_at || (typeof primaryNotification?.created_at === "string" ? primaryNotification.created_at : undefined),
     };
   });
+  return entries
+    .sort((left, right) => chainTimestamp(right.time) - chainTimestamp(left.time))
+    .slice(0, 12);
 }
 
-function dispatchHealth(snapshot: SnapshotResult | null, audit: AuditResult | null) {
+export function dispatchHealth(snapshot: SnapshotResult | null, audit: AuditResult | null) {
   const now = Date.now();
   const commands = audit?.commands || [];
   const attempts = audit?.command_attempts || [];
@@ -275,12 +288,15 @@ function dispatchHealth(snapshot: SnapshotResult | null, audit: AuditResult | nu
   const failed = commands.filter((command) => command.state === "failed");
   const stale = queued.filter((command) => isExpiredTimestamp(command.claim_expires_at, now));
   const sideEffectRisk = attempts.filter((attempt) => attempt.side_effect_started && !attempt.side_effect_completed);
+  const suppressedSignals = (snapshot?.telemetry?.recent || [])
+    .filter((event) => event.actor === "dispatch" && event.event_type === "dispatch_signal_suppressed");
   return {
     failed_count: commands.length ? failed.length : snapshot?.commands?.failed_count || 0,
     heartbeat: latestDispatchHeartbeat(snapshot),
     queued_count: commands.length ? queued.length : snapshot?.commands?.unfinished_count || 0,
     side_effect_risk_count: sideEffectRisk.length,
     stale_claim_count: stale.length,
+    suppressed_signal_count: suppressedSignals.length,
   };
 }
 
