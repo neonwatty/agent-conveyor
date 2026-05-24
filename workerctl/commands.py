@@ -1400,6 +1400,31 @@ def command_qa_plan(args: argparse.Namespace) -> int:
                 "If any live simulation would require disrupting real tmux or active Codex sessions, stop at the generated plan and cover that case with unit tests or dependency injection instead.",
             ],
         },
+        "dispatch-completion": {
+            "expected_observations": [
+                "dispatch --once routes a bound worker task_complete signal from codex_events, not pane classifier output",
+                "routed_notifications contains the worker_task_complete row with a correlation_id, source_event_id, delivered state, and dedupe key including the source event id",
+                "the bound manager tmux pane receives a mechanical notification that asks the manager to inspect evidence and decide next action, without declaring task success",
+                "a second task_complete event for the same binding creates a second routed notification rather than being suppressed by signal type alone",
+                "a duplicate-route race emits dispatch_signal_suppressed telemetry and does not send another tmux notification",
+                "audit, replay, and dashboard dispatch surfaces show the completion-only chain with a human-readable notification label, source event, timestamp, and notification count",
+                "mixed command-backed and completion-only dispatch chains appear in chronological order",
+                "the Dispatch panel surfaces queued, failed, stale, risky, and suppressed dispatch state without presenting Dispatch as a decision maker",
+            ],
+            "steps": [
+                'Create a disposable pair: workerctl pair --task qa-dispatch-completion --worker-name qa-dispatch-worker --manager-name qa-dispatch-manager --cwd "$PWD" --task-goal "QA dispatch completion routing without tracked edits." --task-summary "Verify dispatch observes worker completion and wakes the manager mechanically." --task-prompt "Do not edit tracked files. Complete a short status-only response, then stop."',
+                "Run workerctl cycle qa-dispatch-completion until the worker session has ingested codex_events with last_event_subtype task_complete.",
+                "Run workerctl dispatch --once --type worker_task_complete --dispatcher-id qa-dispatch --json and verify processed_count is 1 and state is delivered.",
+                "Inspect workerctl audit qa-dispatch-completion --json and verify routed_notifications has signal_type worker_task_complete, source_event_id, correlation_id, delivered state, and a dedupe_key containing the source event id.",
+                "Inspect the manager tmux pane and verify it received a notification telling the manager the worker appears to have completed a turn and must inspect evidence before deciding what completion means.",
+                "Run workerctl replay qa-dispatch-completion and verify routed_notifications and correlation_chains entries use the notification timestamp/source event rather than falling back to task creation time.",
+                "Open the dashboard for the bound task and verify the Dispatch chain row uses a readable notification label, shows one notification, and does not replace the label with only the correlation id.",
+                "Create or simulate a second worker task_complete event, run workerctl dispatch --once again, and verify a second routed notification appears because dedupe includes source_event_id.",
+                "Simulate a duplicate-route race only against the disposable task or with a patched test double; verify dispatch_signal_suppressed telemetry is recorded and no extra manager send occurs.",
+                "Verify the dashboard Dispatch health shows any recent suppressed dispatch signal count, and that mixed command-backed and completion-only chains are ordered by event time.",
+                "Finish or clean up only the disposable pair, then run workerctl reconcile --stale-cycles-seconds 1 and git status --short --branch.",
+            ],
+        },
     }
     if scenario not in qa_plans:
         raise WorkerError(f"Unsupported QA scenario: {scenario}")

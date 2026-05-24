@@ -492,7 +492,7 @@ tmux attach -t codex-live-test
 - `transcript-show <task> [--role R] [--include-content]` — Show stored
   transcript segment metadata. Segment text is redacted unless
   `--include-content` is passed.
-- `qa-plan <self-management|emergent-criteria|tmux-errors>` — Print a
+- `qa-plan <self-management|emergent-criteria|tmux-errors|dispatch-completion>` — Print a
   repeatable manual QA checklist.
 - `import-compat` — Dry-run or import existing `.codex-workers/<worker>/`
   artifacts into SQLite.
@@ -515,6 +515,7 @@ scripts/workerctl qa-plan self-management
 scripts/workerctl qa-plan emergent-criteria
 scripts/workerctl qa-plan emergent-criteria --json
 scripts/workerctl qa-plan tmux-errors
+scripts/workerctl qa-plan dispatch-completion
 ```
 
 The `emergent-criteria` scenario covers a real worker/manager pair, criteria
@@ -526,6 +527,13 @@ worker's separated must-have and follow-up response.
 The `tmux-errors` scenario covers read-only JSON degradation, mutating command
 failures, pane capture degradation, stop failures, and reconcile recovery when
 tmux is unavailable or a disposable tmux target disappears.
+
+The `dispatch-completion` scenario covers the issue #113 completion-routing
+flow: a worker `task_complete` signal is read from `codex_events`, Dispatch
+records and deduplicates a routed notification, the bound manager receives a
+mechanical wake-up, duplicate-route races emit suppressed telemetry without an
+extra send, and audit/replay/dashboard surfaces show readable, chronological
+dispatch evidence.
 
 ### Terminal helpers
 
@@ -678,7 +686,8 @@ Current dispatch state:
 - Replay/audit surfaces include routed notifications, command attempts, and
   correlation chains where the data exists. The dashboard groups bound-task
   dispatch correlation chains with command state, attempt counts, notification
-  counts, decision/cycle ids, and side-effect risk.
+  counts, decision/cycle ids, source event ids, suppressed-signal visibility,
+  chronological ordering, and side-effect risk.
 
 The adjacent completion-contract surfaces are separate from Dispatch:
 

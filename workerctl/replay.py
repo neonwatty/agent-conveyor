@@ -225,6 +225,8 @@ def replay_entries(audit: dict[str, Any], *, role: str = "all", mode: str = "tim
         if role != "all" and role != "manager":
             continue
         parts = [chain["command_type"], chain["command_state"]]
+        if chain.get("command_id") is None and chain.get("source_event_id") is not None:
+            parts.append(f"source event #{chain['source_event_id']}")
         if chain.get("manager_decision_id") is not None:
             parts.append(f"decision #{chain['manager_decision_id']}")
         if chain.get("manager_cycle_id") is not None:
@@ -239,7 +241,7 @@ def replay_entries(audit: dict[str, Any], *, role: str = "all", mode: str = "tim
                 "details": chain,
                 "kind": "correlation_chain",
                 "source": "correlation_chains",
-                "source_id": chain["command_id"],
+                "source_id": chain["command_id"] or chain.get("correlation_id") or chain.get("source_event_id"),
                 "summary": " -> ".join(parts),
                 "timestamp": next(
                     (
@@ -247,7 +249,7 @@ def replay_entries(audit: dict[str, Any], *, role: str = "all", mode: str = "tim
                         for command in audit.get("commands", [])
                         if command["id"] == chain["command_id"]
                     ),
-                    audit["task"]["created_at"],
+                    chain.get("created_at") or audit["task"]["created_at"],
                 ),
             }
         )

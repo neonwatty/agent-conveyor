@@ -7,6 +7,7 @@ import {
   normalizeServerOptions,
 } from "./workerctl.ts";
 import {
+  dispatchHealth,
   dispatchChainEntries,
 } from "./index.ts";
 import {
@@ -101,6 +102,7 @@ test("groups dispatch correlation chains with command attempts for dashboard dis
         command_state: "failed",
         command_type: "notify_manager",
         correlation_id: "corr-1",
+        created_at: "2026-05-23T10:00:00Z",
         manager_cycle_id: 11,
         manager_decision_id: 12,
         routed_notification_ids: [21, 22],
@@ -111,6 +113,7 @@ test("groups dispatch correlation chains with command attempts for dashboard dis
         command_state: "succeeded",
         command_type: "nudge_worker",
         correlation_id: "corr-2",
+        created_at: "2026-05-23T10:01:00Z",
         manager_cycle_id: null,
         manager_decision_id: null,
         routed_notification_ids: [],
@@ -151,6 +154,7 @@ test("groups completion-only dispatch notifications for dashboard display", () =
         command_state: "delivered",
         command_type: "worker_task_complete",
         correlation_id: "dispatch-completion",
+        created_at: "2026-05-23T10:02:00Z",
         manager_cycle_id: null,
         manager_decision_id: null,
         routed_notification_ids: [31],
@@ -177,6 +181,71 @@ test("groups completion-only dispatch notifications for dashboard display", () =
   assert.equal(chains[0].notification_count, 1);
   assert.equal(chains[0].summary, "worker_task_complete notification #31");
   assert.equal(chains[0].time, "2026-05-23T10:02:00Z");
+});
+
+test("orders mixed dispatch chains by timestamp before dashboard display", () => {
+  const chains = dispatchChainEntries({
+    command_attempts: [],
+    commands: [
+      {
+        correlation_id: "corr-new",
+        created_at: "2026-05-23T10:03:00Z",
+        id: "cmd-new",
+        state: "succeeded",
+        type: "notify_manager",
+      },
+    ],
+    correlation_chains: [
+      {
+        command_id: "cmd-new",
+        command_state: "succeeded",
+        command_type: "notify_manager",
+        correlation_id: "corr-new",
+        created_at: "2026-05-23T10:03:00Z",
+        manager_cycle_id: null,
+        manager_decision_id: null,
+        routed_notification_ids: [],
+      },
+      {
+        command_id: null,
+        command_state: "delivered",
+        command_type: "worker_task_complete",
+        correlation_id: "dispatch-old",
+        created_at: "2026-05-23T10:01:00Z",
+        manager_cycle_id: null,
+        manager_decision_id: null,
+        routed_notification_ids: [31],
+        signal_type: "worker_task_complete",
+        source_event_id: 17,
+      },
+    ],
+    routed_notifications: [
+      {
+        correlation_id: "dispatch-old",
+        created_at: "2026-05-23T10:01:00Z",
+        id: 31,
+        signal_type: "worker_task_complete",
+        state: "delivered",
+      },
+    ],
+  });
+
+  assert.equal(chains[0].command_id, "cmd-new");
+  assert.equal(chains[1].summary, "worker_task_complete notification #31");
+});
+
+test("counts suppressed dispatch signals in health", () => {
+  const health = dispatchHealth({
+    telemetry: {
+      recent: [
+        { actor: "dispatch", event_type: "dispatch_signal_suppressed" },
+        { actor: "dispatch", event_type: "dispatch_signal_routed" },
+        { actor: "workerctl", event_type: "dispatch_signal_suppressed" },
+      ],
+    },
+  }, null);
+
+  assert.equal(health.suppressed_signal_count, 1);
 });
 
 test("builds session list arguments using the existing JSON default", () => {
