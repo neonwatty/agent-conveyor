@@ -82,6 +82,10 @@ if [[ "$write" == false ]]; then
     echo "  $CODEX_HOME_DIR/skills/manage-codex-workers"
     echo
   fi
+  echo "Dispatch setup:"
+  echo "  workerctl dispatch --watch --dispatcher-id dispatch-local"
+  echo "  workerctl qa-plan dispatch-completion"
+  echo
   echo "To install for zsh:"
   echo "  scripts/install-local --write"
   echo
@@ -122,3 +126,7 @@ echo "  $PATH_LINE"
 if [[ "$INSTALL_SKILL" == true ]]; then
   echo "Plain Codex sessions can use the installed manage-codex-workers skill after starting a new session."
 fi
+echo "Start Dispatch when supervising a pair so worker completion wakes the manager:"
+echo "  workerctl dispatch --watch --dispatcher-id dispatch-local"
+echo "For a bounded verification flow:"
+echo "  workerctl qa-plan dispatch-completion"

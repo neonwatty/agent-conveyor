@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import sqlite3
 import time
-from typing import Any
+from typing import Any, Callable
 
 from workerctl.classify import classify_startup_output
 from workerctl.constants import DEFAULT_HISTORY_LINES
@@ -227,6 +227,7 @@ def send_text_to_session(
     text: str,
     dry_run: bool = False,
     side_effect_audit: dict[str, Any] | None = None,
+    side_effect_started_callback: Callable[[], None] | None = None,
 ) -> dict[str, Any]:
     """Send `text` (followed by Enter) to the session's tmux pane.
 
@@ -265,6 +266,8 @@ def send_text_to_session(
     buffer_name = f"workerctl-session-{session_name}"
     try:
         run(["tmux", "set-buffer", "-b", buffer_name, text])
+        if side_effect_started_callback is not None:
+            side_effect_started_callback()
         result["side_effect_started"] = True
         if side_effect_audit is not None:
             side_effect_audit["side_effect_started"] = True

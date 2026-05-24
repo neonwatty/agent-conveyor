@@ -1,0 +1,457 @@
+version: 2
+
+goal:
+  title: "Dispatch Setup Gap Closure"
+  slug: dispatch-setup-gap-closure
+  kind: existing_plan
+  tranche: "Fix the named post-close dispatcher/setup gaps with backend, dashboard, setup/docs, CI/manual QA, and final audit proof."
+  status: done
+  oracle:
+    signal: "Gap-by-gap verification: backend dispatch tests, dashboard tests/build, setup/docs tests, CI coverage, manual QA checklist coverage, and final Judge audit all pass."
+    cadence: "after each Worker package and at final audit"
+    final_proof: "A final Judge receipt maps every named gap to implemented evidence or an explicit non-goal, with all required verification commands passing."
+  intake:
+    original_request: "use $goalbuddy:goal-prep to fix all gaps"
+    interpreted_outcome: "All known post-close dispatcher/setup gaps are fixed with tests, docs, CI/manual QA coverage, and a final audit against issue #113."
+    input_shape: existing_plan
+    audience:
+      - workerctl operators
+      - managers
+      - workers
+      - dashboard users
+      - maintainers
+    authority: requested
+    proof_type: test
+    completion_proof: "Focused backend, dashboard, docs/setup, CI, and final audit checks pass and map every named gap to evidence."
+    likely_misfire: "Only improving README/setup wording while backend notification consumption/recovery or dashboard health remains wrong."
+    blind_spots_considered:
+      - "Changing notification recovery could accidentally duplicate tmux sends."
+      - "Starting Dispatch automatically may require an explicit product decision; strong setup guidance may be safer than a daemon."
+      - "CI changes should stay lightweight enough for the existing repo cadence."
+    existing_plan_facts:
+      - "High gap: delivered dispatch notifications can be consumed by failed manager cycles."
+      - "Medium gap: completion-only dispatch lacks pending notification recovery after crash between insert and send/finish."
+      - "Medium gap: setup does not start or strongly guide starting workerctl dispatch --watch."
+      - "Medium gap: dashboard treats missing dispatcher heartbeat too softly."
+      - "Medium gap: CI does not run dashboard tests/build."
+      - "Low gap: README omits enqueue-notify-manager and enqueue-nudge-worker from command reference."
+      - "Low gap: manual QA heartbeat coverage lacks bounded watch-mode step."
+      - "Low test gap: install/setup tests do not assert Dispatch guidance."
+
+rules:
+  pm_owns_state: true
+  one_active_task: true
+  max_write_workers: 1
+  no_implementation_without_worker_or_pm_task: true
+  no_completion_without_judge_or_pm_audit: true
+  planning_is_not_completion: true
+  queued_required_worker_blocks_completion: true
+  continuous_until_full_outcome: true
+  missing_input_or_credentials_do_not_stop_goal: true
+  preserve_and_validate_existing_plan: true
+  intake_misfire_must_be_audited: true
+  goal_pressure_requires_oracle: true
+  no_completion_on_weak_proof: true
+  slice_policy:
+    max_consecutive_tiny_tasks: 2
+    prefer_vertical_slices: true
+    judge_picks_largest_safe_slice: true
+    worker_completes_whole_slice: true
+
+agents:
+  scout: installed
+  worker: installed
+  judge: installed
+
+visual_board:
+  selected: local
+  local:
+    status: live
+    url: "http://goalbuddy.localhost:41737/dispatch-setup-gap-closure/"
+    command: "npx goalbuddy board docs/goals/dispatch-setup-gap-closure"
+
+active_task: null
+
+constraints:
+  - "Dispatch must remain mechanical and must not decide task success, acceptance criteria, next work, PR merging, or human/operator routing."
+  - "Keep existing direct session-nudge and command queue behavior available."
+  - "Use conservative tmux side-effect retry behavior."
+  - "Keep schema changes migration-compatible and additive where possible."
+  - "Do not touch unrelated dirty work."
+
+tasks:
+  - id: T001
+    type: scout
+    assignee: Scout
+    status: done
+    reasoning_hint: default
+    objective: "Revalidate the named gaps and map exact source/test surfaces for the safest implementation order."
+    inputs:
+      - "docs/goals/dispatch-setup-gap-closure/goal.md"
+      - "The preceding three-agent audit findings recorded in state.yaml intake facts."
+    constraints:
+      - "Read-only."
+      - "Do not edit implementation files."
+      - "Do not rediscover unrelated Dispatch improvements."
+    expected_output:
+      - "Confirmed, revised, or rejected gap list with source/test references."
+      - "Recommended ordering and risk notes."
+      - "Any gap that should be intentionally out of scope."
+    receipt:
+      result: done
+      summary: "Confirmed all eight named gaps still map to current source/test surfaces; backend notification semantics should be fixed before setup/dashboard polish."
+      evidence:
+        - "workerctl/supervise_cycle.py:236 consumes delivered notifications before later ack/context gates, then commits at line 244."
+        - "workerctl/supervise_cycle.py:355 can fail the cycle after consumption; the exception path rolls back only later work."
+        - "workerctl/commands.py:4474 inserts completion notification and commits at line 4534 before tmux send at line 4535."
+        - "workerctl/db.py:2347 excludes any source event with an existing routed_notification row, including stale pending rows."
+        - "README.md:77 and README.md:97 install/quickstart omit starting or requiring dispatch --watch."
+        - "dashboard/server/index.ts:195 derives heartbeat only from snapshot recent telemetry; dashboard/client/main.tsx:157 renders no heartbeat as ok/none."
+        - "scripts/rc-check:30 and .github/workflows/test.yml:18 do not run npm test or npm run build."
+        - "docs/manual-qa-checklist.md:36 uses dispatch --once; heartbeat is emitted only in watch mode at workerctl/commands.py:4752."
+      recommended_order:
+        - "Fix backend failed-cycle consumption and pending notification recovery first."
+        - "Then fix setup/docs, dashboard heartbeat state, CI, and manual QA coverage in one operator-facing slice."
+      out_of_scope: []
+  - id: T002
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: default
+    objective: "Select the largest safe backend Worker slice for notification consumption and recovery semantics."
+    inputs:
+      - "T001 receipt"
+      - "goal.md"
+    constraints:
+      - "Read-only."
+      - "Preserve no-judgment Dispatch boundary."
+      - "Prefer conservative side-effect semantics over blind retry."
+    expected_output:
+      - "Decision"
+      - "Exact Worker objective"
+      - "allowed_files"
+      - "verify"
+      - "stop_if"
+    receipt:
+      result: done
+      decision: approved
+      summary: "Implement one backend slice covering failed-cycle consumption and stale pending completion notification recovery."
+      rationale: "Both bugs affect the same durable notification lifecycle. Fixing them together avoids adding setup/dashboard confidence around an unsafe backend path."
+      worker_objective: "Change manager-cycle notification consumption so only successful cycles consume delivered notifications, and add conservative recovery for stale pending completion-only routed notifications without blind duplicate tmux sends."
+      allowed_files:
+        - "workerctl/db.py"
+        - "workerctl/commands.py"
+        - "workerctl/supervise_cycle.py"
+        - "tests/test_workerctl.py"
+      verify:
+        - "python3 -m unittest tests.test_workerctl.DispatchTests tests.test_workerctl.DatabaseTests tests.test_workerctl.SuperviseCycleTests -v"
+        - "python3 -m py_compile workerctl/*.py"
+        - "git diff --check"
+      stop_if:
+        - "Recovery semantics would retry a tmux send when the previous process may have already sent text."
+        - "Need schema changes outside migration-compatible routed_notifications fields/indexes."
+        - "Need files outside allowed_files."
+  - id: T003
+    type: worker
+    assignee: Worker
+    reasoning_hint: default
+    objective: "Implement the backend notification consumption and pending recovery slice selected by Judge."
+    status: done
+    allowed_files:
+      - "workerctl/db.py"
+      - "workerctl/commands.py"
+      - "workerctl/supervise_cycle.py"
+      - "tests/test_workerctl.py"
+    verify:
+      - "python3 -m unittest tests.test_workerctl.DispatchTests tests.test_workerctl.DatabaseTests tests.test_workerctl.SuperviseCycleTests -v"
+      - "python3 -m py_compile workerctl/*.py"
+      - "git diff --check"
+    stop_if:
+      - "Need files outside allowed_files."
+      - "Recovery semantics would risk duplicate tmux sends without an auditable state."
+      - "Verification fails twice with different unexplained symptoms."
+    receipt:
+      result: done
+      changed_files:
+        - "workerctl/db.py"
+        - "workerctl/commands.py"
+        - "workerctl/supervise_cycle.py"
+        - "tests/test_workerctl.py"
+      summary: "Backend notification lifecycle hardened: successful cycles consume notifications only after ack/context gates pass; completion notifications now track claim and side-effect state so pending rows can be recovered before send starts and risky started rows are failed instead of retried."
+      commands:
+        - cmd: "python3 -m unittest tests.test_workerctl.DispatchTests tests.test_workerctl.DatabaseTests tests.test_workerctl.SuperviseCycleTests -v"
+          status: pass
+          summary: "Ran 91 tests OK."
+        - cmd: "python3 -m py_compile workerctl/*.py"
+          status: pass
+        - cmd: "git diff --check"
+          status: pass
+      evidence:
+        - "tests.test_workerctl.DispatchTests.test_dispatch_recovers_pending_completion_notification_before_send_started"
+        - "tests.test_workerctl.DispatchTests.test_dispatch_does_not_retry_pending_completion_after_send_started"
+        - "tests.test_workerctl.SuperviseCycleTests.test_run_cycle_does_not_consume_dispatch_notification_when_ack_gate_fails"
+      notes:
+        - "Schema version bumped to 20 with additive routed_notifications claim/side-effect fields and claimable index."
+  - id: T004
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: default
+    objective: "Review backend slice and select the largest safe setup/dashboard/CI Worker slice."
+    inputs:
+      - "T003 receipt"
+      - "Current diff"
+      - "Verification output"
+    constraints:
+      - "Read-only."
+      - "Do not approve automatic daemon behavior unless evidence shows it is safe and expected."
+    expected_output:
+      - "Backend slice accepted or rejected"
+      - "Exact next Worker objective"
+      - "allowed_files"
+      - "verify"
+      - "stop_if"
+    receipt:
+      result: done
+      decision: approved
+      backend_slice: accepted
+      summary: "Backend slice directly covers the high-risk lifecycle bugs with focused tests and preserves Dispatch's no-judgment boundary."
+      next_worker_objective: "Implement the operator-facing slice: setup/docs guidance for dispatch watch, enqueue command docs, install/setup tests, explicit dashboard heartbeat status, dashboard tests for no/stale/active heartbeat, CI/rc-check dashboard coverage, and bounded watch manual QA."
+      allowed_files:
+        - "README.md"
+        - "docs/manual-qa-checklist.md"
+        - "scripts/install-local"
+        - "scripts/rc-check"
+        - ".github/workflows/test.yml"
+        - "skills/manage-codex-workers/SKILL.md"
+        - "dashboard/server/index.ts"
+        - "dashboard/client/main.tsx"
+        - "dashboard/server/workerctl.test.ts"
+        - "tests/test_workerctl.py"
+      verify:
+        - "python3 -m unittest tests.test_workerctl.CliTests -v"
+        - "npm test -- --runInBand"
+        - "npm run build"
+        - "bash -n scripts/install-local scripts/rc-check"
+        - "git diff --check"
+      stop_if:
+        - "A proposed setup change would start a long-running dispatcher automatically without explicit user approval."
+        - "Need files outside allowed_files."
+        - "Dashboard heartbeat behavior cannot be covered without changing the API contract beyond the dispatch panel."
+  - id: T005
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: default
+    objective: "Implement setup/operator guidance, dashboard heartbeat clarity, CI dashboard coverage, enqueue docs, manual QA watch-mode coverage, and focused tests as selected by Judge."
+    allowed_files:
+      - "README.md"
+      - "docs/manual-qa-checklist.md"
+      - "scripts/install-local"
+      - "scripts/rc-check"
+      - ".github/workflows/test.yml"
+      - "skills/manage-codex-workers/SKILL.md"
+      - "dashboard/server/index.ts"
+      - "dashboard/client/main.tsx"
+      - "dashboard/server/workerctl.test.ts"
+      - "tests/test_workerctl.py"
+    verify:
+      - "python3 -m unittest tests.test_workerctl.CliTests -v"
+      - "npm test -- --runInBand"
+      - "npm run build"
+      - "bash -n scripts/install-local scripts/rc-check"
+      - "git diff --check"
+    stop_if:
+      - "Need files outside allowed_files."
+      - "A setup behavior choice requires operator approval."
+      - "Dashboard or CI verification fails twice with different unexplained symptoms."
+    receipt:
+      result: done
+      changed_files:
+        - "README.md"
+        - "docs/manual-qa-checklist.md"
+        - "scripts/install-local"
+        - "scripts/rc-check"
+        - "skills/manage-codex-workers/SKILL.md"
+        - "dashboard/server/index.ts"
+        - "dashboard/client/main.tsx"
+        - "dashboard/server/workerctl.test.ts"
+        - "tests/test_workerctl.py"
+      summary: "Operator-facing Dispatch gaps closed: setup/install/skill docs now point operators at dispatch --watch, enqueue commands are documented, manual QA includes bounded watch heartbeat verification, dashboard heartbeat state is explicit and backed by durable telemetry lookup, and rc-check now runs dashboard tests/build."
+      commands:
+        - cmd: "python3 -m unittest tests.test_workerctl.CliTests -v"
+          status: pass
+          summary: "Ran 98 tests OK."
+        - cmd: "npm test -- --runInBand"
+          status: pass
+          summary: "Ran 26 dashboard tests OK."
+        - cmd: "npm run build"
+          status: pass
+        - cmd: "bash -n scripts/install-local scripts/rc-check"
+          status: pass
+        - cmd: "git diff --check"
+          status: pass
+      evidence:
+        - "dashboard/server/workerctl.test.ts covers missing, stale, and durable active dispatch heartbeat states."
+        - "tests.test_workerctl.CliTests.test_install_local_prints_path_line and test_install_local_write_is_idempotent assert Dispatch setup guidance."
+        - "scripts/rc-check now runs npm test and npm run build."
+  - id: T006
+    type: pm
+    assignee: PM
+    status: done
+    reasoning_hint: default
+    objective: "Run consolidated verification and update the board with receipts, blocked items, or follow-up tasks."
+    inputs:
+      - "All Worker receipts"
+    constraints:
+      - "Control-file edits only unless activating a Worker task."
+    expected_output:
+      - "Verification matrix"
+      - "Any new tasks or blockers"
+    receipt:
+      result: done
+      summary: "Consolidated verification passed across backend dispatch lifecycle, CLI/setup guidance, dashboard tests/build, Python compile, and diff hygiene."
+      commands:
+        - cmd: "python3 -m unittest tests.test_workerctl.DispatchTests tests.test_workerctl.DatabaseTests tests.test_workerctl.SuperviseCycleTests tests.test_workerctl.CliTests -v"
+          status: pass
+          summary: "Ran 189 tests OK."
+        - cmd: "npm test -- --runInBand"
+          status: pass
+          summary: "Ran 26 dashboard tests OK."
+        - cmd: "npm run build"
+          status: pass
+        - cmd: "python3 -m py_compile workerctl/*.py"
+          status: pass
+        - cmd: "git diff --check"
+          status: pass
+      blockers: []
+  - id: T999
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: default
+    objective: "Audit whether every named dispatcher/setup gap is fixed and the original issue #113 outcome is genuinely satisfied."
+    inputs:
+      - "All done task receipts"
+      - "Last verification"
+      - "Current dirty diff"
+      - "docs/goals/dispatch-setup-gap-closure/goal.md"
+    constraints:
+      - "Read-only."
+      - "Be skeptical about false completion from docs-only changes."
+      - "Reject completion if any required Worker task is queued or active."
+    expected_output:
+      - "complete | not_complete"
+      - "full_outcome_complete: true | false"
+      - "Gap-by-gap evidence map"
+      - "Missing evidence"
+      - "Next task if not complete"
+    receipt:
+      result: done
+      decision: complete
+      full_outcome_complete: true
+      summary: "Three independent read-only audits plus final consolidated verification found all named dispatcher/setup gaps closed."
+      gap_evidence:
+        - gap: "Delivered dispatch notifications consumed by failed manager cycles."
+          status: fixed
+          evidence:
+            - "workerctl/supervise_cycle.py consumes delivered notifications only after ack/context gates pass."
+            - "tests.test_workerctl.SuperviseCycleTests.test_run_cycle_does_not_consume_dispatch_notification_when_ack_gate_fails"
+        - gap: "Completion-only dispatch had no recovery path after pending notification insert before send/finish."
+          status: fixed
+          evidence:
+            - "workerctl/db.py schema v20 adds routed notification claim and side-effect state."
+            - "workerctl/commands.py recovers unstarted stale pending completion notifications and fails started/incomplete rows instead of retrying blind sends."
+            - "tests.test_workerctl.DispatchTests.test_dispatch_recovers_pending_completion_notification_before_send_started"
+            - "tests.test_workerctl.DispatchTests.test_dispatch_does_not_retry_pending_completion_after_send_started"
+        - gap: "Setup did not start or strongly guide starting workerctl dispatch --watch."
+          status: fixed
+          evidence:
+            - "README.md install/quickstart and scripts/install-local now direct operators to run dispatch --watch."
+            - "skills/manage-codex-workers/SKILL.md describes Dispatch as a separate always-on mechanical router."
+        - gap: "Dashboard did not distinguish healthy from no dispatcher observed."
+          status: fixed
+          evidence:
+            - "dashboard/server/index.ts emits heartbeat states active, stale, and not_observed, including durable heartbeat lookup."
+            - "dashboard/client/main.tsx renders active, stale, and not observed labels."
+            - "dashboard/server/workerctl.test.ts covers missing, stale, durable active, and selected-task behavior."
+        - gap: "CI did not run dashboard tests/build."
+          status: fixed
+          evidence:
+            - "scripts/rc-check runs npm test -- --runInBand and npm run build."
+            - ".github/workflows/test.yml now installs Node dependencies with setup-node and npm ci before rc-check."
+        - gap: "README omitted enqueue-notify-manager and enqueue-nudge-worker."
+          status: fixed
+          evidence:
+            - "README.md command reference documents enqueue-notify-manager and enqueue-nudge-worker."
+            - "tests.test_workerctl.CliTests.test_task_scoped_read_commands_are_listed_in_help asserts both commands."
+        - gap: "Manual QA heartbeat coverage was only dispatch --once."
+          status: fixed
+          evidence:
+            - "docs/manual-qa-checklist.md includes bounded dispatch --watch --watch-iterations heartbeat verification."
+        - gap: "Install/setup tests did not assert Dispatch guidance."
+          status: fixed
+          evidence:
+            - "tests.test_workerctl.CliTests.test_install_local_prints_path_line"
+            - "tests.test_workerctl.CliTests.test_install_local_write_is_idempotent"
+      auditors:
+        - "Backend auditor: complete; noted conservative no-blind-retry tradeoff as intended."
+        - "Dashboard/CI auditor: complete after T007 CI dependency-install fix."
+        - "Setup/docs/manual QA auditor: complete."
+      commands:
+        - cmd: "python3 -m unittest tests.test_workerctl.DispatchTests tests.test_workerctl.DatabaseTests tests.test_workerctl.SuperviseCycleTests tests.test_workerctl.CliTests -v"
+          status: pass
+          summary: "Ran 189 tests OK."
+        - cmd: "npm test -- --runInBand"
+          status: pass
+          summary: "Ran 26 dashboard tests OK."
+        - cmd: "npm run build"
+          status: pass
+        - cmd: "python3 -m py_compile workerctl/*.py"
+          status: pass
+        - cmd: "git diff --check"
+          status: pass
+      missing_evidence: []
+      residual_risks:
+        - "Resolved in follow-up: routed completion notifications now remain pending when tmux send fails before pane mutation starts, so Dispatch can recover them without blind duplicate sends."
+  - id: T007
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: default
+    objective: "Fix the final CI gap by ensuring GitHub Actions installs Node dependencies before rc-check runs dashboard tests/build."
+    allowed_files:
+      - ".github/workflows/test.yml"
+      - "docs/goals/dispatch-setup-gap-closure/state.yaml"
+    verify:
+      - "npm test -- --runInBand"
+      - "npm run build"
+      - "git diff --check"
+    stop_if:
+      - "Need to change dashboard implementation files."
+      - "Workflow would run dashboard gates without a deterministic dependency install."
+    receipt:
+      result: done
+      changed_files:
+        - ".github/workflows/test.yml"
+      summary: "GitHub Actions now installs Node.js dependencies with setup-node and npm ci before rc-check runs dashboard tests/build."
+      commands:
+        - cmd: "npm test -- --runInBand"
+          status: pass
+          summary: "Ran 26 dashboard tests OK."
+        - cmd: "npm run build"
+          status: pass
+        - cmd: "git diff --check"
+          status: pass
+
+checks:
+  dirty_fingerprint: unknown
+  last_verification:
+    result: pass
+    task: T999
+    commands:
+      - "python3 -m unittest tests.test_workerctl.DispatchTests tests.test_workerctl.DatabaseTests tests.test_workerctl.SuperviseCycleTests tests.test_workerctl.CliTests -v"
+      - "npm test -- --runInBand"
+      - "npm run build"
+      - "python3 -m py_compile workerctl/*.py"
+      - "git diff --check"

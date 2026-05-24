@@ -86,6 +86,16 @@ type SnapshotResult = {
   worker?: { last_heartbeat_at?: string | null } | null;
 };
 
+type TelemetryEvent = {
+  actor?: string;
+  attributes?: Record<string, unknown>;
+  correlation?: Record<string, unknown>;
+  event_type?: string;
+  severity?: string;
+  summary?: string;
+  timestamp?: string;
+};
+
 type AuditCommand = {
   available_at?: string | null;
   claim_expires_at?: string | null;
@@ -192,26 +202,36 @@ function isExpiredTimestamp(value: unknown, now: number): boolean {
   return Number.isFinite(timestamp) && timestamp < now;
 }
 
-function latestDispatchHeartbeat(snapshot: SnapshotResult | null) {
-  const heartbeats = (snapshot?.telemetry?.recent || [])
+function latestDispatchHeartbeat(snapshot: SnapshotResult | null, durableHeartbeats: TelemetryEvent[] = []) {
+  const heartbeats = [
+    ...durableHeartbeats,
+    ...(snapshot?.telemetry?.recent || []),
+  ]
     .filter((event) => event.event_type === "dispatch_watch_heartbeat")
     .sort((left, right) => Date.parse(String(right.timestamp || "")) - Date.parse(String(left.timestamp || "")));
   const heartbeat = heartbeats[0];
   if (!heartbeat) {
-    return null;
+    return {
+      stale: true,
+      stale_seconds: null,
+      state: "not_observed",
+      timestamp: "",
+    };
   }
   const timestamp = heartbeat.timestamp || "";
   const parsedTimestamp = Date.parse(timestamp);
   const ageSeconds = Number.isFinite(parsedTimestamp)
     ? Math.max(0, Math.round((Date.now() - parsedTimestamp) / 1000))
     : null;
+  const stale = ageSeconds === null ? true : ageSeconds > 30;
   return {
     dispatcher_id: typeof heartbeat.correlation?.dispatcher_id === "string" ? heartbeat.correlation.dispatcher_id : undefined,
     dry_run: typeof heartbeat.attributes?.dry_run === "boolean" ? heartbeat.attributes.dry_run : undefined,
     iteration: typeof heartbeat.correlation?.iteration === "number" ? heartbeat.correlation.iteration : undefined,
     processed_count: typeof heartbeat.attributes?.processed_count === "number" ? heartbeat.attributes.processed_count : undefined,
-    stale: ageSeconds === null ? false : ageSeconds > 30,
+    stale,
     stale_seconds: ageSeconds,
+    state: stale ? "stale" : "active",
     timestamp,
   };
 }
@@ -265,6 +285,7 @@ export function dispatchChainEntries(audit: AuditResult | null) {
       command_state: chain.command_state || command?.state || (typeof primaryNotification?.state === "string" ? primaryNotification.state : undefined),
       command_type: chain.command_type || command?.type || (typeof primaryNotification?.signal_type === "string" ? primaryNotification.signal_type : undefined),
       correlation_id: chain.correlation_id || command?.correlation_id || (typeof primaryNotification?.correlation_id === "string" ? primaryNotification.correlation_id : undefined),
+      error: attempts.find((attempt) => attempt.error)?.error || command?.error || (typeof primaryNotification?.error === "string" ? primaryNotification.error : undefined),
       key: `chain-${chain.command_id || chain.correlation_id || chain.routed_notification_ids?.join("-")}`,
       manager_cycle_id: chain.manager_cycle_id,
       manager_decision_id: chain.manager_decision_id,
@@ -288,6 +309,7 @@ export function dispatchHealth(
   snapshot: SnapshotResult | null,
   audit: AuditResult | null,
   suppressedTelemetry?: Array<Record<string, unknown>>,
+  heartbeatTelemetry?: Array<Record<string, unknown>>,
 ) {
   const now = Date.now();
   const commands = audit?.commands || [];
@@ -300,7 +322,7 @@ export function dispatchHealth(
     .filter((event) => event.actor === "dispatch" && event.event_type === "dispatch_signal_suppressed");
   return {
     failed_count: commands.length ? failed.length : snapshot?.commands?.failed_count || 0,
-    heartbeat: latestDispatchHeartbeat(snapshot),
+    heartbeat: latestDispatchHeartbeat(snapshot, heartbeatTelemetry as TelemetryEvent[]),
     queued_count: commands.length ? queued.length : snapshot?.commands?.unfinished_count || 0,
     side_effect_risk_count: sideEffectRisk.length,
     stale_claim_count: stale.length,
@@ -383,6 +405,7 @@ async function dashboardObservation(options: ReturnType<typeof normalizeServerOp
   let snapshot: SnapshotResult | null = null;
   let audit: AuditResult | null = null;
   let suppressedTelemetry: Array<Record<string, unknown>> = [];
+  let heartbeatTelemetry: Array<Record<string, unknown>> = [];
   const taskName = dashboardTaskName(options, binding);
   if (taskName) {
     try {
@@ -419,6 +442,19 @@ async function dashboardObservation(options: ReturnType<typeof normalizeServerOp
     } catch {
       suppressedTelemetry = [];
     }
+    try {
+      heartbeatTelemetry = await runWorkerctlJson({
+        command: "telemetry",
+        limit: 1,
+        task: taskName,
+        telemetryActor: "dispatch",
+        telemetryEventType: "dispatch_watch_heartbeat",
+        workerctlPath: options.workerctlPath,
+        dbPath: options.dbPath,
+      }) as Array<Record<string, unknown>>;
+    } catch {
+      heartbeatTelemetry = [];
+    }
   }
   return {
     audit: audit ? {
@@ -430,7 +466,7 @@ async function dashboardObservation(options: ReturnType<typeof normalizeServerOp
     binding,
     dispatch: {
       chains: dispatchChainEntries(audit),
-      health: dispatchHealth(snapshot, audit, suppressedTelemetry),
+      health: dispatchHealth(snapshot, audit, suppressedTelemetry, heartbeatTelemetry),
     },
     latest_cycle: snapshot?.latest_cycle || null,
     polled_at: new Date().toISOString(),

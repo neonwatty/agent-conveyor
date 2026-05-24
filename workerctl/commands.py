@@ -4199,13 +4199,16 @@ def command_enqueue_notify_manager(args: argparse.Namespace) -> int:
             message=args.message,
             required_permission=getattr(args, "required_permission", None),
             idempotency_key=getattr(args, "idempotency_key", None),
+            correlation_id=getattr(args, "correlation_id", None),
         )
+        command = conn.execute("select correlation_id from commands where id = ?", (command_id,)).fetchone()
         conn.commit()
     _print_enqueue_result(
         args,
         {
             "command_id": command_id,
             "command_type": "notify_manager",
+            "correlation_id": command["correlation_id"],
             "required_permission": getattr(args, "required_permission", None),
             "task": args.task,
         },
@@ -4226,13 +4229,16 @@ def command_enqueue_nudge_worker(args: argparse.Namespace) -> int:
             message=args.message,
             required_permission=getattr(args, "required_permission", None),
             idempotency_key=getattr(args, "idempotency_key", None),
+            correlation_id=getattr(args, "correlation_id", None),
         )
+        command = conn.execute("select correlation_id from commands where id = ?", (command_id,)).fetchone()
         conn.commit()
     _print_enqueue_result(
         args,
         {
             "command_id": command_id,
             "command_type": "nudge_worker",
+            "correlation_id": command["correlation_id"],
             "required_permission": getattr(args, "required_permission", None),
             "task": args.task,
         },
@@ -4437,7 +4443,20 @@ def _execute_dispatch_command(*, worker_db, worker_tmux, db_path: Path | None, c
         return result
 
 
-def _route_worker_completion(*, worker_db, worker_tmux, db_path: Path | None, row, dispatcher_id: str, dry_run: bool) -> dict[str, Any]:
+def _dispatch_claim_expires_at(lease_seconds: int) -> str:
+    return (datetime.now(timezone.utc) + timedelta(seconds=max(1, lease_seconds))).isoformat().replace("+00:00", "Z")
+
+
+def _route_worker_completion(
+    *,
+    worker_db,
+    worker_tmux,
+    db_path: Path | None,
+    row,
+    dispatcher_id: str,
+    dry_run: bool,
+    lease_seconds: int,
+) -> dict[str, Any]:
     dedupe_key = (
         f"{row['binding_id']}:worker_task_complete:"
         f"{row['source_session_id']}:{row['source_event_id']}"
@@ -4470,6 +4489,9 @@ def _route_worker_completion(*, worker_db, worker_tmux, db_path: Path | None, ro
         result["state"] = "planned"
         return result
     notification_id = None
+    side_effect_audit = {"side_effect_completed": False, "side_effect_started": False}
+    claimed_at = now_iso()
+    claim_expires_at = _dispatch_claim_expires_at(lease_seconds)
     try:
         with worker_db.connect(db_path) as conn:
             worker_db.initialize_database(conn)
@@ -4486,6 +4508,9 @@ def _route_worker_completion(*, worker_db, worker_tmux, db_path: Path | None, ro
                     source_event_timestamp=row["source_event_timestamp"],
                     dedupe_key=dedupe_key,
                     payload=payload,
+                    claimed_by=dispatcher_id,
+                    claimed_at=claimed_at,
+                    claim_expires_at=claim_expires_at,
                 )
             except Exception as exc:
                 if "UNIQUE constraint failed" not in str(exc):
@@ -4532,6 +4557,17 @@ def _route_worker_completion(*, worker_db, worker_tmux, db_path: Path | None, ro
                 },
             )
             conn.commit()
+        def mark_side_effect_started() -> None:
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                worker_db.mark_routed_notification_side_effect_started(
+                    conn,
+                    notification_id=notification_id,
+                    claimed_by=dispatcher_id,
+                    claim_expires_at=claim_expires_at,
+                )
+                conn.commit()
+
         with worker_db.connect(db_path) as send_conn:
             worker_db.initialize_database(send_conn)
             send_result = worker_tmux.send_text_to_session(
@@ -4539,9 +4575,12 @@ def _route_worker_completion(*, worker_db, worker_tmux, db_path: Path | None, ro
                 session_name=row["manager_session_name"],
                 text=message,
                 dry_run=False,
+                side_effect_audit=side_effect_audit,
+                side_effect_started_callback=mark_side_effect_started,
             )
         with worker_db.connect(db_path) as conn:
             worker_db.initialize_database(conn)
+            worker_db.mark_routed_notification_side_effect_started(conn, notification_id=notification_id)
             worker_db.finish_routed_notification(
                 conn,
                 notification_id=notification_id,
@@ -4572,12 +4611,20 @@ def _route_worker_completion(*, worker_db, worker_tmux, db_path: Path | None, ro
         if notification_id is not None:
             with worker_db.connect(db_path) as conn:
                 worker_db.initialize_database(conn)
-                worker_db.finish_routed_notification(
-                    conn,
-                    notification_id=notification_id,
-                    state="failed",
-                    error=str(exc),
-                )
+                if side_effect_audit.get("side_effect_started"):
+                    worker_db.mark_routed_notification_side_effect_started(conn, notification_id=notification_id)
+                    worker_db.finish_routed_notification(
+                        conn,
+                        notification_id=notification_id,
+                        state="failed",
+                        error=str(exc),
+                    )
+                else:
+                    worker_db.defer_routed_notification_before_side_effect(
+                        conn,
+                        notification_id=notification_id,
+                        error=str(exc),
+                    )
                 worker_db.emit_telemetry_event(
                     conn,
                     actor="dispatch",
@@ -4601,6 +4648,146 @@ def _route_worker_completion(*, worker_db, worker_tmux, db_path: Path | None, ro
                 )
                 conn.commit()
         result.update({"error": str(exc), "notification_id": notification_id, "state": "failed"})
+    return result
+
+
+def _deliver_claimed_worker_completion(
+    *,
+    worker_db,
+    worker_tmux,
+    db_path: Path | None,
+    row,
+    dispatcher_id: str,
+    lease_seconds: int,
+) -> dict[str, Any]:
+    payload = json.loads(row["notification_payload_json"]) if row["notification_payload_json"] else {}
+    message = payload.get("message") or _dispatch_completion_message(
+        worker_name=row["worker_session_name"],
+        task_name=row["task_name"],
+    )
+    notification_id = int(row["notification_id"])
+    result = {
+        "binding_id": row["binding_id"],
+        "correlation_id": row["correlation_id"],
+        "dedupe_key": row["dedupe_key"],
+        "dry_run": False,
+        "notification_id": notification_id,
+        "recovered": True,
+        "signal_type": "worker_task_complete",
+        "source_event_id": row["source_event_id"],
+        "target_session": row["manager_session_name"],
+        "task": row["task_name"],
+    }
+    side_effect_audit = {"side_effect_completed": False, "side_effect_started": False}
+    claim_expires_at = _dispatch_claim_expires_at(lease_seconds)
+    try:
+        with worker_db.connect(db_path) as conn:
+            worker_db.initialize_database(conn)
+            worker_db.emit_telemetry_event(
+                conn,
+                actor="dispatch",
+                event_type="dispatch_signal_recovered",
+                task_id=row["task_id"],
+                summary=f"Dispatch recovered pending worker completion notification for {row['task_name']}.",
+                correlation={
+                    "binding_id": row["binding_id"],
+                    "correlation_id": row["correlation_id"],
+                    "dispatcher_id": dispatcher_id,
+                    "routed_notification_id": notification_id,
+                    "source_event_id": row["source_event_id"],
+                    "signal_type": "worker_task_complete",
+                },
+                attributes={"target_session": row["manager_session_name"]},
+            )
+            conn.commit()
+        def mark_side_effect_started() -> None:
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                worker_db.mark_routed_notification_side_effect_started(
+                    conn,
+                    notification_id=notification_id,
+                    claimed_by=dispatcher_id,
+                    claim_expires_at=claim_expires_at,
+                )
+                conn.commit()
+
+        with worker_db.connect(db_path) as send_conn:
+            worker_db.initialize_database(send_conn)
+            send_result = worker_tmux.send_text_to_session(
+                send_conn,
+                session_name=row["manager_session_name"],
+                text=message,
+                dry_run=False,
+                side_effect_audit=side_effect_audit,
+                side_effect_started_callback=mark_side_effect_started,
+            )
+        with worker_db.connect(db_path) as conn:
+            worker_db.initialize_database(conn)
+            worker_db.mark_routed_notification_side_effect_started(conn, notification_id=notification_id)
+            worker_db.finish_routed_notification(conn, notification_id=notification_id, state="delivered")
+            worker_db.emit_telemetry_event(
+                conn,
+                actor="dispatch",
+                event_type="dispatch_signal_routed",
+                task_id=row["task_id"],
+                summary=f"Dispatch notified manager {row['manager_session_name']}.",
+                correlation={
+                    "binding_id": row["binding_id"],
+                    "correlation_id": row["correlation_id"],
+                    "dispatcher_id": dispatcher_id,
+                    "routed_notification_id": notification_id,
+                    "source_event_id": row["source_event_id"],
+                    "signal_type": "worker_task_complete",
+                },
+                attributes={
+                    "recovered": True,
+                    "target": send_result.get("target"),
+                    "target_session": row["manager_session_name"],
+                },
+            )
+            conn.commit()
+        result.update({"state": "delivered"})
+    except Exception as exc:
+        with worker_db.connect(db_path) as conn:
+            worker_db.initialize_database(conn)
+            if side_effect_audit.get("side_effect_started"):
+                worker_db.mark_routed_notification_side_effect_started(conn, notification_id=notification_id)
+                worker_db.finish_routed_notification(
+                    conn,
+                    notification_id=notification_id,
+                    state="failed",
+                    error=str(exc),
+                )
+            else:
+                worker_db.defer_routed_notification_before_side_effect(
+                    conn,
+                    notification_id=notification_id,
+                    error=str(exc),
+                )
+            worker_db.emit_telemetry_event(
+                conn,
+                actor="dispatch",
+                event_type="dispatch_signal_failed",
+                severity="error",
+                task_id=row["task_id"],
+                summary=f"Dispatch failed to notify manager {row['manager_session_name']}.",
+                correlation={
+                    "binding_id": row["binding_id"],
+                    "correlation_id": row["correlation_id"],
+                    "dispatcher_id": dispatcher_id,
+                    "routed_notification_id": notification_id,
+                    "source_event_id": row["source_event_id"],
+                    "signal_type": "worker_task_complete",
+                },
+                attributes={
+                    "error": str(exc),
+                    "error_type": type(exc).__name__,
+                    "recovered": True,
+                    "target_session": row["manager_session_name"],
+                },
+            )
+            conn.commit()
+        result.update({"error": str(exc), "state": "failed"})
     return result
 
 
@@ -4677,6 +4864,52 @@ def _dispatch_once_pass(
                 remaining -= 1
     rows = []
     if remaining > 0 and getattr(args, "type", None) in {None, "worker_task_complete"}:
+        if not dry_run:
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                abandoned = worker_db.fail_stale_started_routed_notifications(conn, limit=remaining)
+                for notification in abandoned:
+                    worker_db.emit_telemetry_event(
+                        conn,
+                        actor="dispatch",
+                        event_type="dispatch_signal_failed",
+                        severity="error",
+                        task_id=notification["task_id"],
+                        summary="Dispatch found stale pending completion notification with side-effect risk.",
+                        correlation={
+                            "binding_id": notification["binding_id"],
+                            "correlation_id": notification["correlation_id"],
+                            "dispatcher_id": dispatcher_id,
+                            "routed_notification_id": notification["notification_id"],
+                            "source_event_id": notification["source_event_id"],
+                            "signal_type": notification["signal_type"],
+                        },
+                        attributes={
+                            "claim_expires_at": notification["claim_expires_at"],
+                            "claimed_by": notification["claimed_by"],
+                            "error": notification["error"],
+                            "side_effect_risk": True,
+                        },
+                    )
+                claimed_notifications = worker_db.claim_pending_routed_completion_notifications(
+                    conn,
+                    dispatcher_id=dispatcher_id,
+                    lease_seconds=lease_seconds,
+                    limit=remaining,
+                )
+                conn.commit()
+            for notification in claimed_notifications:
+                processed.append(
+                    _deliver_claimed_worker_completion(
+                        worker_db=worker_db,
+                        worker_tmux=worker_tmux,
+                        db_path=db_path,
+                        row=notification,
+                        dispatcher_id=dispatcher_id,
+                        lease_seconds=lease_seconds,
+                    )
+                )
+            remaining = max(0, remaining - len(claimed_notifications))
         with worker_db.connect(db_path) as conn:
             worker_db.initialize_database(conn)
             rows = worker_db.unrouted_worker_completion_events(conn, limit=remaining)
@@ -4690,6 +4923,7 @@ def _dispatch_once_pass(
                 row=row,
                 dispatcher_id=dispatcher_id,
                 dry_run=dry_run,
+                lease_seconds=lease_seconds,
             )
         )
     return processed
