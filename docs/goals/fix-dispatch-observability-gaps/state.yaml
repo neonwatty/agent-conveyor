@@ -1,0 +1,294 @@
+version: 2
+
+goal:
+  title: "Fix Dispatch Observability Gaps"
+  slug: fix-dispatch-observability-gaps
+  kind: specific
+  tranche: "Fix or deliberately resolve the known dispatch-observability gaps identified by the independent reviewers, then verify with focused tests and final audit."
+  status: done
+  oracle:
+    signal: "Focused Python/dashboard verification plus a final Judge audit that maps each known gap to implemented evidence or deliberate follow-up."
+    cadence: "after each Worker package and at final audit"
+    final_proof: "A final audit receipt records full_outcome_complete: true and includes gap-by-gap evidence, verification commands, and any explicit out-of-scope follow-up."
+  intake:
+    original_request: "use $goalbuddy:goal-prep to plan to fix all these gaps"
+    interpreted_outcome: "Fix or deliberately resolve all dispatch-observability gaps identified by the independent reviewers."
+    input_shape: specific
+    audience: "Operators and maintainers using dispatch observation, audit, replay, and dashboard surfaces."
+    authority: requested
+    proof_type: test
+    completion_proof: "All known gaps are mapped to code/test/docs evidence or deliberate follow-up, focused verification passes, and final Judge audit approves completion."
+    likely_misfire: "Passing narrow tests while leaving operators with opaque, misordered, or incomplete dispatch evidence."
+    blind_spots_considered:
+      - "Issue #113 is broader than PR #136; the run must distinguish must-fix gaps from deliberate follow-up."
+      - "Dashboard API mapping may be correct while the React client still renders opaque text."
+      - "Replay/audit correlation may need chronological anchoring, not only extra fields."
+      - "Suppressed duplicate telemetry may exist durably but remain invisible in the primary operator surface."
+    existing_plan_facts:
+      - "Known gap: dashboard client prefers correlation_id over clearer summary for completion-only chains."
+      - "Known gap: mixed command-backed and notification-only chains may order incorrectly."
+      - "Known gap: suppressed duplicate dispatch telemetry is not first-class in the Dispatch panel."
+      - "Known gap: notification-only replay/correlation chains may not satisfy the broader next-manager-cycle ideal."
+      - "Known gap: dispatch-specific manual QA guidance may be missing."
+
+rules:
+  pm_owns_state: true
+  one_active_task: true
+  max_write_workers: 1
+  no_implementation_without_worker_or_pm_task: true
+  no_completion_without_judge_or_pm_audit: true
+  planning_is_not_completion: true
+  queued_required_worker_blocks_completion: true
+  continuous_until_full_outcome: true
+  missing_input_or_credentials_do_not_stop_goal: true
+  preserve_and_validate_existing_plan: true
+  intake_misfire_must_be_audited: true
+  goal_pressure_requires_oracle: true
+  no_completion_on_weak_proof: true
+  slice_policy:
+    max_consecutive_tiny_tasks: 2
+    prefer_vertical_slices: true
+    judge_picks_largest_safe_slice: true
+    worker_completes_whole_slice: true
+
+agents:
+  scout: installed
+  worker: installed
+  judge: installed
+
+visual_board:
+  selected: local
+  local:
+    status: starting
+    url: "http://goalbuddy.localhost:41737/fix-dispatch-observability-gaps/"
+    command: "npx goalbuddy board docs/goals/fix-dispatch-observability-gaps"
+
+active_task: null
+
+tasks:
+  - id: T001
+    type: scout
+    assignee: Scout
+    status: done
+    reasoning_hint: default
+    objective: "Map the exact implementation and test touchpoints for the five known dispatch-observability gaps."
+    inputs:
+      - "docs/goals/fix-dispatch-observability-gaps/goal.md"
+      - "Reviewer findings from the prep conversation."
+    constraints:
+      - "Read-only."
+      - "Do not propose unrelated refactors."
+      - "Prefer exact file and line references."
+    expected_output:
+      - "Gap-to-file map."
+      - "Existing tests that should be extended."
+      - "Any ambiguity requiring Judge decision."
+    receipt:
+      result: done
+      summary: "Mapped all five known gaps to exact touchpoints: dashboard client row text, dashboard chain ordering/health, DB/replay commandless chain anchoring, and qa-plan docs/tests."
+      evidence:
+        - "dashboard/client/main.tsx:133"
+        - "dashboard/client/main.tsx:167"
+        - "dashboard/server/index.ts:229"
+        - "dashboard/server/index.ts:238"
+        - "dashboard/server/index.ts:270"
+        - "dashboard/server/workerctl.test.ts:144"
+        - "workerctl/db.py:1352"
+        - "workerctl/db.py:1394"
+        - "workerctl/replay.py:224"
+        - "workerctl/replay.py:242"
+        - "workerctl/commands.py:4535"
+        - "workerctl/commands.py:1306"
+        - "workerctl/cli.py:289"
+        - "README.md:495"
+        - "README.md:657"
+        - "tests/test_workerctl.py:1230"
+        - "tests/test_workerctl.py:3703"
+      ambiguity:
+        - "Broader issue #113 next-manager-cycle linkage is not fully inferable from existing commandless chains; fix anchoring and record residual linkage as an explicit follow-up unless a current DB relationship can prove it."
+  - id: T002
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Choose the largest safe implementation slice that fixes the operator-facing and ordering gaps without overreaching."
+    inputs:
+      - "T001 receipt."
+      - "docs/goals/fix-dispatch-observability-gaps/goal.md"
+    constraints:
+      - "Read-only."
+      - "Separate must-fix defects from deliberate follow-ups."
+      - "Do not approve changes that expand Dispatch into judgment or human-operator routing."
+    expected_output:
+      - "Decision."
+      - "Exact Worker objective."
+      - "allowed_files."
+      - "verify commands."
+      - "stop_if conditions."
+    receipt:
+      result: done
+      decision: approved
+      rationale: "One coherent slice can fix the operator-visible dashboard label, chronological chain ordering, suppression visibility, replay anchoring, and manual QA plan without expanding Dispatch into decision-making."
+      worker_objective: "Implement the dispatch-observability gap closure slice across dashboard mapping/client rendering, DB/replay chain anchoring, suppression visibility, and dispatch QA plan coverage."
+      allowed_files:
+        - "dashboard/server/index.ts"
+        - "dashboard/server/workerctl.test.ts"
+        - "dashboard/client/main.tsx"
+        - "workerctl/db.py"
+        - "workerctl/replay.py"
+        - "workerctl/commands.py"
+        - "workerctl/cli.py"
+        - "tests/test_workerctl.py"
+        - "README.md"
+      verify:
+        - "python3 -m unittest tests.test_workerctl.DispatchTests -v"
+        - "python3 -m unittest tests.test_workerctl.WorkerctlCliTests -v"
+        - "npm test -- --runInBand"
+        - "python3 -m py_compile workerctl/*.py"
+        - "git diff --check"
+      stop_if:
+        - "Need files outside allowed_files."
+        - "A fix would require Dispatch to judge task success or route to human operators."
+        - "Verification fails twice for different reasons."
+  - id: T003
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: default
+    objective: "Implement the first Judge-approved dispatch-observability fix slice."
+    inputs:
+      - "T002 receipt."
+    constraints:
+      - "Only edit allowed files supplied by Judge."
+      - "Keep behavior scoped to known gaps."
+      - "Add or update focused regression tests."
+    allowed_files:
+      - "dashboard/server/index.ts"
+      - "dashboard/server/workerctl.test.ts"
+      - "dashboard/client/main.tsx"
+      - "workerctl/db.py"
+      - "workerctl/replay.py"
+      - "workerctl/commands.py"
+      - "workerctl/cli.py"
+      - "tests/test_workerctl.py"
+      - "README.md"
+    verify:
+      - "python3 -m unittest tests.test_workerctl.DispatchTests -v"
+      - "python3 -m unittest tests.test_workerctl.WorkerctlCliTests -v"
+      - "npm test -- --runInBand"
+      - "python3 -m py_compile workerctl/*.py"
+      - "git diff --check"
+    stop_if:
+      - "Need files outside allowed_files."
+      - "The intended user-visible behavior is ambiguous."
+      - "Focused verification fails twice for different reasons."
+      - "A change would expand Dispatch into judgment or human-operator routing."
+    expected_output:
+      - "Changed files."
+      - "Commands run and pass/fail status."
+      - "Summary mapping changes to gaps."
+    receipt:
+      result: done
+      changed_files:
+        - "dashboard/server/index.ts"
+        - "dashboard/server/workerctl.test.ts"
+        - "dashboard/client/main.tsx"
+        - "workerctl/db.py"
+        - "workerctl/replay.py"
+        - "workerctl/commands.py"
+        - "workerctl/cli.py"
+        - "tests/test_workerctl.py"
+        - "README.md"
+      commands:
+        - cmd: "python3 -m unittest tests.test_workerctl.DispatchTests -v"
+          status: pass
+        - cmd: "python3 -m unittest tests.test_workerctl.CliTests -v"
+          status: pass
+        - cmd: "npm test -- --runInBand"
+          status: pass
+        - cmd: "npm run build"
+          status: pass
+        - cmd: "python3 -m py_compile workerctl/*.py && git diff --check"
+          status: pass
+      summary: "Closed the dispatch-observability gaps: dashboard rows now prefer readable summaries, dispatch chain entries sort by timestamp, suppressed dispatch signals appear in health, commandless replay/audit chains are timestamped and can link to the next manager cycle/decision, and dispatch-completion QA guidance is documented and tested."
+  - id: T004
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Review the first implementation slice for correctness, scope, and whether additional Worker work is required."
+    inputs:
+      - "T003 receipt."
+      - "Current diff."
+      - "docs/goals/fix-dispatch-observability-gaps/goal.md"
+    constraints:
+      - "Read-only."
+      - "Be skeptical about dashboard operator visibility and chronological ordering."
+    expected_output:
+      - "approved | needs_changes | additional_slice_required."
+      - "Specific missing gaps, if any."
+      - "Next Worker allowed_files/verify/stop_if if additional work is required."
+    receipt:
+      result: done
+      decision: approved
+      additional_slice_required: false
+      summary: "The first Worker slice covers the known operator visibility, ordering, suppression, replay/correlation, and manual QA gaps. No second implementation slice is required."
+      evidence:
+        - "dashboard/client/main.tsx renders chain.summary before correlation_id."
+        - "dashboard/server/index.ts sorts dispatch entries by timestamp and exposes suppressed_signal_count."
+        - "workerctl/db.py adds created_at to correlation chains and links commandless notifications to the next manager cycle/decision when present."
+        - "workerctl/replay.py anchors commandless correlation-chain entries to correlation/source event and notification timestamp."
+        - "workerctl/commands.py and workerctl/cli.py expose qa-plan dispatch-completion."
+  - id: T999
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Audit whether all known dispatch-observability gaps are fixed or deliberately resolved for this tranche."
+    inputs:
+      - "All task receipts."
+      - "Current diff."
+      - "Latest verification output."
+      - "docs/goals/fix-dispatch-observability-gaps/goal.md"
+    constraints:
+      - "Read-only."
+      - "Do not call the goal complete if any required Worker task remains queued or active."
+    expected_output:
+      - "complete | not_complete."
+      - "full_outcome_complete: true | false."
+      - "Gap-by-gap evidence."
+      - "Missing evidence or next task if not complete."
+    receipt:
+      result: done
+      decision: complete
+      full_outcome_complete: true
+      summary: "All five known dispatch-observability gaps are fixed or resolved with current implementation evidence and passing verification."
+      gap_evidence:
+        - gap: "Dashboard visible rows hid notification labels behind correlation ids."
+          evidence: "dashboard/client/main.tsx now renders chain.summary first and moves correlation/source event details into the metadata row."
+        - gap: "Mixed command-backed and notification-only chains could order incorrectly."
+          evidence: "workerctl/db.py adds created_at to chains and sorts audit chains chronologically; dashboard/server/index.ts sorts mapped entries by timestamp before slicing."
+        - gap: "Suppressed duplicate route telemetry was durable but not operator-facing."
+          evidence: "dashboard/server/index.ts counts recent dispatch_signal_suppressed events in dispatch health; dashboard/client/main.tsx renders a Suppressed health chip."
+        - gap: "Notification-only replay/correlation chains were poorly anchored and did not connect to later manager cycles."
+          evidence: "workerctl/replay.py uses commandless chain correlation/source event and chain created_at; workerctl/db.py links commandless notifications to the next manager cycle and decision when present."
+        - gap: "Dispatch-specific manual QA guidance was missing."
+          evidence: "workerctl qa-plan dispatch-completion added in workerctl/commands.py and workerctl/cli.py, documented in README.md, and covered by tests.test_workerctl.CliTests."
+      verification:
+        - "python3 -m unittest tests.test_workerctl.DispatchTests -v: pass"
+        - "python3 -m unittest tests.test_workerctl.CliTests -v: pass"
+        - "npm test -- --runInBand: pass"
+        - "npm run build: pass"
+        - "python3 -m py_compile workerctl/*.py && git diff --check: pass"
+
+checks:
+  dirty_fingerprint: unknown
+  last_verification:
+    result: pass
+    task: T999
+    commands:
+      - "python3 -m unittest tests.test_workerctl.DispatchTests -v"
+      - "python3 -m unittest tests.test_workerctl.CliTests -v"
+      - "npm test -- --runInBand"
+      - "npm run build"
+      - "python3 -m py_compile workerctl/*.py && git diff --check"

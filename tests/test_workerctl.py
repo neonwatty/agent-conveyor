@@ -1230,7 +1230,7 @@ class DispatchTests(unittest.TestCase):
     def test_dispatch_completion_notification_has_correlation_chain(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             conn, db_path = self.open_db(tmpdir)
-            worker_id, _manager_id = self.setup_bound_task(conn)
+            worker_id, manager_id = self.setup_bound_task(conn)
             event_id = self.insert_completion(conn, worker_id)
             conn.commit()
 
@@ -1248,14 +1248,79 @@ class DispatchTests(unittest.TestCase):
                 with contextlib.redirect_stdout(io.StringIO()):
                     commands.command_dispatch(args)
 
+            conn.execute(
+                """
+                insert into manager_cycles(task_id, started_at, completed_at, state, status_json)
+                values ('task-dispatch', '9999-01-01T00:00:00Z', '9999-01-01T00:00:01Z', 'succeeded', '{}')
+                """
+            )
+            cycle_id = conn.execute("select id from manager_cycles").fetchone()["id"]
+            decision_id = worker_db.insert_manager_decision(
+                conn,
+                task_id="task-dispatch",
+                manager_id=None,
+                manager_cycle_id=cycle_id,
+                decision="inspect",
+                reason="inspect routed worker completion",
+            )
+            conn.commit()
+
             audit = worker_db.task_audit(conn, task="dispatch-task")
             chain = audit["correlation_chains"][0]
             notification = worker_db.routed_notifications(conn, task_id="task-dispatch")[0]
             self.assertIsNone(chain["command_id"])
             self.assertEqual(chain["correlation_id"], notification["correlation_id"])
+            self.assertEqual(chain["created_at"], notification["created_at"])
+            self.assertEqual(chain["manager_cycle_id"], cycle_id)
+            self.assertEqual(chain["manager_decision_id"], decision_id)
             self.assertEqual(chain["signal_type"], "worker_task_complete")
             self.assertEqual(chain["source_event_id"], event_id)
             self.assertEqual(chain["routed_notification_ids"], [notification["id"]])
+            replay_entries = replay.replay_entries(audit)
+            chain_entry = next(entry for entry in replay_entries if entry["source"] == "correlation_chains")
+            self.assertEqual(chain_entry["source_id"], notification["correlation_id"])
+            self.assertEqual(chain_entry["timestamp"], notification["created_at"])
+            self.assertIn(f"source event #{event_id}", chain_entry["summary"])
+
+    def test_dispatch_correlation_chains_sort_mixed_rows_chronologically(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn, _db_path = self.open_db(tmpdir)
+            worker_id, manager_id = self.setup_bound_task(conn)
+            binding = conn.execute(
+                "select id as binding_id from bindings where task_id = 'task-dispatch'"
+            ).fetchone()
+            event_id = self.insert_completion(conn, worker_id, offset=17, timestamp="2026-05-23T10:00:59Z")
+            notification_id = worker_db.insert_routed_notification(
+                conn,
+                task_id="task-dispatch",
+                binding_id=binding["binding_id"],
+                correlation_id="dispatch-old",
+                source_session_id=worker_id,
+                target_session_id=manager_id,
+                signal_type="worker_task_complete",
+                source_event_id=event_id,
+                source_event_timestamp="2026-05-23T10:00:59Z",
+                dedupe_key=f"binding:worker_task_complete:worker:{event_id}",
+                payload={"message": "inspect"},
+                state="delivered",
+                timestamp="2026-05-23T10:01:00Z",
+            )
+            command_id = worker_db.create_command(
+                conn,
+                command_type="notify_manager",
+                task_id="task-dispatch",
+                payload={"message": "newer"},
+                correlation_id="corr-new",
+                timestamp="2026-05-23T10:03:00Z",
+            )
+            conn.commit()
+
+            audit = worker_db.task_audit(conn, task="dispatch-task")
+            chains = audit["correlation_chains"]
+            self.assertEqual([chain["command_id"] for chain in chains], [None, command_id])
+            self.assertEqual(chains[0]["routed_notification_ids"], [notification_id])
+            self.assertEqual(chains[0]["created_at"], "2026-05-23T10:01:00Z")
+            self.assertEqual(chains[1]["created_at"], "2026-05-23T10:03:00Z")
 
     def test_dispatch_duplicate_completion_race_emits_suppressed_telemetry(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -4026,6 +4091,22 @@ Deferred follow-up criteria:
         self.assertIn("nonzero exit", joined)
         self.assertIn("no misleading successful session_nudged event", joined)
         self.assertIn("worker_alive/manager_alive", joined)
+
+    def test_qa_plan_dispatch_completion_outputs_dispatch_flow(self):
+        proc = self.run_workerctl("qa-plan", "dispatch-completion", "--json")
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        payload = json.loads(proc.stdout)
+        self.assertEqual(payload["scenario"], "dispatch-completion")
+        self.assertTrue(any("workerctl pair" in step for step in payload["steps"]))
+        self.assertTrue(any("workerctl dispatch --once --type worker_task_complete" in step for step in payload["steps"]))
+        self.assertTrue(any("workerctl audit" in step for step in payload["steps"]))
+        self.assertTrue(any("workerctl replay" in step for step in payload["steps"]))
+        self.assertTrue(any("dashboard" in step.lower() for step in payload["steps"]))
+        self.assertTrue(any("dispatch_signal_suppressed" in step for step in payload["steps"]))
+        self.assertTrue(any("source_event_id" in observation for observation in payload["expected_observations"]))
+        self.assertTrue(any("does not send another tmux notification" in observation for observation in payload["expected_observations"]))
+        self.assertTrue(any("chronological order" in observation for observation in payload["expected_observations"]))
 
     def test_db_doctor_outputs_expected_structure(self):
         with tempfile.TemporaryDirectory() as tmpdir:
