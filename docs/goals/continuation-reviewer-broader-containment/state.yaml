@@ -1,0 +1,296 @@
+version: 2
+goal:
+  title: "Continuation Reviewer Broader Containment"
+  slug: "continuation-reviewer-broader-containment"
+  kind: "specific"
+  tranche: "dispatch-follow-up"
+  status: "done"
+  oracle:
+    signal: "Final Judge audit maps issue #133 acceptance criteria to repo evidence and returns full_outcome_complete true."
+    cadence: "After Scout inventory, after Worker changes or no-code decision, and before merge/close."
+    final_proof: "Acceptance matrix for #133, direct test results, README evidence, and PR/issue hygiene receipt."
+  intake:
+    original_request: "make a detailed plan with $goalbuddy:goal-prep for issue #133"
+    interpreted_outcome: "Decide and, if approved, implement broader continuation-reviewer containment for .codex-workers artifacts while preserving allowed context, replay/audit, CLI behavior, and redaction."
+    input_shape: "existing_issue"
+    audience: "maintainer"
+    authority: "user_requested"
+    proof_type: "tests_and_judge_audit"
+    completion_proof: "A final Judge audit confirms that issue #133 has an explicit broader .codex-workers containment boundary decision; any approved denial is implemented without breaking allowed reviewer context, replay/audit, or normal CLI operation; direct reviewer-command tests prove approved artifact classes are inaccessible; failure output and telemetry remain redacted; README documents the guarantee precisely; and the agreed verification commands are green."
+    likely_misfire: "Implementing broad .codex-workers denial before mapping artifacts and allowed context, or closing as no-op without an explicit evidence-backed boundary decision."
+    blind_spots_considered:
+      - "Reviewer may legitimately need selected prepared context files even while runtime artifacts should be denied."
+      - "Replay/audit/export flows may rely on .codex-workers paths outside the reviewer command."
+      - "Sandbox behavior can differ by platform, so tests must prove the actual reviewer command path."
+      - "Redaction needs coverage for denied artifact failures as well as success paths."
+    existing_plan_facts:
+      - "Issue #133 follows the continuation-reviewer hardening merged for #130/#132."
+      - "Current hard-isolation guarantee is targeted to bound rollout files and active workerctl DB/sidecars."
+      - "Issue #133 asks whether transcripts, capture metadata, task state, exports, and other session-adjacent .codex-workers artifacts should also be denied."
+rules:
+  allowed_goalbuddy_mutation:
+    - "docs/goals/continuation-reviewer-broader-containment/goal.md"
+    - "docs/goals/continuation-reviewer-broader-containment/state.yaml"
+    - "docs/goals/continuation-reviewer-broader-containment/notes/"
+  implementation_files_require_worker: true
+  stop_if:
+    - "The Scout cannot identify current artifact classes or reviewer execution boundaries from repo evidence."
+    - "The Judge cannot choose a containment boundary without new product input."
+    - "The Worker needs files outside its allowed_files."
+    - "Verification exposes platform-specific sandbox behavior that invalidates the approved design."
+agents:
+  scout: installed
+  worker: installed
+  judge: installed
+visual_board:
+  selected: local
+  local:
+    status: live
+    url: "http://goalbuddy.localhost:41737/continuation-reviewer-broader-containment/"
+    command: "npx goalbuddy board /Users/neonwatty/Desktop/codex-terminal-manager/docs/goals/continuation-reviewer-broader-containment"
+  github_projects:
+    status: not_requested
+    url: null
+    command: "npx goalbuddy extend github-projects"
+    missing: []
+active_task: null
+tasks:
+  - id: "T001"
+    type: scout
+    assignee: Scout
+    title: "Map current artifacts and reviewer containment"
+    status: "done"
+    reasoning_hint: low
+    objective: "Map current .codex-workers artifact classes, current continuation-reviewer containment, allowed reviewer context dependencies, and safe boundary options for issue #133."
+    owns:
+      - "Read-only inventory of .codex-workers artifact classes."
+      - "Read-only map of current continuation-reviewer deny rules and allowed context paths."
+      - "Risk matrix for broader denial versus allowed context, replay/audit, exports, and CLI workflows."
+    prompt: |
+      Read repo evidence only. Map issue #133's broader .codex-workers containment problem.
+
+      Produce a compact receipt with:
+      - artifact inventory: rollout files, active workerctl DB/sidecars, transcripts, capture metadata, task state, exports, boards, and any other session-adjacent files found;
+      - current continuation-reviewer execution and denial boundary;
+      - which artifacts are sensitive versus intentionally consumed by reviewer/replay/audit/CLI flows;
+      - recommended containment boundary options with risks;
+      - files and tests likely affected;
+      - stop_if items if implementation would be unsafe without product input.
+    expected_receipt:
+      - "artifact_inventory"
+      - "current_boundary"
+      - "allowed_context_dependencies"
+      - "boundary_options"
+      - "recommended_next_step"
+      - "candidate_files_tests"
+      - "stop_if"
+    receipt:
+      result: done
+      summary: "Current reviewer containment is targeted to bound rollout JSONL plus active workerctl DB/WAL/SHM, temp cwd, and stripped env. Broader .codex-workers runtime/session/export artifacts exist and are not directly denied from reviewer commands today."
+      note: "docs/goals/continuation-reviewer-broader-containment/notes/T001-scout-receipt.md"
+      recommended_next_step: "Judge should decide between a documented targeted-boundary no-code decision and reviewer-subprocess denial for the .codex-workers state root."
+  - id: "T002"
+    type: judge
+    assignee: Judge
+    title: "Decide containment boundary"
+    status: "done"
+    reasoning_hint: high
+    objective: "Choose the intended broader .codex-workers containment boundary and produce exact Worker instructions before implementation."
+    depends_on:
+      - "T001"
+    owns:
+      - "Boundary decision for issue #133 before implementation."
+      - "Worker instructions, allowed files, verification commands, and stop conditions."
+    prompt: |
+      Using the Scout receipt and issue #133 acceptance criteria, decide whether broader .codex-workers denial is required.
+
+      Return:
+      - decision: no-code/no-op with issue comment, or implementation required;
+      - exact artifact classes in scope and out of scope;
+      - approved design shape: deny root, deny subtrees, deny specific files, or another scoped model;
+      - direct test strategy for inaccessible artifacts;
+      - README documentation requirement;
+      - redaction verification requirement;
+      - Worker allowed_files and stop_if.
+    expected_receipt:
+      - "decision"
+      - "scope_in"
+      - "scope_out"
+      - "approved_design"
+      - "test_strategy"
+      - "doc_strategy"
+      - "redaction_strategy"
+      - "worker_allowed_files"
+      - "stop_if"
+    receipt:
+      result: done
+      decision: "implementation_required_broader_denial"
+      summary: "Deny the active .codex-workers state root as a read-prohibited subpath only inside continuation-reviewer reviewer-command sandbox execution."
+      note: "docs/goals/continuation-reviewer-broader-containment/notes/T002-judge-boundary-decision.md"
+      worker_allowed_files:
+        - "workerctl/commands.py"
+        - "tests/test_workerctl.py"
+        - "README.md"
+        - "docs/goals/continuation-reviewer-broader-containment/notes/"
+      verify:
+        - "python3 -m unittest tests.test_workerctl.PairCommandTests -v"
+        - "python3 -m unittest tests.test_workerctl -v"
+        - "python3 -m py_compile workerctl/*.py"
+        - "git diff --check"
+        - "./scripts/rc-check"
+  - id: "T003"
+    type: worker
+    assignee: Worker
+    title: "Implement approved containment decision"
+    status: "done"
+    reasoning_hint: default
+    objective: "Implement the Judge-approved containment decision for issue #133 with direct tests, README updates, and redaction verification."
+    depends_on:
+      - "T002"
+    owns:
+      - "Judge-approved code, tests, README, and notes only."
+    allowed_files:
+      - "workerctl/commands.py"
+      - "tests/test_workerctl.py"
+      - "README.md"
+      - "docs/goals/continuation-reviewer-broader-containment/notes/"
+    verify:
+      - "python3 -m unittest tests.test_workerctl.PairCommandTests -v"
+      - "python3 -m unittest tests.test_workerctl -v"
+      - "python3 -m py_compile workerctl/*.py"
+      - "git diff --check"
+      - "./scripts/rc-check"
+    stop_if:
+      - "Implementation needs files outside allowed_files."
+      - "Implementation requires changing reviewer allowed context instead of only filesystem denial."
+      - "sandbox-exec cannot deny the .codex-workers state root subpath without breaking reviewer temp cwd, command startup, or stdin context."
+      - "Replay/audit/export behavior is affected by the reviewer-command sandbox change."
+      - "Tests cannot prove denied artifact contents remain redacted from failure output."
+    prompt: |
+      Implement exactly the Judge-approved decision for issue #133.
+
+      If the Judge chooses broader denial:
+      - edit only allowed_files unless the Judge explicitly expanded the list;
+      - add direct tests proving approved artifact classes are inaccessible from reviewer commands;
+      - preserve allowed reviewer context, replay/audit, and normal CLI operation;
+      - keep failure output and telemetry redacted;
+      - update README to describe the guarantee precisely.
+
+      If the Judge chooses no-code/no-op:
+      - add a concise notes receipt explaining the evidence-backed decision and proposed issue response;
+      - do not touch implementation files.
+
+      Run the verification commands the Judge requires and return changed paths plus command results. Stop if any required file is outside allowed_files.
+    expected_receipt:
+      - "changed_files"
+      - "implementation_summary"
+      - "tests_added_or_updated"
+      - "readme_update"
+      - "verification"
+      - "known_risks"
+      - "stop_if_triggered"
+    receipt:
+      result: done
+      changed_files:
+        - "workerctl/commands.py"
+        - "tests/test_workerctl.py"
+        - "README.md"
+      summary: "Implemented reviewer-command sandbox denial for the active .codex-workers state root, added direct artifact-denial/redaction coverage, and updated README boundary documentation."
+      note: "docs/goals/continuation-reviewer-broader-containment/notes/T003-worker-receipt.md"
+      commands:
+        - cmd: "python3 -m unittest tests.test_workerctl.PairCommandTests -v"
+          status: pass
+          note: "43 tests"
+        - cmd: "python3 -m py_compile workerctl/*.py"
+          status: pass
+        - cmd: "git diff --check"
+          status: pass
+        - cmd: "WORKERCTL_STATE_ROOT=$(mktemp -d)/.codex-workers python3 -m unittest tests.test_workerctl -v"
+          status: pass
+          note: "442 tests"
+        - cmd: "WORKERCTL_STATE_ROOT=$(mktemp -d)/.codex-workers ./scripts/rc-check"
+          status: pass
+      discarded_attempt: "A parallel broad-suite run failed due shared .codex-workers test-state interference; sequential isolated reruns passed."
+  - id: "T004"
+    type: pm
+    assignee: PM
+    title: "Issue and PR hygiene"
+    status: "done"
+    reasoning_hint: default
+    objective: "Prepare issue and PR hygiene for #133 with an acceptance checklist, evidence references, and merge readiness status."
+    depends_on:
+      - "T003"
+    owns:
+      - "PR/issue update plan and hygiene receipt for #133."
+    allowed_files:
+      - "docs/goals/continuation-reviewer-broader-containment/notes/"
+    prompt: |
+      Prepare issue/PR hygiene for #133 after the implementation or no-code decision exists.
+
+      Return:
+      - proposed PR title/body or issue comment;
+      - acceptance criteria checklist with evidence links or file references;
+      - merge readiness status;
+      - any remaining QA or manual testing needed.
+
+      Do not modify implementation files.
+    expected_receipt:
+      - "pr_or_issue_text"
+      - "acceptance_checklist"
+      - "merge_readiness"
+      - "remaining_qa"
+    receipt:
+      result: done
+      note: "docs/goals/continuation-reviewer-broader-containment/notes/T004-issue-pr-hygiene.md"
+      pr_title: "Broaden continuation reviewer artifact containment"
+      closes: "#133"
+      merge_readiness: "Locally ready for final Judge audit; no remaining implementation blockers found."
+      remaining_qa:
+        - "Final Judge audit should inspect the diff and verify all #133 acceptance criteria are met."
+  - id: "T999"
+    type: judge
+    assignee: Judge
+    title: "Final audit for #133"
+    status: "done"
+    reasoning_hint: high
+    objective: "Audit the final repo state and receipts against all issue #133 acceptance criteria before merge or close."
+    depends_on:
+      - "T003"
+      - "T004"
+    owns:
+      - "Completion gate for issue #133."
+    prompt: |
+      Audit the repo and receipts against issue #133.
+
+      Return complete/not_complete with:
+      - acceptance criteria matrix;
+      - evidence for boundary decision, tests, redaction, README, and verification;
+      - any remaining gaps;
+      - whether this goal can be marked done;
+      - whether PR merge/issue close is safe.
+    expected_receipt:
+      - "status"
+      - "full_outcome_complete"
+      - "acceptance_matrix"
+      - "verification_evidence"
+      - "remaining_gaps"
+      - "merge_or_close_recommendation"
+    receipt:
+      result: done
+      decision: complete
+      status: complete
+      full_outcome_complete: true
+      note: "docs/goals/continuation-reviewer-broader-containment/notes/T999-final-audit.md"
+      remaining_gaps: []
+      merge_or_close_recommendation: "Safe to merge the diff and close #133 after applying the prepared PR/issue hygiene text."
+checks:
+  dirty_fingerprint: "unknown"
+  last_verification:
+    result: "pass"
+    task: "T999"
+    commands:
+      - "git diff --check"
+      - "PYTHONPYCACHEPREFIX=$(mktemp -d) python3 -B -m py_compile workerctl/*.py"
+      - "WORKERCTL_STATE_ROOT=$(mktemp -d)/.codex-workers PYTHONPYCACHEPREFIX=$(mktemp -d) python3 -B -m unittest tests.test_workerctl.PairCommandTests -v"
+      - "WORKERCTL_STATE_ROOT=$(mktemp -d)/.codex-workers PYTHONPYCACHEPREFIX=$(mktemp -d) python3 -B -m unittest tests.test_workerctl -v"
+      - "WORKERCTL_STATE_ROOT=$(mktemp -d)/.codex-workers PYTHONPYCACHEPREFIX=$(mktemp -d) PYTHONDONTWRITEBYTECODE=1 ./scripts/rc-check"

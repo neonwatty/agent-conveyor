@@ -15213,6 +15213,70 @@ class PairCommandTests(unittest.TestCase):
             self.assertNotIn("MANAGER_ROLLOUT_SECRET", json.dumps(review, sort_keys=True))
             self.assertNotIn("WORKER_ROLLOUT_SECRET", json.dumps(review, sort_keys=True))
 
+    def test_continuation_reviewer_runner_sandbox_denies_state_root_artifacts(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_dir = Path(tmpdir) / ".codex-workers"
+            state_dir.mkdir()
+            session_dir = state_dir / "legacy-session"
+            session_dir.mkdir()
+            artifact_secret = "STATE_ROOT_ARTIFACT_SECRET"
+            artifact_paths = [
+                session_dir / "config.json",
+                session_dir / "status.json",
+                session_dir / "events.jsonl",
+                session_dir / "transcript.txt",
+                session_dir / "capture-meta.json",
+                state_dir / "artifacts" / "tasks" / "continuation-state-root-task" / "export" / "payload.json",
+                state_dir / "artifacts" / "tasks" / "continuation-state-root-task" / "export.zip",
+            ]
+            for index, path in enumerate(artifact_paths):
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(f"{artifact_secret}_{index}", encoding="utf-8")
+
+            db_path = self._setup_db(tmpdir)
+            conn = worker_db.connect(db_path)
+            try:
+                self._create_continuation_reviewer_task(
+                    conn,
+                    task_name="continuation-state-root-task",
+                    correlation_id="corr-state-root",
+                )
+                self._bind_continuation_sessions(conn, task_name="continuation-state-root-task", tmpdir=tmpdir)
+                conn.commit()
+            finally:
+                conn.close()
+
+            reviewer_code = (
+                "from pathlib import Path; import json, sys; "
+                f"paths={[str(path) for path in artifact_paths]!r}; "
+                "ctx=json.load(sys.stdin); "
+                "context_ok=ctx['task']['name']=='continuation-state-root-task' and 'worker_continuation' in ctx['allowed_context']; "
+                "leaks=[]; denied=0\n"
+                "for p in paths:\n"
+                "    try:\n"
+                "        leaks.append(Path(p).read_text(encoding='utf-8'))\n"
+                "    except Exception:\n"
+                "        denied += 1\n"
+                "payload={'agreement':'match','verdict':'proceed','rationale':f'stdin context ok; denied {denied} state-root artifact reads'} if context_ok and not leaks else {'agreement':'divergent','verdict':'stop','rationale':'|'.join(leaks) or 'stdin context missing'}\n"
+                "print(json.dumps(payload))"
+            )
+            with mock.patch.dict(os.environ, {"WORKERCTL_STATE_ROOT": str(state_dir)}, clear=False):
+                review = self._run_continuation_reviewer_direct(
+                    db_path=db_path,
+                    task_name="continuation-state-root-task",
+                    correlation_id="corr-state-root",
+                    reviewer_command=[sys.executable, "-c", reviewer_code],
+                )
+
+            review_json = json.dumps(review, sort_keys=True)
+            self.assertEqual(review["agreement"], "match")
+            self.assertEqual(review["verdict"], "proceed")
+            self.assertEqual(review["rationale"], "stdin context ok; denied 7 state-root artifact reads")
+            self.assertIn("worker_continuation", review["subagent_run"]["allowed_context"])
+            self.assertTrue(review["subagent_run"]["sandbox"]["enabled"])
+            self.assertGreaterEqual(review["subagent_run"]["sandbox"]["denied_path_count"], 6)
+            self.assertNotIn(artifact_secret, review_json)
+
     def test_continuation_reviewer_runner_uses_temp_cwd_and_stripped_env(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = self._setup_db(tmpdir)

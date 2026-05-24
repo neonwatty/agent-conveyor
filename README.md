@@ -315,11 +315,15 @@ tmux attach -t codex-live-test
   criteria, manager config summary, diff metadata, and recent PR metadata; it
   does not include manager rollout context. Reviewer commands run from an
   isolated temporary cwd with a stripped environment and, on macOS, through
-  `sandbox-exec` with read access denied to the bound worker/manager rollout
-  files and active workerctl database. Sandbox setup failures, reviewer command
-  failures, timeouts, or invalid JSON are recorded as `verdict=stop`, not silent
-  approvals. Use `--dry-run` to inspect the exact context without running the
-  command.
+  `sandbox-exec`. The sandbox keeps the targeted denial of bound
+  worker/manager rollout files plus the active workerctl database and sidecars,
+  and also denies direct reads of the active `.codex-workers` state root so
+  legacy session files, transcripts, capture metadata, task state, and exports
+  are not available through filesystem reads. The allowed reviewer context still
+  arrives on stdin, and replay/audit/export commands outside this reviewer
+  subprocess are unchanged. Sandbox setup failures, reviewer command failures,
+  timeouts, or invalid JSON are recorded as `verdict=stop`, not silent approvals.
+  Use `--dry-run` to inspect the exact context without running the command.
 - `continuation <task> --list [--as-role all|worker|manager|reviewer]
   [--include-payload]` — List continuation proposals and reviews with
   role-aware payload redaction.
@@ -687,7 +691,10 @@ The adjacent completion-contract surfaces are separate from Dispatch:
   independent restricted-context reviewer command through
   `continuation-reviewer`. Reviewer execution is additionally isolated with a
   temporary cwd, stripped environment, and macOS `sandbox-exec` denial of bound
-  rollout/database reads.
+  rollout/database reads plus direct reads under the active `.codex-workers`
+  state root. That broader state-root denial applies only to the
+  `continuation-reviewer` subprocess; normal replay, audit, export, and
+  telemetry generation paths remain outside that sandbox.
 
 ## Schema
 
