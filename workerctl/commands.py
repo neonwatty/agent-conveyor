@@ -4535,6 +4535,26 @@ def _dispatch_once_pass(
             except Exception as exc:
                 if "UNIQUE constraint failed" in str(exc):
                     result["state"] = "suppressed"
+                    worker_db.emit_telemetry_event(
+                        conn,
+                        actor="dispatch",
+                        event_type="dispatch_signal_suppressed",
+                        task_id=row["task_id"],
+                        summary=f"Dispatch suppressed duplicate {result['signal_type']} for {row['task_name']}.",
+                        correlation={
+                            "binding_id": row["binding_id"],
+                            "correlation_id": correlation_id,
+                            "dispatcher_id": dispatcher_id,
+                            "source_event_id": row["source_event_id"],
+                            "signal_type": "worker_task_complete",
+                        },
+                        attributes={
+                            "dedupe_key": dedupe_key,
+                            "error": str(exc),
+                            "source_session": row["worker_session_name"],
+                            "target_session": row["manager_session_name"],
+                        },
+                    )
                     processed.append(result)
                     continue
                 raise

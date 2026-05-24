@@ -1363,10 +1363,13 @@ def _build_correlation_chains(
     for attempt in command_attempts:
         attempts_by_command.setdefault(attempt["command_id"], []).append(attempt)
     notifications_by_command: dict[str, list[dict[str, Any]]] = {}
+    notifications_without_command: list[dict[str, Any]] = []
     for notification in routed_notifications:
         command_id = notification.get("command_id")
         if command_id:
             notifications_by_command.setdefault(command_id, []).append(notification)
+        else:
+            notifications_without_command.append(notification)
     chains: list[dict[str, Any]] = []
     for command in commands:
         decision_id = _command_manager_decision_id(command)
@@ -1386,6 +1389,21 @@ def _build_correlation_chains(
                 "manager_cycle_id": cycle["id"] if cycle else None,
                 "manager_decision_id": decision["id"] if decision else None,
                 "routed_notification_ids": [notification["id"] for notification in notifications],
+            }
+        )
+    for notification in notifications_without_command:
+        chains.append(
+            {
+                "attempt_ids": [],
+                "command_id": None,
+                "command_state": notification["state"],
+                "command_type": notification["signal_type"],
+                "correlation_id": notification["correlation_id"],
+                "manager_cycle_id": None,
+                "manager_decision_id": None,
+                "routed_notification_ids": [notification["id"]],
+                "signal_type": notification["signal_type"],
+                "source_event_id": notification["source_event_id"],
             }
         )
     return chains
