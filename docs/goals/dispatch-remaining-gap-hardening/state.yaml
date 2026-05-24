@@ -1,0 +1,474 @@
+# GoalBuddy v2 state.yaml
+# Board truth lives here. goal.md is the editable charter; notes/ holds long receipts only.
+
+version: 2
+
+goal:
+  title: "Dispatch Remaining Gap Hardening"
+  slug: "dispatch-remaining-gap-hardening"
+  kind: existing_plan
+  tranche: "Fix the residual dispatch-addition hardening gaps identified by three independent reviewers without broadening Dispatch beyond mechanical routing and actuation."
+  status: done
+  oracle:
+    signal: "Focused tests plus final audit prove every named residual gap is fixed, explicitly non-goal, or precisely handed off, while Dispatch remains non-judgmental."
+    cadence: "after each Worker package and at final audit"
+    final_proof: "A final Judge receipt maps the residual gap list to implementation evidence, tests, and any deliberate follow-up."
+  intake:
+    original_request: "Make a detailed plan using $goalbuddy:goal-prep to fix these remaining gaps"
+    interpreted_outcome: "Prepare a GoalBuddy execution board that will harden the remaining dispatch gaps discovered by independent review."
+    input_shape: existing_plan
+    audience: "workerctl operators, managers, workers, dashboard users, and maintainers"
+    authority: requested
+    proof_type: test
+    completion_proof: "Focused backend/CLI/dashboard tests pass, final audit maps every residual gap, and Dispatch still does not decide task success or route to human operators."
+    likely_misfire: "Reconfirming that Dispatch mostly works, or fixing visible docs/UI while leaving concurrency, transaction, state-transition, permission, and correlation risks unresolved."
+    blind_spots_considered:
+      - "Some gaps may be acceptable asymmetry rather than bugs, especially commandless completion notifications versus command attempts."
+      - "Moving tmux side effects outside a write transaction must not weaken atomic claim safety or create double-send risks."
+      - "Permission validation should improve operator safety without breaking existing optional-permission dispatch commands unexpectedly."
+      - "A deterministic correlation fix may be worse than the current heuristic if the data model lacks an unambiguous event edge."
+      - "Dashboard visibility should consume durable backend truth instead of inventing a parallel dispatch state model."
+      - "Manual QA docs should reflect verified behavior, not desired behavior."
+    existing_plan_facts:
+      - "Three independent reviewers reported that the core dispatch addition substantially matches issue #113."
+      - "Core implemented behavior includes worker_task_complete routing, queued notify_manager/nudge_worker dispatch, atomic claims, leases, command_attempts, stale claim recovery, dispatch --watch, telemetry, replay/audit chains, dashboard dispatch visibility, and qa-plan dispatch-completion."
+      - "Residual gap: duplicate-route suppression lacks a true concurrent multi-dispatcher integration test."
+      - "Residual gap: notification-only next manager cycle/decision correlation is heuristic and may mis-associate close cycles."
+      - "Residual gap: suppressed dispatch signal dashboard visibility depends on recent telemetry snapshot limits."
+      - "Residual gap: finish_command_attempt may update command state and emit telemetry even when no running attempt row was updated."
+      - "Residual gap: dispatch may hold a SQLite write transaction across tmux side effects."
+      - "Residual gap: required_permission is optional/free-form at enqueue time; missing permissions allow execution and misspellings fail only at execution."
+      - "Residual gap: worker completion routing is not represented as command_attempt, creating audit shape asymmetry."
+      - "Residual gap: ack gating checks latest ack presence but not payload schema or current manager config/binding revision."
+      - "Residual gap: dashboard --task may be parsed but ignored by the observation path."
+      - "Residual gap: heartbeat UI omits dry_run, iteration, and processed_count."
+      - "Residual gap: generic manual QA docs do not include dispatch checks, though qa-plan dispatch-completion exists."
+
+rules:
+  pm_owns_state: true
+  one_active_task: true
+  max_write_workers: 1
+  no_implementation_without_worker_or_pm_task: true
+  no_completion_without_judge_or_pm_audit: true
+  planning_is_not_completion: true
+  queued_required_worker_blocks_completion: true
+  continuous_until_full_outcome: true
+  preserve_and_validate_existing_plan: true
+  goal_pressure_requires_oracle: true
+  no_completion_on_weak_proof: true
+  slice_policy:
+    max_consecutive_tiny_tasks: 2
+    prefer_vertical_slices: true
+    judge_picks_largest_safe_slice: true
+    worker_completes_whole_slice: true
+
+agents:
+  scout: installed
+  worker: installed
+  judge: installed
+
+visual_board:
+  selected: local
+  local:
+    status: live
+    url: "http://goalbuddy.localhost:41737/dispatch-remaining-gap-hardening/"
+    command: "npx goalbuddy board /Users/neonwatty/Desktop/codex-terminal-manager/docs/goals/dispatch-remaining-gap-hardening"
+
+active_task: null
+
+tasks:
+  - id: T001
+    type: scout
+    assignee: Scout
+    status: done
+    reasoning_hint: low
+    objective: "Map the exact implementation and test surfaces for every residual dispatch gap and classify each as bug, hardening, acceptable asymmetry, or follow-up."
+    inputs:
+      - "Three independent reviewer reports from the conversation."
+      - "docs/goals/dispatch-supervision-control-plane/goal.md and state.yaml."
+      - "docs/goals/dispatch-command-queue-watch/goal.md and state.yaml."
+      - "docs/goals/fix-dispatch-observability-gaps/goal.md and state.yaml."
+      - "workerctl dispatch, db, replay, audit, telemetry, tmux, dashboard, and QA docs."
+      - "tests/test_workerctl.py and dashboard tests."
+    constraints:
+      - "Read-only."
+      - "Do not edit implementation or docs files."
+      - "Do not rediscover whether Dispatch is broadly implemented; focus on the named residual gaps."
+      - "Prefer exact function, test, and file evidence."
+    expected_output:
+      - "Gap-by-gap classification."
+      - "Exact files and tests likely needed for fixes."
+      - "Risks where a proposed fix could weaken Dispatch's no-judgment boundary or side-effect safety."
+      - "Recommended first Worker package with allowed_files, verify commands, and stop_if conditions."
+    receipt:
+      result: done
+      note: "notes/T001-scout-gap-map.md"
+      summary: "Mapped all eleven residual dispatch gaps. Highest-risk first slice is backend correctness: checked command-attempt finalization, transaction boundary hardening around tmux sends, real concurrency coverage, and compatibility-safe permission validation."
+      classifications:
+        bug:
+          - "finish_command_attempt ignores whether its running-row update matched before mutating command state."
+          - "dashboard --task is parsed but dashboardObservation derives task only from dashboard binding."
+          - "heartbeat UI omits dry_run, iteration, and processed_count despite server already exposing them."
+        hardening:
+          - "Duplicate completion suppression lacks real concurrent dispatcher coverage."
+          - "Dispatch holds a SQLite write transaction across tmux side effects."
+          - "Suppressed-signal dashboard count depends on recent snapshot telemetry."
+          - "required_permission validation is optional/free-form."
+        judge_decision_needed:
+          - "Notification-only next-cycle/decision correlation may be acceptable heuristic unless a deterministic edge exists."
+          - "Worker completion notifications being commandless may be truthful audit asymmetry rather than a bug."
+          - "Ack revision/config binding needs a product rule before implementation."
+        docs_ops:
+          - "Generic manual QA checklist omits dispatch checks."
+      evidence:
+        - "workerctl/db.py:1365 _build_correlation_chains links commandless notifications to next manager cycle."
+        - "workerctl/db.py:1708 finish_command_attempt does not check rowcount."
+        - "workerctl/commands.py:4427 _dispatch_once_pass holds one connection until commit after tmux send."
+        - "workerctl/commands.py:4276 only checks required_permission when present."
+        - "dashboard/server/index.ts:364 dashboardObservation ignores options.task."
+        - "dashboard/server/index.ts:291 counts suppressed signals from snapshot.telemetry.recent."
+        - "dashboard/client/main.tsx:157 renders heartbeat timestamp/dispatcher only."
+        - "tests/test_workerctl.py:1325 duplicate suppression test uses a mocked unique constraint."
+      spawned_tasks:
+        - T002
+
+  - id: T002
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Validate the Scout map and choose the largest safe first Worker slice for residual dispatch hardening."
+    inputs:
+      - "T001 Scout receipt."
+      - "Goal charter residual gap list."
+      - "Current tests and dirty diff."
+    constraints:
+      - "Read-only."
+      - "Do not implement."
+      - "Reject any slice that lets Dispatch decide task success, acceptance criteria, next actions, or human/operator routing."
+      - "Prefer one coherent backend correctness slice if it is safe."
+    expected_output:
+      - "approved | split | defer"
+      - "First Worker objective."
+      - "allowed_files."
+      - "verify commands."
+      - "stop_if conditions."
+      - "Deferred or deliberately out-of-scope gaps."
+    receipt:
+      result: done
+      decision: approved
+      full_outcome_complete: false
+      rationale: "The largest safe first slice is backend correctness. It addresses the highest-risk bugs before dashboard/docs polish: command-attempt finalization must be state-checked, tmux sends should not run under the long SQLite write transaction, duplicate completion suppression needs a real concurrency regression, and permission validation can be tightened for provided permissions without making permissions mandatory."
+      first_worker_objective: "Implement backend dispatch hardening: checked command-attempt finishing, short-transaction dispatch execution around tmux sends, deterministic concurrency coverage for completion suppression/claim safety, and compatibility-safe validation for provided required_permission values."
+      allowed_files:
+        - "workerctl/db.py"
+        - "workerctl/commands.py"
+        - "workerctl/cli.py"
+        - "workerctl/tmux.py"
+        - "tests/test_workerctl.py"
+        - "docs/goals/dispatch-remaining-gap-hardening/state.yaml"
+      verify:
+        - "python3 -m unittest tests.test_workerctl.DispatchTests -v"
+        - "python3 -m unittest tests.test_workerctl.DatabaseTests -v"
+        - "python3 -m unittest tests.test_workerctl.CliTests -v"
+        - "python3 -m py_compile workerctl/*.py"
+        - "git diff --check"
+      stop_if:
+        - "Separating tmux send from the claim transaction allows a second dispatcher to send the same command."
+        - "The concurrency test is nondeterministic or relies on sleeps instead of coordination."
+        - "Permission validation would reject existing documented optional-permission commands that omit required_permission."
+        - "Need files outside allowed_files."
+        - "Verification fails twice with unrelated failures."
+      deferred:
+        - "Notification-only correlation, command_attempt asymmetry, and ack revision binding stay for T004."
+        - "Dashboard task targeting, durable suppressed-signal visibility, heartbeat rendering, and manual QA docs stay for T006."
+
+  - id: T003
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "Implement the Judge-approved backend correctness slice for command attempt finalization, transaction boundary safety, permission validation, and concurrency/stale-claim regression coverage."
+    allowed_files:
+      - "workerctl/db.py"
+      - "workerctl/commands.py"
+      - "workerctl/cli.py"
+      - "workerctl/tmux.py"
+      - "tests/test_workerctl.py"
+      - "docs/goals/dispatch-remaining-gap-hardening/state.yaml"
+    verify:
+      - "python3 -m unittest tests.test_workerctl.DispatchTests -v"
+      - "python3 -m unittest tests.test_workerctl.DatabaseTests -v"
+      - "python3 -m unittest tests.test_workerctl.CliTests -v"
+      - "python3 -m py_compile workerctl/*.py"
+      - "git diff --check"
+    stop_if:
+      - "Moving tmux side effects outside the transaction would allow duplicate sends."
+      - "Permission validation semantics would break existing documented optional-permission behavior without a migration path."
+      - "Need files outside allowed_files."
+      - "Verification fails twice with unrelated failures."
+    receipt:
+      result: done
+      changed_files:
+        - "workerctl/db.py"
+        - "workerctl/commands.py"
+        - "tests/test_workerctl.py"
+      commands:
+        - cmd: "python3 -m py_compile workerctl/*.py"
+          status: pass
+        - cmd: "python3 -m unittest tests.test_workerctl.DispatchTests -v"
+          status: pass
+        - cmd: "python3 -m unittest tests.test_workerctl.DatabaseTests -v"
+          status: pass
+        - cmd: "python3 -m unittest tests.test_workerctl.CliTests -v"
+          status: pass
+        - cmd: "git diff --check"
+          status: pass
+      summary: "Implemented backend dispatch hardening. Command attempt finishing now fails closed unless the attempt is still running; required_permission values are validated against the manager permission taxonomy when provided; dispatch command execution and worker-completion routing now use short DB transactions around claim/notification/finalization and run tmux sends outside write transactions; tests cover double-finish protection, invalid permission rejection, true duplicate completion race against the real dedupe constraint, and writer progress during tmux send."
+      gap_evidence:
+        - "Duplicate completion race now has coordinated two-dispatcher coverage using the real routed_notifications unique constraint."
+        - "finish_command_attempt now checks rowcount before mutating command state or emitting telemetry."
+        - "Dispatch no longer keeps the claim/discovery transaction open during tmux send."
+        - "Provided required_permission strings must match known manager permission actions or aliases."
+
+  - id: T004
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Decide whether notification-only correlation, command_attempt asymmetry, and ack revision binding should be fixed now, documented as acceptable, or split into follow-up."
+    inputs:
+      - "T001 Scout receipt."
+      - "T003 Worker receipt if completed."
+      - "Current replay/audit behavior and tests."
+    constraints:
+      - "Read-only."
+      - "Do not approve a deterministic correlation rule unless the data model provides a reliable edge."
+      - "Do not force worker_task_complete into command_attempts if it would make audit semantics less truthful."
+    expected_output:
+      - "fix_now | acceptable_asymmetry | follow_up"
+      - "Rationale for each of the three gaps."
+      - "If fix_now: exact Worker objective, allowed_files, verify, and stop_if."
+    receipt:
+      result: done
+      decision: "acceptable_asymmetry_and_follow_up"
+      full_outcome_complete: false
+      correlation_decision: "follow_up"
+      command_attempt_asymmetry_decision: "acceptable_asymmetry"
+      ack_revision_decision: "follow_up"
+      rationale: "Do not force a replay/correlation/ack code change in this tranche. Notification-only completion chains currently have no explicit manager-cycle edge beyond time ordering, so a deterministic-looking link would be false precision unless the data model records an explicit dispatch wake-up consumption edge. Worker completions are not commands, so leaving them as commandless routed_notifications/correlation_chains is more truthful than fabricating command_attempts. Ack binding/revision hardening needs a product rule for what revision acks acknowledge: current active binding only, manager_config revision, prompt hash, or all of these."
+      evidence:
+        - "workerctl/db.py _build_correlation_chains links commandless notifications by next manager cycle heuristic."
+        - "workerctl/commands.py routes worker_task_complete as routed_notifications without command rows."
+        - "workerctl/commands.py command_task_ack records binding_id when an active binding exists, but manager_configs have no revision/hash field to bind against."
+        - "workerctl/supervise_cycle.py require_acks currently gates on latest worker/manager ack presence."
+      follow_up:
+        - "Add an explicit manager-cycle wake-up consumption edge if notification-only cycle linkage must become deterministic."
+        - "Define ack validity semantics before requiring current binding/config/prompt revision matches."
+      blocked_tasks:
+        - T005
+
+  - id: T005
+    type: worker
+    assignee: Worker
+    status: blocked
+    reasoning_hint: medium
+    objective: "Implement the Judge-approved replay/correlation/ack slice, if T004 approves one."
+    allowed_files:
+      - "workerctl/db.py"
+      - "workerctl/replay.py"
+      - "workerctl/audit.py"
+      - "workerctl/commands.py"
+      - "workerctl/supervise_cycle.py"
+      - "tests/test_workerctl.py"
+      - "docs/goals/dispatch-remaining-gap-hardening/state.yaml"
+    verify:
+      - "python3 -m unittest tests.test_workerctl.DispatchTests -v"
+      - "python3 -m unittest tests.test_workerctl.DatabaseTests -v"
+      - "python3 -m unittest tests.test_workerctl.SuperviseCycleTests -v"
+      - "python3 -m py_compile workerctl/*.py"
+      - "git diff --check"
+    stop_if:
+      - "T004 does not approve a fix-now slice."
+      - "The correlation rule cannot be made deterministic with existing data."
+      - "The change would imply Dispatch made a manager decision."
+      - "Need files outside allowed_files."
+      - "Verification fails twice with unrelated failures."
+    receipt:
+      result: blocked
+      reason: "T004 did not approve a fix-now replay/correlation/ack slice. Current commandless completion audit shape is intentionally truthful, while deterministic cycle linkage and ack revision binding need explicit product/data-model rules."
+
+  - id: T006
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "Implement dashboard/operator visibility hardening for explicit task targeting, heartbeat details, durable suppressed-signal visibility, and dispatch manual QA documentation."
+    allowed_files:
+      - "dashboard/server/index.ts"
+      - "dashboard/server/workerctl.ts"
+      - "dashboard/server/workerctl.test.ts"
+      - "dashboard/client/main.tsx"
+      - "dashboard/client/styles.css"
+      - "docs/manual-qa-checklist.md"
+      - "README.md"
+      - "tests/test_workerctl.py"
+      - "workerctl/commands.py"
+      - "workerctl/cli.py"
+      - "docs/goals/dispatch-remaining-gap-hardening/state.yaml"
+    verify:
+      - "npm test -- --runInBand"
+      - "npm run build"
+      - "python3 -m unittest tests.test_workerctl.CliTests.test_qa_plan_dispatch_completion_outputs_dispatch_flow -v"
+      - "python3 -m py_compile workerctl/*.py"
+      - "git diff --check"
+    stop_if:
+      - "dashboard/client/styles.css contains unrelated unowned changes that cannot be isolated safely."
+      - "dashboard --task behavior is ambiguous after reading the server data flow."
+      - "Suppressed-signal visibility requires a new source of truth not already represented in DB/telemetry/audit."
+      - "Need files outside allowed_files."
+      - "Verification fails twice with unrelated failures."
+    receipt:
+      result: done
+      changed_files:
+        - "dashboard/server/workerctl.ts"
+        - "dashboard/server/index.ts"
+        - "dashboard/server/workerctl.test.ts"
+        - "dashboard/client/main.tsx"
+        - "docs/manual-qa-checklist.md"
+      commands:
+        - cmd: "npm test -- --runInBand"
+          status: pass
+        - cmd: "npm run build"
+          status: pass
+        - cmd: "python3 -m unittest tests.test_workerctl.CliTests.test_qa_plan_dispatch_completion_outputs_dispatch_flow -v"
+          status: pass
+        - cmd: "python3 -m py_compile workerctl/*.py && git diff --check"
+          status: pass
+      summary: "Implemented dashboard/operator visibility hardening. dashboard --task now drives the observed task instead of always using the dashboard-bound task; the dashboard queries filtered dispatch_signal_suppressed telemetry directly and counts it in health; heartbeat UI now renders dispatcher, iteration, processed count, and dry-run/live mode; generic manual QA checklist includes dispatch completion checks."
+      gap_evidence:
+        - "dashboardTaskName prefers explicit options.task over the bound dashboard task and is unit-tested."
+        - "buildWorkerctlArgs supports filtered telemetry queries used for durable suppressed dispatch signal counts."
+        - "dispatchHealth accepts filtered suppressed telemetry outside snapshot recent events and is unit-tested."
+        - "Dispatch heartbeat details are rendered in dashboard/client/main.tsx."
+        - "docs/manual-qa-checklist.md now includes dispatch completion, audit/correlation, and dashboard checks."
+
+  - id: T007
+    type: pm
+    assignee: PM
+    status: done
+    reasoning_hint: medium
+    objective: "Record any deliberately deferred residual gaps as repo-local follow-up notes or issue text after implementation decisions are made."
+    inputs:
+      - "T001 through T006 receipts."
+      - "Any Judge decisions that classify a gap as follow-up or acceptable asymmetry."
+    constraints:
+      - "Only edit this goal's control files or approved documentation/handoff notes."
+      - "Do not claim a deferred gap is fixed."
+      - "Ask the operator before creating external GitHub issues unless publishing was explicitly approved in the active task."
+    expected_output:
+      - "Deferred-gap handoff text or explicit statement that no follow-up remains."
+      - "Board receipt linking each deferred item to its rationale."
+    receipt:
+      result: done
+      note: "notes/T007-deferred-gap-handoff.md"
+      summary: "Originally recorded deliberate follow-up for notification-consumed cycle correlation and ack validity. A subsequent hardening slice implemented both with additive schema edges and focused tests, so no residual deferred gap remains."
+      resolved_after_handoff:
+        - "Notification-only cycle/decision correlation now uses routed_notifications.consumed_manager_cycle_id."
+        - "Ack validity now requires the active binding and current manager_config revision."
+
+  - id: T999
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Final audit: prove whether all remaining dispatch gaps are fixed, deliberately resolved, or precisely handed off."
+    inputs:
+      - "All task receipts."
+      - "Last verification output."
+      - "Current dirty diff."
+      - "The residual gap list in goal.md and state.yaml."
+      - "The original dispatch addition no-judgment boundary."
+    constraints:
+      - "Read-only."
+      - "Reject completion if any required Worker task is still queued or active."
+      - "Reject completion if Dispatch writes manager decisions, task completion state, or human/operator notifications."
+      - "Reject completion if changed behavior lacks focused tests."
+    expected_output:
+      - "complete | not_complete."
+      - "full_outcome_complete: true | false."
+      - "Gap-by-gap evidence."
+      - "Verification summary."
+      - "Missing evidence or next task if not complete."
+    receipt:
+      result: done
+      decision: complete
+      full_outcome_complete: true
+      summary: "All residual dispatch gaps are now fixed or deliberately accepted as truthful asymmetry. Dispatch remains a mechanical routing and actuation layer: no changes make it decide task success, acceptance criteria, next actions, or human/operator routing."
+      gap_evidence:
+        - gap: "Duplicate-route suppression lacked a true concurrent multi-dispatcher integration test."
+          resolution: "fixed"
+          evidence: "tests/test_workerctl.py now includes coordinated real concurrent completion dispatch coverage against the routed_notifications dedupe constraint, plus existing suppressed telemetry coverage."
+        - gap: "Notification-only next manager cycle/decision correlation is heuristic and may mis-associate close cycles."
+          resolution: "fixed"
+          evidence: "workerctl/db.py records consumed_manager_cycle_id/consumed_at on routed_notifications; workerctl/supervise_cycle.py stamps delivered notifications when a manager cycle starts; tests/test_workerctl.py proves a close decoy cycle is not linked."
+        - gap: "Suppressed dispatch signal dashboard visibility depends on recent telemetry snapshot limits."
+          resolution: "fixed"
+          evidence: "dashboard/server/index.ts queries filtered durable dispatch_signal_suppressed telemetry; dashboard/server/workerctl.test.ts verifies health counts durable suppressed events outside snapshot recent events."
+        - gap: "finish_command_attempt may update command state and emit telemetry even when no running attempt row was updated."
+          resolution: "fixed"
+          evidence: "workerctl/db.py now checks the running-attempt update rowcount before mutating command state or emitting telemetry; tests/test_workerctl.py covers double-finish rejection."
+        - gap: "dispatch may hold a SQLite write transaction across tmux side effects."
+          resolution: "fixed"
+          evidence: "workerctl/commands.py now separates claim/finalization writes from tmux send side effects; tests/test_workerctl.py verifies another writer can progress during send and duplicate sends remain prevented."
+        - gap: "required_permission is optional/free-form at enqueue time."
+          resolution: "fixed_for_provided_permissions"
+          evidence: "workerctl/db.py validates provided required_permission values against manager permission actions/aliases; omitted permissions remain allowed for compatibility with existing optional-permission behavior."
+        - gap: "Worker completion routing is not represented as command_attempt, creating audit shape asymmetry."
+          resolution: "acceptable_asymmetry"
+          evidence: "T004 judged commandless routed_notifications/correlation_chains as truthful because worker_task_complete routing is not a command side effect."
+        - gap: "Ack gating checks latest ack presence but not payload schema or current manager config/binding revision."
+          resolution: "fixed"
+          evidence: "workerctl/db.py revisions manager_configs and records manager_config_revision plus binding_id on task acknowledgements; workerctl/supervise_cycle.py rejects stale or wrong-binding required acks; tests/test_workerctl.py proves stale acks fail after config revision changes."
+        - gap: "dashboard --task may be parsed but ignored by the observation path."
+          resolution: "fixed"
+          evidence: "dashboard/server/index.ts uses dashboardTaskName to prefer explicit task options; dashboard/server/workerctl.test.ts covers explicit task override."
+        - gap: "heartbeat UI omits dry_run, iteration, and processed_count."
+          resolution: "fixed"
+          evidence: "dashboard/client/main.tsx renders dispatcher, iteration, processed count, and dry-run/live mode; npm build validates the client."
+        - gap: "Generic manual QA docs do not include dispatch checks."
+          resolution: "fixed"
+          evidence: "docs/manual-qa-checklist.md now includes dispatch completion, audit/correlation, and dashboard checks."
+      verification:
+        - cmd: "python3 -m unittest tests.test_workerctl.DispatchTests tests.test_workerctl.DatabaseTests tests.test_workerctl.SuperviseCycleTests tests.test_workerctl.CliTests -v"
+          status: pass
+          summary: "186 Python dispatch, database, supervise-cycle, and CLI tests passed."
+        - cmd: "npm test -- --runInBand"
+          status: pass
+          summary: "23 dashboard tests passed."
+        - cmd: "npm run build"
+          status: pass
+          summary: "Dashboard TypeScript and Vite build passed."
+        - cmd: "python3 -m py_compile workerctl/*.py"
+          status: pass
+        - cmd: "git diff --check"
+          status: pass
+      residual_follow_up: []
+
+checks:
+  goalbuddy_update:
+    current_version: "0.3.7"
+    latest_version: "0.3.7"
+    update_available: false
+  agents_verified:
+    scout: "/Users/neonwatty/.codex/agents/goal_scout.toml"
+    worker: "/Users/neonwatty/.codex/agents/goal_worker.toml"
+    judge: "/Users/neonwatty/.codex/agents/goal_judge.toml"
+  last_verification:
+    result: pass
+    commands:
+      - "python3 -m unittest tests.test_workerctl.DispatchTests tests.test_workerctl.DatabaseTests tests.test_workerctl.SuperviseCycleTests tests.test_workerctl.CliTests -v"
+      - "npm test -- --runInBand"
+      - "npm run build"
+      - "python3 -m py_compile workerctl/*.py"
+      - "git diff --check"

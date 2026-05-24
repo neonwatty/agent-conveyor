@@ -233,6 +233,13 @@ def run_cycle(
         },
         attributes={"busy_wait_seconds": busy_wait_seconds, "cycle_id": cycle_id},
     )
+    consumed_notifications = worker_db.consume_routed_notifications_for_cycle(
+        conn,
+        task_id=binding["task_id"],
+        binding_id=binding["binding_id"],
+        manager_cycle_id=cycle_id,
+        timestamp=started_at,
+    )
     spans.flush(conn)
     conn.commit()
 
@@ -345,15 +352,22 @@ def run_cycle(
         manager_ack = worker_db.latest_task_acknowledgement(
             conn, task_id=binding["task_id"], role="manager"
         )
-        if manager_config and manager_config.get("require_acks") and (worker_ack is None or manager_ack is None):
-            missing = [
+        if manager_config and manager_config.get("require_acks"):
+            stale = [
                 role
                 for role, ack in (("worker", worker_ack), ("manager", manager_ack))
-                if ack is None
+                if (
+                    ack is None
+                    or ack.get("binding_id") != binding["binding_id"]
+                    or ack.get("manager_config_revision") != manager_config.get("revision")
+                )
             ]
+        else:
+            stale = []
+        if stale:
             raise WorkerError(
-                "cycle requires acknowledgement(s) before first observation: "
-                + ", ".join(missing)
+                "cycle requires current acknowledgement(s) before first observation: "
+                + ", ".join(stale)
             )
         manager_context = {
             "manager_config": manager_config,
@@ -375,6 +389,7 @@ def run_cycle(
                 "require_acks": bool(manager_config and manager_config.get("require_acks")),
                 "worker_ack_present": worker_ack is not None,
                 "worker_handoff_present": manager_context["worker_handoff"] is not None,
+                "consumed_dispatch_notifications": consumed_notifications,
             },
         )
         active_phase = None
@@ -393,6 +408,7 @@ def run_cycle(
             "worker_alive": _alive(worker_row),
             "manager_alive": _alive(manager_row),
             "manager_context": manager_context,
+            "consumed_dispatch_notifications": consumed_notifications,
             "last_event_subtype": last_subtype,
             "task_completed": last_subtype == "task_complete",
         }

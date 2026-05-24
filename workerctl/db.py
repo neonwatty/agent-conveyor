@@ -12,7 +12,7 @@ from workerctl.core import now_iso
 from workerctl.state import state_root
 
 
-SCHEMA_VERSION = 18
+SCHEMA_VERSION = 19
 REQUIRED_TABLES = {
     "acceptance_criteria",
     "agent_observations",
@@ -107,6 +107,11 @@ _MANAGER_PERMISSION_ALIASES = {
     "allow_worker_compact_clear": ["worker_session.compact", "worker_session.clear"],
     "worker_compact_clear": ["worker_session.compact", "worker_session.clear"],
 }
+_MANAGER_PERMISSION_ACTIONS = {
+    f"{category}.{action}"
+    for category, actions in _MANAGER_PERMISSION_TAXONOMY.items()
+    for action in actions
+}
 
 
 class _ClosingConnection(sqlite3.Connection):
@@ -126,9 +131,7 @@ def _empty_manager_permissions() -> dict[str, list[str]]:
 
 
 def _grant_manager_permission(normalized: dict[str, list[str]], name: str) -> None:
-    aliases = _MANAGER_PERMISSION_ALIASES.get(name, name)
-    names = aliases if isinstance(aliases, list) else [aliases]
-    for canonical in names:
+    for canonical in _canonical_manager_permission_names(name):
         if "." not in canonical:
             continue
         category, action = canonical.split(".", 1)
@@ -137,6 +140,27 @@ def _grant_manager_permission(normalized: dict[str, list[str]], name: str) -> No
             if action not in bucket:
                 bucket.append(action)
                 bucket.sort()
+
+
+def _canonical_manager_permission_names(name: str) -> list[str]:
+    alias = _MANAGER_PERMISSION_ALIASES.get(name, name)
+    return alias if isinstance(alias, list) else [alias]
+
+
+def _validate_required_permission(required_permission: str | None) -> str | None:
+    if required_permission is None:
+        return None
+    permission = required_permission.strip()
+    if not permission:
+        raise ValueError("required_permission must be non-empty when provided")
+    unknown = [
+        canonical
+        for canonical in _canonical_manager_permission_names(permission)
+        if canonical not in _MANAGER_PERMISSION_ACTIONS
+    ]
+    if unknown:
+        raise ValueError(f"unknown required_permission: {required_permission}")
+    return permission
 
 
 def normalize_manager_permissions_json(permissions: dict[str, Any] | None) -> dict[str, list[str]]:
@@ -401,6 +425,7 @@ def migrate(conn: sqlite3.Connection, from_version: int) -> None:
           role text not null check (role in ('worker','manager')),
           payload_json text not null check (json_valid(payload_json)),
           revision integer not null check (revision > 0),
+          manager_config_revision integer check (manager_config_revision is null or manager_config_revision > 0),
           created_at text not null,
           correlation_id text
         );
@@ -441,6 +466,7 @@ def migrate(conn: sqlite3.Connection, from_version: int) -> None:
           epilogues_json text not null default '[]' check (json_valid(epilogues_json)),
           nudge_on_completion text not null default 'ask-operator' check (nudge_on_completion in ('off','ask-operator','auto-review','auto-proceed')),
           require_acks integer not null default 0 check (require_acks in (0, 1)),
+          revision integer not null default 1 check (revision > 0),
           created_at text not null,
           updated_at text not null
         );
@@ -574,6 +600,8 @@ def migrate(conn: sqlite3.Connection, from_version: int) -> None:
           command_id text references commands(id),
           created_at text not null,
           delivered_at text,
+          consumed_manager_cycle_id integer references manager_cycles(id),
+          consumed_at text,
           state text not null check (state in ('pending','delivered','failed','suppressed')),
           payload_json text not null check (json_valid(payload_json)),
           error text
@@ -661,6 +689,9 @@ def migrate(conn: sqlite3.Connection, from_version: int) -> None:
         create index if not exists routed_notifications_source_event
         on routed_notifications(source_event_id);
 
+        create index if not exists routed_notifications_consumed_cycle
+        on routed_notifications(consumed_manager_cycle_id);
+
         create index if not exists manager_configs_task_id
         on manager_configs(task_id);
 
@@ -734,6 +765,7 @@ def migrate(conn: sqlite3.Connection, from_version: int) -> None:
     migrate_to_v16_dispatch_command_attempts(conn)
     migrate_to_v17_command_required_permission(conn)
     migrate_to_v18_manager_cycle_spans(conn)
+    migrate_to_v19_dispatch_consumption_and_ack_revisions(conn)
     sync_worker_ids_to_config_files(conn)
     conn.execute(
         "insert or ignore into schema_migrations(version, applied_at) values (?, ?)",
@@ -1167,6 +1199,25 @@ def migrate_to_v18_manager_cycle_spans(conn: sqlite3.Connection) -> None:
     )
 
 
+def migrate_to_v19_dispatch_consumption_and_ack_revisions(conn: sqlite3.Connection) -> None:
+    """Bind dispatch consumption and acknowledgements to explicit revisions."""
+    _add_column_if_missing(conn, "routed_notifications", "consumed_manager_cycle_id", "integer references manager_cycles(id)")
+    _add_column_if_missing(conn, "routed_notifications", "consumed_at", "text")
+    _add_column_if_missing(
+        conn,
+        "task_acknowledgements",
+        "manager_config_revision",
+        "integer check (manager_config_revision is null or manager_config_revision > 0)",
+    )
+    _add_column_if_missing(conn, "manager_configs", "revision", "integer not null default 1 check (revision > 0)")
+    conn.execute(
+        """
+        create index if not exists routed_notifications_consumed_cycle
+        on routed_notifications(consumed_manager_cycle_id)
+        """
+    )
+
+
 def sync_worker_ids_to_config_files(conn: sqlite3.Connection) -> None:
     database_path = conn.execute("PRAGMA database_list").fetchone()["file"]
     if Path(database_path).resolve() != default_db_path().resolve():
@@ -1318,6 +1369,8 @@ def _routed_notification_record(row: sqlite3.Row) -> dict[str, Any]:
         "command_id": row["command_id"],
         "correlation_id": row["correlation_id"],
         "created_at": row["created_at"],
+        "consumed_at": row["consumed_at"],
+        "consumed_manager_cycle_id": row["consumed_manager_cycle_id"],
         "dedupe_key": row["dedupe_key"],
         "delivered_at": row["delivered_at"],
         "error": row["error"],
@@ -1353,13 +1406,10 @@ def _next_manager_cycle_for_notification(
     notification: dict[str, Any],
     manager_cycles: list[dict[str, Any]],
 ) -> dict[str, Any] | None:
-    created_at = notification.get("created_at") or ""
-    candidates = []
-    for cycle in manager_cycles:
-        if (cycle.get("started_at") or "") < created_at:
-            continue
-        candidates.append(cycle)
-    return min(candidates, key=lambda cycle: (cycle.get("started_at") or "", cycle.get("id") or 0)) if candidates else None
+    consumed_cycle_id = notification.get("consumed_manager_cycle_id")
+    if consumed_cycle_id is None:
+        return None
+    return next((cycle for cycle in manager_cycles if cycle.get("id") == consumed_cycle_id), None)
 
 
 def _build_correlation_chains(
@@ -1447,8 +1497,7 @@ def create_command(
     required_permission: str | None = None,
     timestamp: str | None = None,
 ) -> str:
-    if required_permission is not None and not required_permission.strip():
-        raise ValueError("required_permission must be non-empty when provided")
+    required_permission = _validate_required_permission(required_permission)
     command_id = f"command-{uuid.uuid4()}"
     now = timestamp or now_iso()
     key = idempotency_key or command_id
@@ -1719,7 +1768,7 @@ def finish_command_attempt(
     if state not in {"succeeded", "failed", "abandoned"}:
         raise ValueError(f"invalid command attempt finish state: {state}")
     now = timestamp or now_iso()
-    conn.execute(
+    cursor = conn.execute(
         """
         update command_attempts
         set state = ?, finished_at = ?, result_json = ?, error = ?,
@@ -1736,6 +1785,17 @@ def finish_command_attempt(
             attempt_id,
         ),
     )
+    if cursor.rowcount != 1:
+        existing_attempt = conn.execute(
+            "select state from command_attempts where id = ?",
+            (attempt_id,),
+        ).fetchone()
+        if existing_attempt is None:
+            raise WorkerError(f"Unknown command attempt: {attempt_id}")
+        raise WorkerError(
+            f"Command attempt {attempt_id} is not running "
+            f"(state: {existing_attempt['state']})"
+        )
     attempt = conn.execute(
         """
         select command_attempts.id, command_attempts.command_id,
@@ -2364,11 +2424,35 @@ def finish_routed_notification(
     )
 
 
+def consume_routed_notifications_for_cycle(
+    conn: sqlite3.Connection,
+    *,
+    task_id: str,
+    binding_id: str,
+    manager_cycle_id: int,
+    timestamp: str | None = None,
+) -> int:
+    consumed_at = timestamp or now_iso()
+    cursor = conn.execute(
+        """
+        update routed_notifications
+        set consumed_manager_cycle_id = ?, consumed_at = ?
+        where task_id = ?
+          and binding_id = ?
+          and state = 'delivered'
+          and consumed_manager_cycle_id is null
+        """,
+        (manager_cycle_id, consumed_at, task_id, binding_id),
+    )
+    return int(cursor.rowcount or 0)
+
+
 def routed_notifications(conn: sqlite3.Connection, *, task_id: str | None = None) -> list[dict[str, Any]]:
     query = """
         select id, task_id, binding_id, correlation_id, source_session_id,
                target_session_id, signal_type, source_event_id, source_event_timestamp,
-               dedupe_key, command_id, created_at, delivered_at, state, payload_json, error
+               dedupe_key, command_id, created_at, delivered_at, consumed_manager_cycle_id,
+               consumed_at, state, payload_json, error
         from routed_notifications
     """
     params: list[Any] = []
@@ -2382,6 +2466,8 @@ def routed_notifications(conn: sqlite3.Connection, *, task_id: str | None = None
             "command_id": row["command_id"],
             "correlation_id": row["correlation_id"],
             "created_at": row["created_at"],
+            "consumed_at": row["consumed_at"],
+            "consumed_manager_cycle_id": row["consumed_manager_cycle_id"],
             "dedupe_key": row["dedupe_key"],
             "delivered_at": row["delivered_at"],
             "error": row["error"],
@@ -3541,6 +3627,23 @@ def insert_task_acknowledgement(
         raise WorkerError("ack role must be one of: worker, manager")
     if not isinstance(payload, dict):
         raise WorkerError("ack payload must be a JSON object")
+    if binding_id is None:
+        binding_row = conn.execute(
+            """
+            select id
+            from bindings
+            where task_id = ? and state in ('active', 'ending')
+            order by created_at desc, id desc
+            limit 1
+            """,
+            (task_id,),
+        ).fetchone()
+        binding_id = binding_row["id"] if binding_row else None
+    config_row = conn.execute(
+        "select revision from manager_configs where task_id = ?",
+        (task_id,),
+    ).fetchone()
+    manager_config_revision = int(config_row["revision"]) if config_row else None
     row = conn.execute(
         """
         select max(revision) as revision
@@ -3553,9 +3656,9 @@ def insert_task_acknowledgement(
     cursor = conn.execute(
         """
         insert into task_acknowledgements(
-          task_id, binding_id, role, payload_json, revision, created_at, correlation_id
+          task_id, binding_id, role, payload_json, revision, manager_config_revision, created_at, correlation_id
         )
-        values (?, ?, ?, ?, ?, ?, ?)
+        values (?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             task_id,
@@ -3563,6 +3666,7 @@ def insert_task_acknowledgement(
             role,
             json.dumps(payload, sort_keys=True),
             revision,
+            manager_config_revision,
             timestamp or now_iso(),
             correlation_id,
         ),
@@ -3578,7 +3682,8 @@ def latest_task_acknowledgement(
 ) -> dict[str, Any] | None:
     row = conn.execute(
         """
-        select id, task_id, binding_id, role, payload_json, revision, created_at, correlation_id
+        select id, task_id, binding_id, role, payload_json, revision,
+               manager_config_revision, created_at, correlation_id
         from task_acknowledgements
         where task_id = ? and role = ?
         order by revision desc, id desc
@@ -3593,6 +3698,7 @@ def latest_task_acknowledgement(
         "correlation_id": row["correlation_id"],
         "created_at": row["created_at"],
         "id": row["id"],
+        "manager_config_revision": row["manager_config_revision"],
         "payload": json.loads(row["payload_json"]),
         "revision": row["revision"],
         "role": row["role"],
@@ -3870,9 +3976,9 @@ def upsert_manager_config(
         insert into manager_configs(
           task_id, supervision_mode, objective, guidelines_json,
           acceptance_criteria_json, reference_paths_json, permissions_json, tools_json, epilogues_json, nudge_on_completion, require_acks,
-          created_at, updated_at
+          revision, created_at, updated_at
         )
-        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
         on conflict(task_id) do update set
           supervision_mode = excluded.supervision_mode,
           objective = excluded.objective,
@@ -3884,6 +3990,18 @@ def upsert_manager_config(
           epilogues_json = excluded.epilogues_json,
           nudge_on_completion = excluded.nudge_on_completion,
           require_acks = excluded.require_acks,
+          revision = case when
+            manager_configs.supervision_mode is not excluded.supervision_mode or
+            manager_configs.objective is not excluded.objective or
+            manager_configs.guidelines_json is not excluded.guidelines_json or
+            manager_configs.acceptance_criteria_json is not excluded.acceptance_criteria_json or
+            manager_configs.reference_paths_json is not excluded.reference_paths_json or
+            manager_configs.permissions_json is not excluded.permissions_json or
+            manager_configs.tools_json is not excluded.tools_json or
+            manager_configs.epilogues_json is not excluded.epilogues_json or
+            manager_configs.nudge_on_completion is not excluded.nudge_on_completion or
+            manager_configs.require_acks is not excluded.require_acks
+          then manager_configs.revision + 1 else manager_configs.revision end,
           updated_at = excluded.updated_at
         """,
         (
@@ -3909,7 +4027,7 @@ def manager_config(conn: sqlite3.Connection, *, task_id: str) -> dict[str, Any] 
         """
         select task_id, supervision_mode, objective, guidelines_json,
                acceptance_criteria_json, reference_paths_json, permissions_json, tools_json, epilogues_json, nudge_on_completion, require_acks,
-               created_at, updated_at
+               revision, created_at, updated_at
         from manager_configs
         where task_id = ?
         """,
@@ -3927,6 +4045,7 @@ def manager_config(conn: sqlite3.Connection, *, task_id: str) -> dict[str, Any] 
         "permissions": normalize_manager_permissions_json(json.loads(row["permissions_json"])),
         "reference_paths": json.loads(row["reference_paths_json"]),
         "require_acks": bool(row["require_acks"]),
+        "revision": row["revision"],
         "supervision_mode": row["supervision_mode"],
         "task_id": row["task_id"],
         "tools": json.loads(row["tools_json"]),
@@ -4878,7 +4997,8 @@ def task_audit(conn: sqlite3.Connection, *, task: str) -> dict[str, Any]:
         """
         select id, task_id, binding_id, correlation_id, source_session_id,
                target_session_id, signal_type, source_event_id, source_event_timestamp,
-               dedupe_key, command_id, created_at, delivered_at, state, payload_json, error
+               dedupe_key, command_id, created_at, delivered_at, consumed_manager_cycle_id,
+               consumed_at, state, payload_json, error
         from routed_notifications
         where task_id = ?
         order by created_at, id
@@ -4954,7 +5074,8 @@ def task_audit(conn: sqlite3.Connection, *, task: str) -> dict[str, Any]:
     ).fetchall()
     acknowledgement_rows = conn.execute(
         """
-        select id, task_id, binding_id, role, payload_json, revision, created_at, correlation_id
+        select id, task_id, binding_id, role, payload_json, revision,
+               manager_config_revision, created_at, correlation_id
         from task_acknowledgements
         where task_id = ?
         order by created_at, id
@@ -5011,6 +5132,7 @@ def task_audit(conn: sqlite3.Connection, *, task: str) -> dict[str, Any]:
                 "correlation_id": row["correlation_id"],
                 "created_at": row["created_at"],
                 "id": row["id"],
+                "manager_config_revision": row["manager_config_revision"],
                 "payload": json.loads(row["payload_json"]),
                 "revision": row["revision"],
                 "role": row["role"],

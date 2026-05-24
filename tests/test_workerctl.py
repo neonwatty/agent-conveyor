@@ -11,11 +11,13 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 import zipfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 from unittest import mock
 
 from workerctl import classify
@@ -283,6 +285,19 @@ class DatabaseTests(unittest.TestCase):
             self.assertEqual(by_id[nudge_id]["payload"]["message"], "please continue")
             self.assertEqual(by_id[nudge_id]["required_permission"], "worker_session.interrupt")
 
+    def test_enqueue_helpers_reject_unknown_required_permission(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self.insert_task(conn, "task-enqueue", "enqueue-task")
+
+            with self.assertRaises(ValueError):
+                worker_db.enqueue_notify_manager(
+                    conn,
+                    task_id="task-enqueue",
+                    message="inspect worker",
+                    required_permission="communication.not_real",
+                )
+
     def test_command_attempt_finish_records_side_effect_flags_and_replay(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             conn = self.open_db(tmpdir)
@@ -318,6 +333,51 @@ class DatabaseTests(unittest.TestCase):
             self.assertEqual(audit["command_attempts"][0]["state"], "abandoned")
             entries = replay.replay_entries(audit)
             self.assertTrue(any(entry["source"] == "command_attempts" for entry in entries))
+
+    def test_command_attempt_finish_requires_running_attempt(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self.insert_task(conn, "task-attempt", "attempt-task")
+            command_id = worker_db.create_command(
+                conn,
+                command_type="notify_manager",
+                task_id="task-attempt",
+                payload={"message": "hello"},
+            )
+            claimed = worker_db.claim_next_dispatch_command(
+                conn,
+                dispatcher_id="dispatch-a",
+                command_types=["notify_manager"],
+                timestamp="2026-05-23T10:01:00Z",
+            )
+            worker_db.finish_command_attempt(
+                conn,
+                attempt_id=claimed["attempt"]["id"],
+                state="succeeded",
+                result={"ok": True},
+                timestamp="2026-05-23T10:01:01Z",
+            )
+
+            with self.assertRaises(WorkerError):
+                worker_db.finish_command_attempt(
+                    conn,
+                    attempt_id=claimed["attempt"]["id"],
+                    state="failed",
+                    error="late failure",
+                    timestamp="2026-05-23T10:01:02Z",
+                )
+
+            command_row = conn.execute("select state, error from commands where id = ?", (command_id,)).fetchone()
+            attempt_row = conn.execute("select state, error from command_attempts where id = ?", (claimed["attempt"]["id"],)).fetchone()
+            telemetry = [
+                event for event in worker_db.telemetry_events(conn, task_id="task-attempt")
+                if event["event_type"] in {"dispatch_command_succeeded", "dispatch_command_failed"}
+            ]
+            self.assertEqual(command_row["state"], "succeeded")
+            self.assertIsNone(command_row["error"])
+            self.assertEqual(attempt_row["state"], "succeeded")
+            self.assertIsNone(attempt_row["error"])
+            self.assertEqual([event["event_type"] for event in telemetry], ["dispatch_command_succeeded"])
 
     def test_telemetry_event_helpers_attach_active_run_and_index_search_text(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -726,6 +786,30 @@ class DatabaseTests(unittest.TestCase):
             self.assertFalse(config["require_acks"])
             self.assertEqual(config["nudge_on_completion"], "ask-operator")
             self.assertEqual(config["tools"], ["pytest"])
+            self.assertEqual(config["revision"], 1)
+
+            worker_db.upsert_manager_config(
+                conn,
+                task_id=task_id,
+                supervision_mode="strict",
+                objective="Check against PRD.",
+                guidelines=["Nudge only when stale"],
+                acceptance_criteria=["Tests pass"],
+                reference_paths=["docs/prd.md"],
+                permissions={"create_pr": True, "merge_green_pr": False},
+                tools=["pytest"],
+                timestamp="2026-05-08T10:01:00Z",
+            )
+            self.assertEqual(worker_db.manager_config(conn, task_id=task_id)["revision"], 1)
+
+            worker_db.upsert_manager_config(
+                conn,
+                task_id=task_id,
+                supervision_mode="strict",
+                objective="Check against revised PRD.",
+                guidelines=["Nudge only when stale"],
+            )
+            self.assertEqual(worker_db.manager_config(conn, task_id=task_id)["revision"], 2)
 
     def test_continuations_and_reviews_round_trip_through_audit(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1255,6 +1339,14 @@ class DispatchTests(unittest.TestCase):
                 """
             )
             cycle_id = conn.execute("select id from manager_cycles").fetchone()["id"]
+            notifications = worker_db.routed_notifications(conn, task_id="task-dispatch")
+            worker_db.consume_routed_notifications_for_cycle(
+                conn,
+                task_id="task-dispatch",
+                binding_id=notifications[0]["binding_id"],
+                manager_cycle_id=cycle_id,
+                timestamp="9999-01-01T00:00:00Z",
+            )
             decision_id = worker_db.insert_manager_decision(
                 conn,
                 task_id="task-dispatch",
@@ -1281,6 +1373,76 @@ class DispatchTests(unittest.TestCase):
             self.assertEqual(chain_entry["source_id"], notification["correlation_id"])
             self.assertEqual(chain_entry["timestamp"], notification["created_at"])
             self.assertIn(f"source event #{event_id}", chain_entry["summary"])
+
+    def test_dispatch_completion_correlation_uses_consumed_cycle_not_next_cycle_heuristic(self):
+        from workerctl import supervise_cycle
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn, db_path = self.open_db(tmpdir)
+            worker_id, manager_id = self.setup_bound_task(conn)
+            rollout = Path(tmpdir) / "worker.jsonl"
+            rollout.write_text(json.dumps({"type": "session_meta", "payload": {"id": "codex-worker"}}) + "\n")
+            conn.execute(
+                "update sessions set codex_session_path = ? where id = ?",
+                (str(rollout), worker_id),
+            )
+            binding_id = conn.execute(
+                "select id from bindings where task_id = 'task-dispatch'"
+            ).fetchone()["id"]
+            event_id = self.insert_completion(conn, worker_id, timestamp="2026-05-23T10:01:00Z")
+            notification_id = worker_db.insert_routed_notification(
+                conn,
+                task_id="task-dispatch",
+                binding_id=binding_id,
+                correlation_id="dispatch-consume",
+                source_session_id=worker_id,
+                target_session_id=manager_id,
+                signal_type="worker_task_complete",
+                source_event_id=event_id,
+                source_event_timestamp="2026-05-23T10:01:00Z",
+                dedupe_key=f"{binding_id}:worker_task_complete:{worker_id}:{event_id}",
+                payload={"message": "inspect"},
+                state="delivered",
+                timestamp="2026-05-23T10:01:30Z",
+            )
+            decoy_cycle_id = worker_db.create_manager_cycle(
+                conn,
+                task_id="task-dispatch",
+                manager_id=None,
+                timestamp="2026-05-23T10:02:00Z",
+            )
+            worker_db.finish_manager_cycle(
+                conn,
+                cycle_id=decoy_cycle_id,
+                state="succeeded",
+                status={"kind": "session_cycle", "task": "dispatch-task"},
+                timestamp="2026-05-23T10:02:01Z",
+            )
+            worker_db.insert_manager_decision(
+                conn,
+                task_id="task-dispatch",
+                manager_id=None,
+                manager_cycle_id=decoy_cycle_id,
+                decision="inspect",
+                reason="decoy cycle should not consume notification",
+            )
+            conn.commit()
+
+            with mock.patch.object(supervise_cycle, "_pid_is_alive", return_value=True):
+                result = supervise_cycle.run_cycle(
+                    conn,
+                    task_name="dispatch-task",
+                    now="2026-05-23T10:03:00Z",
+                )
+
+            audit = worker_db.task_audit(conn, task="dispatch-task")
+            chain = next(
+                chain
+                for chain in audit["correlation_chains"]
+                if chain["routed_notification_ids"] == [notification_id]
+            )
+            self.assertEqual(chain["manager_cycle_id"], result["cycle_id"])
+            self.assertNotEqual(chain["manager_cycle_id"], decoy_cycle_id)
 
     def test_dispatch_correlation_chains_sort_mixed_rows_chronologically(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1353,6 +1515,70 @@ class DispatchTests(unittest.TestCase):
             self.assertEqual(payload["processed"][0]["state"], "suppressed")
             self.assertIn("dispatch_signal_suppressed", [event["event_type"] for event in telemetry])
             send.assert_not_called()
+
+    def test_dispatch_concurrent_completion_race_uses_real_dedupe_constraint(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn, db_path = self.open_db(tmpdir)
+            worker_id, _manager_id = self.setup_bound_task(conn)
+            self.insert_completion(conn, worker_id)
+            conn.commit()
+
+            insert_barrier = threading.Barrier(2)
+            outputs: list[list[dict[str, Any]]] = []
+            errors: list[BaseException] = []
+            sent: list[str] = []
+            output_lock = threading.Lock()
+            original_insert = worker_db.insert_routed_notification
+
+            def racing_insert(*args, **kwargs):
+                if kwargs.get("signal_type") == "worker_task_complete":
+                    insert_barrier.wait(timeout=5)
+                return original_insert(*args, **kwargs)
+
+            def fake_send(conn, *, session_name, text, dry_run=False):
+                sent.append(session_name)
+                return {"target": f"{session_name}:0.0"}
+
+            def run_dispatcher(dispatcher_id: str) -> None:
+                args = argparse.Namespace(
+                    type=None,
+                )
+                try:
+                    batch = commands._dispatch_once_pass(
+                        args,
+                        worker_db=worker_db,
+                        worker_tmux=worker_tmux,
+                        limit=10,
+                        dispatcher_id=dispatcher_id,
+                        db_path=db_path,
+                        dry_run=False,
+                        lease_seconds=60,
+                    )
+                    with output_lock:
+                        outputs.append(batch)
+                except BaseException as exc:
+                    with output_lock:
+                        errors.append(exc)
+
+            with mock.patch.object(worker_db, "insert_routed_notification", new=racing_insert):
+                with mock.patch.object(worker_tmux, "send_text_to_session", side_effect=fake_send):
+                    threads = [
+                        threading.Thread(target=run_dispatcher, args=("dispatch-a",)),
+                        threading.Thread(target=run_dispatcher, args=("dispatch-b",)),
+                    ]
+                    for thread in threads:
+                        thread.start()
+                    for thread in threads:
+                        thread.join(timeout=10)
+
+            self.assertEqual(errors, [])
+            self.assertEqual(len(outputs), 2)
+            processed = [item for output in outputs for item in output]
+            self.assertEqual(sorted(item["state"] for item in processed), ["delivered", "suppressed"])
+            self.assertEqual(len(worker_db.routed_notifications(conn, task_id="task-dispatch")), 1)
+            self.assertEqual(sent, ["manager-session"])
+            telemetry = worker_db.telemetry_events(conn, task_id="task-dispatch")
+            self.assertIn("dispatch_signal_suppressed", [event["event_type"] for event in telemetry])
 
     def test_dispatch_dedupe_uses_source_event_so_consecutive_completions_route(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1506,6 +1732,59 @@ class DispatchTests(unittest.TestCase):
             self.assertEqual(notification["state"], "delivered")
             self.assertEqual(notification["signal_type"], "notify_manager")
             send.assert_called_once()
+
+    def test_dispatch_command_send_runs_after_claim_transaction_commits(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn, db_path = self.open_db(tmpdir)
+            self.setup_bound_task(conn)
+            command_id = worker_db.create_command(
+                conn,
+                command_type="notify_manager",
+                task_id="task-dispatch",
+                payload={"message": "inspect"},
+            )
+            conn.commit()
+
+            def fake_send(conn, *, session_name, text, dry_run=False, side_effect_audit=None):
+                if side_effect_audit is not None:
+                    side_effect_audit["side_effect_started"] = True
+                    side_effect_audit["side_effect_completed"] = True
+                with worker_db.connect(db_path) as other:
+                    worker_db.initialize_database(other)
+                    command_row = other.execute(
+                        "select state from commands where id = ?",
+                        (command_id,),
+                    ).fetchone()
+                    self.assertEqual(command_row["state"], "attempted")
+                    worker_db.create_command(
+                        other,
+                        command_type="notify_manager",
+                        task_id="task-dispatch",
+                        payload={"message": "other writer is not blocked"},
+                    )
+                    other.commit()
+                return {"target": "tmux-manager:0.0"}
+
+            args = argparse.Namespace(
+                dispatcher_id="dispatch-test",
+                dry_run=False,
+                json=True,
+                limit=1,
+                once=True,
+                path=str(db_path),
+                type="notify_manager",
+                watch=False,
+            )
+            with mock.patch.object(worker_tmux, "send_text_to_session", side_effect=fake_send):
+                with contextlib.redirect_stdout(io.StringIO()):
+                    commands.command_dispatch(args)
+
+            command_row = conn.execute("select state from commands where id = ?", (command_id,)).fetchone()
+            other_count = conn.execute(
+                "select count(*) as count from commands where payload_json like '%other writer%'"
+            ).fetchone()["count"]
+            self.assertEqual(command_row["state"], "succeeded")
+            self.assertEqual(other_count, 1)
 
     def test_dispatch_honors_required_permission_before_sending(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -10139,7 +10418,7 @@ class SuperviseCycleTests(unittest.TestCase):
             with self.assertRaises(WorkerError) as raised:
                 supervise_cycle.run_cycle(conn, task_name="t", now="2026-05-11T14:32:15Z")
 
-            self.assertIn("cycle requires acknowledgement", str(raised.exception))
+            self.assertIn("cycle requires current acknowledgement", str(raised.exception))
             worker_db.insert_task_acknowledgement(
                 conn,
                 task_id=task["id"],
@@ -10156,6 +10435,48 @@ class SuperviseCycleTests(unittest.TestCase):
 
             result = supervise_cycle.run_cycle(conn, task_name="t", now="2026-05-11T14:32:16Z")
             self.assertTrue(result["manager_context"]["manager_config"]["require_acks"])
+
+    def test_run_cycle_rejects_stale_acknowledgements_after_manager_config_revision_changes(self):
+        from workerctl import supervise_cycle
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self._setup_bound_task(conn, tmpdir, [
+                {"type": "session_meta", "payload": {"id": "u-w", "cwd": "/r"}},
+            ])
+            task = worker_db.task_row(conn, task="t")
+            worker_db.upsert_manager_config(
+                conn,
+                task_id=task["id"],
+                supervision_mode="guided",
+                objective="first",
+                require_acks=True,
+            )
+            worker_db.insert_task_acknowledgement(
+                conn,
+                task_id=task["id"],
+                role="worker",
+                payload={"ready_to_start": True},
+            )
+            worker_db.insert_task_acknowledgement(
+                conn,
+                task_id=task["id"],
+                role="manager",
+                payload={"ready_to_supervise": True},
+            )
+            worker_db.upsert_manager_config(
+                conn,
+                task_id=task["id"],
+                supervision_mode="guided",
+                objective="revised",
+                require_acks=True,
+            )
+            conn.commit()
+
+            with self.assertRaises(WorkerError) as raised:
+                supervise_cycle.run_cycle(conn, task_name="t", now="2026-05-11T14:32:17Z")
+
+            self.assertIn("current acknowledgement", str(raised.exception))
 
     def test_run_cycle_records_manager_cycle_row(self):
         from workerctl import supervise_cycle

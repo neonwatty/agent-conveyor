@@ -9,6 +9,7 @@ import {
 import {
   dispatchHealth,
   dispatchChainEntries,
+  dashboardTaskName,
 } from "./index.ts";
 import {
   encodeTerminalResizeMessage,
@@ -56,6 +57,39 @@ test("builds task audit workerctl arguments", () => {
     "--path",
     "/tmp/workerctl.db",
   ]);
+});
+
+test("builds filtered telemetry workerctl arguments", () => {
+  const args = buildWorkerctlArgs({
+    command: "telemetry",
+    limit: 1000,
+    task: "dispatch-task",
+    telemetryActor: "dispatch",
+    telemetryEventType: "dispatch_signal_suppressed",
+    workerctlPath: "scripts/workerctl",
+  });
+
+  assert.deepEqual(args, [
+    "scripts/workerctl",
+    "telemetry",
+    "--task",
+    "dispatch-task",
+    "--actor",
+    "dispatch",
+    "--event-type",
+    "dispatch_signal_suppressed",
+    "--limit",
+    "1000",
+    "--json",
+  ]);
+});
+
+test("explicit dashboard task overrides dashboard-bound task", () => {
+  assert.equal(
+    dashboardTaskName({ task: "requested-task" }, { task_name: "bound-task" }),
+    "requested-task",
+  );
+  assert.equal(dashboardTaskName({}, { task_name: "bound-task" }), "bound-task");
 });
 
 test("groups dispatch correlation chains with command attempts for dashboard display", () => {
@@ -246,6 +280,19 @@ test("counts suppressed dispatch signals in health", () => {
   }, null);
 
   assert.equal(health.suppressed_signal_count, 1);
+});
+
+test("counts durable suppressed dispatch telemetry outside snapshot recent events", () => {
+  const health = dispatchHealth({
+    telemetry: {
+      recent: [],
+    },
+  }, null, [
+    { actor: "dispatch", event_type: "dispatch_signal_suppressed" },
+    { actor: "dispatch", event_type: "dispatch_signal_suppressed" },
+  ]);
+
+  assert.equal(health.suppressed_signal_count, 2);
 });
 
 test("builds session list arguments using the existing JSON default", () => {

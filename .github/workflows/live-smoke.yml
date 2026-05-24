@@ -10,7 +10,7 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Show Python version
         run: python3 --version
@@ -35,7 +35,7 @@ jobs:
 
       - name: Upload live smoke artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: live-smoke-artifacts
           path: docs/live-qa-artifacts/
