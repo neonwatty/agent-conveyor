@@ -124,8 +124,6 @@ def dashboard_launch_payload(args: argparse.Namespace) -> dict[str, Any]:
         "--dispatcher-id",
         args.dispatcher_id,
     ]
-    if args.task:
-        dispatch_command.extend(["--task", args.task])
     return {
         "command": command,
         "dispatch_command": dispatch_command if getattr(args, "ensure_dispatch", False) else None,

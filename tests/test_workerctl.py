@@ -2850,6 +2850,8 @@ class CliTests(unittest.TestCase):
         self.assertIn("--watch", payload["dispatch_command"])
         self.assertIn("--dispatcher-id", payload["dispatch_command"])
         self.assertIn("dispatch-dashboard", payload["dispatch_command"])
+        self.assertNotIn("--task", payload["dispatch_command"])
+        self.assertNotIn("qa-task", payload["dispatch_command"])
 
     def test_enqueue_dispatch_commands_cli_records_required_permission(self):
         with tempfile.TemporaryDirectory() as tmpdir:
