@@ -362,6 +362,39 @@ body {
   overflow-wrap: anywhere;
 }
 
+.dispatch-conversation {
+  display: grid;
+  gap: 4px;
+  margin: 5px 0 0;
+  padding-left: 18px;
+}
+
+.dispatch-chain-list .dispatch-conversation li {
+  background: transparent;
+  border: 0;
+  border-left: 2px solid #a8b5ae;
+  border-radius: 0;
+  color: #59665f;
+  display: list-item;
+  font-size: 10px;
+  line-height: 1.3;
+  padding: 0 0 0 5px;
+  overflow-wrap: anywhere;
+}
+
+.dispatch-chain-list .dispatch-conversation li[data-kind="dispatch_attempt"] {
+  border-left-color: #557a68;
+}
+
+.dispatch-chain-list .dispatch-conversation li[data-kind="routed_notification"] {
+  border-left-color: #5870a0;
+}
+
+.dispatch-chain-list .dispatch-conversation li[data-kind="manager_cycle"],
+.dispatch-chain-list .dispatch-conversation li[data-kind="manager_decision"] {
+  border-left-color: #8b7654;
+}
+
 .timeline-section {
   min-height: 0;
   overflow: hidden;

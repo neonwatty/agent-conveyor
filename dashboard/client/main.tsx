@@ -48,6 +48,7 @@ type DispatchChain = {
   command_state?: string;
   command_type?: string;
   correlation_id?: string | null;
+  conversation?: Array<{ kind: string; label: string }>;
   error?: string | null;
   key: string;
   manager_cycle_id?: number | null;
@@ -206,6 +207,13 @@ function DispatchPanel({ observation }: { observation: Observation | null }) {
                 `${chain.notification_count} notification${chain.notification_count === 1 ? "" : "s"}`,
               ].filter(Boolean).join(" / ")}
             </small>
+            {chain.conversation?.length ? (
+              <ol className="dispatch-conversation">
+                {chain.conversation.map((item, index) => (
+                  <li key={`${chain.key}-${index}`} data-kind={item.kind}>{item.label}</li>
+                ))}
+              </ol>
+            ) : null}
           </li>
         ))}
         {chains.length === 0 ? <li><strong>No dispatch chains for the bound task</strong></li> : null}

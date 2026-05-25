@@ -144,6 +144,11 @@ type AuditResult = {
   routed_notifications?: Array<Record<string, unknown>>;
 };
 
+type DispatchConversationItem = {
+  kind: string;
+  label: string;
+};
+
 function isDashboardSession(session: Record<string, unknown>): boolean {
   return DASHBOARD_TERMINALS.some((terminal) => terminal.tmuxSession === session.tmux_session);
 }
@@ -257,6 +262,27 @@ function notificationLabel(notification: Record<string, unknown> | undefined, fa
   return notification?.id ? `${signalType} notification #${notification.id}` : signalType;
 }
 
+function dispatchConversationItems(
+  chain: AuditCorrelationChain,
+  attempts: AuditCommandAttempt[],
+  primaryNotification: Record<string, unknown> | undefined,
+): DispatchConversationItem[] {
+  return [
+    chain.manager_decision_id
+      ? { kind: "manager_decision", label: `Manager decision #${chain.manager_decision_id}` }
+      : null,
+    attempts.length
+      ? { kind: "dispatch_attempt", label: `Dispatch ${attempts[0].state || "attempted"} via ${attempts[0].dispatcher_id || "unknown dispatcher"}` }
+      : null,
+    primaryNotification
+      ? { kind: "routed_notification", label: `Routed notification #${primaryNotification.id} ${primaryNotification.state || "unknown"}` }
+      : null,
+    chain.manager_cycle_id
+      ? { kind: "manager_cycle", label: `Manager cycle #${chain.manager_cycle_id} consumed the routed fact` }
+      : null,
+  ].filter((item): item is DispatchConversationItem => item !== null);
+}
+
 function chainTimestamp(value: unknown): number {
   if (typeof value !== "string" || !value) {
     return 0;
@@ -295,6 +321,7 @@ export function dispatchChainEntries(audit: AuditResult | null) {
       command_state: chain.command_state || command?.state || (typeof primaryNotification?.state === "string" ? primaryNotification.state : undefined),
       command_type: chain.command_type || command?.type || (typeof primaryNotification?.signal_type === "string" ? primaryNotification.signal_type : undefined),
       correlation_id: chain.correlation_id || command?.correlation_id || (typeof primaryNotification?.correlation_id === "string" ? primaryNotification.correlation_id : undefined),
+      conversation: dispatchConversationItems(chain, attempts, primaryNotification),
       error: attempts.find((attempt) => attempt.error)?.error || command?.error || (typeof primaryNotification?.error === "string" ? primaryNotification.error : undefined),
       key: `chain-${chain.command_id || chain.correlation_id || chain.routed_notification_ids?.join("-")}`,
       manager_cycle_id: chain.manager_cycle_id,

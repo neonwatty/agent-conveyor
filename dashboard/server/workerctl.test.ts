@@ -218,6 +218,57 @@ test("groups completion-only dispatch notifications for dashboard display", () =
   assert.equal(chains[0].time, "2026-05-23T10:02:00Z");
 });
 
+test("dispatch chains summarize worker manager conversation", () => {
+  const chains = dispatchChainEntries({
+    command_attempts: [
+      {
+        command_id: "cmd-1",
+        dispatcher_id: "dispatch-local",
+        id: 1,
+        side_effect_completed: true,
+        side_effect_started: true,
+        state: "succeeded",
+      },
+    ],
+    commands: [
+      {
+        correlation_id: "corr-1",
+        created_at: "2026-05-25T10:00:00Z",
+        id: "cmd-1",
+        state: "succeeded",
+        type: "nudge_worker",
+      },
+    ],
+    correlation_chains: [
+      {
+        attempt_ids: [1],
+        command_id: "cmd-1",
+        command_state: "succeeded",
+        command_type: "nudge_worker",
+        correlation_id: "corr-1",
+        created_at: "2026-05-25T10:00:00Z",
+        manager_cycle_id: 44,
+        manager_decision_id: 12,
+        routed_notification_ids: [99],
+      },
+    ],
+    routed_notifications: [
+      {
+        id: 99,
+        state: "delivered",
+        signal_type: "nudge_worker",
+      },
+    ],
+  });
+
+  assert.deepEqual(chains[0].conversation, [
+    { kind: "manager_decision", label: "Manager decision #12" },
+    { kind: "dispatch_attempt", label: "Dispatch succeeded via dispatch-local" },
+    { kind: "routed_notification", label: "Routed notification #99 delivered" },
+    { kind: "manager_cycle", label: "Manager cycle #44 consumed the routed fact" },
+  ]);
+});
+
 test("orders mixed dispatch chains by timestamp before dashboard display", () => {
   const chains = dispatchChainEntries({
     command_attempts: [],
