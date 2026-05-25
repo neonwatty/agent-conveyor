@@ -102,6 +102,12 @@ workerctl dispatch --watch --dispatcher-id dispatch-local
 ```
 
 Use `workerctl qa-plan dispatch-completion` for a bounded verification flow.
+For manual QA, launch the dashboard with Dispatch enforcement so the page can
+show live proof:
+
+```bash
+workerctl dashboard --task <task> --ensure-dispatch --dispatcher-id qa-dispatch-dashboard
+```
 
 ## Quickstart
 
@@ -379,14 +385,17 @@ tmux attach -t codex-live-test
 
 ### Observation
 
-- `dashboard [--task T] [--host 127.0.0.1] [--port 8797]` — Launch the
+- `dashboard [--task T] [--ensure-dispatch] [--dispatcher-id ID]
+  [--host 127.0.0.1] [--port 8797]` — Launch the
   local live supervision cockpit. The dashboard binds to loopback by default,
   uses the TypeScript backend to shell out to `workerctl` JSON commands, and
   attaches interactive terminals to tmux-backed worker/manager sessions through
   a WebSocket PTY bridge. It includes browser bootstrap controls for creating a
   task, starting a worker/manager pair with `workerctl pair`, auto-attaching the
   terminals, attach/bind controls, and audited action receipts for cycle,
-  nudge, interrupt, finish, and export. Use
+  nudge, interrupt, finish, and export. With `--ensure-dispatch`, launch also
+  ensures a Dispatch watch process using the supplied `--dispatcher-id` when
+  provided. Use
   `--dry-run --json` to inspect the launch command.
 - `cycle <task> [--busy-wait-seconds N]` — One observation cycle. Idempotent. Runs `ingest`, computes
   worker state from the JSON event stream, captures the tmux pane as a shadow
@@ -711,6 +720,12 @@ Current dispatch state:
   dispatch correlation chains with command state, attempt counts, notification
   counts, decision/cycle ids, source event ids, suppressed-signal visibility,
   chronological ordering, and side-effect risk.
+- Dashboard manual QA should use
+  `workerctl dashboard --task <task> --ensure-dispatch --dispatcher-id qa-dispatch-dashboard`
+  and visually confirm the Dispatch active banner, dispatcher id, heartbeat age,
+  iteration, processed count, dry-run/live state, completion/routing/cycle
+  conversation lane entries, command claim/attempt/delivery entries where
+  applicable, and stale or not-observed warnings.
 
 The adjacent completion-contract surfaces are separate from Dispatch:
 
