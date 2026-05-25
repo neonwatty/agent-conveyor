@@ -96,6 +96,23 @@ def cli_path_prefix() -> str:
     return f"PATH={sh_quote(str(PROJECT_ROOT / 'bin'))}:$PATH"
 
 
+def dashboard_dispatch_command(
+    workerctl_path: str | Path,
+    dispatcher_id: str,
+    db_path: str | Path | None = None,
+) -> list[str]:
+    command = [
+        str(workerctl_path),
+        "dispatch",
+        "--watch",
+        "--dispatcher-id",
+        dispatcher_id,
+    ]
+    if db_path:
+        command.extend(["--path", str(db_path)])
+    return command
+
+
 def dashboard_launch_payload(args: argparse.Namespace) -> dict[str, Any]:
     query = urlencode({"task": args.task}) if args.task else ""
     url = f"http://{args.host}:{args.port}/"
@@ -117,15 +134,11 @@ def dashboard_launch_payload(args: argparse.Namespace) -> dict[str, Any]:
         command.extend(["--task", args.task])
     if args.db_path:
         command.extend(["--db-path", args.db_path])
-    dispatch_command = [
-        args.workerctl_path,
-        "dispatch",
-        "--watch",
-        "--dispatcher-id",
-        args.dispatcher_id,
-    ]
-    if args.db_path:
-        dispatch_command.extend(["--path", args.db_path])
+    dispatch_command = dashboard_dispatch_command(
+        workerctl_path=args.workerctl_path,
+        dispatcher_id=args.dispatcher_id,
+        db_path=args.db_path,
+    )
     return {
         "command": command,
         "dispatch_command": dispatch_command if getattr(args, "ensure_dispatch", False) else None,
@@ -146,6 +159,15 @@ def command_dashboard(args: argparse.Namespace) -> int:
             print(" ".join(sh_quote(part) for part in payload["command"]))
             print(payload["url"])
         return 0
+    if payload["ensure_dispatch"] and payload["dispatch_command"]:
+        subprocess.Popen(
+            payload["dispatch_command"],
+            cwd=PROJECT_ROOT,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
     return subprocess.run(payload["command"], cwd=PROJECT_ROOT, check=False).returncode
 
 

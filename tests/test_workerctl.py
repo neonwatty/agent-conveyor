@@ -2857,6 +2857,62 @@ class CliTests(unittest.TestCase):
         self.assertNotIn("--task", payload["dispatch_command"])
         self.assertNotIn("qa-task", payload["dispatch_command"])
 
+    def test_dashboard_ensure_dispatch_starts_watch_process_before_dashboard(self):
+        events = []
+        args = argparse.Namespace(
+            db_path="/tmp/workerctl-dashboard-test.db",
+            dispatcher_id="dispatch-dashboard",
+            dry_run=False,
+            ensure_dispatch=True,
+            host="127.0.0.1",
+            json=False,
+            port=8797,
+            task="qa-task",
+            workerctl_path="scripts/workerctl",
+        )
+
+        def fake_popen(command, **kwargs):
+            events.append(("popen", command, kwargs))
+
+            class Proc:
+                pid = 12345
+
+            return Proc()
+
+        def fake_run(command, **kwargs):
+            events.append(("run", command, kwargs))
+            return subprocess.CompletedProcess(command, 0)
+
+        with mock.patch("workerctl.commands.subprocess.Popen", side_effect=fake_popen) as popen, mock.patch(
+            "workerctl.commands.subprocess.run",
+            side_effect=fake_run,
+        ) as run:
+            result = commands.command_dashboard(args)
+
+        self.assertEqual(result, 0)
+        self.assertEqual([event[0] for event in events], ["popen", "run"])
+        popen.assert_called_once()
+        run.assert_called_once()
+
+        dispatch_command = events[0][1]
+        self.assertEqual(dispatch_command[:4], ["scripts/workerctl", "dispatch", "--watch", "--dispatcher-id"])
+        self.assertIn("dispatch-dashboard", dispatch_command)
+        self.assertIn("--path", dispatch_command)
+        self.assertIn("/tmp/workerctl-dashboard-test.db", dispatch_command)
+        self.assertNotIn("--task", dispatch_command)
+        self.assertNotIn("qa-task", dispatch_command)
+        self.assertEqual(
+            events[0][2],
+            {
+                "cwd": commands.PROJECT_ROOT,
+                "stdin": subprocess.DEVNULL,
+                "stdout": subprocess.DEVNULL,
+                "stderr": subprocess.DEVNULL,
+                "start_new_session": True,
+            },
+        )
+        self.assertEqual(events[1][2]["cwd"], commands.PROJECT_ROOT)
+
     def test_enqueue_dispatch_commands_cli_records_required_permission(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "workerctl.db"
