@@ -159,8 +159,9 @@ def command_dashboard(args: argparse.Namespace) -> int:
             print(" ".join(sh_quote(part) for part in payload["command"]))
             print(payload["url"])
         return 0
+    dispatch_process = None
     if payload["ensure_dispatch"] and payload["dispatch_command"]:
-        subprocess.Popen(
+        dispatch_process = subprocess.Popen(
             payload["dispatch_command"],
             cwd=PROJECT_ROOT,
             stdin=subprocess.DEVNULL,
@@ -168,7 +169,16 @@ def command_dashboard(args: argparse.Namespace) -> int:
             stderr=subprocess.DEVNULL,
             start_new_session=True,
         )
-    return subprocess.run(payload["command"], cwd=PROJECT_ROOT, check=False).returncode
+    try:
+        return subprocess.run(payload["command"], cwd=PROJECT_ROOT, check=False).returncode
+    finally:
+        if dispatch_process is not None and dispatch_process.poll() is None:
+            dispatch_process.terminate()
+            try:
+                dispatch_process.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                dispatch_process.kill()
+                dispatch_process.wait(timeout=2)
 
 
 def resolve_codex_startup_options(

@@ -2859,6 +2859,7 @@ class CliTests(unittest.TestCase):
 
     def test_dashboard_ensure_dispatch_starts_watch_process_before_dashboard(self):
         events = []
+        spawned = []
         args = argparse.Namespace(
             db_path="/tmp/workerctl-dashboard-test.db",
             dispatcher_id="dispatch-dashboard",
@@ -2877,7 +2878,31 @@ class CliTests(unittest.TestCase):
             class Proc:
                 pid = 12345
 
-            return Proc()
+                def __init__(self):
+                    self.killed = False
+                    self.terminated = False
+                    self.wait_calls = []
+
+                def poll(self):
+                    events.append(("poll", None, {}))
+                    return None
+
+                def terminate(self):
+                    events.append(("terminate", None, {}))
+                    self.terminated = True
+
+                def wait(self, timeout=None):
+                    events.append(("wait", None, {"timeout": timeout}))
+                    self.wait_calls.append(timeout)
+                    return 0
+
+                def kill(self):
+                    events.append(("kill", None, {}))
+                    self.killed = True
+
+            proc = Proc()
+            spawned.append(proc)
+            return proc
 
         def fake_run(command, **kwargs):
             events.append(("run", command, kwargs))
@@ -2890,7 +2915,7 @@ class CliTests(unittest.TestCase):
             result = commands.command_dashboard(args)
 
         self.assertEqual(result, 0)
-        self.assertEqual([event[0] for event in events], ["popen", "run"])
+        self.assertEqual([event[0] for event in events], ["popen", "run", "poll", "terminate", "wait"])
         popen.assert_called_once()
         run.assert_called_once()
 
@@ -2912,6 +2937,9 @@ class CliTests(unittest.TestCase):
             },
         )
         self.assertEqual(events[1][2]["cwd"], commands.PROJECT_ROOT)
+        self.assertTrue(spawned[0].terminated)
+        self.assertFalse(spawned[0].killed)
+        self.assertEqual(spawned[0].wait_calls, [2])
 
     def test_dashboard_ensure_dispatch_dry_run_does_not_start_watch_process(self):
         args = argparse.Namespace(
@@ -2938,6 +2966,52 @@ class CliTests(unittest.TestCase):
         payload = json.loads(stdout.getvalue())
         self.assertTrue(payload["ensure_dispatch"])
         self.assertIn("dispatch", payload["dispatch_command"])
+
+    def test_dashboard_ensure_dispatch_kills_watch_process_when_terminate_times_out(self):
+        events = []
+        args = argparse.Namespace(
+            db_path="/tmp/workerctl-dashboard-test.db",
+            dispatcher_id="dispatch-dashboard",
+            dry_run=False,
+            ensure_dispatch=True,
+            host="127.0.0.1",
+            json=False,
+            port=8797,
+            task="qa-task",
+            workerctl_path="scripts/workerctl",
+        )
+
+        class Proc:
+            pid = 12345
+
+            def __init__(self):
+                self.wait_count = 0
+
+            def poll(self):
+                events.append("poll")
+                return None
+
+            def terminate(self):
+                events.append("terminate")
+
+            def wait(self, timeout=None):
+                self.wait_count += 1
+                events.append(("wait", timeout))
+                if self.wait_count == 1:
+                    raise subprocess.TimeoutExpired("dispatch", timeout)
+                return 0
+
+            def kill(self):
+                events.append("kill")
+
+        with mock.patch("workerctl.commands.subprocess.Popen", return_value=Proc()), mock.patch(
+            "workerctl.commands.subprocess.run",
+            return_value=subprocess.CompletedProcess(["npm"], 0),
+        ):
+            result = commands.command_dashboard(args)
+
+        self.assertEqual(result, 0)
+        self.assertEqual(events, ["poll", "terminate", ("wait", 2), "kill", ("wait", 2)])
 
     def test_enqueue_dispatch_commands_cli_records_required_permission(self):
         with tempfile.TemporaryDirectory() as tmpdir:
