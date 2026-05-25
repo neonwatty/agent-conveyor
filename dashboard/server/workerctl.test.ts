@@ -269,6 +269,60 @@ test("dispatch chains summarize worker manager conversation", () => {
   ]);
 });
 
+test("dispatch conversation uses the latest retry attempt", () => {
+  const chains = dispatchChainEntries({
+    command_attempts: [
+      {
+        command_id: "cmd-1",
+        dispatcher_id: "dispatch-old",
+        id: 1,
+        side_effect_completed: false,
+        side_effect_started: true,
+        started_at: "2026-05-25T10:00:00Z",
+        state: "failed",
+      },
+      {
+        command_id: "cmd-1",
+        dispatcher_id: "dispatch-new",
+        id: 2,
+        side_effect_completed: true,
+        side_effect_started: true,
+        started_at: "2026-05-25T10:01:00Z",
+        state: "succeeded",
+      },
+    ],
+    commands: [
+      {
+        correlation_id: "corr-1",
+        created_at: "2026-05-25T10:00:00Z",
+        id: "cmd-1",
+        state: "succeeded",
+        type: "nudge_worker",
+      },
+    ],
+    correlation_chains: [
+      {
+        attempt_ids: [1, 2],
+        command_id: "cmd-1",
+        command_state: "succeeded",
+        command_type: "nudge_worker",
+        correlation_id: "corr-1",
+        created_at: "2026-05-25T10:00:00Z",
+        manager_cycle_id: null,
+        manager_decision_id: 12,
+        routed_notification_ids: [],
+      },
+    ],
+    routed_notifications: [],
+  });
+
+  assert.deepEqual(chains[0].attempts.map((attempt) => attempt.id), [1, 2]);
+  assert.equal(
+    chains[0].conversation.find((item) => item.kind === "dispatch_attempt")?.label,
+    "Dispatch succeeded via dispatch-new",
+  );
+});
+
 test("orders mixed dispatch chains by timestamp before dashboard display", () => {
   const chains = dispatchChainEntries({
     command_attempts: [],

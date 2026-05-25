@@ -262,17 +262,28 @@ function notificationLabel(notification: Record<string, unknown> | undefined, fa
   return notification?.id ? `${signalType} notification #${notification.id}` : signalType;
 }
 
+function latestDispatchAttempt(attempts: AuditCommandAttempt[]): AuditCommandAttempt | undefined {
+  const timestampedAttempts = attempts
+    .map((attempt) => ({ attempt, timestamp: attempt.started_at ? Date.parse(attempt.started_at) : NaN }))
+    .filter((item) => Number.isFinite(item.timestamp));
+  if (timestampedAttempts.length) {
+    return timestampedAttempts.reduce((latest, item) => (item.timestamp >= latest.timestamp ? item : latest)).attempt;
+  }
+  return attempts.at(-1);
+}
+
 function dispatchConversationItems(
   chain: AuditCorrelationChain,
   attempts: AuditCommandAttempt[],
   primaryNotification: Record<string, unknown> | undefined,
 ): DispatchConversationItem[] {
+  const dispatchAttempt = latestDispatchAttempt(attempts);
   return [
     chain.manager_decision_id
       ? { kind: "manager_decision", label: `Manager decision #${chain.manager_decision_id}` }
       : null,
-    attempts.length
-      ? { kind: "dispatch_attempt", label: `Dispatch ${attempts[0].state || "attempted"} via ${attempts[0].dispatcher_id || "unknown dispatcher"}` }
+    dispatchAttempt
+      ? { kind: "dispatch_attempt", label: `Dispatch ${dispatchAttempt.state || "attempted"} via ${dispatchAttempt.dispatcher_id || "unknown dispatcher"}` }
       : null,
     primaryNotification
       ? { kind: "routed_notification", label: `Routed notification #${primaryNotification.id} ${primaryNotification.state || "unknown"}` }
@@ -294,6 +305,7 @@ function chainTimestamp(value: unknown): number {
 export function dispatchChainEntries(audit: AuditResult | null) {
   const commandsById = new Map((audit?.commands || []).map((command) => [String(command.id), command]));
   const notificationsById = new Map((audit?.routed_notifications || []).map((notification) => [Number(notification.id), notification]));
+  const attemptsById = new Map((audit?.command_attempts || []).map((attempt) => [Number(attempt.id), attempt]));
   const attemptsByCommand = new Map<string, AuditCommandAttempt[]>();
   for (const attempt of audit?.command_attempts || []) {
     if (attempt.command_id) {
@@ -302,7 +314,10 @@ export function dispatchChainEntries(audit: AuditResult | null) {
   }
   const entries = (audit?.correlation_chains || []).map((chain) => {
     const command = chain.command_id ? commandsById.get(chain.command_id) : undefined;
-    const attempts = chain.command_id ? attemptsByCommand.get(chain.command_id) || [] : [];
+    const chainAttempts = (chain.attempt_ids || [])
+      .map((id) => attemptsById.get(Number(id)))
+      .filter((attempt) => attempt !== undefined);
+    const attempts = chainAttempts.length ? chainAttempts : chain.command_id ? attemptsByCommand.get(chain.command_id) || [] : [];
     const notifications = (chain.routed_notification_ids || [])
       .map((id) => notificationsById.get(Number(id)))
       .filter((notification) => notification !== undefined);
