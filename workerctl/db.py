@@ -4574,6 +4574,7 @@ def query_telemetry_events(
     severity: str | None = None,
     search: str | None = None,
     limit: int = 100,
+    newest: bool = False,
 ) -> list[dict[str, Any]]:
     clauses: list[str] = []
     params: list[Any] = []
@@ -4600,6 +4601,7 @@ def query_telemetry_events(
         clauses.append("te.severity = ?")
         params.append(severity)
     where = f"where {' and '.join(clauses)}" if clauses else ""
+    order_direction = "desc" if newest else "asc"
     params.append(limit)
     rows = conn.execute(
         f"""
@@ -4608,7 +4610,7 @@ def query_telemetry_events(
                te.correlation_json, te.attributes_json
         from {from_sql}
         {where}
-        order by te.timestamp, te.rowid
+        order by te.timestamp {order_direction}, te.rowid {order_direction}
         limit ?
         """,
         params,

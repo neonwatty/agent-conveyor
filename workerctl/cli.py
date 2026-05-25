@@ -448,6 +448,7 @@ def build_parser() -> argparse.ArgumentParser:
     telemetry.add_argument("--active-only", action="store_true", help="For telemetry failures, show only failures for active tasks.")
     telemetry.add_argument("--json", action="store_true", help="Print JSON instead of text timeline output.")
     telemetry.add_argument("--limit", type=int, default=100, help="Maximum telemetry events to inspect.")
+    telemetry.add_argument("--newest", action="store_true", help="Return newest telemetry events first.")
     telemetry.add_argument("--stale-cycle-seconds", type=float, default=3600.0, help="Flag active tasks whose latest manager cycle is older than this threshold.")
     telemetry.add_argument("--worker-staleness-seconds", type=float, default=3600.0, help="Flag active sessions whose last heartbeat is older than this threshold.")
     telemetry.add_argument("--max-unfinished-commands", type=int, default=0, help="Maximum allowed pending or attempted commands for telemetry check.")

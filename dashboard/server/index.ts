@@ -392,9 +392,10 @@ export function dispatchHeartbeatTelemetryOptions(
 ): WorkerctlCommandOptions {
   return {
     command: "telemetry",
-    limit: 100,
+    limit: 1,
     telemetryActor: "dispatch",
     telemetryEventType: "dispatch_watch_heartbeat",
+    telemetryNewest: true,
     workerctlPath: options.workerctlPath,
     dbPath: options.dbPath,
   };

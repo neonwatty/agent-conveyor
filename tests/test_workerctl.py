@@ -3241,6 +3241,21 @@ class CliTests(unittest.TestCase):
             dispatch_events = json.loads(dispatch.stdout)
             self.assertEqual([event["event_type"] for event in dispatch_events], ["dispatch_watch_heartbeat"])
 
+            newest = self.run_workerctl(
+                "telemetry",
+                "--run",
+                run_id,
+                "--limit",
+                "1",
+                "--newest",
+                "--json",
+                "--path",
+                str(db_path),
+            )
+            self.assertEqual(newest.returncode, 0, newest.stderr)
+            newest_events = json.loads(newest.stdout)
+            self.assertEqual([event["event_type"] for event in newest_events], ["dispatch_watch_heartbeat"])
+
     def test_telemetry_cli_summary_counts_events(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "workerctl.db"

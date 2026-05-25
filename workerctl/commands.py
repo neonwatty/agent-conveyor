@@ -3199,6 +3199,7 @@ def command_telemetry(args: argparse.Namespace) -> int:
             severity=args.severity,
             search=args.search,
             limit=args.limit,
+            newest=getattr(args, "newest", False),
         )
     if args.summary:
         result = telemetry_summary(events)
