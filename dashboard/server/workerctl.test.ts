@@ -9,6 +9,7 @@ import {
 import {
   dispatchHealth,
   dispatchChainEntries,
+  dispatchHeartbeatTelemetryOptions,
   dashboardTaskName,
 } from "./index.ts";
 import {
@@ -218,6 +219,111 @@ test("groups completion-only dispatch notifications for dashboard display", () =
   assert.equal(chains[0].time, "2026-05-23T10:02:00Z");
 });
 
+test("dispatch chains summarize worker manager conversation", () => {
+  const chains = dispatchChainEntries({
+    command_attempts: [
+      {
+        command_id: "cmd-1",
+        dispatcher_id: "dispatch-local",
+        id: 1,
+        side_effect_completed: true,
+        side_effect_started: true,
+        state: "succeeded",
+      },
+    ],
+    commands: [
+      {
+        correlation_id: "corr-1",
+        created_at: "2026-05-25T10:00:00Z",
+        id: "cmd-1",
+        state: "succeeded",
+        type: "nudge_worker",
+      },
+    ],
+    correlation_chains: [
+      {
+        attempt_ids: [1],
+        command_id: "cmd-1",
+        command_state: "succeeded",
+        command_type: "nudge_worker",
+        correlation_id: "corr-1",
+        created_at: "2026-05-25T10:00:00Z",
+        manager_cycle_id: 44,
+        manager_decision_id: 12,
+        routed_notification_ids: [99],
+      },
+    ],
+    routed_notifications: [
+      {
+        id: 99,
+        state: "delivered",
+        signal_type: "nudge_worker",
+      },
+    ],
+  });
+
+  assert.deepEqual(chains[0].conversation, [
+    { kind: "manager_decision", label: "Manager decision #12" },
+    { kind: "dispatch_attempt", label: "Dispatch succeeded via dispatch-local" },
+    { kind: "routed_notification", label: "Routed notification #99 delivered" },
+    { kind: "manager_cycle", label: "Manager cycle #44 consumed the routed fact" },
+  ]);
+});
+
+test("dispatch conversation uses the latest retry attempt", () => {
+  const chains = dispatchChainEntries({
+    command_attempts: [
+      {
+        command_id: "cmd-1",
+        dispatcher_id: "dispatch-old",
+        id: 1,
+        side_effect_completed: false,
+        side_effect_started: true,
+        started_at: "2026-05-25T10:00:00Z",
+        state: "failed",
+      },
+      {
+        command_id: "cmd-1",
+        dispatcher_id: "dispatch-new",
+        id: 2,
+        side_effect_completed: true,
+        side_effect_started: true,
+        started_at: "2026-05-25T10:01:00Z",
+        state: "succeeded",
+      },
+    ],
+    commands: [
+      {
+        correlation_id: "corr-1",
+        created_at: "2026-05-25T10:00:00Z",
+        id: "cmd-1",
+        state: "succeeded",
+        type: "nudge_worker",
+      },
+    ],
+    correlation_chains: [
+      {
+        attempt_ids: [1, 2],
+        command_id: "cmd-1",
+        command_state: "succeeded",
+        command_type: "nudge_worker",
+        correlation_id: "corr-1",
+        created_at: "2026-05-25T10:00:00Z",
+        manager_cycle_id: null,
+        manager_decision_id: 12,
+        routed_notification_ids: [],
+      },
+    ],
+    routed_notifications: [],
+  });
+
+  assert.deepEqual(chains[0].attempts.map((attempt) => attempt.id), [1, 2]);
+  assert.equal(
+    chains[0].conversation.find((item) => item.kind === "dispatch_attempt")?.label,
+    "Dispatch succeeded via dispatch-new",
+  );
+});
+
 test("orders mixed dispatch chains by timestamp before dashboard display", () => {
   const chains = dispatchChainEntries({
     command_attempts: [],
@@ -286,9 +392,39 @@ test("counts suppressed dispatch signals in health", () => {
 test("marks missing dispatch heartbeat as not observed", () => {
   const health = dispatchHealth({ telemetry: { recent: [] } }, null);
 
+  assert.equal(health.core_status, "not_observed");
+  assert.equal(health.operator_message, "Dispatch has not been observed; worker completions will not wake managers.");
   assert.equal(health.heartbeat.state, "not_observed");
   assert.equal(health.heartbeat.stale, true);
   assert.equal(health.heartbeat.timestamp, "");
+});
+
+test("ignores non-dispatch heartbeat telemetry for core status", () => {
+  const health = dispatchHealth({
+    telemetry: {
+      recent: [
+        {
+          actor: "workerctl",
+          event_type: "dispatch_watch_heartbeat",
+          timestamp: new Date().toISOString(),
+          correlation: { dispatcher_id: "not-dispatch", iteration: 9 },
+          attributes: { dry_run: false, processed_count: 12 },
+        },
+      ],
+    },
+  }, null, [], [
+    {
+      actor: "manager",
+      event_type: "dispatch_watch_heartbeat",
+      timestamp: new Date().toISOString(),
+      correlation: { dispatcher_id: "also-not-dispatch", iteration: 10 },
+      attributes: { dry_run: false, processed_count: 20 },
+    },
+  ]);
+
+  assert.equal(health.core_status, "not_observed");
+  assert.equal(health.heartbeat.state, "not_observed");
+  assert.equal(health.heartbeat.dispatcher_id, undefined);
 });
 
 test("marks stale dispatch heartbeat explicitly", () => {
@@ -306,6 +442,8 @@ test("marks stale dispatch heartbeat explicitly", () => {
     },
   }, null);
 
+  assert.equal(health.core_status, "stale");
+  assert.equal(health.operator_message, "Dispatch heartbeat is stale; worker completions may not wake managers.");
   assert.equal(health.heartbeat.state, "stale");
   assert.equal(health.heartbeat.dispatcher_id, "dispatch-old");
 });
@@ -321,6 +459,8 @@ test("uses durable dispatch heartbeat when snapshot recent events omit it", () =
     },
   ]);
 
+  assert.equal(health.core_status, "active");
+  assert.equal(health.operator_message, "Dispatch is routing worker/manager events.");
   assert.equal(health.heartbeat.state, "active");
   assert.equal(health.heartbeat.dispatcher_id, "dispatch-live");
   assert.equal(health.heartbeat.iteration, 4);
@@ -339,6 +479,29 @@ test("counts durable suppressed dispatch telemetry outside snapshot recent event
   ]);
 
   assert.equal(health.suppressed_signal_count, 2);
+});
+
+test("builds global dispatch heartbeat telemetry options", () => {
+  const options = dispatchHeartbeatTelemetryOptions({
+    dbPath: "/tmp/workerctl.db",
+    workerctlPath: "scripts/workerctl",
+  });
+
+  assert.equal(options.task, undefined);
+  assert.deepEqual(buildWorkerctlArgs(options), [
+    "scripts/workerctl",
+    "telemetry",
+    "--actor",
+    "dispatch",
+    "--event-type",
+    "dispatch_watch_heartbeat",
+    "--limit",
+    "1",
+    "--newest",
+    "--json",
+    "--path",
+    "/tmp/workerctl.db",
+  ]);
 });
 
 test("builds session list arguments using the existing JSON default", () => {

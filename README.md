@@ -92,14 +92,22 @@ The `export` line makes `workerctl` available in the current shell.
 `workerctl db-doctor` initializes and checks the SQLite control-plane
 database.
 
-When supervising worker/manager pairs, run Dispatch in a separate shell so
-worker completion is routed to the bound manager mechanically:
+Dispatch is core infrastructure for supervised worker/manager pairs. The
+`pair` workflow starts a detached Dispatch watch process by default so worker
+completion is routed to the bound manager mechanically. For manually bound
+pairs, run Dispatch in a separate shell:
 
 ```bash
 workerctl dispatch --watch --dispatcher-id dispatch-local
 ```
 
 Use `workerctl qa-plan dispatch-completion` for a bounded verification flow.
+For manual QA, launch the dashboard with Dispatch enforcement so the page can
+show live proof:
+
+```bash
+workerctl dashboard --task <task> --ensure-dispatch --dispatcher-id qa-dispatch-dashboard
+```
 
 ## Quickstart
 
@@ -192,7 +200,7 @@ tmux attach -t codex-live-test
   task prompt. The bootstrap opens Codex rollout metadata reliably and tells the
   manager to run `manager-config <task> --questions` before supervising when a
   task is known.
-- `pair --task T --worker-name W --manager-name M [--cwd D] [--task-prompt PROMPT] [--task-goal GOAL] [--task-summary S] [--manager-objective O] [--manager-guideline G ...] [--manager-acceptance A ...] [--sandbox SANDBOX] [--ask-for-approval ASK_FOR_APPROVAL] [--timeout-seconds N]` —
+- `pair --task T --worker-name W --manager-name M [--cwd D] [--task-prompt PROMPT] [--task-goal GOAL] [--task-summary S] [--manager-objective O] [--manager-guideline G ...] [--manager-acceptance A ...] [--sandbox SANDBOX] [--ask-for-approval ASK_FOR_APPROVAL] [--timeout-seconds N] [--dispatcher-id ID] [--no-dispatch]` —
   One-shot: spawn worker + manager and bind to a task in a single command. Combines
   `start-worker` + `start-manager` + `bind`. The task is looked up or created (if
   `--task-goal` is provided); if the task does not exist and no goal is given, an
@@ -205,7 +213,10 @@ tmux attach -t codex-live-test
   `pair` records that config before launching the manager and the bootstrap tells
   the manager to start supervising with `cycle` instead of asking setup
   questions first. Manager acceptance entries are also seeded into the living
-  acceptance criteria ledger when they do not already exist for the task.
+  acceptance criteria ledger when they do not already exist for the task. By
+  default `pair` starts a detached `dispatch --watch` process after successful
+  worker/manager setup, bind, and run creation. Use `--dispatcher-id` to set its
+  identity or `--no-dispatch` for isolated/manual workflows.
   If the manager or bind fails after the worker is spawned, the worker remains
   registered and can be cleaned up with `workerctl deregister`.
 - `register-worker --name N [--pid P | --codex-session PATH] [--cwd D] [--tmux-session S]` —
@@ -374,14 +385,17 @@ tmux attach -t codex-live-test
 
 ### Observation
 
-- `dashboard [--task T] [--host 127.0.0.1] [--port 8797]` — Launch the
+- `dashboard [--task T] [--ensure-dispatch] [--dispatcher-id ID]
+  [--host 127.0.0.1] [--port 8797]` — Launch the
   local live supervision cockpit. The dashboard binds to loopback by default,
   uses the TypeScript backend to shell out to `workerctl` JSON commands, and
   attaches interactive terminals to tmux-backed worker/manager sessions through
   a WebSocket PTY bridge. It includes browser bootstrap controls for creating a
   task, starting a worker/manager pair with `workerctl pair`, auto-attaching the
   terminals, attach/bind controls, and audited action receipts for cycle,
-  nudge, interrupt, finish, and export. Use
+  nudge, interrupt, finish, and export. With `--ensure-dispatch`, launch also
+  ensures a Dispatch watch process using the supplied `--dispatcher-id` when
+  provided. Use
   `--dry-run --json` to inspect the launch command.
 - `cycle <task> [--busy-wait-seconds N]` — One observation cycle. Idempotent. Runs `ingest`, computes
   worker state from the JSON event stream, captures the tmux pane as a shadow
@@ -682,10 +696,10 @@ Three quality-of-life additions following Phase 6 dogfood:
 
 ## Dispatch and completion contracts
 
-Dispatch is the mechanical role between workers and managers. It routes facts
-and executes queued side effects; it does not decide whether work is correct,
-finish tasks, satisfy criteria, choose strategy, merge PRs, or route to human
-operators.
+Dispatch is the mechanical core infrastructure between workers and managers. It
+routes facts and executes queued side effects; it does not decide whether work
+is correct, finish tasks, satisfy criteria, choose strategy, merge PRs, or route
+to human operators.
 
 Current dispatch state:
 
@@ -706,6 +720,12 @@ Current dispatch state:
   dispatch correlation chains with command state, attempt counts, notification
   counts, decision/cycle ids, source event ids, suppressed-signal visibility,
   chronological ordering, and side-effect risk.
+- Dashboard manual QA should use
+  `workerctl dashboard --task <task> --ensure-dispatch --dispatcher-id qa-dispatch-dashboard`
+  and visually confirm the Dispatch active banner, dispatcher id, heartbeat age,
+  iteration, processed count, dry-run/live state, completion/routing/cycle
+  conversation lane entries, command claim/attempt/delivery entries where
+  applicable, and stale or not-observed warnings.
 
 The adjacent completion-contract surfaces are separate from Dispatch:
 

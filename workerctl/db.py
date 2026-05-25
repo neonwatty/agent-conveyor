@@ -695,12 +695,6 @@ def migrate(conn: sqlite3.Connection, from_version: int) -> None:
         create index if not exists routed_notifications_source_event
         on routed_notifications(source_event_id);
 
-        create index if not exists routed_notifications_consumed_cycle
-        on routed_notifications(consumed_manager_cycle_id);
-
-        create index if not exists routed_notifications_claimable
-        on routed_notifications(state, signal_type, side_effect_started, claim_expires_at, created_at);
-
         create index if not exists manager_configs_task_id
         on manager_configs(task_id);
 
@@ -4580,6 +4574,7 @@ def query_telemetry_events(
     severity: str | None = None,
     search: str | None = None,
     limit: int = 100,
+    newest: bool = False,
 ) -> list[dict[str, Any]]:
     clauses: list[str] = []
     params: list[Any] = []
@@ -4606,6 +4601,7 @@ def query_telemetry_events(
         clauses.append("te.severity = ?")
         params.append(severity)
     where = f"where {' and '.join(clauses)}" if clauses else ""
+    order_direction = "desc" if newest else "asc"
     params.append(limit)
     rows = conn.execute(
         f"""
@@ -4614,7 +4610,7 @@ def query_telemetry_events(
                te.correlation_json, te.attributes_json
         from {from_sql}
         {where}
-        order by te.timestamp, te.rowid
+        order by te.timestamp {order_direction}, te.rowid {order_direction}
         limit ?
         """,
         params,

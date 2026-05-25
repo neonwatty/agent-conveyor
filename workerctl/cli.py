@@ -236,6 +236,8 @@ def build_parser() -> argparse.ArgumentParser:
     dashboard.add_argument("--port", type=int, default=8797, help="Dashboard port. Default: 8797.")
     dashboard.add_argument("--workerctl-path", default="scripts/workerctl", help="workerctl executable for the dashboard backend.")
     dashboard.add_argument("--db-path", help="Optional workerctl database path passed to dashboard commands.")
+    dashboard.add_argument("--ensure-dispatch", action="store_true", help="Start a local Dispatch watch process for this dashboard if one is not observed.")
+    dashboard.add_argument("--dispatcher-id", default="dispatch-dashboard", help="Dispatcher id used with --ensure-dispatch.")
     dashboard.add_argument("--dry-run", action="store_true", help="Print the launch command without starting the dashboard.")
     dashboard.add_argument("--json", action="store_true", help="Print JSON for --dry-run output.")
     dashboard.set_defaults(func=command_dashboard)
@@ -446,6 +448,7 @@ def build_parser() -> argparse.ArgumentParser:
     telemetry.add_argument("--active-only", action="store_true", help="For telemetry failures, show only failures for active tasks.")
     telemetry.add_argument("--json", action="store_true", help="Print JSON instead of text timeline output.")
     telemetry.add_argument("--limit", type=int, default=100, help="Maximum telemetry events to inspect.")
+    telemetry.add_argument("--newest", action="store_true", help="Return newest telemetry events first.")
     telemetry.add_argument("--stale-cycle-seconds", type=float, default=3600.0, help="Flag active tasks whose latest manager cycle is older than this threshold.")
     telemetry.add_argument("--worker-staleness-seconds", type=float, default=3600.0, help="Flag active sessions whose last heartbeat is older than this threshold.")
     telemetry.add_argument("--max-unfinished-commands", type=int, default=0, help="Maximum allowed pending or attempted commands for telemetry check.")
@@ -814,6 +817,18 @@ def build_parser() -> argparse.ArgumentParser:
         "--path",
         help="Override the workerctl database path.",
     )
+    pair.add_argument(
+        "--no-dispatch",
+        action="store_true",
+        help="Do not start the Dispatch watch process after pair setup.",
+    )
+    pair.add_argument(
+        "--dispatcher-id",
+        default="dispatch-pair",
+        help="Dispatcher id used for the pair Dispatch watch process.",
+    )
+    pair.add_argument("--dry-run", action="store_true", help="Report planned pair setup without spawning sessions.")
+    pair.add_argument("--json", action="store_true", help="Print pair dry-run results as JSON.")
     pair.set_defaults(func=command_pair)
 
     register_manager = subparsers.add_parser(

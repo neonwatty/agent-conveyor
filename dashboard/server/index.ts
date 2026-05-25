@@ -11,6 +11,7 @@ import {
   normalizeServerOptions,
   runWorkerctlJson,
   type PartialServerOptions,
+  type WorkerctlCommandOptions,
 } from "./workerctl.ts";
 import { parseTerminalControlMessage } from "./terminal.ts";
 
@@ -144,6 +145,11 @@ type AuditResult = {
   routed_notifications?: Array<Record<string, unknown>>;
 };
 
+type DispatchConversationItem = {
+  kind: string;
+  label: string;
+};
+
 function isDashboardSession(session: Record<string, unknown>): boolean {
   return DASHBOARD_TERMINALS.some((terminal) => terminal.tmuxSession === session.tmux_session);
 }
@@ -207,7 +213,7 @@ function latestDispatchHeartbeat(snapshot: SnapshotResult | null, durableHeartbe
     ...durableHeartbeats,
     ...(snapshot?.telemetry?.recent || []),
   ]
-    .filter((event) => event.event_type === "dispatch_watch_heartbeat")
+    .filter((event) => event.actor === "dispatch" && event.event_type === "dispatch_watch_heartbeat")
     .sort((left, right) => Date.parse(String(right.timestamp || "")) - Date.parse(String(left.timestamp || "")));
   const heartbeat = heartbeats[0];
   if (!heartbeat) {
@@ -236,6 +242,16 @@ function latestDispatchHeartbeat(snapshot: SnapshotResult | null, durableHeartbe
   };
 }
 
+function dispatchOperatorMessage(coreStatus: "active" | "not_observed" | "stale"): string {
+  if (coreStatus === "active") {
+    return "Dispatch is routing worker/manager events.";
+  }
+  if (coreStatus === "stale") {
+    return "Dispatch heartbeat is stale; worker completions may not wake managers.";
+  }
+  return "Dispatch has not been observed; worker completions will not wake managers.";
+}
+
 function commandLabel(command: AuditCommand | undefined, commandId: string | undefined): string {
   const type = command?.type || "command";
   const id = command?.id || commandId || "";
@@ -245,6 +261,38 @@ function commandLabel(command: AuditCommand | undefined, commandId: string | und
 function notificationLabel(notification: Record<string, unknown> | undefined, fallbackType: string | undefined): string {
   const signalType = String(notification?.signal_type || fallbackType || "notification");
   return notification?.id ? `${signalType} notification #${notification.id}` : signalType;
+}
+
+function latestDispatchAttempt(attempts: AuditCommandAttempt[]): AuditCommandAttempt | undefined {
+  const timestampedAttempts = attempts
+    .map((attempt) => ({ attempt, timestamp: attempt.started_at ? Date.parse(attempt.started_at) : NaN }))
+    .filter((item) => Number.isFinite(item.timestamp));
+  if (timestampedAttempts.length) {
+    return timestampedAttempts.reduce((latest, item) => (item.timestamp >= latest.timestamp ? item : latest)).attempt;
+  }
+  return attempts.at(-1);
+}
+
+function dispatchConversationItems(
+  chain: AuditCorrelationChain,
+  attempts: AuditCommandAttempt[],
+  primaryNotification: Record<string, unknown> | undefined,
+): DispatchConversationItem[] {
+  const dispatchAttempt = latestDispatchAttempt(attempts);
+  return [
+    chain.manager_decision_id
+      ? { kind: "manager_decision", label: `Manager decision #${chain.manager_decision_id}` }
+      : null,
+    dispatchAttempt
+      ? { kind: "dispatch_attempt", label: `Dispatch ${dispatchAttempt.state || "attempted"} via ${dispatchAttempt.dispatcher_id || "unknown dispatcher"}` }
+      : null,
+    primaryNotification
+      ? { kind: "routed_notification", label: `Routed notification #${primaryNotification.id} ${primaryNotification.state || "unknown"}` }
+      : null,
+    chain.manager_cycle_id
+      ? { kind: "manager_cycle", label: `Manager cycle #${chain.manager_cycle_id} consumed the routed fact` }
+      : null,
+  ].filter((item): item is DispatchConversationItem => item !== null);
 }
 
 function chainTimestamp(value: unknown): number {
@@ -258,6 +306,7 @@ function chainTimestamp(value: unknown): number {
 export function dispatchChainEntries(audit: AuditResult | null) {
   const commandsById = new Map((audit?.commands || []).map((command) => [String(command.id), command]));
   const notificationsById = new Map((audit?.routed_notifications || []).map((notification) => [Number(notification.id), notification]));
+  const attemptsById = new Map((audit?.command_attempts || []).map((attempt) => [Number(attempt.id), attempt]));
   const attemptsByCommand = new Map<string, AuditCommandAttempt[]>();
   for (const attempt of audit?.command_attempts || []) {
     if (attempt.command_id) {
@@ -266,7 +315,10 @@ export function dispatchChainEntries(audit: AuditResult | null) {
   }
   const entries = (audit?.correlation_chains || []).map((chain) => {
     const command = chain.command_id ? commandsById.get(chain.command_id) : undefined;
-    const attempts = chain.command_id ? attemptsByCommand.get(chain.command_id) || [] : [];
+    const chainAttempts = (chain.attempt_ids || [])
+      .map((id) => attemptsById.get(Number(id)))
+      .filter((attempt) => attempt !== undefined);
+    const attempts = chainAttempts.length ? chainAttempts : chain.command_id ? attemptsByCommand.get(chain.command_id) || [] : [];
     const notifications = (chain.routed_notification_ids || [])
       .map((id) => notificationsById.get(Number(id)))
       .filter((notification) => notification !== undefined);
@@ -285,6 +337,7 @@ export function dispatchChainEntries(audit: AuditResult | null) {
       command_state: chain.command_state || command?.state || (typeof primaryNotification?.state === "string" ? primaryNotification.state : undefined),
       command_type: chain.command_type || command?.type || (typeof primaryNotification?.signal_type === "string" ? primaryNotification.signal_type : undefined),
       correlation_id: chain.correlation_id || command?.correlation_id || (typeof primaryNotification?.correlation_id === "string" ? primaryNotification.correlation_id : undefined),
+      conversation: dispatchConversationItems(chain, attempts, primaryNotification),
       error: attempts.find((attempt) => attempt.error)?.error || command?.error || (typeof primaryNotification?.error === "string" ? primaryNotification.error : undefined),
       key: `chain-${chain.command_id || chain.correlation_id || chain.routed_notification_ids?.join("-")}`,
       manager_cycle_id: chain.manager_cycle_id,
@@ -320,13 +373,31 @@ export function dispatchHealth(
   const sideEffectRisk = attempts.filter((attempt) => attempt.side_effect_started && !attempt.side_effect_completed);
   const suppressedSignals = (suppressedTelemetry || snapshot?.telemetry?.recent || [])
     .filter((event) => event.actor === "dispatch" && event.event_type === "dispatch_signal_suppressed");
+  const heartbeat = latestDispatchHeartbeat(snapshot, heartbeatTelemetry as TelemetryEvent[]);
+  const coreStatus = heartbeat.state as "active" | "not_observed" | "stale";
   return {
+    core_status: coreStatus,
     failed_count: commands.length ? failed.length : snapshot?.commands?.failed_count || 0,
-    heartbeat: latestDispatchHeartbeat(snapshot, heartbeatTelemetry as TelemetryEvent[]),
+    heartbeat,
+    operator_message: dispatchOperatorMessage(coreStatus),
     queued_count: commands.length ? queued.length : snapshot?.commands?.unfinished_count || 0,
     side_effect_risk_count: sideEffectRisk.length,
     stale_claim_count: stale.length,
     suppressed_signal_count: suppressedSignals.length,
+  };
+}
+
+export function dispatchHeartbeatTelemetryOptions(
+  options: Pick<ReturnType<typeof normalizeServerOptions>, "workerctlPath" | "dbPath">,
+): WorkerctlCommandOptions {
+  return {
+    command: "telemetry",
+    limit: 1,
+    telemetryActor: "dispatch",
+    telemetryEventType: "dispatch_watch_heartbeat",
+    telemetryNewest: true,
+    workerctlPath: options.workerctlPath,
+    dbPath: options.dbPath,
   };
 }
 
@@ -443,15 +514,7 @@ async function dashboardObservation(options: ReturnType<typeof normalizeServerOp
       suppressedTelemetry = [];
     }
     try {
-      heartbeatTelemetry = await runWorkerctlJson({
-        command: "telemetry",
-        limit: 1,
-        task: taskName,
-        telemetryActor: "dispatch",
-        telemetryEventType: "dispatch_watch_heartbeat",
-        workerctlPath: options.workerctlPath,
-        dbPath: options.dbPath,
-      }) as Array<Record<string, unknown>>;
+      heartbeatTelemetry = await runWorkerctlJson(dispatchHeartbeatTelemetryOptions(options)) as Array<Record<string, unknown>>;
     } catch {
       heartbeatTelemetry = [];
     }

@@ -52,6 +52,7 @@ export interface WorkerctlCommandOptions {
   managerReference?: string[];
   telemetryActor?: "dispatch" | "manager" | "operator" | "system" | "worker" | "workerctl";
   telemetryEventType?: string;
+  telemetryNewest?: boolean;
   requireCriteriaAudit?: boolean;
   sandbox?: string;
   session?: string;
@@ -101,6 +102,9 @@ export function buildWorkerctlArgs(options: WorkerctlCommandOptions): string[] {
     }
     if (options.limit) {
       args.push("--limit", String(options.limit));
+    }
+    if (options.telemetryNewest) {
+      args.push("--newest");
     }
     args.push("--json");
   } else if (options.command === "audit") {

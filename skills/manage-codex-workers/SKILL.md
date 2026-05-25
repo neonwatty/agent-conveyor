@@ -30,8 +30,9 @@ The manager Codex drives the supervision loop by calling
 captures the worker's tmux pane as a shadow signal, persists a `manager_cycles`
 row, and returns structured JSON. The manager reads that JSON and decides.
 
-Dispatch is the separate mechanical router. When supervising a pair, keep
-Dispatch running in another shell with:
+Dispatch is core infrastructure for supervised pairs. The `pair` workflow starts
+a detached Dispatch watch process by default after worker/manager setup and
+bind. For manually bound pairs, keep Dispatch running in another shell with:
 
 ```bash
 scripts/workerctl dispatch --watch --dispatcher-id dispatch-local
@@ -125,10 +126,12 @@ with a long `pair` command. Use the skill in each session:
    scripts/workerctl telemetry --task <task-name>
    scripts/workerctl replay <task-name>
    ```
-   Keep `scripts/workerctl dispatch --watch --dispatcher-id dispatch-local`
-   running in a separate shell while the pair is active, or run a bounded
-   verification pass with `scripts/workerctl dispatch --watch --watch-iterations
-   2 --dry-run --json`.
+   For `pair`-started workflows, Dispatch is started automatically unless
+   `--no-dispatch` is passed. For manually bound pairs, keep
+   `scripts/workerctl dispatch --watch --dispatcher-id dispatch-local` running
+   in a separate shell while the pair is active, or run a bounded verification
+   pass with `scripts/workerctl dispatch --watch --watch-iterations 2 --dry-run
+   --json`.
 
 The skill should translate those prompts into explicit `workerctl` commands.
 For the worker, run `doctor-self`; if supported, register the current session
@@ -204,6 +207,7 @@ scripts/workerctl pair \
   --task <task-slug> \
   --worker-name <worker-name> \
   --manager-name <manager-name> \
+  --dispatcher-id dispatch-pair \
   --cwd <target-repo> \
   --codex-profile yolo \
   --manager-mode strict \
@@ -212,6 +216,8 @@ scripts/workerctl pair \
   --manager-objective "<manager objective>" \
   --manager-acceptance "<finish criterion>"
 ```
+
+Use `--no-dispatch` only for isolated tests or manual Dispatch supervision.
 
 Use this for external dogfood runs. Keep the control repo as the command cwd,
 but set `--cwd` to the downstream project:
