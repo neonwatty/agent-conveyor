@@ -2913,6 +2913,32 @@ class CliTests(unittest.TestCase):
         )
         self.assertEqual(events[1][2]["cwd"], commands.PROJECT_ROOT)
 
+    def test_dashboard_ensure_dispatch_dry_run_does_not_start_watch_process(self):
+        args = argparse.Namespace(
+            db_path="/tmp/workerctl-dashboard-test.db",
+            dispatcher_id="dispatch-dashboard",
+            dry_run=True,
+            ensure_dispatch=True,
+            host="127.0.0.1",
+            json=True,
+            port=8797,
+            task="qa-task",
+            workerctl_path="scripts/workerctl",
+        )
+
+        stdout = io.StringIO()
+        with mock.patch("workerctl.commands.subprocess.Popen") as popen, mock.patch(
+            "workerctl.commands.subprocess.run",
+        ) as run, contextlib.redirect_stdout(stdout):
+            result = commands.command_dashboard(args)
+
+        self.assertEqual(result, 0)
+        popen.assert_not_called()
+        run.assert_not_called()
+        payload = json.loads(stdout.getvalue())
+        self.assertTrue(payload["ensure_dispatch"])
+        self.assertIn("dispatch", payload["dispatch_command"])
+
     def test_enqueue_dispatch_commands_cli_records_required_permission(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "workerctl.db"
