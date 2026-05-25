@@ -293,6 +293,34 @@ test("marks missing dispatch heartbeat as not observed", () => {
   assert.equal(health.heartbeat.timestamp, "");
 });
 
+test("ignores non-dispatch heartbeat telemetry for core status", () => {
+  const health = dispatchHealth({
+    telemetry: {
+      recent: [
+        {
+          actor: "workerctl",
+          event_type: "dispatch_watch_heartbeat",
+          timestamp: new Date().toISOString(),
+          correlation: { dispatcher_id: "not-dispatch", iteration: 9 },
+          attributes: { dry_run: false, processed_count: 12 },
+        },
+      ],
+    },
+  }, null, [], [
+    {
+      actor: "manager",
+      event_type: "dispatch_watch_heartbeat",
+      timestamp: new Date().toISOString(),
+      correlation: { dispatcher_id: "also-not-dispatch", iteration: 10 },
+      attributes: { dry_run: false, processed_count: 20 },
+    },
+  ]);
+
+  assert.equal(health.core_status, "not_observed");
+  assert.equal(health.heartbeat.state, "not_observed");
+  assert.equal(health.heartbeat.dispatcher_id, undefined);
+});
+
 test("marks stale dispatch heartbeat explicitly", () => {
   const health = dispatchHealth({
     telemetry: {

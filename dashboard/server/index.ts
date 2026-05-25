@@ -207,7 +207,7 @@ function latestDispatchHeartbeat(snapshot: SnapshotResult | null, durableHeartbe
     ...durableHeartbeats,
     ...(snapshot?.telemetry?.recent || []),
   ]
-    .filter((event) => event.event_type === "dispatch_watch_heartbeat")
+    .filter((event) => event.actor === "dispatch" && event.event_type === "dispatch_watch_heartbeat")
     .sort((left, right) => Date.parse(String(right.timestamp || "")) - Date.parse(String(left.timestamp || "")));
   const heartbeat = heartbeats[0];
   if (!heartbeat) {
