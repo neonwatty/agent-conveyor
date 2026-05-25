@@ -2838,6 +2838,8 @@ class CliTests(unittest.TestCase):
             "--ensure-dispatch",
             "--dispatcher-id",
             "dispatch-dashboard",
+            "--db-path",
+            "/tmp/workerctl-dashboard-test.db",
             "--dry-run",
             "--json",
         )
@@ -2850,6 +2852,8 @@ class CliTests(unittest.TestCase):
         self.assertIn("--watch", payload["dispatch_command"])
         self.assertIn("--dispatcher-id", payload["dispatch_command"])
         self.assertIn("dispatch-dashboard", payload["dispatch_command"])
+        self.assertIn("--path", payload["dispatch_command"])
+        self.assertIn("/tmp/workerctl-dashboard-test.db", payload["dispatch_command"])
         self.assertNotIn("--task", payload["dispatch_command"])
         self.assertNotIn("qa-task", payload["dispatch_command"])
 

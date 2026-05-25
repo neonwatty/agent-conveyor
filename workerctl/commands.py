@@ -124,6 +124,8 @@ def dashboard_launch_payload(args: argparse.Namespace) -> dict[str, Any]:
         "--dispatcher-id",
         args.dispatcher_id,
     ]
+    if args.db_path:
+        dispatch_command.extend(["--path", args.db_path])
     return {
         "command": command,
         "dispatch_command": dispatch_command if getattr(args, "ensure_dispatch", False) else None,
