@@ -11,6 +11,7 @@ import {
   normalizeServerOptions,
   runWorkerctlJson,
   type PartialServerOptions,
+  type WorkerctlCommandOptions,
 } from "./workerctl.ts";
 import { parseTerminalControlMessage } from "./terminal.ts";
 
@@ -386,6 +387,19 @@ export function dispatchHealth(
   };
 }
 
+export function dispatchHeartbeatTelemetryOptions(
+  options: Pick<ReturnType<typeof normalizeServerOptions>, "workerctlPath" | "dbPath">,
+): WorkerctlCommandOptions {
+  return {
+    command: "telemetry",
+    limit: 100,
+    telemetryActor: "dispatch",
+    telemetryEventType: "dispatch_watch_heartbeat",
+    workerctlPath: options.workerctlPath,
+    dbPath: options.dbPath,
+  };
+}
+
 function interpretedTimeline({
   binding,
   snapshot,
@@ -499,15 +513,7 @@ async function dashboardObservation(options: ReturnType<typeof normalizeServerOp
       suppressedTelemetry = [];
     }
     try {
-      heartbeatTelemetry = await runWorkerctlJson({
-        command: "telemetry",
-        limit: 1,
-        task: taskName,
-        telemetryActor: "dispatch",
-        telemetryEventType: "dispatch_watch_heartbeat",
-        workerctlPath: options.workerctlPath,
-        dbPath: options.dbPath,
-      }) as Array<Record<string, unknown>>;
+      heartbeatTelemetry = await runWorkerctlJson(dispatchHeartbeatTelemetryOptions(options)) as Array<Record<string, unknown>>;
     } catch {
       heartbeatTelemetry = [];
     }

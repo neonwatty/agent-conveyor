@@ -9,6 +9,7 @@ import {
 import {
   dispatchHealth,
   dispatchChainEntries,
+  dispatchHeartbeatTelemetryOptions,
   dashboardTaskName,
 } from "./index.ts";
 import {
@@ -478,6 +479,28 @@ test("counts durable suppressed dispatch telemetry outside snapshot recent event
   ]);
 
   assert.equal(health.suppressed_signal_count, 2);
+});
+
+test("builds global dispatch heartbeat telemetry options", () => {
+  const options = dispatchHeartbeatTelemetryOptions({
+    dbPath: "/tmp/workerctl.db",
+    workerctlPath: "scripts/workerctl",
+  });
+
+  assert.equal(options.task, undefined);
+  assert.deepEqual(buildWorkerctlArgs(options), [
+    "scripts/workerctl",
+    "telemetry",
+    "--actor",
+    "dispatch",
+    "--event-type",
+    "dispatch_watch_heartbeat",
+    "--limit",
+    "100",
+    "--json",
+    "--path",
+    "/tmp/workerctl.db",
+  ]);
 });
 
 test("builds session list arguments using the existing JSON default", () => {
