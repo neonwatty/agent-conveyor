@@ -236,6 +236,8 @@ def build_parser() -> argparse.ArgumentParser:
     dashboard.add_argument("--port", type=int, default=8797, help="Dashboard port. Default: 8797.")
     dashboard.add_argument("--workerctl-path", default="scripts/workerctl", help="workerctl executable for the dashboard backend.")
     dashboard.add_argument("--db-path", help="Optional workerctl database path passed to dashboard commands.")
+    dashboard.add_argument("--ensure-dispatch", action="store_true", help="Start a local Dispatch watch process for this dashboard if one is not observed.")
+    dashboard.add_argument("--dispatcher-id", default="dispatch-dashboard", help="Dispatcher id used with --ensure-dispatch.")
     dashboard.add_argument("--dry-run", action="store_true", help="Print the launch command without starting the dashboard.")
     dashboard.add_argument("--json", action="store_true", help="Print JSON for --dry-run output.")
     dashboard.set_defaults(func=command_dashboard)

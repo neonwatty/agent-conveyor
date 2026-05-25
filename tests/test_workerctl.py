@@ -2830,6 +2830,27 @@ class CliTests(unittest.TestCase):
         self.assertIn("--task", payload["command"])
         self.assertIn("snapshot-task", payload["command"])
 
+    def test_dashboard_dry_run_can_include_dispatch_watch(self):
+        proc = self.run_workerctl(
+            "dashboard",
+            "--task",
+            "qa-task",
+            "--ensure-dispatch",
+            "--dispatcher-id",
+            "dispatch-dashboard",
+            "--dry-run",
+            "--json",
+        )
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        payload = json.loads(proc.stdout)
+        self.assertEqual(payload["task"], "qa-task")
+        self.assertTrue(payload["ensure_dispatch"])
+        self.assertIn("dispatch", payload["dispatch_command"])
+        self.assertIn("--watch", payload["dispatch_command"])
+        self.assertIn("--dispatcher-id", payload["dispatch_command"])
+        self.assertIn("dispatch-dashboard", payload["dispatch_command"])
+
     def test_enqueue_dispatch_commands_cli_records_required_permission(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "workerctl.db"

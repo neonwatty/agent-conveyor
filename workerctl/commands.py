@@ -117,8 +117,19 @@ def dashboard_launch_payload(args: argparse.Namespace) -> dict[str, Any]:
         command.extend(["--task", args.task])
     if args.db_path:
         command.extend(["--db-path", args.db_path])
+    dispatch_command = [
+        args.workerctl_path,
+        "dispatch",
+        "--watch",
+        "--dispatcher-id",
+        args.dispatcher_id,
+    ]
+    if args.task:
+        dispatch_command.extend(["--task", args.task])
     return {
         "command": command,
+        "dispatch_command": dispatch_command if getattr(args, "ensure_dispatch", False) else None,
+        "ensure_dispatch": bool(getattr(args, "ensure_dispatch", False)),
         "host": args.host,
         "port": args.port,
         "task": args.task,
