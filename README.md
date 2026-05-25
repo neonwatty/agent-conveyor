@@ -92,8 +92,10 @@ The `export` line makes `workerctl` available in the current shell.
 `workerctl db-doctor` initializes and checks the SQLite control-plane
 database.
 
-When supervising worker/manager pairs, run Dispatch in a separate shell so
-worker completion is routed to the bound manager mechanically:
+Dispatch is core infrastructure for supervised worker/manager pairs. The
+`pair` workflow starts a detached Dispatch watch process by default so worker
+completion is routed to the bound manager mechanically. For manually bound
+pairs, run Dispatch in a separate shell:
 
 ```bash
 workerctl dispatch --watch --dispatcher-id dispatch-local
@@ -192,7 +194,7 @@ tmux attach -t codex-live-test
   task prompt. The bootstrap opens Codex rollout metadata reliably and tells the
   manager to run `manager-config <task> --questions` before supervising when a
   task is known.
-- `pair --task T --worker-name W --manager-name M [--cwd D] [--task-prompt PROMPT] [--task-goal GOAL] [--task-summary S] [--manager-objective O] [--manager-guideline G ...] [--manager-acceptance A ...] [--sandbox SANDBOX] [--ask-for-approval ASK_FOR_APPROVAL] [--timeout-seconds N]` —
+- `pair --task T --worker-name W --manager-name M [--cwd D] [--task-prompt PROMPT] [--task-goal GOAL] [--task-summary S] [--manager-objective O] [--manager-guideline G ...] [--manager-acceptance A ...] [--sandbox SANDBOX] [--ask-for-approval ASK_FOR_APPROVAL] [--timeout-seconds N] [--dispatcher-id ID] [--no-dispatch]` —
   One-shot: spawn worker + manager and bind to a task in a single command. Combines
   `start-worker` + `start-manager` + `bind`. The task is looked up or created (if
   `--task-goal` is provided); if the task does not exist and no goal is given, an
@@ -205,7 +207,10 @@ tmux attach -t codex-live-test
   `pair` records that config before launching the manager and the bootstrap tells
   the manager to start supervising with `cycle` instead of asking setup
   questions first. Manager acceptance entries are also seeded into the living
-  acceptance criteria ledger when they do not already exist for the task.
+  acceptance criteria ledger when they do not already exist for the task. By
+  default `pair` starts a detached `dispatch --watch` process after successful
+  worker/manager setup, bind, and run creation. Use `--dispatcher-id` to set its
+  identity or `--no-dispatch` for isolated/manual workflows.
   If the manager or bind fails after the worker is spawned, the worker remains
   registered and can be cleaned up with `workerctl deregister`.
 - `register-worker --name N [--pid P | --codex-session PATH] [--cwd D] [--tmux-session S]` —
@@ -682,10 +687,10 @@ Three quality-of-life additions following Phase 6 dogfood:
 
 ## Dispatch and completion contracts
 
-Dispatch is the mechanical role between workers and managers. It routes facts
-and executes queued side effects; it does not decide whether work is correct,
-finish tasks, satisfy criteria, choose strategy, merge PRs, or route to human
-operators.
+Dispatch is the mechanical core infrastructure between workers and managers. It
+routes facts and executes queued side effects; it does not decide whether work
+is correct, finish tasks, satisfy criteria, choose strategy, merge PRs, or route
+to human operators.
 
 Current dispatch state:
 

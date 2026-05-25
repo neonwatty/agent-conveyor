@@ -96,7 +96,7 @@ def cli_path_prefix() -> str:
     return f"PATH={sh_quote(str(PROJECT_ROOT / 'bin'))}:$PATH"
 
 
-def dashboard_dispatch_command(
+def dispatch_watch_command(
     workerctl_path: str | Path,
     dispatcher_id: str,
     db_path: str | Path | None = None,
@@ -111,6 +111,20 @@ def dashboard_dispatch_command(
     if db_path:
         command.extend(["--path", str(db_path)])
     return command
+
+
+def dashboard_dispatch_command(
+    workerctl_path: str | Path,
+    dispatcher_id: str,
+    db_path: str | Path | None = None,
+) -> list[str]:
+    return dispatch_watch_command(workerctl_path, dispatcher_id, db_path)
+
+
+def _release_detached_popen_handle(process: subprocess.Popen[Any]) -> None:
+    process.poll()
+    if getattr(process, "returncode", None) is None:
+        process.returncode = 0
 
 
 def dashboard_launch_payload(args: argparse.Namespace) -> dict[str, Any]:
@@ -134,7 +148,7 @@ def dashboard_launch_payload(args: argparse.Namespace) -> dict[str, Any]:
         command.extend(["--task", args.task])
     if args.db_path:
         command.extend(["--db-path", args.db_path])
-    dispatch_command = dashboard_dispatch_command(
+    dispatch_command = dispatch_watch_command(
         workerctl_path=args.workerctl_path,
         dispatcher_id=args.dispatcher_id,
         db_path=args.db_path,
@@ -179,6 +193,24 @@ def command_dashboard(args: argparse.Namespace) -> int:
             except subprocess.TimeoutExpired:
                 dispatch_process.kill()
                 dispatch_process.wait(timeout=2)
+
+
+def pair_dispatch_payload(args: argparse.Namespace, db_path: Path | None) -> dict[str, Any]:
+    dispatcher_id = getattr(args, "dispatcher_id", None)
+    ensure_dispatch = bool(dispatcher_id) and not bool(getattr(args, "no_dispatch", False))
+    dispatch_command = (
+        dispatch_watch_command(
+            workerctl_path=PROJECT_ROOT / "scripts" / "workerctl",
+            dispatcher_id=dispatcher_id,
+            db_path=db_path,
+        )
+        if ensure_dispatch
+        else None
+    )
+    return {
+        "dispatch_command": dispatch_command,
+        "ensure_dispatch": ensure_dispatch,
+    }
 
 
 def resolve_codex_startup_options(
@@ -7207,6 +7239,21 @@ def command_pair(args: argparse.Namespace) -> int:
     from workerctl import db as worker_db
 
     db_path = Path(args.path).expanduser().resolve() if hasattr(args, 'path') and args.path else None
+    dispatch_payload = pair_dispatch_payload(args, db_path)
+    if getattr(args, "dry_run", False):
+        payload = {
+            "dispatch_command": dispatch_payload["dispatch_command"],
+            "ensure_dispatch": dispatch_payload["ensure_dispatch"],
+            "manager": args.manager_name,
+            "task": args.task,
+            "worker": args.worker_name,
+        }
+        if getattr(args, "json", False):
+            print(json.dumps(payload, indent=2, sort_keys=True))
+        else:
+            print(json.dumps(payload, indent=2, sort_keys=True))
+        return 0
+
     task_id = None
     task_created = False
     manager_config_seeded = False
@@ -7560,12 +7607,34 @@ def command_pair(args: argparse.Namespace) -> int:
         finally:
             conn.close()
 
+        dispatch_result = {
+            "command": dispatch_payload["dispatch_command"],
+            "ensure": dispatch_payload["ensure_dispatch"],
+            "pid": None,
+            "started": False,
+        }
+        if dispatch_payload["ensure_dispatch"] and dispatch_payload["dispatch_command"]:
+            dispatch_process = subprocess.Popen(
+                dispatch_payload["dispatch_command"],
+                cwd=PROJECT_ROOT,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+            dispatch_result["pid"] = dispatch_process.pid
+            dispatch_result["started"] = True
+            _release_detached_popen_handle(dispatch_process)
+
         result = {
             "task": {"name": args.task, "id": task_id, "created": task_created},
             "worker": worker_info,
             "manager": manager_info,
             "binding_id": binding_id,
             "run_id": run_id,
+            "dispatch": dispatch_result,
+            "dispatch_command": dispatch_payload["dispatch_command"],
+            "ensure_dispatch": dispatch_payload["ensure_dispatch"],
             "manager_config_seeded": manager_config_seeded,
             "manager_config_seeded_by_pair": manager_config_seeded_by_pair,
             "manager_acceptance_criteria_seeded": len(manager_acceptance_criteria_seeded),

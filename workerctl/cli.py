@@ -816,6 +816,18 @@ def build_parser() -> argparse.ArgumentParser:
         "--path",
         help="Override the workerctl database path.",
     )
+    pair.add_argument(
+        "--no-dispatch",
+        action="store_true",
+        help="Do not start the Dispatch watch process after pair setup.",
+    )
+    pair.add_argument(
+        "--dispatcher-id",
+        default="dispatch-pair",
+        help="Dispatcher id used for the pair Dispatch watch process.",
+    )
+    pair.add_argument("--dry-run", action="store_true", help="Report planned pair setup without spawning sessions.")
+    pair.add_argument("--json", action="store_true", help="Print pair dry-run results as JSON.")
     pair.set_defaults(func=command_pair)
 
     register_manager = subparsers.add_parser(

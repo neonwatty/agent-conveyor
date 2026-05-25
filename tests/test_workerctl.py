@@ -14767,6 +14767,201 @@ class PairCommandTests(unittest.TestCase):
         conn.close()
         return db_path
 
+    def _pair_args(self, *, db_path, tmpdir, **overrides):
+        values = {
+            "ask_for_approval": "never",
+            "codex_profile": None,
+            "cwd": tmpdir,
+            "dispatcher_id": "dispatch-pair",
+            "dry_run": False,
+            "json": True,
+            "manager_acceptance": [],
+            "manager_allow_merge_green": False,
+            "manager_allow_pr": False,
+            "manager_allow_worker_compact_clear": False,
+            "manager_epilogue": [],
+            "manager_guideline": [],
+            "manager_mode": None,
+            "manager_name": "m1",
+            "manager_nudge_on_completion": None,
+            "manager_objective": None,
+            "manager_permissions_json": None,
+            "manager_permit": [],
+            "manager_reference": [],
+            "manager_require_acks": False,
+            "manager_tool": [],
+            "no_dispatch": False,
+            "path": str(db_path),
+            "sandbox": "danger-full-access",
+            "task": "pair-task",
+            "task_goal": "Build a thing",
+            "task_prompt": None,
+            "task_summary": None,
+            "timeout_seconds": 30,
+            "worker_name": "w1",
+        }
+        values.update(overrides)
+        return argparse.Namespace(**values)
+
+    def _fake_pair_spawn(self, db_path):
+        def fake_spawn(*, name, role, **kwargs):
+            conn = worker_db.connect(db_path)
+            worker_db.initialize_database(conn)
+            try:
+                session_id = worker_db.register_session(
+                    conn,
+                    name=name,
+                    role=role,
+                    codex_session_path=f"/tmp/{name}.jsonl",
+                    codex_session_id=f"codex-id-{name}",
+                    pid=10000 + hash(name) % 1000,
+                    cwd=kwargs.get("cwd", "/tmp"),
+                    tmux_session=f"codex-{name}",
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            return {
+                "name": name,
+                "role": role,
+                "session_id": session_id,
+                "pid": 10000 + hash(name) % 1000,
+                "tmux_session": f"codex-{name}",
+                "codex_session_path": f"/tmp/{name}.jsonl",
+                "codex_session_id": f"codex-id-{name}",
+                "cwd": kwargs.get("cwd", "/tmp"),
+            }
+
+        return fake_spawn
+
+    def test_pair_dry_run_reports_dispatch_ensure_by_default(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = self._setup_db(tmpdir)
+            args = self._pair_args(
+                db_path=db_path,
+                tmpdir=tmpdir,
+                dry_run=True,
+                dispatcher_id="dispatch-pair-test",
+            )
+
+            stdout_capture = io.StringIO()
+            with mock.patch.object(
+                commands,
+                "_spawn_codex_and_register",
+                side_effect=AssertionError("dry-run should not spawn sessions"),
+            ), contextlib.redirect_stdout(stdout_capture):
+                result = commands.command_pair(args)
+
+        self.assertEqual(result, 0)
+        payload = json.loads(stdout_capture.getvalue())
+        self.assertTrue(payload["ensure_dispatch"])
+        self.assertEqual(
+            payload["dispatch_command"][:4],
+            [str(commands.PROJECT_ROOT / "scripts" / "workerctl"), "dispatch", "--watch", "--dispatcher-id"],
+        )
+        self.assertIn("dispatch-pair-test", payload["dispatch_command"])
+        self.assertIn("--path", payload["dispatch_command"])
+        self.assertIn(str(db_path.resolve()), payload["dispatch_command"])
+        self.assertNotIn("--task", payload["dispatch_command"])
+        self.assertNotIn("pair-task", payload["dispatch_command"])
+
+    def test_pair_dry_run_no_dispatch_reports_no_command(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = self._setup_db(tmpdir)
+            args = self._pair_args(
+                db_path=db_path,
+                tmpdir=tmpdir,
+                dry_run=True,
+                no_dispatch=True,
+            )
+
+            stdout_capture = io.StringIO()
+            with contextlib.redirect_stdout(stdout_capture):
+                result = commands.command_pair(args)
+
+        self.assertEqual(result, 0)
+        payload = json.loads(stdout_capture.getvalue())
+        self.assertFalse(payload["ensure_dispatch"])
+        self.assertIsNone(payload["dispatch_command"])
+
+    def test_pair_starts_dispatch_after_bind_and_run_setup(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = self._setup_db(tmpdir)
+            args = self._pair_args(
+                db_path=db_path,
+                tmpdir=tmpdir,
+                dispatcher_id="dispatch-pair-test",
+            )
+            events = []
+
+            def fake_popen(command, **kwargs):
+                events.append(("dispatch", command, kwargs))
+
+                class Proc:
+                    pid = 12345
+                    returncode = None
+
+                    def poll(self):
+                        return None
+
+                    def wait(self, timeout=None):
+                        return 0
+
+                return Proc()
+
+            original_bind_sessions = worker_db.bind_sessions
+            original_create_run = worker_db.create_run
+
+            def bind_recorder(*bind_args, **bind_kwargs):
+                binding_id = original_bind_sessions(*bind_args, **bind_kwargs)
+                events.append(("bind", binding_id))
+                return binding_id
+
+            def run_recorder(*run_args, **run_kwargs):
+                run_id = original_create_run(*run_args, **run_kwargs)
+                events.append(("run", run_id))
+                return run_id
+
+            stdout_capture = io.StringIO()
+            with mock.patch.object(
+                commands,
+                "_spawn_codex_and_register",
+                side_effect=self._fake_pair_spawn(db_path),
+            ), mock.patch.object(worker_db, "bind_sessions", side_effect=bind_recorder), mock.patch.object(
+                worker_db,
+                "create_run",
+                side_effect=run_recorder,
+            ), mock.patch("workerctl.commands.subprocess.Popen", side_effect=fake_popen), contextlib.redirect_stdout(
+                stdout_capture
+            ):
+                result = commands.command_pair(args)
+
+        self.assertEqual(result, 0)
+        self.assertEqual([event[0] for event in events], ["bind", "run", "dispatch"])
+        payload = json.loads(stdout_capture.getvalue())
+        self.assertTrue(payload["dispatch"]["ensure"])
+        dispatch_command = events[-1][1]
+        self.assertEqual(
+            dispatch_command[:4],
+            [str(commands.PROJECT_ROOT / "scripts" / "workerctl"), "dispatch", "--watch", "--dispatcher-id"],
+        )
+        self.assertIn("dispatch-pair-test", dispatch_command)
+        self.assertIn("--path", dispatch_command)
+        self.assertIn(str(db_path.resolve()), dispatch_command)
+        self.assertNotIn("--task", dispatch_command)
+        self.assertNotIn("pair-task", dispatch_command)
+        self.assertEqual(
+            events[-1][2],
+            {
+                "cwd": commands.PROJECT_ROOT,
+                "stdin": subprocess.DEVNULL,
+                "stdout": subprocess.DEVNULL,
+                "stderr": subprocess.DEVNULL,
+                "start_new_session": True,
+            },
+        )
+
     def _bind_continuation_sessions(self, conn, *, task_name, tmpdir):
         root = Path(tmpdir)
         worker_rollout = root / f"{task_name}-worker-rollout.jsonl"
@@ -15411,6 +15606,8 @@ class PairCommandTests(unittest.TestCase):
             "--manager-objective",
             "--manager-guideline",
             "--manager-acceptance",
+            "--no-dispatch",
+            "--dispatcher-id",
         ):
             self.assertIn(flag, proc.stdout)
 
