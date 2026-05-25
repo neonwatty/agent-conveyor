@@ -695,12 +695,6 @@ def migrate(conn: sqlite3.Connection, from_version: int) -> None:
         create index if not exists routed_notifications_source_event
         on routed_notifications(source_event_id);
 
-        create index if not exists routed_notifications_consumed_cycle
-        on routed_notifications(consumed_manager_cycle_id);
-
-        create index if not exists routed_notifications_claimable
-        on routed_notifications(state, signal_type, side_effect_started, claim_expires_at, created_at);
-
         create index if not exists manager_configs_task_id
         on manager_configs(task_id);
 

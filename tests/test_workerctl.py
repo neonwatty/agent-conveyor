@@ -180,6 +180,51 @@ class DatabaseTests(unittest.TestCase):
             self.assertIn("commands_claimable", indexes)
             self.assertEqual(conn.execute("PRAGMA user_version").fetchone()[0], worker_db.SCHEMA_VERSION)
 
+    def test_database_migrates_routed_notifications_before_consumption_columns(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "workerctl.db"
+            conn = sqlite3.connect(path)
+            conn.executescript(
+                """
+                create table routed_notifications(
+                  id integer primary key autoincrement,
+                  task_id text not null,
+                  binding_id text not null,
+                  correlation_id text not null,
+                  source_session_id text not null,
+                  target_session_id text not null,
+                  signal_type text not null,
+                  source_event_id integer,
+                  source_event_timestamp text,
+                  dedupe_key text not null unique,
+                  command_id text,
+                  created_at text not null,
+                  delivered_at text,
+                  state text not null check (state in ('pending','delivered','failed','suppressed')),
+                  payload_json text not null check (json_valid(payload_json)),
+                  error text
+                );
+                pragma user_version = 18;
+                """
+            )
+            conn.close()
+
+            conn = worker_db.connect(path)
+            self.addCleanup(conn.close)
+            worker_db.initialize_database(conn)
+            columns = {row["name"] for row in conn.execute("pragma table_info(routed_notifications)")}
+            indexes = {
+                row["name"]
+                for row in conn.execute("select name from sqlite_master where type = 'index'")
+            }
+
+            self.assertIn("consumed_manager_cycle_id", columns)
+            self.assertIn("claim_expires_at", columns)
+            self.assertIn("side_effect_started", columns)
+            self.assertIn("routed_notifications_consumed_cycle", indexes)
+            self.assertIn("routed_notifications_claimable", indexes)
+            self.assertEqual(conn.execute("PRAGMA user_version").fetchone()[0], worker_db.SCHEMA_VERSION)
+
     def test_run_helpers_create_list_finish_and_enforce_one_active_run_per_task(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             conn = self.open_db(tmpdir)
