@@ -5086,16 +5086,17 @@ Deferred follow-up criteria:
                 self.assertTrue(Path(payload["start_prompt_path"]).exists())
                 prompt = Path(payload["start_prompt_path"]).read_text()
                 self.assertIn("workerctl tmux session qa-raw", prompt)
-                self.assertIn("workerctl register-worker --name <worker-name>", prompt)
-                self.assertIn("workerctl start-manager --name <manager-name>", prompt)
-                self.assertIn("workerctl bind --task <task-name>", prompt)
-                self.assertIn("workerctl manager-config <task-name> --questions", prompt)
+                workerctl = commands.workerctl_cli()
+                self.assertIn(f"{workerctl} register-worker --name <worker-name>", prompt)
+                self.assertIn(f"{workerctl} start-manager --name <manager-name>", prompt)
+                self.assertIn(f"{workerctl} bind --task <task-name>", prompt)
+                self.assertIn(f"{workerctl} manager-config <task-name> --questions", prompt)
                 self.assertIn("-- '--model' 'gpt-5.4-mini'", prompt)
                 self.assertNotIn("become-managed", prompt)
                 self.assertNotIn("workerctl unmanage", prompt)
                 self.assertNotIn("workerctl my-status", prompt)
                 self.assertNotIn("workerctl remanage", prompt)
-                self.assertIn("workerctl open-manager <task-name>", prompt)
+                self.assertIn(f"{workerctl} open-manager <task-name>", prompt)
                 self.assertIn("If any required field is missing, ask the user", prompt)
                 self.assertIn("Do not invent worker", prompt)
                 self.assertEqual(launched[0][:5], ["tmux", "new-session", "-d", "-s", "qa-raw"])
@@ -13455,8 +13456,10 @@ class StartWorkerTests(unittest.TestCase):
 class ManagerBootstrapPromptTests(unittest.TestCase):
     def test_raw_worker_prompt_instructs_worker_ack(self):
         prompt = commands.raw_worker_start_prompt("raw-worker", Path("/repo"))
+        workerctl = commands.workerctl_cli()
 
-        self.assertIn("workerctl worker-ack <task-name> --from-stdin", prompt)
+        self.assertIn(f"{workerctl} worker-ack <task-name> --from-stdin", prompt)
+        self.assertIn(f"{workerctl} register-worker", prompt)
         self.assertIn("before editing files", prompt)
 
     def test_prompt_includes_living_criteria_guidance_and_runnable_examples(self):
@@ -15357,7 +15360,7 @@ class PairCommandTests(unittest.TestCase):
             worker_spawn = next(r for r in recorded if r["role"] == "worker")
             manager_spawn = next(r for r in recorded if r["role"] == "manager")
             self.assertIn("Do the thing", worker_spawn["task"])
-            self.assertIn("workerctl worker-ack prompt-task --from-stdin", worker_spawn["task"])
+            self.assertIn(f"{commands.workerctl_cli()} worker-ack prompt-task --from-stdin", worker_spawn["task"])
             self.assertIsNone(manager_spawn["task"])
             self.assertIn("manager-config prompt-task --questions", manager_spawn["initial_prompt"])
             self.assertIn("Task goal: Build a thing", manager_spawn["initial_prompt"])

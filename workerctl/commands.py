@@ -260,7 +260,8 @@ def workerctl_cli() -> str:
 
 def raw_worker_start_prompt(session_name: str, cwd: Path, manager_codex_args: list[str] | None = None) -> str:
     manager_suffix = codex_arg_suffix(manager_codex_args or [])
-    start_manager_template = f"workerctl start-manager --name <manager-name> --cwd {sh_quote(str(cwd))}{manager_suffix}"
+    workerctl = workerctl_cli()
+    start_manager_template = f"{workerctl} start-manager --name <manager-name> --cwd {sh_quote(str(cwd))}{manager_suffix}"
     return f"""You are a raw worker candidate running inside workerctl tmux session {session_name}.
 
 Current working directory: {cwd}
@@ -272,11 +273,11 @@ The supported manager/worker setup is session-based:
 1. Register this session as a worker after identifying the Codex process pid and
    rollout JSONL:
 
-   workerctl register-worker --name <worker-name> --pid <pid> --codex-session <rollout.jsonl> --cwd {sh_quote(str(cwd))} --tmux-session {session_name}
+   {workerctl} register-worker --name <worker-name> --pid <pid> --codex-session <rollout.jsonl> --cwd {sh_quote(str(cwd))} --tmux-session {session_name}
 
 2. Create or select a task:
 
-   workerctl tasks --create <task-name> --goal "<goal>"
+   {workerctl} tasks --create <task-name> --goal "<goal>"
 
 3. Start a manager:
 
@@ -284,16 +285,16 @@ The supported manager/worker setup is session-based:
 
 4. Bind the sessions:
 
-   workerctl bind --task <task-name> --worker <worker-name> --manager <manager-name>
+   {workerctl} bind --task <task-name> --worker <worker-name> --manager <manager-name>
 
 5. Configure manager supervision:
 
-   workerctl manager-config <task-name> --questions
+   {workerctl} manager-config <task-name> --questions
 
 6. After the task is bound and before editing files for the task, record your
    acknowledgement:
 
-   workerctl worker-ack <task-name> --from-stdin
+   {workerctl} worker-ack <task-name> --from-stdin
 
    The JSON should restate the goal, list proposed must-have/follow-up
    criteria, expected tools, open questions, and ready_to_start.
@@ -310,8 +311,8 @@ you to choose them.
 
 If the user asks to see the manager or worker terminal for your task, run:
 
-workerctl open-manager <task-name>
-workerctl open-worker <task-name>
+{workerctl} open-manager <task-name>
+{workerctl} open-worker <task-name>
 """
 
 
@@ -5225,11 +5226,12 @@ def worker_ack_task_prompt(task_name: str | None, task_prompt: str | None) -> st
     if task_prompt is None:
         return None
     task_ref = task_name or "<task>"
+    workerctl = workerctl_cli()
     return f"""{task_prompt}
 
 Before editing files or running implementation work, acknowledge the task contract:
 
-workerctl worker-ack {task_ref} --from-stdin
+{workerctl} worker-ack {task_ref} --from-stdin
 
 Use a JSON object with goal_restatement, proposed_criteria, expected_tools,
 open_questions, and ready_to_start."""
