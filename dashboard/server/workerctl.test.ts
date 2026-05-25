@@ -11,6 +11,7 @@ import {
   dispatchChainEntries,
   dispatchHeartbeatTelemetryOptions,
   dashboardTaskName,
+  isDashboardSession,
 } from "./index.ts";
 import {
   encodeTerminalResizeMessage,
@@ -91,6 +92,19 @@ test("explicit dashboard task overrides dashboard-bound task", () => {
     "requested-task",
   );
   assert.equal(dashboardTaskName({}, { task_name: "bound-task" }), "bound-task");
+});
+
+test("ignores gone registrations for dashboard terminals", () => {
+  assert.equal(isDashboardSession({
+    name: "old-worker",
+    state: "gone",
+    tmux_session: "workerctl-dashboard-a",
+  }), false);
+  assert.equal(isDashboardSession({
+    name: "active-worker",
+    state: "active",
+    tmux_session: "workerctl-dashboard-a",
+  }), true);
 });
 
 test("groups dispatch correlation chains with command attempts for dashboard display", () => {

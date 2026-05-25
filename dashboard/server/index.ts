@@ -150,8 +150,8 @@ type DispatchConversationItem = {
   label: string;
 };
 
-function isDashboardSession(session: Record<string, unknown>): boolean {
-  return DASHBOARD_TERMINALS.some((terminal) => terminal.tmuxSession === session.tmux_session);
+export function isDashboardSession(session: Record<string, unknown>): boolean {
+  return session.state !== "gone" && DASHBOARD_TERMINALS.some((terminal) => terminal.tmuxSession === session.tmux_session);
 }
 
 function sessionAlive(session: Record<string, unknown>): boolean | null {
