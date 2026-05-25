@@ -236,6 +236,16 @@ function latestDispatchHeartbeat(snapshot: SnapshotResult | null, durableHeartbe
   };
 }
 
+function dispatchOperatorMessage(coreStatus: "active" | "not_observed" | "stale"): string {
+  if (coreStatus === "active") {
+    return "Dispatch is routing worker/manager events.";
+  }
+  if (coreStatus === "stale") {
+    return "Dispatch heartbeat is stale; worker completions may not wake managers.";
+  }
+  return "Dispatch has not been observed; worker completions will not wake managers.";
+}
+
 function commandLabel(command: AuditCommand | undefined, commandId: string | undefined): string {
   const type = command?.type || "command";
   const id = command?.id || commandId || "";
@@ -320,9 +330,13 @@ export function dispatchHealth(
   const sideEffectRisk = attempts.filter((attempt) => attempt.side_effect_started && !attempt.side_effect_completed);
   const suppressedSignals = (suppressedTelemetry || snapshot?.telemetry?.recent || [])
     .filter((event) => event.actor === "dispatch" && event.event_type === "dispatch_signal_suppressed");
+  const heartbeat = latestDispatchHeartbeat(snapshot, heartbeatTelemetry as TelemetryEvent[]);
+  const coreStatus = heartbeat.state as "active" | "not_observed" | "stale";
   return {
+    core_status: coreStatus,
     failed_count: commands.length ? failed.length : snapshot?.commands?.failed_count || 0,
-    heartbeat: latestDispatchHeartbeat(snapshot, heartbeatTelemetry as TelemetryEvent[]),
+    heartbeat,
+    operator_message: dispatchOperatorMessage(coreStatus),
     queued_count: commands.length ? queued.length : snapshot?.commands?.unfinished_count || 0,
     side_effect_risk_count: sideEffectRisk.length,
     stale_claim_count: stale.length,

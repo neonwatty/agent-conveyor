@@ -286,6 +286,8 @@ test("counts suppressed dispatch signals in health", () => {
 test("marks missing dispatch heartbeat as not observed", () => {
   const health = dispatchHealth({ telemetry: { recent: [] } }, null);
 
+  assert.equal(health.core_status, "not_observed");
+  assert.equal(health.operator_message, "Dispatch has not been observed; worker completions will not wake managers.");
   assert.equal(health.heartbeat.state, "not_observed");
   assert.equal(health.heartbeat.stale, true);
   assert.equal(health.heartbeat.timestamp, "");
@@ -306,6 +308,8 @@ test("marks stale dispatch heartbeat explicitly", () => {
     },
   }, null);
 
+  assert.equal(health.core_status, "stale");
+  assert.equal(health.operator_message, "Dispatch heartbeat is stale; worker completions may not wake managers.");
   assert.equal(health.heartbeat.state, "stale");
   assert.equal(health.heartbeat.dispatcher_id, "dispatch-old");
 });
@@ -321,6 +325,8 @@ test("uses durable dispatch heartbeat when snapshot recent events omit it", () =
     },
   ]);
 
+  assert.equal(health.core_status, "active");
+  assert.equal(health.operator_message, "Dispatch is routing worker/manager events.");
   assert.equal(health.heartbeat.state, "active");
   assert.equal(health.heartbeat.dispatcher_id, "dispatch-live");
   assert.equal(health.heartbeat.iteration, 4);

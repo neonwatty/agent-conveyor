@@ -59,6 +59,7 @@ type DispatchChain = {
   time?: string;
 };
 type DispatchHealth = {
+  core_status: "active" | "not_observed" | "stale";
   failed_count: number;
   heartbeat?: {
     dispatcher_id?: string;
@@ -71,6 +72,7 @@ type DispatchHealth = {
     timestamp?: string;
   } | null;
   queued_count: number;
+  operator_message: string;
   side_effect_risk_count: number;
   stale_claim_count: number;
   suppressed_signal_count: number;
@@ -138,7 +140,8 @@ function DispatchPanel({ observation }: { observation: Observation | null }) {
   const health = observation?.dispatch?.health;
   const chains = observation?.dispatch?.chains || [];
   const heartbeat = health?.heartbeat;
-  const heartbeatState = heartbeat?.state || (heartbeat?.stale ? "stale" : "not_observed");
+  const coreStatus = health?.core_status || heartbeat?.state || (heartbeat?.stale ? "stale" : "not_observed");
+  const heartbeatState = coreStatus;
   const heartbeatLabel = heartbeatState === "active"
     ? "active"
     : heartbeatState === "stale"
@@ -154,6 +157,13 @@ function DispatchPanel({ observation }: { observation: Observation | null }) {
   return (
     <section className="dispatch-section">
       <h2>Dispatch</h2>
+      <div className="dispatch-core-banner" data-state={coreStatus}>
+        <div>
+          <span>Dispatch core</span>
+          <strong>{coreStatus === "not_observed" ? "not observed" : coreStatus}</strong>
+        </div>
+        <p>{health?.operator_message || "Dispatch has not been observed; worker completions will not wake managers."}</p>
+      </div>
       <div className="dispatch-health">
         {chips.map(([label, value, state]) => (
           <div key={label} data-state={state}>
