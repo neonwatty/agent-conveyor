@@ -2941,6 +2941,43 @@ class CliTests(unittest.TestCase):
         self.assertFalse(spawned[0].killed)
         self.assertEqual(spawned[0].wait_calls, [2])
 
+    def test_dashboard_ensure_dispatch_reuses_active_dispatch_heartbeat(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                worker_db.emit_telemetry_event(
+                    conn,
+                    actor="dispatch",
+                    event_type="dispatch_watch_heartbeat",
+                    summary="Dispatch watch heartbeat.",
+                    correlation={"dispatcher_id": "dispatch-pair", "iteration": 12},
+                    attributes={"dry_run": False, "processed_count": 0},
+                )
+                conn.commit()
+
+            args = argparse.Namespace(
+                db_path=str(db_path),
+                dispatcher_id="dispatch-dashboard",
+                dry_run=False,
+                ensure_dispatch=True,
+                host="127.0.0.1",
+                json=False,
+                port=8797,
+                task="qa-task",
+                workerctl_path="scripts/workerctl",
+            )
+
+            with mock.patch("workerctl.commands.subprocess.Popen") as popen, mock.patch(
+                "workerctl.commands.subprocess.run",
+                return_value=subprocess.CompletedProcess(["npm"], 0),
+            ) as run:
+                result = commands.command_dashboard(args)
+
+        self.assertEqual(result, 0)
+        popen.assert_not_called()
+        run.assert_called_once()
+
     def test_dashboard_ensure_dispatch_dry_run_does_not_start_watch_process(self):
         args = argparse.Namespace(
             db_path="/tmp/workerctl-dashboard-test.db",
@@ -14979,6 +15016,49 @@ class PairCommandTests(unittest.TestCase):
                 "start_new_session": True,
             },
         )
+
+    def test_pair_reuses_active_dispatch_heartbeat(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = self._setup_db(tmpdir)
+            with worker_db.connect(db_path) as conn:
+                worker_db.emit_telemetry_event(
+                    conn,
+                    actor="dispatch",
+                    event_type="dispatch_watch_heartbeat",
+                    summary="Dispatch watch heartbeat.",
+                    correlation={"dispatcher_id": "dispatch-pair", "iteration": 44},
+                    attributes={"dry_run": False, "processed_count": 0},
+                )
+                conn.commit()
+            args = self._pair_args(
+                db_path=db_path,
+                tmpdir=tmpdir,
+                dispatcher_id="dispatch-pair-test",
+            )
+
+            class Proc:
+                pid = 12345
+
+                def poll(self):
+                    return None
+
+                def wait(self, timeout=None):
+                    return 0
+
+            stdout_capture = io.StringIO()
+            with mock.patch.object(
+                commands,
+                "_spawn_codex_and_register",
+                side_effect=self._fake_pair_spawn(db_path),
+            ), mock.patch("workerctl.commands.subprocess.Popen", return_value=Proc()) as popen, contextlib.redirect_stdout(stdout_capture):
+                result = commands.command_pair(args)
+
+        self.assertEqual(result, 0)
+        popen.assert_not_called()
+        payload = json.loads(stdout_capture.getvalue())
+        self.assertTrue(payload["dispatch"]["ensure"])
+        self.assertFalse(payload["dispatch"]["started"])
+        self.assertIsNone(payload["dispatch"]["pid"])
 
     def _bind_continuation_sessions(self, conn, *, task_name, tmpdir):
         root = Path(tmpdir)
