@@ -146,6 +146,7 @@ type AuditResult = {
 };
 
 type DispatchConversationItem = {
+  detail?: string;
   kind: string;
   label: string;
 };
@@ -263,6 +264,15 @@ function notificationLabel(notification: Record<string, unknown> | undefined, fa
   return notification?.id ? `${signalType} notification #${notification.id}` : signalType;
 }
 
+function notificationMessage(notification: Record<string, unknown> | undefined): string | undefined {
+  const payload = notification?.payload;
+  if (!payload || typeof payload !== "object") {
+    return undefined;
+  }
+  const message = (payload as Record<string, unknown>).message;
+  return typeof message === "string" && message.trim() ? message : undefined;
+}
+
 function latestDispatchAttempt(attempts: AuditCommandAttempt[]): AuditCommandAttempt | undefined {
   const timestampedAttempts = attempts
     .map((attempt) => ({ attempt, timestamp: attempt.started_at ? Date.parse(attempt.started_at) : NaN }))
@@ -287,7 +297,11 @@ function dispatchConversationItems(
       ? { kind: "dispatch_attempt", label: `Dispatch ${dispatchAttempt.state || "attempted"} via ${dispatchAttempt.dispatcher_id || "unknown dispatcher"}` }
       : null,
     primaryNotification
-      ? { kind: "routed_notification", label: `Routed notification #${primaryNotification.id} ${primaryNotification.state || "unknown"}` }
+      ? {
+        detail: notificationMessage(primaryNotification),
+        kind: "routed_notification",
+        label: `Routed notification #${primaryNotification.id} ${primaryNotification.state || "unknown"}`,
+      }
       : null,
     chain.manager_cycle_id
       ? { kind: "manager_cycle", label: `Manager cycle #${chain.manager_cycle_id} consumed the routed fact` }

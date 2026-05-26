@@ -48,7 +48,7 @@ type DispatchChain = {
   command_state?: string;
   command_type?: string;
   correlation_id?: string | null;
-  conversation?: Array<{ kind: string; label: string }>;
+  conversation?: Array<{ detail?: string; kind: string; label: string }>;
   error?: string | null;
   key: string;
   manager_cycle_id?: number | null;
@@ -210,7 +210,10 @@ function DispatchPanel({ observation }: { observation: Observation | null }) {
             {chain.conversation?.length ? (
               <ol className="dispatch-conversation">
                 {chain.conversation.map((item, index) => (
-                  <li key={`${chain.key}-${index}`} data-kind={item.kind}>{item.label}</li>
+                  <li key={`${chain.key}-${index}`} data-kind={item.kind}>
+                    <span>{item.label}</span>
+                    {item.detail ? <em>{item.detail}</em> : null}
+                  </li>
                 ))}
               </ol>
             ) : null}

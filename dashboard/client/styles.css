@@ -382,6 +382,18 @@ body {
   overflow-wrap: anywhere;
 }
 
+.dispatch-chain-list .dispatch-conversation li span,
+.dispatch-chain-list .dispatch-conversation li em {
+  display: block;
+}
+
+.dispatch-chain-list .dispatch-conversation li em {
+  color: #33413a;
+  font-size: 10px;
+  font-style: normal;
+  margin-top: 2px;
+}
+
 .dispatch-chain-list .dispatch-conversation li[data-kind="dispatch_attempt"] {
   border-left-color: #557a68;
 }

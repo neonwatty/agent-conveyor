@@ -270,6 +270,11 @@ test("dispatch chains summarize worker manager conversation", () => {
     routed_notifications: [
       {
         id: 99,
+        payload: {
+          message: "Worker demo-worker appears to have completed a turn for task demo-task.",
+          source_session: "demo-worker",
+          target_session: "demo-manager",
+        },
         state: "delivered",
         signal_type: "nudge_worker",
       },
@@ -279,7 +284,11 @@ test("dispatch chains summarize worker manager conversation", () => {
   assert.deepEqual(chains[0].conversation, [
     { kind: "manager_decision", label: "Manager decision #12" },
     { kind: "dispatch_attempt", label: "Dispatch succeeded via dispatch-local" },
-    { kind: "routed_notification", label: "Routed notification #99 delivered" },
+    {
+      detail: "Worker demo-worker appears to have completed a turn for task demo-task.",
+      kind: "routed_notification",
+      label: "Routed notification #99 delivered",
+    },
     { kind: "manager_cycle", label: "Manager cycle #44 consumed the routed fact" },
   ]);
 });

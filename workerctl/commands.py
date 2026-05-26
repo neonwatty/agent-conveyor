@@ -164,6 +164,30 @@ def dashboard_launch_payload(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
+def _recent_active_dispatch_heartbeat(db_path: str | Path | None, *, stale_seconds: float = 10.0) -> dict[str, Any] | None:
+    try:
+        with connect_db(Path(db_path).expanduser().resolve() if db_path else None) as conn:
+            initialize_database(conn)
+            heartbeats = query_telemetry_events(
+                conn,
+                actor="dispatch",
+                event_type="dispatch_watch_heartbeat",
+                limit=1,
+                newest=True,
+            )
+    except Exception:
+        return None
+    if not heartbeats:
+        return None
+    heartbeat = heartbeats[0]
+    if heartbeat.get("attributes", {}).get("dry_run") is True:
+        return None
+    heartbeat_age = age_seconds(heartbeat.get("timestamp"))
+    if heartbeat_age is None or heartbeat_age > stale_seconds:
+        return None
+    return heartbeat
+
+
 def command_dashboard(args: argparse.Namespace) -> int:
     payload = dashboard_launch_payload(args)
     if args.dry_run:
@@ -175,14 +199,15 @@ def command_dashboard(args: argparse.Namespace) -> int:
         return 0
     dispatch_process = None
     if payload["ensure_dispatch"] and payload["dispatch_command"]:
-        dispatch_process = subprocess.Popen(
-            payload["dispatch_command"],
-            cwd=PROJECT_ROOT,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
-        )
+        if _recent_active_dispatch_heartbeat(getattr(args, "db_path", None)) is None:
+            dispatch_process = subprocess.Popen(
+                payload["dispatch_command"],
+                cwd=PROJECT_ROOT,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
     try:
         return subprocess.run(payload["command"], cwd=PROJECT_ROOT, check=False).returncode
     finally:
@@ -7617,17 +7642,18 @@ def command_pair(args: argparse.Namespace) -> int:
             "started": False,
         }
         if dispatch_payload["ensure_dispatch"] and dispatch_payload["dispatch_command"]:
-            dispatch_process = subprocess.Popen(
-                dispatch_payload["dispatch_command"],
-                cwd=PROJECT_ROOT,
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                start_new_session=True,
-            )
-            dispatch_result["pid"] = dispatch_process.pid
-            dispatch_result["started"] = True
-            _release_detached_popen_handle(dispatch_process)
+            if _recent_active_dispatch_heartbeat(db_path) is None:
+                dispatch_process = subprocess.Popen(
+                    dispatch_payload["dispatch_command"],
+                    cwd=PROJECT_ROOT,
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    start_new_session=True,
+                )
+                dispatch_result["pid"] = dispatch_process.pid
+                dispatch_result["started"] = True
+                _release_detached_popen_handle(dispatch_process)
 
         result = {
             "task": {"name": args.task, "id": task_id, "created": task_created},
