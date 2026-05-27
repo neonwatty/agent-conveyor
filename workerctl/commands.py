@@ -4568,6 +4568,17 @@ def _route_worker_completion(
         worker_name=row["worker_session_name"],
         task_name=row["task_name"],
     )
+    source_payload = json.loads(row["source_payload_json"])
+    worker_receipt = {
+        "completed_at": source_payload.get("completed_at"),
+        "duration_ms": source_payload.get("duration_ms"),
+        "last_agent_message": source_payload.get("last_agent_message"),
+        "source_event_id": row["source_event_id"],
+        "source_event_timestamp": row["source_event_timestamp"],
+        "source_session": row["worker_session_name"],
+        "time_to_first_token_ms": source_payload.get("time_to_first_token_ms"),
+        "turn_id": source_payload.get("turn_id"),
+    }
     payload = {
         "dispatcher_id": dispatcher_id,
         "message": message,
@@ -4576,6 +4587,7 @@ def _route_worker_completion(
         "source_session": row["worker_session_name"],
         "target_session": row["manager_session_name"],
         "task": row["task_name"],
+        "worker_receipt": worker_receipt,
     }
     result = {
         "binding_id": row["binding_id"],
@@ -6895,6 +6907,21 @@ def _lsof_codex_rollout(pid: int) -> str | None:
     return None
 
 
+def _parse_rollout_timestamp(value: object) -> datetime | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    text = value.strip()
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
 def _register_session_from_args(args: argparse.Namespace, *, role: str) -> dict:
     from workerctl import codex_session as cs
     from workerctl import db as worker_db
@@ -6972,6 +6999,7 @@ def _discover_codex_session_in_tmux(
     *,
     timeout_seconds: int = 15,
     poll_interval: float = 0.5,
+    minimum_session_timestamp: datetime | None = None,
 ) -> dict:
     """Poll until we find the native codex pid + open rollout in a tmux session's
     process tree. Raises WorkerError on timeout.
@@ -7033,6 +7061,24 @@ def _discover_codex_session_in_tmux(
                     queue.extend(cs._ps_children_default(pid))
                     continue
                 meta = cs.read_session_meta(rollout_path)
+                meta_timestamp = _parse_rollout_timestamp(meta.get("timestamp"))
+                if minimum_session_timestamp is not None and meta_timestamp is None:
+                    last_error = (
+                        "found codex rollout "
+                        f"{rollout_path} without parseable session timestamp; "
+                        "waiting for fresh session_meta"
+                    )
+                    continue
+                if (
+                    minimum_session_timestamp is not None
+                    and meta_timestamp < minimum_session_timestamp
+                ):
+                    last_error = (
+                        "found stale codex rollout "
+                        f"{rollout_path} from {meta_timestamp.isoformat()}; "
+                        "waiting for fresh session_meta"
+                    )
+                    continue
                 return {
                     "native_pid": pid,
                     "codex_session_path": str(rollout_path),
@@ -7116,7 +7162,9 @@ def _spawn_codex_and_register(
         codex_args.append(prompt)
     codex_cmd = " ".join(shlex.quote(a) for a in codex_args)
 
-    # Spawn tmux + codex.
+    # Spawn tmux + codex. Discovery must ignore older rollout files briefly held
+    # by a newly-started Codex process before it opens the fresh session file.
+    spawn_started_at = datetime.now(timezone.utc)
     worker_tmux.run([
         "tmux", "new-session", "-d", "-s", tmux_session_name, "-c", cwd, codex_cmd,
     ])
@@ -7124,7 +7172,9 @@ def _spawn_codex_and_register(
     # Discover codex pid + rollout.
     try:
         discovery = _discover_codex_session_in_tmux(
-            tmux_session_name, timeout_seconds=timeout_seconds,
+            tmux_session_name,
+            timeout_seconds=timeout_seconds,
+            minimum_session_timestamp=spawn_started_at,
         )
     except WorkerError as exc:
         raise WorkerError(

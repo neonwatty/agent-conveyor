@@ -217,7 +217,13 @@ test("groups completion-only dispatch notifications for dashboard display", () =
         correlation_id: "dispatch-completion",
         created_at: "2026-05-23T10:02:00Z",
         id: 31,
+        payload: {
+          worker_receipt: {
+            last_agent_message: "pytest passed; diff is focused",
+          },
+        },
         signal_type: "worker_task_complete",
+        source_event_id: 17,
         state: "delivered",
       },
     ],
@@ -231,6 +237,18 @@ test("groups completion-only dispatch notifications for dashboard display", () =
   assert.equal(chains[0].notification_count, 1);
   assert.equal(chains[0].summary, "worker_task_complete notification #31");
   assert.equal(chains[0].time, "2026-05-23T10:02:00Z");
+  assert.deepEqual(chains[0].conversation, [
+    {
+      detail: undefined,
+      kind: "routed_notification",
+      label: "Routed notification #31 delivered",
+    },
+    {
+      detail: "pytest passed; diff is focused",
+      kind: "worker_receipt",
+      label: "Worker receipt from source event #17",
+    },
+  ]);
 });
 
 test("dispatch chains summarize worker manager conversation", () => {

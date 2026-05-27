@@ -2363,6 +2363,44 @@ def latest_codex_event_subtype(
     return row["subtype"] if row else None
 
 
+def latest_worker_receipt_for_task(conn: sqlite3.Connection, *, task_id: str) -> dict[str, Any] | None:
+    """Return the latest worker task_complete receipt for a task, if one exists."""
+    row = conn.execute(
+        """
+        select
+          ce.id as source_event_id,
+          ce.timestamp as source_event_timestamp,
+          ce.session_id as source_session_id,
+          ce.payload_json as source_payload_json,
+          s.name as source_session_name,
+          b.id as binding_id
+        from codex_events ce
+        join bindings b on b.worker_session_id = ce.session_id
+        join sessions s on s.id = ce.session_id
+        where b.task_id = ?
+          and ce.subtype = 'task_complete'
+        order by ce.id desc
+        limit 1
+        """,
+        (task_id,),
+    ).fetchone()
+    if row is None:
+        return None
+    payload = json.loads(row["source_payload_json"])
+    return {
+        "binding_id": row["binding_id"],
+        "completed_at": payload.get("completed_at"),
+        "duration_ms": payload.get("duration_ms"),
+        "last_agent_message": payload.get("last_agent_message"),
+        "source_event_id": row["source_event_id"],
+        "source_event_timestamp": row["source_event_timestamp"],
+        "source_session_id": row["source_session_id"],
+        "source_session_name": row["source_session_name"],
+        "time_to_first_token_ms": payload.get("time_to_first_token_ms"),
+        "turn_id": payload.get("turn_id"),
+    }
+
+
 def unrouted_worker_completion_events(conn: sqlite3.Connection, *, limit: int = 10) -> list[sqlite3.Row]:
     """Return bound worker task_complete events that Dispatch has not routed."""
     return list(

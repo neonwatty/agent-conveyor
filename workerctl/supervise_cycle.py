@@ -374,6 +374,7 @@ def run_cycle(
             "worker_ack": worker_ack,
             "manager_ack": manager_ack,
             "worker_handoff": worker_db.latest_worker_handoff(conn, task_id=binding["task_id"]),
+            "worker_receipt": worker_db.latest_worker_receipt_for_task(conn, task_id=binding["task_id"]),
             "acceptance_criteria": criteria_context,
             "criteria_negotiation": _criteria_negotiation_context(
                 task_name=task_name,
@@ -389,6 +390,7 @@ def run_cycle(
                 "require_acks": bool(manager_config and manager_config.get("require_acks")),
                 "worker_ack_present": worker_ack is not None,
                 "worker_handoff_present": manager_context["worker_handoff"] is not None,
+                "worker_receipt_present": manager_context["worker_receipt"] is not None,
                 "consumed_dispatch_notifications": consumed_notifications,
             },
         )
