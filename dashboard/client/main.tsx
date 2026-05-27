@@ -137,6 +137,20 @@ function roleLabel(terminal: TerminalState) {
   return `${session.role}: ${session.name} (${health})`;
 }
 
+function latestFinishChain(observation: Observation | null): DispatchChain | undefined {
+  return observation?.dispatch?.chains.find((chain) => chain.command_type === "finish_task");
+}
+
+function finishLabel(chain: DispatchChain | undefined) {
+  if (!chain) {
+    return "none";
+  }
+  return [
+    chain.command_state || "unknown",
+    chain.command_id || chain.correlation_id || null,
+  ].filter(Boolean).join(" / ");
+}
+
 function DispatchPanel({ observation }: { observation: Observation | null }) {
   const health = observation?.dispatch?.health;
   const chains = observation?.dispatch?.chains || [];
@@ -281,12 +295,15 @@ function TerminalPane({ terminal }: { terminal: TerminalState }) {
 function StatePanel({ observation }: { observation: Observation | null }) {
   const terminalA = observation?.terminals.find((item) => item.id === "a");
   const terminalB = observation?.terminals.find((item) => item.id === "b");
+  const finish = latestFinishChain(observation);
   const rows = [
     ["Terminal A", terminalA ? roleLabel(terminalA) : "starting"],
     ["Terminal B", terminalB ? roleLabel(terminalB) : "starting"],
     ["Relationship", observation?.binding ? observation.binding.state || "bound" : "none"],
     ["Task", observation?.task?.name || observation?.binding?.task_name || "none"],
+    ["Task state", observation?.task?.state || "unknown"],
     ["Latest cycle", observation?.latest_cycle?.state || "none"],
+    ["Finish task", finishLabel(finish)],
   ];
   return (
     <section>

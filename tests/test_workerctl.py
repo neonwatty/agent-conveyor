@@ -1303,14 +1303,22 @@ class DispatchTests(unittest.TestCase):
         conn.commit()
         return worker_id, manager_id
 
-    def insert_completion(self, conn, session_id, *, offset=1, timestamp="2026-05-23T10:01:00Z"):
+    def insert_completion(
+        self,
+        conn,
+        session_id,
+        *,
+        offset=1,
+        timestamp="2026-05-23T10:01:00Z",
+        payload=None,
+    ):
         return worker_db.insert_codex_event(
             conn,
             session_id=session_id,
             timestamp=timestamp,
             event_type="message",
             subtype="task_complete",
-            payload={"msg": "done"},
+            payload=payload or {"msg": "done"},
             byte_offset=offset,
         )
 
@@ -1318,7 +1326,14 @@ class DispatchTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             conn, db_path = self.open_db(tmpdir)
             worker_id, _manager_id = self.setup_bound_task(conn)
-            event_id = self.insert_completion(conn, worker_id)
+            event_id = self.insert_completion(
+                conn,
+                worker_id,
+                payload={
+                    "last_agent_message": "pytest passed; diff is focused",
+                    "turn_id": "turn-dispatch",
+                },
+            )
             conn.commit()
 
             sent = []
@@ -1352,6 +1367,14 @@ class DispatchTests(unittest.TestCase):
             self.assertEqual(notifications[0]["state"], "delivered")
             self.assertEqual(notifications[0]["source_event_id"], event_id)
             self.assertIn(str(event_id), notifications[0]["dedupe_key"])
+            self.assertEqual(
+                notifications[0]["payload"]["worker_receipt"]["last_agent_message"],
+                "pytest passed; diff is focused",
+            )
+            self.assertEqual(
+                notifications[0]["payload"]["worker_receipt"]["turn_id"],
+                "turn-dispatch",
+            )
             self.assertTrue(notifications[0]["correlation_id"].startswith("dispatch-"))
             self.assertIn("dispatch_signal_detected", [event["event_type"] for event in telemetry])
             self.assertIn("dispatch_signal_routed", [event["event_type"] for event in telemetry])
@@ -10955,6 +10978,36 @@ class SuperviseCycleTests(unittest.TestCase):
             self.assertEqual(result["manager_context"]["worker_ack"]["payload"]["ready_to_start"], True)
             self.assertEqual(result["manager_context"]["manager_ack"]["payload"]["ready_to_supervise"], True)
 
+    def test_run_cycle_includes_latest_worker_receipt(self):
+        from workerctl import supervise_cycle
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self._setup_bound_task(conn, tmpdir, [
+                {"type": "session_meta", "payload": {"id": "u-w", "cwd": "/r"}},
+                {
+                    "timestamp": "2026-05-11T14:32:11Z",
+                    "type": "event_msg",
+                    "payload": {
+                        "type": "task_complete",
+                        "turn_id": "turn-1",
+                        "last_agent_message": "pytest passed; diff is focused",
+                        "duration_ms": 1200,
+                    },
+                },
+            ])
+
+            result = supervise_cycle.run_cycle(
+                conn, task_name="t", now="2026-05-11T14:32:15Z",
+            )
+
+            receipt = result["manager_context"]["worker_receipt"]
+            self.assertEqual(receipt["last_agent_message"], "pytest passed; diff is focused")
+            self.assertEqual(receipt["source_session_name"], "w")
+            self.assertEqual(receipt["source_event_timestamp"], "2026-05-11T14:32:11Z")
+            self.assertEqual(receipt["turn_id"], "turn-1")
+            self.assertEqual(result["task_completed"], True)
+
     def test_run_cycle_requires_acknowledgements_when_manager_configured(self):
         from workerctl import supervise_cycle
 
@@ -13284,7 +13337,13 @@ class StartWorkerTests(unittest.TestCase):
                 def fake_session_exists(name):
                     return False
 
-                def fake_discover(tmux_session, *, timeout_seconds=15, poll_interval=0.5):
+                def fake_discover(
+                    tmux_session,
+                    *,
+                    timeout_seconds=15,
+                    poll_interval=0.5,
+                    minimum_session_timestamp=None,
+                ):
                     return {
                         "native_pid": 99999,
                         "codex_session_path": str(rollout),
@@ -13360,7 +13419,13 @@ class StartWorkerTests(unittest.TestCase):
 
                     return R()
 
-                def fake_discover(tmux_session, *, timeout_seconds=15, poll_interval=0.5):
+                def fake_discover(
+                    tmux_session,
+                    *,
+                    timeout_seconds=15,
+                    poll_interval=0.5,
+                    minimum_session_timestamp=None,
+                ):
                     return {
                         "native_pid": 99998,
                         "codex_session_path": str(rollout),
@@ -13400,6 +13465,132 @@ class StartWorkerTests(unittest.TestCase):
                     worker_commands._discover_codex_session_in_tmux = orig_discover
             finally:
                 os.environ.pop("WORKERCTL_STATE_ROOT", None)
+
+    def test_discover_tmux_session_skips_stale_rollout_metadata(self):
+        from workerctl import codex_session
+        from workerctl import commands as worker_commands
+        from workerctl import tmux as worker_tmux
+
+        calls = {"rollout": 0}
+
+        def fake_run(cmd, check=True, input_text=None):
+            self.assertEqual(cmd[:3], ["tmux", "list-panes", "-t"])
+
+            class R:
+                returncode = 0
+                stdout = "101\n"
+                stderr = ""
+
+            return R()
+
+        def fake_children(pid):
+            return [202] if pid == 101 else []
+
+        def fake_rollout(pid):
+            if pid == 101:
+                raise codex_session.CodexSessionError("shell has no rollout")
+            self.assertEqual(pid, 202)
+            calls["rollout"] += 1
+            if calls["rollout"] == 1:
+                return Path("/tmp/stale-rollout.jsonl")
+            return Path("/tmp/fresh-rollout.jsonl")
+
+        def fake_meta(path):
+            if str(path).endswith("stale-rollout.jsonl"):
+                return {
+                    "id": "old-session",
+                    "timestamp": "2026-05-25T23:54:16.133Z",
+                    "cwd": "/repo",
+                }
+            return {
+                "id": "fresh-session",
+                "timestamp": "2026-05-27T21:12:26.177Z",
+                "cwd": "/repo",
+            }
+
+        orig_run = worker_tmux.run
+        orig_children = codex_session._ps_children_default
+        orig_rollout = codex_session.find_rollout_path_for_pid
+        orig_meta = codex_session.read_session_meta
+        worker_tmux.run = fake_run
+        codex_session._ps_children_default = fake_children
+        codex_session.find_rollout_path_for_pid = fake_rollout
+        codex_session.read_session_meta = fake_meta
+        try:
+            result = worker_commands._discover_codex_session_in_tmux(
+                "codex-fresh",
+                timeout_seconds=1,
+                poll_interval=0.001,
+                minimum_session_timestamp=datetime(2026, 5, 27, 21, 12, 20, tzinfo=timezone.utc),
+            )
+        finally:
+            worker_tmux.run = orig_run
+            codex_session._ps_children_default = orig_children
+            codex_session.find_rollout_path_for_pid = orig_rollout
+            codex_session.read_session_meta = orig_meta
+
+        self.assertEqual(result["codex_session_id"], "fresh-session")
+        self.assertEqual(result["codex_session_path"], "/tmp/fresh-rollout.jsonl")
+        self.assertGreaterEqual(calls["rollout"], 2)
+
+    def test_discover_tmux_session_skips_unparseable_rollout_timestamp(self):
+        from workerctl import codex_session
+        from workerctl import commands as worker_commands
+        from workerctl import tmux as worker_tmux
+
+        calls = {"rollout": 0}
+
+        def fake_run(cmd, check=True, input_text=None):
+            class R:
+                returncode = 0
+                stdout = "101\n"
+                stderr = ""
+
+            return R()
+
+        def fake_children(pid):
+            return [202] if pid == 101 else []
+
+        def fake_rollout(pid):
+            if pid == 101:
+                raise codex_session.CodexSessionError("shell has no rollout")
+            calls["rollout"] += 1
+            if calls["rollout"] == 1:
+                return Path("/tmp/no-timestamp-rollout.jsonl")
+            return Path("/tmp/fresh-rollout.jsonl")
+
+        def fake_meta(path):
+            if str(path).endswith("no-timestamp-rollout.jsonl"):
+                return {"id": "missing-timestamp", "cwd": "/repo"}
+            return {
+                "id": "fresh-session",
+                "timestamp": "2026-05-27T21:12:26.177Z",
+                "cwd": "/repo",
+            }
+
+        orig_run = worker_tmux.run
+        orig_children = codex_session._ps_children_default
+        orig_rollout = codex_session.find_rollout_path_for_pid
+        orig_meta = codex_session.read_session_meta
+        worker_tmux.run = fake_run
+        codex_session._ps_children_default = fake_children
+        codex_session.find_rollout_path_for_pid = fake_rollout
+        codex_session.read_session_meta = fake_meta
+        try:
+            result = worker_commands._discover_codex_session_in_tmux(
+                "codex-fresh",
+                timeout_seconds=1,
+                poll_interval=0.001,
+                minimum_session_timestamp=datetime(2026, 5, 27, 21, 12, 20, tzinfo=timezone.utc),
+            )
+        finally:
+            worker_tmux.run = orig_run
+            codex_session._ps_children_default = orig_children
+            codex_session.find_rollout_path_for_pid = orig_rollout
+            codex_session.read_session_meta = orig_meta
+
+        self.assertEqual(result["codex_session_id"], "fresh-session")
+        self.assertGreaterEqual(calls["rollout"], 2)
 
     def test_start_worker_refuses_if_session_name_already_registered(self):
         """If a session with the given name already exists in the DB, refuse cleanly."""
@@ -13451,7 +13642,13 @@ class StartWorkerTests(unittest.TestCase):
                 def fake_session_exists(name):
                     return False
 
-                def timeout_discover(tmux_session, *, timeout_seconds=15, poll_interval=0.5):
+                def timeout_discover(
+                    tmux_session,
+                    *,
+                    timeout_seconds=15,
+                    poll_interval=0.5,
+                    minimum_session_timestamp=None,
+                ):
                     raise WorkerError(
                         f"codex did not write session_meta within {timeout_seconds}s"
                     )
@@ -13619,7 +13816,13 @@ class StartManagerTests(unittest.TestCase):
                 def fake_session_exists(name):
                     return False
 
-                def fake_discover(tmux_session, *, timeout_seconds=15, poll_interval=0.5):
+                def fake_discover(
+                    tmux_session,
+                    *,
+                    timeout_seconds=15,
+                    poll_interval=0.5,
+                    minimum_session_timestamp=None,
+                ):
                     return {
                         "native_pid": 88888,
                         "codex_session_path": str(rollout),

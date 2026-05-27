@@ -402,6 +402,10 @@ body {
   border-left-color: #5870a0;
 }
 
+.dispatch-chain-list .dispatch-conversation li[data-kind="worker_receipt"] {
+  border-left-color: #1f7a55;
+}
+
 .dispatch-chain-list .dispatch-conversation li[data-kind="manager_cycle"],
 .dispatch-chain-list .dispatch-conversation li[data-kind="manager_decision"] {
   border-left-color: #8b7654;

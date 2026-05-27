@@ -273,6 +273,19 @@ function notificationMessage(notification: Record<string, unknown> | undefined):
   return typeof message === "string" && message.trim() ? message : undefined;
 }
 
+function notificationWorkerReceipt(notification: Record<string, unknown> | undefined): string | undefined {
+  const payload = notification?.payload;
+  if (!payload || typeof payload !== "object") {
+    return undefined;
+  }
+  const receipt = (payload as Record<string, unknown>).worker_receipt;
+  if (!receipt || typeof receipt !== "object") {
+    return undefined;
+  }
+  const message = (receipt as Record<string, unknown>).last_agent_message;
+  return typeof message === "string" && message.trim() ? message : undefined;
+}
+
 function latestDispatchAttempt(attempts: AuditCommandAttempt[]): AuditCommandAttempt | undefined {
   const timestampedAttempts = attempts
     .map((attempt) => ({ attempt, timestamp: attempt.started_at ? Date.parse(attempt.started_at) : NaN }))
@@ -301,6 +314,13 @@ function dispatchConversationItems(
         detail: notificationMessage(primaryNotification),
         kind: "routed_notification",
         label: `Routed notification #${primaryNotification.id} ${primaryNotification.state || "unknown"}`,
+      }
+      : null,
+    primaryNotification && notificationWorkerReceipt(primaryNotification)
+      ? {
+        detail: notificationWorkerReceipt(primaryNotification),
+        kind: "worker_receipt",
+        label: `Worker receipt from source event #${primaryNotification.source_event_id || "unknown"}`,
       }
       : null,
     chain.manager_cycle_id
