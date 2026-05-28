@@ -139,10 +139,21 @@ type AuditCorrelationChain = {
 };
 
 type AuditResult = {
+  acceptance_criteria?: Array<Record<string, unknown>>;
   command_attempts?: AuditCommandAttempt[];
   commands?: AuditCommand[];
   correlation_chains?: AuditCorrelationChain[];
   routed_notifications?: Array<Record<string, unknown>>;
+};
+
+type CriteriaSummary = {
+  accepted: number;
+  deferred: number;
+  open: number;
+  proposed: number;
+  rejected: number;
+  satisfied: number;
+  total: number;
 };
 
 type DispatchConversationItem = {
@@ -388,6 +399,38 @@ export function dispatchChainEntries(audit: AuditResult | null) {
     .slice(0, 12);
 }
 
+export function acceptanceCriteriaSummary(audit: AuditResult | null): CriteriaSummary {
+  const criteria = audit?.acceptance_criteria || [];
+  const summary: CriteriaSummary = {
+    accepted: 0,
+    deferred: 0,
+    open: 0,
+    proposed: 0,
+    rejected: 0,
+    satisfied: 0,
+    total: criteria.length,
+  };
+  for (const item of criteria) {
+    const status = typeof item.status === "string" ? item.status : "unknown";
+    if (status === "accepted") {
+      summary.accepted += 1;
+      summary.open += 1;
+    } else if (status === "deferred") {
+      summary.deferred += 1;
+    } else if (status === "proposed") {
+      summary.proposed += 1;
+      summary.open += 1;
+    } else if (status === "rejected") {
+      summary.rejected += 1;
+    } else if (status === "satisfied") {
+      summary.satisfied += 1;
+    } else {
+      summary.open += 1;
+    }
+  }
+  return summary;
+}
+
 export function dashboardTaskName(options: Pick<ReturnType<typeof normalizeServerOptions>, "task">, binding: Record<string, unknown> | null): string {
   return options.task || (binding?.task_name ? String(binding.task_name) : "");
 }
@@ -475,17 +518,17 @@ function interpretedTimeline({
       severity: "info",
     });
   }
-  for (const alert of snapshot?.alerts || []) {
+  for (const [index, alert] of (snapshot?.alerts || []).entries()) {
     items.push({
-      key: `alert-${alert.type}-${alert.message}`,
+      key: `alert-${index}-${alert.type}-${alert.message}`,
       title: alert.type || "Alert",
       detail: alert.message,
       severity: alert.severity || "warning",
     });
   }
-  for (const event of snapshot?.telemetry?.recent || []) {
+  for (const [index, event] of (snapshot?.telemetry?.recent || []).entries()) {
     items.push({
-      key: `telemetry-${event.timestamp}-${event.actor}-${event.event_type}-${event.summary}`,
+      key: `telemetry-${index}-${event.timestamp}-${event.actor}-${event.event_type}-${event.summary}`,
       time: event.timestamp,
       title: [event.actor, event.event_type].filter(Boolean).join(" / ") || "Telemetry event",
       detail: event.summary,
@@ -561,6 +604,7 @@ async function dashboardObservation(options: ReturnType<typeof normalizeServerOp
       routed_notifications: audit.routed_notifications || [],
     } : null,
     binding,
+    criteria: acceptanceCriteriaSummary(audit),
     dispatch: {
       chains: dispatchChainEntries(audit),
       health: dispatchHealth(snapshot, audit, suppressedTelemetry, heartbeatTelemetry),

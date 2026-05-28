@@ -78,6 +78,15 @@ type DispatchHealth = {
   stale_claim_count: number;
   suppressed_signal_count: number;
 };
+type CriteriaSummary = {
+  accepted: number;
+  deferred: number;
+  open: number;
+  proposed: number;
+  rejected: number;
+  satisfied: number;
+  total: number;
+};
 type Observation = {
   audit?: {
     command_attempts: unknown[];
@@ -91,6 +100,7 @@ type Observation = {
     task_name?: string;
     worker_name?: string;
   } | null;
+  criteria?: CriteriaSummary;
   dispatch?: {
     chains: DispatchChain[];
     health: DispatchHealth;
@@ -149,6 +159,22 @@ function finishLabel(chain: DispatchChain | undefined) {
     chain.command_state || "unknown",
     chain.command_id || chain.correlation_id || null,
   ].filter(Boolean).join(" / ");
+}
+
+function criteriaLabel(criteria: CriteriaSummary | undefined) {
+  if (!criteria || criteria.total === 0) {
+    return "none";
+  }
+  const extra = [
+    criteria.proposed > 0 ? `${criteria.proposed} proposed` : null,
+    criteria.deferred > 0 ? `${criteria.deferred} deferred` : null,
+    criteria.rejected > 0 ? `${criteria.rejected} rejected` : null,
+  ].filter(Boolean);
+  return [
+    `${criteria.satisfied} satisfied`,
+    `${criteria.open} open`,
+    ...extra,
+  ].join(" / ");
 }
 
 function DispatchPanel({ observation }: { observation: Observation | null }) {
@@ -302,6 +328,7 @@ function StatePanel({ observation }: { observation: Observation | null }) {
     ["Relationship", observation?.binding ? observation.binding.state || "bound" : "none"],
     ["Task", observation?.task?.name || observation?.binding?.task_name || "none"],
     ["Task state", observation?.task?.state || "unknown"],
+    ["Criteria", criteriaLabel(observation?.criteria)],
     ["Latest cycle", observation?.latest_cycle?.state || "none"],
     ["Finish task", finishLabel(finish)],
   ];
