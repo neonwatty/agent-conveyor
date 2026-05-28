@@ -179,7 +179,17 @@ function sessionAlive(session: Record<string, unknown>): boolean | null {
   }
 }
 
-function findDashboardBinding(discovered: DiscoverResult, sessions: Array<Record<string, unknown>>): Record<string, unknown> | null {
+export function findDashboardBinding(
+  discovered: DiscoverResult,
+  sessions: Array<Record<string, unknown>>,
+  taskName = "",
+): Record<string, unknown> | null {
+  if (taskName) {
+    const binding = (discovered.bindings || []).find((item) => item.task_name === taskName);
+    if (binding) {
+      return binding;
+    }
+  }
   const names = new Set(sessions.map((session) => String(session.name)));
   for (const binding of discovered.bindings || []) {
     if (names.has(String(binding.worker_name)) || names.has(String(binding.manager_name))) {
@@ -431,6 +441,30 @@ export function acceptanceCriteriaSummary(audit: AuditResult | null): CriteriaSu
   return summary;
 }
 
+export function bindingFromAudit(audit: AuditResult | null, taskName = ""): Record<string, unknown> | null {
+  const notifications = audit?.routed_notifications || [];
+  for (const notification of [...notifications].reverse()) {
+    const payload = notification.payload;
+    if (!payload || typeof payload !== "object") {
+      continue;
+    }
+    const record = payload as Record<string, unknown>;
+    const workerName = typeof record.source_session === "string" ? record.source_session : "";
+    const managerName = typeof record.target_session === "string" ? record.target_session : "";
+    const notificationTask = typeof record.task === "string" ? record.task : taskName;
+    if (workerName && managerName && notificationTask === taskName) {
+      return {
+        id: notification.binding_id,
+        manager_name: managerName,
+        state: "observed",
+        task_name: notificationTask,
+        worker_name: workerName,
+      };
+    }
+  }
+  return null;
+}
+
 export function dashboardTaskName(options: Pick<ReturnType<typeof normalizeServerOptions>, "task">, binding: Record<string, unknown> | null): string {
   return options.task || (binding?.task_name ? String(binding.task_name) : "");
 }
@@ -549,7 +583,7 @@ async function dashboardObservation(options: ReturnType<typeof normalizeServerOp
   }) as DiscoverResult;
   const sessions = (discovered.sessions || []).filter(isDashboardSession);
   const terminals = DASHBOARD_TERMINALS.map((terminal) => terminalState(terminal, sessions));
-  const binding = findDashboardBinding(discovered, sessions);
+  const binding = findDashboardBinding(discovered, sessions, options.task);
   let snapshot: SnapshotResult | null = null;
   let audit: AuditResult | null = null;
   let suppressedTelemetry: Array<Record<string, unknown>> = [];
@@ -596,6 +630,7 @@ async function dashboardObservation(options: ReturnType<typeof normalizeServerOp
       heartbeatTelemetry = [];
     }
   }
+  const observedBinding = binding || bindingFromAudit(audit, taskName);
   return {
     audit: audit ? {
       command_attempts: audit.command_attempts || [],
@@ -603,7 +638,7 @@ async function dashboardObservation(options: ReturnType<typeof normalizeServerOp
       correlation_chains: audit.correlation_chains || [],
       routed_notifications: audit.routed_notifications || [],
     } : null,
-    binding,
+    binding: observedBinding,
     criteria: acceptanceCriteriaSummary(audit),
     dispatch: {
       chains: dispatchChainEntries(audit),
@@ -613,7 +648,7 @@ async function dashboardObservation(options: ReturnType<typeof normalizeServerOp
     polled_at: new Date().toISOString(),
     task: snapshot?.task || (taskName ? { name: taskName } : null),
     terminals,
-    timeline: interpretedTimeline({ binding, snapshot, terminals }),
+    timeline: interpretedTimeline({ binding: observedBinding, snapshot, terminals }),
   };
 }
 

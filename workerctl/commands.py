@@ -436,6 +436,8 @@ Supervision loop:
   evidence, or the manager's own inspection; `manager_config` is not a valid
   criteria source.
 - Before finishing, compare worker receipts/verification against accepted open criteria.
+- When all accepted criteria are satisfied, deferred, or rejected, finish the task with
+  `{workerctl} finish-task {task_line} --reason "Accepted criteria satisfied" --require-criteria-audit`.
 - Communicate with the worker only through workerctl session/task commands.
 - Do not edit project files unless the user explicitly asks this manager
   session to change workerctl itself.

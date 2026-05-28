@@ -13715,6 +13715,10 @@ class ManagerBootstrapPromptTests(unittest.TestCase):
         self.assertIn(f"{workerctl} manager-ack docs-task --from-stdin", prompt)
         self.assertIn(f"{workerctl} worker-ack docs-task --json", prompt)
         self.assertIn("Before your first cycle", prompt)
+        self.assertIn(
+            f'{workerctl} finish-task docs-task --reason "Accepted criteria satisfied" --require-criteria-audit',
+            prompt,
+        )
         self.assertIn("must-have vs follow-up criteria", prompt)
         self.assertIn(f"Record useful criteria with `{workerctl} criteria`", prompt)
         self.assertIn("compare worker receipts/verification against accepted open criteria", prompt)

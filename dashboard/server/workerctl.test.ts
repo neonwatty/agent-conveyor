@@ -12,6 +12,8 @@ import {
   dispatchChainEntries,
   dispatchHeartbeatTelemetryOptions,
   dashboardTaskName,
+  bindingFromAudit,
+  findDashboardBinding,
   isDashboardSession,
 } from "./index.ts";
 import {
@@ -93,6 +95,36 @@ test("explicit dashboard task overrides dashboard-bound task", () => {
     "requested-task",
   );
   assert.equal(dashboardTaskName({}, { task_name: "bound-task" }), "bound-task");
+});
+
+test("explicit dashboard task selects the matching binding", () => {
+  assert.deepEqual(findDashboardBinding({
+    bindings: [
+      { task_name: "other-task", worker_name: "other-worker" },
+      { task_name: "requested-task", worker_name: "requested-worker" },
+    ],
+  }, [], "requested-task"), { task_name: "requested-task", worker_name: "requested-worker" });
+});
+
+test("reconstructs completed task binding from routed dispatch audit", () => {
+  assert.deepEqual(bindingFromAudit({
+    routed_notifications: [
+      {
+        binding_id: "binding-1",
+        payload: {
+          source_session: "worker-a",
+          target_session: "manager-a",
+          task: "task-a",
+        },
+      },
+    ],
+  }, "task-a"), {
+    id: "binding-1",
+    manager_name: "manager-a",
+    state: "observed",
+    task_name: "task-a",
+    worker_name: "worker-a",
+  });
 });
 
 test("ignores gone registrations for dashboard terminals", () => {
