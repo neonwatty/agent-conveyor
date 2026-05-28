@@ -7,6 +7,7 @@ import {
   normalizeServerOptions,
 } from "./workerctl.ts";
 import {
+  acceptanceCriteriaSummary,
   dispatchHealth,
   dispatchChainEntries,
   dispatchHeartbeatTelemetryOptions,
@@ -363,6 +364,40 @@ test("dispatch conversation uses the latest retry attempt", () => {
     chains[0].conversation.find((item) => item.kind === "dispatch_attempt")?.label,
     "Dispatch succeeded via dispatch-new",
   );
+});
+
+test("summarizes acceptance criteria status for dashboard display", () => {
+  assert.deepEqual(acceptanceCriteriaSummary({
+    acceptance_criteria: [
+      { status: "satisfied" },
+      { status: "satisfied" },
+      { status: "accepted" },
+      { status: "proposed" },
+      { status: "deferred" },
+      { status: "rejected" },
+      { status: "needs-review" },
+    ],
+  }), {
+    accepted: 1,
+    deferred: 1,
+    open: 3,
+    proposed: 1,
+    rejected: 1,
+    satisfied: 2,
+    total: 7,
+  });
+});
+
+test("summarizes missing acceptance criteria as none", () => {
+  assert.deepEqual(acceptanceCriteriaSummary(null), {
+    accepted: 0,
+    deferred: 0,
+    open: 0,
+    proposed: 0,
+    rejected: 0,
+    satisfied: 0,
+    total: 0,
+  });
 });
 
 test("orders mixed dispatch chains by timestamp before dashboard display", () => {
