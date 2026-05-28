@@ -14,6 +14,8 @@ pass/fail evidence.
 - [Support triage](support-triage.md) - support routing, SLA, and summary test.
 - [Subscription billing](subscription-billing.md) - billing, credits, proration,
   entitlement, and audit-summary test.
+- [Dashboard evidence review](dashboard-evidence-review.md) - dashboard
+  evidence summarization and what-next review test.
 
 ## Standard Invocation
 
