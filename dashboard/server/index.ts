@@ -20,6 +20,12 @@ const DASHBOARD_TERMINALS = [
   { id: "b", label: "Terminal B", tmuxSession: "workerctl-dashboard-b" },
 ] as const;
 
+type SpawnSyncRunner = (
+  command: string,
+  args: string[],
+  options?: Parameters<typeof spawnSync>[2],
+) => unknown;
+
 function resolveExecutable(name: string): string {
   const result = spawnSync("/bin/sh", ["-lc", `command -v ${name}`], { encoding: "utf8" });
   return result.status === 0 && result.stdout.trim() ? result.stdout.trim() : name;
@@ -35,11 +41,17 @@ function shellEnvironment(): NodeJS.ProcessEnv {
   return env;
 }
 
+export function cleanupDashboardShells(tmux = resolveExecutable("tmux"), runCommand: SpawnSyncRunner = spawnSync): void {
+  for (const terminal of DASHBOARD_TERMINALS) {
+    runCommand(tmux, ["kill-session", "-t", terminal.tmuxSession], { stdio: "ignore" });
+  }
+}
+
 function resetDashboardShells(cwd: string): void {
   const tmux = resolveExecutable("tmux");
   const shell = process.env.SHELL || "/bin/zsh";
+  cleanupDashboardShells(tmux);
   for (const terminal of DASHBOARD_TERMINALS) {
-    spawnSync(tmux, ["kill-session", "-t", terminal.tmuxSession], { stdio: "ignore" });
     const result = spawnSync(tmux, ["new-session", "-d", "-s", terminal.tmuxSession, "-c", cwd, "env", "-u", "npm_config_prefix", shell], {
       encoding: "utf8",
       env: shellEnvironment(),
@@ -700,8 +712,27 @@ function parseArgs(argv: string[]): PartialServerOptions {
   return options;
 }
 
+function installDashboardShellCleanup(): void {
+  let cleaned = false;
+  const cleanupOnce = () => {
+    if (cleaned) {
+      return;
+    }
+    cleaned = true;
+    cleanupDashboardShells();
+  };
+  process.once("exit", cleanupOnce);
+  for (const signal of ["SIGHUP", "SIGINT", "SIGTERM"] as const) {
+    process.once(signal, () => {
+      cleanupOnce();
+      process.exit(0);
+    });
+  }
+}
+
 async function main(): Promise<void> {
   const options = normalizeServerOptions(parseArgs(process.argv.slice(2)));
+  installDashboardShellCleanup();
   resetDashboardShells(process.cwd());
   const app = express();
   const server = http.createServer(app);

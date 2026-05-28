@@ -13,6 +13,7 @@ import {
   dispatchHeartbeatTelemetryOptions,
   dashboardTaskName,
   bindingFromAudit,
+  cleanupDashboardShells,
   findDashboardBinding,
   isDashboardSession,
 } from "./index.ts";
@@ -138,6 +139,19 @@ test("ignores gone registrations for dashboard terminals", () => {
     state: "active",
     tmux_session: "workerctl-dashboard-a",
   }), true);
+});
+
+test("cleanupDashboardShells kills both dashboard terminal tmux sessions", () => {
+  const calls: Array<{ command: string; args: string[] }> = [];
+
+  cleanupDashboardShells("tmux", (command, args) => {
+    calls.push({ command, args: [...args] });
+  });
+
+  assert.deepEqual(calls, [
+    { command: "tmux", args: ["kill-session", "-t", "workerctl-dashboard-a"] },
+    { command: "tmux", args: ["kill-session", "-t", "workerctl-dashboard-b"] },
+  ]);
 });
 
 test("groups dispatch correlation chains with command attempts for dashboard display", () => {
