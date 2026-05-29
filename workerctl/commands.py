@@ -6870,17 +6870,79 @@ def command_nudge(args: argparse.Namespace) -> int:
 
 
 def command_stop(args: argparse.Namespace) -> int:
-    require_worker(args.name)
-    if args.message and session_exists(args.name):
-        send_text(args.name, args.message)
-        append_event(args.name, "stop_message", {"message": args.message})
-    if session_exists(args.name):
-        run(["tmux", "kill-session", "-t", tmux_target(args.name)])
-        append_event(args.name, "stop", {"killed_session": True})
+    config = _worker_config_or_session(args.name)
+    if config.get("_workerctl_lookup_source") == "legacy":
+        if args.message and session_exists(args.name):
+            send_text(args.name, args.message)
+            append_event(args.name, "stop_message", {"message": args.message})
+        if session_exists(args.name):
+            run(["tmux", "kill-session", "-t", tmux_target(args.name)])
+            append_event(args.name, "stop", {"killed_session": True})
+            print(f"stopped {args.name}")
+        else:
+            append_event(args.name, "stop", {"killed_session": False})
+            print(f"{args.name} was not running")
+        return 0
+
+    from workerctl import db as worker_db
+    from workerctl import tmux as worker_tmux
+
+    target = _tmux_target_for_config(args.name, config)
+    running = _session_exists_for_config(args.name, config)
+    if args.message and running:
+        with worker_db.connect() as conn:
+            worker_db.initialize_database(conn)
+            worker_tmux.send_text_to_session(conn, session_name=args.name, text=args.message)
+            worker_db.insert_event(
+                conn,
+                "session_stop_message",
+                actor="workerctl",
+                payload={
+                    "session": args.name,
+                    "role": config.get("role"),
+                    "text_length": len(args.message),
+                    "target": target,
+                },
+            )
+            conn.commit()
+
+    killed = False
+    if running:
+        run(["tmux", "kill-session", "-t", target])
+        killed = True
         print(f"stopped {args.name}")
     else:
-        append_event(args.name, "stop", {"killed_session": False})
         print(f"{args.name} was not running")
+
+    stopped_at = now_iso()
+    with worker_db.connect() as conn:
+        worker_db.initialize_database(conn)
+        conn.execute(
+            "update sessions set state='gone', last_heartbeat_at=? where name=?",
+            (stopped_at, args.name),
+        )
+        worker_db.insert_event(
+            conn,
+            "session_stopped",
+            actor="workerctl",
+            payload={
+                "session": args.name,
+                "role": config.get("role"),
+                "target": target,
+                "killed_session": killed,
+            },
+        )
+        conn.commit()
+    append_event(
+        args.name,
+        "stop",
+        {
+            "killed_session": killed,
+            "lookup_source": "session",
+            "role": config.get("role"),
+            "target": target,
+        },
+    )
     return 0
 
 
@@ -7261,8 +7323,9 @@ def command_start_worker(args: argparse.Namespace) -> int:
 def command_start_manager(args: argparse.Namespace) -> int:
     """Spawn codex in a fresh tmux session and register it as a manager in one call.
 
-    Mirrors command_start_worker but with role="manager" and no task prompt.
-    Managers supervise rather than execute, so they don't take an initial prompt.
+    Mirrors command_start_worker but with role="manager" and a manager bootstrap
+    prompt. Managers supervise rather than execute; optional task context only
+    teaches the bootstrap prompt which workerctl commands to run.
 
     Refuses if either the tmux session `codex-<name>` already exists or the DB
     already has a session named `<name>`.
@@ -7272,6 +7335,23 @@ def command_start_manager(args: argparse.Namespace) -> int:
         sandbox=args.sandbox,
         ask_for_approval=args.ask_for_approval,
     )
+    task_name = getattr(args, "task", None)
+    task_goal = getattr(args, "task_goal", None)
+    manager_config_seeded = False
+    manager_config = None
+    if task_name:
+        from workerctl import db as worker_db
+
+        with worker_db.connect() as conn:
+            worker_db.initialize_database(conn)
+            try:
+                task = worker_db.task_row(conn, task=task_name)
+            except WorkerError:
+                task = None
+            if task is not None:
+                task_goal = task_goal or task["goal"]
+                manager_config = worker_db.manager_config(conn, task_id=task["id"])
+                manager_config_seeded = manager_config is not None
     result = _spawn_codex_and_register(
         name=args.name,
         role="manager",
@@ -7280,6 +7360,11 @@ def command_start_manager(args: argparse.Namespace) -> int:
         initial_prompt=manager_bootstrap_prompt(
             manager_name=args.name,
             cwd=args.cwd,
+            task_name=task_name,
+            task_goal=task_goal,
+            worker_name=getattr(args, "worker", None),
+            manager_config_seeded=manager_config_seeded,
+            manager_config=manager_config,
         ),
         sandbox=sandbox,
         ask_for_approval=ask_for_approval,

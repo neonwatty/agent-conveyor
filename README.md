@@ -194,12 +194,16 @@ tmux attach -t codex-live-test
   Spawn Codex in a fresh tmux session and register it as a worker in one call.
   The fastest way to start a supervised worker. Internally: `tmux new-session`
   + `codex` + poll for rollout + `register-worker`.
-- `start-manager --name N [--cwd D] [--sandbox SANDBOX] [--ask-for-approval ASK_FOR_APPROVAL] [--timeout-seconds N]` —
+- `start-manager --name N [--cwd D] [--task T] [--task-goal G] [--worker W] [--sandbox SANDBOX] [--ask-for-approval ASK_FOR_APPROVAL] [--timeout-seconds N]` —
   Spawn Codex in a fresh tmux session and register it as a manager in one call.
   Mirrors `start-worker` but uses a manager bootstrap prompt instead of a worker
-  task prompt. The bootstrap opens Codex rollout metadata reliably and tells the
-  manager to run `manager-config <task> --questions` before supervising when a
-  task is known.
+  task prompt. When `--task`, `--task-goal`, and `--worker` are supplied, the
+  bootstrap is ready for late attach: it names the task, goal, worker session,
+  and concrete `manager-config`, `cycle`, `manager-ack`, and `worker-ack`
+  commands. If manager config has already been recorded for the task, the
+  bootstrap tells the manager to start with `cycle` instead of asking setup
+  questions again. Without those flags, the bootstrap asks the manager to
+  collect the missing supervision details before cycling.
 - `pair --task T --worker-name W --manager-name M [--cwd D] [--task-prompt PROMPT] [--task-goal GOAL] [--task-summary S] [--manager-objective O] [--manager-guideline G ...] [--manager-acceptance A ...] [--sandbox SANDBOX] [--ask-for-approval ASK_FOR_APPROVAL] [--timeout-seconds N] [--dispatcher-id ID] [--no-dispatch]` —
   One-shot: spawn worker + manager and bind to a task in a single command. Combines
   `start-worker` + `start-manager` + `bind`. The task is looked up or created (if
@@ -382,6 +386,11 @@ tmux attach -t codex-live-test
 - `stop-task <task> [--reason R] [--stop-worker]` — Force-stop a task's
   manager (and optionally the worker), recording the reason in the audit
   payload.
+- `stop <session>` — Stop a tmux-backed worker or manager session by name. This
+  works for both legacy worker records and session-table workers/managers. For a
+  completed task with an active binding, prefer an idempotent cleanup pass with
+  `finish-task <task> --stop-manager --stop-worker` so the task audit records
+  the cleanup against the binding.
 
 ### Observation
 

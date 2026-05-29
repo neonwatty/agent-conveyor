@@ -672,6 +672,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="Working directory for codex (default: cwd).",
     )
     start_manager.add_argument(
+        "--task",
+        help="Optional existing task name to include in the manager bootstrap prompt.",
+    )
+    start_manager.add_argument(
+        "--task-goal",
+        help="Optional task goal to include in the manager bootstrap prompt.",
+    )
+    start_manager.add_argument(
+        "--worker",
+        help="Optional worker session name to include in the manager bootstrap prompt.",
+    )
+    start_manager.add_argument(
         "--sandbox",
         default="danger-full-access",
         help="Codex --sandbox mode.",
@@ -1270,7 +1282,7 @@ def build_parser() -> argparse.ArgumentParser:
     open_manager.add_argument("--path", help="Override the workerctl database path.")
     open_manager.set_defaults(func=command_open_manager)
 
-    stop = subparsers.add_parser("stop", help="Stop a worker tmux session.")
+    stop = subparsers.add_parser("stop", help="Stop a tmux-backed worker or manager session.")
     stop.add_argument("name")
     stop.add_argument("--message", help="Optional final message to send before stopping.")
     stop.set_defaults(func=command_stop)

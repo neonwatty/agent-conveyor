@@ -189,6 +189,18 @@ opened during startup and the manager has setup context. In `pair`, the manager
 prompt includes the task name, goal, worker session, `manager-config
 <task> --questions`, and `cycle <task>`.
 
+For late attach, pass the known task context directly:
+
+```bash
+scripts/workerctl start-manager --name foo-mgr --cwd "$PWD" \
+  --task foo-task --task-goal "..." --worker foo-worker
+```
+
+That bootstrap starts with concrete `manager-config`, `cycle`, `manager-ack`,
+and `worker-ack` commands instead of `<task>` placeholders. If manager config
+has already been recorded for the task, the bootstrap tells the manager to start
+with `cycle`.
+
 List registered sessions:
 
 ```bash

@@ -13846,6 +13846,7 @@ class StartManagerTests(unittest.TestCase):
                     args = argparse.Namespace(
                         name="auto-mgr", cwd="/repo",
                         sandbox="danger-full-access", ask_for_approval="never",
+                        task=None, task_goal=None, worker=None,
                         timeout_seconds=15,
                     )
                     captured_stdout = io.StringIO()
@@ -13908,10 +13909,195 @@ class StartManagerTests(unittest.TestCase):
                 args = argparse.Namespace(
                     name="taken", cwd="/repo",
                     sandbox="danger-full-access", ask_for_approval="never",
+                    task=None, task_goal=None, worker=None,
                     timeout_seconds=15,
                 )
                 with self.assertRaises(WorkerError):
                     worker_commands.command_start_manager(args)
+            finally:
+                os.environ.pop("WORKERCTL_STATE_ROOT", None)
+
+    def test_start_manager_bootstrap_can_attach_to_known_task(self):
+        """Late attach: a manager started after worker progress gets concrete task commands."""
+        from workerctl import commands as worker_commands
+        from workerctl import tmux as worker_tmux
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_dir = Path(tmpdir) / "state"
+            state_dir.mkdir()
+            os.environ["WORKERCTL_STATE_ROOT"] = str(state_dir)
+            try:
+                rollout = self._build_fake_rollout(tmpdir, "known-task")
+
+                spawned: list[list[str]] = []
+
+                def fake_run(cmd, check=True, input_text=None):
+                    spawned.append(list(cmd))
+
+                    class R:
+                        returncode = 0
+                        stdout = ""
+                        stderr = ""
+
+                    return R()
+
+                def fake_session_exists(name):
+                    return False
+
+                def fake_discover(
+                    tmux_session,
+                    *,
+                    timeout_seconds=15,
+                    poll_interval=0.5,
+                    minimum_session_timestamp=None,
+                ):
+                    return {
+                        "native_pid": 88889,
+                        "codex_session_path": str(rollout),
+                        "codex_session_id": "cuid-known-task",
+                        "cwd": "/repo",
+                        "originator": "codex-tui",
+                        "cli_version": "",
+                    }
+
+                orig_run = worker_tmux.run
+                orig_session_exists = worker_tmux.session_exists
+                orig_discover = worker_commands._discover_codex_session_in_tmux
+                worker_tmux.run = fake_run
+                worker_tmux.session_exists = fake_session_exists
+                worker_commands._discover_codex_session_in_tmux = fake_discover
+                try:
+                    args = argparse.Namespace(
+                        name="late-mgr",
+                        cwd="/repo",
+                        sandbox="danger-full-access",
+                        ask_for_approval="never",
+                        task="late-task",
+                        task_goal="Ship the support queue reporter",
+                        worker="late-worker",
+                        timeout_seconds=15,
+                    )
+                    with contextlib.redirect_stdout(io.StringIO()):
+                        exit_code = worker_commands.command_start_manager(args)
+                    self.assertEqual(exit_code, 0)
+
+                    tmux_cmds = [c for c in spawned if len(c) > 1 and c[1] == "new-session"]
+                    self.assertEqual(len(tmux_cmds), 1)
+                    codex_cmd = tmux_cmds[0][-1]
+                    self.assertNotIn("<unbound-task>", codex_cmd)
+                    self.assertIn("Task: late-task", codex_cmd)
+                    self.assertIn("Task goal: Ship the support queue reporter", codex_cmd)
+                    self.assertIn("Worker session: late-worker", codex_cmd)
+                    self.assertIn("manager-config late-task --questions", codex_cmd)
+                    self.assertIn("cycle late-task", codex_cmd)
+                    self.assertIn("manager-ack late-task --from-stdin", codex_cmd)
+                    self.assertIn("worker-ack late-task --json", codex_cmd)
+                finally:
+                    worker_tmux.run = orig_run
+                    worker_tmux.session_exists = orig_session_exists
+                    worker_commands._discover_codex_session_in_tmux = orig_discover
+            finally:
+                os.environ.pop("WORKERCTL_STATE_ROOT", None)
+
+    def test_start_manager_bootstrap_uses_seeded_manager_config_for_task(self):
+        """Late attach should not ask setup questions when config was already recorded."""
+        from workerctl import commands as worker_commands
+        from workerctl import tmux as worker_tmux
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_dir = Path(tmpdir) / "state"
+            state_dir.mkdir()
+            os.environ["WORKERCTL_STATE_ROOT"] = str(state_dir)
+            try:
+                conn = worker_db.connect()
+                worker_db.initialize_database(conn)
+                task_id = worker_db.create_task(
+                    conn,
+                    name="late-task",
+                    goal="Ship the support queue reporter",
+                )
+                worker_db.upsert_manager_config(
+                    conn,
+                    task_id=task_id,
+                    supervision_mode="strict",
+                    objective="Verify the reporter with pytest evidence.",
+                    guidelines=[],
+                    acceptance_criteria=[".venv/bin/python -m pytest -q passes."],
+                    reference_paths=[],
+                    permissions={},
+                    tools=["pytest"],
+                    epilogues=[],
+                    nudge_on_completion="ask-operator",
+                    require_acks=False,
+                )
+                conn.commit()
+                conn.close()
+
+                rollout = self._build_fake_rollout(tmpdir, "seeded")
+                spawned: list[list[str]] = []
+
+                def fake_run(cmd, check=True, input_text=None):
+                    spawned.append(list(cmd))
+
+                    class R:
+                        returncode = 0
+                        stdout = ""
+                        stderr = ""
+
+                    return R()
+
+                def fake_session_exists(name):
+                    return False
+
+                def fake_discover(
+                    tmux_session,
+                    *,
+                    timeout_seconds=15,
+                    poll_interval=0.5,
+                    minimum_session_timestamp=None,
+                ):
+                    return {
+                        "native_pid": 88890,
+                        "codex_session_path": str(rollout),
+                        "codex_session_id": "cuid-seeded",
+                        "cwd": "/repo",
+                        "originator": "codex-tui",
+                        "cli_version": "",
+                    }
+
+                orig_run = worker_tmux.run
+                orig_session_exists = worker_tmux.session_exists
+                orig_discover = worker_commands._discover_codex_session_in_tmux
+                worker_tmux.run = fake_run
+                worker_tmux.session_exists = fake_session_exists
+                worker_commands._discover_codex_session_in_tmux = fake_discover
+                try:
+                    args = argparse.Namespace(
+                        name="late-mgr",
+                        cwd="/repo",
+                        sandbox="danger-full-access",
+                        ask_for_approval="never",
+                        task="late-task",
+                        task_goal=None,
+                        worker="late-worker",
+                        timeout_seconds=15,
+                    )
+                    with contextlib.redirect_stdout(io.StringIO()):
+                        exit_code = worker_commands.command_start_manager(args)
+                    self.assertEqual(exit_code, 0)
+
+                    tmux_cmds = [c for c in spawned if len(c) > 1 and c[1] == "new-session"]
+                    self.assertEqual(len(tmux_cmds), 1)
+                    codex_cmd = tmux_cmds[0][-1]
+                    self.assertIn("Manager config has already been recorded", codex_cmd)
+                    self.assertIn("Start with", codex_cmd)
+                    self.assertIn("cycle late-task", codex_cmd)
+                    self.assertNotIn("Ask the user the returned setup questions", codex_cmd)
+                    self.assertIn("Expected tools: pytest.", codex_cmd)
+                finally:
+                    worker_tmux.run = orig_run
+                    worker_tmux.session_exists = orig_session_exists
+                    worker_commands._discover_codex_session_in_tmux = orig_discover
             finally:
                 os.environ.pop("WORKERCTL_STATE_ROOT", None)
 
@@ -13925,7 +14111,9 @@ class StartManagerTests(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertIn("--name", proc.stdout)
         self.assertIn("Manager session name.", proc.stdout)
-        self.assertNotIn("--task", proc.stdout)  # managers don't take a task prompt
+        self.assertIn("--task", proc.stdout)
+        self.assertIn("--task-goal", proc.stdout)
+        self.assertIn("--worker", proc.stdout)
 
 
 class SessionLookupFallbackTests(unittest.TestCase):
@@ -14054,6 +14242,50 @@ class SessionLookupFallbackTests(unittest.TestCase):
         self.assertEqual(len(events), 1)
         self.assertEqual(events[0]["type"], "note")
         self.assertEqual(events[0]["message"], "from sessions fallback")
+
+    def test_stop_resolves_sessions_table_manager_when_legacy_worker_missing(self):
+        conn = worker_db.connect()
+        worker_db.initialize_database(conn)
+        worker_db.register_session(
+            conn,
+            name="session-manager",
+            role="manager",
+            codex_session_path="/tmp/manager-rollout.jsonl",
+            codex_session_id="codex-manager-id",
+            pid=23456,
+            cwd=str(ROOT),
+            tmux_session="manager-tmux",
+            tmux_pane_id="%9",
+        )
+        conn.commit()
+        conn.close()
+
+        calls: list[list[str]] = []
+        original_run = commands.run
+
+        def fake_run(cmd, *args, **kwargs):
+            calls.append(list(cmd))
+            if cmd[:2] in (["tmux", "has-session"], ["tmux", "kill-session"]):
+                return subprocess.CompletedProcess(cmd, 0, "", "")
+            raise AssertionError(f"unexpected command: {cmd!r}")
+
+        commands.run = fake_run
+        self.addCleanup(setattr, commands, "run", original_run)
+
+        args = argparse.Namespace(name="session-manager", message=None)
+        with contextlib.redirect_stdout(io.StringIO()) as stdout:
+            result = commands.command_stop(args)
+
+        self.assertEqual(result, 0)
+        self.assertIn(["tmux", "kill-session", "-t", "manager-tmux"], calls)
+        self.assertIn("stopped session-manager", stdout.getvalue())
+
+        conn = worker_db.connect()
+        self.addCleanup(conn.close)
+        row = conn.execute(
+            "select state from sessions where name = 'session-manager'"
+        ).fetchone()
+        self.assertEqual(row["state"], "gone")
 
 
 class SessionsLegacyFilterTests(unittest.TestCase):
