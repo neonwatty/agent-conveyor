@@ -192,11 +192,11 @@ tmux attach -t codex-live-test
 
 ### Sessions and binding
 
-- `start-worker --name N [--cwd D] [--task "..."] [--sandbox SANDBOX] [--ask-for-approval ASK_FOR_APPROVAL] [--timeout-seconds N]` —
+- `start-worker --name N [--cwd D] [--task "..."] [--sandbox SANDBOX] [--ask-for-approval ASK_FOR_APPROVAL] [--accept-trust] [--timeout-seconds N]` —
   Spawn Codex in a fresh tmux session and register it as a worker in one call.
   The fastest way to start a supervised worker. Internally: `tmux new-session`
   + `codex` + poll for rollout + `register-worker`.
-- `start-manager --name N [--cwd D] [--task T] [--task-goal G] [--worker W] [--sandbox SANDBOX] [--ask-for-approval ASK_FOR_APPROVAL] [--timeout-seconds N]` —
+- `start-manager --name N [--cwd D] [--task T] [--task-goal G] [--worker W] [--sandbox SANDBOX] [--ask-for-approval ASK_FOR_APPROVAL] [--accept-trust] [--timeout-seconds N]` —
   Spawn Codex in a fresh tmux session and register it as a manager in one call.
   Mirrors `start-worker` but uses a manager bootstrap prompt instead of a worker
   task prompt. When `--task`, `--task-goal`, and `--worker` are supplied, the
@@ -206,25 +206,30 @@ tmux attach -t codex-live-test
   bootstrap tells the manager to start with `cycle` instead of asking setup
   questions again. Without those flags, the bootstrap asks the manager to
   collect the missing supervision details before cycling.
-- `pair --task T --worker-name W --manager-name M [--cwd D] [--task-prompt PROMPT] [--task-goal GOAL] [--task-summary S] [--manager-objective O] [--manager-guideline G ...] [--manager-acceptance A ...] [--sandbox SANDBOX] [--ask-for-approval ASK_FOR_APPROVAL] [--timeout-seconds N] [--dispatcher-id ID] [--no-dispatch]` —
+- `pair --task T --worker-name W --manager-name M [--cwd D] [--task-prompt PROMPT] [--task-goal GOAL] [--task-summary S] [--manager-objective O] [--manager-guideline G ...] [--manager-acceptance A ...] [--sandbox SANDBOX] [--ask-for-approval ASK_FOR_APPROVAL] [--accept-trust] [--timeout-seconds N] [--dispatcher-id ID] [--no-dispatch]` —
   One-shot: spawn worker + manager and bind to a task in a single command. Combines
   `start-worker` + `start-manager` + `bind`. The task is looked up or created (if
   `--task-goal` is provided); if the task does not exist and no goal is given, an
   error is raised with a hint. The worker receives the optional `--task-prompt` as
   its initial Codex prompt; the manager receives a manager bootstrap prompt with
-  the task, goal, worker name, `manager-config --questions`, and `cycle` commands.
+  the task, goal, worker name, manager configuration status, and `cycle` commands.
+  `pair` records a default guided manager config before launching the manager, so
+  retries against an existing task do not fall back into setup-question mode.
   If manager config flags are supplied (`--manager-mode`,
   `--manager-objective`, repeated `--manager-guideline`,
   `--manager-acceptance`, `--manager-reference`, or manager permission flags),
-  `pair` records that config before launching the manager and the bootstrap tells
-  the manager to start supervising with `cycle` instead of asking setup
-  questions first. Manager acceptance entries are also seeded into the living
+  those values are merged into the seeded config and the bootstrap tells the
+  manager to start supervising with `cycle` instead of asking setup questions
+  first. Manager acceptance entries are also seeded into the living
   acceptance criteria ledger when they do not already exist for the task. By
   default `pair` starts a detached `dispatch --watch` process after successful
   worker/manager setup, bind, and run creation. Use `--dispatcher-id` to set its
   identity or `--no-dispatch` for isolated/manual workflows.
   If the manager or bind fails after the worker is spawned, the worker remains
   registered and can be cleaned up with `workerctl deregister`.
+  Use `--accept-trust` only for directories you intentionally trust; it sends
+  Enter to both spawned sessions so fresh workspaces do not stall before
+  registration.
 - `register-worker --name N [--pid P | --codex-session PATH] [--cwd D] [--tmux-session S]` —
   Register an already-running Codex session as a worker. Rollout JSONL is
   auto-discovered from the pid via `lsof` unless `--codex-session` is given.

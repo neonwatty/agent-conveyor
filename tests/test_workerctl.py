@@ -5037,11 +5037,20 @@ Deferred follow-up criteria:
         self.assertTrue(any("export-task" in step and "telemetry" in step.lower() for step in payload["steps"]))
         self.assertTrue(any("PR action" in observation for observation in payload["expected_observations"]))
         self.assertTrue(any("CI failure path" in observation for observation in payload["expected_observations"]))
+        self.assertTrue(any("gh pr merge --auto" in observation and "required checks" in observation for observation in payload["expected_observations"]))
         self.assertTrue(any("finish-task --require-criteria-audit --require-epilogue cannot succeed" in observation for observation in payload["expected_observations"]))
         self.assertTrue(any("accepted criteria and configured epilogues" in observation for observation in payload["expected_observations"]))
         self.assertTrue(any("PR URL is recorded separately" in observation for observation in payload["expected_observations"]))
         self.assertTrue(any("Dispatcher telemetry captures" in observation for observation in payload["expected_observations"]))
+        self.assertTrue(any("worker/manager liveness" in observation and "dispatch" in observation.lower() for observation in payload["expected_observations"]))
         self.assertTrue(any("Final evidence bundle" in observation for observation in payload["expected_observations"]))
+        self.assertTrue(any("session-nudge qa-ralph-worker-1" in step for step in payload["steps"]))
+        self.assertTrue(any("manager-routed" in step and "PR" in step for step in payload["steps"]))
+        self.assertTrue(any("gh pr checks" in step and "required jobs green" in step for step in payload["steps"]))
+        self.assertTrue(any("telemetry task qa-ralph-loop-iter-1 --json" in step for step in payload["steps"]))
+        self.assertTrue(any("dispatch_watch_heartbeat" in step and "--newest --limit 1" in step for step in payload["steps"]))
+        self.assertFalse(any("workerctl nudge qa-ralph-loop-iter-1" in step for step in payload["steps"]))
+        self.assertFalse(any("Have the worker open or prepare the PR" in step for step in payload["steps"]))
         self.assertFalse(any("telemetry searches" in step.lower() for step in payload["steps"]))
 
     def test_qa_plan_ralph_loop_includes_correlation_and_receipt_template(self):
@@ -13790,6 +13799,71 @@ class StartWorkerTests(unittest.TestCase):
             finally:
                 os.environ.pop("WORKERCTL_STATE_ROOT", None)
 
+    def test_spawn_accept_trust_sends_enter_before_discovery(self):
+        from workerctl import commands as worker_commands
+        from workerctl import tmux as worker_tmux
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_dir = Path(tmpdir) / "state"
+            state_dir.mkdir()
+            os.environ["WORKERCTL_STATE_ROOT"] = str(state_dir)
+            try:
+                calls = []
+
+                def fake_run(cmd, check=True, input_text=None):
+                    calls.append(list(cmd))
+                    class R:
+                        returncode = 0
+                        stdout = ""
+                        stderr = ""
+                    return R()
+
+                def fake_session_exists(name):
+                    return False
+
+                def fake_discover(
+                    tmux_session,
+                    *,
+                    timeout_seconds=15,
+                    poll_interval=0.5,
+                    minimum_session_timestamp=None,
+                ):
+                    return {
+                        "native_pid": 12345,
+                        "codex_session_path": "/tmp/accept-trust.jsonl",
+                        "codex_session_id": "codex-accept-trust",
+                        "cwd": "/repo",
+                        "originator": "codex-tui",
+                        "cli_version": "",
+                    }
+
+                orig_run = worker_tmux.run
+                orig_session_exists = worker_tmux.session_exists
+                orig_discover = worker_commands._discover_codex_session_in_tmux
+                worker_tmux.run = fake_run
+                worker_tmux.session_exists = fake_session_exists
+                worker_commands._discover_codex_session_in_tmux = fake_discover
+                try:
+                    result = worker_commands._spawn_codex_and_register(
+                        name="trust-worker",
+                        role="worker",
+                        cwd="/repo",
+                        task="Do it",
+                        sandbox="danger-full-access",
+                        ask_for_approval="never",
+                        timeout_seconds=1,
+                        accept_trust=True,
+                    )
+                finally:
+                    worker_tmux.run = orig_run
+                    worker_tmux.session_exists = orig_session_exists
+                    worker_commands._discover_codex_session_in_tmux = orig_discover
+            finally:
+                os.environ.pop("WORKERCTL_STATE_ROOT", None)
+
+        self.assertEqual(result["codex_session_id"], "codex-accept-trust")
+        self.assertIn(["tmux", "send-keys", "-t", "codex-trust-worker", "Enter"], calls)
+
     def test_start_worker_subparser_describes_name_flag(self):
         proc = subprocess.run(
             [sys.executable, "-m", "workerctl", "start-worker", "--help"],
@@ -15782,6 +15856,7 @@ class PairCommandTests(unittest.TestCase):
                     [
                         "pair_started",
                         "pair_task_resolved",
+                        "pair_manager_config_seeded",
                         "pair_worker_spawned",
                         "pair_manager_spawned",
                         "pair_binding_created",
@@ -15855,6 +15930,136 @@ class PairCommandTests(unittest.TestCase):
                 with contextlib.redirect_stdout(stdout_capture):
                     result = commands.command_pair(args)
             self.assertEqual(result, 0)
+
+    def test_pair_seeds_default_manager_config_for_existing_task_retry(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = self._setup_db(tmpdir)
+            conn = worker_db.connect(db_path)
+            task_id = worker_db.create_task(
+                conn, name="retry-task", goal="Recover pair retry.", summary=None
+            )
+            conn.commit()
+            conn.close()
+            recorded = []
+
+            def fake_spawn(*, name, role, task=None, initial_prompt=None, **kwargs):
+                recorded.append({"name": name, "role": role, "task": task, "initial_prompt": initial_prompt})
+                conn = worker_db.connect(db_path)
+                worker_db.initialize_database(conn)
+                try:
+                    session_id = worker_db.register_session(
+                        conn,
+                        name=name,
+                        role=role,
+                        codex_session_path=f"/tmp/{name}.jsonl",
+                        codex_session_id=f"codex-id-{name}",
+                        pid=10000 + hash(name) % 1000,
+                        cwd=kwargs.get("cwd", "/tmp"),
+                        tmux_session=f"codex-{name}",
+                    )
+                    conn.commit()
+                finally:
+                    conn.close()
+                return {
+                    "name": name,
+                    "role": role,
+                    "session_id": session_id,
+                    "pid": 10000 + hash(name) % 1000,
+                    "tmux_session": f"codex-{name}",
+                    "codex_session_path": f"/tmp/{name}.jsonl",
+                    "codex_session_id": f"codex-id-{name}",
+                    "cwd": kwargs.get("cwd", "/tmp"),
+                }
+
+            args = argparse.Namespace(
+                task="retry-task",
+                worker_name="w1",
+                manager_name="m1",
+                cwd=tmpdir,
+                task_prompt="Do work.",
+                task_goal=None,
+                task_summary=None,
+                sandbox="danger-full-access",
+                ask_for_approval="never",
+                timeout_seconds=30,
+                path=str(db_path),
+            )
+
+            with mock.patch.object(commands, "_spawn_codex_and_register", side_effect=fake_spawn):
+                stdout_capture = io.StringIO()
+                with contextlib.redirect_stdout(stdout_capture):
+                    result = commands.command_pair(args)
+
+            self.assertEqual(result, 0)
+            output = json.loads(stdout_capture.getvalue())
+            self.assertTrue(output["manager_config_seeded"])
+            self.assertTrue(output["manager_config_seeded_by_pair"])
+            manager_spawn = next(r for r in recorded if r["role"] == "manager")
+            self.assertIn("Manager config has already been recorded for this task.", manager_spawn["initial_prompt"])
+            self.assertNotIn("Ask the user the returned setup questions", manager_spawn["initial_prompt"])
+            conn = worker_db.connect(db_path)
+            try:
+                config = worker_db.manager_config(conn, task_id=task_id)
+            finally:
+                conn.close()
+            self.assertIsNotNone(config)
+            self.assertEqual(config["supervision_mode"], "guided")
+
+    def test_pair_passes_accept_trust_to_worker_and_manager_spawns(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = self._setup_db(tmpdir)
+            recorded = []
+
+            def fake_spawn(*, name, role, **kwargs):
+                recorded.append({"name": name, "role": role, "accept_trust": kwargs.get("accept_trust")})
+                conn = worker_db.connect(db_path)
+                worker_db.initialize_database(conn)
+                try:
+                    session_id = worker_db.register_session(
+                        conn,
+                        name=name,
+                        role=role,
+                        codex_session_path=f"/tmp/{name}.jsonl",
+                        codex_session_id=f"codex-id-{name}",
+                        pid=10000 + hash(name) % 1000,
+                        cwd=kwargs.get("cwd", "/tmp"),
+                        tmux_session=f"codex-{name}",
+                    )
+                    conn.commit()
+                finally:
+                    conn.close()
+                return {
+                    "name": name,
+                    "role": role,
+                    "session_id": session_id,
+                    "pid": 10000 + hash(name) % 1000,
+                    "tmux_session": f"codex-{name}",
+                    "codex_session_path": f"/tmp/{name}.jsonl",
+                    "codex_session_id": f"codex-id-{name}",
+                    "cwd": kwargs.get("cwd", "/tmp"),
+                }
+
+            args = argparse.Namespace(
+                task="trust-pair-task",
+                worker_name="w1",
+                manager_name="m1",
+                cwd=tmpdir,
+                task_prompt=None,
+                task_goal="Trust pair.",
+                task_summary=None,
+                sandbox="danger-full-access",
+                ask_for_approval="never",
+                timeout_seconds=30,
+                accept_trust=True,
+                path=str(db_path),
+            )
+            with mock.patch.object(commands, "_spawn_codex_and_register", side_effect=fake_spawn):
+                stdout_capture = io.StringIO()
+                with contextlib.redirect_stdout(stdout_capture):
+                    result = commands.command_pair(args)
+
+            self.assertEqual(result, 0)
+            self.assertEqual([r["accept_trust"] for r in recorded], [True, True])
 
     def test_pair_fails_when_task_missing_and_no_goal_provided(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -15997,7 +16202,8 @@ class PairCommandTests(unittest.TestCase):
             self.assertIn("Do the thing", worker_spawn["task"])
             self.assertIn(f"{commands.workerctl_cli()} worker-ack prompt-task --from-stdin", worker_spawn["task"])
             self.assertIsNone(manager_spawn["task"])
-            self.assertIn("manager-config prompt-task --questions", manager_spawn["initial_prompt"])
+            self.assertIn("Manager config has already been recorded for this task.", manager_spawn["initial_prompt"])
+            self.assertNotIn("manager-config prompt-task --questions", manager_spawn["initial_prompt"])
             self.assertIn("Task goal: Build a thing", manager_spawn["initial_prompt"])
             self.assertIn("Worker session: w1", manager_spawn["initial_prompt"])
             self.assertIn("acceptance criteria as living supervision state", manager_spawn["initial_prompt"])

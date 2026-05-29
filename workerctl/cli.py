@@ -654,6 +654,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     add_codex_startup_options(start_worker)
     start_worker.add_argument(
+        "--accept-trust",
+        action="store_true",
+        help=(
+            "Send Enter after launch to accept Codex's workspace trust prompt. "
+            "Use only for directories you intentionally trust."
+        ),
+    )
+    start_worker.add_argument(
         "--timeout-seconds",
         type=int,
         default=15,
@@ -694,6 +702,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Codex --ask-for-approval mode.",
     )
     add_codex_startup_options(start_manager)
+    start_manager.add_argument(
+        "--accept-trust",
+        action="store_true",
+        help=(
+            "Send Enter after launch to accept Codex's workspace trust prompt. "
+            "Use only for directories you intentionally trust."
+        ),
+    )
     start_manager.add_argument(
         "--timeout-seconds",
         type=int,
@@ -819,6 +835,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Codex --ask-for-approval mode.",
     )
     add_codex_startup_options(pair)
+    pair.add_argument(
+        "--accept-trust",
+        action="store_true",
+        help=(
+            "Send Enter after launching worker and manager to accept Codex's workspace trust prompt. "
+            "Use only for directories you intentionally trust."
+        ),
+    )
     pair.add_argument(
         "--timeout-seconds",
         type=int,
