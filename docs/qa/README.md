@@ -16,6 +16,8 @@ pass/fail evidence.
   entitlement, and audit-summary test.
 - [Dashboard evidence review](dashboard-evidence-review.md) - dashboard
   evidence summarization and what-next review test.
+- [Nudge readiness report](nudge-readiness-report.md) - dedicated what-next
+  nudge, worker-side assessment, and manager-side comparison test.
 - [Late attach support reporter](late-attach-support-reporter.md) - assign a
   manager after worker progress on a small CLI/reporting feature.
 
