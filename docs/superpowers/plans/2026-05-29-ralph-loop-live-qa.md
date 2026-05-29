@@ -14,7 +14,7 @@
 
 - Create: `docs/superpowers/plans/2026-05-29-ralph-loop-live-qa.md`
   - Execution plan and checklist for the live QA canary.
-- Create during execution: `/tmp/codex-ralph-loop-canary-20260529`
+- Create during execution: `/Users/neonwatty/Desktop/codex-ralph-loop-canary-20260529`
   - Disposable target repository used by the managed worker.
 - Create during execution: `artifacts/ralph-loop-live-qa-20260529/`
   - Final evidence bundle copied out of workerctl exports and command outputs.
@@ -98,15 +98,15 @@ Expected: commit succeeds. Skip this step if the plan should remain local scratc
 ### Task 2: Disposable GitHub Canary Repo
 
 **Files:**
-- Create: `/tmp/codex-ralph-loop-canary-20260529`
+- Create: `/Users/neonwatty/Desktop/codex-ralph-loop-canary-20260529`
 - Evidence: `/Users/neonwatty/Desktop/codex-terminal-manager/artifacts/ralph-loop-live-qa-20260529/canary-repo/`
 
 - [ ] **Step 1: Create a disposable local repo with intentionally failing CI**
 
 ```bash
-rm -rf /tmp/codex-ralph-loop-canary-20260529
-mkdir -p /tmp/codex-ralph-loop-canary-20260529/.github/workflows
-cd /tmp/codex-ralph-loop-canary-20260529
+rm -rf /Users/neonwatty/Desktop/codex-ralph-loop-canary-20260529
+mkdir -p /Users/neonwatty/Desktop/codex-ralph-loop-canary-20260529/.github/workflows
+cd /Users/neonwatty/Desktop/codex-ralph-loop-canary-20260529
 git init
 git branch -M main
 printf 'def add(a, b):\n    return a - b\n' > calculator.py
@@ -121,7 +121,7 @@ Expected: local commit succeeds and `python3 -m unittest discover -v` fails befo
 - [ ] **Step 2: Create the private GitHub repo and push main**
 
 ```bash
-cd /tmp/codex-ralph-loop-canary-20260529
+cd /Users/neonwatty/Desktop/codex-ralph-loop-canary-20260529
 gh repo create neonwatty/codex-ralph-loop-canary-20260529 --private --source . --remote origin --push
 ```
 
@@ -132,7 +132,7 @@ Expected: GitHub repository `neonwatty/codex-ralph-loop-canary-20260529` exists 
 ```bash
 cd /Users/neonwatty/Desktop/codex-terminal-manager
 mkdir -p artifacts/ralph-loop-live-qa-20260529/canary-repo
-cd /tmp/codex-ralph-loop-canary-20260529
+cd /Users/neonwatty/Desktop/codex-ralph-loop-canary-20260529
 gh repo view --json nameWithOwner,url,defaultBranchRef \
   | tee /Users/neonwatty/Desktop/codex-terminal-manager/artifacts/ralph-loop-live-qa-20260529/canary-repo/repo.json
 git status --short --branch \
@@ -146,7 +146,7 @@ Expected: repo JSON includes `neonwatty/codex-ralph-loop-canary-20260529`.
 ### Task 3: Iteration 1 Manager/Worker Loop
 
 **Files:**
-- Target repo: `/tmp/codex-ralph-loop-canary-20260529`
+- Target repo: `/Users/neonwatty/Desktop/codex-ralph-loop-canary-20260529`
 - Evidence: `/Users/neonwatty/Desktop/codex-terminal-manager/artifacts/ralph-loop-live-qa-20260529/iter-1/`
 
 - [ ] **Step 1: Define the exact seed prompt and hash**
@@ -154,7 +154,7 @@ Expected: repo JSON includes `neonwatty/codex-ralph-loop-canary-20260529`.
 ```bash
 cd /Users/neonwatty/Desktop/codex-terminal-manager
 mkdir -p artifacts/ralph-loop-live-qa-20260529/iter-1
-export TARGET_REPO=/tmp/codex-ralph-loop-canary-20260529
+export TARGET_REPO=/Users/neonwatty/Desktop/codex-ralph-loop-canary-20260529
 export SEED_PROMPT='You are working in the disposable calculator canary repo. Fix the failing unit test by correcting the implementation, verify tests locally, open a pull request, monitor CI, fix CI if needed, and merge only when green. Record concise evidence for every decision.'
 export SEED_PROMPT_SHA256="$(printf '%s' "$SEED_PROMPT" | shasum -a 256 | awk '{print $1}')"
 printf '%s\n' "$SEED_PROMPT" > artifacts/ralph-loop-live-qa-20260529/seed-prompt.txt
@@ -245,7 +245,7 @@ Expected: decision and epilogue appear in `audit` and `replay`.
 - [ ] **Step 8: Capture PR URL evidence**
 
 ```bash
-cd /tmp/codex-ralph-loop-canary-20260529
+cd /Users/neonwatty/Desktop/codex-ralph-loop-canary-20260529
 export PR_URL="$(gh pr view --json url --jq .url)"
 cd /Users/neonwatty/Desktop/codex-terminal-manager
 export PR_URL_CRITERION_ID="$(scripts/workerctl criteria qa-ralph-loop-iter-1 \
@@ -277,7 +277,7 @@ Expected: manager decision, nudge command, worker fix receipt, and updated PR ar
 - [ ] **Step 10: Merge only when CI is green**
 
 ```bash
-cd /tmp/codex-ralph-loop-canary-20260529
+cd /Users/neonwatty/Desktop/codex-ralph-loop-canary-20260529
 gh pr checks --watch
 export MERGE_RESULT="$(gh pr merge --squash --delete-branch --subject 'Fix calculator add implementation' 2>&1)"
 printf '%s\n' "$MERGE_RESULT" | tee /Users/neonwatty/Desktop/codex-terminal-manager/artifacts/ralph-loop-live-qa-20260529/iter-1/merge-result.txt
@@ -310,7 +310,7 @@ Expected: `worker_compact_clear` is permitted only after handoff and records a d
 ### Task 4: Iteration 2 Replay And Fresh-Worker Isolation
 
 **Files:**
-- Target repo: `/tmp/codex-ralph-loop-canary-20260529`
+- Target repo: `/Users/neonwatty/Desktop/codex-ralph-loop-canary-20260529`
 - Evidence: `/Users/neonwatty/Desktop/codex-terminal-manager/artifacts/ralph-loop-live-qa-20260529/iter-2/`
 
 - [ ] **Step 1: Start iteration 2 with the exact same seed prompt**
@@ -318,7 +318,7 @@ Expected: `worker_compact_clear` is permitted only after handoff and records a d
 ```bash
 cd /Users/neonwatty/Desktop/codex-terminal-manager
 mkdir -p artifacts/ralph-loop-live-qa-20260529/iter-2
-export TARGET_REPO=/tmp/codex-ralph-loop-canary-20260529
+export TARGET_REPO=/Users/neonwatty/Desktop/codex-ralph-loop-canary-20260529
 export SEED_PROMPT="$(cat artifacts/ralph-loop-live-qa-20260529/seed-prompt.txt)"
 export SEED_PROMPT_SHA256="$(cat artifacts/ralph-loop-live-qa-20260529/seed-prompt.sha256)"
 scripts/workerctl pair \
