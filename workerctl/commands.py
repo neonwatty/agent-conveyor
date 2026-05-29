@@ -988,8 +988,12 @@ def command_list(args: argparse.Namespace) -> int:
         if not path.is_dir():
             continue
         config = load_json(path / "config.json", {})
-        status = load_json(path / "status.json", {})
         name = config.get("name", path.name)
+        fallback_status = load_json(path / "status.json", {})
+        try:
+            status = latest_status(name)
+        except WorkerError:
+            status = fallback_status
         terminal_error = None
         try:
             running = session_exists(name)
@@ -1211,17 +1215,12 @@ def command_update_status(args: argparse.Namespace) -> int:
         "next_action": args.next_action,
         "state": args.state,
     }
-    write_json(status_path(args.name), payload)
-    append_event(
-        args.name,
-        "status_updated",
-        {
-            "blocker": args.blocker,
-            "current_task": args.current_task,
-            "next_action": args.next_action,
-            "state": args.state,
-        },
-    )
+    event_payload = {
+        "blocker": args.blocker,
+        "current_task": args.current_task,
+        "next_action": args.next_action,
+        "state": args.state,
+    }
     with connect_db() as conn:
         initialize_database(conn)
         worker_id = upsert_worker(
@@ -1240,14 +1239,17 @@ def command_update_status(args: argparse.Namespace) -> int:
             "status_updated",
             actor="workerctl",
             worker_id=worker_id,
-            payload={
-                "blocker": args.blocker,
-                "current_task": args.current_task,
-                "next_action": args.next_action,
-                "state": args.state,
-            },
+            payload=event_payload,
         )
         conn.commit()
+    for label, writer in (
+        ("status.json compatibility file", lambda: write_json(status_path(args.name), payload)),
+        ("events.jsonl compatibility file", lambda: append_event(args.name, "status_updated", event_payload)),
+    ):
+        try:
+            writer()
+        except OSError as exc:
+            print(f"Warning: {label} write failed: {exc}", file=sys.stderr)
     print(json.dumps(payload, indent=2, sort_keys=True))
     return 0
 
