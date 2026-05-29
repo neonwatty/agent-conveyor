@@ -591,7 +591,10 @@ The `ralph-loop` scenario covers the issue #152 managed delivery loop: the
 manager runs the same seed prompt through at least two iterations, requires
 criteria and epilogue evidence, gates PR creation, CI monitoring/fixing, green
 merge, handoff, and worker clear on explicit permissions, and proves the second
-iteration starts after audited clear in fresh-worker isolation.
+iteration starts after audited clear in fresh-worker isolation. Replay iterations
+start with an inspect-first guard: if the previous iteration's work is already
+merged, the worker records that state and stops without making replacement edits
+or opening another PR unless something is actually missing.
 
 ### Terminal helpers
 
