@@ -4639,6 +4639,61 @@ class CliTests(unittest.TestCase):
                 else:
                     os.environ["WORKERCTL_STATE_ROOT"] = original_root
 
+    def test_list_json_reads_sqlite_status_when_compatibility_json_is_stale(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_dir = Path(tmpdir) / "state"
+            worker_path = state_dir / "worker-a"
+            worker_path.mkdir(parents=True)
+            (worker_path / "config.json").write_text(json.dumps({"name": "worker-a"}) + "\n")
+            (worker_path / "status.json").write_text(
+                json.dumps({"state": "waiting", "current_task": "stale json"}) + "\n"
+            )
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                worker_id = worker_db.upsert_worker(
+                    conn,
+                    name="worker-a",
+                    cwd=str(ROOT),
+                    tmux_session="codex-worker-a",
+                    state="active",
+                )
+                worker_db.insert_status(
+                    conn,
+                    worker_id=worker_id,
+                    status={
+                        "blocker": None,
+                        "current_task": "fresh db",
+                        "next_action": "none",
+                        "state": "done",
+                    },
+                    timestamp="2026-05-29T20:30:00Z",
+                )
+                conn.commit()
+
+            original_root = os.environ.get("WORKERCTL_STATE_ROOT")
+            original_session_exists = commands.session_exists
+            original_default_db_path = worker_db.default_db_path
+            try:
+                os.environ["WORKERCTL_STATE_ROOT"] = str(state_dir)
+                commands.session_exists = lambda _name: True
+                worker_db.default_db_path = lambda: db_path
+
+                with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                    result = commands.command_list(argparse.Namespace(json=True))
+
+                payload = json.loads(stdout.getvalue())
+                self.assertEqual(result, 0)
+                self.assertEqual(payload[0]["state"], "done")
+                self.assertEqual(payload[0]["current_task"], "fresh db")
+            finally:
+                commands.session_exists = original_session_exists
+                worker_db.default_db_path = original_default_db_path
+                if original_root is None:
+                    os.environ.pop("WORKERCTL_STATE_ROOT", None)
+                else:
+                    os.environ["WORKERCTL_STATE_ROOT"] = original_root
+
     def test_status_reports_tmux_permission_error_without_failing(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             state_dir = Path(tmpdir) / "state"
@@ -7643,6 +7698,73 @@ Deferred follow-up criteria:
                     self.assertEqual(event["type"], "status_updated")
             finally:
                 commands.connect_db = original_connect_db
+                if worker_path.exists():
+                    shutil.rmtree(worker_path)
+
+    def test_update_status_keeps_sqlite_when_compatibility_files_are_unwritable(self):
+        name = "db-update-status-unwritable-compat"
+        worker_path = worker_dir(name)
+        if worker_path.exists():
+            shutil.rmtree(worker_path)
+        worker_path.mkdir(parents=True)
+        config_path(name).write_text(
+            json.dumps(
+                {
+                    "cwd": str(ROOT),
+                    "name": name,
+                    "tmux_pane_id": "%1",
+                    "tmux_session": f"codex-{name}",
+                }
+            )
+            + "\n"
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            original_connect_db = commands.connect_db
+            original_write_json = commands.write_json
+            original_append_event = commands.append_event
+
+            def fail_legacy_file_write(*args, **kwargs):
+                raise PermissionError("compatibility path is sandboxed")
+
+            commands.connect_db = lambda path=None: worker_db.connect(db_path if path is None else path)
+            commands.write_json = fail_legacy_file_write
+            commands.append_event = fail_legacy_file_write
+            args = argparse.Namespace(
+                blocker=None,
+                current_task="Finished spawned worker task.",
+                name=name,
+                next_action="Nothing remains.",
+                state="done",
+            )
+            try:
+                stdout = io.StringIO()
+                stderr = io.StringIO()
+                with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                    self.assertEqual(commands.command_update_status(args), 0)
+
+                status = json.loads(stdout.getvalue())
+                self.assertEqual(status["state"], "done")
+                self.assertIn("compatibility file write failed", stderr.getvalue())
+
+                with worker_db.connect(db_path) as conn:
+                    worker = conn.execute("select * from workers where name = ?", (name,)).fetchone()
+                    self.assertIsNotNone(worker)
+                    db_status = conn.execute(
+                        "select * from statuses where worker_id = ? order by id desc limit 1",
+                        (worker["id"],),
+                    ).fetchone()
+                    self.assertEqual(db_status["state"], "done")
+                    self.assertEqual(db_status["current_task"], "Finished spawned worker task.")
+                    event = conn.execute(
+                        "select * from events where worker_id = ? order by id desc limit 1",
+                        (worker["id"],),
+                    ).fetchone()
+                    self.assertEqual(event["type"], "status_updated")
+            finally:
+                commands.connect_db = original_connect_db
+                commands.write_json = original_write_json
+                commands.append_event = original_append_event
                 if worker_path.exists():
                     shutil.rmtree(worker_path)
 
