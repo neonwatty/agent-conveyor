@@ -110,7 +110,7 @@ cd /tmp/codex-ralph-loop-canary-20260529
 git init
 git branch -M main
 printf 'def add(a, b):\n    return a - b\n' > calculator.py
-printf 'from calculator import add\n\n\ndef test_add():\n    assert add(2, 3) == 5\n' > test_calculator.py
+printf 'import unittest\n\nfrom calculator import add\n\n\nclass CalculatorTests(unittest.TestCase):\n    def test_add(self):\n        self.assertEqual(add(2, 3), 5)\n\n\nif __name__ == "__main__":\n    unittest.main()\n' > test_calculator.py
 printf 'name: Tests\non: [push, pull_request]\njobs:\n  unittest:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-python@v5\n        with:\n          python-version: "3.12"\n      - run: python -m unittest discover -v\n' > .github/workflows/tests.yml
 git add .
 git commit -m "Initial failing calculator"
@@ -473,4 +473,3 @@ Expected: `go-no-go.md` records whether the merged QA flow is ready for live use
 - Stop immediately if Dispatch appears to decide readiness instead of routing the manager's decision.
 - Stop immediately if permissions allow PR, merge, or clear before manager config permits them.
 - Stop and open a fix branch if audit/replay/commands cannot connect manager dispatcher and worker dispatcher receipts.
-
