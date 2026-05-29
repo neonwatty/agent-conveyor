@@ -1214,6 +1214,57 @@ class DatabaseTests(unittest.TestCase):
             self.assertEqual(audit["commands"][0]["result"], {"sent": True})
             self.assertEqual(audit["events"][0]["type"], "task_nudge_succeeded")
 
+    def test_task_audit_returns_session_nudge_telemetry(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self.insert_task(conn, "task-1", "task-a")
+            self.insert_task(conn, "task-2", "task-b")
+            worker_db.emit_telemetry_event(
+                conn,
+                event_id="telemetry-nudge-1",
+                actor="workerctl",
+                event_type="session_nudge_succeeded",
+                task_id="task-1",
+                timestamp="2026-05-29T15:14:42Z",
+                summary="Nudged session worker-a.",
+                correlation={
+                    "binding_id": "binding-1",
+                    "dry_run": False,
+                    "role": "worker",
+                    "session": "worker-a",
+                    "session_id": "session-worker-a",
+                },
+                attributes={
+                    "dry_run": False,
+                    "success": True,
+                    "text_length": 409,
+                },
+            )
+            worker_db.emit_telemetry_event(
+                conn,
+                event_id="telemetry-nudge-other",
+                actor="workerctl",
+                event_type="session_nudge_succeeded",
+                task_id="task-2",
+                timestamp="2026-05-29T15:15:42Z",
+                summary="Nudged session worker-b.",
+                correlation={"session": "worker-b"},
+                attributes={"success": True},
+            )
+            conn.commit()
+
+            audit = worker_db.task_audit(conn, task="task-a")
+
+            self.assertEqual(len(audit["session_nudges"]), 1)
+            nudge = audit["session_nudges"][0]
+            self.assertEqual(nudge["id"], "telemetry-nudge-1")
+            self.assertEqual(nudge["event_type"], "session_nudge_succeeded")
+            self.assertEqual(nudge["timestamp"], "2026-05-29T15:14:42Z")
+            self.assertEqual(nudge["summary"], "Nudged session worker-a.")
+            self.assertEqual(nudge["correlation"]["session"], "worker-a")
+            self.assertEqual(nudge["correlation"]["binding_id"], "binding-1")
+            self.assertEqual(nudge["attributes"]["text_length"], 409)
+
     def test_task_audit_returns_acknowledgements(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             conn = self.open_db(tmpdir)

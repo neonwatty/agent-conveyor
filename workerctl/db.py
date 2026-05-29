@@ -5345,6 +5345,17 @@ def task_audit(conn: sqlite3.Connection, *, task: str) -> dict[str, Any]:
         """,
         (task_row["id"],),
     ).fetchall()
+    session_nudge_rows = conn.execute(
+        """
+        select id, run_id, task_id, timestamp, actor, event_type, severity,
+               summary, correlation_json, attributes_json
+        from telemetry_events
+        where task_id = ?
+          and event_type in ('session_nudge_succeeded', 'session_nudge_failed')
+        order by timestamp, rowid
+        """,
+        (task_row["id"],),
+    ).fetchall()
     acknowledgement_rows = conn.execute(
         """
         select id, task_id, binding_id, role, payload_json, revision,
@@ -5458,6 +5469,7 @@ def task_audit(conn: sqlite3.Connection, *, task: str) -> dict[str, Any]:
         "manager_cycle_spans": manager_cycle_span_records,
         "manager_decisions": manager_decision_records,
         "routed_notifications": routed_notification_records,
+        "session_nudges": [_telemetry_event_from_row(row) for row in session_nudge_rows],
         "task": {
             "created_at": task_row["created_at"],
             "goal": task_row["goal"],
