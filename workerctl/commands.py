@@ -164,7 +164,12 @@ def dashboard_launch_payload(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
-def _recent_active_dispatch_heartbeat(db_path: str | Path | None, *, stale_seconds: float = 10.0) -> dict[str, Any] | None:
+def _recent_active_dispatch_heartbeat(
+    db_path: str | Path | None,
+    *,
+    dispatcher_id: str | None = None,
+    stale_seconds: float = 10.0,
+) -> dict[str, Any] | None:
     try:
         with connect_db(Path(db_path).expanduser().resolve() if db_path else None) as conn:
             initialize_database(conn)
@@ -172,20 +177,23 @@ def _recent_active_dispatch_heartbeat(db_path: str | Path | None, *, stale_secon
                 conn,
                 actor="dispatch",
                 event_type="dispatch_watch_heartbeat",
-                limit=1,
+                limit=25,
                 newest=True,
             )
     except Exception:
         return None
-    if not heartbeats:
-        return None
-    heartbeat = heartbeats[0]
-    if heartbeat.get("attributes", {}).get("dry_run") is True:
-        return None
-    heartbeat_age = age_seconds(heartbeat.get("timestamp"))
-    if heartbeat_age is None or heartbeat_age > stale_seconds:
-        return None
-    return heartbeat
+    for heartbeat in heartbeats:
+        heartbeat_age = age_seconds(heartbeat.get("timestamp"))
+        if heartbeat_age is None:
+            continue
+        if heartbeat_age > stale_seconds:
+            break
+        if heartbeat.get("attributes", {}).get("dry_run") is True:
+            continue
+        if dispatcher_id is not None and heartbeat.get("correlation", {}).get("dispatcher_id") != dispatcher_id:
+            continue
+        return heartbeat
+    return None
 
 
 def command_dashboard(args: argparse.Namespace) -> int:
@@ -199,7 +207,10 @@ def command_dashboard(args: argparse.Namespace) -> int:
         return 0
     dispatch_process = None
     if payload["ensure_dispatch"] and payload["dispatch_command"]:
-        if _recent_active_dispatch_heartbeat(getattr(args, "db_path", None)) is None:
+        if _recent_active_dispatch_heartbeat(
+            getattr(args, "db_path", None),
+            dispatcher_id=args.dispatcher_id,
+        ) is None:
             dispatch_process = subprocess.Popen(
                 payload["dispatch_command"],
                 cwd=PROJECT_ROOT,
@@ -7272,6 +7283,47 @@ def _discover_codex_session_in_tmux(
     )
 
 
+def _discover_spawned_codex_session(
+    tmux_session_name: str,
+    *,
+    timeout_seconds: int,
+    minimum_session_timestamp: datetime,
+    accept_trust: bool,
+) -> dict:
+    from workerctl import tmux as worker_tmux
+
+    if not accept_trust:
+        return _discover_codex_session_in_tmux(
+            tmux_session_name,
+            timeout_seconds=timeout_seconds,
+            minimum_session_timestamp=minimum_session_timestamp,
+        )
+
+    deadline = time.monotonic() + timeout_seconds
+    last_error: WorkerError | None = None
+    while True:
+        worker_tmux.run(["tmux", "send-keys", "-t", tmux_session_name, "Enter"])
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        try:
+            return _discover_codex_session_in_tmux(
+                tmux_session_name,
+                timeout_seconds=min(2.0, remaining),
+                minimum_session_timestamp=minimum_session_timestamp,
+            )
+        except WorkerError as exc:
+            last_error = exc
+            if time.monotonic() >= deadline:
+                break
+    if last_error is not None:
+        raise last_error
+    raise WorkerError(
+        f"codex did not write session_meta within {timeout_seconds}s "
+        f"in tmux session {tmux_session_name!r}"
+    )
+
+
 def _spawn_codex_and_register(
     *,
     name: str,
@@ -7343,14 +7395,13 @@ def _spawn_codex_and_register(
     worker_tmux.run([
         "tmux", "new-session", "-d", "-s", tmux_session_name, "-c", cwd, codex_cmd,
     ])
-    if accept_trust:
-        worker_tmux.run(["tmux", "send-keys", "-t", tmux_session_name, "Enter"])
 
     # Discover codex pid + rollout.
     try:
-        discovery = _discover_codex_session_in_tmux(
+        discovery = _discover_spawned_codex_session(
             tmux_session_name,
             timeout_seconds=timeout_seconds,
+            accept_trust=accept_trust,
             minimum_session_timestamp=spawn_started_at,
         )
     except WorkerError as exc:
@@ -7896,7 +7947,10 @@ def command_pair(args: argparse.Namespace) -> int:
             "started": False,
         }
         if dispatch_payload["ensure_dispatch"] and dispatch_payload["dispatch_command"]:
-            if _recent_active_dispatch_heartbeat(db_path) is None:
+            if _recent_active_dispatch_heartbeat(
+                db_path,
+                dispatcher_id=getattr(args, "dispatcher_id", None),
+            ) is None:
                 dispatch_process = subprocess.Popen(
                     dispatch_payload["dispatch_command"],
                     cwd=PROJECT_ROOT,

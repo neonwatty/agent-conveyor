@@ -3025,8 +3025,108 @@ class CliTests(unittest.TestCase):
                     actor="dispatch",
                     event_type="dispatch_watch_heartbeat",
                     summary="Dispatch watch heartbeat.",
+                    correlation={"dispatcher_id": "dispatch-dashboard", "iteration": 12},
+                    attributes={"dry_run": False, "processed_count": 0},
+                )
+                conn.commit()
+
+            args = argparse.Namespace(
+                db_path=str(db_path),
+                dispatcher_id="dispatch-dashboard",
+                dry_run=False,
+                ensure_dispatch=True,
+                host="127.0.0.1",
+                json=False,
+                port=8797,
+                task="qa-task",
+                workerctl_path="scripts/workerctl",
+            )
+
+            with mock.patch("workerctl.commands.subprocess.Popen") as popen, mock.patch(
+                "workerctl.commands.subprocess.run",
+                return_value=subprocess.CompletedProcess(["npm"], 0),
+            ) as run:
+                result = commands.command_dashboard(args)
+
+        self.assertEqual(result, 0)
+        popen.assert_not_called()
+        run.assert_called_once()
+
+    def test_dashboard_ensure_dispatch_starts_when_only_other_dispatcher_is_active(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                worker_db.emit_telemetry_event(
+                    conn,
+                    actor="dispatch",
+                    event_type="dispatch_watch_heartbeat",
+                    summary="Dispatch watch heartbeat.",
                     correlation={"dispatcher_id": "dispatch-pair", "iteration": 12},
                     attributes={"dry_run": False, "processed_count": 0},
+                )
+                conn.commit()
+
+            args = argparse.Namespace(
+                db_path=str(db_path),
+                dispatcher_id="dispatch-dashboard",
+                dry_run=False,
+                ensure_dispatch=True,
+                host="127.0.0.1",
+                json=False,
+                port=8797,
+                task="qa-task",
+                workerctl_path="scripts/workerctl",
+            )
+
+            class Proc:
+                pid = 12345
+                returncode = None
+
+                def poll(self):
+                    return None
+
+                def terminate(self):
+                    self.returncode = -15
+
+                def wait(self, timeout=None):
+                    return 0
+
+            with mock.patch("workerctl.commands.subprocess.Popen", return_value=Proc()) as popen, mock.patch(
+                "workerctl.commands.subprocess.run",
+                return_value=subprocess.CompletedProcess(["npm"], 0),
+            ) as run:
+                result = commands.command_dashboard(args)
+
+        self.assertEqual(result, 0)
+        popen.assert_called_once()
+        self.assertIn("dispatch-dashboard", popen.call_args.args[0])
+        run.assert_called_once()
+
+    def test_dashboard_ensure_dispatch_reuses_matching_heartbeat_when_other_is_newer(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            matching_timestamp = (datetime.now(timezone.utc) - timedelta(seconds=2)).isoformat()
+            newer_timestamp = datetime.now(timezone.utc).isoformat()
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                worker_db.emit_telemetry_event(
+                    conn,
+                    actor="dispatch",
+                    event_type="dispatch_watch_heartbeat",
+                    summary="Dispatch watch heartbeat.",
+                    correlation={"dispatcher_id": "dispatch-dashboard", "iteration": 12},
+                    attributes={"dry_run": False, "processed_count": 0},
+                    timestamp=matching_timestamp,
+                )
+                worker_db.emit_telemetry_event(
+                    conn,
+                    actor="dispatch",
+                    event_type="dispatch_watch_heartbeat",
+                    summary="Dispatch watch heartbeat.",
+                    correlation={"dispatcher_id": "dispatch-pair", "iteration": 13},
+                    attributes={"dry_run": False, "processed_count": 0},
+                    timestamp=newer_timestamp,
                 )
                 conn.commit()
 
@@ -13864,6 +13964,80 @@ class StartWorkerTests(unittest.TestCase):
         self.assertEqual(result["codex_session_id"], "codex-accept-trust")
         self.assertIn(["tmux", "send-keys", "-t", "codex-trust-worker", "Enter"], calls)
 
+    def test_spawn_accept_trust_retries_enter_when_first_discovery_times_out(self):
+        from workerctl import commands as worker_commands
+        from workerctl import tmux as worker_tmux
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_dir = Path(tmpdir) / "state"
+            state_dir.mkdir()
+            os.environ["WORKERCTL_STATE_ROOT"] = str(state_dir)
+            try:
+                calls = []
+                discover_attempts = 0
+
+                def fake_run(cmd, check=True, input_text=None):
+                    calls.append(list(cmd))
+                    class R:
+                        returncode = 0
+                        stdout = ""
+                        stderr = ""
+                    return R()
+
+                def fake_session_exists(name):
+                    return False
+
+                def flaky_discover(
+                    tmux_session,
+                    *,
+                    timeout_seconds=15,
+                    poll_interval=0.5,
+                    minimum_session_timestamp=None,
+                ):
+                    nonlocal discover_attempts
+                    discover_attempts += 1
+                    if discover_attempts == 1:
+                        raise WorkerError("codex did not write session_meta within chunk")
+                    return {
+                        "native_pid": 12345,
+                        "codex_session_path": "/tmp/accept-trust-retry.jsonl",
+                        "codex_session_id": "codex-accept-trust-retry",
+                        "cwd": "/repo",
+                        "originator": "codex-tui",
+                        "cli_version": "",
+                    }
+
+                orig_run = worker_tmux.run
+                orig_session_exists = worker_tmux.session_exists
+                orig_discover = worker_commands._discover_codex_session_in_tmux
+                worker_tmux.run = fake_run
+                worker_tmux.session_exists = fake_session_exists
+                worker_commands._discover_codex_session_in_tmux = flaky_discover
+                try:
+                    result = worker_commands._spawn_codex_and_register(
+                        name="trust-worker-retry",
+                        role="worker",
+                        cwd="/repo",
+                        task="Do it",
+                        sandbox="danger-full-access",
+                        ask_for_approval="never",
+                        timeout_seconds=10,
+                        accept_trust=True,
+                    )
+                finally:
+                    worker_tmux.run = orig_run
+                    worker_tmux.session_exists = orig_session_exists
+                    worker_commands._discover_codex_session_in_tmux = orig_discover
+            finally:
+                os.environ.pop("WORKERCTL_STATE_ROOT", None)
+
+        self.assertEqual(result["codex_session_id"], "codex-accept-trust-retry")
+        enter_calls = [
+            call for call in calls
+            if call == ["tmux", "send-keys", "-t", "codex-trust-worker-retry", "Enter"]
+        ]
+        self.assertGreaterEqual(len(enter_calls), 2)
+
     def test_start_worker_subparser_describes_name_flag(self):
         proc = subprocess.run(
             [sys.executable, "-m", "workerctl", "start-worker", "--help"],
@@ -15646,7 +15820,50 @@ class PairCommandTests(unittest.TestCase):
             },
         )
 
-    def test_pair_reuses_active_dispatch_heartbeat(self):
+    def test_pair_reuses_matching_active_dispatch_heartbeat(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = self._setup_db(tmpdir)
+            with worker_db.connect(db_path) as conn:
+                worker_db.emit_telemetry_event(
+                    conn,
+                    actor="dispatch",
+                    event_type="dispatch_watch_heartbeat",
+                    summary="Dispatch watch heartbeat.",
+                    correlation={"dispatcher_id": "dispatch-pair-test", "iteration": 44},
+                    attributes={"dry_run": False, "processed_count": 0},
+                )
+                conn.commit()
+            args = self._pair_args(
+                db_path=db_path,
+                tmpdir=tmpdir,
+                dispatcher_id="dispatch-pair-test",
+            )
+
+            class Proc:
+                pid = 12345
+
+                def poll(self):
+                    return None
+
+                def wait(self, timeout=None):
+                    return 0
+
+            stdout_capture = io.StringIO()
+            with mock.patch.object(
+                commands,
+                "_spawn_codex_and_register",
+                side_effect=self._fake_pair_spawn(db_path),
+            ), mock.patch("workerctl.commands.subprocess.Popen", return_value=Proc()) as popen, contextlib.redirect_stdout(stdout_capture):
+                result = commands.command_pair(args)
+
+        self.assertEqual(result, 0)
+        popen.assert_not_called()
+        payload = json.loads(stdout_capture.getvalue())
+        self.assertTrue(payload["dispatch"]["ensure"])
+        self.assertFalse(payload["dispatch"]["started"])
+        self.assertIsNone(payload["dispatch"]["pid"])
+
+    def test_pair_starts_requested_dispatcher_when_only_other_dispatcher_is_active(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = self._setup_db(tmpdir)
             with worker_db.connect(db_path) as conn:
@@ -15657,6 +15874,62 @@ class PairCommandTests(unittest.TestCase):
                     summary="Dispatch watch heartbeat.",
                     correlation={"dispatcher_id": "dispatch-pair", "iteration": 44},
                     attributes={"dry_run": False, "processed_count": 0},
+                )
+                conn.commit()
+            args = self._pair_args(
+                db_path=db_path,
+                tmpdir=tmpdir,
+                dispatcher_id="dispatch-pair-test",
+            )
+
+            class Proc:
+                pid = 12345
+
+                def poll(self):
+                    return None
+
+                def wait(self, timeout=None):
+                    return 0
+
+            stdout_capture = io.StringIO()
+            with mock.patch.object(
+                commands,
+                "_spawn_codex_and_register",
+                side_effect=self._fake_pair_spawn(db_path),
+            ), mock.patch("workerctl.commands.subprocess.Popen", return_value=Proc()) as popen, contextlib.redirect_stdout(stdout_capture):
+                result = commands.command_pair(args)
+
+        self.assertEqual(result, 0)
+        popen.assert_called_once()
+        self.assertIn("dispatch-pair-test", popen.call_args.args[0])
+        payload = json.loads(stdout_capture.getvalue())
+        self.assertTrue(payload["dispatch"]["ensure"])
+        self.assertTrue(payload["dispatch"]["started"])
+        self.assertEqual(payload["dispatch"]["pid"], 12345)
+
+    def test_pair_reuses_matching_heartbeat_when_other_dispatcher_is_newer(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = self._setup_db(tmpdir)
+            matching_timestamp = (datetime.now(timezone.utc) - timedelta(seconds=2)).isoformat()
+            newer_timestamp = datetime.now(timezone.utc).isoformat()
+            with worker_db.connect(db_path) as conn:
+                worker_db.emit_telemetry_event(
+                    conn,
+                    actor="dispatch",
+                    event_type="dispatch_watch_heartbeat",
+                    summary="Dispatch watch heartbeat.",
+                    correlation={"dispatcher_id": "dispatch-pair-test", "iteration": 44},
+                    attributes={"dry_run": False, "processed_count": 0},
+                    timestamp=matching_timestamp,
+                )
+                worker_db.emit_telemetry_event(
+                    conn,
+                    actor="dispatch",
+                    event_type="dispatch_watch_heartbeat",
+                    summary="Dispatch watch heartbeat.",
+                    correlation={"dispatcher_id": "dispatch-dashboard", "iteration": 45},
+                    attributes={"dry_run": False, "processed_count": 0},
+                    timestamp=newer_timestamp,
                 )
                 conn.commit()
             args = self._pair_args(
