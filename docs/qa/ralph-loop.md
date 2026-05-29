@@ -52,8 +52,18 @@ scripts/workerctl pair \
   --cwd "$TARGET_REPO" \
   --task-goal "Managed Ralph loop iteration 1" \
   --task-summary "PR/CI/merge/context-clear QA" \
-  --task-prompt "$SEED_PROMPT"
+  --task-prompt "$SEED_PROMPT" \
+  --accept-trust
 ```
+
+Use `--accept-trust` only for a disposable repo you intentionally trust. Without
+it, a fresh Codex session can pause at the workspace trust prompt before
+worker/manager registration completes.
+
+The seed prompt should get the worker through implementation, local
+verification, branch evidence, and a receipt. It should not ask the worker to
+open or merge a PR by itself; PR creation is a manager-routed action after the
+`repo.open_pr` permission and PR-readiness decision are recorded.
 
 ## Required Loop
 
@@ -73,6 +83,21 @@ Iteration 2 must replay the same seed prompt after the worker context clear
 receipt. The standard smoke uses a fresh worker for iteration 2, so it proves
 fresh-worker isolation plus the audited clear receipt, not same-session clear
 semantics.
+
+## Liveness Receipts
+
+At each PR, CI-fix, merge, handoff, and clear checkpoint, capture both the
+task-scoped worker/manager liveness view and the latest dispatch heartbeat:
+
+```bash
+scripts/workerctl telemetry task qa-ralph-loop-iter-1 --json
+scripts/workerctl telemetry --event-type dispatch_watch_heartbeat --newest --limit 1 --json
+```
+
+Preserve the `worker_alive`, `manager_alive`, latest-cycle, and dispatch
+heartbeat fields with the same `ralph-iter-*` correlation marker used for that
+phase. This is the audit link between the manager dispatcher, worker dispatcher,
+and the worker/manager sessions.
 
 ## Correlation Markers
 
@@ -146,12 +171,28 @@ scripts/workerctl criteria qa-ralph-loop-iter-1 \
   --evidence-json "{\"correlation_id\":\"ralph-iter-1-pr\",\"pr_url\":\"<url>\"}"
 ```
 
+Route the PR action through the manager-to-worker channel after the readiness
+decision:
+
+```bash
+scripts/workerctl session-nudge qa-ralph-worker-1 \
+  "correlation_id=ralph-iter-1-pr; open the PR now, then report the PR URL and evidence."
+```
+
 For the forced or simulated CI failure path:
 
 ```bash
 scripts/workerctl record-decision qa-ralph-loop-iter-1 nudge \
   --reason "CI failed; route a focused CI-fix retry to the worker." \
   --payload-json "{\"ralph_loop\":{\"iteration\":1,\"phase\":\"ci_fix\",\"correlation_id\":\"ralph-iter-1-ci-fix\",\"seed_prompt_sha256\":\"$SEED_PROMPT_SHA256\"}}"
+```
+
+Then route the retry with `session-nudge`, not the legacy task-scoped `nudge`
+path:
+
+```bash
+scripts/workerctl session-nudge qa-ralph-worker-1 \
+  "correlation_id=ralph-iter-1-ci-fix; inspect CI, push a fix, and report the fresh CI URL."
 ```
 
 For the green merge decision:
@@ -161,6 +202,17 @@ scripts/workerctl record-decision qa-ralph-loop-iter-1 inspect \
   --reason "CI is green and repo.merge_green_pr permission is present." \
   --payload-json "{\"ralph_loop\":{\"iteration\":1,\"phase\":\"merge\",\"correlation_id\":\"ralph-iter-1-merge\",\"seed_prompt_sha256\":\"$SEED_PROMPT_SHA256\"}}"
 ```
+
+Before running any merge command, verify the disposable target has required
+checks or branch protection configured, or explicitly verify all required jobs
+are green:
+
+```bash
+gh pr checks "$PR_NUMBER" --repo "$TARGET_REPO_SLUG" --required
+```
+
+Do not treat `gh pr merge --auto` as a green gate by itself. On an unprotected
+repo with no required checks, GitHub can merge immediately.
 
 ## Finish Gates
 
@@ -203,10 +255,11 @@ scripts/workerctl compact-worker qa-ralph-loop-iter-1 \
 ```
 
 Start iteration 2 with a fresh task, worker, and manager name and the exact same
-seed prompt. Capture the initial pane/transcript and confirm it does not
-reference stale iteration 1 chat state. Pair this with the iteration 1 clear
-command receipt; the standard smoke proves fresh-worker isolation after audited
-clear, not same-session clear semantics.
+seed prompt. Include `--accept-trust` again for trusted disposable repos. Capture
+the initial pane/transcript and confirm it does not reference stale iteration 1
+chat state. Pair this with the iteration 1 clear command receipt; the standard
+smoke proves fresh-worker isolation after audited clear, not same-session clear
+semantics.
 
 ## Evidence Bundle
 
@@ -224,6 +277,7 @@ scripts/workerctl export-task "$TASK" --zip --include-transcripts
 Required evidence:
 
 - replay and audit for both iterations
+- per-checkpoint liveness receipts for PR, CI-fix, merge, handoff, and clear
 - telemetry summary for PR, CI monitor/fix, merge, handoff, and clear routing
 - marker lookups in audit, replay, commands, decision payloads, epilogue
   payloads, handoff payloads, and command receipts
