@@ -468,7 +468,15 @@ tmux attach -t codex-live-test
   Dispatch to claim and deliver to the bound manager.
 - `enqueue-nudge-worker <task> --message "..." [--correlation-id C]
   [--required-permission P] [--idempotency-key K] [--json]` — Queue a `nudge_worker` command row for
-  Dispatch to claim and deliver to the bound worker.
+  Dispatch to claim and deliver to the bound worker. Use this dispatcher-backed
+  route instead of `session-nudge` when the worker is registered without tmux;
+  the worker then receives the message through `worker-inbox`.
+- `session-inbox <session> [--consume-next] [--limit N] [--json]` — List or
+  consume unconsumed routed notifications addressed to a registered session.
+- `manager-inbox <task> [--consume-next] [--limit N] [--json]` — Resolve the
+  task's bound manager session and read its dispatcher inbox.
+- `worker-inbox <task> [--consume-next] [--limit N] [--json]` — Resolve the
+  task's bound worker session and read its dispatcher inbox.
 
 ### Actuation
 
@@ -736,6 +744,11 @@ Current dispatch state:
   `codex_events`, not the pane classifier.
 - Routed completion notifications are deduplicated by source event id, recorded
   in `routed_notifications`, and threaded with `correlation_id`.
+- The session inbox is the same `routed_notifications` stream addressed by
+  `target_session_id`: tmux push is optional transport. Codex app-based sessions must poll with `manager-inbox` or `worker-inbox`.
+- A target with a tmux session records `delivery_mode='push'` after successful
+  tmux delivery. A target without tmux records `delivery_mode='pull_required'`
+  and remains unconsumed until the addressed session polls and consumes it.
 - Explicit `notify_manager` and `nudge_worker` command rows can be processed by
   Dispatch with atomic claim/lease metadata, durable `command_attempts`,
   invalid-payload failure before side effects, and conservative tmux

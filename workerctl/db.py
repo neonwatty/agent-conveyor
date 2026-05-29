@@ -12,7 +12,7 @@ from workerctl.core import now_iso
 from workerctl.state import state_root
 
 
-SCHEMA_VERSION = 20
+SCHEMA_VERSION = 21
 REQUIRED_TABLES = {
     "acceptance_criteria",
     "agent_observations",
@@ -75,6 +75,7 @@ REQUIRED_INDEXES = {
     "routed_notifications_dedupe_key",
     "routed_notifications_claimable",
     "routed_notifications_source_event",
+    "routed_notifications_target_inbox",
     "telemetry_events_actor_timestamp",
     "telemetry_events_run_timestamp",
     "telemetry_events_task_timestamp",
@@ -602,7 +603,9 @@ def migrate(conn: sqlite3.Connection, from_version: int) -> None:
           created_at text not null,
           delivered_at text,
           consumed_manager_cycle_id integer references manager_cycles(id),
+          consumed_by_session_id text references sessions(id),
           consumed_at text,
+          delivery_mode text not null default 'push' check (delivery_mode in ('push','pull_required')),
           state text not null check (state in ('pending','delivered','failed','suppressed')),
           claimed_by text,
           claimed_at text,
@@ -770,6 +773,7 @@ def migrate(conn: sqlite3.Connection, from_version: int) -> None:
     migrate_to_v18_manager_cycle_spans(conn)
     migrate_to_v19_dispatch_consumption_and_ack_revisions(conn)
     migrate_to_v20_routed_notification_claims(conn)
+    migrate_to_v21_session_inbox(conn)
     sync_worker_ids_to_config_files(conn)
     conn.execute(
         "insert or ignore into schema_migrations(version, applied_at) values (?, ?)",
@@ -1247,6 +1251,23 @@ def migrate_to_v20_routed_notification_claims(conn: sqlite3.Connection) -> None:
     )
 
 
+def migrate_to_v21_session_inbox(conn: sqlite3.Connection) -> None:
+    """Add target-session inbox fields to routed notifications."""
+    _add_column_if_missing(conn, "routed_notifications", "consumed_by_session_id", "text references sessions(id)")
+    _add_column_if_missing(
+        conn,
+        "routed_notifications",
+        "delivery_mode",
+        "text not null default 'push' check (delivery_mode in ('push','pull_required'))",
+    )
+    conn.execute(
+        """
+        create index if not exists routed_notifications_target_inbox
+        on routed_notifications(target_session_id, consumed_at, state, created_at, id)
+        """
+    )
+
+
 def sync_worker_ids_to_config_files(conn: sqlite3.Connection) -> None:
     database_path = conn.execute("PRAGMA database_list").fetchone()["file"]
     if Path(database_path).resolve() != default_db_path().resolve():
@@ -1402,9 +1423,11 @@ def _routed_notification_record(row: sqlite3.Row) -> dict[str, Any]:
         "correlation_id": row["correlation_id"],
         "created_at": row["created_at"],
         "consumed_at": row["consumed_at"],
+        "consumed_by_session_id": row["consumed_by_session_id"],
         "consumed_manager_cycle_id": row["consumed_manager_cycle_id"],
         "dedupe_key": row["dedupe_key"],
         "delivered_at": row["delivered_at"],
+        "delivery_mode": row["delivery_mode"],
         "error": row["error"],
         "id": row["id"],
         "payload": json.loads(row["payload_json"]),
@@ -2452,19 +2475,23 @@ def insert_routed_notification(
     claimed_by: str | None = None,
     claimed_at: str | None = None,
     claim_expires_at: str | None = None,
+    delivery_mode: str = "push",
     timestamp: str | None = None,
 ) -> int:
     if state not in {"pending", "delivered", "failed", "suppressed"}:
         raise WorkerError(f"invalid routed notification state: {state}")
+    if delivery_mode not in {"push", "pull_required"}:
+        raise WorkerError(f"invalid routed notification delivery mode: {delivery_mode}")
     created_at = timestamp or now_iso()
     cursor = conn.execute(
         """
         insert into routed_notifications(
           task_id, binding_id, correlation_id, source_session_id, target_session_id,
           signal_type, source_event_id, source_event_timestamp, dedupe_key, command_id,
-          created_at, state, payload_json, claimed_by, claimed_at, claim_expires_at
+          created_at, state, payload_json, claimed_by, claimed_at, claim_expires_at,
+          delivery_mode
         )
-        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             task_id,
@@ -2483,6 +2510,7 @@ def insert_routed_notification(
             claimed_by,
             claimed_at or (created_at if claimed_by else None),
             claim_expires_at,
+            delivery_mode,
         ),
     )
     return int(cursor.lastrowid)
@@ -2494,19 +2522,38 @@ def finish_routed_notification(
     notification_id: int,
     state: str,
     error: str | None = None,
+    side_effect_completed: bool | None = None,
     timestamp: str | None = None,
 ) -> None:
     if state not in {"delivered", "failed", "suppressed"}:
         raise WorkerError(f"invalid routed notification finish state: {state}")
     delivered_at = (timestamp or now_iso()) if state == "delivered" else None
-    side_effect_completed = 1 if state == "delivered" else 0
+    completed = (state == "delivered") if side_effect_completed is None else side_effect_completed
     conn.execute(
         """
         update routed_notifications
         set state = ?, delivered_at = ?, error = ?, side_effect_completed = ?
         where id = ?
         """,
-        (state, delivered_at, error, side_effect_completed, notification_id),
+        (state, delivered_at, error, 1 if completed else 0, notification_id),
+    )
+
+
+def set_routed_notification_delivery_mode(
+    conn: sqlite3.Connection,
+    *,
+    notification_id: int,
+    delivery_mode: str,
+) -> None:
+    if delivery_mode not in {"push", "pull_required"}:
+        raise WorkerError(f"invalid routed notification delivery mode: {delivery_mode}")
+    conn.execute(
+        """
+        update routed_notifications
+        set delivery_mode = ?
+        where id = ?
+        """,
+        (delivery_mode, notification_id),
     )
 
 
@@ -2705,10 +2752,113 @@ def consume_routed_notifications_for_cycle(
           and binding_id = ?
           and state = 'delivered'
           and consumed_manager_cycle_id is null
+          and consumed_at is null
+          and target_session_id = (
+            select manager_session_id from bindings where id = ?
+          )
         """,
-        (manager_cycle_id, consumed_at, task_id, binding_id),
+        (manager_cycle_id, consumed_at, task_id, binding_id, binding_id),
     )
     return int(cursor.rowcount or 0)
+
+
+def _session_inbox_query(where_clause: str) -> str:
+    return f"""
+        select
+          rn.id, rn.task_id, rn.binding_id, rn.correlation_id,
+          rn.source_session_id, rn.target_session_id, rn.signal_type,
+          rn.source_event_id, rn.source_event_timestamp, rn.dedupe_key,
+          rn.command_id, rn.created_at, rn.delivered_at,
+          rn.consumed_manager_cycle_id, rn.consumed_by_session_id,
+          rn.consumed_at, rn.delivery_mode, rn.state, rn.claimed_by,
+          rn.claimed_at, rn.claim_expires_at, rn.side_effect_started,
+          rn.side_effect_completed, rn.payload_json, rn.error,
+          ss.name as source_session_name, ss.role as source_session_role,
+          ts.name as target_session_name, ts.role as target_session_role,
+          t.name as task_name
+        from routed_notifications rn
+        join sessions ss on ss.id = rn.source_session_id
+        join sessions ts on ts.id = rn.target_session_id
+        join tasks t on t.id = rn.task_id
+        where {where_clause}
+        order by rn.created_at, rn.id
+    """
+
+
+def _session_inbox_record(row: sqlite3.Row) -> dict[str, Any]:
+    record = _routed_notification_record(row)
+    record.update(
+        {
+            "source_session_name": row["source_session_name"],
+            "source_session_role": row["source_session_role"],
+            "target_session_name": row["target_session_name"],
+            "target_session_role": row["target_session_role"],
+            "task_name": row["task_name"],
+        }
+    )
+    return record
+
+
+def session_inbox(
+    conn: sqlite3.Connection,
+    *,
+    session_name: str,
+    limit: int = 10,
+    include_consumed: bool = False,
+) -> list[dict[str, Any]]:
+    session = session_row(conn, name=session_name)
+    limit = max(1, int(limit or 10))
+    where = "rn.target_session_id = ? and rn.state = 'delivered'"
+    params: list[Any] = [session["id"]]
+    if not include_consumed:
+        where += " and rn.consumed_at is null"
+    query = _session_inbox_query(where) + "\n        limit ?"
+    params.append(limit)
+    return [_session_inbox_record(row) for row in conn.execute(query, tuple(params))]
+
+
+def consume_next_session_inbox_item(
+    conn: sqlite3.Connection,
+    *,
+    session_name: str,
+    timestamp: str | None = None,
+) -> dict[str, Any] | None:
+    session = session_row(conn, name=session_name)
+    row = conn.execute(
+        """
+        select id
+        from routed_notifications
+        where target_session_id = ?
+          and state = 'delivered'
+          and consumed_at is null
+        order by created_at, id
+        limit 1
+        """,
+        (session["id"],),
+    ).fetchone()
+    if row is None:
+        return None
+    consumed_at = timestamp or now_iso()
+    cursor = conn.execute(
+        """
+        update routed_notifications
+        set consumed_at = ?, consumed_by_session_id = ?
+        where id = ?
+          and target_session_id = ?
+          and state = 'delivered'
+          and consumed_at is null
+        """,
+        (consumed_at, session["id"], row["id"], session["id"]),
+    )
+    if cursor.rowcount == 0:
+        return None
+    consumed = conn.execute(
+        _session_inbox_query("rn.id = ?"),
+        (row["id"],),
+    ).fetchone()
+    if consumed is None:
+        return None
+    return _session_inbox_record(consumed)
 
 
 def routed_notifications(conn: sqlite3.Connection, *, task_id: str | None = None) -> list[dict[str, Any]]:
@@ -2716,7 +2866,8 @@ def routed_notifications(conn: sqlite3.Connection, *, task_id: str | None = None
         select id, task_id, binding_id, correlation_id, source_session_id,
                target_session_id, signal_type, source_event_id, source_event_timestamp,
                dedupe_key, command_id, created_at, delivered_at, consumed_manager_cycle_id,
-               consumed_at, state, claimed_by, claimed_at, claim_expires_at,
+               consumed_by_session_id, consumed_at, delivery_mode, state, claimed_by,
+               claimed_at, claim_expires_at,
                side_effect_started, side_effect_completed, payload_json, error
         from routed_notifications
     """
@@ -2735,9 +2886,11 @@ def routed_notifications(conn: sqlite3.Connection, *, task_id: str | None = None
             "correlation_id": row["correlation_id"],
             "created_at": row["created_at"],
             "consumed_at": row["consumed_at"],
+            "consumed_by_session_id": row["consumed_by_session_id"],
             "consumed_manager_cycle_id": row["consumed_manager_cycle_id"],
             "dedupe_key": row["dedupe_key"],
             "delivered_at": row["delivered_at"],
+            "delivery_mode": row["delivery_mode"],
             "error": row["error"],
             "id": row["id"],
             "payload": json.loads(row["payload_json"]),
@@ -5270,7 +5423,8 @@ def task_audit(conn: sqlite3.Connection, *, task: str) -> dict[str, Any]:
         select id, task_id, binding_id, correlation_id, source_session_id,
                target_session_id, signal_type, source_event_id, source_event_timestamp,
                dedupe_key, command_id, created_at, delivered_at, consumed_manager_cycle_id,
-               consumed_at, state, claimed_by, claimed_at, claim_expires_at,
+               consumed_by_session_id, consumed_at, delivery_mode, state, claimed_by,
+               claimed_at, claim_expires_at,
                side_effect_started, side_effect_completed, payload_json, error
         from routed_notifications
         where task_id = ?

@@ -62,12 +62,14 @@ from workerctl.commands import (
     command_deregister,
     command_discover,
     command_sessions,
+    command_session_inbox,
     command_bind,
     command_ingest,
     command_unbind,
     command_handoff,
     command_manager_ack,
     command_manager_config,
+    command_manager_inbox,
     command_manager_permission,
     command_session_nudge,
     command_session_interrupt,
@@ -83,6 +85,7 @@ from workerctl.commands import (
     command_transcript_show,
     command_update_status,
     command_worker_ack,
+    command_worker_inbox,
 )
 from workerctl.core import WorkerError
 from workerctl.codex_session import CodexSessionError
@@ -949,6 +952,36 @@ def build_parser() -> argparse.ArgumentParser:
         help="Print raw payload text fields. Use only with intentional stdout capture.",
     )
     tail.set_defaults(func=command_tail)
+
+    def add_inbox_options(parser: argparse.ArgumentParser) -> None:
+        parser.add_argument("--consume-next", action="store_true", help="Consume the oldest unconsumed inbox item before listing remaining items.")
+        parser.add_argument("--limit", type=int, default=10, help="Maximum unconsumed inbox items to list.")
+        parser.add_argument("--json", action="store_true", help="Print JSON output.")
+        parser.add_argument("--path", help="Override the workerctl database path.")
+
+    session_inbox = subparsers.add_parser(
+        "session-inbox",
+        help="List or consume routed notifications addressed to a registered session.",
+    )
+    session_inbox.add_argument("session", help="Session name.")
+    add_inbox_options(session_inbox)
+    session_inbox.set_defaults(func=command_session_inbox)
+
+    manager_inbox = subparsers.add_parser(
+        "manager-inbox",
+        help="List or consume routed notifications for a task's bound manager session.",
+    )
+    manager_inbox.add_argument("task", help="Task name or ID.")
+    add_inbox_options(manager_inbox)
+    manager_inbox.set_defaults(func=command_manager_inbox)
+
+    worker_inbox = subparsers.add_parser(
+        "worker-inbox",
+        help="List or consume routed notifications for a task's bound worker session.",
+    )
+    worker_inbox.add_argument("task", help="Task name or ID.")
+    add_inbox_options(worker_inbox)
+    worker_inbox.set_defaults(func=command_worker_inbox)
 
     session_nudge = subparsers.add_parser(
         "session-nudge",

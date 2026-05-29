@@ -1,0 +1,355 @@
+# GoalBuddy v2 state.yaml
+# Board truth lives here. goal.md is the editable charter; notes/ holds long receipts only.
+
+version: 2
+
+goal:
+  title: "Universal Session Inbox For Dispatch"
+  slug: "session-inbox-dispatch"
+  kind: specific
+  tranche: "Implement a durable pull inbox for dispatcher signals across tmux and Codex app sessions."
+  status: complete
+  oracle:
+    signal: "Focused inbox/dispatch tests plus full tests.test_workerctl prove tmux push and app-session pull share one routed notification model."
+    cadence: "after each Worker package and at final audit"
+    final_proof: "A final Judge/PM receipt cites passing focused tests, python3 -m unittest tests.test_workerctl -v, git diff --check, docs updates, and a local smoke for no-tmux manager and no-tmux worker consumption."
+  intake:
+    original_request: "Plan universal dispatcher mailbox/inbox support with GoalBuddy."
+    interpreted_outcome: "Codex app-based managers and workers become first-class dispatcher targets by polling durable session inbox messages when tmux push is unavailable."
+    input_shape: specific
+    audience: "workerctl operators, app-based manager sessions, app-based worker sessions"
+    authority: approved
+    proof_type: test
+    completion_proof: "Tests and smoke prove non-tmux manager and worker sessions can consume the same dispatcher notifications tmux sessions receive, while existing tmux push delivery still works."
+    likely_misfire: "Building a manager-only or app-only side queue that loses routed_notifications correlation, dedupe, command attempts, side-effect risk, or audit/replay continuity."
+    blind_spots_considered:
+      - "Delivered tmux push messages may still need durable inbox visibility until explicitly consumed."
+      - "No-tmux target sessions should be pull-required, not ordinary send failures."
+      - "Worker app sessions need symmetric inbox semantics for manager nudges."
+      - "Inbox consumption must be idempotent and auditable."
+      - "The dispatcher must remain a router, not a decider."
+    existing_plan_facts:
+      - "Use a universal session inbox, not manager-only mailbox."
+      - "Tmux push should remain an optional acceleration layer."
+      - "Codex app managers/workers should poll for dispatcher signals at an interval."
+      - "Signals should keep the same message, source event, command id, correlation id, and recommended action semantics."
+
+rules:
+  pm_owns_state: true
+  one_active_task: true
+  max_write_workers: 1
+  no_implementation_without_worker_or_pm_task: true
+  no_completion_without_judge_or_pm_audit: true
+  planning_is_not_completion: true
+  queued_required_worker_blocks_completion: true
+  continuous_until_full_outcome: true
+  missing_input_or_credentials_do_not_stop_goal: true
+  preserve_and_validate_existing_plan: true
+  intake_misfire_must_be_audited: true
+  goal_pressure_requires_oracle: true
+  no_completion_on_weak_proof: true
+  slice_policy:
+    max_consecutive_tiny_tasks: 2
+    prefer_vertical_slices: true
+    judge_picks_largest_safe_slice: true
+    worker_completes_whole_slice: true
+
+agents:
+  scout: installed
+  worker: installed
+  judge: installed
+
+visual_board:
+  selected: local
+  local:
+    status: live
+    url: "http://goalbuddy.localhost:41737/session-inbox-dispatch/"
+    command: "npx goalbuddy board /Users/neonwatty/Desktop/codex-terminal-manager/docs/goals/session-inbox-dispatch"
+
+active_task: null
+
+tasks:
+  - id: T001
+    type: scout
+    assignee: Scout
+    status: done
+    reasoning_hint: low
+    objective: "Map the existing dispatch, routed notification, tmux delivery, and registered-session model for inbox design."
+    inputs:
+      - "workerctl/commands.py dispatch code"
+      - "workerctl/db.py routed_notifications, commands, sessions, and bindings helpers"
+      - "workerctl/tmux.py send_text_to_session behavior"
+      - "workerctl/cli.py current dispatch/session commands"
+      - "tests/test_workerctl.py dispatch and session tests"
+      - "README.md manager/session docs"
+    constraints:
+      - "Read-only."
+      - "Do not implement."
+      - "Identify current facts with file/line evidence."
+      - "Call out any schema or migration risk before Worker tasks begin."
+    expected_output:
+      - "Current data model map."
+      - "Current push delivery lifecycle."
+      - "No-tmux manager/worker failure shape."
+      - "Recommended minimal design candidates."
+      - "Focused tests that should go red first."
+    receipt: |
+      Scout evidence:
+      - Data model: `routed_notifications` already carries task, binding, correlation, source_session_id, target_session_id, signal_type, source_event_id, command_id, state, payload_json, and manager-cycle consumption (`workerctl/db.py:590`, `workerctl/db.py:1206`, `workerctl/db.py:2437`, `workerctl/db.py:2691`). This is the natural session inbox backing store.
+      - Current push lifecycle: `dispatch --once/--watch` claims queued notify/nudge commands, inserts a routed notification, calls `send_text_to_session`, then marks command attempt and routed notification delivered/failed (`workerctl/commands.py:4542`, `workerctl/commands.py:5033`, `workerctl/commands.py:5193`).
+      - Worker completion lifecycle: Dispatch reads bound `codex_events` `task_complete` rows, inserts a deduped `worker_task_complete` notification, sends the manager message via tmux, and retries only pre-side-effect pending notifications (`workerctl/db.py:2404`, `workerctl/commands.py:4677`, `workerctl/commands.py:4893`).
+      - No-tmux failure shape: registered sessions can lack `tmux_session`, and `send_text_to_session` raises before any tmux side effect when that happens (`workerctl/cli.py:870`, `workerctl/tmux.py:189`, `workerctl/tmux.py:223`, `tests/test_workerctl.py:10653`, `tests/test_workerctl.py:11004`).
+      - Existing docs are honest but second-class for app sessions: `session-nudge` requires tmux, while dispatch docs describe routed notifications and watch heartbeats but no pullable inbox (`README.md:454`, `README.md:475`, `README.md:733`).
+      - Design candidates: reuse `routed_notifications` as universal inbox; add only generic target-session consumption and delivery-mode evidence; expose `session-inbox`, `manager-inbox`, and `worker-inbox`; keep tmux send as one optional transport rather than a separate signal system.
+      - Red tests to write first: DB migration/list/consume by target session; CLI `session-inbox --consume-next`; `manager-inbox` and `worker-inbox` active-binding aliases; dispatch completion to no-tmux manager records pull-required and is consumable; queued nudge to no-tmux worker records pull-required and is consumable; existing tmux dispatch stays delivered.
+
+  - id: T002
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Choose the session inbox design and bound the first implementation slice."
+    inputs:
+      - "T001 receipt"
+      - "docs/goals/session-inbox-dispatch/goal.md"
+    constraints:
+      - "Read-only."
+      - "Prefer reusing routed_notifications unless a separate table is clearly safer."
+      - "Choose concrete field names, CLI behavior, and consumption semantics before Worker writes."
+      - "Reject designs that split tmux and app signals into unrelated systems."
+    expected_output:
+      - "Approved design or rejection with rationale."
+      - "Whether schema migration is required."
+      - "Definition of unconsumed, consumed, push-delivered, and pull-required."
+      - "Exact Worker objective for the first implementation slice."
+      - "allowed_files, verify commands, and stop_if conditions."
+    receipt: |
+      Judge decision: approved single-store universal inbox on `routed_notifications`.
+      - Schema migration required: bump schema version and add generic target-session consumption/delivery evidence to `routed_notifications`. Approved fields: `consumed_by_session_id text references sessions(id)`, `delivery_mode text not null default 'push' check (delivery_mode in ('push','pull_required'))`, plus an index for unconsumed target inbox lookup. Existing `consumed_manager_cycle_id` remains as manager-cycle correlation, not the generic consumption owner.
+      - Definitions: unconsumed means `consumed_at is null`; consumed means `consumed_at` and `consumed_by_session_id` are set for the addressed target session; push-delivered means `delivery_mode='push'` and `state='delivered'`; pull-required means `delivery_mode='pull_required'` and `state='delivered'` with no tmux side effect attempted. Failed remains reserved for unexpected dispatch/send failures.
+      - CLI behavior: `session-inbox <session> [--consume-next] [--json] [--limit N]` lists or consumes unconsumed notifications addressed to that session. `manager-inbox <task>` resolves the active binding manager session. `worker-inbox <task>` resolves the active binding worker session. Consumption is idempotent, target-session scoped, and returns notification id, signal type, state, delivery mode, correlation id, command id, source event id/timestamp, source/target session evidence, and payload.
+      - T003 slice: implement migration, DB list/consume primitives, and the three CLI surfaces only. Do not change dispatch transport behavior yet except where needed for schema defaults.
+      - T004 slice: make dispatch detect no-tmux targets and mark pull-required delivered inbox rows without calling tmux; preserve current push path for tmux-backed targets.
+      - Stop conditions: stop if the approved fields cannot be migrated idempotently, if consumption cannot be target-session scoped without weakening existing manager-cycle audit, or if existing dispatch audit/replay tests regress.
+
+  - id: T003
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "Implement universal session inbox DB primitives and CLI consumption for routed notifications."
+    inputs:
+      - "T002 Judge design receipt"
+    constraints:
+      - "Use TDD: write failing tests before production changes."
+      - "Keep changes focused on durable inbox listing/consumption, not dispatcher transport changes."
+      - "Do not change tmux push behavior in this slice unless Judge explicitly authorizes it."
+      - "Consumption must be idempotent and tied to the target session."
+    allowed_files:
+      - "workerctl/db.py"
+      - "workerctl/commands.py"
+      - "workerctl/cli.py"
+      - "tests/test_workerctl.py"
+      - "README.md"
+    verify:
+      - "python3 -m unittest tests.test_workerctl.DispatchTests tests.test_workerctl.RegisterCommandsTests tests.test_workerctl.CliTests -v"
+      - "git diff --check"
+    stop_if:
+      - "Need a schema change not approved by T002."
+      - "Inbox behavior cannot be expressed against routed_notifications without losing audit semantics."
+      - "Verification fails twice for reasons unrelated to the slice."
+    expected_output:
+      - "session-inbox can list pending/unconsumed notifications for a target session."
+      - "session-inbox can consume exactly one notification and returns source event, command, correlation, payload, and target session evidence."
+      - "manager-inbox and worker-inbox aliases resolve the active binding for a task."
+      - "Existing audit/replay routed notification tests still pass."
+    receipt: |
+      Implemented T003 universal inbox primitives.
+      - Added schema v21 migration with `consumed_by_session_id`, `delivery_mode`, and `routed_notifications_target_inbox`.
+      - Added DB helpers `session_inbox` and `consume_next_session_inbox_item`, target-session scoped and idempotent.
+      - Added CLI surfaces: `session-inbox <session>`, `manager-inbox <task>`, and `worker-inbox <task>` with `--consume-next`, `--limit`, `--json`, and `--path`.
+      - Added red-first coverage for migration, DB list/consume, session consume CLI, manager alias after consume, and worker alias for worker-directed nudges.
+      - Verification: focused red tests failed for missing fields/functions/commands, then passed after implementation.
+      - Verification: `python3 -m unittest tests.test_workerctl.DispatchTests tests.test_workerctl.RegisterCommandsTests tests.test_workerctl.CliTests -v` passed, 154 tests.
+      - Verification: `git diff --check` passed.
+
+  - id: T004
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "Make dispatch transport-aware so no-tmux targets become pull-required inbox deliveries instead of opaque send failures."
+    inputs:
+      - "T003 receipt"
+      - "T002 Judge design receipt"
+    constraints:
+      - "Use TDD: cover no-tmux manager and no-tmux worker targets before changing dispatch."
+      - "Preserve current tmux delivery for tmux-backed sessions."
+      - "Keep command claim/attempt/lease and side-effect-risk semantics intact."
+      - "Do not mark a pull-required notification as push-delivered."
+    allowed_files:
+      - "workerctl/commands.py"
+      - "workerctl/db.py"
+      - "workerctl/tmux.py"
+      - "tests/test_workerctl.py"
+      - "README.md"
+    verify:
+      - "python3 -m unittest tests.test_workerctl.DispatchTests tests.test_workerctl.SessionTmuxTests -v"
+      - "python3 -m unittest tests.test_workerctl.CliTests -v"
+      - "git diff --check"
+    stop_if:
+      - "Need to relax or remove side-effect-risk protections."
+      - "A no-tmux target is still recorded as an ordinary failed send instead of pull-required."
+      - "Existing tmux dispatch tests regress."
+    expected_output:
+      - "Worker task_complete to a no-tmux manager creates an inbox item consumable by manager-inbox."
+      - "nudge_worker to a no-tmux worker creates an inbox item consumable by worker-inbox."
+      - "Tmux-backed manager/worker dispatch still pushes text and records existing delivery evidence."
+      - "Telemetry/audit clearly distinguishes push-delivered from pull-required."
+    receipt: |
+      Implemented T004 transport-aware dispatch.
+      - Worker completion to a no-tmux manager now records a `delivery_mode='pull_required'`, `state='delivered'` routed notification without invoking tmux.
+      - Queued `nudge_worker` to a no-tmux worker now succeeds as a pull-required inbox delivery without side-effect started/completed flags.
+      - Tmux-backed dispatch paths still call `send_text_to_session` and record existing delivered push evidence.
+      - Telemetry now includes `dispatch_signal_pull_required` to distinguish inbox-only delivery from push delivery.
+      - Verification: red-first no-tmux manager/worker dispatch tests failed as ordinary failed sends, then passed after implementation.
+      - Verification: `python3 -m unittest tests.test_workerctl.DispatchTests tests.test_workerctl.SessionTmuxTests tests.test_workerctl.CliTests -v` passed, 152 tests.
+      - Verification: `git diff --check` passed.
+
+  - id: T005
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "Update manager/worker instructions, docs, and QA guidance for app-session polling loops."
+    inputs:
+      - "T003 receipt"
+      - "T004 receipt"
+    constraints:
+      - "Do not add new behavior beyond docs/prompts unless tests require it."
+      - "Document both modes: tmux push and app-session pull."
+      - "Make polling guidance operational, not vague."
+    allowed_files:
+      - "README.md"
+      - "workerctl/state.py"
+      - "workerctl/commands.py"
+      - "tests/test_workerctl.py"
+      - "docs/goals/session-inbox-dispatch/**"
+    verify:
+      - "python3 -m unittest tests.test_workerctl.ContractTests tests.test_workerctl.ManagerBootstrapPromptTests tests.test_workerctl.CliTests -v"
+      - "git diff --check"
+    stop_if:
+      - "Prompt/doc updates conflict with actual CLI behavior."
+      - "Instructions imply dispatch can push into Codex app threads."
+    expected_output:
+      - "Manager instructions tell app-based managers to poll and consume inbox signals."
+      - "Worker instructions tell app-based workers how to poll for manager nudges when not tmux-backed."
+      - "README explains universal inbox, push-capable targets, pull-required targets, and audit semantics."
+      - "Tests cover the new prompt/doc contract strings."
+    receipt: |
+      Implemented T005 prompt and docs guidance.
+      - Manager bootstrap prompt now tells no-tmux/app managers to poll `manager-inbox <task> --consume-next --json` and explicitly says Dispatch cannot push into the Codex app chat.
+      - Worker contract now tells no-tmux/app workers to poll `worker-inbox <task-name> --consume-next --json` for pull-required dispatcher signals.
+      - README documents `session-inbox`, `manager-inbox`, `worker-inbox`, `delivery_mode='push'`, `delivery_mode='pull_required'`, and the shared `routed_notifications` inbox model.
+      - Verification: prompt/doc tests failed first for missing strings, then passed after updates.
+      - Verification: `python3 -m unittest tests.test_workerctl.ContractTests tests.test_workerctl.ManagerBootstrapPromptTests tests.test_workerctl.CliTests -v` passed, 118 tests.
+      - Verification: `git diff --check` passed.
+
+  - id: T006
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "Run an end-to-end local smoke for universal inbox delivery and record the result."
+    inputs:
+      - "T003 receipt"
+      - "T004 receipt"
+      - "T005 receipt"
+    constraints:
+      - "Use disposable WORKERCTL_STATE_ROOT and disposable session/task names."
+      - "Do not leave tmux sessions running."
+      - "Do not mutate real workerctl state."
+      - "Record only concise smoke evidence in this goal board or notes."
+    allowed_files:
+      - "docs/goals/session-inbox-dispatch/state.yaml"
+      - "docs/goals/session-inbox-dispatch/notes/**"
+    verify:
+      - "python3 -m unittest tests.test_workerctl -v"
+      - "git diff --check"
+      - "local smoke: no-tmux manager consumes worker_task_complete via manager-inbox"
+      - "local smoke: no-tmux worker consumes nudge_worker via worker-inbox"
+      - "local smoke: tmux-backed dispatch path still pushes or is covered by focused tests if live tmux would be disruptive"
+    stop_if:
+      - "Disposable smoke would disrupt real tmux/Codex sessions."
+      - "Smoke reveals a product bug that requires files outside prior allowed scopes."
+    expected_output:
+      - "Smoke receipt with commands and pass/fail status."
+      - "No leftover disposable sessions, tmux sessions, or dirty temp state."
+      - "Full test suite green after smoke."
+    receipt: |
+      Completed T006 smoke and full verification.
+      - Disposable no-tmux smoke passed using an isolated temporary DB via `--path`.
+      - Smoke proved a no-tmux manager consumed a dispatcher-created `worker_task_complete` notification through `manager-inbox --consume-next --json`.
+      - Smoke proved a no-tmux worker consumed a dispatcher-created `nudge_worker` notification through `worker-inbox --consume-next --json`.
+      - Smoke avoided live tmux mutation; tmux-backed push behavior remains covered by focused dispatch/session tests.
+      - First smoke harness attempt failed because the disposable harness passed a string where `worker_db.connect` expected a `Path`; the harness was corrected and no product state was touched.
+      - Verification: `python3 -m unittest tests.test_workerctl -v` passed, 494 tests.
+
+  - id: T999
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Audit whether universal session inbox support is complete for this tranche."
+    inputs:
+      - "All done task receipts"
+      - "Last verification"
+      - "Current dirty diff"
+      - "docs/goals/session-inbox-dispatch/goal.md"
+    constraints:
+      - "Read-only."
+      - "Reject completion if app managers or app workers remain second-class."
+      - "Reject completion if tmux push regressed."
+      - "Reject completion if audit/replay/correlation evidence is weaker than before."
+      - "Reject completion if any required Worker task remains queued or active."
+    expected_output:
+      - "complete | not_complete"
+      - "full_outcome_complete: true | false"
+      - "Evidence mapped to original request"
+      - "Missing evidence or next task if not complete"
+    receipt: |
+      complete
+      full_outcome_complete: true
+      Evidence mapped to original request:
+      - Codex app-based managers are first-class dispatcher targets: no-tmux manager sessions receive `worker_task_complete` through the same `routed_notifications` row model and consume it with `manager-inbox --consume-next --json`.
+      - Codex app-based workers are symmetric dispatcher targets: no-tmux worker sessions receive `nudge_worker` through the same durable inbox and consume it with `worker-inbox --consume-next --json`.
+      - The dispatcher does not need to know "Codex app" as a product category; it chooses `delivery_mode='push'` when a registered target has tmux coordinates and `delivery_mode='pull_required'` when it does not.
+      - Tmux push did not regress: existing push tests still pass, and pull-required delivery skips tmux without recording an ordinary send failure.
+      - Audit/replay/correlation evidence is preserved and slightly improved: `routed_notifications` now records target-session consumption and delivery mode while retaining command id, source event id, correlation id, task, binding, source session, target session, state, and payload.
+      - Operator guidance is documented in README and embedded in manager/worker prompts: Codex app-based sessions must poll, while tmux push is optional transport.
+      Verification:
+      - `git diff --check` passed.
+      - `python3 -m unittest tests.test_workerctl -v` passed, 497 tests.
+      - Disposable smoke passed for no-tmux manager `worker_task_complete` consumption and no-tmux worker `nudge_worker` consumption.
+      Post-review closeout:
+      - `codex review --uncommitted` found one accepted P1: manager-cycle consumption could hide worker-targeted pull-required nudges before a no-tmux worker polled.
+      - Fixed by scoping `consume_routed_notifications_for_cycle` to manager-addressed notifications only.
+      - Added regression coverage for worker-targeted inbox notifications remaining visible after a manager cycle consumption pass.
+      - A follow-up `codex review --uncommitted` found two accepted P2s: manager cycles could re-consume session-inbox-consumed manager rows, and no-tmux worker guidance still emphasized `session-nudge`.
+      - Fixed by requiring `consumed_at is null` for manager-cycle consumption and by documenting the dispatcher-backed `enqueue-nudge-worker` plus `worker-inbox` flow in the manager prompt and README.
+      - A later review found one accepted P2: recovered pending completion notifications could still try tmux for no-tmux managers.
+      - Fixed by recomputing delivery mode in `_deliver_claimed_worker_completion`, updating the existing routed notification to `pull_required`, finishing it as delivered without side effects, and adding recovered no-tmux regression coverage.
+      - Final `codex review --uncommitted` reported no discrete actionable bugs; its focused Dispatch/Cli, Database, and `git diff --check` probes passed.
+      Missing evidence or next task:
+      - None for this tranche.
+
+checks:
+  dirty_fingerprint: "README.md; tests/test_workerctl.py; workerctl/cli.py; workerctl/commands.py; workerctl/db.py; workerctl/state.py; docs/goals/session-inbox-dispatch/"
+  last_verification:
+    result: passed
+    task: T999
+    commands:
+      - "git diff --check"
+      - "python3 -m unittest tests.test_workerctl -v"
+      - "python3 -m unittest tests.test_workerctl.DispatchTests.test_dispatch_recovers_pending_completion_to_no_tmux_manager_as_pull_required tests.test_workerctl.DispatchTests.test_dispatch_recovers_pending_completion_notification_before_send_started tests.test_workerctl.DispatchTests.test_dispatch_completion_to_no_tmux_manager_creates_pull_required_inbox_item -v"
+      - "codex review --uncommitted"
