@@ -200,6 +200,15 @@ workerctl update-status {name} \\
 workerctl also exports this compatibility file for existing tooling:
 {status_file}
 
+Dispatcher inbox:
+- If this worker is registered without a tmux session, manager nudges are
+  pull-required dispatcher signals. Poll for them with:
+
+  workerctl worker-inbox <task-name> --consume-next --json
+
+- Treat a consumed inbox item as the next manager instruction, then update
+  status with workerctl.
+
 Compatibility JSON shape:
 {{
   "state": "planning | editing | running_tests | blocked | waiting | done",

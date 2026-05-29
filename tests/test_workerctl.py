@@ -223,6 +223,9 @@ class DatabaseTests(unittest.TestCase):
             self.assertIn("side_effect_started", columns)
             self.assertIn("routed_notifications_consumed_cycle", indexes)
             self.assertIn("routed_notifications_claimable", indexes)
+            self.assertIn("consumed_by_session_id", columns)
+            self.assertIn("delivery_mode", columns)
+            self.assertIn("routed_notifications_target_inbox", indexes)
             self.assertEqual(conn.execute("PRAGMA user_version").fetchone()[0], worker_db.SCHEMA_VERSION)
 
     def test_run_helpers_create_list_finish_and_enforce_one_active_run_per_task(self):
@@ -1430,6 +1433,44 @@ class DispatchTests(unittest.TestCase):
             self.assertIn("dispatch_signal_detected", [event["event_type"] for event in telemetry])
             self.assertIn("dispatch_signal_routed", [event["event_type"] for event in telemetry])
 
+    def test_dispatch_completion_to_no_tmux_manager_creates_pull_required_inbox_item(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn, db_path = self.open_db(tmpdir)
+            worker_id, manager_id = self.setup_bound_task(conn)
+            conn.execute("update sessions set tmux_session = null where id = ?", (manager_id,))
+            event_id = self.insert_completion(conn, worker_id)
+            conn.commit()
+
+            args = argparse.Namespace(
+                dispatcher_id="dispatch-test",
+                dry_run=False,
+                json=True,
+                limit=10,
+                once=True,
+                path=str(db_path),
+                type=None,
+                watch=False,
+            )
+            with mock.patch.object(worker_tmux, "send_text_to_session") as send:
+                with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                    result = commands.command_dispatch(args)
+
+            payload = json.loads(stdout.getvalue())
+            notification = worker_db.routed_notifications(conn, task_id="task-dispatch")[0]
+            inbox = worker_db.session_inbox(conn, session_name="manager-session")
+            telemetry = worker_db.telemetry_events(conn, task_id="task-dispatch")
+
+            self.assertEqual(result, 0)
+            self.assertEqual(payload["processed"][0]["state"], "pull_required")
+            self.assertEqual(notification["state"], "delivered")
+            self.assertEqual(notification["delivery_mode"], "pull_required")
+            self.assertFalse(notification["side_effect_started"])
+            self.assertFalse(notification["side_effect_completed"])
+            self.assertEqual(notification["source_event_id"], event_id)
+            self.assertEqual([item["id"] for item in inbox], [notification["id"]])
+            self.assertIn("dispatch_signal_pull_required", [event["event_type"] for event in telemetry])
+            send.assert_not_called()
+
     def test_dispatch_completion_notification_has_correlation_chain(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             conn, db_path = self.open_db(tmpdir)
@@ -1562,6 +1603,138 @@ class DispatchTests(unittest.TestCase):
             )
             self.assertEqual(chain["manager_cycle_id"], result["cycle_id"])
             self.assertNotEqual(chain["manager_cycle_id"], decoy_cycle_id)
+
+    def test_session_inbox_lists_and_consumes_target_notifications(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn, _db_path = self.open_db(tmpdir)
+            worker_id, manager_id = self.setup_bound_task(conn)
+            binding = worker_db.active_binding_for_task(conn, task_name="dispatch-task")
+            notification_id = worker_db.insert_routed_notification(
+                conn,
+                task_id="task-dispatch",
+                binding_id=binding["binding_id"],
+                correlation_id="dispatch-inbox",
+                source_session_id=worker_id,
+                target_session_id=manager_id,
+                signal_type="worker_task_complete",
+                source_event_id=None,
+                source_event_timestamp=None,
+                dedupe_key="dispatch-inbox-1",
+                command_id=None,
+                payload={"message": "inspect completion"},
+                state="delivered",
+            )
+            conn.commit()
+
+            inbox = worker_db.session_inbox(conn, session_name="manager-session")
+            self.assertEqual([item["id"] for item in inbox], [notification_id])
+            self.assertEqual(inbox[0]["delivery_mode"], "push")
+            self.assertEqual(inbox[0]["source_session_name"], "worker-session")
+            self.assertEqual(inbox[0]["target_session_name"], "manager-session")
+
+            consumed = worker_db.consume_next_session_inbox_item(
+                conn,
+                session_name="manager-session",
+                timestamp="2026-05-23T10:02:00Z",
+            )
+            self.assertEqual(consumed["id"], notification_id)
+            self.assertEqual(consumed["consumed_by_session_id"], manager_id)
+            self.assertEqual(consumed["consumed_at"], "2026-05-23T10:02:00Z")
+            self.assertEqual(worker_db.session_inbox(conn, session_name="manager-session"), [])
+            self.assertIsNone(worker_db.consume_next_session_inbox_item(conn, session_name="manager-session"))
+
+    def test_manager_cycle_consumption_skips_session_consumed_notifications(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn, _db_path = self.open_db(tmpdir)
+            worker_id, manager_id = self.setup_bound_task(conn)
+            binding = worker_db.active_binding_for_task(conn, task_name="dispatch-task")
+            notification_id = worker_db.insert_routed_notification(
+                conn,
+                task_id="task-dispatch",
+                binding_id=binding["binding_id"],
+                correlation_id="dispatch-manager-inbox",
+                source_session_id=worker_id,
+                target_session_id=manager_id,
+                signal_type="worker_task_complete",
+                source_event_id=None,
+                source_event_timestamp=None,
+                dedupe_key="dispatch-manager-inbox-1",
+                command_id=None,
+                payload={"message": "inspect completion"},
+                state="delivered",
+                delivery_mode="pull_required",
+            )
+            consumed = worker_db.consume_next_session_inbox_item(
+                conn,
+                session_name="manager-session",
+                timestamp="2026-05-23T10:02:00Z",
+            )
+            self.assertEqual(consumed["id"], notification_id)
+            conn.execute(
+                """
+                insert into manager_cycles(task_id, started_at, completed_at, state, status_json)
+                values ('task-dispatch', '2026-05-23T10:03:00Z', '2026-05-23T10:03:01Z', 'succeeded', '{}')
+                """
+            )
+            cycle_id = conn.execute("select id from manager_cycles").fetchone()["id"]
+
+            consumed_count = worker_db.consume_routed_notifications_for_cycle(
+                conn,
+                task_id="task-dispatch",
+                binding_id=binding["binding_id"],
+                manager_cycle_id=cycle_id,
+                timestamp="2026-05-23T10:03:00Z",
+            )
+
+            notification = worker_db.routed_notifications(conn, task_id="task-dispatch")[0]
+            self.assertEqual(consumed_count, 0)
+            self.assertEqual(notification["consumed_at"], "2026-05-23T10:02:00Z")
+            self.assertIsNone(notification["consumed_manager_cycle_id"])
+
+    def test_manager_cycle_consumption_does_not_hide_worker_inbox_notifications(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn, _db_path = self.open_db(tmpdir)
+            worker_id, manager_id = self.setup_bound_task(conn)
+            binding = worker_db.active_binding_for_task(conn, task_name="dispatch-task")
+            notification_id = worker_db.insert_routed_notification(
+                conn,
+                task_id="task-dispatch",
+                binding_id=binding["binding_id"],
+                correlation_id="dispatch-worker-inbox",
+                source_session_id=manager_id,
+                target_session_id=worker_id,
+                signal_type="nudge_worker",
+                source_event_id=None,
+                source_event_timestamp=None,
+                dedupe_key="dispatch-worker-inbox-1",
+                command_id=None,
+                payload={"message": "please continue"},
+                state="delivered",
+                delivery_mode="pull_required",
+            )
+            conn.execute(
+                """
+                insert into manager_cycles(task_id, started_at, completed_at, state, status_json)
+                values ('task-dispatch', '2026-05-23T10:02:00Z', '2026-05-23T10:02:01Z', 'succeeded', '{}')
+                """
+            )
+            cycle_id = conn.execute("select id from manager_cycles").fetchone()["id"]
+
+            consumed_count = worker_db.consume_routed_notifications_for_cycle(
+                conn,
+                task_id="task-dispatch",
+                binding_id=binding["binding_id"],
+                manager_cycle_id=cycle_id,
+                timestamp="2026-05-23T10:02:00Z",
+            )
+
+            notification = worker_db.routed_notifications(conn, task_id="task-dispatch")[0]
+            inbox = worker_db.session_inbox(conn, session_name="worker-session")
+            self.assertEqual(consumed_count, 0)
+            self.assertEqual(notification["id"], notification_id)
+            self.assertIsNone(notification["consumed_at"])
+            self.assertIsNone(notification["consumed_manager_cycle_id"])
+            self.assertEqual([item["id"] for item in inbox], [notification_id])
 
     def test_dispatch_correlation_chains_sort_mixed_rows_chronologically(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1750,6 +1923,63 @@ class DispatchTests(unittest.TestCase):
             self.assertEqual(notification["claimed_by"], "dispatch-recover")
             send.assert_called_once()
             self.assertIn("dispatch_signal_recovered", [event["event_type"] for event in telemetry])
+
+    def test_dispatch_recovers_pending_completion_to_no_tmux_manager_as_pull_required(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn, db_path = self.open_db(tmpdir)
+            worker_id, manager_id = self.setup_bound_task(conn)
+            binding_id = conn.execute(
+                "select id from bindings where task_id = 'task-dispatch'"
+            ).fetchone()["id"]
+            event_id = self.insert_completion(conn, worker_id)
+            notification_id = worker_db.insert_routed_notification(
+                conn,
+                task_id="task-dispatch",
+                binding_id=binding_id,
+                correlation_id="dispatch-pending-pull",
+                source_session_id=worker_id,
+                target_session_id=manager_id,
+                signal_type="worker_task_complete",
+                source_event_id=event_id,
+                source_event_timestamp="2026-05-23T10:01:00Z",
+                dedupe_key=f"{binding_id}:worker_task_complete:{worker_id}:{event_id}",
+                payload={"message": "recover me"},
+                state="pending",
+                timestamp="2026-05-23T10:01:30Z",
+            )
+            conn.execute("update sessions set tmux_session = null where id = ?", (manager_id,))
+            conn.commit()
+
+            args = argparse.Namespace(
+                dispatcher_id="dispatch-recover",
+                dry_run=False,
+                json=True,
+                limit=10,
+                once=True,
+                path=str(db_path),
+                type="worker_task_complete",
+                watch=False,
+            )
+            with mock.patch.object(worker_tmux, "send_text_to_session") as send:
+                with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                    commands.command_dispatch(args)
+
+            payload = json.loads(stdout.getvalue())
+            notification = worker_db.routed_notifications(conn, task_id="task-dispatch")[0]
+            inbox = worker_db.session_inbox(conn, session_name="manager-session")
+            telemetry = worker_db.telemetry_events(conn, task_id="task-dispatch")
+
+            self.assertEqual(payload["processed"][0]["notification_id"], notification_id)
+            self.assertTrue(payload["processed"][0]["recovered"])
+            self.assertEqual(payload["processed"][0]["state"], "pull_required")
+            self.assertEqual(notification["state"], "delivered")
+            self.assertEqual(notification["delivery_mode"], "pull_required")
+            self.assertFalse(notification["side_effect_started"])
+            self.assertFalse(notification["side_effect_completed"])
+            self.assertEqual([item["id"] for item in inbox], [notification_id])
+            self.assertIn("dispatch_signal_recovered", [event["event_type"] for event in telemetry])
+            self.assertIn("dispatch_signal_pull_required", [event["event_type"] for event in telemetry])
+            send.assert_not_called()
 
     def test_dispatch_does_not_retry_pending_completion_after_send_started(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -2098,6 +2328,53 @@ class DispatchTests(unittest.TestCase):
             self.assertEqual(notification["state"], "delivered")
             self.assertEqual(notification["signal_type"], "notify_manager")
             send.assert_called_once()
+
+    def test_dispatch_nudge_worker_to_no_tmux_worker_creates_pull_required_inbox_item(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn, db_path = self.open_db(tmpdir)
+            worker_id, _manager_id = self.setup_bound_task(conn)
+            conn.execute("update sessions set tmux_session = null where id = ?", (worker_id,))
+            command_id = worker_db.create_command(
+                conn,
+                command_type="nudge_worker",
+                task_id="task-dispatch",
+                payload={"message": "please continue"},
+            )
+            conn.commit()
+
+            args = argparse.Namespace(
+                dispatcher_id="dispatch-test",
+                dry_run=False,
+                json=True,
+                limit=10,
+                once=True,
+                path=str(db_path),
+                type="nudge_worker",
+                watch=False,
+            )
+            with mock.patch.object(worker_tmux, "send_text_to_session") as send:
+                with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                    commands.command_dispatch(args)
+
+            payload = json.loads(stdout.getvalue())
+            command_row = conn.execute("select state from commands where id = ?", (command_id,)).fetchone()
+            attempt_row = conn.execute(
+                "select state, side_effect_started, side_effect_completed from command_attempts"
+            ).fetchone()
+            notification = worker_db.routed_notifications(conn, task_id="task-dispatch")[0]
+            consumed = worker_db.consume_next_session_inbox_item(conn, session_name="worker-session")
+
+            self.assertEqual(payload["processed"][0]["state"], "pull_required")
+            self.assertEqual(command_row["state"], "succeeded")
+            self.assertEqual(attempt_row["state"], "succeeded")
+            self.assertEqual(attempt_row["side_effect_started"], 0)
+            self.assertEqual(attempt_row["side_effect_completed"], 0)
+            self.assertEqual(notification["command_id"], command_id)
+            self.assertEqual(notification["state"], "delivered")
+            self.assertEqual(notification["delivery_mode"], "pull_required")
+            self.assertEqual(notification["signal_type"], "nudge_worker")
+            self.assertEqual(consumed["payload"]["message"], "please continue")
+            send.assert_not_called()
 
     def test_dispatch_command_send_runs_after_claim_transaction_commits(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -2668,6 +2945,13 @@ class ContractTests(unittest.TestCase):
         self.assertIn("--blocker", contract)
         self.assertIn("compatibility file", contract)
         self.assertIn(str(status_path("worker-a")), contract)
+
+    def test_worker_contract_tells_app_workers_to_poll_worker_inbox(self):
+        contract = worker_contract("worker-a", "Do the task.")
+
+        self.assertIn("workerctl worker-inbox <task-name> --consume-next --json", contract)
+        self.assertIn("registered without a tmux session", contract)
+        self.assertIn("pull-required dispatcher signals", contract)
 
 
 class ClassifierTests(unittest.TestCase):
@@ -3262,6 +3546,143 @@ class CliTests(unittest.TestCase):
             self.assertEqual(command["required_permission"], "communication.notify_operator")
             self.assertEqual(command["correlation_id"], payload["correlation_id"])
             self.assertEqual(json.loads(command["payload_json"])["message"], "inspect worker")
+
+    def test_session_inbox_cli_consumes_next_item(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                conn.execute(
+                    "insert into tasks(id, name, goal, state, created_at, updated_at) "
+                    "values ('task-inbox', 'inbox-task', 'g', 'managed', '2026-05-23T10:00:00Z', '2026-05-23T10:00:00Z')"
+                )
+                worker_id = worker_db.register_session(
+                    conn,
+                    name="inbox-worker",
+                    role="worker",
+                    codex_session_path="/tmp/w.jsonl",
+                    codex_session_id="u-w",
+                    pid=1,
+                    cwd="/repo",
+                )
+                manager_id = worker_db.register_session(
+                    conn,
+                    name="inbox-manager",
+                    role="manager",
+                    codex_session_path="/tmp/m.jsonl",
+                    codex_session_id="u-m",
+                    pid=2,
+                    cwd="/repo",
+                )
+                binding_id = worker_db.bind_sessions(
+                    conn,
+                    task_name="inbox-task",
+                    worker_session_name="inbox-worker",
+                    manager_session_name="inbox-manager",
+                )
+                notification_id = worker_db.insert_routed_notification(
+                    conn,
+                    task_id="task-inbox",
+                    binding_id=binding_id,
+                    correlation_id="dispatch-cli-inbox",
+                    source_session_id=worker_id,
+                    target_session_id=manager_id,
+                    signal_type="worker_task_complete",
+                    source_event_id=None,
+                    source_event_timestamp=None,
+                    dedupe_key="dispatch-cli-inbox-1",
+                    payload={"message": "inspect"},
+                    state="delivered",
+                )
+                conn.commit()
+
+            proc = self.run_workerctl(
+                "session-inbox",
+                "inbox-manager",
+                "--consume-next",
+                "--json",
+                "--path",
+                str(db_path),
+            )
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            payload = json.loads(proc.stdout)
+            self.assertEqual(payload["consumed"]["id"], notification_id)
+            self.assertEqual(payload["consumed"]["correlation_id"], "dispatch-cli-inbox")
+            self.assertEqual(payload["session"]["name"], "inbox-manager")
+
+            proc = self.run_workerctl(
+                "manager-inbox",
+                "inbox-task",
+                "--json",
+                "--path",
+                str(db_path),
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertEqual(json.loads(proc.stdout)["items"], [])
+
+    def test_worker_inbox_cli_resolves_active_binding_worker(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                conn.execute(
+                    "insert into tasks(id, name, goal, state, created_at, updated_at) "
+                    "values ('task-inbox', 'inbox-task', 'g', 'managed', '2026-05-23T10:00:00Z', '2026-05-23T10:00:00Z')"
+                )
+                worker_id = worker_db.register_session(
+                    conn,
+                    name="inbox-worker",
+                    role="worker",
+                    codex_session_path="/tmp/w.jsonl",
+                    codex_session_id="u-w",
+                    pid=1,
+                    cwd="/repo",
+                )
+                manager_id = worker_db.register_session(
+                    conn,
+                    name="inbox-manager",
+                    role="manager",
+                    codex_session_path="/tmp/m.jsonl",
+                    codex_session_id="u-m",
+                    pid=2,
+                    cwd="/repo",
+                )
+                binding_id = worker_db.bind_sessions(
+                    conn,
+                    task_name="inbox-task",
+                    worker_session_name="inbox-worker",
+                    manager_session_name="inbox-manager",
+                )
+                worker_db.insert_routed_notification(
+                    conn,
+                    task_id="task-inbox",
+                    binding_id=binding_id,
+                    correlation_id="dispatch-worker-inbox",
+                    source_session_id=manager_id,
+                    target_session_id=worker_id,
+                    signal_type="nudge_worker",
+                    source_event_id=None,
+                    source_event_timestamp=None,
+                    dedupe_key="dispatch-worker-inbox-1",
+                    payload={"message": "please continue"},
+                    state="delivered",
+                )
+                conn.commit()
+
+            proc = self.run_workerctl(
+                "worker-inbox",
+                "inbox-task",
+                "--json",
+                "--path",
+                str(db_path),
+            )
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            payload = json.loads(proc.stdout)
+            self.assertEqual(payload["session"]["name"], "inbox-worker")
+            self.assertEqual(payload["items"][0]["signal_type"], "nudge_worker")
+            self.assertEqual(payload["items"][0]["payload"]["message"], "please continue")
 
     def test_classify_cli_outputs_json(self):
         proc = self.run_workerctl(
@@ -14202,6 +14623,11 @@ class ManagerBootstrapPromptTests(unittest.TestCase):
         self.assertIn("use its prompt when needed is true", prompt)
         workerctl = commands.workerctl_cli()
         self.assertIn(f"{workerctl} session-nudge docs-worker", prompt)
+        self.assertIn(f"{workerctl} enqueue-nudge-worker docs-task --message", prompt)
+        self.assertIn(f"{workerctl} dispatch --once --type nudge_worker --json", prompt)
+        self.assertIn(f"{workerctl} worker-inbox docs-task --consume-next --json", prompt)
+        self.assertIn(f"{workerctl} manager-inbox docs-task --consume-next --json", prompt)
+        self.assertIn("registered without tmux", prompt)
         self.assertIn("legacy `nudge` command is only for old file-backed workers", prompt)
         self.assertIn(f"{workerctl} manager-ack docs-task --from-stdin", prompt)
         self.assertIn(f"{workerctl} worker-ack docs-task --json", prompt)
@@ -14251,6 +14677,16 @@ class ManagerBootstrapPromptTests(unittest.TestCase):
             self.assertIn('"satisfied": [...]', document)
             self.assertIn('"deferred": [...]', document)
             self.assertIn('"rejected": [...]', document)
+
+    def test_readme_documents_universal_session_inbox(self):
+        readme = (ROOT / "README.md").read_text()
+
+        self.assertIn("session-inbox <session>", readme)
+        self.assertIn("manager-inbox <task>", readme)
+        self.assertIn("worker-inbox <task>", readme)
+        self.assertIn("delivery_mode='pull_required'", readme)
+        self.assertIn("tmux push is optional transport", readme)
+        self.assertIn("Codex app-based sessions must poll", readme)
 
     def test_docs_include_local_telemetry_workflow(self):
         readme = (ROOT / "README.md").read_text()

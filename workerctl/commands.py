@@ -429,9 +429,17 @@ Supervision loop:
 - Treat acceptance criteria as living supervision state.
 - Inspect `manager_context.acceptance_criteria` each cycle.
 - Inspect `manager_context.criteria_negotiation`; use its prompt when needed is true.
+- If this manager is registered without tmux, poll for pull-required dispatcher
+  signals with `{workerctl} manager-inbox {task_line} --consume-next --json`;
+  Dispatch records these messages durably but cannot push text into this Codex
+  app chat.
 - Nudge the worker with `{workerctl} session-nudge {worker_line} "..."`;
   the legacy `nudge` command is only for old file-backed workers and should not
   be the first choice for session-bound pairs.
+- If the worker is registered without tmux, route nudges through Dispatch with
+  `{workerctl} enqueue-nudge-worker {task_line} --message "..." --json`, then
+  run `{workerctl} dispatch --once --type nudge_worker --json`; the worker
+  should poll `{workerctl} worker-inbox {task_line} --consume-next --json`.
 - If worker progress reveals new edge cases, tests, polish, or scope
   boundaries, ask the worker to propose must-have vs follow-up criteria.
 - After a worker proposes separated criteria, use `{workerctl} criteria-plan`
@@ -4539,6 +4547,13 @@ def _dispatch_required_permission_check(conn, *, worker_db, command: dict[str, A
     return permission_check
 
 
+def _dispatch_delivery_mode(conn: Any, *, worker_db: Any, target_session_id: str) -> str:
+    target = worker_db.session_by_id(conn, session_id=target_session_id)
+    if target is None:
+        raise WorkerError(f"target session {target_session_id!r} no longer exists")
+    return "push" if target["tmux_session"] else "pull_required"
+
+
 def _execute_dispatch_command(*, worker_db, worker_tmux, db_path: Path | None, command: dict[str, Any], attempt: dict[str, Any], dispatcher_id: str) -> dict[str, Any]:
     notification_id = None
     prepared = False
@@ -4557,9 +4572,11 @@ def _execute_dispatch_command(*, worker_db, worker_tmux, db_path: Path | None, c
             worker_db.initialize_database(conn)
             route = _dispatch_command_route(conn, command)
             permission_check = _dispatch_required_permission_check(conn, worker_db=worker_db, command=command)
+            delivery_mode = _dispatch_delivery_mode(conn, worker_db=worker_db, target_session_id=route["target_session_id"])
             payload = {
                 "command_id": command["id"],
                 "command_type": command["type"],
+                "delivery_mode": delivery_mode,
                 "dispatcher_id": dispatcher_id,
                 "message": text,
                 "permission_check": permission_check,
@@ -4580,6 +4597,7 @@ def _execute_dispatch_command(*, worker_db, worker_tmux, db_path: Path | None, c
                 dedupe_key=f"{route['binding_id']}:{command['type']}:{command['id']}",
                 command_id=command["id"],
                 payload=payload,
+                delivery_mode=delivery_mode,
             )
             worker_db.emit_telemetry_event(
                 conn,
@@ -4597,10 +4615,59 @@ def _execute_dispatch_command(*, worker_db, worker_tmux, db_path: Path | None, c
                 },
                 attributes={
                     "permission_check": permission_check,
+                    "delivery_mode": delivery_mode,
                     "source_session": route["source_session_name"],
                     "target_session": route["target_session_name"],
                 },
             )
+            if delivery_mode == "pull_required":
+                result = {
+                    **base_result,
+                    "delivery_mode": delivery_mode,
+                    "notification_id": notification_id,
+                    "permission_check": permission_check,
+                    "side_effect_completed": False,
+                    "side_effect_started": False,
+                    "state": "pull_required",
+                    "target_session": route["target_session_name"],
+                }
+                worker_db.finish_routed_notification(
+                    conn,
+                    notification_id=notification_id,
+                    state="delivered",
+                    side_effect_completed=False,
+                )
+                worker_db.emit_telemetry_event(
+                    conn,
+                    actor="dispatch",
+                    event_type="dispatch_signal_pull_required",
+                    task_id=command["task_id"],
+                    summary=f"Dispatch recorded pull-required {route['signal_type']} for {route['target_session_name']}.",
+                    correlation={
+                        "attempt_id": attempt["id"],
+                        "binding_id": route["binding_id"],
+                        "command_id": command["id"],
+                        "command_type": command["type"],
+                        "correlation_id": command["correlation_id"],
+                        "dispatcher_id": dispatcher_id,
+                        "routed_notification_id": notification_id,
+                        "signal_type": route["signal_type"],
+                    },
+                    attributes={
+                        "delivery_mode": delivery_mode,
+                        "target_session": route["target_session_name"],
+                    },
+                )
+                worker_db.finish_command_attempt(
+                    conn,
+                    attempt_id=attempt["id"],
+                    state="succeeded",
+                    result=result,
+                    side_effect_started=False,
+                    side_effect_completed=False,
+                )
+                conn.commit()
+                return result
             worker_db.mark_command_attempt_side_effect_started(conn, attempt_id=attempt["id"])
             conn.commit()
             prepared = True
@@ -4616,6 +4683,7 @@ def _execute_dispatch_command(*, worker_db, worker_tmux, db_path: Path | None, c
             )
         result = {
             **base_result,
+            "delivery_mode": delivery_mode,
             "notification_id": notification_id,
             "permission_check": permission_check,
             "send_result": send_result,
@@ -4734,6 +4802,8 @@ def _route_worker_completion(
     try:
         with worker_db.connect(db_path) as conn:
             worker_db.initialize_database(conn)
+            delivery_mode = _dispatch_delivery_mode(conn, worker_db=worker_db, target_session_id=row["target_session_id"])
+            payload["delivery_mode"] = delivery_mode
             try:
                 notification_id = worker_db.insert_routed_notification(
                     conn,
@@ -4750,6 +4820,7 @@ def _route_worker_completion(
                     claimed_by=dispatcher_id,
                     claimed_at=claimed_at,
                     claim_expires_at=claim_expires_at,
+                    delivery_mode=delivery_mode,
                 )
             except Exception as exc:
                 if "UNIQUE constraint failed" not in str(exc):
@@ -4793,8 +4864,45 @@ def _route_worker_completion(
                 attributes={
                     "source_session": row["worker_session_name"],
                     "target_session": row["manager_session_name"],
+                    "delivery_mode": delivery_mode,
                 },
             )
+            if delivery_mode == "pull_required":
+                worker_db.finish_routed_notification(
+                    conn,
+                    notification_id=notification_id,
+                    state="delivered",
+                    side_effect_completed=False,
+                )
+                worker_db.emit_telemetry_event(
+                    conn,
+                    actor="dispatch",
+                    event_type="dispatch_signal_pull_required",
+                    task_id=row["task_id"],
+                    summary=f"Dispatch recorded pull-required worker completion for {row['manager_session_name']}.",
+                    correlation={
+                        "binding_id": row["binding_id"],
+                        "correlation_id": correlation_id,
+                        "dispatcher_id": dispatcher_id,
+                        "routed_notification_id": notification_id,
+                        "source_event_id": row["source_event_id"],
+                        "signal_type": "worker_task_complete",
+                    },
+                    attributes={
+                        "delivery_mode": delivery_mode,
+                        "source_session": row["worker_session_name"],
+                        "target_session": row["manager_session_name"],
+                    },
+                )
+                conn.commit()
+                result.update(
+                    {
+                        "delivery_mode": delivery_mode,
+                        "notification_id": notification_id,
+                        "state": "pull_required",
+                    }
+                )
+                return result
             conn.commit()
         def mark_side_effect_started() -> None:
             with worker_db.connect(db_path) as conn:
@@ -4845,7 +4953,7 @@ def _route_worker_completion(
                 },
             )
             conn.commit()
-        result.update({"notification_id": notification_id, "state": "delivered"})
+        result.update({"delivery_mode": delivery_mode, "notification_id": notification_id, "state": "delivered"})
     except Exception as exc:
         if notification_id is not None:
             with worker_db.connect(db_path) as conn:
@@ -4922,6 +5030,12 @@ def _deliver_claimed_worker_completion(
     try:
         with worker_db.connect(db_path) as conn:
             worker_db.initialize_database(conn)
+            delivery_mode = _dispatch_delivery_mode(conn, worker_db=worker_db, target_session_id=row["target_session_id"])
+            worker_db.set_routed_notification_delivery_mode(
+                conn,
+                notification_id=notification_id,
+                delivery_mode=delivery_mode,
+            )
             worker_db.emit_telemetry_event(
                 conn,
                 actor="dispatch",
@@ -4936,8 +5050,38 @@ def _deliver_claimed_worker_completion(
                     "source_event_id": row["source_event_id"],
                     "signal_type": "worker_task_complete",
                 },
-                attributes={"target_session": row["manager_session_name"]},
+                attributes={"delivery_mode": delivery_mode, "target_session": row["manager_session_name"]},
             )
+            if delivery_mode == "pull_required":
+                worker_db.finish_routed_notification(
+                    conn,
+                    notification_id=notification_id,
+                    state="delivered",
+                    side_effect_completed=False,
+                )
+                worker_db.emit_telemetry_event(
+                    conn,
+                    actor="dispatch",
+                    event_type="dispatch_signal_pull_required",
+                    task_id=row["task_id"],
+                    summary=f"Dispatch recorded pull-required recovered worker completion for {row['manager_session_name']}.",
+                    correlation={
+                        "binding_id": row["binding_id"],
+                        "correlation_id": row["correlation_id"],
+                        "dispatcher_id": dispatcher_id,
+                        "routed_notification_id": notification_id,
+                        "source_event_id": row["source_event_id"],
+                        "signal_type": "worker_task_complete",
+                    },
+                    attributes={
+                        "delivery_mode": delivery_mode,
+                        "recovered": True,
+                        "target_session": row["manager_session_name"],
+                    },
+                )
+                conn.commit()
+                result.update({"delivery_mode": delivery_mode, "state": "pull_required"})
+                return result
             conn.commit()
         def mark_side_effect_started() -> None:
             with worker_db.connect(db_path) as conn:
@@ -4985,7 +5129,7 @@ def _deliver_claimed_worker_completion(
                 },
             )
             conn.commit()
-        result.update({"state": "delivered"})
+        result.update({"delivery_mode": delivery_mode, "state": "delivered"})
     except Exception as exc:
         with worker_db.connect(db_path) as conn:
             worker_db.initialize_database(conn)
@@ -8290,6 +8434,99 @@ def command_tail(args: argparse.Namespace) -> int:
         for r in rows
     ]
     print(json.dumps(events, indent=2, sort_keys=True, default=str))
+    return 0
+
+
+def _session_inbox_response(
+    conn: Any,
+    *,
+    worker_db: Any,
+    session_name: str,
+    consume_next: bool,
+    limit: int,
+) -> dict[str, Any]:
+    session = worker_db.session_row(conn, name=session_name)
+    consumed = None
+    if consume_next:
+        consumed = worker_db.consume_next_session_inbox_item(conn, session_name=session_name)
+    items = worker_db.session_inbox(conn, session_name=session_name, limit=limit)
+    return {
+        "consumed": consumed,
+        "items": items,
+        "session": {
+            "id": session["id"],
+            "name": session["name"],
+            "role": session["role"],
+        },
+    }
+
+
+def _print_session_inbox_result(args: argparse.Namespace, result: dict[str, Any]) -> None:
+    if getattr(args, "json", False):
+        print(json.dumps(result, indent=2, sort_keys=True, default=str))
+        return
+    consumed = result.get("consumed")
+    if consumed is not None:
+        print(f"consumed #{consumed['id']} {consumed['signal_type']} ({consumed['correlation_id']})")
+    for item in result["items"]:
+        print(f"#{item['id']} {item['signal_type']} {item['delivery_mode']} {item['correlation_id']}")
+
+
+def command_session_inbox(args: argparse.Namespace) -> int:
+    from workerctl import db as worker_db
+
+    db_path = Path(args.path).expanduser().resolve() if getattr(args, "path", None) else None
+    with worker_db.connect(db_path) as conn:
+        worker_db.initialize_database(conn)
+        result = _session_inbox_response(
+            conn,
+            worker_db=worker_db,
+            session_name=args.session,
+            consume_next=bool(getattr(args, "consume_next", False)),
+            limit=getattr(args, "limit", 10),
+        )
+        conn.commit()
+    _print_session_inbox_result(args, result)
+    return 0
+
+
+def command_manager_inbox(args: argparse.Namespace) -> int:
+    from workerctl import db as worker_db
+
+    db_path = Path(args.path).expanduser().resolve() if getattr(args, "path", None) else None
+    with worker_db.connect(db_path) as conn:
+        worker_db.initialize_database(conn)
+        binding = worker_db.active_binding_for_task(conn, task_name=args.task)
+        result = _session_inbox_response(
+            conn,
+            worker_db=worker_db,
+            session_name=binding["manager_session_name"],
+            consume_next=bool(getattr(args, "consume_next", False)),
+            limit=getattr(args, "limit", 10),
+        )
+        result["task"] = {"id": binding["task_id"], "name": args.task}
+        conn.commit()
+    _print_session_inbox_result(args, result)
+    return 0
+
+
+def command_worker_inbox(args: argparse.Namespace) -> int:
+    from workerctl import db as worker_db
+
+    db_path = Path(args.path).expanduser().resolve() if getattr(args, "path", None) else None
+    with worker_db.connect(db_path) as conn:
+        worker_db.initialize_database(conn)
+        binding = worker_db.active_binding_for_task(conn, task_name=args.task)
+        result = _session_inbox_response(
+            conn,
+            worker_db=worker_db,
+            session_name=binding["worker_session_name"],
+            consume_next=bool(getattr(args, "consume_next", False)),
+            limit=getattr(args, "limit", 10),
+        )
+        result["task"] = {"id": binding["task_id"], "name": args.task}
+        conn.commit()
+    _print_session_inbox_result(args, result)
     return 0
 
 
