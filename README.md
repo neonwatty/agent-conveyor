@@ -224,11 +224,14 @@ tmux attach -t codex-live-test
   acceptance criteria ledger when they do not already exist for the task. By
   default `pair` starts a detached `dispatch --watch` process after successful
   worker/manager setup, bind, and run creation. Use `--dispatcher-id` to set its
-  identity or `--no-dispatch` for isolated/manual workflows.
+  identity or `--no-dispatch` for isolated/manual workflows. A live dispatch
+  heartbeat is reused only when it has the same dispatcher id; otherwise `pair`
+  starts the requested dispatcher so audit receipts keep the configured
+  identity.
   If the manager or bind fails after the worker is spawned, the worker remains
   registered and can be cleaned up with `workerctl deregister`.
-  Use `--accept-trust` only for directories you intentionally trust; it sends
-  Enter to both spawned sessions so fresh workspaces do not stall before
+  Use `--accept-trust` only for directories you intentionally trust; it retries
+  Enter during startup discovery so fresh workspaces do not stall before
   registration.
 - `register-worker --name N [--pid P | --codex-session PATH] [--cwd D] [--tmux-session S]` —
   Register an already-running Codex session as a worker. Rollout JSONL is
@@ -411,7 +414,7 @@ tmux attach -t codex-live-test
   terminals, attach/bind controls, and audited action receipts for cycle,
   nudge, interrupt, finish, and export. With `--ensure-dispatch`, launch also
   ensures a Dispatch watch process using the supplied `--dispatcher-id` when
-  provided. Use
+  provided, reusing only a fresh heartbeat from that same dispatcher id. Use
   `--dry-run --json` to inspect the launch command.
 - `cycle <task> [--busy-wait-seconds N]` — One observation cycle. Idempotent. Runs `ingest`, computes
   worker state from the JSON event stream, captures the tmux pane as a shadow
