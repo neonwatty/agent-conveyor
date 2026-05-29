@@ -1,0 +1,400 @@
+version: 2
+
+goal:
+  title: "Late-Attach Support Queue Reporter"
+  slug: "late-attach-support-queue-reporter"
+  kind: specific
+  tranche: "Create and run a late-manager-attach workerctl experiment around a small support-reporting CLI feature."
+  status: done
+  oracle:
+    signal: "Support-reporter tests pass and dashboard plus workerctl audit prove late manager attachment, Dispatch routing, manager consumption before finish_task, closed criteria, task done, and cleanup."
+    cadence: "after each setup/experiment phase and at final audit"
+    final_proof: "Run id, dashboard URL, support-reporter verification command output, routed worker_task_complete source_event_id, consumed_manager_cycle_id, finish_task command id, criteria summary, task done state, and cleanup/git status."
+  intake:
+    original_request: "Cook up a small CLI/reporting feature task in an associated repo, start a worker on it, then attach a manager for trustworthy management."
+    interpreted_outcome: "A runnable late-attach dogfood experiment proves a manager can supervise an already-started worker through auditable Dispatch evidence."
+    input_shape: specific
+    audience: "operator validating workerctl trust and manager behavior"
+    authority: approved
+    proof_type: demo
+    completion_proof: "A completed late-attach workerctl run with support-reporter tests passing, dashboard/audit proof of routed completion consumed before finish_task, closed criteria, task done, and clean cleanup."
+    likely_misfire: "Treating a successful toy CLI implementation as success without proving the manager attached midstream and made an auditable finish decision."
+    blind_spots_considered:
+      - "Worker may finish before manager attachment."
+      - "Manager may trust pane text instead of Dispatch/audit evidence."
+      - "Acceptance criteria may be too vague to close objectively."
+      - "Dashboard may hide backend truth."
+      - "Cleanup may leave stale sessions."
+    existing_plan_facts:
+      - "Use a standalone repo at /Users/neonwatty/Desktop/support-queue-reporter-late-attach."
+      - "Use Python and pytest."
+      - "Seed a half-built support queue reporter CLI."
+      - "Start the worker before manager attachment."
+      - "Use dashboard and workerctl audit as the trust evidence."
+
+rules:
+  pm_owns_state: true
+  one_active_task: true
+  max_write_workers: 1
+  no_implementation_without_worker_or_pm_task: true
+  no_completion_without_judge_or_pm_audit: true
+  planning_is_not_completion: true
+  queued_required_worker_blocks_completion: true
+  continuous_until_full_outcome: true
+  missing_input_or_credentials_do_not_stop_goal: true
+  preserve_and_validate_existing_plan: true
+  intake_misfire_must_be_audited: true
+  goal_pressure_requires_oracle: true
+  no_completion_on_weak_proof: true
+  slice_policy:
+    max_consecutive_tiny_tasks: 2
+    prefer_vertical_slices: true
+    judge_picks_largest_safe_slice: true
+    worker_completes_whole_slice: true
+
+agents:
+  scout: installed
+  worker: installed
+  judge: installed
+
+visual_board:
+  selected: local
+  local:
+    status: live
+    url: "http://127.0.0.1:41737/late-attach-support-queue-reporter/"
+    command: "npx goalbuddy board /Users/neonwatty/Desktop/codex-terminal-manager/docs/goals/late-attach-support-queue-reporter"
+
+active_task: null
+
+tasks:
+  - id: T001
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "Scaffold the standalone support queue reporter repo with a half-built Python CLI, fixture data, and a known failing pytest baseline."
+    inputs:
+      - "Charter in docs/goals/late-attach-support-queue-reporter/goal.md"
+      - "/Users/neonwatty/Desktop/support-queue-reporter-late-attach"
+    constraints:
+      - "Create a small standalone repo; do not modify workerctl product behavior for this task."
+      - "Keep the feature intentionally incomplete enough for the workerctl worker to finish later."
+      - "Document the intended CLI behavior in the repo README or tests."
+      - "The scaffold should be deterministic and offline."
+    allowed_files:
+      - "/Users/neonwatty/Desktop/support-queue-reporter-late-attach/**"
+    verify:
+      - "cd /Users/neonwatty/Desktop/support-queue-reporter-late-attach && .venv/bin/python -m pytest -q"
+      - "cd /Users/neonwatty/Desktop/support-queue-reporter-late-attach && git status --short"
+    stop_if:
+      - "The target path already contains unrelated user work."
+      - "The task requires network access or external service credentials."
+      - "The failing baseline is ambiguous or unrelated to the intended support-report feature."
+    expected_output:
+      - "Files created in the standalone repo."
+      - "Initial pytest result with expected failures documented."
+      - "A concise worker task prompt for completing the feature."
+    receipt:
+      result: done
+      summary: "Scaffolded a standalone Python support-report CLI fixture with fixture data, tests, partial implementation, local .venv verification, and a committed red baseline for the later worker to finish."
+      changed_files:
+        - "/Users/neonwatty/Desktop/support-queue-reporter-late-attach/.gitignore"
+        - "/Users/neonwatty/Desktop/support-queue-reporter-late-attach/README.md"
+        - "/Users/neonwatty/Desktop/support-queue-reporter-late-attach/pyproject.toml"
+        - "/Users/neonwatty/Desktop/support-queue-reporter-late-attach/data/tickets.json"
+        - "/Users/neonwatty/Desktop/support-queue-reporter-late-attach/src/support_reporter/__init__.py"
+        - "/Users/neonwatty/Desktop/support-queue-reporter-late-attach/src/support_reporter/cli.py"
+        - "/Users/neonwatty/Desktop/support-queue-reporter-late-attach/src/support_reporter/reporter.py"
+        - "/Users/neonwatty/Desktop/support-queue-reporter-late-attach/tests/test_reporter.py"
+      commands:
+        - cmd: "uv venv && uv pip install -e '.[dev]'"
+          status: pass
+        - cmd: ".venv/bin/python -m pytest -q"
+          status: pass
+          output: "Baseline-red check passed: command exited nonzero as intended with 1 passed, 7 failed; failures cover missing severity counts, SLA risk, routing, blockers, next action, JSON details, and Markdown sections."
+        - cmd: "git status --short --branch && git log --oneline -1"
+          status: pass
+          output: "## main; 58a10da Seed support queue reporter fixture"
+      worker_task_prompt: "Finish the support-report CLI. Keep the implementation small and deterministic, make .venv/bin/python -m pytest -q pass, and report files changed, final pytest output, one example JSON or Markdown command output, and any product or QA risks."
+
+  - id: T002
+    type: pm
+    assignee: PM
+    status: done
+    reasoning_hint: medium
+    objective: "Start an unmanaged workerctl worker on the support-reporter feature and let it make observable progress before manager attachment."
+    inputs:
+      - "T001 receipt"
+      - "/Users/neonwatty/Desktop/codex-terminal-manager/scripts/workerctl"
+      - "/Users/neonwatty/Desktop/support-queue-reporter-late-attach"
+    constraints:
+      - "Do not attach or bind a manager before at least one observable worker progress signal exists."
+      - "Record worker name, task name or setup code, prompt, start time, and the pre-manager progress signal."
+      - "Use workerctl-managed paths for worker creation or registration."
+    expected_output:
+      - "Worker/session identifiers."
+      - "Evidence that the worker started before manager attachment."
+      - "Evidence of partial progress such as git diff, test output, or worker receipt/capture."
+    receipt:
+      result: done
+      summary: "Started an unmanaged worker first, waited for it to make one scoped pre-manager improvement, and captured a dirty diff plus test delta before any manager was attached."
+      worker:
+        name: "lateattach-support-20260528-170405-worker"
+        session_id: "session-30a42fb8-b445-4b28-b837-6e4eba69914e"
+        codex_session_id: "019e710d-1c05-7553-b511-741a3d094198"
+        tmux_session: "codex-lateattach-support-20260528-170405-worker"
+        pid: 95928
+        cwd: "/Users/neonwatty/Desktop/support-queue-reporter-late-attach"
+      pre_manager_progress:
+        started_before_manager: true
+        changed_files:
+          - "/Users/neonwatty/Desktop/support-queue-reporter-late-attach/src/support_reporter/reporter.py"
+        diff_summary: "Added SEVERITY_ORDER and summary.by_severity counting only; left SLA risk, routing, blockers, next action, and Markdown incomplete."
+        baseline_tests: ".venv/bin/python -m pytest -q -> 1 passed, 7 failed"
+        after_initial_change_tests: ".venv/bin/python -m pytest -q -> 2 passed, 6 failed"
+        git_status: "## main; M src/support_reporter/reporter.py"
+        worker_report: "Worker explicitly stopped after one coherent change and is waiting for manager attachment before continuing."
+      commands:
+        - cmd: "scripts/workerctl start-worker --name lateattach-support-20260528-170405-worker --cwd /Users/neonwatty/Desktop/support-queue-reporter-late-attach --task <partial-progress prompt> --codex-profile yolo --timeout-seconds 180"
+          status: pass
+        - cmd: "cd /Users/neonwatty/Desktop/support-queue-reporter-late-attach && git status --short --branch && git diff -- src/support_reporter/reporter.py"
+          status: pass
+        - cmd: "cd /Users/neonwatty/Desktop/support-queue-reporter-late-attach && .venv/bin/python -m pytest -q"
+          status: expected_fail
+          output: "2 passed, 6 failed"
+        - cmd: "scripts/workerctl status lateattach-support-20260528-170405-worker"
+          status: pass
+
+  - id: T003
+    type: pm
+    assignee: PM
+    status: done
+    reasoning_hint: high
+    objective: "Attach a strict manager after worker progress, bind the task, configure measurable criteria, and open the dashboard."
+    inputs:
+      - "T002 receipt"
+      - "Manage Codex Workers skill"
+      - "workerctl dashboard and Dispatch commands"
+    constraints:
+      - "Manager attachment must happen after the recorded worker progress signal."
+      - "Acceptance criteria must include support-reporter feature proof and Dispatch/finish-order proof."
+      - "Open the dashboard URL and use it as part of the evidence loop."
+    expected_output:
+      - "Manager/session identifiers."
+      - "Binding/task identifiers."
+      - "Dashboard URL."
+      - "Saved manager criteria."
+    receipt:
+      result: done
+      summary: "Attached a strict manager after documented worker progress, persisted five measurable criteria, bound worker and manager to the task, opened the dashboard, and confirmed Dispatch active with 5 open accepted criteria."
+      task:
+        name: "lateattach-support-20260528-170405"
+        id: "task-d54d6096-98c9-46d1-9229-864206cb220d"
+      manager:
+        name: "lateattach-support-20260528-170405-manager"
+        session_id: "session-c1b1a1e8-808f-436d-918f-e00be05cc6f2"
+        codex_session_id: "019e710f-6d57-7aa3-a8bb-65b39ee4710c"
+        tmux_session: "codex-lateattach-support-20260528-170405-manager"
+        pid: 19180
+      binding:
+        id: "binding-015dec63-7d83-42cb-b423-a2df3256c54c"
+        worker: "lateattach-support-20260528-170405-worker"
+        manager: "lateattach-support-20260528-170405-manager"
+      dashboard:
+        url: "http://127.0.0.1:8797/?task=lateattach-support-20260528-170405"
+        visible_state: "relationship active; task candidate; criteria 0 satisfied / 5 open; Dispatch core active; heartbeat fresh; no dispatch chains yet."
+      criteria:
+        accepted_ids: [175, 176, 177, 178, 179]
+        summary: "0 satisfied / 5 open"
+      commands:
+        - cmd: "scripts/workerctl tasks --create lateattach-support-20260528-170405 --goal <goal> --summary <summary>"
+          status: pass
+        - cmd: "scripts/workerctl start-manager --name lateattach-support-20260528-170405-manager --cwd /Users/neonwatty/Desktop/support-queue-reporter-late-attach --codex-profile yolo --timeout-seconds 180"
+          status: pass
+        - cmd: "scripts/workerctl manager-config lateattach-support-20260528-170405 --mode strict ..."
+          status: pass
+        - cmd: "scripts/workerctl criteria lateattach-support-20260528-170405 --add ... --status accepted"
+          status: pass
+          output: "Added criteria 175 through 179."
+        - cmd: "scripts/workerctl bind --task lateattach-support-20260528-170405 --worker lateattach-support-20260528-170405-worker --manager lateattach-support-20260528-170405-manager"
+          status: pass
+        - cmd: "scripts/workerctl dashboard --task lateattach-support-20260528-170405 --ensure-dispatch --dispatcher-id lateattach-support-dispatch-20260528-170405"
+          status: pass
+      manager_prompt: "Confirmed persisted strict defaults and instructed the manager to begin cycle supervision after the recorded pre-manager progress."
+
+  - id: T004
+    type: pm
+    assignee: PM
+    status: done
+    reasoning_hint: high
+    objective: "Drive the manager loop through completion, requiring worker evidence and Dispatch consumption before finish_task."
+    inputs:
+      - "T003 receipt"
+      - "Dashboard URL"
+      - "workerctl cycle, criteria, audit, telemetry"
+    constraints:
+      - "Nudge the worker only through audited workerctl or Dispatch paths."
+      - "Do not accept pane text alone as completion proof."
+      - "If dashboard visibility is weaker than backend audit truth, record the visibility gap."
+      - "If the run fails, capture run id, dashboard URL, cycle output, audit JSON summary, visible dashboard state, and exact missing behavior."
+    expected_output:
+      - "Run id and dashboard URL."
+      - "Support-reporter test evidence."
+      - "worker_task_complete routed notification with source_event_id."
+      - "Manager consumed cycle id."
+      - "Criteria summary with zero open accepted criteria."
+      - "finish_task command id and task done state."
+    receipt:
+      result: done
+      summary: "Manager drove the worker from partial progress to completion, verified the implementation independently, consumed the final Dispatch-routed worker_task_complete notification, satisfied all criteria, and finished the task with criteria audit."
+      run:
+        task: "lateattach-support-20260528-170405"
+        dashboard_url: "http://127.0.0.1:8797/?task=lateattach-support-20260528-170405"
+      support_reporter_evidence:
+        test_command: ".venv/bin/python -m pytest -q"
+        test_output: "8 passed in 0.04s"
+        changed_files:
+          - "/Users/neonwatty/Desktop/support-queue-reporter-late-attach/src/support_reporter/cli.py"
+          - "/Users/neonwatty/Desktop/support-queue-reporter-late-attach/src/support_reporter/reporter.py"
+        git_status: "## main; M src/support_reporter/cli.py; M src/support_reporter/reporter.py"
+        diff_check: "clean"
+      dispatch_evidence:
+        pre_manager_partial_notification:
+          notification_id: 31
+          source_event_id: 4797
+          consumed_manager_cycle_id: 355
+        final_completion_notification:
+          notification_id: 32
+          source_event_id: 4880
+          consumed_manager_cycle_id: 360
+          delivered_at: "2026-05-29T00:13:12Z"
+          consumed_at: "2026-05-29T00:13:34Z"
+      criteria:
+        summary: "5 satisfied / 0 open"
+        satisfied_ids: [175, 176, 177, 178, 179]
+      finish:
+        command_id: "command-6f8ce3b4-90ac-4245-8e1b-bafecf37d36f"
+        state: "succeeded"
+        task_state: "done"
+      dashboard_visible_state: "relationship observed; task done; criteria 5 satisfied / 0 open; latest cycle succeeded; finish_task succeeded; Dispatch active; worker_task_complete #32 source event #4880 consumed by manager cycle #360; worker receipt visible."
+      commands:
+        - cmd: "Manager session ran workerctl cycle until final worker receipt was visible."
+          status: pass
+        - cmd: "Manager session verified git diff --check, git status --short, and .venv/bin/python -m pytest -q."
+          status: pass
+        - cmd: "Manager session satisfied criteria 175-179 with evidence."
+          status: pass
+        - cmd: "scripts/workerctl audit lateattach-support-20260528-170405 --json"
+          status: pass
+        - cmd: "Browser dashboard inspection"
+          status: pass
+
+  - id: T005
+    type: pm
+    assignee: PM
+    status: done
+    reasoning_hint: medium
+    objective: "Clean up current-run sessions and record final git/process hygiene."
+    inputs:
+      - "T004 receipt"
+      - "workerctl sessions"
+      - "tmux list-sessions"
+      - "git status for product and support-reporter repos"
+    constraints:
+      - "Do not remove unrelated stale sessions without explicit operator approval."
+      - "Preserve useful support-reporter repo artifacts unless the operator asks for deletion."
+    expected_output:
+      - "Cleanup commands run."
+      - "Remaining current-run sessions, if any."
+      - "Final git status for relevant repos."
+    receipt:
+      result: done
+      summary: "Cleaned up current-run worker, manager, and dashboard processes; committed the completed support-reporter feature so the standalone repo is clean."
+      commands:
+        - cmd: "tmux kill-session -t codex-lateattach-support-20260528-170405-manager; tmux kill-session -t codex-lateattach-support-20260528-170405-worker; scripts/workerctl deregister <manager>; scripts/workerctl deregister <worker>"
+          status: pass
+        - cmd: "kill -TERM 27906"
+          status: pass
+          output: "Stopped dashboard server on port 8797; workerctl-dashboard tmux sessions were removed."
+        - cmd: "cd /Users/neonwatty/Desktop/support-queue-reporter-late-attach && git add src/support_reporter/cli.py src/support_reporter/reporter.py && git commit -m 'Complete support queue report feature'"
+          status: pass
+          output: "6a87d8e Complete support queue report feature"
+        - cmd: "cd /Users/neonwatty/Desktop/support-queue-reporter-late-attach && .venv/bin/python -m pytest -q && git status --short --branch"
+          status: pass
+          output: "8 passed in 0.09s; ## main"
+        - cmd: "tmux/lsof/session cleanup check"
+          status: pass
+          output: "No current-run lateattach tmux sessions, no workerctl-dashboard tmux sessions, no process listening on 127.0.0.1:8797, and no active lateattach sessions in workerctl."
+      final_git_state:
+        support_repo: "clean on main at 6a87d8e"
+        product_repo: "contains active GoalBuddy board files to be finalized by T999"
+
+  - id: T999
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Audit whether the late-manager-attach experiment satisfies the original owner outcome."
+    inputs:
+      - "All done task receipts"
+      - "Final support-reporter verification"
+      - "workerctl audit JSON summary"
+      - "Dashboard-visible evidence"
+      - "Final git and session hygiene"
+    constraints:
+      - "Do not implement."
+      - "Reject completion if manager attachment did not occur after worker progress."
+      - "Reject completion if worker_task_complete routing or manager consumption is missing."
+      - "Reject completion if finish_task happened before consumption."
+      - "Reject completion if accepted criteria remain open."
+    expected_output:
+      - "complete | not_complete"
+      - "full_outcome_complete: true | false"
+      - "Evidence map back to the goal oracle."
+      - "Missing evidence or next task if not complete."
+    receipt:
+      result: done
+      decision: complete
+      full_outcome_complete: true
+      summary: "The late-manager-attach experiment satisfies the original oracle: a worker began before management, produced pre-manager progress, a manager attached afterward, Dispatch routed both worker completions, the manager consumed the final routed completion before finish_task, all criteria closed, the task reached done, and cleanup left no current-run processes."
+      evidence_map:
+        worker_started_before_manager:
+          status: proven
+          evidence: "Worker registered at 2026-05-29T00:05:46Z and produced partial source event 4797 at 2026-05-29T00:06:35Z; manager registered at 2026-05-29T00:08:18Z and binding was created at 2026-05-29T00:08:53Z."
+        pre_manager_progress:
+          status: proven
+          evidence: "Worker changed only src/support_reporter/reporter.py for by_severity and moved tests from 1 passed / 7 failed to 2 passed / 6 failed before manager attachment."
+        support_reporter_complete:
+          status: proven
+          evidence: "Support repo verification after final commit: .venv/bin/python -m pytest -q -> 8 passed in 0.04s; commit 6a87d8e Complete support queue report feature."
+        manager_recovered_and_supervised:
+          status: proven
+          evidence: "Manager acknowledged the strict contract, ran cycles, treated the pre-manager receipt as context, nudged the worker through workerctl, independently verified pytest, git status, and diff check."
+        dispatch_routing_and_consumption:
+          status: proven
+          evidence: "Final worker_task_complete notification #32 had source_event_id 4880 and was consumed by manager cycle 360 at 2026-05-29T00:13:34Z."
+        criteria_closed:
+          status: proven
+          evidence: "Criteria 175, 176, 177, 178, and 179 are all satisfied; criteria summary is 5 satisfied / 0 open."
+        finish_order:
+          status: proven
+          evidence: "finish_task command command-6f8ce3b4-90ac-4245-8e1b-bafecf37d36f was created at 2026-05-29T00:14:24Z after final Dispatch consumption at 2026-05-29T00:13:34Z and succeeded."
+        dashboard_visible:
+          status: proven
+          evidence: "Dashboard showed relationship observed, task done, criteria 5 satisfied / 0 open, Dispatch active, worker_task_complete #32 source event #4880 consumed by manager cycle #360, worker receipt visible, and finish_task succeeded."
+        cleanup:
+          status: proven
+          evidence: "No current-run lateattach tmux sessions, no workerctl-dashboard sessions, no 8797 listener, no active lateattach workerctl sessions; support repo clean on main at 6a87d8e."
+      residual_risk:
+        - "Worker final risk remains product-level: SLA-risk currently follows the fixture contract of unresolved tickets with escalation_reason; broader overdue-but-not-escalated semantics would need a future product decision."
+        - "Input schema validation is minimal and intentionally out of this fixture's current scope."
+
+checks:
+  dirty_fingerprint: "support repo baseline commit 58a10da; product repo has active GoalBuddy board files"
+  last_verification:
+    result: pass
+    task: T999
+    commands:
+      - cmd: "final oracle audit"
+        status: pass
+        output: "worker started before manager; final source_event_id 4880 consumed by manager cycle 360 before finish_task command-6f8ce3b4-90ac-4245-8e1b-bafecf37d36f; criteria 5 satisfied / 0 open; task done; cleanup complete"
