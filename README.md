@@ -101,7 +101,9 @@ pairs, run Dispatch in a separate shell:
 workerctl dispatch --watch --dispatcher-id dispatch-local
 ```
 
-Use `workerctl qa-plan dispatch-completion` for a bounded verification flow.
+Use `workerctl qa-plan dispatch-completion` for a bounded verification flow, or
+`workerctl qa-plan ralph-loop` for the repeated PR/CI/merge/context-clear
+dogfood loop.
 For manual QA, launch the dashboard with Dispatch enforcement so the page can
 show live proof:
 
@@ -533,7 +535,7 @@ tmux attach -t codex-live-test
 - `transcript-show <task> [--role R] [--include-content]` — Show stored
   transcript segment metadata. Segment text is redacted unless
   `--include-content` is passed.
-- `qa-plan <self-management|emergent-criteria|tmux-errors|dispatch-completion>` — Print a
+- `qa-plan <self-management|emergent-criteria|tmux-errors|dispatch-completion|ralph-loop>` — Print a
   repeatable manual QA checklist.
 - `import-compat` — Dry-run or import existing `.codex-workers/<worker>/`
   artifacts into SQLite.
@@ -557,6 +559,7 @@ scripts/workerctl qa-plan emergent-criteria
 scripts/workerctl qa-plan emergent-criteria --json
 scripts/workerctl qa-plan tmux-errors
 scripts/workerctl qa-plan dispatch-completion
+scripts/workerctl qa-plan ralph-loop
 ```
 
 The `emergent-criteria` scenario covers a real worker/manager pair, criteria
@@ -575,6 +578,12 @@ records and deduplicates a routed notification, the bound manager receives a
 mechanical wake-up, duplicate-route races emit suppressed telemetry without an
 extra send, and audit/replay/dashboard surfaces show readable, chronological
 dispatch evidence.
+
+The `ralph-loop` scenario covers the issue #152 managed delivery loop: the
+manager runs the same seed prompt through at least two iterations, requires
+criteria and epilogue evidence, gates PR creation, CI monitoring/fixing, green
+merge, handoff, and worker clear on explicit permissions, and proves the second
+iteration starts after audited clear in fresh-worker isolation.
 
 ### Terminal helpers
 

@@ -18,6 +18,8 @@ pass/fail evidence.
   evidence summarization and what-next review test.
 - [Nudge readiness report](nudge-readiness-report.md) - dedicated what-next
   nudge, worker-side assessment, and manager-side comparison test.
+- [Managed Ralph loop](ralph-loop.md) - repeated manager-led PR, CI, merge,
+  handoff, worker clear, and same-prompt replay test.
 - [Late attach support reporter](late-attach-support-reporter.md) - assign a
   manager after worker progress on a small CLI/reporting feature.
 

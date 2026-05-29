@@ -5011,6 +5011,71 @@ Deferred follow-up criteria:
         self.assertTrue(any("does not send another tmux notification" in observation for observation in payload["expected_observations"]))
         self.assertTrue(any("chronological order" in observation for observation in payload["expected_observations"]))
 
+    def test_qa_plan_ralph_loop_outputs_managed_delivery_loop(self):
+        proc = self.run_workerctl("qa-plan", "ralph-loop", "--json")
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        payload = json.loads(proc.stdout)
+        self.assertEqual(payload["scenario"], "ralph-loop")
+        self.assertTrue(any("max iterations" in step.lower() and "2" in step for step in payload["steps"]))
+        self.assertTrue(any("same seed prompt" in step.lower() for step in payload["steps"]))
+        self.assertTrue(any("--allow-pr" in step for step in payload["steps"]))
+        self.assertTrue(any("--allow-merge-green" in step for step in payload["steps"]))
+        self.assertTrue(any("--allow-worker-compact-clear" in step for step in payload["steps"]))
+        self.assertTrue(any("repo.open_pr" in step for step in payload["steps"]))
+        self.assertTrue(any("repo.merge_green_pr" in step for step in payload["steps"]))
+        self.assertTrue(any("worker_compact_clear" in step for step in payload["steps"]))
+        self.assertTrue(any("draft-pr" in step for step in payload["steps"]))
+        self.assertTrue(any("PR-readiness checkpoint" in step and "actual PR URL" in step for step in payload["steps"]))
+        self.assertTrue(any("CI" in step and "fail" in step.lower() for step in payload["steps"]))
+        self.assertTrue(any("merge" in step.lower() and "green" in step.lower() for step in payload["steps"]))
+        self.assertTrue(any("handoff" in step.lower() and "compact-worker" in step for step in payload["steps"]))
+        self.assertTrue(any("handoff" in step.lower() and "ralph-iter-1-clear" in step for step in payload["steps"]))
+        self.assertTrue(any("compact-worker" in step and "ralph-iter-1-clear" in step for step in payload["steps"]))
+        self.assertTrue(any("iteration 2" in step.lower() and "fresh-worker isolation" in step for step in payload["steps"]))
+        self.assertTrue(any("--require-criteria-audit --require-epilogue" in step for step in payload["steps"]))
+        self.assertTrue(any("export-task" in step and "telemetry" in step.lower() for step in payload["steps"]))
+        self.assertTrue(any("PR action" in observation for observation in payload["expected_observations"]))
+        self.assertTrue(any("CI failure path" in observation for observation in payload["expected_observations"]))
+        self.assertTrue(any("finish-task --require-criteria-audit --require-epilogue cannot succeed" in observation for observation in payload["expected_observations"]))
+        self.assertTrue(any("accepted criteria and configured epilogues" in observation for observation in payload["expected_observations"]))
+        self.assertTrue(any("PR URL is recorded separately" in observation for observation in payload["expected_observations"]))
+        self.assertTrue(any("Dispatcher telemetry captures" in observation for observation in payload["expected_observations"]))
+        self.assertTrue(any("Final evidence bundle" in observation for observation in payload["expected_observations"]))
+        self.assertFalse(any("telemetry searches" in step.lower() for step in payload["steps"]))
+
+    def test_qa_plan_ralph_loop_includes_correlation_and_receipt_template(self):
+        json_proc = self.run_workerctl("qa-plan", "ralph-loop", "--json")
+        text_proc = self.run_workerctl("qa-plan", "ralph-loop")
+
+        self.assertEqual(json_proc.returncode, 0, json_proc.stderr)
+        self.assertEqual(text_proc.returncode, 0, text_proc.stderr)
+        payload = json.loads(json_proc.stdout)
+        markers = payload["correlation_markers"]
+        self.assertTrue(any(marker["correlation_id"] == "ralph-iter-1-pr" for marker in markers))
+        self.assertTrue(any(marker["correlation_id"] == "ralph-iter-1-ci-fix" for marker in markers))
+        self.assertTrue(any(marker["correlation_id"] == "ralph-iter-1-clear" for marker in markers))
+        self.assertTrue(any(marker["correlation_id"] == "ralph-iter-2-replay" for marker in markers))
+        template = payload["evidence_template"]
+        for key in (
+            "iteration",
+            "seed_prompt_sha256",
+            "manager_cycle_ids",
+            "worker_completion_event_ids",
+            "manager_decision_ids",
+            "dispatch_correlation_ids",
+            "pr_url",
+            "ci",
+            "merge",
+            "handoff_id",
+            "clear_receipt",
+        ):
+            self.assertIn(key, template)
+        self.assertIn("Correlation markers:", text_proc.stdout)
+        self.assertIn("ralph-iter-1-pr", text_proc.stdout)
+        self.assertIn("Evidence template:", text_proc.stdout)
+        self.assertIn("seed_prompt_sha256", text_proc.stdout)
+
     def test_db_doctor_outputs_expected_structure(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "workerctl.db"

@@ -1528,6 +1528,103 @@ def command_qa_plan(args: argparse.Namespace) -> int:
                 "Finish or clean up only the disposable pair, then run workerctl reconcile --stale-cycles-seconds 1 and git status --short --branch.",
             ],
         },
+        "ralph-loop": {
+            "correlation_markers": [
+                {
+                    "correlation_id": "ralph-iter-1-pr",
+                    "purpose": "Link iteration 1 PR-readiness decision, PR action, separate PR URL evidence, and manager consumption.",
+                },
+                {
+                    "correlation_id": "ralph-iter-1-ci",
+                    "purpose": "Link iteration 1 CI monitor command, CI result, and manager CI decision.",
+                },
+                {
+                    "correlation_id": "ralph-iter-1-ci-fix",
+                    "purpose": "Link the forced or simulated CI failure, CI-fix nudge, worker fix receipt, and updated PR.",
+                },
+                {
+                    "correlation_id": "ralph-iter-1-merge",
+                    "purpose": "Link green-CI merge permission check, manager merge decision, and merge receipt.",
+                },
+                {
+                    "correlation_id": "ralph-iter-1-clear",
+                    "purpose": "Link handoff, compact-worker --clear request, and worker clear receipt.",
+                },
+                {
+                    "correlation_id": "ralph-iter-2-replay",
+                    "purpose": "Link the same seed prompt replay, fresh-worker isolation proof, and iteration 2 first completion.",
+                },
+            ],
+            "evidence_template": {
+                "iteration": 1,
+                "seed_prompt_sha256": "<sha256 of exact seed prompt>",
+                "manager_cycle_ids": [],
+                "worker_completion_event_ids": [],
+                "manager_decision_ids": {
+                    "pr_ready": None,
+                    "ci_fix": None,
+                    "merge_green": None,
+                    "continue_or_stop": None,
+                },
+                "dispatch_correlation_ids": [
+                    "ralph-iter-1-pr",
+                    "ralph-iter-1-ci",
+                    "ralph-iter-1-ci-fix",
+                    "ralph-iter-1-merge",
+                    "ralph-iter-1-clear",
+                ],
+                "pr_url": "<url>",
+                "ci": {
+                    "provider": "<github-actions|simulated>",
+                    "initial_result": "<green|failed|simulated_failed>",
+                    "fix_result": "<green|not_needed>",
+                },
+                "merge": {
+                    "permitted": False,
+                    "result": "<merged|not_merged>",
+                },
+                "handoff_id": None,
+                "clear_receipt": {
+                    "command_id": None,
+                    "correlation_id": "ralph-iter-1-clear",
+                },
+            },
+            "expected_observations": [
+                "the run records at least two managed iterations from the same seed prompt, with the second iteration starting after audited worker context clear in fresh-worker isolation",
+                "each iteration records manager cycles, worker completions, criteria state, PR action, CI state, and merge decision",
+                "PR creation is blocked until manager config permits repo.open_pr, the allowed run records a draft-pr readiness epilogue, and the PR URL is recorded separately in criteria, decision, handoff, or command evidence",
+                "merge is blocked until manager config permits repo.merge_green_pr, CI is green, and the manager records the merge decision",
+                "worker context clear is blocked until manager config permits worker_compact_clear and a worker handoff exists",
+                "Dispatcher telemetry captures routing or command attempts for PR creation, CI monitoring, CI fix routing, merge, handoff, and clear steps",
+                "CI failure path is exercised against a disposable repo or explicitly simulated in one iteration before the manager routes a CI-fix retry",
+                "finish-task --require-criteria-audit --require-epilogue cannot succeed before accepted criteria and configured epilogues are satisfied; PR, CI, merge, handoff, and clear proof must be represented as accepted criteria and evidence receipts before final finish",
+                "Final evidence bundle includes replay, audit, telemetry summary, PR URLs, CI result, merge result, and worker clear receipt",
+                "Dispatch remains a mechanical router/executor; the manager records readiness, merge, and continue/stop decisions",
+            ],
+            "steps": [
+                "Choose a disposable target repo, seed prompt, cleanup policy, CI provider expectation, and max iterations value. Max iterations must be at least 2; use max iterations 2 for the standard smoke.",
+                "Compute and preserve the exact seed prompt SHA-256, then reuse the listed correlation markers for manager decisions, epilogues, commands, handoffs, and evidence searches.",
+                "Start Dispatch for the run if it is not already active: workerctl dispatch --watch --dispatcher-id qa-ralph-loop.",
+                "Create iteration 1 with the same seed prompt that will later be replayed: workerctl pair --task qa-ralph-loop-iter-1 --worker-name qa-ralph-worker-1 --manager-name qa-ralph-manager --cwd <target-repo> --task-goal \"Managed Ralph loop iteration 1\" --task-summary \"PR/CI/merge/context-clear QA\" --task-prompt \"<same seed prompt>\".",
+                "Configure manager policy for iteration 1 with required epilogues but without permissions first; verify repo.open_pr, repo.merge_green_pr, and worker_compact_clear are denied by workerctl manager-permission before enabling them.",
+                "Enable the allowed run explicitly: workerctl manager-config qa-ralph-loop-iter-1 --allow-pr --allow-merge-green --allow-worker-compact-clear --epilogue draft-pr --epilogue record-handoff --tool verification.run_tests --tool context.fetch_prs.",
+                "Run workerctl cycle qa-ralph-loop-iter-1 until the worker reports completion, then ask what remains or what the next useful slice is before deciding whether the iteration is PR-worthy.",
+                "Require accepted criteria closure and verification evidence before PR work: workerctl finish-task qa-ralph-loop-iter-1 --require-criteria-audit --require-epilogue should fail while criteria or epilogue steps are incomplete.",
+                "Record the PR-readiness manager decision with payload ralph_loop.iteration=1, phase=pr, correlation_id=ralph-iter-1-pr, and seed_prompt_sha256 before asking for PR work.",
+                "Have the worker open or prepare the PR only after repo.open_pr is permitted; run workerctl epilogue qa-ralph-loop-iter-1 --step draft-pr --correlation-id ralph-iter-1-pr as the PR-readiness checkpoint, then record the actual PR URL in accepted criterion evidence, a manager decision payload, a handoff payload, or a command receipt.",
+                "Monitor CI for the PR and record the CI state. In one iteration, force or simulate a CI fail result, then route a CI-fix nudge to the worker and require an updated PR before continuing.",
+                "Record the CI-fix manager decision with payload ralph_loop.iteration=1, phase=ci_fix, correlation_id=ralph-iter-1-ci-fix when the failure path is exercised.",
+                "After CI is green, verify repo.merge_green_pr permission and have the manager record the green merge decision before merge; merge only the disposable PR and record the merge result as accepted criterion evidence, a manager decision payload, a handoff payload, or a command receipt.",
+                "Record an iteration handoff with workerctl handoff qa-ralph-loop-iter-1 --summary \"...\" --next-step \"Replay same seed prompt after clear\" --payload-json '{\"iteration\":1,\"pr\":\"<url>\",\"ci\":\"green\",\"merge\":\"merged\",\"clear_correlation_id\":\"ralph-iter-1-clear\"}'.",
+                "Use the audited clear path only after handoff and worker_compact_clear permission: workerctl compact-worker qa-ralph-loop-iter-1 --clear --reason \"Clear worker context between Ralph loop iterations; correlation_id=ralph-iter-1-clear\" --message \"correlation_id=ralph-iter-1-clear; clear worker context between Ralph loop iterations after saved handoff\".",
+                "Start iteration 2 with a fresh task/worker/manager after the audited clear receipt and the same seed prompt: workerctl pair --task qa-ralph-loop-iter-2 --worker-name qa-ralph-worker-2 --manager-name qa-ralph-manager-2 --cwd <target-repo> --task-goal \"Managed Ralph loop iteration 2\" --task-summary \"Replay after audited clear with fresh-worker isolation\" --task-prompt \"<same seed prompt>\".",
+                "Prove iteration 2 starts in fresh-worker isolation by capturing the initial worker pane/transcript and verifying it does not rely on stale local chat state from iteration 1; use the iteration 1 clear command receipt as the audited clear proof.",
+                "Repeat the manager-led delivery loop for iteration 2: completion judgment, what-remains probe, criteria closure, PR action, CI monitor/fix if needed, green merge decision, handoff, and audited clear or cleanup.",
+                "Run workerctl audit, workerctl replay, workerctl commands --task, and workerctl telemetry --task for both iterations; verify dispatcher telemetry includes PR, CI monitor/fix, merge, handoff, and clear transitions, and use audit/replay/commands output for marker linkage.",
+                "Export final evidence with workerctl export-task for both iteration tasks and preserve telemetry summary artifacts, PR URLs, CI result, merge result, worker clear receipt, fresh-worker isolation proof, replay, and audit output.",
+                "Stop after max iterations or when the manager records no useful remaining work; run workerctl reconcile --stale-cycles-seconds 1 and git status --short --branch in the manager repo and target repo.",
+            ],
+        },
     }
     if scenario not in qa_plans:
         raise WorkerError(f"Unsupported QA scenario: {scenario}")
@@ -1543,6 +1640,15 @@ def command_qa_plan(args: argparse.Namespace) -> int:
         print("Expected observations:")
         for observation in payload["expected_observations"]:
             print(f"- {observation}")
+        if payload.get("correlation_markers"):
+            print("")
+            print("Correlation markers:")
+            for marker in payload["correlation_markers"]:
+                print(f"- {marker['correlation_id']}: {marker['purpose']}")
+        if payload.get("evidence_template"):
+            print("")
+            print("Evidence template:")
+            print(json.dumps(payload["evidence_template"], indent=2, sort_keys=True))
     return 0
 
 
