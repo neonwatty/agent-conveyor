@@ -1632,7 +1632,7 @@ def command_qa_plan(args: argparse.Namespace) -> int:
                 "After CI is green, verify repo.merge_green_pr permission and have the manager record the green merge decision before merge; merge only the disposable PR and record the merge result as accepted criterion evidence, a manager decision payload, a handoff payload, or a command receipt.",
                 "Record an iteration handoff with workerctl handoff qa-ralph-loop-iter-1 --summary \"...\" --next-step \"Replay same seed prompt after clear\" --payload-json '{\"iteration\":1,\"pr\":\"<url>\",\"ci\":\"green\",\"merge\":\"merged\",\"clear_correlation_id\":\"ralph-iter-1-clear\"}'.",
                 "Use the audited clear path only after handoff and worker_compact_clear permission: workerctl compact-worker qa-ralph-loop-iter-1 --clear --reason \"Clear worker context between Ralph loop iterations; correlation_id=ralph-iter-1-clear\" --message \"correlation_id=ralph-iter-1-clear; clear worker context between Ralph loop iterations after saved handoff\".",
-                "Start iteration 2 with a fresh task/worker/manager after the audited clear receipt and the same seed prompt; for trusted disposable repos include --accept-trust again: workerctl pair --task qa-ralph-loop-iter-2 --worker-name qa-ralph-worker-2 --manager-name qa-ralph-manager-2 --cwd <target-repo> --task-goal \"Managed Ralph loop iteration 2\" --task-summary \"Replay after audited clear with fresh-worker isolation\" --task-prompt \"<same seed prompt>\" --accept-trust.",
+                "Start iteration 2 with a fresh task/worker/manager after the audited clear receipt and the same seed prompt, but wrap the replay with an inspect first guard: if the iteration 1 work is already merged, the worker must report the already merged state and avoid edits, commits, or PR work unless something is actually missing. For trusted disposable repos include --accept-trust again: workerctl pair --task qa-ralph-loop-iter-2 --worker-name qa-ralph-worker-2 --manager-name qa-ralph-manager-2 --cwd <target-repo> --task-goal \"Managed Ralph loop iteration 2\" --task-summary \"Replay after audited clear with fresh-worker isolation\" --task-prompt \"<same seed prompt plus inspect-first already-merged guard>\" --accept-trust.",
                 "Prove iteration 2 starts in fresh-worker isolation by capturing the initial worker pane/transcript and verifying it does not rely on stale local chat state from iteration 1; use the iteration 1 clear command receipt as the audited clear proof.",
                 "Repeat the manager-led delivery loop for iteration 2: completion judgment, what-remains probe, criteria closure, PR action, CI monitor/fix if needed, green merge decision, handoff, and audited clear or cleanup.",
                 "Run workerctl audit, workerctl replay, workerctl commands --task, and workerctl telemetry --task for both iterations; verify dispatcher telemetry includes PR, CI monitor/fix, merge, handoff, and clear transitions, and use audit/replay/commands output for marker linkage.",
@@ -7324,6 +7324,15 @@ def _discover_spawned_codex_session(
     )
 
 
+def _codex_tmux_shell_command(codex_args: list[str]) -> str:
+    codex_cmd = " ".join(shlex.quote(a) for a in codex_args)
+    npm_env_cleanup = (
+        "for name in $(env | awk -F= '/^(npm|NPM)_/ {print $1}'); "
+        "do unset \"$name\"; done; unset PNPM_SCRIPT_SRC_DIR"
+    )
+    return f"{npm_env_cleanup}; exec {codex_cmd}"
+
+
 def _spawn_codex_and_register(
     *,
     name: str,
@@ -7387,7 +7396,7 @@ def _spawn_codex_and_register(
     prompt = initial_prompt if initial_prompt is not None else task
     if prompt:
         codex_args.append(prompt)
-    codex_cmd = " ".join(shlex.quote(a) for a in codex_args)
+    codex_cmd = _codex_tmux_shell_command(codex_args)
 
     # Spawn tmux + codex. Discovery must ignore older rollout files briefly held
     # by a newly-started Codex process before it opens the fresh session file.

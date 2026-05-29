@@ -5133,6 +5133,7 @@ Deferred follow-up criteria:
         self.assertTrue(any("handoff" in step.lower() and "ralph-iter-1-clear" in step for step in payload["steps"]))
         self.assertTrue(any("compact-worker" in step and "ralph-iter-1-clear" in step for step in payload["steps"]))
         self.assertTrue(any("iteration 2" in step.lower() and "fresh-worker isolation" in step for step in payload["steps"]))
+        self.assertTrue(any("iteration 2" in step.lower() and "inspect first" in step.lower() and "already merged" in step.lower() for step in payload["steps"]))
         self.assertTrue(any("--require-criteria-audit --require-epilogue" in step for step in payload["steps"]))
         self.assertTrue(any("export-task" in step and "telemetry" in step.lower() for step in payload["steps"]))
         self.assertTrue(any("PR action" in observation for observation in payload["expected_observations"]))
@@ -13601,7 +13602,11 @@ class StartWorkerTests(unittest.TestCase):
                     tmux_cmds = [c for c in spawned if len(c) > 1 and c[1] == "new-session"]
                     self.assertEqual(len(tmux_cmds), 1)
                     self.assertIn("codex-auto-foo", tmux_cmds[0])
-                    self.assertIn("/opt/test/bin/codex", tmux_cmds[0][-1])
+                    codex_cmd = tmux_cmds[0][-1]
+                    self.assertIn("/opt/test/bin/codex", codex_cmd)
+                    self.assertIn("unset \"$name\"", codex_cmd)
+                    self.assertIn("PNPM_SCRIPT_SRC_DIR", codex_cmd)
+                    self.assertIn("exec /opt/test/bin/codex", codex_cmd)
 
                     # Confirm a session was registered.
                     conn = worker_db.connect(state_dir / "workerctl.db")
