@@ -1,0 +1,13 @@
+{
+  "consumed": null,
+  "items": [],
+  "session": {
+    "id": "session-d882f0cc-5ebd-492e-ae9a-f6eed39a039b",
+    "name": "live-app-worker-20260530",
+    "role": "worker"
+  },
+  "task": {
+    "id": "task-6a1c6503-ba05-47a5-90ef-9ea0b5a2c5c7",
+    "name": "live-codex-app-inbox-20260530"
+  }
+}

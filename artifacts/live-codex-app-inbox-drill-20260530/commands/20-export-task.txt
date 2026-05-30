@@ -1,0 +1,5 @@
+{
+  "archive": null,
+  "export_dir": "/Users/neonwatty/Desktop/codex-terminal-manager/artifacts/live-codex-app-inbox-drill-20260530/export",
+  "task": "live-codex-app-inbox-20260530"
+}

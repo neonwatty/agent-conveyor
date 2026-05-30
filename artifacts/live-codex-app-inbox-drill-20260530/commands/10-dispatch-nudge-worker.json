@@ -1,0 +1,24 @@
+{
+  "dispatcher_id": "live-app-drill-20260530",
+  "dry_run": false,
+  "iterations": 1,
+  "processed": [
+    {
+      "attempt_id": 2,
+      "command_id": "command-27af071f-e9bf-4eba-b616-a95190c030cc",
+      "command_type": "nudge_worker",
+      "correlation_id": "live-app-manager-to-worker-20260530",
+      "delivery_mode": "pull_required",
+      "dispatcher_id": "live-app-drill-20260530",
+      "dry_run": false,
+      "notification_id": 45,
+      "permission_check": null,
+      "side_effect_completed": false,
+      "side_effect_started": false,
+      "state": "pull_required",
+      "target_session": "live-app-worker-20260530"
+    }
+  ],
+  "processed_count": 1,
+  "watch": true
+}

@@ -1,0 +1,12 @@
+Task: live-codex-app-inbox-20260530
+State: candidate
+Mode: compact
+
+12:43:04  workerctl        nudge_worker succeeded
+12:43:04  dispatch         nudge_worker -> succeeded -> 1 attempt(s) -> 1 notification(s)
+12:43:14  dispatch         dispatch attempt succeeded: command-27af071f-e9bf-4eba-b616-a95190c030cc
+12:43:14  dispatch         dispatch notification nudge_worker: delivered via pull_required
+12:52:19  dispatch         worker_task_complete -> delivered -> source event #6448 -> 1 notification(s)
+12:52:19  dispatch         worker_task_complete -> delivered -> source event #6462 -> 1 notification(s)
+12:52:19  dispatch         dispatch notification worker_task_complete: delivered via pull_required
+12:52:19  dispatch         dispatch notification worker_task_complete: delivered via pull_required

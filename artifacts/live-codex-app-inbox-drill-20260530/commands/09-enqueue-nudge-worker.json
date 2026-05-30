@@ -1,0 +1,7 @@
+{
+  "command_id": "command-27af071f-e9bf-4eba-b616-a95190c030cc",
+  "command_type": "nudge_worker",
+  "correlation_id": "live-app-manager-to-worker-20260530",
+  "required_permission": null,
+  "task": "live-codex-app-inbox-20260530"
+}

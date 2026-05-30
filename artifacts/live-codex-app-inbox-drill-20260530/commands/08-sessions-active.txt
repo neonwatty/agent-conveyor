@@ -1,0 +1,34 @@
+[
+  {
+    "codex_session_id": "019e78d3-d0c5-7423-b885-55e8047473e6",
+    "codex_session_path": "/Users/neonwatty/.codex/sessions/2026/05/30/rollout-2026-05-30T05-20-08-019e78d3-d0c5-7423-b885-55e8047473e6.jsonl",
+    "cwd": "/Users/neonwatty/Desktop/codex-terminal-manager",
+    "id": "session-d882f0cc-5ebd-492e-ae9a-f6eed39a039b",
+    "identity_token": "[REDACTED]",
+    "last_heartbeat_at": "2026-05-30T12:32:01Z",
+    "last_ingest_offset": null,
+    "name": "live-app-worker-20260530",
+    "pid": 61478,
+    "registered_at": "2026-05-30T12:32:01Z",
+    "role": "worker",
+    "state": "active",
+    "tmux_pane_id": null,
+    "tmux_session": null
+  },
+  {
+    "codex_session_id": "019e78d3-fc6d-7371-b57c-fcae94170975",
+    "codex_session_path": "/Users/neonwatty/.codex/sessions/2026/05/30/rollout-2026-05-30T05-20-19-019e78d3-fc6d-7371-b57c-fcae94170975.jsonl",
+    "cwd": "/Users/neonwatty/Desktop/codex-terminal-manager",
+    "id": "session-848f6263-d101-4db3-b33a-e4c3cf3a226a",
+    "identity_token": "[REDACTED]",
+    "last_heartbeat_at": "2026-05-30T12:32:14Z",
+    "last_ingest_offset": null,
+    "name": "live-app-manager-20260530",
+    "pid": 61478,
+    "registered_at": "2026-05-30T12:32:14Z",
+    "role": "manager",
+    "state": "active",
+    "tmux_pane_id": null,
+    "tmux_session": null
+  }
+]

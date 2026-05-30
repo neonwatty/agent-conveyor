@@ -1,0 +1,19 @@
+{
+  "budget": null,
+  "created_at": "2026-05-30T12:32:24Z",
+  "goal": "Prove real Codex app manager and worker sessions can consume Dispatch inbox signals without tmux.",
+  "id": "task-6a1c6503-ba05-47a5-90ef-9ea0b5a2c5c7",
+  "integrity": {
+    "issues": [],
+    "ok": true
+  },
+  "manager": null,
+  "manager_config": null,
+  "name": "live-codex-app-inbox-20260530",
+  "state": "candidate",
+  "summary": "Live Codex app manager/worker Dispatch inbox drill.",
+  "updated_at": "2026-05-30T12:32:24Z",
+  "worker": null,
+  "worker_handoff": null,
+  "worker_status": null
+}

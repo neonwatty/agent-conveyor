@@ -1,0 +1,6 @@
+{
+  "binding_id": "binding-ca7f51d9-18a9-4afe-889d-a66861caa6c3",
+  "manager": "live-app-manager-20260530",
+  "task": "live-codex-app-inbox-20260530",
+  "worker": "live-app-worker-20260530"
+}
