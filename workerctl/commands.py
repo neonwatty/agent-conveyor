@@ -8465,11 +8465,33 @@ def _print_session_inbox_result(args: argparse.Namespace, result: dict[str, Any]
     if getattr(args, "json", False):
         print(json.dumps(result, indent=2, sort_keys=True, default=str))
         return
+    session = result.get("session") or {}
+    task = result.get("task") or {}
+    header = f"inbox for {session.get('name', 'unknown session')}"
+    if task.get("name"):
+        header += f" on {task['name']}"
+    print(header)
     consumed = result.get("consumed")
     if consumed is not None:
-        print(f"consumed #{consumed['id']} {consumed['signal_type']} ({consumed['correlation_id']})")
+        print(
+            "consumed "
+            f"#{consumed['id']} {consumed['signal_type']} {consumed['delivery_mode']} "
+            f"from {consumed.get('source_session_name') or consumed.get('source_session_id')} "
+            f"to {consumed.get('target_session_name') or consumed.get('target_session_id')} "
+            f"at {consumed.get('consumed_at')} ({consumed['correlation_id']})"
+        )
+    if not result["items"]:
+        print("pending: none")
+        return
+    print(f"pending: {len(result['items'])}")
     for item in result["items"]:
-        print(f"#{item['id']} {item['signal_type']} {item['delivery_mode']} {item['correlation_id']}")
+        print(
+            f"#{item['id']} {item['signal_type']} {item['delivery_mode']} "
+            f"from {item.get('source_session_name') or item.get('source_session_id')} "
+            f"to {item.get('target_session_name') or item.get('target_session_id')} "
+            f"delivered {item.get('delivered_at') or 'not-yet'} "
+            f"({item['correlation_id']})"
+        )
 
 
 def command_session_inbox(args: argparse.Namespace) -> int:

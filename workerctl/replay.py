@@ -203,20 +203,33 @@ def replay_entries(audit: dict[str, Any], *, role: str = "all", mode: str = "tim
     for notification in audit.get("routed_notifications", []):
         if role != "all" and role != "manager":
             continue
+        details = {
+            "command_id": notification.get("command_id"),
+            "consumed_at": notification.get("consumed_at"),
+            "consumed_by_session_id": notification.get("consumed_by_session_id"),
+            "consumed_by_session_name": notification.get("consumed_by_session_name"),
+            "correlation_id": notification["correlation_id"],
+            "delivered_at": notification.get("delivered_at"),
+            "delivery_mode": notification.get("delivery_mode"),
+            "notification_id": notification["id"],
+            "signal_type": notification["signal_type"],
+            "source_session_id": notification.get("source_session_id"),
+            "source_session_name": notification.get("source_session_name"),
+            "state": notification["state"],
+            "target_session_id": notification.get("target_session_id"),
+            "target_session_name": notification.get("target_session_name"),
+        }
         entries.append(
             {
                 "actor": "dispatch",
-                "details": {
-                    "command_id": notification.get("command_id"),
-                    "correlation_id": notification["correlation_id"],
-                    "notification_id": notification["id"],
-                    "signal_type": notification["signal_type"],
-                    "state": notification["state"],
-                },
+                "details": details,
                 "kind": "routed_notification",
                 "source": "routed_notifications",
                 "source_id": notification["id"],
-                "summary": f"dispatch notification {notification['signal_type']}: {notification['state']}",
+                "summary": (
+                    f"dispatch notification {notification['signal_type']}: "
+                    f"{notification['state']} via {notification.get('delivery_mode') or 'unknown'}"
+                ),
                 "timestamp": notification.get("delivered_at") or notification["created_at"],
             }
         )

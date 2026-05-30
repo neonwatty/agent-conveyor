@@ -8,6 +8,7 @@ import {
 } from "./workerctl.ts";
 import {
   acceptanceCriteriaSummary,
+  dispatchInboxSummary,
   dispatchHealth,
   dispatchChainEntries,
   dispatchHeartbeatTelemetryOptions,
@@ -495,6 +496,135 @@ test("orders mixed dispatch chains by timestamp before dashboard display", () =>
 
   assert.equal(chains[0].command_id, "cmd-new");
   assert.equal(chains[1].summary, "worker_task_complete notification #31");
+});
+
+test("dispatch chains include inbox delivery and consumption evidence", () => {
+  const chains = dispatchChainEntries({
+    command_attempts: [
+      {
+        command_id: "cmd-1",
+        dispatcher_id: "dispatch-local",
+        id: 3,
+        side_effect_completed: false,
+        side_effect_started: false,
+        started_at: "2026-05-23T10:00:01Z",
+        state: "succeeded",
+      },
+    ],
+    commands: [
+      {
+        correlation_id: "corr-1",
+        created_at: "2026-05-23T10:00:00Z",
+        id: "cmd-1",
+        state: "succeeded",
+        type: "nudge_worker",
+      },
+    ],
+    correlation_chains: [
+      {
+        attempt_ids: [3],
+        command_id: "cmd-1",
+        command_state: "succeeded",
+        command_type: "nudge_worker",
+        correlation_id: "corr-1",
+        created_at: "2026-05-23T10:00:00Z",
+        manager_cycle_id: null,
+        manager_decision_id: null,
+        routed_notification_ids: [41],
+      },
+    ],
+    routed_notifications: [
+      {
+        command_id: "cmd-1",
+        consumed_at: "2026-05-23T10:02:00Z",
+        consumed_by_session_id: "worker-session-id",
+        consumed_by_session_name: "worker-session",
+        correlation_id: "corr-1",
+        delivered_at: "2026-05-23T10:01:00Z",
+        delivery_mode: "pull_required",
+        id: 41,
+        payload: { message: "Check manager instruction." },
+        source_session_id: "manager-session-id",
+        source_session_name: "manager-session",
+        state: "delivered",
+        signal_type: "nudge_worker",
+        target_session_id: "worker-session-id",
+        target_session_name: "worker-session",
+      },
+    ],
+  });
+
+  assert.deepEqual(chains[0].notifications, [
+    {
+      command_id: "cmd-1",
+      consumed_at: "2026-05-23T10:02:00Z",
+      consumed_by_session_id: "worker-session-id",
+      consumed_by_session_name: "worker-session",
+      correlation_id: "corr-1",
+      delivered_at: "2026-05-23T10:01:00Z",
+      delivery_mode: "pull_required",
+      id: 41,
+      signal_type: "nudge_worker",
+      source_session_id: "manager-session-id",
+      source_session_name: "manager-session",
+      state: "delivered",
+      target_session_id: "worker-session-id",
+      target_session_name: "worker-session",
+    },
+  ]);
+  assert.equal(
+    chains[0].conversation.find((item) => item.kind === "routed_notification")?.label,
+    "Routed notification #41 delivered via pull_required to worker-session",
+  );
+});
+
+test("summarizes dispatch inbox backlog and consumed evidence for dashboard display", () => {
+  assert.deepEqual(dispatchInboxSummary({
+    routed_notifications: [
+      {
+        consumed_at: null,
+        delivered_at: "2026-05-23T10:01:00Z",
+        delivery_mode: "pull_required",
+        id: 1,
+        signal_type: "nudge_worker",
+        state: "delivered",
+        target_session_id: "worker-id",
+        target_session_name: "worker-session",
+      },
+      {
+        consumed_at: "2026-05-23T10:03:00Z",
+        consumed_by_session_id: "manager-id",
+        consumed_by_session_name: "manager-session",
+        delivered_at: "2026-05-23T10:02:00Z",
+        delivery_mode: "pull_required",
+        id: 2,
+        signal_type: "worker_task_complete",
+        state: "delivered",
+        target_session_id: "manager-id",
+        target_session_name: "manager-session",
+      },
+    ],
+  }), {
+    consumed_count: 1,
+    pending_count: 1,
+    pull_required_pending_count: 1,
+    sessions: [
+      {
+        consumed_count: 0,
+        latest_consumed_at: undefined,
+        pending_count: 1,
+        session_id: "worker-id",
+        session_name: "worker-session",
+      },
+      {
+        consumed_count: 1,
+        latest_consumed_at: "2026-05-23T10:03:00Z",
+        pending_count: 0,
+        session_id: "manager-id",
+        session_name: "manager-session",
+      },
+    ],
+  });
 });
 
 test("counts suppressed dispatch signals in health", () => {

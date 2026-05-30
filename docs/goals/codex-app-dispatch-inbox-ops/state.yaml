@@ -1,0 +1,308 @@
+# GoalBuddy v2 state.yaml
+# Board truth lives here. goal.md is the editable charter; notes/ holds long receipts only.
+
+version: 2
+
+goal:
+  title: "Codex App Dispatch Inbox Ops"
+  slug: "codex-app-dispatch-inbox-ops"
+  kind: specific
+  tranche: "Make no-tmux Codex app manager/worker dispatcher inbox workflows ergonomic, observable, and QA-proven."
+  status: active
+  oracle:
+    signal: "A disposable no-tmux manager/worker drill plus automated tests prove both dispatcher signal directions work through inbox polling and are visible in operator surfaces."
+    cadence: "after each Worker package and at final audit"
+    final_proof: "Final Judge/PM receipt cites passing full tests, diff check, PR review toolkit, docs/operator surfaces, and a live QA transcript showing manager-to-worker and worker-to-manager inbox consumption with delivery/consumption evidence."
+  intake:
+    original_request: "Use GoalBuddy to plan the next dispatcher inbox slice with measurable acceptance criteria."
+    interpreted_outcome: "The newly merged session inbox becomes a practical, observable workflow for Codex app-based managers and workers before broader QA rollout."
+    input_shape: specific
+    audience: "workerctl operators, Codex app manager sessions, Codex app worker sessions, maintainers preparing QA rollout"
+    authority: approved
+    proof_type: "test + demo + review"
+    completion_proof: "A merged PR with tests and a disposable live QA receipt proves no-tmux app managers/workers exchange dispatcher signals by polling and operators can inspect route, delivery, backlog, heartbeat, and consumption evidence."
+    likely_misfire: "Stopping after docs or backend commands without proving a realistic app-session workflow or surfacing stuck/pending inbox state to operators."
+    blind_spots_considered:
+      - "Polling guidance may be too raw unless wrapped or templated."
+      - "Backlog and consumed evidence must be easy to inspect during a live QA run."
+      - "Dashboard/replay must show dispatch routing evidence without turning Dispatch into a decision-maker."
+      - "Both manager-to-worker and worker-to-manager routes must be exercised."
+      - "Bounded/testable behavior is required for any loop-like helper."
+    existing_plan_facts:
+      - "PR #163 merged the universal session inbox over routed_notifications."
+      - "No-tmux targets use delivery_mode=pull_required."
+      - "Existing commands include session-inbox, manager-inbox, and worker-inbox."
+      - "Next useful slice is operational trust: polling ergonomics, observability, and live QA."
+
+rules:
+  pm_owns_state: true
+  one_active_task: true
+  max_write_workers: 1
+  no_implementation_without_worker_or_pm_task: true
+  no_completion_without_judge_or_pm_audit: true
+  planning_is_not_completion: true
+  queued_required_worker_blocks_completion: true
+  continuous_until_full_outcome: true
+  missing_input_or_credentials_do_not_stop_goal: true
+  preserve_and_validate_existing_plan: true
+  intake_misfire_must_be_audited: true
+  goal_pressure_requires_oracle: true
+  no_completion_on_weak_proof: true
+  slice_policy:
+    max_consecutive_tiny_tasks: 2
+    prefer_vertical_slices: true
+    judge_picks_largest_safe_slice: true
+    worker_completes_whole_slice: true
+
+agents:
+  scout: installed
+  worker: installed
+  judge: installed
+
+visual_board:
+  selected: local
+  local:
+    status: live
+    url: "http://goalbuddy.localhost:41737/codex-app-dispatch-inbox-ops/"
+    command: "npx goalbuddy board /Users/neonwatty/Desktop/codex-terminal-manager/docs/goals/codex-app-dispatch-inbox-ops"
+
+active_task: T006
+
+tasks:
+  - id: T001
+    type: scout
+    assignee: Scout
+    status: done
+    reasoning_hint: low
+    objective: "Map the current post-PR #163 polling, replay, dashboard, docs, and QA surfaces for no-tmux Codex app dispatcher inbox workflows."
+    inputs:
+      - "PR #163 merged state on main"
+      - "workerctl session-inbox, manager-inbox, worker-inbox behavior"
+      - "dashboard/replay/operator-facing dispatch evidence"
+      - "README and manager/worker runtime guidance"
+      - "existing tests around routed_notifications, command_attempts, and dispatch heartbeat"
+    constraints:
+      - "Read-only."
+      - "Do not implement."
+      - "Do not assume dashboard support exists; cite actual surfaces."
+      - "Identify exactly what an operator cannot currently see or do during a no-tmux QA drill."
+    expected_output:
+      - "Current app-session polling workflow facts."
+      - "Current observability/replay/dashboard evidence map."
+      - "Operator gaps ranked by rollout risk."
+      - "Recommended red tests or live QA checks."
+      - "Candidate smallest coherent Worker slice."
+    receipt: |
+      Scout result: done.
+      Summary: Post-PR #163 has real universal inbox plumbing and tests for pull-required manager/worker delivery, CLI consumption, replay/audit records, and dashboard dispatch chains/heartbeat. The operator gap is visibility and ergonomics: no dashboard inbox/backlog/consumption panel, no live no-tmux QA transcript, and CLI text output is too sparse unless JSON is used.
+      Evidence:
+      - `workerctl/db.py` session inbox query already exposes delivery mode, source/target sessions, consumption owner/timestamp, payload, state, command id, and task name.
+      - `workerctl/cli.py` registers `session-inbox`, `manager-inbox`, and `worker-inbox` with `--consume-next`, `--limit`, `--json`, and `--path`.
+      - README and `workerctl/state.py` document no-tmux polling with `manager-inbox`/`worker-inbox`.
+      - Tests cover pull-required manager completion, no-tmux worker nudge, CLI consume JSON, and alias resolution.
+      - `workerctl/replay.py` currently renders routed notification id/type/state/correlation/command but omits delivery mode and consumption evidence.
+      - Dashboard surfaces dispatch health, heartbeat, queue/failure/stale/risk counts, and correlation chains, but no inbox/backlog/consumption UI.
+      Ranked rollout gaps:
+      - Rank 1: no dashboard per-session pending inbox backlog or consumed-by/consumed-at proof.
+      - Rank 2: replay omits delivery mode, source/target sessions, consumption owner, and consumed timestamp.
+      - Rank 3: CLI text mode is too sparse for QA without JSON.
+      - Rank 4: no bounded polling helper or operator checklist proving both directions end to end.
+      Candidate Worker slice: add operator-facing inbox observability without changing routing: extend replay/audit/dashboard/CLI surfaces for delivery mode, source/target, pending vs consumed, consumed owner/timestamp, and add focused tests plus README/manual QA steps.
+
+  - id: T002
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Decide the smallest coherent implementation slice for polling ergonomics, observability, and QA proof."
+    inputs:
+      - "T001 Scout receipt"
+      - "docs/goals/codex-app-dispatch-inbox-ops/goal.md"
+    constraints:
+      - "Read-only."
+      - "Prefer a vertical slice that proves one full no-tmux workflow end to end."
+      - "Decide whether a polling helper is necessary now or docs/commands are sufficient."
+      - "Keep Dispatch mechanical; reject any task that gives Dispatch decision authority."
+    expected_output:
+      - "Approved implementation plan or scoped rejection."
+      - "Exact Worker objective for the first write slice."
+      - "Allowed files, tests, manual QA command sequence, and stop_if conditions."
+      - "Definition of done for observability and live QA evidence."
+    receipt: |
+      Judge decision: approved.
+      Rationale: Approve one vertical Worker slice that makes existing polling commands and operator surfaces prove pending/consumed no-tmux inbox flow, without adding a new polling daemon/helper. A bounded helper is not necessary yet because `manager-inbox`, `worker-inbox`, and `session-inbox` already provide the mechanical polling action. The gap is sparse text, replay/dashboard evidence, docs, and QA proof. Dispatch must remain a mechanical router only.
+      Approved T003 objective: Implement operator-facing no-tmux inbox polling observability: enrich existing inbox CLI text and replay/dashboard overview evidence for pending and consumed routed notifications, document bounded polling commands, and add tests proving manager-to-worker and worker-to-manager pull_required visibility.
+      Definition of done:
+      - Pending backlog per manager and worker is visible before consumption.
+      - `consumed_by_session_id` and `consumed_at` are visible after consumption.
+      - `delivery_mode`, source session, target session, delivered timestamp, command id/attempt linkage, and dispatcher heartbeat are present in replay or dashboard evidence.
+      - Live QA after T003 includes exact commands, timestamps, before/after inbox outputs for both directions, replay/dashboard evidence references, and notes any failed or retried command attempts.
+      Manual QA sequence for T004:
+      - Create disposable no-tmux task with manager and worker sessions registered without tmux.
+      - Run dispatch watch/ensure-dispatch for the disposable task.
+      - Trigger manager-to-worker nudge, then consume with `workerctl worker-inbox <task> --consume-next --json`.
+      - Trigger worker-to-manager completion/notify, then consume with `workerctl manager-inbox <task> --consume-next --json`.
+      - Run `workerctl replay <task> --json` and dashboard overview/export evidence.
+      - Confirm heartbeat and command attempt linkage.
+
+  - id: T003
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "Implement operator-facing no-tmux inbox polling observability: enrich existing inbox CLI text and replay/dashboard overview evidence for pending and consumed routed notifications, document bounded polling commands, and add tests proving manager-to-worker and worker-to-manager pull_required visibility."
+    inputs:
+      - "T002 Judge receipt"
+    constraints:
+      - "Use TDD for behavior changes."
+      - "Keep changes scoped to the approved files and surfaces."
+      - "Do not add indefinite background processes without explicit operator command and bounded tests."
+      - "Preserve existing tmux push and pull_required semantics."
+    allowed_files:
+      - "workerctl/db.py"
+      - "workerctl/commands.py"
+      - "workerctl/cli.py"
+      - "workerctl/replay.py"
+      - "workerctl/dashboard.py"
+      - "dashboard/**"
+      - "tests/test_workerctl.py"
+      - "README.md"
+    verify:
+      - "python3 -m unittest tests.test_workerctl -v"
+      - "git diff --check"
+    stop_if:
+      - "The implementation requires changing Dispatch into a decision-maker."
+      - "A new persistent/background polling loop is needed."
+      - "Replay/dashboard data cannot expose required fields from existing routed_notifications, heartbeat, and command tables."
+      - "Automated tests fail twice for unrelated pre-existing reasons."
+      - "Changes require files outside allowed_files."
+    expected_output:
+      - "Manager and worker polling workflows are easier to run or clearer to follow."
+      - "Operator-facing output shows pending and consumed inbox state with delivery evidence."
+      - "Tests cover the new behavior."
+    receipt: |
+      Worker result: done.
+      Summary: Implemented operator-facing inbox observability without changing dispatch routing. `task_audit` now enriches routed notifications with source/target/consumed-by session names and roles. Replay routed notification entries now include delivery mode, source/target session ids/names, delivered timestamp, consumed-by session, and consumed timestamp. Dashboard dispatch chains now carry notification delivery/consumption summaries, inbox pending/consumed/pull-required counts, and UI rows for pending vs consumed inbox state. CLI text output now shows inbox header, pending count, source/target sessions, delivery mode, delivered timestamp, and consumed evidence. README now documents the richer polling and dashboard QA evidence.
+      Files changed:
+      - `workerctl/db.py`
+      - `workerctl/replay.py`
+      - `workerctl/commands.py`
+      - `dashboard/server/index.ts`
+      - `dashboard/server/workerctl.test.ts`
+      - `dashboard/client/main.tsx`
+      - `dashboard/client/styles.css`
+      - `tests/test_workerctl.py`
+      - `README.md`
+      Verification:
+      - Red tests first: replay/audit test failed on missing `source_session_name`; dashboard test failed on missing `dispatchInboxSummary`.
+      - `python3 -m unittest tests.test_workerctl.DispatchTests.test_task_audit_and_replay_expose_inbox_delivery_and_consumption_evidence tests.test_workerctl.CliTests.test_session_inbox_cli_consumes_next_item -v` passed.
+      - `npm test` passed, 38 tests.
+      - `npm run build` passed.
+      - `python3 -m unittest tests.test_workerctl -v` passed, 498 tests.
+      - `git diff --check` passed.
+
+  - id: T004
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "Run a disposable no-tmux Codex app manager/worker QA drill and record a concise receipt."
+    inputs:
+      - "T003 receipt"
+    constraints:
+      - "Use disposable task/session names."
+      - "Do not mutate unrelated live task state."
+      - "Exercise both manager-to-worker and worker-to-manager signal paths."
+      - "Capture commands, outputs, timestamps, and any dashboard/replay links needed for audit."
+    allowed_files:
+      - "docs/goals/codex-app-dispatch-inbox-ops/notes/**"
+      - "docs/goals/codex-app-dispatch-inbox-ops/state.yaml"
+      - "README.md"
+      - "tests/test_workerctl.py"
+    verify:
+      - "python3 -m unittest tests.test_workerctl -v"
+      - "git diff --check"
+    stop_if:
+      - "A required signal direction cannot be proven."
+      - "The drill reveals a product bug that needs a new Worker fix before QA can pass."
+    expected_output:
+      - "QA note showing manager-to-worker inbox polling."
+      - "QA note showing worker-to-manager inbox polling."
+      - "Evidence that operator surfaces show route, delivery mode, backlog/consumption, heartbeat, and command attempt linkage."
+    receipt: |
+      Worker result: done.
+      QA note: `docs/goals/codex-app-dispatch-inbox-ops/notes/T004-no-tmux-qa.md`.
+      Summary: Ran a disposable no-tmux drill in a throwaway `WORKERCTL_STATE_ROOT` with task `qa-inbox-ops-20260530045042`, worker `qa-inbox-ops-20260530045042-worker`, manager `qa-inbox-ops-20260530045042-manager`, and dispatcher id `qa-inbox-ops`. Both sessions were registered without tmux.
+      Manager-to-worker proof:
+      - `enqueue-nudge-worker` created command `command-a214aa2c-e7d5-4163-8ab8-0e690a2213c2`.
+      - `dispatch --watch --watch-iterations 1 --type nudge_worker` returned `state='pull_required'`, `delivery_mode='pull_required'`, `notification_id=1`, `side_effect_started=false`, and `side_effect_completed=false`.
+      - `worker-inbox --json` showed notification 1 pending for the worker.
+      - `worker-inbox --consume-next --json` consumed notification 1 with worker `consumed_by_session_id` and `consumed_at=2026-05-30T11:50:43Z`.
+      Worker-to-manager proof:
+      - Appended a synthetic worker `task_complete` event, ran `ingest`, and then `dispatch --watch --watch-iterations 1 --type worker_task_complete`.
+      - Dispatch returned `state='pull_required'`, `delivery_mode='pull_required'`, `notification_id=2`, `signal_type='worker_task_complete'`, and `source_event_id=2`.
+      - `manager-inbox --json` showed notification 2 pending for the manager with the worker receipt.
+      - `manager-inbox --consume-next --json` consumed notification 2 with manager `consumed_by_session_id` and `consumed_at=2026-05-30T11:50:43Z`.
+      Replay/dashboard proof:
+      - `replay --json` included delivery mode, source/target sessions, delivered timestamps, consumed-by sessions, consumed timestamps, and command attempt linkage.
+      - Dashboard helper output reported inbox `consumed_count=2`, `pending_count=0`, `pull_required_pending_count=0`, active dispatch heartbeat for dispatcher `qa-inbox-ops`, and zero queued/failed/stale/risk/suppressed counts.
+
+  - id: T005
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Audit whether the goal oracle is satisfied and whether remaining gaps block rollout."
+    inputs:
+      - "T001-T004 receipts"
+      - "Local test output"
+      - "QA drill notes"
+      - "Diff and docs"
+    constraints:
+      - "Read-only."
+      - "Do not accept backend-only proof if operator workflow remains unclear."
+      - "Call out any required follow-up with concrete acceptance criteria."
+    expected_output:
+      - "Pass/fail decision against every acceptance criterion."
+      - "Residual risks and whether they block broader QA rollout."
+      - "Required final fixes or approval for PR review/publish."
+    receipt: |
+      Judge decision: approved.
+      Rationale: Goal oracle is satisfied for local rollout readiness: tests, docs, CLI, replay/dashboard evidence, and the disposable no-tmux drill prove both inbox polling directions with operator-visible delivery and consumption evidence. This is not full goal completion because PR review toolkit, publish, and merge evidence are still outstanding. T006 is authorized to run final verification, review, publish, and merge gates.
+      Evidence by acceptance criterion:
+      - Manager polling flow: README and T004 command transcript document `manager-inbox --json` and `--consume-next --json` with measurable pending/consumed behavior.
+      - Worker polling flow: README and T004 command transcript document `worker-inbox --json` and `--consume-next --json` with measurable pending/consumed behavior.
+      - Pending backlog: T003 receipt says CLI text output shows inbox header, pending count, source/target sessions, delivery mode, delivered timestamp, and consumed evidence.
+      - Dashboard/replay: T003 and T004 receipts show delivery mode, source/target sessions, consumed-by session ids/names, delivered/consumed timestamps, dispatcher heartbeat, and command attempt linkage.
+      - No-tmux QA: T004 proves manager-to-worker notification 1 and worker-to-manager notification 2 were delivered via pull_required and consumed by the intended target sessions.
+      - Tests: focused Python tests passed, `npm test` passed with 38 tests, `npm run build` passed, full `python3 -m unittest tests.test_workerctl -v` passed with 498 tests, and `git diff --check` passed.
+      Residual risks:
+      - T004 used a synthetic worker `task_complete` event for the worker-to-manager path; acceptable for dispatcher inbox rollout, but broader app-session UX still depends on final PR review and live operator use.
+      - Changed files are still local and unmerged; release safety depends on T006 review/publish/CI gates.
+      Missing evidence before completion:
+      - PR review toolkit has not reported no actionable findings.
+      - PR URL, GitHub CI, and merge receipt are not present.
+
+  - id: T006
+    type: pm
+    assignee: PM
+    status: active
+    reasoning_hint: medium
+    objective: "Run final verification, PR review toolkit, publish the PR, and merge once green if the user has approved execution."
+    inputs:
+      - "T005 Judge receipt"
+    constraints:
+      - "Do not publish with failing tests or actionable review findings."
+      - "Do not merge before GitHub checks are green."
+      - "Preserve user changes outside the goal scope."
+    expected_output:
+      - "Passing `python3 -m unittest tests.test_workerctl -v`."
+      - "Passing `git diff --check`."
+      - "Clean PR review toolkit result or fixed findings."
+      - "PR URL and merge receipt if green."
+
+receipts: []
+
+completion:
+  full_outcome_complete: false
+  final_audit: null

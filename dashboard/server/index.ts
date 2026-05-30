@@ -150,12 +150,34 @@ type AuditCorrelationChain = {
   source_event_id?: number | null;
 };
 
+type AuditRoutedNotification = {
+  binding_id?: string | null;
+  command_id?: string | null;
+  consumed_at?: string | null;
+  consumed_by_session_id?: string | null;
+  consumed_by_session_name?: string | null;
+  correlation_id?: string | null;
+  created_at?: string;
+  delivered_at?: string | null;
+  delivery_mode?: string | null;
+  error?: string | null;
+  id?: number;
+  payload?: Record<string, unknown>;
+  signal_type?: string;
+  source_event_id?: number | null;
+  source_session_id?: string | null;
+  source_session_name?: string | null;
+  state?: string;
+  target_session_id?: string | null;
+  target_session_name?: string | null;
+};
+
 type AuditResult = {
   acceptance_criteria?: Array<Record<string, unknown>>;
   command_attempts?: AuditCommandAttempt[];
   commands?: AuditCommand[];
   correlation_chains?: AuditCorrelationChain[];
-  routed_notifications?: Array<Record<string, unknown>>;
+  routed_notifications?: AuditRoutedNotification[];
 };
 
 type CriteriaSummary = {
@@ -172,6 +194,23 @@ type DispatchConversationItem = {
   detail?: string;
   kind: string;
   label: string;
+};
+
+type DispatchNotificationSummary = {
+  command_id?: string | null;
+  consumed_at?: string | null;
+  consumed_by_session_id?: string | null;
+  consumed_by_session_name?: string | null;
+  correlation_id?: string | null;
+  delivered_at?: string | null;
+  delivery_mode?: string | null;
+  id?: number;
+  signal_type?: string;
+  source_session_id?: string | null;
+  source_session_name?: string | null;
+  state?: string;
+  target_session_id?: string | null;
+  target_session_name?: string | null;
 };
 
 export function isDashboardSession(session: Record<string, unknown>): boolean {
@@ -292,23 +331,31 @@ function commandLabel(command: AuditCommand | undefined, commandId: string | und
   return id ? `${type} ${id}` : type;
 }
 
-function notificationLabel(notification: Record<string, unknown> | undefined, fallbackType: string | undefined): string {
+function notificationLabel(notification: AuditRoutedNotification | undefined, fallbackType: string | undefined): string {
   const signalType = String(notification?.signal_type || fallbackType || "notification");
   return notification?.id ? `${signalType} notification #${notification.id}` : signalType;
 }
 
-function notificationMessage(notification: Record<string, unknown> | undefined): string | undefined {
+function notificationPayload(notification: AuditRoutedNotification | undefined): Record<string, unknown> | undefined {
   const payload = notification?.payload;
   if (!payload || typeof payload !== "object") {
+    return undefined;
+  }
+  return payload as Record<string, unknown>;
+}
+
+function notificationMessage(notification: AuditRoutedNotification | undefined): string | undefined {
+  const payload = notificationPayload(notification);
+  if (!payload) {
     return undefined;
   }
   const message = (payload as Record<string, unknown>).message;
   return typeof message === "string" && message.trim() ? message : undefined;
 }
 
-function notificationWorkerReceipt(notification: Record<string, unknown> | undefined): string | undefined {
-  const payload = notification?.payload;
-  if (!payload || typeof payload !== "object") {
+function notificationWorkerReceipt(notification: AuditRoutedNotification | undefined): string | undefined {
+  const payload = notificationPayload(notification);
+  if (!payload) {
     return undefined;
   }
   const receipt = (payload as Record<string, unknown>).worker_receipt;
@@ -332,9 +379,21 @@ function latestDispatchAttempt(attempts: AuditCommandAttempt[]): AuditCommandAtt
 function dispatchConversationItems(
   chain: AuditCorrelationChain,
   attempts: AuditCommandAttempt[],
-  primaryNotification: Record<string, unknown> | undefined,
+  primaryNotification: AuditRoutedNotification | undefined,
 ): DispatchConversationItem[] {
   const dispatchAttempt = latestDispatchAttempt(attempts);
+  const deliveryDetail = primaryNotification
+    ? [
+      primaryNotification.delivery_mode ? `via ${primaryNotification.delivery_mode}` : null,
+      primaryNotification.target_session_name ? `to ${primaryNotification.target_session_name}` : null,
+    ].filter(Boolean).join(" ")
+    : "";
+  const consumptionDetail = primaryNotification?.consumed_at
+    ? [
+      `consumed ${primaryNotification.consumed_at}`,
+      primaryNotification.consumed_by_session_name ? `by ${primaryNotification.consumed_by_session_name}` : null,
+    ].filter(Boolean).join(" ")
+    : null;
   return [
     chain.manager_decision_id
       ? { kind: "manager_decision", label: `Manager decision #${chain.manager_decision_id}` }
@@ -344,9 +403,12 @@ function dispatchConversationItems(
       : null,
     primaryNotification
       ? {
-        detail: notificationMessage(primaryNotification),
+        detail: [notificationMessage(primaryNotification), consumptionDetail].filter(Boolean).join(" / ") || undefined,
         kind: "routed_notification",
-        label: `Routed notification #${primaryNotification.id} ${primaryNotification.state || "unknown"}`,
+        label: [
+          `Routed notification #${primaryNotification.id} ${primaryNotification.state || "unknown"}`,
+          deliveryDetail || null,
+        ].filter(Boolean).join(" "),
       }
       : null,
     primaryNotification && notificationWorkerReceipt(primaryNotification)
@@ -360,6 +422,25 @@ function dispatchConversationItems(
       ? { kind: "manager_cycle", label: `Manager cycle #${chain.manager_cycle_id} consumed the routed fact` }
       : null,
   ].filter((item): item is DispatchConversationItem => item !== null);
+}
+
+function notificationSummary(notification: AuditRoutedNotification): DispatchNotificationSummary {
+  return {
+    command_id: notification.command_id,
+    consumed_at: notification.consumed_at,
+    consumed_by_session_id: notification.consumed_by_session_id,
+    consumed_by_session_name: notification.consumed_by_session_name,
+    correlation_id: notification.correlation_id,
+    delivered_at: notification.delivered_at,
+    delivery_mode: notification.delivery_mode,
+    id: notification.id,
+    signal_type: notification.signal_type,
+    source_session_id: notification.source_session_id,
+    source_session_name: notification.source_session_name,
+    state: notification.state,
+    target_session_id: notification.target_session_id,
+    target_session_name: notification.target_session_name,
+  };
 }
 
 function chainTimestamp(value: unknown): number {
@@ -409,6 +490,7 @@ export function dispatchChainEntries(audit: AuditResult | null) {
       key: `chain-${chain.command_id || chain.correlation_id || chain.routed_notification_ids?.join("-")}`,
       manager_cycle_id: chain.manager_cycle_id,
       manager_decision_id: chain.manager_decision_id,
+      notifications: notifications.map(notificationSummary),
       notification_count: chain.routed_notification_ids?.length || 0,
       side_effect_risk: riskyAttempts.length > 0,
       source_event_id: chain.source_event_id,
@@ -419,6 +501,50 @@ export function dispatchChainEntries(audit: AuditResult | null) {
   return entries
     .sort((left, right) => chainTimestamp(right.time) - chainTimestamp(left.time))
     .slice(0, 12);
+}
+
+export function dispatchInboxSummary(audit: AuditResult | null) {
+  const notifications = (audit?.routed_notifications || [])
+    .filter((notification) => notification.state === "delivered");
+  const sessions = new Map<string, {
+    consumed_count: number;
+    latest_consumed_at?: string;
+    pending_count: number;
+    session_id?: string | null;
+    session_name?: string | null;
+  }>();
+  const sessionKey = (notification: AuditRoutedNotification): string => (
+    notification.target_session_id
+      || notification.target_session_name
+      || `notification-${notification.id || "unknown"}`
+  );
+  for (const notification of notifications) {
+    const key = sessionKey(notification);
+    const current = sessions.get(key) || {
+      consumed_count: 0,
+      latest_consumed_at: undefined,
+      pending_count: 0,
+      session_id: notification.target_session_id,
+      session_name: notification.target_session_name,
+    };
+    if (notification.consumed_at) {
+      current.consumed_count += 1;
+      if (!current.latest_consumed_at || notification.consumed_at > current.latest_consumed_at) {
+        current.latest_consumed_at = notification.consumed_at;
+      }
+    } else {
+      current.pending_count += 1;
+    }
+    sessions.set(key, current);
+  }
+  return {
+    consumed_count: notifications.filter((notification) => Boolean(notification.consumed_at)).length,
+    pending_count: notifications.filter((notification) => !notification.consumed_at).length,
+    pull_required_pending_count: notifications.filter((notification) => (
+      notification.delivery_mode === "pull_required" && !notification.consumed_at
+    )).length,
+    sessions: Array.from(sessions.values()),
+  };
 }
 
 export function acceptanceCriteriaSummary(audit: AuditResult | null): CriteriaSummary {
@@ -655,6 +781,7 @@ async function dashboardObservation(options: ReturnType<typeof normalizeServerOp
     dispatch: {
       chains: dispatchChainEntries(audit),
       health: dispatchHealth(snapshot, audit, suppressedTelemetry, heartbeatTelemetry),
+      inbox: dispatchInboxSummary(audit),
     },
     latest_cycle: snapshot?.latest_cycle || null,
     polled_at: new Date().toISOString(),
