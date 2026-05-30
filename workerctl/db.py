@@ -1648,6 +1648,7 @@ def create_ralph_loop_run(
     max_iterations: int,
     current_iteration: int = 0,
     cleanup_policy: str | None = None,
+    required_before_continue: list[str] | None = None,
     stop_conditions: list[str] | None = None,
     seed_prompt_sha256: str | None = None,
     name: str | None = None,
@@ -1660,6 +1661,13 @@ def create_ralph_loop_run(
         raise WorkerError("current_iteration must be non-negative")
     if current_iteration > max_iterations:
         raise WorkerError("current_iteration must not exceed max_iterations")
+    if required_before_continue is not None and not isinstance(required_before_continue, list):
+        raise WorkerError("required_before_continue must be a list of non-empty strings")
+    required_evidence = []
+    for evidence in required_before_continue or []:
+        if not isinstance(evidence, str) or not evidence.strip():
+            raise WorkerError("required_before_continue entries must be non-empty strings")
+        required_evidence.append(evidence.strip())
     task = conn.execute(
         "select id, name from tasks where id = ?",
         (task_id,),
@@ -1672,6 +1680,7 @@ def create_ralph_loop_run(
         "kind": "ralph_loop",
         "max_iterations": max_iterations,
         "policy_record": True,
+        "required_before_continue": required_evidence,
         "seed_prompt_sha256": seed_prompt_sha256,
         "stop_conditions": stop_conditions or [],
     }
@@ -1710,6 +1719,11 @@ def ralph_loop_run(conn: sqlite3.Connection, *, run: str) -> dict[str, Any]:
         "cleanup_policy": metadata.get("cleanup_policy"),
         "current_iteration": current_iteration,
         "max_iterations": max_iterations,
+        "required_before_continue": [
+            item.strip()
+            for item in metadata.get("required_before_continue") or []
+            if isinstance(item, str) and item.strip()
+        ],
         "seed_prompt_sha256": metadata.get("seed_prompt_sha256"),
         "stop_conditions": metadata.get("stop_conditions") or [],
     }

@@ -1,0 +1,366 @@
+# GoalBuddy v2 state.yaml
+# Board truth lives here. goal.md is the editable charter; notes/ holds long receipts only.
+
+version: 2
+
+goal:
+  title: "Ralph Loop Evidence Gates"
+  slug: "ralph-loop-evidence-gates"
+  kind: specific
+  tranche: "Implement dispatcher-enforced Ralph-loop evidence gates so manager continuation requests are blocked before worker delivery until required worker/PR/CI/merge/cleanup evidence exists."
+  status: active
+  oracle:
+    signal: "Browser QA proves a required ci_green gate blocks a manager-requested next iteration before worker delivery, then allows a fresh continuation after CI-green evidence is recorded."
+    cadence: "after Scout, after implementation, after browser QA, and at final audit"
+    final_proof: "Merged PR with backend tests, dashboard/browser QA evidence, replay/audit evidence, clean review, and final receipt mapping missing-evidence block plus allowed retry to worker delivery outcomes."
+  intake:
+    original_request: "Plan the next guardrail slice for evidence-gated Ralph-loop continuation."
+    interpreted_outcome: "Dispatch enforces preset evidence requirements so manager continuation requests do not reach workers until required loop receipts exist."
+    input_shape: specific
+    audience: "workerctl operators, Ralph-loop managers, Codex app workers, tmux workers, Dispatch maintainers, and dashboard QA reviewers"
+    authority: requested
+    proof_type: "test + demo + review"
+    completion_proof: "A browser-backed QA walkthrough plus automated tests prove missing evidence blocks continuation before worker delivery, then adding evidence allows delivery."
+    likely_misfire: "Only documenting evidence gates or adding dashboard labels while Dispatch still delivers invalid continuation commands."
+    blind_spots_considered:
+      - "Dispatch must enforce explicit mechanical evidence only, not judge task success, PR quality, or strategy."
+      - "Missing evidence needs a manager-visible refusal receipt with a machine-readable missing_evidence list."
+      - "Both tmux push delivery and Codex app worker-inbox delivery must be blocked by the same policy gate."
+      - "Browser QA must prove the negative path and the recovery path."
+      - "Evidence records must be structured enough for future gates to compose without brittle string matching."
+    existing_plan_facts:
+      - "Ralph-loop max-iteration blocking already exists for continue_iteration and is visible in dashboard/replay/audit."
+      - "Dispatch already processes durable commands before routed_notifications and tmux side effects."
+      - "Session inbox supports no-tmux Codex app delivery through manager-inbox and worker-inbox."
+      - "Dashboard/replay/audit already expose blocked command results and dispatch chain evidence."
+
+rules:
+  pm_owns_state: true
+  one_active_task: true
+  max_write_workers: 1
+  no_implementation_without_worker_or_pm_task: true
+  no_completion_without_judge_or_pm_audit: true
+  planning_is_not_completion: true
+  queued_required_worker_blocks_completion: true
+  continuous_until_full_outcome: true
+  missing_input_or_credentials_do_not_stop_goal: true
+  preserve_and_validate_existing_plan: true
+  intake_misfire_must_be_audited: true
+  goal_pressure_requires_oracle: true
+  no_completion_on_weak_proof: true
+  slice_policy:
+    max_consecutive_tiny_tasks: 2
+    prefer_vertical_slices: true
+    judge_picks_largest_safe_slice: true
+    worker_completes_whole_slice: true
+
+agents:
+  scout: installed
+  worker: installed
+  judge: installed
+
+visual_board:
+  selected: local
+  local:
+    status: starting
+    url: "http://goalbuddy.localhost:41737/ralph-loop-evidence-gates/"
+    command: "npx goalbuddy board /Users/neonwatty/Desktop/codex-terminal-manager/docs/goals/ralph-loop-evidence-gates"
+
+active_task: T005
+
+tasks:
+  - id: T001
+    type: scout
+    assignee: Scout
+    status: done
+    reasoning_hint: low
+    objective: "Map existing Ralph-loop policy, command result, receipt/evidence, PR/CI/merge/cleanup, replay/audit, dashboard, and browser QA surfaces needed for evidence-gated continuation."
+    inputs:
+      - "docs/goals/ralph-loop-dispatch-guardrails/goal.md"
+      - "docs/goals/ralph-loop-dispatch-guardrails/state.yaml"
+      - "docs/qa/ralph-loop.md"
+      - "workerctl continue_iteration and dispatch code paths"
+      - "workerctl run/receipt/manager decision/replay/audit code paths"
+      - "dashboard server/client dispatch evidence surfaces"
+      - "existing browser QA patterns"
+    constraints:
+      - "Read-only."
+      - "Do not implement."
+      - "Cite exact files and tests."
+      - "Separate existing max-iteration behavior from proposed evidence gate behavior."
+      - "Identify how to prove no worker delivery and allowed retry for both no-tmux and tmux delivery paths."
+    expected_output:
+      - "Current surfaces and gaps."
+      - "Candidate structured evidence model or safe reuse path."
+      - "Dispatch interception point for missing-evidence gates."
+      - "Dashboard/browser QA path and exact observable assertions."
+      - "Recommended red tests for Worker."
+    receipt:
+      result: done
+      summary: "Mapped existing Ralph-loop max-iteration policy, structured acceptance-criteria evidence, manager decisions, replay/audit, dashboard blocked-policy rendering, and browser QA paths; identified the pre-notification dispatch gate and evidence model for missing ci_green blocking plus allowed retry."
+      evidence:
+        - "Detailed receipt: docs/goals/ralph-loop-evidence-gates/notes/T001-scout-map.md"
+        - "workerctl/commands.py:4664 evaluates continue_iteration Ralph-loop policy."
+        - "workerctl/commands.py:4711 routes, checks permission, computes delivery mode, and evaluates loop policy before workerctl/commands.py:4790 inserts a routed notification."
+        - "workerctl/db.py:1644 stores Ralph-loop policy records in run metadata."
+        - "workerctl/db.py:3706 and workerctl/commands.py:3510 provide structured satisfied acceptance-criteria evidence."
+        - "dashboard/server/index.ts:335 and dashboard/client/main.tsx:287 expose blocked policy details in browser-visible Dispatch chains."
+      recommended_next: "T002 should approve a ci_green evidence-gate slice that reuses run metadata and satisfied acceptance-criteria evidence, blocks before delivery, exposes missing_evidence, and proves blocked plus allowed retry in browser QA."
+
+  - id: T002
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Choose the smallest coherent implementation slice that enforces at least one required evidence gate and proves both block and allowed retry in browser QA."
+    inputs:
+      - "T001 Scout receipt"
+      - "docs/goals/ralph-loop-evidence-gates/goal.md"
+    constraints:
+      - "Read-only."
+      - "Reject designs that make Dispatch decide code quality, PR quality, CI meaning beyond explicit recorded evidence, merge readiness beyond explicit recorded evidence, or strategic continuation."
+      - "Prefer reusing existing commands, command_attempts, run metadata, manager decisions, routed_notifications, replay, audit, and dashboard surfaces where safe."
+      - "Require browser QA with precise blocked and allowed assertions."
+    expected_output:
+      - "Approved implementation plan or scoped rejection."
+      - "Exact Worker objective."
+      - "Allowed files."
+      - "Red tests and verification commands."
+      - "Browser QA scenario with measurable assertions."
+      - "Stop conditions."
+    receipt:
+      result: done
+      decision: approved
+      summary: "Approved the smallest coherent evidence-gate slice: require ci_green evidence before continue_iteration, using run metadata for policy and satisfied acceptance criteria evidence for receipts."
+      evidence:
+        - "Detailed receipt: docs/goals/ralph-loop-evidence-gates/notes/T002-judge-slice.md"
+        - "Scope limited to explicit recorded ci_green evidence; Dispatch must not inspect external CI or judge CI meaning."
+        - "Worker must preserve max-iteration blocking, block missing evidence before routed_notifications/tmux send, and allow a fresh retry after evidence exists."
+        - "Browser QA must prove missing_ci_green_evidence, missing ci_green, zero notifications/inbox, then delivered retry after evidence."
+      allowed_files:
+        - "workerctl/db.py"
+        - "workerctl/cli.py"
+        - "workerctl/commands.py"
+        - "workerctl/replay.py"
+        - "dashboard/server/index.ts"
+        - "dashboard/client/main.tsx"
+        - "dashboard/client/styles.css"
+        - "dashboard/server/workerctl.test.ts"
+        - "tests/test_workerctl.py"
+        - "docs/qa/ralph-loop.md"
+        - "docs/manual-qa-checklist.md"
+        - "docs/goals/ralph-loop-evidence-gates/notes/**"
+        - "docs/goals/ralph-loop-evidence-gates/state.yaml"
+      verify:
+        - "Focused Python tests covering missing ci_green blocking, tmux no-send, allowed retry, and replay/audit."
+        - "python3 -m unittest tests.test_workerctl -v"
+        - "npm test"
+        - "npm run build"
+        - "Browser/Playwright walkthrough against local dashboard fixture"
+        - "git diff --check"
+
+  - id: T003
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "Implement dispatcher-enforced evidence-gated continuation for Ralph-loop commands and expose missing evidence in CLI/replay/audit/dashboard surfaces."
+    inputs:
+      - "T002 Judge receipt"
+    allowed_files:
+      - "workerctl/db.py"
+      - "workerctl/cli.py"
+      - "workerctl/commands.py"
+      - "workerctl/replay.py"
+      - "dashboard/server/index.ts"
+      - "dashboard/client/main.tsx"
+      - "dashboard/client/styles.css"
+      - "dashboard/server/workerctl.test.ts"
+      - "tests/test_workerctl.py"
+      - "docs/qa/ralph-loop.md"
+      - "docs/manual-qa-checklist.md"
+      - "docs/goals/ralph-loop-evidence-gates/notes/**"
+      - "docs/goals/ralph-loop-evidence-gates/state.yaml"
+    verify:
+      - "Focused red/green tests selected by T002."
+      - "python3 -m unittest tests.test_workerctl -v"
+      - "npm test"
+      - "npm run build"
+      - "git diff --check"
+    stop_if:
+      - "Implementation requires Dispatch to decide task success, code quality, PR quality, or strategic next work."
+      - "Blocking cannot happen before both tmux push and worker-inbox notification creation."
+      - "No reliable structured evidence model or safe reuse path is found."
+      - "No reliable way is found to prove no worker delivery and allowed retry."
+      - "Required files fall outside allowed_files."
+      - "Verification fails twice for the same unknown reason."
+    expected_output:
+      - "Durable evidence policy and evidence record or validated reuse."
+      - "Manager continuation request command/decision linkage."
+      - "Dispatch blocks missing evidence before delivery."
+      - "Dispatch allows a fresh retry after evidence exists."
+      - "Manager-visible refusal receipt with missing evidence list."
+      - "Replay/audit/dashboard evidence for blocked and allowed continuation."
+      - "Tests covering blocked, allowed, no-tmux, and tmux paths."
+    receipt:
+      result: done
+      summary: "Implemented dispatcher-enforced ci_green evidence gating for Ralph-loop continue_iteration commands, including missing-evidence refusal, allowed retry after satisfied criterion evidence, replay/audit visibility, dashboard rendering, docs, and tests."
+      changed_files:
+        - "workerctl/db.py"
+        - "workerctl/commands.py"
+        - "dashboard/server/index.ts"
+        - "dashboard/client/main.tsx"
+        - "dashboard/server/workerctl.test.ts"
+        - "tests/test_workerctl.py"
+        - "docs/qa/ralph-loop.md"
+        - "docs/manual-qa-checklist.md"
+        - "docs/goals/ralph-loop-evidence-gates/notes/T003-worker-implementation.md"
+        - "docs/goals/ralph-loop-evidence-gates/state.yaml"
+      commands:
+        - cmd: "python3 -m unittest focused Ralph-loop evidence gate tests -v"
+          status: pass
+          summary: "12 focused Dispatch/CLI tests passed."
+        - cmd: "npm test -- --runInBand dashboard/server/workerctl.test.ts"
+          status: pass
+          summary: "40 dashboard/server tests passed."
+        - cmd: "npm run build"
+          status: pass
+          summary: "TypeScript and Vite build passed."
+        - cmd: "python3 -m unittest tests.test_workerctl -v"
+          status: pass
+          summary: "Full Python suite passed: 515 tests after the review fix."
+        - cmd: "npm test"
+          status: pass
+          summary: "Full dashboard test suite passed: 40 tests."
+        - cmd: "git diff --check"
+          status: pass
+      evidence:
+        - "Detailed receipt: docs/goals/ralph-loop-evidence-gates/notes/T003-worker-implementation.md"
+        - "Missing ci_green no-tmux path creates no routed notification and leaves worker inbox empty."
+        - "Missing ci_green tmux path does not call send_text_to_session."
+        - "Satisfied criterion evidence with evidence_type=ci_green, ralph_loop_run_id, and iteration=1 allows a fresh requested iteration 2 command."
+        - "Replay/audit expose reason=missing_ci_green_evidence and missing_evidence=[ci_green]."
+        - "Dashboard blocked-policy summaries expose and render missing_evidence."
+        - "Malformed required_before_continue metadata is rejected fail-closed instead of silently disabling the gate."
+
+  - id: T004
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "Add and run the browser QA test case for missing-evidence continuation blocking and allowed retry after evidence is recorded."
+    inputs:
+      - "T003 Worker receipt"
+      - "Browser QA acceptance criteria from T002"
+    allowed_files:
+      - "dashboard/**"
+      - "tests/**"
+      - "docs/qa/ralph-loop.md"
+      - "docs/manual-qa-checklist.md"
+      - "docs/goals/ralph-loop-evidence-gates/notes/**"
+      - "docs/goals/ralph-loop-evidence-gates/state.yaml"
+    verify:
+      - "Browser or Playwright walkthrough against a local dashboard showing missing ci_green block and allowed retry."
+      - "Dashboard tests/build if changed."
+      - "git diff --check"
+    stop_if:
+      - "The dashboard cannot show evidence gate details without additional backend work."
+      - "The browser test cannot prove worker non-delivery and later delivery."
+      - "Local browser automation is unavailable; record blocker and produce a manual browser QA script instead."
+    expected_output:
+      - "Browser QA receipt with URL/screenshots or Playwright trace details."
+      - "Assertion that blocked continuation is visible with reason missing_ci_green_evidence."
+      - "Assertion that missing_evidence includes ci_green."
+      - "Assertion that worker inbox pending count remains zero for the blocked continuation."
+      - "Assertion that after CI-green evidence exists, a fresh continuation is delivered and visible."
+      - "Assertion that replay/audit preserve both attempts under correlation evidence."
+    receipt:
+      result: done
+      summary: "Ran browser QA against a local dashboard fixture proving missing ci_green blocks continuation before worker delivery, then satisfied CI-green evidence allows a fresh retry to the worker inbox."
+      changed_files:
+        - "docs/goals/ralph-loop-evidence-gates/notes/T004-browser-qa.md"
+        - "docs/goals/ralph-loop-evidence-gates/state.yaml"
+      commands:
+        - cmd: "scripts/workerctl dispatch --once --type continue_iteration --dispatcher-id qa-ralph-loop --json --path /tmp/workerctl-ralph-loop-evidence-qa.db"
+          status: pass
+          summary: "First dispatch blocked with missing_ci_green_evidence; second dispatch delivered after CI-green evidence."
+        - cmd: "npm run dashboard -- --host 127.0.0.1 --port 8799 --task qa-ralph-loop-evidence-gate --db-path /tmp/workerctl-ralph-loop-evidence-qa.db --workerctl-path scripts/workerctl"
+          status: pass
+          summary: "Started local dashboard for browser QA; server was stopped after assertions."
+        - cmd: "Playwright browser assertions against http://127.0.0.1:8799/"
+          status: pass
+          summary: "Dashboard showed missing_ci_green_evidence, missing ci_green, iteration 1/3, target_worker_notified=false, blocked and allowed correlations, one notification, and inbox count 1 after retry."
+        - cmd: "scripts/workerctl audit qa-ralph-loop-evidence-gate --json --path /tmp/workerctl-ralph-loop-evidence-qa.db"
+          status: pass
+          summary: "Audit showed blocked first attempt, satisfied ci_green criterion evidence, and delivered retry notification."
+        - cmd: "scripts/workerctl worker-inbox qa-ralph-loop-evidence-gate --json --path /tmp/workerctl-ralph-loop-evidence-qa.db"
+          status: pass
+          summary: "Worker inbox showed exactly the allowed retry item."
+        - cmd: "scripts/workerctl replay qa-ralph-loop-evidence-gate --json --path /tmp/workerctl-ralph-loop-evidence-qa.db"
+          status: pass
+          summary: "Replay showed blocked attempt, evidence receipt, allowed attempt, and routed notification."
+      evidence:
+        - "Detailed receipt: docs/goals/ralph-loop-evidence-gates/notes/T004-browser-qa.md"
+        - "First dispatch returned state=blocked, reason=missing_ci_green_evidence, missing_evidence=[ci_green], notification_id=null, delivered=false, and target_worker_notified=false."
+        - "Dashboard showed missing ci_green with 1/3 iteration context and the allowed retry correlation."
+        - "Worker inbox contained the retry only after CI-green evidence was recorded."
+
+  - id: T005
+    type: pm
+    assignee: PM
+    status: active
+    reasoning_hint: medium
+    objective: "Run final verification, PR review toolkit, publish the PR, and merge once green if execution has been approved."
+    inputs:
+      - "T003/T004 receipts"
+    constraints:
+      - "Do not publish with failing tests or actionable review findings."
+      - "Do not merge before GitHub checks are green."
+      - "Record PR URL, CI status, and merge receipt."
+    expected_output:
+      - "Passing full local verification."
+      - "Clean PR review toolkit result or fixed findings."
+      - "PR URL and merge receipt if green."
+    receipt: null
+
+  - id: T999
+    type: judge
+    assignee: Judge
+    status: queued
+    reasoning_hint: high
+    objective: "Audit whether the dispatcher-enforced Ralph-loop evidence-gate workflow satisfies the original request."
+    inputs:
+      - "All done task receipts"
+      - "Last verification output"
+      - "Browser QA evidence"
+      - "Current diff or merged PR receipt"
+    constraints:
+      - "Do not implement."
+      - "Reject completion if missing evidence can still reach a worker."
+      - "Reject completion if adding evidence does not allow a fresh retry."
+      - "Reject completion if browser QA does not prove both no worker delivery and later delivery."
+      - "Reject completion if Dispatch gained decision authority over task success, code quality, PR quality, or strategy."
+    expected_output:
+      - "complete | not_complete"
+      - "full_outcome_complete: true | false"
+      - "Acceptance-criteria evidence map"
+      - "Residual risks or next task"
+    receipt: null
+
+receipts:
+  - task_id: T001
+    path: "docs/goals/ralph-loop-evidence-gates/notes/T001-scout-map.md"
+    summary: "Mapped existing policy, evidence, dispatch, replay/audit, dashboard, and browser QA surfaces for evidence-gated continuation."
+  - task_id: T002
+    path: "docs/goals/ralph-loop-evidence-gates/notes/T002-judge-slice.md"
+    summary: "Approved ci_green evidence-gate implementation slice using run metadata plus satisfied acceptance-criteria evidence."
+  - task_id: T003
+    path: "docs/goals/ralph-loop-evidence-gates/notes/T003-worker-implementation.md"
+    summary: "Implemented ci_green evidence-gated continuation with no-delivery block and allowed retry after recorded evidence."
+  - task_id: T004
+    path: "docs/goals/ralph-loop-evidence-gates/notes/T004-browser-qa.md"
+    summary: "Ran browser QA proving missing ci_green block before delivery and allowed retry after evidence."
+
+completion:
+  full_outcome_complete: false
+  final_audit: null

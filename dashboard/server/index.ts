@@ -181,6 +181,14 @@ type AuditResult = {
   routed_notifications?: AuditRoutedNotification[];
 };
 
+function stringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  const items = value.filter((item): item is string => typeof item === "string");
+  return items.length ? items : [];
+}
+
 type CriteriaSummary = {
   accepted: number;
   deferred: number;
@@ -348,7 +356,9 @@ function blockedPolicySummary(attempts: AuditCommandAttempt[]) {
     delivered: typeof result.delivered === "boolean" ? result.delivered : undefined,
     manager_decision_id: typeof result.manager_decision_id === "number" ? result.manager_decision_id : undefined,
     max_iterations: typeof result.max_iterations === "number" ? result.max_iterations : undefined,
+    missing_evidence: stringArray(result.missing_evidence),
     reason: String(result.reason),
+    required_before_continue: stringArray(result.required_before_continue),
     requested_iteration: typeof result.requested_iteration === "number" ? result.requested_iteration : undefined,
     run_id: typeof result.run_id === "string" ? result.run_id : undefined,
     target_worker_notified: typeof result.target_worker_notified === "boolean" ? result.target_worker_notified : undefined,
