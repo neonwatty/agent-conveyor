@@ -36,6 +36,9 @@ Run this after unit tests and `scripts/live-smoke-repeat 3` pass.
 - [ ] `scripts/workerctl dispatch --watch --watch-iterations 2 --interval 0 --dispatcher-id qa-dispatch-watch --dry-run --json` emits bounded watch heartbeat telemetry with iteration, processed count, and dry-run fields.
 - [ ] `scripts/workerctl dispatch --once --type worker_task_complete --dispatcher-id qa-dispatch --json` routes a disposable worker completion to the bound manager without Dispatch deciding task success.
 - [ ] `scripts/workerctl audit <task> --json` includes `routed_notifications` and `correlation_chains` for the dispatch completion.
+- [ ] For shareable session evidence, use `scripts/workerctl sessions --name <session> --redact-identity-token` for each relevant manager/worker instead of unfiltered `sessions --state active`; verify no unredacted `identity_token` values are retained in artifacts.
+- [ ] For Codex app inbox drills, record whether `doctor-self --json` reports `workerctl_on_path=false`; if so, use explicit `scripts/workerctl` commands or install the local wrapper before handing instructions to app sessions.
+- [ ] For whole-rollout ingest drills, note whether older completion signals are delivered before the target proof turn; consume/review older manager inbox items before deciding on the current signal.
 - [ ] `scripts/workerctl dashboard --task <task> --ensure-dispatch --dispatcher-id qa-dispatch-dashboard` shows a top/banner Dispatch active state with dispatcher id, heartbeat age, iteration, processed count, dry-run/live state, and any durable `dispatch_signal_suppressed` telemetry count.
 - [ ] Dashboard Dispatch conversation lane shows worker completion detection, routed notification, manager cycle consumption, and manager decision/command claim/attempt/delivery where applicable.
 - [ ] Dashboard clearly warns when Dispatch is stale or not observed.
