@@ -902,6 +902,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--include-legacy", action="store_true",
         help="Include Phase 1 backfill rows (pid IS NULL) — legacy workers/managers.",
     )
+    sessions.add_argument(
+        "--name", action="append", default=[],
+        help="Limit output to a registered session name. Repeat to include multiple names.",
+    )
+    sessions.add_argument(
+        "--redact-identity-token", action="store_true",
+        help="Replace identity_token values with [REDACTED] for shareable QA evidence.",
+    )
     sessions.set_defaults(func=command_sessions)
 
     discover = subparsers.add_parser(
