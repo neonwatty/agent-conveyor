@@ -117,6 +117,10 @@ receipts, handoffs, and clear receipts can be connected after the run:
   and iteration 2 first completion
 - `ralph-loop-max-block`: max-iteration refusal drill, manager continuation
   request, blocked Dispatch attempt, dashboard row, and empty worker inbox proof
+- `ralph-loop-missing-ci`: missing `ci_green` evidence refusal drill,
+  blocked Dispatch attempt, dashboard row, and empty worker inbox proof
+- `ralph-loop-ci-allowed`: fresh retry after `ci_green` evidence is recorded,
+  delivered Dispatch attempt, and worker inbox proof
 
 When a command does not accept `--correlation-id`, include the marker in
 `--payload-json` under `ralph_loop.correlation_id`.
@@ -194,6 +198,115 @@ scripts/workerctl worker-inbox qa-ralph-loop-guardrail --json --path "$WORKERCTL
 
 The manager-visible refusal receipt must appear in command output, replay, or
 audit. The worker inbox must remain empty for the blocked continuation.
+
+## Missing CI-Green Evidence Drill
+
+Run this negative-and-recovery browser QA case in a disposable bound task to
+prove Dispatch blocks a manager continuation until required loop evidence is
+recorded. The fixture uses `max_iterations=3`, `current_iteration=1`, and
+`required_before_continue=["ci_green"]`, then asks for iteration 2 before CI
+evidence exists.
+
+Create the evidence-gated Ralph-loop run record:
+
+```bash
+RALPH_LOOP_RUN_ID="$(scripts/workerctl runs \
+  --create qa-ralph-loop-evidence-gate \
+  --name qa-ralph-loop-ci-gate \
+  --purpose ralph_loop \
+  --metadata-json '{"kind":"ralph_loop","max_iterations":3,"current_iteration":1,"cleanup_policy":"clear","required_before_continue":["ci_green"],"stop_conditions":["max_iterations","required_evidence"],"seed_prompt_sha256":"<seed-sha256>"}' \
+  --path "$WORKERCTL_DB" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')"
+```
+
+Record the manager request before CI-green evidence exists, then dispatch:
+
+```bash
+MANAGER_DECISION_ID="$(scripts/workerctl record-decision qa-ralph-loop-evidence-gate nudge \
+  --reason "Manager requests iteration 2 before CI-green evidence exists." \
+  --payload-json "{\"ralph_loop_run_id\":\"$RALPH_LOOP_RUN_ID\",\"requested_iteration\":2,\"correlation_id\":\"ralph-loop-missing-ci\"}" \
+  --path "$WORKERCTL_DB" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')"
+
+scripts/workerctl enqueue-continue-iteration qa-ralph-loop-evidence-gate \
+  --loop-run "$RALPH_LOOP_RUN_ID" \
+  --requested-iteration 2 \
+  --manager-decision-id "$MANAGER_DECISION_ID" \
+  --correlation-id ralph-loop-missing-ci \
+  --message "Run iteration 2." \
+  --json \
+  --path "$WORKERCTL_DB"
+
+scripts/workerctl dispatch \
+  --once \
+  --type continue_iteration \
+  --dispatcher-id qa-ralph-loop \
+  --json \
+  --path "$WORKERCTL_DB"
+```
+
+Required blocked result fields:
+
+- `state=blocked`
+- `reason=missing_ci_green_evidence`
+- `missing_evidence=["ci_green"]`
+- `delivered=false`
+- `target_worker_notified=false`
+- `current_iteration=1`
+- `max_iterations=3`
+- `requested_iteration=2`
+- no routed notification id
+
+Open the dashboard for the bound task and verify the Dispatch panel shows
+`continue_iteration`, `missing_ci_green_evidence`, `missing ci_green`,
+`iteration 1/3`, `requested 2`, `0 notifications`, `Inbox 0`, and
+`Pull inbox 0` for `ralph-loop-missing-ci`.
+
+Then record CI-green evidence as a satisfied criterion for iteration 1 and
+retry with a fresh command:
+
+```bash
+CI_GREEN_CRITERION_ID="$(scripts/workerctl criteria qa-ralph-loop-evidence-gate \
+  --add \
+  --criterion "Iteration 1 CI is green" \
+  --source manager_inferred \
+  --status accepted \
+  --path "$WORKERCTL_DB" | python3 -c 'import json,sys; print(json.load(sys.stdin)["affected_criterion"]["id"])')"
+
+scripts/workerctl criteria qa-ralph-loop-evidence-gate \
+  --satisfy "$CI_GREEN_CRITERION_ID" \
+  --proof "CI-green receipt recorded." \
+  --evidence-json "{\"correlation_id\":\"ralph-loop-ci-green\",\"evidence_type\":\"ci_green\",\"iteration\":1,\"ralph_loop_run_id\":\"$RALPH_LOOP_RUN_ID\",\"status\":\"green\"}" \
+  --path "$WORKERCTL_DB"
+
+MANAGER_DECISION_ID="$(scripts/workerctl record-decision qa-ralph-loop-evidence-gate nudge \
+  --reason "CI-green evidence exists; retry iteration 2." \
+  --payload-json "{\"ralph_loop_run_id\":\"$RALPH_LOOP_RUN_ID\",\"requested_iteration\":2,\"correlation_id\":\"ralph-loop-ci-allowed\"}" \
+  --path "$WORKERCTL_DB" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')"
+
+scripts/workerctl enqueue-continue-iteration qa-ralph-loop-evidence-gate \
+  --loop-run "$RALPH_LOOP_RUN_ID" \
+  --requested-iteration 2 \
+  --manager-decision-id "$MANAGER_DECISION_ID" \
+  --correlation-id ralph-loop-ci-allowed \
+  --message "Run iteration 2." \
+  --json \
+  --path "$WORKERCTL_DB"
+
+scripts/workerctl dispatch \
+  --once \
+  --type continue_iteration \
+  --dispatcher-id qa-ralph-loop \
+  --json \
+  --path "$WORKERCTL_DB"
+```
+
+Required retry evidence:
+
+- the fresh command is delivered
+- `routed_notifications` includes `signal_type=continue_iteration`
+- `worker-inbox qa-ralph-loop-evidence-gate --json` contains the iteration 2
+  message for no-tmux workers, or tmux send evidence exists for tmux workers
+- replay/audit preserve both `ralph-loop-missing-ci` and
+  `ralph-loop-ci-allowed`
 
 ## Permission Checks
 
@@ -414,6 +527,9 @@ Use this per-iteration evidence shape in the final report:
 - Iteration 2 appears as a fresh managed task after the clear receipt.
 - The max-iteration refusal drill shows `max_iterations_reached`, iteration
   `1/1`, `0 notifications`, `Inbox 0`, and `Pull inbox 0`.
+- The missing-evidence drill shows `missing_ci_green_evidence`,
+  `missing ci_green`, iteration `1/3`, `0 notifications`, `Inbox 0`, and
+  `Pull inbox 0`, then the retry after CI-green evidence is delivered.
 - Task state reaches `done` only after criteria and epilogue gates are closed.
 
 ## Cleanup

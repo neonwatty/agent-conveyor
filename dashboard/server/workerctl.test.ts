@@ -641,6 +641,62 @@ test("dispatch chains expose blocked Ralph-loop continuation policy", () => {
   assert.equal(inbox.pull_required_pending_count, 0);
 });
 
+test("dispatch chains expose missing Ralph-loop continuation evidence", () => {
+  const chains = dispatchChainEntries({
+    command_attempts: [
+      {
+        command_id: "cmd-missing-evidence",
+        dispatcher_id: "dispatch-local",
+        error: "missing_ci_green_evidence missing_evidence=ci_green current_iteration=1 max_iterations=3 requested_iteration=2",
+        id: 8,
+        result: {
+          current_iteration: 1,
+          delivered: false,
+          manager_decision_id: 13,
+          max_iterations: 3,
+          missing_evidence: ["ci_green"],
+          reason: "missing_ci_green_evidence",
+          requested_iteration: 2,
+          run_id: "run-ralph",
+          state: "blocked",
+          target_worker_notified: false,
+        },
+        side_effect_completed: false,
+        side_effect_started: false,
+        started_at: "2026-05-23T10:00:01Z",
+        state: "failed",
+      },
+    ],
+    commands: [
+      {
+        correlation_id: "ralph-loop-missing-ci",
+        created_at: "2026-05-23T10:00:00Z",
+        id: "cmd-missing-evidence",
+        state: "failed",
+        type: "continue_iteration",
+      },
+    ],
+    correlation_chains: [
+      {
+        attempt_ids: [8],
+        command_id: "cmd-missing-evidence",
+        command_state: "failed",
+        command_type: "continue_iteration",
+        correlation_id: "ralph-loop-missing-ci",
+        created_at: "2026-05-23T10:00:00Z",
+        manager_cycle_id: null,
+        manager_decision_id: 13,
+        routed_notification_ids: [],
+      },
+    ],
+    routed_notifications: [],
+  });
+
+  assert.equal(chains[0].blocked_policy?.reason, "missing_ci_green_evidence");
+  assert.deepEqual(chains[0].blocked_policy?.missing_evidence, ["ci_green"]);
+  assert.equal(chains[0].notification_count, 0);
+});
+
 test("summarizes dispatch inbox backlog and consumed evidence for dashboard display", () => {
   assert.deepEqual(dispatchInboxSummary({
     routed_notifications: [

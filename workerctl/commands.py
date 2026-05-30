@@ -1605,6 +1605,14 @@ def command_qa_plan(args: argparse.Namespace) -> int:
                     "correlation_id": "ralph-loop-max-block",
                     "purpose": "Link a max_iterations=1 negative guardrail drill, manager continuation request, blocked Dispatch attempt, dashboard row, and empty worker inbox proof.",
                 },
+                {
+                    "correlation_id": "ralph-loop-missing-ci",
+                    "purpose": "Link the missing ci_green evidence guardrail drill, blocked Dispatch attempt, dashboard row, and empty worker inbox proof.",
+                },
+                {
+                    "correlation_id": "ralph-loop-ci-allowed",
+                    "purpose": "Link the retry after recorded ci_green evidence to the delivered worker inbox item.",
+                },
             ],
             "evidence_template": {
                 "iteration": 1,
@@ -1655,6 +1663,8 @@ def command_qa_plan(args: argparse.Namespace) -> int:
                 "Dispatch remains a mechanical router/executor; the manager records readiness, merge, and continue/stop decisions",
                 "A max_iterations=1 guardrail drill blocks the manager's requested second iteration with reason max_iterations_reached before worker delivery",
                 "The blocked continuation creates 0 notifications, leaves worker Inbox 0 and Pull inbox 0, and records delivered=false plus target_worker_notified=false in command/replay/audit evidence",
+                "A required ci_green evidence guardrail drill blocks the manager's requested next iteration with reason missing_ci_green_evidence before worker delivery",
+                "After ci_green evidence is recorded as satisfied criterion evidence, a fresh continue_iteration retry is delivered to the worker inbox or tmux target",
             ],
             "steps": [
                 "Choose a disposable target repo, seed prompt, cleanup policy, CI provider expectation, and max iterations value. Max iterations must be at least 2; use max iterations 2 for the standard smoke.",
@@ -1684,6 +1694,11 @@ def command_qa_plan(args: argparse.Namespace) -> int:
                 "Run workerctl dispatch --once --type continue_iteration --dispatcher-id qa-ralph-loop --json and verify the processed item returns state=blocked, reason=max_iterations_reached, delivered=false, target_worker_notified=false, current_iteration=1, max_iterations=1, requested_iteration=2, and no routed notification id.",
                 "Open the dashboard for the bound task and verify the Dispatch panel shows continue_iteration, max_iterations_reached, iteration 1/1, 0 notifications, Inbox 0, and Pull inbox 0 for correlation ralph-loop-max-block.",
                 "Run workerctl replay, workerctl audit, workerctl commands --task --attempts, and workerctl worker-inbox for the negative drill; verify the manager-visible refusal receipt is present and the worker inbox remains empty.",
+                "Run the missing-evidence browser drill in a disposable task: create a Ralph-loop run with max_iterations=3, current_iteration=1, and required_before_continue=[\"ci_green\"], record a manager decision requesting iteration 2, then queue it with workerctl enqueue-continue-iteration <task> --loop-run <run-id> --requested-iteration 2 --message \"run iteration 2\" --manager-decision-id <id> --correlation-id ralph-loop-missing-ci.",
+                "Run workerctl dispatch --once --type continue_iteration --dispatcher-id qa-ralph-loop --json and verify the processed item returns state=blocked, reason=missing_ci_green_evidence, missing_evidence=[ci_green], delivered=false, target_worker_notified=false, current_iteration=1, max_iterations=3, requested_iteration=2, and no routed notification id.",
+                "Open the dashboard for the bound task and verify the Dispatch panel shows continue_iteration, missing_ci_green_evidence, missing ci_green, iteration 1/3, requested 2, 0 notifications, Inbox 0, and Pull inbox 0 for correlation ralph-loop-missing-ci.",
+                "Record ci_green as satisfied criterion evidence with ralph_loop_run_id=<run-id>, iteration=1, evidence_type=ci_green, status=green, and correlation_id=ralph-loop-ci-green; then enqueue a fresh continue_iteration command for requested iteration 2 with correlation ralph-loop-ci-allowed.",
+                "Run workerctl dispatch --once --type continue_iteration --dispatcher-id qa-ralph-loop --json again and verify the fresh retry is delivered, the routed notification signal_type is continue_iteration, and worker-inbox contains the iteration 2 message.",
             ],
         },
     }
@@ -1799,6 +1814,9 @@ def command_runs(args: argparse.Namespace) -> int:
                     current_iteration = int(metadata.get("current_iteration", 0))
                 except (TypeError, ValueError) as exc:
                     raise WorkerError("ralph_loop run metadata requires integer max_iterations and current_iteration") from exc
+                required_before_continue = metadata.get("required_before_continue")
+                if required_before_continue is not None and not isinstance(required_before_continue, list):
+                    raise WorkerError("ralph_loop run metadata required_before_continue must be a JSON array")
                 run_id = create_db_ralph_loop_run(
                     conn,
                     task_id=task["id"],
@@ -1806,6 +1824,7 @@ def command_runs(args: argparse.Namespace) -> int:
                     max_iterations=max_iterations,
                     current_iteration=current_iteration,
                     cleanup_policy=metadata.get("cleanup_policy"),
+                    required_before_continue=required_before_continue,
                     stop_conditions=metadata.get("stop_conditions") if isinstance(metadata.get("stop_conditions"), list) else None,
                     seed_prompt_sha256=metadata.get("seed_prompt_sha256"),
                 )
@@ -4661,6 +4680,57 @@ def _manager_decision_id_from_command(command: dict[str, Any]) -> int | None:
     return None
 
 
+def _ralph_loop_evidence_matches(
+    evidence: dict[str, Any],
+    *,
+    evidence_type: str,
+    iteration: int,
+    run_id: str,
+) -> bool:
+    return (
+        evidence.get("evidence_type") == evidence_type
+        and evidence.get("ralph_loop_run_id") == run_id
+        and evidence.get("iteration") == iteration
+    )
+
+
+def _missing_ralph_loop_evidence(
+    conn: Any,
+    *,
+    worker_db: Any,
+    task_id: str,
+    required_before_continue: list[str],
+    requested_iteration: int,
+    run_id: str,
+) -> list[str]:
+    if requested_iteration <= 1 or not required_before_continue:
+        return []
+    previous_iteration = requested_iteration - 1
+    criteria = worker_db.acceptance_criteria_for_task(conn, task_id=task_id, statuses=["satisfied"])
+    missing: list[str] = []
+    for evidence_type in required_before_continue:
+        if any(
+            _ralph_loop_evidence_matches(
+                criterion.get("evidence") or {},
+                evidence_type=evidence_type,
+                iteration=previous_iteration,
+                run_id=run_id,
+            )
+            for criterion in criteria
+        ):
+            continue
+        missing.append(evidence_type)
+    return missing
+
+
+def _missing_evidence_reason(missing_evidence: list[str]) -> str | None:
+    if not missing_evidence:
+        return None
+    if len(missing_evidence) == 1:
+        return f"missing_{missing_evidence[0]}_evidence"
+    return "missing_required_evidence"
+
+
 def _dispatch_ralph_loop_policy(conn: Any, *, worker_db: Any, command: dict[str, Any]) -> dict[str, Any] | None:
     if command.get("type") != "continue_iteration":
         return None
@@ -4676,15 +4746,30 @@ def _dispatch_ralph_loop_policy(conn: Any, *, worker_db: Any, command: dict[str,
     run = worker_db.ralph_loop_run(conn, run=run_id)
     if run["task_id"] != command.get("task_id"):
         raise WorkerError("continue_iteration Ralph loop run does not belong to command task")
+    required_before_continue = run.get("required_before_continue") or []
+    missing_evidence: list[str] = []
+    reason = (
+        "max_iterations_reached"
+        if run["current_iteration"] >= run["max_iterations"] or requested_iteration > run["max_iterations"]
+        else None
+    )
+    if reason is None:
+        missing_evidence = _missing_ralph_loop_evidence(
+            conn,
+            worker_db=worker_db,
+            task_id=command["task_id"],
+            required_before_continue=required_before_continue,
+            requested_iteration=requested_iteration,
+            run_id=run["id"],
+        )
+        reason = _missing_evidence_reason(missing_evidence)
     return {
         "cleanup_policy": run.get("cleanup_policy"),
         "current_iteration": run["current_iteration"],
         "max_iterations": run["max_iterations"],
-        "reason": (
-            "max_iterations_reached"
-            if run["current_iteration"] >= run["max_iterations"] or requested_iteration > run["max_iterations"]
-            else None
-        ),
+        "missing_evidence": missing_evidence,
+        "reason": reason,
+        "required_before_continue": required_before_continue,
         "requested_iteration": requested_iteration,
         "run_id": run["id"],
         "seed_prompt_sha256": run.get("seed_prompt_sha256"),
@@ -4712,13 +4797,17 @@ def _execute_dispatch_command(*, worker_db, worker_tmux, db_path: Path | None, c
             permission_check = _dispatch_required_permission_check(conn, worker_db=worker_db, command=command)
             delivery_mode = _dispatch_delivery_mode(conn, worker_db=worker_db, target_session_id=route["target_session_id"])
             loop_policy = _dispatch_ralph_loop_policy(conn, worker_db=worker_db, command=command)
-            if loop_policy is not None and loop_policy.get("reason") == "max_iterations_reached":
-                error = (
-                    "max_iterations_reached "
-                    f"current_iteration={loop_policy['current_iteration']} "
-                    f"max_iterations={loop_policy['max_iterations']} "
-                    f"requested_iteration={loop_policy['requested_iteration']}"
-                )
+            if loop_policy is not None and loop_policy.get("reason"):
+                reason = loop_policy["reason"]
+                error_parts = [
+                    str(reason),
+                    f"current_iteration={loop_policy['current_iteration']}",
+                    f"max_iterations={loop_policy['max_iterations']}",
+                    f"requested_iteration={loop_policy['requested_iteration']}",
+                ]
+                if loop_policy.get("missing_evidence"):
+                    error_parts.insert(1, f"missing_evidence={','.join(loop_policy['missing_evidence'])}")
+                error = " ".join(error_parts)
                 result = {
                     **base_result,
                     "cleanup_policy": loop_policy.get("cleanup_policy"),
@@ -4727,8 +4816,10 @@ def _execute_dispatch_command(*, worker_db, worker_tmux, db_path: Path | None, c
                     "delivery_mode": delivery_mode,
                     "manager_decision_id": _manager_decision_id_from_command(command),
                     "max_iterations": loop_policy["max_iterations"],
+                    "missing_evidence": loop_policy.get("missing_evidence") or [],
                     "notification_id": None,
-                    "reason": "max_iterations_reached",
+                    "reason": reason,
+                    "required_before_continue": loop_policy.get("required_before_continue") or [],
                     "requested_iteration": loop_policy["requested_iteration"],
                     "run_id": loop_policy["run_id"],
                     "side_effect_completed": False,
@@ -4782,6 +4873,7 @@ def _execute_dispatch_command(*, worker_db, worker_tmux, db_path: Path | None, c
                     "cleanup_policy": loop_policy.get("cleanup_policy"),
                     "current_iteration": loop_policy["current_iteration"],
                     "max_iterations": loop_policy["max_iterations"],
+                    "required_before_continue": loop_policy.get("required_before_continue") or [],
                     "requested_iteration": loop_policy["requested_iteration"],
                     "run_id": loop_policy["run_id"],
                     "seed_prompt_sha256": loop_policy.get("seed_prompt_sha256"),
