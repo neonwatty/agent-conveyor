@@ -184,6 +184,8 @@ def replay_entries(audit: dict[str, Any], *, role: str = "all", mode: str = "tim
             "command_id": attempt["command_id"],
             "correlation_id": attempt["correlation_id"],
             "dispatcher_id": attempt["dispatcher_id"],
+            "error": attempt.get("error"),
+            "result": attempt.get("result"),
             "side_effect_completed": attempt["side_effect_completed"],
             "side_effect_started": attempt["side_effect_started"],
             "state": attempt["state"],

@@ -1641,6 +1641,80 @@ def create_command(
     return command_id
 
 
+def create_ralph_loop_run(
+    conn: sqlite3.Connection,
+    *,
+    task_id: str,
+    max_iterations: int,
+    current_iteration: int = 0,
+    cleanup_policy: str | None = None,
+    stop_conditions: list[str] | None = None,
+    seed_prompt_sha256: str | None = None,
+    name: str | None = None,
+    run_id: str | None = None,
+    timestamp: str | None = None,
+) -> str:
+    if max_iterations < 1:
+        raise WorkerError("max_iterations must be at least 1")
+    if current_iteration < 0:
+        raise WorkerError("current_iteration must be non-negative")
+    if current_iteration > max_iterations:
+        raise WorkerError("current_iteration must not exceed max_iterations")
+    task = conn.execute(
+        "select id, name from tasks where id = ?",
+        (task_id,),
+    ).fetchone()
+    if task is None:
+        raise WorkerError(f"Unknown task id: {task_id}")
+    metadata: dict[str, Any] = {
+        "cleanup_policy": cleanup_policy,
+        "current_iteration": current_iteration,
+        "kind": "ralph_loop",
+        "max_iterations": max_iterations,
+        "policy_record": True,
+        "seed_prompt_sha256": seed_prompt_sha256,
+        "stop_conditions": stop_conditions or [],
+    }
+    now = timestamp or now_iso()
+    new_run_id = run_id or f"run-{uuid.uuid4()}"
+    run_name = name or f"{task['name']}-ralph-loop-{now.replace(':', '').replace('.', '-')}"
+    conn.execute(
+        """
+        insert into runs(id, task_id, name, purpose, status, started_at, ended_at, metadata_json)
+        values (?, ?, ?, 'ralph_loop', 'finished', ?, ?, ?)
+        """,
+        (
+            new_run_id,
+            task_id,
+            run_name,
+            now,
+            now,
+            _metadata_json(metadata, field="run metadata"),
+        ),
+    )
+    return new_run_id
+
+
+def ralph_loop_run(conn: sqlite3.Connection, *, run: str) -> dict[str, Any]:
+    record = run_row(conn, run=run)
+    metadata = record["metadata"]
+    if metadata.get("kind") != "ralph_loop" and record.get("purpose") != "ralph_loop":
+        raise WorkerError(f"Run {run!r} is not a Ralph loop run")
+    try:
+        current_iteration = int(metadata["current_iteration"])
+        max_iterations = int(metadata["max_iterations"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise WorkerError(f"Ralph loop run {run!r} is missing iteration policy") from exc
+    return {
+        **record,
+        "cleanup_policy": metadata.get("cleanup_policy"),
+        "current_iteration": current_iteration,
+        "max_iterations": max_iterations,
+        "seed_prompt_sha256": metadata.get("seed_prompt_sha256"),
+        "stop_conditions": metadata.get("stop_conditions") or [],
+    }
+
+
 def enqueue_notify_manager(
     conn: sqlite3.Connection,
     *,
@@ -1661,6 +1735,51 @@ def enqueue_notify_manager(
         command_type="notify_manager",
         task_id=task_id,
         payload={**(payload or {}), "message": message},
+        idempotency_key=idempotency_key,
+        correlation_id=correlation_id,
+        available_at=available_at,
+        max_attempts=max_attempts,
+        required_permission=required_permission,
+        timestamp=timestamp,
+    )
+
+
+def enqueue_continue_iteration(
+    conn: sqlite3.Connection,
+    *,
+    task_id: str,
+    message: str,
+    loop_run_id: str,
+    requested_iteration: int,
+    manager_decision_id: int | None = None,
+    required_permission: str | None = None,
+    idempotency_key: str | None = None,
+    correlation_id: str | None = None,
+    available_at: str | None = None,
+    max_attempts: int = 1,
+    timestamp: str | None = None,
+    payload: dict[str, Any] | None = None,
+) -> str:
+    if not message.strip():
+        raise ValueError("continue_iteration message must be non-empty")
+    if requested_iteration < 1:
+        raise WorkerError("requested_iteration must be at least 1")
+    manager_decision = {"decision_id": manager_decision_id} if manager_decision_id is not None else {}
+    command_payload: dict[str, Any] = {
+        **(payload or {}),
+        "message": message,
+        "ralph_loop": {
+            "run_id": loop_run_id,
+            "requested_iteration": requested_iteration,
+        },
+    }
+    if manager_decision:
+        command_payload["manager_decision"] = manager_decision
+    return create_command(
+        conn,
+        command_type="continue_iteration",
+        task_id=task_id,
+        payload=command_payload,
         idempotency_key=idempotency_key,
         correlation_id=correlation_id,
         available_at=available_at,

@@ -115,9 +115,85 @@ receipts, handoffs, and clear receipts can be connected after the run:
   clear receipt
 - `ralph-iter-2-replay`: same seed prompt replay, fresh-worker isolation proof,
   and iteration 2 first completion
+- `ralph-loop-max-block`: max-iteration refusal drill, manager continuation
+  request, blocked Dispatch attempt, dashboard row, and empty worker inbox proof
 
 When a command does not accept `--correlation-id`, include the marker in
 `--payload-json` under `ralph_loop.correlation_id`.
+
+## Max-Iteration Refusal Drill
+
+Run this negative browser QA case in a disposable bound task to prove Dispatch
+cuts off an invalid manager continuation before worker delivery. The fixture
+uses `max_iterations=1` and `current_iteration=1`, then asks for iteration 2.
+
+Create a Ralph-loop run record:
+
+```bash
+RALPH_LOOP_RUN_ID="$(scripts/workerctl runs \
+  --create qa-ralph-loop-guardrail \
+  --name qa-ralph-loop-max-block \
+  --purpose ralph_loop \
+  --metadata-json '{"kind":"ralph_loop","max_iterations":1,"current_iteration":1,"cleanup_policy":"clear","stop_conditions":["max_iterations"],"seed_prompt_sha256":"<seed-sha256>"}' \
+  --path "$WORKERCTL_DB" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')"
+```
+
+Record the manager request for one more iteration:
+
+```bash
+MANAGER_DECISION_ID="$(scripts/workerctl record-decision qa-ralph-loop-guardrail nudge \
+  --reason "Manager requests iteration 2 for max-iteration refusal QA." \
+  --payload-json "{\"ralph_loop_run_id\":\"$RALPH_LOOP_RUN_ID\",\"requested_iteration\":2,\"correlation_id\":\"ralph-loop-max-block\"}" \
+  --path "$WORKERCTL_DB" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')"
+```
+
+Queue and dispatch the continuation request:
+
+```bash
+scripts/workerctl enqueue-continue-iteration qa-ralph-loop-guardrail \
+  --loop-run "$RALPH_LOOP_RUN_ID" \
+  --requested-iteration 2 \
+  --manager-decision-id "$MANAGER_DECISION_ID" \
+  --correlation-id ralph-loop-max-block \
+  --message "Run iteration 2." \
+  --json \
+  --path "$WORKERCTL_DB"
+
+scripts/workerctl dispatch \
+  --once \
+  --type continue_iteration \
+  --dispatcher-id qa-ralph-loop \
+  --json \
+  --path "$WORKERCTL_DB"
+```
+
+Required dispatch result fields:
+
+- `state=blocked`
+- `reason=max_iterations_reached`
+- `delivered=false`
+- `target_worker_notified=false`
+- `current_iteration=1`
+- `max_iterations=1`
+- `requested_iteration=2`
+- no routed notification id
+
+Open the dashboard for the bound task and verify the Dispatch panel shows
+`continue_iteration`, `max_iterations_reached`, `iteration 1/1`,
+`0 notifications`, `Inbox 0`, and `Pull inbox 0` for
+`ralph-loop-max-block`.
+
+Then verify the non-delivery evidence from the CLI:
+
+```bash
+scripts/workerctl replay qa-ralph-loop-guardrail
+scripts/workerctl audit qa-ralph-loop-guardrail --json --path "$WORKERCTL_DB"
+scripts/workerctl commands --task qa-ralph-loop-guardrail --attempts --json --path "$WORKERCTL_DB"
+scripts/workerctl worker-inbox qa-ralph-loop-guardrail --json --path "$WORKERCTL_DB"
+```
+
+The manager-visible refusal receipt must appear in command output, replay, or
+audit. The worker inbox must remain empty for the blocked continuation.
 
 ## Permission Checks
 
@@ -336,6 +412,8 @@ Use this per-iteration evidence shape in the final report:
 - PR, CI, merge, handoff, and clear transitions appear in the Dispatch
   conversation, dashboard evidence, or audit output.
 - Iteration 2 appears as a fresh managed task after the clear receipt.
+- The max-iteration refusal drill shows `max_iterations_reached`, iteration
+  `1/1`, `0 notifications`, `Inbox 0`, and `Pull inbox 0`.
 - Task state reaches `done` only after criteria and epilogue gates are closed.
 
 ## Cleanup

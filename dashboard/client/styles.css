@@ -362,6 +362,11 @@ body {
   overflow-wrap: anywhere;
 }
 
+.dispatch-chain-list .dispatch-blocked-policy {
+  color: #8f3a35;
+  font-weight: 800;
+}
+
 .dispatch-conversation {
   display: grid;
   gap: 4px;

@@ -36,6 +36,7 @@ from workerctl.commands import (
     command_divergences,
     command_doctor,
     command_doctor_self,
+    command_enqueue_continue_iteration,
     command_enqueue_notify_manager,
     command_enqueue_nudge_worker,
     command_epilogue,
@@ -256,7 +257,7 @@ def build_parser() -> argparse.ArgumentParser:
     dispatch.add_argument("--dispatcher-id", default="dispatch-local", help="Stable id for this dispatcher process.")
     dispatch.add_argument(
         "--type",
-        choices=("notify_manager", "nudge_worker", "worker_task_complete"),
+        choices=("notify_manager", "nudge_worker", "continue_iteration", "worker_task_complete"),
         help="Restrict dispatch work by type.",
     )
     dispatch.add_argument("--dry-run", action="store_true", help="Report planned dispatch work without writing or sending.")
@@ -283,6 +284,19 @@ def build_parser() -> argparse.ArgumentParser:
     enqueue_nudge.add_argument("--json", action="store_true", help="Print JSON output.")
     enqueue_nudge.add_argument("--path", help="Override the workerctl database path.")
     enqueue_nudge.set_defaults(func=command_enqueue_nudge_worker)
+
+    enqueue_continue = subparsers.add_parser("enqueue-continue-iteration", help="Queue a Ralph-loop continue_iteration command for Dispatch.")
+    enqueue_continue.add_argument("task", help="Task name or ID.")
+    enqueue_continue.add_argument("--message", required=True, help="Message Dispatch should deliver to the bound worker.")
+    enqueue_continue.add_argument("--loop-run", required=True, help="Ralph-loop run id or name containing the continuation policy.")
+    enqueue_continue.add_argument("--requested-iteration", required=True, type=int, help="Iteration number the manager is requesting.")
+    enqueue_continue.add_argument("--manager-decision-id", type=int, help="Manager decision id that requested this continuation.")
+    enqueue_continue.add_argument("--correlation-id", help="Optional correlation id for dashboard/replay grouping.")
+    enqueue_continue.add_argument("--required-permission", help="Manager permission required before Dispatch may send.")
+    enqueue_continue.add_argument("--idempotency-key", help="Optional idempotency key for this queued command.")
+    enqueue_continue.add_argument("--json", action="store_true", help="Print JSON output.")
+    enqueue_continue.add_argument("--path", help="Override the workerctl database path.")
+    enqueue_continue.set_defaults(func=command_enqueue_continue_iteration)
 
     doctor = subparsers.add_parser("doctor", help="Check local dependencies and worker state.")
     doctor.add_argument("--cwd", default=str(INVOCATION_CWD), help="Target worker cwd to check.")

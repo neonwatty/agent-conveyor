@@ -255,6 +255,29 @@ class DatabaseTests(unittest.TestCase):
             self.assertIsNotNone(finished["ended_at"])
             self.assertIsNone(worker_db.active_run_for_task(conn, task_id=task_id))
 
+    def test_ralph_loop_run_does_not_replace_active_telemetry_run(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            task_id = worker_db.create_task(conn, name="qa-task", goal="Run QA.")
+            active_run_id = worker_db.create_run(conn, task_id=task_id, name="telemetry-run")
+
+            loop_run_id = worker_db.create_ralph_loop_run(
+                conn,
+                task_id=task_id,
+                name="loop-policy",
+                max_iterations=2,
+                current_iteration=1,
+                cleanup_policy="compact",
+                stop_conditions=["max_iterations"],
+            )
+
+            self.assertEqual(worker_db.active_run_for_task(conn, task_id=task_id)["id"], active_run_id)
+            loop_run = worker_db.ralph_loop_run(conn, run=loop_run_id)
+            self.assertEqual(loop_run["status"], "finished")
+            self.assertEqual(loop_run["current_iteration"], 1)
+            self.assertEqual(loop_run["max_iterations"], 2)
+            self.assertEqual(loop_run["cleanup_policy"], "compact")
+
     def test_command_claiming_creates_attempt_and_prevents_double_claim(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "workerctl.db"
@@ -1379,7 +1402,7 @@ class DispatchTests(unittest.TestCase):
     def test_dispatch_once_routes_worker_completion_to_bound_manager(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             conn, db_path = self.open_db(tmpdir)
-            worker_id, _manager_id = self.setup_bound_task(conn)
+            worker_id, manager_id = self.setup_bound_task(conn)
             event_id = self.insert_completion(
                 conn,
                 worker_id,
@@ -2423,6 +2446,302 @@ class DispatchTests(unittest.TestCase):
             self.assertEqual(notification["delivery_mode"], "pull_required")
             self.assertEqual(notification["signal_type"], "nudge_worker")
             self.assertEqual(consumed["payload"]["message"], "please continue")
+            send.assert_not_called()
+
+    def test_dispatch_blocks_continue_iteration_past_max_before_no_tmux_worker_inbox(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn, db_path = self.open_db(tmpdir)
+            worker_id, _manager_id = self.setup_bound_task(conn)
+            conn.execute("update sessions set tmux_session = null where id = ?", (worker_id,))
+            loop_run_id = worker_db.create_ralph_loop_run(
+                conn,
+                task_id="task-dispatch",
+                name="qa-loop",
+                max_iterations=1,
+                current_iteration=1,
+                cleanup_policy="clear",
+                stop_conditions=["max_iterations"],
+                seed_prompt_sha256="seed-hash",
+            )
+            decision_id = worker_db.insert_manager_decision(
+                conn,
+                task_id="task-dispatch",
+                manager_id=None,
+                decision="nudge",
+                reason="Request one more coverage loop.",
+                payload={"ralph_loop_run_id": loop_run_id, "requested_iteration": 2},
+            )
+            command_id = worker_db.enqueue_continue_iteration(
+                conn,
+                task_id="task-dispatch",
+                message="Run iteration 2.",
+                loop_run_id=loop_run_id,
+                requested_iteration=2,
+                manager_decision_id=decision_id,
+                correlation_id="ralph-loop-max-block",
+            )
+            conn.commit()
+
+            args = argparse.Namespace(
+                dispatcher_id="dispatch-test",
+                dry_run=False,
+                json=True,
+                limit=10,
+                once=True,
+                path=str(db_path),
+                type="continue_iteration",
+                watch=False,
+            )
+            with mock.patch.object(worker_tmux, "send_text_to_session") as send:
+                with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                    commands.command_dispatch(args)
+
+            payload = json.loads(stdout.getvalue())
+            processed = payload["processed"][0]
+            command_row = conn.execute(
+                "select state, result_json, error from commands where id = ?",
+                (command_id,),
+            ).fetchone()
+            attempt_row = conn.execute(
+                "select state, result_json, error, side_effect_started, side_effect_completed from command_attempts"
+            ).fetchone()
+
+            self.assertEqual(processed["state"], "blocked")
+            self.assertEqual(processed["reason"], "max_iterations_reached")
+            self.assertFalse(processed["delivered"])
+            self.assertFalse(processed["target_worker_notified"])
+            self.assertEqual(processed["current_iteration"], 1)
+            self.assertEqual(processed["max_iterations"], 1)
+            self.assertEqual(processed["requested_iteration"], 2)
+            self.assertEqual(processed["manager_decision_id"], decision_id)
+            self.assertEqual(command_row["state"], "failed")
+            self.assertIn("max_iterations_reached", command_row["error"])
+            self.assertEqual(attempt_row["state"], "failed")
+            self.assertIn("max_iterations_reached", attempt_row["error"])
+            attempt_result = json.loads(attempt_row["result_json"])
+            self.assertEqual(attempt_result["state"], "blocked")
+            self.assertFalse(attempt_result["target_worker_notified"])
+            self.assertEqual(attempt_row["side_effect_started"], 0)
+            self.assertEqual(attempt_row["side_effect_completed"], 0)
+            self.assertEqual(worker_db.routed_notifications(conn, task_id="task-dispatch"), [])
+            self.assertEqual(worker_db.session_inbox(conn, session_name="worker-session"), [])
+            send.assert_not_called()
+
+    def test_dispatch_blocks_continue_iteration_past_max_before_tmux_send(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn, db_path = self.open_db(tmpdir)
+            self.setup_bound_task(conn)
+            loop_run_id = worker_db.create_ralph_loop_run(
+                conn,
+                task_id="task-dispatch",
+                name="qa-loop",
+                max_iterations=1,
+                current_iteration=1,
+                cleanup_policy="clear",
+                stop_conditions=["max_iterations"],
+            )
+            worker_db.enqueue_continue_iteration(
+                conn,
+                task_id="task-dispatch",
+                message="Run iteration 2.",
+                loop_run_id=loop_run_id,
+                requested_iteration=2,
+                correlation_id="ralph-loop-max-block-tmux",
+            )
+            conn.commit()
+
+            args = argparse.Namespace(
+                dispatcher_id="dispatch-test",
+                dry_run=False,
+                json=True,
+                limit=10,
+                once=True,
+                path=str(db_path),
+                type="continue_iteration",
+                watch=False,
+            )
+            with mock.patch.object(worker_tmux, "send_text_to_session") as send:
+                with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                    commands.command_dispatch(args)
+
+            payload = json.loads(stdout.getvalue())
+            attempt_row = conn.execute(
+                "select state, side_effect_started, side_effect_completed from command_attempts"
+            ).fetchone()
+            self.assertEqual(payload["processed"][0]["state"], "blocked")
+            self.assertEqual(attempt_row["state"], "failed")
+            self.assertEqual(attempt_row["side_effect_started"], 0)
+            self.assertEqual(attempt_row["side_effect_completed"], 0)
+            self.assertEqual(worker_db.routed_notifications(conn, task_id="task-dispatch"), [])
+            send.assert_not_called()
+
+    def test_dispatch_blocks_requested_continue_iteration_over_max_before_tmux_send(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn, db_path = self.open_db(tmpdir)
+            self.setup_bound_task(conn)
+            loop_run_id = worker_db.create_ralph_loop_run(
+                conn,
+                task_id="task-dispatch",
+                name="qa-loop",
+                max_iterations=1,
+                current_iteration=0,
+                cleanup_policy="clear",
+                stop_conditions=["max_iterations"],
+            )
+            worker_db.enqueue_continue_iteration(
+                conn,
+                task_id="task-dispatch",
+                message="Run iteration 2.",
+                loop_run_id=loop_run_id,
+                requested_iteration=2,
+                correlation_id="ralph-loop-requested-over-max",
+            )
+            conn.commit()
+
+            args = argparse.Namespace(
+                dispatcher_id="dispatch-test",
+                dry_run=False,
+                json=True,
+                limit=10,
+                once=True,
+                path=str(db_path),
+                type="continue_iteration",
+                watch=False,
+            )
+            with mock.patch.object(worker_tmux, "send_text_to_session") as send:
+                with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                    commands.command_dispatch(args)
+
+            payload = json.loads(stdout.getvalue())
+            processed = payload["processed"][0]
+            attempt_row = conn.execute(
+                "select state, side_effect_started, side_effect_completed from command_attempts"
+            ).fetchone()
+            self.assertEqual(processed["state"], "blocked")
+            self.assertEqual(processed["reason"], "max_iterations_reached")
+            self.assertEqual(processed["current_iteration"], 0)
+            self.assertEqual(processed["max_iterations"], 1)
+            self.assertEqual(processed["requested_iteration"], 2)
+            self.assertFalse(processed["target_worker_notified"])
+            self.assertEqual(attempt_row["state"], "failed")
+            self.assertEqual(attempt_row["side_effect_started"], 0)
+            self.assertEqual(attempt_row["side_effect_completed"], 0)
+            self.assertEqual(worker_db.routed_notifications(conn, task_id="task-dispatch"), [])
+            send.assert_not_called()
+
+    def test_replay_exposes_blocked_continue_iteration_without_worker_notification(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn, db_path = self.open_db(tmpdir)
+            worker_id, _manager_id = self.setup_bound_task(conn)
+            conn.execute("update sessions set tmux_session = null where id = ?", (worker_id,))
+            loop_run_id = worker_db.create_ralph_loop_run(
+                conn,
+                task_id="task-dispatch",
+                name="qa-loop",
+                max_iterations=1,
+                current_iteration=1,
+                cleanup_policy="clear",
+                stop_conditions=["max_iterations"],
+            )
+            decision_id = worker_db.insert_manager_decision(
+                conn,
+                task_id="task-dispatch",
+                manager_id=None,
+                decision="nudge",
+                reason="Try another iteration.",
+                payload={"ralph_loop_run_id": loop_run_id, "requested_iteration": 2},
+            )
+            command_id = worker_db.enqueue_continue_iteration(
+                conn,
+                task_id="task-dispatch",
+                message="Run iteration 2.",
+                loop_run_id=loop_run_id,
+                requested_iteration=2,
+                manager_decision_id=decision_id,
+                correlation_id="ralph-loop-replay-block",
+            )
+            conn.commit()
+
+            args = argparse.Namespace(
+                dispatcher_id="dispatch-test",
+                dry_run=False,
+                json=True,
+                limit=10,
+                once=True,
+                path=str(db_path),
+                type="continue_iteration",
+                watch=False,
+            )
+            with mock.patch.object(worker_tmux, "send_text_to_session"):
+                with contextlib.redirect_stdout(io.StringIO()):
+                    commands.command_dispatch(args)
+
+            audit = worker_db.task_audit(conn, task="dispatch-task")
+            attempts = [attempt for attempt in audit["command_attempts"] if attempt["command_id"] == command_id]
+            self.assertEqual(len(attempts), 1)
+            self.assertEqual(attempts[0]["result"]["state"], "blocked")
+            self.assertEqual(attempts[0]["result"]["reason"], "max_iterations_reached")
+            self.assertEqual(attempts[0]["result"]["current_iteration"], 1)
+            self.assertEqual(audit["routed_notifications"], [])
+
+            entries = replay.replay_entries(audit)
+            attempt_entry = next(entry for entry in entries if entry["source"] == "command_attempts")
+            self.assertEqual(attempt_entry["details"]["result"]["state"], "blocked")
+            self.assertEqual(attempt_entry["details"]["result"]["reason"], "max_iterations_reached")
+            self.assertEqual(attempt_entry["details"]["result"]["max_iterations"], 1)
+            self.assertEqual(attempt_entry["details"]["error"].split()[0], "max_iterations_reached")
+
+    def test_dispatch_allows_continue_iteration_within_max_to_no_tmux_worker_inbox(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn, db_path = self.open_db(tmpdir)
+            worker_id, _manager_id = self.setup_bound_task(conn)
+            conn.execute("update sessions set tmux_session = null where id = ?", (worker_id,))
+            loop_run_id = worker_db.create_ralph_loop_run(
+                conn,
+                task_id="task-dispatch",
+                name="qa-loop",
+                max_iterations=1,
+                current_iteration=0,
+                cleanup_policy="clear",
+                stop_conditions=["max_iterations"],
+            )
+            command_id = worker_db.enqueue_continue_iteration(
+                conn,
+                task_id="task-dispatch",
+                message="Run iteration 1.",
+                loop_run_id=loop_run_id,
+                requested_iteration=1,
+                correlation_id="ralph-loop-allowed",
+            )
+            conn.commit()
+
+            args = argparse.Namespace(
+                dispatcher_id="dispatch-test",
+                dry_run=False,
+                json=True,
+                limit=10,
+                once=True,
+                path=str(db_path),
+                type="continue_iteration",
+                watch=False,
+            )
+            with mock.patch.object(worker_tmux, "send_text_to_session") as send:
+                with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                    commands.command_dispatch(args)
+
+            payload = json.loads(stdout.getvalue())
+            command_row = conn.execute("select state from commands where id = ?", (command_id,)).fetchone()
+            notification = worker_db.routed_notifications(conn, task_id="task-dispatch")[0]
+            consumed = worker_db.consume_next_session_inbox_item(conn, session_name="worker-session")
+
+            self.assertEqual(payload["processed"][0]["state"], "pull_required")
+            self.assertEqual(command_row["state"], "succeeded")
+            self.assertEqual(notification["command_id"], command_id)
+            self.assertEqual(notification["signal_type"], "continue_iteration")
+            self.assertEqual(notification["delivery_mode"], "pull_required")
+            self.assertEqual(notification["payload"]["ralph_loop"]["run_id"], loop_run_id)
+            self.assertEqual(notification["payload"]["ralph_loop"]["requested_iteration"], 1)
+            self.assertEqual(consumed["payload"]["message"], "Run iteration 1.")
             send.assert_not_called()
 
     def test_dispatch_command_send_runs_after_claim_transaction_commits(self):
@@ -3595,6 +3914,120 @@ class CliTests(unittest.TestCase):
             self.assertEqual(command["required_permission"], "communication.notify_operator")
             self.assertEqual(command["correlation_id"], payload["correlation_id"])
             self.assertEqual(json.loads(command["payload_json"])["message"], "inspect worker")
+
+    def test_enqueue_continue_iteration_cli_records_loop_policy_reference(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                task_id = worker_db.create_task(conn, name="enqueue-loop-task", goal="Queue loop work.")
+                loop_run_id = worker_db.create_ralph_loop_run(
+                    conn,
+                    task_id=task_id,
+                    name="enqueue-loop",
+                    max_iterations=2,
+                    current_iteration=1,
+                    cleanup_policy="compact",
+                )
+                decision_id = worker_db.insert_manager_decision(
+                    conn,
+                    task_id=task_id,
+                    manager_id=None,
+                    decision="nudge",
+                    reason="Continue the loop.",
+                    payload={"ralph_loop_run_id": loop_run_id, "requested_iteration": 2},
+                )
+                conn.commit()
+
+            proc = self.run_workerctl(
+                "enqueue-continue-iteration",
+                "enqueue-loop-task",
+                "--message",
+                "run iteration 2",
+                "--loop-run",
+                loop_run_id,
+                "--requested-iteration",
+                "2",
+                "--manager-decision-id",
+                str(decision_id),
+                "--correlation-id",
+                "ralph-loop-cli",
+                "--json",
+                "--path",
+                str(db_path),
+            )
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            payload = json.loads(proc.stdout)
+            self.assertEqual(payload["command_type"], "continue_iteration")
+            self.assertEqual(payload["loop_run_id"], loop_run_id)
+            self.assertEqual(payload["manager_decision_id"], decision_id)
+            with worker_db.connect(db_path) as conn:
+                command = conn.execute(
+                    "select type, correlation_id, payload_json from commands where id = ?",
+                    (payload["command_id"],),
+                ).fetchone()
+            command_payload = json.loads(command["payload_json"])
+            self.assertEqual(command["type"], "continue_iteration")
+            self.assertEqual(command["correlation_id"], "ralph-loop-cli")
+            self.assertEqual(command_payload["ralph_loop"]["run_id"], loop_run_id)
+            self.assertEqual(command_payload["ralph_loop"]["requested_iteration"], 2)
+            self.assertEqual(command_payload["manager_decision"]["decision_id"], decision_id)
+
+    def test_runs_cli_creates_ralph_loop_policy_when_active_telemetry_run_exists(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                task_id = worker_db.create_task(conn, name="loop-policy-task", goal="Run loops.")
+                active_run_id = worker_db.create_run(conn, task_id=task_id, name="pair-telemetry")
+                conn.commit()
+
+            proc = self.run_workerctl(
+                "runs",
+                "--create",
+                "loop-policy-task",
+                "--name",
+                "loop-policy",
+                "--purpose",
+                "ralph_loop",
+                "--metadata-json",
+                '{"kind":"ralph_loop","max_iterations":1,"current_iteration":1,"cleanup_policy":"clear","stop_conditions":["max_iterations"]}',
+                "--path",
+                str(db_path),
+            )
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            payload = json.loads(proc.stdout)
+            self.assertEqual(payload["purpose"], "ralph_loop")
+            self.assertEqual(payload["status"], "finished")
+            self.assertEqual(payload["metadata"]["max_iterations"], 1)
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                self.assertEqual(worker_db.active_run_for_task(conn, task_id=task_id)["id"], active_run_id)
+                self.assertEqual(worker_db.ralph_loop_run(conn, run=payload["id"])["current_iteration"], 1)
+
+    def test_runs_cli_rejects_ralph_loop_policy_without_max_iterations_cleanly(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                worker_db.create_task(conn, name="loop-policy-task", goal="Run loops.")
+                conn.commit()
+
+            proc = self.run_workerctl(
+                "runs",
+                "--create",
+                "loop-policy-task",
+                "--purpose",
+                "ralph_loop",
+                "--path",
+                str(db_path),
+            )
+
+            self.assertEqual(proc.returncode, 1)
+            self.assertIn("ralph_loop run metadata requires max_iterations", proc.stderr)
+            self.assertNotIn("Traceback", proc.stderr)
 
     def test_session_inbox_cli_consumes_next_item(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -5720,6 +6153,11 @@ Deferred follow-up criteria:
         self.assertTrue(any("gh pr checks" in step and "required jobs green" in step for step in payload["steps"]))
         self.assertTrue(any("telemetry task qa-ralph-loop-iter-1 --json" in step for step in payload["steps"]))
         self.assertTrue(any("dispatch_watch_heartbeat" in step and "--newest --limit 1" in step for step in payload["steps"]))
+        self.assertTrue(any("enqueue-continue-iteration" in step and "max_iterations=1" in step for step in payload["steps"]))
+        self.assertTrue(any("dispatch --once --type continue_iteration" in step for step in payload["steps"]))
+        self.assertTrue(any("dashboard" in step.lower() and "Inbox 0" in step for step in payload["steps"]))
+        self.assertTrue(any("max_iterations_reached" in observation for observation in payload["expected_observations"]))
+        self.assertTrue(any("0 notifications" in observation and "Pull inbox 0" in observation for observation in payload["expected_observations"]))
         self.assertFalse(any("workerctl nudge qa-ralph-loop-iter-1" in step for step in payload["steps"]))
         self.assertFalse(any("Have the worker open or prepare the PR" in step for step in payload["steps"]))
         self.assertFalse(any("telemetry searches" in step.lower() for step in payload["steps"]))
