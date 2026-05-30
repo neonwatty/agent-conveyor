@@ -40,6 +40,7 @@ from workerctl.db import mark_manager_seen
 from workerctl.db import mark_worker_state, upsert_worker
 from workerctl.db import active_run_for_task
 from workerctl.db import create_run as create_db_run
+from workerctl.db import create_ralph_loop_run as create_db_ralph_loop_run
 from workerctl.db import finish_run as finish_db_run
 from workerctl.db import run_row as db_run_row
 from workerctl.db import session_by_id
@@ -1600,6 +1601,10 @@ def command_qa_plan(args: argparse.Namespace) -> int:
                     "correlation_id": "ralph-iter-2-replay",
                     "purpose": "Link the same seed prompt replay, fresh-worker isolation proof, and iteration 2 first completion.",
                 },
+                {
+                    "correlation_id": "ralph-loop-max-block",
+                    "purpose": "Link a max_iterations=1 negative guardrail drill, manager continuation request, blocked Dispatch attempt, dashboard row, and empty worker inbox proof.",
+                },
             ],
             "evidence_template": {
                 "iteration": 1,
@@ -1648,6 +1653,8 @@ def command_qa_plan(args: argparse.Namespace) -> int:
                 "finish-task --require-criteria-audit --require-epilogue cannot succeed before accepted criteria and configured epilogues are satisfied; PR, CI, merge, handoff, and clear proof must be represented as accepted criteria and evidence receipts before final finish",
                 "Final evidence bundle includes replay, audit, telemetry summary, PR URLs, CI result, merge result, and worker clear receipt",
                 "Dispatch remains a mechanical router/executor; the manager records readiness, merge, and continue/stop decisions",
+                "A max_iterations=1 guardrail drill blocks the manager's requested second iteration with reason max_iterations_reached before worker delivery",
+                "The blocked continuation creates 0 notifications, leaves worker Inbox 0 and Pull inbox 0, and records delivered=false plus target_worker_notified=false in command/replay/audit evidence",
             ],
             "steps": [
                 "Choose a disposable target repo, seed prompt, cleanup policy, CI provider expectation, and max iterations value. Max iterations must be at least 2; use max iterations 2 for the standard smoke.",
@@ -1673,6 +1680,10 @@ def command_qa_plan(args: argparse.Namespace) -> int:
                 "Run workerctl audit, workerctl replay, workerctl commands --task, and workerctl telemetry --task for both iterations; verify dispatcher telemetry includes PR, CI monitor/fix, merge, handoff, and clear transitions, and use audit/replay/commands output for marker linkage.",
                 "Export final evidence with workerctl export-task for both iteration tasks and preserve telemetry summary artifacts, PR URLs, CI result, merge result, worker clear receipt, fresh-worker isolation proof, replay, and audit output.",
                 "Stop after max iterations or when the manager records no useful remaining work; run workerctl reconcile --stale-cycles-seconds 1 and git status --short --branch in the manager repo and target repo.",
+                "Run the negative max-iteration browser drill in a disposable task: create a Ralph-loop run with max_iterations=1 and current_iteration=1, record a manager decision requesting iteration 2, then queue it with workerctl enqueue-continue-iteration <task> --loop-run <run-id> --requested-iteration 2 --message \"run iteration 2\" --manager-decision-id <id> --correlation-id ralph-loop-max-block. Preserve max_iterations=1 in the receipt.",
+                "Run workerctl dispatch --once --type continue_iteration --dispatcher-id qa-ralph-loop --json and verify the processed item returns state=blocked, reason=max_iterations_reached, delivered=false, target_worker_notified=false, current_iteration=1, max_iterations=1, requested_iteration=2, and no routed notification id.",
+                "Open the dashboard for the bound task and verify the Dispatch panel shows continue_iteration, max_iterations_reached, iteration 1/1, 0 notifications, Inbox 0, and Pull inbox 0 for correlation ralph-loop-max-block.",
+                "Run workerctl replay, workerctl audit, workerctl commands --task --attempts, and workerctl worker-inbox for the negative drill; verify the manager-visible refusal receipt is present and the worker inbox remains empty.",
             ],
         },
     }
@@ -1779,13 +1790,33 @@ def command_runs(args: argparse.Namespace) -> int:
         initialize_database(conn)
         if args.create:
             task = db_task_row(conn, task=args.create)
-            run_id = create_db_run(
-                conn,
-                task_id=task["id"],
-                name=args.name,
-                purpose=args.purpose,
-                metadata=_json_arg(args.metadata_json, flag="--metadata-json"),
-            )
+            metadata = _json_arg(args.metadata_json, flag="--metadata-json")
+            if args.purpose == "ralph_loop" or metadata.get("kind") == "ralph_loop":
+                if "max_iterations" not in metadata:
+                    raise WorkerError("ralph_loop run metadata requires max_iterations")
+                try:
+                    max_iterations = int(metadata["max_iterations"])
+                    current_iteration = int(metadata.get("current_iteration", 0))
+                except (TypeError, ValueError) as exc:
+                    raise WorkerError("ralph_loop run metadata requires integer max_iterations and current_iteration") from exc
+                run_id = create_db_ralph_loop_run(
+                    conn,
+                    task_id=task["id"],
+                    name=args.name,
+                    max_iterations=max_iterations,
+                    current_iteration=current_iteration,
+                    cleanup_policy=metadata.get("cleanup_policy"),
+                    stop_conditions=metadata.get("stop_conditions") if isinstance(metadata.get("stop_conditions"), list) else None,
+                    seed_prompt_sha256=metadata.get("seed_prompt_sha256"),
+                )
+            else:
+                run_id = create_db_run(
+                    conn,
+                    task_id=task["id"],
+                    name=args.name,
+                    purpose=args.purpose,
+                    metadata=metadata,
+                )
             conn.commit()
             result = db_run_row(conn, run=run_id)
             print(json.dumps(result, indent=2, sort_keys=True))
@@ -4434,9 +4465,9 @@ def _dispatch_completion_message(*, worker_name: str, task_name: str) -> str:
 def _dispatch_command_types(dispatch_type: str | None) -> list[str]:
     if dispatch_type == "worker_task_complete":
         return []
-    if dispatch_type in {"notify_manager", "nudge_worker"}:
+    if dispatch_type in {"notify_manager", "nudge_worker", "continue_iteration"}:
         return [dispatch_type]
-    return ["notify_manager", "nudge_worker"]
+    return ["notify_manager", "nudge_worker", "continue_iteration"]
 
 
 def _print_enqueue_result(args: argparse.Namespace, result: dict[str, Any]) -> None:
@@ -4506,6 +4537,45 @@ def command_enqueue_nudge_worker(args: argparse.Namespace) -> int:
     return 0
 
 
+def command_enqueue_continue_iteration(args: argparse.Namespace) -> int:
+    from workerctl import db as worker_db
+
+    db_path = Path(args.path).expanduser().resolve() if getattr(args, "path", None) else None
+    with worker_db.connect(db_path) as conn:
+        worker_db.initialize_database(conn)
+        task = worker_db.task_row(conn, task=args.task)
+        loop_run = worker_db.ralph_loop_run(conn, run=args.loop_run)
+        if loop_run["task_id"] != task["id"]:
+            raise WorkerError("Ralph loop run does not belong to the requested task")
+        command_id = worker_db.enqueue_continue_iteration(
+            conn,
+            task_id=task["id"],
+            message=args.message,
+            loop_run_id=loop_run["id"],
+            requested_iteration=args.requested_iteration,
+            manager_decision_id=getattr(args, "manager_decision_id", None),
+            required_permission=getattr(args, "required_permission", None),
+            idempotency_key=getattr(args, "idempotency_key", None),
+            correlation_id=getattr(args, "correlation_id", None),
+        )
+        command = conn.execute("select correlation_id from commands where id = ?", (command_id,)).fetchone()
+        conn.commit()
+    _print_enqueue_result(
+        args,
+        {
+            "command_id": command_id,
+            "command_type": "continue_iteration",
+            "correlation_id": command["correlation_id"],
+            "loop_run_id": loop_run["id"],
+            "manager_decision_id": getattr(args, "manager_decision_id", None),
+            "requested_iteration": args.requested_iteration,
+            "required_permission": getattr(args, "required_permission", None),
+            "task": args.task,
+        },
+    )
+    return 0
+
+
 def _dispatch_command_text(command: dict[str, Any]) -> str:
     payload = command.get("payload") or {}
     text = payload.get("message", payload.get("text"))
@@ -4527,10 +4597,10 @@ def _dispatch_command_route(conn, command: dict[str, Any]) -> dict[str, Any]:
             "target_session_id": binding["manager_session_id"],
             "target_session_name": binding["manager_session_name"],
         }
-    if command["type"] == "nudge_worker":
+    if command["type"] in {"nudge_worker", "continue_iteration"}:
         return {
             **binding,
-            "signal_type": "nudge_worker",
+            "signal_type": command["type"],
             "source_session_id": binding["manager_session_id"],
             "source_session_name": binding["manager_session_name"],
             "target_session_id": binding["worker_session_id"],
@@ -4579,6 +4649,49 @@ def _dispatch_delivery_mode(conn: Any, *, worker_db: Any, target_session_id: str
     return "push" if target["tmux_session"] else "pull_required"
 
 
+def _manager_decision_id_from_command(command: dict[str, Any]) -> int | None:
+    manager_decision = (command.get("payload") or {}).get("manager_decision")
+    if not isinstance(manager_decision, dict):
+        return None
+    decision_id = manager_decision.get("decision_id") or manager_decision.get("id")
+    if isinstance(decision_id, int):
+        return decision_id
+    if isinstance(decision_id, str) and decision_id.isdigit():
+        return int(decision_id)
+    return None
+
+
+def _dispatch_ralph_loop_policy(conn: Any, *, worker_db: Any, command: dict[str, Any]) -> dict[str, Any] | None:
+    if command.get("type") != "continue_iteration":
+        return None
+    loop_payload = (command.get("payload") or {}).get("ralph_loop")
+    if not isinstance(loop_payload, dict):
+        raise WorkerError("continue_iteration command requires payload.ralph_loop")
+    run_id = loop_payload.get("run_id")
+    if not isinstance(run_id, str) or not run_id.strip():
+        raise WorkerError("continue_iteration command requires payload.ralph_loop.run_id")
+    requested_iteration = loop_payload.get("requested_iteration")
+    if not isinstance(requested_iteration, int):
+        raise WorkerError("continue_iteration command requires integer payload.ralph_loop.requested_iteration")
+    run = worker_db.ralph_loop_run(conn, run=run_id)
+    if run["task_id"] != command.get("task_id"):
+        raise WorkerError("continue_iteration Ralph loop run does not belong to command task")
+    return {
+        "cleanup_policy": run.get("cleanup_policy"),
+        "current_iteration": run["current_iteration"],
+        "max_iterations": run["max_iterations"],
+        "reason": (
+            "max_iterations_reached"
+            if run["current_iteration"] >= run["max_iterations"] or requested_iteration > run["max_iterations"]
+            else None
+        ),
+        "requested_iteration": requested_iteration,
+        "run_id": run["id"],
+        "seed_prompt_sha256": run.get("seed_prompt_sha256"),
+        "stop_conditions": run.get("stop_conditions") or [],
+    }
+
+
 def _execute_dispatch_command(*, worker_db, worker_tmux, db_path: Path | None, command: dict[str, Any], attempt: dict[str, Any], dispatcher_id: str) -> dict[str, Any]:
     notification_id = None
     prepared = False
@@ -4598,6 +4711,61 @@ def _execute_dispatch_command(*, worker_db, worker_tmux, db_path: Path | None, c
             route = _dispatch_command_route(conn, command)
             permission_check = _dispatch_required_permission_check(conn, worker_db=worker_db, command=command)
             delivery_mode = _dispatch_delivery_mode(conn, worker_db=worker_db, target_session_id=route["target_session_id"])
+            loop_policy = _dispatch_ralph_loop_policy(conn, worker_db=worker_db, command=command)
+            if loop_policy is not None and loop_policy.get("reason") == "max_iterations_reached":
+                error = (
+                    "max_iterations_reached "
+                    f"current_iteration={loop_policy['current_iteration']} "
+                    f"max_iterations={loop_policy['max_iterations']} "
+                    f"requested_iteration={loop_policy['requested_iteration']}"
+                )
+                result = {
+                    **base_result,
+                    "cleanup_policy": loop_policy.get("cleanup_policy"),
+                    "current_iteration": loop_policy["current_iteration"],
+                    "delivered": False,
+                    "delivery_mode": delivery_mode,
+                    "manager_decision_id": _manager_decision_id_from_command(command),
+                    "max_iterations": loop_policy["max_iterations"],
+                    "notification_id": None,
+                    "reason": "max_iterations_reached",
+                    "requested_iteration": loop_policy["requested_iteration"],
+                    "run_id": loop_policy["run_id"],
+                    "side_effect_completed": False,
+                    "side_effect_started": False,
+                    "state": "blocked",
+                    "target_session": route["target_session_name"],
+                    "target_worker_notified": False,
+                }
+                worker_db.emit_telemetry_event(
+                    conn,
+                    actor="dispatch",
+                    event_type="dispatch_command_blocked",
+                    severity="warning",
+                    task_id=command["task_id"],
+                    summary="Dispatch blocked continue_iteration command by Ralph loop policy.",
+                    correlation={
+                        "attempt_id": attempt["id"],
+                        "command_id": command["id"],
+                        "command_type": command["type"],
+                        "correlation_id": command["correlation_id"],
+                        "dispatcher_id": dispatcher_id,
+                        "manager_decision_id": result["manager_decision_id"],
+                        "run_id": loop_policy["run_id"],
+                    },
+                    attributes=result,
+                )
+                worker_db.finish_command_attempt(
+                    conn,
+                    attempt_id=attempt["id"],
+                    state="failed",
+                    result=result,
+                    error=error,
+                    side_effect_started=False,
+                    side_effect_completed=False,
+                )
+                conn.commit()
+                return result
             payload = {
                 "command_id": command["id"],
                 "command_type": command["type"],
@@ -4609,6 +4777,16 @@ def _execute_dispatch_command(*, worker_db, worker_tmux, db_path: Path | None, c
                 "target_session": route["target_session_name"],
                 "task_id": command["task_id"],
             }
+            if loop_policy is not None:
+                payload["ralph_loop"] = {
+                    "cleanup_policy": loop_policy.get("cleanup_policy"),
+                    "current_iteration": loop_policy["current_iteration"],
+                    "max_iterations": loop_policy["max_iterations"],
+                    "requested_iteration": loop_policy["requested_iteration"],
+                    "run_id": loop_policy["run_id"],
+                    "seed_prompt_sha256": loop_policy.get("seed_prompt_sha256"),
+                    "stop_conditions": loop_policy.get("stop_conditions") or [],
+                }
             notification_id = worker_db.insert_routed_notification(
                 conn,
                 task_id=command["task_id"],
@@ -5365,8 +5543,8 @@ def command_dispatch(args: argparse.Namespace) -> int:
 
     if getattr(args, "once", False) and getattr(args, "watch", False):
         raise WorkerError("dispatch accepts either --once or --watch, not both")
-    if getattr(args, "type", None) not in {None, "notify_manager", "nudge_worker", "worker_task_complete"}:
-        raise WorkerError("dispatch --type supports notify_manager, nudge_worker, and worker_task_complete")
+    if getattr(args, "type", None) not in {None, "notify_manager", "nudge_worker", "continue_iteration", "worker_task_complete"}:
+        raise WorkerError("dispatch --type supports notify_manager, nudge_worker, continue_iteration, and worker_task_complete")
     limit = max(1, int(getattr(args, "limit", 10) or 10))
     dispatcher_id = getattr(args, "dispatcher_id", None) or "dispatch-local"
     db_path = Path(args.path).expanduser().resolve() if getattr(args, "path", None) else None

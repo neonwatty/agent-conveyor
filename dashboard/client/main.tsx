@@ -44,6 +44,16 @@ type DispatchChain = {
     side_effect_started: boolean;
     state?: string;
   }>;
+  blocked_policy?: {
+    current_iteration?: number;
+    delivered?: boolean;
+    manager_decision_id?: number;
+    max_iterations?: number;
+    reason?: string;
+    requested_iteration?: number;
+    run_id?: string;
+    target_worker_notified?: boolean;
+  };
   command_id?: string | null;
   command_state?: string;
   command_type?: string;
@@ -274,6 +284,19 @@ function DispatchPanel({ observation }: { observation: Observation | null }) {
                 `${chain.notification_count} notification${chain.notification_count === 1 ? "" : "s"}`,
               ].filter(Boolean).join(" / ")}
             </small>
+            {chain.blocked_policy ? (
+              <small className="dispatch-blocked-policy">
+                {[
+                  chain.blocked_policy.reason,
+                  typeof chain.blocked_policy.current_iteration === "number" && typeof chain.blocked_policy.max_iterations === "number"
+                    ? `iteration ${chain.blocked_policy.current_iteration}/${chain.blocked_policy.max_iterations}`
+                    : null,
+                  typeof chain.blocked_policy.requested_iteration === "number" ? `requested ${chain.blocked_policy.requested_iteration}` : null,
+                  `delivered=${chain.blocked_policy.delivered === true}`,
+                  `target_worker_notified=${chain.blocked_policy.target_worker_notified === true}`,
+                ].filter(Boolean).join(" / ")}
+              </small>
+            ) : null}
             {chain.notifications?.length ? (
               <ul className="dispatch-notifications">
                 {chain.notifications.map((notification) => (

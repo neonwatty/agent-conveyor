@@ -33,6 +33,7 @@ Run this after unit tests and `scripts/live-smoke-repeat 3` pass.
 - [ ] `scripts/workerctl telemetry --run <run_id>` prints the telemetry timeline.
 - [ ] `scripts/workerctl telemetry --search manager --run <run_id>` finds manager-linked telemetry events.
 - [ ] `scripts/workerctl qa-plan dispatch-completion` prints the dispatch completion QA flow.
+- [ ] `scripts/workerctl qa-plan ralph-loop` includes the max-iteration refusal browser drill: `enqueue-continue-iteration`, `dispatch --once --type continue_iteration`, `max_iterations_reached`, `0 notifications`, `Inbox 0`, and `Pull inbox 0`.
 - [ ] `scripts/workerctl dispatch --watch --watch-iterations 2 --interval 0 --dispatcher-id qa-dispatch-watch --dry-run --json` emits bounded watch heartbeat telemetry with iteration, processed count, and dry-run fields.
 - [ ] `scripts/workerctl dispatch --once --type worker_task_complete --dispatcher-id qa-dispatch --json` routes a disposable worker completion to the bound manager without Dispatch deciding task success.
 - [ ] `scripts/workerctl audit <task> --json` includes `routed_notifications` and `correlation_chains` for the dispatch completion.

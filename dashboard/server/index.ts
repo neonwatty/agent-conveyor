@@ -130,6 +130,7 @@ type AuditCommandAttempt = {
   error?: string | null;
   finished_at?: string | null;
   id?: number;
+  result?: Record<string, unknown> | null;
   side_effect_completed?: boolean;
   side_effect_started?: boolean;
   started_at?: string;
@@ -331,6 +332,29 @@ function commandLabel(command: AuditCommand | undefined, commandId: string | und
   return id ? `${type} ${id}` : type;
 }
 
+function blockedPolicySummary(attempts: AuditCommandAttempt[]) {
+  const result = attempts
+    .map((attempt) => attempt.result)
+    .find((candidate): candidate is Record<string, unknown> => (
+      Boolean(candidate)
+      && candidate?.state === "blocked"
+      && typeof candidate.reason === "string"
+    ));
+  if (!result) {
+    return undefined;
+  }
+  return {
+    current_iteration: typeof result.current_iteration === "number" ? result.current_iteration : undefined,
+    delivered: typeof result.delivered === "boolean" ? result.delivered : undefined,
+    manager_decision_id: typeof result.manager_decision_id === "number" ? result.manager_decision_id : undefined,
+    max_iterations: typeof result.max_iterations === "number" ? result.max_iterations : undefined,
+    reason: String(result.reason),
+    requested_iteration: typeof result.requested_iteration === "number" ? result.requested_iteration : undefined,
+    run_id: typeof result.run_id === "string" ? result.run_id : undefined,
+    target_worker_notified: typeof result.target_worker_notified === "boolean" ? result.target_worker_notified : undefined,
+  };
+}
+
 function notificationLabel(notification: AuditRoutedNotification | undefined, fallbackType: string | undefined): string {
   const signalType = String(notification?.signal_type || fallbackType || "notification");
   return notification?.id ? `${signalType} notification #${notification.id}` : signalType;
@@ -477,10 +501,12 @@ export function dispatchChainEntries(audit: AuditResult | null) {
         dispatcher_id: attempt.dispatcher_id,
         error: attempt.error,
         id: attempt.id,
+        ...(attempt.result ? { result: attempt.result } : {}),
         side_effect_completed: Boolean(attempt.side_effect_completed),
         side_effect_started: Boolean(attempt.side_effect_started),
         state: attempt.state,
       })),
+      blocked_policy: blockedPolicySummary(attempts),
       command_id: chain.command_id,
       command_state: chain.command_state || command?.state || (typeof primaryNotification?.state === "string" ? primaryNotification.state : undefined),
       command_type: chain.command_type || command?.type || (typeof primaryNotification?.signal_type === "string" ? primaryNotification.signal_type : undefined),

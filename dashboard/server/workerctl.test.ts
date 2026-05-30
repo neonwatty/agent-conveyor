@@ -578,6 +578,69 @@ test("dispatch chains include inbox delivery and consumption evidence", () => {
   );
 });
 
+test("dispatch chains expose blocked Ralph-loop continuation policy", () => {
+  const chains = dispatchChainEntries({
+    command_attempts: [
+      {
+        command_id: "cmd-blocked",
+        dispatcher_id: "dispatch-local",
+        error: "max_iterations_reached current_iteration=1 max_iterations=1 requested_iteration=2",
+        id: 7,
+        result: {
+          current_iteration: 1,
+          delivered: false,
+          manager_decision_id: 12,
+          max_iterations: 1,
+          reason: "max_iterations_reached",
+          requested_iteration: 2,
+          run_id: "run-ralph",
+          state: "blocked",
+          target_worker_notified: false,
+        },
+        side_effect_completed: false,
+        side_effect_started: false,
+        started_at: "2026-05-23T10:00:01Z",
+        state: "failed",
+      },
+    ],
+    commands: [
+      {
+        correlation_id: "ralph-loop-max-block",
+        created_at: "2026-05-23T10:00:00Z",
+        id: "cmd-blocked",
+        state: "failed",
+        type: "continue_iteration",
+      },
+    ],
+    correlation_chains: [
+      {
+        attempt_ids: [7],
+        command_id: "cmd-blocked",
+        command_state: "failed",
+        command_type: "continue_iteration",
+        correlation_id: "ralph-loop-max-block",
+        created_at: "2026-05-23T10:00:00Z",
+        manager_cycle_id: null,
+        manager_decision_id: 12,
+        routed_notification_ids: [],
+      },
+    ],
+    routed_notifications: [],
+  });
+  const inbox = dispatchInboxSummary({ routed_notifications: [] });
+
+  assert.equal(chains[0].command_type, "continue_iteration");
+  assert.equal(chains[0].notification_count, 0);
+  assert.equal(chains[0].manager_decision_id, 12);
+  assert.equal(chains[0].blocked_policy?.reason, "max_iterations_reached");
+  assert.equal(chains[0].blocked_policy?.current_iteration, 1);
+  assert.equal(chains[0].blocked_policy?.max_iterations, 1);
+  assert.equal(chains[0].blocked_policy?.requested_iteration, 2);
+  assert.equal(chains[0].blocked_policy?.target_worker_notified, false);
+  assert.equal(inbox.pending_count, 0);
+  assert.equal(inbox.pull_required_pending_count, 0);
+});
+
 test("summarizes dispatch inbox backlog and consumed evidence for dashboard display", () => {
   assert.deepEqual(dispatchInboxSummary({
     routed_notifications: [

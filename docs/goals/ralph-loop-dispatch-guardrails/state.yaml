@@ -1,0 +1,355 @@
+# GoalBuddy v2 state.yaml
+# Board truth lives here. goal.md is the editable charter; notes/ holds long receipts only.
+
+version: 2
+
+goal:
+  title: "Ralph Loop Dispatch Guardrails"
+  slug: "ralph-loop-dispatch-guardrails"
+  kind: specific
+  tranche: "Implement dispatcher-enforced Ralph-loop continuation policy so invalid manager continue requests never reach workers, then prove it in browser QA."
+  status: active
+  oracle:
+    signal: "Browser QA proves a max_iterations=1 Ralph loop blocks a manager-requested second iteration before worker delivery and exposes the refusal in operator surfaces."
+    cadence: "after Scout, after implementation, after browser QA, and at final audit"
+    final_proof: "Merged PR with backend tests, dashboard/browser QA evidence, replay/audit evidence, clean review, and final receipt mapping max-iteration block to no worker delivery."
+  intake:
+    original_request: "Plan this out with GoalBuddy prep including a new browser QA test case with precise acceptance criteria."
+    interpreted_outcome: "Dispatch enforces preset Ralph-loop limits so invalid manager continuation requests are blocked before reaching workers, with browser-visible proof."
+    input_shape: specific
+    audience: "workerctl operators, Ralph-loop managers, Codex workers, Dispatch maintainers, and dashboard QA reviewers"
+    authority: requested
+    proof_type: "test + demo + review"
+    completion_proof: "A browser-backed QA walkthrough plus automated tests prove max-iteration refusal, no worker delivery, manager refusal receipt, and dashboard/replay/audit visibility."
+    likely_misfire: "Only documenting manager behavior or adding a dashboard badge while Dispatch still delivers invalid continuation commands."
+    blind_spots_considered:
+      - "Dispatch must enforce mechanical policy only, not judge task success or PR quality."
+      - "The manager needs a refusal receipt; silent drops are not acceptable."
+      - "Both tmux push delivery and Codex app worker-inbox delivery must be blocked by the same policy gate."
+      - "Browser QA must prove the negative: no worker inbox item and no tmux send for a blocked continuation."
+      - "Any future operator override must be explicit and permission-gated, not implicit manager authority."
+    existing_plan_facts:
+      - "Ralph-loop runs use seed prompts, iterations, correlation ids, manager decisions, PR/CI/merge evidence, handoff, clear/compact policy, and stop conditions."
+      - "Dispatch already processes durable commands and routed notifications and records command attempts."
+      - "Session inbox supports no-tmux Codex app delivery through manager-inbox and worker-inbox."
+      - "Dashboard/replay/audit already expose dispatch chains, inbox delivery, and command attempt evidence."
+
+rules:
+  pm_owns_state: true
+  one_active_task: true
+  max_write_workers: 1
+  no_implementation_without_worker_or_pm_task: true
+  no_completion_without_judge_or_pm_audit: true
+  planning_is_not_completion: true
+  queued_required_worker_blocks_completion: true
+  continuous_until_full_outcome: true
+  missing_input_or_credentials_do_not_stop_goal: true
+  preserve_and_validate_existing_plan: true
+  intake_misfire_must_be_audited: true
+  goal_pressure_requires_oracle: true
+  no_completion_on_weak_proof: true
+  slice_policy:
+    max_consecutive_tiny_tasks: 2
+    prefer_vertical_slices: true
+    judge_picks_largest_safe_slice: true
+    worker_completes_whole_slice: true
+
+agents:
+  scout: installed
+  worker: installed
+  judge: installed
+
+visual_board:
+  selected: local
+  local:
+    status: starting
+    url: "http://goalbuddy.localhost:41737/ralph-loop-dispatch-guardrails/"
+    command: "npx goalbuddy board /Users/neonwatty/Desktop/codex-terminal-manager/docs/goals/ralph-loop-dispatch-guardrails"
+
+active_task: T005
+
+tasks:
+  - id: T001
+    type: scout
+    assignee: Scout
+    status: done
+    reasoning_hint: low
+    objective: "Map the current Ralph-loop, Dispatch command, routed notification, loop policy, dashboard, replay, and browser QA surfaces relevant to blocking invalid continuation before worker delivery."
+    inputs:
+      - "docs/qa/ralph-loop.md"
+      - "workerctl qa-plan ralph-loop output"
+      - "workerctl command and dispatch code paths"
+      - "workerctl routed_notifications/session inbox code paths"
+      - "dashboard server/client dispatch evidence surfaces"
+      - "existing dashboard/browser QA patterns"
+    constraints:
+      - "Read-only."
+      - "Do not implement."
+      - "Cite exact files and tests."
+      - "Separate current behavior from proposed loop policy behavior."
+      - "Identify how to prove no worker delivery for both tmux and no-tmux workers."
+    expected_output:
+      - "Current surfaces and gaps."
+      - "Candidate data model or reuse path."
+      - "Dispatch interception point for continuation commands."
+      - "Dashboard/browser QA path and exact observable assertions."
+      - "Recommended red tests for Worker."
+    receipt:
+      result: done
+      summary: "Mapped current Ralph-loop docs, dispatch routing, command attempts, routed notifications, session inbox, replay, dashboard, and test surfaces; identified the pre-notification dispatch gate for blocking max-iteration continuation before worker delivery."
+      evidence:
+        - "Detailed receipt: docs/goals/ralph-loop-dispatch-guardrails/notes/T001-scout-map.md"
+        - "workerctl/commands.py:4582 resolves command text, route, permission, and delivery mode before workerctl/commands.py:4612 inserts a routed notification."
+        - "workerctl/commands.py:4648 records no-tmux delivery as pull_required through routed_notifications/session inbox; workerctl/commands.py:4696 starts tmux side effects only after notification insertion."
+        - "tests/test_workerctl.py:2381 proves no-tmux worker pull inbox delivery; tests/test_workerctl.py:2579 proves invalid payloads fail before routed notification or tmux send."
+        - "dashboard/server/index.ts:454 and dashboard/client/main.tsx:203 expose dispatch chains, errors, notification counts, and inbox counts suitable for browser QA."
+      recommended_next: "T002 should approve a vertical slice with a durable loop run, first-class continue_iteration command, pre-notification max-iteration block, replay/dashboard evidence, and browser-visible zero-notification/zero-inbox assertions."
+
+  - id: T002
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Choose the smallest coherent implementation slice that enforces max-iteration continuation blocking and proves it in browser QA."
+    inputs:
+      - "T001 Scout receipt"
+      - "docs/goals/ralph-loop-dispatch-guardrails/goal.md"
+    constraints:
+      - "Read-only."
+      - "Reject designs that make Dispatch decide task success, PR quality, or strategic continuation."
+      - "Prefer reusing existing commands, command_attempts, routed_notifications, manager decisions, and dashboard surfaces where safe."
+      - "Require a browser QA test case with precise assertions."
+    expected_output:
+      - "Approved implementation plan or scoped rejection."
+      - "Exact Worker objective."
+      - "Allowed files."
+      - "Red tests and verification commands."
+      - "Browser QA scenario with measurable assertions."
+      - "Stop conditions."
+    receipt:
+      result: done
+      decision: approved
+      summary: "Approved a vertical max-iteration guardrail slice: durable Ralph-loop run state, first-class continue_iteration command, pre-notification Dispatch block, replay/audit/dashboard evidence, and browser QA proving no worker delivery."
+      evidence:
+        - "Detailed receipt: docs/goals/ralph-loop-dispatch-guardrails/notes/T002-judge-slice.md"
+        - "Scope limited to explicit numeric policy current_iteration >= max_iterations; broader CI/merge/handoff/cleanup policy gates are deferred."
+        - "Worker must block before routed_notifications insertion and before tmux send, while preserving existing nudge_worker behavior."
+        - "Browser QA must assert continue_iteration, max_iterations_reached, 1/1 or current/max details, 0 notifications, Inbox 0, and Pull inbox 0."
+      allowed_files:
+        - "workerctl/db.py"
+        - "workerctl/cli.py"
+        - "workerctl/commands.py"
+        - "workerctl/replay.py"
+        - "dashboard/server/index.ts"
+        - "dashboard/client/main.tsx"
+        - "dashboard/server/workerctl.test.ts"
+        - "tests/test_workerctl.py"
+        - "docs/qa/ralph-loop.md"
+        - "docs/manual-qa-checklist.md"
+        - "docs/goals/ralph-loop-dispatch-guardrails/notes/**"
+        - "docs/goals/ralph-loop-dispatch-guardrails/state.yaml"
+      verify:
+        - "python3 -m unittest tests.test_workerctl.DispatchTests -v"
+        - "python3 -m unittest tests.test_workerctl -v"
+        - "npm test"
+        - "npm run build"
+        - "Browser or Playwright walkthrough against a local dashboard fixture"
+        - "git diff --check"
+
+  - id: T003
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "Implement dispatcher-enforced max-iteration blocking for Ralph-loop continuation commands and expose the refusal in CLI/replay/audit/dashboard surfaces."
+    inputs:
+      - "T002 Judge receipt"
+    allowed_files:
+      - "workerctl/db.py"
+      - "workerctl/cli.py"
+      - "workerctl/commands.py"
+      - "workerctl/replay.py"
+      - "workerctl/dashboard.py"
+      - "dashboard/**"
+      - "tests/test_workerctl.py"
+      - "tests/**"
+      - "README.md"
+      - "docs/qa/ralph-loop.md"
+      - "docs/manual-qa-checklist.md"
+    verify:
+      - "Focused red/green tests selected by T002."
+      - "python3 -m unittest tests.test_workerctl -v"
+      - "npm test"
+      - "npm run build"
+      - "git diff --check"
+    stop_if:
+      - "Implementation requires Dispatch to decide task success, PR quality, or strategic next work."
+      - "Blocking cannot happen before both tmux push and worker-inbox notification creation."
+      - "No reliable way is found to prove no worker delivery."
+      - "Required files fall outside allowed_files."
+      - "Verification fails twice for the same unknown reason."
+    expected_output:
+      - "Durable loop policy state or equivalent validated reuse."
+      - "Manager continuation request command/decision linkage."
+      - "Dispatch blocks max-iteration continuation before delivery."
+      - "Manager-visible refusal receipt."
+      - "Replay/audit/dashboard blocked continuation evidence."
+      - "Tests covering blocked and allowed continuation paths."
+    receipt:
+      result: done
+      summary: "Implemented durable Ralph-loop max-iteration guardrails: continue_iteration commands route through Dispatch, max_iterations blocks happen before worker delivery, refusal evidence appears in command output, replay/audit, and dashboard data."
+      changed_files:
+        - "workerctl/db.py"
+        - "workerctl/commands.py"
+        - "workerctl/cli.py"
+        - "workerctl/replay.py"
+        - "dashboard/server/index.ts"
+        - "dashboard/client/main.tsx"
+        - "dashboard/client/styles.css"
+        - "dashboard/server/workerctl.test.ts"
+        - "tests/test_workerctl.py"
+        - "docs/qa/ralph-loop.md"
+        - "docs/manual-qa-checklist.md"
+      commands:
+        - cmd: "python3 -m unittest tests.test_workerctl.DispatchTests tests.test_workerctl.CliTests.test_enqueue_continue_iteration_cli_records_loop_policy_reference tests.test_workerctl.CliTests.test_qa_plan_ralph_loop_outputs_managed_delivery_loop tests.test_workerctl.CliTests.test_qa_plan_ralph_loop_includes_correlation_and_receipt_template -v"
+          status: pass
+          summary: "Focused Dispatch/CLI/QA-plan tests passed."
+        - cmd: "python3 -m unittest tests.test_workerctl -v"
+          status: pass
+          summary: "Full Python suite passed: 505 tests."
+        - cmd: "npm test"
+          status: pass
+          summary: "Dashboard/server test suite passed: 39 tests."
+        - cmd: "npm run build"
+          status: pass
+          summary: "TypeScript and Vite build passed."
+        - cmd: "git diff --check"
+          status: pass
+      evidence:
+        - "Detailed receipt: docs/goals/ralph-loop-dispatch-guardrails/notes/T003-worker-implementation.md"
+        - "Blocked no-tmux worker path creates no routed notification and empty worker inbox."
+        - "Blocked tmux worker path starts no side effect and does not call tmux send."
+        - "Allowed no-tmux continuation still creates a pull_required worker inbox item."
+        - "Replay command attempts now include blocked result/error."
+        - "Dashboard chain entries expose blocked_policy and the client renders max_iterations_reached with iteration 1/1."
+      verify:
+        - "python3 -m unittest tests.test_workerctl -v: passed, 505 tests"
+        - "npm test: passed, 39 tests"
+        - "npm run build: passed"
+        - "git diff --check: passed"
+
+  - id: T004
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "Add and run the browser QA test case for max-iteration continuation blocking."
+    inputs:
+      - "T003 Worker receipt"
+      - "Browser QA acceptance criteria from T002"
+    allowed_files:
+      - "dashboard/**"
+      - "tests/**"
+      - "docs/qa/ralph-loop.md"
+      - "docs/manual-qa-checklist.md"
+      - "docs/goals/ralph-loop-dispatch-guardrails/notes/**"
+      - "docs/goals/ralph-loop-dispatch-guardrails/state.yaml"
+    verify:
+      - "Browser or Playwright walkthrough against a local dashboard showing max_iterations=1 block."
+      - "Dashboard tests/build if changed."
+      - "git diff --check"
+    stop_if:
+      - "The dashboard cannot show loop guardrail evidence without additional backend work."
+      - "The browser test cannot prove worker non-delivery."
+      - "Local browser automation is unavailable; record blocker and produce a manual browser QA script instead."
+    expected_output:
+      - "Browser QA receipt with URL/screenshots or Playwright trace details."
+      - "Assertion that blocked continuation is visible with reason max_iterations_reached."
+      - "Assertion that worker inbox pending count remains zero for the blocked continuation."
+      - "Assertion that manager sees a refusal receipt."
+    receipt:
+      result: done
+      summary: "Ran Playwright browser QA against a local dashboard fixture proving max_iterations=1 blocks requested iteration 2 with visible zero-notification and zero-inbox evidence."
+      changed_files:
+        - "docs/goals/ralph-loop-dispatch-guardrails/notes/T004-browser-qa.md"
+        - "docs/goals/ralph-loop-dispatch-guardrails/state.yaml"
+      commands:
+        - cmd: "scripts/workerctl dispatch --once --type continue_iteration --dispatcher-id qa-ralph-loop --json --path /tmp/workerctl-ralph-loop-browser-qa.db"
+          status: pass
+          summary: "Processed one blocked continue_iteration with max_iterations_reached and notification_id=null."
+        - cmd: "npm run dashboard -- --host 127.0.0.1 --port 8798 --task qa-ralph-loop-guardrail --db-path /tmp/workerctl-ralph-loop-browser-qa.db --workerctl-path scripts/workerctl"
+          status: pass
+          summary: "Started local dashboard for browser QA; server was stopped after assertions."
+        - cmd: "Playwright browser assertions against http://127.0.0.1:8798/"
+          status: pass
+          summary: "Dispatch panel contained continue_iteration, max_iterations_reached, iteration 1/1, 0 notifications, Inbox 0, Pull inbox 0, and target_worker_notified=false."
+        - cmd: "scripts/workerctl audit qa-ralph-loop-guardrail --json --path /tmp/workerctl-ralph-loop-browser-qa.db"
+          status: pass
+          summary: "Audit showed blocked command result and routed_notifications_count=0."
+        - cmd: "scripts/workerctl worker-inbox qa-ralph-loop-guardrail --json --path /tmp/workerctl-ralph-loop-browser-qa.db"
+          status: pass
+          summary: "Worker inbox returned items=[]."
+      evidence:
+        - "Detailed receipt: docs/goals/ralph-loop-dispatch-guardrails/notes/T004-browser-qa.md"
+        - "Browser Dispatch panel contained continue_iteration, max_iterations_reached, iteration 1/1, 0 notifications, Inbox 0, Pull inbox 0, and target_worker_notified=false."
+        - "Audit showed failed continue_iteration command result state=blocked and routed_notifications_count=0."
+        - "worker-inbox for the bound task returned items=[] after the blocked dispatch."
+
+  - id: T005
+    type: pm
+    assignee: PM
+    status: active
+    reasoning_hint: medium
+    objective: "Run final verification, PR review toolkit, publish the PR, and merge once green if execution has been approved."
+    inputs:
+      - "T003/T004 receipts"
+    constraints:
+      - "Do not publish with failing tests or actionable review findings."
+      - "Do not merge before GitHub checks are green."
+      - "Record PR URL, CI status, and merge receipt."
+    expected_output:
+      - "Passing full local verification."
+      - "Clean PR review toolkit result or fixed findings."
+      - "PR URL and merge receipt if green."
+    receipt: null
+
+  - id: T999
+    type: judge
+    assignee: Judge
+    status: queued
+    reasoning_hint: high
+    objective: "Audit whether the dispatcher-enforced Ralph-loop guardrail workflow satisfies the original request."
+    inputs:
+      - "All done task receipts"
+      - "Last verification output"
+      - "Browser QA evidence"
+      - "Current diff or merged PR receipt"
+    constraints:
+      - "Do not implement."
+      - "Reject completion if invalid continuation can still reach a worker."
+      - "Reject completion if browser QA does not prove worker non-delivery."
+      - "Reject completion if Dispatch gained decision authority over task success or PR quality."
+    expected_output:
+      - "complete | not_complete"
+      - "full_outcome_complete: true | false"
+      - "Acceptance-criteria evidence map"
+      - "Residual risks or next task"
+    receipt: null
+
+receipts:
+  - task_id: T001
+    path: "docs/goals/ralph-loop-dispatch-guardrails/notes/T001-scout-map.md"
+    summary: "Mapped existing Ralph-loop docs, dispatch routing, routed notification, session inbox, replay, dashboard, and test surfaces; identified the pre-notification dispatch gate and red/browser QA assertions for max-iteration blocking."
+  - task_id: T002
+    path: "docs/goals/ralph-loop-dispatch-guardrails/notes/T002-judge-slice.md"
+    summary: "Approved the vertical max-iteration guardrail implementation slice and browser QA assertions."
+  - task_id: T003
+    path: "docs/goals/ralph-loop-dispatch-guardrails/notes/T003-worker-implementation.md"
+    summary: "Implemented durable continue_iteration guardrails, replay/audit/dashboard evidence, CLI enqueue support, and tests."
+  - task_id: T004
+    path: "docs/goals/ralph-loop-dispatch-guardrails/notes/T004-browser-qa.md"
+    summary: "Ran browser QA against a local dashboard fixture and proved blocked continuation plus no worker delivery."
+
+completion:
+  full_outcome_complete: false
+  final_audit: null
