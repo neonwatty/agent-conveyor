@@ -8,7 +8,7 @@ goal:
   slug: "codex-app-dispatch-inbox-ops"
   kind: specific
   tranche: "Make no-tmux Codex app manager/worker dispatcher inbox workflows ergonomic, observable, and QA-proven."
-  status: active
+  status: done
   oracle:
     signal: "A disposable no-tmux manager/worker drill plus automated tests prove both dispatcher signal directions work through inbox polling and are visible in operator surfaces."
     cadence: "after each Worker package and at final audit"
@@ -66,7 +66,7 @@ visual_board:
     url: "http://goalbuddy.localhost:41737/codex-app-dispatch-inbox-ops/"
     command: "npx goalbuddy board /Users/neonwatty/Desktop/codex-terminal-manager/docs/goals/codex-app-dispatch-inbox-ops"
 
-active_task: T006
+active_task: null
 
 tasks:
   - id: T001
@@ -286,7 +286,7 @@ tasks:
   - id: T006
     type: pm
     assignee: PM
-    status: active
+    status: done
     reasoning_hint: medium
     objective: "Run final verification, PR review toolkit, publish the PR, and merge once green if the user has approved execution."
     inputs:
@@ -300,9 +300,42 @@ tasks:
       - "Passing `git diff --check`."
       - "Clean PR review toolkit result or fixed findings."
       - "PR URL and merge receipt if green."
+    receipt:
+      result: done
+      decision: complete
+      full_outcome_complete: true
+      summary: "Final verification, review, PR publish, CI, merge, and post-merge hardening are complete for the Codex app dispatcher inbox workflow."
+      verification:
+        - "PR #165: GitHub `unittest` checks passed after updating the branch from main."
+        - "PR #165: merged to main after green checks."
+        - "PR #166: focused hardening tests passed, full `python3 -m unittest tests.test_workerctl -v` passed with 500 tests, `python3 -m py_compile scripts/workerctl scripts/check-resource-warnings workerctl/*.py` passed, `git diff --check` passed, and `codex review --uncommitted` reported no actionable findings."
+        - "PR #166: GitHub `unittest` checks passed and the PR was merged to main."
+      merged_prs:
+        - number: 165
+          url: "https://github.com/neonwatty/codex-terminal-manager/pull/165"
+          summary: "Documented the live no-tmux Codex app inbox drill and committed the proof artifacts."
+        - number: 166
+          url: "https://github.com/neonwatty/codex-terminal-manager/pull/166"
+          summary: "Hardened session evidence redaction, doctor-self app-session diagnostics, PATH/bootstrap guidance, and whole-rollout ingest guidance."
+      final_audit:
+        result: complete
+        full_outcome_complete: true
+        evidence:
+          - "No-tmux manager-to-worker route proven through `nudge_worker` dispatch, `pull_required` routed notification, worker inbox pending output, and worker inbox consumption."
+          - "No-tmux worker-to-manager route proven through worker completion ingest, `pull_required` routed notification, manager inbox pending output, and manager inbox consumption."
+          - "Replay, audit/export, and dashboard helper evidence show delivery mode, source/target sessions, delivered/consumed timestamps, command attempt linkage, dispatch heartbeat, and final zero pending backlog."
+          - "Operator hardening now gives maintainers scoped redacted session evidence, explicit `scripts/workerctl` fallback guidance, app-session context for `doctor-self`, and guidance for older whole-rollout completion signals."
+        residual_risks:
+          - "The live drill remains a bounded proof rather than an always-on app-session polling daemon; this is intentional because app sessions should explicitly poll or be instructed by their local skill."
+          - "Whole-rollout ingest can still surface older completion signals; the documented mitigation is to ingest after the target turn or consume/review older manager inbox items before deciding."
 
 receipts: []
 
 completion:
-  full_outcome_complete: false
-  final_audit: null
+  full_outcome_complete: true
+  final_audit:
+    result: complete
+    summary: "The Codex app dispatcher inbox ops tranche is complete: implementation, live no-tmux evidence, focused hardening, PR review, CI, and both merges are done."
+    merged_prs:
+      - "https://github.com/neonwatty/codex-terminal-manager/pull/165"
+      - "https://github.com/neonwatty/codex-terminal-manager/pull/166"
