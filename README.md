@@ -239,14 +239,19 @@ tmux attach -t codex-live-test
 - `register-manager --name N ...` — Same arguments; tmux is not required.
 - `deregister <name>` — Mark a session gone. Refuses if the session is bound
   to an active task.
-- `sessions [--role worker|manager] [--state active|gone|all] [--include-legacy]` — List registered sessions.
+- `sessions [--role worker|manager] [--state active|gone|all] [--include-legacy]
+  [--name N ...] [--redact-identity-token]` — List registered sessions.
   By default, `sessions` shows active registered sessions and hides Phase 1 backfill rows (legacy pre-redesign workers/managers, identified by `pid IS NULL`) plus rows marked `state='gone'`. Pass `--state all` to show every row, or `--state gone` to inspect only gone rows:
   ```bash
   workerctl sessions                    # active registered sessions only
   workerctl sessions --state active     # explicit equivalent of the default
   workerctl sessions --state gone       # gone sessions only
   workerctl sessions --state all        # active, gone, and legacy rows
+  workerctl sessions --name <session> --redact-identity-token
   ```
+  For shareable QA evidence, prefer repeating `--name` for just the sessions in
+  scope and include `--redact-identity-token`; unfiltered output can include
+  unrelated active sessions and their registration tokens.
 - `tasks [--create NAME --goal G --summary S]` — List or create tasks.
 - `discover [QUERY] [--all] [--limit N]` / `search [QUERY]` — Search tasks,
   registered sessions, active bindings, and recent telemetry in one JSON result.
@@ -752,6 +757,15 @@ Current dispatch state:
 - A target with a tmux session records `delivery_mode='push'` after successful
   tmux delivery. A target without tmux records `delivery_mode='pull_required'`
   and remains unconsumed until the addressed session polls and consumes it.
+- If `doctor-self --json` reports `workerctl_on_path=false` inside a Codex app
+  session, run `scripts/workerctl ...` from the repository root or install the
+  local wrapper with `scripts/install-local --write`. Its `inside_tmux` check
+  describes the shell running `doctor-self`; for Codex app evidence, prefer the
+  rollout JSONL path, `lsof` lookup, and the workerctl registration role.
+- When a live drill ingests a whole rollout, Dispatch may route older completion
+  signals before the target proof turn. Either ingest after the target worker
+  turn or have the manager consume/review older completion signals before
+  deciding on the current one.
 - Explicit `notify_manager` and `nudge_worker` command rows can be processed by
   Dispatch with atomic claim/lease metadata, durable `command_attempts`,
   invalid-payload failure before side effects, and conservative tmux

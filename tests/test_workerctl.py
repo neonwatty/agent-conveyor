@@ -5262,6 +5262,39 @@ class CliTests(unittest.TestCase):
             os.environ.clear()
             os.environ.update(original_env)
 
+    def test_doctor_self_explains_app_session_path_and_script_workerctl_fallback(self):
+        original_current_session_name = commands.current_session_name
+        original_which = commands.shutil.which
+        original_run = commands.run
+        original_env = os.environ.copy()
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                skill_dir = Path(tmpdir) / "skills" / "manage-codex-workers"
+                skill_dir.mkdir(parents=True)
+                (skill_dir / "SKILL.md").write_text("skill")
+                os.environ["CODEX_HOME"] = tmpdir
+                commands.current_session_name = lambda: "inherited-controller-tmux"
+                commands.shutil.which = lambda name: None if name == "workerctl" else f"/usr/bin/{name}"
+                commands.run = lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, '{"ok": true}\n', "")
+
+                with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                    result = commands.command_doctor_self(argparse.Namespace(json=True, session=None))
+
+                payload = json.loads(stdout.getvalue())
+                self.assertEqual(result, 1)
+                self.assertFalse(payload["supported"])
+                self.assertEqual(payload["workerctl_invocation"], "scripts/workerctl")
+                self.assertTrue(any(check["name"] == "workerctl_script" and check["ok"] for check in payload["checks"]))
+                self.assertIn("command environment", payload["command_context_note"])
+                self.assertIn("Codex app", payload["codex_app_inbox_guidance"])
+                self.assertIn("scripts/workerctl", payload["why_or_why_not"])
+        finally:
+            commands.current_session_name = original_current_session_name
+            commands.shutil.which = original_which
+            commands.run = original_run
+            os.environ.clear()
+            os.environ.update(original_env)
+
     def test_doctor_self_fails_closed_outside_tmux(self):
         original_current_session_name = commands.current_session_name
         try:
@@ -9796,6 +9829,37 @@ class RegisterCommandsTests(unittest.TestCase):
             rows = json.loads(proc.stdout)
             names = {r["name"] for r in rows}
             self.assertEqual(names, {"w", "m"})
+
+    def test_cli_sessions_can_emit_narrow_redacted_evidence(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            rollout = Path(tmpdir) / "r.jsonl"
+            rollout.write_text(json.dumps({
+                "type": "session_meta",
+                "payload": {"id": "u1", "cwd": str(ROOT), "originator": "codex-tui"},
+            }) + "\n")
+            state_dir = Path(tmpdir) / "state"
+            state_dir.mkdir()
+            env = {"WORKERCTL_STATE_ROOT": str(state_dir)}
+
+            self.run_cli("register-worker", "--name", "target-worker", "--codex-session", str(rollout),
+                         "--pid", "1", "--cwd", str(ROOT), env_extra=env)
+            self.run_cli("register-manager", "--name", "target-manager", "--codex-session", str(rollout),
+                         "--pid", "2", "--cwd", str(ROOT), env_extra=env)
+            self.run_cli("register-worker", "--name", "unrelated-worker", "--codex-session", str(rollout),
+                         "--pid", "3", "--cwd", str(ROOT), env_extra=env)
+
+            proc = self.run_cli(
+                "sessions",
+                "--name", "target-worker",
+                "--name", "target-manager",
+                "--redact-identity-token",
+                env_extra=env,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            rows = json.loads(proc.stdout)
+            self.assertEqual({row["name"] for row in rows}, {"target-worker", "target-manager"})
+            self.assertNotIn("unrelated-worker", proc.stdout)
+            self.assertEqual({row["identity_token"] for row in rows}, {"[REDACTED]"})
 
     def test_cli_discover_searches_tasks_sessions_and_suggests_bind(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -14741,6 +14805,7 @@ class ManagerBootstrapPromptTests(unittest.TestCase):
 
     def test_readme_documents_universal_session_inbox(self):
         readme = (ROOT / "README.md").read_text()
+        checklist = (ROOT / "docs" / "manual-qa-checklist.md").read_text()
 
         self.assertIn("session-inbox <session>", readme)
         self.assertIn("manager-inbox <task>", readme)
@@ -14748,6 +14813,12 @@ class ManagerBootstrapPromptTests(unittest.TestCase):
         self.assertIn("delivery_mode='pull_required'", readme)
         self.assertIn("tmux push is optional transport", readme)
         self.assertIn("Codex app-based sessions must poll", readme)
+        self.assertIn("sessions --name <session> --redact-identity-token", readme)
+        self.assertIn("workerctl_on_path", readme)
+        self.assertIn("whole rollout", readme)
+        self.assertIn("older completion signals", readme)
+        self.assertIn("scripts/workerctl sessions --name", checklist)
+        self.assertIn("identity_token", checklist)
 
     def test_docs_include_local_telemetry_workflow(self):
         readme = (ROOT / "README.md").read_text()

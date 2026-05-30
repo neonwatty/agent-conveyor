@@ -1351,6 +1351,10 @@ def new_path_payload(*, session: str | None = None) -> dict[str, Any]:
     }
 
 
+def _workerctl_script_path() -> Path:
+    return PROJECT_ROOT / "scripts" / "workerctl"
+
+
 def command_doctor_self(args: argparse.Namespace) -> int:
     """Verify the current Codex session can register itself as a worker.
 
@@ -1367,9 +1371,11 @@ def command_doctor_self(args: argparse.Namespace) -> int:
     tmux_path = shutil.which("tmux")
     codex_path = shutil.which("codex")
     workerctl_path = shutil.which("workerctl")
+    workerctl_script = _workerctl_script_path()
     skill_path = _codex_home() / "skills" / "manage-codex-workers" / "SKILL.md"
     checks = [
         {"name": "workerctl_on_path", "ok": bool(workerctl_path), "path": workerctl_path},
+        {"name": "workerctl_script", "ok": workerctl_script.exists(), "path": str(workerctl_script)},
         {"name": "tmux_on_path", "ok": bool(tmux_path), "path": tmux_path},
         {"name": "codex_on_path", "ok": bool(codex_path), "path": codex_path},
         {"name": "inside_tmux", "ok": bool(session), "session": session},
@@ -1406,20 +1412,39 @@ def command_doctor_self(args: argparse.Namespace) -> int:
         )
     else:
         failed = [check["name"] for check in checks if not check["ok"]]
+        workerctl_hint = (
+            " Use `scripts/workerctl` from the repository root or run "
+            "`scripts/install-local --write` if workerctl_on_path failed."
+            if not workerctl_path and workerctl_script.exists()
+            else ""
+        )
         why_or_why_not = (
             "This Codex session cannot register itself as a tmux-backed worker. "
             f"Failed checks: {', '.join(failed) if failed else 'unknown'}. "
             "A Codex session running outside tmux can still register itself as a "
             "manager via `workerctl register-manager`."
+            f"{workerctl_hint}"
         )
+    workerctl_invocation = "workerctl" if workerctl_path else ("scripts/workerctl" if workerctl_script.exists() else None)
     result = {
         "checks": checks,
         "command_template": payload["command_template"],
+        "codex_app_inbox_guidance": (
+            "Codex app manager/worker sessions are first-class pull targets: "
+            "register them without --tmux-session, then poll manager-inbox or "
+            "worker-inbox with --consume-next --json at the start of a turn."
+        ),
+        "command_context_note": (
+            "The tmux checks describe the command environment running doctor-self. "
+            "For Codex app sessions, use rollout JSONL path/lsof evidence plus "
+            "register-manager/register-worker role metadata to prove the app session identity."
+        ),
         "current_session": session,
         "follow_up": payload["follow_up"],
         "ok": supported,
         "skill_path": str(skill_path),
         "supported": supported,
+        "workerctl_invocation": workerctl_invocation,
         "why_or_why_not": why_or_why_not,
     }
     print(json.dumps(result, indent=2, sort_keys=True))
@@ -8257,6 +8282,14 @@ def command_sessions(args: argparse.Namespace) -> int:
         )
     finally:
         conn.close()
+    names = set(getattr(args, "name", []) or [])
+    if names:
+        rows = [row for row in rows if row.get("name") in names]
+    if getattr(args, "redact_identity_token", False):
+        rows = [
+            {**row, "identity_token": "[REDACTED]" if row.get("identity_token") is not None else None}
+            for row in rows
+        ]
     print(json.dumps(rows, indent=2, sort_keys=True, default=str))
     return 0
 
