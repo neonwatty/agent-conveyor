@@ -1643,6 +1643,55 @@ class DispatchTests(unittest.TestCase):
             self.assertEqual(worker_db.session_inbox(conn, session_name="manager-session"), [])
             self.assertIsNone(worker_db.consume_next_session_inbox_item(conn, session_name="manager-session"))
 
+    def test_task_audit_and_replay_expose_inbox_delivery_and_consumption_evidence(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn, _db_path = self.open_db(tmpdir)
+            worker_id, manager_id = self.setup_bound_task(conn)
+            binding = worker_db.active_binding_for_task(conn, task_name="dispatch-task")
+            notification_id = worker_db.insert_routed_notification(
+                conn,
+                task_id="task-dispatch",
+                binding_id=binding["binding_id"],
+                correlation_id="dispatch-inbox-replay",
+                source_session_id=worker_id,
+                target_session_id=manager_id,
+                signal_type="worker_task_complete",
+                source_event_id=None,
+                source_event_timestamp=None,
+                dedupe_key="dispatch-inbox-replay-1",
+                command_id=None,
+                payload={"message": "inspect completion"},
+                delivery_mode="pull_required",
+            )
+            worker_db.finish_routed_notification(
+                conn,
+                notification_id=notification_id,
+                state="delivered",
+                side_effect_completed=False,
+                timestamp="2026-05-23T10:01:00Z",
+            )
+            worker_db.consume_next_session_inbox_item(
+                conn,
+                session_name="manager-session",
+                timestamp="2026-05-23T10:02:00Z",
+            )
+            conn.commit()
+
+            audit = worker_db.task_audit(conn, task="dispatch-task")
+            notification = audit["routed_notifications"][0]
+            entries = replay.replay_entries(audit)
+            replay_entry = next(entry for entry in entries if entry["source"] == "routed_notifications")
+
+            self.assertEqual(notification["delivery_mode"], "pull_required")
+            self.assertEqual(notification["source_session_name"], "worker-session")
+            self.assertEqual(notification["target_session_name"], "manager-session")
+            self.assertEqual(notification["consumed_by_session_name"], "manager-session")
+            self.assertEqual(notification["consumed_at"], "2026-05-23T10:02:00Z")
+            self.assertEqual(replay_entry["details"]["delivery_mode"], "pull_required")
+            self.assertEqual(replay_entry["details"]["target_session_name"], "manager-session")
+            self.assertEqual(replay_entry["details"]["consumed_by_session_name"], "manager-session")
+            self.assertEqual(replay_entry["details"]["consumed_at"], "2026-05-23T10:02:00Z")
+
     def test_manager_cycle_consumption_skips_session_consumed_notifications(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             conn, _db_path = self.open_db(tmpdir)
@@ -3595,6 +3644,18 @@ class CliTests(unittest.TestCase):
                     state="delivered",
                 )
                 conn.commit()
+
+            proc = self.run_workerctl(
+                "session-inbox",
+                "inbox-manager",
+                "--path",
+                str(db_path),
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("inbox for inbox-manager", proc.stdout)
+            self.assertIn("pending: 1", proc.stdout)
+            self.assertIn("#1 worker_task_complete push from inbox-worker to inbox-manager", proc.stdout)
+            self.assertIn("dispatch-cli-inbox", proc.stdout)
 
             proc = self.run_workerctl(
                 "session-inbox",

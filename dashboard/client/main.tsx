@@ -53,6 +53,17 @@ type DispatchChain = {
   key: string;
   manager_cycle_id?: number | null;
   manager_decision_id?: number | null;
+  notifications?: Array<{
+    consumed_at?: string | null;
+    consumed_by_session_name?: string | null;
+    delivered_at?: string | null;
+    delivery_mode?: string | null;
+    id?: number;
+    signal_type?: string;
+    source_session_name?: string | null;
+    state?: string;
+    target_session_name?: string | null;
+  }>;
   notification_count: number;
   side_effect_risk: boolean;
   source_event_id?: number | null;
@@ -104,6 +115,18 @@ type Observation = {
   dispatch?: {
     chains: DispatchChain[];
     health: DispatchHealth;
+    inbox?: {
+      consumed_count: number;
+      pending_count: number;
+      pull_required_pending_count: number;
+      sessions: Array<{
+        consumed_count: number;
+        latest_consumed_at?: string;
+        pending_count: number;
+        session_id?: string | null;
+        session_name?: string | null;
+      }>;
+    };
   };
   latest_cycle?: { state?: string } | null;
   polled_at: string;
@@ -180,6 +203,7 @@ function criteriaLabel(criteria: CriteriaSummary | undefined) {
 function DispatchPanel({ observation }: { observation: Observation | null }) {
   const health = observation?.dispatch?.health;
   const chains = observation?.dispatch?.chains || [];
+  const inbox = observation?.dispatch?.inbox;
   const heartbeat = health?.heartbeat;
   const coreStatus = health?.core_status || heartbeat?.state || (heartbeat?.stale ? "stale" : "not_observed");
   const heartbeatState = coreStatus;
@@ -194,6 +218,9 @@ function DispatchPanel({ observation }: { observation: Observation | null }) {
     ["Stale", String(health?.stale_claim_count ?? 0), (health?.stale_claim_count ?? 0) > 0 ? "warning" : "ok"],
     ["Risk", String(health?.side_effect_risk_count ?? 0), (health?.side_effect_risk_count ?? 0) > 0 ? "error" : "ok"],
     ["Suppressed", String(health?.suppressed_signal_count ?? 0), (health?.suppressed_signal_count ?? 0) > 0 ? "warning" : "ok"],
+    ["Inbox", String(inbox?.pending_count ?? 0), (inbox?.pending_count ?? 0) > 0 ? "warning" : "ok"],
+    ["Pull inbox", String(inbox?.pull_required_pending_count ?? 0), (inbox?.pull_required_pending_count ?? 0) > 0 ? "warning" : "ok"],
+    ["Consumed", String(inbox?.consumed_count ?? 0), "ok"],
   ];
   return (
     <section className="dispatch-section">
@@ -247,6 +274,22 @@ function DispatchPanel({ observation }: { observation: Observation | null }) {
                 `${chain.notification_count} notification${chain.notification_count === 1 ? "" : "s"}`,
               ].filter(Boolean).join(" / ")}
             </small>
+            {chain.notifications?.length ? (
+              <ul className="dispatch-notifications">
+                {chain.notifications.map((notification) => (
+                  <li key={`${chain.key}-notification-${notification.id}`}>
+                    {[
+                      notification.delivery_mode || "unknown delivery",
+                      notification.target_session_name ? `to ${notification.target_session_name}` : null,
+                      notification.delivered_at ? `delivered ${formatTime(notification.delivered_at)}` : null,
+                      notification.consumed_at
+                        ? `consumed ${formatTime(notification.consumed_at)}${notification.consumed_by_session_name ? ` by ${notification.consumed_by_session_name}` : ""}`
+                        : "pending inbox",
+                    ].filter(Boolean).join(" / ")}
+                  </li>
+                ))}
+              </ul>
+            ) : null}
             {chain.conversation?.length ? (
               <ol className="dispatch-conversation">
                 {chain.conversation.map((item, index) => (

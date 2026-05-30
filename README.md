@@ -473,6 +473,9 @@ tmux attach -t codex-live-test
   the worker then receives the message through `worker-inbox`.
 - `session-inbox <session> [--consume-next] [--limit N] [--json]` — List or
   consume unconsumed routed notifications addressed to a registered session.
+  Text output includes the pending count, signal type, delivery mode,
+  source/target sessions, delivered timestamp, and correlation id. Use `--json`
+  during QA to capture payload, `consumed_by_session_id`, and exact timestamps.
 - `manager-inbox <task> [--consume-next] [--limit N] [--json]` — Resolve the
   task's bound manager session and read its dispatcher inbox.
 - `worker-inbox <task> [--consume-next] [--limit N] [--json]` — Resolve the
@@ -758,16 +761,19 @@ Current dispatch state:
   run and `--lease-seconds N` controls when attempted command claims become
   recoverable.
 - Replay/audit surfaces include routed notifications, command attempts, and
-  correlation chains where the data exists. The dashboard groups bound-task
-  dispatch correlation chains with command state, attempt counts, notification
-  counts, decision/cycle ids, source event ids, suppressed-signal visibility,
-  chronological ordering, and side-effect risk.
+  correlation chains where the data exists. Routed notification replay includes
+  delivery mode, source/target sessions, delivered timestamp, consumed-by
+  session, and consumed timestamp. The dashboard groups bound-task dispatch
+  correlation chains with command state, attempt counts, notification counts,
+  inbox pending/consumed counts, decision/cycle ids, source event ids,
+  suppressed-signal visibility, chronological ordering, and side-effect risk.
 - Dashboard manual QA should use
   `workerctl dashboard --task <task> --ensure-dispatch --dispatcher-id qa-dispatch-dashboard`
   and visually confirm the Dispatch active banner, dispatcher id, heartbeat age,
   iteration, processed count, dry-run/live state, completion/routing/cycle
-  conversation lane entries, command claim/attempt/delivery entries where
-  applicable, and stale or not-observed warnings.
+  conversation lane entries, command claim/attempt/delivery entries, inbox
+  pending/consumed counts, pull-required notification evidence where applicable,
+  and stale or not-observed warnings.
 
 The adjacent completion-contract surfaces are separate from Dispatch:
 

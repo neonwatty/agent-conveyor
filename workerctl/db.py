@@ -1414,7 +1414,7 @@ def _command_attempt_record(row: sqlite3.Row) -> dict[str, Any]:
 
 
 def _routed_notification_record(row: sqlite3.Row) -> dict[str, Any]:
-    return {
+    record = {
         "binding_id": row["binding_id"],
         "claimed_at": row["claimed_at"],
         "claimed_by": row["claimed_by"],
@@ -1441,6 +1441,15 @@ def _routed_notification_record(row: sqlite3.Row) -> dict[str, Any]:
         "target_session_id": row["target_session_id"],
         "task_id": row["task_id"],
     }
+    keys = set(row.keys())
+    for prefix in ("source", "target", "consumed_by"):
+        name_key = f"{prefix}_session_name"
+        role_key = f"{prefix}_session_role"
+        if name_key in keys:
+            record[name_key] = row[name_key]
+        if role_key in keys:
+            record[role_key] = row[role_key]
+    return record
 
 
 def _command_manager_decision_id(command: dict[str, Any]) -> int | None:
@@ -5420,15 +5429,25 @@ def task_audit(conn: sqlite3.Connection, *, task: str) -> dict[str, Any]:
     ).fetchall()
     routed_notification_rows = conn.execute(
         """
-        select id, task_id, binding_id, correlation_id, source_session_id,
-               target_session_id, signal_type, source_event_id, source_event_timestamp,
-               dedupe_key, command_id, created_at, delivered_at, consumed_manager_cycle_id,
-               consumed_by_session_id, consumed_at, delivery_mode, state, claimed_by,
-               claimed_at, claim_expires_at,
-               side_effect_started, side_effect_completed, payload_json, error
-        from routed_notifications
-        where task_id = ?
-        order by created_at, id
+        select rn.id, rn.task_id, rn.binding_id, rn.correlation_id,
+               rn.source_session_id, rn.target_session_id, rn.signal_type,
+               rn.source_event_id, rn.source_event_timestamp, rn.dedupe_key,
+               rn.command_id, rn.created_at, rn.delivered_at,
+               rn.consumed_manager_cycle_id, rn.consumed_by_session_id,
+               rn.consumed_at, rn.delivery_mode, rn.state, rn.claimed_by,
+               rn.claimed_at, rn.claim_expires_at,
+               rn.side_effect_started, rn.side_effect_completed, rn.payload_json,
+               rn.error,
+               ss.name as source_session_name, ss.role as source_session_role,
+               ts.name as target_session_name, ts.role as target_session_role,
+               cs.name as consumed_by_session_name,
+               cs.role as consumed_by_session_role
+        from routed_notifications rn
+        join sessions ss on ss.id = rn.source_session_id
+        join sessions ts on ts.id = rn.target_session_id
+        left join sessions cs on cs.id = rn.consumed_by_session_id
+        where rn.task_id = ?
+        order by rn.created_at, rn.id
         """,
         (task_row["id"],),
     ).fetchall()
