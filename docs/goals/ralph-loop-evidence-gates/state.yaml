@@ -8,7 +8,7 @@ goal:
   slug: "ralph-loop-evidence-gates"
   kind: specific
   tranche: "Implement dispatcher-enforced Ralph-loop evidence gates so manager continuation requests are blocked before worker delivery until required worker/PR/CI/merge/cleanup evidence exists."
-  status: active
+  status: done
   oracle:
     signal: "Browser QA proves a required ci_green gate blocks a manager-requested next iteration before worker delivery, then allows a fresh continuation after CI-green evidence is recorded."
     cadence: "after Scout, after implementation, after browser QA, and at final audit"
@@ -66,7 +66,7 @@ visual_board:
     url: "http://goalbuddy.localhost:41737/ralph-loop-evidence-gates/"
     command: "npx goalbuddy board /Users/neonwatty/Desktop/codex-terminal-manager/docs/goals/ralph-loop-evidence-gates"
 
-active_task: T005
+active_task: null
 
 tasks:
   - id: T001
@@ -308,7 +308,7 @@ tasks:
   - id: T005
     type: pm
     assignee: PM
-    status: active
+    status: done
     reasoning_hint: medium
     objective: "Run final verification, PR review toolkit, publish the PR, and merge once green if execution has been approved."
     inputs:
@@ -321,12 +321,42 @@ tasks:
       - "Passing full local verification."
       - "Clean PR review toolkit result or fixed findings."
       - "PR URL and merge receipt if green."
-    receipt: null
+    receipt:
+      result: done
+      summary: "Ran final verification and PR review, fixed the accepted malformed-metadata fail-open finding, opened PR #170, waited for both GitHub unittest checks to pass, and merged as 47ce0ec."
+      changed_files:
+        - "docs/goals/ralph-loop-evidence-gates/notes/T005-pr-merge.md"
+        - "docs/goals/ralph-loop-evidence-gates/state.yaml"
+      commands:
+        - cmd: "/Users/neonwatty/.codex/skills/codex-review/scripts/codex-review --full-access"
+          status: pass
+          summary: "Final run clean after fixing one accepted P2 finding."
+        - cmd: "python3 -m unittest tests.test_workerctl -q"
+          status: pass
+          summary: "515 Python tests passed."
+        - cmd: "npm test"
+          status: pass
+          summary: "40 dashboard tests passed."
+        - cmd: "npm run build"
+          status: pass
+          summary: "TypeScript and Vite build passed."
+        - cmd: "git diff --check"
+          status: pass
+        - cmd: "GoalBuddy state checker"
+          status: pass
+        - cmd: "gh pr checks 170 --watch --interval 10"
+          status: pass
+          summary: "Both GitHub unittest checks passed."
+      evidence:
+        - "Detailed receipt: docs/goals/ralph-loop-evidence-gates/notes/T005-pr-merge.md"
+        - "PR #170: https://github.com/neonwatty/codex-terminal-manager/pull/170"
+        - "Merge commit: 47ce0ec319afe35ce0f5a96affd9c0baf71560d2"
+        - "Merged at: 2026-05-30T19:38:30Z"
 
   - id: T999
     type: judge
     assignee: Judge
-    status: queued
+    status: done
     reasoning_hint: high
     objective: "Audit whether the dispatcher-enforced Ralph-loop evidence-gate workflow satisfies the original request."
     inputs:
@@ -345,7 +375,22 @@ tasks:
       - "full_outcome_complete: true | false"
       - "Acceptance-criteria evidence map"
       - "Residual risks or next task"
-    receipt: null
+    receipt:
+      result: done
+      decision: complete
+      full_outcome_complete: true
+      summary: "Final audit maps the merged implementation, browser QA, tests, review, and PR #170 merge back to the goal oracle; the evidence-gated continuation workflow is complete."
+      changed_files:
+        - "docs/goals/ralph-loop-evidence-gates/notes/T999-final-audit.md"
+        - "docs/goals/ralph-loop-evidence-gates/state.yaml"
+      evidence:
+        - "Detailed receipt: docs/goals/ralph-loop-evidence-gates/notes/T999-final-audit.md"
+        - "Missing ci_green blocks before worker delivery."
+        - "No routed notification, worker inbox item, or tmux send occurs for the blocked continuation."
+        - "Satisfied ci_green criterion evidence allows a fresh retry."
+        - "Dashboard, replay, and audit expose missing evidence and allowed retry evidence."
+        - "Dispatch remains a mechanical policy/evidence checker and does not decide code quality, PR quality, CI truth, or strategy."
+        - "PR #170 merged after two green GitHub unittest checks."
 
 receipts:
   - task_id: T001
@@ -360,7 +405,18 @@ receipts:
   - task_id: T004
     path: "docs/goals/ralph-loop-evidence-gates/notes/T004-browser-qa.md"
     summary: "Ran browser QA proving missing ci_green block before delivery and allowed retry after evidence."
+  - task_id: T005
+    path: "docs/goals/ralph-loop-evidence-gates/notes/T005-pr-merge.md"
+    summary: "Recorded clean review, local verification, PR #170, green GitHub checks, and merge commit."
+  - task_id: T999
+    path: "docs/goals/ralph-loop-evidence-gates/notes/T999-final-audit.md"
+    summary: "Final audit marked the evidence-gated Ralph-loop continuation outcome complete."
 
 completion:
-  full_outcome_complete: false
-  final_audit: null
+  full_outcome_complete: true
+  final_audit:
+    result: complete
+    summary: "PR #170 merged with tests, browser QA, clean review, and final audit proving missing evidence blocks continuation before worker delivery and recorded evidence allows a fresh retry."
+    pr: "https://github.com/neonwatty/codex-terminal-manager/pull/170"
+    merge_commit: "47ce0ec319afe35ce0f5a96affd9c0baf71560d2"
+    merged_at: "2026-05-30T19:38:30Z"
