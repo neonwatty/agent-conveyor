@@ -1,0 +1,6 @@
+{
+  "new_events": 36,
+  "new_offset": 86695,
+  "session": "live-app-worker-20260530",
+  "skipped_lines": 0
+}

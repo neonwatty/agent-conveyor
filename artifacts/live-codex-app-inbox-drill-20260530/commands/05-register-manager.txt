@@ -1,0 +1,9 @@
+{
+  "codex_session_id": "019e78d3-fc6d-7371-b57c-fcae94170975",
+  "codex_session_path": "/Users/neonwatty/.codex/sessions/2026/05/30/rollout-2026-05-30T05-20-19-019e78d3-fc6d-7371-b57c-fcae94170975.jsonl",
+  "cwd": "/Users/neonwatty/Desktop/codex-terminal-manager",
+  "name": "live-app-manager-20260530",
+  "pid": 61478,
+  "role": "manager",
+  "session_id": "session-848f6263-d101-4db3-b33a-e4c3cf3a226a"
+}

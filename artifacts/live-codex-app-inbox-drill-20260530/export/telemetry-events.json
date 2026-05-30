@@ -1,0 +1,244 @@
+[
+  {
+    "actor": "workerctl",
+    "attributes": {
+      "idempotency_key": "command-27af071f-e9bf-4eba-b616-a95190c030cc",
+      "manager_id": null,
+      "required_permission": null,
+      "state": "pending",
+      "worker_id": null
+    },
+    "correlation": {
+      "command_id": "command-27af071f-e9bf-4eba-b616-a95190c030cc",
+      "command_type": "nudge_worker",
+      "correlation_id": "live-app-manager-to-worker-20260530"
+    },
+    "event_type": "command_created",
+    "id": "telemetry-f464b8a0-51b9-472b-a71a-2cf2b03815ca",
+    "run_id": null,
+    "severity": "info",
+    "summary": "Created command nudge_worker.",
+    "task_id": "task-6a1c6503-ba05-47a5-90ef-9ea0b5a2c5c7",
+    "timestamp": "2026-05-30T12:43:04Z"
+  },
+  {
+    "actor": "dispatch",
+    "attributes": {
+      "attempts": 1,
+      "claim_expires_at": "2026-05-30T12:44:14Z",
+      "manager_id": null,
+      "worker_id": null
+    },
+    "correlation": {
+      "attempt_id": 2,
+      "command_id": "command-27af071f-e9bf-4eba-b616-a95190c030cc",
+      "command_type": "nudge_worker",
+      "correlation_id": "live-app-manager-to-worker-20260530",
+      "dispatcher_id": "live-app-drill-20260530"
+    },
+    "event_type": "dispatch_command_claimed",
+    "id": "telemetry-d740b8e1-3f52-40c6-8eb1-d609eec37c73",
+    "run_id": null,
+    "severity": "info",
+    "summary": "Dispatch claimed command nudge_worker.",
+    "task_id": "task-6a1c6503-ba05-47a5-90ef-9ea0b5a2c5c7",
+    "timestamp": "2026-05-30T12:43:14Z"
+  },
+  {
+    "actor": "dispatch",
+    "attributes": {
+      "delivery_mode": "pull_required",
+      "permission_check": null,
+      "source_session": "live-app-manager-20260530",
+      "target_session": "live-app-worker-20260530"
+    },
+    "correlation": {
+      "attempt_id": 2,
+      "command_id": "command-27af071f-e9bf-4eba-b616-a95190c030cc",
+      "command_type": "nudge_worker",
+      "correlation_id": "live-app-manager-to-worker-20260530",
+      "dispatcher_id": "live-app-drill-20260530",
+      "routed_notification_id": 45
+    },
+    "event_type": "dispatch_command_attempted",
+    "id": "telemetry-d99744fd-e2f8-448d-9821-13390e464367",
+    "run_id": null,
+    "severity": "info",
+    "summary": "Dispatch is executing command nudge_worker.",
+    "task_id": "task-6a1c6503-ba05-47a5-90ef-9ea0b5a2c5c7",
+    "timestamp": "2026-05-30T12:43:14Z"
+  },
+  {
+    "actor": "dispatch",
+    "attributes": {
+      "delivery_mode": "pull_required",
+      "target_session": "live-app-worker-20260530"
+    },
+    "correlation": {
+      "attempt_id": 2,
+      "binding_id": "binding-ca7f51d9-18a9-4afe-889d-a66861caa6c3",
+      "command_id": "command-27af071f-e9bf-4eba-b616-a95190c030cc",
+      "command_type": "nudge_worker",
+      "correlation_id": "live-app-manager-to-worker-20260530",
+      "dispatcher_id": "live-app-drill-20260530",
+      "routed_notification_id": 45,
+      "signal_type": "nudge_worker"
+    },
+    "event_type": "dispatch_signal_pull_required",
+    "id": "telemetry-fca110c4-8e07-4ea7-818e-e48a6648d27e",
+    "run_id": null,
+    "severity": "info",
+    "summary": "Dispatch recorded pull-required nudge_worker for live-app-worker-20260530.",
+    "task_id": "task-6a1c6503-ba05-47a5-90ef-9ea0b5a2c5c7",
+    "timestamp": "2026-05-30T12:43:14Z"
+  },
+  {
+    "actor": "dispatch",
+    "attributes": {
+      "error": null,
+      "manager_id": null,
+      "result": {
+        "attempt_id": 2,
+        "command_id": "command-27af071f-e9bf-4eba-b616-a95190c030cc",
+        "command_type": "nudge_worker",
+        "correlation_id": "live-app-manager-to-worker-20260530",
+        "delivery_mode": "pull_required",
+        "dispatcher_id": "live-app-drill-20260530",
+        "dry_run": false,
+        "notification_id": 45,
+        "permission_check": null,
+        "side_effect_completed": false,
+        "side_effect_started": false,
+        "state": "pull_required",
+        "target_session": "live-app-worker-20260530"
+      },
+      "side_effect_completed": false,
+      "side_effect_started": false,
+      "worker_id": null
+    },
+    "correlation": {
+      "attempt_id": 2,
+      "command_id": "command-27af071f-e9bf-4eba-b616-a95190c030cc",
+      "command_type": "nudge_worker",
+      "correlation_id": "live-app-manager-to-worker-20260530",
+      "dispatcher_id": "live-app-drill-20260530"
+    },
+    "event_type": "dispatch_command_succeeded",
+    "id": "telemetry-de1ee40e-e3d6-47df-acc5-bda3ff60fe3d",
+    "run_id": null,
+    "severity": "info",
+    "summary": "Dispatch command nudge_worker succeeded.",
+    "task_id": "task-6a1c6503-ba05-47a5-90ef-9ea0b5a2c5c7",
+    "timestamp": "2026-05-30T12:43:14Z"
+  },
+  {
+    "actor": "workerctl",
+    "attributes": {
+      "new_events": 36,
+      "new_offset": 86695,
+      "skipped_lines": 0,
+      "start_offset": 0
+    },
+    "correlation": {
+      "session": "live-app-worker-20260530",
+      "session_id": "session-d882f0cc-5ebd-492e-ae9a-f6eed39a039b"
+    },
+    "event_type": "codex_events_ingested",
+    "id": "telemetry-1c4df30a-02d8-4a88-a873-9e227c506a4b",
+    "run_id": null,
+    "severity": "info",
+    "summary": "Ingested Codex events for session live-app-worker-20260530.",
+    "task_id": "task-6a1c6503-ba05-47a5-90ef-9ea0b5a2c5c7",
+    "timestamp": "2026-05-30T12:52:10Z"
+  },
+  {
+    "actor": "dispatch",
+    "attributes": {
+      "delivery_mode": "pull_required",
+      "source_session": "live-app-worker-20260530",
+      "target_session": "live-app-manager-20260530"
+    },
+    "correlation": {
+      "binding_id": "binding-ca7f51d9-18a9-4afe-889d-a66861caa6c3",
+      "correlation_id": "dispatch-3c8dea2c-5ac0-4457-8180-3cdf3eda2741",
+      "dispatcher_id": "live-app-drill-20260530",
+      "signal_type": "worker_task_complete",
+      "source_event_id": 6448
+    },
+    "event_type": "dispatch_signal_detected",
+    "id": "telemetry-16d627ac-3725-4df7-87dd-ba05c1685d10",
+    "run_id": null,
+    "severity": "info",
+    "summary": "Dispatch detected worker completion for live-codex-app-inbox-20260530.",
+    "task_id": "task-6a1c6503-ba05-47a5-90ef-9ea0b5a2c5c7",
+    "timestamp": "2026-05-30T12:52:19Z"
+  },
+  {
+    "actor": "dispatch",
+    "attributes": {
+      "delivery_mode": "pull_required",
+      "source_session": "live-app-worker-20260530",
+      "target_session": "live-app-manager-20260530"
+    },
+    "correlation": {
+      "binding_id": "binding-ca7f51d9-18a9-4afe-889d-a66861caa6c3",
+      "correlation_id": "dispatch-3c8dea2c-5ac0-4457-8180-3cdf3eda2741",
+      "dispatcher_id": "live-app-drill-20260530",
+      "routed_notification_id": 46,
+      "signal_type": "worker_task_complete",
+      "source_event_id": 6448
+    },
+    "event_type": "dispatch_signal_pull_required",
+    "id": "telemetry-32a6be12-3d11-40a5-86c7-390f2a3838c8",
+    "run_id": null,
+    "severity": "info",
+    "summary": "Dispatch recorded pull-required worker completion for live-app-manager-20260530.",
+    "task_id": "task-6a1c6503-ba05-47a5-90ef-9ea0b5a2c5c7",
+    "timestamp": "2026-05-30T12:52:19Z"
+  },
+  {
+    "actor": "dispatch",
+    "attributes": {
+      "delivery_mode": "pull_required",
+      "source_session": "live-app-worker-20260530",
+      "target_session": "live-app-manager-20260530"
+    },
+    "correlation": {
+      "binding_id": "binding-ca7f51d9-18a9-4afe-889d-a66861caa6c3",
+      "correlation_id": "dispatch-d03a8881-123e-422e-bef2-f4709fd977d8",
+      "dispatcher_id": "live-app-drill-20260530",
+      "signal_type": "worker_task_complete",
+      "source_event_id": 6462
+    },
+    "event_type": "dispatch_signal_detected",
+    "id": "telemetry-ed09b588-75ce-4217-923c-93cd22b8bcd9",
+    "run_id": null,
+    "severity": "info",
+    "summary": "Dispatch detected worker completion for live-codex-app-inbox-20260530.",
+    "task_id": "task-6a1c6503-ba05-47a5-90ef-9ea0b5a2c5c7",
+    "timestamp": "2026-05-30T12:52:19Z"
+  },
+  {
+    "actor": "dispatch",
+    "attributes": {
+      "delivery_mode": "pull_required",
+      "source_session": "live-app-worker-20260530",
+      "target_session": "live-app-manager-20260530"
+    },
+    "correlation": {
+      "binding_id": "binding-ca7f51d9-18a9-4afe-889d-a66861caa6c3",
+      "correlation_id": "dispatch-d03a8881-123e-422e-bef2-f4709fd977d8",
+      "dispatcher_id": "live-app-drill-20260530",
+      "routed_notification_id": 47,
+      "signal_type": "worker_task_complete",
+      "source_event_id": 6462
+    },
+    "event_type": "dispatch_signal_pull_required",
+    "id": "telemetry-224fa78a-8fa8-4265-b3eb-cfdec0eba299",
+    "run_id": null,
+    "severity": "info",
+    "summary": "Dispatch recorded pull-required worker completion for live-app-manager-20260530.",
+    "task_id": "task-6a1c6503-ba05-47a5-90ef-9ea0b5a2c5c7",
+    "timestamp": "2026-05-30T12:52:19Z"
+  }
+]

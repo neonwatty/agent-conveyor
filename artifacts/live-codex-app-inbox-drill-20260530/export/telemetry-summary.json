@@ -1,0 +1,23 @@
+{
+  "by_actor": {
+    "dispatch": 8,
+    "workerctl": 2
+  },
+  "by_event_type": {
+    "codex_events_ingested": 1,
+    "command_created": 1,
+    "dispatch_command_attempted": 1,
+    "dispatch_command_claimed": 1,
+    "dispatch_command_succeeded": 1,
+    "dispatch_signal_detected": 2,
+    "dispatch_signal_pull_required": 3
+  },
+  "by_severity": {
+    "info": 10
+  },
+  "first_timestamp": "2026-05-30T12:43:04Z",
+  "last_timestamp": "2026-05-30T12:52:19Z",
+  "run_id": null,
+  "task_id": "task-6a1c6503-ba05-47a5-90ef-9ea0b5a2c5c7",
+  "total": 10
+}

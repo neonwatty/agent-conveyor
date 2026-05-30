@@ -1,0 +1,19 @@
+role: manager
+agent_id: 019e78d3-fc6d-7371-b57c-fcae94170975
+rollout: /Users/neonwatty/.codex/sessions/2026/05/30/rollout-2026-05-30T05-20-19-019e78d3-fc6d-7371-b57c-fcae94170975.jsonl
+
+lsof (Codex app server PID 61478):
+COMMAND   PID      USER   FD   TYPE DEVICE SIZE/OFF     NODE NAME
+codex   61478 neonwatty  345w   REG   1,13    66728 97314435 /Users/neonwatty/.codex/sessions/2026/05/30/rollout-2026-05-30T05-20-19-019e78d3-fc6d-7371-b57c-fcae94170975.jsonl
+
+standing instruction excerpt:
+## Your standing instruction for the drill
+
+Do not use tmux. After the controller gives you the task name later, you will run:
+
+```bash
+cd /Users/neonwatty/Desktop/codex-terminal-manager
+scripts/workerctl manager-inbox live-codex-app-inbox-20260530 --consume-next --json
+```
+
+Treat any consumed dispatcher message as your signal from Dispatch. Use manager judgment after reading the signal, and keep a concise note of each command you run.

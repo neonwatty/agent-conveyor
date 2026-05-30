@@ -1,0 +1,35 @@
+{
+  "dispatcher_id": "live-app-drill-20260530",
+  "dry_run": false,
+  "iterations": 1,
+  "processed": [
+    {
+      "binding_id": "binding-ca7f51d9-18a9-4afe-889d-a66861caa6c3",
+      "correlation_id": "dispatch-3c8dea2c-5ac0-4457-8180-3cdf3eda2741",
+      "dedupe_key": "binding-ca7f51d9-18a9-4afe-889d-a66861caa6c3:worker_task_complete:session-d882f0cc-5ebd-492e-ae9a-f6eed39a039b:6448",
+      "delivery_mode": "pull_required",
+      "dry_run": false,
+      "notification_id": 46,
+      "signal_type": "worker_task_complete",
+      "source_event_id": 6448,
+      "state": "pull_required",
+      "target_session": "live-app-manager-20260530",
+      "task": "live-codex-app-inbox-20260530"
+    },
+    {
+      "binding_id": "binding-ca7f51d9-18a9-4afe-889d-a66861caa6c3",
+      "correlation_id": "dispatch-d03a8881-123e-422e-bef2-f4709fd977d8",
+      "dedupe_key": "binding-ca7f51d9-18a9-4afe-889d-a66861caa6c3:worker_task_complete:session-d882f0cc-5ebd-492e-ae9a-f6eed39a039b:6462",
+      "delivery_mode": "pull_required",
+      "dry_run": false,
+      "notification_id": 47,
+      "signal_type": "worker_task_complete",
+      "source_event_id": 6462,
+      "state": "pull_required",
+      "target_session": "live-app-manager-20260530",
+      "task": "live-codex-app-inbox-20260530"
+    }
+  ],
+  "processed_count": 2,
+  "watch": true
+}

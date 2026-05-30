@@ -1,0 +1,45 @@
+{
+  "checks": [
+    {
+      "name": "workerctl_on_path",
+      "ok": false,
+      "path": null
+    },
+    {
+      "name": "tmux_on_path",
+      "ok": true,
+      "path": "/opt/homebrew/bin/tmux"
+    },
+    {
+      "name": "codex_on_path",
+      "ok": true,
+      "path": "/Applications/Codex.app/Contents/Resources/codex"
+    },
+    {
+      "name": "inside_tmux",
+      "ok": true,
+      "session": "codex-ios-deeplink-contracts"
+    },
+    {
+      "name": "manage_skill_installed",
+      "ok": true,
+      "path": "/Users/neonwatty/.codex/skills/manage-codex-workers/SKILL.md"
+    },
+    {
+      "name": "current_tmux_session_live",
+      "ok": true,
+      "session": "codex-ios-deeplink-contracts"
+    }
+  ],
+  "command_template": "workerctl register-worker --name <NAME> --pid <PID> --cwd <CWD> --tmux-session <SESSION>",
+  "current_session": "codex-ios-deeplink-contracts",
+  "follow_up": [
+    "Have a manager Codex session register itself via `workerctl register-manager --name <MGR_NAME> --pid <MGR_PID> --cwd <CWD>`.",
+    "Create a task and bind the pair: `workerctl tasks --create <TASK> --goal \"<goal>\"` then `workerctl bind --task <TASK> --worker <NAME> --manager <MGR_NAME>`.",
+    "The manager Codex drives the supervision loop by calling `workerctl cycle <TASK>` repeatedly and reading the returned JSON."
+  ],
+  "ok": false,
+  "skill_path": "/Users/neonwatty/.codex/skills/manage-codex-workers/SKILL.md",
+  "supported": false,
+  "why_or_why_not": "This Codex session cannot register itself as a tmux-backed worker. Failed checks: workerctl_on_path. A Codex session running outside tmux can still register itself as a manager via `workerctl register-manager`."
+}

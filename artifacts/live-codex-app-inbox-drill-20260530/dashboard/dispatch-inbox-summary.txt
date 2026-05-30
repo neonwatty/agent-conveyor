@@ -1,0 +1,6 @@
+Dashboard task: live-codex-app-inbox-20260530
+Inbox pending count: 0
+Inbox consumed count: 3 routed notifications show consumed_by_session evidence in audit/replay: one worker nudge consumed by live-app-worker-20260530 and two worker_task_complete signals consumed by live-app-manager-20260530.
+Manager notification rows: two worker_task_complete rows routed from live-app-worker-20260530 to live-app-manager-20260530 via pull_required; notification 46 consumed at 2026-05-30T12:53:15Z by live-app-manager-20260530 and notification 47 consumed at 2026-05-30T12:53:39Z by live-app-manager-20260530.
+Worker notification rows: one nudge_worker row routed from live-app-manager-20260530 to live-app-worker-20260530 via pull_required; notification 45 consumed at 2026-05-30T12:44:34Z by live-app-worker-20260530.
+Any confusing labels: routed notification state remains delivered while consumed_at and consumed_by_session fields prove consumption; replay also showed two worker_task_complete rows due whole-rollout ingest signal noise. Dashboard UI not launched in this noninteractive subagent pass; follow-up optional/manual.

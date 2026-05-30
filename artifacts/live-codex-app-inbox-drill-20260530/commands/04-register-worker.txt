@@ -1,0 +1,9 @@
+{
+  "codex_session_id": "019e78d3-d0c5-7423-b885-55e8047473e6",
+  "codex_session_path": "/Users/neonwatty/.codex/sessions/2026/05/30/rollout-2026-05-30T05-20-08-019e78d3-d0c5-7423-b885-55e8047473e6.jsonl",
+  "cwd": "/Users/neonwatty/Desktop/codex-terminal-manager",
+  "name": "live-app-worker-20260530",
+  "pid": 61478,
+  "role": "worker",
+  "session_id": "session-d882f0cc-5ebd-492e-ae9a-f6eed39a039b"
+}

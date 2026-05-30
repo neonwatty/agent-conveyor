@@ -1,0 +1,19 @@
+role: worker
+agent_id: 019e78d3-d0c5-7423-b885-55e8047473e6
+rollout: /Users/neonwatty/.codex/sessions/2026/05/30/rollout-2026-05-30T05-20-08-019e78d3-d0c5-7423-b885-55e8047473e6.jsonl
+
+lsof (Codex app server PID 61478):
+COMMAND   PID      USER   FD   TYPE DEVICE SIZE/OFF     NODE NAME
+codex   61478 neonwatty  403w   REG   1,13    75840 97313971 /Users/neonwatty/.codex/sessions/2026/05/30/rollout-2026-05-30T05-20-08-019e78d3-d0c5-7423-b885-55e8047473e6.jsonl
+
+standing instruction excerpt:
+## Your standing instruction for the drill
+
+Do not use tmux. After the controller gives you the task name later, you will run:
+
+```bash
+cd /Users/neonwatty/Desktop/codex-terminal-manager
+scripts/workerctl worker-inbox live-codex-app-inbox-20260530 --consume-next --json
+```
+
+Treat any consumed dispatcher message as your instruction source. When you complete the requested work, reply normally so your rollout JSONL records the completion event. Keep a concise note of each command you run.
