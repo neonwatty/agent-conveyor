@@ -647,15 +647,15 @@ test("dispatch chains expose missing Ralph-loop continuation evidence", () => {
       {
         command_id: "cmd-missing-evidence",
         dispatcher_id: "dispatch-local",
-        error: "missing_ci_green_evidence missing_evidence=ci_green current_iteration=1 max_iterations=3 requested_iteration=2",
+        error: "missing_required_evidence missing_evidence=pr_url,ci_green,merge current_iteration=1 max_iterations=3 requested_iteration=2",
         id: 8,
         result: {
           current_iteration: 1,
           delivered: false,
           manager_decision_id: 13,
           max_iterations: 3,
-          missing_evidence: ["ci_green"],
-          reason: "missing_ci_green_evidence",
+          missing_evidence: ["pr_url", "ci_green", "merge"],
+          reason: "missing_required_evidence",
           requested_iteration: 2,
           run_id: "run-ralph",
           state: "blocked",
@@ -692,8 +692,8 @@ test("dispatch chains expose missing Ralph-loop continuation evidence", () => {
     routed_notifications: [],
   });
 
-  assert.equal(chains[0].blocked_policy?.reason, "missing_ci_green_evidence");
-  assert.deepEqual(chains[0].blocked_policy?.missing_evidence, ["ci_green"]);
+  assert.equal(chains[0].blocked_policy?.reason, "missing_required_evidence");
+  assert.deepEqual(chains[0].blocked_policy?.missing_evidence, ["pr_url", "ci_green", "merge"]);
   assert.equal(chains[0].notification_count, 0);
 });
 

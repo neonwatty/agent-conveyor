@@ -121,6 +121,11 @@ receipts, handoffs, and clear receipts can be connected after the run:
   blocked Dispatch attempt, dashboard row, and empty worker inbox proof
 - `ralph-loop-ci-allowed`: fresh retry after `ci_green` evidence is recorded,
   delivered Dispatch attempt, and worker inbox proof
+- `ralph-loop-preset-missing`: `pr_ci_merge_loop` preset refusal drill,
+  blocked Dispatch attempt, dashboard row, and empty worker inbox proof
+- `ralph-loop-preset-allowed`: fresh retry after `pr_url`, `ci_green`, and
+  `merge` evidence is recorded, delivered Dispatch attempt, and worker inbox
+  proof
 
 When a command does not accept `--correlation-id`, include the marker in
 `--payload-json` under `ralph_loop.correlation_id`.
@@ -307,6 +312,128 @@ Required retry evidence:
   message for no-tmux workers, or tmux send evidence exists for tmux workers
 - replay/audit preserve both `ralph-loop-missing-ci` and
   `ralph-loop-ci-allowed`
+
+## Preset PR/CI/Merge Evidence Drill
+
+Run this preset negative-and-recovery browser QA case in a disposable bound task
+to prove Dispatch blocks a manager continuation until every required
+`pr_ci_merge_loop` evidence receipt exists.
+
+List available presets first:
+
+```bash
+scripts/workerctl ralph-loop-presets --list --json
+```
+
+Verify the output includes `test_coverage_loop`, `build_then_clear`,
+`pr_ci_merge_loop`, and `compact_then_continue`.
+
+Create the preset-backed Ralph-loop run record:
+
+```bash
+RALPH_LOOP_RUN_ID="$(scripts/workerctl ralph-loop-presets \
+  --create-run qa-ralph-loop-preset \
+  --preset pr_ci_merge_loop \
+  --name qa-ralph-loop-preset-policy \
+  --max-iterations 3 \
+  --current-iteration 1 \
+  --seed-prompt-sha256 "<seed-sha256>" \
+  --json \
+  --path "$WORKERCTL_DB" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')"
+```
+
+Record the manager request before PR, CI, and merge evidence exists, then
+dispatch:
+
+```bash
+MANAGER_DECISION_ID="$(scripts/workerctl record-decision qa-ralph-loop-preset nudge \
+  --reason "Manager requests iteration 2 before PR, CI, and merge evidence exists." \
+  --payload-json "{\"ralph_loop_run_id\":\"$RALPH_LOOP_RUN_ID\",\"requested_iteration\":2,\"correlation_id\":\"ralph-loop-preset-missing\"}" \
+  --path "$WORKERCTL_DB" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')"
+
+scripts/workerctl enqueue-continue-iteration qa-ralph-loop-preset \
+  --loop-run "$RALPH_LOOP_RUN_ID" \
+  --requested-iteration 2 \
+  --manager-decision-id "$MANAGER_DECISION_ID" \
+  --correlation-id ralph-loop-preset-missing \
+  --message "Run iteration 2." \
+  --json \
+  --path "$WORKERCTL_DB"
+
+scripts/workerctl dispatch \
+  --once \
+  --type continue_iteration \
+  --dispatcher-id qa-ralph-loop \
+  --json \
+  --path "$WORKERCTL_DB"
+```
+
+Required blocked result fields:
+
+- `state=blocked`
+- `reason=missing_required_evidence`
+- `missing_evidence=["pr_url","ci_green","merge"]`
+- `delivered=false`
+- `target_worker_notified=false`
+- `current_iteration=1`
+- `max_iterations=3`
+- `requested_iteration=2`
+- no routed notification id
+
+Open the dashboard for the bound task and verify the Dispatch panel shows
+`continue_iteration`, `missing_required_evidence`,
+`missing pr_url, ci_green, merge`, `iteration 1/3`, `requested 2`,
+`0 notifications`, `Inbox 0`, and `Pull inbox 0` for
+`ralph-loop-preset-missing`.
+
+Then record all required evidence as satisfied criteria for iteration 1 and
+retry with a fresh command:
+
+```bash
+for EVIDENCE_TYPE in pr_url ci_green merge; do
+  CRITERION_ID="$(scripts/workerctl criteria qa-ralph-loop-preset \
+    --add \
+    --criterion "Iteration 1 ${EVIDENCE_TYPE} evidence" \
+    --source manager_inferred \
+    --status accepted \
+    --path "$WORKERCTL_DB" | python3 -c 'import json,sys; print(json.load(sys.stdin)["affected_criterion"]["id"])')"
+  scripts/workerctl criteria qa-ralph-loop-preset \
+    --satisfy "$CRITERION_ID" \
+    --proof "${EVIDENCE_TYPE} receipt recorded." \
+    --evidence-json "{\"correlation_id\":\"ralph-loop-${EVIDENCE_TYPE}\",\"evidence_type\":\"${EVIDENCE_TYPE}\",\"iteration\":1,\"ralph_loop_run_id\":\"$RALPH_LOOP_RUN_ID\",\"status\":\"recorded\"}" \
+    --path "$WORKERCTL_DB"
+done
+
+MANAGER_DECISION_ID="$(scripts/workerctl record-decision qa-ralph-loop-preset nudge \
+  --reason "PR, CI, and merge evidence exists; retry iteration 2." \
+  --payload-json "{\"ralph_loop_run_id\":\"$RALPH_LOOP_RUN_ID\",\"requested_iteration\":2,\"correlation_id\":\"ralph-loop-preset-allowed\"}" \
+  --path "$WORKERCTL_DB" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')"
+
+scripts/workerctl enqueue-continue-iteration qa-ralph-loop-preset \
+  --loop-run "$RALPH_LOOP_RUN_ID" \
+  --requested-iteration 2 \
+  --manager-decision-id "$MANAGER_DECISION_ID" \
+  --correlation-id ralph-loop-preset-allowed \
+  --message "Run iteration 2." \
+  --json \
+  --path "$WORKERCTL_DB"
+
+scripts/workerctl dispatch \
+  --once \
+  --type continue_iteration \
+  --dispatcher-id qa-ralph-loop \
+  --json \
+  --path "$WORKERCTL_DB"
+```
+
+Required retry evidence:
+
+- the fresh command is delivered
+- `routed_notifications` includes `signal_type=continue_iteration`
+- `worker-inbox qa-ralph-loop-preset --json` contains the iteration 2 message
+  for no-tmux workers, or tmux send evidence exists for tmux workers
+- replay/audit preserve both `ralph-loop-preset-missing` and
+  `ralph-loop-preset-allowed`
 
 ## Permission Checks
 

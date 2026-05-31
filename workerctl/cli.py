@@ -54,6 +54,7 @@ from workerctl.commands import (
     command_qa_plan,
     command_reconcile,
     command_record_decision,
+    command_ralph_loop_presets,
     command_register_worker,
     command_request_worker_compact,
     command_register_manager,
@@ -297,6 +298,32 @@ def build_parser() -> argparse.ArgumentParser:
     enqueue_continue.add_argument("--json", action="store_true", help="Print JSON output.")
     enqueue_continue.add_argument("--path", help="Override the workerctl database path.")
     enqueue_continue.set_defaults(func=command_enqueue_continue_iteration)
+
+    ralph_loop_presets = subparsers.add_parser(
+        "ralph-loop-presets",
+        help="List Ralph-loop policy presets or create a preset-backed policy run.",
+    )
+    preset_action = ralph_loop_presets.add_mutually_exclusive_group(required=True)
+    preset_action.add_argument("--list", action="store_true", help="List available Ralph-loop presets.")
+    preset_action.add_argument("--show", metavar="PRESET", help="Show one Ralph-loop preset.")
+    preset_action.add_argument("--create-run", metavar="TASK", help="Create a preset-backed Ralph-loop policy run for a task.")
+    ralph_loop_presets.add_argument("--preset", help="Preset name to use with --create-run.")
+    ralph_loop_presets.add_argument("--name", help="Optional run name when creating a preset-backed run.")
+    ralph_loop_presets.add_argument(
+        "--max-iterations",
+        type=int,
+        help="Override the preset default max iterations when creating a run.",
+    )
+    ralph_loop_presets.add_argument(
+        "--current-iteration",
+        type=int,
+        default=0,
+        help="Current completed iteration when creating a run.",
+    )
+    ralph_loop_presets.add_argument("--seed-prompt-sha256", help="Seed prompt hash to store with the policy run.")
+    ralph_loop_presets.add_argument("--json", action="store_true", help="Print stable JSON output.")
+    ralph_loop_presets.add_argument("--path", help="Override the workerctl database path.")
+    ralph_loop_presets.set_defaults(func=command_ralph_loop_presets)
 
     doctor = subparsers.add_parser("doctor", help="Check local dependencies and worker state.")
     doctor.add_argument("--cwd", default=str(INVOCATION_CWD), help="Target worker cwd to check.")
