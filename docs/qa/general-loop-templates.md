@@ -1,0 +1,185 @@
+# Codex QA: General Loop Templates
+
+Use this QA scenario to prove a named loop template can create a generic policy
+run, Dispatch can block a manager-requested continuation before worker delivery
+when required evidence is missing, and a fresh retry can reach the worker inbox
+after evidence is recorded.
+
+## Scenario
+
+- Template: `visual_diff_loop`
+- Task: `qa-general-loop-template`
+- Default max iterations: `4`
+- Required evidence before iteration 2: `reference_artifact`,
+  `candidate_screenshot`, `visual_diff_report`, `diff_below_threshold`
+- Dispatcher role: mechanical routing and policy enforcement only
+- Manager role: decide whether another visual pass is useful and record the
+  evidence receipts
+- Worker role: implement or inspect the UI, produce screenshots or HTML, and
+  report artifact paths
+
+## Setup
+
+```bash
+WORKERCTL_DB="$(mktemp -t workerctl-loop-template.XXXXXX.db)"
+scripts/workerctl tasks --create qa-general-loop-template --goal "QA generic loop templates with visual-diff evidence." --path "$WORKERCTL_DB"
+scripts/workerctl register-worker --name qa-loop-worker --pid $$ --cwd "$PWD" --path "$WORKERCTL_DB"
+scripts/workerctl register-manager --name qa-loop-manager --pid $$ --cwd "$PWD" --path "$WORKERCTL_DB"
+scripts/workerctl bind --task qa-general-loop-template --worker qa-loop-worker --manager qa-loop-manager --path "$WORKERCTL_DB"
+scripts/workerctl loop-templates --list --json --path "$WORKERCTL_DB"
+scripts/workerctl loop-templates --show visual_diff_loop --json --path "$WORKERCTL_DB"
+```
+
+Acceptance criteria:
+
+- `loop-templates --list` includes `visual_diff_loop`, `test_coverage_loop`,
+  `pr_ci_merge_loop`, `build_then_clear`, and `compact_then_continue`.
+- `loop-templates --show visual_diff_loop` shows the four required evidence
+  fields, artifact requirements, recommended tools, cleanup policy, tags, and
+  stop conditions.
+
+## Template-Backed Run Creation
+
+Create the template-backed run:
+
+```bash
+RUN_ID="$(scripts/workerctl loop-templates --create-run qa-general-loop-template \
+  --template visual_diff_loop \
+  --name qa-visual-template-run \
+  --max-iterations 4 \
+  --current-iteration 1 \
+  --seed-prompt-sha256 visual-template-seed \
+  --json \
+  --path "$WORKERCTL_DB" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')"
+```
+
+Acceptance criteria:
+
+- The created run has `purpose=ralph_loop`.
+- The metadata has `template=visual_diff_loop`, `preset=visual_diff_loop`,
+  `max_iterations=4`, `current_iteration=1`, and `cleanup_policy=compact`.
+- The metadata includes `required_before_continue` with
+  `reference_artifact`, `candidate_screenshot`, `visual_diff_report`, and
+  `diff_below_threshold`.
+
+## Missing Evidence Block
+
+Queue a manager continuation before visual evidence exists:
+
+```bash
+DECISION_ID="$(scripts/workerctl record-decision qa-general-loop-template nudge \
+  --reason "Manager requests visual iteration 2 before visual evidence exists." \
+  --payload-json "{\"loop_run_id\":\"$RUN_ID\",\"requested_iteration\":2,\"template\":\"visual_diff_loop\",\"correlation_id\":\"visual-loop-missing\"}" \
+  --path "$WORKERCTL_DB" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')"
+
+scripts/workerctl enqueue-continue-iteration qa-general-loop-template \
+  --loop-run "$RUN_ID" \
+  --requested-iteration 2 \
+  --manager-decision-id "$DECISION_ID" \
+  --correlation-id visual-loop-missing \
+  --message "Run visual iteration 2." \
+  --json \
+  --path "$WORKERCTL_DB"
+
+scripts/workerctl dispatch --once --type continue_iteration --dispatcher-id qa-loop-template --json --path "$WORKERCTL_DB"
+scripts/workerctl worker-inbox qa-general-loop-template --json --path "$WORKERCTL_DB"
+```
+
+Acceptance criteria:
+
+- Dispatch result includes `state=blocked`.
+- Dispatch result includes `reason=missing_required_evidence`.
+- Dispatch result includes all four missing evidence names in order.
+- Dispatch result includes `delivered=false` and `target_worker_notified=false`.
+- `scripts/workerctl worker-inbox qa-general-loop-template --json --path "$WORKERCTL_DB"`
+  returns no items.
+- Dashboard Dispatch panel shows the correlation `visual-loop-missing`,
+  `0 notifications`, `Inbox 0`, and `Pull inbox 0`.
+
+## Allowed Retry After Evidence
+
+Record visual evidence as satisfied criteria:
+
+```bash
+scripts/workerctl criteria qa-general-loop-template --add --criterion "Reference artifact recorded" --source manager_inferred --status satisfied --proof "/tmp/reference.png" --evidence-json "{\"ralph_loop_run_id\":\"$RUN_ID\",\"iteration\":1,\"evidence_type\":\"reference_artifact\",\"status\":\"pass\",\"artifact_path\":\"/tmp/reference.png\",\"correlation_id\":\"visual-loop-reference\"}" --path "$WORKERCTL_DB"
+scripts/workerctl criteria qa-general-loop-template --add --criterion "Candidate screenshot recorded" --source manager_inferred --status satisfied --proof "/tmp/candidate.png" --evidence-json "{\"ralph_loop_run_id\":\"$RUN_ID\",\"iteration\":1,\"evidence_type\":\"candidate_screenshot\",\"status\":\"pass\",\"artifact_path\":\"/tmp/candidate.png\",\"viewport\":\"1440x900\",\"correlation_id\":\"visual-loop-candidate\"}" --path "$WORKERCTL_DB"
+scripts/workerctl criteria qa-general-loop-template --add --criterion "Visual diff report recorded" --source manager_inferred --status satisfied --proof "/tmp/visual-diff.json" --evidence-json "{\"ralph_loop_run_id\":\"$RUN_ID\",\"iteration\":1,\"evidence_type\":\"visual_diff_report\",\"status\":\"pass\",\"artifact_path\":\"/tmp/visual-diff.json\",\"diff_score\":0.012,\"threshold\":0.02,\"correlation_id\":\"visual-loop-report\"}" --path "$WORKERCTL_DB"
+scripts/workerctl criteria qa-general-loop-template --add --criterion "Visual diff is below threshold" --source manager_inferred --status satisfied --proof "diff score 0.012 <= threshold 0.02" --evidence-json "{\"ralph_loop_run_id\":\"$RUN_ID\",\"iteration\":1,\"evidence_type\":\"diff_below_threshold\",\"status\":\"pass\",\"diff_score\":0.012,\"threshold\":0.02,\"correlation_id\":\"visual-loop-threshold\"}" --path "$WORKERCTL_DB"
+```
+
+Queue and dispatch a fresh retry:
+
+```bash
+scripts/workerctl enqueue-continue-iteration qa-general-loop-template \
+  --loop-run "$RUN_ID" \
+  --requested-iteration 2 \
+  --correlation-id visual-loop-allowed \
+  --message "Run visual iteration 2 after evidence receipts." \
+  --json \
+  --path "$WORKERCTL_DB"
+
+scripts/workerctl dispatch --once --type continue_iteration --dispatcher-id qa-loop-template --json --path "$WORKERCTL_DB"
+scripts/workerctl worker-inbox qa-general-loop-template --consume-next --wait --timeout 2 --json --path "$WORKERCTL_DB"
+scripts/workerctl telemetry --task qa-general-loop-template --event-type dispatch_inbox_consumed --json --path "$WORKERCTL_DB"
+```
+
+Acceptance criteria:
+
+- Dispatch result includes `state=pull_required` for a non-tmux worker.
+- Routed notification has `signal_type=continue_iteration`.
+- Worker inbox consumption returns the visual iteration message.
+- Telemetry includes `dispatch_inbox_consumed`.
+- Replay and audit connect `visual-loop-allowed` to the command attempt, routed
+  notification, worker inbox item, and consumption event.
+
+## Max Iteration Cutoff
+
+Create a second run at its max:
+
+```bash
+MAX_RUN_ID="$(scripts/workerctl loop-templates --create-run qa-general-loop-template \
+  --template visual_diff_loop \
+  --name qa-visual-max-run \
+  --max-iterations 1 \
+  --current-iteration 1 \
+  --json \
+  --path "$WORKERCTL_DB" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')"
+
+scripts/workerctl enqueue-continue-iteration qa-general-loop-template \
+  --loop-run "$MAX_RUN_ID" \
+  --requested-iteration 2 \
+  --correlation-id visual-loop-max-block \
+  --message "Run visual iteration 2." \
+  --json \
+  --path "$WORKERCTL_DB"
+
+scripts/workerctl dispatch --once --type continue_iteration --dispatcher-id qa-loop-template --json --path "$WORKERCTL_DB"
+scripts/workerctl worker-inbox qa-general-loop-template --json --path "$WORKERCTL_DB"
+```
+
+Acceptance criteria:
+
+- Dispatch result includes `state=blocked`.
+- Dispatch result includes `reason=max_iterations_reached`.
+- Dispatch result includes `delivered=false` and `target_worker_notified=false`.
+- Worker inbox receives no item for `visual-loop-max-block`.
+
+## Export Evidence
+
+Export the task evidence for review:
+
+```bash
+scripts/workerctl replay qa-general-loop-template --json --path "$WORKERCTL_DB" > /tmp/qa-general-loop-template-replay.json
+scripts/workerctl telemetry --task qa-general-loop-template --json --path "$WORKERCTL_DB" > /tmp/qa-general-loop-template-telemetry.json
+scripts/workerctl export-task qa-general-loop-template --zip --path "$WORKERCTL_DB"
+```
+
+Acceptance criteria:
+
+- Replay includes the blocked `visual-loop-missing` attempt, the allowed
+  `visual-loop-allowed` attempt, and the max cutoff `visual-loop-max-block`
+  attempt.
+- Telemetry includes the `dispatch_inbox_consumed` event from the consumed
+  worker inbox item.
+- The export bundle includes replay, telemetry, criteria evidence, command
+  attempts, and routed notification evidence for the visual-diff drill.

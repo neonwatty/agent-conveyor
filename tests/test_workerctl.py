@@ -16308,6 +16308,24 @@ class ManagerBootstrapPromptTests(unittest.TestCase):
         self.assertIn("telemetry-events.json", workflow)
         self.assertIn("telemetry-report.md", workflow)
 
+    def test_readme_documents_generic_loop_templates(self):
+        readme = (ROOT / "README.md").read_text()
+
+        self.assertIn("loop-templates", readme)
+        self.assertIn("visual_diff_loop", readme)
+        self.assertIn("required_before_continue", readme)
+        self.assertIn("ralph-loop-presets", readme)
+
+    def test_general_loop_template_qa_documents_visual_drill(self):
+        qa_doc = (ROOT / "docs" / "qa" / "general-loop-templates.md").read_text()
+
+        self.assertIn("visual_diff_loop", qa_doc)
+        self.assertIn("loop-templates --create-run", qa_doc)
+        self.assertIn("missing_required_evidence", qa_doc)
+        self.assertIn("diff_below_threshold", qa_doc)
+        self.assertIn("worker-inbox", qa_doc)
+        self.assertIn("dispatch_inbox_consumed", qa_doc)
+
 
 class StartManagerTests(unittest.TestCase):
     """Tests for `workerctl start-manager` — the spawn-and-register convenience for managers."""
