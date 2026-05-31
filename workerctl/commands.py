@@ -3777,14 +3777,22 @@ def _record_loop_evidence(
     return {"criterion": criterion, "evidence": evidence, "run": run}
 
 
-def _adversarial_check_metadata(metadata: dict[str, Any]) -> dict[str, str]:
-    values: dict[str, str] = {}
+def _is_structured_adversarial_evidence(evidence: dict[str, Any]) -> bool:
+    for key in ("failure_mode", "check", "result"):
+        value = evidence.get(key)
+        if not isinstance(value, str) or not value.strip():
+            return False
+    return True
+
+
+def _adversarial_check_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
+    values = dict(metadata)
     for key, flag in (
         ("failure_mode", "--failure-mode"),
         ("check", "--check"),
         ("result", "--result"),
     ):
-        value = metadata.get(key)
+        value = values.get(key)
         if not isinstance(value, str):
             value = ""
         value = value.strip()
@@ -5058,11 +5066,16 @@ def _ralph_loop_evidence_matches(
     iteration: int,
     run_id: str,
 ) -> bool:
-    return (
+    matches = (
         evidence.get("evidence_type") == evidence_type
         and evidence.get("ralph_loop_run_id") == run_id
         and evidence.get("iteration") == iteration
     )
+    if not matches:
+        return False
+    if evidence_type == "adversarial_check":
+        return _is_structured_adversarial_evidence(evidence)
+    return True
 
 
 def _missing_ralph_loop_evidence(

@@ -3098,6 +3098,21 @@ class DispatchTests(unittest.TestCase):
                 self.assertEqual(worker_db.session_inbox(conn, session_name="worker-session"), [])
 
                 for evidence_type in ("pr_url", "ci_green", "merge", "adversarial_check"):
+                    evidence = {
+                        "correlation_id": f"ralph-loop-{evidence_type}",
+                        "evidence_type": evidence_type,
+                        "iteration": 1,
+                        "ralph_loop_run_id": loop_run_id,
+                        "status": "recorded",
+                    }
+                    if evidence_type == "adversarial_check":
+                        evidence.update(
+                            {
+                                "failure_mode": "PR, CI, and merge receipts could hide an unverified regression.",
+                                "check": "Inspect PR, CI, merge, and adversarial receipts before retry.",
+                                "result": "All required receipts are present with structured proof.",
+                            }
+                        )
                     worker_db.insert_acceptance_criterion(
                         conn,
                         task_id="task-dispatch",
@@ -3105,13 +3120,7 @@ class DispatchTests(unittest.TestCase):
                         status="satisfied",
                         source="manager_inferred",
                         proof=f"{evidence_type} receipt recorded.",
-                        evidence={
-                            "correlation_id": f"ralph-loop-{evidence_type}",
-                            "evidence_type": evidence_type,
-                            "iteration": 1,
-                            "ralph_loop_run_id": loop_run_id,
-                            "status": "recorded",
-                        },
+                        evidence=evidence,
                     )
                 allowed_command_id = worker_db.enqueue_continue_iteration(
                     conn,
@@ -3145,6 +3154,75 @@ class DispatchTests(unittest.TestCase):
                 ["pr_url", "ci_green", "merge", "adversarial_check"],
             )
             self.assertEqual(consumed["payload"]["message"], "Run iteration 2 after PR, CI, merge, and adversarial evidence.")
+            send.assert_not_called()
+
+    def test_dispatch_blocks_malformed_adversarial_evidence_from_criteria_path(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn, db_path = self.open_db(tmpdir)
+            worker_id, _manager_id = self.setup_bound_task(conn)
+            conn.execute("update sessions set tmux_session = null where id = ?", (worker_id,))
+            loop_run_id = worker_db.create_ralph_loop_run(
+                conn,
+                task_id="task-dispatch",
+                name="adversarial-policy",
+                max_iterations=3,
+                current_iteration=1,
+                cleanup_policy="clear",
+                required_before_continue=["adversarial_check"],
+                stop_conditions=["max_iterations", "required_evidence"],
+            )
+            worker_db.insert_acceptance_criterion(
+                conn,
+                task_id="task-dispatch",
+                criterion="Malformed adversarial evidence",
+                status="satisfied",
+                source="manager_inferred",
+                proof="This receipt lacks structured proof fields.",
+                evidence={
+                    "evidence_type": "adversarial_check",
+                    "iteration": 1,
+                    "ralph_loop_run_id": loop_run_id,
+                    "status": "pass",
+                },
+            )
+            command_id = worker_db.enqueue_continue_iteration(
+                conn,
+                task_id="task-dispatch",
+                message="Run iteration 2.",
+                loop_run_id=loop_run_id,
+                requested_iteration=2,
+                correlation_id="malformed-adversarial-blocked",
+            )
+            conn.commit()
+
+            args = argparse.Namespace(
+                dispatcher_id="dispatch-test",
+                dry_run=False,
+                json=True,
+                limit=10,
+                once=True,
+                path=str(db_path),
+                type="continue_iteration",
+                watch=False,
+            )
+            with mock.patch.object(worker_tmux, "send_text_to_session") as send:
+                with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                    commands.command_dispatch(args)
+
+            processed = json.loads(stdout.getvalue())["processed"][0]
+            command_row = conn.execute(
+                "select state, result_json, error from commands where id = ?",
+                (command_id,),
+            ).fetchone()
+
+            self.assertEqual(processed["state"], "blocked")
+            self.assertEqual(processed["reason"], "missing_adversarial_check_evidence")
+            self.assertEqual(processed["missing_evidence"], ["adversarial_check"])
+            self.assertEqual(command_row["state"], "failed")
+            self.assertIn("missing_adversarial_check_evidence", command_row["error"])
+            self.assertEqual(json.loads(command_row["result_json"])["missing_evidence"], ["adversarial_check"])
+            self.assertEqual(worker_db.routed_notifications(conn, task_id="task-dispatch"), [])
+            self.assertEqual(worker_db.session_inbox(conn, session_name="worker-session"), [])
             send.assert_not_called()
 
     def test_dispatch_blocks_visual_diff_template_until_required_evidence_exists(self):
@@ -5494,6 +5572,59 @@ class CliTests(unittest.TestCase):
                 ).fetchall()
             self.assertEqual(criteria, [])
             self.assertEqual(criterion_events, [])
+
+    def test_loop_evidence_add_preserves_extra_adversarial_metadata(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                task_id = worker_db.create_task(
+                    conn,
+                    name="extra-adversarial-task",
+                    goal="Preserve extra adversarial metadata.",
+                )
+                run_id = worker_db.create_ralph_loop_run(
+                    conn,
+                    task_id=task_id,
+                    max_iterations=2,
+                    current_iteration=1,
+                    required_before_continue=["adversarial_check"],
+                )
+                conn.commit()
+
+            proc = self.run_workerctl(
+                "loop-evidence",
+                "add",
+                "extra-adversarial-task",
+                "--loop-run",
+                run_id,
+                "--iteration",
+                "1",
+                "--evidence-type",
+                "adversarial_check",
+                "--metadata-json",
+                json.dumps(
+                    {
+                        "failure_mode": "The proof may be structurally valid but lose audit context.",
+                        "check": "Record via generic add with extra metadata.",
+                        "result": "The receipt keeps both required and extra metadata.",
+                        "reviewer": "qa",
+                        "notes": {"source": "second-review"},
+                    }
+                ),
+                "--path",
+                str(db_path),
+            )
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            payload = json.loads(proc.stdout)
+            self.assertEqual(payload["evidence"]["evidence_type"], "adversarial_check")
+            self.assertEqual(payload["evidence"]["reviewer"], "qa")
+            self.assertEqual(payload["evidence"]["notes"], {"source": "second-review"})
+            self.assertEqual(
+                payload["evidence"]["failure_mode"],
+                "The proof may be structurally valid but lose audit context.",
+            )
 
     def test_ralph_loop_presets_cli_creates_policy_run(self):
         with tempfile.TemporaryDirectory() as tmpdir:
