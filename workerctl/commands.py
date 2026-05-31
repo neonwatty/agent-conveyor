@@ -3785,19 +3785,6 @@ def _is_structured_adversarial_evidence(evidence: dict[str, Any]) -> bool:
     return True
 
 
-def _task_has_satisfied_adversarial_proof(conn: Any, *, task_id: str) -> bool:
-    from workerctl import db as worker_db
-
-    criteria = worker_db.acceptance_criteria_for_task(conn, task_id=task_id, statuses=["satisfied"])
-    for criterion in criteria:
-        evidence = criterion.get("evidence") or {}
-        if evidence.get("evidence_type") != "adversarial_check":
-            continue
-        if _is_structured_adversarial_evidence(evidence):
-            return True
-    return False
-
-
 def _adversarial_check_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
     values = dict(metadata)
     for key, flag in (
@@ -3916,22 +3903,6 @@ def command_loop_evidence(args: argparse.Namespace) -> int:
         conn.commit()
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0
-
-
-def command_finish_task(args: argparse.Namespace) -> int:
-    from workerctl.lifecycle import command_finish_task as lifecycle_command_finish_task
-
-    if getattr(args, "require_adversarial_proof", False):
-        db_path = Path(args.path).expanduser().resolve() if args.path else None
-        with connect_db(db_path) as conn:
-            initialize_database(conn)
-            task = task_status_snapshot(conn, task=args.task)
-            if not _task_has_satisfied_adversarial_proof(conn, task_id=task["id"]):
-                raise WorkerError(
-                    "adversarial proof is required before finish; record satisfied "
-                    "evidence_type=adversarial_check with non-empty failure_mode, check, and result"
-                )
-    return lifecycle_command_finish_task(args)
 
 
 def command_criteria(args: argparse.Namespace) -> int:

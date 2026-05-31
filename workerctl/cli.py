@@ -41,7 +41,6 @@ from workerctl.commands import (
     command_enqueue_nudge_worker,
     command_epilogue,
     command_events,
-    command_finish_task,
     command_idle_check,
     command_interrupt,
     command_list,
@@ -98,6 +97,7 @@ from workerctl.ingest import IngestError
 from workerctl.export import command_export_task
 from workerctl.importer import command_import_compat
 from workerctl.lifecycle import (
+    command_finish_task,
     command_stop_task,
 )
 from workerctl.replay import command_replay
