@@ -1655,6 +1655,7 @@ def create_ralph_loop_run(
     name: str | None = None,
     run_id: str | None = None,
     timestamp: str | None = None,
+    metadata: dict[str, Any] | None = None,
 ) -> str:
     if max_iterations < 1:
         raise WorkerError("max_iterations must be at least 1")
@@ -1675,7 +1676,10 @@ def create_ralph_loop_run(
     ).fetchone()
     if task is None:
         raise WorkerError(f"Unknown task id: {task_id}")
-    metadata: dict[str, Any] = {
+    if metadata is not None and not isinstance(metadata, dict):
+        raise WorkerError("run metadata must be a JSON object")
+    run_metadata: dict[str, Any] = dict(metadata or {})
+    run_metadata.update({
         "cleanup_policy": cleanup_policy,
         "current_iteration": current_iteration,
         "kind": "ralph_loop",
@@ -1685,7 +1689,7 @@ def create_ralph_loop_run(
         "required_before_continue": required_evidence,
         "seed_prompt_sha256": seed_prompt_sha256,
         "stop_conditions": stop_conditions or [],
-    }
+    })
     now = timestamp or now_iso()
     new_run_id = run_id or f"run-{uuid.uuid4()}"
     run_name = name or f"{task['name']}-ralph-loop-{now.replace(':', '').replace('.', '-')}"
@@ -1700,7 +1704,7 @@ def create_ralph_loop_run(
             run_name,
             now,
             now,
-            _metadata_json(metadata, field="run metadata"),
+            _metadata_json(run_metadata, field="run metadata"),
         ),
     )
     return new_run_id

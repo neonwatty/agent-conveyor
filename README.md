@@ -564,6 +564,16 @@ tmux attach -t codex-live-test
   `--include-content` is passed.
 - `qa-plan <self-management|emergent-criteria|tmux-errors|dispatch-completion|ralph-loop>` — Print a
   repeatable manual QA checklist.
+- `loop-templates --list|--show TEMPLATE|--create-run TASK --template TEMPLATE` —
+  List generic loop templates or create a template-backed loop policy run.
+  Template-backed runs use the same Dispatch guardrails as Ralph-loop presets:
+  `max_iterations` prevents over-looping, and `required_before_continue`
+  evidence blocks a manager continuation before worker delivery until matching
+  satisfied criterion evidence exists. `ralph-loop-presets` remains as a
+  compatibility alias for the current Ralph-loop QA flows. The built-in
+  `visual_diff_loop` template requires `reference_artifact`,
+  `candidate_screenshot`, `visual_diff_report`, and `diff_below_threshold`
+  evidence before a manager-requested next visual pass can reach the worker.
 - `ralph-loop-presets --list|--show PRESET|--create-run TASK --preset PRESET` —
   List saved Ralph-loop guardrail templates or create a preset-backed
   `ralph_loop` policy run.
@@ -590,8 +600,18 @@ scripts/workerctl qa-plan emergent-criteria --json
 scripts/workerctl qa-plan tmux-errors
 scripts/workerctl qa-plan dispatch-completion
 scripts/workerctl qa-plan ralph-loop
+scripts/workerctl loop-templates --list --json
+scripts/workerctl loop-templates --show visual_diff_loop --json
 scripts/workerctl ralph-loop-presets --list --json
 ```
+
+General loop templates let operators create policy-backed runs without adding
+bespoke Dispatch behavior for each loop shape. For example,
+`scripts/workerctl loop-templates --create-run qa-task --template visual_diff_loop`
+creates a visual-diff loop run whose `required_before_continue` evidence must
+be recorded before the manager's next visual pass can reach the worker.
+Existing `ralph-loop-presets` commands remain compatible aliases over the same
+template-backed guardrails.
 
 The `emergent-criteria` scenario covers a real worker/manager pair, criteria
 negotiation, audited finish gating, replay/export evidence, and

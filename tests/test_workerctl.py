@@ -113,6 +113,59 @@ class RalphLoopPresetTests(unittest.TestCase):
         with self.assertRaisesRegex(WorkerError, "Unknown Ralph loop preset"):
             ralph_loop_preset_metadata("not-a-preset")
 
+    def test_loop_templates_include_visual_diff_template(self):
+        from workerctl.loop_templates import list_loop_templates, loop_template_metadata
+
+        names = [template["name"] for template in list_loop_templates()]
+
+        self.assertIn("test_coverage_loop", names)
+        self.assertIn("pr_ci_merge_loop", names)
+        self.assertIn("visual_diff_loop", names)
+
+        visual = loop_template_metadata("visual_diff_loop")
+        self.assertEqual(visual["kind"], "ralph_loop")
+        self.assertEqual(visual["template"], "visual_diff_loop")
+        self.assertEqual(visual["preset"], "visual_diff_loop")
+        self.assertEqual(
+            visual["required_before_continue"],
+            ["reference_artifact", "candidate_screenshot", "visual_diff_report", "diff_below_threshold"],
+        )
+        self.assertEqual(visual["stop_conditions"], ["max_iterations", "required_evidence", "manager_accepts"])
+        self.assertEqual(visual["artifact_requirements"]["diff_score"]["type"], "number")
+
+    def test_loop_template_metadata_allows_visual_diff_overrides(self):
+        from workerctl.loop_templates import loop_template_metadata
+
+        metadata = loop_template_metadata(
+            "visual_diff_loop",
+            max_iterations=5,
+            current_iteration=2,
+            seed_prompt_sha256="visual-seed",
+        )
+
+        self.assertEqual(metadata["max_iterations"], 5)
+        self.assertEqual(metadata["current_iteration"], 2)
+        self.assertEqual(metadata["seed_prompt_sha256"], "visual-seed")
+        self.assertEqual(metadata["cleanup_policy"], "compact")
+        self.assertEqual(metadata["template"], "visual_diff_loop")
+
+    def test_loop_template_outputs_are_mutation_safe(self):
+        from workerctl.loop_templates import list_loop_templates, loop_template_metadata
+
+        metadata = loop_template_metadata("visual_diff_loop")
+        metadata["artifact_requirements"]["diff_score"]["type"] = "mutated"
+
+        fresh_metadata = loop_template_metadata("visual_diff_loop")
+
+        self.assertEqual(fresh_metadata["artifact_requirements"]["diff_score"]["type"], "number")
+
+        summary = next(template for template in list_loop_templates() if template["name"] == "visual_diff_loop")
+        summary["artifact_requirements"]["diff_score"]["type"] = "mutated-again"
+
+        fresh_summary = next(template for template in list_loop_templates() if template["name"] == "visual_diff_loop")
+
+        self.assertEqual(fresh_summary["artifact_requirements"]["diff_score"]["type"], "number")
+
 
 class DatabaseTests(unittest.TestCase):
     def open_db(self, tmpdir):
@@ -1430,6 +1483,24 @@ class DispatchTests(unittest.TestCase):
         )
         conn.commit()
         return worker_id, manager_id
+
+    def create_visual_diff_template_loop_run(self, conn):
+        from workerctl.loop_templates import loop_template_metadata
+
+        metadata = loop_template_metadata("visual_diff_loop", current_iteration=1)
+        return worker_db.create_ralph_loop_run(
+            conn,
+            task_id="task-dispatch",
+            name="visual-loop",
+            max_iterations=metadata["max_iterations"],
+            current_iteration=metadata["current_iteration"],
+            cleanup_policy=metadata.get("cleanup_policy"),
+            required_before_continue=metadata.get("required_before_continue"),
+            stop_conditions=metadata.get("stop_conditions"),
+            seed_prompt_sha256=metadata.get("seed_prompt_sha256"),
+            preset=metadata.get("preset"),
+            metadata=metadata,
+        )
 
     def insert_completion(
         self,
@@ -2985,6 +3056,140 @@ class DispatchTests(unittest.TestCase):
             self.assertEqual(consumed["payload"]["message"], "Run iteration 2 after PR, CI, and merge evidence.")
             send.assert_not_called()
 
+    def test_dispatch_blocks_visual_diff_template_until_required_evidence_exists(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn, db_path = self.open_db(tmpdir)
+            worker_id, _manager_id = self.setup_bound_task(conn)
+            conn.execute("update sessions set tmux_session = null where id = ?", (worker_id,))
+            loop_run_id = self.create_visual_diff_template_loop_run(conn)
+            persisted_run = worker_db.run_row(conn, run=loop_run_id)
+            self.assertEqual(persisted_run["metadata"]["template"], "visual_diff_loop")
+            self.assertEqual(persisted_run["metadata"]["artifact_requirements"]["diff_score"]["type"], "number")
+            self.assertEqual(
+                persisted_run["metadata"]["required_before_continue"],
+                ["reference_artifact", "candidate_screenshot", "visual_diff_report", "diff_below_threshold"],
+            )
+            command_id = worker_db.enqueue_continue_iteration(
+                conn,
+                task_id="task-dispatch",
+                message="Run visual iteration 2.",
+                loop_run_id=loop_run_id,
+                requested_iteration=2,
+                correlation_id="visual-loop-missing-evidence",
+            )
+            conn.commit()
+
+            args = argparse.Namespace(
+                dispatcher_id="dispatch-test",
+                dry_run=False,
+                json=True,
+                limit=10,
+                once=True,
+                path=str(db_path),
+                type="continue_iteration",
+                watch=False,
+            )
+            with mock.patch.object(worker_tmux, "send_text_to_session") as send:
+                with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                    commands.command_dispatch(args)
+
+            payload = json.loads(stdout.getvalue())
+            processed = payload["processed"][0]
+            command_row = conn.execute(
+                "select state, error from commands where id = ?",
+                (command_id,),
+            ).fetchone()
+
+            self.assertEqual(processed["state"], "blocked")
+            self.assertEqual(processed["reason"], "missing_required_evidence")
+            self.assertEqual(
+                processed["missing_evidence"],
+                ["reference_artifact", "candidate_screenshot", "visual_diff_report", "diff_below_threshold"],
+            )
+            self.assertFalse(processed["delivered"])
+            self.assertFalse(processed["target_worker_notified"])
+            self.assertEqual(processed["current_iteration"], 1)
+            self.assertEqual(processed["max_iterations"], 4)
+            self.assertEqual(processed["requested_iteration"], 2)
+            self.assertEqual(command_row["state"], "failed")
+            self.assertIn("missing_required_evidence", command_row["error"])
+            self.assertEqual(worker_db.routed_notifications(conn, task_id="task-dispatch"), [])
+            self.assertEqual(worker_db.session_inbox(conn, session_name="worker-session"), [])
+            send.assert_not_called()
+
+    def test_dispatch_allows_visual_diff_template_after_required_evidence_exists(self):
+        required_before_continue = [
+            "reference_artifact",
+            "candidate_screenshot",
+            "visual_diff_report",
+            "diff_below_threshold",
+        ]
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn, db_path = self.open_db(tmpdir)
+            worker_id, _manager_id = self.setup_bound_task(conn)
+            conn.execute("update sessions set tmux_session = null where id = ?", (worker_id,))
+            loop_run_id = self.create_visual_diff_template_loop_run(conn)
+            persisted_run = worker_db.run_row(conn, run=loop_run_id)
+            self.assertEqual(persisted_run["metadata"]["template"], "visual_diff_loop")
+            self.assertEqual(persisted_run["metadata"]["artifact_requirements"]["diff_score"]["type"], "number")
+            self.assertEqual(persisted_run["metadata"]["required_before_continue"], required_before_continue)
+            for evidence_type in required_before_continue:
+                worker_db.insert_acceptance_criterion(
+                    conn,
+                    task_id="task-dispatch",
+                    criterion=f"Iteration 1 {evidence_type} evidence",
+                    status="satisfied",
+                    source="manager_inferred",
+                    proof=f"{evidence_type} receipt recorded.",
+                    evidence={
+                        "correlation_id": "visual-loop-allowed",
+                        "evidence_type": evidence_type,
+                        "iteration": 1,
+                        "ralph_loop_run_id": loop_run_id,
+                        "status": "pass",
+                    },
+                )
+            command_id = worker_db.enqueue_continue_iteration(
+                conn,
+                task_id="task-dispatch",
+                message="Run visual iteration 2.",
+                loop_run_id=loop_run_id,
+                requested_iteration=2,
+                correlation_id="visual-loop-allowed",
+            )
+            conn.commit()
+
+            args = argparse.Namespace(
+                dispatcher_id="dispatch-test",
+                dry_run=False,
+                json=True,
+                limit=10,
+                once=True,
+                path=str(db_path),
+                type="continue_iteration",
+                watch=False,
+            )
+            with mock.patch.object(worker_tmux, "send_text_to_session") as send:
+                with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                    commands.command_dispatch(args)
+
+            payload = json.loads(stdout.getvalue())
+            processed = payload["processed"][0]
+            command_row = conn.execute("select state from commands where id = ?", (command_id,)).fetchone()
+            notification = worker_db.routed_notifications(conn, task_id="task-dispatch")[0]
+            consumed = worker_db.consume_next_session_inbox_item(conn, session_name="worker-session")
+
+            self.assertEqual(processed["state"], "pull_required")
+            self.assertEqual(command_row["state"], "succeeded")
+            self.assertEqual(notification["command_id"], command_id)
+            self.assertEqual(notification["signal_type"], "continue_iteration")
+            self.assertEqual(notification["delivery_mode"], "pull_required")
+            self.assertEqual(notification["payload"]["ralph_loop"]["run_id"], loop_run_id)
+            self.assertEqual(notification["payload"]["ralph_loop"]["requested_iteration"], 2)
+            self.assertEqual(notification["payload"]["ralph_loop"]["required_before_continue"], required_before_continue)
+            self.assertEqual(consumed["payload"]["message"], "Run visual iteration 2.")
+            send.assert_not_called()
+
     def test_replay_exposes_blocked_continue_iteration_without_worker_notification(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             conn, db_path = self.open_db(tmpdir)
@@ -4399,6 +4604,126 @@ class CliTests(unittest.TestCase):
         self.assertEqual(preset["name"], "pr_ci_merge_loop")
         self.assertEqual(preset["required_before_continue"], ["pr_url", "ci_green", "merge"])
 
+    def test_ralph_loop_presets_cli_lists_and_shows_templates(self):
+        list_proc = self.run_workerctl("ralph-loop-presets", "--list", "--json")
+
+        self.assertEqual(list_proc.returncode, 0, list_proc.stderr)
+        payload = json.loads(list_proc.stdout)
+        names = [preset["name"] for preset in payload["presets"]]
+        self.assertIn("test_coverage_loop", names)
+        self.assertIn("pr_ci_merge_loop", names)
+        self.assertIn("visual_diff_loop", names)
+
+        show_proc = self.run_workerctl("ralph-loop-presets", "--show", "visual_diff_loop", "--json")
+
+        self.assertEqual(show_proc.returncode, 0, show_proc.stderr)
+        preset = json.loads(show_proc.stdout)
+        self.assertEqual(preset["name"], "visual_diff_loop")
+        self.assertEqual(
+            preset["required_before_continue"],
+            ["reference_artifact", "candidate_screenshot", "visual_diff_report", "diff_below_threshold"],
+        )
+
+    def test_loop_templates_cli_rejects_create_run_options_without_create_run(self):
+        cases = [
+            ("--list", "--template", "visual_diff_loop"),
+            ("--list", "--name", "visual-policy"),
+            ("--list", "--max-iterations", "4"),
+            ("--show", "visual_diff_loop", "--current-iteration", "1"),
+            ("--show", "visual_diff_loop", "--seed-prompt-sha256", "visual123"),
+            ("--list", "--path", "/tmp/workerctl.db"),
+            ("--show", "visual_diff_loop", "--path", "/tmp/workerctl.db"),
+        ]
+
+        for case in cases:
+            with self.subTest(case=case):
+                proc = self.run_workerctl("loop-templates", *case, "--json")
+
+                self.assertEqual(proc.returncode, 1)
+                self.assertIn("is only valid with --create-run", proc.stderr)
+                self.assertNotIn("Traceback", proc.stderr)
+
+    def test_ralph_loop_presets_cli_rejects_create_run_options_without_create_run(self):
+        cases = [
+            ("--list", "--preset", "visual_diff_loop"),
+            ("--list", "--name", "visual-policy"),
+            ("--list", "--max-iterations", "4"),
+            ("--show", "visual_diff_loop", "--current-iteration", "1"),
+            ("--show", "visual_diff_loop", "--seed-prompt-sha256", "visual123"),
+            ("--list", "--path", "/tmp/workerctl.db"),
+            ("--show", "visual_diff_loop", "--path", "/tmp/workerctl.db"),
+        ]
+
+        for case in cases:
+            with self.subTest(case=case):
+                proc = self.run_workerctl("ralph-loop-presets", *case, "--json")
+
+                self.assertEqual(proc.returncode, 1)
+                self.assertIn("is only valid with --create-run", proc.stderr)
+                self.assertNotIn("Traceback", proc.stderr)
+
+    def test_loop_templates_cli_lists_and_shows_visual_diff_template(self):
+        list_proc = self.run_workerctl("loop-templates", "--list", "--json")
+
+        self.assertEqual(list_proc.returncode, 0, list_proc.stderr)
+        payload = json.loads(list_proc.stdout)
+        names = [template["name"] for template in payload["templates"]]
+        self.assertIn("visual_diff_loop", names)
+
+        show_proc = self.run_workerctl("loop-templates", "--show", "visual_diff_loop", "--json")
+
+        self.assertEqual(show_proc.returncode, 0, show_proc.stderr)
+        template = json.loads(show_proc.stdout)
+        self.assertEqual(template["name"], "visual_diff_loop")
+        self.assertEqual(
+            template["required_before_continue"],
+            ["reference_artifact", "candidate_screenshot", "visual_diff_report", "diff_below_threshold"],
+        )
+
+    def test_loop_templates_cli_creates_visual_diff_policy_run(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                task_id = worker_db.create_task(conn, name="visual-template-task", goal="Run visual template loop.")
+                conn.commit()
+
+            proc = self.run_workerctl(
+                "loop-templates",
+                "--create-run",
+                "visual-template-task",
+                "--template",
+                "visual_diff_loop",
+                "--name",
+                "visual-policy",
+                "--max-iterations",
+                "4",
+                "--current-iteration",
+                "1",
+                "--seed-prompt-sha256",
+                "visual123",
+                "--json",
+                "--path",
+                str(db_path),
+            )
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            payload = json.loads(proc.stdout)
+            self.assertEqual(payload["purpose"], "ralph_loop")
+            self.assertEqual(payload["metadata"]["template"], "visual_diff_loop")
+            self.assertEqual(payload["metadata"]["preset"], "visual_diff_loop")
+            self.assertEqual(payload["metadata"]["max_iterations"], 4)
+            self.assertEqual(payload["metadata"]["current_iteration"], 1)
+            self.assertEqual(
+                payload["metadata"]["required_before_continue"],
+                ["reference_artifact", "candidate_screenshot", "visual_diff_report", "diff_below_threshold"],
+            )
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                loop_run = worker_db.ralph_loop_run(conn, run=payload["id"])
+            self.assertEqual(loop_run["task_id"], task_id)
+            self.assertEqual(loop_run["preset"], "visual_diff_loop")
+
     def test_ralph_loop_presets_cli_creates_policy_run(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "workerctl.db"
@@ -4438,6 +4763,50 @@ class CliTests(unittest.TestCase):
                 loop_run = worker_db.ralph_loop_run(conn, run=payload["id"])
             self.assertEqual(loop_run["task_id"], task_id)
             self.assertEqual(loop_run["required_before_continue"], ["pr_url", "ci_green", "merge"])
+
+    def test_ralph_loop_presets_cli_creates_visual_diff_policy_run_with_template_metadata(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                task_id = worker_db.create_task(conn, name="visual-preset-task", goal="Run visual preset loop.")
+                conn.commit()
+
+            proc = self.run_workerctl(
+                "ralph-loop-presets",
+                "--create-run",
+                "visual-preset-task",
+                "--preset",
+                "visual_diff_loop",
+                "--name",
+                "visual-preset-policy",
+                "--max-iterations",
+                "4",
+                "--current-iteration",
+                "1",
+                "--seed-prompt-sha256",
+                "visual-seed",
+                "--json",
+                "--path",
+                str(db_path),
+            )
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            payload = json.loads(proc.stdout)
+            self.assertEqual(payload["purpose"], "ralph_loop")
+            self.assertEqual(payload["metadata"]["preset"], "visual_diff_loop")
+            self.assertEqual(payload["metadata"]["template"], "visual_diff_loop")
+            self.assertEqual(payload["metadata"]["artifact_requirements"]["diff_score"]["type"], "number")
+            self.assertIn("browser", payload["metadata"]["recommended_tools"])
+            self.assertEqual(
+                payload["metadata"]["required_before_continue"],
+                ["reference_artifact", "candidate_screenshot", "visual_diff_report", "diff_below_threshold"],
+            )
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                loop_run = worker_db.ralph_loop_run(conn, run=payload["id"])
+            self.assertEqual(loop_run["task_id"], task_id)
+            self.assertEqual(loop_run["preset"], "visual_diff_loop")
 
     def test_ralph_loop_presets_cli_rejects_unknown_preset(self):
         proc = self.run_workerctl("ralph-loop-presets", "--show", "nope", "--json")
@@ -15938,6 +16307,196 @@ class ManagerBootstrapPromptTests(unittest.TestCase):
             self.assertIn("scripts/workerctl export-task <task> --zip --include-transcripts", document)
         self.assertIn("telemetry-events.json", workflow)
         self.assertIn("telemetry-report.md", workflow)
+
+    def test_readme_documents_generic_loop_templates(self):
+        readme = (ROOT / "README.md").read_text()
+
+        self.assertIn("loop-templates", readme)
+        self.assertIn("visual_diff_loop", readme)
+        self.assertIn("required_before_continue", readme)
+        self.assertIn("ralph-loop-presets", readme)
+
+    def test_general_loop_template_qa_documents_visual_drill(self):
+        qa_doc = (ROOT / "docs" / "qa" / "general-loop-templates.md").read_text()
+
+        self.assertIn("visual_diff_loop", qa_doc)
+        self.assertIn("loop-templates --create-run", qa_doc)
+        self.assertIn("missing_required_evidence", qa_doc)
+        self.assertIn("diff_below_threshold", qa_doc)
+        self.assertIn("worker-inbox", qa_doc)
+        self.assertIn("dispatch_inbox_consumed", qa_doc)
+        self.assertIn("WORKER_ROLLOUT", qa_doc)
+        self.assertIn("MANAGER_ROLLOUT", qa_doc)
+        self.assertIn('export WORKERCTL_DB="$QA_TMPDIR/workerctl.db"', qa_doc)
+        self.assertIn('export WORKER_ROLLOUT="$QA_TMPDIR/rollout-worker.jsonl"', qa_doc)
+        self.assertIn('export MANAGER_ROLLOUT="$QA_TMPDIR/rollout-manager.jsonl"', qa_doc)
+        self.assertIn('--codex-session "$WORKER_ROLLOUT"', qa_doc)
+        self.assertIn('--codex-session "$MANAGER_ROLLOUT"', qa_doc)
+        self.assertIn("scripts/workerctl loop-templates --list --json", qa_doc)
+        self.assertIn("scripts/workerctl loop-templates --show visual_diff_loop --json", qa_doc)
+        self.assertNotIn('loop-templates --list --json --path "$WORKERCTL_DB"', qa_doc)
+        self.assertNotIn('loop-templates --show visual_diff_loop --json --path "$WORKERCTL_DB"', qa_doc)
+
+    def test_general_loop_template_documented_setup_smoke_blocks_missing_evidence(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            fixture_proc = subprocess.run(
+                [
+                    "bash",
+                    "-lc",
+                    f"""
+QA_TMPDIR={shlex.quote(str(tmp_path))}
+export WORKERCTL_DB="$QA_TMPDIR/workerctl.db"
+export WORKER_ROLLOUT="$QA_TMPDIR/rollout-worker.jsonl"
+export MANAGER_ROLLOUT="$QA_TMPDIR/rollout-manager.jsonl"
+
+{shlex.quote(sys.executable)} - <<'PY'
+import json
+import os
+from pathlib import Path
+
+fixtures = {{
+    "WORKER_ROLLOUT": "qa-loop-worker-session",
+    "MANAGER_ROLLOUT": "qa-loop-manager-session",
+}}
+for env_name, session_id in fixtures.items():
+    Path(os.environ[env_name]).write_text(
+        json.dumps({{
+            "type": "session_meta",
+            "payload": {{
+                "id": session_id,
+                "cwd": os.getcwd(),
+                "originator": "codex-tui",
+            }},
+        }}) + "\\n"
+    )
+PY
+printf '%s\\n' "$WORKERCTL_DB" "$WORKER_ROLLOUT" "$MANAGER_ROLLOUT"
+""",
+                ],
+                capture_output=True,
+                text=True,
+                cwd=str(ROOT),
+            )
+            self.assertEqual(fixture_proc.returncode, 0, fixture_proc.stderr)
+            db_path_text, worker_rollout_text, manager_rollout_text = fixture_proc.stdout.strip().splitlines()
+            db_path = Path(db_path_text)
+            worker_rollout = Path(worker_rollout_text)
+            manager_rollout = Path(manager_rollout_text)
+            self.assertTrue(worker_rollout.exists(), fixture_proc.stdout)
+            self.assertTrue(manager_rollout.exists(), fixture_proc.stdout)
+
+            def run_workerctl(*args, with_path=True):
+                command = [sys.executable, "-m", "workerctl", *args]
+                if with_path:
+                    command.extend(["--path", str(db_path)])
+                return subprocess.run(
+                    command,
+                    capture_output=True,
+                    text=True,
+                    cwd=str(ROOT),
+                )
+
+            setup_commands = [
+                ("tasks", "--create", "qa-general-loop-template", "--goal", "QA generic loop templates with visual-diff evidence."),
+                (
+                    "register-worker",
+                    "--name",
+                    "qa-loop-worker",
+                    "--pid",
+                    str(os.getpid()),
+                    "--codex-session",
+                    str(worker_rollout),
+                    "--cwd",
+                    str(ROOT),
+                ),
+                (
+                    "register-manager",
+                    "--name",
+                    "qa-loop-manager",
+                    "--pid",
+                    str(os.getpid()),
+                    "--codex-session",
+                    str(manager_rollout),
+                    "--cwd",
+                    str(ROOT),
+                ),
+                ("bind", "--task", "qa-general-loop-template", "--worker", "qa-loop-worker", "--manager", "qa-loop-manager"),
+            ]
+            for command in setup_commands:
+                proc = run_workerctl(*command)
+                self.assertEqual(proc.returncode, 0, proc.stderr)
+
+            list_proc = run_workerctl("loop-templates", "--list", "--json", with_path=False)
+            self.assertEqual(list_proc.returncode, 0, list_proc.stderr)
+            self.assertIn(
+                "visual_diff_loop",
+                [template["name"] for template in json.loads(list_proc.stdout)["templates"]],
+            )
+
+            show_proc = run_workerctl("loop-templates", "--show", "visual_diff_loop", "--json", with_path=False)
+            self.assertEqual(show_proc.returncode, 0, show_proc.stderr)
+            shown_template = json.loads(show_proc.stdout)
+            self.assertEqual(shown_template["name"], "visual_diff_loop")
+            self.assertEqual(
+                shown_template["required_before_continue"],
+                ["reference_artifact", "candidate_screenshot", "visual_diff_report", "diff_below_threshold"],
+            )
+
+            create_proc = run_workerctl(
+                "loop-templates",
+                "--create-run",
+                "qa-general-loop-template",
+                "--template",
+                "visual_diff_loop",
+                "--name",
+                "qa-visual-template-run",
+                "--max-iterations",
+                "4",
+                "--current-iteration",
+                "1",
+                "--seed-prompt-sha256",
+                "visual-template-seed",
+                "--json",
+            )
+            self.assertEqual(create_proc.returncode, 0, create_proc.stderr)
+            run_id = json.loads(create_proc.stdout)["id"]
+
+            enqueue_proc = run_workerctl(
+                "enqueue-continue-iteration",
+                "qa-general-loop-template",
+                "--loop-run",
+                str(run_id),
+                "--requested-iteration",
+                "2",
+                "--correlation-id",
+                "visual-loop-missing",
+                "--message",
+                "Run visual iteration 2.",
+                "--json",
+            )
+            self.assertEqual(enqueue_proc.returncode, 0, enqueue_proc.stderr)
+
+            dispatch_proc = run_workerctl(
+                "dispatch",
+                "--once",
+                "--type",
+                "continue_iteration",
+                "--dispatcher-id",
+                "qa-loop-template",
+                "--json",
+            )
+            self.assertEqual(dispatch_proc.returncode, 0, dispatch_proc.stderr)
+            processed = json.loads(dispatch_proc.stdout)["processed"][0]
+
+            self.assertEqual(processed["state"], "blocked")
+            self.assertEqual(processed["reason"], "missing_required_evidence")
+            self.assertEqual(
+                processed["missing_evidence"],
+                ["reference_artifact", "candidate_screenshot", "visual_diff_report", "diff_below_threshold"],
+            )
+            self.assertFalse(processed["delivered"])
+            self.assertFalse(processed["target_worker_notified"])
 
 
 class StartManagerTests(unittest.TestCase):
