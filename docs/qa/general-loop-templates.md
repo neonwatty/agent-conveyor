@@ -52,8 +52,8 @@ scripts/workerctl tasks --create qa-general-loop-template --goal "QA generic loo
 scripts/workerctl register-worker --name qa-loop-worker --pid $$ --codex-session "$WORKER_ROLLOUT" --cwd "$PWD" --path "$WORKERCTL_DB"
 scripts/workerctl register-manager --name qa-loop-manager --pid $$ --codex-session "$MANAGER_ROLLOUT" --cwd "$PWD" --path "$WORKERCTL_DB"
 scripts/workerctl bind --task qa-general-loop-template --worker qa-loop-worker --manager qa-loop-manager --path "$WORKERCTL_DB"
-scripts/workerctl loop-templates --list --json --path "$WORKERCTL_DB"
-scripts/workerctl loop-templates --show visual_diff_loop --json --path "$WORKERCTL_DB"
+scripts/workerctl loop-templates --list --json
+scripts/workerctl loop-templates --show visual_diff_loop --json
 ```
 
 Acceptance criteria:

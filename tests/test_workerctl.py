@@ -16329,6 +16329,10 @@ class ManagerBootstrapPromptTests(unittest.TestCase):
         self.assertIn("MANAGER_ROLLOUT", qa_doc)
         self.assertIn('--codex-session "$WORKER_ROLLOUT"', qa_doc)
         self.assertIn('--codex-session "$MANAGER_ROLLOUT"', qa_doc)
+        self.assertIn("scripts/workerctl loop-templates --list --json", qa_doc)
+        self.assertIn("scripts/workerctl loop-templates --show visual_diff_loop --json", qa_doc)
+        self.assertNotIn('loop-templates --list --json --path "$WORKERCTL_DB"', qa_doc)
+        self.assertNotIn('loop-templates --show visual_diff_loop --json --path "$WORKERCTL_DB"', qa_doc)
 
     def test_general_loop_template_documented_setup_smoke_blocks_missing_evidence(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -16345,9 +16349,12 @@ class ManagerBootstrapPromptTests(unittest.TestCase):
                 "payload": {"id": "qa-loop-manager-session", "cwd": str(ROOT), "originator": "codex-tui"},
             }) + "\n")
 
-            def run_workerctl(*args):
+            def run_workerctl(*args, with_path=True):
+                command = [sys.executable, "-m", "workerctl", *args]
+                if with_path:
+                    command.extend(["--path", str(db_path)])
                 return subprocess.run(
-                    [sys.executable, "-m", "workerctl", *args, "--path", str(db_path)],
+                    command,
                     capture_output=True,
                     text=True,
                     cwd=str(ROOT),
@@ -16382,6 +16389,22 @@ class ManagerBootstrapPromptTests(unittest.TestCase):
             for command in setup_commands:
                 proc = run_workerctl(*command)
                 self.assertEqual(proc.returncode, 0, proc.stderr)
+
+            list_proc = run_workerctl("loop-templates", "--list", "--json", with_path=False)
+            self.assertEqual(list_proc.returncode, 0, list_proc.stderr)
+            self.assertIn(
+                "visual_diff_loop",
+                [template["name"] for template in json.loads(list_proc.stdout)["templates"]],
+            )
+
+            show_proc = run_workerctl("loop-templates", "--show", "visual_diff_loop", "--json", with_path=False)
+            self.assertEqual(show_proc.returncode, 0, show_proc.stderr)
+            shown_template = json.loads(show_proc.stdout)
+            self.assertEqual(shown_template["name"], "visual_diff_loop")
+            self.assertEqual(
+                shown_template["required_before_continue"],
+                ["reference_artifact", "candidate_screenshot", "visual_diff_report", "diff_below_threshold"],
+            )
 
             create_proc = run_workerctl(
                 "loop-templates",
