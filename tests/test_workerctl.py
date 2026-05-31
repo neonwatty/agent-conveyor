@@ -91,7 +91,7 @@ class RalphLoopPresetTests(unittest.TestCase):
 
         coverage = ralph_loop_preset_metadata("test_coverage_loop")
         self.assertEqual(coverage["kind"], "ralph_loop")
-        self.assertEqual(coverage["required_before_continue"], ["test_coverage"])
+        self.assertEqual(coverage["required_before_continue"], ["test_coverage", "adversarial_check"])
         self.assertEqual(coverage["stop_conditions"], ["max_iterations", "required_evidence"])
 
     def test_ralph_loop_preset_metadata_allows_safe_overrides(self):
@@ -107,7 +107,7 @@ class RalphLoopPresetTests(unittest.TestCase):
         self.assertEqual(metadata["max_iterations"], 4)
         self.assertEqual(metadata["current_iteration"], 1)
         self.assertEqual(metadata["seed_prompt_sha256"], "abc123")
-        self.assertEqual(metadata["required_before_continue"], ["pr_url", "ci_green", "merge"])
+        self.assertEqual(metadata["required_before_continue"], ["pr_url", "ci_green", "merge", "adversarial_check"])
 
     def test_ralph_loop_preset_rejects_unknown_name(self):
         from workerctl.ralph_loop_presets import ralph_loop_preset_metadata
@@ -130,10 +130,38 @@ class RalphLoopPresetTests(unittest.TestCase):
         self.assertEqual(visual["preset"], "visual_diff_loop")
         self.assertEqual(
             visual["required_before_continue"],
-            ["reference_artifact", "candidate_screenshot", "visual_diff_report", "diff_below_threshold"],
+            [
+                "reference_artifact",
+                "candidate_screenshot",
+                "visual_diff_report",
+                "diff_below_threshold",
+                "adversarial_check",
+            ],
         )
         self.assertEqual(visual["stop_conditions"], ["max_iterations", "required_evidence", "manager_accepts"])
         self.assertEqual(visual["artifact_requirements"]["diff_score"]["type"], "number")
+
+    def test_quality_loop_templates_require_adversarial_check(self):
+        from workerctl.loop_templates import list_loop_templates
+
+        templates = {template["name"]: template for template in list_loop_templates()}
+
+        for name in ("pr_ci_merge_loop", "test_coverage_loop", "visual_diff_loop"):
+            with self.subTest(name=name):
+                self.assertIn("adversarial_check", templates[name]["required_before_continue"])
+                self.assertIn("adversarial_check", templates[name]["artifact_requirements"])
+                requirement = templates[name]["artifact_requirements"]["adversarial_check"]
+                self.assertEqual(requirement["type"], "object")
+                self.assertEqual(requirement["required"], ["failure_mode", "check", "result"])
+                self.assertEqual(
+                    sorted(requirement["properties"]),
+                    ["check", "failure_mode", "result"],
+                )
+
+        for name in ("build_then_clear", "compact_then_continue"):
+            with self.subTest(name=name):
+                self.assertNotIn("adversarial_check", templates[name]["required_before_continue"])
+                self.assertNotIn("adversarial_check", templates[name]["artifact_requirements"])
 
     def test_loop_template_metadata_allows_visual_diff_overrides(self):
         from workerctl.loop_templates import loop_template_metadata
@@ -2979,7 +3007,7 @@ class DispatchTests(unittest.TestCase):
                 current_iteration=1,
                 cleanup_policy="clear",
                 preset="pr_ci_merge_loop",
-                required_before_continue=["pr_url", "ci_green", "merge"],
+                required_before_continue=["pr_url", "ci_green", "merge", "adversarial_check"],
                 stop_conditions=["max_iterations", "required_evidence"],
             )
             blocked_command_id = worker_db.enqueue_continue_iteration(
@@ -3015,19 +3043,19 @@ class DispatchTests(unittest.TestCase):
 
                 self.assertEqual(blocked["state"], "blocked")
                 self.assertEqual(blocked["reason"], "missing_required_evidence")
-                self.assertEqual(blocked["missing_evidence"], ["pr_url", "ci_green", "merge"])
+                self.assertEqual(blocked["missing_evidence"], ["pr_url", "ci_green", "merge", "adversarial_check"])
                 self.assertFalse(blocked["delivered"])
                 self.assertFalse(blocked["target_worker_notified"])
-                self.assertEqual(blocked["required_before_continue"], ["pr_url", "ci_green", "merge"])
+                self.assertEqual(blocked["required_before_continue"], ["pr_url", "ci_green", "merge", "adversarial_check"])
                 self.assertEqual(blocked_row["state"], "failed")
                 self.assertIn("missing_required_evidence", blocked_row["error"])
-                self.assertIn("missing_evidence=pr_url,ci_green,merge", blocked_row["error"])
+                self.assertIn("missing_evidence=pr_url,ci_green,merge,adversarial_check", blocked_row["error"])
                 blocked_result = json.loads(blocked_row["result_json"])
-                self.assertEqual(blocked_result["missing_evidence"], ["pr_url", "ci_green", "merge"])
+                self.assertEqual(blocked_result["missing_evidence"], ["pr_url", "ci_green", "merge", "adversarial_check"])
                 self.assertEqual(worker_db.routed_notifications(conn, task_id="task-dispatch"), [])
                 self.assertEqual(worker_db.session_inbox(conn, session_name="worker-session"), [])
 
-                for evidence_type in ("pr_url", "ci_green", "merge"):
+                for evidence_type in ("pr_url", "ci_green", "merge", "adversarial_check"):
                     worker_db.insert_acceptance_criterion(
                         conn,
                         task_id="task-dispatch",
@@ -3046,7 +3074,7 @@ class DispatchTests(unittest.TestCase):
                 allowed_command_id = worker_db.enqueue_continue_iteration(
                     conn,
                     task_id="task-dispatch",
-                    message="Run iteration 2 after PR, CI, and merge evidence.",
+                    message="Run iteration 2 after PR, CI, merge, and adversarial evidence.",
                     loop_run_id=loop_run_id,
                     requested_iteration=2,
                     correlation_id="ralph-loop-all-evidence-allowed",
@@ -3070,8 +3098,11 @@ class DispatchTests(unittest.TestCase):
             self.assertEqual(allowed_row["state"], "succeeded")
             self.assertEqual(notification["command_id"], allowed_command_id)
             self.assertEqual(notification["signal_type"], "continue_iteration")
-            self.assertEqual(notification["payload"]["ralph_loop"]["required_before_continue"], ["pr_url", "ci_green", "merge"])
-            self.assertEqual(consumed["payload"]["message"], "Run iteration 2 after PR, CI, and merge evidence.")
+            self.assertEqual(
+                notification["payload"]["ralph_loop"]["required_before_continue"],
+                ["pr_url", "ci_green", "merge", "adversarial_check"],
+            )
+            self.assertEqual(consumed["payload"]["message"], "Run iteration 2 after PR, CI, merge, and adversarial evidence.")
             send.assert_not_called()
 
     def test_dispatch_blocks_visual_diff_template_until_required_evidence_exists(self):
@@ -3085,7 +3116,13 @@ class DispatchTests(unittest.TestCase):
             self.assertEqual(persisted_run["metadata"]["artifact_requirements"]["diff_score"]["type"], "number")
             self.assertEqual(
                 persisted_run["metadata"]["required_before_continue"],
-                ["reference_artifact", "candidate_screenshot", "visual_diff_report", "diff_below_threshold"],
+                [
+                    "reference_artifact",
+                    "candidate_screenshot",
+                    "visual_diff_report",
+                    "diff_below_threshold",
+                    "adversarial_check",
+                ],
             )
             command_id = worker_db.enqueue_continue_iteration(
                 conn,
@@ -3122,7 +3159,13 @@ class DispatchTests(unittest.TestCase):
             self.assertEqual(processed["reason"], "missing_required_evidence")
             self.assertEqual(
                 processed["missing_evidence"],
-                ["reference_artifact", "candidate_screenshot", "visual_diff_report", "diff_below_threshold"],
+                [
+                    "reference_artifact",
+                    "candidate_screenshot",
+                    "visual_diff_report",
+                    "diff_below_threshold",
+                    "adversarial_check",
+                ],
             )
             self.assertFalse(processed["delivered"])
             self.assertFalse(processed["target_worker_notified"])
@@ -3141,6 +3184,7 @@ class DispatchTests(unittest.TestCase):
             "candidate_screenshot",
             "visual_diff_report",
             "diff_below_threshold",
+            "adversarial_check",
         ]
         with tempfile.TemporaryDirectory() as tmpdir:
             conn, db_path = self.open_db(tmpdir)
@@ -3214,6 +3258,7 @@ class DispatchTests(unittest.TestCase):
             "candidate_screenshot",
             "visual_diff_report",
             "diff_below_threshold",
+            "adversarial_check",
         ]
         with tempfile.TemporaryDirectory() as tmpdir:
             conn, db_path = self.open_db(tmpdir)
@@ -5103,7 +5148,7 @@ class CliTests(unittest.TestCase):
         self.assertEqual(show_proc.returncode, 0, show_proc.stderr)
         preset = json.loads(show_proc.stdout)
         self.assertEqual(preset["name"], "pr_ci_merge_loop")
-        self.assertEqual(preset["required_before_continue"], ["pr_url", "ci_green", "merge"])
+        self.assertEqual(preset["required_before_continue"], ["pr_url", "ci_green", "merge", "adversarial_check"])
 
     def test_ralph_loop_presets_cli_lists_and_shows_templates(self):
         list_proc = self.run_workerctl("ralph-loop-presets", "--list", "--json")
@@ -5122,7 +5167,13 @@ class CliTests(unittest.TestCase):
         self.assertEqual(preset["name"], "visual_diff_loop")
         self.assertEqual(
             preset["required_before_continue"],
-            ["reference_artifact", "candidate_screenshot", "visual_diff_report", "diff_below_threshold"],
+            [
+                "reference_artifact",
+                "candidate_screenshot",
+                "visual_diff_report",
+                "diff_below_threshold",
+                "adversarial_check",
+            ],
         )
 
     def test_loop_templates_cli_rejects_create_run_options_without_create_run(self):
@@ -5178,7 +5229,13 @@ class CliTests(unittest.TestCase):
         self.assertEqual(template["name"], "visual_diff_loop")
         self.assertEqual(
             template["required_before_continue"],
-            ["reference_artifact", "candidate_screenshot", "visual_diff_report", "diff_below_threshold"],
+            [
+                "reference_artifact",
+                "candidate_screenshot",
+                "visual_diff_report",
+                "diff_below_threshold",
+                "adversarial_check",
+            ],
         )
 
     def test_loop_templates_cli_creates_visual_diff_policy_run(self):
@@ -5217,7 +5274,13 @@ class CliTests(unittest.TestCase):
             self.assertEqual(payload["metadata"]["current_iteration"], 1)
             self.assertEqual(
                 payload["metadata"]["required_before_continue"],
-                ["reference_artifact", "candidate_screenshot", "visual_diff_report", "diff_below_threshold"],
+                [
+                    "reference_artifact",
+                    "candidate_screenshot",
+                    "visual_diff_report",
+                    "diff_below_threshold",
+                    "adversarial_check",
+                ],
             )
             with worker_db.connect(db_path) as conn:
                 worker_db.initialize_database(conn)
@@ -5258,12 +5321,15 @@ class CliTests(unittest.TestCase):
             self.assertEqual(payload["metadata"]["preset"], "pr_ci_merge_loop")
             self.assertEqual(payload["metadata"]["max_iterations"], 3)
             self.assertEqual(payload["metadata"]["current_iteration"], 1)
-            self.assertEqual(payload["metadata"]["required_before_continue"], ["pr_url", "ci_green", "merge"])
+            self.assertEqual(
+                payload["metadata"]["required_before_continue"],
+                ["pr_url", "ci_green", "merge", "adversarial_check"],
+            )
             with worker_db.connect(db_path) as conn:
                 worker_db.initialize_database(conn)
                 loop_run = worker_db.ralph_loop_run(conn, run=payload["id"])
             self.assertEqual(loop_run["task_id"], task_id)
-            self.assertEqual(loop_run["required_before_continue"], ["pr_url", "ci_green", "merge"])
+            self.assertEqual(loop_run["required_before_continue"], ["pr_url", "ci_green", "merge", "adversarial_check"])
 
     def test_ralph_loop_presets_cli_creates_visual_diff_policy_run_with_template_metadata(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -5301,7 +5367,13 @@ class CliTests(unittest.TestCase):
             self.assertIn("browser", payload["metadata"]["recommended_tools"])
             self.assertEqual(
                 payload["metadata"]["required_before_continue"],
-                ["reference_artifact", "candidate_screenshot", "visual_diff_report", "diff_below_threshold"],
+                [
+                    "reference_artifact",
+                    "candidate_screenshot",
+                    "visual_diff_report",
+                    "diff_below_threshold",
+                    "adversarial_check",
+                ],
             )
             with worker_db.connect(db_path) as conn:
                 worker_db.initialize_database(conn)
@@ -16848,6 +16920,9 @@ class ManagerBootstrapPromptTests(unittest.TestCase):
         self.assertIn("loop-templates", readme)
         self.assertIn("visual_diff_loop", readme)
         self.assertIn("required_before_continue", readme)
+        self.assertIn("adversarial_check", readme)
+        self.assertIn("failure_mode", readme)
+        self.assertIn("result", readme)
         self.assertIn("ralph-loop-presets", readme)
 
     def test_general_loop_template_qa_documents_visual_drill(self):
@@ -16856,6 +16931,8 @@ class ManagerBootstrapPromptTests(unittest.TestCase):
         self.assertIn("visual_diff_loop", qa_doc)
         self.assertIn("loop-templates --create-run", qa_doc)
         self.assertIn("missing_required_evidence", qa_doc)
+        self.assertIn("adversarial_check", qa_doc)
+        self.assertIn("failure_mode", qa_doc)
         self.assertIn("diff_below_threshold", qa_doc)
         self.assertIn("worker-inbox", qa_doc)
         self.assertIn("dispatch_inbox_consumed", qa_doc)
@@ -16974,7 +17051,13 @@ printf '%s\\n' "$WORKERCTL_DB" "$WORKER_ROLLOUT" "$MANAGER_ROLLOUT"
             self.assertEqual(shown_template["name"], "visual_diff_loop")
             self.assertEqual(
                 shown_template["required_before_continue"],
-                ["reference_artifact", "candidate_screenshot", "visual_diff_report", "diff_below_threshold"],
+                [
+                    "reference_artifact",
+                    "candidate_screenshot",
+                    "visual_diff_report",
+                    "diff_below_threshold",
+                    "adversarial_check",
+                ],
             )
 
             create_proc = run_workerctl(
@@ -17027,7 +17110,13 @@ printf '%s\\n' "$WORKERCTL_DB" "$WORKER_ROLLOUT" "$MANAGER_ROLLOUT"
             self.assertEqual(processed["reason"], "missing_required_evidence")
             self.assertEqual(
                 processed["missing_evidence"],
-                ["reference_artifact", "candidate_screenshot", "visual_diff_report", "diff_below_threshold"],
+                [
+                    "reference_artifact",
+                    "candidate_screenshot",
+                    "visual_diff_report",
+                    "diff_below_threshold",
+                    "adversarial_check",
+                ],
             )
             self.assertFalse(processed["delivered"])
             self.assertFalse(processed["target_worker_notified"])

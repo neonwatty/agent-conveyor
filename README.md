@@ -581,8 +581,12 @@ tmux attach -t codex-live-test
   satisfied criterion evidence exists. `ralph-loop-presets` remains as a
   compatibility alias for the current Ralph-loop QA flows. The built-in
   `visual_diff_loop` template requires `reference_artifact`,
-  `candidate_screenshot`, `visual_diff_report`, and `diff_below_threshold`
-  evidence before a manager-requested next visual pass can reach the worker.
+  `candidate_screenshot`, `visual_diff_report`, `diff_below_threshold`, and
+  `adversarial_check` evidence before a manager-requested next visual pass can
+  reach the worker. Quality-oriented templates (`pr_ci_merge_loop`,
+  `test_coverage_loop`, and `visual_diff_loop`) also expose an
+  `artifact_requirements["adversarial_check"]` object requiring
+  `failure_mode`, `check`, and `result` fields.
 - `loop-evidence add TASK --loop-run RUN --iteration N --evidence-type TYPE` —
   Record a run-qualified evidence receipt for a loop policy. Use
   `loop-evidence visual-diff` to compare PNG screenshots, write an optional
@@ -655,8 +659,8 @@ start with an inspect-first guard: if the previous iteration's work is already
 merged, the worker records that state and stops without making replacement edits
 or opening another PR unless something is actually missing. The same QA plan
 also covers preset-backed guardrails such as `pr_ci_merge_loop`, where Dispatch
-blocks another worker iteration until required `pr_url`, `ci_green`, and `merge`
-evidence exists.
+blocks another worker iteration until required `pr_url`, `ci_green`, `merge`,
+and `adversarial_check` evidence exists.
 
 ### Terminal helpers
 

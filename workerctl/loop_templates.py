@@ -62,6 +62,24 @@ class LoopTemplate:
         }
 
 
+ADVERSARIAL_CHECK_REQUIREMENT: dict[str, Any] = {
+    "type": "object",
+    "description": "Structured proof that the manager or worker tried to disprove the iteration before continuing.",
+    "required": ["failure_mode", "check", "result"],
+    "properties": {
+        "failure_mode": {"type": "string", "description": "Strongest realistic failure mode considered."},
+        "check": {
+            "type": "string",
+            "description": "Command, test, trace, screenshot, audit, diff, or inspection used.",
+        },
+        "result": {
+            "type": "string",
+            "description": "Why the check rules out the failure mode or what remains unresolved.",
+        },
+    },
+}
+
+
 LOOP_TEMPLATES: dict[str, LoopTemplate] = {
     "build_then_clear": LoopTemplate(
         name="build_then_clear",
@@ -84,7 +102,8 @@ LOOP_TEMPLATES: dict[str, LoopTemplate] = {
         description="Require PR URL, green CI, and merge evidence before continuing a manager-led PR loop.",
         max_iterations=2,
         cleanup_policy="clear",
-        required_before_continue=("pr_url", "ci_green", "merge"),
+        required_before_continue=("pr_url", "ci_green", "merge", "adversarial_check"),
+        artifact_requirements={"adversarial_check": ADVERSARIAL_CHECK_REQUIREMENT},
         recommended_tools=("gh", "verification.run_tests"),
         tags=("repo", "ci"),
     ),
@@ -93,7 +112,8 @@ LOOP_TEMPLATES: dict[str, LoopTemplate] = {
         description="Repeat a test-coverage analysis/fix loop until coverage evidence is recorded or max iterations is reached.",
         max_iterations=3,
         cleanup_policy="clear",
-        required_before_continue=("test_coverage",),
+        required_before_continue=("test_coverage", "adversarial_check"),
+        artifact_requirements={"adversarial_check": ADVERSARIAL_CHECK_REQUIREMENT},
         recommended_tools=("coverage", "verification.run_tests"),
         tags=("tests",),
     ),
@@ -107,9 +127,11 @@ LOOP_TEMPLATES: dict[str, LoopTemplate] = {
             "candidate_screenshot",
             "visual_diff_report",
             "diff_below_threshold",
+            "adversarial_check",
         ),
         stop_conditions=("max_iterations", "required_evidence", "manager_accepts"),
         artifact_requirements={
+            "adversarial_check": ADVERSARIAL_CHECK_REQUIREMENT,
             "reference_artifact": {"type": "path", "description": "Desired UX screenshot or reference image path."},
             "candidate_screenshot": {"type": "path", "description": "Screenshot captured from the worker-produced HTML or app view."},
             "visual_diff_report": {"type": "path", "description": "Readable report describing visual differences and screenshots compared."},
