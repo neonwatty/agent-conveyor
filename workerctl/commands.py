@@ -432,7 +432,7 @@ Supervision loop:
 - Inspect `manager_context.acceptance_criteria` each cycle.
 - Inspect `manager_context.criteria_negotiation`; use its prompt when needed is true.
 - If this manager is registered without tmux, poll for pull-required dispatcher
-  signals with `{workerctl} manager-inbox {task_line} --consume-next --json`;
+  signals with `{workerctl} manager-inbox {task_line} --consume-next --wait --timeout 60 --json`;
   Dispatch records these messages durably but cannot push text into this Codex
   app chat.
 - Nudge the worker with `{workerctl} session-nudge {worker_line} "..."`;
@@ -441,7 +441,7 @@ Supervision loop:
 - If the worker is registered without tmux, route nudges through Dispatch with
   `{workerctl} enqueue-nudge-worker {task_line} --message "..." --json`, then
   run `{workerctl} dispatch --once --type nudge_worker --json`; the worker
-  should poll `{workerctl} worker-inbox {task_line} --consume-next --json`.
+  should poll `{workerctl} worker-inbox {task_line} --consume-next --wait --timeout 60 --json`.
 - If worker progress reveals new edge cases, tests, polish, or scope
   boundaries, ask the worker to propose must-have vs follow-up criteria.
 - After a worker proposes separated criteria, use `{workerctl} criteria-plan`
@@ -1434,7 +1434,7 @@ def command_doctor_self(args: argparse.Namespace) -> int:
         "codex_app_inbox_guidance": (
             "Codex app manager/worker sessions are first-class pull targets: "
             "register them without --tmux-session, then poll manager-inbox or "
-            "worker-inbox with --consume-next --json at the start of a turn."
+            "worker-inbox with --consume-next --wait --json at the start of a turn."
         ),
         "command_context_note": (
             "The tmux checks describe the command environment running doctor-self. "
@@ -8805,11 +8805,60 @@ def _session_inbox_response(
     session_name: str,
     consume_next: bool,
     limit: int,
+    wait: bool = False,
+    timeout: float = 30.0,
+    interval: float = 2.0,
 ) -> dict[str, Any]:
+    if timeout < 0:
+        raise WorkerError("--timeout must be non-negative")
+    if interval <= 0:
+        raise WorkerError("--interval must be greater than zero")
     session = worker_db.session_row(conn, name=session_name)
     consumed = None
-    if consume_next:
-        consumed = worker_db.consume_next_session_inbox_item(conn, session_name=session_name)
+    items: list[dict[str, Any]] = []
+    started = time.monotonic()
+    poll_count = 0
+    timed_out = False
+    while True:
+        poll_count += 1
+        if consume_next:
+            consumed = worker_db.consume_next_session_inbox_item(conn, session_name=session_name)
+            if consumed is not None:
+                break
+        else:
+            items = worker_db.session_inbox(conn, session_name=session_name, limit=limit)
+            if items:
+                break
+        if not wait:
+            break
+        elapsed = time.monotonic() - started
+        if elapsed >= timeout:
+            timed_out = True
+            break
+        time.sleep(min(interval, max(0.0, timeout - elapsed)))
+    if consumed is not None:
+        worker_db.emit_telemetry_event(
+            conn,
+            actor="dispatch",
+            event_type="dispatch_inbox_consumed",
+            task_id=consumed["task_id"],
+            summary=f"{session['role']} session consumed dispatcher inbox item.",
+            correlation={
+                "correlation_id": consumed["correlation_id"],
+                "notification_id": consumed["id"],
+                "signal_type": consumed["signal_type"],
+                "target_session_id": consumed["target_session_id"],
+            },
+            attributes={
+                "consumed_by_session_id": consumed.get("consumed_by_session_id"),
+                "delivery_mode": consumed.get("delivery_mode"),
+                "poll_count": poll_count,
+                "source_session_name": consumed.get("source_session_name"),
+                "target_session_name": consumed.get("target_session_name"),
+                "target_session_role": session["role"],
+                "wait_enabled": wait,
+            },
+        )
     items = worker_db.session_inbox(conn, session_name=session_name, limit=limit)
     return {
         "consumed": consumed,
@@ -8818,6 +8867,14 @@ def _session_inbox_response(
             "id": session["id"],
             "name": session["name"],
             "role": session["role"],
+        },
+        "wait": {
+            "enabled": wait,
+            "elapsed_seconds": round(time.monotonic() - started, 3),
+            "interval_seconds": interval,
+            "poll_count": poll_count,
+            "timed_out": timed_out,
+            "timeout_seconds": timeout,
         },
     }
 
@@ -8866,7 +8923,10 @@ def command_session_inbox(args: argparse.Namespace) -> int:
             worker_db=worker_db,
             session_name=args.session,
             consume_next=bool(getattr(args, "consume_next", False)),
+            interval=float(getattr(args, "interval", 2.0)),
             limit=getattr(args, "limit", 10),
+            timeout=float(getattr(args, "timeout", 30.0)),
+            wait=bool(getattr(args, "wait", False)),
         )
         conn.commit()
     _print_session_inbox_result(args, result)
@@ -8885,7 +8945,10 @@ def command_manager_inbox(args: argparse.Namespace) -> int:
             worker_db=worker_db,
             session_name=binding["manager_session_name"],
             consume_next=bool(getattr(args, "consume_next", False)),
+            interval=float(getattr(args, "interval", 2.0)),
             limit=getattr(args, "limit", 10),
+            timeout=float(getattr(args, "timeout", 30.0)),
+            wait=bool(getattr(args, "wait", False)),
         )
         result["task"] = {"id": binding["task_id"], "name": args.task}
         conn.commit()
@@ -8905,7 +8968,10 @@ def command_worker_inbox(args: argparse.Namespace) -> int:
             worker_db=worker_db,
             session_name=binding["worker_session_name"],
             consume_next=bool(getattr(args, "consume_next", False)),
+            interval=float(getattr(args, "interval", 2.0)),
             limit=getattr(args, "limit", 10),
+            timeout=float(getattr(args, "timeout", 30.0)),
+            wait=bool(getattr(args, "wait", False)),
         )
         result["task"] = {"id": binding["task_id"], "name": args.task}
         conn.commit()

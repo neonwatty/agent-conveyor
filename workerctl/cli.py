@@ -1004,6 +1004,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     def add_inbox_options(parser: argparse.ArgumentParser) -> None:
         parser.add_argument("--consume-next", action="store_true", help="Consume the oldest unconsumed inbox item before listing remaining items.")
+        parser.add_argument("--wait", action="store_true", help="Poll until an inbox item is available or --timeout is reached.")
+        parser.add_argument("--timeout", type=float, default=30.0, help="Seconds to wait with --wait. Default: 30.")
+        parser.add_argument("--interval", type=float, default=2.0, help="Seconds between polls with --wait. Default: 2.")
         parser.add_argument("--limit", type=int, default=10, help="Maximum unconsumed inbox items to list.")
         parser.add_argument("--json", action="store_true", help="Print JSON output.")
         parser.add_argument("--path", help="Override the workerctl database path.")
