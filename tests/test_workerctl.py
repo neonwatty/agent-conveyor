@@ -196,6 +196,48 @@ class RalphLoopPresetTests(unittest.TestCase):
 
         self.assertEqual(fresh_summary["artifact_requirements"]["diff_score"]["type"], "number")
 
+    def test_adversarial_check_requirement_is_not_shared_between_templates(self):
+        from copy import deepcopy
+
+        from workerctl.loop_templates import list_loop_templates, loop_template, loop_template_metadata
+
+        quality_template_names = ("pr_ci_merge_loop", "test_coverage_loop", "visual_diff_loop")
+        templates = {name: loop_template(name) for name in quality_template_names}
+        originals = {
+            name: deepcopy(templates[name].artifact_requirements["adversarial_check"])
+            for name in quality_template_names
+        }
+        try:
+            templates["pr_ci_merge_loop"].artifact_requirements["adversarial_check"]["required"].append("leaked_field")
+            templates["pr_ci_merge_loop"].artifact_requirements["adversarial_check"]["properties"]["leaked_field"] = {
+                "type": "string"
+            }
+
+            visual_metadata = loop_template_metadata("visual_diff_loop")
+            coverage_summary = next(
+                template for template in list_loop_templates() if template["name"] == "test_coverage_loop"
+            )
+
+            self.assertEqual(
+                visual_metadata["artifact_requirements"]["adversarial_check"]["required"],
+                ["failure_mode", "check", "result"],
+            )
+            self.assertNotIn(
+                "leaked_field",
+                visual_metadata["artifact_requirements"]["adversarial_check"]["properties"],
+            )
+            self.assertEqual(
+                coverage_summary["artifact_requirements"]["adversarial_check"]["required"],
+                ["failure_mode", "check", "result"],
+            )
+            self.assertNotIn(
+                "leaked_field",
+                coverage_summary["artifact_requirements"]["adversarial_check"]["properties"],
+            )
+        finally:
+            for name, original in originals.items():
+                templates[name].artifact_requirements["adversarial_check"] = original
+
 
 class DatabaseTests(unittest.TestCase):
     def open_db(self, tmpdir):

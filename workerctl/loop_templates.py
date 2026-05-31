@@ -80,6 +80,10 @@ ADVERSARIAL_CHECK_REQUIREMENT: dict[str, Any] = {
 }
 
 
+def adversarial_check_requirement() -> dict[str, Any]:
+    return deepcopy(ADVERSARIAL_CHECK_REQUIREMENT)
+
+
 LOOP_TEMPLATES: dict[str, LoopTemplate] = {
     "build_then_clear": LoopTemplate(
         name="build_then_clear",
@@ -103,7 +107,7 @@ LOOP_TEMPLATES: dict[str, LoopTemplate] = {
         max_iterations=2,
         cleanup_policy="clear",
         required_before_continue=("pr_url", "ci_green", "merge", "adversarial_check"),
-        artifact_requirements={"adversarial_check": ADVERSARIAL_CHECK_REQUIREMENT},
+        artifact_requirements={"adversarial_check": adversarial_check_requirement()},
         recommended_tools=("gh", "verification.run_tests"),
         tags=("repo", "ci"),
     ),
@@ -113,7 +117,7 @@ LOOP_TEMPLATES: dict[str, LoopTemplate] = {
         max_iterations=3,
         cleanup_policy="clear",
         required_before_continue=("test_coverage", "adversarial_check"),
-        artifact_requirements={"adversarial_check": ADVERSARIAL_CHECK_REQUIREMENT},
+        artifact_requirements={"adversarial_check": adversarial_check_requirement()},
         recommended_tools=("coverage", "verification.run_tests"),
         tags=("tests",),
     ),
@@ -131,7 +135,7 @@ LOOP_TEMPLATES: dict[str, LoopTemplate] = {
         ),
         stop_conditions=("max_iterations", "required_evidence", "manager_accepts"),
         artifact_requirements={
-            "adversarial_check": ADVERSARIAL_CHECK_REQUIREMENT,
+            "adversarial_check": adversarial_check_requirement(),
             "reference_artifact": {"type": "path", "description": "Desired UX screenshot or reference image path."},
             "candidate_screenshot": {"type": "path", "description": "Screenshot captured from the worker-produced HTML or app view."},
             "visual_diff_report": {"type": "path", "description": "Readable report describing visual differences and screenshots compared."},
