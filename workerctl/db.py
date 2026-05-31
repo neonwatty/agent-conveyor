@@ -1651,6 +1651,7 @@ def create_ralph_loop_run(
     required_before_continue: list[str] | None = None,
     stop_conditions: list[str] | None = None,
     seed_prompt_sha256: str | None = None,
+    preset: str | None = None,
     name: str | None = None,
     run_id: str | None = None,
     timestamp: str | None = None,
@@ -1680,6 +1681,7 @@ def create_ralph_loop_run(
         "kind": "ralph_loop",
         "max_iterations": max_iterations,
         "policy_record": True,
+        "preset": preset,
         "required_before_continue": required_evidence,
         "seed_prompt_sha256": seed_prompt_sha256,
         "stop_conditions": stop_conditions or [],
@@ -1719,6 +1721,7 @@ def ralph_loop_run(conn: sqlite3.Connection, *, run: str) -> dict[str, Any]:
         "cleanup_policy": metadata.get("cleanup_policy"),
         "current_iteration": current_iteration,
         "max_iterations": max_iterations,
+        "preset": metadata.get("preset"),
         "required_before_continue": [
             item.strip()
             for item in metadata.get("required_before_continue") or []

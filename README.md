@@ -561,6 +561,9 @@ tmux attach -t codex-live-test
   `--include-content` is passed.
 - `qa-plan <self-management|emergent-criteria|tmux-errors|dispatch-completion|ralph-loop>` — Print a
   repeatable manual QA checklist.
+- `ralph-loop-presets --list|--show PRESET|--create-run TASK --preset PRESET` —
+  List saved Ralph-loop guardrail templates or create a preset-backed
+  `ralph_loop` policy run.
 - `import-compat` — Dry-run or import existing `.codex-workers/<worker>/`
   artifacts into SQLite.
 
@@ -584,6 +587,7 @@ scripts/workerctl qa-plan emergent-criteria --json
 scripts/workerctl qa-plan tmux-errors
 scripts/workerctl qa-plan dispatch-completion
 scripts/workerctl qa-plan ralph-loop
+scripts/workerctl ralph-loop-presets --list --json
 ```
 
 The `emergent-criteria` scenario covers a real worker/manager pair, criteria
@@ -610,7 +614,10 @@ merge, handoff, and worker clear on explicit permissions, and proves the second
 iteration starts after audited clear in fresh-worker isolation. Replay iterations
 start with an inspect-first guard: if the previous iteration's work is already
 merged, the worker records that state and stops without making replacement edits
-or opening another PR unless something is actually missing.
+or opening another PR unless something is actually missing. The same QA plan
+also covers preset-backed guardrails such as `pr_ci_merge_loop`, where Dispatch
+blocks another worker iteration until required `pr_url`, `ci_green`, and `merge`
+evidence exists.
 
 ### Terminal helpers
 

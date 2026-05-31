@@ -71,6 +71,7 @@ from workerctl.state import (
 )
 from workerctl.lifecycle import manager_liveness_warnings, reconcile_rows
 from workerctl.output_safety import redact_audit, redact_capture_result, redact_payload, redact_transcript_segments
+from workerctl.ralph_loop_presets import list_ralph_loop_presets, ralph_loop_preset, ralph_loop_preset_metadata
 from workerctl.tmux import (
     capture_output,
     capture_tmux_target,
@@ -1613,6 +1614,14 @@ def command_qa_plan(args: argparse.Namespace) -> int:
                     "correlation_id": "ralph-loop-ci-allowed",
                     "purpose": "Link the retry after recorded ci_green evidence to the delivered worker inbox item.",
                 },
+                {
+                    "correlation_id": "ralph-loop-preset-missing",
+                    "purpose": "Link a pr_ci_merge_loop preset guardrail drill, blocked Dispatch attempt, dashboard row, and empty worker inbox proof.",
+                },
+                {
+                    "correlation_id": "ralph-loop-preset-allowed",
+                    "purpose": "Link the retry after recorded pr_url, ci_green, and merge evidence to the delivered worker inbox item.",
+                },
             ],
             "evidence_template": {
                 "iteration": 1,
@@ -1665,10 +1674,14 @@ def command_qa_plan(args: argparse.Namespace) -> int:
                 "The blocked continuation creates 0 notifications, leaves worker Inbox 0 and Pull inbox 0, and records delivered=false plus target_worker_notified=false in command/replay/audit evidence",
                 "A required ci_green evidence guardrail drill blocks the manager's requested next iteration with reason missing_ci_green_evidence before worker delivery",
                 "After ci_green evidence is recorded as satisfied criterion evidence, a fresh continue_iteration retry is delivered to the worker inbox or tmux target",
+                "A preset-backed pr_ci_merge_loop drill blocks the manager's requested next iteration with reason missing_required_evidence and missing_evidence=[pr_url,ci_green,merge] before worker delivery",
+                "The dashboard presents multiple missing evidence gates in readable order as missing pr_url, ci_green, merge while notifications, Inbox, and Pull inbox remain 0",
+                "After pr_url, ci_green, and merge evidence are recorded as satisfied criterion evidence, a fresh preset-backed continue_iteration retry is delivered to the worker inbox or tmux target",
             ],
             "steps": [
                 "Choose a disposable target repo, seed prompt, cleanup policy, CI provider expectation, and max iterations value. Max iterations must be at least 2; use max iterations 2 for the standard smoke.",
                 "Compute and preserve the exact seed prompt SHA-256, then reuse the listed correlation markers for manager decisions, epilogues, commands, handoffs, and evidence searches.",
+                "List preset policies with workerctl ralph-loop-presets --list --json and verify test_coverage_loop, build_then_clear, pr_ci_merge_loop, and compact_then_continue are present with their required_before_continue evidence lists.",
                 "Start Dispatch for the run if it is not already active: workerctl dispatch --watch --dispatcher-id qa-ralph-loop.",
                 "Create iteration 1 with the same seed prompt that will later be replayed; for trusted disposable repos include --accept-trust so startup cannot stall at the Codex trust prompt: workerctl pair --task qa-ralph-loop-iter-1 --worker-name qa-ralph-worker-1 --manager-name qa-ralph-manager --cwd <target-repo> --task-goal \"Managed Ralph loop iteration 1\" --task-summary \"PR/CI/merge/context-clear QA\" --task-prompt \"<same seed prompt>\" --accept-trust.",
                 "Configure manager policy for iteration 1 with required epilogues but without permissions first; verify repo.open_pr, repo.merge_green_pr, and worker_compact_clear are denied by workerctl manager-permission before enabling them.",
@@ -1699,6 +1712,11 @@ def command_qa_plan(args: argparse.Namespace) -> int:
                 "Open the dashboard for the bound task and verify the Dispatch panel shows continue_iteration, missing_ci_green_evidence, missing ci_green, iteration 1/3, requested 2, 0 notifications, Inbox 0, and Pull inbox 0 for correlation ralph-loop-missing-ci.",
                 "Record ci_green as satisfied criterion evidence with ralph_loop_run_id=<run-id>, iteration=1, evidence_type=ci_green, status=green, and correlation_id=ralph-loop-ci-green; then enqueue a fresh continue_iteration command for requested iteration 2 with correlation ralph-loop-ci-allowed.",
                 "Run workerctl dispatch --once --type continue_iteration --dispatcher-id qa-ralph-loop --json again and verify the fresh retry is delivered, the routed notification signal_type is continue_iteration, and worker-inbox contains the iteration 2 message.",
+                "Run the preset evidence browser drill in a disposable task: create a preset-backed run with workerctl ralph-loop-presets --create-run <task> --preset pr_ci_merge_loop --name qa-ralph-loop-preset --max-iterations 3 --current-iteration 1 --seed-prompt-sha256 <seed-sha256> --json, then queue requested iteration 2 with correlation ralph-loop-preset-missing.",
+                "Run workerctl dispatch --once --type continue_iteration --dispatcher-id qa-ralph-loop --json and verify the processed item returns state=blocked, reason=missing_required_evidence, missing_evidence=[pr_url,ci_green,merge], delivered=false, target_worker_notified=false, current_iteration=1, max_iterations=3, requested_iteration=2, and no routed notification id.",
+                "Open the dashboard for the bound task and verify the Dispatch panel shows continue_iteration, missing_required_evidence, missing pr_url, ci_green, merge, iteration 1/3, requested 2, 0 notifications, Inbox 0, and Pull inbox 0 for correlation ralph-loop-preset-missing.",
+                "Record pr_url, ci_green, and merge as satisfied criterion evidence with ralph_loop_run_id=<run-id>, iteration=1, matching evidence_type values, and correlation receipts; then enqueue a fresh continue_iteration command for requested iteration 2 with correlation ralph-loop-preset-allowed.",
+                "Run workerctl dispatch --once --type continue_iteration --dispatcher-id qa-ralph-loop --json again and verify the fresh preset-backed retry is delivered, the routed notification signal_type is continue_iteration, and worker-inbox contains the iteration 2 message.",
             ],
         },
     }
@@ -1827,6 +1845,7 @@ def command_runs(args: argparse.Namespace) -> int:
                     required_before_continue=required_before_continue,
                     stop_conditions=metadata.get("stop_conditions") if isinstance(metadata.get("stop_conditions"), list) else None,
                     seed_prompt_sha256=metadata.get("seed_prompt_sha256"),
+                    preset=metadata.get("preset"),
                 )
             else:
                 run_id = create_db_run(
@@ -1855,6 +1874,45 @@ def command_runs(args: argparse.Namespace) -> int:
         runs = list_db_runs(conn, task_id=task_id, status=args.status)
     print(json.dumps(runs, indent=2, sort_keys=True))
     return 0
+
+
+def command_ralph_loop_presets(args: argparse.Namespace) -> int:
+    if args.list:
+        print(json.dumps({"presets": list_ralph_loop_presets()}, indent=2, sort_keys=True))
+        return 0
+    if args.show:
+        print(json.dumps(ralph_loop_preset(args.show).summary(), indent=2, sort_keys=True))
+        return 0
+    if args.create_run:
+        if not args.preset:
+            raise WorkerError("--create-run requires --preset")
+        db_path = Path(args.path).expanduser().resolve() if args.path else None
+        metadata = ralph_loop_preset_metadata(
+            args.preset,
+            max_iterations=args.max_iterations,
+            current_iteration=args.current_iteration,
+            seed_prompt_sha256=args.seed_prompt_sha256,
+        )
+        with connect_db(db_path) as conn:
+            initialize_database(conn)
+            task = db_task_row(conn, task=args.create_run)
+            run_id = create_db_ralph_loop_run(
+                conn,
+                task_id=task["id"],
+                name=args.name,
+                max_iterations=metadata["max_iterations"],
+                current_iteration=metadata["current_iteration"],
+                cleanup_policy=metadata.get("cleanup_policy"),
+                required_before_continue=metadata.get("required_before_continue"),
+                stop_conditions=metadata.get("stop_conditions"),
+                seed_prompt_sha256=metadata.get("seed_prompt_sha256"),
+                preset=metadata.get("preset"),
+            )
+            conn.commit()
+            result = db_run_row(conn, run=run_id)
+        print(json.dumps(result, indent=2, sort_keys=True))
+        return 0
+    raise WorkerError("Choose one of --list, --show, or --create-run")
 
 
 def _session_snapshot_for_dashboard(row: Any | None) -> dict[str, Any] | None:

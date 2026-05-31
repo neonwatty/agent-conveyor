@@ -290,7 +290,7 @@ function DispatchPanel({ observation }: { observation: Observation | null }) {
               <small className="dispatch-blocked-policy">
                 {[
                   chain.blocked_policy.reason,
-                  chain.blocked_policy.missing_evidence?.length ? `missing ${chain.blocked_policy.missing_evidence.join(",")}` : null,
+                  chain.blocked_policy.missing_evidence?.length ? `missing ${chain.blocked_policy.missing_evidence.join(", ")}` : null,
                   typeof chain.blocked_policy.current_iteration === "number" && typeof chain.blocked_policy.max_iterations === "number"
                     ? `iteration ${chain.blocked_policy.current_iteration}/${chain.blocked_policy.max_iterations}`
                     : null,

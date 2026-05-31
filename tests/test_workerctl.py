@@ -76,6 +76,44 @@ class CoreRunTests(unittest.TestCase):
                 self.assertIn("Operation not permitted", str(exc))
 
 
+class RalphLoopPresetTests(unittest.TestCase):
+    def test_ralph_loop_presets_include_operator_ready_templates(self):
+        from workerctl.ralph_loop_presets import list_ralph_loop_presets, ralph_loop_preset_metadata
+
+        names = [preset["name"] for preset in list_ralph_loop_presets()]
+
+        self.assertIn("test_coverage_loop", names)
+        self.assertIn("build_then_clear", names)
+        self.assertIn("pr_ci_merge_loop", names)
+        self.assertIn("compact_then_continue", names)
+
+        coverage = ralph_loop_preset_metadata("test_coverage_loop")
+        self.assertEqual(coverage["kind"], "ralph_loop")
+        self.assertEqual(coverage["required_before_continue"], ["test_coverage"])
+        self.assertEqual(coverage["stop_conditions"], ["max_iterations", "required_evidence"])
+
+    def test_ralph_loop_preset_metadata_allows_safe_overrides(self):
+        from workerctl.ralph_loop_presets import ralph_loop_preset_metadata
+
+        metadata = ralph_loop_preset_metadata(
+            "pr_ci_merge_loop",
+            max_iterations=4,
+            current_iteration=1,
+            seed_prompt_sha256="abc123",
+        )
+
+        self.assertEqual(metadata["max_iterations"], 4)
+        self.assertEqual(metadata["current_iteration"], 1)
+        self.assertEqual(metadata["seed_prompt_sha256"], "abc123")
+        self.assertEqual(metadata["required_before_continue"], ["pr_url", "ci_green", "merge"])
+
+    def test_ralph_loop_preset_rejects_unknown_name(self):
+        from workerctl.ralph_loop_presets import ralph_loop_preset_metadata
+
+        with self.assertRaisesRegex(WorkerError, "Unknown Ralph loop preset"):
+            ralph_loop_preset_metadata("not-a-preset")
+
+
 class DatabaseTests(unittest.TestCase):
     def open_db(self, tmpdir):
         path = Path(tmpdir) / "workerctl.db"
@@ -2839,6 +2877,114 @@ class DispatchTests(unittest.TestCase):
             self.assertEqual(consumed["payload"]["message"], "Run iteration 2.")
             send.assert_not_called()
 
+    def test_dispatch_blocks_multiple_required_evidence_then_allows_fresh_retry(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn, db_path = self.open_db(tmpdir)
+            worker_id, _manager_id = self.setup_bound_task(conn)
+            conn.execute("update sessions set tmux_session = null where id = ?", (worker_id,))
+            loop_run_id = worker_db.create_ralph_loop_run(
+                conn,
+                task_id="task-dispatch",
+                name="qa-preset-loop",
+                max_iterations=3,
+                current_iteration=1,
+                cleanup_policy="clear",
+                preset="pr_ci_merge_loop",
+                required_before_continue=["pr_url", "ci_green", "merge"],
+                stop_conditions=["max_iterations", "required_evidence"],
+            )
+            blocked_command_id = worker_db.enqueue_continue_iteration(
+                conn,
+                task_id="task-dispatch",
+                message="Run iteration 2.",
+                loop_run_id=loop_run_id,
+                requested_iteration=2,
+                correlation_id="ralph-loop-missing-required-evidence",
+            )
+            conn.commit()
+
+            args = argparse.Namespace(
+                dispatcher_id="dispatch-test",
+                dry_run=False,
+                json=True,
+                limit=10,
+                once=True,
+                path=str(db_path),
+                type="continue_iteration",
+                watch=False,
+            )
+            with mock.patch.object(worker_tmux, "send_text_to_session") as send:
+                with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                    commands.command_dispatch(args)
+
+                blocked_payload = json.loads(stdout.getvalue())
+                blocked = blocked_payload["processed"][0]
+                blocked_row = conn.execute(
+                    "select state, result_json, error from commands where id = ?",
+                    (blocked_command_id,),
+                ).fetchone()
+
+                self.assertEqual(blocked["state"], "blocked")
+                self.assertEqual(blocked["reason"], "missing_required_evidence")
+                self.assertEqual(blocked["missing_evidence"], ["pr_url", "ci_green", "merge"])
+                self.assertFalse(blocked["delivered"])
+                self.assertFalse(blocked["target_worker_notified"])
+                self.assertEqual(blocked["required_before_continue"], ["pr_url", "ci_green", "merge"])
+                self.assertEqual(blocked_row["state"], "failed")
+                self.assertIn("missing_required_evidence", blocked_row["error"])
+                self.assertIn("missing_evidence=pr_url,ci_green,merge", blocked_row["error"])
+                blocked_result = json.loads(blocked_row["result_json"])
+                self.assertEqual(blocked_result["missing_evidence"], ["pr_url", "ci_green", "merge"])
+                self.assertEqual(worker_db.routed_notifications(conn, task_id="task-dispatch"), [])
+                self.assertEqual(worker_db.session_inbox(conn, session_name="worker-session"), [])
+
+                for evidence_type in ("pr_url", "ci_green", "merge"):
+                    worker_db.insert_acceptance_criterion(
+                        conn,
+                        task_id="task-dispatch",
+                        criterion=f"Iteration 1 {evidence_type} evidence",
+                        status="satisfied",
+                        source="manager_inferred",
+                        proof=f"{evidence_type} receipt recorded.",
+                        evidence={
+                            "correlation_id": f"ralph-loop-{evidence_type}",
+                            "evidence_type": evidence_type,
+                            "iteration": 1,
+                            "ralph_loop_run_id": loop_run_id,
+                            "status": "recorded",
+                        },
+                    )
+                allowed_command_id = worker_db.enqueue_continue_iteration(
+                    conn,
+                    task_id="task-dispatch",
+                    message="Run iteration 2 after PR, CI, and merge evidence.",
+                    loop_run_id=loop_run_id,
+                    requested_iteration=2,
+                    correlation_id="ralph-loop-all-evidence-allowed",
+                )
+                conn.commit()
+
+                stdout = io.StringIO()
+                with contextlib.redirect_stdout(stdout):
+                    commands.command_dispatch(args)
+
+            allowed_payload = json.loads(stdout.getvalue())
+            allowed = allowed_payload["processed"][0]
+            allowed_row = conn.execute(
+                "select state from commands where id = ?",
+                (allowed_command_id,),
+            ).fetchone()
+            notification = worker_db.routed_notifications(conn, task_id="task-dispatch")[0]
+            consumed = worker_db.consume_next_session_inbox_item(conn, session_name="worker-session")
+
+            self.assertEqual(allowed["state"], "pull_required")
+            self.assertEqual(allowed_row["state"], "succeeded")
+            self.assertEqual(notification["command_id"], allowed_command_id)
+            self.assertEqual(notification["signal_type"], "continue_iteration")
+            self.assertEqual(notification["payload"]["ralph_loop"]["required_before_continue"], ["pr_url", "ci_green", "merge"])
+            self.assertEqual(consumed["payload"]["message"], "Run iteration 2 after PR, CI, and merge evidence.")
+            send.assert_not_called()
+
     def test_replay_exposes_blocked_continue_iteration_without_worker_notification(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             conn, db_path = self.open_db(tmpdir)
@@ -4235,6 +4381,69 @@ class CliTests(unittest.TestCase):
             self.assertEqual(command_payload["ralph_loop"]["run_id"], loop_run_id)
             self.assertEqual(command_payload["ralph_loop"]["requested_iteration"], 2)
             self.assertEqual(command_payload["manager_decision"]["decision_id"], decision_id)
+
+    def test_ralph_loop_presets_cli_lists_and_shows_presets(self):
+        list_proc = self.run_workerctl("ralph-loop-presets", "--list", "--json")
+
+        self.assertEqual(list_proc.returncode, 0, list_proc.stderr)
+        payload = json.loads(list_proc.stdout)
+        names = [preset["name"] for preset in payload["presets"]]
+        self.assertIn("test_coverage_loop", names)
+        self.assertIn("pr_ci_merge_loop", names)
+
+        show_proc = self.run_workerctl("ralph-loop-presets", "--show", "pr_ci_merge_loop", "--json")
+
+        self.assertEqual(show_proc.returncode, 0, show_proc.stderr)
+        preset = json.loads(show_proc.stdout)
+        self.assertEqual(preset["name"], "pr_ci_merge_loop")
+        self.assertEqual(preset["required_before_continue"], ["pr_url", "ci_green", "merge"])
+
+    def test_ralph_loop_presets_cli_creates_policy_run(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                task_id = worker_db.create_task(conn, name="preset-task", goal="Run preset loop.")
+                conn.commit()
+
+            proc = self.run_workerctl(
+                "ralph-loop-presets",
+                "--create-run",
+                "preset-task",
+                "--preset",
+                "pr_ci_merge_loop",
+                "--name",
+                "preset-policy",
+                "--max-iterations",
+                "3",
+                "--current-iteration",
+                "1",
+                "--seed-prompt-sha256",
+                "seed123",
+                "--json",
+                "--path",
+                str(db_path),
+            )
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            payload = json.loads(proc.stdout)
+            self.assertEqual(payload["purpose"], "ralph_loop")
+            self.assertEqual(payload["metadata"]["preset"], "pr_ci_merge_loop")
+            self.assertEqual(payload["metadata"]["max_iterations"], 3)
+            self.assertEqual(payload["metadata"]["current_iteration"], 1)
+            self.assertEqual(payload["metadata"]["required_before_continue"], ["pr_url", "ci_green", "merge"])
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                loop_run = worker_db.ralph_loop_run(conn, run=payload["id"])
+            self.assertEqual(loop_run["task_id"], task_id)
+            self.assertEqual(loop_run["required_before_continue"], ["pr_url", "ci_green", "merge"])
+
+    def test_ralph_loop_presets_cli_rejects_unknown_preset(self):
+        proc = self.run_workerctl("ralph-loop-presets", "--show", "nope", "--json")
+
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("Unknown Ralph loop preset", proc.stderr)
+        self.assertNotIn("Traceback", proc.stderr)
 
     def test_runs_cli_creates_ralph_loop_policy_when_active_telemetry_run_exists(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -6454,6 +6663,13 @@ Deferred follow-up criteria:
         self.assertTrue(any("worker-inbox" in step and "iteration 2" in step for step in payload["steps"]))
         self.assertTrue(any("missing_ci_green_evidence" in observation for observation in payload["expected_observations"]))
         self.assertTrue(any("fresh continue_iteration retry is delivered" in observation for observation in payload["expected_observations"]))
+        self.assertTrue(any("ralph-loop-presets --list --json" in step for step in payload["steps"]))
+        self.assertTrue(any("ralph-loop-presets --create-run" in step and "pr_ci_merge_loop" in step for step in payload["steps"]))
+        self.assertTrue(any("missing_required_evidence" in step and "missing_evidence=[pr_url,ci_green,merge]" in step for step in payload["steps"]))
+        self.assertTrue(any("missing pr_url, ci_green, merge" in step for step in payload["steps"]))
+        self.assertTrue(any("ralph-loop-preset-allowed" in step for step in payload["steps"]))
+        self.assertTrue(any("pr_ci_merge_loop" in observation and "missing_required_evidence" in observation for observation in payload["expected_observations"]))
+        self.assertTrue(any("missing pr_url, ci_green, merge" in observation for observation in payload["expected_observations"]))
         self.assertFalse(any("workerctl nudge qa-ralph-loop-iter-1" in step for step in payload["steps"]))
         self.assertFalse(any("Have the worker open or prepare the PR" in step for step in payload["steps"]))
         self.assertFalse(any("telemetry searches" in step.lower() for step in payload["steps"]))
@@ -6470,6 +6686,8 @@ Deferred follow-up criteria:
         self.assertTrue(any(marker["correlation_id"] == "ralph-iter-1-ci-fix" for marker in markers))
         self.assertTrue(any(marker["correlation_id"] == "ralph-iter-1-clear" for marker in markers))
         self.assertTrue(any(marker["correlation_id"] == "ralph-iter-2-replay" for marker in markers))
+        self.assertTrue(any(marker["correlation_id"] == "ralph-loop-preset-missing" for marker in markers))
+        self.assertTrue(any(marker["correlation_id"] == "ralph-loop-preset-allowed" for marker in markers))
         template = payload["evidence_template"]
         for key in (
             "iteration",
