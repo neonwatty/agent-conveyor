@@ -8314,6 +8314,67 @@ Deferred follow-up criteria:
         self.assertFalse(any("Have the worker open or prepare the PR" in step for step in payload["steps"]))
         self.assertFalse(any("telemetry searches" in step.lower() for step in payload["steps"]))
 
+    def test_qa_plan_adversarial_triggers_outputs_prompt_language_drills(self):
+        proc = self.run_workerctl("qa-plan", "adversarial-triggers", "--json")
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        payload = json.loads(proc.stdout)
+        self.assertEqual(payload["scenario"], "adversarial-triggers")
+        trigger_tasks = payload["trigger_tasks"]
+        triggers = {task["name"]: task["trigger"] for task in trigger_tasks}
+        self.assertEqual(
+            triggers["loop-gate-trigger"],
+            "Run this as an adversarially gated Ralph loop.",
+        )
+        self.assertEqual(
+            triggers["iteration-gate-trigger"],
+            "Do not send the worker another iteration until adversarial proof exists.",
+        )
+        self.assertEqual(
+            triggers["finish-gate-trigger"],
+            "Do not mark this done until you have tried to disprove it.",
+        )
+        self.assertEqual(
+            triggers["worker-directed-trigger"],
+            "Ask the worker to identify the strongest realistic failure mode and prove it is handled.",
+        )
+        self.assertEqual(
+            triggers["acceptance-criteria-trigger"],
+            "Each loop must include adversarial acceptance criteria from manager to worker.",
+        )
+        joined_steps = " ".join(payload["steps"])
+        joined_observations = " ".join(payload["expected_observations"])
+        self.assertIn('required_before_continue=["adversarial_check"]', joined_steps)
+        self.assertIn("missing_evidence=[adversarial_check]", joined_steps)
+        self.assertIn("delivered=false", joined_steps)
+        self.assertIn("target_worker_notified=false", joined_steps)
+        self.assertIn("worker Inbox 0", joined_observations)
+        self.assertIn("loop-evidence adversarial-check", joined_steps)
+        self.assertIn("--source worker_proposed", joined_steps)
+        self.assertIn("finish-task <task> --require-adversarial-proof", joined_steps)
+        self.assertIn("manager_inferred accepted criteria", joined_steps)
+        self.assertIn("failure_mode", joined_steps)
+        self.assertIn("check", joined_steps)
+        self.assertIn("result", joined_steps)
+        self.assertIn("generic loop-evidence add --evidence-type adversarial_check", joined_observations)
+        markers = {marker["correlation_id"] for marker in payload["correlation_markers"]}
+        self.assertIn("nl-loop-gate-policy", markers)
+        self.assertIn("nl-iteration-gate-missing-proof", markers)
+        self.assertIn("nl-iteration-gate-adversarial-proof", markers)
+        self.assertIn("nl-iteration-gate-allowed", markers)
+        self.assertIn("nl-finish-gate-proof", markers)
+        self.assertIn("nl-worker-directed-proof", markers)
+        self.assertIn("nl-manager-criteria-negative-checks", markers)
+
+    def test_qa_plan_adversarial_triggers_text_includes_trigger_tasks(self):
+        proc = self.run_workerctl("qa-plan", "adversarial-triggers")
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("Trigger tasks:", proc.stdout)
+        self.assertIn("loop-gate-trigger: Run this as an adversarially gated Ralph loop.", proc.stdout)
+        self.assertIn("iteration-gate-trigger: Do not send the worker another iteration", proc.stdout)
+        self.assertIn("worker-directed-trigger: Ask the worker to identify", proc.stdout)
+
     def test_qa_plan_ralph_loop_includes_correlation_and_receipt_template(self):
         json_proc = self.run_workerctl("qa-plan", "ralph-loop", "--json")
         text_proc = self.run_workerctl("qa-plan", "ralph-loop")
@@ -17707,6 +17768,28 @@ class ManagerBootstrapPromptTests(unittest.TestCase):
         self.assertIn("ralph-loop-preset-adversarial", qa_doc)
         self.assertNotIn('required_before_continue=["ci_green"]', qa_doc)
         self.assertNotIn('missing_evidence=["pr_url","ci_green","merge"]', qa_doc)
+
+    def test_adversarial_trigger_qa_documents_prompt_language_drills(self):
+        qa_doc = (ROOT / "docs" / "qa" / "adversarial-triggers.md").read_text()
+        qa_readme = (ROOT / "docs" / "qa" / "README.md").read_text()
+        proof_doc = (ROOT / "docs" / "qa" / "adversarial-proof.md").read_text()
+        checklist = (ROOT / "docs" / "manual-qa-checklist.md").read_text()
+
+        for document in (qa_doc, proof_doc, checklist):
+            self.assertIn("qa-plan adversarial-triggers", document)
+        self.assertIn("Adversarial triggers", qa_readme)
+        self.assertIn("Run this as an adversarially gated Ralph loop.", qa_doc)
+        self.assertIn("Do not send the worker another iteration until adversarial proof exists.", qa_doc)
+        self.assertIn("Do not mark this done until you have tried to disprove it.", qa_doc)
+        self.assertIn("Ask the worker to identify the strongest realistic failure mode", qa_doc)
+        self.assertIn("Each loop must include adversarial acceptance criteria", qa_doc)
+        self.assertIn("manager_inferred", qa_doc)
+        self.assertIn("worker_proposed", qa_doc)
+        self.assertIn("failure_mode", qa_doc)
+        self.assertIn("check", qa_doc)
+        self.assertIn("result", qa_doc)
+        self.assertIn("generic", qa_doc)
+        self.assertIn("without structured", qa_doc)
 
     def test_general_loop_template_documented_setup_smoke_blocks_missing_evidence(self):
         with tempfile.TemporaryDirectory() as tmpdir:

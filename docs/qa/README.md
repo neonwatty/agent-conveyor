@@ -20,6 +20,9 @@ pass/fail evidence.
   nudge, worker-side assessment, and manager-side comparison test.
 - [Managed Ralph loop](ralph-loop.md) - repeated manager-led PR, CI, merge,
   handoff, worker clear, and same-prompt replay test.
+- [Adversarial triggers](adversarial-triggers.md) - natural-language trigger
+  phrases for Ralph-loop policy, Dispatch continuation gates, finish gates,
+  worker-proposed proof, and manager-created adversarial criteria.
 - [Late attach support reporter](late-attach-support-reporter.md) - assign a
   manager after worker progress on a small CLI/reporting feature.
 

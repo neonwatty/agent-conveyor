@@ -36,6 +36,9 @@ The manager should translate those requests into:
 - `finish-task --require-adversarial-proof` when final completion should also
   be blocked until proof exists.
 
+Use `workerctl qa-plan adversarial-triggers` and
+`docs/qa/adversarial-triggers.md` to run the natural-language trigger QA suite.
+
 ## GoalBuddy Usage
 
 When planning with GoalBuddy, include adversarial proof in the oracle:

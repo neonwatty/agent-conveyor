@@ -1587,6 +1587,94 @@ def command_qa_plan(args: argparse.Namespace) -> int:
                 "Finish or clean up only the disposable pair, then run workerctl reconcile --stale-cycles-seconds 1 and git status --short --branch.",
             ],
         },
+        "adversarial-triggers": {
+            "trigger_tasks": [
+                {
+                    "name": "loop-gate-trigger",
+                    "trigger": "Run this as an adversarially gated Ralph loop.",
+                    "acceptance": "A Ralph-loop policy run exists and required_before_continue includes adversarial_check before any continuation is requested.",
+                },
+                {
+                    "name": "iteration-gate-trigger",
+                    "trigger": "Do not send the worker another iteration until adversarial proof exists.",
+                    "acceptance": "Dispatch blocks continue_iteration before worker delivery until loop-evidence adversarial-check records failure_mode, check, and result.",
+                },
+                {
+                    "name": "finish-gate-trigger",
+                    "trigger": "Do not mark this done until you have tried to disprove it.",
+                    "acceptance": "The manager uses finish-task --require-adversarial-proof; the first finish fails closed without proof and succeeds only after structured proof exists.",
+                },
+                {
+                    "name": "worker-directed-trigger",
+                    "trigger": "Ask the worker to identify the strongest realistic failure mode and prove it is handled.",
+                    "acceptance": "The worker returns failure_mode, check, and result, and the manager records them with loop-evidence adversarial-check --source worker_proposed.",
+                },
+                {
+                    "name": "acceptance-criteria-trigger",
+                    "trigger": "Each loop must include adversarial acceptance criteria from manager to worker.",
+                    "acceptance": "The manager creates manager_inferred accepted criteria that name negative Dispatch/evidence checks, then satisfies them only with audit, replay, command, inbox, and loop-evidence receipts.",
+                },
+            ],
+            "correlation_markers": [
+                {
+                    "correlation_id": "nl-loop-gate-policy",
+                    "purpose": "Link the natural-language loop gate prompt to the created Ralph-loop policy and adversarial_check requirement.",
+                },
+                {
+                    "correlation_id": "nl-iteration-gate-missing-proof",
+                    "purpose": "Link the manager's requested continuation to the Dispatch block before adversarial proof exists.",
+                },
+                {
+                    "correlation_id": "nl-iteration-gate-adversarial-proof",
+                    "purpose": "Link the structured adversarial_check receipt that unblocks a fresh continuation retry.",
+                },
+                {
+                    "correlation_id": "nl-iteration-gate-allowed",
+                    "purpose": "Link the fresh post-proof continue_iteration retry to worker inbox or tmux delivery.",
+                },
+                {
+                    "correlation_id": "nl-finish-gate-proof",
+                    "purpose": "Link finish-task --require-adversarial-proof to the final structured proof criterion.",
+                },
+                {
+                    "correlation_id": "nl-worker-directed-proof",
+                    "purpose": "Link the worker's failure_mode/check/result response to manager-recorded worker_proposed adversarial_check evidence.",
+                },
+                {
+                    "correlation_id": "nl-manager-criteria-negative-checks",
+                    "purpose": "Link manager_inferred adversarial criteria to blocked Dispatch, empty inbox, structured evidence, and allowed retry receipts.",
+                },
+            ],
+            "expected_observations": [
+                "the phrase Run this as an adversarially gated Ralph loop causes the manager to create or use a Ralph-loop policy whose required_before_continue includes adversarial_check",
+                "the phrase Do not send the worker another iteration until adversarial proof exists causes Dispatch to block continue_iteration before worker delivery when adversarial_check is missing",
+                "blocked continuation leaves routed notification empty or absent, target_worker_notified=false, delivered=false, worker Inbox 0, and Pull inbox 0",
+                "after loop-evidence adversarial-check records failure_mode, check, and result for the previous iteration, only a fresh retry reaches the worker",
+                "the phrase Do not mark this done until you have tried to disprove it causes the manager to use finish-task --require-adversarial-proof",
+                "finish-task --require-adversarial-proof fails closed before structured proof, leaves the task non-done, and records no succeeded finish_task command",
+                "the worker-directed trigger requires the worker response to contain failure_mode, check, and result, and the manager records those fields as source=worker_proposed evidence",
+                "the acceptance-criteria trigger creates manager_inferred accepted criteria that name negative/adversarial checks, not only happy-path tests or CI green",
+                "audit, replay, commands, worker-inbox, and export-task can reconstruct manager prompt -> criteria/policy -> blocked Dispatch -> adversarial evidence -> allowed retry or final finish",
+                "generic prose, worker claims, tests passed text, and generic loop-evidence add --evidence-type adversarial_check without structured metadata do not satisfy these trigger gates",
+            ],
+            "steps": [
+                "Create a disposable WORKERCTL_DB and record git status --short --branch before the drill; all trigger tasks must be read-only against tracked files.",
+                "Run the loop gate trigger task: create or pair a disposable task with task prompt \"Run this as an adversarially gated Ralph loop.\" Then verify workerctl runs --task <task> --json shows a purpose=ralph_loop run with metadata.required_before_continue containing adversarial_check; use correlation nl-loop-gate-policy.",
+                "For the loop gate trigger, verify the policy is not just generic burden-of-proof prose: audit/replay must show a Ralph-loop run or template/preset record before any continue_iteration request.",
+                "Run the iteration gate trigger task with prompt \"Do not send the worker another iteration until adversarial proof exists.\" Create a no-tmux worker/manager binding, a Ralph-loop run with required_before_continue=[\"adversarial_check\"], and enqueue continue_iteration for requested iteration 2 with correlation nl-iteration-gate-missing-proof.",
+                "Run workerctl dispatch --once --type continue_iteration --dispatcher-id qa-adversarial-triggers --json and verify state=blocked, missing_evidence=[adversarial_check], delivered=false, target_worker_notified=false, and no worker inbox item.",
+                "Record proof with workerctl loop-evidence adversarial-check <task> --loop-run <run-id> --iteration 1 --failure-mode \"iteration 2 could be delivered after only a manager request\" --check \"dispatch result, worker inbox, and command receipt inspection\" --result \"blocked command produced no worker delivery before proof\" --correlation-id nl-iteration-gate-adversarial-proof.",
+                "Enqueue a fresh continue_iteration command with correlation nl-iteration-gate-allowed, run Dispatch again, and verify the fresh retry is delivered to the worker inbox or tmux target.",
+                "Run the finish gate trigger task with prompt \"Do not mark this done until you have tried to disprove it.\" First run workerctl finish-task <task> --require-adversarial-proof --reason \"premature natural-language finish drill\" and verify it fails with adversarial proof is required, task remains non-done, and no succeeded finish_task command exists.",
+                "Record a satisfied manager_inferred criterion with evidence_type=adversarial_check plus non-empty failure_mode, check, and result using correlation nl-finish-gate-proof; then run workerctl finish-task <task> --require-adversarial-proof --require-criteria-audit and verify it succeeds.",
+                "Run the worker-directed trigger task: nudge the worker with \"Ask the worker to identify the strongest realistic failure mode and prove it is handled. Reply with exactly three labeled fields: failure_mode, check, result.\" Verify the worker response contains all three labels.",
+                "Record the worker response with workerctl loop-evidence adversarial-check <task> --loop-run <run-id> --iteration 1 --failure-mode \"<worker failure_mode>\" --check \"<worker check>\" --result \"<worker result>\" --source worker_proposed --correlation-id nl-worker-directed-proof; verify audit/replay/export preserve source=worker_proposed.",
+                "Run the acceptance-criteria trigger task with prompt \"Each loop must include adversarial acceptance criteria from manager to worker.\" Add manager_inferred accepted criteria that require blocked Dispatch before proof, empty worker inbox on blocked continuation, and structured adversarial_check evidence before retry.",
+                "Satisfy the manager-created adversarial criteria only after audit, replay, commands --attempts, worker-inbox, and loop-evidence receipts prove the negative checks; use correlation nl-manager-criteria-negative-checks.",
+                "Run workerctl replay, workerctl audit, workerctl commands --task --attempts, workerctl worker-inbox, and workerctl export-task for each disposable trigger task; verify the correlation markers connect natural-language prompt, policy/criteria, blocked attempt, proof receipt, and allowed retry or finish.",
+                "Run git status --short --branch after cleanup and verify no tracked-file edits came from the live QA run.",
+            ],
+        },
         "ralph-loop": {
             "correlation_markers": [
                 {
@@ -1753,6 +1841,11 @@ def command_qa_plan(args: argparse.Namespace) -> int:
         print("Expected observations:")
         for observation in payload["expected_observations"]:
             print(f"- {observation}")
+        if payload.get("trigger_tasks"):
+            print("")
+            print("Trigger tasks:")
+            for task in payload["trigger_tasks"]:
+                print(f"- {task['name']}: {task['trigger']} -> {task['acceptance']}")
         if payload.get("correlation_markers"):
             print("")
             print("Correlation markers:")
