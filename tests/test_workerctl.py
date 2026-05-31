@@ -8278,20 +8278,38 @@ Deferred follow-up criteria:
         self.assertTrue(any("dashboard" in step.lower() and "Inbox 0" in step for step in payload["steps"]))
         self.assertTrue(any("max_iterations_reached" in observation for observation in payload["expected_observations"]))
         self.assertTrue(any("0 notifications" in observation and "Pull inbox 0" in observation for observation in payload["expected_observations"]))
-        self.assertTrue(any('required_before_continue=["ci_green"]' in step for step in payload["steps"]))
-        self.assertTrue(any("missing_ci_green_evidence" in step for step in payload["steps"]))
-        self.assertTrue(any("missing_evidence=[ci_green]" in step for step in payload["steps"]))
+        self.assertTrue(any('required_before_continue=["ci_green","adversarial_check"]' in step for step in payload["steps"]))
+        self.assertTrue(any("missing_required_evidence" in step and "missing_evidence=[ci_green,adversarial_check]" in step for step in payload["steps"]))
+        self.assertTrue(any("missing ci_green, adversarial_check" in step for step in payload["steps"]))
+        self.assertTrue(
+            any(
+                "loop-evidence adversarial-check" in step
+                and "ralph-loop-ci-adversarial" in step
+                for step in payload["steps"]
+            )
+        )
         self.assertTrue(any("ralph-loop-ci-allowed" in step for step in payload["steps"]))
         self.assertTrue(any("worker-inbox" in step and "iteration 2" in step for step in payload["steps"]))
-        self.assertTrue(any("missing_ci_green_evidence" in observation for observation in payload["expected_observations"]))
+        self.assertTrue(any("missing_required_evidence" in observation and "ci_green,adversarial_check" in observation for observation in payload["expected_observations"]))
         self.assertTrue(any("fresh continue_iteration retry is delivered" in observation for observation in payload["expected_observations"]))
         self.assertTrue(any("ralph-loop-presets --list --json" in step for step in payload["steps"]))
         self.assertTrue(any("ralph-loop-presets --create-run" in step and "pr_ci_merge_loop" in step for step in payload["steps"]))
-        self.assertTrue(any("missing_required_evidence" in step and "missing_evidence=[pr_url,ci_green,merge]" in step for step in payload["steps"]))
-        self.assertTrue(any("missing pr_url, ci_green, merge" in step for step in payload["steps"]))
+        self.assertTrue(any("missing_required_evidence" in step and "missing_evidence=[pr_url,ci_green,merge,adversarial_check]" in step for step in payload["steps"]))
+        self.assertTrue(any("missing pr_url, ci_green, merge, adversarial_check" in step for step in payload["steps"]))
+        self.assertTrue(
+            any(
+                "loop-evidence adversarial-check" in step
+                and "ralph-loop-preset-adversarial" in step
+                for step in payload["steps"]
+            )
+        )
         self.assertTrue(any("ralph-loop-preset-allowed" in step for step in payload["steps"]))
         self.assertTrue(any("pr_ci_merge_loop" in observation and "missing_required_evidence" in observation for observation in payload["expected_observations"]))
-        self.assertTrue(any("missing pr_url, ci_green, merge" in observation for observation in payload["expected_observations"]))
+        self.assertTrue(any("missing pr_url, ci_green, merge, adversarial_check" in observation for observation in payload["expected_observations"]))
+        self.assertFalse(any('required_before_continue=["ci_green"]' in step for step in payload["steps"]))
+        self.assertFalse(any("missing_ci_green_evidence" in step for step in payload["steps"]))
+        self.assertFalse(any("missing_evidence=[ci_green]" in step for step in payload["steps"]))
+        self.assertFalse(any("missing_evidence=[pr_url,ci_green,merge]" in step for step in payload["steps"]))
         self.assertFalse(any("workerctl nudge qa-ralph-loop-iter-1" in step for step in payload["steps"]))
         self.assertFalse(any("Have the worker open or prepare the PR" in step for step in payload["steps"]))
         self.assertFalse(any("telemetry searches" in step.lower() for step in payload["steps"]))
@@ -8308,7 +8326,9 @@ Deferred follow-up criteria:
         self.assertTrue(any(marker["correlation_id"] == "ralph-iter-1-ci-fix" for marker in markers))
         self.assertTrue(any(marker["correlation_id"] == "ralph-iter-1-clear" for marker in markers))
         self.assertTrue(any(marker["correlation_id"] == "ralph-iter-2-replay" for marker in markers))
+        self.assertTrue(any(marker["correlation_id"] == "ralph-loop-ci-adversarial" for marker in markers))
         self.assertTrue(any(marker["correlation_id"] == "ralph-loop-preset-missing" for marker in markers))
+        self.assertTrue(any(marker["correlation_id"] == "ralph-loop-preset-adversarial" for marker in markers))
         self.assertTrue(any(marker["correlation_id"] == "ralph-loop-preset-allowed" for marker in markers))
         template = payload["evidence_template"]
         for key in (
