@@ -126,6 +126,10 @@ Acceptance criteria:
 - Dispatch result includes `delivered=false` and `target_worker_notified=false`.
 - `scripts/workerctl worker-inbox qa-general-loop-template --json --path "$WORKERCTL_DB"`
   returns no items.
+- Because `visual_diff_loop` requires `adversarial_check`, missing
+  adversarial proof blocks worker delivery; do not queue the allowed retry until
+  `scripts/workerctl loop-evidence adversarial-check ...` records structured
+  proof for the prior iteration.
 - Dashboard Dispatch panel shows the correlation `visual-loop-missing`,
   `0 notifications`, `Inbox 0`, and `Pull inbox 0`.
 
@@ -200,7 +204,8 @@ Acceptance criteria:
 - Worker inbox consumption returns the visual iteration message.
 - Telemetry includes `dispatch_inbox_consumed`.
 - Replay and audit connect `visual-loop-allowed` to the command attempt, routed
-  notification, worker inbox item, and consumption event.
+  notification, worker inbox item, consumption event, and the
+  `visual-loop-adversarial` proof criterion.
 
 ## Max Iteration Cutoff
 

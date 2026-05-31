@@ -3225,6 +3225,122 @@ class DispatchTests(unittest.TestCase):
             self.assertEqual(worker_db.session_inbox(conn, session_name="worker-session"), [])
             send.assert_not_called()
 
+    def test_dispatch_blocks_continue_iteration_until_adversarial_check_exists(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn, db_path = self.open_db(tmpdir)
+            worker_id, _manager_id = self.setup_bound_task(conn)
+            conn.execute("update sessions set tmux_session = null where id = ?", (worker_id,))
+            loop_run_id = worker_db.create_ralph_loop_run(
+                conn,
+                task_id="task-dispatch",
+                name="adversarial-proof-policy",
+                max_iterations=3,
+                current_iteration=1,
+                cleanup_policy="clear",
+                required_before_continue=["adversarial_check"],
+                stop_conditions=["max_iterations", "required_evidence"],
+            )
+            blocked_command_id = worker_db.enqueue_continue_iteration(
+                conn,
+                task_id="task-dispatch",
+                message="Run iteration 2 before adversarial proof.",
+                loop_run_id=loop_run_id,
+                requested_iteration=2,
+                correlation_id="adversarial-proof-missing",
+            )
+            conn.commit()
+
+            args = argparse.Namespace(
+                dispatcher_id="dispatch-test",
+                dry_run=False,
+                json=True,
+                limit=10,
+                once=True,
+                path=str(db_path),
+                type="continue_iteration",
+                watch=False,
+            )
+            with mock.patch.object(worker_tmux, "send_text_to_session") as send:
+                with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                    commands.command_dispatch(args)
+
+                blocked = json.loads(stdout.getvalue())["processed"][0]
+                blocked_row = conn.execute(
+                    "select state, result_json, error from commands where id = ?",
+                    (blocked_command_id,),
+                ).fetchone()
+
+                self.assertEqual(blocked["state"], "blocked")
+                self.assertEqual(blocked["reason"], "missing_adversarial_check_evidence")
+                self.assertEqual(blocked["missing_evidence"], ["adversarial_check"])
+                self.assertFalse(blocked["delivered"])
+                self.assertFalse(blocked["target_worker_notified"])
+                self.assertEqual(blocked_row["state"], "failed")
+                self.assertIn("missing_adversarial_check_evidence", blocked_row["error"])
+                self.assertEqual(json.loads(blocked_row["result_json"])["missing_evidence"], ["adversarial_check"])
+                self.assertEqual(worker_db.routed_notifications(conn, task_id="task-dispatch"), [])
+                self.assertEqual(worker_db.session_inbox(conn, session_name="worker-session"), [])
+
+                proof_args = argparse.Namespace(
+                    action="adversarial-check",
+                    artifact_path=None,
+                    check="manager inspected the worker receipt and diff",
+                    correlation_id="adversarial-proof-recorded",
+                    failure_mode="The continuation repeats the same mistake.",
+                    iteration=1,
+                    json=True,
+                    loop_run=loop_run_id,
+                    path=str(db_path),
+                    result="The receipt and diff show the issue was fixed before continuing.",
+                    source="manager_inferred",
+                    status="pass",
+                    task="dispatch-task",
+                )
+                with contextlib.redirect_stdout(io.StringIO()) as proof_stdout:
+                    commands.command_loop_evidence(proof_args)
+                proof = json.loads(proof_stdout.getvalue())
+                self.assertEqual(proof["criterion"]["status"], "satisfied")
+                self.assertEqual(proof["evidence"]["evidence_type"], "adversarial_check")
+                self.assertEqual(proof["evidence"]["ralph_loop_run_id"], loop_run_id)
+                self.assertEqual(proof["evidence"]["iteration"], 1)
+                self.assertEqual(proof["evidence"]["failure_mode"], "The continuation repeats the same mistake.")
+                self.assertEqual(proof["evidence"]["check"], "manager inspected the worker receipt and diff")
+                self.assertEqual(
+                    proof["evidence"]["result"],
+                    "The receipt and diff show the issue was fixed before continuing.",
+                )
+
+                allowed_command_id = worker_db.enqueue_continue_iteration(
+                    conn,
+                    task_id="task-dispatch",
+                    message="Run iteration 2 after adversarial proof.",
+                    loop_run_id=loop_run_id,
+                    requested_iteration=2,
+                    correlation_id="adversarial-proof-allowed",
+                )
+                conn.commit()
+
+                stdout = io.StringIO()
+                with contextlib.redirect_stdout(stdout):
+                    commands.command_dispatch(args)
+
+            allowed = json.loads(stdout.getvalue())["processed"][0]
+            allowed_row = conn.execute(
+                "select state from commands where id = ?",
+                (allowed_command_id,),
+            ).fetchone()
+            notification = worker_db.routed_notifications(conn, task_id="task-dispatch")[0]
+            consumed = worker_db.consume_next_session_inbox_item(conn, session_name="worker-session")
+
+            self.assertEqual(allowed["state"], "pull_required")
+            self.assertEqual(allowed_row["state"], "succeeded")
+            self.assertEqual(notification["command_id"], allowed_command_id)
+            self.assertEqual(notification["signal_type"], "continue_iteration")
+            self.assertEqual(notification["delivery_mode"], "pull_required")
+            self.assertEqual(notification["payload"]["ralph_loop"]["required_before_continue"], ["adversarial_check"])
+            self.assertEqual(consumed["payload"]["message"], "Run iteration 2 after adversarial proof.")
+            send.assert_not_called()
+
     def test_dispatch_blocks_visual_diff_template_until_required_evidence_exists(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             conn, db_path = self.open_db(tmpdir)
@@ -17555,6 +17671,22 @@ class ManagerBootstrapPromptTests(unittest.TestCase):
         self.assertNotIn('loop-templates --show visual_diff_loop --json --path "$WORKERCTL_DB"', qa_doc)
         self.assertIn("loop-evidence adversarial-check qa-general-loop-template", qa_doc)
         self.assertNotIn("--evidence-type adversarial_check", qa_doc)
+
+    def test_ralph_loop_qa_documents_adversarial_evidence_gate(self):
+        qa_doc = (ROOT / "docs" / "qa" / "ralph-loop.md").read_text()
+        checklist = (ROOT / "docs" / "manual-qa-checklist.md").read_text()
+
+        for document in (qa_doc, checklist):
+            self.assertIn("loop-evidence adversarial-check", document)
+            self.assertIn("missing_required_evidence", document)
+            self.assertIn("adversarial_check", document)
+        self.assertIn('required_before_continue=["ci_green","adversarial_check"]', qa_doc)
+        self.assertIn('missing_evidence=["ci_green","adversarial_check"]', qa_doc)
+        self.assertIn('missing_evidence=["pr_url","ci_green","merge","adversarial_check"]', qa_doc)
+        self.assertIn("ralph-loop-ci-adversarial", qa_doc)
+        self.assertIn("ralph-loop-preset-adversarial", qa_doc)
+        self.assertNotIn('required_before_continue=["ci_green"]', qa_doc)
+        self.assertNotIn('missing_evidence=["pr_url","ci_green","merge"]', qa_doc)
 
     def test_general_loop_template_documented_setup_smoke_blocks_missing_evidence(self):
         with tempfile.TemporaryDirectory() as tmpdir:
