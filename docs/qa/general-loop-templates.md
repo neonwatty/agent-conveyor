@@ -21,10 +21,36 @@ after evidence is recorded.
 ## Setup
 
 ```bash
-WORKERCTL_DB="$(mktemp -t workerctl-loop-template.XXXXXX.db)"
+QA_TMPDIR="$(mktemp -d -t workerctl-loop-template.XXXXXX)"
+WORKERCTL_DB="$QA_TMPDIR/workerctl.db"
+WORKER_ROLLOUT="$QA_TMPDIR/rollout-worker.jsonl"
+MANAGER_ROLLOUT="$QA_TMPDIR/rollout-manager.jsonl"
+
+python3 - <<'PY'
+import json
+import os
+from pathlib import Path
+
+fixtures = {
+    "WORKER_ROLLOUT": "qa-loop-worker-session",
+    "MANAGER_ROLLOUT": "qa-loop-manager-session",
+}
+for env_name, session_id in fixtures.items():
+    Path(os.environ[env_name]).write_text(
+        json.dumps({
+            "type": "session_meta",
+            "payload": {
+                "id": session_id,
+                "cwd": os.getcwd(),
+                "originator": "codex-tui",
+            },
+        }) + "\n"
+    )
+PY
+
 scripts/workerctl tasks --create qa-general-loop-template --goal "QA generic loop templates with visual-diff evidence." --path "$WORKERCTL_DB"
-scripts/workerctl register-worker --name qa-loop-worker --pid $$ --cwd "$PWD" --path "$WORKERCTL_DB"
-scripts/workerctl register-manager --name qa-loop-manager --pid $$ --cwd "$PWD" --path "$WORKERCTL_DB"
+scripts/workerctl register-worker --name qa-loop-worker --pid $$ --codex-session "$WORKER_ROLLOUT" --cwd "$PWD" --path "$WORKERCTL_DB"
+scripts/workerctl register-manager --name qa-loop-manager --pid $$ --codex-session "$MANAGER_ROLLOUT" --cwd "$PWD" --path "$WORKERCTL_DB"
 scripts/workerctl bind --task qa-general-loop-template --worker qa-loop-worker --manager qa-loop-manager --path "$WORKERCTL_DB"
 scripts/workerctl loop-templates --list --json --path "$WORKERCTL_DB"
 scripts/workerctl loop-templates --show visual_diff_loop --json --path "$WORKERCTL_DB"
@@ -37,6 +63,8 @@ Acceptance criteria:
 - `loop-templates --show visual_diff_loop` shows the four required evidence
   fields, artifact requirements, recommended tools, cleanup policy, tags, and
   stop conditions.
+- Worker and manager registration succeed without relying on `lsof` discovery
+  because the commands pass explicit `--codex-session` rollout fixture paths.
 
 ## Template-Backed Run Creation
 

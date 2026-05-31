@@ -16325,6 +16325,118 @@ class ManagerBootstrapPromptTests(unittest.TestCase):
         self.assertIn("diff_below_threshold", qa_doc)
         self.assertIn("worker-inbox", qa_doc)
         self.assertIn("dispatch_inbox_consumed", qa_doc)
+        self.assertIn("WORKER_ROLLOUT", qa_doc)
+        self.assertIn("MANAGER_ROLLOUT", qa_doc)
+        self.assertIn('--codex-session "$WORKER_ROLLOUT"', qa_doc)
+        self.assertIn('--codex-session "$MANAGER_ROLLOUT"', qa_doc)
+
+    def test_general_loop_template_documented_setup_smoke_blocks_missing_evidence(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            db_path = tmp_path / "workerctl.db"
+            worker_rollout = tmp_path / "rollout-worker.jsonl"
+            manager_rollout = tmp_path / "rollout-manager.jsonl"
+            worker_rollout.write_text(json.dumps({
+                "type": "session_meta",
+                "payload": {"id": "qa-loop-worker-session", "cwd": str(ROOT), "originator": "codex-tui"},
+            }) + "\n")
+            manager_rollout.write_text(json.dumps({
+                "type": "session_meta",
+                "payload": {"id": "qa-loop-manager-session", "cwd": str(ROOT), "originator": "codex-tui"},
+            }) + "\n")
+
+            def run_workerctl(*args):
+                return subprocess.run(
+                    [sys.executable, "-m", "workerctl", *args, "--path", str(db_path)],
+                    capture_output=True,
+                    text=True,
+                    cwd=str(ROOT),
+                )
+
+            setup_commands = [
+                ("tasks", "--create", "qa-general-loop-template", "--goal", "QA generic loop templates with visual-diff evidence."),
+                (
+                    "register-worker",
+                    "--name",
+                    "qa-loop-worker",
+                    "--pid",
+                    str(os.getpid()),
+                    "--codex-session",
+                    str(worker_rollout),
+                    "--cwd",
+                    str(ROOT),
+                ),
+                (
+                    "register-manager",
+                    "--name",
+                    "qa-loop-manager",
+                    "--pid",
+                    str(os.getpid()),
+                    "--codex-session",
+                    str(manager_rollout),
+                    "--cwd",
+                    str(ROOT),
+                ),
+                ("bind", "--task", "qa-general-loop-template", "--worker", "qa-loop-worker", "--manager", "qa-loop-manager"),
+            ]
+            for command in setup_commands:
+                proc = run_workerctl(*command)
+                self.assertEqual(proc.returncode, 0, proc.stderr)
+
+            create_proc = run_workerctl(
+                "loop-templates",
+                "--create-run",
+                "qa-general-loop-template",
+                "--template",
+                "visual_diff_loop",
+                "--name",
+                "qa-visual-template-run",
+                "--max-iterations",
+                "4",
+                "--current-iteration",
+                "1",
+                "--seed-prompt-sha256",
+                "visual-template-seed",
+                "--json",
+            )
+            self.assertEqual(create_proc.returncode, 0, create_proc.stderr)
+            run_id = json.loads(create_proc.stdout)["id"]
+
+            enqueue_proc = run_workerctl(
+                "enqueue-continue-iteration",
+                "qa-general-loop-template",
+                "--loop-run",
+                str(run_id),
+                "--requested-iteration",
+                "2",
+                "--correlation-id",
+                "visual-loop-missing",
+                "--message",
+                "Run visual iteration 2.",
+                "--json",
+            )
+            self.assertEqual(enqueue_proc.returncode, 0, enqueue_proc.stderr)
+
+            dispatch_proc = run_workerctl(
+                "dispatch",
+                "--once",
+                "--type",
+                "continue_iteration",
+                "--dispatcher-id",
+                "qa-loop-template",
+                "--json",
+            )
+            self.assertEqual(dispatch_proc.returncode, 0, dispatch_proc.stderr)
+            processed = json.loads(dispatch_proc.stdout)["processed"][0]
+
+            self.assertEqual(processed["state"], "blocked")
+            self.assertEqual(processed["reason"], "missing_required_evidence")
+            self.assertEqual(
+                processed["missing_evidence"],
+                ["reference_artifact", "candidate_screenshot", "visual_diff_report", "diff_below_threshold"],
+            )
+            self.assertFalse(processed["delivered"])
+            self.assertFalse(processed["target_worker_notified"])
 
 
 class StartManagerTests(unittest.TestCase):
