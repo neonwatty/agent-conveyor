@@ -3316,6 +3316,21 @@ class DispatchTests(unittest.TestCase):
             self.assertEqual(persisted_run["metadata"]["artifact_requirements"]["diff_score"]["type"], "number")
             self.assertEqual(persisted_run["metadata"]["required_before_continue"], required_before_continue)
             for evidence_type in required_before_continue:
+                evidence = {
+                    "correlation_id": "visual-loop-allowed",
+                    "evidence_type": evidence_type,
+                    "iteration": 1,
+                    "ralph_loop_run_id": loop_run_id,
+                    "status": "pass",
+                }
+                if evidence_type == "adversarial_check":
+                    evidence.update(
+                        {
+                            "failure_mode": "Visual artifacts may pass while hiding an unreviewed regression.",
+                            "check": "Inspect the visual diff report and candidate screenshot before retry.",
+                            "result": "Visual evidence was reviewed with no unresolved blocker.",
+                        }
+                    )
                 worker_db.insert_acceptance_criterion(
                     conn,
                     task_id="task-dispatch",
@@ -3323,13 +3338,7 @@ class DispatchTests(unittest.TestCase):
                     status="satisfied",
                     source="manager_inferred",
                     proof=f"{evidence_type} receipt recorded.",
-                    evidence={
-                        "correlation_id": "visual-loop-allowed",
-                        "evidence_type": evidence_type,
-                        "iteration": 1,
-                        "ralph_loop_run_id": loop_run_id,
-                        "status": "pass",
-                    },
+                    evidence=evidence,
                 )
             command_id = worker_db.enqueue_continue_iteration(
                 conn,
