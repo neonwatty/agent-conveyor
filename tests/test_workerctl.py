@@ -4452,6 +4452,71 @@ class CliTests(unittest.TestCase):
         self.assertEqual(preset["name"], "pr_ci_merge_loop")
         self.assertEqual(preset["required_before_continue"], ["pr_url", "ci_green", "merge"])
 
+    def test_ralph_loop_presets_cli_lists_and_shows_templates(self):
+        self.test_ralph_loop_presets_cli_lists_and_shows_presets()
+
+    def test_loop_templates_cli_lists_and_shows_visual_diff_template(self):
+        list_proc = self.run_workerctl("loop-templates", "--list", "--json")
+
+        self.assertEqual(list_proc.returncode, 0, list_proc.stderr)
+        payload = json.loads(list_proc.stdout)
+        names = [template["name"] for template in payload["templates"]]
+        self.assertIn("visual_diff_loop", names)
+
+        show_proc = self.run_workerctl("loop-templates", "--show", "visual_diff_loop", "--json")
+
+        self.assertEqual(show_proc.returncode, 0, show_proc.stderr)
+        template = json.loads(show_proc.stdout)
+        self.assertEqual(template["name"], "visual_diff_loop")
+        self.assertEqual(
+            template["required_before_continue"],
+            ["reference_artifact", "candidate_screenshot", "visual_diff_report", "diff_below_threshold"],
+        )
+
+    def test_loop_templates_cli_creates_visual_diff_policy_run(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                task_id = worker_db.create_task(conn, name="visual-template-task", goal="Run visual template loop.")
+                conn.commit()
+
+            proc = self.run_workerctl(
+                "loop-templates",
+                "--create-run",
+                "visual-template-task",
+                "--template",
+                "visual_diff_loop",
+                "--name",
+                "visual-policy",
+                "--max-iterations",
+                "4",
+                "--current-iteration",
+                "1",
+                "--seed-prompt-sha256",
+                "visual123",
+                "--json",
+                "--path",
+                str(db_path),
+            )
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            payload = json.loads(proc.stdout)
+            self.assertEqual(payload["purpose"], "ralph_loop")
+            self.assertEqual(payload["metadata"]["template"], "visual_diff_loop")
+            self.assertEqual(payload["metadata"]["preset"], "visual_diff_loop")
+            self.assertEqual(payload["metadata"]["max_iterations"], 4)
+            self.assertEqual(payload["metadata"]["current_iteration"], 1)
+            self.assertEqual(
+                payload["metadata"]["required_before_continue"],
+                ["reference_artifact", "candidate_screenshot", "visual_diff_report", "diff_below_threshold"],
+            )
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                loop_run = worker_db.ralph_loop_run(conn, run=payload["id"])
+            self.assertEqual(loop_run["task_id"], task_id)
+            self.assertEqual(loop_run["preset"], "visual_diff_loop")
+
     def test_ralph_loop_presets_cli_creates_policy_run(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "workerctl.db"

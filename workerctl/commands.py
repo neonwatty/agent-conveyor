@@ -71,6 +71,7 @@ from workerctl.state import (
 )
 from workerctl.lifecycle import manager_liveness_warnings, reconcile_rows
 from workerctl.output_safety import redact_audit, redact_capture_result, redact_payload, redact_transcript_segments
+from workerctl.loop_templates import list_loop_templates, loop_template, loop_template_metadata
 from workerctl.ralph_loop_presets import list_ralph_loop_presets, ralph_loop_preset, ralph_loop_preset_metadata
 from workerctl.tmux import (
     capture_output,
@@ -1876,6 +1877,61 @@ def command_runs(args: argparse.Namespace) -> int:
     return 0
 
 
+def _create_loop_policy_run(
+    *,
+    db_path: Path | None,
+    task_ref: str,
+    name: str | None,
+    metadata: dict[str, Any],
+) -> dict[str, Any]:
+    with connect_db(db_path) as conn:
+        initialize_database(conn)
+        task = db_task_row(conn, task=task_ref)
+        run_id = create_db_ralph_loop_run(
+            conn,
+            task_id=task["id"],
+            name=name,
+            max_iterations=metadata["max_iterations"],
+            current_iteration=metadata["current_iteration"],
+            cleanup_policy=metadata.get("cleanup_policy"),
+            required_before_continue=metadata.get("required_before_continue"),
+            stop_conditions=metadata.get("stop_conditions"),
+            seed_prompt_sha256=metadata.get("seed_prompt_sha256"),
+            preset=metadata.get("preset"),
+            metadata=metadata,
+        )
+        conn.commit()
+        return db_run_row(conn, run=run_id)
+
+
+def command_loop_templates(args: argparse.Namespace) -> int:
+    if args.list:
+        print(json.dumps({"templates": list_loop_templates()}, indent=2, sort_keys=True))
+        return 0
+    if args.show:
+        print(json.dumps(loop_template(args.show).summary(), indent=2, sort_keys=True))
+        return 0
+    if args.create_run:
+        if not args.template:
+            raise WorkerError("--create-run requires --template")
+        db_path = Path(args.path).expanduser().resolve() if args.path else None
+        metadata = loop_template_metadata(
+            args.template,
+            max_iterations=args.max_iterations,
+            current_iteration=args.current_iteration,
+            seed_prompt_sha256=args.seed_prompt_sha256,
+        )
+        result = _create_loop_policy_run(
+            db_path=db_path,
+            task_ref=args.create_run,
+            name=args.name,
+            metadata=metadata,
+        )
+        print(json.dumps(result, indent=2, sort_keys=True))
+        return 0
+    raise WorkerError("Choose one of --list, --show, or --create-run")
+
+
 def command_ralph_loop_presets(args: argparse.Namespace) -> int:
     if args.list:
         print(json.dumps({"presets": list_ralph_loop_presets()}, indent=2, sort_keys=True))
@@ -1893,24 +1949,12 @@ def command_ralph_loop_presets(args: argparse.Namespace) -> int:
             current_iteration=args.current_iteration,
             seed_prompt_sha256=args.seed_prompt_sha256,
         )
-        with connect_db(db_path) as conn:
-            initialize_database(conn)
-            task = db_task_row(conn, task=args.create_run)
-            run_id = create_db_ralph_loop_run(
-                conn,
-                task_id=task["id"],
-                name=args.name,
-                max_iterations=metadata["max_iterations"],
-                current_iteration=metadata["current_iteration"],
-                cleanup_policy=metadata.get("cleanup_policy"),
-                required_before_continue=metadata.get("required_before_continue"),
-                stop_conditions=metadata.get("stop_conditions"),
-                seed_prompt_sha256=metadata.get("seed_prompt_sha256"),
-                preset=metadata.get("preset"),
-                metadata=metadata,
-            )
-            conn.commit()
-            result = db_run_row(conn, run=run_id)
+        result = _create_loop_policy_run(
+            db_path=db_path,
+            task_ref=args.create_run,
+            name=args.name,
+            metadata=metadata,
+        )
         print(json.dumps(result, indent=2, sort_keys=True))
         return 0
     raise WorkerError("Choose one of --list, --show, or --create-run")

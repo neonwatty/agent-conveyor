@@ -46,6 +46,7 @@ from workerctl.commands import (
     command_list,
     command_mutation_audit,
     command_nudge,
+    command_loop_templates,
     command_open,
     command_open_manager,
     command_open_worker,
@@ -298,6 +299,32 @@ def build_parser() -> argparse.ArgumentParser:
     enqueue_continue.add_argument("--json", action="store_true", help="Print JSON output.")
     enqueue_continue.add_argument("--path", help="Override the workerctl database path.")
     enqueue_continue.set_defaults(func=command_enqueue_continue_iteration)
+
+    loop_templates = subparsers.add_parser(
+        "loop-templates",
+        help="List loop templates or create a template-backed policy run.",
+    )
+    template_action = loop_templates.add_mutually_exclusive_group(required=True)
+    template_action.add_argument("--list", action="store_true", help="List available loop templates.")
+    template_action.add_argument("--show", metavar="TEMPLATE", help="Show one loop template.")
+    template_action.add_argument("--create-run", metavar="TASK", help="Create a template-backed Ralph-loop policy run for a task.")
+    loop_templates.add_argument("--template", help="Template name to use with --create-run.")
+    loop_templates.add_argument("--name", help="Optional run name when creating a template-backed run.")
+    loop_templates.add_argument(
+        "--max-iterations",
+        type=int,
+        help="Override the template default max iterations when creating a run.",
+    )
+    loop_templates.add_argument(
+        "--current-iteration",
+        type=int,
+        default=0,
+        help="Current completed iteration when creating a run.",
+    )
+    loop_templates.add_argument("--seed-prompt-sha256", help="Seed prompt hash to store with the policy run.")
+    loop_templates.add_argument("--json", action="store_true", help="Print stable JSON output.")
+    loop_templates.add_argument("--path", help="Override the workerctl database path.")
+    loop_templates.set_defaults(func=command_loop_templates)
 
     ralph_loop_presets = subparsers.add_parser(
         "ralph-loop-presets",
