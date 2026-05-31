@@ -101,6 +101,9 @@ and the worker/manager sessions.
 
 ## Correlation Markers
 
+See `docs/qa/adversarial-proof.md` for the structured `adversarial_check`
+receipt shape used by the missing-evidence and preset continuation drills.
+
 Use these marker names consistently so replay, audit, command receipts, PR
 receipts, handoffs, and clear receipts can be connected after the run:
 

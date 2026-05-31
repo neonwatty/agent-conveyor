@@ -603,7 +603,9 @@ tmux attach -t codex-live-test
   manager or worker tried to disprove the iteration before continuing. The
   receipt is stored as `evidence_type=adversarial_check` with structured
   `failure_mode`, `check`, and `result` metadata and can satisfy Ralph-loop
-  continuation policy.
+  continuation policy. See `docs/qa/adversarial-proof.md` for the receipt
+  shape and how it maps to manager prompts, Ralph-loop evidence, Dispatch
+  blocking, and audited finish.
 - `ralph-loop-presets --list|--show PRESET|--create-run TASK --preset PRESET` —
   List saved Ralph-loop guardrail templates or create a preset-backed
   `ralph_loop` policy run.

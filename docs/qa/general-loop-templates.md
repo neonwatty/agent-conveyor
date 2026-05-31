@@ -5,6 +5,9 @@ run, Dispatch can block a manager-requested continuation before worker delivery
 when required evidence is missing, and a fresh retry can reach the worker inbox
 after evidence is recorded.
 
+See `docs/qa/adversarial-proof.md` for the structured `adversarial_check`
+receipt shape used by quality-oriented loop templates.
+
 ## Scenario
 
 - Template: `visual_diff_loop`
