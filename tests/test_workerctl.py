@@ -16757,6 +16757,23 @@ class ManagerBootstrapPromptTests(unittest.TestCase):
         self.assertIn("affected_criterion", prompt)
         self.assertNotIn('["criteria"][0]["id"]', prompt)
 
+    def test_prompt_includes_adversarial_burden_of_proof_guidance(self):
+        prompt = commands.manager_bootstrap_prompt(
+            manager_name="proof-mgr",
+            cwd="/repo",
+            task_name="proof-task",
+            task_goal="Verify a worker change",
+            worker_name="proof-worker",
+        )
+
+        self.assertIn("Before declaring work complete, try to disprove the change.", prompt)
+        self.assertIn("strongest realistic failure mode", prompt)
+        self.assertIn("Treat unverified assumptions as blockers or explicit follow-ups.", prompt)
+        self.assertIn(
+            "Do not accept worker claims, passing happy-path tests, or generated summaries as proof by themselves.",
+            prompt,
+        )
+
     def test_docs_include_criteria_context_and_capture_id_examples(self):
         readme = (ROOT / "README.md").read_text()
         skill = (ROOT / "skills/manage-codex-workers/SKILL.md").read_text()
@@ -16774,6 +16791,22 @@ class ManagerBootstrapPromptTests(unittest.TestCase):
             self.assertIn('"satisfied": [...]', document)
             self.assertIn('"deferred": [...]', document)
             self.assertIn('"rejected": [...]', document)
+
+    def test_docs_include_adversarial_burden_of_proof_guidance(self):
+        documents = [
+            ROOT / "AGENTS.md",
+            ROOT / "CLAUDE.md",
+            ROOT / "README.md",
+            ROOT / "skills" / "manage-codex-workers" / "SKILL.md",
+        ]
+
+        for path in documents:
+            with self.subTest(path=path.name):
+                document = path.read_text()
+                self.assertIn("Before declaring work complete, try to disprove the change.", document)
+                self.assertIn("strongest realistic failure mode", document)
+                self.assertIn("Treat unverified assumptions", document)
+                self.assertIn("blockers or explicit follow-ups", document)
 
     def test_readme_documents_universal_session_inbox(self):
         readme = (ROOT / "README.md").read_text()

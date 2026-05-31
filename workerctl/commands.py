@@ -355,6 +355,14 @@ If the user asks to see the manager or worker terminal for your task, run:
 """
 
 
+ADVERSARIAL_PROOF_GUIDANCE = """Burden of proof:
+- Before declaring work complete, try to disprove the change.
+- Identify the strongest realistic failure mode that would embarrass this work after merge.
+- Verify that failure mode with a command, test, trace, screenshot, audit record, diff, or direct inspection.
+- Do not accept worker claims, passing happy-path tests, or generated summaries as proof by themselves.
+- Treat unverified assumptions as blockers or explicit follow-ups."""
+
+
 def manager_bootstrap_prompt(
     *,
     manager_name: str,
@@ -423,6 +431,8 @@ Task goal: {goal_line}
 Worker session: {worker_line}
 
 Your role is to supervise, not to implement the worker task.
+
+{ADVERSARIAL_PROOF_GUIDANCE}
 
 {initial_setup}
 
