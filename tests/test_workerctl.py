@@ -149,6 +149,23 @@ class RalphLoopPresetTests(unittest.TestCase):
         self.assertEqual(metadata["cleanup_policy"], "compact")
         self.assertEqual(metadata["template"], "visual_diff_loop")
 
+    def test_loop_template_outputs_are_mutation_safe(self):
+        from workerctl.loop_templates import list_loop_templates, loop_template_metadata
+
+        metadata = loop_template_metadata("visual_diff_loop")
+        metadata["artifact_requirements"]["diff_score"]["type"] = "mutated"
+
+        fresh_metadata = loop_template_metadata("visual_diff_loop")
+
+        self.assertEqual(fresh_metadata["artifact_requirements"]["diff_score"]["type"], "number")
+
+        summary = next(template for template in list_loop_templates() if template["name"] == "visual_diff_loop")
+        summary["artifact_requirements"]["diff_score"]["type"] = "mutated-again"
+
+        fresh_summary = next(template for template in list_loop_templates() if template["name"] == "visual_diff_loop")
+
+        self.assertEqual(fresh_summary["artifact_requirements"]["diff_score"]["type"], "number")
+
 
 class DatabaseTests(unittest.TestCase):
     def open_db(self, tmpdir):
@@ -4474,6 +4491,50 @@ class CliTests(unittest.TestCase):
                 loop_run = worker_db.ralph_loop_run(conn, run=payload["id"])
             self.assertEqual(loop_run["task_id"], task_id)
             self.assertEqual(loop_run["required_before_continue"], ["pr_url", "ci_green", "merge"])
+
+    def test_ralph_loop_presets_cli_creates_visual_diff_policy_run_with_template_metadata(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                task_id = worker_db.create_task(conn, name="visual-preset-task", goal="Run visual preset loop.")
+                conn.commit()
+
+            proc = self.run_workerctl(
+                "ralph-loop-presets",
+                "--create-run",
+                "visual-preset-task",
+                "--preset",
+                "visual_diff_loop",
+                "--name",
+                "visual-preset-policy",
+                "--max-iterations",
+                "4",
+                "--current-iteration",
+                "1",
+                "--seed-prompt-sha256",
+                "visual-seed",
+                "--json",
+                "--path",
+                str(db_path),
+            )
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            payload = json.loads(proc.stdout)
+            self.assertEqual(payload["purpose"], "ralph_loop")
+            self.assertEqual(payload["metadata"]["preset"], "visual_diff_loop")
+            self.assertEqual(payload["metadata"]["template"], "visual_diff_loop")
+            self.assertEqual(payload["metadata"]["artifact_requirements"]["diff_score"]["type"], "number")
+            self.assertIn("browser", payload["metadata"]["recommended_tools"])
+            self.assertEqual(
+                payload["metadata"]["required_before_continue"],
+                ["reference_artifact", "candidate_screenshot", "visual_diff_report", "diff_below_threshold"],
+            )
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                loop_run = worker_db.ralph_loop_run(conn, run=payload["id"])
+            self.assertEqual(loop_run["task_id"], task_id)
+            self.assertEqual(loop_run["preset"], "visual_diff_loop")
 
     def test_ralph_loop_presets_cli_rejects_unknown_preset(self):
         proc = self.run_workerctl("ralph-loop-presets", "--show", "nope", "--json")

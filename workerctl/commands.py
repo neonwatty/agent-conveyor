@@ -1907,6 +1907,7 @@ def command_ralph_loop_presets(args: argparse.Namespace) -> int:
                 stop_conditions=metadata.get("stop_conditions"),
                 seed_prompt_sha256=metadata.get("seed_prompt_sha256"),
                 preset=metadata.get("preset"),
+                metadata=metadata,
             )
             conn.commit()
             result = db_run_row(conn, run=run_id)

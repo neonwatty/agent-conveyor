@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -33,7 +34,7 @@ class LoopTemplate:
         if current_iteration > effective_max:
             raise WorkerError("current_iteration must not exceed max_iterations")
         return {
-            "artifact_requirements": self.artifact_requirements,
+            "artifact_requirements": deepcopy(self.artifact_requirements),
             "cleanup_policy": self.cleanup_policy,
             "current_iteration": current_iteration,
             "kind": "ralph_loop",
@@ -49,7 +50,7 @@ class LoopTemplate:
 
     def summary(self) -> dict[str, Any]:
         return {
-            "artifact_requirements": self.artifact_requirements,
+            "artifact_requirements": deepcopy(self.artifact_requirements),
             "cleanup_policy": self.cleanup_policy,
             "description": self.description,
             "max_iterations": self.max_iterations,
