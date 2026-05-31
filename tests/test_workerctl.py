@@ -10373,6 +10373,12 @@ Deferred follow-up criteria:
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertIn("--reason", proc.stdout)
 
+    def test_finish_task_help_includes_adversarial_proof_gate(self):
+        proc = self.run_workerctl("finish-task", "--help")
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("--require-adversarial-proof", proc.stdout)
+
     def test_start_test_is_listed_in_help(self):
         proc = self.run_workerctl("--help")
 
@@ -10765,6 +10771,121 @@ class CriteriaFinalAuditTests(unittest.TestCase):
             strict_decisions=False,
             task=task,
         )
+
+    def run_workerctl(self, *args):
+        return subprocess.run(
+            [sys.executable, str(WORKERCTL_PATH), *args],
+            cwd=ROOT,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+
+    def test_finish_task_requires_adversarial_proof_when_requested(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            task_id = self._create_task(db_path, name="finish-proof-task")
+
+            proc = self.run_workerctl(
+                "finish-task",
+                "finish-proof-task",
+                "--require-adversarial-proof",
+                "--reason",
+                "Done without proof.",
+                "--path",
+                str(db_path),
+            )
+
+            self.assertEqual(proc.returncode, 1)
+            self.assertIn("adversarial proof is required", proc.stderr)
+            self.assertNotIn("Traceback", proc.stderr)
+            with worker_db.connect(db_path) as conn:
+                task = conn.execute("select state from tasks where id = ?", (task_id,)).fetchone()
+                commands = conn.execute("select count(*) as count from commands where type = 'finish_task'").fetchone()
+                events = conn.execute("select count(*) as count from events where type like 'finish_task_%'").fetchone()
+            self.assertEqual(task["state"], "managed")
+            self.assertEqual(commands["count"], 0)
+            self.assertEqual(events["count"], 0)
+
+    def test_finish_task_accepts_satisfied_adversarial_proof(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            task_id = self._create_task(db_path, name="finish-proof-task")
+            with worker_db.connect(db_path) as conn:
+                worker_db.insert_acceptance_criterion(
+                    conn,
+                    task_id=task_id,
+                    criterion="Adversarial proof recorded",
+                    status="satisfied",
+                    source="manager_inferred",
+                    proof="Tried to disprove the change.",
+                    evidence={
+                        "evidence_type": "adversarial_check",
+                        "failure_mode": "Happy-path only verification.",
+                        "check": "negative test",
+                        "result": "negative test passed",
+                    },
+                )
+                conn.commit()
+
+            proc = self.run_workerctl(
+                "finish-task",
+                "finish-proof-task",
+                "--require-adversarial-proof",
+                "--reason",
+                "Proof exists.",
+                "--path",
+                str(db_path),
+            )
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            payload = json.loads(proc.stdout)
+            self.assertTrue(payload["finish"])
+            with worker_db.connect(db_path) as conn:
+                task = conn.execute("select state from tasks where id = ?", (task_id,)).fetchone()
+                command = conn.execute("select state from commands where type = 'finish_task'").fetchone()
+            self.assertEqual(task["state"], "done")
+            self.assertEqual(command["state"], "succeeded")
+
+    def test_finish_task_rejects_malformed_adversarial_proof(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            task_id = self._create_task(db_path, name="malformed-finish-proof-task")
+            with worker_db.connect(db_path) as conn:
+                worker_db.insert_acceptance_criterion(
+                    conn,
+                    task_id=task_id,
+                    criterion="Malformed adversarial proof",
+                    status="satisfied",
+                    source="manager_inferred",
+                    proof="Missing the failure mode.",
+                    evidence={
+                        "evidence_type": "adversarial_check",
+                        "failure_mode": "   ",
+                        "check": "inspection",
+                        "result": "looked okay",
+                    },
+                )
+                conn.commit()
+
+            proc = self.run_workerctl(
+                "finish-task",
+                "malformed-finish-proof-task",
+                "--require-adversarial-proof",
+                "--reason",
+                "Malformed proof should not pass.",
+                "--path",
+                str(db_path),
+            )
+
+            self.assertEqual(proc.returncode, 1)
+            self.assertIn("adversarial proof is required", proc.stderr)
+            with worker_db.connect(db_path) as conn:
+                task = conn.execute("select state from tasks where id = ?", (task_id,)).fetchone()
+                commands = conn.execute("select count(*) as count from commands where type = 'finish_task'").fetchone()
+            self.assertEqual(task["state"], "managed")
+            self.assertEqual(commands["count"], 0)
 
     def test_finish_task_with_criteria_audit_fails_when_accepted_criteria_are_open(self):
         with tempfile.TemporaryDirectory() as tmpdir:

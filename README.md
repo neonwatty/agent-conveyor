@@ -397,16 +397,21 @@ tmux attach -t codex-live-test
 - `bind --task T --worker W --manager M` — Create the task binding.
 - `unbind --task T` — End the active binding for a task.
 - `finish-task <task> [--reason R] [--require-criteria-audit]
-  [--require-acks] [--require-epilogue] [--stop-manager] [--stop-worker]
+  [--require-acks] [--require-epilogue] [--require-adversarial-proof]
+  [--stop-manager] [--stop-worker]
   [--capture-transcript-before-stop]` — Mark a task done.
   Leaves the manager terminal open by default for review. With
   `--require-criteria-audit`, fails before finishing if any acceptance criteria
   for the task are still `accepted`; `proposed`, `satisfied`, `deferred`, and
   `rejected` criteria do not block. With `--require-acks`, fails if worker or
   manager acknowledgement is missing. With `--require-epilogue`, fails if any
-  configured epilogue step is not succeeded. With `--capture-transcript-before-stop`,
-  captures transcript segments for any worker/manager sessions being stopped
-  before killing tmux sessions; capture failure fails before stop side effects.
+  configured epilogue step is not succeeded. With `--require-adversarial-proof`,
+  fails before finishing unless the task has at least one satisfied criterion
+  with `evidence_type=adversarial_check` and non-empty `failure_mode`, `check`,
+  and `result` fields; use this when `tests passed` is not enough by itself.
+  With `--capture-transcript-before-stop`, captures transcript segments for any
+  worker/manager sessions being stopped before killing tmux sessions; capture
+  failure fails before stop side effects.
 - `stop-task <task> [--reason R] [--stop-worker]` — Force-stop a task's
   manager (and optionally the worker), recording the reason in the audit
   payload.
