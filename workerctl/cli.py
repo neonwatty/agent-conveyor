@@ -364,6 +364,24 @@ def build_parser() -> argparse.ArgumentParser:
     loop_evidence_visual.add_argument("--path", help="Override the workerctl database path.")
     loop_evidence_visual.set_defaults(func=command_loop_evidence)
 
+    loop_evidence_adversarial = loop_evidence_actions.add_parser(
+        "adversarial-check",
+        help="Record structured adversarial proof for a Ralph-loop iteration.",
+    )
+    loop_evidence_adversarial.add_argument("task", help="Task name or ID.")
+    loop_evidence_adversarial.add_argument("--loop-run", required=True, help="Ralph-loop run id or name.")
+    loop_evidence_adversarial.add_argument("--iteration", required=True, type=int, help="Iteration the adversarial check proves.")
+    loop_evidence_adversarial.add_argument("--failure-mode", required=True, help="Strongest realistic failure mode considered.")
+    loop_evidence_adversarial.add_argument("--check", required=True, help="Command, test, trace, screenshot, audit, diff, or inspection used.")
+    loop_evidence_adversarial.add_argument("--result", required=True, help="Why the check rules out the failure mode or what remains unresolved.")
+    loop_evidence_adversarial.add_argument("--status", default="pass", help="Evidence status stored in the receipt.")
+    loop_evidence_adversarial.add_argument("--source", default="manager_inferred", choices=("manager_inferred", "worker_proposed", "user_requested", "final_audit"))
+    loop_evidence_adversarial.add_argument("--artifact-path", help="Optional artifact backing this evidence.")
+    loop_evidence_adversarial.add_argument("--correlation-id", help="Optional correlation id for replay and dashboard linkage.")
+    loop_evidence_adversarial.add_argument("--json", action="store_true", help="Print stable JSON output.")
+    loop_evidence_adversarial.add_argument("--path", help="Override the workerctl database path.")
+    loop_evidence_adversarial.set_defaults(func=command_loop_evidence)
+
     ralph_loop_presets = subparsers.add_parser(
         "ralph-loop-presets",
         help="List Ralph-loop policy presets or create a preset-backed policy run.",
@@ -1245,6 +1263,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--require-epilogue",
         action="store_true",
         help="Fail before finishing if configured epilogue steps are not succeeded.",
+    )
+    finish_task.add_argument(
+        "--require-adversarial-proof",
+        action="store_true",
+        help="Fail before finishing unless a satisfied adversarial_check proof exists for the task.",
     )
     finish_task.add_argument(
         "--reason",

@@ -5,13 +5,17 @@ run, Dispatch can block a manager-requested continuation before worker delivery
 when required evidence is missing, and a fresh retry can reach the worker inbox
 after evidence is recorded.
 
+See `docs/qa/adversarial-proof.md` for the structured `adversarial_check`
+receipt shape used by quality-oriented loop templates.
+
 ## Scenario
 
 - Template: `visual_diff_loop`
 - Task: `qa-general-loop-template`
 - Default max iterations: `4`
 - Required evidence before iteration 2: `reference_artifact`,
-  `candidate_screenshot`, `visual_diff_report`, `diff_below_threshold`
+  `candidate_screenshot`, `visual_diff_report`, `diff_below_threshold`,
+  `adversarial_check`
 - Dispatcher role: mechanical routing and policy enforcement only
 - Manager role: decide whether another visual pass is useful and record the
   evidence receipts
@@ -60,9 +64,13 @@ Acceptance criteria:
 
 - `loop-templates --list` includes `visual_diff_loop`, `test_coverage_loop`,
   `pr_ci_merge_loop`, `build_then_clear`, and `compact_then_continue`.
-- `loop-templates --show visual_diff_loop` shows the four required evidence
-  fields, artifact requirements, recommended tools, cleanup policy, tags, and
-  stop conditions.
+- `loop-templates --show visual_diff_loop` shows the five required evidence
+  fields, including `adversarial_check`, artifact requirements, recommended
+  tools, cleanup policy, tags, and stop conditions.
+- The quality templates `visual_diff_loop`, `test_coverage_loop`, and
+  `pr_ci_merge_loop` expose `artifact_requirements["adversarial_check"]` with
+  required `failure_mode`, `check`, and `result` fields, while
+  `build_then_clear` and `compact_then_continue` do not require it.
 - Worker and manager registration succeed without relying on `lsof` discovery
   because the commands pass explicit `--codex-session` rollout fixture paths.
 
@@ -88,7 +96,7 @@ Acceptance criteria:
   `max_iterations=4`, `current_iteration=1`, and `cleanup_policy=compact`.
 - The metadata includes `required_before_continue` with
   `reference_artifact`, `candidate_screenshot`, `visual_diff_report`, and
-  `diff_below_threshold`.
+  `diff_below_threshold`, and `adversarial_check`.
 
 ## Missing Evidence Block
 
@@ -117,10 +125,14 @@ Acceptance criteria:
 
 - Dispatch result includes `state=blocked`.
 - Dispatch result includes `reason=missing_required_evidence`.
-- Dispatch result includes all four missing evidence names in order.
+- Dispatch result includes all five missing evidence names in order.
 - Dispatch result includes `delivered=false` and `target_worker_notified=false`.
 - `scripts/workerctl worker-inbox qa-general-loop-template --json --path "$WORKERCTL_DB"`
   returns no items.
+- Because `visual_diff_loop` requires `adversarial_check`, missing
+  adversarial proof blocks worker delivery; do not queue the allowed retry until
+  `scripts/workerctl loop-evidence adversarial-check ...` records structured
+  proof for the prior iteration.
 - Dashboard Dispatch panel shows the correlation `visual-loop-missing`,
   `0 notifications`, `Inbox 0`, and `Pull inbox 0`.
 
@@ -156,6 +168,15 @@ scripts/workerctl loop-evidence visual-diff qa-general-loop-template \
   --report-output /tmp/visual-diff.json \
   --correlation-id visual-loop-report \
   --path "$WORKERCTL_DB"
+
+scripts/workerctl loop-evidence adversarial-check qa-general-loop-template \
+  --loop-run "$RUN_ID" \
+  --iteration 1 \
+  --failure-mode "visual pass still hides a regression after diff artifacts are present" \
+  --check "inspect visual diff report and candidate screenshot" \
+  --result "report and screenshot match the accepted threshold with no unresolved blocker" \
+  --correlation-id visual-loop-adversarial \
+  --path "$WORKERCTL_DB"
 ```
 
 Queue and dispatch a fresh retry:
@@ -180,11 +201,14 @@ Acceptance criteria:
 - `loop-evidence visual-diff` records `visual_diff_report` and marks
   `diff_below_threshold` satisfied only when the computed
   `diff_score <= threshold`.
+- `loop-evidence adversarial-check` records `adversarial_check` with
+  `failure_mode`, `check`, and `result` metadata before the retry is allowed.
 - Routed notification has `signal_type=continue_iteration`.
 - Worker inbox consumption returns the visual iteration message.
 - Telemetry includes `dispatch_inbox_consumed`.
 - Replay and audit connect `visual-loop-allowed` to the command attempt, routed
-  notification, worker inbox item, and consumption event.
+  notification, worker inbox item, consumption event, and the
+  `visual-loop-adversarial` proof criterion.
 
 ## Max Iteration Cutoff
 

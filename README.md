@@ -23,6 +23,15 @@ clean stop/resume handling.
   leave enough structured history to understand why the worker was pushed and
   what evidence supported finishing or continuing the task.
 
+## Burden Of Proof
+
+Before declaring work complete, try to disprove the change. Identify the
+strongest realistic failure mode, verify it with a command, test, trace,
+screenshot, audit record, diff, or direct inspection, and include that evidence
+in the final handoff. Treat `done`, `tests passed`, worker claims, passing
+happy-path tests, generated summaries, and optimistic UI as claims, not proof.
+Treat unverified assumptions as blockers or explicit follow-ups.
+
 ## Architecture
 
 Supervision is built on three primitives: **sessions**, **tasks**, and
@@ -388,16 +397,21 @@ tmux attach -t codex-live-test
 - `bind --task T --worker W --manager M` — Create the task binding.
 - `unbind --task T` — End the active binding for a task.
 - `finish-task <task> [--reason R] [--require-criteria-audit]
-  [--require-acks] [--require-epilogue] [--stop-manager] [--stop-worker]
+  [--require-acks] [--require-epilogue] [--require-adversarial-proof]
+  [--stop-manager] [--stop-worker]
   [--capture-transcript-before-stop]` — Mark a task done.
   Leaves the manager terminal open by default for review. With
   `--require-criteria-audit`, fails before finishing if any acceptance criteria
   for the task are still `accepted`; `proposed`, `satisfied`, `deferred`, and
   `rejected` criteria do not block. With `--require-acks`, fails if worker or
   manager acknowledgement is missing. With `--require-epilogue`, fails if any
-  configured epilogue step is not succeeded. With `--capture-transcript-before-stop`,
-  captures transcript segments for any worker/manager sessions being stopped
-  before killing tmux sessions; capture failure fails before stop side effects.
+  configured epilogue step is not succeeded. With `--require-adversarial-proof`,
+  fails before finishing unless the task has at least one satisfied criterion
+  with `evidence_type=adversarial_check` and non-empty `failure_mode`, `check`,
+  and `result` fields; use this when `tests passed` is not enough by itself.
+  With `--capture-transcript-before-stop`, captures transcript segments for any
+  worker/manager sessions being stopped before killing tmux sessions; capture
+  failure fails before stop side effects.
 - `stop-task <task> [--reason R] [--stop-worker]` — Force-stop a task's
   manager (and optionally the worker), recording the reason in the audit
   payload.
@@ -572,14 +586,26 @@ tmux attach -t codex-live-test
   satisfied criterion evidence exists. `ralph-loop-presets` remains as a
   compatibility alias for the current Ralph-loop QA flows. The built-in
   `visual_diff_loop` template requires `reference_artifact`,
-  `candidate_screenshot`, `visual_diff_report`, and `diff_below_threshold`
-  evidence before a manager-requested next visual pass can reach the worker.
+  `candidate_screenshot`, `visual_diff_report`, `diff_below_threshold`, and
+  `adversarial_check` evidence before a manager-requested next visual pass can
+  reach the worker. Quality-oriented templates (`pr_ci_merge_loop`,
+  `test_coverage_loop`, and `visual_diff_loop`) also expose an
+  `artifact_requirements["adversarial_check"]` object requiring
+  `failure_mode`, `check`, and `result` fields.
 - `loop-evidence add TASK --loop-run RUN --iteration N --evidence-type TYPE` —
   Record a run-qualified evidence receipt for a loop policy. Use
   `loop-evidence visual-diff` to compare PNG screenshots, write an optional
   diff/report artifact, and record `visual_diff_report` plus
   `diff_below_threshold` as satisfied only when the computed score is within
   threshold.
+- `loop-evidence adversarial-check TASK --loop-run RUN --iteration N --failure-mode F --check C --result R` —
+  Record first-class adversarial proof for a loop iteration. Use it when a
+  manager or worker tried to disprove the iteration before continuing. The
+  receipt is stored as `evidence_type=adversarial_check` with structured
+  `failure_mode`, `check`, and `result` metadata and can satisfy Ralph-loop
+  continuation policy. See `docs/qa/adversarial-proof.md` for the receipt
+  shape and how it maps to manager prompts, Ralph-loop evidence, Dispatch
+  blocking, and audited finish.
 - `ralph-loop-presets --list|--show PRESET|--create-run TASK --preset PRESET` —
   List saved Ralph-loop guardrail templates or create a preset-backed
   `ralph_loop` policy run.
@@ -646,8 +672,8 @@ start with an inspect-first guard: if the previous iteration's work is already
 merged, the worker records that state and stops without making replacement edits
 or opening another PR unless something is actually missing. The same QA plan
 also covers preset-backed guardrails such as `pr_ci_merge_loop`, where Dispatch
-blocks another worker iteration until required `pr_url`, `ci_green`, and `merge`
-evidence exists.
+blocks another worker iteration until required `pr_url`, `ci_green`, `merge`,
+and `adversarial_check` evidence exists.
 
 ### Terminal helpers
 

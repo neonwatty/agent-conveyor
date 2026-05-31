@@ -362,6 +362,13 @@ loop. Each cycle is idempotent: it ingests only new bytes from the rollout
 JSONL, computes worker state from the JSON event stream, captures the worker
 tmux pane, and returns a JSON dict.
 
+Before declaring work complete, try to disprove the change. Identify the
+strongest realistic failure mode, verify it with a command, test, trace,
+screenshot, audit record, diff, or direct inspection, and include that evidence
+in the handoff. Do not accept worker claims, passing happy-path tests, generated
+summaries, or optimistic UI as proof by themselves. Treat unverified assumptions
+as blockers or explicit follow-ups.
+
 ```bash
 scripts/workerctl cycle my-task
 # {

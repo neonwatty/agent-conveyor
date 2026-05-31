@@ -355,6 +355,14 @@ If the user asks to see the manager or worker terminal for your task, run:
 """
 
 
+ADVERSARIAL_PROOF_GUIDANCE = """Burden of proof:
+- Before declaring work complete, try to disprove the change.
+- Identify the strongest realistic failure mode that would embarrass this work after merge.
+- Verify that failure mode with a command, test, trace, screenshot, audit record, diff, or direct inspection.
+- Do not accept worker claims, passing happy-path tests, or generated summaries as proof by themselves.
+- Treat unverified assumptions as blockers or explicit follow-ups."""
+
+
 def manager_bootstrap_prompt(
     *,
     manager_name: str,
@@ -423,6 +431,8 @@ Task goal: {goal_line}
 Worker session: {worker_line}
 
 Your role is to supervise, not to implement the worker task.
+
+{ADVERSARIAL_PROOF_GUIDANCE}
 
 {initial_setup}
 
@@ -1609,19 +1619,27 @@ def command_qa_plan(args: argparse.Namespace) -> int:
                 },
                 {
                     "correlation_id": "ralph-loop-missing-ci",
-                    "purpose": "Link the missing ci_green evidence guardrail drill, blocked Dispatch attempt, dashboard row, and empty worker inbox proof.",
+                    "purpose": "Link the missing ci_green and adversarial_check evidence guardrail drill, blocked Dispatch attempt, dashboard row, and empty worker inbox proof.",
+                },
+                {
+                    "correlation_id": "ralph-loop-ci-adversarial",
+                    "purpose": "Link the structured adversarial_check receipt for the CI evidence drill before the allowed retry.",
                 },
                 {
                     "correlation_id": "ralph-loop-ci-allowed",
-                    "purpose": "Link the retry after recorded ci_green evidence to the delivered worker inbox item.",
+                    "purpose": "Link the retry after recorded ci_green and adversarial_check evidence to the delivered worker inbox item.",
                 },
                 {
                     "correlation_id": "ralph-loop-preset-missing",
                     "purpose": "Link a pr_ci_merge_loop preset guardrail drill, blocked Dispatch attempt, dashboard row, and empty worker inbox proof.",
                 },
                 {
+                    "correlation_id": "ralph-loop-preset-adversarial",
+                    "purpose": "Link the structured adversarial_check receipt for the preset drill before the allowed retry.",
+                },
+                {
                     "correlation_id": "ralph-loop-preset-allowed",
-                    "purpose": "Link the retry after recorded pr_url, ci_green, and merge evidence to the delivered worker inbox item.",
+                    "purpose": "Link the retry after recorded pr_url, ci_green, merge, and adversarial_check evidence to the delivered worker inbox item.",
                 },
             ],
             "evidence_template": {
@@ -1673,11 +1691,11 @@ def command_qa_plan(args: argparse.Namespace) -> int:
                 "Dispatch remains a mechanical router/executor; the manager records readiness, merge, and continue/stop decisions",
                 "A max_iterations=1 guardrail drill blocks the manager's requested second iteration with reason max_iterations_reached before worker delivery",
                 "The blocked continuation creates 0 notifications, leaves worker Inbox 0 and Pull inbox 0, and records delivered=false plus target_worker_notified=false in command/replay/audit evidence",
-                "A required ci_green evidence guardrail drill blocks the manager's requested next iteration with reason missing_ci_green_evidence before worker delivery",
-                "After ci_green evidence is recorded as satisfied criterion evidence, a fresh continue_iteration retry is delivered to the worker inbox or tmux target",
-                "A preset-backed pr_ci_merge_loop drill blocks the manager's requested next iteration with reason missing_required_evidence and missing_evidence=[pr_url,ci_green,merge] before worker delivery",
-                "The dashboard presents multiple missing evidence gates in readable order as missing pr_url, ci_green, merge while notifications, Inbox, and Pull inbox remain 0",
-                "After pr_url, ci_green, and merge evidence are recorded as satisfied criterion evidence, a fresh preset-backed continue_iteration retry is delivered to the worker inbox or tmux target",
+                "A required ci_green plus adversarial_check evidence guardrail drill blocks the manager's requested next iteration with reason missing_required_evidence and missing_evidence=[ci_green,adversarial_check] before worker delivery",
+                "After ci_green evidence and structured adversarial_check proof are recorded as satisfied evidence, a fresh continue_iteration retry is delivered to the worker inbox or tmux target",
+                "A preset-backed pr_ci_merge_loop drill blocks the manager's requested next iteration with reason missing_required_evidence and missing_evidence=[pr_url,ci_green,merge,adversarial_check] before worker delivery",
+                "The dashboard presents multiple missing evidence gates in readable order as missing pr_url, ci_green, merge, adversarial_check while notifications, Inbox, and Pull inbox remain 0",
+                "After pr_url, ci_green, merge, and structured adversarial_check evidence are recorded as satisfied evidence, a fresh preset-backed continue_iteration retry is delivered to the worker inbox or tmux target",
             ],
             "steps": [
                 "Choose a disposable target repo, seed prompt, cleanup policy, CI provider expectation, and max iterations value. Max iterations must be at least 2; use max iterations 2 for the standard smoke.",
@@ -1708,15 +1726,15 @@ def command_qa_plan(args: argparse.Namespace) -> int:
                 "Run workerctl dispatch --once --type continue_iteration --dispatcher-id qa-ralph-loop --json and verify the processed item returns state=blocked, reason=max_iterations_reached, delivered=false, target_worker_notified=false, current_iteration=1, max_iterations=1, requested_iteration=2, and no routed notification id.",
                 "Open the dashboard for the bound task and verify the Dispatch panel shows continue_iteration, max_iterations_reached, iteration 1/1, 0 notifications, Inbox 0, and Pull inbox 0 for correlation ralph-loop-max-block.",
                 "Run workerctl replay, workerctl audit, workerctl commands --task --attempts, and workerctl worker-inbox for the negative drill; verify the manager-visible refusal receipt is present and the worker inbox remains empty.",
-                "Run the missing-evidence browser drill in a disposable task: create a Ralph-loop run with max_iterations=3, current_iteration=1, and required_before_continue=[\"ci_green\"], record a manager decision requesting iteration 2, then queue it with workerctl enqueue-continue-iteration <task> --loop-run <run-id> --requested-iteration 2 --message \"run iteration 2\" --manager-decision-id <id> --correlation-id ralph-loop-missing-ci.",
-                "Run workerctl dispatch --once --type continue_iteration --dispatcher-id qa-ralph-loop --json and verify the processed item returns state=blocked, reason=missing_ci_green_evidence, missing_evidence=[ci_green], delivered=false, target_worker_notified=false, current_iteration=1, max_iterations=3, requested_iteration=2, and no routed notification id.",
-                "Open the dashboard for the bound task and verify the Dispatch panel shows continue_iteration, missing_ci_green_evidence, missing ci_green, iteration 1/3, requested 2, 0 notifications, Inbox 0, and Pull inbox 0 for correlation ralph-loop-missing-ci.",
-                "Record ci_green as run-qualified evidence with workerctl loop-evidence add <task> --loop-run <run-id> --iteration 1 --evidence-type ci_green --status green --correlation-id ralph-loop-ci-green; then enqueue a fresh continue_iteration command for requested iteration 2 with correlation ralph-loop-ci-allowed.",
+                "Run the missing-evidence browser drill in a disposable task: create a Ralph-loop run with max_iterations=3, current_iteration=1, and required_before_continue=[\"ci_green\",\"adversarial_check\"], record a manager decision requesting iteration 2, then queue it with workerctl enqueue-continue-iteration <task> --loop-run <run-id> --requested-iteration 2 --message \"run iteration 2\" --manager-decision-id <id> --correlation-id ralph-loop-missing-ci.",
+                "Run workerctl dispatch --once --type continue_iteration --dispatcher-id qa-ralph-loop --json and verify the processed item returns state=blocked, reason=missing_required_evidence, missing_evidence=[ci_green,adversarial_check], delivered=false, target_worker_notified=false, current_iteration=1, max_iterations=3, requested_iteration=2, and no routed notification id.",
+                "Open the dashboard for the bound task and verify the Dispatch panel shows continue_iteration, missing_required_evidence, missing ci_green, adversarial_check, iteration 1/3, requested 2, 0 notifications, Inbox 0, and Pull inbox 0 for correlation ralph-loop-missing-ci.",
+                "Record ci_green as run-qualified evidence with workerctl loop-evidence add <task> --loop-run <run-id> --iteration 1 --evidence-type ci_green --status green --correlation-id ralph-loop-ci-green; record structured proof with workerctl loop-evidence adversarial-check <task> --loop-run <run-id> --iteration 1 --failure-mode \"iteration 2 could continue even though CI-green hides an unreviewed regression\" --check \"inspect the CI result, diff, and manager receipt before retry\" --result \"CI-green and direct inspection leave no unresolved blocker for iteration 2\" --correlation-id ralph-loop-ci-adversarial; then enqueue a fresh continue_iteration command for requested iteration 2 with correlation ralph-loop-ci-allowed.",
                 "Run workerctl dispatch --once --type continue_iteration --dispatcher-id qa-ralph-loop --json again and verify the fresh retry is delivered, the routed notification signal_type is continue_iteration, and worker-inbox contains the iteration 2 message.",
                 "Run the preset evidence browser drill in a disposable task: create a preset-backed run with workerctl ralph-loop-presets --create-run <task> --preset pr_ci_merge_loop --name qa-ralph-loop-preset --max-iterations 3 --current-iteration 1 --seed-prompt-sha256 <seed-sha256> --json, then queue requested iteration 2 with correlation ralph-loop-preset-missing.",
-                "Run workerctl dispatch --once --type continue_iteration --dispatcher-id qa-ralph-loop --json and verify the processed item returns state=blocked, reason=missing_required_evidence, missing_evidence=[pr_url,ci_green,merge], delivered=false, target_worker_notified=false, current_iteration=1, max_iterations=3, requested_iteration=2, and no routed notification id.",
-                "Open the dashboard for the bound task and verify the Dispatch panel shows continue_iteration, missing_required_evidence, missing pr_url, ci_green, merge, iteration 1/3, requested 2, 0 notifications, Inbox 0, and Pull inbox 0 for correlation ralph-loop-preset-missing.",
-                "Record pr_url, ci_green, and merge as run-qualified evidence with workerctl loop-evidence add <task> --loop-run <run-id> --iteration 1 --evidence-type <type> and matching correlation receipts; then enqueue a fresh continue_iteration command for requested iteration 2 with correlation ralph-loop-preset-allowed.",
+                "Run workerctl dispatch --once --type continue_iteration --dispatcher-id qa-ralph-loop --json and verify the processed item returns state=blocked, reason=missing_required_evidence, missing_evidence=[pr_url,ci_green,merge,adversarial_check], delivered=false, target_worker_notified=false, current_iteration=1, max_iterations=3, requested_iteration=2, and no routed notification id.",
+                "Open the dashboard for the bound task and verify the Dispatch panel shows continue_iteration, missing_required_evidence, missing pr_url, ci_green, merge, adversarial_check, iteration 1/3, requested 2, 0 notifications, Inbox 0, and Pull inbox 0 for correlation ralph-loop-preset-missing.",
+                "Record pr_url, ci_green, and merge as run-qualified evidence with workerctl loop-evidence add <task> --loop-run <run-id> --iteration 1 --evidence-type <type> and matching correlation receipts; record structured proof with workerctl loop-evidence adversarial-check <task> --loop-run <run-id> --iteration 1 --failure-mode \"PR, CI, and merge receipts could hide an unverified regression\" --check \"inspect PR URL, CI result, merge receipt, and final diff before retry\" --result \"all receipts and direct inspection are present with no unresolved blocker\" --correlation-id ralph-loop-preset-adversarial; then enqueue a fresh continue_iteration command for requested iteration 2 with correlation ralph-loop-preset-allowed.",
                 "Run workerctl dispatch --once --type continue_iteration --dispatcher-id qa-ralph-loop --json again and verify the fresh preset-backed retry is delivered, the routed notification signal_type is continue_iteration, and worker-inbox contains the iteration 2 message.",
             ],
         },
@@ -3767,6 +3785,29 @@ def _record_loop_evidence(
     return {"criterion": criterion, "evidence": evidence, "run": run}
 
 
+def _is_structured_adversarial_evidence(evidence: dict[str, Any]) -> bool:
+    from workerctl.lifecycle import _is_structured_adversarial_proof
+
+    return _is_structured_adversarial_proof(evidence)
+
+
+def _adversarial_check_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
+    values = dict(metadata)
+    for key, flag in (
+        ("failure_mode", "--failure-mode"),
+        ("check", "--check"),
+        ("result", "--result"),
+    ):
+        value = values.get(key)
+        if not isinstance(value, str):
+            value = ""
+        value = value.strip()
+        if not value:
+            raise WorkerError(f"{flag} must be non-empty")
+        values[key] = value
+    return values
+
+
 def command_loop_evidence(args: argparse.Namespace) -> int:
     from workerctl import db as worker_db
     from workerctl.visual_diff import compute_visual_diff
@@ -3778,12 +3819,15 @@ def command_loop_evidence(args: argparse.Namespace) -> int:
         _begin_criteria_mutation(conn)
         if args.action == "add":
             metadata = _json_arg(args.metadata_json, flag="--metadata-json")
+            evidence_type = args.evidence_type.strip()
+            if evidence_type == "adversarial_check":
+                metadata = _adversarial_check_metadata(metadata)
             result = _record_loop_evidence(
                 conn,
                 task=task,
                 loop_run=args.loop_run,
                 iteration=args.iteration,
-                evidence_type=args.evidence_type,
+                evidence_type=evidence_type,
                 status=args.status,
                 source=args.source,
                 proof=args.proof,
@@ -3839,6 +3883,27 @@ def command_loop_evidence(args: argparse.Namespace) -> int:
                 "evidence": report_result["evidence"],
                 "threshold_criterion": threshold_result["criterion"] if threshold_result else None,
             }
+        elif args.action in {"adversarial_check", "adversarial-check"}:
+            metadata = _adversarial_check_metadata(
+                {
+                    "failure_mode": args.failure_mode,
+                    "check": args.check,
+                    "result": args.result,
+                }
+            )
+            result = _record_loop_evidence(
+                conn,
+                task=task,
+                loop_run=args.loop_run,
+                iteration=args.iteration,
+                evidence_type="adversarial_check",
+                status=args.status,
+                source=args.source,
+                proof=f"Adversarial check: {metadata['failure_mode']} -> {metadata['result']}",
+                artifact_path=args.artifact_path,
+                correlation_id=args.correlation_id,
+                metadata=metadata,
+            )
         else:
             raise WorkerError(f"Unsupported loop-evidence action: {args.action}")
         conn.commit()
@@ -5007,11 +5072,16 @@ def _ralph_loop_evidence_matches(
     iteration: int,
     run_id: str,
 ) -> bool:
-    return (
+    matches = (
         evidence.get("evidence_type") == evidence_type
         and evidence.get("ralph_loop_run_id") == run_id
         and evidence.get("iteration") == iteration
     )
+    if not matches:
+        return False
+    if evidence_type == "adversarial_check":
+        return _is_structured_adversarial_evidence(evidence)
+    return True
 
 
 def _missing_ralph_loop_evidence(

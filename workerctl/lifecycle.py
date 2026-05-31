@@ -51,6 +51,7 @@ from workerctl.tmux import tmux_target
 
 
 CRITERIA_AUDIT_STATUSES = ("proposed", "accepted", "satisfied", "deferred", "rejected")
+FAILING_ADVERSARIAL_PROOF_STATUSES = {"error", "errored", "fail", "failed", "failure", "rejected"}
 
 
 def safe_slug(value: str) -> str:
@@ -158,6 +159,34 @@ def _final_epilogue_audit_error(final_epilogue_audit: dict[str, Any], *, task_na
         return None
     missing = ", ".join(final_epilogue_audit["missing_or_incomplete"])
     return f"Task {task_name} has incomplete required epilogue step(s): {missing}"
+
+
+def _is_structured_adversarial_proof(evidence: dict[str, Any]) -> bool:
+    if evidence.get("evidence_type") != "adversarial_check":
+        return False
+    for key in ("failure_mode", "check", "result"):
+        value = evidence.get(key)
+        if not isinstance(value, str) or not value.strip():
+            return False
+    status = evidence.get("status")
+    if status is None:
+        return True
+    if not isinstance(status, str):
+        return False
+    return status.strip().lower() not in FAILING_ADVERSARIAL_PROOF_STATUSES
+
+
+def _task_has_satisfied_adversarial_proof(conn, *, task_id: str) -> bool:
+    criteria = acceptance_criteria_for_task(conn, task_id=task_id, statuses=["satisfied"])
+    return any(_is_structured_adversarial_proof(criterion.get("evidence") or {}) for criterion in criteria)
+
+
+def _adversarial_proof_error(*, task_name: str) -> str:
+    return (
+        f"Task {task_name}: adversarial proof is required before finish; record satisfied "
+        "evidence_type=adversarial_check with non-empty failure_mode, check, result, "
+        "and a non-failing evidence status"
+    )
 
 
 def _resolve_session_binding(conn, *, task_name: str, include_ended: bool = False) -> dict[str, Any] | None:
@@ -303,6 +332,9 @@ def _stop_or_finish_task(args: argparse.Namespace, *, finish: bool) -> int:
         require_criteria_audit = bool(getattr(args, "require_criteria_audit", False)) if finish else False
         require_acks = bool(getattr(args, "require_acks", False)) if finish else False
         require_epilogue = bool(getattr(args, "require_epilogue", False)) if finish else False
+        require_adversarial_proof = bool(getattr(args, "require_adversarial_proof", False)) if finish else False
+        if require_adversarial_proof and not _task_has_satisfied_adversarial_proof(conn, task_id=snapshot["id"]):
+            raise WorkerError(_adversarial_proof_error(task_name=snapshot["name"]))
         final_audit = _final_criteria_audit(
             conn,
             task_id=snapshot["id"],
