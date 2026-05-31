@@ -5330,6 +5330,106 @@ class CliTests(unittest.TestCase):
             self.assertEqual(loop_run["task_id"], task_id)
             self.assertEqual(loop_run["preset"], "visual_diff_loop")
 
+    def test_loop_evidence_adversarial_check_records_structured_receipt(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                task_id = worker_db.create_task(conn, name="adversarial-task", goal="Prove adversarial evidence.")
+                run_id = worker_db.create_ralph_loop_run(
+                    conn,
+                    task_id=task_id,
+                    max_iterations=2,
+                    current_iteration=1,
+                    required_before_continue=["adversarial_check"],
+                    name="adversarial-policy",
+                )
+                conn.commit()
+
+            proc = self.run_workerctl(
+                "loop-evidence",
+                "adversarial-check",
+                "adversarial-task",
+                "--loop-run",
+                run_id,
+                "--iteration",
+                "1",
+                "--failure-mode",
+                "The worker only tested the happy path.",
+                "--check",
+                "python3 -m unittest tests.test_workerctl.SomeFocusedTest -v",
+                "--result",
+                "The focused negative case passed and rules out the regression.",
+                "--artifact-path",
+                "/tmp/adversarial-proof.txt",
+                "--correlation-id",
+                "corr-adversarial",
+                "--path",
+                str(db_path),
+            )
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            payload = json.loads(proc.stdout)
+            self.assertEqual(payload["evidence"]["evidence_type"], "adversarial_check")
+            self.assertEqual(payload["evidence"]["failure_mode"], "The worker only tested the happy path.")
+            self.assertEqual(payload["evidence"]["check"], "python3 -m unittest tests.test_workerctl.SomeFocusedTest -v")
+            self.assertEqual(
+                payload["evidence"]["result"],
+                "The focused negative case passed and rules out the regression.",
+            )
+            self.assertEqual(payload["evidence"]["artifact_path"], "/tmp/adversarial-proof.txt")
+            self.assertEqual(payload["evidence"]["correlation_id"], "corr-adversarial")
+            self.assertEqual(payload["criterion"]["status"], "satisfied")
+
+    def test_loop_evidence_adversarial_check_rejects_empty_required_fields(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                task_id = worker_db.create_task(conn, name="bad-adversarial-task", goal="Reject empty proof.")
+                run_id = worker_db.create_ralph_loop_run(
+                    conn,
+                    task_id=task_id,
+                    max_iterations=2,
+                    required_before_continue=["adversarial_check"],
+                )
+                conn.commit()
+
+            cases = [
+                ("--failure-mode", "--failure-mode must be non-empty"),
+                ("--check", "--check must be non-empty"),
+                ("--result", "--result must be non-empty"),
+            ]
+            for empty_flag, expected_error in cases:
+                values = {
+                    "--failure-mode": "The proof may only cover the happy path.",
+                    "--check": "inspection",
+                    "--result": "checked",
+                }
+                values[empty_flag] = "   "
+                with self.subTest(empty_flag=empty_flag):
+                    proc = self.run_workerctl(
+                        "loop-evidence",
+                        "adversarial-check",
+                        "bad-adversarial-task",
+                        "--loop-run",
+                        run_id,
+                        "--iteration",
+                        "1",
+                        "--failure-mode",
+                        values["--failure-mode"],
+                        "--check",
+                        values["--check"],
+                        "--result",
+                        values["--result"],
+                        "--path",
+                        str(db_path),
+                    )
+
+                    self.assertEqual(proc.returncode, 1)
+                    self.assertIn(expected_error, proc.stderr)
+                    self.assertNotIn("Traceback", proc.stderr)
+
     def test_ralph_loop_presets_cli_creates_policy_run(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "workerctl.db"

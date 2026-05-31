@@ -593,6 +593,12 @@ tmux attach -t codex-live-test
   diff/report artifact, and record `visual_diff_report` plus
   `diff_below_threshold` as satisfied only when the computed score is within
   threshold.
+- `loop-evidence adversarial-check TASK --loop-run RUN --iteration N --failure-mode F --check C --result R` —
+  Record first-class adversarial proof for a loop iteration. Use it when a
+  manager or worker tried to disprove the iteration before continuing. The
+  receipt is stored as `evidence_type=adversarial_check` with structured
+  `failure_mode`, `check`, and `result` metadata and can satisfy Ralph-loop
+  continuation policy.
 - `ralph-loop-presets --list|--show PRESET|--create-run TASK --preset PRESET` —
   List saved Ralph-loop guardrail templates or create a preset-backed
   `ralph_loop` policy run.

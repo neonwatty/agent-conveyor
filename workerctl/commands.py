@@ -3849,6 +3849,33 @@ def command_loop_evidence(args: argparse.Namespace) -> int:
                 "evidence": report_result["evidence"],
                 "threshold_criterion": threshold_result["criterion"] if threshold_result else None,
             }
+        elif args.action in {"adversarial_check", "adversarial-check"}:
+            failure_mode = args.failure_mode.strip()
+            check = args.check.strip()
+            result_text = args.result.strip()
+            if not failure_mode:
+                raise WorkerError("--failure-mode must be non-empty")
+            if not check:
+                raise WorkerError("--check must be non-empty")
+            if not result_text:
+                raise WorkerError("--result must be non-empty")
+            result = _record_loop_evidence(
+                conn,
+                task=task,
+                loop_run=args.loop_run,
+                iteration=args.iteration,
+                evidence_type="adversarial_check",
+                status=args.status,
+                source=args.source,
+                proof=f"Adversarial check: {failure_mode} -> {result_text}",
+                artifact_path=args.artifact_path,
+                correlation_id=args.correlation_id,
+                metadata={
+                    "failure_mode": failure_mode,
+                    "check": check,
+                    "result": result_text,
+                },
+            )
         else:
             raise WorkerError(f"Unsupported loop-evidence action: {args.action}")
         conn.commit()
