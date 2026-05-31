@@ -3725,7 +3725,8 @@ class ContractTests(unittest.TestCase):
     def test_worker_contract_tells_app_workers_to_poll_worker_inbox(self):
         contract = worker_contract("worker-a", "Do the task.")
 
-        self.assertIn("workerctl worker-inbox <task-name> --consume-next --json", contract)
+        self.assertIn("workerctl worker-inbox <task-name> --consume-next --wait --timeout 60 --json", contract)
+        self.assertIn("dispatch_inbox_consumed", contract)
         self.assertIn("registered without a tmux session", contract)
         self.assertIn("pull-required dispatcher signals", contract)
 
@@ -4675,6 +4676,155 @@ class CliTests(unittest.TestCase):
             self.assertEqual(payload["session"]["name"], "inbox-worker")
             self.assertEqual(payload["items"][0]["signal_type"], "nudge_worker")
             self.assertEqual(payload["items"][0]["payload"]["message"], "please continue")
+
+    def test_worker_inbox_wait_consumes_item_inserted_after_poll(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                conn.execute(
+                    "insert into tasks(id, name, goal, state, created_at, updated_at) "
+                    "values ('task-inbox', 'inbox-task', 'g', 'managed', '2026-05-23T10:00:00Z', '2026-05-23T10:00:00Z')"
+                )
+                worker_id = worker_db.register_session(
+                    conn,
+                    name="inbox-worker",
+                    role="worker",
+                    codex_session_path="/tmp/w.jsonl",
+                    codex_session_id="u-w",
+                    pid=1,
+                    cwd="/repo",
+                )
+                manager_id = worker_db.register_session(
+                    conn,
+                    name="inbox-manager",
+                    role="manager",
+                    codex_session_path="/tmp/m.jsonl",
+                    codex_session_id="u-m",
+                    pid=2,
+                    cwd="/repo",
+                )
+                binding_id = worker_db.bind_sessions(
+                    conn,
+                    task_name="inbox-task",
+                    worker_session_name="inbox-worker",
+                    manager_session_name="inbox-manager",
+                )
+                conn.commit()
+
+            inserted = {"done": False, "notification_id": None}
+
+            def insert_after_first_poll(_seconds):
+                if inserted["done"]:
+                    return
+                with worker_db.connect(db_path) as conn:
+                    worker_db.initialize_database(conn)
+                    inserted["notification_id"] = worker_db.insert_routed_notification(
+                        conn,
+                        task_id="task-inbox",
+                        binding_id=binding_id,
+                        correlation_id="dispatch-worker-poll",
+                        source_session_id=manager_id,
+                        target_session_id=worker_id,
+                        signal_type="nudge_worker",
+                        source_event_id=None,
+                        source_event_timestamp=None,
+                        dedupe_key="dispatch-worker-poll-1",
+                        payload={"message": "poll-delivered"},
+                        state="delivered",
+                        delivery_mode="pull_required",
+                    )
+                    conn.commit()
+                inserted["done"] = True
+
+            args = argparse.Namespace(
+                consume_next=True,
+                interval=0.01,
+                json=True,
+                limit=10,
+                path=str(db_path),
+                task="inbox-task",
+                timeout=1.0,
+                wait=True,
+            )
+            with mock.patch("workerctl.commands.time.sleep", side_effect=insert_after_first_poll):
+                with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                    commands.command_worker_inbox(args)
+
+            payload = json.loads(stdout.getvalue())
+            self.assertEqual(payload["consumed"]["id"], inserted["notification_id"])
+            self.assertEqual(payload["consumed"]["payload"]["message"], "poll-delivered")
+            self.assertTrue(payload["wait"]["enabled"])
+            self.assertFalse(payload["wait"]["timed_out"])
+            self.assertGreaterEqual(payload["wait"]["poll_count"], 2)
+            with worker_db.connect(db_path) as conn:
+                events = worker_db.query_telemetry_events(
+                    conn,
+                    task_id="task-inbox",
+                    actor="dispatch",
+                    event_type="dispatch_inbox_consumed",
+                )
+            self.assertEqual(len(events), 1)
+            self.assertEqual(events[0]["correlation"]["signal_type"], "nudge_worker")
+            self.assertEqual(events[0]["attributes"]["delivery_mode"], "pull_required")
+            self.assertEqual(events[0]["attributes"]["target_session_role"], "worker")
+
+    def test_manager_inbox_wait_times_out_without_consuming(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                conn.execute(
+                    "insert into tasks(id, name, goal, state, created_at, updated_at) "
+                    "values ('task-inbox', 'inbox-task', 'g', 'managed', '2026-05-23T10:00:00Z', '2026-05-23T10:00:00Z')"
+                )
+                worker_db.register_session(
+                    conn,
+                    name="inbox-worker",
+                    role="worker",
+                    codex_session_path="/tmp/w.jsonl",
+                    codex_session_id="u-w",
+                    pid=1,
+                    cwd="/repo",
+                )
+                worker_db.register_session(
+                    conn,
+                    name="inbox-manager",
+                    role="manager",
+                    codex_session_path="/tmp/m.jsonl",
+                    codex_session_id="u-m",
+                    pid=2,
+                    cwd="/repo",
+                )
+                worker_db.bind_sessions(
+                    conn,
+                    task_name="inbox-task",
+                    worker_session_name="inbox-worker",
+                    manager_session_name="inbox-manager",
+                )
+                conn.commit()
+
+            proc = self.run_workerctl(
+                "manager-inbox",
+                "inbox-task",
+                "--consume-next",
+                "--wait",
+                "--timeout",
+                "0.01",
+                "--interval",
+                "0.01",
+                "--json",
+                "--path",
+                str(db_path),
+            )
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            payload = json.loads(proc.stdout)
+            self.assertIsNone(payload["consumed"])
+            self.assertEqual(payload["items"], [])
+            self.assertTrue(payload["wait"]["enabled"])
+            self.assertTrue(payload["wait"]["timed_out"])
+            self.assertGreaterEqual(payload["wait"]["poll_count"], 1)
 
     def test_classify_cli_outputs_json(self):
         proc = self.run_workerctl(
@@ -15702,8 +15852,8 @@ class ManagerBootstrapPromptTests(unittest.TestCase):
         self.assertIn(f"{workerctl} session-nudge docs-worker", prompt)
         self.assertIn(f"{workerctl} enqueue-nudge-worker docs-task --message", prompt)
         self.assertIn(f"{workerctl} dispatch --once --type nudge_worker --json", prompt)
-        self.assertIn(f"{workerctl} worker-inbox docs-task --consume-next --json", prompt)
-        self.assertIn(f"{workerctl} manager-inbox docs-task --consume-next --json", prompt)
+        self.assertIn(f"{workerctl} worker-inbox docs-task --consume-next --wait --timeout 60 --json", prompt)
+        self.assertIn(f"{workerctl} manager-inbox docs-task --consume-next --wait --timeout 60 --json", prompt)
         self.assertIn("registered without tmux", prompt)
         self.assertIn("legacy `nudge` command is only for old file-backed workers", prompt)
         self.assertIn(f"{workerctl} manager-ack docs-task --from-stdin", prompt)
@@ -15762,9 +15912,11 @@ class ManagerBootstrapPromptTests(unittest.TestCase):
         self.assertIn("session-inbox <session>", readme)
         self.assertIn("manager-inbox <task>", readme)
         self.assertIn("worker-inbox <task>", readme)
+        self.assertIn("--consume-next --wait --json", readme)
         self.assertIn("delivery_mode='pull_required'", readme)
         self.assertIn("tmux push is optional transport", readme)
-        self.assertIn("Codex app-based sessions must poll", readme)
+        self.assertIn("Codex app-based sessions", readme)
+        self.assertIn("dispatch_inbox_consumed", readme)
         self.assertIn("sessions --name <session> --redact-identity-token", readme)
         self.assertIn("workerctl_on_path", readme)
         self.assertIn("whole rollout", readme)

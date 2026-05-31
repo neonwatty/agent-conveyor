@@ -204,10 +204,11 @@ Dispatcher inbox:
 - If this worker is registered without a tmux session, manager nudges are
   pull-required dispatcher signals. Poll for them with:
 
-  workerctl worker-inbox <task-name> --consume-next --json
+  workerctl worker-inbox <task-name> --consume-next --wait --timeout 60 --json
 
 - Treat a consumed inbox item as the next manager instruction, then update
-  status with workerctl.
+  status with workerctl. Each consumed item records `dispatch_inbox_consumed`
+  telemetry so the dispatcher-to-session handoff is auditable.
 
 Compatibility JSON shape:
 {{

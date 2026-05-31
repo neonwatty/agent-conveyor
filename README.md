@@ -476,15 +476,18 @@ tmux attach -t codex-live-test
   Dispatch to claim and deliver to the bound worker. Use this dispatcher-backed
   route instead of `session-nudge` when the worker is registered without tmux;
   the worker then receives the message through `worker-inbox`.
-- `session-inbox <session> [--consume-next] [--limit N] [--json]` — List or
-  consume unconsumed routed notifications addressed to a registered session.
-  Text output includes the pending count, signal type, delivery mode,
-  source/target sessions, delivered timestamp, and correlation id. Use `--json`
-  during QA to capture payload, `consumed_by_session_id`, and exact timestamps.
-- `manager-inbox <task> [--consume-next] [--limit N] [--json]` — Resolve the
-  task's bound manager session and read its dispatcher inbox.
-- `worker-inbox <task> [--consume-next] [--limit N] [--json]` — Resolve the
-  task's bound worker session and read its dispatcher inbox.
+- `session-inbox <session> [--consume-next] [--wait] [--timeout N]
+  [--interval N] [--limit N] [--json]` — List or consume unconsumed routed
+  notifications addressed to a registered session. Text output includes the
+  pending count, signal type, delivery mode, source/target sessions, delivered
+  timestamp, and correlation id. Use `--consume-next --wait --json` for Codex
+  app long-polling; consumed items emit `dispatch_inbox_consumed` telemetry.
+- `manager-inbox <task> [--consume-next] [--wait] [--timeout N] [--interval N]
+  [--limit N] [--json]` — Resolve the task's bound manager session and read its
+  dispatcher inbox.
+- `worker-inbox <task> [--consume-next] [--wait] [--timeout N] [--interval N]
+  [--limit N] [--json]` — Resolve the task's bound worker session and read its
+  dispatcher inbox.
 
 ### Actuation
 
@@ -760,10 +763,15 @@ Current dispatch state:
 - Routed completion notifications are deduplicated by source event id, recorded
   in `routed_notifications`, and threaded with `correlation_id`.
 - The session inbox is the same `routed_notifications` stream addressed by
-  `target_session_id`: tmux push is optional transport. Codex app-based sessions must poll with `manager-inbox` or `worker-inbox`.
+  `target_session_id`: tmux push is optional transport. Codex app-based sessions
+  should long-poll with `manager-inbox --consume-next --wait --json` or
+  `worker-inbox --consume-next --wait --json`.
 - A target with a tmux session records `delivery_mode='push'` after successful
   tmux delivery. A target without tmux records `delivery_mode='pull_required'`
   and remains unconsumed until the addressed session polls and consumes it.
+- Consuming a mailbox item records `dispatch_inbox_consumed` telemetry with the
+  notification id, signal type, delivery mode, target session role, and poll
+  count, so manager/worker dispatcher handoffs are visible in audit evidence.
 - If `doctor-self --json` reports `workerctl_on_path=false` inside a Codex app
   session, run `scripts/workerctl ...` from the repository root or install the
   local wrapper with `scripts/install-local --write`. Its `inside_tmux` check
