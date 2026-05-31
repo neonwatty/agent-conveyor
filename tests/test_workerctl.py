@@ -16327,6 +16327,9 @@ class ManagerBootstrapPromptTests(unittest.TestCase):
         self.assertIn("dispatch_inbox_consumed", qa_doc)
         self.assertIn("WORKER_ROLLOUT", qa_doc)
         self.assertIn("MANAGER_ROLLOUT", qa_doc)
+        self.assertIn('export WORKERCTL_DB="$QA_TMPDIR/workerctl.db"', qa_doc)
+        self.assertIn('export WORKER_ROLLOUT="$QA_TMPDIR/rollout-worker.jsonl"', qa_doc)
+        self.assertIn('export MANAGER_ROLLOUT="$QA_TMPDIR/rollout-manager.jsonl"', qa_doc)
         self.assertIn('--codex-session "$WORKER_ROLLOUT"', qa_doc)
         self.assertIn('--codex-session "$MANAGER_ROLLOUT"', qa_doc)
         self.assertIn("scripts/workerctl loop-templates --list --json", qa_doc)
@@ -16337,17 +16340,51 @@ class ManagerBootstrapPromptTests(unittest.TestCase):
     def test_general_loop_template_documented_setup_smoke_blocks_missing_evidence(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp_path = Path(tmpdir)
-            db_path = tmp_path / "workerctl.db"
-            worker_rollout = tmp_path / "rollout-worker.jsonl"
-            manager_rollout = tmp_path / "rollout-manager.jsonl"
-            worker_rollout.write_text(json.dumps({
-                "type": "session_meta",
-                "payload": {"id": "qa-loop-worker-session", "cwd": str(ROOT), "originator": "codex-tui"},
-            }) + "\n")
-            manager_rollout.write_text(json.dumps({
-                "type": "session_meta",
-                "payload": {"id": "qa-loop-manager-session", "cwd": str(ROOT), "originator": "codex-tui"},
-            }) + "\n")
+            fixture_proc = subprocess.run(
+                [
+                    "bash",
+                    "-lc",
+                    f"""
+QA_TMPDIR={shlex.quote(str(tmp_path))}
+export WORKERCTL_DB="$QA_TMPDIR/workerctl.db"
+export WORKER_ROLLOUT="$QA_TMPDIR/rollout-worker.jsonl"
+export MANAGER_ROLLOUT="$QA_TMPDIR/rollout-manager.jsonl"
+
+{shlex.quote(sys.executable)} - <<'PY'
+import json
+import os
+from pathlib import Path
+
+fixtures = {{
+    "WORKER_ROLLOUT": "qa-loop-worker-session",
+    "MANAGER_ROLLOUT": "qa-loop-manager-session",
+}}
+for env_name, session_id in fixtures.items():
+    Path(os.environ[env_name]).write_text(
+        json.dumps({{
+            "type": "session_meta",
+            "payload": {{
+                "id": session_id,
+                "cwd": os.getcwd(),
+                "originator": "codex-tui",
+            }},
+        }}) + "\\n"
+    )
+PY
+printf '%s\\n' "$WORKERCTL_DB" "$WORKER_ROLLOUT" "$MANAGER_ROLLOUT"
+""",
+                ],
+                capture_output=True,
+                text=True,
+                cwd=str(ROOT),
+            )
+            self.assertEqual(fixture_proc.returncode, 0, fixture_proc.stderr)
+            db_path_text, worker_rollout_text, manager_rollout_text = fixture_proc.stdout.strip().splitlines()
+            db_path = Path(db_path_text)
+            worker_rollout = Path(worker_rollout_text)
+            manager_rollout = Path(manager_rollout_text)
+            self.assertTrue(worker_rollout.exists(), fixture_proc.stdout)
+            self.assertTrue(manager_rollout.exists(), fixture_proc.stdout)
 
             def run_workerctl(*args, with_path=True):
                 command = [sys.executable, "-m", "workerctl", *args]

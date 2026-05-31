@@ -22,9 +22,9 @@ after evidence is recorded.
 
 ```bash
 QA_TMPDIR="$(mktemp -d -t workerctl-loop-template.XXXXXX)"
-WORKERCTL_DB="$QA_TMPDIR/workerctl.db"
-WORKER_ROLLOUT="$QA_TMPDIR/rollout-worker.jsonl"
-MANAGER_ROLLOUT="$QA_TMPDIR/rollout-manager.jsonl"
+export WORKERCTL_DB="$QA_TMPDIR/workerctl.db"
+export WORKER_ROLLOUT="$QA_TMPDIR/rollout-worker.jsonl"
+export MANAGER_ROLLOUT="$QA_TMPDIR/rollout-manager.jsonl"
 
 python3 - <<'PY'
 import json
