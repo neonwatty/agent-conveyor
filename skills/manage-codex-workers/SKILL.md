@@ -369,6 +369,17 @@ in the handoff. Do not accept worker claims, passing happy-path tests, generated
 summaries, or optimistic UI as proof by themselves. Treat unverified assumptions
 as blockers or explicit follow-ups.
 
+Natural-language requests such as "run this as an adversarially gated loop",
+"require adversarial proof before another worker iteration", or "do not finish
+until you have tried to disprove it" should be treated as operational gate
+requests. For Ralph-loop work, create or use a loop policy whose
+`required_before_continue` includes `adversarial_check`, then record each proof
+receipt with `scripts/workerctl loop-evidence adversarial-check <task>
+--loop-run <run-id> --iteration <n> --failure-mode ... --check ... --result
+...`. For final completion, use `scripts/workerctl finish-task <task>
+--require-adversarial-proof` so the task cannot be marked done until structured
+proof exists.
+
 ```bash
 scripts/workerctl cycle my-task
 # {
