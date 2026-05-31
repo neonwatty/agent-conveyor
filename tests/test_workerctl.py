@@ -3530,6 +3530,73 @@ class DispatchTests(unittest.TestCase):
             self.assertIn("missing_coverage_checked_evidence", command_row["error"])
             send.assert_not_called()
 
+    def test_dispatch_rejects_failed_adversarial_check_evidence_status(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn, db_path = self.open_db(tmpdir)
+            worker_id, _manager_id = self.setup_bound_task(conn)
+            conn.execute("update sessions set tmux_session = null where id = ?", (worker_id,))
+            loop_run_id = worker_db.create_ralph_loop_run(
+                conn,
+                task_id="task-dispatch",
+                name="adversarial-loop",
+                max_iterations=3,
+                current_iteration=1,
+                cleanup_policy="clear",
+                required_before_continue=["adversarial_check"],
+                stop_conditions=["max_iterations"],
+                metadata={"allowed_actions": ["continue_iteration"]},
+            )
+            worker_db.insert_acceptance_criterion(
+                conn,
+                task_id="task-dispatch",
+                criterion="Failed adversarial proof",
+                status="satisfied",
+                source="manager_inferred",
+                proof="The adversarial check found a blocker.",
+                evidence={
+                    "evidence_type": "adversarial_check",
+                    "failure_mode": "Continuation might hide a failed verification.",
+                    "check": "negative test",
+                    "result": "negative test failed",
+                    "iteration": 1,
+                    "ralph_loop_run_id": loop_run_id,
+                    "status": "fail",
+                },
+            )
+            command_id = worker_db.enqueue_continue_iteration(
+                conn,
+                task_id="task-dispatch",
+                message="Run adversarial iteration 2.",
+                loop_run_id=loop_run_id,
+                requested_iteration=2,
+                correlation_id="adversarial-failed-status",
+            )
+            conn.commit()
+
+            args = argparse.Namespace(
+                dispatcher_id="dispatch-test",
+                dry_run=False,
+                json=True,
+                limit=10,
+                once=True,
+                path=str(db_path),
+                type="continue_iteration",
+                watch=False,
+            )
+            with mock.patch.object(worker_tmux, "send_text_to_session") as send:
+                with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                    commands.command_dispatch(args)
+
+            processed = json.loads(stdout.getvalue())["processed"][0]
+            command_row = conn.execute("select state, error from commands where id = ?", (command_id,)).fetchone()
+
+            self.assertEqual(processed["state"], "blocked")
+            self.assertEqual(processed["reason"], "missing_adversarial_check_evidence")
+            self.assertEqual(processed["missing_evidence"], ["adversarial_check"])
+            self.assertEqual(command_row["state"], "failed")
+            self.assertIn("missing_adversarial_check_evidence", command_row["error"])
+            send.assert_not_called()
+
     def test_loop_evidence_add_accepts_native_satisfied_status_as_passing(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             conn, db_path = self.open_db(tmpdir)

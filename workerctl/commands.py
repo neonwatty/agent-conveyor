@@ -3778,11 +3778,9 @@ def _record_loop_evidence(
 
 
 def _is_structured_adversarial_evidence(evidence: dict[str, Any]) -> bool:
-    for key in ("failure_mode", "check", "result"):
-        value = evidence.get(key)
-        if not isinstance(value, str) or not value.strip():
-            return False
-    return True
+    from workerctl.lifecycle import _is_structured_adversarial_proof
+
+    return _is_structured_adversarial_proof(evidence)
 
 
 def _adversarial_check_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
