@@ -113,6 +113,42 @@ class RalphLoopPresetTests(unittest.TestCase):
         with self.assertRaisesRegex(WorkerError, "Unknown Ralph loop preset"):
             ralph_loop_preset_metadata("not-a-preset")
 
+    def test_loop_templates_include_visual_diff_template(self):
+        from workerctl.loop_templates import list_loop_templates, loop_template_metadata
+
+        names = [template["name"] for template in list_loop_templates()]
+
+        self.assertIn("test_coverage_loop", names)
+        self.assertIn("pr_ci_merge_loop", names)
+        self.assertIn("visual_diff_loop", names)
+
+        visual = loop_template_metadata("visual_diff_loop")
+        self.assertEqual(visual["kind"], "ralph_loop")
+        self.assertEqual(visual["template"], "visual_diff_loop")
+        self.assertEqual(visual["preset"], "visual_diff_loop")
+        self.assertEqual(
+            visual["required_before_continue"],
+            ["reference_artifact", "candidate_screenshot", "visual_diff_report", "diff_below_threshold"],
+        )
+        self.assertEqual(visual["stop_conditions"], ["max_iterations", "required_evidence", "manager_accepts"])
+        self.assertEqual(visual["artifact_requirements"]["diff_score"]["type"], "number")
+
+    def test_loop_template_metadata_allows_visual_diff_overrides(self):
+        from workerctl.loop_templates import loop_template_metadata
+
+        metadata = loop_template_metadata(
+            "visual_diff_loop",
+            max_iterations=5,
+            current_iteration=2,
+            seed_prompt_sha256="visual-seed",
+        )
+
+        self.assertEqual(metadata["max_iterations"], 5)
+        self.assertEqual(metadata["current_iteration"], 2)
+        self.assertEqual(metadata["seed_prompt_sha256"], "visual-seed")
+        self.assertEqual(metadata["cleanup_policy"], "compact")
+        self.assertEqual(metadata["template"], "visual_diff_loop")
+
 
 class DatabaseTests(unittest.TestCase):
     def open_db(self, tmpdir):
