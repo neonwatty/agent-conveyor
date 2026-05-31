@@ -3777,6 +3777,23 @@ def _record_loop_evidence(
     return {"criterion": criterion, "evidence": evidence, "run": run}
 
 
+def _adversarial_check_metadata(metadata: dict[str, Any]) -> dict[str, str]:
+    values: dict[str, str] = {}
+    for key, flag in (
+        ("failure_mode", "--failure-mode"),
+        ("check", "--check"),
+        ("result", "--result"),
+    ):
+        value = metadata.get(key)
+        if not isinstance(value, str):
+            value = ""
+        value = value.strip()
+        if not value:
+            raise WorkerError(f"{flag} must be non-empty")
+        values[key] = value
+    return values
+
+
 def command_loop_evidence(args: argparse.Namespace) -> int:
     from workerctl import db as worker_db
     from workerctl.visual_diff import compute_visual_diff
@@ -3788,12 +3805,15 @@ def command_loop_evidence(args: argparse.Namespace) -> int:
         _begin_criteria_mutation(conn)
         if args.action == "add":
             metadata = _json_arg(args.metadata_json, flag="--metadata-json")
+            evidence_type = args.evidence_type.strip()
+            if evidence_type == "adversarial_check":
+                metadata = _adversarial_check_metadata(metadata)
             result = _record_loop_evidence(
                 conn,
                 task=task,
                 loop_run=args.loop_run,
                 iteration=args.iteration,
-                evidence_type=args.evidence_type,
+                evidence_type=evidence_type,
                 status=args.status,
                 source=args.source,
                 proof=args.proof,
@@ -3850,15 +3870,13 @@ def command_loop_evidence(args: argparse.Namespace) -> int:
                 "threshold_criterion": threshold_result["criterion"] if threshold_result else None,
             }
         elif args.action in {"adversarial_check", "adversarial-check"}:
-            failure_mode = args.failure_mode.strip()
-            check = args.check.strip()
-            result_text = args.result.strip()
-            if not failure_mode:
-                raise WorkerError("--failure-mode must be non-empty")
-            if not check:
-                raise WorkerError("--check must be non-empty")
-            if not result_text:
-                raise WorkerError("--result must be non-empty")
+            metadata = _adversarial_check_metadata(
+                {
+                    "failure_mode": args.failure_mode,
+                    "check": args.check,
+                    "result": args.result,
+                }
+            )
             result = _record_loop_evidence(
                 conn,
                 task=task,
@@ -3867,14 +3885,10 @@ def command_loop_evidence(args: argparse.Namespace) -> int:
                 evidence_type="adversarial_check",
                 status=args.status,
                 source=args.source,
-                proof=f"Adversarial check: {failure_mode} -> {result_text}",
+                proof=f"Adversarial check: {metadata['failure_mode']} -> {metadata['result']}",
                 artifact_path=args.artifact_path,
                 correlation_id=args.correlation_id,
-                metadata={
-                    "failure_mode": failure_mode,
-                    "check": check,
-                    "result": result_text,
-                },
+                metadata=metadata,
             )
         else:
             raise WorkerError(f"Unsupported loop-evidence action: {args.action}")

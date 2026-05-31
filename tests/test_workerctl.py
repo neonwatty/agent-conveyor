@@ -3310,6 +3310,13 @@ class DispatchTests(unittest.TestCase):
             conn.commit()
 
             for evidence_type in required_before_continue:
+                metadata_json = (
+                    '{"failure_mode":"visual loop could continue without proof",'
+                    '"check":"inspect required evidence receipts",'
+                    '"result":"structured adversarial proof recorded"}'
+                    if evidence_type == "adversarial_check"
+                    else '{"status":"pass"}'
+                )
                 args = argparse.Namespace(
                     action="add",
                     artifact_path=f"/tmp/{evidence_type}.json",
@@ -3318,7 +3325,7 @@ class DispatchTests(unittest.TestCase):
                     iteration=1,
                     json=True,
                     loop_run=loop_run_id,
-                    metadata_json='{"status":"pass"}',
+                    metadata_json=metadata_json,
                     path=str(db_path),
                     proof=f"{evidence_type} proof",
                     source="manager_inferred",
@@ -5429,6 +5436,64 @@ class CliTests(unittest.TestCase):
                     self.assertEqual(proc.returncode, 1)
                     self.assertIn(expected_error, proc.stderr)
                     self.assertNotIn("Traceback", proc.stderr)
+
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                criteria = worker_db.acceptance_criteria_for_task(conn, task_id=task_id)
+                criterion_events = conn.execute(
+                    "select type from events where task_id = ? and type like 'acceptance_criterion_%'",
+                    (task_id,),
+                ).fetchall()
+            self.assertEqual(criteria, [])
+            self.assertEqual(criterion_events, [])
+
+    def test_loop_evidence_add_rejects_adversarial_check_without_structured_metadata(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                task_id = worker_db.create_task(
+                    conn,
+                    name="generic-adversarial-task",
+                    goal="Reject generic adversarial evidence without proof fields.",
+                )
+                run_id = worker_db.create_ralph_loop_run(
+                    conn,
+                    task_id=task_id,
+                    max_iterations=2,
+                    current_iteration=1,
+                    required_before_continue=["adversarial_check"],
+                )
+                conn.commit()
+
+            proc = self.run_workerctl(
+                "loop-evidence",
+                "add",
+                "generic-adversarial-task",
+                "--loop-run",
+                run_id,
+                "--iteration",
+                "1",
+                "--evidence-type",
+                "adversarial_check",
+                "--metadata-json",
+                "{}",
+                "--path",
+                str(db_path),
+            )
+
+            self.assertEqual(proc.returncode, 1)
+            self.assertIn("--failure-mode must be non-empty", proc.stderr)
+            self.assertNotIn("Traceback", proc.stderr)
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                criteria = worker_db.acceptance_criteria_for_task(conn, task_id=task_id)
+                criterion_events = conn.execute(
+                    "select type from events where task_id = ? and type like 'acceptance_criterion_%'",
+                    (task_id,),
+                ).fetchall()
+            self.assertEqual(criteria, [])
+            self.assertEqual(criterion_events, [])
 
     def test_ralph_loop_presets_cli_creates_policy_run(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -17089,6 +17154,8 @@ class ManagerBootstrapPromptTests(unittest.TestCase):
         self.assertIn("scripts/workerctl loop-templates --show visual_diff_loop --json", qa_doc)
         self.assertNotIn('loop-templates --list --json --path "$WORKERCTL_DB"', qa_doc)
         self.assertNotIn('loop-templates --show visual_diff_loop --json --path "$WORKERCTL_DB"', qa_doc)
+        self.assertIn("loop-evidence adversarial-check qa-general-loop-template", qa_doc)
+        self.assertNotIn("--evidence-type adversarial_check", qa_doc)
 
     def test_general_loop_template_documented_setup_smoke_blocks_missing_evidence(self):
         with tempfile.TemporaryDirectory() as tmpdir:

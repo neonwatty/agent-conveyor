@@ -162,11 +162,12 @@ scripts/workerctl loop-evidence visual-diff qa-general-loop-template \
   --correlation-id visual-loop-report \
   --path "$WORKERCTL_DB"
 
-scripts/workerctl loop-evidence add qa-general-loop-template \
+scripts/workerctl loop-evidence adversarial-check qa-general-loop-template \
   --loop-run "$RUN_ID" \
   --iteration 1 \
-  --evidence-type adversarial_check \
-  --metadata-json "{\"failure_mode\":\"visual pass still hides a regression after diff artifacts are present\",\"check\":\"inspect visual diff report and candidate screenshot\",\"result\":\"report and screenshot match the accepted threshold with no unresolved blocker\"}" \
+  --failure-mode "visual pass still hides a regression after diff artifacts are present" \
+  --check "inspect visual diff report and candidate screenshot" \
+  --result "report and screenshot match the accepted threshold with no unresolved blocker" \
   --correlation-id visual-loop-adversarial \
   --path "$WORKERCTL_DB"
 ```
@@ -193,8 +194,8 @@ Acceptance criteria:
 - `loop-evidence visual-diff` records `visual_diff_report` and marks
   `diff_below_threshold` satisfied only when the computed
   `diff_score <= threshold`.
-- `loop-evidence add` records `adversarial_check` with `failure_mode`, `check`,
-  and `result` metadata before the retry is allowed.
+- `loop-evidence adversarial-check` records `adversarial_check` with
+  `failure_mode`, `check`, and `result` metadata before the retry is allowed.
 - Routed notification has `signal_type=continue_iteration`.
 - Worker inbox consumption returns the visual iteration message.
 - Telemetry includes `dispatch_inbox_consumed`.
