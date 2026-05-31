@@ -4479,6 +4479,8 @@ class CliTests(unittest.TestCase):
             ("--list", "--max-iterations", "4"),
             ("--show", "visual_diff_loop", "--current-iteration", "1"),
             ("--show", "visual_diff_loop", "--seed-prompt-sha256", "visual123"),
+            ("--list", "--path", "/tmp/workerctl.db"),
+            ("--show", "visual_diff_loop", "--path", "/tmp/workerctl.db"),
         ]
 
         for case in cases:
@@ -4496,6 +4498,8 @@ class CliTests(unittest.TestCase):
             ("--list", "--max-iterations", "4"),
             ("--show", "visual_diff_loop", "--current-iteration", "1"),
             ("--show", "visual_diff_loop", "--seed-prompt-sha256", "visual123"),
+            ("--list", "--path", "/tmp/workerctl.db"),
+            ("--show", "visual_diff_loop", "--path", "/tmp/workerctl.db"),
         ]
 
         for case in cases:

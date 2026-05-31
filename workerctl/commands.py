@@ -1916,6 +1916,7 @@ def _reject_loop_create_only_options(
         ("max_iterations", "--max-iterations"),
         ("current_iteration", "--current-iteration"),
         ("seed_prompt_sha256", "--seed-prompt-sha256"),
+        ("path", "--path"),
     ]
     for attr, flag in create_only_options:
         if getattr(args, attr, None) is not None:
