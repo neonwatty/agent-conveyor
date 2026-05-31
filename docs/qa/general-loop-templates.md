@@ -129,10 +129,33 @@ Acceptance criteria:
 Record visual evidence as satisfied criteria:
 
 ```bash
-scripts/workerctl criteria qa-general-loop-template --add --criterion "Reference artifact recorded" --source manager_inferred --status satisfied --proof "/tmp/reference.png" --evidence-json "{\"ralph_loop_run_id\":\"$RUN_ID\",\"iteration\":1,\"evidence_type\":\"reference_artifact\",\"status\":\"pass\",\"artifact_path\":\"/tmp/reference.png\",\"correlation_id\":\"visual-loop-reference\"}" --path "$WORKERCTL_DB"
-scripts/workerctl criteria qa-general-loop-template --add --criterion "Candidate screenshot recorded" --source manager_inferred --status satisfied --proof "/tmp/candidate.png" --evidence-json "{\"ralph_loop_run_id\":\"$RUN_ID\",\"iteration\":1,\"evidence_type\":\"candidate_screenshot\",\"status\":\"pass\",\"artifact_path\":\"/tmp/candidate.png\",\"viewport\":\"1440x900\",\"correlation_id\":\"visual-loop-candidate\"}" --path "$WORKERCTL_DB"
-scripts/workerctl criteria qa-general-loop-template --add --criterion "Visual diff report recorded" --source manager_inferred --status satisfied --proof "/tmp/visual-diff.json" --evidence-json "{\"ralph_loop_run_id\":\"$RUN_ID\",\"iteration\":1,\"evidence_type\":\"visual_diff_report\",\"status\":\"pass\",\"artifact_path\":\"/tmp/visual-diff.json\",\"diff_score\":0.012,\"threshold\":0.02,\"correlation_id\":\"visual-loop-report\"}" --path "$WORKERCTL_DB"
-scripts/workerctl criteria qa-general-loop-template --add --criterion "Visual diff is below threshold" --source manager_inferred --status satisfied --proof "diff score 0.012 <= threshold 0.02" --evidence-json "{\"ralph_loop_run_id\":\"$RUN_ID\",\"iteration\":1,\"evidence_type\":\"diff_below_threshold\",\"status\":\"pass\",\"diff_score\":0.012,\"threshold\":0.02,\"correlation_id\":\"visual-loop-threshold\"}" --path "$WORKERCTL_DB"
+scripts/workerctl loop-evidence add qa-general-loop-template \
+  --loop-run "$RUN_ID" \
+  --iteration 1 \
+  --evidence-type reference_artifact \
+  --artifact-path /tmp/reference.png \
+  --correlation-id visual-loop-reference \
+  --path "$WORKERCTL_DB"
+
+scripts/workerctl loop-evidence add qa-general-loop-template \
+  --loop-run "$RUN_ID" \
+  --iteration 1 \
+  --evidence-type candidate_screenshot \
+  --artifact-path /tmp/candidate.png \
+  --metadata-json "{\"viewport\":\"1440x900\"}" \
+  --correlation-id visual-loop-candidate \
+  --path "$WORKERCTL_DB"
+
+scripts/workerctl loop-evidence visual-diff qa-general-loop-template \
+  --loop-run "$RUN_ID" \
+  --iteration 1 \
+  --reference /tmp/reference.png \
+  --candidate /tmp/candidate.png \
+  --threshold 0.02 \
+  --diff-output /tmp/visual-diff.png \
+  --report-output /tmp/visual-diff.json \
+  --correlation-id visual-loop-report \
+  --path "$WORKERCTL_DB"
 ```
 
 Queue and dispatch a fresh retry:
@@ -154,6 +177,9 @@ scripts/workerctl telemetry --task qa-general-loop-template --event-type dispatc
 Acceptance criteria:
 
 - Dispatch result includes `state=pull_required` for a non-tmux worker.
+- `loop-evidence visual-diff` records `visual_diff_report` and marks
+  `diff_below_threshold` satisfied only when the computed
+  `diff_score <= threshold`.
 - Routed notification has `signal_type=continue_iteration`.
 - Worker inbox consumption returns the visual iteration message.
 - Telemetry includes `dispatch_inbox_consumed`.

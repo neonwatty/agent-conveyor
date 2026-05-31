@@ -8,6 +8,7 @@ import os
 import shlex
 import shutil
 import sqlite3
+import struct
 import subprocess
 import sys
 import tempfile
@@ -15,6 +16,7 @@ import threading
 import time
 import unittest
 import zipfile
+import zlib
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -1500,6 +1502,22 @@ class DispatchTests(unittest.TestCase):
             seed_prompt_sha256=metadata.get("seed_prompt_sha256"),
             preset=metadata.get("preset"),
             metadata=metadata,
+        )
+
+    def write_test_png(self, path: Path, pixels: list[tuple[int, int, int, int]]) -> None:
+        width = len(pixels)
+        height = 1
+
+        def chunk(kind: bytes, payload: bytes) -> bytes:
+            checksum = zlib.crc32(kind + payload) & 0xFFFFFFFF
+            return struct.pack(">I", len(payload)) + kind + payload + struct.pack(">I", checksum)
+
+        raw = b"\x00" + b"".join(bytes(pixel) for pixel in pixels)
+        path.write_bytes(
+            b"\x89PNG\r\n\x1a\n"
+            + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(raw))
+            + chunk(b"IEND", b"")
         )
 
     def insert_completion(
@@ -3189,6 +3207,489 @@ class DispatchTests(unittest.TestCase):
             self.assertEqual(notification["payload"]["ralph_loop"]["required_before_continue"], required_before_continue)
             self.assertEqual(consumed["payload"]["message"], "Run visual iteration 2.")
             send.assert_not_called()
+
+    def test_loop_evidence_add_records_run_qualified_receipts_for_dispatch(self):
+        required_before_continue = [
+            "reference_artifact",
+            "candidate_screenshot",
+            "visual_diff_report",
+            "diff_below_threshold",
+        ]
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn, db_path = self.open_db(tmpdir)
+            worker_id, _manager_id = self.setup_bound_task(conn)
+            conn.execute("update sessions set tmux_session = null where id = ?", (worker_id,))
+            loop_run_id = self.create_visual_diff_template_loop_run(conn)
+            conn.commit()
+
+            for evidence_type in required_before_continue:
+                args = argparse.Namespace(
+                    action="add",
+                    artifact_path=f"/tmp/{evidence_type}.json",
+                    correlation_id=f"visual-loop-{evidence_type}",
+                    evidence_type=evidence_type,
+                    iteration=1,
+                    json=True,
+                    loop_run=loop_run_id,
+                    metadata_json='{"status":"pass"}',
+                    path=str(db_path),
+                    proof=f"{evidence_type} proof",
+                    source="manager_inferred",
+                    status="pass",
+                    task="dispatch-task",
+                )
+                with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                    commands.command_loop_evidence(args)
+                payload = json.loads(stdout.getvalue())
+                self.assertEqual(payload["evidence"]["ralph_loop_run_id"], loop_run_id)
+                self.assertEqual(payload["evidence"]["evidence_type"], evidence_type)
+                self.assertIn(loop_run_id, payload["criterion"]["criterion"])
+
+            command_id = worker_db.enqueue_continue_iteration(
+                conn,
+                task_id="task-dispatch",
+                message="Run visual iteration 2.",
+                loop_run_id=loop_run_id,
+                requested_iteration=2,
+                correlation_id="visual-loop-evidence-helper",
+            )
+            conn.commit()
+
+            dispatch_args = argparse.Namespace(
+                dispatcher_id="dispatch-test",
+                dry_run=False,
+                json=True,
+                limit=10,
+                once=True,
+                path=str(db_path),
+                type="continue_iteration",
+                watch=False,
+            )
+            with mock.patch.object(worker_tmux, "send_text_to_session") as send:
+                with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                    commands.command_dispatch(dispatch_args)
+
+            processed = json.loads(stdout.getvalue())["processed"][0]
+            command_row = conn.execute("select state from commands where id = ?", (command_id,)).fetchone()
+
+            self.assertEqual(processed["state"], "pull_required")
+            self.assertEqual(command_row["state"], "succeeded")
+            send.assert_not_called()
+
+    def test_loop_evidence_add_rejects_failed_receipt_so_dispatch_stays_blocked(self):
+        required_before_continue = ["coverage_checked"]
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn, db_path = self.open_db(tmpdir)
+            worker_id, _manager_id = self.setup_bound_task(conn)
+            conn.execute("update sessions set tmux_session = null where id = ?", (worker_id,))
+            loop_run_id = worker_db.create_ralph_loop_run(
+                conn,
+                task_id="task-dispatch",
+                name="coverage-loop",
+                max_iterations=3,
+                current_iteration=1,
+                cleanup_policy="clear",
+                stop_conditions=["max_iterations"],
+                required_before_continue=required_before_continue,
+                metadata={"allowed_actions": ["continue_iteration"]},
+            )
+            conn.commit()
+
+            args = argparse.Namespace(
+                action="add",
+                artifact_path="/tmp/coverage.json",
+                correlation_id="coverage-red",
+                evidence_type="coverage_checked",
+                iteration=1,
+                json=True,
+                loop_run=loop_run_id,
+                metadata_json='{"tests":"failed"}',
+                path=str(db_path),
+                proof="Coverage check failed.",
+                source="manager_inferred",
+                status="fail",
+                task="dispatch-task",
+            )
+            with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                commands.command_loop_evidence(args)
+            payload = json.loads(stdout.getvalue())
+            self.assertEqual(payload["criterion"]["status"], "rejected")
+
+            command_id = worker_db.enqueue_continue_iteration(
+                conn,
+                task_id="task-dispatch",
+                message="Run coverage iteration 2.",
+                loop_run_id=loop_run_id,
+                requested_iteration=2,
+                correlation_id="coverage-blocked",
+            )
+            conn.commit()
+
+            dispatch_args = argparse.Namespace(
+                dispatcher_id="dispatch-test",
+                dry_run=False,
+                json=True,
+                limit=10,
+                once=True,
+                path=str(db_path),
+                type="continue_iteration",
+                watch=False,
+            )
+            with mock.patch.object(worker_tmux, "send_text_to_session") as send:
+                with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                    commands.command_dispatch(dispatch_args)
+
+            processed = json.loads(stdout.getvalue())["processed"][0]
+            command_row = conn.execute("select state, error from commands where id = ?", (command_id,)).fetchone()
+
+            self.assertEqual(processed["state"], "blocked")
+            self.assertEqual(processed["reason"], "missing_coverage_checked_evidence")
+            self.assertEqual(processed["missing_evidence"], ["coverage_checked"])
+            self.assertEqual(command_row["state"], "failed")
+            self.assertIn("missing_coverage_checked_evidence", command_row["error"])
+            send.assert_not_called()
+
+    def test_loop_evidence_add_accepts_native_satisfied_status_as_passing(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn, db_path = self.open_db(tmpdir)
+            self.setup_bound_task(conn)
+            loop_run_id = worker_db.create_ralph_loop_run(
+                conn,
+                task_id="task-dispatch",
+                name="coverage-loop",
+                max_iterations=3,
+                current_iteration=1,
+                cleanup_policy="clear",
+                required_before_continue=["coverage_checked"],
+                stop_conditions=["max_iterations"],
+            )
+            conn.commit()
+
+            args = argparse.Namespace(
+                action="add",
+                artifact_path="/tmp/coverage.json",
+                correlation_id="coverage-satisfied",
+                evidence_type="coverage_checked",
+                iteration=1,
+                json=True,
+                loop_run=loop_run_id,
+                metadata_json=None,
+                path=str(db_path),
+                proof="Coverage check passed.",
+                source="manager_inferred",
+                status="satisfied",
+                task="dispatch-task",
+            )
+            with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                commands.command_loop_evidence(args)
+
+            payload = json.loads(stdout.getvalue())
+            self.assertEqual(payload["criterion"]["status"], "satisfied")
+            self.assertEqual(payload["evidence"]["status"], "satisfied")
+
+    def test_loop_evidence_add_rejects_non_ralph_loop_run(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn, db_path = self.open_db(tmpdir)
+            self.setup_bound_task(conn)
+            ordinary_run_id = worker_db.create_run(
+                conn,
+                task_id="task-dispatch",
+                name="ordinary-run",
+                purpose="telemetry",
+                metadata={"kind": "telemetry"},
+            )
+            conn.commit()
+
+            args = argparse.Namespace(
+                action="add",
+                artifact_path="/tmp/coverage.json",
+                correlation_id="ordinary-run-receipt",
+                evidence_type="coverage_checked",
+                iteration=1,
+                json=True,
+                loop_run=ordinary_run_id,
+                metadata_json=None,
+                path=str(db_path),
+                proof="Should not record.",
+                source="manager_inferred",
+                status="pass",
+                task="dispatch-task",
+            )
+
+            with self.assertRaisesRegex(WorkerError, "is not a Ralph loop run"):
+                commands.command_loop_evidence(args)
+            criteria = worker_db.acceptance_criteria_for_task(conn, task_id="task-dispatch")
+            self.assertEqual(criteria, [])
+
+    def test_loop_evidence_visual_diff_records_report_and_threshold_evidence(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn, db_path = self.open_db(tmpdir)
+            self.setup_bound_task(conn)
+            loop_run_id = self.create_visual_diff_template_loop_run(conn)
+            conn.commit()
+            reference = Path(tmpdir) / "reference.png"
+            candidate = Path(tmpdir) / "candidate.png"
+            diff = Path(tmpdir) / "diff.png"
+            report = Path(tmpdir) / "report.json"
+            self.write_test_png(reference, [(255, 0, 0, 255), (0, 255, 0, 255)])
+            self.write_test_png(candidate, [(255, 0, 0, 255), (0, 0, 255, 255)])
+
+            args = argparse.Namespace(
+                action="visual-diff",
+                candidate=str(candidate),
+                correlation_id="visual-diff-receipt",
+                diff_output=str(diff),
+                iteration=1,
+                json=True,
+                loop_run=loop_run_id,
+                path=str(db_path),
+                reference=str(reference),
+                report_output=str(report),
+                source="manager_inferred",
+                task="dispatch-task",
+                threshold=0.6,
+            )
+            with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                commands.command_loop_evidence(args)
+
+            payload = json.loads(stdout.getvalue())
+            criteria = worker_db.acceptance_criteria_for_task(conn, task_id="task-dispatch", statuses=["satisfied"])
+            evidence_types = [row["evidence"]["evidence_type"] for row in criteria]
+
+            self.assertEqual(payload["diff"]["changed_pixels"], 1)
+            self.assertEqual(payload["diff"]["total_pixels"], 2)
+            self.assertEqual(payload["diff"]["diff_score"], 0.5)
+            self.assertTrue(payload["diff"]["below_threshold"])
+            self.assertTrue(diff.exists())
+            self.assertTrue(report.exists())
+            self.assertIn("visual_diff_report", evidence_types)
+            self.assertIn("diff_below_threshold", evidence_types)
+
+    def test_loop_evidence_visual_diff_omits_threshold_evidence_when_diff_is_too_high(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn, db_path = self.open_db(tmpdir)
+            self.setup_bound_task(conn)
+            loop_run_id = self.create_visual_diff_template_loop_run(conn)
+            conn.commit()
+            reference = Path(tmpdir) / "reference.png"
+            candidate = Path(tmpdir) / "candidate.png"
+            self.write_test_png(reference, [(255, 0, 0, 255), (0, 255, 0, 255)])
+            self.write_test_png(candidate, [(0, 0, 255, 255), (0, 0, 255, 255)])
+
+            args = argparse.Namespace(
+                action="visual-diff",
+                candidate=str(candidate),
+                correlation_id="visual-diff-high",
+                diff_output=None,
+                iteration=1,
+                json=True,
+                loop_run=loop_run_id,
+                path=str(db_path),
+                reference=str(reference),
+                report_output=None,
+                source="manager_inferred",
+                task="dispatch-task",
+                threshold=0.4,
+            )
+            with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                commands.command_loop_evidence(args)
+
+            payload = json.loads(stdout.getvalue())
+            criteria = worker_db.acceptance_criteria_for_task(conn, task_id="task-dispatch", statuses=["satisfied"])
+            evidence_types = [row["evidence"]["evidence_type"] for row in criteria]
+
+            self.assertEqual(payload["diff"]["diff_score"], 1.0)
+            self.assertFalse(payload["diff"]["below_threshold"])
+            self.assertIn("visual_diff_report", evidence_types)
+            self.assertNotIn("diff_below_threshold", evidence_types)
+
+    def test_loop_evidence_visual_diff_rejects_stale_threshold_evidence_on_failed_rerun(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn, db_path = self.open_db(tmpdir)
+            self.setup_bound_task(conn)
+            loop_run_id = self.create_visual_diff_template_loop_run(conn)
+            conn.commit()
+            reference = Path(tmpdir) / "reference.png"
+            passing_candidate = Path(tmpdir) / "passing.png"
+            failing_candidate = Path(tmpdir) / "failing.png"
+            self.write_test_png(reference, [(255, 0, 0, 255), (0, 255, 0, 255)])
+            self.write_test_png(passing_candidate, [(255, 0, 0, 255), (0, 0, 255, 255)])
+            self.write_test_png(failing_candidate, [(0, 0, 255, 255), (0, 0, 255, 255)])
+
+            base_args = dict(
+                action="visual-diff",
+                correlation_id="visual-diff-rerun",
+                diff_output=None,
+                iteration=1,
+                json=True,
+                loop_run=loop_run_id,
+                path=str(db_path),
+                reference=str(reference),
+                report_output=None,
+                source="manager_inferred",
+                task="dispatch-task",
+                threshold=0.6,
+            )
+            with contextlib.redirect_stdout(io.StringIO()):
+                commands.command_loop_evidence(argparse.Namespace(candidate=str(passing_candidate), **base_args))
+            failing_args = dict(base_args)
+            failing_args["source"] = "final_audit"
+            with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                commands.command_loop_evidence(argparse.Namespace(candidate=str(failing_candidate), **failing_args))
+
+            payload = json.loads(stdout.getvalue())
+            all_criteria = worker_db.acceptance_criteria_for_task(conn, task_id="task-dispatch")
+            threshold_rows = [
+                row
+                for row in all_criteria
+                if row["evidence"]["evidence_type"] == "diff_below_threshold"
+            ]
+            satisfied_types = [
+                row["evidence"]["evidence_type"]
+                for row in worker_db.acceptance_criteria_for_task(conn, task_id="task-dispatch", statuses=["satisfied"])
+            ]
+
+            self.assertFalse(payload["diff"]["below_threshold"])
+            self.assertEqual(len(threshold_rows), 1)
+            self.assertEqual(threshold_rows[0]["status"], "rejected")
+            self.assertEqual(threshold_rows[0]["evidence"]["status"], "fail")
+            self.assertNotIn("diff_below_threshold", satisfied_types)
+
+    def test_loop_evidence_visual_diff_rejects_nan_threshold(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn, db_path = self.open_db(tmpdir)
+            self.setup_bound_task(conn)
+            loop_run_id = self.create_visual_diff_template_loop_run(conn)
+            conn.commit()
+            reference = Path(tmpdir) / "reference.png"
+            candidate = Path(tmpdir) / "candidate.png"
+            self.write_test_png(reference, [(255, 0, 0, 255), (0, 255, 0, 255)])
+            self.write_test_png(candidate, [(255, 0, 0, 255), (0, 0, 255, 255)])
+
+            args = argparse.Namespace(
+                action="visual-diff",
+                candidate=str(candidate),
+                correlation_id="visual-diff-nan",
+                diff_output=None,
+                iteration=1,
+                json=True,
+                loop_run=loop_run_id,
+                path=str(db_path),
+                reference=str(reference),
+                report_output=None,
+                source="manager_inferred",
+                task="dispatch-task",
+                threshold=float("nan"),
+            )
+
+            with self.assertRaisesRegex(WorkerError, "--threshold must be between 0 and 1"):
+                commands.command_loop_evidence(args)
+            criteria = worker_db.acceptance_criteria_for_task(conn, task_id="task-dispatch")
+            self.assertEqual(criteria, [])
+
+    def test_loop_evidence_visual_diff_rejects_zero_dimension_png(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn, db_path = self.open_db(tmpdir)
+            self.setup_bound_task(conn)
+            loop_run_id = self.create_visual_diff_template_loop_run(conn)
+            conn.commit()
+            reference = Path(tmpdir) / "reference.png"
+            candidate = Path(tmpdir) / "candidate.png"
+            self.write_test_png(reference, [])
+            self.write_test_png(candidate, [])
+
+            args = argparse.Namespace(
+                action="visual-diff",
+                candidate=str(candidate),
+                correlation_id="visual-diff-empty",
+                diff_output=None,
+                iteration=1,
+                json=True,
+                loop_run=loop_run_id,
+                path=str(db_path),
+                reference=str(reference),
+                report_output=None,
+                source="manager_inferred",
+                task="dispatch-task",
+                threshold=0.0,
+            )
+
+            with self.assertRaisesRegex(WorkerError, "width and height must be positive"):
+                commands.command_loop_evidence(args)
+            criteria = worker_db.acceptance_criteria_for_task(conn, task_id="task-dispatch")
+            self.assertEqual(criteria, [])
+
+    def test_loop_evidence_visual_diff_rejects_missing_png_cleanly(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn, db_path = self.open_db(tmpdir)
+            self.setup_bound_task(conn)
+            loop_run_id = self.create_visual_diff_template_loop_run(conn)
+            conn.commit()
+            reference = Path(tmpdir) / "missing-reference.png"
+            candidate = Path(tmpdir) / "missing-candidate.png"
+
+            args = argparse.Namespace(
+                action="visual-diff",
+                candidate=str(candidate),
+                correlation_id="visual-diff-missing",
+                diff_output=None,
+                iteration=1,
+                json=True,
+                loop_run=loop_run_id,
+                path=str(db_path),
+                reference=str(reference),
+                report_output=None,
+                source="manager_inferred",
+                task="dispatch-task",
+                threshold=0.1,
+            )
+
+            with self.assertRaisesRegex(WorkerError, "unable to read visual diff PNG"):
+                commands.command_loop_evidence(args)
+            criteria = worker_db.acceptance_criteria_for_task(conn, task_id="task-dispatch")
+            self.assertEqual(criteria, [])
+
+    def test_loop_evidence_visual_diff_validates_run_before_writing_artifacts(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn, db_path = self.open_db(tmpdir)
+            self.setup_bound_task(conn)
+            ordinary_run_id = worker_db.create_run(
+                conn,
+                task_id="task-dispatch",
+                name="ordinary-visual-run",
+                purpose="telemetry",
+                metadata={"kind": "telemetry"},
+            )
+            conn.commit()
+            reference = Path(tmpdir) / "reference.png"
+            candidate = Path(tmpdir) / "candidate.png"
+            diff = Path(tmpdir) / "diff.png"
+            report = Path(tmpdir) / "report.json"
+            self.write_test_png(reference, [(255, 0, 0, 255), (0, 255, 0, 255)])
+            self.write_test_png(candidate, [(255, 0, 0, 255), (0, 0, 255, 255)])
+
+            args = argparse.Namespace(
+                action="visual-diff",
+                candidate=str(candidate),
+                correlation_id="visual-diff-bad-run",
+                diff_output=str(diff),
+                iteration=1,
+                json=True,
+                loop_run=ordinary_run_id,
+                path=str(db_path),
+                reference=str(reference),
+                report_output=str(report),
+                source="manager_inferred",
+                task="dispatch-task",
+                threshold=0.6,
+            )
+
+            with self.assertRaisesRegex(WorkerError, "is not a Ralph loop run"):
+                commands.command_loop_evidence(args)
+            self.assertFalse(diff.exists())
+            self.assertFalse(report.exists())
+            criteria = worker_db.acceptance_criteria_for_task(conn, task_id="task-dispatch")
+            self.assertEqual(criteria, [])
 
     def test_replay_exposes_blocked_continue_iteration_without_worker_notification(self):
         with tempfile.TemporaryDirectory() as tmpdir:

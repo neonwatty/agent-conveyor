@@ -44,6 +44,7 @@ from workerctl.commands import (
     command_idle_check,
     command_interrupt,
     command_list,
+    command_loop_evidence,
     command_mutation_audit,
     command_nudge,
     command_loop_templates,
@@ -324,6 +325,44 @@ def build_parser() -> argparse.ArgumentParser:
     loop_templates.add_argument("--json", action="store_true", help="Print stable JSON output.")
     loop_templates.add_argument("--path", help="Override the workerctl database path.")
     loop_templates.set_defaults(func=command_loop_templates)
+
+    loop_evidence = subparsers.add_parser(
+        "loop-evidence",
+        help="Record Ralph-loop evidence receipts, including visual diff verifier receipts.",
+    )
+    loop_evidence_actions = loop_evidence.add_subparsers(dest="action", required=True)
+    loop_evidence_add = loop_evidence_actions.add_parser("add", help="Record one run-qualified evidence receipt.")
+    loop_evidence_add.add_argument("task", help="Task name or ID.")
+    loop_evidence_add.add_argument("--loop-run", required=True, help="Ralph-loop run id or name.")
+    loop_evidence_add.add_argument("--iteration", required=True, type=int, help="Iteration the evidence proves.")
+    loop_evidence_add.add_argument("--evidence-type", required=True, help="Evidence type required by the loop policy.")
+    loop_evidence_add.add_argument("--status", default="pass", help="Evidence status stored in the receipt.")
+    loop_evidence_add.add_argument("--source", default="manager_inferred", choices=("manager_inferred", "worker_proposed", "user_requested", "final_audit"))
+    loop_evidence_add.add_argument("--proof", help="Human-readable proof text for the criteria ledger.")
+    loop_evidence_add.add_argument("--artifact-path", help="Optional path to the artifact backing this evidence.")
+    loop_evidence_add.add_argument("--correlation-id", help="Optional correlation id for replay and dashboard linkage.")
+    loop_evidence_add.add_argument("--metadata-json", help="Optional JSON object merged into the evidence receipt.")
+    loop_evidence_add.add_argument("--json", action="store_true", help="Print stable JSON output.")
+    loop_evidence_add.add_argument("--path", help="Override the workerctl database path.")
+    loop_evidence_add.set_defaults(func=command_loop_evidence)
+
+    loop_evidence_visual = loop_evidence_actions.add_parser(
+        "visual-diff",
+        help="Compute a PNG screenshot diff and record visual_diff_report plus threshold evidence.",
+    )
+    loop_evidence_visual.add_argument("task", help="Task name or ID.")
+    loop_evidence_visual.add_argument("--loop-run", required=True, help="Ralph-loop run id or name.")
+    loop_evidence_visual.add_argument("--iteration", required=True, type=int, help="Iteration the diff proves.")
+    loop_evidence_visual.add_argument("--reference", required=True, help="Reference PNG screenshot.")
+    loop_evidence_visual.add_argument("--candidate", required=True, help="Candidate PNG screenshot.")
+    loop_evidence_visual.add_argument("--threshold", required=True, type=float, help="Maximum allowed changed-pixel ratio, between 0 and 1.")
+    loop_evidence_visual.add_argument("--diff-output", help="Optional PNG path for the generated diff mask.")
+    loop_evidence_visual.add_argument("--report-output", help="Optional JSON report path.")
+    loop_evidence_visual.add_argument("--source", default="manager_inferred", choices=("manager_inferred", "worker_proposed", "user_requested", "final_audit"))
+    loop_evidence_visual.add_argument("--correlation-id", help="Optional correlation id for replay and dashboard linkage.")
+    loop_evidence_visual.add_argument("--json", action="store_true", help="Print stable JSON output.")
+    loop_evidence_visual.add_argument("--path", help="Override the workerctl database path.")
+    loop_evidence_visual.set_defaults(func=command_loop_evidence)
 
     ralph_loop_presets = subparsers.add_parser(
         "ralph-loop-presets",

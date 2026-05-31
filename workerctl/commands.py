@@ -1711,12 +1711,12 @@ def command_qa_plan(args: argparse.Namespace) -> int:
                 "Run the missing-evidence browser drill in a disposable task: create a Ralph-loop run with max_iterations=3, current_iteration=1, and required_before_continue=[\"ci_green\"], record a manager decision requesting iteration 2, then queue it with workerctl enqueue-continue-iteration <task> --loop-run <run-id> --requested-iteration 2 --message \"run iteration 2\" --manager-decision-id <id> --correlation-id ralph-loop-missing-ci.",
                 "Run workerctl dispatch --once --type continue_iteration --dispatcher-id qa-ralph-loop --json and verify the processed item returns state=blocked, reason=missing_ci_green_evidence, missing_evidence=[ci_green], delivered=false, target_worker_notified=false, current_iteration=1, max_iterations=3, requested_iteration=2, and no routed notification id.",
                 "Open the dashboard for the bound task and verify the Dispatch panel shows continue_iteration, missing_ci_green_evidence, missing ci_green, iteration 1/3, requested 2, 0 notifications, Inbox 0, and Pull inbox 0 for correlation ralph-loop-missing-ci.",
-                "Record ci_green as satisfied criterion evidence with ralph_loop_run_id=<run-id>, iteration=1, evidence_type=ci_green, status=green, and correlation_id=ralph-loop-ci-green; then enqueue a fresh continue_iteration command for requested iteration 2 with correlation ralph-loop-ci-allowed.",
+                "Record ci_green as run-qualified evidence with workerctl loop-evidence add <task> --loop-run <run-id> --iteration 1 --evidence-type ci_green --status green --correlation-id ralph-loop-ci-green; then enqueue a fresh continue_iteration command for requested iteration 2 with correlation ralph-loop-ci-allowed.",
                 "Run workerctl dispatch --once --type continue_iteration --dispatcher-id qa-ralph-loop --json again and verify the fresh retry is delivered, the routed notification signal_type is continue_iteration, and worker-inbox contains the iteration 2 message.",
                 "Run the preset evidence browser drill in a disposable task: create a preset-backed run with workerctl ralph-loop-presets --create-run <task> --preset pr_ci_merge_loop --name qa-ralph-loop-preset --max-iterations 3 --current-iteration 1 --seed-prompt-sha256 <seed-sha256> --json, then queue requested iteration 2 with correlation ralph-loop-preset-missing.",
                 "Run workerctl dispatch --once --type continue_iteration --dispatcher-id qa-ralph-loop --json and verify the processed item returns state=blocked, reason=missing_required_evidence, missing_evidence=[pr_url,ci_green,merge], delivered=false, target_worker_notified=false, current_iteration=1, max_iterations=3, requested_iteration=2, and no routed notification id.",
                 "Open the dashboard for the bound task and verify the Dispatch panel shows continue_iteration, missing_required_evidence, missing pr_url, ci_green, merge, iteration 1/3, requested 2, 0 notifications, Inbox 0, and Pull inbox 0 for correlation ralph-loop-preset-missing.",
-                "Record pr_url, ci_green, and merge as satisfied criterion evidence with ralph_loop_run_id=<run-id>, iteration=1, matching evidence_type values, and correlation receipts; then enqueue a fresh continue_iteration command for requested iteration 2 with correlation ralph-loop-preset-allowed.",
+                "Record pr_url, ci_green, and merge as run-qualified evidence with workerctl loop-evidence add <task> --loop-run <run-id> --iteration 1 --evidence-type <type> and matching correlation receipts; then enqueue a fresh continue_iteration command for requested iteration 2 with correlation ralph-loop-preset-allowed.",
                 "Run workerctl dispatch --once --type continue_iteration --dispatcher-id qa-ralph-loop --json again and verify the fresh preset-backed retry is delivered, the routed notification signal_type is continue_iteration, and worker-inbox contains the iteration 2 message.",
             ],
         },
@@ -3658,6 +3658,192 @@ def _acceptance_criterion_event_payload(
             }
         )
     return payload
+
+
+def _loop_evidence_criterion(run_id: str, iteration: int, evidence_type: str) -> str:
+    return f"Ralph loop {run_id} iteration {iteration} {evidence_type} evidence"
+
+
+def _loop_evidence_criterion_status(status: str) -> str:
+    normalized = status.strip().lower()
+    if normalized in {"pass", "passed", "success", "succeeded", "ok", "green", "satisfied"}:
+        return "satisfied"
+    return "rejected"
+
+
+def _loop_evidence_run_for_task(conn: Any, *, task: dict[str, Any], loop_run: str) -> dict[str, Any]:
+    from workerctl import db as worker_db
+
+    run = worker_db.ralph_loop_run(conn, run=loop_run)
+    if run["task_id"] != task["id"]:
+        raise WorkerError(f"loop run {loop_run!r} does not belong to task {task['name']!r}")
+    return run
+
+
+def _record_loop_evidence(
+    conn: Any,
+    *,
+    task: dict[str, Any],
+    loop_run: str,
+    iteration: int,
+    evidence_type: str,
+    status: str,
+    source: str,
+    proof: str | None,
+    artifact_path: str | None,
+    correlation_id: str | None,
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    from workerctl import db as worker_db
+
+    if iteration < 1:
+        raise WorkerError("--iteration must be at least 1")
+    evidence_type = evidence_type.strip()
+    if not evidence_type:
+        raise WorkerError("--evidence-type must be non-empty")
+    criterion_status = _loop_evidence_criterion_status(status)
+    run = _loop_evidence_run_for_task(conn, task=task, loop_run=loop_run)
+    evidence = dict(metadata or {})
+    evidence.update(
+        {
+            "evidence_type": evidence_type,
+            "iteration": iteration,
+            "ralph_loop_run_id": run["id"],
+            "status": status,
+        }
+    )
+    if artifact_path:
+        evidence["artifact_path"] = str(artifact_path)
+    if correlation_id:
+        evidence["correlation_id"] = correlation_id
+    criterion_text = _loop_evidence_criterion(run["id"], iteration, evidence_type)
+    existing_criteria = worker_db.acceptance_criteria_for_task(conn, task_id=task["id"])
+    matching_criteria = [row for row in existing_criteria if row["criterion"] == criterion_text]
+    if not matching_criteria:
+        criterion_id = worker_db.insert_acceptance_criterion(
+            conn,
+            task_id=task["id"],
+            criterion=criterion_text,
+            status=criterion_status,
+            source=source,
+            proof=proof or f"{evidence_type} evidence recorded for Ralph loop {run['id']} iteration {iteration}.",
+            evidence=evidence,
+        )
+        criteria = worker_db.acceptance_criteria_for_task(conn, task_id=task["id"])
+        criterion = next(row for row in criteria if row["id"] == criterion_id)
+        worker_db.insert_event(
+            conn,
+            "acceptance_criterion_added",
+            actor="workerctl",
+            task_id=task["id"],
+            payload=_acceptance_criterion_event_payload(
+                criterion=criterion,
+                task_id=task["id"],
+                created=True,
+            ),
+        )
+    else:
+        criterion = None
+        for existing in matching_criteria:
+            criterion = worker_db.update_acceptance_criterion(
+                conn,
+                criterion_id=existing["id"],
+                status=criterion_status,
+                proof=proof or existing["proof"],
+                evidence=evidence,
+            )
+            worker_db.insert_event(
+                conn,
+                "acceptance_criterion_updated",
+                actor="workerctl",
+                task_id=task["id"],
+                payload=_acceptance_criterion_event_payload(
+                    criterion=criterion,
+                    task_id=task["id"],
+                    previous=existing,
+                ),
+            )
+        assert criterion is not None
+    return {"criterion": criterion, "evidence": evidence, "run": run}
+
+
+def command_loop_evidence(args: argparse.Namespace) -> int:
+    from workerctl import db as worker_db
+    from workerctl.visual_diff import compute_visual_diff
+
+    db_path = Path(args.path).expanduser().resolve() if args.path else None
+    with worker_db.connect(db_path) as conn:
+        worker_db.initialize_database(conn)
+        task = worker_db.task_row(conn, task=args.task)
+        _begin_criteria_mutation(conn)
+        if args.action == "add":
+            metadata = _json_arg(args.metadata_json, flag="--metadata-json")
+            result = _record_loop_evidence(
+                conn,
+                task=task,
+                loop_run=args.loop_run,
+                iteration=args.iteration,
+                evidence_type=args.evidence_type,
+                status=args.status,
+                source=args.source,
+                proof=args.proof,
+                artifact_path=args.artifact_path,
+                correlation_id=args.correlation_id,
+                metadata=metadata,
+            )
+        elif args.action in {"visual_diff", "visual-diff"}:
+            _loop_evidence_run_for_task(conn, task=task, loop_run=args.loop_run)
+            report = compute_visual_diff(
+                reference_path=Path(args.reference).expanduser().resolve(),
+                candidate_path=Path(args.candidate).expanduser().resolve(),
+                threshold=args.threshold,
+                diff_output=Path(args.diff_output).expanduser().resolve() if args.diff_output else None,
+                report_output=Path(args.report_output).expanduser().resolve() if args.report_output else None,
+            )
+            report_result = _record_loop_evidence(
+                conn,
+                task=task,
+                loop_run=args.loop_run,
+                iteration=args.iteration,
+                evidence_type="visual_diff_report",
+                status="pass",
+                source=args.source,
+                proof="Visual diff report recorded.",
+                artifact_path=args.report_output,
+                correlation_id=args.correlation_id,
+                metadata=report,
+            )
+            threshold_result = None
+            threshold_status = "pass" if report["below_threshold"] else "fail"
+            threshold_proof = (
+                f"Visual diff score {report['diff_score']:.6g} is at or below threshold {report['threshold']:.6g}."
+                if report["below_threshold"]
+                else f"Visual diff score {report['diff_score']:.6g} exceeds threshold {report['threshold']:.6g}."
+            )
+            threshold_result = _record_loop_evidence(
+                conn,
+                task=task,
+                loop_run=args.loop_run,
+                iteration=args.iteration,
+                evidence_type="diff_below_threshold",
+                status=threshold_status,
+                source=args.source,
+                proof=threshold_proof,
+                artifact_path=args.report_output,
+                correlation_id=args.correlation_id,
+                metadata=report,
+            )
+            result = {
+                "criterion": report_result["criterion"],
+                "diff": report,
+                "evidence": report_result["evidence"],
+                "threshold_criterion": threshold_result["criterion"] if threshold_result else None,
+            }
+        else:
+            raise WorkerError(f"Unsupported loop-evidence action: {args.action}")
+        conn.commit()
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0
 
 
 def command_criteria(args: argparse.Namespace) -> int:

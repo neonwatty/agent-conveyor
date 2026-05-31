@@ -38,6 +38,7 @@ Run this after unit tests and `scripts/live-smoke-repeat 3` pass.
 - [ ] `scripts/workerctl qa-plan ralph-loop` includes the preset evidence drill: `ralph-loop-presets --list`, `ralph-loop-presets --create-run`, `pr_ci_merge_loop`, `missing_required_evidence`, `missing pr_url, ci_green, merge`, `0 notifications`, `Inbox 0`, `Pull inbox 0`, and delivered retry after `pr_url`, `ci_green`, and `merge` criterion evidence is recorded.
 - [ ] `scripts/workerctl loop-templates --list --json` includes `visual_diff_loop`, `test_coverage_loop`, `pr_ci_merge_loop`, `build_then_clear`, and `compact_then_continue`.
 - [ ] Generic loop template QA blocks `visual_diff_loop` continuation with `missing_required_evidence`, `0 notifications`, `Inbox 0`, and `Pull inbox 0` before visual evidence exists.
+- [ ] Generic loop template QA records run-qualified receipts with `scripts/workerctl loop-evidence add` and computes visual receipts with `scripts/workerctl loop-evidence visual-diff`.
 - [ ] Generic loop template QA delivers a fresh `continue_iteration` after `reference_artifact`, `candidate_screenshot`, `visual_diff_report`, and `diff_below_threshold` evidence are recorded.
 - [ ] Generic loop template QA consumes the delivered worker inbox item with `--consume-next --wait` and records `dispatch_inbox_consumed` telemetry.
 - [ ] `scripts/workerctl dispatch --watch --watch-iterations 2 --interval 0 --dispatcher-id qa-dispatch-watch --dry-run --json` emits bounded watch heartbeat telemetry with iteration, processed count, and dry-run fields.

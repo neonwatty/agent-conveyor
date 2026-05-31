@@ -574,6 +574,12 @@ tmux attach -t codex-live-test
   `visual_diff_loop` template requires `reference_artifact`,
   `candidate_screenshot`, `visual_diff_report`, and `diff_below_threshold`
   evidence before a manager-requested next visual pass can reach the worker.
+- `loop-evidence add TASK --loop-run RUN --iteration N --evidence-type TYPE` —
+  Record a run-qualified evidence receipt for a loop policy. Use
+  `loop-evidence visual-diff` to compare PNG screenshots, write an optional
+  diff/report artifact, and record `visual_diff_report` plus
+  `diff_below_threshold` as satisfied only when the computed score is within
+  threshold.
 - `ralph-loop-presets --list|--show PRESET|--create-run TASK --preset PRESET` —
   List saved Ralph-loop guardrail templates or create a preset-backed
   `ralph_loop` policy run.
@@ -602,6 +608,7 @@ scripts/workerctl qa-plan dispatch-completion
 scripts/workerctl qa-plan ralph-loop
 scripts/workerctl loop-templates --list --json
 scripts/workerctl loop-templates --show visual_diff_loop --json
+scripts/workerctl loop-evidence visual-diff qa-task --loop-run "$RUN_ID" --iteration 1 --reference reference.png --candidate candidate.png --threshold 0.02 --report-output visual-diff.json --diff-output visual-diff.png
 scripts/workerctl ralph-loop-presets --list --json
 ```
 
