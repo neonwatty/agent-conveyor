@@ -318,7 +318,6 @@ def build_parser() -> argparse.ArgumentParser:
     loop_templates.add_argument(
         "--current-iteration",
         type=int,
-        default=0,
         help="Current completed iteration when creating a run.",
     )
     loop_templates.add_argument("--seed-prompt-sha256", help="Seed prompt hash to store with the policy run.")
@@ -344,7 +343,6 @@ def build_parser() -> argparse.ArgumentParser:
     ralph_loop_presets.add_argument(
         "--current-iteration",
         type=int,
-        default=0,
         help="Current completed iteration when creating a run.",
     )
     ralph_loop_presets.add_argument("--seed-prompt-sha256", help="Seed prompt hash to store with the policy run.")

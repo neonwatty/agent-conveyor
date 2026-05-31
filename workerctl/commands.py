@@ -1904,7 +1904,31 @@ def _create_loop_policy_run(
         return db_run_row(conn, run=run_id)
 
 
+def _reject_loop_create_only_options(
+    args: argparse.Namespace,
+    *,
+    selector_attr: str,
+    selector_flag: str,
+) -> None:
+    create_only_options = [
+        (selector_attr, selector_flag),
+        ("name", "--name"),
+        ("max_iterations", "--max-iterations"),
+        ("current_iteration", "--current-iteration"),
+        ("seed_prompt_sha256", "--seed-prompt-sha256"),
+    ]
+    for attr, flag in create_only_options:
+        if getattr(args, attr, None) is not None:
+            raise WorkerError(f"{flag} is only valid with --create-run")
+
+
 def command_loop_templates(args: argparse.Namespace) -> int:
+    if not args.create_run:
+        _reject_loop_create_only_options(
+            args,
+            selector_attr="template",
+            selector_flag="--template",
+        )
     if args.list:
         print(json.dumps({"templates": list_loop_templates()}, indent=2, sort_keys=True))
         return 0
@@ -1918,7 +1942,7 @@ def command_loop_templates(args: argparse.Namespace) -> int:
         metadata = loop_template_metadata(
             args.template,
             max_iterations=args.max_iterations,
-            current_iteration=args.current_iteration,
+            current_iteration=0 if args.current_iteration is None else args.current_iteration,
             seed_prompt_sha256=args.seed_prompt_sha256,
         )
         result = _create_loop_policy_run(
@@ -1933,6 +1957,12 @@ def command_loop_templates(args: argparse.Namespace) -> int:
 
 
 def command_ralph_loop_presets(args: argparse.Namespace) -> int:
+    if not args.create_run:
+        _reject_loop_create_only_options(
+            args,
+            selector_attr="preset",
+            selector_flag="--preset",
+        )
     if args.list:
         print(json.dumps({"presets": list_ralph_loop_presets()}, indent=2, sort_keys=True))
         return 0
@@ -1946,7 +1976,7 @@ def command_ralph_loop_presets(args: argparse.Namespace) -> int:
         metadata = ralph_loop_preset_metadata(
             args.preset,
             max_iterations=args.max_iterations,
-            current_iteration=args.current_iteration,
+            current_iteration=0 if args.current_iteration is None else args.current_iteration,
             seed_prompt_sha256=args.seed_prompt_sha256,
         )
         result = _create_loop_policy_run(

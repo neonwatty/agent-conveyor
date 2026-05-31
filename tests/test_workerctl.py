@@ -4453,7 +4453,58 @@ class CliTests(unittest.TestCase):
         self.assertEqual(preset["required_before_continue"], ["pr_url", "ci_green", "merge"])
 
     def test_ralph_loop_presets_cli_lists_and_shows_templates(self):
-        self.test_ralph_loop_presets_cli_lists_and_shows_presets()
+        list_proc = self.run_workerctl("ralph-loop-presets", "--list", "--json")
+
+        self.assertEqual(list_proc.returncode, 0, list_proc.stderr)
+        payload = json.loads(list_proc.stdout)
+        names = [preset["name"] for preset in payload["presets"]]
+        self.assertIn("test_coverage_loop", names)
+        self.assertIn("pr_ci_merge_loop", names)
+        self.assertIn("visual_diff_loop", names)
+
+        show_proc = self.run_workerctl("ralph-loop-presets", "--show", "visual_diff_loop", "--json")
+
+        self.assertEqual(show_proc.returncode, 0, show_proc.stderr)
+        preset = json.loads(show_proc.stdout)
+        self.assertEqual(preset["name"], "visual_diff_loop")
+        self.assertEqual(
+            preset["required_before_continue"],
+            ["reference_artifact", "candidate_screenshot", "visual_diff_report", "diff_below_threshold"],
+        )
+
+    def test_loop_templates_cli_rejects_create_run_options_without_create_run(self):
+        cases = [
+            ("--list", "--template", "visual_diff_loop"),
+            ("--list", "--name", "visual-policy"),
+            ("--list", "--max-iterations", "4"),
+            ("--show", "visual_diff_loop", "--current-iteration", "1"),
+            ("--show", "visual_diff_loop", "--seed-prompt-sha256", "visual123"),
+        ]
+
+        for case in cases:
+            with self.subTest(case=case):
+                proc = self.run_workerctl("loop-templates", *case, "--json")
+
+                self.assertEqual(proc.returncode, 1)
+                self.assertIn("is only valid with --create-run", proc.stderr)
+                self.assertNotIn("Traceback", proc.stderr)
+
+    def test_ralph_loop_presets_cli_rejects_create_run_options_without_create_run(self):
+        cases = [
+            ("--list", "--preset", "visual_diff_loop"),
+            ("--list", "--name", "visual-policy"),
+            ("--list", "--max-iterations", "4"),
+            ("--show", "visual_diff_loop", "--current-iteration", "1"),
+            ("--show", "visual_diff_loop", "--seed-prompt-sha256", "visual123"),
+        ]
+
+        for case in cases:
+            with self.subTest(case=case):
+                proc = self.run_workerctl("ralph-loop-presets", *case, "--json")
+
+                self.assertEqual(proc.returncode, 1)
+                self.assertIn("is only valid with --create-run", proc.stderr)
+                self.assertNotIn("Traceback", proc.stderr)
 
     def test_loop_templates_cli_lists_and_shows_visual_diff_template(self):
         list_proc = self.run_workerctl("loop-templates", "--list", "--json")
