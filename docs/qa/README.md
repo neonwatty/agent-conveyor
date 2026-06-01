@@ -23,6 +23,9 @@ pass/fail evidence.
 - [Adversarial triggers](adversarial-triggers.md) - natural-language trigger
   phrases for Ralph-loop policy, Dispatch continuation gates, finish gates,
   worker-proposed proof, and manager-created adversarial criteria.
+- [GoalBuddy conveyor live dogfood](goalbuddy-conveyor-live-dogfood.md) -
+  two-child smoke for `satisfied_on_main`, one-active-child sequencing, and
+  PR/CI/merge receipt rails.
 - [Late attach support reporter](late-attach-support-reporter.md) - assign a
   manager after worker progress on a small CLI/reporting feature.
 

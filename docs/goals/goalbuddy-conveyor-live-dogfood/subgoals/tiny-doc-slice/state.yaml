@@ -1,0 +1,96 @@
+version: 2
+
+goal:
+  title: "Tiny Doc Slice"
+  slug: tiny-doc-slice
+  kind: existing_plan
+  tranche: "Small implementation child for the live conveyor dogfood."
+  status: active
+  oracle:
+    signal: "A live-dogfood QA note exists and is merged green."
+    cadence: "after PR merge"
+    final_proof: "Docs change, focused verification, adversarial review, PR URL, green CI, merge SHA, and parent receipt update."
+  intake:
+    original_request: "Second child that makes a tiny real implementation/docs change."
+    interpreted_outcome: "Add a small reusable QA note that operators can use to repeat this live conveyor dogfood."
+    input_shape: specific
+    audience:
+      - maintainers
+      - GoalBuddy managers
+      - workerctl operators
+    authority: requested
+    proof_type: test_review_ci_merge
+    completion_proof: "PR containing the note is merged green and receipt proof is recorded."
+    likely_misfire: "Treating a docs-only change as complete before review, CI, merge, and parent receipt update."
+
+rules:
+  pm_owns_state: true
+  one_active_task: true
+  max_write_workers: 1
+  no_completion_without_judge_or_pm_audit: true
+  planning_is_not_completion: true
+  continuous_until_full_outcome: true
+  no_completion_on_weak_proof: true
+
+agents:
+  scout: installed
+  worker: installed
+  judge: installed
+
+visual_board:
+  selected: local
+  local:
+    status: not_started
+    url: "http://goalbuddy.localhost:41737/tiny-doc-slice/"
+    command: "npx goalbuddy board docs/goals/goalbuddy-conveyor-live-dogfood/subgoals/tiny-doc-slice"
+
+active_task: T001
+
+tasks:
+  - id: T001
+    type: worker
+    assignee: Worker
+    status: active
+    reasoning_hint: medium
+    objective: "Add docs/qa/goalbuddy-conveyor-live-dogfood.md and verify the board rails still pass."
+    allowed_files:
+      - "docs/qa/goalbuddy-conveyor-live-dogfood.md"
+      - "docs/qa/README.md"
+      - "docs/goals/goalbuddy-conveyor-live-dogfood/**"
+    verify:
+      - "The new QA note references `scripts/workerctl qa-plan goalbuddy-conveyor`."
+      - "Parent, satisfied-main, and tiny-doc child GoalBuddy state checks pass."
+      - "Adversarial review records the strongest failure mode before PR creation."
+    stop_if:
+      - "Parent active_task does not equal T002."
+      - "The satisfied-main child lacks satisfied_on_main: true."
+    receipt:
+      result: active
+      activated_by_parent_task: T002
+      activation_proof: "Parent T001 and satisfied-main child T001 are both recorded as satisfied_on_main."
+      summary: "Active implementation child for the live conveyor dogfood."
+      changed_files:
+        - "docs/qa/goalbuddy-conveyor-live-dogfood.md"
+        - "docs/qa/README.md"
+        - "docs/goals/goalbuddy-conveyor-live-dogfood/goal.md"
+        - "docs/goals/goalbuddy-conveyor-live-dogfood/state.yaml"
+        - "docs/goals/goalbuddy-conveyor-live-dogfood/subgoals/satisfied-main-proof/goal.md"
+        - "docs/goals/goalbuddy-conveyor-live-dogfood/subgoals/satisfied-main-proof/state.yaml"
+        - "docs/goals/goalbuddy-conveyor-live-dogfood/subgoals/tiny-doc-slice/goal.md"
+        - "docs/goals/goalbuddy-conveyor-live-dogfood/subgoals/tiny-doc-slice/state.yaml"
+      commands:
+        - cmd: "scripts/workerctl qa-plan goalbuddy-conveyor --json | python3 -m json.tool >/tmp/goalbuddy-conveyor-dogfood.json"
+          status: pass
+        - cmd: "node /Users/neonwatty/.codex/plugins/cache/goalbuddy/goalbuddy/0.3.8/skills/goalbuddy/scripts/check-goal-state.mjs docs/goals/goalbuddy-conveyor-live-dogfood/state.yaml"
+          status: pass
+        - cmd: "node /Users/neonwatty/.codex/plugins/cache/goalbuddy/goalbuddy/0.3.8/skills/goalbuddy/scripts/check-goal-state.mjs docs/goals/goalbuddy-conveyor-live-dogfood/subgoals/satisfied-main-proof/state.yaml"
+          status: pass
+        - cmd: "node /Users/neonwatty/.codex/plugins/cache/goalbuddy/goalbuddy/0.3.8/skills/goalbuddy/scripts/check-goal-state.mjs docs/goals/goalbuddy-conveyor-live-dogfood/subgoals/tiny-doc-slice/state.yaml"
+          status: pass
+        - cmd: "git diff --check"
+          status: pass
+        - cmd: "/Users/neonwatty/.codex/skills/codex-review/scripts/codex-review --mode local --full-access --parallel-tests \"node /Users/neonwatty/.codex/plugins/cache/goalbuddy/goalbuddy/0.3.8/skills/goalbuddy/scripts/check-goal-state.mjs docs/goals/goalbuddy-conveyor-live-dogfood/state.yaml && node /Users/neonwatty/.codex/plugins/cache/goalbuddy/goalbuddy/0.3.8/skills/goalbuddy/scripts/check-goal-state.mjs docs/goals/goalbuddy-conveyor-live-dogfood/subgoals/satisfied-main-proof/state.yaml && node /Users/neonwatty/.codex/plugins/cache/goalbuddy/goalbuddy/0.3.8/skills/goalbuddy/scripts/check-goal-state.mjs docs/goals/goalbuddy-conveyor-live-dogfood/subgoals/tiny-doc-slice/state.yaml && git diff --check\""
+          status: pass
+      adversarial_review:
+        strongest_failure_mode: "This docs child could look complete even though the QA index edit is outside the child scope, the checker path is not portable, or the parent has not preserved one-active-child sequencing."
+        proof: "The child allowed_files includes both changed QA docs, the command block avoids shell redirection placeholders, and parent plus both child GoalBuddy checks passed."

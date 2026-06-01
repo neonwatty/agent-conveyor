@@ -1,0 +1,76 @@
+version: 2
+
+goal:
+  title: "Satisfied Main Proof"
+  slug: satisfied-main-proof
+  kind: existing_plan
+  tranche: "No-op proof child for the live conveyor dogfood."
+  status: done
+  oracle:
+    signal: "`workerctl qa-plan goalbuddy-conveyor` exists on current main with docs and skill guidance."
+    cadence: "once before activating the implementation child"
+    final_proof: "Source evidence, focused command proof, adversarial review, and parent handoff are recorded."
+  intake:
+    original_request: "First child that is already satisfied on main."
+    interpreted_outcome: "Prove the reusable conveyor command and docs are already present instead of creating churn."
+    input_shape: specific
+    audience:
+      - maintainers
+      - GoalBuddy managers
+    authority: requested
+    proof_type: source_backed_answer
+    completion_proof: "Parent and child receipts record satisfied_on_main evidence."
+    likely_misfire: "Treating previous PR knowledge as proof without checking the current files."
+
+rules:
+  pm_owns_state: true
+  one_active_task: true
+  no_completion_without_judge_or_pm_audit: true
+  planning_is_not_completion: true
+  no_completion_on_weak_proof: true
+
+agents:
+  scout: installed
+  worker: installed
+  judge: installed
+
+visual_board:
+  selected: local
+  local:
+    status: not_started
+    url: "http://goalbuddy.localhost:41737/satisfied-main-proof/"
+    command: "npx goalbuddy board docs/goals/goalbuddy-conveyor-live-dogfood/subgoals/satisfied-main-proof"
+
+active_task: null
+
+tasks:
+  - id: T001
+    type: pm
+    assignee: PM
+    status: done
+    reasoning_hint: low
+    objective: "Audit current source and command output for the already-merged conveyor path."
+    receipt:
+      result: done
+      satisfied_on_main: true
+      decision: complete
+      full_outcome_complete: true
+      summary: "Current main already contains the reusable conveyor QA command, docs, tests, and skill trigger mapping."
+      correlation_id: "conveyor-satisfied-on-main"
+      commands:
+        - cmd: "scripts/workerctl qa-plan goalbuddy-conveyor --json | python3 -m json.tool >/tmp/goalbuddy-conveyor-dogfood.json"
+          status: pass
+        - cmd: "rg 'goalbuddy-conveyor|autonomous GoalBuddy conveyor|conveyor-satisfied-on-main' workerctl/cli.py workerctl/commands.py docs/qa/goalbuddy-conveyor.md skills/manage-codex-workers/SKILL.md"
+          status: pass
+      evidence:
+        - "workerctl/cli.py exposes the scenario choice."
+        - "workerctl/commands.py emits the reusable starter prompt and conveyor guardrails."
+        - "docs/qa/goalbuddy-conveyor.md documents the trigger and required proof."
+        - "skills/manage-codex-workers/SKILL.md tells managers to use the qa-plan for conveyor requests."
+      adversarial_review:
+        strongest_failure_mode: "The no-op child could accidentally bless stale or absent behavior."
+        proof: "Focused command proof and source search were run against the current checkout before activation of the next child."
+      parent_handoff:
+        parent_task: T001
+        activated_next_child: T002
+        activated_at: "2026-06-01T14:08:12Z"
