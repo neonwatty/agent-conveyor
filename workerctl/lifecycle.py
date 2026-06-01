@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 from pathlib import Path
 from typing import Any
@@ -37,6 +38,7 @@ from workerctl.db import set_task_state
 from workerctl.db import set_worker_pane_id
 from workerctl.db import session_by_id
 from workerctl.db import task_status_snapshot
+from workerctl import codex_session
 from workerctl import identity
 from workerctl.state import append_event
 from workerctl.state import config_path
@@ -210,22 +212,68 @@ def _resolve_session_binding(conn, *, task_name: str, include_ended: bool = Fals
 
 def _verify_session_identity(session: dict[str, Any]) -> dict[str, Any]:
     tmux_session_name = session.get("tmux_session")
+    codex_session_id = session.get("codex_session_id")
+    codex_session_path = session.get("codex_session_path")
     live = (
         identity.session_snapshot(tmux_session_name)
         if tmux_session_name
         else {"live": False, "pane_id": None, "session": None}
     )
     verification = {
+        "codex_session_id": codex_session_id,
+        "codex_session_path": codex_session_path,
         "db_pane_id": session.get("tmux_pane_id"),
         "db_session": tmux_session_name,
+        "delivery_mode": "push" if tmux_session_name else "pull_required",
         "live": live["live"],
         "live_pane_id": live["pane_id"],
+        "pid": session.get("pid"),
         "role": session["role"],
         "session": session["name"],
+        "state": session.get("state"),
     }
     mismatches = []
+    if session.get("state") != "active":
+        mismatches.append(f"session_state_{session.get('state') or 'missing'}")
     if not tmux_session_name:
-        mismatches.append("tmux_session_missing")
+        if not codex_session_id or not codex_session_path:
+            mismatches.append("session_identity_missing")
+        pid = session.get("pid")
+        pid_int = None
+        pid_is_live = False
+        if pid is None:
+            mismatches.append("session_pid_missing")
+        else:
+            try:
+                pid_int = int(pid)
+                if pid_int <= 0:
+                    raise ValueError
+                os.kill(pid_int, 0)
+                pid_is_live = True
+            except ProcessLookupError:
+                mismatches.append("session_pid_dead")
+            except PermissionError:
+                pid_is_live = True
+            except (TypeError, ValueError):
+                mismatches.append("session_pid_invalid")
+        if codex_session_id and codex_session_path:
+            rollout_path = Path(codex_session_path).expanduser()
+            try:
+                meta = codex_session.read_session_meta(rollout_path)
+            except codex_session.CodexSessionError:
+                mismatches.append("codex_session_path_invalid")
+            else:
+                if meta.get("id") != codex_session_id:
+                    mismatches.append("codex_session_id_mismatch")
+            if pid_int is not None and pid_is_live:
+                try:
+                    native_pid = codex_session.find_native_codex_pid(pid_int)
+                    live_rollout_path = codex_session.find_rollout_path_for_pid(native_pid)
+                except codex_session.CodexSessionError:
+                    mismatches.append("codex_session_pid_mismatch")
+                else:
+                    if live_rollout_path.expanduser().resolve() != rollout_path.resolve():
+                        mismatches.append("codex_session_pid_mismatch")
     elif not live["live"]:
         mismatches.append("tmux_session_missing")
     if session.get("tmux_pane_id") and live["pane_id"] and live["pane_id"] != session["tmux_pane_id"]:
@@ -645,13 +693,28 @@ def _stop_or_finish_task(args: argparse.Namespace, *, finish: bool) -> int:
             manager_tmux_session = manager["tmux_session"]
         elif manager_session and result.get("manager_identity", {}).get("live"):
             manager_tmux_session = manager_session["tmux_session"]
-        if finish and capture_transcript_before_stop and (args.stop_worker or stop_manager):
+        capture_worker_before_stop = bool(
+            args.stop_worker and (worker is not None or (worker_session and worker_session.get("tmux_session")))
+        )
+        capture_manager_before_stop = bool(stop_manager and manager_tmux_session)
+        if finish and capture_transcript_before_stop and require_transcript_segment:
+            missing_required_capture_roles = []
+            if args.stop_worker and not capture_worker_before_stop:
+                missing_required_capture_roles.append("worker")
+            if stop_manager and not capture_manager_before_stop:
+                missing_required_capture_roles.append("manager")
+            if missing_required_capture_roles:
+                raise WorkerError(
+                    "no non-empty transcript segment captured for role(s): "
+                    + ", ".join(missing_required_capture_roles)
+                )
+        if finish and capture_transcript_before_stop and (capture_worker_before_stop or capture_manager_before_stop):
             result["pre_stop_transcript_captures"] = _capture_pre_stop_transcripts(
                 db_path,
                 task=snapshot["name"],
                 command_id=command_id,
-                stop_worker=bool(args.stop_worker),
-                stop_manager=bool(stop_manager),
+                stop_worker=capture_worker_before_stop,
+                stop_manager=capture_manager_before_stop,
                 lines=capture_transcript_lines,
                 mode=capture_transcript_mode,
             )
@@ -727,12 +790,12 @@ def _stop_or_finish_task(args: argparse.Namespace, *, finish: bool) -> int:
                 set_manager_state(conn, manager_id=manager["id"], state="stopped")
             if worker and args.stop_worker:
                 mark_worker_state(conn, name=worker["name"], state="stopped")
-            if manager_session and stop_manager:
+            if manager_session and stop_manager and result["killed_manager"]:
                 conn.execute(
                     "update sessions set state='gone', last_heartbeat_at=? where id=?",
                     (stopped_at, manager_session["id"]),
                 )
-            if worker_session and args.stop_worker:
+            if worker_session and args.stop_worker and result["killed_worker"]:
                 conn.execute(
                     "update sessions set state='gone', last_heartbeat_at=? where id=?",
                     (stopped_at, worker_session["id"]),

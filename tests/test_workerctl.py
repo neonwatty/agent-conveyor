@@ -5001,6 +5001,13 @@ class CliTests(unittest.TestCase):
             check=False,
         )
 
+    def write_codex_rollout(self, directory: str, session_id: str) -> Path:
+        rollout = Path(directory) / f"rollout-{session_id}.jsonl"
+        rollout.write_text(
+            json.dumps({"type": "session_meta", "payload": {"id": session_id, "cwd": directory}}) + "\n"
+        )
+        return rollout
+
     def test_dashboard_help_includes_loopback_defaults(self):
         proc = self.run_workerctl("dashboard", "--help")
 
@@ -9964,7 +9971,7 @@ Deferred follow-up criteria:
                     role="worker",
                     codex_session_path="/tmp/worker.jsonl",
                     codex_session_id="codex-worker",
-                    pid=111,
+                    pid=os.getpid(),
                     cwd=str(ROOT),
                     tmux_session="codex-session-worker",
                     tmux_pane_id="%1",
@@ -9975,7 +9982,7 @@ Deferred follow-up criteria:
                     role="manager",
                     codex_session_path="/tmp/manager.jsonl",
                     codex_session_id="codex-manager",
-                    pid=222,
+                    pid=os.getpid(),
                     cwd=str(ROOT),
                     tmux_session="codex-session-manager",
                     tmux_pane_id="%2",
@@ -10050,6 +10057,640 @@ Deferred follow-up criteria:
                 lifecycle.run = original_run
                 worker_identity.session_snapshot = original_session_snapshot
 
+    def test_finish_task_accepts_bound_no_tmux_manager_session_identity(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            worker_rollout = self.write_codex_rollout(tmpdir, "codex-worker")
+            manager_rollout = self.write_codex_rollout(tmpdir, "codex-manager")
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                task_id = worker_db.create_task(conn, name="session-task", goal="Do task.")
+                worker_db.register_session(
+                    conn,
+                    name="session-worker",
+                    role="worker",
+                    codex_session_path=str(worker_rollout),
+                    codex_session_id="codex-worker",
+                    pid=os.getpid(),
+                    cwd=str(ROOT),
+                )
+                worker_db.register_session(
+                    conn,
+                    name="session-manager",
+                    role="manager",
+                    codex_session_path=str(manager_rollout),
+                    codex_session_id="codex-manager",
+                    pid=os.getpid(),
+                    cwd=str(ROOT),
+                )
+                binding_id = worker_db.bind_sessions(
+                    conn,
+                    task_name="session-task",
+                    worker_session_name="session-worker",
+                    manager_session_name="session-manager",
+                )
+                worker_db.insert_acceptance_criterion(
+                    conn,
+                    task_id=task_id,
+                    criterion="Adversarial proof recorded",
+                    status="satisfied",
+                    source="manager_inferred",
+                    proof="Tried to disprove the change.",
+                    evidence={
+                        "evidence_type": "adversarial_check",
+                        "failure_mode": "Bound no-tmux manager is rejected as tmux_session_missing.",
+                        "check": "finish a bound no-tmux manager/worker task",
+                        "result": "finish-task succeeded and preserved pull-required identity metadata",
+                    },
+                )
+                conn.commit()
+
+            original_session_snapshot = worker_identity.session_snapshot
+            try:
+                snapshot_calls = []
+                worker_identity.session_snapshot = lambda session: snapshot_calls.append(session) or {
+                    "live": False,
+                    "pane_id": None,
+                    "session": session,
+                }
+                args = argparse.Namespace(
+                    decision_id=None,
+                    message=None,
+                    path=str(db_path),
+                    reason="session work complete",
+                    require_adversarial_proof=True,
+                    require_criteria_audit=True,
+                    stop_manager=False,
+                    stop_worker=False,
+                    strict_decisions=False,
+                    task="session-task",
+                )
+
+                with (
+                    mock.patch("workerctl.codex_session.find_native_codex_pid", return_value=os.getpid()),
+                    mock.patch("workerctl.codex_session.find_rollout_path_for_pid", return_value=manager_rollout),
+                    contextlib.redirect_stdout(io.StringIO()) as stdout,
+                ):
+                    result = lifecycle.command_finish_task(args)
+
+                payload = json.loads(stdout.getvalue())
+                self.assertEqual(result, 0)
+                self.assertEqual(snapshot_calls, [])
+                self.assertFalse(payload["killed_manager"])
+                self.assertFalse(payload["killed_worker"])
+                self.assertEqual(payload["manager_session"], "session-manager")
+                self.assertEqual(payload["worker"], "session-worker")
+                self.assertEqual(payload["manager_identity"]["codex_session_id"], "codex-manager")
+                self.assertEqual(payload["manager_identity"]["codex_session_path"], str(manager_rollout))
+                self.assertEqual(payload["manager_identity"]["delivery_mode"], "pull_required")
+                self.assertEqual(payload["manager_identity"]["mismatches"], [])
+                self.assertFalse(payload["manager_identity"]["live"])
+                with worker_db.connect(db_path) as conn:
+                    task = conn.execute("select state from tasks where id = ?", (task_id,)).fetchone()
+                    binding = conn.execute("select state, ended_at from bindings where id = ?", (binding_id,)).fetchone()
+                    sessions = {
+                        row["name"]: row["state"]
+                        for row in conn.execute("select name, state from sessions")
+                    }
+                    command = conn.execute("select state, result_json from commands where type = 'finish_task'").fetchone()
+                    event = conn.execute(
+                        "select payload_json from events where type = 'manager_identity_verified'"
+                    ).fetchone()
+                self.assertEqual(task["state"], "done")
+                self.assertEqual(binding["state"], "ended")
+                self.assertIsNotNone(binding["ended_at"])
+                self.assertEqual(sessions["session-worker"], "active")
+                self.assertEqual(sessions["session-manager"], "active")
+                self.assertEqual(command["state"], "succeeded")
+                self.assertEqual(json.loads(command["result_json"])["manager_identity"]["delivery_mode"], "pull_required")
+                self.assertEqual(json.loads(event["payload_json"])["mismatches"], [])
+            finally:
+                worker_identity.session_snapshot = original_session_snapshot
+
+    def test_no_tmux_session_identity_requires_codex_session_identity(self):
+        original_session_snapshot = worker_identity.session_snapshot
+        try:
+            snapshot_calls = []
+            worker_identity.session_snapshot = lambda session: snapshot_calls.append(session) or {
+                "live": False,
+                "pane_id": None,
+                "session": session,
+            }
+
+            with self.assertRaisesRegex(WorkerError, "session_identity_missing"):
+                lifecycle._verify_session_identity(
+                    {
+                        "codex_session_id": None,
+                        "codex_session_path": None,
+                        "name": "legacy-manager",
+                        "role": "manager",
+                        "tmux_pane_id": None,
+                        "tmux_session": None,
+                    }
+                )
+
+            self.assertEqual(snapshot_calls, [])
+        finally:
+            worker_identity.session_snapshot = original_session_snapshot
+
+    def test_no_tmux_session_identity_rejects_non_positive_pid(self):
+        original_session_snapshot = worker_identity.session_snapshot
+        try:
+            snapshot_calls = []
+            worker_identity.session_snapshot = lambda session: snapshot_calls.append(session) or {
+                "live": False,
+                "pane_id": None,
+                "session": session,
+            }
+
+            with self.assertRaisesRegex(WorkerError, "session_pid_invalid"):
+                lifecycle._verify_session_identity(
+                    {
+                        "codex_session_id": "codex-manager",
+                        "codex_session_path": "/tmp/manager.jsonl",
+                        "name": "manager",
+                        "pid": 0,
+                        "role": "manager",
+                        "state": "active",
+                        "tmux_pane_id": None,
+                        "tmux_session": None,
+                    }
+                )
+
+            self.assertEqual(snapshot_calls, [])
+        finally:
+            worker_identity.session_snapshot = original_session_snapshot
+
+    def test_no_tmux_session_identity_rejects_missing_rollout_path(self):
+        original_session_snapshot = worker_identity.session_snapshot
+        try:
+            snapshot_calls = []
+            worker_identity.session_snapshot = lambda session: snapshot_calls.append(session) or {
+                "live": False,
+                "pane_id": None,
+                "session": session,
+            }
+
+            with tempfile.TemporaryDirectory() as tmpdir:
+                missing_rollout = Path(tmpdir) / "missing-rollout.jsonl"
+                with (
+                    mock.patch("workerctl.codex_session.find_native_codex_pid", return_value=os.getpid()),
+                    mock.patch("workerctl.codex_session.find_rollout_path_for_pid", return_value=missing_rollout),
+                ):
+                    with self.assertRaisesRegex(WorkerError, "codex_session_path_invalid"):
+                        lifecycle._verify_session_identity(
+                            {
+                                "codex_session_id": "codex-manager",
+                                "codex_session_path": str(missing_rollout),
+                                "name": "stale-manager",
+                                "pid": os.getpid(),
+                                "role": "manager",
+                                "state": "active",
+                                "tmux_pane_id": None,
+                                "tmux_session": None,
+                            }
+                        )
+
+            self.assertEqual(snapshot_calls, [])
+        finally:
+            worker_identity.session_snapshot = original_session_snapshot
+
+    def test_no_tmux_session_identity_rejects_rollout_pid_mismatch(self):
+        original_session_snapshot = worker_identity.session_snapshot
+        try:
+            snapshot_calls = []
+            worker_identity.session_snapshot = lambda session: snapshot_calls.append(session) or {
+                "live": False,
+                "pane_id": None,
+                "session": session,
+            }
+
+            with tempfile.TemporaryDirectory() as tmpdir:
+                registered_rollout = self.write_codex_rollout(tmpdir, "codex-manager")
+                live_rollout = self.write_codex_rollout(tmpdir, "other-codex-session")
+                with (
+                    mock.patch("workerctl.codex_session.find_native_codex_pid", return_value=os.getpid()),
+                    mock.patch("workerctl.codex_session.find_rollout_path_for_pid", return_value=live_rollout),
+                ):
+                    with self.assertRaisesRegex(WorkerError, "codex_session_pid_mismatch"):
+                        lifecycle._verify_session_identity(
+                            {
+                                "codex_session_id": "codex-manager",
+                                "codex_session_path": str(registered_rollout),
+                                "name": "stale-manager",
+                                "pid": os.getpid(),
+                                "role": "manager",
+                                "state": "active",
+                                "tmux_pane_id": None,
+                                "tmux_session": None,
+                            }
+                        )
+
+            self.assertEqual(snapshot_calls, [])
+        finally:
+            worker_identity.session_snapshot = original_session_snapshot
+
+    def test_finish_task_rejects_gone_no_tmux_manager_session_identity(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                task_id = worker_db.create_task(conn, name="session-task", goal="Do task.")
+                worker_db.register_session(
+                    conn,
+                    name="session-worker",
+                    role="worker",
+                    codex_session_path="/tmp/worker.jsonl",
+                    codex_session_id="codex-worker",
+                    pid=os.getpid(),
+                    cwd=str(ROOT),
+                )
+                worker_db.register_session(
+                    conn,
+                    name="session-manager",
+                    role="manager",
+                    codex_session_path="/tmp/manager.jsonl",
+                    codex_session_id="codex-manager",
+                    pid=os.getpid(),
+                    cwd=str(ROOT),
+                )
+                binding_id = worker_db.bind_sessions(
+                    conn,
+                    task_name="session-task",
+                    worker_session_name="session-worker",
+                    manager_session_name="session-manager",
+                )
+                conn.execute("update sessions set state='gone' where name='session-manager'")
+                conn.commit()
+
+            original_session_snapshot = worker_identity.session_snapshot
+            try:
+                snapshot_calls = []
+                worker_identity.session_snapshot = lambda session: snapshot_calls.append(session) or {
+                    "live": False,
+                    "pane_id": None,
+                    "session": session,
+                }
+                args = argparse.Namespace(
+                    capture_transcript_before_stop=False,
+                    capture_transcript_lines=80,
+                    capture_transcript_mode="segment",
+                    decision_id=None,
+                    message=None,
+                    path=str(db_path),
+                    reason="session work complete",
+                    require_adversarial_proof=False,
+                    require_acks=False,
+                    require_criteria_audit=False,
+                    require_epilogue=False,
+                    require_transcript_segment=False,
+                    stop_manager=False,
+                    stop_worker=False,
+                    strict_decisions=False,
+                    task="session-task",
+                )
+
+                with self.assertRaisesRegex(WorkerError, "session_state_gone"):
+                    lifecycle.command_finish_task(args)
+                self.assertEqual(snapshot_calls, [])
+                with worker_db.connect(db_path) as conn:
+                    task = conn.execute("select state from tasks where id = ?", (task_id,)).fetchone()
+                    binding = conn.execute("select state, ended_at from bindings where id = ?", (binding_id,)).fetchone()
+                    command = conn.execute(
+                        "select state, error from commands where type = 'finish_task' order by id desc limit 1"
+                    ).fetchone()
+                self.assertEqual(task["state"], "candidate")
+                self.assertEqual(binding["state"], "active")
+                self.assertIsNone(binding["ended_at"])
+                self.assertEqual(command["state"], "failed")
+                self.assertIn("session_state_gone", command["error"])
+            finally:
+                worker_identity.session_snapshot = original_session_snapshot
+
+    def test_finish_task_rejects_dead_pid_no_tmux_manager_session_identity(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            dead_pid = 2147483646
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                task_id = worker_db.create_task(conn, name="session-task", goal="Do task.")
+                worker_db.register_session(
+                    conn,
+                    name="session-worker",
+                    role="worker",
+                    codex_session_path="/tmp/worker.jsonl",
+                    codex_session_id="codex-worker",
+                    pid=os.getpid(),
+                    cwd=str(ROOT),
+                )
+                worker_db.register_session(
+                    conn,
+                    name="session-manager",
+                    role="manager",
+                    codex_session_path="/tmp/manager.jsonl",
+                    codex_session_id="codex-manager",
+                    pid=dead_pid,
+                    cwd=str(ROOT),
+                )
+                binding_id = worker_db.bind_sessions(
+                    conn,
+                    task_name="session-task",
+                    worker_session_name="session-worker",
+                    manager_session_name="session-manager",
+                )
+                conn.commit()
+
+            original_session_snapshot = worker_identity.session_snapshot
+            try:
+                snapshot_calls = []
+                worker_identity.session_snapshot = lambda session: snapshot_calls.append(session) or {
+                    "live": False,
+                    "pane_id": None,
+                    "session": session,
+                }
+                args = argparse.Namespace(
+                    capture_transcript_before_stop=False,
+                    capture_transcript_lines=80,
+                    capture_transcript_mode="segment",
+                    decision_id=None,
+                    message=None,
+                    path=str(db_path),
+                    reason="session work complete",
+                    require_adversarial_proof=False,
+                    require_acks=False,
+                    require_criteria_audit=False,
+                    require_epilogue=False,
+                    require_transcript_segment=False,
+                    stop_manager=False,
+                    stop_worker=False,
+                    strict_decisions=False,
+                    task="session-task",
+                )
+
+                with self.assertRaisesRegex(WorkerError, "session_pid_dead"):
+                    lifecycle.command_finish_task(args)
+                self.assertEqual(snapshot_calls, [])
+                with worker_db.connect(db_path) as conn:
+                    task = conn.execute("select state from tasks where id = ?", (task_id,)).fetchone()
+                    binding = conn.execute("select state, ended_at from bindings where id = ?", (binding_id,)).fetchone()
+                    command = conn.execute(
+                        "select state, error from commands where type = 'finish_task' order by id desc limit 1"
+                    ).fetchone()
+                self.assertEqual(task["state"], "candidate")
+                self.assertEqual(binding["state"], "active")
+                self.assertIsNone(binding["ended_at"])
+                self.assertEqual(command["state"], "failed")
+                self.assertIn("session_pid_dead", command["error"])
+            finally:
+                worker_identity.session_snapshot = original_session_snapshot
+
+    def test_stop_task_keeps_no_tmux_session_active_when_no_process_was_stopped(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            worker_rollout = self.write_codex_rollout(tmpdir, "codex-worker")
+            manager_rollout = self.write_codex_rollout(tmpdir, "codex-manager")
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                task_id = worker_db.create_task(conn, name="session-task", goal="Do task.")
+                worker_db.register_session(
+                    conn,
+                    name="session-worker",
+                    role="worker",
+                    codex_session_path=str(worker_rollout),
+                    codex_session_id="codex-worker",
+                    pid=os.getpid(),
+                    cwd=str(ROOT),
+                )
+                worker_db.register_session(
+                    conn,
+                    name="session-manager",
+                    role="manager",
+                    codex_session_path=str(manager_rollout),
+                    codex_session_id="codex-manager",
+                    pid=os.getpid(),
+                    cwd=str(ROOT),
+                )
+                binding_id = worker_db.bind_sessions(
+                    conn,
+                    task_name="session-task",
+                    worker_session_name="session-worker",
+                    manager_session_name="session-manager",
+                )
+                conn.commit()
+
+            original_session_snapshot = worker_identity.session_snapshot
+            try:
+                snapshot_calls = []
+                worker_identity.session_snapshot = lambda session: snapshot_calls.append(session) or {
+                    "live": False,
+                    "pane_id": None,
+                    "session": session,
+                }
+                args = argparse.Namespace(
+                    decision_id=None,
+                    message=None,
+                    path=str(db_path),
+                    reason="session work stopped",
+                    stop_worker=False,
+                    strict_decisions=False,
+                    task="session-task",
+                )
+
+                with (
+                    mock.patch("workerctl.codex_session.find_native_codex_pid", return_value=os.getpid()),
+                    mock.patch("workerctl.codex_session.find_rollout_path_for_pid", return_value=manager_rollout),
+                    contextlib.redirect_stdout(io.StringIO()) as stdout,
+                ):
+                    result = lifecycle.command_stop_task(args)
+
+                payload = json.loads(stdout.getvalue())
+                self.assertEqual(result, 0)
+                self.assertEqual(snapshot_calls, [])
+                self.assertFalse(payload["killed_manager"])
+                self.assertFalse(payload["killed_worker"])
+                self.assertEqual(payload["manager_identity"]["delivery_mode"], "pull_required")
+                with worker_db.connect(db_path) as conn:
+                    task = conn.execute("select state from tasks where id = ?", (task_id,)).fetchone()
+                    binding = conn.execute("select state, ended_at from bindings where id = ?", (binding_id,)).fetchone()
+                    sessions = {
+                        row["name"]: row["state"]
+                        for row in conn.execute("select name, state from sessions")
+                    }
+                self.assertEqual(task["state"], "done")
+                self.assertEqual(binding["state"], "ended")
+                self.assertIsNotNone(binding["ended_at"])
+                self.assertEqual(sessions["session-worker"], "active")
+                self.assertEqual(sessions["session-manager"], "active")
+            finally:
+                worker_identity.session_snapshot = original_session_snapshot
+
+    def test_finish_task_skips_pre_stop_capture_for_no_tmux_session(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            worker_rollout = self.write_codex_rollout(tmpdir, "codex-worker")
+            manager_rollout = self.write_codex_rollout(tmpdir, "codex-manager")
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                task_id = worker_db.create_task(conn, name="session-task", goal="Do task.")
+                worker_db.register_session(
+                    conn,
+                    name="session-worker",
+                    role="worker",
+                    codex_session_path=str(worker_rollout),
+                    codex_session_id="codex-worker",
+                    pid=os.getpid(),
+                    cwd=str(ROOT),
+                )
+                worker_db.register_session(
+                    conn,
+                    name="session-manager",
+                    role="manager",
+                    codex_session_path=str(manager_rollout),
+                    codex_session_id="codex-manager",
+                    pid=os.getpid(),
+                    cwd=str(ROOT),
+                )
+                binding_id = worker_db.bind_sessions(
+                    conn,
+                    task_name="session-task",
+                    worker_session_name="session-worker",
+                    manager_session_name="session-manager",
+                )
+                conn.commit()
+
+            original_session_snapshot = worker_identity.session_snapshot
+            try:
+                snapshot_calls = []
+                worker_identity.session_snapshot = lambda session: snapshot_calls.append(session) or {
+                    "live": False,
+                    "pane_id": None,
+                    "session": session,
+                }
+                args = argparse.Namespace(
+                    capture_transcript_before_stop=True,
+                    capture_transcript_lines=80,
+                    capture_transcript_mode="segment",
+                    decision_id=None,
+                    message=None,
+                    path=str(db_path),
+                    reason="session work complete",
+                    require_adversarial_proof=False,
+                    require_acks=False,
+                    require_criteria_audit=False,
+                    require_epilogue=False,
+                    require_transcript_segment=False,
+                    stop_manager=True,
+                    stop_worker=False,
+                    strict_decisions=False,
+                    task="session-task",
+                )
+
+                with (
+                    mock.patch("workerctl.codex_session.find_native_codex_pid", return_value=os.getpid()),
+                    mock.patch("workerctl.codex_session.find_rollout_path_for_pid", return_value=manager_rollout),
+                    contextlib.redirect_stdout(io.StringIO()) as stdout,
+                ):
+                    result = lifecycle.command_finish_task(args)
+
+                payload = json.loads(stdout.getvalue())
+                self.assertEqual(result, 0)
+                self.assertEqual(snapshot_calls, [])
+                self.assertFalse(payload["killed_manager"])
+                self.assertEqual(payload["pre_stop_transcript_captures"], [])
+                with worker_db.connect(db_path) as conn:
+                    binding = conn.execute("select state, ended_at from bindings where id = ?", (binding_id,)).fetchone()
+                    captures = conn.execute("select count(*) as count from terminal_captures").fetchone()
+                    sessions = {
+                        row["name"]: row["state"]
+                        for row in conn.execute("select name, state from sessions")
+                    }
+                self.assertEqual(binding["state"], "ended")
+                self.assertIsNotNone(binding["ended_at"])
+                self.assertEqual(captures["count"], 0)
+                self.assertEqual(sessions["session-worker"], "active")
+                self.assertEqual(sessions["session-manager"], "active")
+            finally:
+                worker_identity.session_snapshot = original_session_snapshot
+
+    def test_finish_task_requires_transcript_segment_for_no_tmux_capture_request(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            worker_rollout = self.write_codex_rollout(tmpdir, "codex-worker")
+            manager_rollout = self.write_codex_rollout(tmpdir, "codex-manager")
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                task_id = worker_db.create_task(conn, name="session-task", goal="Do task.")
+                worker_db.register_session(
+                    conn,
+                    name="session-worker",
+                    role="worker",
+                    codex_session_path=str(worker_rollout),
+                    codex_session_id="codex-worker",
+                    pid=os.getpid(),
+                    cwd=str(ROOT),
+                )
+                worker_db.register_session(
+                    conn,
+                    name="session-manager",
+                    role="manager",
+                    codex_session_path=str(manager_rollout),
+                    codex_session_id="codex-manager",
+                    pid=os.getpid(),
+                    cwd=str(ROOT),
+                )
+                binding_id = worker_db.bind_sessions(
+                    conn,
+                    task_name="session-task",
+                    worker_session_name="session-worker",
+                    manager_session_name="session-manager",
+                )
+                conn.commit()
+
+            original_session_snapshot = worker_identity.session_snapshot
+            try:
+                snapshot_calls = []
+                worker_identity.session_snapshot = lambda session: snapshot_calls.append(session) or {
+                    "live": False,
+                    "pane_id": None,
+                    "session": session,
+                }
+                args = argparse.Namespace(
+                    capture_transcript_before_stop=True,
+                    capture_transcript_lines=80,
+                    capture_transcript_mode="segment",
+                    decision_id=None,
+                    message=None,
+                    path=str(db_path),
+                    reason="session work complete",
+                    require_adversarial_proof=False,
+                    require_acks=False,
+                    require_criteria_audit=False,
+                    require_epilogue=False,
+                    require_transcript_segment=True,
+                    stop_manager=True,
+                    stop_worker=False,
+                    strict_decisions=False,
+                    task="session-task",
+                )
+
+                with (
+                    mock.patch("workerctl.codex_session.find_native_codex_pid", return_value=os.getpid()),
+                    mock.patch("workerctl.codex_session.find_rollout_path_for_pid", return_value=manager_rollout),
+                ):
+                    with self.assertRaisesRegex(WorkerError, "no non-empty transcript segment captured for role\\(s\\): manager"):
+                        lifecycle.command_finish_task(args)
+                self.assertEqual(snapshot_calls, [])
+                with worker_db.connect(db_path) as conn:
+                    binding = conn.execute("select state, ended_at from bindings where id = ?", (binding_id,)).fetchone()
+                    captures = conn.execute("select count(*) as count from terminal_captures").fetchone()
+                    task = conn.execute("select state from tasks where id = ?", (task_id,)).fetchone()
+                self.assertEqual(binding["state"], "active")
+                self.assertIsNone(binding["ended_at"])
+                self.assertEqual(captures["count"], 0)
+                self.assertEqual(task["state"], "candidate")
+            finally:
+                worker_identity.session_snapshot = original_session_snapshot
+
     def test_finish_task_captures_session_transcripts_before_stop(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "workerctl.db"
@@ -10062,7 +10703,7 @@ Deferred follow-up criteria:
                     role="worker",
                     codex_session_path="/tmp/worker.jsonl",
                     codex_session_id="codex-worker",
-                    pid=111,
+                    pid=os.getpid(),
                     cwd=str(ROOT),
                     tmux_session="codex-session-worker",
                     tmux_pane_id="%1",
@@ -10073,7 +10714,7 @@ Deferred follow-up criteria:
                     role="manager",
                     codex_session_path="/tmp/manager.jsonl",
                     codex_session_id="codex-manager",
-                    pid=222,
+                    pid=os.getpid(),
                     cwd=str(ROOT),
                     tmux_session="codex-session-manager",
                     tmux_pane_id="%2",
@@ -10177,7 +10818,7 @@ Deferred follow-up criteria:
                     role="worker",
                     codex_session_path="/tmp/worker.jsonl",
                     codex_session_id="codex-worker",
-                    pid=111,
+                    pid=os.getpid(),
                     cwd=str(ROOT),
                     tmux_session="codex-session-worker",
                     tmux_pane_id="%1",
@@ -10188,7 +10829,7 @@ Deferred follow-up criteria:
                     role="manager",
                     codex_session_path="/tmp/manager.jsonl",
                     codex_session_id="codex-manager",
-                    pid=222,
+                    pid=os.getpid(),
                     cwd=str(ROOT),
                     tmux_session="codex-session-manager",
                     tmux_pane_id="%2",
@@ -10259,7 +10900,7 @@ Deferred follow-up criteria:
                     role="worker",
                     codex_session_path="/tmp/worker.jsonl",
                     codex_session_id="codex-worker",
-                    pid=111,
+                    pid=os.getpid(),
                     cwd=str(ROOT),
                     tmux_session="codex-session-worker",
                     tmux_pane_id="%1",
@@ -10270,7 +10911,7 @@ Deferred follow-up criteria:
                     role="manager",
                     codex_session_path="/tmp/manager.jsonl",
                     codex_session_id="codex-manager",
-                    pid=222,
+                    pid=os.getpid(),
                     cwd=str(ROOT),
                     tmux_session="codex-session-manager",
                     tmux_pane_id="%2",

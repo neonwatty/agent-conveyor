@@ -46,13 +46,13 @@ visual_board:
     url: "http://goalbuddy.localhost:41737/ralph-loop-manager-prompt-contract/"
     command: "npx goalbuddy board docs/goals/adversarial-ralph-loop-conveyor/subgoals/ralph-loop-manager-prompt-contract"
 
-active_task: T001
+active_task: T003
 
 tasks:
   - id: T001
     type: scout
     assignee: Scout
-    status: active
+    status: done
     reasoning_hint: medium
     objective: "Compare live QA receipts against manager prompt examples and identify any prompt-contract gap."
     allowed_files:
@@ -67,5 +67,128 @@ tasks:
       - "Focused tests or evidence proving the prompt contract."
       - "Adversarial review of any prompt-contract change."
     receipt:
+      result: done
+      summary: "Live QA found the gap was not prompt wording: finish-task verified bound no-tmux managers through tmux identity and failed with tmux_session_missing."
+      evidence:
+        - "docs/live-qa-artifacts/2026-06-01-adversarial-trigger-live-run/summary.md"
+
+  - id: T002
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "Make bound no-tmux Codex-app manager sessions valid for finish-task identity verification without accepting blank legacy rows."
+    allowed_files:
+      - "workerctl/lifecycle.py"
+      - "tests/test_workerctl.py"
+      - "docs/live-qa-artifacts/2026-06-01-no-tmux-manager-finish-gate/**"
+      - "docs/goals/adversarial-ralph-loop-conveyor/subgoals/ralph-loop-manager-prompt-contract/state.yaml"
+    verify:
+      - "Focused no-tmux manager finish-task regression passes."
+      - "Counter-test proves no-tmux rows still require Codex session identity."
+      - "Disposable CLI drill succeeds with manager_identity.delivery_mode=pull_required and mismatches=[]."
+      - "Stopping no-tmux manager/worker bindings does not mark sessions gone when no process was killed."
+      - "Finish-task transcript capture skips no-tmux sessions instead of trying tmux capture."
+      - "Required transcript-segment gates fail closed when a requested no-tmux role cannot be captured."
+      - "Gone no-tmux session rows cannot satisfy finish-task identity verification."
+      - "Active no-tmux session rows with dead Codex PIDs cannot satisfy finish-task identity verification."
+      - "Non-positive no-tmux PIDs cannot satisfy identity verification."
+      - "No-tmux session rows with missing rollout files or PIDs attached to a different rollout cannot satisfy identity verification."
+    receipt:
+      result: done
+      summary: "Updated session identity verification to accept active registered Codex-app sessions without tmux only when their Codex session id/path and positive live PID still resolve to the same rollout; fixed review-found no-tmux lifecycle/capture edge cases, including fail-closed transcript-segment requirements."
+      changed_files:
+        - "workerctl/lifecycle.py"
+        - "tests/test_workerctl.py"
+        - "docs/live-qa-artifacts/2026-06-01-no-tmux-manager-finish-gate/summary.md"
+        - "docs/goals/adversarial-ralph-loop-conveyor/subgoals/ralph-loop-manager-prompt-contract/state.yaml"
+      commands:
+        - cmd: "python3 -m unittest tests.test_workerctl.CliTests.test_finish_task_accepts_bound_no_tmux_manager_session_identity tests.test_workerctl.CliTests.test_no_tmux_session_identity_requires_codex_session_identity tests.test_workerctl.CliTests.test_finish_task_stops_session_bound_worker_and_manager -v"
+          status: pass
+        - cmd: "Disposable CLI drill: scripts/workerctl finish-task no-tmux-finish-live --require-adversarial-proof --require-criteria-audit"
+          status: pass
+          summary: "Bound no-tmux manager finished with manager_identity.delivery_mode=pull_required and mismatches=[]."
+        - cmd: "python3 -m unittest tests.test_workerctl.CliTests.test_finish_task_accepts_bound_no_tmux_manager_session_identity tests.test_workerctl.CliTests.test_no_tmux_session_identity_requires_codex_session_identity tests.test_workerctl.CliTests.test_stop_task_keeps_no_tmux_session_active_when_no_process_was_stopped tests.test_workerctl.CliTests.test_finish_task_skips_pre_stop_capture_for_no_tmux_session tests.test_workerctl.CliTests.test_finish_task_captures_session_transcripts_before_stop tests.test_workerctl.CliTests.test_finish_task_stops_session_bound_worker_and_manager -v"
+          status: pass
+          summary: "Focused regression set covered pull-only identity, missing identity fail-closed, no false gone state, no-tmux capture skip, and existing tmux capture/stop behavior."
+        - cmd: "python3 -m unittest -k finish_task tests.test_workerctl -v"
+          status: pass
+          summary: "25 finish-task tests passed after review fixes."
+        - cmd: "python3 -m unittest tests.test_workerctl.CliTests.test_finish_task_skips_pre_stop_capture_for_no_tmux_session tests.test_workerctl.CliTests.test_finish_task_requires_transcript_segment_for_no_tmux_capture_request tests.test_workerctl.CliTests.test_finish_task_captures_session_transcripts_before_stop tests.test_workerctl.CliTests.test_finish_task_required_transcript_segment_fails_before_stopping_empty_capture -v"
+          status: pass
+          summary: "Reviewed transcript-capture edge cases: no-tmux optional capture skip, no-tmux required capture fail-closed, and existing tmux capture behavior."
+        - cmd: "python3 -m unittest tests.test_workerctl.CliTests.test_finish_task_accepts_bound_no_tmux_manager_session_identity tests.test_workerctl.CliTests.test_no_tmux_session_identity_requires_codex_session_identity tests.test_workerctl.CliTests.test_finish_task_rejects_gone_no_tmux_manager_session_identity tests.test_workerctl.CliTests.test_stop_task_keeps_no_tmux_session_active_when_no_process_was_stopped tests.test_workerctl.CliTests.test_finish_task_requires_transcript_segment_for_no_tmux_capture_request -v"
+          status: pass
+          summary: "No-tmux identity/lifecycle regressions covered active identity acceptance, missing identity rejection, stale gone-session rejection, no false gone marking, and required transcript fail-closed."
+        - cmd: "python3 -m unittest tests.test_workerctl.CliTests.test_finish_task_accepts_bound_no_tmux_manager_session_identity tests.test_workerctl.CliTests.test_finish_task_rejects_gone_no_tmux_manager_session_identity tests.test_workerctl.CliTests.test_finish_task_rejects_dead_pid_no_tmux_manager_session_identity tests.test_workerctl.CliTests.test_stop_task_keeps_no_tmux_session_active_when_no_process_was_stopped tests.test_workerctl.CliTests.test_finish_task_skips_pre_stop_capture_for_no_tmux_session tests.test_workerctl.CliTests.test_finish_task_requires_transcript_segment_for_no_tmux_capture_request -v"
+          status: pass
+          summary: "Review-found stale active PID path now fails closed while live no-tmux sessions remain accepted."
+        - cmd: "python3 -m unittest tests.test_workerctl.CliTests.test_no_tmux_session_identity_rejects_non_positive_pid -v"
+          status: pass
+          summary: "No-tmux identity rejects PID 0 before os.kill liveness probing."
+        - cmd: "python3 -m unittest tests.test_workerctl.CliTests.test_finish_task_accepts_bound_no_tmux_manager_session_identity tests.test_workerctl.CliTests.test_no_tmux_session_identity_rejects_missing_rollout_path tests.test_workerctl.CliTests.test_no_tmux_session_identity_rejects_rollout_pid_mismatch tests.test_workerctl.CliTests.test_stop_task_keeps_no_tmux_session_active_when_no_process_was_stopped tests.test_workerctl.CliTests.test_finish_task_skips_pre_stop_capture_for_no_tmux_session tests.test_workerctl.CliTests.test_finish_task_requires_transcript_segment_for_no_tmux_capture_request -v"
+          status: pass
+          summary: "No-tmux acceptance now requires a readable rollout with matching session_meta.id and rejects stale PID-to-rollout bindings."
+        - cmd: "python3 -m unittest -k no_tmux_session_identity tests.test_workerctl -v"
+          status: pass
+          summary: "No-tmux identity unit set covered missing identity, invalid PID, missing rollout path, and PID/rollout mismatch."
+      evidence:
+        - "workerctl/lifecycle.py includes codex_session_id, codex_session_path, delivery_mode, and session_identity_missing guard."
+        - "workerctl/lifecycle.py rejects non-active session rows with session_state_<state> mismatch before finish-task/stop-task can close the binding."
+        - "workerctl/lifecycle.py rejects pull-required session rows with missing, non-positive, invalid, or dead PIDs before finish-task/stop-task can close the binding."
+        - "workerctl/lifecycle.py validates pull-required rollout metadata and rejects codex_session_path_invalid, codex_session_id_mismatch, and codex_session_pid_mismatch before finish-task/stop-task can close the binding."
+        - "workerctl/lifecycle.py only marks manager/worker sessions gone when the corresponding process was actually killed."
+        - "workerctl/lifecycle.py skips pre-stop transcript capture for no-tmux manager/worker sessions."
+        - "workerctl/lifecycle.py raises WorkerError for required transcript segments when a requested no-tmux role cannot be captured."
+        - "tests.test_workerctl.CliTests.test_finish_task_accepts_bound_no_tmux_manager_session_identity passed."
+        - "tests.test_workerctl.CliTests.test_no_tmux_session_identity_requires_codex_session_identity passed."
+        - "tests.test_workerctl.CliTests.test_finish_task_rejects_gone_no_tmux_manager_session_identity passed."
+        - "tests.test_workerctl.CliTests.test_finish_task_rejects_dead_pid_no_tmux_manager_session_identity passed."
+        - "tests.test_workerctl.CliTests.test_no_tmux_session_identity_rejects_non_positive_pid passed."
+        - "tests.test_workerctl.CliTests.test_no_tmux_session_identity_rejects_missing_rollout_path passed."
+        - "tests.test_workerctl.CliTests.test_no_tmux_session_identity_rejects_rollout_pid_mismatch passed."
+        - "tests.test_workerctl.CliTests.test_stop_task_keeps_no_tmux_session_active_when_no_process_was_stopped passed."
+        - "tests.test_workerctl.CliTests.test_finish_task_skips_pre_stop_capture_for_no_tmux_session passed."
+        - "tests.test_workerctl.CliTests.test_finish_task_requires_transcript_segment_for_no_tmux_capture_request passed."
+        - "docs/live-qa-artifacts/2026-06-01-no-tmux-manager-finish-gate/summary.md"
+
+  - id: T003
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: medium
+    objective: "Run focused verification and adversarial review, then carry the slice through PR creation, CI, merge, and receipt update."
+    allowed_files:
+      - "workerctl/lifecycle.py"
+      - "tests/test_workerctl.py"
+      - "docs/live-qa-artifacts/2026-06-01-no-tmux-manager-finish-gate/**"
+      - "docs/goals/adversarial-ralph-loop-conveyor/subgoals/ralph-loop-manager-prompt-contract/state.yaml"
+      - "docs/goals/adversarial-ralph-loop-conveyor/state.yaml"
+    verify:
+      - "Focused finish-task tests pass."
+      - "GoalBuddy state checker passes."
+      - "PR review toolkit or equivalent adversarial review is clean."
+      - "PR is created, CI is green, PR is merged, and merge SHA is recorded."
+    receipt:
       result: active
-      summary: "Waiting for parent T003 activation after live QA receipts."
+      decision: "approved_for_pr"
+      summary: "Focused finish-task and no-tmux identity verification passed; codex-review toolkit completed clean with no accepted/actionable findings. PR/CI/merge receipt remains active."
+      commands:
+        - cmd: "python3 -m py_compile scripts/workerctl workerctl/*.py tests/test_workerctl.py"
+          status: pass
+        - cmd: "python3 -m unittest tests.test_workerctl.CliTests.test_finish_task_accepts_bound_no_tmux_manager_session_identity tests.test_workerctl.CliTests.test_no_tmux_session_identity_rejects_missing_rollout_path tests.test_workerctl.CliTests.test_no_tmux_session_identity_rejects_rollout_pid_mismatch tests.test_workerctl.CliTests.test_stop_task_keeps_no_tmux_session_active_when_no_process_was_stopped tests.test_workerctl.CliTests.test_finish_task_skips_pre_stop_capture_for_no_tmux_session tests.test_workerctl.CliTests.test_finish_task_requires_transcript_segment_for_no_tmux_capture_request -v"
+          status: pass
+        - cmd: "python3 -m unittest -k finish_task tests.test_workerctl -v"
+          status: pass
+          summary: "25 finish-task tests passed."
+        - cmd: "python3 -m unittest -k no_tmux_session_identity tests.test_workerctl -v"
+          status: pass
+          summary: "4 no-tmux identity tests passed."
+        - cmd: "node /Users/neonwatty/.codex/plugins/cache/goalbuddy/goalbuddy/0.3.8/skills/goalbuddy/scripts/check-goal-state.mjs docs/goals/adversarial-ralph-loop-conveyor/state.yaml && node /Users/neonwatty/.codex/plugins/cache/goalbuddy/goalbuddy/0.3.8/skills/goalbuddy/scripts/check-goal-state.mjs docs/goals/adversarial-ralph-loop-conveyor/subgoals/ralph-loop-manager-prompt-contract/state.yaml"
+          status: pass
+        - cmd: "/Users/neonwatty/.codex/skills/codex-review/scripts/codex-review --mode local --full-access --parallel-tests \"python3 -m unittest -k finish_task tests.test_workerctl -v && python3 -m unittest -k no_tmux_session_identity tests.test_workerctl -v && python3 -m unittest tests.test_workerctl.CliTests.test_stop_task_keeps_no_tmux_session_active_when_no_process_was_stopped -v\""
+          status: pass
+          summary: "codex-review clean: no accepted/actionable findings reported; nested reviewer also ran python3 -m unittest tests.test_workerctl -v and git diff --check successfully."
+      adversarial_review:
+        strongest_failure_mode: "A stale or PID-reused no-tmux manager row could pass finish-task identity verification because the PID exists but no longer owns the registered Codex rollout."
+        proof: "test_no_tmux_session_identity_rejects_missing_rollout_path and test_no_tmux_session_identity_rejects_rollout_pid_mismatch both pass; codex-review accepted no remaining actionable findings."
