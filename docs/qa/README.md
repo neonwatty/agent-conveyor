@@ -26,8 +26,14 @@ pass/fail evidence.
 - [GoalBuddy conveyor live dogfood](goalbuddy-conveyor-live-dogfood.md) -
   two-child smoke for `satisfied_on_main`, one-active-child sequencing, and
   PR/CI/merge receipt rails.
+- [Codex review recursion guard](codex-review-recursion-guard.md) - proves the
+  local review helper blocks nested review invocations and does not leave stale
+  review processes behind.
 - [Late attach support reporter](late-attach-support-reporter.md) - assign a
   manager after worker progress on a small CLI/reporting feature.
+
+shell-only QA docs should follow their own command blocks instead of the
+Chrome, dashboard, and lab instructions below.
 
 ## Standard Invocation
 
