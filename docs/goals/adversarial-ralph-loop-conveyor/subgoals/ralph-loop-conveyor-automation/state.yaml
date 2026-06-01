@@ -5,7 +5,7 @@ goal:
   slug: ralph-loop-conveyor-automation
   kind: existing_plan
   tranche: "Reusable conveyor command or documented prompt pattern."
-  status: active
+  status: done
   oracle:
     signal: "A reusable conveyor start path exists and preserves one-child-at-a-time receipts."
     cadence: "after prompt-contract child is complete"
@@ -46,13 +46,13 @@ visual_board:
     url: "http://goalbuddy.localhost:41737/ralph-loop-conveyor-automation/"
     command: "npx goalbuddy board docs/goals/adversarial-ralph-loop-conveyor/subgoals/ralph-loop-conveyor-automation"
 
-active_task: T001
+active_task: null
 
 tasks:
   - id: T001
     type: worker
     assignee: Worker
-    status: active
+    status: done
     reasoning_hint: medium
     objective: "Implement or document the reusable Ralph-loop conveyor start pattern after upstream proof exists."
     allowed_files:
@@ -68,11 +68,15 @@ tasks:
       - "Parent board has not activated this child."
       - "Earlier live QA or prompt-contract proof is missing."
     receipt:
-      result: active
+      result: done
       activated_by_parent_task: T004
       activation_pr: "https://github.com/neonwatty/codex-terminal-manager/pull/181"
       activation_merge_sha: "0cb6c957f66b0ca1277fbec1e210d2d53e3fdaab"
-      summary: "Implemented a reusable workerctl qa-plan goalbuddy-conveyor contract with docs and skill guidance; adversarial review/PR/CI/merge remain in progress."
+      summary: "Implemented a reusable workerctl qa-plan goalbuddy-conveyor contract with docs and skill guidance; PR #183 passed CI and merged."
+      pr_url: "https://github.com/neonwatty/codex-terminal-manager/pull/183"
+      ci_result: "green"
+      merge_sha: "bfa72a2c271cc9789fde299fe614f8da08e6739f"
+      merged_at: "2026-06-01T12:21:55Z"
       changed_files:
         - "workerctl/commands.py"
         - "workerctl/cli.py"
@@ -100,3 +104,25 @@ tasks:
       adversarial_review:
         strongest_failure_mode: "A natural-language conveyor request could still become a flat checklist or multiple active child boards instead of a one-child-at-a-time PR/CI/merge conveyor."
         proof: "The new goalbuddy-conveyor QA plan pins the starter prompt, authority boundaries, one-active-child observations, negative receipt QA, PR/CI/merge receipts, and satisfied_on_main proof in JSON/text tests."
+
+  - id: T002
+    type: pm
+    assignee: PM
+    status: done
+    reasoning_hint: low
+    objective: "Final audit that the reusable conveyor child has merged and the completion proof is durable."
+    receipt:
+      result: done
+      decision: complete
+      full_outcome_complete: true
+      summary: "Child board complete: reusable conveyor QA plan merged in PR #183 with green CI and evidence recorded."
+      pr_url: "https://github.com/neonwatty/codex-terminal-manager/pull/183"
+      ci_result: "green"
+      merge_sha: "bfa72a2c271cc9789fde299fe614f8da08e6739f"
+      merged_at: "2026-06-01T12:21:55Z"
+      evidence:
+        - "PR #183 merged after both GitHub `unittest` checks passed."
+        - "The merged command `workerctl qa-plan goalbuddy-conveyor` emits the starter prompt, authority boundaries, acceptance criteria, correlation markers, expected observations, and negative QA checks."
+        - "README.md, docs/qa/goalbuddy-conveyor.md, and skills/manage-codex-workers/SKILL.md document the natural-language conveyor trigger."
+        - "tests.test_workerctl pins JSON and text output for the reusable conveyor contract."
+        - "Final receipt branch will update the parent board with PR URL, CI result, and merge SHA."
