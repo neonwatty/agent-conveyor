@@ -584,6 +584,11 @@ tmux attach -t codex-live-test
   `--include-content` is passed.
 - `qa-plan <self-management|emergent-criteria|tmux-errors|dispatch-completion|ralph-loop|adversarial-triggers|goalbuddy-conveyor>` — Print a
   repeatable manual QA checklist.
+- `qa-run ralph-loop-guardrails --receipt-output RECEIPT.json [--path DB]` —
+  Run a deterministic no-tmux Ralph-loop guardrail harness and save a JSON
+  receipt. The run proves max-iteration cutoff, missing-evidence cutoff,
+  fresh retry delivery after structured `adversarial_check` evidence, and the
+  `pr_ci_merge_loop` preset evidence gate before worker inbox delivery.
 - `loop-templates --list|--show TEMPLATE|--create-run TASK --template TEMPLATE` —
   List generic loop templates or create a template-backed loop policy run.
   Template-backed runs use the same Dispatch guardrails as Ralph-loop presets:
@@ -645,6 +650,7 @@ scripts/workerctl qa-plan dispatch-completion
 scripts/workerctl qa-plan ralph-loop
 scripts/workerctl qa-plan adversarial-triggers
 scripts/workerctl qa-plan goalbuddy-conveyor
+scripts/workerctl qa-run ralph-loop-guardrails --receipt-output /tmp/ralph-loop-guardrails-receipt.json --json
 scripts/workerctl loop-templates --list --json
 scripts/workerctl loop-templates --show visual_diff_loop --json
 scripts/workerctl loop-evidence visual-diff qa-task --loop-run "$RUN_ID" --iteration 1 --reference reference.png --candidate candidate.png --threshold 0.02 --report-output visual-diff.json --diff-output visual-diff.png
