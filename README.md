@@ -115,6 +115,8 @@ Use `workerctl qa-plan dispatch-completion` for a bounded verification flow, or
 dogfood loop.
 Use `workerctl qa-plan adversarial-triggers` to verify natural-language
 manager prompts activate Ralph-loop adversarial gates.
+Use `workerctl qa-plan goalbuddy-conveyor` when a broad request should become
+sequential GoalBuddy child boards with PR/CI/merge receipts.
 For manual QA, launch the dashboard with Dispatch enforcement so the page can
 show live proof:
 
@@ -578,7 +580,7 @@ tmux attach -t codex-live-test
 - `transcript-show <task> [--role R] [--include-content]` — Show stored
   transcript segment metadata. Segment text is redacted unless
   `--include-content` is passed.
-- `qa-plan <self-management|emergent-criteria|tmux-errors|dispatch-completion|ralph-loop|adversarial-triggers>` — Print a
+- `qa-plan <self-management|emergent-criteria|tmux-errors|dispatch-completion|ralph-loop|adversarial-triggers|goalbuddy-conveyor>` — Print a
   repeatable manual QA checklist.
 - `loop-templates --list|--show TEMPLATE|--create-run TASK --template TEMPLATE` —
   List generic loop templates or create a template-backed loop policy run.
@@ -608,6 +610,11 @@ tmux attach -t codex-live-test
   continuation policy. See `docs/qa/adversarial-proof.md` for the receipt
   shape and how it maps to manager prompts, Ralph-loop evidence, Dispatch
   blocking, and audited finish.
+- `qa-plan goalbuddy-conveyor` — Print the reusable natural-language starter
+  prompt and QA contract for autonomous GoalBuddy conveyor runs. Use it when a
+  manager should split broad work into one parent board plus sequential
+  vertical-slice child boards with PR/CI/merge receipts, satisfied-on-main
+  proof, and adversarial review gates. See `docs/qa/goalbuddy-conveyor.md`.
 - `ralph-loop-presets --list|--show PRESET|--create-run TASK --preset PRESET` —
   List saved Ralph-loop guardrail templates or create a preset-backed
   `ralph_loop` policy run.
@@ -634,6 +641,8 @@ scripts/workerctl qa-plan emergent-criteria --json
 scripts/workerctl qa-plan tmux-errors
 scripts/workerctl qa-plan dispatch-completion
 scripts/workerctl qa-plan ralph-loop
+scripts/workerctl qa-plan adversarial-triggers
+scripts/workerctl qa-plan goalbuddy-conveyor
 scripts/workerctl loop-templates --list --json
 scripts/workerctl loop-templates --show visual_diff_loop --json
 scripts/workerctl loop-evidence visual-diff qa-task --loop-run "$RUN_ID" --iteration 1 --reference reference.png --candidate candidate.png --threshold 0.02 --report-output visual-diff.json --diff-output visual-diff.png

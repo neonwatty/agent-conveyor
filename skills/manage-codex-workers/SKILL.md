@@ -380,6 +380,16 @@ receipt with `scripts/workerctl loop-evidence adversarial-check <task>
 --require-adversarial-proof` so the task cannot be marked done until structured
 proof exists.
 
+Natural-language requests such as "create an autonomous GoalBuddy conveyor" or
+"split this into vertical-slice child GoalBuddy boards and continue until all
+are merged or proven satisfied" should be treated as conveyor requests, not as a
+flat task list. Use `scripts/workerctl qa-plan goalbuddy-conveyor` to retrieve
+the reusable starter prompt, authority boundaries, acceptance criteria,
+correlation markers, and negative QA checks. The manager should keep exactly one
+child board active, require PR/CI/merge or `satisfied_on_main` proof before
+marking a child done, and update the parent receipt before activating the next
+child.
+
 ```bash
 scripts/workerctl cycle my-task
 # {

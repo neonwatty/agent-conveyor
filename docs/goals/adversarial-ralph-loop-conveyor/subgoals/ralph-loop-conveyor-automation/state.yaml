@@ -72,4 +72,31 @@ tasks:
       activated_by_parent_task: T004
       activation_pr: "https://github.com/neonwatty/codex-terminal-manager/pull/181"
       activation_merge_sha: "0cb6c957f66b0ca1277fbec1e210d2d53e3fdaab"
-      summary: "Activated after prompt-contract/no-tmux finish gate child merged green."
+      summary: "Implemented a reusable workerctl qa-plan goalbuddy-conveyor contract with docs and skill guidance; adversarial review/PR/CI/merge remain in progress."
+      changed_files:
+        - "workerctl/commands.py"
+        - "workerctl/cli.py"
+        - "tests/test_workerctl.py"
+        - "README.md"
+        - "docs/qa/goalbuddy-conveyor.md"
+        - "skills/manage-codex-workers/SKILL.md"
+        - "docs/goals/adversarial-ralph-loop-conveyor/subgoals/ralph-loop-conveyor-automation/state.yaml"
+      commands:
+        - cmd: "scripts/workerctl qa-plan goalbuddy-conveyor --json | python3 -m json.tool >/tmp/goalbuddy-conveyor-qa.json && scripts/workerctl qa-plan goalbuddy-conveyor | sed -n '1,80p'"
+          status: pass
+          summary: "Command emits starter prompt, authority boundaries, steps, expected observations, acceptance criteria, and correlation markers."
+        - cmd: "/Users/neonwatty/.codex/skills/codex-review/scripts/codex-review --mode local --full-access --parallel-tests \"python3 -m unittest -k qa_plan tests.test_workerctl -v && python3 -m py_compile scripts/workerctl workerctl/*.py tests/test_workerctl.py && git diff --check\""
+          status: pass
+          summary: "No actionable correctness issues; review verified JSON/text command output, focused tests, qa_plan tests, diff checks, and GoalBuddy state checks."
+        - cmd: "python3 -m unittest tests.test_workerctl.CliTests.test_qa_plan_goalbuddy_conveyor_outputs_reusable_contract tests.test_workerctl.CliTests.test_qa_plan_goalbuddy_conveyor_text_prints_starter_prompt -v"
+          status: pass
+        - cmd: "python3 -m unittest -k qa_plan tests.test_workerctl -v"
+          status: pass
+          summary: "10 QA-plan tests passed, including existing Ralph-loop and adversarial-trigger scenarios."
+        - cmd: "python3 -m py_compile scripts/workerctl workerctl/*.py tests/test_workerctl.py && git diff --check"
+          status: pass
+        - cmd: "node /Users/neonwatty/.codex/plugins/cache/goalbuddy/goalbuddy/0.3.8/skills/goalbuddy/scripts/check-goal-state.mjs docs/goals/adversarial-ralph-loop-conveyor/state.yaml && node /Users/neonwatty/.codex/plugins/cache/goalbuddy/goalbuddy/0.3.8/skills/goalbuddy/scripts/check-goal-state.mjs docs/goals/adversarial-ralph-loop-conveyor/subgoals/ralph-loop-conveyor-automation/state.yaml"
+          status: pass
+      adversarial_review:
+        strongest_failure_mode: "A natural-language conveyor request could still become a flat checklist or multiple active child boards instead of a one-child-at-a-time PR/CI/merge conveyor."
+        proof: "The new goalbuddy-conveyor QA plan pins the starter prompt, authority boundaries, one-active-child observations, negative receipt QA, PR/CI/merge receipts, and satisfied_on_main proof in JSON/text tests."
