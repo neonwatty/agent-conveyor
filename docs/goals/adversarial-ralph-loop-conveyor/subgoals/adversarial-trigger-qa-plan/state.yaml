@@ -1,0 +1,176 @@
+version: 2
+
+goal:
+  title: "Adversarial Trigger QA Plan"
+  slug: adversarial-trigger-qa-plan
+  kind: existing_plan
+  tranche: "Natural-language adversarial trigger phrases plus runnable QA plan and tests."
+  status: active
+  oracle:
+    signal: "qa-plan adversarial-triggers renders five trigger drills, focused tests pass, mechanical smoke proves Dispatch/finish gates, PR CI is green, and PR is merged."
+    cadence: "after implementation, review, CI, and merge"
+    final_proof: "PR URL, green CI result, merge SHA, focused test output, mechanical smoke output, and adversarial review receipt."
+  intake:
+    original_request: "Create QA tasks for five adversarial trigger scenarios, run them, and check behavior."
+    interpreted_outcome: "A maintainable QA surface proves natural-language manager prompts drive the desired adversarial Ralph-loop behavior."
+    input_shape: existing_plan
+    audience:
+      - GoalBuddy managers
+      - workerctl operators
+      - Ralph-loop QA maintainers
+    authority: requested
+    proof_type: test_review_ci_merge
+    completion_proof: "PR #179 merges after focused verification, adversarial review, and green CI."
+    likely_misfire: "Documenting trigger phrases without a runnable QA plan or proof that Dispatch/finish gates behave mechanically."
+
+rules:
+  pm_owns_state: true
+  one_active_task: true
+  max_write_workers: 1
+  no_completion_without_judge_or_pm_audit: true
+  planning_is_not_completion: true
+  queued_required_worker_blocks_completion: true
+  continuous_until_full_outcome: true
+  goal_pressure_requires_oracle: true
+  no_completion_on_weak_proof: true
+  child_completion_requires:
+    - implementation
+    - focused_verification
+    - adversarial_review
+    - pr_creation
+    - ci_monitoring
+    - merge
+    - parent_receipt_update
+
+agents:
+  scout: installed
+  worker: installed
+  judge: installed
+
+visual_board:
+  selected: local
+  local:
+    status: not_started
+    url: "http://goalbuddy.localhost:41737/adversarial-trigger-qa-plan/"
+    command: "npx goalbuddy board docs/goals/adversarial-ralph-loop-conveyor/subgoals/adversarial-trigger-qa-plan"
+
+active_task: T005
+
+tasks:
+  - id: T001
+    type: scout
+    assignee: Scout
+    status: done
+    reasoning_hint: medium
+    objective: "Collect independent QA task drafts for the five natural-language trigger families."
+    receipt:
+      result: done
+      summary: "Five independent subagents produced QA tasks for loop gate, iteration gate, finish gate, worker-directed proof, and manager-created adversarial criteria."
+      evidence:
+        - "loop-gate-trigger: phrase must create or use a Ralph-loop policy with adversarial_check."
+        - "iteration-gate-trigger: Dispatch must block continuation before proof and allow only a fresh post-proof retry."
+        - "finish-gate-trigger: finish-task --require-adversarial-proof must fail closed before proof."
+        - "worker-directed-trigger: worker response must provide failure_mode/check/result and manager records --source worker_proposed."
+        - "acceptance-criteria-trigger: manager_inferred accepted criteria must name negative Dispatch/evidence checks."
+
+  - id: T002
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "Implement the adversarial trigger QA plan, docs, checklist links, and tests."
+    allowed_files:
+      - "workerctl/cli.py"
+      - "workerctl/commands.py"
+      - "tests/test_workerctl.py"
+      - "docs/qa/adversarial-triggers.md"
+      - "docs/qa/adversarial-proof.md"
+      - "docs/qa/README.md"
+      - "docs/manual-qa-checklist.md"
+    verify:
+      - "python3 -m unittest -k qa_plan tests.test_workerctl -v"
+      - "python3 -m unittest tests.test_workerctl.ManagerBootstrapPromptTests.test_adversarial_trigger_qa_documents_prompt_language_drills -v"
+      - "scripts/workerctl qa-plan adversarial-triggers --json"
+      - "git diff --check"
+    stop_if:
+      - "The QA plan requires live external credentials or production state."
+      - "The trigger contract cannot be expressed without changing Dispatch semantics."
+    receipt:
+      result: done
+      changed_files:
+        - "workerctl/cli.py"
+        - "workerctl/commands.py"
+        - "tests/test_workerctl.py"
+        - "docs/qa/adversarial-triggers.md"
+        - "docs/qa/adversarial-proof.md"
+        - "docs/qa/README.md"
+        - "docs/manual-qa-checklist.md"
+      summary: "Added workerctl qa-plan adversarial-triggers with five trigger tasks, correlation markers, docs, checklist/README links, and focused tests."
+      commit: "9595b3a11ac04bbd56e55138402f1aca19bcfeca"
+      commands:
+        - cmd: "python3 -m unittest -k qa_plan tests.test_workerctl -v"
+          status: pass
+          summary: "8 qa_plan tests OK."
+        - cmd: "scripts/workerctl qa-plan adversarial-triggers --json"
+          status: pass
+
+  - id: T003
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: medium
+    objective: "Run focused verification and adversarial mechanical smoke for the implemented QA plan."
+    receipt:
+      result: done
+      decision: approved
+      summary: "Focused verification and mechanical smoke prove the plan is runnable and maps to real Dispatch/finish gate behavior."
+      commands:
+        - cmd: "python3 -m unittest tests.test_workerctl.CliTests.test_qa_plan_adversarial_triggers_outputs_prompt_language_drills tests.test_workerctl.CliTests.test_qa_plan_adversarial_triggers_text_includes_trigger_tasks tests.test_workerctl.ManagerBootstrapPromptTests.test_adversarial_trigger_qa_documents_prompt_language_drills -v"
+          status: pass
+        - cmd: "python3 -m unittest -k qa_plan tests.test_workerctl -v"
+          status: pass
+          summary: "8 qa_plan tests OK."
+        - cmd: "python3 -m unittest tests.test_workerctl.ManagerBootstrapPromptTests.test_adversarial_trigger_qa_documents_prompt_language_drills tests.test_workerctl.ManagerBootstrapPromptTests.test_ralph_loop_qa_documents_adversarial_evidence_gate tests.test_workerctl.ManagerBootstrapPromptTests.test_general_loop_template_qa_documents_visual_drill -v"
+          status: pass
+        - cmd: "scripts/workerctl qa-plan adversarial-triggers --json"
+          status: pass
+        - cmd: "mechanical adversarial trigger smoke"
+          status: pass
+          summary: "Dispatch blocked missing adversarial proof; fresh retry became pull_required after proof; finish-task --require-adversarial-proof failed closed then succeeded."
+        - cmd: "git diff --check"
+          status: pass
+      adversarial_review:
+        failure_mode: "The plan could merely document phrases without proving the actual Dispatch and finish gates behave."
+        check: "Ran a disposable no-tmux Dispatch smoke plus finish-gate smoke against workerctl."
+        result: "The smoke proved missing adversarial proof blocks delivery, proof unlocks a fresh retry, and final finish fails closed before structured proof."
+
+  - id: T004
+    type: pm
+    assignee: PM
+    status: done
+    reasoning_hint: low
+    objective: "Create or update PR for the child slice."
+    receipt:
+      result: done
+      pr_url: "https://github.com/neonwatty/codex-terminal-manager/pull/179"
+      branch: "codex/adversarial-gate-natural-language"
+      head_sha: "9595b3a11ac04bbd56e55138402f1aca19bcfeca"
+      summary: "PR #179 opened and updated with the trigger phrase docs plus adversarial trigger QA plan."
+
+  - id: T005
+    type: pm
+    assignee: PM
+    status: active
+    reasoning_hint: low
+    objective: "Monitor PR #179 CI; if green, merge; if red, inspect logs, fix, push, and re-monitor."
+    receipt:
+      result: active
+      pr_url: "https://github.com/neonwatty/codex-terminal-manager/pull/179"
+      ci_status: pending
+
+  - id: T006
+    type: pm
+    assignee: PM
+    status: queued
+    reasoning_hint: low
+    objective: "Merge PR #179 when green and record merge SHA in child and parent boards."

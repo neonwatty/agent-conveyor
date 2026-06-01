@@ -1,0 +1,71 @@
+version: 2
+
+goal:
+  title: "Ralph Loop Manager Prompt Contract"
+  slug: ralph-loop-manager-prompt-contract
+  kind: existing_plan
+  tranche: "Manager prompt contract for adversarial criteria propagation."
+  status: active
+  oracle:
+    signal: "Manager prompts produce worker-visible adversarial criteria or are proven already sufficient on main."
+    cadence: "after adversarial-trigger-live-run receipts"
+    final_proof: "Code/docs evidence, focused tests or live QA receipts, adversarial review, PR/CI/merge receipt if fixes are required, and parent receipt update."
+  intake:
+    original_request: "Ensure manager-dispatcher-worker Ralph-loop language drives the desired app behavior."
+    interpreted_outcome: "Close any prompt-contract gap between manager natural language and worker-visible adversarial acceptance criteria."
+    input_shape: existing_plan
+    audience:
+      - GoalBuddy managers
+      - workerctl operators
+      - Ralph-loop QA maintainers
+    authority: requested
+    proof_type: evidence_review_ci_merge_if_needed
+    completion_proof: "Prompt contract is fixed or proven satisfied on main with receipts."
+    likely_misfire: "Adding more prose without proving the worker actually receives actionable adversarial criteria."
+
+rules:
+  pm_owns_state: true
+  one_active_task: true
+  max_write_workers: 1
+  no_completion_without_judge_or_pm_audit: true
+  planning_is_not_completion: true
+  queued_required_worker_blocks_completion: true
+  continuous_until_full_outcome: true
+  goal_pressure_requires_oracle: true
+  no_completion_on_weak_proof: true
+
+agents:
+  scout: installed
+  worker: installed
+  judge: installed
+
+visual_board:
+  selected: local
+  local:
+    status: not_started
+    url: "http://goalbuddy.localhost:41737/ralph-loop-manager-prompt-contract/"
+    command: "npx goalbuddy board docs/goals/adversarial-ralph-loop-conveyor/subgoals/ralph-loop-manager-prompt-contract"
+
+active_task: T001
+
+tasks:
+  - id: T001
+    type: scout
+    assignee: Scout
+    status: active
+    reasoning_hint: medium
+    objective: "Compare live QA receipts against manager prompt examples and identify any prompt-contract gap."
+    allowed_files:
+      - "README.md"
+      - "AGENTS.md"
+      - "CLAUDE.md"
+      - "skills/manage-codex-workers/SKILL.md"
+      - "workerctl/**"
+      - "tests/**"
+      - "docs/**"
+    verify:
+      - "Focused tests or evidence proving the prompt contract."
+      - "Adversarial review of any prompt-contract change."
+    receipt:
+      result: active
+      summary: "Waiting for parent T003 activation after live QA receipts."

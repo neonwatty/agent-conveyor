@@ -18,6 +18,27 @@ An adversarial proof receipt must record:
 - Dispatch blocks `continue_iteration` when required adversarial evidence is missing, malformed, or failed.
 - `finish-task --require-adversarial-proof` blocks task completion until satisfied structured adversarial proof exists.
 
+## Natural Language Triggers
+
+Use these phrases when you want the manager to turn the feature on without
+remembering command flags:
+
+- "Run this as an adversarially gated Ralph loop."
+- "Require adversarial proof before the worker gets another iteration."
+- "Do not let this finish until the manager has tried to disprove it."
+- "Before continuing, record the strongest realistic failure mode, the check,
+  and the result."
+
+The manager should translate those requests into:
+
+- a loop policy whose `required_before_continue` includes `adversarial_check`;
+- a recorded `loop-evidence adversarial-check` receipt before each gated retry;
+- `finish-task --require-adversarial-proof` when final completion should also
+  be blocked until proof exists.
+
+Use `workerctl qa-plan adversarial-triggers` and
+`docs/qa/adversarial-triggers.md` to run the natural-language trigger QA suite.
+
 ## GoalBuddy Usage
 
 When planning with GoalBuddy, include adversarial proof in the oracle:

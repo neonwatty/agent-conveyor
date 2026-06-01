@@ -1,0 +1,72 @@
+version: 2
+
+goal:
+  title: "Adversarial Trigger Live Run"
+  slug: adversarial-trigger-live-run
+  kind: existing_plan
+  tranche: "Disposable live QA run for adversarial natural-language trigger behavior."
+  status: active
+  oracle:
+    signal: "Live disposable manager/worker tasks prove or disprove all five adversarial trigger drills."
+    cadence: "after first child merge"
+    final_proof: "Live QA artifacts, pass/fail receipts, focused verification, adversarial review, PR/CI/merge receipt if fixes are required, and parent receipt update."
+  intake:
+    original_request: "Run the generated adversarial trigger QA and check behavior."
+    interpreted_outcome: "Prove the natural-language trigger QA plan against disposable live sessions without touching tracked files."
+    input_shape: existing_plan
+    audience:
+      - GoalBuddy managers
+      - workerctl operators
+      - Ralph-loop QA maintainers
+    authority: requested
+    proof_type: live_qa_review_ci_merge_if_needed
+    completion_proof: "All five trigger drills have receipts, or a blocker/fix PR records the failure."
+    likely_misfire: "Treating generated QA text as proof without running the live disposable drill."
+
+rules:
+  pm_owns_state: true
+  one_active_task: true
+  max_write_workers: 1
+  no_completion_without_judge_or_pm_audit: true
+  planning_is_not_completion: true
+  queued_required_worker_blocks_completion: true
+  continuous_until_full_outcome: true
+  goal_pressure_requires_oracle: true
+  no_completion_on_weak_proof: true
+
+agents:
+  scout: installed
+  worker: installed
+  judge: installed
+
+visual_board:
+  selected: local
+  local:
+    status: not_started
+    url: "http://goalbuddy.localhost:41737/adversarial-trigger-live-run/"
+    command: "npx goalbuddy board docs/goals/adversarial-ralph-loop-conveyor/subgoals/adversarial-trigger-live-run"
+
+active_task: T001
+
+tasks:
+  - id: T001
+    type: worker
+    assignee: Worker
+    status: active
+    reasoning_hint: medium
+    objective: "Run the adversarial-trigger QA plan against disposable live manager/worker tasks and capture receipts."
+    allowed_files:
+      - "docs/live-qa-artifacts/**"
+      - "docs/live-qa-log.md"
+      - "workerctl/**"
+      - "tests/**"
+    verify:
+      - "scripts/workerctl qa-plan adversarial-triggers"
+      - "scripts/workerctl qa-plan adversarial-triggers --json"
+      - "git status --short --branch"
+    stop_if:
+      - "Parent board has not activated this child."
+      - "Running live QA would target non-disposable sessions or tracked-file edits."
+    receipt:
+      result: active
+      summary: "Waiting for parent T002 activation after the first child merge."

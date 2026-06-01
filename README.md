@@ -113,6 +113,8 @@ workerctl dispatch --watch --dispatcher-id dispatch-local
 Use `workerctl qa-plan dispatch-completion` for a bounded verification flow, or
 `workerctl qa-plan ralph-loop` for the repeated PR/CI/merge/context-clear
 dogfood loop.
+Use `workerctl qa-plan adversarial-triggers` to verify natural-language
+manager prompts activate Ralph-loop adversarial gates.
 For manual QA, launch the dashboard with Dispatch enforcement so the page can
 show live proof:
 
@@ -576,7 +578,7 @@ tmux attach -t codex-live-test
 - `transcript-show <task> [--role R] [--include-content]` — Show stored
   transcript segment metadata. Segment text is redacted unless
   `--include-content` is passed.
-- `qa-plan <self-management|emergent-criteria|tmux-errors|dispatch-completion|ralph-loop>` — Print a
+- `qa-plan <self-management|emergent-criteria|tmux-errors|dispatch-completion|ralph-loop|adversarial-triggers>` — Print a
   repeatable manual QA checklist.
 - `loop-templates --list|--show TEMPLATE|--create-run TASK --template TEMPLATE` —
   List generic loop templates or create a template-backed loop policy run.
