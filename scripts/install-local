@@ -16,7 +16,7 @@ Usage: scripts/install-local [--write] [--profile PATH] [--codex-home PATH] [--n
 Print or install the local workerctl PATH setup and Codex skills.
 
 Options:
-  --write           Append the PATH line and install the skill.
+  --write           Append the PATH line and install Codex skills.
   --profile PATH    Shell profile to update. Defaults to ~/.zshrc.
   --codex-home PATH Codex home directory. Defaults to \$CODEX_HOME or ~/.codex.
   --no-skill        Skip installing Codex skills.
