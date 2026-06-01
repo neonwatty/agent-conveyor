@@ -5,7 +5,7 @@ goal:
   slug: adversarial-trigger-qa-plan
   kind: existing_plan
   tranche: "Natural-language adversarial trigger phrases plus runnable QA plan and tests."
-  status: active
+  status: done
   oracle:
     signal: "qa-plan adversarial-triggers renders five trigger drills, focused tests pass, mechanical smoke proves Dispatch/finish gates, PR CI is green, and PR is merged."
     cadence: "after implementation, review, CI, and merge"
@@ -54,7 +54,7 @@ visual_board:
     url: "http://goalbuddy.localhost:41737/adversarial-trigger-qa-plan/"
     command: "npx goalbuddy board docs/goals/adversarial-ralph-loop-conveyor/subgoals/adversarial-trigger-qa-plan"
 
-active_task: T005
+active_task: null
 
 tasks:
   - id: T001
@@ -154,23 +154,51 @@ tasks:
       result: done
       pr_url: "https://github.com/neonwatty/codex-terminal-manager/pull/179"
       branch: "codex/adversarial-gate-natural-language"
-      head_sha: "9595b3a11ac04bbd56e55138402f1aca19bcfeca"
-      summary: "PR #179 opened and updated with the trigger phrase docs plus adversarial trigger QA plan."
+      head_sha: "f4698c48b5480226b88e8799cc2a320bff9d39e5"
+      summary: "PR #179 opened and updated with the trigger phrase docs, adversarial trigger QA plan, and conveyor child boards."
 
   - id: T005
     type: pm
     assignee: PM
-    status: active
+    status: done
     reasoning_hint: low
     objective: "Monitor PR #179 CI; if green, merge; if red, inspect logs, fix, push, and re-monitor."
     receipt:
-      result: active
+      result: done
       pr_url: "https://github.com/neonwatty/codex-terminal-manager/pull/179"
-      ci_status: pending
+      ci_status: green
+      checks:
+        - "unittest pass: https://github.com/neonwatty/codex-terminal-manager/actions/runs/26729227864/job/78769852950"
+        - "unittest pass: https://github.com/neonwatty/codex-terminal-manager/actions/runs/26729228658/job/78769855424"
+      summary: "PR #179 CI passed for both push and pull_request workflow runs."
 
   - id: T006
     type: pm
     assignee: PM
-    status: queued
+    status: done
     reasoning_hint: low
     objective: "Merge PR #179 when green and record merge SHA in child and parent boards."
+    receipt:
+      result: done
+      pr_url: "https://github.com/neonwatty/codex-terminal-manager/pull/179"
+      merge_sha: "37c3a16f9380b49730bf8f68a0c0c4067262530f"
+      merged_at: "2026-06-01T00:42:50Z"
+      parent_receipt_update: "docs/goals/adversarial-ralph-loop-conveyor/state.yaml activates T002 after recording PR #179 CI and merge proof."
+      summary: "Merged PR #179 and recorded the handoff receipt for the next conveyor child."
+
+  - id: T007
+    type: pm
+    assignee: PM
+    status: done
+    reasoning_hint: low
+    objective: "Audit the child board completion proof before closing the slice."
+    receipt:
+      result: done
+      decision: complete
+      full_outcome_complete: true
+      summary: "Implementation, focused verification, adversarial review, PR creation, green CI, merge, and parent handoff receipt are all recorded."
+      evidence:
+        - "PR #179 merged at 37c3a16f9380b49730bf8f68a0c0c4067262530f."
+        - "Focused qa_plan tests passed."
+        - "codex-review --mode branch reported no accepted/actionable findings."
+        - "Parent board T002 is activated for the live QA child."

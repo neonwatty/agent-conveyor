@@ -70,13 +70,13 @@ visual_board:
     url: "http://goalbuddy.localhost:41737/adversarial-ralph-loop-conveyor/"
     command: "npx goalbuddy board docs/goals/adversarial-ralph-loop-conveyor"
 
-active_task: T001
+active_task: T003
 
 tasks:
   - id: T001
     type: pm
     assignee: PM
-    status: active
+    status: done
     reasoning_hint: medium
     objective: "Complete child board adversarial-trigger-qa-plan through PR review, CI, merge, and parent receipt update."
     child_board: "docs/goals/adversarial-ralph-loop-conveyor/subgoals/adversarial-trigger-qa-plan/goal.md"
@@ -93,34 +93,54 @@ tasks:
       - "Child board marked done."
       - "Parent receipt updated."
     receipt:
-      result: active
-      summary: "First child is implemented and pushed in PR #179; CI monitoring is active."
+      result: done
+      summary: "First child completed: PR #179 merged with green CI, final branch review clean, and merge proof recorded."
+      pr_url: "https://github.com/neonwatty/codex-terminal-manager/pull/179"
+      ci_result: "green"
+      merge_sha: "37c3a16f9380b49730bf8f68a0c0c4067262530f"
+      merged_at: "2026-06-01T00:42:50Z"
       evidence:
         - "Local focused qa_plan tests passed."
+        - "GoalBuddy checker passed for parent and all child boards."
+        - "codex-review --mode branch completed clean with no accepted/actionable findings."
         - "Mechanical smoke passed: Dispatch blocked missing adversarial proof, fresh retry became pull_required, and finish gate failed closed then succeeded."
-        - "PR #179 is open at https://github.com/neonwatty/codex-terminal-manager/pull/179."
-      pending:
-        - "CI green result."
-        - "Merge."
-        - "Merge SHA receipt."
+        - "GitHub checks `unittest` passed for push and pull_request runs before merge."
+        - "PR #179 merged as 37c3a16f9380b49730bf8f68a0c0c4067262530f."
 
   - id: T002
     type: pm
     assignee: PM
-    status: queued
+    status: done
     reasoning_hint: medium
     objective: "Run the adversarial-trigger QA plan live against disposable manager/worker tasks and record evidence."
     child_board: "docs/goals/adversarial-ralph-loop-conveyor/subgoals/adversarial-trigger-live-run/goal.md"
     activation_rule: "Activate only after T001 is merged or proven satisfied on main."
+    receipt:
+      result: done
+      summary: "Disposable live QA passed for all five adversarial trigger families; one follow-up finding moves to the prompt-contract child."
+      artifact: "docs/live-qa-artifacts/2026-06-01-adversarial-trigger-live-run/summary.md"
+      live_result: pass
+      evidence:
+        - "Loop policy run exposed metadata.required_before_continue=[adversarial_check]."
+        - "Dispatch blocked missing adversarial proof before worker delivery and left worker inbox empty."
+        - "Post-proof fresh retry delivered through the no-tmux mailbox path with state=pull_required."
+        - "Finish gate failed closed before proof and succeeded after structured proof on an unbound disposable task."
+        - "Worker-directed proof persisted source=worker_proposed adversarial_check evidence."
+        - "Manager-created adversarial criterion was satisfied with structured negative-check evidence."
+      follow_up:
+        - "Bound no-tmux manager finish-task path still fails identity verification with tmux_session_missing."
 
   - id: T003
     type: pm
     assignee: PM
-    status: queued
+    status: active
     reasoning_hint: medium
     objective: "Tighten manager prompt examples for adversarial acceptance criteria from manager to worker if live QA shows any ambiguity."
     child_board: "docs/goals/adversarial-ralph-loop-conveyor/subgoals/ralph-loop-manager-prompt-contract/goal.md"
     activation_rule: "Activate after T002 has a pass/fail receipt."
+    receipt:
+      result: active
+      summary: "Activated after live QA found the bound no-tmux manager finish-task identity gap."
 
   - id: T004
     type: pm

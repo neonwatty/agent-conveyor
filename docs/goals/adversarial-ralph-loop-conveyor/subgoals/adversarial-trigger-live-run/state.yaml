@@ -5,7 +5,7 @@ goal:
   slug: adversarial-trigger-live-run
   kind: existing_plan
   tranche: "Disposable live QA run for adversarial natural-language trigger behavior."
-  status: active
+  status: done
   oracle:
     signal: "Live disposable manager/worker tasks prove or disprove all five adversarial trigger drills."
     cadence: "after first child merge"
@@ -46,13 +46,13 @@ visual_board:
     url: "http://goalbuddy.localhost:41737/adversarial-trigger-live-run/"
     command: "npx goalbuddy board docs/goals/adversarial-ralph-loop-conveyor/subgoals/adversarial-trigger-live-run"
 
-active_task: T001
+active_task: null
 
 tasks:
   - id: T001
     type: worker
     assignee: Worker
-    status: active
+    status: done
     reasoning_hint: medium
     objective: "Run the adversarial-trigger QA plan against disposable live manager/worker tasks and capture receipts."
     allowed_files:
@@ -68,5 +68,38 @@ tasks:
       - "Parent board has not activated this child."
       - "Running live QA would target non-disposable sessions or tracked-file edits."
     receipt:
-      result: active
-      summary: "Waiting for parent T002 activation after the first child merge."
+      result: done
+      activated_by_parent_task: T002
+      activation_pr: "https://github.com/neonwatty/codex-terminal-manager/pull/179"
+      activation_merge_sha: "37c3a16f9380b49730bf8f68a0c0c4067262530f"
+      changed_files:
+        - "docs/live-qa-artifacts/2026-06-01-adversarial-trigger-live-run/summary.md"
+      summary: "Disposable live QA passed for loop gate, iteration gate, finish gate, worker-directed proof, and manager-created criteria triggers."
+      artifact: "docs/live-qa-artifacts/2026-06-01-adversarial-trigger-live-run/summary.md"
+      commands:
+        - cmd: "scripts/workerctl qa-plan adversarial-triggers"
+          status: pass
+        - cmd: "scripts/workerctl qa-plan adversarial-triggers --json"
+          status: pass
+        - cmd: "Disposable WORKERCTL_DB live drill with one no-tmux manager/worker mailbox pair per bound trigger task"
+          status: pass
+          summary: "Blocked missing proof, empty worker inbox, post-proof pull_required retry, worker_proposed proof, and manager_inferred criteria evidence all passed."
+        - cmd: "git status --short --branch before and after disposable run"
+          status: pass
+          summary: "No tracked-file edits came from the disposable live run."
+      follow_up:
+        - "Bound no-tmux manager finish-task identity verification failed with tmux_session_missing; finish gate used an unbound disposable task."
+  - id: T002
+    type: pm
+    assignee: PM
+    status: done
+    reasoning_hint: low
+    objective: "Audit the live-run child completion proof before closing the slice."
+    receipt:
+      result: done
+      decision: complete
+      full_outcome_complete: true
+      summary: "Live QA has a durable artifact, focused command proof, adversarial finding, and parent handoff to the prompt-contract child."
+      evidence:
+        - "docs/live-qa-artifacts/2026-06-01-adversarial-trigger-live-run/summary.md records all trigger outcomes."
+        - "Parent board T003 is active for the no-tmux manager prompt/identity follow-up."
