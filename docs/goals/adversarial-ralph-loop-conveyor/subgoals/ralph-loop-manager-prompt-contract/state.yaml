@@ -172,6 +172,7 @@ tasks:
     receipt:
       result: active
       decision: "approved_for_pr"
+      pr_url: "https://github.com/neonwatty/codex-terminal-manager/pull/181"
       summary: "Focused finish-task and no-tmux identity verification passed; codex-review toolkit completed clean with no accepted/actionable findings. PR/CI/merge receipt remains active."
       commands:
         - cmd: "python3 -m py_compile scripts/workerctl workerctl/*.py tests/test_workerctl.py"
