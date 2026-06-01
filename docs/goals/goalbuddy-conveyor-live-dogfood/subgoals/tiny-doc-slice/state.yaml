@@ -5,7 +5,7 @@ goal:
   slug: tiny-doc-slice
   kind: existing_plan
   tranche: "Small implementation child for the live conveyor dogfood."
-  status: active
+  status: done
   oracle:
     signal: "A live-dogfood QA note exists and is merged green."
     cadence: "after PR merge"
@@ -44,13 +44,13 @@ visual_board:
     url: "http://goalbuddy.localhost:41737/tiny-doc-slice/"
     command: "npx goalbuddy board docs/goals/goalbuddy-conveyor-live-dogfood/subgoals/tiny-doc-slice"
 
-active_task: T001
+active_task: null
 
 tasks:
   - id: T001
     type: worker
     assignee: Worker
-    status: active
+    status: done
     reasoning_hint: medium
     objective: "Add docs/qa/goalbuddy-conveyor-live-dogfood.md and verify the board rails still pass."
     allowed_files:
@@ -65,10 +65,14 @@ tasks:
       - "Parent active_task does not equal T002."
       - "The satisfied-main child lacks satisfied_on_main: true."
     receipt:
-      result: active
+      result: done
       activated_by_parent_task: T002
       activation_proof: "Parent T001 and satisfied-main child T001 are both recorded as satisfied_on_main."
-      summary: "Active implementation child for the live conveyor dogfood."
+      summary: "Added the live-dogfood QA note and QA index link, then merged PR #185 with green CI."
+      pr_url: "https://github.com/neonwatty/codex-terminal-manager/pull/185"
+      ci_result: "green"
+      merge_sha: "553679db3853d79a813a5040bd72d42a7c6253c6"
+      merged_at: "2026-06-01T14:35:22Z"
       changed_files:
         - "docs/qa/goalbuddy-conveyor-live-dogfood.md"
         - "docs/qa/README.md"
@@ -94,3 +98,19 @@ tasks:
       adversarial_review:
         strongest_failure_mode: "This docs child could look complete even though the QA index edit is outside the child scope, the checker path is not portable, or the parent has not preserved one-active-child sequencing."
         proof: "The child allowed_files includes both changed QA docs, the command block avoids shell redirection placeholders, and parent plus both child GoalBuddy checks passed."
+
+  - id: T002
+    type: pm
+    assignee: PM
+    status: done
+    reasoning_hint: low
+    objective: "Final audit for the tiny docs child."
+    receipt:
+      result: done
+      decision: complete
+      full_outcome_complete: true
+      summary: "The tiny docs child is complete: PR #185 merged green and the child board records changed files, verification, review, and adversarial proof."
+      pr_url: "https://github.com/neonwatty/codex-terminal-manager/pull/185"
+      ci_result: "green"
+      merge_sha: "553679db3853d79a813a5040bd72d42a7c6253c6"
+      merged_at: "2026-06-01T14:35:22Z"
