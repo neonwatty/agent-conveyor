@@ -8470,61 +8470,14 @@ Deferred follow-up criteria:
             self.assertIn("dispatch --once --type continue_iteration", replay_commands)
             self.assertIn("loop-evidence adversarial-check", replay_commands)
 
-    def test_qa_run_refuses_to_share_dirty_continue_iteration_queue(self):
+    def test_qa_run_generic_loop_template_writes_replayable_receipt(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "workerctl.db"
             receipt_path = Path(tmpdir) / "receipt.json"
-            with worker_db.connect(db_path) as conn:
-                worker_db.initialize_database(conn)
-                task_id = worker_db.create_task(conn, name="preexisting-task", goal="Existing queue.")
-                conn.execute("update tasks set state = 'managed' where id = ?", (task_id,))
-                worker_db.register_session(
-                    conn,
-                    name="preexisting-worker",
-                    role="worker",
-                    codex_session_path="/tmp/preexisting-worker.jsonl",
-                    codex_session_id="preexisting-worker",
-                    pid=os.getpid(),
-                    cwd=str(ROOT),
-                    tmux_session=None,
-                )
-                worker_db.register_session(
-                    conn,
-                    name="preexisting-manager",
-                    role="manager",
-                    codex_session_path="/tmp/preexisting-manager.jsonl",
-                    codex_session_id="preexisting-manager",
-                    pid=os.getpid(),
-                    cwd=str(ROOT),
-                    tmux_session=None,
-                )
-                worker_db.bind_sessions(
-                    conn,
-                    task_name="preexisting-task",
-                    worker_session_name="preexisting-worker",
-                    manager_session_name="preexisting-manager",
-                )
-                run_id = worker_db.create_ralph_loop_run(
-                    conn,
-                    task_id=task_id,
-                    name="preexisting-run",
-                    max_iterations=3,
-                    current_iteration=1,
-                    required_before_continue=[],
-                )
-                command_id = worker_db.enqueue_continue_iteration(
-                    conn,
-                    task_id=task_id,
-                    message="Do not consume me.",
-                    loop_run_id=run_id,
-                    requested_iteration=2,
-                    correlation_id="preexisting-command",
-                )
-                conn.commit()
 
             proc = self.run_workerctl(
                 "qa-run",
-                "ralph-loop-guardrails",
+                "generic-loop-template",
                 "--receipt-output",
                 str(receipt_path),
                 "--path",
@@ -8532,94 +8485,220 @@ Deferred follow-up criteria:
                 "--json",
             )
 
-            self.assertNotEqual(proc.returncode, 0)
-            self.assertIn("continue_iteration dispatch queue is not clean", proc.stderr)
-            self.assertFalse(receipt_path.exists())
-            with worker_db.connect(db_path) as conn:
-                command = conn.execute(
-                    "select state from commands where id = ?",
-                    (command_id,),
-                ).fetchone()
-                self.assertEqual(command["state"], "pending")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertTrue(receipt_path.exists())
+            summary = json.loads(proc.stdout)
+            receipt = json.loads(receipt_path.read_text())
+            self.assertEqual(summary["scenario"], "generic-loop-template")
+            self.assertEqual(summary["result"], "passed")
+            self.assertEqual(summary["checks"], 3)
+            self.assertEqual(receipt["scenario"], "generic-loop-template")
+            self.assertEqual(receipt["template"], "visual_diff_loop")
+            self.assertEqual(receipt["result"], "passed")
+            self.assertEqual(Path(receipt["artifacts"]["db_path"]), db_path.resolve())
+            self.assertEqual(receipt["template_metadata"]["template"], "visual_diff_loop")
+            self.assertEqual(receipt["template_metadata"]["cleanup_policy"], "compact")
+            self.assertEqual(
+                receipt["template_metadata"]["required_before_continue"],
+                [
+                    "reference_artifact",
+                    "candidate_screenshot",
+                    "visual_diff_report",
+                    "diff_below_threshold",
+                    "adversarial_check",
+                ],
+            )
+
+            checks = {check["name"]: check for check in receipt["checks"]}
+            missing = checks["visual_template_blocks_before_visual_evidence"]
+            self.assertEqual(missing["status"], "passed")
+            self.assertEqual(missing["dispatch"]["state"], "blocked")
+            self.assertEqual(missing["dispatch"]["reason"], "missing_required_evidence")
+            self.assertEqual(
+                missing["dispatch"]["missing_evidence"],
+                [
+                    "reference_artifact",
+                    "candidate_screenshot",
+                    "visual_diff_report",
+                    "diff_below_threshold",
+                    "adversarial_check",
+                ],
+            )
+            self.assertEqual(missing["routed_notifications_count"], 0)
+            self.assertEqual(missing["worker_inbox_count"], 0)
+
+            unstructured = checks["unstructured_adversarial_check_still_blocks"]
+            self.assertEqual(unstructured["status"], "passed")
+            self.assertEqual(unstructured["dispatch"]["state"], "blocked")
+            self.assertEqual(unstructured["dispatch"]["missing_evidence"], ["adversarial_check"])
+            self.assertEqual(unstructured["worker_inbox_count"], 0)
+
+            allowed = checks["structured_visual_evidence_retry_delivers"]
+            self.assertEqual(allowed["status"], "passed")
+            self.assertEqual(allowed["dispatch"]["state"], "pull_required")
+            self.assertEqual(allowed["worker_inbox_count"], 1)
+
+            replay_commands = "\n".join(receipt["replay_commands"])
+            self.assertIn("loop-templates --show visual_diff_loop", replay_commands)
+            self.assertIn("--evidence-type reference_artifact", replay_commands)
+            self.assertIn("--evidence-type candidate_screenshot", replay_commands)
+            self.assertIn("loop-evidence visual-diff", replay_commands)
+            self.assertIn("loop-evidence adversarial-check", replay_commands)
+
+    def test_qa_run_refuses_to_share_dirty_continue_iteration_queue(self):
+        for scenario in ("ralph-loop-guardrails", "generic-loop-template"):
+            with self.subTest(scenario=scenario):
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    db_path = Path(tmpdir) / "workerctl.db"
+                    receipt_path = Path(tmpdir) / "receipt.json"
+                    with worker_db.connect(db_path) as conn:
+                        worker_db.initialize_database(conn)
+                        task_id = worker_db.create_task(conn, name="preexisting-task", goal="Existing queue.")
+                        conn.execute("update tasks set state = 'managed' where id = ?", (task_id,))
+                        worker_db.register_session(
+                            conn,
+                            name="preexisting-worker",
+                            role="worker",
+                            codex_session_path="/tmp/preexisting-worker.jsonl",
+                            codex_session_id="preexisting-worker",
+                            pid=os.getpid(),
+                            cwd=str(ROOT),
+                            tmux_session=None,
+                        )
+                        worker_db.register_session(
+                            conn,
+                            name="preexisting-manager",
+                            role="manager",
+                            codex_session_path="/tmp/preexisting-manager.jsonl",
+                            codex_session_id="preexisting-manager",
+                            pid=os.getpid(),
+                            cwd=str(ROOT),
+                            tmux_session=None,
+                        )
+                        worker_db.bind_sessions(
+                            conn,
+                            task_name="preexisting-task",
+                            worker_session_name="preexisting-worker",
+                            manager_session_name="preexisting-manager",
+                        )
+                        run_id = worker_db.create_ralph_loop_run(
+                            conn,
+                            task_id=task_id,
+                            name="preexisting-run",
+                            max_iterations=3,
+                            current_iteration=1,
+                            required_before_continue=[],
+                        )
+                        command_id = worker_db.enqueue_continue_iteration(
+                            conn,
+                            task_id=task_id,
+                            message="Do not consume me.",
+                            loop_run_id=run_id,
+                            requested_iteration=2,
+                            correlation_id="preexisting-command",
+                        )
+                        conn.commit()
+
+                    proc = self.run_workerctl(
+                        "qa-run",
+                        scenario,
+                        "--receipt-output",
+                        str(receipt_path),
+                        "--path",
+                        str(db_path),
+                        "--json",
+                    )
+
+                    self.assertNotEqual(proc.returncode, 0)
+                    self.assertIn("continue_iteration dispatch queue is not clean", proc.stderr)
+                    self.assertFalse(receipt_path.exists())
+                    with worker_db.connect(db_path) as conn:
+                        command = conn.execute(
+                            "select state from commands where id = ?",
+                            (command_id,),
+                        ).fetchone()
+                        self.assertEqual(command["state"], "pending")
 
     def test_qa_run_refuses_stale_attempted_continue_iteration_queue(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            db_path = Path(tmpdir) / "workerctl.db"
-            receipt_path = Path(tmpdir) / "receipt.json"
-            with worker_db.connect(db_path) as conn:
-                worker_db.initialize_database(conn)
-                task_id = worker_db.create_task(conn, name="stale-task", goal="Existing stale queue.")
-                conn.execute("update tasks set state = 'managed' where id = ?", (task_id,))
-                worker_db.register_session(
-                    conn,
-                    name="stale-worker",
-                    role="worker",
-                    codex_session_path="/tmp/stale-worker.jsonl",
-                    codex_session_id="stale-worker",
-                    pid=os.getpid(),
-                    cwd=str(ROOT),
-                    tmux_session=None,
-                )
-                worker_db.register_session(
-                    conn,
-                    name="stale-manager",
-                    role="manager",
-                    codex_session_path="/tmp/stale-manager.jsonl",
-                    codex_session_id="stale-manager",
-                    pid=os.getpid(),
-                    cwd=str(ROOT),
-                    tmux_session=None,
-                )
-                worker_db.bind_sessions(
-                    conn,
-                    task_name="stale-task",
-                    worker_session_name="stale-worker",
-                    manager_session_name="stale-manager",
-                )
-                run_id = worker_db.create_ralph_loop_run(
-                    conn,
-                    task_id=task_id,
-                    name="stale-run",
-                    max_iterations=3,
-                    current_iteration=1,
-                    required_before_continue=[],
-                )
-                command_id = worker_db.enqueue_continue_iteration(
-                    conn,
-                    task_id=task_id,
-                    message="Do not recover me.",
-                    loop_run_id=run_id,
-                    requested_iteration=2,
-                    correlation_id="stale-command",
-                )
-                worker_db.claim_next_dispatch_command(
-                    conn,
-                    dispatcher_id="old-dispatcher",
-                    command_types=["continue_iteration"],
-                    timestamp="2000-01-01T00:00:00Z",
-                    lease_seconds=1,
-                )
-                conn.commit()
+        for scenario in ("ralph-loop-guardrails", "generic-loop-template"):
+            with self.subTest(scenario=scenario):
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    db_path = Path(tmpdir) / "workerctl.db"
+                    receipt_path = Path(tmpdir) / "receipt.json"
+                    with worker_db.connect(db_path) as conn:
+                        worker_db.initialize_database(conn)
+                        task_id = worker_db.create_task(conn, name="stale-task", goal="Existing stale queue.")
+                        conn.execute("update tasks set state = 'managed' where id = ?", (task_id,))
+                        worker_db.register_session(
+                            conn,
+                            name="stale-worker",
+                            role="worker",
+                            codex_session_path="/tmp/stale-worker.jsonl",
+                            codex_session_id="stale-worker",
+                            pid=os.getpid(),
+                            cwd=str(ROOT),
+                            tmux_session=None,
+                        )
+                        worker_db.register_session(
+                            conn,
+                            name="stale-manager",
+                            role="manager",
+                            codex_session_path="/tmp/stale-manager.jsonl",
+                            codex_session_id="stale-manager",
+                            pid=os.getpid(),
+                            cwd=str(ROOT),
+                            tmux_session=None,
+                        )
+                        worker_db.bind_sessions(
+                            conn,
+                            task_name="stale-task",
+                            worker_session_name="stale-worker",
+                            manager_session_name="stale-manager",
+                        )
+                        run_id = worker_db.create_ralph_loop_run(
+                            conn,
+                            task_id=task_id,
+                            name="stale-run",
+                            max_iterations=3,
+                            current_iteration=1,
+                            required_before_continue=[],
+                        )
+                        command_id = worker_db.enqueue_continue_iteration(
+                            conn,
+                            task_id=task_id,
+                            message="Do not recover me.",
+                            loop_run_id=run_id,
+                            requested_iteration=2,
+                            correlation_id="stale-command",
+                        )
+                        worker_db.claim_next_dispatch_command(
+                            conn,
+                            dispatcher_id="old-dispatcher",
+                            command_types=["continue_iteration"],
+                            timestamp="2000-01-01T00:00:00Z",
+                            lease_seconds=1,
+                        )
+                        conn.commit()
 
-            proc = self.run_workerctl(
-                "qa-run",
-                "ralph-loop-guardrails",
-                "--receipt-output",
-                str(receipt_path),
-                "--path",
-                str(db_path),
-                "--json",
-            )
+                    proc = self.run_workerctl(
+                        "qa-run",
+                        scenario,
+                        "--receipt-output",
+                        str(receipt_path),
+                        "--path",
+                        str(db_path),
+                        "--json",
+                    )
 
-            self.assertNotEqual(proc.returncode, 0)
-            self.assertIn("continue_iteration dispatch queue is not clean", proc.stderr)
-            self.assertFalse(receipt_path.exists())
-            with worker_db.connect(db_path) as conn:
-                command = conn.execute(
-                    "select state from commands where id = ?",
-                    (command_id,),
-                ).fetchone()
-                self.assertEqual(command["state"], "attempted")
+                    self.assertNotEqual(proc.returncode, 0)
+                    self.assertIn("continue_iteration dispatch queue is not clean", proc.stderr)
+                    self.assertFalse(receipt_path.exists())
+                    with worker_db.connect(db_path) as conn:
+                        command = conn.execute(
+                            "select state from commands where id = ?",
+                            (command_id,),
+                        ).fetchone()
+                        self.assertEqual(command["state"], "attempted")
 
     def test_qa_plan_goalbuddy_conveyor_outputs_reusable_contract(self):
         proc = self.run_workerctl("qa-plan", "goalbuddy-conveyor", "--json")

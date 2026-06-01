@@ -2120,6 +2120,7 @@ def _qa_run_record_loop_evidence(
     evidence_type: str,
     correlation_id: str,
     status: str = "pass",
+    artifact_path: str | Path | None = None,
     metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     from workerctl import db as worker_db
@@ -2136,12 +2137,121 @@ def _qa_run_record_loop_evidence(
             status=status,
             source="manager_inferred",
             proof=f"qa-run recorded {evidence_type} receipt before continuing.",
-            artifact_path=None,
+            artifact_path=str(artifact_path) if artifact_path else None,
             correlation_id=correlation_id,
             metadata=metadata,
         )
         conn.commit()
         return result
+
+
+def _qa_run_png_chunk(kind: bytes, payload: bytes) -> bytes:
+    import struct
+    import zlib
+
+    checksum = zlib.crc32(kind + payload) & 0xFFFFFFFF
+    return struct.pack(">I", len(payload)) + kind + payload + struct.pack(">I", checksum)
+
+
+def _qa_run_write_png_rgba(path: Path, width: int, height: int, pixels: list[tuple[int, int, int, int]]) -> None:
+    import struct
+    import zlib
+
+    raw_rows = []
+    for y in range(height):
+        start = y * width
+        row = b"".join(bytes(pixel) for pixel in pixels[start : start + width])
+        raw_rows.append(b"\x00" + row)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(
+        b"\x89PNG\r\n\x1a\n"
+        + _qa_run_png_chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0))
+        + _qa_run_png_chunk(b"IDAT", zlib.compress(b"".join(raw_rows)))
+        + _qa_run_png_chunk(b"IEND", b"")
+    )
+
+
+def _qa_run_record_visual_template_evidence(
+    *,
+    db_path: Path,
+    task_name: str,
+    loop_run_id: str,
+    artifact_dir: Path,
+) -> dict[str, Any]:
+    from workerctl.visual_diff import compute_visual_diff
+
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    reference_path = artifact_dir / "reference.png"
+    candidate_path = artifact_dir / "candidate.png"
+    diff_path = artifact_dir / "diff.png"
+    report_path = artifact_dir / "visual-diff-report.json"
+    pixels = [
+        (18, 24, 38, 255),
+        (44, 92, 152, 255),
+        (218, 226, 236, 255),
+        (246, 248, 251, 255),
+    ]
+    _qa_run_write_png_rgba(reference_path, 2, 2, pixels)
+    _qa_run_write_png_rgba(candidate_path, 2, 2, pixels)
+    report = compute_visual_diff(
+        reference_path=reference_path,
+        candidate_path=candidate_path,
+        threshold=0.0,
+        diff_output=diff_path,
+        report_output=report_path,
+    )
+    reference = _qa_run_record_loop_evidence(
+        db_path=db_path,
+        task_name=task_name,
+        loop_run_id=loop_run_id,
+        evidence_type="reference_artifact",
+        correlation_id="qa-run-template-reference",
+        artifact_path=reference_path,
+        metadata={"artifact_path": str(reference_path), "viewport": report["viewport"]},
+    )
+    candidate = _qa_run_record_loop_evidence(
+        db_path=db_path,
+        task_name=task_name,
+        loop_run_id=loop_run_id,
+        evidence_type="candidate_screenshot",
+        correlation_id="qa-run-template-candidate",
+        artifact_path=candidate_path,
+        metadata={"artifact_path": str(candidate_path), "viewport": report["viewport"]},
+    )
+    report_result = _qa_run_record_loop_evidence(
+        db_path=db_path,
+        task_name=task_name,
+        loop_run_id=loop_run_id,
+        evidence_type="visual_diff_report",
+        correlation_id="qa-run-template-visual-diff",
+        artifact_path=report_path,
+        metadata=report,
+    )
+    threshold_result = _qa_run_record_loop_evidence(
+        db_path=db_path,
+        task_name=task_name,
+        loop_run_id=loop_run_id,
+        evidence_type="diff_below_threshold",
+        correlation_id="qa-run-template-visual-diff",
+        status="pass" if report["below_threshold"] else "fail",
+        artifact_path=report_path,
+        metadata=report,
+    )
+    return {
+        "artifacts": {
+            "candidate_screenshot": str(candidate_path),
+            "diff": str(diff_path),
+            "reference_artifact": str(reference_path),
+            "visual_diff_report": str(report_path),
+        },
+        "diff": report,
+        "evidence": {
+            "candidate_screenshot": candidate["evidence"],
+            "diff_below_threshold": threshold_result["evidence"],
+            "reference_artifact": reference["evidence"],
+            "visual_diff_report": report_result["evidence"],
+        },
+    }
 
 
 def _qa_run_ralph_loop_guardrails(args: argparse.Namespace) -> dict[str, Any]:
@@ -2431,13 +2541,237 @@ def _qa_run_ralph_loop_guardrails(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
+def _qa_run_generic_loop_template(args: argparse.Namespace) -> dict[str, Any]:
+    from workerctl import db as worker_db
+
+    db_path = _qa_run_db_path(args)
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    slug = uuid.uuid4().hex[:8]
+    dispatcher_id = getattr(args, "dispatcher_id", None) or f"qa-run-{slug}"
+    template_metadata = loop_template_metadata(
+        "visual_diff_loop",
+        max_iterations=4,
+        current_iteration=1,
+        seed_prompt_sha256="qa-run-generic-template-seed",
+    )
+    required_evidence = template_metadata["required_before_continue"]
+    checks: list[dict[str, Any]] = []
+
+    with worker_db.connect(db_path) as conn:
+        worker_db.initialize_database(conn)
+        _qa_run_require_clean_continue_queue(conn, worker_db=worker_db)
+        template_task = _qa_run_bound_task(conn, slug=slug, suffix="generic-loop-template")
+        template_run_id = worker_db.create_ralph_loop_run(
+            conn,
+            task_id=template_task["task_id"],
+            name=f"{template_task['task_name']}-run",
+            max_iterations=template_metadata["max_iterations"],
+            current_iteration=template_metadata["current_iteration"],
+            cleanup_policy=template_metadata["cleanup_policy"],
+            required_before_continue=required_evidence,
+            stop_conditions=template_metadata["stop_conditions"],
+            seed_prompt_sha256=template_metadata["seed_prompt_sha256"],
+            preset=template_metadata.get("preset"),
+            metadata=template_metadata,
+        )
+        worker_db.enqueue_continue_iteration(
+            conn,
+            task_id=template_task["task_id"],
+            message="Run visual diff template iteration 2 before evidence.",
+            loop_run_id=template_run_id,
+            requested_iteration=2,
+            correlation_id="qa-run-template-missing-visual",
+        )
+        conn.commit()
+
+    missing_dispatch = _qa_run_dispatch_continue_once(
+        db_path=db_path,
+        dispatcher_id=dispatcher_id,
+        expected_correlation_id="qa-run-template-missing-visual",
+    )
+    missing_counts = _qa_run_delivery_counts(
+        db_path=db_path,
+        task_id=template_task["task_id"],
+        worker_name=template_task["worker_name"],
+    )
+    _qa_run_require(missing_dispatch.get("state") == "blocked", "visual template did not block before evidence")
+    _qa_run_require(
+        missing_dispatch.get("reason") == "missing_required_evidence",
+        "visual template used the wrong block reason before evidence",
+    )
+    _qa_run_require(
+        missing_dispatch.get("missing_evidence") == required_evidence,
+        "visual template reported the wrong missing evidence before evidence",
+    )
+    _qa_run_require(missing_counts["routed_notifications_count"] == 0, "visual template created a routed notification before evidence")
+    _qa_run_require(missing_counts["worker_inbox_count"] == 0, "visual template left worker inbox mail before evidence")
+    checks.append(
+        _qa_run_check_result(
+            name="visual_template_blocks_before_visual_evidence",
+            dispatch=missing_dispatch,
+            counts=missing_counts,
+            command="workerctl dispatch --once --type continue_iteration --dispatcher-id qa-run",
+        )
+    )
+
+    visual_evidence = _qa_run_record_visual_template_evidence(
+        db_path=db_path,
+        task_name=template_task["task_name"],
+        loop_run_id=template_run_id,
+        artifact_dir=db_path.parent / "generic-loop-template-artifacts" / f"{slug}-{template_run_id}",
+    )
+    _qa_run_record_loop_evidence(
+        db_path=db_path,
+        task_name=template_task["task_name"],
+        loop_run_id=template_run_id,
+        evidence_type="adversarial_check",
+        correlation_id="qa-run-template-unstructured-adversarial",
+        metadata={"note": "qa-run intentionally omits failure_mode, check, and result."},
+    )
+    with worker_db.connect(db_path) as conn:
+        worker_db.initialize_database(conn)
+        worker_db.enqueue_continue_iteration(
+            conn,
+            task_id=template_task["task_id"],
+            message="Run visual diff template iteration 2 after visual evidence and malformed adversarial proof.",
+            loop_run_id=template_run_id,
+            requested_iteration=2,
+            correlation_id="qa-run-template-unstructured-adversarial",
+        )
+        conn.commit()
+
+    unstructured_dispatch = _qa_run_dispatch_continue_once(
+        db_path=db_path,
+        dispatcher_id=dispatcher_id,
+        expected_correlation_id="qa-run-template-unstructured-adversarial",
+    )
+    unstructured_counts = _qa_run_delivery_counts(
+        db_path=db_path,
+        task_id=template_task["task_id"],
+        worker_name=template_task["worker_name"],
+    )
+    _qa_run_require(unstructured_dispatch.get("state") == "blocked", "unstructured adversarial evidence did not block")
+    _qa_run_require(
+        unstructured_dispatch.get("reason") == "missing_adversarial_check_evidence",
+        "unstructured adversarial evidence used the wrong block reason",
+    )
+    _qa_run_require(
+        unstructured_dispatch.get("missing_evidence") == ["adversarial_check"],
+        "unstructured adversarial evidence reported the wrong missing evidence",
+    )
+    _qa_run_require(
+        unstructured_counts["routed_notifications_count"] == 0,
+        "unstructured adversarial evidence created a routed notification",
+    )
+    _qa_run_require(unstructured_counts["worker_inbox_count"] == 0, "unstructured adversarial evidence left worker inbox mail")
+    checks.append(
+        _qa_run_check_result(
+            name="unstructured_adversarial_check_still_blocks",
+            dispatch=unstructured_dispatch,
+            counts=unstructured_counts,
+            command="workerctl loop-evidence add --evidence-type adversarial_check ... && workerctl dispatch --once --type continue_iteration",
+        )
+    )
+
+    _qa_run_record_loop_evidence(
+        db_path=db_path,
+        task_name=template_task["task_name"],
+        loop_run_id=template_run_id,
+        evidence_type="adversarial_check",
+        correlation_id="qa-run-template-structured-adversarial",
+        metadata=_adversarial_check_metadata(
+            {
+                "failure_mode": "Visual artifacts could be present while the diff evidence still proves the wrong prior iteration.",
+                "check": "Dispatch was retried only after reference, candidate, diff report, threshold, and structured adversarial receipts existed for iteration 1.",
+                "result": "The malformed receipt stayed blocked, and the structured retry delivered exactly one worker inbox item.",
+            }
+        ),
+    )
+    with worker_db.connect(db_path) as conn:
+        worker_db.initialize_database(conn)
+        worker_db.enqueue_continue_iteration(
+            conn,
+            task_id=template_task["task_id"],
+            message="Run visual diff template iteration 2 after structured adversarial proof.",
+            loop_run_id=template_run_id,
+            requested_iteration=2,
+            correlation_id="qa-run-template-structured-allowed",
+        )
+        conn.commit()
+
+    allowed_dispatch = _qa_run_dispatch_continue_once(
+        db_path=db_path,
+        dispatcher_id=dispatcher_id,
+        expected_correlation_id="qa-run-template-structured-allowed",
+    )
+    allowed_counts = _qa_run_delivery_counts(
+        db_path=db_path,
+        task_id=template_task["task_id"],
+        worker_name=template_task["worker_name"],
+    )
+    _qa_run_require(allowed_dispatch.get("state") == "pull_required", "structured visual evidence retry did not deliver")
+    _qa_run_require(allowed_counts["worker_inbox_count"] == 1, "structured visual evidence retry did not create exactly one worker inbox item")
+    checks.append(
+        _qa_run_check_result(
+            name="structured_visual_evidence_retry_delivers",
+            dispatch=allowed_dispatch,
+            counts=allowed_counts,
+            command="workerctl loop-evidence adversarial-check ... && workerctl dispatch --once --type continue_iteration",
+        )
+    )
+
+    return {
+        "artifacts": {
+            "db_path": str(db_path),
+            **visual_evidence["artifacts"],
+        },
+        "checks": checks,
+        "generated_at": now_iso(),
+        "replay_commands": [
+            "scripts/workerctl loop-templates --show visual_diff_loop --json",
+            (
+                "scripts/workerctl loop-templates --create-run <task> --template visual_diff_loop "
+                "--max-iterations 4 --current-iteration 1 --seed-prompt-sha256 qa-run-generic-template-seed"
+            ),
+            (
+                "scripts/workerctl loop-evidence add <task> --loop-run <run-id> --iteration 1 "
+                "--evidence-type reference_artifact --artifact-path <reference.png>"
+            ),
+            (
+                "scripts/workerctl loop-evidence add <task> --loop-run <run-id> --iteration 1 "
+                "--evidence-type candidate_screenshot --artifact-path <candidate.png> "
+                "--metadata-json '{\"viewport\":\"2x2\"}'"
+            ),
+            (
+                "scripts/workerctl loop-evidence visual-diff <task> --loop-run <run-id> --iteration 1 "
+                "--reference <reference.png> --candidate <candidate.png> --threshold 0 --diff-output <diff.png> --report-output <report.json>"
+            ),
+            (
+                "scripts/workerctl loop-evidence adversarial-check <task> --loop-run <run-id> --iteration 1 "
+                "--failure-mode <failure> --check <check> --result <result>"
+            ),
+            f"scripts/workerctl dispatch --once --type continue_iteration --dispatcher-id {dispatcher_id} --path {db_path}",
+        ],
+        "result": "passed",
+        "scenario": "generic-loop-template",
+        "template": "visual_diff_loop",
+        "template_metadata": template_metadata,
+    }
+
+
 def command_qa_run(args: argparse.Namespace) -> int:
     scenario = getattr(args, "scenario", "ralph-loop-guardrails")
-    if scenario != "ralph-loop-guardrails":
-        raise WorkerError(f"Unsupported QA run scenario: {scenario}")
+    scenarios = {
+        "ralph-loop-guardrails": _qa_run_ralph_loop_guardrails,
+        "generic-loop-template": lambda scenario_args: _qa_run_generic_loop_template(scenario_args),
+    }
+    try:
+        runner = scenarios[scenario]
+    except KeyError as exc:
+        raise WorkerError(f"Unsupported QA run scenario: {scenario}") from exc
     receipt_output = Path(args.receipt_output).expanduser().resolve()
     receipt_output.parent.mkdir(parents=True, exist_ok=True)
-    receipt = _qa_run_ralph_loop_guardrails(args)
+    receipt = runner(args)
     receipt["receipt_path"] = str(receipt_output)
     receipt_output.write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n")
     summary = {
