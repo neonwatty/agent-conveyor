@@ -5,7 +5,7 @@ goal:
   slug: goalbuddy-conveyor-live-dogfood
   kind: existing_plan
   tranche: "Live dogfood of the reusable GoalBuddy conveyor trigger."
-  status: active
+  status: done
   oracle:
     signal: "Parent and child boards prove one satisfied-on-main child plus one PR/CI/merge child."
     cadence: "after each child is proven or merged"
@@ -62,7 +62,7 @@ visual_board:
     url: "http://goalbuddy.localhost:41737/goalbuddy-conveyor-live-dogfood/"
     command: "npx goalbuddy board docs/goals/goalbuddy-conveyor-live-dogfood"
 
-active_task: T002
+active_task: null
 
 tasks:
   - id: T001
@@ -97,7 +97,7 @@ tasks:
   - id: T002
     type: worker
     assignee: Worker
-    status: active
+    status: done
     reasoning_hint: medium
     objective: "Add the tiny live-dogfood QA note and run it through review, PR, CI, merge, and parent receipt update."
     child_board: "docs/goals/goalbuddy-conveyor-live-dogfood/subgoals/tiny-doc-slice/goal.md"
@@ -112,10 +112,16 @@ tasks:
       - "Parent active_task does not equal T002."
       - "T001 lacks satisfied_on_main proof."
     receipt:
-      result: active
+      result: done
       activated_by_parent_task: T001
       activation_proof: "T001 records satisfied_on_main proof and parent_handoff.activated_next_child=T002."
-      summary: "Activated after the no-op satisfied-on-main child proved the reusable conveyor path already exists on main."
+      summary: "Tiny docs child completed: PR #185 merged with green CI and the parent conveyor dogfood now has one satisfied-on-main child plus one PR/CI/merge child receipt."
+      pr_url: "https://github.com/neonwatty/codex-terminal-manager/pull/185"
+      ci_result: "green"
+      merge_sha: "553679db3853d79a813a5040bd72d42a7c6253c6"
+      merged_at: "2026-06-01T14:35:22Z"
+      decision: complete
+      full_outcome_complete: true
       changed_files:
         - "docs/qa/goalbuddy-conveyor-live-dogfood.md"
         - "docs/qa/README.md"
@@ -143,3 +149,23 @@ tasks:
       adversarial_review:
         strongest_failure_mode: "The live dogfood could falsely pass while the parent activates multiple children, marks a child done without satisfied_on_main or PR/CI/merge evidence, or excludes files actually changed by the active child."
         proof: "Parent and child checkers passed; a copied done-with-active-task state failed the checker as expected; codex-review found and the patch fixed portable checker-path and allowed_files scope issues."
+
+  - id: T003
+    type: pm
+    assignee: PM
+    status: done
+    reasoning_hint: low
+    objective: "Final audit for the live GoalBuddy conveyor dogfood."
+    receipt:
+      result: done
+      decision: complete
+      full_outcome_complete: true
+      summary: "The live conveyor dogfood is complete: T001 is proven satisfied_on_main, T002 merged via PR #185 with green CI, and both child boards have durable receipts."
+      pr_url: "https://github.com/neonwatty/codex-terminal-manager/pull/185"
+      ci_result: "green"
+      merge_sha: "553679db3853d79a813a5040bd72d42a7c6253c6"
+      merged_at: "2026-06-01T14:35:22Z"
+      proof:
+        - "Parent checker passed after final audit."
+        - "Satisfied-main child checker passed after final audit."
+        - "Tiny-doc child checker passed after final audit."
