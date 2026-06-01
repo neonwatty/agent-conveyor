@@ -5,7 +5,7 @@ goal:
   slug: adversarial-ralph-loop-conveyor
   kind: existing_plan
   tranche: "Sequential vertical-slice child boards for Ralph-loop adversarial trigger and conveyor reliability work."
-  status: active
+  status: done
   oracle:
     signal: "Every child board has a PR/CI/merge receipt, satisfied-on-main proof, or explicit blocker evidence."
     cadence: "after each child PR reaches green/merge or blocker"
@@ -70,7 +70,7 @@ visual_board:
     url: "http://goalbuddy.localhost:41737/adversarial-ralph-loop-conveyor/"
     command: "npx goalbuddy board docs/goals/adversarial-ralph-loop-conveyor"
 
-active_task: T004
+active_task: null
 
 tasks:
   - id: T001
@@ -156,14 +156,26 @@ tasks:
   - id: T004
     type: pm
     assignee: PM
-    status: active
+    status: done
     reasoning_hint: medium
     objective: "Create reusable conveyor automation or docs once live trigger behavior proves the prompt contract."
     child_board: "docs/goals/adversarial-ralph-loop-conveyor/subgoals/ralph-loop-conveyor-automation/goal.md"
     activation_rule: "Activate after T003 is merged, satisfied on main, or blocked."
     receipt:
-      result: active
+      result: done
       activated_by_parent_task: T003
       activation_pr: "https://github.com/neonwatty/codex-terminal-manager/pull/181"
       activation_merge_sha: "0cb6c957f66b0ca1277fbec1e210d2d53e3fdaab"
-      summary: "Activated after prompt-contract/no-tmux finish gate child merged green."
+      summary: "Final child completed: reusable GoalBuddy conveyor QA path merged in PR #183 with green CI, and parent conveyor is complete."
+      pr_url: "https://github.com/neonwatty/codex-terminal-manager/pull/183"
+      ci_result: "green"
+      merge_sha: "bfa72a2c271cc9789fde299fe614f8da08e6739f"
+      merged_at: "2026-06-01T12:21:55Z"
+      decision: complete
+      full_outcome_complete: true
+      evidence:
+        - "PR #183 added `workerctl qa-plan goalbuddy-conveyor`, README/docs/skill guidance, and JSON/text tests."
+        - "GitHub checks `unittest` passed twice before merge."
+        - "codex-review toolkit completed clean with no accepted/actionable findings."
+        - "The strongest failure mode was checked: a broad conveyor request could become a flat checklist or multiple active child boards; the merged QA plan pins one-child-at-a-time authority, PR/CI/merge receipts, satisfied_on_main proof, and adversarial review gates."
+        - "Child board docs/goals/adversarial-ralph-loop-conveyor/subgoals/ralph-loop-conveyor-automation/state.yaml records PR URL, CI result, merge SHA, and final PM audit."
