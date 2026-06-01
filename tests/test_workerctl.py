@@ -51,6 +51,7 @@ ROOT = Path(__file__).resolve().parents[1]
 WORKERCTL_PATH = ROOT / "scripts" / "workerctl"
 WORKERCTL_SHIM_PATH = ROOT / "bin" / "workerctl"
 INSTALL_LOCAL_PATH = ROOT / "scripts" / "install-local"
+CODEX_REVIEW_HELPER_PATH = ROOT / "skills" / "codex-review" / "scripts" / "codex-review"
 
 
 def namespaced_test_name(base: str) -> str:
@@ -4995,6 +4996,20 @@ class CliTests(unittest.TestCase):
         return subprocess.run(
             command,
             cwd=ROOT,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+
+    def run_codex_review_helper(self, *args, env=None):
+        merged_env = os.environ.copy()
+        if env:
+            merged_env.update(env)
+        return subprocess.run(
+            [str(CODEX_REVIEW_HELPER_PATH), *args],
+            cwd=ROOT,
+            env=merged_env,
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -11434,6 +11449,119 @@ Deferred follow-up criteria:
             self.assertTrue(skill_path.exists())
             self.assertIn("workerctl dispatch --watch --dispatcher-id dispatch-local", proc.stdout)
             self.assertIn("workerctl qa-plan dispatch-completion", proc.stdout)
+
+    def test_codex_review_helper_blocks_nested_invocation(self):
+        proc = self.run_codex_review_helper(
+            "--mode",
+            "local",
+            env={"CODEX_REVIEW_HELPER_LEVEL": "1"},
+        )
+
+        self.assertEqual(proc.returncode, 78)
+        self.assertIn("nested codex-review invocation blocked", proc.stderr)
+
+    def test_codex_review_helper_rejects_invalid_level(self):
+        proc = self.run_codex_review_helper(
+            "--mode",
+            "local",
+            env={"CODEX_REVIEW_HELPER_LEVEL": "abc"},
+        )
+
+        self.assertEqual(proc.returncode, 2)
+        self.assertIn("invalid CODEX_REVIEW_HELPER_LEVEL=abc", proc.stderr)
+
+    def test_codex_review_helper_treats_zero_padded_zero_as_top_level(self):
+        proc = self.run_codex_review_helper(
+            "--mode",
+            "local",
+            "--codex-bin",
+            "/bin/echo",
+            "--dry-run",
+            env={"CODEX_REVIEW_HELPER_LEVEL": "0000"},
+        )
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("review: /bin/echo review --uncommitted", proc.stdout)
+
+    def test_codex_review_helper_allows_debug_nested_dry_run_with_leading_zero(self):
+        proc = self.run_codex_review_helper(
+            "--mode",
+            "local",
+            "--codex-bin",
+            "/bin/echo",
+            "--dry-run",
+            env={"CODEX_REVIEW_HELPER_LEVEL": "08", "CODEX_REVIEW_ALLOW_NESTED": "1"},
+        )
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("review: /bin/echo review --uncommitted", proc.stdout)
+
+    def test_codex_review_helper_huge_nested_level_fails_closed_without_overflow(self):
+        proc = self.run_codex_review_helper(
+            "--mode",
+            "local",
+            env={"CODEX_REVIEW_HELPER_LEVEL": "9223372036854775808"},
+        )
+
+        self.assertEqual(proc.returncode, 78)
+        self.assertIn("nested codex-review invocation blocked", proc.stderr)
+        self.assertNotIn("value too great for base", proc.stderr)
+
+    def test_codex_review_helper_missing_option_value_before_dry_run_exits_2_without_running_codex(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            fake_codex = Path(tmpdir) / "fake-codex"
+            marker = Path(tmpdir) / "fake-codex-ran"
+            fake_codex.write_text(
+                "#!/usr/bin/env bash\n"
+                "set -euo pipefail\n"
+                f"touch {shlex.quote(str(marker))}\n"
+                "echo fake codex should not run\n"
+            )
+            fake_codex.chmod(0o755)
+
+            proc = self.run_codex_review_helper(
+                "--mode",
+                "local",
+                "--codex-bin",
+                str(fake_codex),
+                "--output",
+                "--dry-run",
+                env={"CODEX_REVIEW_HELPER_LEVEL": "0"},
+            )
+
+            self.assertEqual(proc.returncode, 2)
+            self.assertIn("missing value for --output", proc.stderr)
+            self.assertFalse(marker.exists(), proc.stdout + proc.stderr)
+
+    def test_codex_review_helper_blocks_recursive_fake_codex_shape(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            fake_codex = Path(tmpdir) / "fake-codex-review-recursive"
+            nested_stdout = Path(tmpdir) / "nested.stdout"
+            nested_stderr = Path(tmpdir) / "nested.stderr"
+            fake_codex.write_text(
+                "#!/usr/bin/env bash\n"
+                "set -euo pipefail\n"
+                "set +e\n"
+                f"{shlex.quote(str(CODEX_REVIEW_HELPER_PATH))} --mode local "
+                f">{shlex.quote(str(nested_stdout))} 2>{shlex.quote(str(nested_stderr))}\n"
+                "nested_status=$?\n"
+                "set -e\n"
+                'echo "nested-status:$nested_status"\n'
+                f"cat {shlex.quote(str(nested_stderr))}\n"
+                "exit 0\n"
+            )
+            fake_codex.chmod(0o755)
+            proc = self.run_codex_review_helper(
+                "--mode",
+                "local",
+                "--codex-bin",
+                str(fake_codex),
+                env={"CODEX_REVIEW_HELPER_LEVEL": "0"},
+            )
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("nested-status:78", proc.stdout)
+        self.assertIn("nested codex-review invocation blocked", proc.stdout)
 
     def test_create_dual_writes_worker_and_initial_status_to_sqlite(self):
         name = "db-create-dual-write"
