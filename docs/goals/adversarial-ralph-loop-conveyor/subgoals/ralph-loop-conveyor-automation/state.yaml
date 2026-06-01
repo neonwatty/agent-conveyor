@@ -69,4 +69,7 @@ tasks:
       - "Earlier live QA or prompt-contract proof is missing."
     receipt:
       result: active
-      summary: "Waiting for parent T004 activation after prompt-contract completion."
+      activated_by_parent_task: T004
+      activation_pr: "https://github.com/neonwatty/codex-terminal-manager/pull/181"
+      activation_merge_sha: "0cb6c957f66b0ca1277fbec1e210d2d53e3fdaab"
+      summary: "Activated after prompt-contract/no-tmux finish gate child merged green."

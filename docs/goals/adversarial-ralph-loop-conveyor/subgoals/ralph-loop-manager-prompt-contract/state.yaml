@@ -5,7 +5,7 @@ goal:
   slug: ralph-loop-manager-prompt-contract
   kind: existing_plan
   tranche: "Manager prompt contract for adversarial criteria propagation."
-  status: active
+  status: done
   oracle:
     signal: "Manager prompts produce worker-visible adversarial criteria or are proven already sufficient on main."
     cadence: "after adversarial-trigger-live-run receipts"
@@ -46,7 +46,7 @@ visual_board:
     url: "http://goalbuddy.localhost:41737/ralph-loop-manager-prompt-contract/"
     command: "npx goalbuddy board docs/goals/adversarial-ralph-loop-conveyor/subgoals/ralph-loop-manager-prompt-contract"
 
-active_task: T003
+active_task: null
 
 tasks:
   - id: T001
@@ -155,7 +155,7 @@ tasks:
   - id: T003
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: medium
     objective: "Run focused verification and adversarial review, then carry the slice through PR creation, CI, merge, and receipt update."
     allowed_files:
@@ -170,10 +170,14 @@ tasks:
       - "PR review toolkit or equivalent adversarial review is clean."
       - "PR is created, CI is green, PR is merged, and merge SHA is recorded."
     receipt:
-      result: active
-      decision: "approved_for_pr"
+      result: done
+      decision: complete
+      full_outcome_complete: true
       pr_url: "https://github.com/neonwatty/codex-terminal-manager/pull/181"
-      summary: "Focused finish-task and no-tmux identity verification passed; codex-review toolkit completed clean with no accepted/actionable findings. PR/CI/merge receipt remains active."
+      ci_result: "green"
+      merge_sha: "0cb6c957f66b0ca1277fbec1e210d2d53e3fdaab"
+      merged_at: "2026-06-01T02:26:21Z"
+      summary: "Focused finish-task and no-tmux identity verification passed; codex-review toolkit completed clean with no accepted/actionable findings; PR #181 passed CI and merged."
       commands:
         - cmd: "python3 -m py_compile scripts/workerctl workerctl/*.py tests/test_workerctl.py"
           status: pass

@@ -70,7 +70,7 @@ visual_board:
     url: "http://goalbuddy.localhost:41737/adversarial-ralph-loop-conveyor/"
     command: "npx goalbuddy board docs/goals/adversarial-ralph-loop-conveyor"
 
-active_task: T003
+active_task: T004
 
 tasks:
   - id: T001
@@ -133,20 +133,37 @@ tasks:
   - id: T003
     type: pm
     assignee: PM
-    status: active
+    status: done
     reasoning_hint: medium
     objective: "Tighten manager prompt examples for adversarial acceptance criteria from manager to worker if live QA shows any ambiguity."
     child_board: "docs/goals/adversarial-ralph-loop-conveyor/subgoals/ralph-loop-manager-prompt-contract/goal.md"
     activation_rule: "Activate after T002 has a pass/fail receipt."
     receipt:
-      result: active
-      summary: "Activated after live QA found the bound no-tmux manager finish-task identity gap."
+      result: done
+      summary: "Prompt-contract child completed: the real gap was bound no-tmux manager finish identity. PR #181 hardened pull-mode session identity, passed CI, and merged."
+      pr_url: "https://github.com/neonwatty/codex-terminal-manager/pull/181"
+      ci_result: "green"
+      merge_sha: "0cb6c957f66b0ca1277fbec1e210d2d53e3fdaab"
+      merged_at: "2026-06-01T02:26:21Z"
+      evidence:
+        - "No-tmux manager finish gate now requires active session state, codex_session_id/path metadata, readable rollout session_meta, positive live PID, and PID-to-rollout match."
+        - "Focused finish-task and no-tmux identity tests passed locally."
+        - "GoalBuddy checker passed for parent and prompt-contract child."
+        - "codex-review toolkit completed clean with no accepted/actionable findings."
+        - "GitHub checks `unittest` passed before merge."
+        - "PR #181 merged as 0cb6c957f66b0ca1277fbec1e210d2d53e3fdaab."
 
   - id: T004
     type: pm
     assignee: PM
-    status: queued
+    status: active
     reasoning_hint: medium
     objective: "Create reusable conveyor automation or docs once live trigger behavior proves the prompt contract."
     child_board: "docs/goals/adversarial-ralph-loop-conveyor/subgoals/ralph-loop-conveyor-automation/goal.md"
     activation_rule: "Activate after T003 is merged, satisfied on main, or blocked."
+    receipt:
+      result: active
+      activated_by_parent_task: T003
+      activation_pr: "https://github.com/neonwatty/codex-terminal-manager/pull/181"
+      activation_merge_sha: "0cb6c957f66b0ca1277fbec1e210d2d53e3fdaab"
+      summary: "Activated after prompt-contract/no-tmux finish gate child merged green."
