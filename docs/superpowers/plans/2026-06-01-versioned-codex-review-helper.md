@@ -286,7 +286,51 @@ review_output_empty() {
 }
 
 review_output_has_findings() {
-  grep -Eq '\[P[0-3]\]' "$review_output"
+  # Codex CLI transcripts include tool output before the final `codex` section.
+  # After the CLI header, prefer the first final-answer marker after the last
+  # Codex diagnostic line; if there are no diagnostics, use the last marker.
+  # Direct/fake review commands are scanned as a whole.
+  awk '
+    {
+      lines[NR] = $0
+      if ($0 ~ /^OpenAI Codex v/) {
+        has_codex_header = 1
+      }
+      if ($0 ~ /^[0-9]{4}-[0-9]{2}-[0-9]{2}T.* (WARN|ERROR) /) {
+        last_diagnostic = NR
+      }
+      if ($0 ~ /\[P[0-3]\]/) {
+        any_finding = 1
+      }
+    }
+    END {
+      if (has_codex_header) {
+        if (last_diagnostic) {
+          for (i = last_diagnostic + 1; i <= NR; i++) {
+            if (lines[i] == "codex") {
+              final_start = i + 1
+              break
+            }
+          }
+        } else {
+          for (i = 1; i <= NR; i++) {
+            if (lines[i] == "codex") {
+              final_start = i + 1
+            }
+          }
+        }
+        if (final_start) {
+          for (i = final_start; i <= NR; i++) {
+            if (lines[i] ~ /\[P[0-3]\]/) {
+              exit 0
+            }
+          }
+          exit 1
+        }
+      }
+      exit any_finding ? 0 : 1
+    }
+  ' "$review_output"
 }
 
 report_clean_review_or_fail() {
@@ -625,7 +669,7 @@ Expected: methods are inside `CliTests`.
 Run:
 
 ```bash
-python -m unittest \
+python3 -m unittest \
   tests.test_workerctl.CliTests.test_codex_review_helper_blocks_nested_invocation \
   tests.test_workerctl.CliTests.test_codex_review_helper_rejects_invalid_level \
   tests.test_workerctl.CliTests.test_codex_review_helper_treats_zero_padded_zero_as_top_level \
@@ -677,7 +721,7 @@ Expected: method is inside `CliTests`.
 Run:
 
 ```bash
-python -m unittest tests.test_workerctl.CliTests.test_codex_review_helper_blocks_recursive_fake_codex_shape
+python3 -m unittest tests.test_workerctl.CliTests.test_codex_review_helper_blocks_recursive_fake_codex_shape
 ```
 
 Expected: test passes and proves the real recursive shape is blocked.
@@ -812,7 +856,7 @@ Expected: tests are added but fail before installer changes.
 Run:
 
 ```bash
-python -m unittest \
+python3 -m unittest \
   tests.test_workerctl.CliTests.test_install_local_prints_path_line \
   tests.test_workerctl.CliTests.test_install_local_write_is_idempotent \
   tests.test_workerctl.CliTests.test_install_local_replaces_stale_codex_review_skill \
@@ -938,7 +982,7 @@ Expected: output names both installed skills.
 Run:
 
 ```bash
-python -m unittest \
+python3 -m unittest \
   tests.test_workerctl.CliTests.test_install_local_prints_path_line \
   tests.test_workerctl.CliTests.test_install_local_write_is_idempotent \
   tests.test_workerctl.CliTests.test_install_local_replaces_stale_codex_review_skill \
@@ -1004,7 +1048,7 @@ Expected before implementation: test fails because those check names are absent.
 Run:
 
 ```bash
-python -m unittest tests.test_workerctl.CliTests.test_doctor_self_reports_codex_review_skill_checks
+python3 -m unittest tests.test_workerctl.CliTests.test_doctor_self_reports_codex_review_skill_checks
 ```
 
 Expected before implementation: failure mentions missing `codex_review_skill_installed` or `codex_review_helper_installed`.
@@ -1052,7 +1096,7 @@ Expected: result payload reports exact paths.
 Run:
 
 ```bash
-python -m unittest tests.test_workerctl.CliTests.test_doctor_self_reports_codex_review_skill_checks
+python3 -m unittest tests.test_workerctl.CliTests.test_doctor_self_reports_codex_review_skill_checks
 ```
 
 Expected: test passes.
@@ -1224,7 +1268,7 @@ Expected: commit succeeds.
 Run:
 
 ```bash
-python -m unittest \
+python3 -m unittest \
   tests.test_workerctl.CliTests.test_codex_review_helper_blocks_nested_invocation \
   tests.test_workerctl.CliTests.test_codex_review_helper_rejects_invalid_level \
   tests.test_workerctl.CliTests.test_codex_review_helper_treats_zero_padded_zero_as_top_level \
@@ -1258,7 +1302,7 @@ Run:
 
 ```bash
 bash -n scripts/install-local skills/codex-review/scripts/codex-review
-python -m unittest tests.test_workerctl.CliTests
+python3 -m unittest tests.test_workerctl.CliTests
 git diff --check
 ```
 
@@ -1269,7 +1313,7 @@ Expected: all commands exit `0`.
 Run:
 
 ```bash
-skills/codex-review/scripts/codex-review --full-access --parallel-tests "bash -n scripts/install-local skills/codex-review/scripts/codex-review && python -m unittest tests.test_workerctl.CliTests && git diff --check"
+skills/codex-review/scripts/codex-review --full-access --parallel-tests "bash -n scripts/install-local skills/codex-review/scripts/codex-review && python3 -m unittest tests.test_workerctl.CliTests && git diff --check"
 ```
 
 Expected: review exits `0`, tests exit `0`, and output includes `codex-review clean: no accepted/actionable findings reported`.

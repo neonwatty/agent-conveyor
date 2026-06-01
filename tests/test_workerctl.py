@@ -11689,6 +11689,104 @@ Deferred follow-up criteria:
         self.assertIn("nested-status:78", proc.stdout)
         self.assertIn("nested codex-review invocation blocked", proc.stdout)
 
+    def test_codex_review_helper_ignores_tool_findings_before_final_codex_section(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            fake_codex = Path(tmpdir) / "fake-codex"
+            fake_codex.write_text(
+                "#!/usr/bin/env bash\n"
+                "set -euo pipefail\n"
+                "echo 'OpenAI Codex v0.fake'\n"
+                "echo exec\n"
+                "echo '[P2] synthetic tool-output token'\n"
+                "echo '2026-06-01T19:01:25.184622Z  WARN codex_core::test: after tool output'\n"
+                "echo codex\n"
+                "echo 'No actionable correctness issues were found.'\n"
+            )
+            fake_codex.chmod(0o755)
+            proc = self.run_codex_review_helper(
+                "--mode",
+                "local",
+                "--codex-bin",
+                str(fake_codex),
+                env={"CODEX_REVIEW_HELPER_LEVEL": "0"},
+            )
+
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertIn("codex-review clean", proc.stdout)
+
+    def test_codex_review_helper_handles_clean_codex_transcript_without_diagnostics(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            fake_codex = Path(tmpdir) / "fake-codex"
+            fake_codex.write_text(
+                "#!/usr/bin/env bash\n"
+                "set -euo pipefail\n"
+                "echo 'OpenAI Codex v0.fake'\n"
+                "echo exec\n"
+                "echo '[P2] synthetic tool-output token'\n"
+                "echo codex\n"
+                "echo 'No actionable correctness issues were found.'\n"
+            )
+            fake_codex.chmod(0o755)
+            proc = self.run_codex_review_helper(
+                "--mode",
+                "local",
+                "--codex-bin",
+                str(fake_codex),
+                env={"CODEX_REVIEW_HELPER_LEVEL": "0"},
+            )
+
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertIn("codex-review clean", proc.stdout)
+
+    def test_codex_review_helper_flags_findings_without_codex_section(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            fake_codex = Path(tmpdir) / "fake-codex"
+            fake_codex.write_text(
+                "#!/usr/bin/env bash\n"
+                "set -euo pipefail\n"
+                "echo '[P2] accepted finding'\n"
+                "echo codex\n"
+                "echo 'quoted transcript marker'\n"
+            )
+            fake_codex.chmod(0o755)
+            proc = self.run_codex_review_helper(
+                "--mode",
+                "local",
+                "--codex-bin",
+                str(fake_codex),
+                env={"CODEX_REVIEW_HELPER_LEVEL": "0"},
+            )
+
+        self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+        self.assertIn("codex-review findings: accepted/actionable findings reported", proc.stdout)
+
+    def test_codex_review_helper_flags_large_final_findings_without_sigpipe_clean(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            fake_codex = Path(tmpdir) / "fake-codex"
+            fake_codex.write_text(
+                "#!/usr/bin/env bash\n"
+                "set -euo pipefail\n"
+                "python3 - <<'PY'\n"
+                "print('OpenAI Codex v0.fake')\n"
+                "print('2026-06-01T19:01:25.184622Z  WARN codex_core::test: before final')\n"
+                "print('codex')\n"
+                "print('[P2] accepted finding')\n"
+                "for _ in range(20000):\n"
+                "    print('filler')\n"
+                "PY\n"
+            )
+            fake_codex.chmod(0o755)
+            proc = self.run_codex_review_helper(
+                "--mode",
+                "local",
+                "--codex-bin",
+                str(fake_codex),
+                env={"CODEX_REVIEW_HELPER_LEVEL": "0"},
+            )
+
+        self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+        self.assertIn("codex-review findings: accepted/actionable findings reported", proc.stdout)
+
     def test_create_dual_writes_worker_and_initial_status_to_sqlite(self):
         name = "db-create-dual-write"
         worker_path = worker_dir(name)
