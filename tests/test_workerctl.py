@@ -5004,6 +5004,14 @@ class CliTests(unittest.TestCase):
 
     def run_codex_review_helper(self, *args, env=None):
         merged_env = os.environ.copy()
+        for key in (
+            "CODEX_REVIEW_ALLOW_NESTED",
+            "CODEX_REVIEW_HELPER_LEVEL",
+            "CODEX_REVIEW_HELPER_PARENT_PID",
+            "CODEX_REVIEW_OUTPUT",
+            "CODEX_BIN",
+        ):
+            merged_env.pop(key, None)
         if env:
             merged_env.update(env)
         return subprocess.run(
