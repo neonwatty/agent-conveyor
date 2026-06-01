@@ -1,0 +1,132 @@
+version: 2
+
+goal:
+  title: "Adversarial Ralph Loop Conveyor"
+  slug: adversarial-ralph-loop-conveyor
+  kind: existing_plan
+  tranche: "Sequential vertical-slice child boards for Ralph-loop adversarial trigger and conveyor reliability work."
+  status: active
+  oracle:
+    signal: "Every child board has a PR/CI/merge receipt, satisfied-on-main proof, or explicit blocker evidence."
+    cadence: "after each child PR reaches green/merge or blocker"
+    final_proof: "Parent tasks record each child board path, PR URL, CI result, merge SHA, verification commands, and adversarial review receipt."
+  intake:
+    original_request: "Create an autonomous GoalBuddy conveyor for this project."
+    interpreted_outcome: "Drive Ralph-loop adversarial trigger work as one vertical slice at a time, with GoalBuddy receipts and PR lifecycle proof for each child."
+    input_shape: existing_plan
+    audience:
+      - maintainers
+      - workerctl operators
+      - GoalBuddy managers
+      - Ralph-loop QA users
+    authority: requested
+    proof_type: test_review_ci_merge
+    completion_proof: "All queued children are merged, proven satisfied on main, or blocked with evidence."
+    likely_misfire: "Planning multiple boards but not actually running the first slice through review, CI, merge, and receipt update."
+    blind_spots_considered:
+      - "A child can be docs-only but still needs CI and merge proof."
+      - "Natural-language behavior can look documented but fail in live manager usage."
+      - "A queued child may already be satisfied by a recent merge and should be proven, not reimplemented."
+
+rules:
+  pm_owns_state: true
+  one_active_task: true
+  max_write_workers: 1
+  no_implementation_without_worker_or_pm_task: true
+  no_completion_without_judge_or_pm_audit: true
+  planning_is_not_completion: true
+  queued_required_worker_blocks_completion: true
+  continuous_until_full_outcome: true
+  missing_input_or_credentials_do_not_stop_goal: true
+  preserve_and_validate_existing_plan: true
+  intake_misfire_must_be_audited: true
+  goal_pressure_requires_oracle: true
+  no_completion_on_weak_proof: true
+  conveyor:
+    work_one_child_at_a_time: true
+    child_completion_requires:
+      - implementation
+      - focused_verification
+      - adversarial_review
+      - pr_creation
+      - ci_monitoring
+      - merge
+      - parent_receipt_update
+    if_already_satisfied_on_main: "prove with code evidence and focused tests, then mark satisfied_on_main"
+    if_ci_fails: "inspect logs, fix, push, and re-monitor"
+  slice_policy:
+    prefer_vertical_slices: true
+    worker_completes_whole_slice: true
+
+agents:
+  scout: installed
+  worker: installed
+  judge: installed
+
+visual_board:
+  selected: local
+  local:
+    status: not_started
+    url: "http://goalbuddy.localhost:41737/adversarial-ralph-loop-conveyor/"
+    command: "npx goalbuddy board docs/goals/adversarial-ralph-loop-conveyor"
+
+active_task: T001
+
+tasks:
+  - id: T001
+    type: pm
+    assignee: PM
+    status: active
+    reasoning_hint: medium
+    objective: "Complete child board adversarial-trigger-qa-plan through PR review, CI, merge, and parent receipt update."
+    child_board: "docs/goals/adversarial-ralph-loop-conveyor/subgoals/adversarial-trigger-qa-plan/goal.md"
+    branch: "codex/adversarial-gate-natural-language"
+    pr_url: "https://github.com/neonwatty/codex-terminal-manager/pull/179"
+    constraints:
+      - "Do not mark complete until PR #179 has green CI and is merged."
+      - "If CI fails, inspect logs, fix, push, and re-monitor."
+      - "Record merge SHA and verification receipts before activating C002."
+    expected_output:
+      - "PR #179 merged."
+      - "CI result recorded."
+      - "Merge SHA recorded."
+      - "Child board marked done."
+      - "Parent receipt updated."
+    receipt:
+      result: active
+      summary: "First child is implemented and pushed in PR #179; CI monitoring is active."
+      evidence:
+        - "Local focused qa_plan tests passed."
+        - "Mechanical smoke passed: Dispatch blocked missing adversarial proof, fresh retry became pull_required, and finish gate failed closed then succeeded."
+        - "PR #179 is open at https://github.com/neonwatty/codex-terminal-manager/pull/179."
+      pending:
+        - "CI green result."
+        - "Merge."
+        - "Merge SHA receipt."
+
+  - id: T002
+    type: pm
+    assignee: PM
+    status: queued
+    reasoning_hint: medium
+    objective: "Run the adversarial-trigger QA plan live against disposable manager/worker tasks and record evidence."
+    child_board: "docs/goals/adversarial-ralph-loop-conveyor/subgoals/adversarial-trigger-live-run/goal.md"
+    activation_rule: "Activate only after T001 is merged or proven satisfied on main."
+
+  - id: T003
+    type: pm
+    assignee: PM
+    status: queued
+    reasoning_hint: medium
+    objective: "Tighten manager prompt examples for adversarial acceptance criteria from manager to worker if live QA shows any ambiguity."
+    child_board: "docs/goals/adversarial-ralph-loop-conveyor/subgoals/ralph-loop-manager-prompt-contract/goal.md"
+    activation_rule: "Activate after T002 has a pass/fail receipt."
+
+  - id: T004
+    type: pm
+    assignee: PM
+    status: queued
+    reasoning_hint: medium
+    objective: "Create reusable conveyor automation or docs once live trigger behavior proves the prompt contract."
+    child_board: "docs/goals/adversarial-ralph-loop-conveyor/subgoals/ralph-loop-conveyor-automation/goal.md"
+    activation_rule: "Activate after T003 is merged, satisfied on main, or blocked."
