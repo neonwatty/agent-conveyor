@@ -428,6 +428,7 @@ def build_parser() -> argparse.ArgumentParser:
             "dispatch-completion",
             "ralph-loop",
             "adversarial-triggers",
+            "goalbuddy-conveyor",
         ),
     )
     qa_plan.add_argument("--json", action="store_true", help="Print stable JSON output.")

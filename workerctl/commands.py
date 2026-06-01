@@ -1675,6 +1675,77 @@ def command_qa_plan(args: argparse.Namespace) -> int:
                 "Run git status --short --branch after cleanup and verify no tracked-file edits came from the live QA run.",
             ],
         },
+        "goalbuddy-conveyor": {
+            "starter_prompt": (
+                "Create an autonomous GoalBuddy conveyor for this project. Split the work into "
+                "vertical-slice child GoalBuddy prep boards under one parent conveyor board. "
+                "Work one child at a time; do not mark a child complete until implementation, "
+                "focused verification, adversarial review, PR creation, CI monitoring, merge, "
+                "and parent receipt update are done. If a queued child is already satisfied on "
+                "main, prove it with code evidence and focused tests, then record it as "
+                "satisfied rather than inventing work. If CI fails, inspect logs, fix, push, "
+                "and re-monitor. Continue autonomously until all child boards are merged, "
+                "proven satisfied, or explicitly blocked with evidence."
+            ),
+            "authority_boundaries": [
+                "Work exactly one child board at a time; parent active_task must match the current child.",
+                "Do not mark a child done until its receipt includes implementation or satisfied-on-main proof, focused verification, adversarial review, PR URL, CI result, merge SHA, and parent handoff.",
+                "If CI fails, inspect GitHub logs, fix the branch, push, and re-monitor rather than asking the operator to babysit the PR.",
+                "If queued work is already present on main, prove it with source evidence and focused tests, then record satisfied_on_main instead of creating churn.",
+                "After every merge, update the parent receipt with PR URL, CI result, merge SHA, and activate exactly one next child.",
+            ],
+            "acceptance_criteria": [
+                "Parent state.yaml records conveyor rules, one active child, child board paths, and a final oracle requiring merged/proven/blocker receipts for every child.",
+                "Each child state.yaml has a measurable completion proof, verification plan, adversarial review gate, and receipt schema that can survive thread compaction.",
+                "A reusable natural-language starter prompt is present in docs and in workerctl qa-plan goalbuddy-conveyor output.",
+                "A negative QA check proves the conveyor does not activate two child boards or mark a child complete without PR/CI/merge or satisfied_on_main evidence.",
+                "GoalBuddy checker passes for the parent and all active/done child boards after each receipt update.",
+            ],
+            "correlation_markers": [
+                {
+                    "correlation_id": "conveyor-parent-board",
+                    "purpose": "Link the operator's natural-language conveyor request to the parent GoalBuddy board and its one-child-at-a-time rules.",
+                },
+                {
+                    "correlation_id": "conveyor-child-activation",
+                    "purpose": "Link each parent active_task change to the child board activated by the previous merge or proof receipt.",
+                },
+                {
+                    "correlation_id": "conveyor-pr-ci-merge",
+                    "purpose": "Link a child implementation receipt to PR URL, CI result, merge SHA, and parent handoff.",
+                },
+                {
+                    "correlation_id": "conveyor-satisfied-on-main",
+                    "purpose": "Link a no-op child decision to code evidence and focused tests proving the queued work is already done.",
+                },
+                {
+                    "correlation_id": "conveyor-adversarial-review",
+                    "purpose": "Link the strongest realistic failure mode to review output and verification commands before PR creation or completion.",
+                },
+            ],
+            "expected_observations": [
+                "the phrase autonomous GoalBuddy conveyor causes a parent board plus vertical-slice child boards, not a flat checklist or multiple active workers",
+                "the parent board preserves one_active_task with one active child and activates only one child after a merge, satisfied-on-main proof, or explicit blocker",
+                "each child board records completion proof, focused verification, adversarial review, PR creation, CI monitoring, merge, and parent receipt update before status done",
+                "a queued child that is already satisfied on main is proven with code evidence and focused tests, then recorded as satisfied_on_main without invented implementation work",
+                "CI failure is handled inside the conveyor loop by inspecting logs, fixing, pushing, and re-monitoring until green or explicitly blocked with evidence",
+                "parent and child GoalBuddy state checkers pass after every receipt mutation",
+                "the final parent receipt contains every child board path, PR URL or satisfied-on-main proof, CI result, merge SHA when applicable, adversarial review receipt, and next-child activation history",
+            ],
+            "steps": [
+                "Create or inspect the parent GoalBuddy board and record correlation conveyor-parent-board in the first receipt; verify goal.oracle.final_proof requires every child to be merged, proven satisfied, or blocked with evidence.",
+                "Split the requested work into vertical-slice child boards. Each child must have its own state.yaml, one active task, completion proof, focused verification, and adversarial review gate.",
+                "Activate only the first child in the parent. Verify parent active_task points to that child and all other children are queued before implementation starts.",
+                "For the active child, implement the smallest vertical slice or prove it is already satisfied on main. If satisfied on main, record source evidence, focused tests, and correlation conveyor-satisfied-on-main.",
+                "Run focused verification named by the child board, then run the GoalBuddy checker for the parent and active child.",
+                "Run adversarial review before PR creation or completion. Record strongest_failure_mode, proof command/test/audit, and correlation conveyor-adversarial-review in the child receipt.",
+                "Create the PR for the active child, monitor CI, and if CI fails inspect logs, fix, push, and keep monitoring. Record correlation conveyor-pr-ci-merge in PR/CI receipts.",
+                "Merge only after CI is green. Record PR URL, CI result, merge SHA, and merged_at in the child receipt and parent task receipt.",
+                "After merge or satisfied-on-main proof, activate exactly one next child in the parent and update the next child receipt with activation_pr or activation_proof.",
+                "Run a negative receipt QA: attempt to represent two active children or a done child without PR/CI/merge or satisfied-on-main proof; verify the GoalBuddy checker or manual Judge audit rejects the state.",
+                "At the end, run all parent and child state checkers plus git status --short --branch, and preserve the final parent receipt as the durable conveyor handoff.",
+            ],
+        },
         "ralph-loop": {
             "correlation_markers": [
                 {
@@ -1835,12 +1906,26 @@ def command_qa_plan(args: argparse.Namespace) -> int:
     else:
         print(f"QA plan: {scenario}")
         print("")
+        if payload.get("starter_prompt"):
+            print("Starter prompt:")
+            print(payload["starter_prompt"])
+            print("")
+        if payload.get("authority_boundaries"):
+            print("Authority boundaries:")
+            for boundary in payload["authority_boundaries"]:
+                print(f"- {boundary}")
+            print("")
         for index, step in enumerate(payload["steps"], start=1):
             print(f"{index}. {step}")
         print("")
         print("Expected observations:")
         for observation in payload["expected_observations"]:
             print(f"- {observation}")
+        if payload.get("acceptance_criteria"):
+            print("")
+            print("Acceptance criteria:")
+            for criterion in payload["acceptance_criteria"]:
+                print(f"- {criterion}")
         if payload.get("trigger_tasks"):
             print("")
             print("Trigger tasks:")

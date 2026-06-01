@@ -8388,6 +8388,40 @@ Deferred follow-up criteria:
         self.assertIn("iteration-gate-trigger: Do not send the worker another iteration", proc.stdout)
         self.assertIn("worker-directed-trigger: Ask the worker to identify", proc.stdout)
 
+    def test_qa_plan_goalbuddy_conveyor_outputs_reusable_contract(self):
+        proc = self.run_workerctl("qa-plan", "goalbuddy-conveyor", "--json")
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        payload = json.loads(proc.stdout)
+        self.assertEqual(payload["scenario"], "goalbuddy-conveyor")
+        self.assertIn("autonomous GoalBuddy conveyor", payload["starter_prompt"])
+        self.assertIn("vertical-slice child GoalBuddy prep boards", payload["starter_prompt"])
+        self.assertTrue(any("Work exactly one child board at a time" in item for item in payload["authority_boundaries"]))
+        self.assertTrue(any("PR URL, CI result, merge SHA" in item for item in payload["authority_boundaries"]))
+        self.assertTrue(any("satisfied_on_main" in item for item in payload["acceptance_criteria"]))
+        self.assertTrue(any("GoalBuddy checker passes" in item for item in payload["acceptance_criteria"]))
+        self.assertTrue(any("parent active_task points to that child" in step for step in payload["steps"]))
+        self.assertTrue(any("CI fails inspect logs, fix, push" in step for step in payload["steps"]))
+        self.assertTrue(any("negative receipt QA" in step for step in payload["steps"]))
+        self.assertTrue(any("one active child" in observation for observation in payload["expected_observations"]))
+        self.assertTrue(any("satisfied on main" in observation for observation in payload["expected_observations"]))
+        markers = {marker["correlation_id"] for marker in payload["correlation_markers"]}
+        self.assertIn("conveyor-parent-board", markers)
+        self.assertIn("conveyor-child-activation", markers)
+        self.assertIn("conveyor-pr-ci-merge", markers)
+        self.assertIn("conveyor-satisfied-on-main", markers)
+        self.assertIn("conveyor-adversarial-review", markers)
+
+    def test_qa_plan_goalbuddy_conveyor_text_prints_starter_prompt(self):
+        proc = self.run_workerctl("qa-plan", "goalbuddy-conveyor")
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("Starter prompt:", proc.stdout)
+        self.assertIn("Create an autonomous GoalBuddy conveyor", proc.stdout)
+        self.assertIn("Authority boundaries:", proc.stdout)
+        self.assertIn("Acceptance criteria:", proc.stdout)
+        self.assertIn("Correlation markers:", proc.stdout)
+
     def test_qa_plan_ralph_loop_includes_correlation_and_receipt_template(self):
         json_proc = self.run_workerctl("qa-plan", "ralph-loop", "--json")
         text_proc = self.run_workerctl("qa-plan", "ralph-loop")
