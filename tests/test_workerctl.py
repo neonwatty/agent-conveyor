@@ -11429,6 +11429,7 @@ Deferred follow-up criteria:
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertIn(str(ROOT / "bin"), proc.stdout)
         self.assertIn("manage-codex-workers", proc.stdout)
+        self.assertIn("codex-review", proc.stdout)
         self.assertIn("workerctl dispatch --watch --dispatcher-id dispatch-local", proc.stdout)
         self.assertIn("workerctl qa-plan dispatch-completion", proc.stdout)
 
@@ -11453,10 +11454,69 @@ Deferred follow-up criteria:
             profile_text = profile.read_text()
             path_line = f'export PATH="{ROOT / "bin"}:$PATH"'
             self.assertEqual(profile_text.count(path_line), 1)
-            skill_path = Path(env["CODEX_HOME"]) / "skills" / "manage-codex-workers" / "SKILL.md"
-            self.assertTrue(skill_path.exists())
+
+            codex_home = Path(env["CODEX_HOME"])
+            manage_skill_path = codex_home / "skills" / "manage-codex-workers" / "SKILL.md"
+            review_skill_path = codex_home / "skills" / "codex-review" / "SKILL.md"
+            review_helper_path = codex_home / "skills" / "codex-review" / "scripts" / "codex-review"
+            self.assertTrue(manage_skill_path.exists())
+            self.assertTrue(review_skill_path.exists())
+            self.assertTrue(review_helper_path.exists())
+            self.assertTrue(os.access(review_helper_path, os.X_OK))
+            self.assertEqual(
+                review_helper_path.read_text(),
+                CODEX_REVIEW_HELPER_PATH.read_text(),
+            )
             self.assertIn("workerctl dispatch --watch --dispatcher-id dispatch-local", proc.stdout)
             self.assertIn("workerctl qa-plan dispatch-completion", proc.stdout)
+
+    def test_install_local_replaces_stale_codex_review_skill(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            profile = Path(tmpdir) / ".zshrc"
+            codex_home = Path(tmpdir) / "codex-home"
+            stale_helper = codex_home / "skills" / "codex-review" / "scripts" / "codex-review"
+            stale_helper.parent.mkdir(parents=True)
+            stale_helper.write_text("#!/usr/bin/env bash\necho stale-helper\n")
+            stale_helper.chmod(0o755)
+            env = os.environ.copy()
+            env["WORKERCTL_INSTALL_PROFILE"] = str(profile)
+            env["CODEX_HOME"] = str(codex_home)
+
+            proc = subprocess.run(
+                [str(INSTALL_LOCAL_PATH), "--write"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertNotIn("stale-helper", stale_helper.read_text())
+            self.assertEqual(stale_helper.read_text(), CODEX_REVIEW_HELPER_PATH.read_text())
+
+    def test_install_local_no_skill_skips_all_skill_installs(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            profile = Path(tmpdir) / ".zshrc"
+            codex_home = Path(tmpdir) / "codex-home"
+            env = os.environ.copy()
+            env["WORKERCTL_INSTALL_PROFILE"] = str(profile)
+            env["CODEX_HOME"] = str(codex_home)
+
+            proc = subprocess.run(
+                [str(INSTALL_LOCAL_PATH), "--write", "--no-skill"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertFalse((codex_home / "skills" / "manage-codex-workers").exists())
+            self.assertFalse((codex_home / "skills" / "codex-review").exists())
 
     def test_codex_review_helper_blocks_nested_invocation(self):
         proc = self.run_codex_review_helper(

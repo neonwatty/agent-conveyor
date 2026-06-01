@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BIN_DIR="$ROOT/bin"
-SKILL_SRC="$ROOT/skills/manage-codex-workers"
+SKILL_NAMES=(manage-codex-workers codex-review)
 PROFILE="${WORKERCTL_INSTALL_PROFILE:-$HOME/.zshrc}"
 CODEX_HOME_DIR="${CODEX_HOME:-$HOME/.codex}"
 PATH_LINE="export PATH=\"$BIN_DIR:\$PATH\""
@@ -13,13 +13,13 @@ usage() {
   cat <<EOF
 Usage: scripts/install-local [--write] [--profile PATH] [--codex-home PATH] [--no-skill]
 
-Print or install the local workerctl PATH setup and Codex worker skill.
+Print or install the local workerctl PATH setup and Codex skills.
 
 Options:
   --write           Append the PATH line and install the skill.
   --profile PATH    Shell profile to update. Defaults to ~/.zshrc.
   --codex-home PATH Codex home directory. Defaults to \$CODEX_HOME or ~/.codex.
-  --no-skill        Skip installing the manage-codex-workers skill.
+  --no-skill        Skip installing Codex skills.
   -h, --help        Show this help.
 EOF
 }
@@ -69,17 +69,28 @@ if [[ ! -x "$BIN_DIR/workerctl" ]]; then
   exit 1
 fi
 
-if [[ "$INSTALL_SKILL" == true && ! -f "$SKILL_SRC/SKILL.md" ]]; then
-  echo "install-local: expected skill not found: $SKILL_SRC/SKILL.md" >&2
-  exit 1
+if [[ "$INSTALL_SKILL" == true ]]; then
+  for skill_name in "${SKILL_NAMES[@]}"; do
+    skill_src="$ROOT/skills/$skill_name"
+    if [[ ! -f "$skill_src/SKILL.md" ]]; then
+      echo "install-local: expected skill not found: $skill_src/SKILL.md" >&2
+      exit 1
+    fi
+    if [[ "$skill_name" == "codex-review" && ! -x "$skill_src/scripts/codex-review" ]]; then
+      echo "install-local: expected executable helper not found: $skill_src/scripts/codex-review" >&2
+      exit 1
+    fi
+  done
 fi
 
 if [[ "$write" == false ]]; then
   echo "$PATH_LINE"
   echo
   if [[ "$INSTALL_SKILL" == true ]]; then
-    echo "Skill install target:"
-    echo "  $CODEX_HOME_DIR/skills/manage-codex-workers"
+    echo "Skill install targets:"
+    for skill_name in "${SKILL_NAMES[@]}"; do
+      echo "  $CODEX_HOME_DIR/skills/$skill_name"
+    done
     echo
   fi
   echo "Dispatch setup:"
@@ -114,17 +125,23 @@ PATH="$BIN_DIR:$PATH" workerctl classify --text "workerctl install check" >/dev/
 }
 
 if [[ "$INSTALL_SKILL" == true ]]; then
-  SKILL_DEST="$CODEX_HOME_DIR/skills/manage-codex-workers"
-  mkdir -p "$(dirname "$SKILL_DEST")"
-  rm -rf "$SKILL_DEST"
-  cp -R "$SKILL_SRC" "$SKILL_DEST"
-  echo "installed manage-codex-workers skill in $SKILL_DEST"
+  for skill_name in "${SKILL_NAMES[@]}"; do
+    skill_src="$ROOT/skills/$skill_name"
+    skill_dest="$CODEX_HOME_DIR/skills/$skill_name"
+    mkdir -p "$(dirname "$skill_dest")"
+    rm -rf "$skill_dest"
+    cp -R "$skill_src" "$skill_dest"
+    if [[ "$skill_name" == "codex-review" ]]; then
+      chmod +x "$skill_dest/scripts/codex-review"
+    fi
+    echo "installed $skill_name skill in $skill_dest"
+  done
 fi
 
 echo "workerctl is available after opening a new shell, or immediately with:"
 echo "  $PATH_LINE"
 if [[ "$INSTALL_SKILL" == true ]]; then
-  echo "Plain Codex sessions can use the installed manage-codex-workers skill after starting a new session."
+  echo "Plain Codex sessions can use the installed manage-codex-workers and codex-review skills after starting a new session."
 fi
 echo "Start Dispatch when supervising a pair so worker completion wakes the manager:"
 echo "  workerctl dispatch --watch --dispatcher-id dispatch-local"
