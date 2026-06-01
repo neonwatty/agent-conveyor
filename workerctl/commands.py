@@ -1386,6 +1386,8 @@ def command_doctor_self(args: argparse.Namespace) -> int:
     workerctl_path = shutil.which("workerctl")
     workerctl_script = _workerctl_script_path()
     skill_path = _codex_home() / "skills" / "manage-codex-workers" / "SKILL.md"
+    codex_review_skill_path = _codex_home() / "skills" / "codex-review" / "SKILL.md"
+    codex_review_helper_path = _codex_home() / "skills" / "codex-review" / "scripts" / "codex-review"
     checks = [
         {"name": "workerctl_on_path", "ok": bool(workerctl_path), "path": workerctl_path},
         {"name": "workerctl_script", "ok": workerctl_script.exists(), "path": str(workerctl_script)},
@@ -1393,6 +1395,16 @@ def command_doctor_self(args: argparse.Namespace) -> int:
         {"name": "codex_on_path", "ok": bool(codex_path), "path": codex_path},
         {"name": "inside_tmux", "ok": bool(session), "session": session},
         {"name": "manage_skill_installed", "ok": skill_path.exists(), "path": str(skill_path)},
+        {
+            "name": "codex_review_skill_installed",
+            "ok": codex_review_skill_path.exists(),
+            "path": str(codex_review_skill_path),
+        },
+        {
+            "name": "codex_review_helper_installed",
+            "ok": codex_review_helper_path.exists() and os.access(codex_review_helper_path, os.X_OK),
+            "path": str(codex_review_helper_path),
+        },
     ]
     if session_error is not None:
         checks.append({"name": "tmux_access", "ok": False, "error": session_error})
@@ -1456,6 +1468,8 @@ def command_doctor_self(args: argparse.Namespace) -> int:
         "follow_up": payload["follow_up"],
         "ok": supported,
         "skill_path": str(skill_path),
+        "codex_review_skill_path": str(codex_review_skill_path),
+        "codex_review_helper_path": str(codex_review_helper_path),
         "supported": supported,
         "workerctl_invocation": workerctl_invocation,
         "why_or_why_not": why_or_why_not,

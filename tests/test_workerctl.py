@@ -11518,6 +11518,64 @@ Deferred follow-up criteria:
             self.assertFalse((codex_home / "skills" / "manage-codex-workers").exists())
             self.assertFalse((codex_home / "skills" / "codex-review").exists())
 
+    def test_doctor_self_reports_codex_review_skill_checks(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            codex_home = Path(tmpdir) / "codex-home"
+            review_skill = codex_home / "skills" / "codex-review"
+            review_helper = review_skill / "scripts" / "codex-review"
+            review_helper.parent.mkdir(parents=True)
+            (review_skill / "SKILL.md").write_text("review skill")
+            review_helper.write_text("#!/usr/bin/env bash\nexit 0\n")
+            review_helper.chmod(0o755)
+            env = os.environ.copy()
+            env["CODEX_HOME"] = str(codex_home)
+
+            proc = subprocess.run(
+                [sys.executable, str(WORKERCTL_PATH), "doctor-self", "--json"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+
+        self.assertIn("codex_review_skill_installed", proc.stdout)
+        self.assertIn("codex_review_helper_installed", proc.stdout)
+        payload = json.loads(proc.stdout)
+        checks = {check["name"]: check for check in payload["checks"]}
+        self.assertTrue(checks["codex_review_skill_installed"]["ok"])
+        self.assertTrue(checks["codex_review_helper_installed"]["ok"])
+        self.assertEqual(payload["codex_review_skill_path"], str(review_skill / "SKILL.md"))
+        self.assertEqual(payload["codex_review_helper_path"], str(review_helper))
+
+    def test_doctor_self_reports_non_executable_codex_review_helper_uninstalled(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            codex_home = Path(tmpdir) / "codex-home"
+            review_skill = codex_home / "skills" / "codex-review"
+            review_helper = review_skill / "scripts" / "codex-review"
+            review_helper.parent.mkdir(parents=True)
+            (review_skill / "SKILL.md").write_text("review skill")
+            review_helper.write_text("#!/usr/bin/env bash\nexit 0\n")
+            review_helper.chmod(0o644)
+            env = os.environ.copy()
+            env["CODEX_HOME"] = str(codex_home)
+
+            proc = subprocess.run(
+                [sys.executable, str(WORKERCTL_PATH), "doctor-self", "--json"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+
+        payload = json.loads(proc.stdout)
+        checks = {check["name"]: check for check in payload["checks"]}
+        self.assertTrue(checks["codex_review_skill_installed"]["ok"])
+        self.assertFalse(checks["codex_review_helper_installed"]["ok"])
+
     def test_codex_review_helper_blocks_nested_invocation(self):
         proc = self.run_codex_review_helper(
             "--mode",
