@@ -94,8 +94,10 @@ workerctl doctor
 ```
 
 `scripts/install-local --write` updates future shells and installs the
-`manage-codex-workers` skill into `$CODEX_HOME/skills` or `~/.codex/skills`.
-The `export` line makes `workerctl` available in the current shell.
+`manage-codex-workers` and `codex-review` skills into `$CODEX_HOME/skills` or
+`~/.codex/skills`. The `codex-review` install includes the guarded review helper
+used by the QA and PR closeout flows. The `export` line makes `workerctl`
+available in the current shell.
 
 `workerctl doctor` reports local dependency health (tmux, codex, etc.).
 `workerctl db-doctor` initializes and checks the SQLite control-plane

@@ -51,6 +51,7 @@ ROOT = Path(__file__).resolve().parents[1]
 WORKERCTL_PATH = ROOT / "scripts" / "workerctl"
 WORKERCTL_SHIM_PATH = ROOT / "bin" / "workerctl"
 INSTALL_LOCAL_PATH = ROOT / "scripts" / "install-local"
+CODEX_REVIEW_HELPER_PATH = ROOT / "skills" / "codex-review" / "scripts" / "codex-review"
 
 
 def namespaced_test_name(base: str) -> str:
@@ -4995,6 +4996,28 @@ class CliTests(unittest.TestCase):
         return subprocess.run(
             command,
             cwd=ROOT,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+
+    def run_codex_review_helper(self, *args, env=None):
+        merged_env = os.environ.copy()
+        for key in (
+            "CODEX_REVIEW_ALLOW_NESTED",
+            "CODEX_REVIEW_HELPER_LEVEL",
+            "CODEX_REVIEW_HELPER_PARENT_PID",
+            "CODEX_REVIEW_OUTPUT",
+            "CODEX_BIN",
+        ):
+            merged_env.pop(key, None)
+        if env:
+            merged_env.update(env)
+        return subprocess.run(
+            [str(CODEX_REVIEW_HELPER_PATH), *args],
+            cwd=ROOT,
+            env=merged_env,
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -11406,6 +11429,7 @@ Deferred follow-up criteria:
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertIn(str(ROOT / "bin"), proc.stdout)
         self.assertIn("manage-codex-workers", proc.stdout)
+        self.assertIn("codex-review", proc.stdout)
         self.assertIn("workerctl dispatch --watch --dispatcher-id dispatch-local", proc.stdout)
         self.assertIn("workerctl qa-plan dispatch-completion", proc.stdout)
 
@@ -11430,10 +11454,338 @@ Deferred follow-up criteria:
             profile_text = profile.read_text()
             path_line = f'export PATH="{ROOT / "bin"}:$PATH"'
             self.assertEqual(profile_text.count(path_line), 1)
-            skill_path = Path(env["CODEX_HOME"]) / "skills" / "manage-codex-workers" / "SKILL.md"
-            self.assertTrue(skill_path.exists())
+
+            codex_home = Path(env["CODEX_HOME"])
+            manage_skill_path = codex_home / "skills" / "manage-codex-workers" / "SKILL.md"
+            review_skill_path = codex_home / "skills" / "codex-review" / "SKILL.md"
+            review_helper_path = codex_home / "skills" / "codex-review" / "scripts" / "codex-review"
+            self.assertTrue(manage_skill_path.exists())
+            self.assertTrue(review_skill_path.exists())
+            self.assertTrue(review_helper_path.exists())
+            self.assertTrue(os.access(review_helper_path, os.X_OK))
+            self.assertEqual(
+                review_helper_path.read_text(),
+                CODEX_REVIEW_HELPER_PATH.read_text(),
+            )
             self.assertIn("workerctl dispatch --watch --dispatcher-id dispatch-local", proc.stdout)
             self.assertIn("workerctl qa-plan dispatch-completion", proc.stdout)
+
+    def test_install_local_replaces_stale_codex_review_skill(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            profile = Path(tmpdir) / ".zshrc"
+            codex_home = Path(tmpdir) / "codex-home"
+            stale_helper = codex_home / "skills" / "codex-review" / "scripts" / "codex-review"
+            stale_helper.parent.mkdir(parents=True)
+            stale_helper.write_text("#!/usr/bin/env bash\necho stale-helper\n")
+            stale_helper.chmod(0o755)
+            env = os.environ.copy()
+            env["WORKERCTL_INSTALL_PROFILE"] = str(profile)
+            env["CODEX_HOME"] = str(codex_home)
+
+            proc = subprocess.run(
+                [str(INSTALL_LOCAL_PATH), "--write"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertNotIn("stale-helper", stale_helper.read_text())
+            self.assertEqual(stale_helper.read_text(), CODEX_REVIEW_HELPER_PATH.read_text())
+
+    def test_install_local_no_skill_skips_all_skill_installs(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            profile = Path(tmpdir) / ".zshrc"
+            codex_home = Path(tmpdir) / "codex-home"
+            env = os.environ.copy()
+            env["WORKERCTL_INSTALL_PROFILE"] = str(profile)
+            env["CODEX_HOME"] = str(codex_home)
+
+            proc = subprocess.run(
+                [str(INSTALL_LOCAL_PATH), "--write", "--no-skill"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertFalse((codex_home / "skills" / "manage-codex-workers").exists())
+            self.assertFalse((codex_home / "skills" / "codex-review").exists())
+
+    def test_doctor_self_reports_codex_review_skill_checks(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            codex_home = Path(tmpdir) / "codex-home"
+            review_skill = codex_home / "skills" / "codex-review"
+            review_helper = review_skill / "scripts" / "codex-review"
+            review_helper.parent.mkdir(parents=True)
+            (review_skill / "SKILL.md").write_text("review skill")
+            review_helper.write_text("#!/usr/bin/env bash\nexit 0\n")
+            review_helper.chmod(0o755)
+            env = os.environ.copy()
+            env["CODEX_HOME"] = str(codex_home)
+
+            proc = subprocess.run(
+                [sys.executable, str(WORKERCTL_PATH), "doctor-self", "--json"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+
+        self.assertIn("codex_review_skill_installed", proc.stdout)
+        self.assertIn("codex_review_helper_installed", proc.stdout)
+        payload = json.loads(proc.stdout)
+        checks = {check["name"]: check for check in payload["checks"]}
+        self.assertTrue(checks["codex_review_skill_installed"]["ok"])
+        self.assertTrue(checks["codex_review_helper_installed"]["ok"])
+        self.assertEqual(payload["codex_review_skill_path"], str(review_skill / "SKILL.md"))
+        self.assertEqual(payload["codex_review_helper_path"], str(review_helper))
+
+    def test_doctor_self_reports_non_executable_codex_review_helper_uninstalled(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            codex_home = Path(tmpdir) / "codex-home"
+            review_skill = codex_home / "skills" / "codex-review"
+            review_helper = review_skill / "scripts" / "codex-review"
+            review_helper.parent.mkdir(parents=True)
+            (review_skill / "SKILL.md").write_text("review skill")
+            review_helper.write_text("#!/usr/bin/env bash\nexit 0\n")
+            review_helper.chmod(0o644)
+            env = os.environ.copy()
+            env["CODEX_HOME"] = str(codex_home)
+
+            proc = subprocess.run(
+                [sys.executable, str(WORKERCTL_PATH), "doctor-self", "--json"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+
+        payload = json.loads(proc.stdout)
+        checks = {check["name"]: check for check in payload["checks"]}
+        self.assertTrue(checks["codex_review_skill_installed"]["ok"])
+        self.assertFalse(checks["codex_review_helper_installed"]["ok"])
+
+    def test_codex_review_helper_blocks_nested_invocation(self):
+        proc = self.run_codex_review_helper(
+            "--mode",
+            "local",
+            env={"CODEX_REVIEW_HELPER_LEVEL": "1"},
+        )
+
+        self.assertEqual(proc.returncode, 78)
+        self.assertIn("nested codex-review invocation blocked", proc.stderr)
+
+    def test_codex_review_helper_rejects_invalid_level(self):
+        proc = self.run_codex_review_helper(
+            "--mode",
+            "local",
+            env={"CODEX_REVIEW_HELPER_LEVEL": "abc"},
+        )
+
+        self.assertEqual(proc.returncode, 2)
+        self.assertIn("invalid CODEX_REVIEW_HELPER_LEVEL=abc", proc.stderr)
+
+    def test_codex_review_helper_treats_zero_padded_zero_as_top_level(self):
+        proc = self.run_codex_review_helper(
+            "--mode",
+            "local",
+            "--codex-bin",
+            "/bin/echo",
+            "--dry-run",
+            env={"CODEX_REVIEW_HELPER_LEVEL": "0000"},
+        )
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("review: /bin/echo review --uncommitted", proc.stdout)
+
+    def test_codex_review_helper_allows_debug_nested_dry_run_with_leading_zero(self):
+        proc = self.run_codex_review_helper(
+            "--mode",
+            "local",
+            "--codex-bin",
+            "/bin/echo",
+            "--dry-run",
+            env={"CODEX_REVIEW_HELPER_LEVEL": "08", "CODEX_REVIEW_ALLOW_NESTED": "1"},
+        )
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("review: /bin/echo review --uncommitted", proc.stdout)
+
+    def test_codex_review_helper_huge_nested_level_fails_closed_without_overflow(self):
+        proc = self.run_codex_review_helper(
+            "--mode",
+            "local",
+            env={"CODEX_REVIEW_HELPER_LEVEL": "9223372036854775808"},
+        )
+
+        self.assertEqual(proc.returncode, 78)
+        self.assertIn("nested codex-review invocation blocked", proc.stderr)
+        self.assertNotIn("value too great for base", proc.stderr)
+
+    def test_codex_review_helper_missing_option_value_before_dry_run_exits_2_without_running_codex(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            fake_codex = Path(tmpdir) / "fake-codex"
+            marker = Path(tmpdir) / "fake-codex-ran"
+            fake_codex.write_text(
+                "#!/usr/bin/env bash\n"
+                "set -euo pipefail\n"
+                f"touch {shlex.quote(str(marker))}\n"
+                "echo fake codex should not run\n"
+            )
+            fake_codex.chmod(0o755)
+
+            proc = self.run_codex_review_helper(
+                "--mode",
+                "local",
+                "--codex-bin",
+                str(fake_codex),
+                "--output",
+                "--dry-run",
+                env={"CODEX_REVIEW_HELPER_LEVEL": "0"},
+            )
+
+            self.assertEqual(proc.returncode, 2)
+            self.assertIn("missing value for --output", proc.stderr)
+            self.assertFalse(marker.exists(), proc.stdout + proc.stderr)
+
+    def test_codex_review_helper_blocks_recursive_fake_codex_shape(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            fake_codex = Path(tmpdir) / "fake-codex-review-recursive"
+            nested_stdout = Path(tmpdir) / "nested.stdout"
+            nested_stderr = Path(tmpdir) / "nested.stderr"
+            fake_codex.write_text(
+                "#!/usr/bin/env bash\n"
+                "set -euo pipefail\n"
+                "set +e\n"
+                f"{shlex.quote(str(CODEX_REVIEW_HELPER_PATH))} --mode local "
+                f">{shlex.quote(str(nested_stdout))} 2>{shlex.quote(str(nested_stderr))}\n"
+                "nested_status=$?\n"
+                "set -e\n"
+                'echo "nested-status:$nested_status"\n'
+                f"cat {shlex.quote(str(nested_stderr))}\n"
+                "exit 0\n"
+            )
+            fake_codex.chmod(0o755)
+            proc = self.run_codex_review_helper(
+                "--mode",
+                "local",
+                "--codex-bin",
+                str(fake_codex),
+                env={"CODEX_REVIEW_HELPER_LEVEL": "0"},
+            )
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("nested-status:78", proc.stdout)
+        self.assertIn("nested codex-review invocation blocked", proc.stdout)
+
+    def test_codex_review_helper_ignores_tool_findings_before_final_codex_section(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            fake_codex = Path(tmpdir) / "fake-codex"
+            fake_codex.write_text(
+                "#!/usr/bin/env bash\n"
+                "set -euo pipefail\n"
+                "echo 'OpenAI Codex v0.fake'\n"
+                "echo exec\n"
+                "echo '[P2] synthetic tool-output token'\n"
+                "echo '2026-06-01T19:01:25.184622Z  WARN codex_core::test: after tool output'\n"
+                "echo codex\n"
+                "echo 'No actionable correctness issues were found.'\n"
+            )
+            fake_codex.chmod(0o755)
+            proc = self.run_codex_review_helper(
+                "--mode",
+                "local",
+                "--codex-bin",
+                str(fake_codex),
+                env={"CODEX_REVIEW_HELPER_LEVEL": "0"},
+            )
+
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertIn("codex-review clean", proc.stdout)
+
+    def test_codex_review_helper_handles_clean_codex_transcript_without_diagnostics(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            fake_codex = Path(tmpdir) / "fake-codex"
+            fake_codex.write_text(
+                "#!/usr/bin/env bash\n"
+                "set -euo pipefail\n"
+                "echo 'OpenAI Codex v0.fake'\n"
+                "echo exec\n"
+                "echo '[P2] synthetic tool-output token'\n"
+                "echo codex\n"
+                "echo 'No actionable correctness issues were found.'\n"
+            )
+            fake_codex.chmod(0o755)
+            proc = self.run_codex_review_helper(
+                "--mode",
+                "local",
+                "--codex-bin",
+                str(fake_codex),
+                env={"CODEX_REVIEW_HELPER_LEVEL": "0"},
+            )
+
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertIn("codex-review clean", proc.stdout)
+
+    def test_codex_review_helper_flags_findings_without_codex_section(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            fake_codex = Path(tmpdir) / "fake-codex"
+            fake_codex.write_text(
+                "#!/usr/bin/env bash\n"
+                "set -euo pipefail\n"
+                "echo '[P2] accepted finding'\n"
+                "echo codex\n"
+                "echo 'quoted transcript marker'\n"
+            )
+            fake_codex.chmod(0o755)
+            proc = self.run_codex_review_helper(
+                "--mode",
+                "local",
+                "--codex-bin",
+                str(fake_codex),
+                env={"CODEX_REVIEW_HELPER_LEVEL": "0"},
+            )
+
+        self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+        self.assertIn("codex-review findings: accepted/actionable findings reported", proc.stdout)
+
+    def test_codex_review_helper_flags_large_final_findings_without_sigpipe_clean(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            fake_codex = Path(tmpdir) / "fake-codex"
+            fake_codex.write_text(
+                "#!/usr/bin/env bash\n"
+                "set -euo pipefail\n"
+                "python3 - <<'PY'\n"
+                "print('OpenAI Codex v0.fake')\n"
+                "print('2026-06-01T19:01:25.184622Z  WARN codex_core::test: before final')\n"
+                "print('codex')\n"
+                "print('[P2] accepted finding')\n"
+                "for _ in range(20000):\n"
+                "    print('filler')\n"
+                "PY\n"
+            )
+            fake_codex.chmod(0o755)
+            proc = self.run_codex_review_helper(
+                "--mode",
+                "local",
+                "--codex-bin",
+                str(fake_codex),
+                env={"CODEX_REVIEW_HELPER_LEVEL": "0"},
+            )
+
+        self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+        self.assertIn("codex-review findings: accepted/actionable findings reported", proc.stdout)
 
     def test_create_dual_writes_worker_and_initial_status_to_sqlite(self):
         name = "db-create-dual-write"
