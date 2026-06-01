@@ -54,6 +54,7 @@ from workerctl.commands import (
     command_pair,
     command_prune,
     command_qa_plan,
+    command_qa_run,
     command_reconcile,
     command_record_decision,
     command_ralph_loop_presets,
@@ -433,6 +434,19 @@ def build_parser() -> argparse.ArgumentParser:
     )
     qa_plan.add_argument("--json", action="store_true", help="Print stable JSON output.")
     qa_plan.set_defaults(func=command_qa_plan)
+
+    qa_run = subparsers.add_parser("qa-run", help="Run a deterministic QA harness and save a receipt.")
+    qa_run.add_argument(
+        "scenario",
+        nargs="?",
+        default="ralph-loop-guardrails",
+        choices=("ralph-loop-guardrails",),
+    )
+    qa_run.add_argument("--receipt-output", required=True, help="Path to write the JSON QA receipt.")
+    qa_run.add_argument("--dispatcher-id", help="Dispatcher id to record in the receipt.")
+    qa_run.add_argument("--path", help="Override the workerctl database path; defaults to a temp QA database.")
+    qa_run.add_argument("--json", action="store_true", help="Print stable JSON summary.")
+    qa_run.set_defaults(func=command_qa_run)
 
     db_doctor = subparsers.add_parser(
         "db-doctor",

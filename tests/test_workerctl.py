@@ -8411,6 +8411,216 @@ Deferred follow-up criteria:
         self.assertIn("iteration-gate-trigger: Do not send the worker another iteration", proc.stdout)
         self.assertIn("worker-directed-trigger: Ask the worker to identify", proc.stdout)
 
+    def test_qa_run_ralph_loop_guardrails_writes_replayable_receipt(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            receipt_path = Path(tmpdir) / "receipt.json"
+
+            proc = self.run_workerctl(
+                "qa-run",
+                "ralph-loop-guardrails",
+                "--receipt-output",
+                str(receipt_path),
+                "--path",
+                str(db_path),
+                "--json",
+            )
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertTrue(receipt_path.exists())
+            summary = json.loads(proc.stdout)
+            receipt = json.loads(receipt_path.read_text())
+            self.assertEqual(summary["scenario"], "ralph-loop-guardrails")
+            self.assertEqual(summary["result"], "passed")
+            self.assertEqual(Path(summary["receipt_path"]), receipt_path.resolve())
+            self.assertEqual(receipt["scenario"], "ralph-loop-guardrails")
+            self.assertEqual(receipt["result"], "passed")
+            self.assertEqual(Path(receipt["artifacts"]["db_path"]), db_path.resolve())
+            checks = {check["name"]: check for check in receipt["checks"]}
+
+            max_block = checks["max_iteration_blocks_before_worker_delivery"]
+            self.assertEqual(max_block["status"], "passed")
+            self.assertEqual(max_block["dispatch"]["state"], "blocked")
+            self.assertEqual(max_block["dispatch"]["reason"], "max_iterations_reached")
+            self.assertFalse(max_block["dispatch"]["target_worker_notified"])
+            self.assertEqual(max_block["routed_notifications_count"], 0)
+            self.assertEqual(max_block["worker_inbox_count"], 0)
+
+            missing_block = checks["missing_evidence_blocks_before_worker_delivery"]
+            self.assertEqual(missing_block["status"], "passed")
+            self.assertEqual(missing_block["dispatch"]["state"], "blocked")
+            self.assertEqual(missing_block["dispatch"]["reason"], "missing_required_evidence")
+            self.assertEqual(missing_block["dispatch"]["missing_evidence"], ["ci_green", "adversarial_check"])
+            self.assertEqual(missing_block["worker_inbox_count"], 0)
+
+            allowed = checks["fresh_retry_delivers_after_structured_evidence"]
+            self.assertEqual(allowed["status"], "passed")
+            self.assertEqual(allowed["dispatch"]["state"], "pull_required")
+            self.assertEqual(allowed["worker_inbox_count"], 1)
+
+            preset_block = checks["preset_requires_pr_ci_merge_and_adversarial_evidence"]
+            self.assertEqual(preset_block["dispatch"]["missing_evidence"], ["pr_url", "ci_green", "merge", "adversarial_check"])
+            preset_allowed = checks["preset_retry_delivers_after_all_required_evidence"]
+            self.assertEqual(preset_allowed["dispatch"]["state"], "pull_required")
+
+            self.assertIn("codex_review_helper", receipt["adversarial_review_gate"])
+            replay_commands = "\n".join(receipt["replay_commands"])
+            self.assertIn("qa-plan ralph-loop", replay_commands)
+            self.assertIn("qa-plan adversarial-triggers", replay_commands)
+            self.assertIn("dispatch --once --type continue_iteration", replay_commands)
+            self.assertIn("loop-evidence adversarial-check", replay_commands)
+
+    def test_qa_run_refuses_to_share_dirty_continue_iteration_queue(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            receipt_path = Path(tmpdir) / "receipt.json"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                task_id = worker_db.create_task(conn, name="preexisting-task", goal="Existing queue.")
+                conn.execute("update tasks set state = 'managed' where id = ?", (task_id,))
+                worker_db.register_session(
+                    conn,
+                    name="preexisting-worker",
+                    role="worker",
+                    codex_session_path="/tmp/preexisting-worker.jsonl",
+                    codex_session_id="preexisting-worker",
+                    pid=os.getpid(),
+                    cwd=str(ROOT),
+                    tmux_session=None,
+                )
+                worker_db.register_session(
+                    conn,
+                    name="preexisting-manager",
+                    role="manager",
+                    codex_session_path="/tmp/preexisting-manager.jsonl",
+                    codex_session_id="preexisting-manager",
+                    pid=os.getpid(),
+                    cwd=str(ROOT),
+                    tmux_session=None,
+                )
+                worker_db.bind_sessions(
+                    conn,
+                    task_name="preexisting-task",
+                    worker_session_name="preexisting-worker",
+                    manager_session_name="preexisting-manager",
+                )
+                run_id = worker_db.create_ralph_loop_run(
+                    conn,
+                    task_id=task_id,
+                    name="preexisting-run",
+                    max_iterations=3,
+                    current_iteration=1,
+                    required_before_continue=[],
+                )
+                command_id = worker_db.enqueue_continue_iteration(
+                    conn,
+                    task_id=task_id,
+                    message="Do not consume me.",
+                    loop_run_id=run_id,
+                    requested_iteration=2,
+                    correlation_id="preexisting-command",
+                )
+                conn.commit()
+
+            proc = self.run_workerctl(
+                "qa-run",
+                "ralph-loop-guardrails",
+                "--receipt-output",
+                str(receipt_path),
+                "--path",
+                str(db_path),
+                "--json",
+            )
+
+            self.assertNotEqual(proc.returncode, 0)
+            self.assertIn("continue_iteration dispatch queue is not clean", proc.stderr)
+            self.assertFalse(receipt_path.exists())
+            with worker_db.connect(db_path) as conn:
+                command = conn.execute(
+                    "select state from commands where id = ?",
+                    (command_id,),
+                ).fetchone()
+                self.assertEqual(command["state"], "pending")
+
+    def test_qa_run_refuses_stale_attempted_continue_iteration_queue(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            receipt_path = Path(tmpdir) / "receipt.json"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                task_id = worker_db.create_task(conn, name="stale-task", goal="Existing stale queue.")
+                conn.execute("update tasks set state = 'managed' where id = ?", (task_id,))
+                worker_db.register_session(
+                    conn,
+                    name="stale-worker",
+                    role="worker",
+                    codex_session_path="/tmp/stale-worker.jsonl",
+                    codex_session_id="stale-worker",
+                    pid=os.getpid(),
+                    cwd=str(ROOT),
+                    tmux_session=None,
+                )
+                worker_db.register_session(
+                    conn,
+                    name="stale-manager",
+                    role="manager",
+                    codex_session_path="/tmp/stale-manager.jsonl",
+                    codex_session_id="stale-manager",
+                    pid=os.getpid(),
+                    cwd=str(ROOT),
+                    tmux_session=None,
+                )
+                worker_db.bind_sessions(
+                    conn,
+                    task_name="stale-task",
+                    worker_session_name="stale-worker",
+                    manager_session_name="stale-manager",
+                )
+                run_id = worker_db.create_ralph_loop_run(
+                    conn,
+                    task_id=task_id,
+                    name="stale-run",
+                    max_iterations=3,
+                    current_iteration=1,
+                    required_before_continue=[],
+                )
+                command_id = worker_db.enqueue_continue_iteration(
+                    conn,
+                    task_id=task_id,
+                    message="Do not recover me.",
+                    loop_run_id=run_id,
+                    requested_iteration=2,
+                    correlation_id="stale-command",
+                )
+                worker_db.claim_next_dispatch_command(
+                    conn,
+                    dispatcher_id="old-dispatcher",
+                    command_types=["continue_iteration"],
+                    timestamp="2000-01-01T00:00:00Z",
+                    lease_seconds=1,
+                )
+                conn.commit()
+
+            proc = self.run_workerctl(
+                "qa-run",
+                "ralph-loop-guardrails",
+                "--receipt-output",
+                str(receipt_path),
+                "--path",
+                str(db_path),
+                "--json",
+            )
+
+            self.assertNotEqual(proc.returncode, 0)
+            self.assertIn("continue_iteration dispatch queue is not clean", proc.stderr)
+            self.assertFalse(receipt_path.exists())
+            with worker_db.connect(db_path) as conn:
+                command = conn.execute(
+                    "select state from commands where id = ?",
+                    (command_id,),
+                ).fetchone()
+                self.assertEqual(command["state"], "attempted")
+
     def test_qa_plan_goalbuddy_conveyor_outputs_reusable_contract(self):
         proc = self.run_workerctl("qa-plan", "goalbuddy-conveyor", "--json")
 

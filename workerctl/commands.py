@@ -1957,6 +1957,503 @@ def command_qa_plan(args: argparse.Namespace) -> int:
     return 0
 
 
+def _qa_run_db_path(args: argparse.Namespace) -> Path:
+    if getattr(args, "path", None):
+        return Path(args.path).expanduser().resolve()
+    qa_dir = Path(tempfile.mkdtemp(prefix="workerctl-qa-run-"))
+    return qa_dir / "workerctl.db"
+
+
+def _qa_run_bound_task(conn: Any, *, slug: str, suffix: str) -> dict[str, str]:
+    from workerctl import db as worker_db
+
+    task_name = f"qa-{suffix}-{slug}"
+    worker_name = f"{task_name}-worker"
+    manager_name = f"{task_name}-manager"
+    task_id = worker_db.create_task(
+        conn,
+        name=task_name,
+        goal=f"Executable QA run for {suffix}.",
+        summary="Disposable no-tmux manager/worker binding for Dispatch guardrail proof.",
+    )
+    conn.execute("update tasks set state = 'managed' where id = ?", (task_id,))
+    worker_id = worker_db.register_session(
+        conn,
+        name=worker_name,
+        role="worker",
+        codex_session_path=f"/tmp/{worker_name}.jsonl",
+        codex_session_id=f"codex-{worker_name}",
+        pid=os.getpid(),
+        cwd=str(PROJECT_ROOT),
+        tmux_session=None,
+    )
+    manager_id = worker_db.register_session(
+        conn,
+        name=manager_name,
+        role="manager",
+        codex_session_path=f"/tmp/{manager_name}.jsonl",
+        codex_session_id=f"codex-{manager_name}",
+        pid=os.getpid(),
+        cwd=str(PROJECT_ROOT),
+        tmux_session=None,
+    )
+    binding_id = worker_db.bind_sessions(
+        conn,
+        task_name=task_name,
+        worker_session_name=worker_name,
+        manager_session_name=manager_name,
+    )
+    return {
+        "binding_id": binding_id,
+        "manager_id": manager_id,
+        "manager_name": manager_name,
+        "task_id": task_id,
+        "task_name": task_name,
+        "worker_id": worker_id,
+        "worker_name": worker_name,
+    }
+
+
+def _qa_run_dispatch_continue_once(*, db_path: Path, dispatcher_id: str, expected_correlation_id: str) -> dict[str, Any]:
+    from workerctl import db as worker_db
+    from workerctl import tmux as worker_tmux
+
+    with worker_db.connect(db_path) as conn:
+        worker_db.initialize_database(conn)
+        queue = [
+            {"correlation_id": row["correlation_id"], "id": row["id"], "state": row["state"]}
+            for row in conn.execute(
+                """
+                select id, correlation_id, state
+                from commands
+                where type = 'continue_iteration'
+                  and state in ('pending', 'attempted')
+                order by created_at, id
+                limit 2
+                """
+            ).fetchall()
+        ]
+    if len(queue) != 1 or queue[0]["correlation_id"] != expected_correlation_id or queue[0]["state"] != "pending":
+        seen = [f"{command['correlation_id']}:{command['state']}" for command in queue]
+        raise WorkerError(
+            "qa-run continue_iteration dispatch queue is not clean; "
+            f"expected only {expected_correlation_id!r}, found {seen!r}"
+        )
+    processed = _dispatch_once_pass(
+        argparse.Namespace(type="continue_iteration"),
+        worker_db=worker_db,
+        worker_tmux=worker_tmux,
+        limit=1,
+        dispatcher_id=dispatcher_id,
+        db_path=db_path,
+        dry_run=False,
+        lease_seconds=60,
+    )
+    if len(processed) != 1:
+        raise WorkerError(f"expected exactly one continue_iteration dispatch item, got {len(processed)}")
+    if processed[0].get("correlation_id") != expected_correlation_id:
+        raise WorkerError(
+            "qa-run dispatched an unexpected continue_iteration command; "
+            f"expected {expected_correlation_id!r}, got {processed[0].get('correlation_id')!r}"
+        )
+    return processed[0]
+
+
+def _qa_run_delivery_counts(*, db_path: Path, task_id: str, worker_name: str) -> dict[str, int]:
+    from workerctl import db as worker_db
+
+    with worker_db.connect(db_path) as conn:
+        worker_db.initialize_database(conn)
+        return {
+            "routed_notifications_count": len(worker_db.routed_notifications(conn, task_id=task_id)),
+            "worker_inbox_count": len(worker_db.session_inbox(conn, session_name=worker_name)),
+        }
+
+
+def _qa_run_require(condition: bool, message: str) -> None:
+    if not condition:
+        raise WorkerError(message)
+
+
+def _qa_run_require_clean_continue_queue(conn: Any, *, worker_db: Any) -> None:
+    rows = conn.execute(
+        """
+        select id, correlation_id, state
+        from commands
+        where type = 'continue_iteration'
+          and state in ('pending', 'attempted')
+        order by created_at, id
+        limit 1
+        """
+    ).fetchall()
+    if rows:
+        command = rows[0]
+        raise WorkerError(
+            "qa-run continue_iteration dispatch queue is not clean; "
+            f"refusing to share queue with pending command {command['id']} "
+            f"({command['correlation_id']}, state={command['state']})"
+        )
+
+
+def _qa_run_check_result(
+    *,
+    name: str,
+    dispatch: dict[str, Any],
+    counts: dict[str, int],
+    command: str,
+) -> dict[str, Any]:
+    return {
+        "command": command,
+        "dispatch": dispatch,
+        "name": name,
+        "routed_notifications_count": counts["routed_notifications_count"],
+        "status": "passed",
+        "worker_inbox_count": counts["worker_inbox_count"],
+    }
+
+
+def _qa_run_record_loop_evidence(
+    *,
+    db_path: Path,
+    task_name: str,
+    loop_run_id: str,
+    evidence_type: str,
+    correlation_id: str,
+    status: str = "pass",
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    from workerctl import db as worker_db
+
+    with worker_db.connect(db_path) as conn:
+        worker_db.initialize_database(conn)
+        task = dict(worker_db.task_row(conn, task=task_name))
+        result = _record_loop_evidence(
+            conn,
+            task=task,
+            loop_run=loop_run_id,
+            iteration=1,
+            evidence_type=evidence_type,
+            status=status,
+            source="manager_inferred",
+            proof=f"qa-run recorded {evidence_type} receipt before continuing.",
+            artifact_path=None,
+            correlation_id=correlation_id,
+            metadata=metadata,
+        )
+        conn.commit()
+        return result
+
+
+def _qa_run_ralph_loop_guardrails(args: argparse.Namespace) -> dict[str, Any]:
+    from workerctl import db as worker_db
+
+    db_path = _qa_run_db_path(args)
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    slug = uuid.uuid4().hex[:8]
+    dispatcher_id = getattr(args, "dispatcher_id", None) or f"qa-run-{slug}"
+    checks: list[dict[str, Any]] = []
+
+    with worker_db.connect(db_path) as conn:
+        worker_db.initialize_database(conn)
+        _qa_run_require_clean_continue_queue(conn, worker_db=worker_db)
+        max_task = _qa_run_bound_task(conn, slug=slug, suffix="max-iteration")
+        max_run_id = worker_db.create_ralph_loop_run(
+            conn,
+            task_id=max_task["task_id"],
+            name=f"{max_task['task_name']}-run",
+            max_iterations=1,
+            current_iteration=1,
+            cleanup_policy="clear",
+            stop_conditions=["max_iterations"],
+            seed_prompt_sha256="qa-run-seed",
+        )
+        max_decision_id = worker_db.insert_manager_decision(
+            conn,
+            task_id=max_task["task_id"],
+            manager_id=None,
+            decision="nudge",
+            reason="QA asks for iteration 2 after max_iterations=1.",
+            payload={"correlation_id": "qa-run-max-block", "requested_iteration": 2, "ralph_loop_run_id": max_run_id},
+        )
+        worker_db.enqueue_continue_iteration(
+            conn,
+            task_id=max_task["task_id"],
+            message="Run iteration 2.",
+            loop_run_id=max_run_id,
+            requested_iteration=2,
+            manager_decision_id=max_decision_id,
+            correlation_id="qa-run-max-block",
+        )
+        conn.commit()
+
+    max_dispatch = _qa_run_dispatch_continue_once(
+        db_path=db_path,
+        dispatcher_id=dispatcher_id,
+        expected_correlation_id="qa-run-max-block",
+    )
+    max_counts = _qa_run_delivery_counts(db_path=db_path, task_id=max_task["task_id"], worker_name=max_task["worker_name"])
+    _qa_run_require(max_dispatch.get("state") == "blocked", "max-iteration drill did not block")
+    _qa_run_require(max_dispatch.get("reason") == "max_iterations_reached", "max-iteration drill used the wrong block reason")
+    _qa_run_require(not max_dispatch.get("target_worker_notified"), "max-iteration drill notified the worker")
+    _qa_run_require(max_counts["routed_notifications_count"] == 0, "max-iteration drill created a routed notification")
+    _qa_run_require(max_counts["worker_inbox_count"] == 0, "max-iteration drill left worker inbox mail")
+    checks.append(
+        _qa_run_check_result(
+            name="max_iteration_blocks_before_worker_delivery",
+            dispatch=max_dispatch,
+            counts=max_counts,
+            command="workerctl dispatch --once --type continue_iteration --dispatcher-id qa-run",
+        )
+    )
+
+    with worker_db.connect(db_path) as conn:
+        worker_db.initialize_database(conn)
+        evidence_task = _qa_run_bound_task(conn, slug=slug, suffix="missing-evidence")
+        evidence_run_id = worker_db.create_ralph_loop_run(
+            conn,
+            task_id=evidence_task["task_id"],
+            name=f"{evidence_task['task_name']}-run",
+            max_iterations=3,
+            current_iteration=1,
+            cleanup_policy="clear",
+            required_before_continue=["ci_green", "adversarial_check"],
+            stop_conditions=["max_iterations", "required_evidence"],
+            seed_prompt_sha256="qa-run-seed",
+        )
+        worker_db.enqueue_continue_iteration(
+            conn,
+            task_id=evidence_task["task_id"],
+            message="Run iteration 2 before evidence.",
+            loop_run_id=evidence_run_id,
+            requested_iteration=2,
+            correlation_id="qa-run-missing-evidence",
+        )
+        conn.commit()
+
+    missing_dispatch = _qa_run_dispatch_continue_once(
+        db_path=db_path,
+        dispatcher_id=dispatcher_id,
+        expected_correlation_id="qa-run-missing-evidence",
+    )
+    missing_counts = _qa_run_delivery_counts(db_path=db_path, task_id=evidence_task["task_id"], worker_name=evidence_task["worker_name"])
+    _qa_run_require(missing_dispatch.get("state") == "blocked", "missing-evidence drill did not block")
+    _qa_run_require(missing_dispatch.get("reason") == "missing_required_evidence", "missing-evidence drill used the wrong block reason")
+    _qa_run_require(missing_dispatch.get("missing_evidence") == ["ci_green", "adversarial_check"], "missing-evidence drill reported the wrong missing evidence")
+    _qa_run_require(missing_counts["routed_notifications_count"] == 0, "missing-evidence drill created a routed notification")
+    _qa_run_require(missing_counts["worker_inbox_count"] == 0, "missing-evidence drill left worker inbox mail")
+    checks.append(
+        _qa_run_check_result(
+            name="missing_evidence_blocks_before_worker_delivery",
+            dispatch=missing_dispatch,
+            counts=missing_counts,
+            command="workerctl dispatch --once --type continue_iteration --dispatcher-id qa-run",
+        )
+    )
+
+    _qa_run_record_loop_evidence(
+        db_path=db_path,
+        task_name=evidence_task["task_name"],
+        loop_run_id=evidence_run_id,
+        evidence_type="ci_green",
+        correlation_id="qa-run-ci-green",
+        status="green",
+    )
+    _qa_run_record_loop_evidence(
+        db_path=db_path,
+        task_name=evidence_task["task_name"],
+        loop_run_id=evidence_run_id,
+        evidence_type="adversarial_check",
+        correlation_id="qa-run-adversarial-proof",
+        metadata=_adversarial_check_metadata(
+            {
+                "failure_mode": "A manager retry could reach the worker after CI green but before adversarial proof.",
+                "check": "Inspect blocked dispatch result, empty inbox, and structured evidence receipt.",
+                "result": "The first retry stayed blocked until ci_green and adversarial_check receipts existed.",
+            }
+        ),
+    )
+    with worker_db.connect(db_path) as conn:
+        worker_db.initialize_database(conn)
+        worker_db.enqueue_continue_iteration(
+            conn,
+            task_id=evidence_task["task_id"],
+            message="Run iteration 2 after CI and adversarial evidence.",
+            loop_run_id=evidence_run_id,
+            requested_iteration=2,
+            correlation_id="qa-run-evidence-allowed",
+        )
+        conn.commit()
+    allowed_dispatch = _qa_run_dispatch_continue_once(
+        db_path=db_path,
+        dispatcher_id=dispatcher_id,
+        expected_correlation_id="qa-run-evidence-allowed",
+    )
+    allowed_counts = _qa_run_delivery_counts(db_path=db_path, task_id=evidence_task["task_id"], worker_name=evidence_task["worker_name"])
+    _qa_run_require(allowed_dispatch.get("state") == "pull_required", "fresh evidence retry did not deliver to pull inbox")
+    _qa_run_require(allowed_counts["worker_inbox_count"] == 1, "fresh evidence retry did not create exactly one worker inbox item")
+    checks.append(
+        _qa_run_check_result(
+            name="fresh_retry_delivers_after_structured_evidence",
+            dispatch=allowed_dispatch,
+            counts=allowed_counts,
+            command="workerctl loop-evidence adversarial-check ... && workerctl dispatch --once --type continue_iteration",
+        )
+    )
+
+    with worker_db.connect(db_path) as conn:
+        worker_db.initialize_database(conn)
+        preset_task = _qa_run_bound_task(conn, slug=slug, suffix="preset")
+        preset_run_id = worker_db.create_ralph_loop_run(
+            conn,
+            task_id=preset_task["task_id"],
+            name=f"{preset_task['task_name']}-run",
+            max_iterations=3,
+            current_iteration=1,
+            cleanup_policy="clear",
+            preset="pr_ci_merge_loop",
+            required_before_continue=["pr_url", "ci_green", "merge", "adversarial_check"],
+            stop_conditions=["max_iterations", "required_evidence"],
+            seed_prompt_sha256="qa-run-seed",
+        )
+        worker_db.enqueue_continue_iteration(
+            conn,
+            task_id=preset_task["task_id"],
+            message="Run preset iteration 2 before evidence.",
+            loop_run_id=preset_run_id,
+            requested_iteration=2,
+            correlation_id="qa-run-preset-missing",
+        )
+        conn.commit()
+    preset_block_dispatch = _qa_run_dispatch_continue_once(
+        db_path=db_path,
+        dispatcher_id=dispatcher_id,
+        expected_correlation_id="qa-run-preset-missing",
+    )
+    preset_block_counts = _qa_run_delivery_counts(db_path=db_path, task_id=preset_task["task_id"], worker_name=preset_task["worker_name"])
+    _qa_run_require(preset_block_dispatch.get("state") == "blocked", "preset evidence drill did not block")
+    _qa_run_require(
+        preset_block_dispatch.get("missing_evidence") == ["pr_url", "ci_green", "merge", "adversarial_check"],
+        "preset evidence drill reported the wrong missing evidence",
+    )
+    _qa_run_require(preset_block_counts["worker_inbox_count"] == 0, "preset evidence drill left worker inbox mail")
+    checks.append(
+        _qa_run_check_result(
+            name="preset_requires_pr_ci_merge_and_adversarial_evidence",
+            dispatch=preset_block_dispatch,
+            counts=preset_block_counts,
+            command="workerctl ralph-loop-presets --create-run <task> --preset pr_ci_merge_loop && workerctl dispatch --once --type continue_iteration",
+        )
+    )
+
+    for evidence_type in ("pr_url", "ci_green", "merge"):
+        _qa_run_record_loop_evidence(
+            db_path=db_path,
+            task_name=preset_task["task_name"],
+            loop_run_id=preset_run_id,
+            evidence_type=evidence_type,
+            correlation_id=f"qa-run-preset-{evidence_type}",
+            status="green" if evidence_type == "ci_green" else "pass",
+        )
+    _qa_run_record_loop_evidence(
+        db_path=db_path,
+        task_name=preset_task["task_name"],
+        loop_run_id=preset_run_id,
+        evidence_type="adversarial_check",
+        correlation_id="qa-run-preset-adversarial",
+        metadata=_adversarial_check_metadata(
+            {
+                "failure_mode": "PR, CI, and merge receipts could still hide an unreviewed regression.",
+                "check": "Inspect PR URL, CI, merge, and adversarial receipt set before retry.",
+                "result": "All required preset receipts are present with structured adversarial proof.",
+            }
+        ),
+    )
+    with worker_db.connect(db_path) as conn:
+        worker_db.initialize_database(conn)
+        worker_db.enqueue_continue_iteration(
+            conn,
+            task_id=preset_task["task_id"],
+            message="Run preset iteration 2 after all evidence.",
+            loop_run_id=preset_run_id,
+            requested_iteration=2,
+            correlation_id="qa-run-preset-allowed",
+        )
+        conn.commit()
+    preset_allowed_dispatch = _qa_run_dispatch_continue_once(
+        db_path=db_path,
+        dispatcher_id=dispatcher_id,
+        expected_correlation_id="qa-run-preset-allowed",
+    )
+    preset_allowed_counts = _qa_run_delivery_counts(db_path=db_path, task_id=preset_task["task_id"], worker_name=preset_task["worker_name"])
+    _qa_run_require(preset_allowed_dispatch.get("state") == "pull_required", "preset evidence retry did not deliver")
+    _qa_run_require(preset_allowed_counts["worker_inbox_count"] == 1, "preset evidence retry did not create exactly one worker inbox item")
+    checks.append(
+        _qa_run_check_result(
+            name="preset_retry_delivers_after_all_required_evidence",
+            dispatch=preset_allowed_dispatch,
+            counts=preset_allowed_counts,
+            command="workerctl loop-evidence adversarial-check ... && workerctl dispatch --once --type continue_iteration",
+        )
+    )
+
+    helper_path = PROJECT_ROOT / "skills" / "codex-review" / "scripts" / "codex-review"
+    helper_syntax = subprocess.run(
+        ["bash", "-n", str(helper_path)],
+        cwd=PROJECT_ROOT,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    _qa_run_require(helper_path.exists(), "codex-review helper is missing")
+    _qa_run_require(helper_syntax.returncode == 0, f"codex-review helper syntax failed: {helper_syntax.stderr}")
+
+    return {
+        "adversarial_review_gate": {
+            "codex_review_helper": str(helper_path),
+            "recursion_guard_expected": "nested codex-review invocation blocked",
+            "syntax_check": {
+                "command": f"bash -n {helper_path}",
+                "returncode": helper_syntax.returncode,
+            },
+        },
+        "artifacts": {"db_path": str(db_path)},
+        "checks": checks,
+        "generated_at": now_iso(),
+        "replay_commands": [
+            "scripts/workerctl qa-plan ralph-loop --json",
+            "scripts/workerctl qa-plan adversarial-triggers --json",
+            f"scripts/workerctl dispatch --once --type continue_iteration --dispatcher-id {dispatcher_id} --path {db_path}",
+            "scripts/workerctl loop-evidence adversarial-check <task> --loop-run <run-id> --iteration 1 --failure-mode <failure> --check <check> --result <result>",
+        ],
+        "result": "passed",
+        "scenario": "ralph-loop-guardrails",
+    }
+
+
+def command_qa_run(args: argparse.Namespace) -> int:
+    scenario = getattr(args, "scenario", "ralph-loop-guardrails")
+    if scenario != "ralph-loop-guardrails":
+        raise WorkerError(f"Unsupported QA run scenario: {scenario}")
+    receipt_output = Path(args.receipt_output).expanduser().resolve()
+    receipt_output.parent.mkdir(parents=True, exist_ok=True)
+    receipt = _qa_run_ralph_loop_guardrails(args)
+    receipt["receipt_path"] = str(receipt_output)
+    receipt_output.write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n")
+    summary = {
+        "checks": len(receipt["checks"]),
+        "receipt_path": str(receipt_output),
+        "result": receipt["result"],
+        "scenario": receipt["scenario"],
+    }
+    if getattr(args, "json", False):
+        print(json.dumps(summary, indent=2, sort_keys=True))
+    else:
+        print(f"QA run {scenario}: {receipt['result']}")
+        print(f"Receipt: {receipt_output}")
+    return 0
+
+
 def command_db_doctor(args: argparse.Namespace) -> int:
     db_path = Path(args.path).expanduser().resolve() if args.path else default_db_path()
     with connect_db(db_path) as conn:
