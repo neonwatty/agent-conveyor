@@ -22,6 +22,17 @@ Modes:
 EOF
 }
 
+require_option_value() {
+  local option=$1
+  local value=${2-}
+
+  if [[ -z "$value" || "$value" == --* || "$value" == "-h" ]]; then
+    echo "missing value for $option" >&2
+    usage >&2
+    exit 2
+  fi
+}
+
 mode=auto
 base_ref=
 codex_bin=${CODEX_BIN:-codex}
@@ -33,15 +44,18 @@ dry_run=false
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --mode)
-      mode=${2:-}
+      require_option_value "$1" "${2-}"
+      mode=$2
       shift 2
       ;;
     --base)
-      base_ref=${2:-}
+      require_option_value "$1" "${2-}"
+      base_ref=$2
       shift 2
       ;;
     --codex-bin)
-      codex_bin=${2:-}
+      require_option_value "$1" "${2-}"
+      codex_bin=$2
       shift 2
       ;;
     --full-access)
@@ -49,11 +63,13 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --output)
-      output=${2:-}
+      require_option_value "$1" "${2-}"
+      output=$2
       shift 2
       ;;
     --parallel-tests)
-      parallel_tests=${2:-}
+      require_option_value "$1" "${2-}"
+      parallel_tests=$2
       shift 2
       ;;
     --dry-run)
