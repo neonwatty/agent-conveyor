@@ -115,6 +115,7 @@ ps -eo pid=,args= | awk -v self="$current_pid" '
 ' | sort -u >/tmp/codex-review-before.pids
 (exec -a codex-review-stale sleep 20) &
 stale_pid=$!
+trap 'kill "$stale_pid" 2>/dev/null || true' EXIT
 sleep 0.2
 current_pid=$$
 ps -eo pid=,args= | awk -v self="$current_pid" '
@@ -124,4 +125,5 @@ comm -13 /tmp/codex-review-before.pids /tmp/codex-review-after.pids \
   >/tmp/codex-review-new.pids
 rg "$stale_pid" /tmp/codex-review-new.pids
 kill "$stale_pid" 2>/dev/null || true
+trap - EXIT
 ```
