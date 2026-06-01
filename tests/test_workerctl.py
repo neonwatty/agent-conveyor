@@ -8275,6 +8275,8 @@ Deferred follow-up criteria:
         self.assertTrue(any("dispatch_watch_heartbeat" in step and "--newest --limit 1" in step for step in payload["steps"]))
         self.assertTrue(any("enqueue-continue-iteration" in step and "max_iterations=1" in step for step in payload["steps"]))
         self.assertTrue(any("dispatch --once --type continue_iteration" in step for step in payload["steps"]))
+        self.assertTrue(any("workerctl commands --task <task> --attempts" in step for step in payload["steps"]))
+        self.assertFalse(any("workerctl commands --task --attempts" in step for step in payload["steps"]))
         self.assertTrue(any("dashboard" in step.lower() and "Inbox 0" in step for step in payload["steps"]))
         self.assertTrue(any("max_iterations_reached" in observation for observation in payload["expected_observations"]))
         self.assertTrue(any("0 notifications" in observation and "Pull inbox 0" in observation for observation in payload["expected_observations"]))
@@ -8344,6 +8346,10 @@ Deferred follow-up criteria:
         )
         joined_steps = " ".join(payload["steps"])
         joined_observations = " ".join(payload["expected_observations"])
+        self.assertIn("workerctl runs --list --task <task>", joined_steps)
+        self.assertNotIn("workerctl runs --task <task> --json", joined_steps)
+        self.assertIn("workerctl commands --task <task> --attempts", joined_steps)
+        self.assertNotIn("workerctl commands --task --attempts", joined_steps)
         self.assertIn('required_before_continue=["adversarial_check"]', joined_steps)
         self.assertIn("missing_evidence=[adversarial_check]", joined_steps)
         self.assertIn("delivered=false", joined_steps)
@@ -17774,8 +17780,9 @@ class ManagerBootstrapPromptTests(unittest.TestCase):
         qa_readme = (ROOT / "docs" / "qa" / "README.md").read_text()
         proof_doc = (ROOT / "docs" / "qa" / "adversarial-proof.md").read_text()
         checklist = (ROOT / "docs" / "manual-qa-checklist.md").read_text()
+        readme = (ROOT / "README.md").read_text()
 
-        for document in (qa_doc, proof_doc, checklist):
+        for document in (qa_doc, proof_doc, checklist, readme):
             self.assertIn("qa-plan adversarial-triggers", document)
         self.assertIn("Adversarial triggers", qa_readme)
         self.assertIn("Run this as an adversarially gated Ralph loop.", qa_doc)

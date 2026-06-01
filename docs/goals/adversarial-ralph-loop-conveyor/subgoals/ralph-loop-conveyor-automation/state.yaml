@@ -1,0 +1,72 @@
+version: 2
+
+goal:
+  title: "Ralph Loop Conveyor Automation"
+  slug: ralph-loop-conveyor-automation
+  kind: existing_plan
+  tranche: "Reusable conveyor command or documented prompt pattern."
+  status: active
+  oracle:
+    signal: "A reusable conveyor start path exists and preserves one-child-at-a-time receipts."
+    cadence: "after prompt-contract child is complete"
+    final_proof: "Implementation or docs, focused verification, adversarial review, PR/CI/merge receipt if fixes are required, and parent receipt update."
+  intake:
+    original_request: "Create an autonomous GoalBuddy conveyor for this project."
+    interpreted_outcome: "Make the conveyor pattern reusable after the behavior has been proven by the earlier slices."
+    input_shape: existing_plan
+    audience:
+      - GoalBuddy managers
+      - workerctl operators
+      - maintainers
+    authority: requested
+    proof_type: test_review_ci_merge_if_needed
+    completion_proof: "Reusable conveyor path is implemented or documented and verified."
+    likely_misfire: "Automating the conveyor before live QA proves the trigger and prompt contract behavior."
+
+rules:
+  pm_owns_state: true
+  one_active_task: true
+  max_write_workers: 1
+  no_completion_without_judge_or_pm_audit: true
+  planning_is_not_completion: true
+  queued_required_worker_blocks_completion: true
+  continuous_until_full_outcome: true
+  goal_pressure_requires_oracle: true
+  no_completion_on_weak_proof: true
+
+agents:
+  scout: installed
+  worker: installed
+  judge: installed
+
+visual_board:
+  selected: local
+  local:
+    status: not_started
+    url: "http://goalbuddy.localhost:41737/ralph-loop-conveyor-automation/"
+    command: "npx goalbuddy board docs/goals/adversarial-ralph-loop-conveyor/subgoals/ralph-loop-conveyor-automation"
+
+active_task: T001
+
+tasks:
+  - id: T001
+    type: worker
+    assignee: Worker
+    status: active
+    reasoning_hint: medium
+    objective: "Implement or document the reusable Ralph-loop conveyor start pattern after upstream proof exists."
+    allowed_files:
+      - "README.md"
+      - "docs/**"
+      - "skills/manage-codex-workers/SKILL.md"
+      - "workerctl/**"
+      - "tests/**"
+    verify:
+      - "Focused tests or command proof for the reusable conveyor path."
+      - "Adversarial review of the conveyor handoff guarantees."
+    stop_if:
+      - "Parent board has not activated this child."
+      - "Earlier live QA or prompt-contract proof is missing."
+    receipt:
+      result: active
+      summary: "Waiting for parent T004 activation after prompt-contract completion."
