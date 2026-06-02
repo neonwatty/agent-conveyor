@@ -48,6 +48,7 @@ from workerctl.commands import (
     command_mutation_audit,
     command_nudge,
     command_loop_templates,
+    command_loop_triggers,
     command_open,
     command_open_manager,
     command_open_worker,
@@ -327,6 +328,16 @@ def build_parser() -> argparse.ArgumentParser:
     loop_templates.add_argument("--path", help="Override the workerctl database path.")
     loop_templates.set_defaults(func=command_loop_templates)
 
+    loop_triggers = subparsers.add_parser(
+        "loop-triggers",
+        help="List or classify controlled natural-language loop triggers.",
+    )
+    trigger_action = loop_triggers.add_mutually_exclusive_group()
+    trigger_action.add_argument("--list", action="store_true", help="List controlled loop trigger phrases.")
+    trigger_action.add_argument("--classify", help="Classify a prompt against controlled loop triggers.")
+    loop_triggers.add_argument("--json", action="store_true", help="Print stable JSON output.")
+    loop_triggers.set_defaults(func=command_loop_triggers)
+
     loop_evidence = subparsers.add_parser(
         "loop-evidence",
         help="Record Ralph-loop evidence receipts, including visual diff verifier receipts.",
@@ -440,7 +451,7 @@ def build_parser() -> argparse.ArgumentParser:
         "scenario",
         nargs="?",
         default="ralph-loop-guardrails",
-        choices=("ralph-loop-guardrails", "generic-loop-template", "generic-loop-template-browser"),
+        choices=("ralph-loop-guardrails", "generic-loop-template", "generic-loop-template-browser", "adversarial-triggers"),
     )
     qa_run.add_argument("--receipt-output", required=True, help="Path to write the JSON QA receipt.")
     qa_run.add_argument("--dispatcher-id", help="Dispatcher id to record in the receipt.")

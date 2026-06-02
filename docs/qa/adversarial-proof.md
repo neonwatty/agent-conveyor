@@ -29,14 +29,17 @@ remembering command flags:
 - "Before continuing, record the strongest realistic failure mode, the check,
   and the result."
 
-The manager should translate those requests into:
+The manager should first run `workerctl loop-triggers --classify "<prompt>"
+--json`. A matched controlled trigger should then be translated into:
 
 - a loop policy whose `required_before_continue` includes `adversarial_check`;
 - a recorded `loop-evidence adversarial-check` receipt before each gated retry;
 - `finish-task --require-adversarial-proof` when final completion should also
   be blocked until proof exists.
 
-Use `workerctl qa-plan adversarial-triggers` and
+Unmatched generic caution stays ordinary guidance. Use
+`workerctl qa-plan adversarial-triggers`,
+`workerctl qa-run adversarial-triggers`, and
 `docs/qa/adversarial-triggers.md` to run the natural-language trigger QA suite.
 
 ## GoalBuddy Usage

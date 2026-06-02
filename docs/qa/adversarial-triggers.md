@@ -8,7 +8,23 @@ Run the generated plan first:
 ```bash
 scripts/workerctl qa-plan adversarial-triggers
 scripts/workerctl qa-plan adversarial-triggers --json
+scripts/workerctl loop-triggers --classify "Run this as an adversarially gated Ralph loop." --json
+scripts/workerctl qa-run adversarial-triggers \
+  --receipt-output /tmp/adversarial-triggers-receipt.json \
+  --json
 ```
+
+Use `loop-triggers --classify` before automatically creating a loop policy or
+continuation gate from manager/operator prose. Only matched controlled trigger
+phrases should arm operational gates. Generic caution such as "be careful, run
+tests, and summarize the risks" remains ordinary guidance and must not create a
+Ralph-loop policy, enqueue a continuation, or require finish gates by itself.
+
+The executable `qa-run adversarial-triggers` receipt proves the full controlled
+path: prompt classification, no-tmux manager/worker continuation delivery,
+blocked Dispatch before structured proof, fresh retry delivery after proof,
+`finish-task --require-adversarial-proof`, worker-proposed proof recording, and
+manager-created adversarial acceptance criteria.
 
 ## Trigger Scenarios
 
