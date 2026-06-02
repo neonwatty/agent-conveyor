@@ -5386,6 +5386,28 @@ class CliTests(unittest.TestCase):
         )
         return rollout
 
+    def test_docs_include_ralph_loop_operator_guide(self):
+        guide = (ROOT / "docs" / "qa" / "ralph-loop-operator-guide.md").read_text()
+        qa_readme = (ROOT / "docs" / "qa" / "README.md").read_text()
+        readme = (ROOT / "README.md").read_text()
+        checklist = (ROOT / "docs" / "manual-qa-checklist.md").read_text()
+
+        for document in (guide, qa_readme, readme, checklist):
+            self.assertIn("Ralph loop operator guide", document)
+        self.assertIn("Run this as an adversarially gated Ralph loop.", guide)
+        self.assertIn("Do not send the worker another iteration until adversarial proof exists.", guide)
+        self.assertIn("loop-triggers --classify", guide)
+        self.assertIn("loop-templates --create-run", guide)
+        self.assertIn("enqueue-continue-iteration", guide)
+        self.assertIn("worker-inbox", guide)
+        self.assertIn("loop-evidence adversarial-check", guide)
+        self.assertIn("telemetry failures", guide)
+        self.assertIn("loop-status", guide)
+        self.assertIn("max_iterations", guide)
+        self.assertIn("required_before_continue", guide)
+        self.assertIn("The manager asks; Dispatch decides.", guide)
+        self.assertIn("Generic caution does not arm a loop gate", guide)
+
     def test_dashboard_help_includes_loopback_defaults(self):
         proc = self.run_workerctl("dashboard", "--help")
 
