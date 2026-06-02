@@ -1,0 +1,976 @@
+{
+  "acceptance_criteria": [
+    {
+      "created_at": "2026-06-02T16:53:11Z",
+      "criterion": "Ralph loop run-6d6b737e-4c37-4562-8bdf-d2a9be667409 iteration 1 test_coverage evidence",
+      "evidence": {
+        "artifact_path": "/Users/neonwatty/Desktop/codex-terminal-manager/docs/live-qa-artifacts/telemetry-reprocessing-qa/T005-test-coverage-loop/test-coverage-loop-artifacts/afd2941a-run-6d6b737e-4c37-4562-8bdf-d2a9be667409/coverage-summary.json",
+        "command": "coverage run -m pytest && coverage report",
+        "correlation_id": "qa-run-test-coverage-report",
+        "coverage_percent": 87.5,
+        "evidence_type": "test_coverage",
+        "iteration": 1,
+        "ralph_loop_run_id": "run-6d6b737e-4c37-4562-8bdf-d2a9be667409",
+        "result": "Coverage report was recorded before retry.",
+        "status": "pass"
+      },
+      "id": 1,
+      "proof": "qa-run recorded test_coverage receipt before continuing.",
+      "rationale": null,
+      "source": "manager_inferred",
+      "status": "satisfied",
+      "task_id": "task-cc8dbc66-af6d-473d-8144-18e523668f8a",
+      "updated_at": "2026-06-02T16:53:11Z"
+    },
+    {
+      "created_at": "2026-06-02T16:53:11Z",
+      "criterion": "Ralph loop run-6d6b737e-4c37-4562-8bdf-d2a9be667409 iteration 1 adversarial_check evidence",
+      "evidence": {
+        "check": "Inspect blocked retry after coverage plus malformed adversarial evidence, then retry after structured proof.",
+        "correlation_id": "qa-run-test-coverage-structured-adversarial",
+        "evidence_type": "adversarial_check",
+        "failure_mode": "Coverage evidence could exist without proving the retry gate rejects malformed adversarial receipts.",
+        "iteration": 1,
+        "ralph_loop_run_id": "run-6d6b737e-4c37-4562-8bdf-d2a9be667409",
+        "result": "The malformed receipt stayed blocked, and the structured retry delivered exactly one worker inbox item.",
+        "status": "pass"
+      },
+      "id": 2,
+      "proof": "qa-run recorded adversarial_check receipt before continuing.",
+      "rationale": null,
+      "source": "manager_inferred",
+      "status": "satisfied",
+      "task_id": "task-cc8dbc66-af6d-473d-8144-18e523668f8a",
+      "updated_at": "2026-06-02T16:53:11Z"
+    }
+  ],
+  "agent_observations": [],
+  "command_attempts": [
+    {
+      "command_id": "command-1b8d67d3-9812-4782-a739-754afc8beba3",
+      "correlation_id": "qa-run-test-coverage-missing",
+      "dispatcher_id": "qa-run-afd2941a",
+      "error": "missing_required_evidence missing_evidence=test_coverage,adversarial_check current_iteration=1 max_iterations=3 requested_iteration=2",
+      "finished_at": "2026-06-02T16:53:11Z",
+      "id": 1,
+      "result": {
+        "attempt_id": 1,
+        "cleanup_policy": "clear",
+        "command_id": "command-1b8d67d3-9812-4782-a739-754afc8beba3",
+        "command_type": "continue_iteration",
+        "correlation_id": "qa-run-test-coverage-missing",
+        "current_iteration": 1,
+        "delivered": false,
+        "delivery_mode": "pull_required",
+        "dispatcher_id": "qa-run-afd2941a",
+        "dry_run": false,
+        "loop_policy": {
+          "artifact_requirements": {
+            "adversarial_check": {
+              "description": "Structured proof that the manager or worker tried to disprove the iteration before continuing.",
+              "properties": {
+                "check": {
+                  "description": "Command, test, trace, screenshot, audit, diff, or inspection used.",
+                  "type": "string"
+                },
+                "failure_mode": {
+                  "description": "Strongest realistic failure mode considered.",
+                  "type": "string"
+                },
+                "result": {
+                  "description": "Why the check rules out the failure mode or what remains unresolved.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "failure_mode",
+                "check",
+                "result"
+              ],
+              "type": "object"
+            }
+          },
+          "cleanup_policy": "clear",
+          "current_iteration": 1,
+          "max_iterations": 3,
+          "preset": "test_coverage_loop",
+          "recommended_tools": [
+            "coverage",
+            "verification.run_tests"
+          ],
+          "required_before_continue": [
+            "test_coverage",
+            "adversarial_check"
+          ],
+          "run_id": "run-6d6b737e-4c37-4562-8bdf-d2a9be667409",
+          "seed_prompt_sha256": "qa-run-test-coverage-seed",
+          "stop_conditions": [
+            "max_iterations",
+            "required_evidence"
+          ],
+          "tags": [
+            "tests"
+          ],
+          "template": "test_coverage_loop"
+        },
+        "manager_decision_id": null,
+        "max_iterations": 3,
+        "missing_evidence": [
+          "test_coverage",
+          "adversarial_check"
+        ],
+        "notification_id": null,
+        "reason": "missing_required_evidence",
+        "requested_iteration": 2,
+        "required_before_continue": [
+          "test_coverage",
+          "adversarial_check"
+        ],
+        "run_id": "run-6d6b737e-4c37-4562-8bdf-d2a9be667409",
+        "side_effect_completed": false,
+        "side_effect_started": false,
+        "state": "blocked",
+        "target_session": "qa-test-coverage-loop-afd2941a-worker",
+        "target_worker_notified": false
+      },
+      "side_effect_completed": false,
+      "side_effect_started": false,
+      "started_at": "2026-06-02T16:53:11Z",
+      "state": "blocked"
+    },
+    {
+      "command_id": "command-8bf72ee3-b491-4370-92a0-b32fc5576570",
+      "correlation_id": "qa-run-test-coverage-unstructured-adversarial",
+      "dispatcher_id": "qa-run-afd2941a",
+      "error": "missing_adversarial_check_evidence missing_evidence=adversarial_check current_iteration=1 max_iterations=3 requested_iteration=2",
+      "finished_at": "2026-06-02T16:53:11Z",
+      "id": 2,
+      "result": {
+        "attempt_id": 2,
+        "cleanup_policy": "clear",
+        "command_id": "command-8bf72ee3-b491-4370-92a0-b32fc5576570",
+        "command_type": "continue_iteration",
+        "correlation_id": "qa-run-test-coverage-unstructured-adversarial",
+        "current_iteration": 1,
+        "delivered": false,
+        "delivery_mode": "pull_required",
+        "dispatcher_id": "qa-run-afd2941a",
+        "dry_run": false,
+        "loop_policy": {
+          "artifact_requirements": {
+            "adversarial_check": {
+              "description": "Structured proof that the manager or worker tried to disprove the iteration before continuing.",
+              "properties": {
+                "check": {
+                  "description": "Command, test, trace, screenshot, audit, diff, or inspection used.",
+                  "type": "string"
+                },
+                "failure_mode": {
+                  "description": "Strongest realistic failure mode considered.",
+                  "type": "string"
+                },
+                "result": {
+                  "description": "Why the check rules out the failure mode or what remains unresolved.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "failure_mode",
+                "check",
+                "result"
+              ],
+              "type": "object"
+            }
+          },
+          "cleanup_policy": "clear",
+          "current_iteration": 1,
+          "max_iterations": 3,
+          "preset": "test_coverage_loop",
+          "recommended_tools": [
+            "coverage",
+            "verification.run_tests"
+          ],
+          "required_before_continue": [
+            "test_coverage",
+            "adversarial_check"
+          ],
+          "run_id": "run-6d6b737e-4c37-4562-8bdf-d2a9be667409",
+          "seed_prompt_sha256": "qa-run-test-coverage-seed",
+          "stop_conditions": [
+            "max_iterations",
+            "required_evidence"
+          ],
+          "tags": [
+            "tests"
+          ],
+          "template": "test_coverage_loop"
+        },
+        "manager_decision_id": null,
+        "max_iterations": 3,
+        "missing_evidence": [
+          "adversarial_check"
+        ],
+        "notification_id": null,
+        "reason": "missing_adversarial_check_evidence",
+        "requested_iteration": 2,
+        "required_before_continue": [
+          "test_coverage",
+          "adversarial_check"
+        ],
+        "run_id": "run-6d6b737e-4c37-4562-8bdf-d2a9be667409",
+        "side_effect_completed": false,
+        "side_effect_started": false,
+        "state": "blocked",
+        "target_session": "qa-test-coverage-loop-afd2941a-worker",
+        "target_worker_notified": false
+      },
+      "side_effect_completed": false,
+      "side_effect_started": false,
+      "started_at": "2026-06-02T16:53:11Z",
+      "state": "blocked"
+    },
+    {
+      "command_id": "command-f324b0d2-7fe0-4541-9fbe-ac81875dee34",
+      "correlation_id": "qa-run-test-coverage-structured-allowed",
+      "dispatcher_id": "qa-run-afd2941a",
+      "error": null,
+      "finished_at": "2026-06-02T16:53:11Z",
+      "id": 3,
+      "result": {
+        "attempt_id": 3,
+        "cleanup_policy": "clear",
+        "command_id": "command-f324b0d2-7fe0-4541-9fbe-ac81875dee34",
+        "command_type": "continue_iteration",
+        "correlation_id": "qa-run-test-coverage-structured-allowed",
+        "current_iteration": 1,
+        "delivery_mode": "pull_required",
+        "dispatcher_id": "qa-run-afd2941a",
+        "dry_run": false,
+        "loop_policy": {
+          "artifact_requirements": {
+            "adversarial_check": {
+              "description": "Structured proof that the manager or worker tried to disprove the iteration before continuing.",
+              "properties": {
+                "check": {
+                  "description": "Command, test, trace, screenshot, audit, diff, or inspection used.",
+                  "type": "string"
+                },
+                "failure_mode": {
+                  "description": "Strongest realistic failure mode considered.",
+                  "type": "string"
+                },
+                "result": {
+                  "description": "Why the check rules out the failure mode or what remains unresolved.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "failure_mode",
+                "check",
+                "result"
+              ],
+              "type": "object"
+            }
+          },
+          "cleanup_policy": "clear",
+          "current_iteration": 1,
+          "max_iterations": 3,
+          "preset": "test_coverage_loop",
+          "recommended_tools": [
+            "coverage",
+            "verification.run_tests"
+          ],
+          "required_before_continue": [
+            "test_coverage",
+            "adversarial_check"
+          ],
+          "run_id": "run-6d6b737e-4c37-4562-8bdf-d2a9be667409",
+          "seed_prompt_sha256": "qa-run-test-coverage-seed",
+          "stop_conditions": [
+            "max_iterations",
+            "required_evidence"
+          ],
+          "tags": [
+            "tests"
+          ],
+          "template": "test_coverage_loop"
+        },
+        "max_iterations": 3,
+        "missing_evidence": [],
+        "notification_id": 1,
+        "permission_check": null,
+        "reason": null,
+        "requested_iteration": 2,
+        "required_before_continue": [
+          "test_coverage",
+          "adversarial_check"
+        ],
+        "run_id": "run-6d6b737e-4c37-4562-8bdf-d2a9be667409",
+        "seed_prompt_sha256": "qa-run-test-coverage-seed",
+        "side_effect_completed": false,
+        "side_effect_started": false,
+        "state": "pull_required",
+        "stop_conditions": [
+          "max_iterations",
+          "required_evidence"
+        ],
+        "target_session": "qa-test-coverage-loop-afd2941a-worker"
+      },
+      "side_effect_completed": false,
+      "side_effect_started": false,
+      "started_at": "2026-06-02T16:53:11Z",
+      "state": "succeeded"
+    }
+  ],
+  "commands": [
+    {
+      "attempts": 1,
+      "available_at": null,
+      "claim_expires_at": "2026-06-02T16:54:11Z",
+      "claimed_at": "2026-06-02T16:53:11Z",
+      "claimed_by": "qa-run-afd2941a",
+      "correlation_id": "qa-run-test-coverage-missing",
+      "created_at": "2026-06-02T16:53:11Z",
+      "error": "missing_required_evidence missing_evidence=test_coverage,adversarial_check current_iteration=1 max_iterations=3 requested_iteration=2",
+      "id": "command-1b8d67d3-9812-4782-a739-754afc8beba3",
+      "idempotency_key": "command-1b8d67d3-9812-4782-a739-754afc8beba3",
+      "manager_id": null,
+      "max_attempts": 1,
+      "payload": {
+        "message": "Run test coverage template iteration 2 before coverage evidence.",
+        "ralph_loop": {
+          "requested_iteration": 2,
+          "run_id": "run-6d6b737e-4c37-4562-8bdf-d2a9be667409"
+        }
+      },
+      "required_permission": null,
+      "result": {
+        "attempt_id": 1,
+        "cleanup_policy": "clear",
+        "command_id": "command-1b8d67d3-9812-4782-a739-754afc8beba3",
+        "command_type": "continue_iteration",
+        "correlation_id": "qa-run-test-coverage-missing",
+        "current_iteration": 1,
+        "delivered": false,
+        "delivery_mode": "pull_required",
+        "dispatcher_id": "qa-run-afd2941a",
+        "dry_run": false,
+        "loop_policy": {
+          "artifact_requirements": {
+            "adversarial_check": {
+              "description": "Structured proof that the manager or worker tried to disprove the iteration before continuing.",
+              "properties": {
+                "check": {
+                  "description": "Command, test, trace, screenshot, audit, diff, or inspection used.",
+                  "type": "string"
+                },
+                "failure_mode": {
+                  "description": "Strongest realistic failure mode considered.",
+                  "type": "string"
+                },
+                "result": {
+                  "description": "Why the check rules out the failure mode or what remains unresolved.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "failure_mode",
+                "check",
+                "result"
+              ],
+              "type": "object"
+            }
+          },
+          "cleanup_policy": "clear",
+          "current_iteration": 1,
+          "max_iterations": 3,
+          "preset": "test_coverage_loop",
+          "recommended_tools": [
+            "coverage",
+            "verification.run_tests"
+          ],
+          "required_before_continue": [
+            "test_coverage",
+            "adversarial_check"
+          ],
+          "run_id": "run-6d6b737e-4c37-4562-8bdf-d2a9be667409",
+          "seed_prompt_sha256": "qa-run-test-coverage-seed",
+          "stop_conditions": [
+            "max_iterations",
+            "required_evidence"
+          ],
+          "tags": [
+            "tests"
+          ],
+          "template": "test_coverage_loop"
+        },
+        "manager_decision_id": null,
+        "max_iterations": 3,
+        "missing_evidence": [
+          "test_coverage",
+          "adversarial_check"
+        ],
+        "notification_id": null,
+        "reason": "missing_required_evidence",
+        "requested_iteration": 2,
+        "required_before_continue": [
+          "test_coverage",
+          "adversarial_check"
+        ],
+        "run_id": "run-6d6b737e-4c37-4562-8bdf-d2a9be667409",
+        "side_effect_completed": false,
+        "side_effect_started": false,
+        "state": "blocked",
+        "target_session": "qa-test-coverage-loop-afd2941a-worker",
+        "target_worker_notified": false
+      },
+      "state": "blocked",
+      "task_id": "task-cc8dbc66-af6d-473d-8144-18e523668f8a",
+      "type": "continue_iteration",
+      "updated_at": "2026-06-02T16:53:11Z",
+      "worker_id": null
+    },
+    {
+      "attempts": 1,
+      "available_at": null,
+      "claim_expires_at": "2026-06-02T16:54:11Z",
+      "claimed_at": "2026-06-02T16:53:11Z",
+      "claimed_by": "qa-run-afd2941a",
+      "correlation_id": "qa-run-test-coverage-unstructured-adversarial",
+      "created_at": "2026-06-02T16:53:11Z",
+      "error": "missing_adversarial_check_evidence missing_evidence=adversarial_check current_iteration=1 max_iterations=3 requested_iteration=2",
+      "id": "command-8bf72ee3-b491-4370-92a0-b32fc5576570",
+      "idempotency_key": "command-8bf72ee3-b491-4370-92a0-b32fc5576570",
+      "manager_id": null,
+      "max_attempts": 1,
+      "payload": {
+        "message": "Run test coverage template iteration 2 after coverage and malformed adversarial proof.",
+        "ralph_loop": {
+          "requested_iteration": 2,
+          "run_id": "run-6d6b737e-4c37-4562-8bdf-d2a9be667409"
+        }
+      },
+      "required_permission": null,
+      "result": {
+        "attempt_id": 2,
+        "cleanup_policy": "clear",
+        "command_id": "command-8bf72ee3-b491-4370-92a0-b32fc5576570",
+        "command_type": "continue_iteration",
+        "correlation_id": "qa-run-test-coverage-unstructured-adversarial",
+        "current_iteration": 1,
+        "delivered": false,
+        "delivery_mode": "pull_required",
+        "dispatcher_id": "qa-run-afd2941a",
+        "dry_run": false,
+        "loop_policy": {
+          "artifact_requirements": {
+            "adversarial_check": {
+              "description": "Structured proof that the manager or worker tried to disprove the iteration before continuing.",
+              "properties": {
+                "check": {
+                  "description": "Command, test, trace, screenshot, audit, diff, or inspection used.",
+                  "type": "string"
+                },
+                "failure_mode": {
+                  "description": "Strongest realistic failure mode considered.",
+                  "type": "string"
+                },
+                "result": {
+                  "description": "Why the check rules out the failure mode or what remains unresolved.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "failure_mode",
+                "check",
+                "result"
+              ],
+              "type": "object"
+            }
+          },
+          "cleanup_policy": "clear",
+          "current_iteration": 1,
+          "max_iterations": 3,
+          "preset": "test_coverage_loop",
+          "recommended_tools": [
+            "coverage",
+            "verification.run_tests"
+          ],
+          "required_before_continue": [
+            "test_coverage",
+            "adversarial_check"
+          ],
+          "run_id": "run-6d6b737e-4c37-4562-8bdf-d2a9be667409",
+          "seed_prompt_sha256": "qa-run-test-coverage-seed",
+          "stop_conditions": [
+            "max_iterations",
+            "required_evidence"
+          ],
+          "tags": [
+            "tests"
+          ],
+          "template": "test_coverage_loop"
+        },
+        "manager_decision_id": null,
+        "max_iterations": 3,
+        "missing_evidence": [
+          "adversarial_check"
+        ],
+        "notification_id": null,
+        "reason": "missing_adversarial_check_evidence",
+        "requested_iteration": 2,
+        "required_before_continue": [
+          "test_coverage",
+          "adversarial_check"
+        ],
+        "run_id": "run-6d6b737e-4c37-4562-8bdf-d2a9be667409",
+        "side_effect_completed": false,
+        "side_effect_started": false,
+        "state": "blocked",
+        "target_session": "qa-test-coverage-loop-afd2941a-worker",
+        "target_worker_notified": false
+      },
+      "state": "blocked",
+      "task_id": "task-cc8dbc66-af6d-473d-8144-18e523668f8a",
+      "type": "continue_iteration",
+      "updated_at": "2026-06-02T16:53:11Z",
+      "worker_id": null
+    },
+    {
+      "attempts": 1,
+      "available_at": null,
+      "claim_expires_at": "2026-06-02T16:54:11Z",
+      "claimed_at": "2026-06-02T16:53:11Z",
+      "claimed_by": "qa-run-afd2941a",
+      "correlation_id": "qa-run-test-coverage-structured-allowed",
+      "created_at": "2026-06-02T16:53:11Z",
+      "error": null,
+      "id": "command-f324b0d2-7fe0-4541-9fbe-ac81875dee34",
+      "idempotency_key": "command-f324b0d2-7fe0-4541-9fbe-ac81875dee34",
+      "manager_id": null,
+      "max_attempts": 1,
+      "payload": {
+        "message": "Run test coverage template iteration 2 after structured adversarial proof.",
+        "ralph_loop": {
+          "requested_iteration": 2,
+          "run_id": "run-6d6b737e-4c37-4562-8bdf-d2a9be667409"
+        }
+      },
+      "required_permission": null,
+      "result": {
+        "attempt_id": 3,
+        "cleanup_policy": "clear",
+        "command_id": "command-f324b0d2-7fe0-4541-9fbe-ac81875dee34",
+        "command_type": "continue_iteration",
+        "correlation_id": "qa-run-test-coverage-structured-allowed",
+        "current_iteration": 1,
+        "delivery_mode": "pull_required",
+        "dispatcher_id": "qa-run-afd2941a",
+        "dry_run": false,
+        "loop_policy": {
+          "artifact_requirements": {
+            "adversarial_check": {
+              "description": "Structured proof that the manager or worker tried to disprove the iteration before continuing.",
+              "properties": {
+                "check": {
+                  "description": "Command, test, trace, screenshot, audit, diff, or inspection used.",
+                  "type": "string"
+                },
+                "failure_mode": {
+                  "description": "Strongest realistic failure mode considered.",
+                  "type": "string"
+                },
+                "result": {
+                  "description": "Why the check rules out the failure mode or what remains unresolved.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "failure_mode",
+                "check",
+                "result"
+              ],
+              "type": "object"
+            }
+          },
+          "cleanup_policy": "clear",
+          "current_iteration": 1,
+          "max_iterations": 3,
+          "preset": "test_coverage_loop",
+          "recommended_tools": [
+            "coverage",
+            "verification.run_tests"
+          ],
+          "required_before_continue": [
+            "test_coverage",
+            "adversarial_check"
+          ],
+          "run_id": "run-6d6b737e-4c37-4562-8bdf-d2a9be667409",
+          "seed_prompt_sha256": "qa-run-test-coverage-seed",
+          "stop_conditions": [
+            "max_iterations",
+            "required_evidence"
+          ],
+          "tags": [
+            "tests"
+          ],
+          "template": "test_coverage_loop"
+        },
+        "max_iterations": 3,
+        "missing_evidence": [],
+        "notification_id": 1,
+        "permission_check": null,
+        "reason": null,
+        "requested_iteration": 2,
+        "required_before_continue": [
+          "test_coverage",
+          "adversarial_check"
+        ],
+        "run_id": "run-6d6b737e-4c37-4562-8bdf-d2a9be667409",
+        "seed_prompt_sha256": "qa-run-test-coverage-seed",
+        "side_effect_completed": false,
+        "side_effect_started": false,
+        "state": "pull_required",
+        "stop_conditions": [
+          "max_iterations",
+          "required_evidence"
+        ],
+        "target_session": "qa-test-coverage-loop-afd2941a-worker"
+      },
+      "state": "succeeded",
+      "task_id": "task-cc8dbc66-af6d-473d-8144-18e523668f8a",
+      "type": "continue_iteration",
+      "updated_at": "2026-06-02T16:53:11Z",
+      "worker_id": null
+    }
+  ],
+  "continuation_reviews": [],
+  "correlation_chains": [
+    {
+      "attempt_ids": [
+        1
+      ],
+      "command_id": "command-1b8d67d3-9812-4782-a739-754afc8beba3",
+      "command_state": "blocked",
+      "command_type": "continue_iteration",
+      "correlation_id": "qa-run-test-coverage-missing",
+      "created_at": "2026-06-02T16:53:11Z",
+      "manager_cycle_id": null,
+      "manager_decision_cycle_id": null,
+      "manager_decision_id": null,
+      "routed_notification_ids": []
+    },
+    {
+      "attempt_ids": [
+        2
+      ],
+      "command_id": "command-8bf72ee3-b491-4370-92a0-b32fc5576570",
+      "command_state": "blocked",
+      "command_type": "continue_iteration",
+      "correlation_id": "qa-run-test-coverage-unstructured-adversarial",
+      "created_at": "2026-06-02T16:53:11Z",
+      "manager_cycle_id": null,
+      "manager_decision_cycle_id": null,
+      "manager_decision_id": null,
+      "routed_notification_ids": []
+    },
+    {
+      "attempt_ids": [
+        3
+      ],
+      "command_id": "command-f324b0d2-7fe0-4541-9fbe-ac81875dee34",
+      "command_state": "succeeded",
+      "command_type": "continue_iteration",
+      "correlation_id": "qa-run-test-coverage-structured-allowed",
+      "created_at": "2026-06-02T16:53:11Z",
+      "manager_cycle_id": null,
+      "manager_decision_cycle_id": null,
+      "manager_decision_id": null,
+      "routed_notification_ids": [
+        1
+      ]
+    }
+  ],
+  "epilogue_runs": [],
+  "events": [
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-06-02T16:53:11Z",
+      "id": 1,
+      "manager_id": null,
+      "payload": {
+        "goal": "Executable QA run for test-coverage-loop.",
+        "name": "qa-test-coverage-loop-afd2941a",
+        "summary": "Disposable no-tmux manager/worker binding for Dispatch guardrail proof."
+      },
+      "task_id": "task-cc8dbc66-af6d-473d-8144-18e523668f8a",
+      "type": "task_created",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-06-02T16:53:11Z",
+      "id": 2,
+      "manager_id": null,
+      "payload": {
+        "created": true,
+        "criterion": "Ralph loop run-6d6b737e-4c37-4562-8bdf-d2a9be667409 iteration 1 test_coverage evidence",
+        "criterion_id": 1,
+        "evidence": {
+          "artifact_path": "/Users/neonwatty/Desktop/codex-terminal-manager/docs/live-qa-artifacts/telemetry-reprocessing-qa/T005-test-coverage-loop/test-coverage-loop-artifacts/afd2941a-run-6d6b737e-4c37-4562-8bdf-d2a9be667409/coverage-summary.json",
+          "command": "coverage run -m pytest && coverage report",
+          "correlation_id": "qa-run-test-coverage-report",
+          "coverage_percent": 87.5,
+          "evidence_type": "test_coverage",
+          "iteration": 1,
+          "ralph_loop_run_id": "run-6d6b737e-4c37-4562-8bdf-d2a9be667409",
+          "result": "Coverage report was recorded before retry.",
+          "status": "pass"
+        },
+        "proof": "qa-run recorded test_coverage receipt before continuing.",
+        "rationale": null,
+        "source": "manager_inferred",
+        "status": "satisfied",
+        "task_id": "task-cc8dbc66-af6d-473d-8144-18e523668f8a"
+      },
+      "task_id": "task-cc8dbc66-af6d-473d-8144-18e523668f8a",
+      "type": "acceptance_criterion_added",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-06-02T16:53:11Z",
+      "id": 3,
+      "manager_id": null,
+      "payload": {
+        "created": true,
+        "criterion": "Ralph loop run-6d6b737e-4c37-4562-8bdf-d2a9be667409 iteration 1 adversarial_check evidence",
+        "criterion_id": 2,
+        "evidence": {
+          "correlation_id": "qa-run-test-coverage-unstructured-adversarial",
+          "evidence_type": "adversarial_check",
+          "iteration": 1,
+          "note": "qa-run intentionally omits failure_mode, check, and result.",
+          "ralph_loop_run_id": "run-6d6b737e-4c37-4562-8bdf-d2a9be667409",
+          "status": "pass"
+        },
+        "proof": "qa-run recorded adversarial_check receipt before continuing.",
+        "rationale": null,
+        "source": "manager_inferred",
+        "status": "satisfied",
+        "task_id": "task-cc8dbc66-af6d-473d-8144-18e523668f8a"
+      },
+      "task_id": "task-cc8dbc66-af6d-473d-8144-18e523668f8a",
+      "type": "acceptance_criterion_added",
+      "worker_id": null
+    },
+    {
+      "actor": "workerctl",
+      "command_id": null,
+      "correlation_id": null,
+      "created_at": "2026-06-02T16:53:11Z",
+      "id": 4,
+      "manager_id": null,
+      "payload": {
+        "criterion": "Ralph loop run-6d6b737e-4c37-4562-8bdf-d2a9be667409 iteration 1 adversarial_check evidence",
+        "criterion_id": 2,
+        "evidence": {
+          "check": "Inspect blocked retry after coverage plus malformed adversarial evidence, then retry after structured proof.",
+          "correlation_id": "qa-run-test-coverage-structured-adversarial",
+          "evidence_type": "adversarial_check",
+          "failure_mode": "Coverage evidence could exist without proving the retry gate rejects malformed adversarial receipts.",
+          "iteration": 1,
+          "ralph_loop_run_id": "run-6d6b737e-4c37-4562-8bdf-d2a9be667409",
+          "result": "The malformed receipt stayed blocked, and the structured retry delivered exactly one worker inbox item.",
+          "status": "pass"
+        },
+        "previous_evidence": {
+          "correlation_id": "qa-run-test-coverage-unstructured-adversarial",
+          "evidence_type": "adversarial_check",
+          "iteration": 1,
+          "note": "qa-run intentionally omits failure_mode, check, and result.",
+          "ralph_loop_run_id": "run-6d6b737e-4c37-4562-8bdf-d2a9be667409",
+          "status": "pass"
+        },
+        "previous_proof": "qa-run recorded adversarial_check receipt before continuing.",
+        "previous_rationale": null,
+        "previous_status": "satisfied",
+        "proof": "qa-run recorded adversarial_check receipt before continuing.",
+        "rationale": null,
+        "source": "manager_inferred",
+        "status": "satisfied",
+        "task_id": "task-cc8dbc66-af6d-473d-8144-18e523668f8a"
+      },
+      "task_id": "task-cc8dbc66-af6d-473d-8144-18e523668f8a",
+      "type": "acceptance_criterion_updated",
+      "worker_id": null
+    }
+  ],
+  "manager_cycle_spans": [],
+  "manager_cycles": [],
+  "manager_decisions": [],
+  "routed_notifications": [
+    {
+      "binding_id": "binding-87e063c1-786e-4123-9a01-c56ecd839377",
+      "claim_expires_at": null,
+      "claimed_at": null,
+      "claimed_by": null,
+      "command_id": "command-f324b0d2-7fe0-4541-9fbe-ac81875dee34",
+      "consumed_at": "2026-06-02T16:55:02Z",
+      "consumed_by_session_id": "session-fc029700-b637-4e84-9541-3e296c0e8a73",
+      "consumed_by_session_name": "qa-test-coverage-loop-afd2941a-worker",
+      "consumed_by_session_role": "worker",
+      "consumed_manager_cycle_id": null,
+      "correlation_id": "qa-run-test-coverage-structured-allowed",
+      "created_at": "2026-06-02T16:53:11Z",
+      "dedupe_key": "binding-87e063c1-786e-4123-9a01-c56ecd839377:continue_iteration:command-f324b0d2-7fe0-4541-9fbe-ac81875dee34",
+      "delivered_at": "2026-06-02T16:53:11Z",
+      "delivery_mode": "pull_required",
+      "error": null,
+      "id": 1,
+      "payload": {
+        "command_id": "command-f324b0d2-7fe0-4541-9fbe-ac81875dee34",
+        "command_type": "continue_iteration",
+        "delivery_mode": "pull_required",
+        "dispatcher_id": "qa-run-afd2941a",
+        "loop_policy": {
+          "artifact_requirements": {
+            "adversarial_check": {
+              "description": "Structured proof that the manager or worker tried to disprove the iteration before continuing.",
+              "properties": {
+                "check": {
+                  "description": "Command, test, trace, screenshot, audit, diff, or inspection used.",
+                  "type": "string"
+                },
+                "failure_mode": {
+                  "description": "Strongest realistic failure mode considered.",
+                  "type": "string"
+                },
+                "result": {
+                  "description": "Why the check rules out the failure mode or what remains unresolved.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "failure_mode",
+                "check",
+                "result"
+              ],
+              "type": "object"
+            }
+          },
+          "cleanup_policy": "clear",
+          "current_iteration": 1,
+          "max_iterations": 3,
+          "preset": "test_coverage_loop",
+          "recommended_tools": [
+            "coverage",
+            "verification.run_tests"
+          ],
+          "required_before_continue": [
+            "test_coverage",
+            "adversarial_check"
+          ],
+          "run_id": "run-6d6b737e-4c37-4562-8bdf-d2a9be667409",
+          "seed_prompt_sha256": "qa-run-test-coverage-seed",
+          "stop_conditions": [
+            "max_iterations",
+            "required_evidence"
+          ],
+          "tags": [
+            "tests"
+          ],
+          "template": "test_coverage_loop"
+        },
+        "message": "Run test coverage template iteration 2 after structured adversarial proof.",
+        "permission_check": null,
+        "ralph_loop": {
+          "artifact_requirements": {
+            "adversarial_check": {
+              "description": "Structured proof that the manager or worker tried to disprove the iteration before continuing.",
+              "properties": {
+                "check": {
+                  "description": "Command, test, trace, screenshot, audit, diff, or inspection used.",
+                  "type": "string"
+                },
+                "failure_mode": {
+                  "description": "Strongest realistic failure mode considered.",
+                  "type": "string"
+                },
+                "result": {
+                  "description": "Why the check rules out the failure mode or what remains unresolved.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "failure_mode",
+                "check",
+                "result"
+              ],
+              "type": "object"
+            }
+          },
+          "cleanup_policy": "clear",
+          "current_iteration": 1,
+          "max_iterations": 3,
+          "preset": "test_coverage_loop",
+          "recommended_tools": [
+            "coverage",
+            "verification.run_tests"
+          ],
+          "requested_iteration": 2,
+          "required_before_continue": [
+            "test_coverage",
+            "adversarial_check"
+          ],
+          "run_id": "run-6d6b737e-4c37-4562-8bdf-d2a9be667409",
+          "seed_prompt_sha256": "qa-run-test-coverage-seed",
+          "stop_conditions": [
+            "max_iterations",
+            "required_evidence"
+          ],
+          "tags": [
+            "tests"
+          ],
+          "template": "test_coverage_loop"
+        },
+        "source_session": "qa-test-coverage-loop-afd2941a-manager",
+        "target_session": "qa-test-coverage-loop-afd2941a-worker",
+        "task_id": "task-cc8dbc66-af6d-473d-8144-18e523668f8a"
+      },
+      "side_effect_completed": false,
+      "side_effect_started": false,
+      "signal_type": "continue_iteration",
+      "source_event_id": null,
+      "source_event_timestamp": null,
+      "source_session_id": "session-5175c644-1cf6-4d23-a71c-68c26526b7fc",
+      "source_session_name": "qa-test-coverage-loop-afd2941a-manager",
+      "source_session_role": "manager",
+      "state": "delivered",
+      "target_session_id": "session-fc029700-b637-4e84-9541-3e296c0e8a73",
+      "target_session_name": "qa-test-coverage-loop-afd2941a-worker",
+      "target_session_role": "worker",
+      "task_id": "task-cc8dbc66-af6d-473d-8144-18e523668f8a"
+    }
+  ],
+  "session_nudges": [],
+  "task": {
+    "created_at": "2026-06-02T16:53:11Z",
+    "goal": "Executable QA run for test-coverage-loop.",
+    "id": "task-cc8dbc66-af6d-473d-8144-18e523668f8a",
+    "name": "qa-test-coverage-loop-afd2941a",
+    "state": "managed",
+    "summary": "Disposable no-tmux manager/worker binding for Dispatch guardrail proof.",
+    "updated_at": "2026-06-02T16:53:11Z"
+  },
+  "task_acknowledgements": [],
+  "task_continuations": [],
+  "terminal_captures": [],
+  "transcript_segments": []
+}

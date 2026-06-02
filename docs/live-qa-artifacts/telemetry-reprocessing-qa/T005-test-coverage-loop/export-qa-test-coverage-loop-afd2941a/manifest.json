@@ -1,0 +1,24 @@
+{
+  "created_at": "2026-06-02T16:55:02Z",
+  "files": [
+    "task-status.json",
+    "audit.json",
+    "acceptance-criteria.json",
+    "prompts.json",
+    "transcript-captures.json",
+    "terminal-captures.json",
+    "agent-observations.json",
+    "manager-cycles.json",
+    "manager-cycle-spans.json",
+    "manager-decisions.json",
+    "mutation-audit.json",
+    "replay.json",
+    "telemetry-events.json",
+    "telemetry-summary.json",
+    "telemetry-report.md"
+  ],
+  "task": {
+    "id": "task-cc8dbc66-af6d-473d-8144-18e523668f8a",
+    "name": "qa-test-coverage-loop-afd2941a"
+  }
+}

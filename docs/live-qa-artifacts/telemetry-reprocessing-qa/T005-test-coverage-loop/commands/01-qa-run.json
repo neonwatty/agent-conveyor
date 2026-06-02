@@ -1,0 +1,6 @@
+{
+  "checks": 3,
+  "receipt_path": "/Users/neonwatty/Desktop/codex-terminal-manager/docs/live-qa-artifacts/telemetry-reprocessing-qa/T005-test-coverage-loop/test-coverage-loop-receipt.json",
+  "result": "passed",
+  "scenario": "test-coverage-loop"
+}

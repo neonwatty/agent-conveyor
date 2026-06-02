@@ -1,0 +1,272 @@
+{
+  "alerts": [],
+  "failed_commands": [],
+  "failed_cycles": [],
+  "filters": {
+    "active_only": false,
+    "run_id": null,
+    "task_id": "task-cc8dbc66-af6d-473d-8144-18e523668f8a",
+    "window": null
+  },
+  "ingest": {
+    "cycle_errors": [],
+    "error_count": 0,
+    "new_events": 0,
+    "recent_errors": [],
+    "recent_skipped": [],
+    "skipped_lines": 0
+  },
+  "open_criteria": {
+    "by_status": {
+      "satisfied": 2
+    },
+    "open_accepted": [],
+    "open_accepted_count": 0
+  },
+  "operator": {
+    "checks": {
+      "ok": true,
+      "thresholds": {
+        "max_open_criteria": 0,
+        "max_storage_bytes": null,
+        "max_unfinished_commands": 0,
+        "stale_cycle_seconds": 3600.0,
+        "worker_staleness_seconds": 3600.0
+      }
+    },
+    "commands": {
+      "counts_by_state": {
+        "blocked": 2,
+        "succeeded": 1
+      },
+      "failed_count": 0,
+      "recent": [
+        {
+          "attempts": 1,
+          "available_at": null,
+          "claimed_by": "qa-run-afd2941a",
+          "correlation_id": "qa-run-test-coverage-structured-allowed",
+          "created_at": "2026-06-02T16:53:11Z",
+          "error": null,
+          "id": "command-f324b0d2-7fe0-4541-9fbe-ac81875dee34",
+          "manager_id": null,
+          "max_attempts": 1,
+          "payload_keys": [
+            "message",
+            "ralph_loop"
+          ],
+          "required_permission": null,
+          "result_keys": [
+            "attempt_id",
+            "cleanup_policy",
+            "command_id",
+            "command_type",
+            "correlation_id",
+            "current_iteration",
+            "delivery_mode",
+            "dispatcher_id",
+            "dry_run",
+            "loop_policy",
+            "max_iterations",
+            "missing_evidence",
+            "notification_id",
+            "permission_check",
+            "reason",
+            "requested_iteration",
+            "required_before_continue",
+            "run_id",
+            "seed_prompt_sha256",
+            "side_effect_completed",
+            "side_effect_started",
+            "state",
+            "stop_conditions",
+            "target_session"
+          ],
+          "state": "succeeded",
+          "task_id": "task-cc8dbc66-af6d-473d-8144-18e523668f8a",
+          "type": "continue_iteration",
+          "updated_at": "2026-06-02T16:53:11Z",
+          "worker_id": null
+        },
+        {
+          "attempts": 1,
+          "available_at": null,
+          "claimed_by": "qa-run-afd2941a",
+          "correlation_id": "qa-run-test-coverage-unstructured-adversarial",
+          "created_at": "2026-06-02T16:53:11Z",
+          "error": "missing_adversarial_check_evidence missing_evidence=adversarial_check current_iteration=1 max_iterations=3 requested_iteration=2",
+          "id": "command-8bf72ee3-b491-4370-92a0-b32fc5576570",
+          "manager_id": null,
+          "max_attempts": 1,
+          "payload_keys": [
+            "message",
+            "ralph_loop"
+          ],
+          "required_permission": null,
+          "result_keys": [
+            "attempt_id",
+            "cleanup_policy",
+            "command_id",
+            "command_type",
+            "correlation_id",
+            "current_iteration",
+            "delivered",
+            "delivery_mode",
+            "dispatcher_id",
+            "dry_run",
+            "loop_policy",
+            "manager_decision_id",
+            "max_iterations",
+            "missing_evidence",
+            "notification_id",
+            "reason",
+            "requested_iteration",
+            "required_before_continue",
+            "run_id",
+            "side_effect_completed",
+            "side_effect_started",
+            "state",
+            "target_session",
+            "target_worker_notified"
+          ],
+          "state": "blocked",
+          "task_id": "task-cc8dbc66-af6d-473d-8144-18e523668f8a",
+          "type": "continue_iteration",
+          "updated_at": "2026-06-02T16:53:11Z",
+          "worker_id": null
+        },
+        {
+          "attempts": 1,
+          "available_at": null,
+          "claimed_by": "qa-run-afd2941a",
+          "correlation_id": "qa-run-test-coverage-missing",
+          "created_at": "2026-06-02T16:53:11Z",
+          "error": "missing_required_evidence missing_evidence=test_coverage,adversarial_check current_iteration=1 max_iterations=3 requested_iteration=2",
+          "id": "command-1b8d67d3-9812-4782-a739-754afc8beba3",
+          "manager_id": null,
+          "max_attempts": 1,
+          "payload_keys": [
+            "message",
+            "ralph_loop"
+          ],
+          "required_permission": null,
+          "result_keys": [
+            "attempt_id",
+            "cleanup_policy",
+            "command_id",
+            "command_type",
+            "correlation_id",
+            "current_iteration",
+            "delivered",
+            "delivery_mode",
+            "dispatcher_id",
+            "dry_run",
+            "loop_policy",
+            "manager_decision_id",
+            "max_iterations",
+            "missing_evidence",
+            "notification_id",
+            "reason",
+            "requested_iteration",
+            "required_before_continue",
+            "run_id",
+            "side_effect_completed",
+            "side_effect_started",
+            "state",
+            "target_session",
+            "target_worker_notified"
+          ],
+          "state": "blocked",
+          "task_id": "task-cc8dbc66-af6d-473d-8144-18e523668f8a",
+          "type": "continue_iteration",
+          "updated_at": "2026-06-02T16:53:11Z",
+          "worker_id": null
+        }
+      ],
+      "total": 3
+    },
+    "cycles": {
+      "recent_failed": [],
+      "recent_failed_count": 0,
+      "stale": [],
+      "stale_count": 0
+    },
+    "sessions": {
+      "active": [
+        {
+          "cwd": "/Users/neonwatty/Desktop/codex-terminal-manager",
+          "heartbeat_age_seconds": 28,
+          "id": "session-5175c644-1cf6-4d23-a71c-68c26526b7fc",
+          "last_heartbeat_at": "2026-06-02T16:53:11Z",
+          "name": "qa-test-coverage-loop-afd2941a-manager",
+          "pid": 78526,
+          "registered_at": "2026-06-02T16:53:11Z",
+          "role": "manager",
+          "tmux_pane_id": null,
+          "tmux_session": null
+        },
+        {
+          "cwd": "/Users/neonwatty/Desktop/codex-terminal-manager",
+          "heartbeat_age_seconds": 28,
+          "id": "session-fc029700-b637-4e84-9541-3e296c0e8a73",
+          "last_heartbeat_at": "2026-06-02T16:53:11Z",
+          "name": "qa-test-coverage-loop-afd2941a-worker",
+          "pid": 78526,
+          "registered_at": "2026-06-02T16:53:11Z",
+          "role": "worker",
+          "tmux_pane_id": null,
+          "tmux_session": null
+        }
+      ],
+      "active_count": 2,
+      "dead_pid_count": 2,
+      "dead_pid_sessions": [
+        {
+          "last_heartbeat_at": "2026-06-02T16:53:11Z",
+          "name": "qa-test-coverage-loop-afd2941a-worker",
+          "pid": 78526,
+          "role": "worker"
+        },
+        {
+          "last_heartbeat_at": "2026-06-02T16:53:11Z",
+          "name": "qa-test-coverage-loop-afd2941a-manager",
+          "pid": 78526,
+          "role": "manager"
+        }
+      ],
+      "stale": [],
+      "stale_count": 0
+    },
+    "tasks": {
+      "active": [
+        {
+          "created_at": "2026-06-02T16:53:11Z",
+          "id": "task-cc8dbc66-af6d-473d-8144-18e523668f8a",
+          "name": "qa-test-coverage-loop-afd2941a",
+          "state": "managed",
+          "summary": "Disposable no-tmux manager/worker binding for Dispatch guardrail proof.",
+          "updated_at": "2026-06-02T16:53:11Z"
+        }
+      ],
+      "active_count": 1
+    }
+  },
+  "pane_capture_failures": [],
+  "schema_version": 1,
+  "storage": {
+    "database_file": 487424,
+    "terminal_captures": {
+      "bytes": 0,
+      "count": 0
+    },
+    "total_retained": 0,
+    "transcript_captures": {
+      "bytes": 0,
+      "count": 0
+    },
+    "transcript_segments": {
+      "bytes": 0,
+      "count": 0
+    }
+  }
+}

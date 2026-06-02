@@ -1,0 +1,27 @@
+[
+  {
+    "actor": "dispatch",
+    "attributes": {
+      "consumed_by_session_id": "session-fc029700-b637-4e84-9541-3e296c0e8a73",
+      "delivery_mode": "pull_required",
+      "poll_count": 1,
+      "source_session_name": "qa-test-coverage-loop-afd2941a-manager",
+      "target_session_name": "qa-test-coverage-loop-afd2941a-worker",
+      "target_session_role": "worker",
+      "wait_enabled": true
+    },
+    "correlation": {
+      "correlation_id": "qa-run-test-coverage-structured-allowed",
+      "notification_id": 1,
+      "signal_type": "continue_iteration",
+      "target_session_id": "session-fc029700-b637-4e84-9541-3e296c0e8a73"
+    },
+    "event_type": "dispatch_inbox_consumed",
+    "id": "telemetry-af73fe30-3ba7-4a16-ba1f-1face1d62382",
+    "run_id": "run-6d6b737e-4c37-4562-8bdf-d2a9be667409",
+    "severity": "info",
+    "summary": "worker session consumed dispatcher inbox item.",
+    "task_id": "task-cc8dbc66-af6d-473d-8144-18e523668f8a",
+    "timestamp": "2026-06-02T16:55:02Z"
+  }
+]

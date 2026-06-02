@@ -1,0 +1,17 @@
+{
+  "ok": true,
+  "records": [],
+  "summary": {
+    "mutations": 0,
+    "with_warnings": 0
+  },
+  "task": {
+    "created_at": "2026-06-02T16:53:11Z",
+    "goal": "Executable QA run for test-coverage-loop.",
+    "id": "task-cc8dbc66-af6d-473d-8144-18e523668f8a",
+    "name": "qa-test-coverage-loop-afd2941a",
+    "state": "managed",
+    "summary": "Disposable no-tmux manager/worker binding for Dispatch guardrail proof.",
+    "updated_at": "2026-06-02T16:53:11Z"
+  }
+}

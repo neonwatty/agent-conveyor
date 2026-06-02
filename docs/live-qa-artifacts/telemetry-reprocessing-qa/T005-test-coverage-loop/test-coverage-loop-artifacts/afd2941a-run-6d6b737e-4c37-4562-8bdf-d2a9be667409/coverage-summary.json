@@ -1,0 +1,8 @@
+{
+  "command": "coverage run -m pytest && coverage report",
+  "coverage_percent": 87.5,
+  "status": "pass",
+  "uncovered_lines": [
+    "workerctl/commands.py:dispatch-edge-case"
+  ]
+}
