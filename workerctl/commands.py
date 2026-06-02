@@ -5030,8 +5030,8 @@ def telemetry_operator_snapshot(
 
 _TELEMETRY_METRICS_WINDOW_RE = re.compile(r"^(?P<count>[1-9][0-9]*)(?P<unit>[smhdw])$")
 _METRICS_CRITERIA_STATUSES = ("proposed", "accepted", "satisfied", "deferred", "rejected")
-_METRICS_COMMAND_STATES = ("pending", "attempted", "succeeded", "failed")
-_METRICS_ATTEMPT_STATES = ("running", "succeeded", "failed", "abandoned")
+_METRICS_COMMAND_STATES = ("pending", "attempted", "succeeded", "failed", "blocked")
+_METRICS_ATTEMPT_STATES = ("running", "succeeded", "failed", "abandoned", "blocked")
 
 
 def _metrics_parse_window(window: str) -> tuple[int, str]:
@@ -7107,28 +7107,10 @@ def _execute_dispatch_command(*, worker_db, worker_tmux, db_path: Path | None, c
                     "target_session": route["target_session_name"],
                     "target_worker_notified": False,
                 }
-                worker_db.emit_telemetry_event(
-                    conn,
-                    actor="dispatch",
-                    event_type="dispatch_command_blocked",
-                    severity="warning",
-                    task_id=command["task_id"],
-                    summary="Dispatch blocked continue_iteration command by Ralph loop policy.",
-                    correlation={
-                        "attempt_id": attempt["id"],
-                        "command_id": command["id"],
-                        "command_type": command["type"],
-                        "correlation_id": command["correlation_id"],
-                        "dispatcher_id": dispatcher_id,
-                        "manager_decision_id": result["manager_decision_id"],
-                        "run_id": loop_policy["run_id"],
-                    },
-                    attributes=result,
-                )
                 worker_db.finish_command_attempt(
                     conn,
                     attempt_id=attempt["id"],
-                    state="failed",
+                    state="blocked",
                     result=result,
                     error=error,
                     side_effect_started=False,

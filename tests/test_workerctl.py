@@ -344,6 +344,117 @@ class DatabaseTests(unittest.TestCase):
             self.assertIn("commands_claimable", indexes)
             self.assertEqual(conn.execute("PRAGMA user_version").fetchone()[0], worker_db.SCHEMA_VERSION)
 
+    def test_database_migrates_v21_command_constraints_to_allow_policy_blocks(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "workerctl.db"
+            conn = sqlite3.connect(path)
+            conn.executescript(
+                """
+                create table commands(
+                  id text primary key,
+                  idempotency_key text unique not null,
+                  created_at text not null,
+                  updated_at text not null,
+                  task_id text,
+                  worker_id text,
+                  manager_id text,
+                  correlation_id text,
+                  type text not null,
+                  state text not null check (state in ('pending','attempted','succeeded','failed')),
+                  available_at text,
+                  claimed_by text,
+                  claimed_at text,
+                  claim_expires_at text,
+                  attempts integer not null default 0 check (attempts >= 0),
+                  max_attempts integer not null default 1 check (max_attempts > 0),
+                  required_permission text,
+                  payload_json text not null check (json_valid(payload_json)),
+                  result_json text check (result_json is null or json_valid(result_json)),
+                  error text
+                );
+
+                create table command_attempts(
+                  id integer primary key autoincrement,
+                  command_id text not null references commands(id),
+                  correlation_id text not null,
+                  dispatcher_id text not null,
+                  started_at text not null,
+                  finished_at text,
+                  state text not null check (state in ('running','succeeded','failed','abandoned')),
+                  result_json text check (result_json is null or json_valid(result_json)),
+                  error text,
+                  side_effect_started integer not null default 0 check (side_effect_started in (0, 1)),
+                  side_effect_completed integer not null default 0 check (side_effect_completed in (0, 1))
+                );
+
+                insert into commands(
+                  id, idempotency_key, created_at, updated_at, correlation_id,
+                  type, state, claimed_by, claimed_at, attempts, max_attempts,
+                  payload_json
+                )
+                values (
+                  'cmd-v21', 'idem-v21', '2026-05-23T10:00:00Z',
+                  '2026-05-23T10:00:01Z', 'corr-v21', 'continue_iteration',
+                  'attempted', 'dispatch-a', '2026-05-23T10:00:01Z', 1, 1,
+                  '{"message":"continue"}'
+                );
+
+                insert into command_attempts(
+                  id, command_id, correlation_id, dispatcher_id, started_at, state
+                )
+                values (
+                  7, 'cmd-v21', 'corr-v21', 'dispatch-a',
+                  '2026-05-23T10:00:01Z', 'running'
+                );
+
+                pragma user_version = 21;
+                """
+            )
+            conn.close()
+
+            conn = worker_db.connect(path)
+            self.addCleanup(conn.close)
+            worker_db.initialize_database(conn)
+
+            commands_sql = conn.execute(
+                "select sql from sqlite_master where type = 'table' and name = 'commands'"
+            ).fetchone()["sql"]
+            attempts_sql = conn.execute(
+                "select sql from sqlite_master where type = 'table' and name = 'command_attempts'"
+            ).fetchone()["sql"]
+            worker_db.finish_command_attempt(
+                conn,
+                attempt_id=7,
+                state="blocked",
+                result={"reason": "missing_required_evidence"},
+                error="missing_required_evidence",
+                side_effect_started=False,
+                side_effect_completed=False,
+                timestamp="2026-05-23T10:00:02Z",
+            )
+
+            command_row = conn.execute("select state, error from commands where id = 'cmd-v21'").fetchone()
+            attempt_row = conn.execute("select state, error from command_attempts where id = 7").fetchone()
+            indexes = {
+                row["name"]
+                for row in conn.execute("select name from sqlite_master where type = 'index'")
+            }
+            health = worker_db.database_health(conn)
+            health_checks = {check["name"]: check for check in health["checks"]}
+
+            self.assertIn("'blocked'", commands_sql)
+            self.assertIn("'blocked'", attempts_sql)
+            self.assertEqual(conn.execute("PRAGMA user_version").fetchone()[0], worker_db.SCHEMA_VERSION)
+            self.assertEqual(conn.execute("PRAGMA foreign_keys").fetchone()[0], 1)
+            self.assertIn("commands_task_state_created", indexes)
+            self.assertIn("commands_claimable", indexes)
+            self.assertIn("command_attempts_command_id", indexes)
+            self.assertTrue(health_checks["required_indexes"]["ok"])
+            self.assertTrue(health["ok"])
+            self.assertEqual(command_row["state"], "blocked")
+            self.assertEqual(attempt_row["state"], "blocked")
+            self.assertEqual(command_row["error"], "missing_required_evidence")
+
     def test_database_migrates_routed_notifications_before_consumption_columns(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "workerctl.db"
@@ -581,6 +692,55 @@ class DatabaseTests(unittest.TestCase):
             self.assertEqual(audit["command_attempts"][0]["state"], "abandoned")
             entries = replay.replay_entries(audit)
             self.assertTrue(any(entry["source"] == "command_attempts" for entry in entries))
+
+    def test_command_attempt_finish_records_policy_block_without_failure_telemetry(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            self.insert_task(conn, "task-attempt", "attempt-task")
+            command_id = worker_db.create_command(
+                conn,
+                command_type="continue_iteration",
+                task_id="task-attempt",
+                payload={"message": "continue"},
+            )
+            claimed = worker_db.claim_next_dispatch_command(
+                conn,
+                dispatcher_id="dispatch-a",
+                command_types=["continue_iteration"],
+                timestamp="2026-05-23T10:01:00Z",
+            )
+
+            worker_db.finish_command_attempt(
+                conn,
+                attempt_id=claimed["attempt"]["id"],
+                state="blocked",
+                result={"reason": "missing_required_evidence", "target_worker_notified": False},
+                error="missing_required_evidence",
+                side_effect_started=False,
+                side_effect_completed=False,
+                timestamp="2026-05-23T10:01:01Z",
+            )
+            conn.commit()
+
+            command_row = conn.execute("select state, error from commands where id = ?", (command_id,)).fetchone()
+            attempt_row = conn.execute(
+                "select state, error, side_effect_started, side_effect_completed from command_attempts where id = ?",
+                (claimed["attempt"]["id"],),
+            ).fetchone()
+            telemetry = [
+                event for event in worker_db.telemetry_events(conn, task_id="task-attempt")
+                if event["event_type"] in {"dispatch_command_blocked", "dispatch_command_failed"}
+            ]
+
+            self.assertEqual(command_row["state"], "blocked")
+            self.assertEqual(command_row["error"], "missing_required_evidence")
+            self.assertEqual(attempt_row["state"], "blocked")
+            self.assertEqual(attempt_row["side_effect_started"], 0)
+            self.assertEqual(attempt_row["side_effect_completed"], 0)
+            self.assertEqual(
+                [(event["event_type"], event["severity"]) for event in telemetry],
+                [("dispatch_command_blocked", "warning")],
+            )
 
     def test_command_attempt_finish_requires_running_attempt(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -2725,9 +2885,9 @@ class DispatchTests(unittest.TestCase):
             self.assertEqual(processed["max_iterations"], 1)
             self.assertEqual(processed["requested_iteration"], 2)
             self.assertEqual(processed["manager_decision_id"], decision_id)
-            self.assertEqual(command_row["state"], "failed")
+            self.assertEqual(command_row["state"], "blocked")
             self.assertIn("max_iterations_reached", command_row["error"])
-            self.assertEqual(attempt_row["state"], "failed")
+            self.assertEqual(attempt_row["state"], "blocked")
             self.assertIn("max_iterations_reached", attempt_row["error"])
             attempt_result = json.loads(attempt_row["result_json"])
             self.assertEqual(attempt_result["state"], "blocked")
@@ -2780,7 +2940,7 @@ class DispatchTests(unittest.TestCase):
                 "select state, side_effect_started, side_effect_completed from command_attempts"
             ).fetchone()
             self.assertEqual(payload["processed"][0]["state"], "blocked")
-            self.assertEqual(attempt_row["state"], "failed")
+            self.assertEqual(attempt_row["state"], "blocked")
             self.assertEqual(attempt_row["side_effect_started"], 0)
             self.assertEqual(attempt_row["side_effect_completed"], 0)
             self.assertEqual(worker_db.routed_notifications(conn, task_id="task-dispatch"), [])
@@ -2834,7 +2994,7 @@ class DispatchTests(unittest.TestCase):
             self.assertEqual(processed["max_iterations"], 1)
             self.assertEqual(processed["requested_iteration"], 2)
             self.assertFalse(processed["target_worker_notified"])
-            self.assertEqual(attempt_row["state"], "failed")
+            self.assertEqual(attempt_row["state"], "blocked")
             self.assertEqual(attempt_row["side_effect_started"], 0)
             self.assertEqual(attempt_row["side_effect_completed"], 0)
             self.assertEqual(worker_db.routed_notifications(conn, task_id="task-dispatch"), [])
@@ -2894,9 +3054,9 @@ class DispatchTests(unittest.TestCase):
             self.assertEqual(processed["current_iteration"], 2)
             self.assertEqual(processed["requested_iteration"], 2)
             self.assertFalse(processed["target_worker_notified"])
-            self.assertEqual(command_row["state"], "failed")
+            self.assertEqual(command_row["state"], "blocked")
             self.assertIn("stale_requested_iteration", command_row["error"])
-            self.assertEqual(attempt_row["state"], "failed")
+            self.assertEqual(attempt_row["state"], "blocked")
             self.assertEqual(attempt_result["reason"], "stale_requested_iteration")
             self.assertEqual(attempt_row["side_effect_started"], 0)
             self.assertEqual(attempt_row["side_effect_completed"], 0)
@@ -2971,9 +3131,9 @@ class DispatchTests(unittest.TestCase):
             self.assertEqual(processed["max_iterations"], 3)
             self.assertEqual(processed["requested_iteration"], 2)
             self.assertEqual(processed["manager_decision_id"], decision_id)
-            self.assertEqual(command_row["state"], "failed")
+            self.assertEqual(command_row["state"], "blocked")
             self.assertIn("missing_ci_green_evidence", command_row["error"])
-            self.assertEqual(attempt_row["state"], "failed")
+            self.assertEqual(attempt_row["state"], "blocked")
             self.assertIn("missing_ci_green_evidence", attempt_row["error"])
             attempt_result = json.loads(attempt_row["result_json"])
             self.assertEqual(attempt_result["state"], "blocked")
@@ -3027,7 +3187,7 @@ class DispatchTests(unittest.TestCase):
             ).fetchone()
             self.assertEqual(payload["processed"][0]["state"], "blocked")
             self.assertEqual(payload["processed"][0]["reason"], "missing_ci_green_evidence")
-            self.assertEqual(attempt_row["state"], "failed")
+            self.assertEqual(attempt_row["state"], "blocked")
             self.assertEqual(attempt_row["side_effect_started"], 0)
             self.assertEqual(attempt_row["side_effect_completed"], 0)
             self.assertEqual(worker_db.routed_notifications(conn, task_id="task-dispatch"), [])
@@ -3154,13 +3314,22 @@ class DispatchTests(unittest.TestCase):
                 self.assertFalse(blocked["delivered"])
                 self.assertFalse(blocked["target_worker_notified"])
                 self.assertEqual(blocked["required_before_continue"], ["pr_url", "ci_green", "merge", "adversarial_check"])
-                self.assertEqual(blocked_row["state"], "failed")
+                self.assertEqual(blocked_row["state"], "blocked")
                 self.assertIn("missing_required_evidence", blocked_row["error"])
                 self.assertIn("missing_evidence=pr_url,ci_green,merge,adversarial_check", blocked_row["error"])
                 blocked_result = json.loads(blocked_row["result_json"])
                 self.assertEqual(blocked_result["missing_evidence"], ["pr_url", "ci_green", "merge", "adversarial_check"])
                 self.assertEqual(worker_db.routed_notifications(conn, task_id="task-dispatch"), [])
                 self.assertEqual(worker_db.session_inbox(conn, session_name="worker-session"), [])
+                telemetry = worker_db.telemetry_events(conn, task_id="task-dispatch")
+                self.assertIn(
+                    ("dispatch_command_blocked", "warning"),
+                    [(event["event_type"], event["severity"]) for event in telemetry],
+                )
+                self.assertNotIn(
+                    ("dispatch_command_failed", "error"),
+                    [(event["event_type"], event["severity"]) for event in telemetry],
+                )
 
                 for evidence_type in ("pr_url", "ci_green", "merge", "adversarial_check"):
                     evidence = {
@@ -3283,7 +3452,7 @@ class DispatchTests(unittest.TestCase):
             self.assertEqual(processed["state"], "blocked")
             self.assertEqual(processed["reason"], "missing_adversarial_check_evidence")
             self.assertEqual(processed["missing_evidence"], ["adversarial_check"])
-            self.assertEqual(command_row["state"], "failed")
+            self.assertEqual(command_row["state"], "blocked")
             self.assertIn("missing_adversarial_check_evidence", command_row["error"])
             self.assertEqual(json.loads(command_row["result_json"])["missing_evidence"], ["adversarial_check"])
             self.assertEqual(worker_db.routed_notifications(conn, task_id="task-dispatch"), [])
@@ -3340,7 +3509,7 @@ class DispatchTests(unittest.TestCase):
                 self.assertEqual(blocked["missing_evidence"], ["adversarial_check"])
                 self.assertFalse(blocked["delivered"])
                 self.assertFalse(blocked["target_worker_notified"])
-                self.assertEqual(blocked_row["state"], "failed")
+                self.assertEqual(blocked_row["state"], "blocked")
                 self.assertIn("missing_adversarial_check_evidence", blocked_row["error"])
                 self.assertEqual(json.loads(blocked_row["result_json"])["missing_evidence"], ["adversarial_check"])
                 self.assertEqual(worker_db.routed_notifications(conn, task_id="task-dispatch"), [])
@@ -3473,7 +3642,7 @@ class DispatchTests(unittest.TestCase):
             self.assertEqual(processed["current_iteration"], 1)
             self.assertEqual(processed["max_iterations"], 4)
             self.assertEqual(processed["requested_iteration"], 2)
-            self.assertEqual(command_row["state"], "failed")
+            self.assertEqual(command_row["state"], "blocked")
             self.assertIn("missing_required_evidence", command_row["error"])
             self.assertEqual(worker_db.routed_notifications(conn, task_id="task-dispatch"), [])
             self.assertEqual(worker_db.session_inbox(conn, session_name="worker-session"), [])
@@ -3707,7 +3876,7 @@ class DispatchTests(unittest.TestCase):
             self.assertEqual(processed["state"], "blocked")
             self.assertEqual(processed["reason"], "missing_coverage_checked_evidence")
             self.assertEqual(processed["missing_evidence"], ["coverage_checked"])
-            self.assertEqual(command_row["state"], "failed")
+            self.assertEqual(command_row["state"], "blocked")
             self.assertIn("missing_coverage_checked_evidence", command_row["error"])
             send.assert_not_called()
 
@@ -3774,7 +3943,7 @@ class DispatchTests(unittest.TestCase):
             self.assertEqual(processed["state"], "blocked")
             self.assertEqual(processed["reason"], "missing_adversarial_check_evidence")
             self.assertEqual(processed["missing_evidence"], ["adversarial_check"])
-            self.assertEqual(command_row["state"], "failed")
+            self.assertEqual(command_row["state"], "blocked")
             self.assertIn("missing_adversarial_check_evidence", command_row["error"])
             send.assert_not_called()
 
@@ -7537,6 +7706,126 @@ class CliTests(unittest.TestCase):
             self.assertNotIn("Do not expose this criterion text", proc.stdout)
             self.assertNotIn("raw transcript segment", proc.stdout)
             self.assertNotIn("raw pane text", proc.stdout)
+
+    def test_telemetry_task_view_treats_policy_blocks_as_blocked_not_failed(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                task_id = worker_db.create_task(conn, name="blocked-policy-task", goal="Inspect policy blocks.")
+                command_id = worker_db.create_command(
+                    conn,
+                    command_type="continue_iteration",
+                    payload={"message": "should be blocked"},
+                    task_id=task_id,
+                    timestamp="2026-05-21T10:00:00Z",
+                )
+                claimed = worker_db.claim_next_dispatch_command(
+                    conn,
+                    dispatcher_id="dispatch-policy",
+                    command_types=["continue_iteration"],
+                    timestamp="2026-05-21T10:00:01Z",
+                )
+                worker_db.finish_command_attempt(
+                    conn,
+                    attempt_id=claimed["attempt"]["id"],
+                    state="blocked",
+                    result={
+                        "reason": "missing_required_evidence",
+                        "missing_evidence": ["adversarial_check"],
+                        "target_worker_notified": False,
+                    },
+                    error="missing_required_evidence missing_evidence=adversarial_check",
+                    side_effect_started=False,
+                    side_effect_completed=False,
+                    timestamp="2026-05-21T10:00:02Z",
+                )
+                conn.commit()
+
+            task_view = self.run_workerctl(
+                "telemetry",
+                "task",
+                "blocked-policy-task",
+                "--json",
+                "--path",
+                str(db_path),
+            )
+            failures_view = self.run_workerctl(
+                "telemetry",
+                "failures",
+                "--task",
+                "blocked-policy-task",
+                "--json",
+                "--path",
+                str(db_path),
+            )
+
+            self.assertEqual(task_view.returncode, 0, task_view.stderr)
+            self.assertEqual(failures_view.returncode, 0, failures_view.stderr)
+            task_payload = json.loads(task_view.stdout)
+            failures_payload = json.loads(failures_view.stdout)
+            alert_types = {alert["type"] for alert in task_payload["alerts"]}
+
+            self.assertEqual(task_payload["commands"]["counts_by_state"]["blocked"], 1)
+            self.assertEqual(task_payload["commands"]["failed_count"], 0)
+            self.assertEqual(task_payload["failed_commands"], [])
+            self.assertNotIn("failed_commands", alert_types)
+            self.assertEqual(failures_payload["failed_commands"], [])
+            self.assertNotIn("failed_commands", {alert["type"] for alert in failures_payload["alerts"]})
+            self.assertEqual(
+                [
+                    (event["event_type"], event["severity"])
+                    for event in task_payload["telemetry"]["recent"]
+                    if event["event_type"] == "dispatch_command_blocked"
+                ],
+                [("dispatch_command_blocked", "warning")],
+            )
+            self.assertNotIn(command_id, [row["id"] for row in failures_payload["failed_commands"]])
+
+    def test_commands_filter_accepts_blocked_policy_commands(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                task_id = worker_db.create_task(conn, name="blocked-command-filter-task", goal="Inspect blocked commands.")
+                command_id = worker_db.create_command(
+                    conn,
+                    command_type="continue_iteration",
+                    payload={"message": "should be blocked"},
+                    task_id=task_id,
+                    timestamp="2026-05-21T10:00:00Z",
+                )
+                claimed = worker_db.claim_next_dispatch_command(
+                    conn,
+                    dispatcher_id="dispatch-policy",
+                    command_types=["continue_iteration"],
+                    timestamp="2026-05-21T10:00:01Z",
+                )
+                worker_db.finish_command_attempt(
+                    conn,
+                    attempt_id=claimed["attempt"]["id"],
+                    state="blocked",
+                    result={"reason": "missing_required_evidence"},
+                    error="missing_required_evidence",
+                    side_effect_started=False,
+                    side_effect_completed=False,
+                    timestamp="2026-05-21T10:00:02Z",
+                )
+                conn.commit()
+
+            proc = self.run_workerctl(
+                "commands",
+                "--state",
+                "blocked",
+                "--json",
+                "--path",
+                str(db_path),
+            )
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            payload = json.loads(proc.stdout)
+            self.assertEqual([row["id"] for row in payload], [command_id])
+            self.assertEqual(payload[0]["state"], "blocked")
 
     def test_telemetry_failures_view_rolls_up_failed_cycles_commands_ingest_and_storage(self):
         with tempfile.TemporaryDirectory() as tmpdir:
