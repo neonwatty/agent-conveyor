@@ -588,7 +588,7 @@ tmux attach -t codex-live-test
   `--include-content` is passed.
 - `qa-plan <self-management|emergent-criteria|tmux-errors|dispatch-completion|ralph-loop|adversarial-triggers|goalbuddy-conveyor>` — Print a
   repeatable manual QA checklist.
-- `qa-run <ralph-loop-guardrails|generic-loop-template|generic-loop-template-browser|test-coverage-loop|adversarial-triggers> --receipt-output RECEIPT.json [--path DB]` —
+- `qa-run <ralph-loop-guardrails|generic-loop-template|generic-loop-template-browser|test-coverage-loop|adversarial-triggers|build-clear-loop> --receipt-output RECEIPT.json [--path DB]` —
   Run a deterministic no-tmux QA harness and save a JSON receipt.
   `ralph-loop-guardrails` proves max-iteration cutoff, missing-evidence
   cutoff, fresh retry delivery after structured `adversarial_check` evidence,
@@ -605,6 +605,9 @@ tmux attach -t codex-live-test
   `test-coverage-loop` proves the `test_coverage_loop` template blocks before
   coverage evidence, rejects malformed adversarial evidence, and delivers only
   after a structured coverage receipt plus adversarial proof exist.
+  `build-clear-loop` proves the non-coverage `build_then_clear` template
+  blocks before `build_passed` and `cleanup` receipts, still blocks after build
+  evidence alone, and delivers only after both build and cleanup evidence exist.
 - `loop-triggers --list|--classify PROMPT [--json]` — List the controlled
   natural-language loop triggers or classify a manager/operator prompt before
   creating a loop policy or continuation gate. Approved trigger phrases include
@@ -625,6 +628,16 @@ tmux attach -t codex-live-test
   `test_coverage_loop`, and `visual_diff_loop`) also expose an
   `artifact_requirements["adversarial_check"]` object requiring
   `failure_mode`, `check`, and `result` fields.
+- `loop-status TASK --run RUN [--json]` — Summarize a Ralph-loop run for manager
+  review: policy template, iteration bounds, command states, routed
+  notifications, worker inbox backlog, evidence types, consumed-inbox
+  telemetry, failure counts, and a recommendation.
+
+For real vertical slices, start with the Ralph loop operator guide in
+`docs/qa/ralph-loop-operator-guide.md`. It explains the controlled
+natural-language triggers, Dispatch authority model, worker inbox polling,
+required evidence, adversarial proof, `loop-status`, and telemetry review pass
+bar.
 - `enqueue-continue-iteration TASK --loop-run RUN --requested-iteration N` —
   Queue a manager-requested next loop pass for Dispatch. The command refuses
   same/current iteration requests before they become pending queue rows, while
@@ -686,6 +699,7 @@ scripts/workerctl qa-run generic-loop-template --receipt-output /tmp/generic-loo
 scripts/workerctl qa-run generic-loop-template-browser --receipt-output /tmp/generic-loop-template-browser-receipt.json --json
 scripts/workerctl qa-run test-coverage-loop --receipt-output /tmp/test-coverage-loop-receipt.json --json
 scripts/workerctl qa-run adversarial-triggers --receipt-output /tmp/adversarial-triggers-receipt.json --json
+scripts/workerctl qa-run build-clear-loop --receipt-output /tmp/build-clear-loop-receipt.json --json
 scripts/workerctl loop-triggers --classify "Run this as an adversarially gated Ralph loop." --json
 scripts/workerctl loop-templates --list --json
 scripts/workerctl loop-templates --show visual_diff_loop --json

@@ -14,6 +14,7 @@ import sys
 import tempfile
 import time
 import uuid
+from collections import Counter
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -3519,6 +3520,246 @@ def _qa_run_test_coverage_loop(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
+def _qa_run_build_clear_loop(args: argparse.Namespace) -> dict[str, Any]:
+    from workerctl import db as worker_db
+
+    db_path = _qa_run_db_path(args)
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    slug = uuid.uuid4().hex[:8]
+    dispatcher_id = getattr(args, "dispatcher_id", None) or f"qa-run-{slug}"
+    template_metadata = loop_template_metadata(
+        "build_then_clear",
+        max_iterations=2,
+        current_iteration=1,
+        seed_prompt_sha256="qa-run-build-clear-seed",
+    )
+    required_evidence = template_metadata["required_before_continue"]
+    checks: list[dict[str, Any]] = []
+
+    with worker_db.connect(db_path) as conn:
+        worker_db.initialize_database(conn)
+        _qa_run_require_clean_continue_queue(conn, worker_db=worker_db)
+        build_task = _qa_run_bound_task(conn, slug=slug, suffix="build-clear-loop")
+        build_run_id = worker_db.create_ralph_loop_run(
+            conn,
+            task_id=build_task["task_id"],
+            name=f"{build_task['task_name']}-run",
+            max_iterations=template_metadata["max_iterations"],
+            current_iteration=template_metadata["current_iteration"],
+            cleanup_policy=template_metadata["cleanup_policy"],
+            required_before_continue=required_evidence,
+            stop_conditions=template_metadata["stop_conditions"],
+            seed_prompt_sha256=template_metadata["seed_prompt_sha256"],
+            preset=template_metadata.get("preset"),
+            metadata=template_metadata,
+        )
+        worker_db.enqueue_continue_iteration(
+            conn,
+            task_id=build_task["task_id"],
+            message="Run build/clear template iteration 2 before build or cleanup evidence.",
+            loop_run_id=build_run_id,
+            requested_iteration=2,
+            correlation_id="qa-run-build-clear-missing",
+        )
+        conn.commit()
+
+    missing_dispatch = _qa_run_dispatch_continue_once(
+        db_path=db_path,
+        dispatcher_id=dispatcher_id,
+        expected_correlation_id="qa-run-build-clear-missing",
+    )
+    missing_counts = _qa_run_delivery_counts(
+        db_path=db_path,
+        task_id=build_task["task_id"],
+        worker_name=build_task["worker_name"],
+    )
+    _qa_run_require(missing_dispatch.get("state") == "blocked", "build_then_clear did not block before evidence")
+    _qa_run_require(
+        missing_dispatch.get("reason") == "missing_required_evidence",
+        "build_then_clear used the wrong block reason before evidence",
+    )
+    _qa_run_require(
+        missing_dispatch.get("missing_evidence") == required_evidence,
+        "build_then_clear reported the wrong missing evidence before evidence",
+    )
+    _qa_run_require(missing_counts["worker_inbox_count"] == 0, "build_then_clear left worker inbox mail before evidence")
+    checks.append(
+        _qa_run_check_result(
+            name="build_clear_blocks_before_build_or_cleanup_evidence",
+            dispatch=missing_dispatch,
+            counts=missing_counts,
+            command="workerctl dispatch --once --type continue_iteration --dispatcher-id qa-run",
+        )
+    )
+
+    artifact_dir = _qa_run_receipt_artifact_dir(
+        args,
+        db_path=db_path,
+        scenario="build-clear-loop",
+        slug=slug,
+        run_id=build_run_id,
+    )
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    build_receipt = artifact_dir / "build-passed.json"
+    build_receipt.write_text(
+        json.dumps(
+            {
+                "command": "scripts/run-unittests-isolated -k build_clear_loop",
+                "result": "pass",
+                "status": "build_passed",
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n"
+    )
+    _qa_run_record_loop_evidence(
+        db_path=db_path,
+        task_name=build_task["task_name"],
+        loop_run_id=build_run_id,
+        evidence_type="build_passed",
+        correlation_id="qa-run-build-clear-build-passed",
+        artifact_path=build_receipt,
+        metadata={
+            "command": "scripts/run-unittests-isolated -k build_clear_loop",
+            "result": "Focused build/test command passed before retry.",
+        },
+    )
+    with worker_db.connect(db_path) as conn:
+        worker_db.initialize_database(conn)
+        worker_db.enqueue_continue_iteration(
+            conn,
+            task_id=build_task["task_id"],
+            message="Run build/clear template iteration 2 after build evidence only.",
+            loop_run_id=build_run_id,
+            requested_iteration=2,
+            correlation_id="qa-run-build-clear-build-only",
+        )
+        conn.commit()
+
+    build_only_dispatch = _qa_run_dispatch_continue_once(
+        db_path=db_path,
+        dispatcher_id=dispatcher_id,
+        expected_correlation_id="qa-run-build-clear-build-only",
+    )
+    build_only_counts = _qa_run_delivery_counts(
+        db_path=db_path,
+        task_id=build_task["task_id"],
+        worker_name=build_task["worker_name"],
+    )
+    _qa_run_require(build_only_dispatch.get("state") == "blocked", "build_then_clear delivered before cleanup evidence")
+    _qa_run_require(
+        build_only_dispatch.get("reason") == "missing_cleanup_evidence",
+        "build_then_clear used the wrong block reason before cleanup evidence",
+    )
+    _qa_run_require(
+        build_only_dispatch.get("missing_evidence") == ["cleanup"],
+        "build_then_clear reported the wrong missing evidence before cleanup evidence",
+    )
+    _qa_run_require(build_only_counts["worker_inbox_count"] == 0, "build_then_clear left worker inbox mail before cleanup evidence")
+    checks.append(
+        _qa_run_check_result(
+            name="build_clear_still_blocks_before_cleanup_evidence",
+            dispatch=build_only_dispatch,
+            counts=build_only_counts,
+            command="workerctl loop-evidence add --evidence-type build_passed ... && workerctl dispatch --once --type continue_iteration",
+        )
+    )
+
+    cleanup_receipt = artifact_dir / "cleanup.json"
+    cleanup_receipt.write_text(
+        json.dumps(
+            {
+                "cleanup_policy": "clear",
+                "result": "pass",
+                "status": "cleanup",
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n"
+    )
+    _qa_run_record_loop_evidence(
+        db_path=db_path,
+        task_name=build_task["task_name"],
+        loop_run_id=build_run_id,
+        evidence_type="cleanup",
+        correlation_id="qa-run-build-clear-cleanup",
+        artifact_path=cleanup_receipt,
+        metadata={
+            "cleanup_policy": "clear",
+            "result": "Worker context clear receipt recorded before retry.",
+        },
+    )
+    with worker_db.connect(db_path) as conn:
+        worker_db.initialize_database(conn)
+        worker_db.enqueue_continue_iteration(
+            conn,
+            task_id=build_task["task_id"],
+            message="Run build/clear template iteration 2 after build and cleanup evidence.",
+            loop_run_id=build_run_id,
+            requested_iteration=2,
+            correlation_id="qa-run-build-clear-allowed",
+        )
+        conn.commit()
+
+    allowed_dispatch = _qa_run_dispatch_continue_once(
+        db_path=db_path,
+        dispatcher_id=dispatcher_id,
+        expected_correlation_id="qa-run-build-clear-allowed",
+    )
+    allowed_counts = _qa_run_delivery_counts(
+        db_path=db_path,
+        task_id=build_task["task_id"],
+        worker_name=build_task["worker_name"],
+    )
+    _qa_run_require(allowed_dispatch.get("state") == "pull_required", "build_then_clear retry did not deliver")
+    _qa_run_require(
+        allowed_counts["worker_inbox_count"] == 1,
+        "build_then_clear retry did not create exactly one worker inbox item",
+    )
+    checks.append(
+        _qa_run_check_result(
+            name="build_clear_retry_delivers_after_build_and_cleanup_evidence",
+            dispatch=allowed_dispatch,
+            counts=allowed_counts,
+            command="workerctl loop-evidence add --evidence-type cleanup ... && workerctl dispatch --once --type continue_iteration",
+        )
+    )
+
+    return {
+        "artifacts": {
+            "build_receipt": str(build_receipt),
+            "cleanup_receipt": str(cleanup_receipt),
+            "db_path": str(db_path),
+        },
+        "checks": checks,
+        "generated_at": now_iso(),
+        "generated_tasks": [_qa_run_generated_task(build_task, suffix="build-clear-loop")],
+        "replay_commands": [
+            "scripts/workerctl loop-templates --show build_then_clear --json",
+            (
+                "scripts/workerctl loop-templates --create-run <task> --template build_then_clear "
+                "--max-iterations 2 --current-iteration 1 --seed-prompt-sha256 qa-run-build-clear-seed"
+            ),
+            (
+                "scripts/workerctl loop-evidence add <task> --loop-run <run-id> --iteration 1 "
+                "--evidence-type build_passed --artifact-path <build-passed.json>"
+            ),
+            (
+                "scripts/workerctl loop-evidence add <task> --loop-run <run-id> --iteration 1 "
+                "--evidence-type cleanup --artifact-path <cleanup.json>"
+            ),
+            f"scripts/workerctl dispatch --once --type continue_iteration --dispatcher-id {dispatcher_id} --path {db_path}",
+            f"scripts/workerctl worker-inbox <task> --consume-next --wait --path {db_path} --json",
+        ],
+        "result": "passed",
+        "scenario": "build-clear-loop",
+        "template": "build_then_clear",
+        "template_metadata": template_metadata,
+    }
+
+
 def _qa_run_adversarial_triggers(args: argparse.Namespace) -> dict[str, Any]:
     from workerctl import db as worker_db
 
@@ -3863,6 +4104,7 @@ def command_qa_run(args: argparse.Namespace) -> int:
         "generic-loop-template-browser": _qa_run_generic_loop_template_browser,
         "test-coverage-loop": _qa_run_test_coverage_loop,
         "adversarial-triggers": _qa_run_adversarial_triggers,
+        "build-clear-loop": _qa_run_build_clear_loop,
     }
     try:
         runner = scenarios[scenario]
@@ -4095,6 +4337,219 @@ def command_loop_templates(args: argparse.Namespace) -> int:
         print(json.dumps(result, indent=2, sort_keys=True))
         return 0
     raise WorkerError("Choose one of --list, --show, or --create-run")
+
+
+def _loop_status_json_object(value: str | None) -> dict[str, Any]:
+    if not value:
+        return {}
+    loaded = json.loads(value)
+    return loaded if isinstance(loaded, dict) else {}
+
+
+def _loop_status_mapping_run_id(mapping: dict[str, Any]) -> str | None:
+    for key in ("ralph_loop", "loop_policy"):
+        value = mapping.get(key)
+        if isinstance(value, dict):
+            run_id = value.get("run_id")
+            if isinstance(run_id, str) and run_id:
+                return run_id
+    for key in ("ralph_loop_run_id", "loop_run_id", "run_id"):
+        run_id = mapping.get(key)
+        if isinstance(run_id, str) and run_id:
+            return run_id
+    return None
+
+
+def _loop_status_command_matches_run(row: Any, *, run_id: str) -> bool:
+    payload = _loop_status_json_object(row["payload_json"])
+    result = _loop_status_json_object(row["result_json"])
+    return _loop_status_mapping_run_id(payload) == run_id or _loop_status_mapping_run_id(result) == run_id
+
+
+def _loop_status_inbox_item_matches_run(row: Any, *, run_id: str) -> bool:
+    payload = _loop_status_json_object(row["payload_json"])
+    return _notification_loop_run_id({"payload": payload}) == run_id
+
+
+def _loop_status_worker_inbox_count(conn: Any, *, task: Any, worker_session_id: str, run_id: str) -> int:
+    rows = conn.execute(
+        """
+        select payload_json
+        from routed_notifications
+        where task_id = ?
+          and target_session_id = ?
+          and state = 'delivered'
+          and consumed_at is null
+        order by created_at, id
+        """,
+        (task["id"], worker_session_id),
+    ).fetchall()
+    return sum(1 for row in rows if _loop_status_inbox_item_matches_run(row, run_id=run_id))
+
+
+def _ralph_loop_run_for_task(conn: Any, *, worker_db: Any, task: Any, run_ref: str) -> dict[str, Any]:
+    row = conn.execute(
+        """
+        select id
+        from runs
+        where task_id = ?
+          and (id = ? or name = ?)
+        order by started_at desc, id desc
+        limit 1
+        """,
+        (task["id"], run_ref, run_ref),
+    ).fetchone()
+    if row is None:
+        raise WorkerError(f"run {run_ref!r} does not belong to task {task['name']!r}")
+    return worker_db.ralph_loop_run(conn, run=row["id"])
+
+
+def _loop_status_summary(conn: Any, *, task: Any, run: dict[str, Any]) -> dict[str, Any]:
+    from workerctl import db as worker_db
+
+    metadata = run.get("metadata") or {}
+    command_rows = conn.execute(
+        """
+        select id, state, payload_json, result_json
+        from commands
+        where task_id = ?
+        order by created_at, id
+        """,
+        (task["id"],),
+    ).fetchall()
+    matching_commands = [row for row in command_rows if _loop_status_command_matches_run(row, run_id=run["id"])]
+    command_states = Counter(row["state"] for row in matching_commands)
+
+    notifications = [
+        notification
+        for notification in worker_db.routed_notifications(conn, task_id=task["id"])
+        if _notification_loop_run_id(notification) == run["id"]
+    ]
+    notification_states = Counter(notification["state"] for notification in notifications)
+
+    worker_inbox = 0
+    try:
+        binding = worker_db.active_binding_for_task(conn, task_name=task["name"])
+    except WorkerError:
+        binding = None
+    if binding is not None:
+        worker_inbox = _loop_status_worker_inbox_count(
+            conn,
+            task=task,
+            worker_session_id=binding["worker_session_id"],
+            run_id=run["id"],
+        )
+
+    criteria = worker_db.acceptance_criteria_for_task(conn, task_id=task["id"])
+    evidence_items = [
+        criterion["evidence"]
+        for criterion in criteria
+        if isinstance(criterion.get("evidence"), dict)
+        and criterion["evidence"].get("ralph_loop_run_id") == run["id"]
+    ]
+    evidence_types = sorted(
+        {
+            evidence.get("evidence_type")
+            for evidence in evidence_items
+            if isinstance(evidence.get("evidence_type"), str) and evidence.get("evidence_type")
+        }
+    )
+
+    telemetry_events = query_telemetry_events(
+        conn,
+        run_id=run["id"],
+        task_id=task["id"],
+        limit=1000,
+    )
+    event_types = Counter(event["event_type"] for event in telemetry_events)
+
+    failures = telemetry_failures_view(conn, task_id=task["id"], run_id=run["id"])
+    failed_command_count = command_states.get("failed", 0)
+    failed_cycle_count = len(failures["failed_cycles"])
+    pane_capture_failure_count = len(failures["pane_capture_failures"])
+    alert_count = 0
+    if failed_command_count:
+        alert_count += 1
+    if failed_cycle_count:
+        alert_count += 1
+    if pane_capture_failure_count:
+        alert_count += 1
+    if failures["ingest"]["error_count"]:
+        alert_count += 1
+    if failures["open_criteria"]["open_accepted_count"]:
+        alert_count += 1
+    failure_counts = {
+        "alerts": alert_count,
+        "failed_commands": failed_command_count,
+        "failed_cycles": failed_cycle_count,
+        "pane_capture_failures": pane_capture_failure_count,
+    }
+    if failure_counts["alerts"] or failure_counts["failed_commands"] or failure_counts["failed_cycles"]:
+        recommendation = "inspect_failures"
+    elif worker_inbox:
+        recommendation = "worker_should_consume_inbox"
+    else:
+        recommendation = "ready_for_manager_review"
+
+    return {
+        "task": {"id": task["id"], "name": task["name"], "state": task["state"]},
+        "run": {"id": run["id"], "name": run["name"], "status": run["status"]},
+        "policy": {
+            "template": metadata.get("template") or metadata.get("preset"),
+            "current_iteration": metadata.get("current_iteration"),
+            "max_iterations": metadata.get("max_iterations"),
+            "required_before_continue": metadata.get("required_before_continue") or [],
+            "cleanup_policy": metadata.get("cleanup_policy"),
+        },
+        "commands": {
+            "total": len(matching_commands),
+            "states": dict(sorted(command_states.items())),
+        },
+        "notifications": {
+            "total": len(notifications),
+            "delivered": notification_states.get("delivered", 0),
+        },
+        "inbox": {"worker_unconsumed": worker_inbox},
+        "evidence": {"total": len(evidence_items), "types": evidence_types},
+        "telemetry": {
+            "total": len(telemetry_events),
+            "dispatch_inbox_consumed": event_types.get("dispatch_inbox_consumed", 0),
+            "by_event_type": dict(sorted(event_types.items())),
+        },
+        "failures": failure_counts,
+        "recommendation": recommendation,
+    }
+
+
+def command_loop_status(args: argparse.Namespace) -> int:
+    from workerctl import db as worker_db
+
+    db_path = Path(args.path).expanduser().resolve() if args.path else None
+    with connect_db(db_path) as conn:
+        initialize_database(conn)
+        task = db_task_row(conn, task=args.task)
+        run = _ralph_loop_run_for_task(conn, worker_db=worker_db, task=task, run_ref=args.run)
+        result = _loop_status_summary(conn, task=task, run=run)
+    if args.json:
+        print(json.dumps(result, indent=2, sort_keys=True, default=str))
+        return 0
+    print(f"task: {result['task']['name']} ({result['task']['state']})")
+    print(f"run: {result['run']['name'] or result['run']['id']} ({result['run']['status']})")
+    print(
+        "policy: "
+        f"{result['policy']['template']} iteration "
+        f"{result['policy']['current_iteration']}/{result['policy']['max_iterations']}"
+    )
+    print(f"commands: {result['commands']['states']}")
+    print(
+        "notifications: "
+        f"{result['notifications']['delivered']}/{result['notifications']['total']} delivered"
+    )
+    print(f"worker_unconsumed: {result['inbox']['worker_unconsumed']}")
+    print(f"dispatch_inbox_consumed: {result['telemetry']['dispatch_inbox_consumed']}")
+    print(f"failures: {result['failures']}")
+    print(f"recommendation: {result['recommendation']}")
+    return 0
 
 
 def command_ralph_loop_presets(args: argparse.Namespace) -> int:
@@ -4521,6 +4976,7 @@ def _commands_view(
     conn: Any,
     *,
     task_id: str | None = None,
+    run_id: str | None = None,
     only_failed: bool = False,
     limit: int,
     updated_since: str | None = None,
@@ -4539,8 +4995,7 @@ def _commands_view(
     if only_failed:
         filters.append("state = 'failed'")
     where = f"where {' and '.join(filters)}" if filters else ""
-    rows = conn.execute(
-        f"""
+    command_sql = f"""
         select id, idempotency_key, created_at, updated_at, task_id, worker_id,
                manager_id, correlation_id, type, state, available_at, claimed_by,
                claimed_at, claim_expires_at, attempts, max_attempts, payload_json,
@@ -4548,22 +5003,27 @@ def _commands_view(
         from commands
         {where}
         order by updated_at desc, created_at desc, id desc
-        limit ?
-        """,
-        [*params, limit],
-    ).fetchall()
-    count_filters = list(filters)
-    count_params = list(params)
-    count_where = f"where {' and '.join(count_filters)}" if count_filters else ""
-    counts = conn.execute(
-        f"select state, count(*) as count from commands {count_where} group by state",
-        count_params,
-    ).fetchall()
+        """
+    if run_id is None:
+        rows = conn.execute(f"{command_sql} limit ?", [*params, limit]).fetchall()
+        count_filters = list(filters)
+        count_params = list(params)
+        count_where = f"where {' and '.join(count_filters)}" if count_filters else ""
+        counts = conn.execute(
+            f"select state, count(*) as count from commands {count_where} group by state",
+            count_params,
+        ).fetchall()
+        counts_by_state = {row["state"]: int(row["count"]) for row in counts}
+    else:
+        all_rows = conn.execute(command_sql, params).fetchall()
+        matching_rows = [row for row in all_rows if _loop_status_command_matches_run(row, run_id=run_id)]
+        rows = matching_rows[:limit]
+        counts_by_state = dict(Counter(row["state"] for row in matching_rows))
     return {
-        "counts_by_state": {row["state"]: int(row["count"]) for row in counts},
-        "failed_count": int(sum(row["count"] for row in counts if row["state"] == "failed")),
+        "counts_by_state": counts_by_state,
+        "failed_count": int(counts_by_state.get("failed", 0)),
         "recent": [_safe_command_view(row) for row in rows],
-        "total": int(sum(row["count"] for row in counts)),
+        "total": int(sum(counts_by_state.values())),
     }
 
 
@@ -4659,6 +5119,14 @@ def _ingest_view(
     if task_id is not None:
         cycle_filters.append("mc.task_id = ?")
         cycle_params.append(task_id)
+    if run_id is not None:
+        cycle_filters.append(
+            "exists ("
+            "select 1 from manager_cycle_spans mcs "
+            "where mcs.manager_cycle_id = mc.id and mcs.run_id = ?"
+            ")"
+        )
+        cycle_params.append(run_id)
     if updated_since is not None:
         cycle_filters.append("coalesce(mc.completed_at, mc.started_at) >= ?")
         cycle_params.append(updated_since)
@@ -4862,6 +5330,7 @@ def _open_criteria_failure_view(
     conn: Any,
     *,
     task_id: str | None = None,
+    run_id: str | None = None,
     active_only: bool = False,
     limit: int,
 ) -> dict[str, Any]:
@@ -4872,6 +5341,10 @@ def _open_criteria_failure_view(
         filters.append("task_id = ?")
         row_filters.append("ac.task_id = ?")
         params.append(task_id)
+    if run_id is not None:
+        filters.append("json_extract(evidence_json, '$.ralph_loop_run_id') = ?")
+        row_filters.append("json_extract(ac.evidence_json, '$.ralph_loop_run_id') = ?")
+        params.append(run_id)
     if active_only:
         filters.append("task_id in (select id from tasks where state in ('candidate', 'managed', 'paused'))")
         row_filters.append("ac.task_id in (select id from tasks where state in ('candidate', 'managed', 'paused'))")
@@ -4927,6 +5400,17 @@ def telemetry_failures_view(
         cycle_params.append(task_id)
         pane_filters.append("mc.task_id = ?")
         pane_params.append(task_id)
+    if run_id is not None:
+        run_filter = (
+            "exists ("
+            "select 1 from manager_cycle_spans mcs "
+            "where mcs.manager_cycle_id = mc.id and mcs.run_id = ?"
+            ")"
+        )
+        cycle_filters.append(run_filter)
+        cycle_params.append(run_id)
+        pane_filters.append(run_filter)
+        pane_params.append(run_id)
     if updated_since is not None:
         cycle_filters.append("coalesce(mc.completed_at, mc.started_at) >= ?")
         cycle_params.append(updated_since)
@@ -4975,6 +5459,7 @@ def telemetry_failures_view(
     failed_commands = _commands_view(
         conn,
         task_id=task_id,
+        run_id=run_id,
         only_failed=True,
         limit=limit,
         updated_since=updated_since,
@@ -4991,6 +5476,7 @@ def telemetry_failures_view(
     open_criteria = _open_criteria_failure_view(
         conn,
         task_id=task_id,
+        run_id=run_id,
         active_only=active_only,
         limit=limit,
     )
@@ -5024,6 +5510,7 @@ def telemetry_failures_view(
             "commands": _commands_view(
                 conn,
                 task_id=task_id,
+                run_id=run_id,
                 limit=limit,
                 updated_since=updated_since,
                 active_only=active_only,
@@ -5665,10 +6152,17 @@ def command_telemetry(args: argparse.Namespace) -> int:
                     print(f"{alert['severity']}: {alert['type']}: {alert['message']}")
             return 0
         if getattr(args, "view", None) == "failures":
+            from workerctl import db as worker_db
+
             run_id = None
-            task_id = db_task_row(conn, task=args.task)["id"] if args.task else None
+            task = db_task_row(conn, task=args.task) if args.task else None
+            task_id = task["id"] if task is not None else None
             if args.run:
-                run = db_run_row(conn, run=args.run)
+                run = (
+                    _ralph_loop_run_for_task(conn, worker_db=worker_db, task=task, run_ref=args.run)
+                    if task is not None
+                    else worker_db.ralph_loop_run(conn, run=args.run)
+                )
                 run_id = run["id"]
                 if task_id is not None and task_id != run["task_id"]:
                     raise WorkerError("--run and --task refer to different tasks")

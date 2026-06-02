@@ -5386,6 +5386,28 @@ class CliTests(unittest.TestCase):
         )
         return rollout
 
+    def test_docs_include_ralph_loop_operator_guide(self):
+        guide = (ROOT / "docs" / "qa" / "ralph-loop-operator-guide.md").read_text()
+        qa_readme = (ROOT / "docs" / "qa" / "README.md").read_text()
+        readme = (ROOT / "README.md").read_text()
+        checklist = (ROOT / "docs" / "manual-qa-checklist.md").read_text()
+
+        for document in (guide, qa_readme, readme, checklist):
+            self.assertIn("Ralph loop operator guide", document)
+        self.assertIn("Run this as an adversarially gated Ralph loop.", guide)
+        self.assertIn("Do not send the worker another iteration until adversarial proof exists.", guide)
+        self.assertIn("loop-triggers --classify", guide)
+        self.assertIn("loop-templates --create-run", guide)
+        self.assertIn("enqueue-continue-iteration", guide)
+        self.assertIn("worker-inbox", guide)
+        self.assertIn("loop-evidence adversarial-check", guide)
+        self.assertIn("telemetry failures", guide)
+        self.assertIn("loop-status", guide)
+        self.assertIn("max_iterations", guide)
+        self.assertIn("required_before_continue", guide)
+        self.assertIn("The manager asks; Dispatch decides.", guide)
+        self.assertIn("Generic caution does not arm a loop gate", guide)
+
     def test_dashboard_help_includes_loopback_defaults(self):
         proc = self.run_workerctl("dashboard", "--help")
 
@@ -6932,6 +6954,537 @@ class CliTests(unittest.TestCase):
             self.assertEqual(finished.returncode, 0, finished.stderr)
             self.assertEqual(json.loads(finished.stdout)["status"], "failed")
 
+    def test_loop_status_help_is_available(self):
+        proc = self.run_workerctl("loop-status", "--help")
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("Summarize a Ralph loop run", proc.stdout)
+        self.assertIn("--run", proc.stdout)
+
+    def test_loop_status_resolves_run_name_within_task(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                first_task_id = worker_db.create_task(conn, name="first-task", goal="Inspect first run.")
+                second_task_id = worker_db.create_task(conn, name="second-task", goal="Inspect second run.")
+                first_run_id = worker_db.create_ralph_loop_run(
+                    conn,
+                    task_id=first_task_id,
+                    name="same-run-name",
+                    max_iterations=3,
+                    current_iteration=1,
+                    cleanup_policy="clear",
+                    required_before_continue=[],
+                    metadata={"template": "test_coverage_loop"},
+                )
+                second_run_id = worker_db.create_ralph_loop_run(
+                    conn,
+                    task_id=second_task_id,
+                    name="same-run-name",
+                    max_iterations=3,
+                    current_iteration=1,
+                    cleanup_policy="clear",
+                    required_before_continue=[],
+                    metadata={"template": "test_coverage_loop"},
+                )
+                conn.commit()
+
+            first = self.run_workerctl(
+                "loop-status",
+                "first-task",
+                "--run",
+                "same-run-name",
+                "--path",
+                str(db_path),
+                "--json",
+            )
+            second = self.run_workerctl(
+                "loop-status",
+                "second-task",
+                "--run",
+                "same-run-name",
+                "--path",
+                str(db_path),
+                "--json",
+            )
+
+            self.assertEqual(first.returncode, 0, first.stderr)
+            self.assertEqual(second.returncode, 0, second.stderr)
+            first_payload = json.loads(first.stdout)
+            second_payload = json.loads(second.stdout)
+            self.assertEqual(first_payload["task"]["name"], "first-task")
+            self.assertEqual(first_payload["run"]["id"], first_run_id)
+            self.assertEqual(first_payload["run"]["name"], "same-run-name")
+            self.assertEqual(second_payload["task"]["name"], "second-task")
+            self.assertEqual(second_payload["run"]["id"], second_run_id)
+            self.assertEqual(second_payload["run"]["name"], "same-run-name")
+
+    def test_loop_status_rejects_non_ralph_loop_run(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                task_id = worker_db.create_task(conn, name="nonralph-task", goal="Inspect plain run.")
+                worker_db.create_run(
+                    conn,
+                    task_id=task_id,
+                    name="plain-run",
+                    purpose="ordinary",
+                    metadata={"kind": "ordinary"},
+                )
+                conn.commit()
+
+            proc = self.run_workerctl(
+                "loop-status",
+                "nonralph-task",
+                "--run",
+                "plain-run",
+                "--path",
+                str(db_path),
+                "--json",
+            )
+
+            self.assertEqual(proc.returncode, 1)
+            self.assertIn("is not a Ralph loop run", proc.stderr)
+
+    def test_loop_status_summarizes_blocked_allowed_and_consumed_flow(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            receipt_path = Path(tmpdir) / "receipt.json"
+            qa = self.run_workerctl(
+                "qa-run",
+                "test-coverage-loop",
+                "--receipt-output",
+                str(receipt_path),
+                "--path",
+                str(db_path),
+                "--json",
+            )
+            self.assertEqual(qa.returncode, 0, qa.stderr)
+            receipt = json.loads(receipt_path.read_text())
+            task = receipt["generated_tasks"][0]["task_name"]
+            checks = {check["name"]: check for check in receipt["checks"]}
+            run_id = checks["structured_test_coverage_retry_delivers"]["dispatch"]["run_id"]
+
+            before = self.run_workerctl("loop-status", task, "--run", run_id, "--path", str(db_path), "--json")
+            self.assertEqual(before.returncode, 0, before.stderr)
+            before_payload = json.loads(before.stdout)
+            self.assertEqual(before_payload["task"]["name"], task)
+            self.assertEqual(before_payload["run"]["id"], run_id)
+            self.assertEqual(before_payload["policy"]["template"], "test_coverage_loop")
+            self.assertEqual(before_payload["policy"]["current_iteration"], 1)
+            self.assertEqual(before_payload["policy"]["max_iterations"], 3)
+            self.assertEqual(before_payload["commands"]["states"]["blocked"], 2)
+            self.assertEqual(before_payload["commands"]["states"]["succeeded"], 1)
+            self.assertEqual(before_payload["notifications"]["delivered"], 1)
+            self.assertEqual(before_payload["inbox"]["worker_unconsumed"], 1)
+            self.assertEqual(before_payload["telemetry"]["dispatch_inbox_consumed"], 0)
+            self.assertEqual(before_payload["recommendation"], "worker_should_consume_inbox")
+
+            consume = self.run_workerctl("worker-inbox", task, "--consume-next", "--wait", "--timeout", "2", "--path", str(db_path), "--json")
+            self.assertEqual(consume.returncode, 0, consume.stderr)
+
+            after = self.run_workerctl("loop-status", task, "--run", run_id, "--path", str(db_path), "--json")
+            self.assertEqual(after.returncode, 0, after.stderr)
+            after_payload = json.loads(after.stdout)
+            self.assertEqual(after_payload["inbox"]["worker_unconsumed"], 0)
+            self.assertEqual(after_payload["telemetry"]["dispatch_inbox_consumed"], 1)
+            self.assertEqual(after_payload["failures"]["failed_commands"], 0)
+            self.assertEqual(after_payload["recommendation"], "ready_for_manager_review")
+
+    def test_loop_status_ignores_failed_commands_from_other_runs(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                task_id = worker_db.create_task(conn, name="loop-status-scope-task", goal="Inspect one run.")
+                target_run_id = worker_db.create_ralph_loop_run(
+                    conn,
+                    task_id=task_id,
+                    name="target-loop-run",
+                    max_iterations=3,
+                    current_iteration=1,
+                    cleanup_policy="clear",
+                    required_before_continue=[],
+                    metadata={"template": "test_coverage_loop"},
+                )
+                other_run_id = worker_db.create_ralph_loop_run(
+                    conn,
+                    task_id=task_id,
+                    name="other-loop-run",
+                    max_iterations=3,
+                    current_iteration=1,
+                    cleanup_policy="clear",
+                    required_before_continue=[],
+                    metadata={"template": "test_coverage_loop"},
+                )
+                target_command_id = worker_db.create_command(
+                    conn,
+                    command_type="continue_iteration",
+                    payload={"loop_policy": {"run_id": target_run_id}},
+                    task_id=task_id,
+                    correlation_id="target-run-command",
+                )
+                worker_db.finish_command(
+                    conn,
+                    command_id=target_command_id,
+                    state="succeeded",
+                    result={"run_id": target_run_id},
+                )
+                other_command_id = worker_db.create_command(
+                    conn,
+                    command_type="continue_iteration",
+                    payload={"loop_policy": {"run_id": other_run_id}},
+                    task_id=task_id,
+                    correlation_id="other-run-command",
+                )
+                worker_db.finish_command(
+                    conn,
+                    command_id=other_command_id,
+                    state="failed",
+                    result={"run_id": other_run_id},
+                    error="other run failed",
+                )
+                conn.commit()
+
+            proc = self.run_workerctl(
+                "loop-status",
+                "loop-status-scope-task",
+                "--run",
+                target_run_id,
+                "--path",
+                str(db_path),
+                "--json",
+            )
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            payload = json.loads(proc.stdout)
+            self.assertEqual(payload["commands"]["states"], {"succeeded": 1})
+            self.assertEqual(payload["failures"]["failed_commands"], 0)
+            self.assertEqual(payload["recommendation"], "ready_for_manager_review")
+
+    def test_loop_status_ignores_unassociated_cycle_and_pane_failures_for_target_run(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                task_id = worker_db.create_task(conn, name="loop-status-cycle-scope-task", goal="Inspect one run.")
+                target_run_id = worker_db.create_ralph_loop_run(
+                    conn,
+                    task_id=task_id,
+                    name="target-clean-loop-run",
+                    max_iterations=3,
+                    current_iteration=1,
+                    cleanup_policy="clear",
+                    required_before_continue=[],
+                    metadata={"template": "test_coverage_loop"},
+                )
+                worker_db.create_ralph_loop_run(
+                    conn,
+                    task_id=task_id,
+                    name="other-loop-run",
+                    max_iterations=3,
+                    current_iteration=1,
+                    cleanup_policy="clear",
+                    required_before_continue=[],
+                    metadata={"template": "test_coverage_loop"},
+                )
+                target_command_id = worker_db.create_command(
+                    conn,
+                    command_type="continue_iteration",
+                    payload={"loop_policy": {"run_id": target_run_id}},
+                    task_id=task_id,
+                    correlation_id="target-clean-run-command",
+                )
+                worker_db.finish_command(
+                    conn,
+                    command_id=target_command_id,
+                    state="succeeded",
+                    result={"run_id": target_run_id},
+                )
+                failed_cycle = worker_db.create_manager_cycle(
+                    conn,
+                    task_id=task_id,
+                    manager_id=None,
+                    timestamp="2026-05-21T10:00:00Z",
+                )
+                worker_db.finish_manager_cycle(
+                    conn,
+                    cycle_id=failed_cycle,
+                    state="failed",
+                    status={
+                        "kind": "session_cycle",
+                        "pane_signal": {"captured": True, "notable_pattern": None},
+                    },
+                    error="unassociated task-wide cycle failed",
+                    timestamp="2026-05-21T10:00:05Z",
+                )
+                pane_failure = worker_db.create_manager_cycle(
+                    conn,
+                    task_id=task_id,
+                    manager_id=None,
+                    timestamp="2026-05-21T10:01:00Z",
+                )
+                worker_db.finish_manager_cycle(
+                    conn,
+                    cycle_id=pane_failure,
+                    state="succeeded",
+                    status={
+                        "kind": "session_cycle",
+                        "pane_signal": {"captured": False, "reason": "other run pane capture failed"},
+                    },
+                    timestamp="2026-05-21T10:01:05Z",
+                )
+                ingest_failure = worker_db.create_manager_cycle(
+                    conn,
+                    task_id=task_id,
+                    manager_id=None,
+                    timestamp="2026-05-21T10:01:30Z",
+                )
+                worker_db.finish_manager_cycle(
+                    conn,
+                    cycle_id=ingest_failure,
+                    state="failed",
+                    status={
+                        "error_type": "CodexIngestError",
+                        "kind": "session_cycle",
+                        "pane_signal": {"captured": True, "notable_pattern": None},
+                    },
+                    error="Ingest failed for another run",
+                    timestamp="2026-05-21T10:01:35Z",
+                )
+                conn.commit()
+
+            proc = self.run_workerctl(
+                "loop-status",
+                "loop-status-cycle-scope-task",
+                "--run",
+                target_run_id,
+                "--path",
+                str(db_path),
+                "--json",
+            )
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            payload = json.loads(proc.stdout)
+            self.assertEqual(payload["commands"]["states"], {"succeeded": 1})
+            self.assertEqual(payload["failures"]["failed_commands"], 0)
+            self.assertEqual(payload["failures"]["failed_cycles"], 0)
+            self.assertEqual(payload["failures"]["pane_capture_failures"], 0)
+            self.assertEqual(payload["recommendation"], "ready_for_manager_review")
+
+            with worker_db.connect(db_path) as conn:
+                associated_cycle = worker_db.create_manager_cycle(
+                    conn,
+                    task_id=task_id,
+                    manager_id=None,
+                    timestamp="2026-05-21T10:02:00Z",
+                )
+                worker_db.finish_manager_cycle(
+                    conn,
+                    cycle_id=associated_cycle,
+                    state="failed",
+                    status={
+                        "kind": "session_cycle",
+                        "pane_signal": {"captured": False, "reason": "target run pane capture failed"},
+                    },
+                    error="target run associated cycle failed",
+                    timestamp="2026-05-21T10:02:05Z",
+                )
+                worker_db.insert_manager_cycle_span(
+                    conn,
+                    manager_cycle_id=associated_cycle,
+                    task_id=task_id,
+                    run_id=target_run_id,
+                    phase="capture_pane_signal",
+                    started_at="2026-05-21T10:02:00Z",
+                    completed_at="2026-05-21T10:02:05Z",
+                    duration_ms=5000.0,
+                    state="failed",
+                    error_type="RuntimeError",
+                )
+                conn.commit()
+
+            associated = self.run_workerctl(
+                "loop-status",
+                "loop-status-cycle-scope-task",
+                "--run",
+                target_run_id,
+                "--path",
+                str(db_path),
+                "--json",
+            )
+
+            self.assertEqual(associated.returncode, 0, associated.stderr)
+            associated_payload = json.loads(associated.stdout)
+            self.assertEqual(associated_payload["failures"]["failed_cycles"], 1)
+            self.assertEqual(associated_payload["failures"]["pane_capture_failures"], 1)
+            self.assertEqual(associated_payload["recommendation"], "inspect_failures")
+
+    def test_loop_status_counts_target_inbox_beyond_first_hundred_items(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                task_id = worker_db.create_task(conn, name="loop-status-inbox-limit-task", goal="Inspect inbox.")
+                conn.execute("update tasks set state = 'managed' where id = ?", (task_id,))
+                worker_id = worker_db.register_session(
+                    conn,
+                    name="loop-status-inbox-worker",
+                    role="worker",
+                    codex_session_path="/tmp/loop-status-inbox-worker.jsonl",
+                    codex_session_id="codex-loop-status-inbox-worker",
+                    pid=11,
+                    cwd="/repo",
+                    tmux_session=None,
+                )
+                manager_id = worker_db.register_session(
+                    conn,
+                    name="loop-status-inbox-manager",
+                    role="manager",
+                    codex_session_path="/tmp/loop-status-inbox-manager.jsonl",
+                    codex_session_id="codex-loop-status-inbox-manager",
+                    pid=12,
+                    cwd="/repo",
+                    tmux_session=None,
+                )
+                binding_id = worker_db.bind_sessions(
+                    conn,
+                    task_name="loop-status-inbox-limit-task",
+                    worker_session_name="loop-status-inbox-worker",
+                    manager_session_name="loop-status-inbox-manager",
+                )
+                target_run_id = worker_db.create_ralph_loop_run(
+                    conn,
+                    task_id=task_id,
+                    name="target-inbox-run",
+                    max_iterations=3,
+                    current_iteration=1,
+                    cleanup_policy="clear",
+                    required_before_continue=[],
+                    metadata={"template": "test_coverage_loop"},
+                )
+                other_run_id = worker_db.create_ralph_loop_run(
+                    conn,
+                    task_id=task_id,
+                    name="other-inbox-run",
+                    max_iterations=3,
+                    current_iteration=1,
+                    cleanup_policy="clear",
+                    required_before_continue=[],
+                    metadata={"template": "test_coverage_loop"},
+                )
+                for index in range(100):
+                    worker_db.insert_routed_notification(
+                        conn,
+                        task_id=task_id,
+                        binding_id=binding_id,
+                        correlation_id=f"other-inbox-{index}",
+                        source_session_id=manager_id,
+                        target_session_id=worker_id,
+                        signal_type="continue_iteration",
+                        source_event_id=None,
+                        source_event_timestamp=None,
+                        dedupe_key=f"other-inbox-{index}",
+                        payload={"ralph_loop": {"run_id": other_run_id}, "message": "other run"},
+                        state="delivered",
+                        delivery_mode="pull_required",
+                        timestamp=f"2026-05-21T10:{index // 60:02d}:{index % 60:02d}Z",
+                    )
+                worker_db.insert_routed_notification(
+                    conn,
+                    task_id=task_id,
+                    binding_id=binding_id,
+                    correlation_id="target-inbox-after-limit",
+                    source_session_id=manager_id,
+                    target_session_id=worker_id,
+                    signal_type="continue_iteration",
+                    source_event_id=None,
+                    source_event_timestamp=None,
+                    dedupe_key="target-inbox-after-limit",
+                    payload={"ralph_loop": {"run_id": target_run_id}, "message": "target run"},
+                    state="delivered",
+                    delivery_mode="pull_required",
+                    timestamp="2026-05-21T10:02:00Z",
+                )
+                conn.commit()
+
+            proc = self.run_workerctl(
+                "loop-status",
+                "loop-status-inbox-limit-task",
+                "--run",
+                target_run_id,
+                "--path",
+                str(db_path),
+                "--json",
+            )
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            payload = json.loads(proc.stdout)
+            self.assertEqual(payload["inbox"]["worker_unconsumed"], 1)
+            self.assertEqual(payload["recommendation"], "worker_should_consume_inbox")
+
+    def test_loop_status_queries_target_run_telemetry_without_task_limit_loss(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                task_id = worker_db.create_task(conn, name="loop-status-telemetry-task", goal="Inspect telemetry.")
+                target_run_id = worker_db.create_ralph_loop_run(
+                    conn,
+                    task_id=task_id,
+                    name="target-telemetry-run",
+                    max_iterations=3,
+                    current_iteration=1,
+                    cleanup_policy="clear",
+                    required_before_continue=[],
+                    metadata={"template": "test_coverage_loop"},
+                )
+                other_run_id = worker_db.create_ralph_loop_run(
+                    conn,
+                    task_id=task_id,
+                    name="other-telemetry-run",
+                    max_iterations=3,
+                    current_iteration=1,
+                    cleanup_policy="clear",
+                    required_before_continue=[],
+                    metadata={"template": "test_coverage_loop"},
+                )
+                for index in range(1005):
+                    worker_db.emit_telemetry_event(
+                        conn,
+                        actor="manager",
+                        event_type="manager_cycle_succeeded",
+                        run_id=other_run_id,
+                        summary=f"Other run event {index}.",
+                        timestamp=f"2026-05-20T11:{index // 60:02d}:{index % 60:02d}Z",
+                    )
+                worker_db.emit_telemetry_event(
+                    conn,
+                    actor="dispatch",
+                    event_type="dispatch_inbox_consumed",
+                    run_id=target_run_id,
+                    summary="Target run inbox consumed.",
+                    timestamp="2026-05-20T12:00:00Z",
+                )
+                conn.commit()
+
+            proc = self.run_workerctl(
+                "loop-status",
+                "loop-status-telemetry-task",
+                "--run",
+                target_run_id,
+                "--path",
+                str(db_path),
+                "--json",
+            )
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            payload = json.loads(proc.stdout)
+            self.assertEqual(payload["telemetry"]["dispatch_inbox_consumed"], 1)
+            self.assertEqual(payload["telemetry"]["by_event_type"], {"dispatch_inbox_consumed": 1})
+
     def test_telemetry_cli_outputs_run_events_and_search_results(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "workerctl.db"
@@ -8026,6 +8579,262 @@ class CliTests(unittest.TestCase):
             self.assertEqual([row["id"] for row in scoped_view["failed_commands"]], [command_id])
             self.assertNotIn("other-failure-task", scoped.stdout)
 
+    def test_telemetry_failures_view_scopes_failed_commands_by_run(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                task_id = worker_db.create_task(conn, name="failure-run-scope-task", goal="Inspect one run.")
+                target_run_id = worker_db.create_ralph_loop_run(
+                    conn,
+                    task_id=task_id,
+                    name="target-loop-run",
+                    max_iterations=3,
+                    current_iteration=1,
+                    cleanup_policy="clear",
+                    required_before_continue=[],
+                    metadata={"template": "test_coverage_loop"},
+                )
+                other_run_id = worker_db.create_ralph_loop_run(
+                    conn,
+                    task_id=task_id,
+                    name="other-loop-run",
+                    max_iterations=3,
+                    current_iteration=1,
+                    cleanup_policy="clear",
+                    required_before_continue=[],
+                    metadata={"template": "test_coverage_loop"},
+                )
+                target_cycle = worker_db.create_manager_cycle(
+                    conn,
+                    task_id=task_id,
+                    manager_id=None,
+                    timestamp="2026-05-21T10:00:00Z",
+                )
+                worker_db.finish_manager_cycle(
+                    conn,
+                    cycle_id=target_cycle,
+                    state="failed",
+                    status={
+                        "kind": "session_cycle",
+                        "pane_signal": {"captured": False, "reason": "target run pane capture failed"},
+                    },
+                    error="target run associated cycle failed",
+                    timestamp="2026-05-21T10:00:05Z",
+                )
+                worker_db.insert_manager_cycle_span(
+                    conn,
+                    manager_cycle_id=target_cycle,
+                    task_id=task_id,
+                    run_id=target_run_id,
+                    phase="capture_pane_signal",
+                    started_at="2026-05-21T10:00:00Z",
+                    completed_at="2026-05-21T10:00:05Z",
+                    duration_ms=5000.0,
+                    state="failed",
+                    error_type="RuntimeError",
+                )
+                target_command_id = worker_db.create_command(
+                    conn,
+                    command_type="continue_iteration",
+                    payload={"message": "target command"},
+                    task_id=task_id,
+                    correlation_id="target-run-command",
+                    timestamp="2026-05-21T10:01:00Z",
+                )
+                worker_db.finish_command(
+                    conn,
+                    command_id=target_command_id,
+                    state="failed",
+                    result={"ralph_loop": {"run_id": target_run_id}},
+                    error="target run failed",
+                    timestamp="2026-05-21T10:01:05Z",
+                )
+                other_command_id = worker_db.create_command(
+                    conn,
+                    command_type="continue_iteration",
+                    payload={"loop_policy": {"run_id": other_run_id}},
+                    task_id=task_id,
+                    correlation_id="other-run-command",
+                    timestamp="2026-05-21T10:02:00Z",
+                )
+                worker_db.finish_command(
+                    conn,
+                    command_id=other_command_id,
+                    state="failed",
+                    result={"message": "other command"},
+                    error="other run failed",
+                    timestamp="2026-05-21T10:02:05Z",
+                )
+                other_ingest_cycle = worker_db.create_manager_cycle(
+                    conn,
+                    task_id=task_id,
+                    manager_id=None,
+                    timestamp="2026-05-21T10:03:00Z",
+                )
+                worker_db.finish_manager_cycle(
+                    conn,
+                    cycle_id=other_ingest_cycle,
+                    state="failed",
+                    status={
+                        "error_type": "CodexIngestError",
+                        "kind": "session_cycle",
+                        "pane_signal": {"captured": True, "notable_pattern": None},
+                    },
+                    error="Ingest failed for other run",
+                    timestamp="2026-05-21T10:03:05Z",
+                )
+                worker_db.insert_acceptance_criterion(
+                    conn,
+                    task_id=task_id,
+                    criterion="Other run accepted criterion",
+                    status="accepted",
+                    source="user_requested",
+                    evidence={
+                        "evidence_type": "adversarial_check",
+                        "ralph_loop_run_id": other_run_id,
+                    },
+                )
+                conn.commit()
+
+            proc = self.run_workerctl(
+                "telemetry",
+                "failures",
+                "--run",
+                target_run_id,
+                "--json",
+                "--limit",
+                "10",
+                "--path",
+                str(db_path),
+            )
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            view = json.loads(proc.stdout)
+            self.assertEqual([row["id"] for row in view["failed_cycles"]], [target_cycle])
+            self.assertEqual([row["id"] for row in view["pane_capture_failures"]], [target_cycle])
+            self.assertEqual([row["id"] for row in view["failed_commands"]], [target_command_id])
+            self.assertEqual(view["ingest"]["cycle_errors"], [])
+            self.assertEqual(view["ingest"]["error_count"], 0)
+            self.assertEqual(view["open_criteria"]["open_accepted_count"], 0)
+            self.assertNotIn(other_command_id, proc.stdout)
+            self.assertNotIn("other-run-command", proc.stdout)
+
+            status = self.run_workerctl(
+                "loop-status",
+                "failure-run-scope-task",
+                "--run",
+                target_run_id,
+                "--json",
+                "--path",
+                str(db_path),
+            )
+
+            self.assertEqual(status.returncode, 0, status.stderr)
+            status_view = json.loads(status.stdout)
+            self.assertEqual(status_view["failures"]["alerts"], 3)
+            self.assertEqual(status_view["recommendation"], "inspect_failures")
+
+            task_scoped = self.run_workerctl(
+                "telemetry",
+                "failures",
+                "--task",
+                "failure-run-scope-task",
+                "--json",
+                "--limit",
+                "10",
+                "--path",
+                str(db_path),
+            )
+
+            self.assertEqual(task_scoped.returncode, 0, task_scoped.stderr)
+            task_view = json.loads(task_scoped.stdout)
+            self.assertEqual(
+                [row["id"] for row in task_view["failed_commands"]],
+                [other_command_id, target_command_id],
+            )
+            self.assertEqual([row["id"] for row in task_view["ingest"]["cycle_errors"]], [other_ingest_cycle])
+            self.assertEqual(task_view["open_criteria"]["open_accepted_count"], 1)
+
+    def test_telemetry_failures_resolves_run_name_within_task(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                first_task_id = worker_db.create_task(conn, name="telemetry-first-task", goal="Inspect first run.")
+                second_task_id = worker_db.create_task(conn, name="telemetry-second-task", goal="Inspect second run.")
+                first_run_id = worker_db.create_ralph_loop_run(
+                    conn,
+                    task_id=first_task_id,
+                    name="same-telemetry-run",
+                    max_iterations=3,
+                    current_iteration=1,
+                    cleanup_policy="clear",
+                    required_before_continue=[],
+                    metadata={"template": "test_coverage_loop"},
+                )
+                second_run_id = worker_db.create_ralph_loop_run(
+                    conn,
+                    task_id=second_task_id,
+                    name="same-telemetry-run",
+                    max_iterations=3,
+                    current_iteration=1,
+                    cleanup_policy="clear",
+                    required_before_continue=[],
+                    metadata={"template": "test_coverage_loop"},
+                )
+                second_command_id = worker_db.create_command(
+                    conn,
+                    command_type="continue_iteration",
+                    payload={"loop_policy": {"run_id": second_run_id}},
+                    task_id=second_task_id,
+                    correlation_id="second-run-failure",
+                    timestamp="2026-05-21T10:00:00Z",
+                )
+                worker_db.finish_command(
+                    conn,
+                    command_id=second_command_id,
+                    state="failed",
+                    result={"run_id": second_run_id},
+                    error="second run failed",
+                    timestamp="2026-05-21T10:00:05Z",
+                )
+                conn.commit()
+
+            first = self.run_workerctl(
+                "telemetry",
+                "failures",
+                "--task",
+                "telemetry-first-task",
+                "--run",
+                "same-telemetry-run",
+                "--path",
+                str(db_path),
+                "--json",
+            )
+            second = self.run_workerctl(
+                "telemetry",
+                "failures",
+                "--task",
+                "telemetry-second-task",
+                "--run",
+                "same-telemetry-run",
+                "--path",
+                str(db_path),
+                "--json",
+            )
+
+            self.assertEqual(first.returncode, 0, first.stderr)
+            self.assertEqual(second.returncode, 0, second.stderr)
+            first_payload = json.loads(first.stdout)
+            second_payload = json.loads(second.stdout)
+            self.assertEqual(first_payload["filters"]["task_id"], first_task_id)
+            self.assertEqual(first_payload["filters"]["run_id"], first_run_id)
+            self.assertEqual(first_payload["failed_commands"], [])
+            self.assertEqual(second_payload["filters"]["task_id"], second_task_id)
+            self.assertEqual(second_payload["filters"]["run_id"], second_run_id)
+            self.assertEqual([row["id"] for row in second_payload["failed_commands"]], [second_command_id])
+
     def test_telemetry_failures_view_scopes_by_window_and_active_tasks(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "workerctl.db"
@@ -9112,6 +9921,12 @@ Deferred follow-up criteria:
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertIn("test-coverage-loop", proc.stdout)
 
+    def test_qa_run_help_lists_build_clear_loop(self):
+        proc = self.run_workerctl("qa-run", "--help")
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("build-clear-loop", proc.stdout)
+
     def test_qa_run_ralph_loop_guardrails_writes_replayable_receipt(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "db" / "workerctl.db"
@@ -9259,6 +10074,70 @@ Deferred follow-up criteria:
             self.assertIn("qa-plan adversarial-triggers", replay_commands)
             self.assertIn("worker-inbox", replay_commands)
             self.assertIn("export-task", replay_commands)
+
+    def test_qa_run_build_clear_loop_writes_replayable_receipt(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "db" / "workerctl.db"
+            receipt_path = Path(tmpdir) / "receipts" / "receipt.json"
+
+            proc = self.run_workerctl(
+                "qa-run",
+                "build-clear-loop",
+                "--receipt-output",
+                str(receipt_path),
+                "--path",
+                str(db_path),
+                "--json",
+            )
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            summary = json.loads(proc.stdout)
+            receipt = json.loads(receipt_path.read_text())
+            self.assertEqual(summary["scenario"], "build-clear-loop")
+            self.assertEqual(summary["result"], "passed")
+            self.assertEqual(summary["checks"], 3)
+            self.assertEqual(receipt["scenario"], "build-clear-loop")
+            self.assertEqual(receipt["template"], "build_then_clear")
+            self.assertEqual(receipt["result"], "passed")
+            self.assertEqual(Path(receipt["artifacts"]["db_path"]), db_path.resolve())
+            self.assertEqual(receipt["template_metadata"]["template"], "build_then_clear")
+            self.assertEqual(receipt["template_metadata"]["cleanup_policy"], "clear")
+            self.assertEqual(receipt["template_metadata"]["required_before_continue"], ["build_passed", "cleanup"])
+
+            generated_task = receipt["generated_tasks"][0]
+            self.assertEqual(generated_task["suffix"], "build-clear-loop")
+            self.assertTrue(generated_task["task_name"].startswith("qa-build-clear-loop-"))
+            self.assertTrue(generated_task["worker_name"].endswith("-worker"))
+
+            checks = {check["name"]: check for check in receipt["checks"]}
+            missing = checks["build_clear_blocks_before_build_or_cleanup_evidence"]
+            self.assertEqual(missing["dispatch"]["state"], "blocked")
+            self.assertEqual(missing["dispatch"]["reason"], "missing_required_evidence")
+            self.assertEqual(missing["dispatch"]["missing_evidence"], ["build_passed", "cleanup"])
+            self.assertEqual(missing["worker_inbox_count"], 0)
+            self.assertEqual(missing["routed_notifications_count"], 0)
+
+            build_only = checks["build_clear_still_blocks_before_cleanup_evidence"]
+            self.assertEqual(build_only["dispatch"]["state"], "blocked")
+            self.assertEqual(build_only["dispatch"]["reason"], "missing_cleanup_evidence")
+            self.assertEqual(build_only["dispatch"]["missing_evidence"], ["cleanup"])
+            self.assertEqual(build_only["worker_inbox_count"], 0)
+
+            allowed = checks["build_clear_retry_delivers_after_build_and_cleanup_evidence"]
+            self.assertEqual(allowed["dispatch"]["state"], "pull_required")
+            self.assertEqual(allowed["dispatch"]["loop_policy"]["template"], "build_then_clear")
+            self.assertEqual(allowed["dispatch"]["requested_iteration"], 2)
+            self.assertEqual(allowed["dispatch"]["current_iteration"], 1)
+            self.assertEqual(allowed["dispatch"]["max_iterations"], 2)
+            self.assertEqual(allowed["dispatch"]["missing_evidence"], [])
+            self.assertEqual(allowed["worker_inbox_count"], 1)
+
+            replay_commands = "\n".join(receipt["replay_commands"])
+            self.assertIn("loop-templates --show build_then_clear", replay_commands)
+            self.assertIn("--evidence-type build_passed", replay_commands)
+            self.assertIn("--evidence-type cleanup", replay_commands)
+            self.assertIn("worker-inbox", replay_commands)
+            self.assertIn(f"--path {db_path.resolve()}", replay_commands)
 
     def test_qa_run_generic_loop_template_writes_replayable_receipt(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -20037,10 +20916,13 @@ class ManagerBootstrapPromptTests(unittest.TestCase):
         self.assertIn("generic-loop-template-browser-receipt.json", readme)
         self.assertIn("qa-run test-coverage-loop", readme)
         self.assertIn("test-coverage-loop-receipt.json", readme)
+        self.assertIn("qa-run build-clear-loop", readme)
+        self.assertIn("build-clear-loop-receipt.json", readme)
         self.assertIn("Playwright dependency", readme)
         self.assertIn("Chromium", readme)
         self.assertIn("qa-run generic-loop-template-browser", checklist)
         self.assertIn("qa-run test-coverage-loop", checklist)
+        self.assertIn("qa-run build-clear-loop", checklist)
         self.assertIn("Playwright dependency", checklist)
         self.assertIn("Chromium", checklist)
         self.assertIn("browser-backed QA helper message", checklist)

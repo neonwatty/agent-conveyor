@@ -20,6 +20,7 @@ pass/fail evidence.
   nudge, worker-side assessment, and manager-side comparison test.
 - [Managed Ralph loop](ralph-loop.md) - repeated manager-led PR, CI, merge,
   handoff, worker clear, and same-prompt replay test.
+- [Ralph loop operator guide](ralph-loop-operator-guide.md): natural-language triggers, Dispatch authority, inbox polling, required evidence, adversarial proof, and telemetry review for real vertical slices.
 - [Adversarial triggers](adversarial-triggers.md) - natural-language trigger
   phrases plus `loop-triggers --classify` and `qa-run adversarial-triggers`
   receipt checks for Ralph-loop policy, Dispatch continuation gates, finish
