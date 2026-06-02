@@ -54,6 +54,13 @@ Record key values:
 - Focused diff checked: yes/no
 - Worker final receipt summarized commands and evidence: yes/no
 
+## Disproof Attempt
+
+- Strongest realistic failure mode:
+- Check used:
+- Result:
+- Residual risk or follow-up:
+
 ## Criteria
 
 - Criterion 1:
