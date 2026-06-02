@@ -1,0 +1,21 @@
+{
+  "consumed": null,
+  "items": [],
+  "session": {
+    "id": "session-fc029700-b637-4e84-9541-3e296c0e8a73",
+    "name": "qa-test-coverage-loop-afd2941a-worker",
+    "role": "worker"
+  },
+  "task": {
+    "id": "task-cc8dbc66-af6d-473d-8144-18e523668f8a",
+    "name": "qa-test-coverage-loop-afd2941a"
+  },
+  "wait": {
+    "elapsed_seconds": 0.0,
+    "enabled": false,
+    "interval_seconds": 2.0,
+    "poll_count": 1,
+    "timed_out": false,
+    "timeout_seconds": 30.0
+  }
+}

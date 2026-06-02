@@ -1,0 +1,127 @@
+{
+  "acceptance": "passed",
+  "allowed_dispatch_result": {
+    "current_iteration": 1,
+    "delivery_mode": "pull_required",
+    "loop_policy_template": "test_coverage_loop",
+    "max_iterations": 3,
+    "missing_evidence": [],
+    "notification_id": 1,
+    "requested_iteration": 2,
+    "run_id": "run-6d6b737e-4c37-4562-8bdf-d2a9be667409",
+    "state": "pull_required"
+  },
+  "artifact": "T005-test-coverage-loop",
+  "artifact_paths": {
+    "coverage_report": "/Users/neonwatty/Desktop/codex-terminal-manager/docs/live-qa-artifacts/telemetry-reprocessing-qa/T005-test-coverage-loop/test-coverage-loop-artifacts/afd2941a-run-6d6b737e-4c37-4562-8bdf-d2a9be667409/coverage-summary.json",
+    "database": "/Users/neonwatty/Desktop/codex-terminal-manager/docs/live-qa-artifacts/telemetry-reprocessing-qa/T005-test-coverage-loop/workerctl.db",
+    "export_archive": "/Users/neonwatty/Desktop/codex-terminal-manager/docs/live-qa-artifacts/telemetry-reprocessing-qa/T005-test-coverage-loop/export-qa-test-coverage-loop-afd2941a.zip",
+    "export_dir": "/Users/neonwatty/Desktop/codex-terminal-manager/docs/live-qa-artifacts/telemetry-reprocessing-qa/T005-test-coverage-loop/export-qa-test-coverage-loop-afd2941a"
+  },
+  "command_state_counts": {
+    "blocked": 2,
+    "succeeded": 1
+  },
+  "consumed_notification_id": 1,
+  "consumed_payload_run_id": "run-6d6b737e-4c37-4562-8bdf-d2a9be667409",
+  "consumed_telemetry_run_id": "run-6d6b737e-4c37-4562-8bdf-d2a9be667409",
+  "dispatch_inbox_consumed_event_type_count": 1,
+  "dispatch_inbox_consumed_search_event_count": 1,
+  "dispatch_search_event_count": 8,
+  "failure_view": {
+    "alerts": 0,
+    "failed_commands": 0,
+    "failed_cycles": 0,
+    "pane_capture_failures": 0,
+    "recent_ingest_errors": 0
+  },
+  "generated_at": "2026-06-02T16:53:11Z",
+  "observations": [
+    "Expected: the two blocked dispatch attempts are warning-severity guardrail events, not QA failures.",
+    "Expected: the successful pull_required result includes top-level run_id and loop_policy.template=test_coverage_loop.",
+    "Expected: dispatch_inbox_consumed appears through both --search and --event-type queries with matching counts.",
+    "Expected: the consumed inbox telemetry attaches the same Ralph loop run_id as the routed notification payload.",
+    "Expected: telemetry failures reports zero alerts, failed commands, failed cycles, and pane capture failures.",
+    "Note: task health can show inactive/dead PID session status because the deterministic QA registers disposable no-tmux sessions; command attempts and telemetry prove dispatch behavior independently."
+  ],
+  "proofs": {
+    "allowed_dispatch_has_loop_policy": true,
+    "allowed_dispatch_has_top_level_run_id": true,
+    "allowed_dispatch_iteration_bounds": {
+      "current_iteration": 1,
+      "max_iterations": 3,
+      "ok": true,
+      "requested_iteration": 2
+    },
+    "allowed_dispatch_missing_evidence_empty": true,
+    "artifact_paths_exist": true,
+    "audit_correlation_is_complete": true,
+    "inbox_consumed_event_carries_run_id": true,
+    "inbox_consumed_search_matches_event_type": true,
+    "no_error_severity_telemetry": true,
+    "no_failed_commands_or_cycles": true,
+    "qa_run_passed": true,
+    "replayable_timeline_exists": true,
+    "worker_inbox_drained_by_consume": true
+  },
+  "result": "passed",
+  "run_id": "run-6d6b737e-4c37-4562-8bdf-d2a9be667409",
+  "scenario": "test-coverage-loop",
+  "task": "qa-test-coverage-loop-afd2941a",
+  "task_health_notes": [],
+  "task_id": "task-cc8dbc66-af6d-473d-8144-18e523668f8a",
+  "telemetry_summary_after_consume": {
+    "by_actor": {
+      "dispatch": 9,
+      "workerctl": 6
+    },
+    "by_event_type": {
+      "acceptance_criterion_added": 2,
+      "acceptance_criterion_updated": 1,
+      "command_created": 3,
+      "dispatch_command_attempted": 1,
+      "dispatch_command_blocked": 2,
+      "dispatch_command_claimed": 3,
+      "dispatch_command_succeeded": 1,
+      "dispatch_inbox_consumed": 1,
+      "dispatch_signal_pull_required": 1
+    },
+    "by_severity": {
+      "info": 13,
+      "warning": 2
+    },
+    "first_timestamp": "2026-06-02T16:53:11Z",
+    "last_timestamp": "2026-06-02T16:55:02Z",
+    "run_id": "run-6d6b737e-4c37-4562-8bdf-d2a9be667409",
+    "task_id": "task-cc8dbc66-af6d-473d-8144-18e523668f8a",
+    "total": 15
+  },
+  "telemetry_summary_before_consume": {
+    "by_actor": {
+      "dispatch": 8,
+      "workerctl": 6
+    },
+    "by_event_type": {
+      "acceptance_criterion_added": 2,
+      "acceptance_criterion_updated": 1,
+      "command_created": 3,
+      "dispatch_command_attempted": 1,
+      "dispatch_command_blocked": 2,
+      "dispatch_command_claimed": 3,
+      "dispatch_command_succeeded": 1,
+      "dispatch_signal_pull_required": 1
+    },
+    "by_severity": {
+      "info": 12,
+      "warning": 2
+    },
+    "first_timestamp": "2026-06-02T16:53:11Z",
+    "last_timestamp": "2026-06-02T16:53:11Z",
+    "run_id": null,
+    "task_id": "task-cc8dbc66-af6d-473d-8144-18e523668f8a",
+    "total": 14
+  },
+  "template": "test_coverage_loop",
+  "worker_inbox_after_count": 0,
+  "worker_inbox_before_count": 1
+}

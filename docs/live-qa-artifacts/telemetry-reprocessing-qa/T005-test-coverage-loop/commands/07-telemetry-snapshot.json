@@ -1,0 +1,171 @@
+{
+  "alerts": [
+    {
+      "message": "2 active sessions have dead or missing pids.",
+      "severity": "error",
+      "type": "dead_pid_sessions"
+    }
+  ],
+  "checks": {
+    "ok": false,
+    "thresholds": {
+      "max_open_criteria": 0,
+      "max_storage_bytes": null,
+      "max_unfinished_commands": 0,
+      "stale_cycle_seconds": 3600.0,
+      "worker_staleness_seconds": 3600.0
+    }
+  },
+  "commands": {
+    "failed_count": 0,
+    "recent_failed": [],
+    "recent_unfinished": [],
+    "unfinished_count": 0
+  },
+  "criteria": {
+    "by_status": {
+      "satisfied": 2
+    },
+    "open_accepted": [],
+    "open_accepted_count": 0
+  },
+  "cycles": {
+    "recent_failed": [],
+    "recent_failed_count": 0,
+    "stale": [],
+    "stale_count": 0
+  },
+  "reconcile": {
+    "dangling_bindings": [],
+    "dead_pid_sessions": [
+      {
+        "last_heartbeat_at": "2026-06-02T16:53:11Z",
+        "name": "qa-test-coverage-loop-afd2941a-worker",
+        "pid": 78526,
+        "role": "worker"
+      },
+      {
+        "last_heartbeat_at": "2026-06-02T16:53:11Z",
+        "name": "qa-test-coverage-loop-afd2941a-manager",
+        "pid": 78526,
+        "role": "manager"
+      }
+    ],
+    "schema_health": {
+      "checks": [
+        {
+          "name": "foreign_keys",
+          "ok": true,
+          "value": 1
+        },
+        {
+          "name": "journal_mode_wal",
+          "ok": true,
+          "value": "wal"
+        },
+        {
+          "name": "busy_timeout",
+          "ok": true,
+          "value": 5000
+        },
+        {
+          "name": "schema_version",
+          "ok": true,
+          "value": 22
+        },
+        {
+          "name": "user_version",
+          "ok": true,
+          "value": 22
+        },
+        {
+          "missing": [],
+          "name": "required_tables",
+          "ok": true
+        },
+        {
+          "missing": [],
+          "name": "required_indexes",
+          "ok": true
+        },
+        {
+          "missing": [],
+          "name": "required_triggers",
+          "ok": true
+        },
+        {
+          "name": "foreign_key_check",
+          "ok": true,
+          "violations": []
+        }
+      ],
+      "ok": true,
+      "schema_version": 22,
+      "user_version": 22
+    },
+    "stuck_tasks": []
+  },
+  "sessions": {
+    "active": [
+      {
+        "cwd": "/Users/neonwatty/Desktop/codex-terminal-manager",
+        "heartbeat_age_seconds": 28,
+        "id": "session-5175c644-1cf6-4d23-a71c-68c26526b7fc",
+        "last_heartbeat_at": "2026-06-02T16:53:11Z",
+        "name": "qa-test-coverage-loop-afd2941a-manager",
+        "pid": 78526,
+        "registered_at": "2026-06-02T16:53:11Z",
+        "role": "manager",
+        "tmux_pane_id": null,
+        "tmux_session": null
+      },
+      {
+        "cwd": "/Users/neonwatty/Desktop/codex-terminal-manager",
+        "heartbeat_age_seconds": 28,
+        "id": "session-fc029700-b637-4e84-9541-3e296c0e8a73",
+        "last_heartbeat_at": "2026-06-02T16:53:11Z",
+        "name": "qa-test-coverage-loop-afd2941a-worker",
+        "pid": 78526,
+        "registered_at": "2026-06-02T16:53:11Z",
+        "role": "worker",
+        "tmux_pane_id": null,
+        "tmux_session": null
+      }
+    ],
+    "active_count": 2,
+    "dead_pid_count": 2,
+    "dead_pid_sessions": [
+      {
+        "last_heartbeat_at": "2026-06-02T16:53:11Z",
+        "name": "qa-test-coverage-loop-afd2941a-worker",
+        "pid": 78526,
+        "role": "worker"
+      },
+      {
+        "last_heartbeat_at": "2026-06-02T16:53:11Z",
+        "name": "qa-test-coverage-loop-afd2941a-manager",
+        "pid": 78526,
+        "role": "manager"
+      }
+    ],
+    "stale": [],
+    "stale_count": 0
+  },
+  "storage": {
+    "database_bytes": 487424,
+    "total_bytes": 487424
+  },
+  "tasks": {
+    "active": [
+      {
+        "created_at": "2026-06-02T16:53:11Z",
+        "id": "task-cc8dbc66-af6d-473d-8144-18e523668f8a",
+        "name": "qa-test-coverage-loop-afd2941a",
+        "state": "managed",
+        "summary": "Disposable no-tmux manager/worker binding for Dispatch guardrail proof.",
+        "updated_at": "2026-06-02T16:53:11Z"
+      }
+    ],
+    "active_count": 1
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "by_actor": {
+    "dispatch": 8,
+    "workerctl": 6
+  },
+  "by_event_type": {
+    "acceptance_criterion_added": 2,
+    "acceptance_criterion_updated": 1,
+    "command_created": 3,
+    "dispatch_command_attempted": 1,
+    "dispatch_command_blocked": 2,
+    "dispatch_command_claimed": 3,
+    "dispatch_command_succeeded": 1,
+    "dispatch_signal_pull_required": 1
+  },
+  "by_severity": {
+    "info": 12,
+    "warning": 2
+  },
+  "first_timestamp": "2026-06-02T16:53:11Z",
+  "last_timestamp": "2026-06-02T16:53:11Z",
+  "run_id": null,
+  "task_id": "task-cc8dbc66-af6d-473d-8144-18e523668f8a",
+  "total": 14
+}

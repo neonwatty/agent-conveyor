@@ -1,0 +1,163 @@
+{
+  "consumed": null,
+  "items": [
+    {
+      "binding_id": "binding-87e063c1-786e-4123-9a01-c56ecd839377",
+      "claim_expires_at": null,
+      "claimed_at": null,
+      "claimed_by": null,
+      "command_id": "command-f324b0d2-7fe0-4541-9fbe-ac81875dee34",
+      "consumed_at": null,
+      "consumed_by_session_id": null,
+      "consumed_manager_cycle_id": null,
+      "correlation_id": "qa-run-test-coverage-structured-allowed",
+      "created_at": "2026-06-02T16:53:11Z",
+      "dedupe_key": "binding-87e063c1-786e-4123-9a01-c56ecd839377:continue_iteration:command-f324b0d2-7fe0-4541-9fbe-ac81875dee34",
+      "delivered_at": "2026-06-02T16:53:11Z",
+      "delivery_mode": "pull_required",
+      "error": null,
+      "id": 1,
+      "payload": {
+        "command_id": "command-f324b0d2-7fe0-4541-9fbe-ac81875dee34",
+        "command_type": "continue_iteration",
+        "delivery_mode": "pull_required",
+        "dispatcher_id": "qa-run-afd2941a",
+        "loop_policy": {
+          "artifact_requirements": {
+            "adversarial_check": {
+              "description": "Structured proof that the manager or worker tried to disprove the iteration before continuing.",
+              "properties": {
+                "check": {
+                  "description": "Command, test, trace, screenshot, audit, diff, or inspection used.",
+                  "type": "string"
+                },
+                "failure_mode": {
+                  "description": "Strongest realistic failure mode considered.",
+                  "type": "string"
+                },
+                "result": {
+                  "description": "Why the check rules out the failure mode or what remains unresolved.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "failure_mode",
+                "check",
+                "result"
+              ],
+              "type": "object"
+            }
+          },
+          "cleanup_policy": "clear",
+          "current_iteration": 1,
+          "max_iterations": 3,
+          "preset": "test_coverage_loop",
+          "recommended_tools": [
+            "coverage",
+            "verification.run_tests"
+          ],
+          "required_before_continue": [
+            "test_coverage",
+            "adversarial_check"
+          ],
+          "run_id": "run-6d6b737e-4c37-4562-8bdf-d2a9be667409",
+          "seed_prompt_sha256": "qa-run-test-coverage-seed",
+          "stop_conditions": [
+            "max_iterations",
+            "required_evidence"
+          ],
+          "tags": [
+            "tests"
+          ],
+          "template": "test_coverage_loop"
+        },
+        "message": "Run test coverage template iteration 2 after structured adversarial proof.",
+        "permission_check": null,
+        "ralph_loop": {
+          "artifact_requirements": {
+            "adversarial_check": {
+              "description": "Structured proof that the manager or worker tried to disprove the iteration before continuing.",
+              "properties": {
+                "check": {
+                  "description": "Command, test, trace, screenshot, audit, diff, or inspection used.",
+                  "type": "string"
+                },
+                "failure_mode": {
+                  "description": "Strongest realistic failure mode considered.",
+                  "type": "string"
+                },
+                "result": {
+                  "description": "Why the check rules out the failure mode or what remains unresolved.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "failure_mode",
+                "check",
+                "result"
+              ],
+              "type": "object"
+            }
+          },
+          "cleanup_policy": "clear",
+          "current_iteration": 1,
+          "max_iterations": 3,
+          "preset": "test_coverage_loop",
+          "recommended_tools": [
+            "coverage",
+            "verification.run_tests"
+          ],
+          "requested_iteration": 2,
+          "required_before_continue": [
+            "test_coverage",
+            "adversarial_check"
+          ],
+          "run_id": "run-6d6b737e-4c37-4562-8bdf-d2a9be667409",
+          "seed_prompt_sha256": "qa-run-test-coverage-seed",
+          "stop_conditions": [
+            "max_iterations",
+            "required_evidence"
+          ],
+          "tags": [
+            "tests"
+          ],
+          "template": "test_coverage_loop"
+        },
+        "source_session": "qa-test-coverage-loop-afd2941a-manager",
+        "target_session": "qa-test-coverage-loop-afd2941a-worker",
+        "task_id": "task-cc8dbc66-af6d-473d-8144-18e523668f8a"
+      },
+      "side_effect_completed": false,
+      "side_effect_started": false,
+      "signal_type": "continue_iteration",
+      "source_event_id": null,
+      "source_event_timestamp": null,
+      "source_session_id": "session-5175c644-1cf6-4d23-a71c-68c26526b7fc",
+      "source_session_name": "qa-test-coverage-loop-afd2941a-manager",
+      "source_session_role": "manager",
+      "state": "delivered",
+      "target_session_id": "session-fc029700-b637-4e84-9541-3e296c0e8a73",
+      "target_session_name": "qa-test-coverage-loop-afd2941a-worker",
+      "target_session_role": "worker",
+      "task_id": "task-cc8dbc66-af6d-473d-8144-18e523668f8a",
+      "task_name": "qa-test-coverage-loop-afd2941a"
+    }
+  ],
+  "session": {
+    "id": "session-fc029700-b637-4e84-9541-3e296c0e8a73",
+    "name": "qa-test-coverage-loop-afd2941a-worker",
+    "role": "worker"
+  },
+  "task": {
+    "id": "task-cc8dbc66-af6d-473d-8144-18e523668f8a",
+    "name": "qa-test-coverage-loop-afd2941a"
+  },
+  "wait": {
+    "elapsed_seconds": 0.0,
+    "enabled": false,
+    "interval_seconds": 2.0,
+    "poll_count": 1,
+    "timed_out": false,
+    "timeout_seconds": 30.0
+  }
+}

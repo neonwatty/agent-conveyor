@@ -1,0 +1,341 @@
+{
+  "artifacts": {
+    "coverage_report": "/Users/neonwatty/Desktop/codex-terminal-manager/docs/live-qa-artifacts/telemetry-reprocessing-qa/T005-test-coverage-loop/test-coverage-loop-artifacts/afd2941a-run-6d6b737e-4c37-4562-8bdf-d2a9be667409/coverage-summary.json",
+    "db_path": "/Users/neonwatty/Desktop/codex-terminal-manager/docs/live-qa-artifacts/telemetry-reprocessing-qa/T005-test-coverage-loop/workerctl.db"
+  },
+  "checks": [
+    {
+      "command": "workerctl dispatch --once --type continue_iteration --dispatcher-id qa-run",
+      "dispatch": {
+        "attempt_id": 1,
+        "cleanup_policy": "clear",
+        "command_id": "command-1b8d67d3-9812-4782-a739-754afc8beba3",
+        "command_type": "continue_iteration",
+        "correlation_id": "qa-run-test-coverage-missing",
+        "current_iteration": 1,
+        "delivered": false,
+        "delivery_mode": "pull_required",
+        "dispatcher_id": "qa-run-afd2941a",
+        "dry_run": false,
+        "loop_policy": {
+          "artifact_requirements": {
+            "adversarial_check": {
+              "description": "Structured proof that the manager or worker tried to disprove the iteration before continuing.",
+              "properties": {
+                "check": {
+                  "description": "Command, test, trace, screenshot, audit, diff, or inspection used.",
+                  "type": "string"
+                },
+                "failure_mode": {
+                  "description": "Strongest realistic failure mode considered.",
+                  "type": "string"
+                },
+                "result": {
+                  "description": "Why the check rules out the failure mode or what remains unresolved.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "failure_mode",
+                "check",
+                "result"
+              ],
+              "type": "object"
+            }
+          },
+          "cleanup_policy": "clear",
+          "current_iteration": 1,
+          "max_iterations": 3,
+          "preset": "test_coverage_loop",
+          "recommended_tools": [
+            "coverage",
+            "verification.run_tests"
+          ],
+          "required_before_continue": [
+            "test_coverage",
+            "adversarial_check"
+          ],
+          "run_id": "run-6d6b737e-4c37-4562-8bdf-d2a9be667409",
+          "seed_prompt_sha256": "qa-run-test-coverage-seed",
+          "stop_conditions": [
+            "max_iterations",
+            "required_evidence"
+          ],
+          "tags": [
+            "tests"
+          ],
+          "template": "test_coverage_loop"
+        },
+        "manager_decision_id": null,
+        "max_iterations": 3,
+        "missing_evidence": [
+          "test_coverage",
+          "adversarial_check"
+        ],
+        "notification_id": null,
+        "reason": "missing_required_evidence",
+        "requested_iteration": 2,
+        "required_before_continue": [
+          "test_coverage",
+          "adversarial_check"
+        ],
+        "run_id": "run-6d6b737e-4c37-4562-8bdf-d2a9be667409",
+        "side_effect_completed": false,
+        "side_effect_started": false,
+        "state": "blocked",
+        "target_session": "qa-test-coverage-loop-afd2941a-worker",
+        "target_worker_notified": false
+      },
+      "name": "test_coverage_template_blocks_before_coverage_evidence",
+      "routed_notifications_count": 0,
+      "status": "passed",
+      "worker_inbox_count": 0
+    },
+    {
+      "command": "workerctl loop-evidence add --evidence-type adversarial_check ... && workerctl dispatch --once --type continue_iteration",
+      "dispatch": {
+        "attempt_id": 2,
+        "cleanup_policy": "clear",
+        "command_id": "command-8bf72ee3-b491-4370-92a0-b32fc5576570",
+        "command_type": "continue_iteration",
+        "correlation_id": "qa-run-test-coverage-unstructured-adversarial",
+        "current_iteration": 1,
+        "delivered": false,
+        "delivery_mode": "pull_required",
+        "dispatcher_id": "qa-run-afd2941a",
+        "dry_run": false,
+        "loop_policy": {
+          "artifact_requirements": {
+            "adversarial_check": {
+              "description": "Structured proof that the manager or worker tried to disprove the iteration before continuing.",
+              "properties": {
+                "check": {
+                  "description": "Command, test, trace, screenshot, audit, diff, or inspection used.",
+                  "type": "string"
+                },
+                "failure_mode": {
+                  "description": "Strongest realistic failure mode considered.",
+                  "type": "string"
+                },
+                "result": {
+                  "description": "Why the check rules out the failure mode or what remains unresolved.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "failure_mode",
+                "check",
+                "result"
+              ],
+              "type": "object"
+            }
+          },
+          "cleanup_policy": "clear",
+          "current_iteration": 1,
+          "max_iterations": 3,
+          "preset": "test_coverage_loop",
+          "recommended_tools": [
+            "coverage",
+            "verification.run_tests"
+          ],
+          "required_before_continue": [
+            "test_coverage",
+            "adversarial_check"
+          ],
+          "run_id": "run-6d6b737e-4c37-4562-8bdf-d2a9be667409",
+          "seed_prompt_sha256": "qa-run-test-coverage-seed",
+          "stop_conditions": [
+            "max_iterations",
+            "required_evidence"
+          ],
+          "tags": [
+            "tests"
+          ],
+          "template": "test_coverage_loop"
+        },
+        "manager_decision_id": null,
+        "max_iterations": 3,
+        "missing_evidence": [
+          "adversarial_check"
+        ],
+        "notification_id": null,
+        "reason": "missing_adversarial_check_evidence",
+        "requested_iteration": 2,
+        "required_before_continue": [
+          "test_coverage",
+          "adversarial_check"
+        ],
+        "run_id": "run-6d6b737e-4c37-4562-8bdf-d2a9be667409",
+        "side_effect_completed": false,
+        "side_effect_started": false,
+        "state": "blocked",
+        "target_session": "qa-test-coverage-loop-afd2941a-worker",
+        "target_worker_notified": false
+      },
+      "name": "test_coverage_unstructured_adversarial_check_still_blocks",
+      "routed_notifications_count": 0,
+      "status": "passed",
+      "worker_inbox_count": 0
+    },
+    {
+      "command": "workerctl loop-evidence adversarial-check ... && workerctl dispatch --once --type continue_iteration",
+      "dispatch": {
+        "attempt_id": 3,
+        "cleanup_policy": "clear",
+        "command_id": "command-f324b0d2-7fe0-4541-9fbe-ac81875dee34",
+        "command_type": "continue_iteration",
+        "correlation_id": "qa-run-test-coverage-structured-allowed",
+        "current_iteration": 1,
+        "delivery_mode": "pull_required",
+        "dispatcher_id": "qa-run-afd2941a",
+        "dry_run": false,
+        "loop_policy": {
+          "artifact_requirements": {
+            "adversarial_check": {
+              "description": "Structured proof that the manager or worker tried to disprove the iteration before continuing.",
+              "properties": {
+                "check": {
+                  "description": "Command, test, trace, screenshot, audit, diff, or inspection used.",
+                  "type": "string"
+                },
+                "failure_mode": {
+                  "description": "Strongest realistic failure mode considered.",
+                  "type": "string"
+                },
+                "result": {
+                  "description": "Why the check rules out the failure mode or what remains unresolved.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "failure_mode",
+                "check",
+                "result"
+              ],
+              "type": "object"
+            }
+          },
+          "cleanup_policy": "clear",
+          "current_iteration": 1,
+          "max_iterations": 3,
+          "preset": "test_coverage_loop",
+          "recommended_tools": [
+            "coverage",
+            "verification.run_tests"
+          ],
+          "required_before_continue": [
+            "test_coverage",
+            "adversarial_check"
+          ],
+          "run_id": "run-6d6b737e-4c37-4562-8bdf-d2a9be667409",
+          "seed_prompt_sha256": "qa-run-test-coverage-seed",
+          "stop_conditions": [
+            "max_iterations",
+            "required_evidence"
+          ],
+          "tags": [
+            "tests"
+          ],
+          "template": "test_coverage_loop"
+        },
+        "max_iterations": 3,
+        "missing_evidence": [],
+        "notification_id": 1,
+        "permission_check": null,
+        "reason": null,
+        "requested_iteration": 2,
+        "required_before_continue": [
+          "test_coverage",
+          "adversarial_check"
+        ],
+        "run_id": "run-6d6b737e-4c37-4562-8bdf-d2a9be667409",
+        "seed_prompt_sha256": "qa-run-test-coverage-seed",
+        "side_effect_completed": false,
+        "side_effect_started": false,
+        "state": "pull_required",
+        "stop_conditions": [
+          "max_iterations",
+          "required_evidence"
+        ],
+        "target_session": "qa-test-coverage-loop-afd2941a-worker"
+      },
+      "name": "structured_test_coverage_retry_delivers",
+      "routed_notifications_count": 1,
+      "status": "passed",
+      "worker_inbox_count": 1
+    }
+  ],
+  "generated_at": "2026-06-02T16:53:11Z",
+  "generated_tasks": [
+    {
+      "binding_id": "binding-87e063c1-786e-4123-9a01-c56ecd839377",
+      "manager_id": "session-5175c644-1cf6-4d23-a71c-68c26526b7fc",
+      "manager_name": "qa-test-coverage-loop-afd2941a-manager",
+      "suffix": "test-coverage-loop",
+      "task_id": "task-cc8dbc66-af6d-473d-8144-18e523668f8a",
+      "task_name": "qa-test-coverage-loop-afd2941a",
+      "worker_id": "session-fc029700-b637-4e84-9541-3e296c0e8a73",
+      "worker_name": "qa-test-coverage-loop-afd2941a-worker"
+    }
+  ],
+  "receipt_path": "/Users/neonwatty/Desktop/codex-terminal-manager/docs/live-qa-artifacts/telemetry-reprocessing-qa/T005-test-coverage-loop/test-coverage-loop-receipt.json",
+  "replay_commands": [
+    "scripts/workerctl loop-templates --show test_coverage_loop --json",
+    "scripts/workerctl loop-templates --create-run <task> --template test_coverage_loop --max-iterations 3 --current-iteration 1 --seed-prompt-sha256 qa-run-test-coverage-seed",
+    "scripts/workerctl loop-evidence add <task> --loop-run <run-id> --iteration 1 --evidence-type test_coverage --artifact-path <coverage-summary.json>",
+    "scripts/workerctl loop-evidence adversarial-check <task> --loop-run <run-id> --iteration 1 --failure-mode <failure> --check <check> --result <result>",
+    "scripts/workerctl dispatch --once --type continue_iteration --dispatcher-id qa-run-afd2941a --path /Users/neonwatty/Desktop/codex-terminal-manager/docs/live-qa-artifacts/telemetry-reprocessing-qa/T005-test-coverage-loop/workerctl.db"
+  ],
+  "result": "passed",
+  "scenario": "test-coverage-loop",
+  "template": "test_coverage_loop",
+  "template_metadata": {
+    "artifact_requirements": {
+      "adversarial_check": {
+        "description": "Structured proof that the manager or worker tried to disprove the iteration before continuing.",
+        "properties": {
+          "check": {
+            "description": "Command, test, trace, screenshot, audit, diff, or inspection used.",
+            "type": "string"
+          },
+          "failure_mode": {
+            "description": "Strongest realistic failure mode considered.",
+            "type": "string"
+          },
+          "result": {
+            "description": "Why the check rules out the failure mode or what remains unresolved.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "failure_mode",
+          "check",
+          "result"
+        ],
+        "type": "object"
+      }
+    },
+    "cleanup_policy": "clear",
+    "current_iteration": 1,
+    "kind": "ralph_loop",
+    "max_iterations": 3,
+    "preset": "test_coverage_loop",
+    "recommended_tools": [
+      "coverage",
+      "verification.run_tests"
+    ],
+    "required_before_continue": [
+      "test_coverage",
+      "adversarial_check"
+    ],
+    "seed_prompt_sha256": "qa-run-test-coverage-seed",
+    "stop_conditions": [
+      "max_iterations",
+      "required_evidence"
+    ],
+    "tags": [
+      "tests"
+    ],
+    "template": "test_coverage_loop"
+  }
+}

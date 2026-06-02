@@ -1,0 +1,403 @@
+{
+  "alerts": [
+    {
+      "message": "managed_without_active_worker_binding",
+      "severity": "error",
+      "type": "integrity_issue"
+    },
+    {
+      "message": "managed_without_active_manager",
+      "severity": "error",
+      "type": "integrity_issue"
+    },
+    {
+      "message": "worker session pid is not alive: qa-test-coverage-loop-afd2941a-worker",
+      "severity": "error",
+      "type": "dead_pid_session"
+    },
+    {
+      "message": "manager session pid is not alive: qa-test-coverage-loop-afd2941a-manager",
+      "severity": "error",
+      "type": "dead_pid_session"
+    }
+  ],
+  "commands": {
+    "counts_by_state": {
+      "blocked": 2,
+      "succeeded": 1
+    },
+    "failed_count": 0,
+    "recent": [
+      {
+        "attempts": 1,
+        "available_at": null,
+        "claimed_by": "qa-run-afd2941a",
+        "correlation_id": "qa-run-test-coverage-structured-allowed",
+        "created_at": "2026-06-02T16:53:11Z",
+        "error": null,
+        "id": "command-f324b0d2-7fe0-4541-9fbe-ac81875dee34",
+        "manager_id": null,
+        "max_attempts": 1,
+        "payload_keys": [
+          "message",
+          "ralph_loop"
+        ],
+        "required_permission": null,
+        "result_keys": [
+          "attempt_id",
+          "cleanup_policy",
+          "command_id",
+          "command_type",
+          "correlation_id",
+          "current_iteration",
+          "delivery_mode",
+          "dispatcher_id",
+          "dry_run",
+          "loop_policy",
+          "max_iterations",
+          "missing_evidence",
+          "notification_id",
+          "permission_check",
+          "reason",
+          "requested_iteration",
+          "required_before_continue",
+          "run_id",
+          "seed_prompt_sha256",
+          "side_effect_completed",
+          "side_effect_started",
+          "state",
+          "stop_conditions",
+          "target_session"
+        ],
+        "state": "succeeded",
+        "task_id": "task-cc8dbc66-af6d-473d-8144-18e523668f8a",
+        "type": "continue_iteration",
+        "updated_at": "2026-06-02T16:53:11Z",
+        "worker_id": null
+      },
+      {
+        "attempts": 1,
+        "available_at": null,
+        "claimed_by": "qa-run-afd2941a",
+        "correlation_id": "qa-run-test-coverage-unstructured-adversarial",
+        "created_at": "2026-06-02T16:53:11Z",
+        "error": "missing_adversarial_check_evidence missing_evidence=adversarial_check current_iteration=1 max_iterations=3 requested_iteration=2",
+        "id": "command-8bf72ee3-b491-4370-92a0-b32fc5576570",
+        "manager_id": null,
+        "max_attempts": 1,
+        "payload_keys": [
+          "message",
+          "ralph_loop"
+        ],
+        "required_permission": null,
+        "result_keys": [
+          "attempt_id",
+          "cleanup_policy",
+          "command_id",
+          "command_type",
+          "correlation_id",
+          "current_iteration",
+          "delivered",
+          "delivery_mode",
+          "dispatcher_id",
+          "dry_run",
+          "loop_policy",
+          "manager_decision_id",
+          "max_iterations",
+          "missing_evidence",
+          "notification_id",
+          "reason",
+          "requested_iteration",
+          "required_before_continue",
+          "run_id",
+          "side_effect_completed",
+          "side_effect_started",
+          "state",
+          "target_session",
+          "target_worker_notified"
+        ],
+        "state": "blocked",
+        "task_id": "task-cc8dbc66-af6d-473d-8144-18e523668f8a",
+        "type": "continue_iteration",
+        "updated_at": "2026-06-02T16:53:11Z",
+        "worker_id": null
+      },
+      {
+        "attempts": 1,
+        "available_at": null,
+        "claimed_by": "qa-run-afd2941a",
+        "correlation_id": "qa-run-test-coverage-missing",
+        "created_at": "2026-06-02T16:53:11Z",
+        "error": "missing_required_evidence missing_evidence=test_coverage,adversarial_check current_iteration=1 max_iterations=3 requested_iteration=2",
+        "id": "command-1b8d67d3-9812-4782-a739-754afc8beba3",
+        "manager_id": null,
+        "max_attempts": 1,
+        "payload_keys": [
+          "message",
+          "ralph_loop"
+        ],
+        "required_permission": null,
+        "result_keys": [
+          "attempt_id",
+          "cleanup_policy",
+          "command_id",
+          "command_type",
+          "correlation_id",
+          "current_iteration",
+          "delivered",
+          "delivery_mode",
+          "dispatcher_id",
+          "dry_run",
+          "loop_policy",
+          "manager_decision_id",
+          "max_iterations",
+          "missing_evidence",
+          "notification_id",
+          "reason",
+          "requested_iteration",
+          "required_before_continue",
+          "run_id",
+          "side_effect_completed",
+          "side_effect_started",
+          "state",
+          "target_session",
+          "target_worker_notified"
+        ],
+        "state": "blocked",
+        "task_id": "task-cc8dbc66-af6d-473d-8144-18e523668f8a",
+        "type": "continue_iteration",
+        "updated_at": "2026-06-02T16:53:11Z",
+        "worker_id": null
+      }
+    ],
+    "total": 3
+  },
+  "criteria": {
+    "open": [],
+    "open_count": 0,
+    "summary": {
+      "accepted": 0,
+      "deferred": 0,
+      "proposed": 0,
+      "rejected": 0,
+      "satisfied": 2
+    },
+    "total": 2
+  },
+  "cycles": {
+    "counts_by_state": {},
+    "failed": [],
+    "failed_count": 0,
+    "history": [],
+    "last_successful": null,
+    "pane_capture_failure_count": 0,
+    "pane_capture_failures": [],
+    "total": 0
+  },
+  "decisions": {
+    "recent": []
+  },
+  "failed_commands": [],
+  "ingest": {
+    "cycle_errors": [],
+    "error_count": 0,
+    "new_events": 0,
+    "recent_errors": [],
+    "recent_skipped": [],
+    "skipped_lines": 0
+  },
+  "liveness": {
+    "latest_cycle_age_seconds": null,
+    "latest_cycle_stale": false,
+    "manager_alive": false,
+    "worker_alive": false
+  },
+  "schema_version": 1,
+  "storage": {
+    "database_file": 487424,
+    "terminal_captures": {
+      "bytes": 0,
+      "count": 0
+    },
+    "total_retained": 0,
+    "transcript_captures": {
+      "bytes": 0,
+      "count": 0
+    },
+    "transcript_segments": {
+      "bytes": 0,
+      "count": 0
+    }
+  },
+  "task": {
+    "created_at": "2026-06-02T16:53:11Z",
+    "goal": "Executable QA run for test-coverage-loop.",
+    "id": "task-cc8dbc66-af6d-473d-8144-18e523668f8a",
+    "integrity": {
+      "issues": [
+        "managed_without_active_worker_binding",
+        "managed_without_active_manager"
+      ],
+      "ok": false
+    },
+    "name": "qa-test-coverage-loop-afd2941a",
+    "state": "managed",
+    "summary": "Disposable no-tmux manager/worker binding for Dispatch guardrail proof.",
+    "updated_at": "2026-06-02T16:53:11Z"
+  },
+  "telemetry": {
+    "recent": [
+      {
+        "actor": "workerctl",
+        "event_type": "command_created",
+        "id": "telemetry-46297a2f-52e2-4c7d-bb99-1674566ff375",
+        "run_id": null,
+        "severity": "info",
+        "summary": "Created command continue_iteration.",
+        "timestamp": "2026-06-02T16:53:11Z"
+      },
+      {
+        "actor": "dispatch",
+        "event_type": "dispatch_command_claimed",
+        "id": "telemetry-17978a98-ec68-41f6-9490-56b98f7fb346",
+        "run_id": null,
+        "severity": "info",
+        "summary": "Dispatch claimed command continue_iteration.",
+        "timestamp": "2026-06-02T16:53:11Z"
+      },
+      {
+        "actor": "dispatch",
+        "event_type": "dispatch_command_blocked",
+        "id": "telemetry-72b6243e-33af-485e-b775-f0b539fec1b1",
+        "run_id": null,
+        "severity": "warning",
+        "summary": "Dispatch command continue_iteration blocked.",
+        "timestamp": "2026-06-02T16:53:11Z"
+      },
+      {
+        "actor": "workerctl",
+        "event_type": "acceptance_criterion_added",
+        "id": "telemetry-3e59e97e-df2c-4667-840c-b53eb53b5ba3",
+        "run_id": null,
+        "severity": "info",
+        "summary": "Added acceptance criterion.",
+        "timestamp": "2026-06-02T16:53:11Z"
+      },
+      {
+        "actor": "workerctl",
+        "event_type": "acceptance_criterion_added",
+        "id": "telemetry-256f524a-7321-4465-b75f-3652020e6aaf",
+        "run_id": null,
+        "severity": "info",
+        "summary": "Added acceptance criterion.",
+        "timestamp": "2026-06-02T16:53:11Z"
+      },
+      {
+        "actor": "workerctl",
+        "event_type": "command_created",
+        "id": "telemetry-24aced42-1320-432a-983b-23dce26fbd5c",
+        "run_id": null,
+        "severity": "info",
+        "summary": "Created command continue_iteration.",
+        "timestamp": "2026-06-02T16:53:11Z"
+      },
+      {
+        "actor": "dispatch",
+        "event_type": "dispatch_command_claimed",
+        "id": "telemetry-5f20c7ad-02e3-46d3-b2d0-027137f7a5b5",
+        "run_id": null,
+        "severity": "info",
+        "summary": "Dispatch claimed command continue_iteration.",
+        "timestamp": "2026-06-02T16:53:11Z"
+      },
+      {
+        "actor": "dispatch",
+        "event_type": "dispatch_command_blocked",
+        "id": "telemetry-a7594743-df6d-4dad-afcf-b70f18f38b43",
+        "run_id": null,
+        "severity": "warning",
+        "summary": "Dispatch command continue_iteration blocked.",
+        "timestamp": "2026-06-02T16:53:11Z"
+      },
+      {
+        "actor": "workerctl",
+        "event_type": "acceptance_criterion_updated",
+        "id": "telemetry-aebba825-89fe-4c27-8ace-226bbc07bd4c",
+        "run_id": null,
+        "severity": "info",
+        "summary": "Updated acceptance criterion.",
+        "timestamp": "2026-06-02T16:53:11Z"
+      },
+      {
+        "actor": "workerctl",
+        "event_type": "command_created",
+        "id": "telemetry-e004e9e8-dd08-49cb-92fd-ea2ed39abe60",
+        "run_id": null,
+        "severity": "info",
+        "summary": "Created command continue_iteration.",
+        "timestamp": "2026-06-02T16:53:11Z"
+      },
+      {
+        "actor": "dispatch",
+        "event_type": "dispatch_command_claimed",
+        "id": "telemetry-df8479ea-2f56-4af4-b589-2ffa541ab687",
+        "run_id": null,
+        "severity": "info",
+        "summary": "Dispatch claimed command continue_iteration.",
+        "timestamp": "2026-06-02T16:53:11Z"
+      },
+      {
+        "actor": "dispatch",
+        "event_type": "dispatch_command_attempted",
+        "id": "telemetry-01cd9f6c-bcd3-4db0-9c67-863bc5424a15",
+        "run_id": null,
+        "severity": "info",
+        "summary": "Dispatch is executing command continue_iteration.",
+        "timestamp": "2026-06-02T16:53:11Z"
+      },
+      {
+        "actor": "dispatch",
+        "event_type": "dispatch_signal_pull_required",
+        "id": "telemetry-5aaf7637-3362-4dfb-8251-5ab5f4c2582c",
+        "run_id": null,
+        "severity": "info",
+        "summary": "Dispatch recorded pull-required continue_iteration for qa-test-coverage-loop-afd2941a-worker.",
+        "timestamp": "2026-06-02T16:53:11Z"
+      },
+      {
+        "actor": "dispatch",
+        "event_type": "dispatch_command_succeeded",
+        "id": "telemetry-9baf516a-f4e0-4812-9153-c0030201a963",
+        "run_id": null,
+        "severity": "info",
+        "summary": "Dispatch command continue_iteration succeeded.",
+        "timestamp": "2026-06-02T16:53:11Z"
+      }
+    ],
+    "summary": {
+      "by_actor": {
+        "dispatch": 8,
+        "workerctl": 6
+      },
+      "by_event_type": {
+        "acceptance_criterion_added": 2,
+        "acceptance_criterion_updated": 1,
+        "command_created": 3,
+        "dispatch_command_attempted": 1,
+        "dispatch_command_blocked": 2,
+        "dispatch_command_claimed": 3,
+        "dispatch_command_succeeded": 1,
+        "dispatch_signal_pull_required": 1
+      },
+      "by_severity": {
+        "info": 12,
+        "warning": 2
+      },
+      "first_timestamp": "2026-06-02T16:53:11Z",
+      "last_timestamp": "2026-06-02T16:53:11Z",
+      "run_id": null,
+      "task_id": "task-cc8dbc66-af6d-473d-8144-18e523668f8a",
+      "total": 14
+    }
+  }
+}
