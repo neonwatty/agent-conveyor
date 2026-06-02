@@ -5408,6 +5408,193 @@ class CliTests(unittest.TestCase):
         self.assertIn("The manager asks; Dispatch decides.", guide)
         self.assertIn("Generic caution does not arm a loop gate", guide)
 
+    def test_create_disposable_binding_help_is_available(self):
+        proc = self.run_workerctl("create-disposable-binding", "--help")
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("Create a disposable no-tmux manager/worker binding", proc.stdout)
+        self.assertIn("--required-before-continue", proc.stdout)
+        self.assertIn("--adversarial", proc.stdout)
+        self.assertIn("--template", proc.stdout)
+
+    def test_create_disposable_binding_creates_no_tmux_pair_and_loop_run(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "workerctl.db"
+            session_dir = Path(tmp) / "sessions"
+
+            proc = self.run_workerctl(
+                "create-disposable-binding",
+                "real-slice",
+                "--goal",
+                "Run a real no-tmux Ralph loop.",
+                "--worker",
+                "real-worker",
+                "--manager",
+                "real-manager",
+                "--run-name",
+                "real-slice-run",
+                "--required-before-continue",
+                "adversarial_check",
+                "--session-dir",
+                str(session_dir),
+                "--path",
+                str(db_path),
+                "--json",
+            )
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            payload = json.loads(proc.stdout)
+            self.assertEqual(payload["task"]["name"], "real-slice")
+            self.assertTrue(payload["task"]["created"])
+            self.assertEqual(payload["task"]["state"], "managed")
+            self.assertEqual(payload["worker"]["name"], "real-worker")
+            self.assertIsNone(payload["worker"]["tmux_session"])
+            self.assertEqual(payload["manager"]["name"], "real-manager")
+            self.assertIsNone(payload["manager"]["tmux_session"])
+            self.assertIn("enqueue-continue-iteration", "\n".join(payload["replay_commands"]))
+            self.assertIn("worker-inbox", "\n".join(payload["replay_commands"]))
+            self.assertIn("loop-status", "\n".join(payload["replay_commands"]))
+            self.assertIn(str(db_path.resolve()), "\n".join(payload["replay_commands"]))
+
+            for key in ("worker", "manager"):
+                rollout_path = Path(payload[key]["rollout_path"])
+                self.assertTrue(rollout_path.exists(), rollout_path)
+                rollout_line = json.loads(rollout_path.read_text().splitlines()[0])
+                self.assertEqual(rollout_line["type"], "session_meta")
+                self.assertEqual(rollout_line["payload"]["cwd"], str(ROOT))
+
+            self.assertEqual(payload["run"]["name"], "real-slice-run")
+            self.assertEqual(payload["run"]["purpose"], "ralph_loop")
+            self.assertEqual(payload["run"]["metadata"]["required_before_continue"], ["adversarial_check"])
+            self.assertEqual(payload["run"]["metadata"]["max_iterations"], 2)
+            self.assertEqual(payload["run"]["metadata"]["current_iteration"], 1)
+
+            blocked_enqueue = self.run_workerctl(
+                "enqueue-continue-iteration",
+                "real-slice",
+                "--loop-run",
+                "real-slice-run",
+                "--requested-iteration",
+                "2",
+                "--message",
+                "Run the next iteration.",
+                "--correlation-id",
+                "helper-missing-proof",
+                "--path",
+                str(db_path),
+                "--json",
+            )
+            self.assertEqual(blocked_enqueue.returncode, 0, blocked_enqueue.stderr)
+            blocked_dispatch = self.run_workerctl(
+                "dispatch",
+                "--once",
+                "--type",
+                "continue_iteration",
+                "--dispatcher-id",
+                "helper-test-dispatch",
+                "--path",
+                str(db_path),
+                "--json",
+            )
+            self.assertEqual(blocked_dispatch.returncode, 0, blocked_dispatch.stderr)
+            blocked_payload = json.loads(blocked_dispatch.stdout)
+            blocked_result = blocked_payload["processed"][0]
+            self.assertEqual(blocked_result["state"], "blocked")
+            self.assertEqual(blocked_result["reason"], "missing_adversarial_check_evidence")
+            self.assertEqual(blocked_result["missing_evidence"], ["adversarial_check"])
+
+            evidence = self.run_workerctl(
+                "loop-evidence",
+                "adversarial-check",
+                "real-slice",
+                "--loop-run",
+                "real-slice-run",
+                "--iteration",
+                "1",
+                "--failure-mode",
+                "The helper may have created a loop that Dispatch can bypass.",
+                "--check",
+                "dispatch blocked before adversarial_check evidence and delivered after evidence",
+                "--result",
+                "The missing-proof command was blocked; this receipt unlocks only the second command.",
+                "--path",
+                str(db_path),
+                "--json",
+            )
+            self.assertEqual(evidence.returncode, 0, evidence.stderr)
+
+            allowed_enqueue = self.run_workerctl(
+                "enqueue-continue-iteration",
+                "real-slice",
+                "--loop-run",
+                "real-slice-run",
+                "--requested-iteration",
+                "2",
+                "--message",
+                "Run the next iteration.",
+                "--correlation-id",
+                "helper-with-proof",
+                "--path",
+                str(db_path),
+                "--json",
+            )
+            self.assertEqual(allowed_enqueue.returncode, 0, allowed_enqueue.stderr)
+            allowed_dispatch = self.run_workerctl(
+                "dispatch",
+                "--once",
+                "--type",
+                "continue_iteration",
+                "--dispatcher-id",
+                "helper-test-dispatch",
+                "--path",
+                str(db_path),
+                "--json",
+            )
+            self.assertEqual(allowed_dispatch.returncode, 0, allowed_dispatch.stderr)
+            allowed_result = json.loads(allowed_dispatch.stdout)["processed"][0]
+            self.assertEqual(allowed_result["state"], "pull_required")
+            self.assertEqual(allowed_result["target_session"], "real-worker")
+
+            pending_status = self.run_workerctl(
+                "loop-status",
+                "real-slice",
+                "--run",
+                "real-slice-run",
+                "--path",
+                str(db_path),
+                "--json",
+            )
+            self.assertEqual(pending_status.returncode, 0, pending_status.stderr)
+            pending_payload = json.loads(pending_status.stdout)
+            self.assertEqual(pending_payload["recommendation"], "worker_should_consume_inbox")
+            self.assertEqual(pending_payload["inbox"]["worker_unconsumed"], 1)
+
+            inbox = self.run_workerctl(
+                "worker-inbox",
+                "real-slice",
+                "--consume-next",
+                "--path",
+                str(db_path),
+                "--json",
+            )
+            self.assertEqual(inbox.returncode, 0, inbox.stderr)
+            self.assertEqual(json.loads(inbox.stdout)["consumed"]["task_id"], payload["task"]["id"])
+
+            final_status = self.run_workerctl(
+                "loop-status",
+                "real-slice",
+                "--run",
+                "real-slice-run",
+                "--path",
+                str(db_path),
+                "--json",
+            )
+            self.assertEqual(final_status.returncode, 0, final_status.stderr)
+            final_payload = json.loads(final_status.stdout)
+            self.assertEqual(final_payload["inbox"]["worker_unconsumed"], 0)
+            self.assertEqual(final_payload["telemetry"]["dispatch_inbox_consumed"], 1)
+            self.assertEqual(final_payload["recommendation"], "ready_for_manager_review")
+
     def test_dashboard_help_includes_loopback_defaults(self):
         proc = self.run_workerctl("dashboard", "--help")
 
