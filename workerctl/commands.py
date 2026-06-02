@@ -2041,6 +2041,32 @@ def _qa_run_bound_task(conn: Any, *, slug: str, suffix: str) -> dict[str, str]:
     }
 
 
+def _qa_run_receipt_artifact_dir(
+    args: argparse.Namespace,
+    *,
+    db_path: Path,
+    scenario: str,
+    slug: str,
+    run_id: str,
+) -> Path:
+    receipt_output = getattr(args, "receipt_output", None)
+    artifact_root = Path(receipt_output).expanduser().resolve().parent if receipt_output else db_path.parent
+    return artifact_root / f"{scenario}-artifacts" / f"{slug}-{run_id}"
+
+
+def _qa_run_generated_task(task: dict[str, Any], *, suffix: str) -> dict[str, Any]:
+    return {
+        "binding_id": task.get("binding_id"),
+        "manager_id": task.get("manager_id"),
+        "manager_name": task.get("manager_name"),
+        "suffix": suffix,
+        "task_id": task.get("task_id"),
+        "task_name": task.get("task_name"),
+        "worker_id": task.get("worker_id"),
+        "worker_name": task.get("worker_name"),
+    }
+
+
 def _qa_run_dispatch_continue_once(*, db_path: Path, dispatcher_id: str, expected_correlation_id: str) -> dict[str, Any]:
     from workerctl import db as worker_db
     from workerctl import tmux as worker_tmux
@@ -2775,6 +2801,11 @@ def _qa_run_ralph_loop_guardrails(args: argparse.Namespace) -> dict[str, Any]:
         "artifacts": {"db_path": str(db_path)},
         "checks": checks,
         "generated_at": now_iso(),
+        "generated_tasks": [
+            _qa_run_generated_task(max_task, suffix="max-iteration"),
+            _qa_run_generated_task(evidence_task, suffix="missing-evidence"),
+            _qa_run_generated_task(preset_task, suffix="preset"),
+        ],
         "replay_commands": [
             "scripts/workerctl qa-plan ralph-loop --json",
             "scripts/workerctl qa-plan adversarial-triggers --json",
@@ -2863,7 +2894,13 @@ def _qa_run_generic_loop_template(args: argparse.Namespace) -> dict[str, Any]:
         db_path=db_path,
         task_name=template_task["task_name"],
         loop_run_id=template_run_id,
-        artifact_dir=db_path.parent / "generic-loop-template-artifacts" / f"{slug}-{template_run_id}",
+        artifact_dir=_qa_run_receipt_artifact_dir(
+            args,
+            db_path=db_path,
+            scenario="generic-loop-template",
+            slug=slug,
+            run_id=template_run_id,
+        ),
     )
     _qa_run_record_loop_evidence(
         db_path=db_path,
@@ -2972,6 +3009,7 @@ def _qa_run_generic_loop_template(args: argparse.Namespace) -> dict[str, Any]:
         },
         "checks": checks,
         "generated_at": now_iso(),
+        "generated_tasks": [_qa_run_generated_task(template_task, suffix="generic-loop-template")],
         "replay_commands": [
             "scripts/workerctl loop-templates --show visual_diff_loop --json",
             (
@@ -3084,7 +3122,13 @@ def _qa_run_generic_loop_template_browser(args: argparse.Namespace) -> dict[str,
         db_path=db_path,
         task_name=template_task["task_name"],
         loop_run_id=template_run_id,
-        artifact_dir=db_path.parent / "generic-loop-template-browser-artifacts" / f"{slug}-{template_run_id}",
+        artifact_dir=_qa_run_receipt_artifact_dir(
+            args,
+            db_path=db_path,
+            scenario="generic-loop-template-browser",
+            slug=slug,
+            run_id=template_run_id,
+        ),
     )
     _qa_run_record_loop_evidence(
         db_path=db_path,
@@ -3200,6 +3244,7 @@ def _qa_run_generic_loop_template_browser(args: argparse.Namespace) -> dict[str,
         "browser": visual_evidence["browser"],
         "checks": checks,
         "generated_at": now_iso(),
+        "generated_tasks": [_qa_run_generated_task(template_task, suffix="generic-loop-template-browser")],
         "replay_commands": [
             "scripts/workerctl loop-templates --show visual_diff_loop --json",
             (
@@ -3234,6 +3279,243 @@ def _qa_run_generic_loop_template_browser(args: argparse.Namespace) -> dict[str,
         "template": "visual_diff_loop",
         "template_metadata": template_metadata,
         "visual_diff": visual_evidence["diff"],
+    }
+
+
+def _qa_run_test_coverage_loop(args: argparse.Namespace) -> dict[str, Any]:
+    from workerctl import db as worker_db
+
+    db_path = _qa_run_db_path(args)
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    slug = uuid.uuid4().hex[:8]
+    dispatcher_id = getattr(args, "dispatcher_id", None) or f"qa-run-{slug}"
+    template_metadata = loop_template_metadata(
+        "test_coverage_loop",
+        max_iterations=3,
+        current_iteration=1,
+        seed_prompt_sha256="qa-run-test-coverage-seed",
+    )
+    required_evidence = template_metadata["required_before_continue"]
+    checks: list[dict[str, Any]] = []
+
+    with worker_db.connect(db_path) as conn:
+        worker_db.initialize_database(conn)
+        _qa_run_require_clean_continue_queue(conn, worker_db=worker_db)
+        coverage_task = _qa_run_bound_task(conn, slug=slug, suffix="test-coverage-loop")
+        coverage_run_id = worker_db.create_ralph_loop_run(
+            conn,
+            task_id=coverage_task["task_id"],
+            name=f"{coverage_task['task_name']}-run",
+            max_iterations=template_metadata["max_iterations"],
+            current_iteration=template_metadata["current_iteration"],
+            cleanup_policy=template_metadata["cleanup_policy"],
+            required_before_continue=required_evidence,
+            stop_conditions=template_metadata["stop_conditions"],
+            seed_prompt_sha256=template_metadata["seed_prompt_sha256"],
+            preset=template_metadata.get("preset"),
+            metadata=template_metadata,
+        )
+        worker_db.enqueue_continue_iteration(
+            conn,
+            task_id=coverage_task["task_id"],
+            message="Run test coverage template iteration 2 before coverage evidence.",
+            loop_run_id=coverage_run_id,
+            requested_iteration=2,
+            correlation_id="qa-run-test-coverage-missing",
+        )
+        conn.commit()
+
+    missing_dispatch = _qa_run_dispatch_continue_once(
+        db_path=db_path,
+        dispatcher_id=dispatcher_id,
+        expected_correlation_id="qa-run-test-coverage-missing",
+    )
+    missing_counts = _qa_run_delivery_counts(
+        db_path=db_path,
+        task_id=coverage_task["task_id"],
+        worker_name=coverage_task["worker_name"],
+    )
+    _qa_run_require(missing_dispatch.get("state") == "blocked", "test coverage template did not block before evidence")
+    _qa_run_require(
+        missing_dispatch.get("reason") == "missing_required_evidence",
+        "test coverage template used the wrong block reason before evidence",
+    )
+    _qa_run_require(
+        missing_dispatch.get("missing_evidence") == required_evidence,
+        "test coverage template reported the wrong missing evidence before evidence",
+    )
+    _qa_run_require(missing_counts["worker_inbox_count"] == 0, "test coverage template left worker inbox mail before evidence")
+    checks.append(
+        _qa_run_check_result(
+            name="test_coverage_template_blocks_before_coverage_evidence",
+            dispatch=missing_dispatch,
+            counts=missing_counts,
+            command="workerctl dispatch --once --type continue_iteration --dispatcher-id qa-run",
+        )
+    )
+
+    artifact_dir = _qa_run_receipt_artifact_dir(
+        args,
+        db_path=db_path,
+        scenario="test-coverage-loop",
+        slug=slug,
+        run_id=coverage_run_id,
+    )
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    coverage_report = artifact_dir / "coverage-summary.json"
+    coverage_report.write_text(
+        json.dumps(
+            {
+                "command": "coverage run -m pytest && coverage report",
+                "coverage_percent": 87.5,
+                "status": "pass",
+                "uncovered_lines": ["workerctl/commands.py:dispatch-edge-case"],
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n"
+    )
+    _qa_run_record_loop_evidence(
+        db_path=db_path,
+        task_name=coverage_task["task_name"],
+        loop_run_id=coverage_run_id,
+        evidence_type="test_coverage",
+        correlation_id="qa-run-test-coverage-report",
+        artifact_path=coverage_report,
+        metadata={
+            "command": "coverage run -m pytest && coverage report",
+            "coverage_percent": 87.5,
+            "result": "Coverage report was recorded before retry.",
+        },
+    )
+    _qa_run_record_loop_evidence(
+        db_path=db_path,
+        task_name=coverage_task["task_name"],
+        loop_run_id=coverage_run_id,
+        evidence_type="adversarial_check",
+        correlation_id="qa-run-test-coverage-unstructured-adversarial",
+        metadata={"note": "qa-run intentionally omits failure_mode, check, and result."},
+    )
+    with worker_db.connect(db_path) as conn:
+        worker_db.initialize_database(conn)
+        worker_db.enqueue_continue_iteration(
+            conn,
+            task_id=coverage_task["task_id"],
+            message="Run test coverage template iteration 2 after coverage and malformed adversarial proof.",
+            loop_run_id=coverage_run_id,
+            requested_iteration=2,
+            correlation_id="qa-run-test-coverage-unstructured-adversarial",
+        )
+        conn.commit()
+
+    unstructured_dispatch = _qa_run_dispatch_continue_once(
+        db_path=db_path,
+        dispatcher_id=dispatcher_id,
+        expected_correlation_id="qa-run-test-coverage-unstructured-adversarial",
+    )
+    unstructured_counts = _qa_run_delivery_counts(
+        db_path=db_path,
+        task_id=coverage_task["task_id"],
+        worker_name=coverage_task["worker_name"],
+    )
+    _qa_run_require(unstructured_dispatch.get("state") == "blocked", "test coverage unstructured adversarial evidence did not block")
+    _qa_run_require(
+        unstructured_dispatch.get("reason") == "missing_adversarial_check_evidence",
+        "test coverage unstructured adversarial evidence used the wrong block reason",
+    )
+    _qa_run_require(
+        unstructured_dispatch.get("missing_evidence") == ["adversarial_check"],
+        "test coverage unstructured adversarial evidence reported the wrong missing evidence",
+    )
+    _qa_run_require(unstructured_counts["worker_inbox_count"] == 0, "test coverage unstructured evidence left worker inbox mail")
+    checks.append(
+        _qa_run_check_result(
+            name="test_coverage_unstructured_adversarial_check_still_blocks",
+            dispatch=unstructured_dispatch,
+            counts=unstructured_counts,
+            command="workerctl loop-evidence add --evidence-type adversarial_check ... && workerctl dispatch --once --type continue_iteration",
+        )
+    )
+
+    _qa_run_record_loop_evidence(
+        db_path=db_path,
+        task_name=coverage_task["task_name"],
+        loop_run_id=coverage_run_id,
+        evidence_type="adversarial_check",
+        correlation_id="qa-run-test-coverage-structured-adversarial",
+        metadata=_adversarial_check_metadata(
+            {
+                "failure_mode": "Coverage evidence could exist without proving the retry gate rejects malformed adversarial receipts.",
+                "check": "Inspect blocked retry after coverage plus malformed adversarial evidence, then retry after structured proof.",
+                "result": "The malformed receipt stayed blocked, and the structured retry delivered exactly one worker inbox item.",
+            }
+        ),
+    )
+    with worker_db.connect(db_path) as conn:
+        worker_db.initialize_database(conn)
+        worker_db.enqueue_continue_iteration(
+            conn,
+            task_id=coverage_task["task_id"],
+            message="Run test coverage template iteration 2 after structured adversarial proof.",
+            loop_run_id=coverage_run_id,
+            requested_iteration=2,
+            correlation_id="qa-run-test-coverage-structured-allowed",
+        )
+        conn.commit()
+
+    allowed_dispatch = _qa_run_dispatch_continue_once(
+        db_path=db_path,
+        dispatcher_id=dispatcher_id,
+        expected_correlation_id="qa-run-test-coverage-structured-allowed",
+    )
+    allowed_counts = _qa_run_delivery_counts(
+        db_path=db_path,
+        task_id=coverage_task["task_id"],
+        worker_name=coverage_task["worker_name"],
+    )
+    _qa_run_require(allowed_dispatch.get("state") == "pull_required", "test coverage structured retry did not deliver")
+    _qa_run_require(
+        allowed_counts["worker_inbox_count"] == 1,
+        "test coverage structured retry did not create exactly one worker inbox item",
+    )
+    checks.append(
+        _qa_run_check_result(
+            name="structured_test_coverage_retry_delivers",
+            dispatch=allowed_dispatch,
+            counts=allowed_counts,
+            command="workerctl loop-evidence adversarial-check ... && workerctl dispatch --once --type continue_iteration",
+        )
+    )
+
+    return {
+        "artifacts": {
+            "coverage_report": str(coverage_report),
+            "db_path": str(db_path),
+        },
+        "checks": checks,
+        "generated_at": now_iso(),
+        "generated_tasks": [_qa_run_generated_task(coverage_task, suffix="test-coverage-loop")],
+        "replay_commands": [
+            "scripts/workerctl loop-templates --show test_coverage_loop --json",
+            (
+                "scripts/workerctl loop-templates --create-run <task> --template test_coverage_loop "
+                "--max-iterations 3 --current-iteration 1 --seed-prompt-sha256 qa-run-test-coverage-seed"
+            ),
+            (
+                "scripts/workerctl loop-evidence add <task> --loop-run <run-id> --iteration 1 "
+                "--evidence-type test_coverage --artifact-path <coverage-summary.json>"
+            ),
+            (
+                "scripts/workerctl loop-evidence adversarial-check <task> --loop-run <run-id> --iteration 1 "
+                "--failure-mode <failure> --check <check> --result <result>"
+            ),
+            f"scripts/workerctl dispatch --once --type continue_iteration --dispatcher-id {dispatcher_id} --path {db_path}",
+        ],
+        "result": "passed",
+        "scenario": "test-coverage-loop",
+        "template": "test_coverage_loop",
+        "template_metadata": template_metadata,
     }
 
 
@@ -3553,6 +3835,12 @@ def _qa_run_adversarial_triggers(args: argparse.Namespace) -> dict[str, Any]:
         "artifacts": {"db_path": str(db_path)},
         "checks": checks,
         "generated_at": now_iso(),
+        "generated_tasks": [
+            _qa_run_generated_task(loop_task, suffix="adversarial-triggers-loop"),
+            _qa_run_generated_task(finish_task, suffix="adversarial-triggers-finish"),
+            _qa_run_generated_task(worker_task, suffix="adversarial-triggers-worker"),
+            _qa_run_generated_task(criteria_task, suffix="adversarial-triggers-criteria"),
+        ],
         "negative_control": negative_control,
         "replay_commands": [
             'scripts/workerctl loop-triggers --classify "Run this as an adversarially gated Ralph loop." --json',
@@ -3573,6 +3861,7 @@ def command_qa_run(args: argparse.Namespace) -> int:
         "ralph-loop-guardrails": _qa_run_ralph_loop_guardrails,
         "generic-loop-template": _qa_run_generic_loop_template,
         "generic-loop-template-browser": _qa_run_generic_loop_template_browser,
+        "test-coverage-loop": _qa_run_test_coverage_loop,
         "adversarial-triggers": _qa_run_adversarial_triggers,
     }
     try:

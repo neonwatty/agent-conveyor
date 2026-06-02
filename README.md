@@ -584,7 +584,7 @@ tmux attach -t codex-live-test
   `--include-content` is passed.
 - `qa-plan <self-management|emergent-criteria|tmux-errors|dispatch-completion|ralph-loop|adversarial-triggers|goalbuddy-conveyor>` — Print a
   repeatable manual QA checklist.
-- `qa-run <ralph-loop-guardrails|generic-loop-template|generic-loop-template-browser|adversarial-triggers> --receipt-output RECEIPT.json [--path DB]` —
+- `qa-run <ralph-loop-guardrails|generic-loop-template|generic-loop-template-browser|test-coverage-loop|adversarial-triggers> --receipt-output RECEIPT.json [--path DB]` —
   Run a deterministic no-tmux QA harness and save a JSON receipt.
   `ralph-loop-guardrails` proves max-iteration cutoff, missing-evidence
   cutoff, fresh retry delivery after structured `adversarial_check` evidence,
@@ -598,6 +598,9 @@ tmux attach -t codex-live-test
   adversarial evidence in the saved receipt. It uses the repo's Node
   Playwright dependency and requires Chromium to be installed and launchable;
   when unavailable, it fails with the browser-backed QA helper message.
+  `test-coverage-loop` proves the `test_coverage_loop` template blocks before
+  coverage evidence, rejects malformed adversarial evidence, and delivers only
+  after a structured coverage receipt plus adversarial proof exist.
 - `loop-triggers --list|--classify PROMPT [--json]` — List the controlled
   natural-language loop triggers or classify a manager/operator prompt before
   creating a loop policy or continuation gate. Approved trigger phrases include
@@ -677,6 +680,7 @@ scripts/workerctl qa-plan goalbuddy-conveyor
 scripts/workerctl qa-run ralph-loop-guardrails --receipt-output /tmp/ralph-loop-guardrails-receipt.json --json
 scripts/workerctl qa-run generic-loop-template --receipt-output /tmp/generic-loop-template-receipt.json --json
 scripts/workerctl qa-run generic-loop-template-browser --receipt-output /tmp/generic-loop-template-browser-receipt.json --json
+scripts/workerctl qa-run test-coverage-loop --receipt-output /tmp/test-coverage-loop-receipt.json --json
 scripts/workerctl qa-run adversarial-triggers --receipt-output /tmp/adversarial-triggers-receipt.json --json
 scripts/workerctl loop-triggers --classify "Run this as an adversarially gated Ralph loop." --json
 scripts/workerctl loop-templates --list --json
