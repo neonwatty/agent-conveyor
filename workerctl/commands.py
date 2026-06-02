@@ -6379,6 +6379,53 @@ def command_enqueue_nudge_worker(args: argparse.Namespace) -> int:
     return 0
 
 
+def _loop_policy_payload(loop_run: dict[str, Any]) -> dict[str, Any]:
+    metadata = loop_run.get("metadata") or {}
+    template = metadata.get("template") or loop_run.get("preset")
+    return {
+        "artifact_requirements": metadata.get("artifact_requirements") or {},
+        "cleanup_policy": loop_run.get("cleanup_policy"),
+        "current_iteration": loop_run["current_iteration"],
+        "max_iterations": loop_run["max_iterations"],
+        "preset": loop_run.get("preset"),
+        "recommended_tools": metadata.get("recommended_tools") or [],
+        "required_before_continue": loop_run.get("required_before_continue") or [],
+        "run_id": loop_run["id"],
+        "seed_prompt_sha256": loop_run.get("seed_prompt_sha256"),
+        "stop_conditions": loop_run.get("stop_conditions") or [],
+        "tags": metadata.get("tags") or [],
+        "template": template,
+    }
+
+
+def _format_loop_policy_push_text(text: str, loop_policy: dict[str, Any] | None) -> str:
+    if loop_policy is None:
+        return text
+    policy_payload = loop_policy.get("loop_policy") or {}
+    template = policy_payload.get("template") or policy_payload.get("preset") or "unknown"
+    required = loop_policy.get("required_before_continue") or []
+    tools = policy_payload.get("recommended_tools") or []
+    artifact_requirements = policy_payload.get("artifact_requirements") or {}
+    artifacts = sorted(str(name) for name in artifact_requirements)
+    lines = [
+        text.rstrip(),
+        "",
+        "Loop policy:",
+        f"- run_id: {loop_policy['run_id']}",
+        f"- template: {template}",
+        (
+            "- iteration: "
+            f"requested {loop_policy['requested_iteration']} "
+            f"(current {loop_policy['current_iteration']} of {loop_policy['max_iterations']})"
+        ),
+        f"- cleanup_policy: {loop_policy.get('cleanup_policy') or 'none'}",
+        f"- required_before_continue: {', '.join(required) if required else 'none'}",
+        f"- recommended_tools: {', '.join(tools) if tools else 'none'}",
+        f"- artifact_requirements: {', '.join(artifacts) if artifacts else 'none'}",
+    ]
+    return "\n".join(lines)
+
+
 def command_enqueue_continue_iteration(args: argparse.Namespace) -> int:
     from workerctl import db as worker_db
 
@@ -6389,6 +6436,9 @@ def command_enqueue_continue_iteration(args: argparse.Namespace) -> int:
         loop_run = worker_db.ralph_loop_run(conn, run=args.loop_run)
         if loop_run["task_id"] != task["id"]:
             raise WorkerError("Ralph loop run does not belong to the requested task")
+        if args.requested_iteration <= loop_run["current_iteration"]:
+            raise WorkerError("requested_iteration must be greater than current_iteration for the loop run")
+        loop_policy = _loop_policy_payload(loop_run)
         command_id = worker_db.enqueue_continue_iteration(
             conn,
             task_id=task["id"],
@@ -6399,6 +6449,7 @@ def command_enqueue_continue_iteration(args: argparse.Namespace) -> int:
             required_permission=getattr(args, "required_permission", None),
             idempotency_key=getattr(args, "idempotency_key", None),
             correlation_id=getattr(args, "correlation_id", None),
+            payload={"loop_policy": loop_policy},
         )
         command = conn.execute("select correlation_id from commands where id = ?", (command_id,)).fetchone()
         conn.commit()
@@ -6408,6 +6459,7 @@ def command_enqueue_continue_iteration(args: argparse.Namespace) -> int:
             "command_id": command_id,
             "command_type": "continue_iteration",
             "correlation_id": command["correlation_id"],
+            "loop_policy": loop_policy,
             "loop_run_id": loop_run["id"],
             "manager_decision_id": getattr(args, "manager_decision_id", None),
             "requested_iteration": args.requested_iteration,
@@ -6576,11 +6628,12 @@ def _dispatch_ralph_loop_policy(conn: Any, *, worker_db: Any, command: dict[str,
         raise WorkerError("continue_iteration Ralph loop run does not belong to command task")
     required_before_continue = run.get("required_before_continue") or []
     missing_evidence: list[str] = []
-    reason = (
-        "max_iterations_reached"
-        if run["current_iteration"] >= run["max_iterations"] or requested_iteration > run["max_iterations"]
-        else None
-    )
+    if requested_iteration <= run["current_iteration"]:
+        reason = "stale_requested_iteration"
+    elif run["current_iteration"] >= run["max_iterations"] or requested_iteration > run["max_iterations"]:
+        reason = "max_iterations_reached"
+    else:
+        reason = None
     if reason is None:
         missing_evidence = _missing_ralph_loop_evidence(
             conn,
@@ -6591,9 +6644,11 @@ def _dispatch_ralph_loop_policy(conn: Any, *, worker_db: Any, command: dict[str,
             run_id=run["id"],
         )
         reason = _missing_evidence_reason(missing_evidence)
+    loop_policy = _loop_policy_payload(run)
     return {
         "cleanup_policy": run.get("cleanup_policy"),
         "current_iteration": run["current_iteration"],
+        "loop_policy": loop_policy,
         "max_iterations": run["max_iterations"],
         "missing_evidence": missing_evidence,
         "reason": reason,
@@ -6642,6 +6697,7 @@ def _execute_dispatch_command(*, worker_db, worker_tmux, db_path: Path | None, c
                     "current_iteration": loop_policy["current_iteration"],
                     "delivered": False,
                     "delivery_mode": delivery_mode,
+                    "loop_policy": loop_policy.get("loop_policy"),
                     "manager_decision_id": _manager_decision_id_from_command(command),
                     "max_iterations": loop_policy["max_iterations"],
                     "missing_evidence": loop_policy.get("missing_evidence") or [],
@@ -6697,16 +6753,24 @@ def _execute_dispatch_command(*, worker_db, worker_tmux, db_path: Path | None, c
                 "task_id": command["task_id"],
             }
             if loop_policy is not None:
+                policy_payload = loop_policy.get("loop_policy") or {}
                 payload["ralph_loop"] = {
+                    "artifact_requirements": policy_payload.get("artifact_requirements") or {},
                     "cleanup_policy": loop_policy.get("cleanup_policy"),
                     "current_iteration": loop_policy["current_iteration"],
                     "max_iterations": loop_policy["max_iterations"],
+                    "preset": policy_payload.get("preset"),
+                    "recommended_tools": policy_payload.get("recommended_tools") or [],
                     "required_before_continue": loop_policy.get("required_before_continue") or [],
                     "requested_iteration": loop_policy["requested_iteration"],
                     "run_id": loop_policy["run_id"],
                     "seed_prompt_sha256": loop_policy.get("seed_prompt_sha256"),
                     "stop_conditions": loop_policy.get("stop_conditions") or [],
+                    "tags": policy_payload.get("tags") or [],
+                    "template": policy_payload.get("template"),
                 }
+                payload["loop_policy"] = policy_payload
+            push_text = _format_loop_policy_push_text(text, loop_policy)
             notification_id = worker_db.insert_routed_notification(
                 conn,
                 task_id=command["task_id"],
@@ -6800,7 +6864,7 @@ def _execute_dispatch_command(*, worker_db, worker_tmux, db_path: Path | None, c
             send_result = worker_tmux.send_text_to_session(
                 send_conn,
                 session_name=route["target_session_name"],
-                text=text,
+                text=push_text,
                 dry_run=False,
                 side_effect_audit=side_effect_audit,
             )
