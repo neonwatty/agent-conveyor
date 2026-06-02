@@ -32,6 +32,10 @@ in the final handoff. Treat `done`, `tests passed`, worker claims, passing
 happy-path tests, generated summaries, and optimistic UI as claims, not proof.
 Treat unverified assumptions as blockers or explicit follow-ups.
 
+See `docs/agent-evidence-playbook.md` for the repo-specific evidence ladder,
+receipt options, and final handoff shape agents should use when closing out
+work.
+
 ## Architecture
 
 Supervision is built on three primitives: **sessions**, **tasks**, and

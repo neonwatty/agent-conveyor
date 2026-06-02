@@ -10,3 +10,6 @@ in the final handoff.
 Treat `done`, `tests passed`, worker claims, passing happy-path tests, generated
 summaries, and optimistic UI as claims, not proof. Treat unverified assumptions
 as blockers or explicit follow-ups.
+
+For repo-specific evidence choices and final handoff shape, use
+`docs/agent-evidence-playbook.md`.
