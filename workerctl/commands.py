@@ -4125,6 +4125,27 @@ def _loop_status_command_matches_run(row: Any, *, run_id: str) -> bool:
     return _loop_status_mapping_run_id(payload) == run_id or _loop_status_mapping_run_id(result) == run_id
 
 
+def _loop_status_inbox_item_matches_run(row: Any, *, run_id: str) -> bool:
+    payload = _loop_status_json_object(row["payload_json"])
+    return _notification_loop_run_id({"payload": payload}) == run_id
+
+
+def _loop_status_worker_inbox_count(conn: Any, *, task: Any, worker_session_id: str, run_id: str) -> int:
+    rows = conn.execute(
+        """
+        select payload_json
+        from routed_notifications
+        where task_id = ?
+          and target_session_id = ?
+          and state = 'delivered'
+          and consumed_at is null
+        order by created_at, id
+        """,
+        (task["id"], worker_session_id),
+    ).fetchall()
+    return sum(1 for row in rows if _loop_status_inbox_item_matches_run(row, run_id=run_id))
+
+
 def _loop_status_run_for_task(conn: Any, *, task: Any, run_ref: str) -> dict[str, Any]:
     row = conn.execute(
         """
@@ -4165,21 +4186,18 @@ def _loop_status_summary(conn: Any, *, task: Any, run: dict[str, Any]) -> dict[s
     ]
     notification_states = Counter(notification["state"] for notification in notifications)
 
-    worker_inbox = []
+    worker_inbox = 0
     try:
         binding = worker_db.active_binding_for_task(conn, task_name=task["name"])
     except WorkerError:
         binding = None
     if binding is not None:
-        worker_inbox = [
-            item
-            for item in worker_db.session_inbox(
-                conn,
-                session_name=binding["worker_session_name"],
-                limit=100,
-            )
-            if _notification_loop_run_id(item) == run["id"]
-        ]
+        worker_inbox = _loop_status_worker_inbox_count(
+            conn,
+            task=task,
+            worker_session_id=binding["worker_session_id"],
+            run_id=run["id"],
+        )
 
     criteria = worker_db.acceptance_criteria_for_task(conn, task_id=task["id"])
     evidence_items = [
@@ -4250,7 +4268,7 @@ def _loop_status_summary(conn: Any, *, task: Any, run: dict[str, Any]) -> dict[s
             "total": len(notifications),
             "delivered": notification_states.get("delivered", 0),
         },
-        "inbox": {"worker_unconsumed": len(worker_inbox)},
+        "inbox": {"worker_unconsumed": worker_inbox},
         "evidence": {"total": len(evidence_items), "types": evidence_types},
         "telemetry": {
             "total": len(telemetry_events),
@@ -5069,6 +5087,7 @@ def _open_criteria_failure_view(
     conn: Any,
     *,
     task_id: str | None = None,
+    run_id: str | None = None,
     active_only: bool = False,
     limit: int,
 ) -> dict[str, Any]:
@@ -5079,6 +5098,10 @@ def _open_criteria_failure_view(
         filters.append("task_id = ?")
         row_filters.append("ac.task_id = ?")
         params.append(task_id)
+    if run_id is not None:
+        filters.append("json_extract(evidence_json, '$.ralph_loop_run_id') = ?")
+        row_filters.append("json_extract(ac.evidence_json, '$.ralph_loop_run_id') = ?")
+        params.append(run_id)
     if active_only:
         filters.append("task_id in (select id from tasks where state in ('candidate', 'managed', 'paused'))")
         row_filters.append("ac.task_id in (select id from tasks where state in ('candidate', 'managed', 'paused'))")
@@ -5210,6 +5233,7 @@ def telemetry_failures_view(
     open_criteria = _open_criteria_failure_view(
         conn,
         task_id=task_id,
+        run_id=run_id,
         active_only=active_only,
         limit=limit,
     )

@@ -7294,6 +7294,109 @@ class CliTests(unittest.TestCase):
             self.assertEqual(associated_payload["failures"]["pane_capture_failures"], 1)
             self.assertEqual(associated_payload["recommendation"], "inspect_failures")
 
+    def test_loop_status_counts_target_inbox_beyond_first_hundred_items(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                task_id = worker_db.create_task(conn, name="loop-status-inbox-limit-task", goal="Inspect inbox.")
+                conn.execute("update tasks set state = 'managed' where id = ?", (task_id,))
+                worker_id = worker_db.register_session(
+                    conn,
+                    name="loop-status-inbox-worker",
+                    role="worker",
+                    codex_session_path="/tmp/loop-status-inbox-worker.jsonl",
+                    codex_session_id="codex-loop-status-inbox-worker",
+                    pid=11,
+                    cwd="/repo",
+                    tmux_session=None,
+                )
+                manager_id = worker_db.register_session(
+                    conn,
+                    name="loop-status-inbox-manager",
+                    role="manager",
+                    codex_session_path="/tmp/loop-status-inbox-manager.jsonl",
+                    codex_session_id="codex-loop-status-inbox-manager",
+                    pid=12,
+                    cwd="/repo",
+                    tmux_session=None,
+                )
+                binding_id = worker_db.bind_sessions(
+                    conn,
+                    task_name="loop-status-inbox-limit-task",
+                    worker_session_name="loop-status-inbox-worker",
+                    manager_session_name="loop-status-inbox-manager",
+                )
+                target_run_id = worker_db.create_ralph_loop_run(
+                    conn,
+                    task_id=task_id,
+                    name="target-inbox-run",
+                    max_iterations=3,
+                    current_iteration=1,
+                    cleanup_policy="clear",
+                    required_before_continue=[],
+                    metadata={"template": "test_coverage_loop"},
+                )
+                other_run_id = worker_db.create_ralph_loop_run(
+                    conn,
+                    task_id=task_id,
+                    name="other-inbox-run",
+                    max_iterations=3,
+                    current_iteration=1,
+                    cleanup_policy="clear",
+                    required_before_continue=[],
+                    metadata={"template": "test_coverage_loop"},
+                )
+                for index in range(100):
+                    worker_db.insert_routed_notification(
+                        conn,
+                        task_id=task_id,
+                        binding_id=binding_id,
+                        correlation_id=f"other-inbox-{index}",
+                        source_session_id=manager_id,
+                        target_session_id=worker_id,
+                        signal_type="continue_iteration",
+                        source_event_id=None,
+                        source_event_timestamp=None,
+                        dedupe_key=f"other-inbox-{index}",
+                        payload={"ralph_loop": {"run_id": other_run_id}, "message": "other run"},
+                        state="delivered",
+                        delivery_mode="pull_required",
+                        timestamp=f"2026-05-21T10:{index // 60:02d}:{index % 60:02d}Z",
+                    )
+                worker_db.insert_routed_notification(
+                    conn,
+                    task_id=task_id,
+                    binding_id=binding_id,
+                    correlation_id="target-inbox-after-limit",
+                    source_session_id=manager_id,
+                    target_session_id=worker_id,
+                    signal_type="continue_iteration",
+                    source_event_id=None,
+                    source_event_timestamp=None,
+                    dedupe_key="target-inbox-after-limit",
+                    payload={"ralph_loop": {"run_id": target_run_id}, "message": "target run"},
+                    state="delivered",
+                    delivery_mode="pull_required",
+                    timestamp="2026-05-21T10:02:00Z",
+                )
+                conn.commit()
+
+            proc = self.run_workerctl(
+                "loop-status",
+                "loop-status-inbox-limit-task",
+                "--run",
+                target_run_id,
+                "--path",
+                str(db_path),
+                "--json",
+            )
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            payload = json.loads(proc.stdout)
+            self.assertEqual(payload["inbox"]["worker_unconsumed"], 1)
+            self.assertEqual(payload["recommendation"], "worker_should_consume_inbox")
+
     def test_loop_status_queries_target_run_telemetry_without_task_limit_loss(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "workerctl.db"
@@ -8553,6 +8656,17 @@ class CliTests(unittest.TestCase):
                     error="Ingest failed for other run",
                     timestamp="2026-05-21T10:03:05Z",
                 )
+                worker_db.insert_acceptance_criterion(
+                    conn,
+                    task_id=task_id,
+                    criterion="Other run accepted criterion",
+                    status="accepted",
+                    source="user_requested",
+                    evidence={
+                        "evidence_type": "adversarial_check",
+                        "ralph_loop_run_id": other_run_id,
+                    },
+                )
                 conn.commit()
 
             proc = self.run_workerctl(
@@ -8574,8 +8688,24 @@ class CliTests(unittest.TestCase):
             self.assertEqual([row["id"] for row in view["failed_commands"]], [target_command_id])
             self.assertEqual(view["ingest"]["cycle_errors"], [])
             self.assertEqual(view["ingest"]["error_count"], 0)
+            self.assertEqual(view["open_criteria"]["open_accepted_count"], 0)
             self.assertNotIn(other_command_id, proc.stdout)
             self.assertNotIn("other-run-command", proc.stdout)
+
+            status = self.run_workerctl(
+                "loop-status",
+                "failure-run-scope-task",
+                "--run",
+                target_run_id,
+                "--json",
+                "--path",
+                str(db_path),
+            )
+
+            self.assertEqual(status.returncode, 0, status.stderr)
+            status_view = json.loads(status.stdout)
+            self.assertEqual(status_view["failures"]["alerts"], 3)
+            self.assertEqual(status_view["recommendation"], "inspect_failures")
 
             task_scoped = self.run_workerctl(
                 "telemetry",
@@ -8596,6 +8726,7 @@ class CliTests(unittest.TestCase):
                 [other_command_id, target_command_id],
             )
             self.assertEqual([row["id"] for row in task_view["ingest"]["cycle_errors"]], [other_ingest_cycle])
+            self.assertEqual(task_view["open_criteria"]["open_accepted_count"], 1)
 
     def test_telemetry_failures_view_scopes_by_window_and_active_tasks(self):
         with tempfile.TemporaryDirectory() as tmpdir:
