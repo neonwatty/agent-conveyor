@@ -821,6 +821,19 @@ class DatabaseTests(unittest.TestCase):
             hyphen_search = worker_db.query_telemetry_events(conn, search="stale-output")
             self.assertEqual([event["id"] for event in hyphen_search], [event_id])
 
+            inbox_event_id = worker_db.emit_telemetry_event(
+                conn,
+                task_id=task_id,
+                actor="worker",
+                event_type="dispatch_inbox_consumed",
+                severity="info",
+                summary="Worker consumed dispatcher inbox item.",
+                correlation={"cycle_id": 8},
+                attributes={"delivery_mode": "pull_required"},
+            )
+            underscore_search = worker_db.query_telemetry_events(conn, search="dispatch_inbox_consumed")
+            self.assertEqual([event["id"] for event in underscore_search], [inbox_event_id])
+
     def test_telemetry_event_helpers_validate_inputs_before_insert(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             conn = self.open_db(tmpdir)
@@ -6495,6 +6508,8 @@ class CliTests(unittest.TestCase):
                     "insert into tasks(id, name, goal, state, created_at, updated_at) "
                     "values ('task-inbox', 'inbox-task', 'g', 'managed', '2026-05-23T10:00:00Z', '2026-05-23T10:00:00Z')"
                 )
+                other_task_id = worker_db.create_task(conn, name="other-inbox-task", goal="other")
+                other_run_id = worker_db.create_run(conn, task_id=other_task_id, name="other-loop-run")
                 worker_id = worker_db.register_session(
                     conn,
                     name="inbox-worker",
@@ -6530,7 +6545,7 @@ class CliTests(unittest.TestCase):
                     source_event_id=None,
                     source_event_timestamp=None,
                     dedupe_key="dispatch-cli-inbox-1",
-                    payload={"message": "inspect"},
+                    payload={"loop_policy": {"run_id": other_run_id}, "message": "inspect"},
                     state="delivered",
                 )
                 conn.commit()
@@ -6561,6 +6576,14 @@ class CliTests(unittest.TestCase):
             self.assertEqual(payload["consumed"]["id"], notification_id)
             self.assertEqual(payload["consumed"]["correlation_id"], "dispatch-cli-inbox")
             self.assertEqual(payload["session"]["name"], "inbox-manager")
+            with worker_db.connect(db_path) as conn:
+                events = worker_db.query_telemetry_events(
+                    conn,
+                    task_id="task-inbox",
+                    event_type="dispatch_inbox_consumed",
+                )
+            self.assertEqual(len(events), 1)
+            self.assertIsNone(events[0]["run_id"])
 
             proc = self.run_workerctl(
                 "manager-inbox",
@@ -6662,6 +6685,18 @@ class CliTests(unittest.TestCase):
                     pid=2,
                     cwd="/repo",
                 )
+                run_id = worker_db.create_run(
+                    conn,
+                    task_id="task-inbox",
+                    name="inbox-loop-run",
+                    purpose="ralph_loop",
+                    metadata={
+                        "kind": "ralph_loop",
+                        "max_iterations": 2,
+                        "required_before_continue": ["adversarial_check"],
+                    },
+                )
+                worker_db.finish_run(conn, run=run_id)
                 binding_id = worker_db.bind_sessions(
                     conn,
                     task_name="inbox-task",
@@ -6688,7 +6723,11 @@ class CliTests(unittest.TestCase):
                         source_event_id=None,
                         source_event_timestamp=None,
                         dedupe_key="dispatch-worker-poll-1",
-                        payload={"message": "poll-delivered"},
+                        payload={
+                            "message": "poll-delivered",
+                            "loop_policy": {"template": "generic_loop", "run_id": run_id},
+                            "ralph_loop": {"template": "generic_loop", "run_id": run_id},
+                        },
                         state="delivered",
                         delivery_mode="pull_required",
                     )
@@ -6724,6 +6763,7 @@ class CliTests(unittest.TestCase):
                 )
             self.assertEqual(len(events), 1)
             self.assertEqual(events[0]["correlation"]["signal_type"], "nudge_worker")
+            self.assertEqual(events[0]["run_id"], run_id)
             self.assertEqual(events[0]["attributes"]["delivery_mode"], "pull_required")
             self.assertEqual(events[0]["attributes"]["target_session_role"], "worker")
 
@@ -9447,6 +9487,13 @@ Deferred follow-up criteria:
 
             allowed = checks["structured_test_coverage_retry_delivers"]
             self.assertEqual(allowed["dispatch"]["state"], "pull_required")
+            self.assertEqual(allowed["dispatch"]["run_id"], missing["dispatch"]["run_id"])
+            self.assertEqual(allowed["dispatch"]["loop_policy"]["template"], "test_coverage_loop")
+            self.assertEqual(allowed["dispatch"]["required_before_continue"], ["test_coverage", "adversarial_check"])
+            self.assertEqual(allowed["dispatch"]["requested_iteration"], 2)
+            self.assertEqual(allowed["dispatch"]["current_iteration"], 1)
+            self.assertEqual(allowed["dispatch"]["max_iterations"], 3)
+            self.assertEqual(allowed["dispatch"]["missing_evidence"], [])
             self.assertEqual(allowed["worker_inbox_count"], 1)
 
             replay_commands = "\n".join(receipt["replay_commands"])
