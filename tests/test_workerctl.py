@@ -9066,10 +9066,16 @@ Deferred follow-up criteria:
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertIn("adversarial-triggers", proc.stdout)
 
+    def test_qa_run_help_lists_test_coverage_loop(self):
+        proc = self.run_workerctl("qa-run", "--help")
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("test-coverage-loop", proc.stdout)
+
     def test_qa_run_ralph_loop_guardrails_writes_replayable_receipt(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            db_path = Path(tmpdir) / "workerctl.db"
-            receipt_path = Path(tmpdir) / "receipt.json"
+            db_path = Path(tmpdir) / "db" / "workerctl.db"
+            receipt_path = Path(tmpdir) / "receipts" / "receipt.json"
 
             proc = self.run_workerctl(
                 "qa-run",
@@ -9091,6 +9097,15 @@ Deferred follow-up criteria:
             self.assertEqual(receipt["scenario"], "ralph-loop-guardrails")
             self.assertEqual(receipt["result"], "passed")
             self.assertEqual(Path(receipt["artifacts"]["db_path"]), db_path.resolve())
+            generated_tasks = {task["suffix"]: task for task in receipt["generated_tasks"]}
+            self.assertEqual(
+                set(generated_tasks),
+                {"max-iteration", "missing-evidence", "preset"},
+            )
+            self.assertTrue(generated_tasks["max-iteration"]["task_name"].startswith("qa-max-iteration-"))
+            self.assertTrue(generated_tasks["max-iteration"]["worker_name"].endswith("-worker"))
+            self.assertTrue(generated_tasks["max-iteration"]["manager_name"].endswith("-manager"))
+            self.assertIn("binding_id", generated_tasks["max-iteration"])
             checks = {check["name"]: check for check in receipt["checks"]}
 
             max_block = checks["max_iteration_blocks_before_worker_delivery"]
@@ -9127,8 +9142,8 @@ Deferred follow-up criteria:
 
     def test_qa_run_adversarial_triggers_writes_replayable_receipt(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            db_path = Path(tmpdir) / "workerctl.db"
-            receipt_path = Path(tmpdir) / "receipt.json"
+            db_path = Path(tmpdir) / "db" / "workerctl.db"
+            receipt_path = Path(tmpdir) / "receipts" / "receipt.json"
 
             proc = self.run_workerctl(
                 "qa-run",
@@ -9148,6 +9163,18 @@ Deferred follow-up criteria:
             self.assertEqual(summary["result"], "passed")
             self.assertEqual(receipt["scenario"], "adversarial-triggers")
             self.assertEqual(Path(receipt["artifacts"]["db_path"]), db_path.resolve())
+            generated_tasks = {task["suffix"]: task for task in receipt["generated_tasks"]}
+            self.assertEqual(
+                set(generated_tasks),
+                {
+                    "adversarial-triggers-loop",
+                    "adversarial-triggers-worker",
+                    "adversarial-triggers-criteria",
+                    "adversarial-triggers-finish",
+                },
+            )
+            self.assertIsNone(generated_tasks["adversarial-triggers-finish"]["worker_name"])
+            self.assertIsNotNone(generated_tasks["adversarial-triggers-loop"]["binding_id"])
 
             classifications = {item["name"]: item for item in receipt["trigger_classifications"]}
             self.assertEqual(classifications["loop-gate-trigger"]["intent"], "create_loop_policy")
@@ -9195,8 +9222,8 @@ Deferred follow-up criteria:
 
     def test_qa_run_generic_loop_template_writes_replayable_receipt(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            db_path = Path(tmpdir) / "workerctl.db"
-            receipt_path = Path(tmpdir) / "receipt.json"
+            db_path = Path(tmpdir) / "db" / "workerctl.db"
+            receipt_path = Path(tmpdir) / "receipts" / "receipt.json"
 
             proc = self.run_workerctl(
                 "qa-run",
@@ -9221,6 +9248,11 @@ Deferred follow-up criteria:
             self.assertEqual(Path(receipt["artifacts"]["db_path"]), db_path.resolve())
             self.assertEqual(receipt["template_metadata"]["template"], "visual_diff_loop")
             self.assertEqual(receipt["template_metadata"]["cleanup_policy"], "compact")
+            self.assertEqual(len(receipt["generated_tasks"]), 1)
+            generated_task = receipt["generated_tasks"][0]
+            self.assertEqual(generated_task["suffix"], "generic-loop-template")
+            self.assertTrue(generated_task["task_name"].startswith("qa-generic-loop-template-"))
+            self.assertTrue(generated_task["worker_name"].endswith("-worker"))
             self.assertEqual(
                 receipt["template_metadata"]["required_before_continue"],
                 [
@@ -9293,8 +9325,8 @@ Deferred follow-up criteria:
             }
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            db_path = Path(tmpdir) / "workerctl.db"
-            receipt_path = Path(tmpdir) / "receipt.json"
+            db_path = Path(tmpdir) / "db" / "workerctl.db"
+            receipt_path = Path(tmpdir) / "receipts" / "receipt.json"
             args = argparse.Namespace(
                 dispatcher_id=None,
                 json=True,
@@ -9321,6 +9353,15 @@ Deferred follow-up criteria:
             self.assertTrue(Path(receipt["artifacts"]["candidate_screenshot"]).exists())
             self.assertTrue(Path(receipt["artifacts"]["reference_artifact"]).exists())
             self.assertTrue(Path(receipt["artifacts"]["visual_diff_report"]).exists())
+            artifact_paths = [
+                Path(value).resolve()
+                for key, value in receipt["artifacts"].items()
+                if key != "db_path"
+            ]
+            self.assertTrue(artifact_paths)
+            self.assertTrue(all(receipt_path.parent.resolve() in path.parents for path in artifact_paths))
+            self.assertEqual(len(receipt["generated_tasks"]), 1)
+            self.assertEqual(receipt["generated_tasks"][0]["suffix"], "generic-loop-template-browser")
             self.assertTrue(receipt["visual_diff"]["below_threshold"])
             self.assertEqual(receipt["visual_diff"]["diff_score"], 0.0)
 
@@ -9358,6 +9399,61 @@ Deferred follow-up criteria:
             self.assertIn("loop-evidence visual-diff", replay_commands)
             self.assertIn("loop-evidence adversarial-check", replay_commands)
 
+    def test_qa_run_test_coverage_loop_writes_replayable_receipt(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "db" / "workerctl.db"
+            receipt_path = Path(tmpdir) / "receipts" / "receipt.json"
+
+            proc = self.run_workerctl(
+                "qa-run",
+                "test-coverage-loop",
+                "--receipt-output",
+                str(receipt_path),
+                "--path",
+                str(db_path),
+                "--json",
+            )
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            summary = json.loads(proc.stdout)
+            receipt = json.loads(receipt_path.read_text())
+            self.assertEqual(summary["scenario"], "test-coverage-loop")
+            self.assertEqual(summary["result"], "passed")
+            self.assertEqual(summary["checks"], 3)
+            self.assertEqual(receipt["scenario"], "test-coverage-loop")
+            self.assertEqual(receipt["template"], "test_coverage_loop")
+            self.assertEqual(receipt["result"], "passed")
+            self.assertEqual(Path(receipt["artifacts"]["db_path"]), db_path.resolve())
+            self.assertTrue(Path(receipt["artifacts"]["coverage_report"]).exists())
+            self.assertTrue(receipt_path.parent.resolve() in Path(receipt["artifacts"]["coverage_report"]).resolve().parents)
+            self.assertEqual(receipt["template_metadata"]["template"], "test_coverage_loop")
+            self.assertEqual(receipt["template_metadata"]["cleanup_policy"], "clear")
+            self.assertEqual(receipt["template_metadata"]["required_before_continue"], ["test_coverage", "adversarial_check"])
+            self.assertEqual(len(receipt["generated_tasks"]), 1)
+            self.assertEqual(receipt["generated_tasks"][0]["suffix"], "test-coverage-loop")
+
+            checks = {check["name"]: check for check in receipt["checks"]}
+            missing = checks["test_coverage_template_blocks_before_coverage_evidence"]
+            self.assertEqual(missing["dispatch"]["state"], "blocked")
+            self.assertEqual(missing["dispatch"]["reason"], "missing_required_evidence")
+            self.assertEqual(missing["dispatch"]["missing_evidence"], ["test_coverage", "adversarial_check"])
+            self.assertEqual(missing["worker_inbox_count"], 0)
+
+            unstructured = checks["test_coverage_unstructured_adversarial_check_still_blocks"]
+            self.assertEqual(unstructured["dispatch"]["state"], "blocked")
+            self.assertEqual(unstructured["dispatch"]["reason"], "missing_adversarial_check_evidence")
+            self.assertEqual(unstructured["dispatch"]["missing_evidence"], ["adversarial_check"])
+            self.assertEqual(unstructured["worker_inbox_count"], 0)
+
+            allowed = checks["structured_test_coverage_retry_delivers"]
+            self.assertEqual(allowed["dispatch"]["state"], "pull_required")
+            self.assertEqual(allowed["worker_inbox_count"], 1)
+
+            replay_commands = "\n".join(receipt["replay_commands"])
+            self.assertIn("loop-templates --show test_coverage_loop", replay_commands)
+            self.assertIn("--evidence-type test_coverage", replay_commands)
+            self.assertIn("loop-evidence adversarial-check", replay_commands)
+
     def test_qa_run_browser_screenshot_reports_missing_node_as_worker_error(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp_path = Path(tmpdir)
@@ -9374,7 +9470,13 @@ Deferred follow-up criteria:
                     )
 
     def test_qa_run_refuses_to_share_dirty_continue_iteration_queue(self):
-        for scenario in ("ralph-loop-guardrails", "generic-loop-template", "generic-loop-template-browser", "adversarial-triggers"):
+        for scenario in (
+            "ralph-loop-guardrails",
+            "generic-loop-template",
+            "generic-loop-template-browser",
+            "test-coverage-loop",
+            "adversarial-triggers",
+        ):
             with self.subTest(scenario=scenario):
                 with tempfile.TemporaryDirectory() as tmpdir:
                     db_path = Path(tmpdir) / "workerctl.db"
@@ -9448,7 +9550,13 @@ Deferred follow-up criteria:
                         self.assertEqual(command["state"], "pending")
 
     def test_qa_run_refuses_stale_attempted_continue_iteration_queue(self):
-        for scenario in ("ralph-loop-guardrails", "generic-loop-template", "generic-loop-template-browser", "adversarial-triggers"):
+        for scenario in (
+            "ralph-loop-guardrails",
+            "generic-loop-template",
+            "generic-loop-template-browser",
+            "test-coverage-loop",
+            "adversarial-triggers",
+        ):
             with self.subTest(scenario=scenario):
                 with tempfile.TemporaryDirectory() as tmpdir:
                     db_path = Path(tmpdir) / "workerctl.db"
@@ -19880,9 +19988,12 @@ class ManagerBootstrapPromptTests(unittest.TestCase):
         self.assertIn("ralph-loop-presets", readme)
         self.assertIn("qa-run generic-loop-template-browser", readme)
         self.assertIn("generic-loop-template-browser-receipt.json", readme)
+        self.assertIn("qa-run test-coverage-loop", readme)
+        self.assertIn("test-coverage-loop-receipt.json", readme)
         self.assertIn("Playwright dependency", readme)
         self.assertIn("Chromium", readme)
         self.assertIn("qa-run generic-loop-template-browser", checklist)
+        self.assertIn("qa-run test-coverage-loop", checklist)
         self.assertIn("Playwright dependency", checklist)
         self.assertIn("Chromium", checklist)
         self.assertIn("browser-backed QA helper message", checklist)

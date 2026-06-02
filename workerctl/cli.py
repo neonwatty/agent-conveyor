@@ -451,7 +451,13 @@ def build_parser() -> argparse.ArgumentParser:
         "scenario",
         nargs="?",
         default="ralph-loop-guardrails",
-        choices=("ralph-loop-guardrails", "generic-loop-template", "generic-loop-template-browser", "adversarial-triggers"),
+        choices=(
+            "ralph-loop-guardrails",
+            "generic-loop-template",
+            "generic-loop-template-browser",
+            "test-coverage-loop",
+            "adversarial-triggers",
+        ),
     )
     qa_run.add_argument("--receipt-output", required=True, help="Path to write the JSON QA receipt.")
     qa_run.add_argument("--dispatcher-id", help="Dispatcher id to record in the receipt.")
