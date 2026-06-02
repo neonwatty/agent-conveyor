@@ -7149,6 +7149,24 @@ class CliTests(unittest.TestCase):
                     },
                     timestamp="2026-05-21T10:01:05Z",
                 )
+                ingest_failure = worker_db.create_manager_cycle(
+                    conn,
+                    task_id=task_id,
+                    manager_id=None,
+                    timestamp="2026-05-21T10:01:30Z",
+                )
+                worker_db.finish_manager_cycle(
+                    conn,
+                    cycle_id=ingest_failure,
+                    state="failed",
+                    status={
+                        "error_type": "CodexIngestError",
+                        "kind": "session_cycle",
+                        "pane_signal": {"captured": True, "notable_pattern": None},
+                    },
+                    error="Ingest failed for another run",
+                    timestamp="2026-05-21T10:01:35Z",
+                )
                 conn.commit()
 
             proc = self.run_workerctl(
@@ -8458,6 +8476,24 @@ class CliTests(unittest.TestCase):
                     error="other run failed",
                     timestamp="2026-05-21T10:02:05Z",
                 )
+                other_ingest_cycle = worker_db.create_manager_cycle(
+                    conn,
+                    task_id=task_id,
+                    manager_id=None,
+                    timestamp="2026-05-21T10:03:00Z",
+                )
+                worker_db.finish_manager_cycle(
+                    conn,
+                    cycle_id=other_ingest_cycle,
+                    state="failed",
+                    status={
+                        "error_type": "CodexIngestError",
+                        "kind": "session_cycle",
+                        "pane_signal": {"captured": True, "notable_pattern": None},
+                    },
+                    error="Ingest failed for other run",
+                    timestamp="2026-05-21T10:03:05Z",
+                )
                 conn.commit()
 
             proc = self.run_workerctl(
@@ -8477,6 +8513,8 @@ class CliTests(unittest.TestCase):
             self.assertEqual([row["id"] for row in view["failed_cycles"]], [target_cycle])
             self.assertEqual([row["id"] for row in view["pane_capture_failures"]], [target_cycle])
             self.assertEqual([row["id"] for row in view["failed_commands"]], [target_command_id])
+            self.assertEqual(view["ingest"]["cycle_errors"], [])
+            self.assertEqual(view["ingest"]["error_count"], 0)
             self.assertNotIn(other_command_id, proc.stdout)
             self.assertNotIn("other-run-command", proc.stdout)
 
@@ -8498,6 +8536,7 @@ class CliTests(unittest.TestCase):
                 [row["id"] for row in task_view["failed_commands"]],
                 [other_command_id, target_command_id],
             )
+            self.assertEqual([row["id"] for row in task_view["ingest"]["cycle_errors"]], [other_ingest_cycle])
 
     def test_telemetry_failures_view_scopes_by_window_and_active_tasks(self):
         with tempfile.TemporaryDirectory() as tmpdir:
