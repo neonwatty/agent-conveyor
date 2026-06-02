@@ -272,6 +272,13 @@ tmux attach -t codex-live-test
   scope and include `--redact-identity-token`; unfiltered output can include
   unrelated active sessions and their registration tokens.
 - `tasks [--create NAME --goal G --summary S]` — List or create tasks.
+- `create-disposable-binding TASK [--worker NAME] [--manager NAME] [--template TEMPLATE | --required-before-continue TYPE] [--adversarial]` —
+  Create a no-tmux manager/worker binding for real Ralph-loop slices. The
+  helper creates the task when missing, marks it managed, writes valid Codex
+  rollout JSONL files, registers worker and manager sessions with
+  `tmux_session=null`, binds them, optionally creates a template-backed or
+  custom Ralph-loop policy run, and prints replay commands for Dispatch,
+  worker inbox polling, and `loop-status`.
 - `discover [QUERY] [--all] [--limit N]` / `search [QUERY]` — Search tasks,
   registered sessions, active bindings, and recent telemetry in one JSON result.
   Use this for conversational setup when a manager or Codex session needs to
@@ -638,6 +645,9 @@ For real vertical slices, start with the Ralph loop operator guide in
 natural-language triggers, Dispatch authority model, worker inbox polling,
 required evidence, adversarial proof, `loop-status`, and telemetry review pass
 bar.
+Use `create-disposable-binding` when the manager and worker are Codex app or
+other no-tmux sessions and you want the same Dispatch rails without manual
+task/session/bind setup.
 - `enqueue-continue-iteration TASK --loop-run RUN --requested-iteration N` —
   Queue a manager-requested next loop pass for Dispatch. The command refuses
   same/current iteration requests before they become pending queue rows, while

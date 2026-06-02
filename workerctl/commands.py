@@ -2042,6 +2042,287 @@ def _qa_run_bound_task(conn: Any, *, slug: str, suffix: str) -> dict[str, str]:
     }
 
 
+def _disposable_session_slug(name: str) -> str:
+    slug = re.sub(r"[^A-Za-z0-9_.-]+", "-", name).strip(".-")
+    return slug or "session"
+
+
+def _write_disposable_rollout(*, session_dir: Path, session_name: str, cwd: str) -> tuple[Path, str]:
+    session_dir.mkdir(parents=True, exist_ok=True)
+    slug = _disposable_session_slug(session_name)
+    session_id = f"codex-{slug}"
+    rollout_path = session_dir / f"rollout-{slug}.jsonl"
+    payload = {
+        "type": "session_meta",
+        "payload": {
+            "cwd": cwd,
+            "id": session_id,
+            "originator": "workerctl create-disposable-binding",
+        },
+    }
+    rollout_path.write_text(json.dumps(payload, sort_keys=True) + "\n")
+    return rollout_path, session_id
+
+
+def _unique_required_evidence(items: list[str]) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for item in items:
+        evidence = item.strip()
+        if not evidence:
+            raise WorkerError("required evidence entries must be non-empty")
+        if evidence not in seen:
+            result.append(evidence)
+            seen.add(evidence)
+    return result
+
+
+def _disposable_replay_commands(
+    *,
+    task_name: str,
+    worker_name: str,
+    manager_name: str,
+    run_name: str | None,
+    template: str | None,
+    required_before_continue: list[str],
+    adversarial: bool,
+    session_dir: Path,
+    db_path: Path,
+    workerctl_path: str = "scripts/workerctl",
+) -> list[str]:
+    path_suffix = f" --path {sh_quote(str(db_path))}"
+    setup_parts = [
+        workerctl_path,
+        "create-disposable-binding",
+        sh_quote(task_name),
+        "--worker",
+        sh_quote(worker_name),
+        "--manager",
+        sh_quote(manager_name),
+        "--session-dir",
+        sh_quote(str(session_dir)),
+    ]
+    if template:
+        setup_parts.extend(["--template", sh_quote(template)])
+    for evidence in required_before_continue:
+        setup_parts.extend(["--required-before-continue", sh_quote(evidence)])
+    if adversarial and "adversarial_check" not in required_before_continue:
+        setup_parts.append("--adversarial")
+    if run_name:
+        setup_parts.extend(["--run-name", sh_quote(run_name)])
+    setup_parts.extend(["--json", "--path", sh_quote(str(db_path))])
+    commands = [
+        " ".join(setup_parts),
+    ]
+    if run_name:
+        loop_flag = f" --loop-run {sh_quote(run_name)}"
+        commands.extend(
+            [
+                f"{workerctl_path} enqueue-continue-iteration {sh_quote(task_name)}{loop_flag} "
+                f"--requested-iteration 2 --message {sh_quote('Run the next iteration.')}{path_suffix}",
+                f"{workerctl_path} dispatch --once --type continue_iteration{path_suffix}",
+                f"{workerctl_path} worker-inbox {sh_quote(task_name)} --consume-next --wait{path_suffix} --json",
+                f"{workerctl_path} loop-status {sh_quote(task_name)} --run {sh_quote(run_name)}{path_suffix} --json",
+            ]
+        )
+    else:
+        commands.extend(
+            [
+                f"{workerctl_path} session-inbox WORKER_SESSION --wait{path_suffix} --json",
+                f"{workerctl_path} manager-inbox MANAGER_SESSION --wait{path_suffix} --json",
+            ]
+        )
+    return commands
+
+
+def command_create_disposable_binding(args: argparse.Namespace) -> int:
+    from workerctl import db as worker_db
+
+    db_path = Path(args.path).expanduser().resolve() if getattr(args, "path", None) else default_db_path()
+    session_dir = (
+        Path(args.session_dir).expanduser().resolve()
+        if getattr(args, "session_dir", None)
+        else db_path.parent / "disposable-sessions"
+    )
+    cwd = str(Path(args.cwd).expanduser().resolve()) if getattr(args, "cwd", None) else str(PROJECT_ROOT)
+    task_name = args.task
+    worker_name = args.worker or f"{task_name}-worker"
+    manager_name = args.manager or f"{task_name}-manager"
+    required_before_continue = _unique_required_evidence(list(getattr(args, "required_before_continue", None) or []))
+    if getattr(args, "adversarial", False):
+        required_before_continue = _unique_required_evidence([*required_before_continue, "adversarial_check"])
+
+    with worker_db.connect(db_path) as conn:
+        worker_db.initialize_database(conn)
+        task = conn.execute(
+            "select id, name from tasks where id = ? or name = ?",
+            (task_name, task_name),
+        ).fetchone()
+        created_task = task is None
+        if created_task:
+            task_id = worker_db.create_task(
+                conn,
+                name=task_name,
+                goal=args.goal or "Disposable no-tmux Ralph-loop task.",
+                summary=args.summary,
+            )
+        else:
+            task_id = task["id"]
+        conn.execute("update tasks set state = 'managed' where id = ?", (task_id,))
+        task_row = worker_db.task_row(conn, task=task_id)
+
+        worker_rollout_path, worker_codex_session_id = _write_disposable_rollout(
+            session_dir=session_dir,
+            session_name=worker_name,
+            cwd=cwd,
+        )
+        manager_rollout_path, manager_codex_session_id = _write_disposable_rollout(
+            session_dir=session_dir,
+            session_name=manager_name,
+            cwd=cwd,
+        )
+
+        worker_id = worker_db.register_session(
+            conn,
+            name=worker_name,
+            role="worker",
+            codex_session_path=str(worker_rollout_path),
+            codex_session_id=worker_codex_session_id,
+            pid=os.getpid(),
+            cwd=cwd,
+            tmux_session=None,
+        )
+        manager_id = worker_db.register_session(
+            conn,
+            name=manager_name,
+            role="manager",
+            codex_session_path=str(manager_rollout_path),
+            codex_session_id=manager_codex_session_id,
+            pid=os.getpid(),
+            cwd=cwd,
+            tmux_session=None,
+        )
+        binding_id = worker_db.bind_sessions(
+            conn,
+            task_name=task_row["name"],
+            worker_session_name=worker_name,
+            manager_session_name=manager_name,
+        )
+
+        run: dict[str, Any] | None = None
+        if getattr(args, "template", None):
+            metadata = loop_template_metadata(
+                args.template,
+                max_iterations=args.max_iterations,
+                current_iteration=args.current_iteration,
+                seed_prompt_sha256=args.seed_prompt_sha256,
+            )
+            if required_before_continue:
+                metadata["required_before_continue"] = _unique_required_evidence(
+                    [*metadata.get("required_before_continue", []), *required_before_continue]
+                )
+            run_id = worker_db.create_ralph_loop_run(
+                conn,
+                task_id=task_row["id"],
+                name=args.run_name,
+                max_iterations=int(metadata["max_iterations"]),
+                current_iteration=int(metadata["current_iteration"]),
+                cleanup_policy=metadata.get("cleanup_policy"),
+                required_before_continue=metadata.get("required_before_continue"),
+                stop_conditions=metadata.get("stop_conditions"),
+                seed_prompt_sha256=metadata.get("seed_prompt_sha256"),
+                preset=metadata.get("preset"),
+                metadata=metadata,
+            )
+            run = worker_db.run_row(conn, run=run_id)
+        elif required_before_continue:
+            max_iterations = args.max_iterations if args.max_iterations is not None else 2
+            metadata = {
+                "cleanup_policy": args.cleanup_policy,
+                "current_iteration": args.current_iteration,
+                "kind": "ralph_loop",
+                "max_iterations": max_iterations,
+                "required_before_continue": required_before_continue,
+                "seed_prompt_sha256": args.seed_prompt_sha256,
+                "source": "create-disposable-binding",
+                "stop_conditions": ["max_iterations", "required_evidence"],
+            }
+            run_id = worker_db.create_ralph_loop_run(
+                conn,
+                task_id=task_row["id"],
+                name=args.run_name,
+                max_iterations=max_iterations,
+                current_iteration=args.current_iteration,
+                cleanup_policy=args.cleanup_policy,
+                required_before_continue=required_before_continue,
+                stop_conditions=metadata["stop_conditions"],
+                seed_prompt_sha256=args.seed_prompt_sha256,
+                metadata=metadata,
+            )
+            run = worker_db.run_row(conn, run=run_id)
+
+        worker_db.insert_event(
+            conn,
+            "disposable_binding_created",
+            actor="workerctl",
+            task_id=task_row["id"],
+            payload={
+                "binding_id": binding_id,
+                "manager": manager_name,
+                "run": run["name"] if run else None,
+                "worker": worker_name,
+            },
+        )
+        conn.commit()
+
+    result = {
+        "binding": {"id": binding_id},
+        "db_path": str(db_path),
+        "manager": {
+            "id": manager_id,
+            "name": manager_name,
+            "rollout_path": str(manager_rollout_path),
+            "tmux_session": None,
+        },
+        "replay_commands": _disposable_replay_commands(
+            task_name=task_row["name"],
+            worker_name=worker_name,
+            manager_name=manager_name,
+            run_name=run["name"] if run else None,
+            template=getattr(args, "template", None),
+            required_before_continue=required_before_continue,
+            adversarial=bool(getattr(args, "adversarial", False)),
+            session_dir=session_dir,
+            db_path=db_path,
+        ),
+        "run": run,
+        "task": {
+            "created": created_task,
+            "id": task_row["id"],
+            "name": task_row["name"],
+            "state": task_row["state"],
+        },
+        "worker": {
+            "id": worker_id,
+            "name": worker_name,
+            "rollout_path": str(worker_rollout_path),
+            "tmux_session": None,
+        },
+    }
+    if getattr(args, "json", False):
+        print(json.dumps(result, indent=2, sort_keys=True))
+    else:
+        print(f"Created disposable binding for task {task_row['name']!r}.")
+        print(f"Worker: {worker_name} ({worker_rollout_path})")
+        print(f"Manager: {manager_name} ({manager_rollout_path})")
+        if run:
+            print(f"Ralph loop run: {run['name']}")
+        print("Replay commands:")
+        for command in result["replay_commands"]:
+            print(f"  {command}")
+    return 0
+
+
 def _qa_run_receipt_artifact_dir(
     args: argparse.Namespace,
     *,

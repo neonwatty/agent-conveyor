@@ -22,6 +22,17 @@ Generic caution does not arm a loop gate. For example, `be careful, run tests, a
 
 ## Standard operating sequence
 
+For no-tmux managers/workers, create the disposable task/session binding first:
+
+```bash
+scripts/workerctl create-disposable-binding <task> --worker <worker-session> --manager <manager-session> --template <template> --adversarial --json
+```
+
+This writes real Codex rollout JSONL files, registers both sessions, binds them
+to the task, and prints replay commands for Dispatch, inbox polling, and
+`loop-status`. Use it for Codex app managers/workers that will poll
+`worker-inbox` or `manager-inbox` instead of receiving tmux keystrokes.
+
 1. Classify the prompt:
 
    ```bash

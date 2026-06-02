@@ -27,6 +27,7 @@ from workerctl.commands import (
     command_continuation,
     command_continuation_reviewer,
     command_create,
+    command_create_disposable_binding,
     command_criteria,
     command_criteria_plan,
     command_cycle,
@@ -477,6 +478,47 @@ def build_parser() -> argparse.ArgumentParser:
     qa_run.add_argument("--path", help="Override the workerctl database path; defaults to a temp QA database.")
     qa_run.add_argument("--json", action="store_true", help="Print stable JSON summary.")
     qa_run.set_defaults(func=command_qa_run)
+
+    create_disposable_binding = subparsers.add_parser(
+        "create-disposable-binding",
+        help="Create a disposable no-tmux manager/worker binding.",
+        description="Create a disposable no-tmux manager/worker binding for Ralph-loop operator slices.",
+    )
+    create_disposable_binding.add_argument("task", help="Task name or ID to bind; created when missing.")
+    create_disposable_binding.add_argument("--goal", help="Goal text when creating the task.")
+    create_disposable_binding.add_argument("--summary", help="Optional summary when creating the task.")
+    create_disposable_binding.add_argument("--worker", help="Worker session name; defaults to TASK-worker.")
+    create_disposable_binding.add_argument("--manager", help="Manager session name; defaults to TASK-manager.")
+    create_disposable_binding.add_argument("--session-dir", help="Directory for disposable Codex rollout JSONL files.")
+    create_disposable_binding.add_argument("--cwd", default=str(INVOCATION_CWD), help="Session cwd to store in rollout metadata.")
+    create_disposable_binding.add_argument("--template", help="Optional Ralph-loop template to create as the policy run.")
+    create_disposable_binding.add_argument("--run-name", help="Optional Ralph-loop run name.")
+    create_disposable_binding.add_argument("--max-iterations", type=int, help="Loop max iterations; defaults to 2 for custom gates.")
+    create_disposable_binding.add_argument(
+        "--current-iteration",
+        type=int,
+        default=1,
+        help="Current loop iteration for the created policy run.",
+    )
+    create_disposable_binding.add_argument("--seed-prompt-sha256", help="Optional seed prompt hash for the loop policy.")
+    create_disposable_binding.add_argument(
+        "--required-before-continue",
+        action="append",
+        help="Evidence key required before Dispatch can forward another loop iteration; repeatable.",
+    )
+    create_disposable_binding.add_argument(
+        "--adversarial",
+        action="store_true",
+        help="Require adversarial_check evidence before another loop iteration can continue.",
+    )
+    create_disposable_binding.add_argument(
+        "--cleanup-policy",
+        default="clear",
+        help="Cleanup policy for custom Ralph-loop runs; defaults to clear.",
+    )
+    create_disposable_binding.add_argument("--path", help="Override the workerctl database path.")
+    create_disposable_binding.add_argument("--json", action="store_true", help="Print stable JSON output.")
+    create_disposable_binding.set_defaults(func=command_create_disposable_binding)
 
     db_doctor = subparsers.add_parser(
         "db-doctor",
