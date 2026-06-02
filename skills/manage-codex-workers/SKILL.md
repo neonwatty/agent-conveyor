@@ -369,6 +369,10 @@ in the handoff. Do not accept worker claims, passing happy-path tests, generated
 summaries, or optimistic UI as proof by themselves. Treat unverified assumptions
 as blockers or explicit follow-ups.
 
+When the repository being managed is CTM, see
+`docs/agent-evidence-playbook.md` for CTM-specific evidence choices and final
+handoff format.
+
 Natural-language requests such as "run this as an adversarially gated loop",
 "require adversarial proof before another worker iteration", or "do not finish
 until you have tried to disprove it" should be treated as operational gate

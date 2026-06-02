@@ -65,3 +65,7 @@ A run passes only when all of these are true:
 
 Pane text alone is not enough. The run must include Dispatch chain evidence from
 the dashboard and/or `workerctl audit`.
+
+For choosing the right proof for a change, see
+[`../agent-evidence-playbook.md`](../agent-evidence-playbook.md). QA reports
+should name the disproof attempt, the evidence used, and any residual risk.

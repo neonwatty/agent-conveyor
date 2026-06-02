@@ -1,6 +1,10 @@
 # Adversarial Proof
 
-Adversarial proof is the burden-of-proof check used by manager-led and Ralph-loop workflows. It asks the manager or worker to assume the implementation may still be wrong until evidence proves otherwise.
+Every CTM closeout should include a burden-of-proof attempt: name the strongest
+realistic failure mode, check it with concrete evidence, and report the result.
+Adversarial proof is the stricter gated version used by manager-led and
+Ralph-loop workflows when proof must be stored as structured
+`adversarial_check` evidence before continuing or finishing.
 
 ## Required Receipt
 
@@ -9,6 +13,11 @@ An adversarial proof receipt must record:
 - `failure_mode`: the strongest realistic failure mode considered.
 - `check`: the command, test, trace, screenshot, audit record, diff, or inspection used.
 - `result`: why the check rules out the failure mode, or what remains unresolved.
+
+For ordinary, ungated closeout, these same fields can appear in the final agent
+handoff instead of a `loop-evidence adversarial-check` receipt. Use the
+structured receipt when Dispatch, a loop policy, or
+`finish-task --require-adversarial-proof` needs to enforce the proof.
 
 ## CTM Enforcement
 
