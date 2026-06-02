@@ -14,6 +14,7 @@ import sys
 import tempfile
 import time
 import uuid
+from collections import Counter
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -4095,6 +4096,169 @@ def command_loop_templates(args: argparse.Namespace) -> int:
         print(json.dumps(result, indent=2, sort_keys=True))
         return 0
     raise WorkerError("Choose one of --list, --show, or --create-run")
+
+
+def _loop_status_json_object(value: str | None) -> dict[str, Any]:
+    if not value:
+        return {}
+    loaded = json.loads(value)
+    return loaded if isinstance(loaded, dict) else {}
+
+
+def _loop_status_mapping_run_id(mapping: dict[str, Any]) -> str | None:
+    for key in ("ralph_loop", "loop_policy"):
+        value = mapping.get(key)
+        if isinstance(value, dict):
+            run_id = value.get("run_id")
+            if isinstance(run_id, str) and run_id:
+                return run_id
+    for key in ("ralph_loop_run_id", "loop_run_id", "run_id"):
+        run_id = mapping.get(key)
+        if isinstance(run_id, str) and run_id:
+            return run_id
+    return None
+
+
+def _loop_status_command_matches_run(row: Any, *, run_id: str) -> bool:
+    payload = _loop_status_json_object(row["payload_json"])
+    result = _loop_status_json_object(row["result_json"])
+    return _loop_status_mapping_run_id(payload) == run_id or _loop_status_mapping_run_id(result) == run_id
+
+
+def _loop_status_summary(conn: Any, *, task: Any, run: dict[str, Any]) -> dict[str, Any]:
+    from workerctl import db as worker_db
+
+    metadata = run.get("metadata") or {}
+    command_rows = conn.execute(
+        """
+        select id, state, payload_json, result_json
+        from commands
+        where task_id = ?
+        order by created_at, id
+        """,
+        (task["id"],),
+    ).fetchall()
+    matching_commands = [row for row in command_rows if _loop_status_command_matches_run(row, run_id=run["id"])]
+    command_states = Counter(row["state"] for row in matching_commands)
+
+    notifications = [
+        notification
+        for notification in worker_db.routed_notifications(conn, task_id=task["id"])
+        if _notification_loop_run_id(notification) == run["id"]
+    ]
+    notification_states = Counter(notification["state"] for notification in notifications)
+
+    worker_inbox = []
+    try:
+        binding = worker_db.active_binding_for_task(conn, task_name=task["name"])
+    except WorkerError:
+        binding = None
+    if binding is not None:
+        worker_inbox = [
+            item
+            for item in worker_db.session_inbox(
+                conn,
+                session_name=binding["worker_session_name"],
+                limit=100,
+            )
+            if _notification_loop_run_id(item) == run["id"]
+        ]
+
+    criteria = worker_db.acceptance_criteria_for_task(conn, task_id=task["id"])
+    evidence_items = [
+        criterion["evidence"]
+        for criterion in criteria
+        if isinstance(criterion.get("evidence"), dict)
+        and criterion["evidence"].get("ralph_loop_run_id") == run["id"]
+    ]
+    evidence_types = sorted(
+        {
+            evidence.get("evidence_type")
+            for evidence in evidence_items
+            if isinstance(evidence.get("evidence_type"), str) and evidence.get("evidence_type")
+        }
+    )
+
+    telemetry_events = [
+        event
+        for event in query_telemetry_events(conn, task_id=task["id"], limit=1000)
+        if event["run_id"] == run["id"]
+    ]
+    event_types = Counter(event["event_type"] for event in telemetry_events)
+
+    failures = telemetry_failures_view(conn, task_id=task["id"], run_id=run["id"])
+    failure_counts = {
+        "alerts": len(failures["alerts"]),
+        "failed_commands": len(failures["failed_commands"]),
+        "failed_cycles": len(failures["failed_cycles"]),
+        "pane_capture_failures": len(failures["pane_capture_failures"]),
+    }
+    if failure_counts["alerts"] or failure_counts["failed_commands"] or failure_counts["failed_cycles"]:
+        recommendation = "inspect_failures"
+    elif worker_inbox:
+        recommendation = "worker_should_consume_inbox"
+    else:
+        recommendation = "ready_for_manager_review"
+
+    return {
+        "task": {"id": task["id"], "name": task["name"], "state": task["state"]},
+        "run": {"id": run["id"], "name": run["name"], "status": run["status"]},
+        "policy": {
+            "template": metadata.get("template") or metadata.get("preset"),
+            "current_iteration": metadata.get("current_iteration"),
+            "max_iterations": metadata.get("max_iterations"),
+            "required_before_continue": metadata.get("required_before_continue") or [],
+            "cleanup_policy": metadata.get("cleanup_policy"),
+        },
+        "commands": {
+            "total": len(matching_commands),
+            "states": dict(sorted(command_states.items())),
+        },
+        "notifications": {
+            "total": len(notifications),
+            "delivered": notification_states.get("delivered", 0),
+        },
+        "inbox": {"worker_unconsumed": len(worker_inbox)},
+        "evidence": {"total": len(evidence_items), "types": evidence_types},
+        "telemetry": {
+            "total": len(telemetry_events),
+            "dispatch_inbox_consumed": event_types.get("dispatch_inbox_consumed", 0),
+            "by_event_type": dict(sorted(event_types.items())),
+        },
+        "failures": failure_counts,
+        "recommendation": recommendation,
+    }
+
+
+def command_loop_status(args: argparse.Namespace) -> int:
+    db_path = Path(args.path).expanduser().resolve() if args.path else None
+    with connect_db(db_path) as conn:
+        initialize_database(conn)
+        task = db_task_row(conn, task=args.task)
+        run = db_run_row(conn, run=args.run)
+        if run["task_id"] != task["id"]:
+            raise WorkerError(f"run {args.run!r} does not belong to task {task['name']!r}")
+        result = _loop_status_summary(conn, task=task, run=run)
+    if args.json:
+        print(json.dumps(result, indent=2, sort_keys=True, default=str))
+        return 0
+    print(f"task: {result['task']['name']} ({result['task']['state']})")
+    print(f"run: {result['run']['name'] or result['run']['id']} ({result['run']['status']})")
+    print(
+        "policy: "
+        f"{result['policy']['template']} iteration "
+        f"{result['policy']['current_iteration']}/{result['policy']['max_iterations']}"
+    )
+    print(f"commands: {result['commands']['states']}")
+    print(
+        "notifications: "
+        f"{result['notifications']['delivered']}/{result['notifications']['total']} delivered"
+    )
+    print(f"worker_unconsumed: {result['inbox']['worker_unconsumed']}")
+    print(f"dispatch_inbox_consumed: {result['telemetry']['dispatch_inbox_consumed']}")
+    print(f"failures: {result['failures']}")
+    print(f"recommendation: {result['recommendation']}")
+    return 0
 
 
 def command_ralph_loop_presets(args: argparse.Namespace) -> int:

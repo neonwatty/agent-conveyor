@@ -45,6 +45,7 @@ from workerctl.commands import (
     command_interrupt,
     command_list,
     command_loop_evidence,
+    command_loop_status,
     command_mutation_audit,
     command_nudge,
     command_loop_templates,
@@ -327,6 +328,17 @@ def build_parser() -> argparse.ArgumentParser:
     loop_templates.add_argument("--json", action="store_true", help="Print stable JSON output.")
     loop_templates.add_argument("--path", help="Override the workerctl database path.")
     loop_templates.set_defaults(func=command_loop_templates)
+
+    loop_status = subparsers.add_parser(
+        "loop-status",
+        description="Summarize a Ralph loop run for manager review.",
+        help="Summarize a Ralph loop run for manager review.",
+    )
+    loop_status.add_argument("task", help="Task name or ID.")
+    loop_status.add_argument("--run", required=True, help="Loop run name or ID.")
+    loop_status.add_argument("--json", action="store_true", help="Print JSON output.")
+    loop_status.add_argument("--path", help="Override the workerctl database path.")
+    loop_status.set_defaults(func=command_loop_status)
 
     loop_triggers = subparsers.add_parser(
         "loop-triggers",

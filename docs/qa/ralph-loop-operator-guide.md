@@ -68,6 +68,11 @@ Generic caution does not arm a loop gate. For example, `be careful, run tests, a
    scripts/workerctl telemetry failures --task <task> --json
    ```
 
+`loop-status` is the compact manager review command. A run is ready for review
+when failures are zero, blocked attempts are explainable policy blocks, worker
+inbox backlog is zero after consumption, and `dispatch_inbox_consumed` telemetry
+is present for pull-required deliveries.
+
 ## Pass bar for real vertical slices
 
 - `max_iterations` is present and blocks over-looping.

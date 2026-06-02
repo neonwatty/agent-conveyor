@@ -6954,6 +6954,58 @@ class CliTests(unittest.TestCase):
             self.assertEqual(finished.returncode, 0, finished.stderr)
             self.assertEqual(json.loads(finished.stdout)["status"], "failed")
 
+    def test_loop_status_help_is_available(self):
+        proc = self.run_workerctl("loop-status", "--help")
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("Summarize a Ralph loop run", proc.stdout)
+        self.assertIn("--run", proc.stdout)
+
+    def test_loop_status_summarizes_blocked_allowed_and_consumed_flow(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            receipt_path = Path(tmpdir) / "receipt.json"
+            qa = self.run_workerctl(
+                "qa-run",
+                "test-coverage-loop",
+                "--receipt-output",
+                str(receipt_path),
+                "--path",
+                str(db_path),
+                "--json",
+            )
+            self.assertEqual(qa.returncode, 0, qa.stderr)
+            receipt = json.loads(receipt_path.read_text())
+            task = receipt["generated_tasks"][0]["task_name"]
+            checks = {check["name"]: check for check in receipt["checks"]}
+            run_id = checks["structured_test_coverage_retry_delivers"]["dispatch"]["run_id"]
+
+            before = self.run_workerctl("loop-status", task, "--run", run_id, "--path", str(db_path), "--json")
+            self.assertEqual(before.returncode, 0, before.stderr)
+            before_payload = json.loads(before.stdout)
+            self.assertEqual(before_payload["task"]["name"], task)
+            self.assertEqual(before_payload["run"]["id"], run_id)
+            self.assertEqual(before_payload["policy"]["template"], "test_coverage_loop")
+            self.assertEqual(before_payload["policy"]["current_iteration"], 1)
+            self.assertEqual(before_payload["policy"]["max_iterations"], 3)
+            self.assertEqual(before_payload["commands"]["states"]["blocked"], 2)
+            self.assertEqual(before_payload["commands"]["states"]["succeeded"], 1)
+            self.assertEqual(before_payload["notifications"]["delivered"], 1)
+            self.assertEqual(before_payload["inbox"]["worker_unconsumed"], 1)
+            self.assertEqual(before_payload["telemetry"]["dispatch_inbox_consumed"], 0)
+            self.assertEqual(before_payload["recommendation"], "worker_should_consume_inbox")
+
+            consume = self.run_workerctl("worker-inbox", task, "--consume-next", "--wait", "--timeout", "2", "--path", str(db_path), "--json")
+            self.assertEqual(consume.returncode, 0, consume.stderr)
+
+            after = self.run_workerctl("loop-status", task, "--run", run_id, "--path", str(db_path), "--json")
+            self.assertEqual(after.returncode, 0, after.stderr)
+            after_payload = json.loads(after.stdout)
+            self.assertEqual(after_payload["inbox"]["worker_unconsumed"], 0)
+            self.assertEqual(after_payload["telemetry"]["dispatch_inbox_consumed"], 1)
+            self.assertEqual(after_payload["failures"]["failed_commands"], 0)
+            self.assertEqual(after_payload["recommendation"], "ready_for_manager_review")
+
     def test_telemetry_cli_outputs_run_events_and_search_results(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "workerctl.db"

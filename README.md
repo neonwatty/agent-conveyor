@@ -625,6 +625,10 @@ tmux attach -t codex-live-test
   `test_coverage_loop`, and `visual_diff_loop`) also expose an
   `artifact_requirements["adversarial_check"]` object requiring
   `failure_mode`, `check`, and `result` fields.
+- `loop-status TASK --run RUN [--json]` — Summarize a Ralph-loop run for manager
+  review: policy template, iteration bounds, command states, routed
+  notifications, worker inbox backlog, evidence types, consumed-inbox
+  telemetry, failure counts, and a recommendation.
 
 For real vertical slices, start with the Ralph loop operator guide in
 `docs/qa/ralph-loop-operator-guide.md`. It explains the controlled
