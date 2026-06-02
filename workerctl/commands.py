@@ -4700,6 +4700,7 @@ def _commands_view(
     conn: Any,
     *,
     task_id: str | None = None,
+    run_id: str | None = None,
     only_failed: bool = False,
     limit: int,
     updated_since: str | None = None,
@@ -4718,8 +4719,7 @@ def _commands_view(
     if only_failed:
         filters.append("state = 'failed'")
     where = f"where {' and '.join(filters)}" if filters else ""
-    rows = conn.execute(
-        f"""
+    command_sql = f"""
         select id, idempotency_key, created_at, updated_at, task_id, worker_id,
                manager_id, correlation_id, type, state, available_at, claimed_by,
                claimed_at, claim_expires_at, attempts, max_attempts, payload_json,
@@ -4727,22 +4727,27 @@ def _commands_view(
         from commands
         {where}
         order by updated_at desc, created_at desc, id desc
-        limit ?
-        """,
-        [*params, limit],
-    ).fetchall()
-    count_filters = list(filters)
-    count_params = list(params)
-    count_where = f"where {' and '.join(count_filters)}" if count_filters else ""
-    counts = conn.execute(
-        f"select state, count(*) as count from commands {count_where} group by state",
-        count_params,
-    ).fetchall()
+        """
+    if run_id is None:
+        rows = conn.execute(f"{command_sql} limit ?", [*params, limit]).fetchall()
+        count_filters = list(filters)
+        count_params = list(params)
+        count_where = f"where {' and '.join(count_filters)}" if count_filters else ""
+        counts = conn.execute(
+            f"select state, count(*) as count from commands {count_where} group by state",
+            count_params,
+        ).fetchall()
+        counts_by_state = {row["state"]: int(row["count"]) for row in counts}
+    else:
+        all_rows = conn.execute(command_sql, params).fetchall()
+        matching_rows = [row for row in all_rows if _loop_status_command_matches_run(row, run_id=run_id)]
+        rows = matching_rows[:limit]
+        counts_by_state = dict(Counter(row["state"] for row in matching_rows))
     return {
-        "counts_by_state": {row["state"]: int(row["count"]) for row in counts},
-        "failed_count": int(sum(row["count"] for row in counts if row["state"] == "failed")),
+        "counts_by_state": counts_by_state,
+        "failed_count": int(counts_by_state.get("failed", 0)),
         "recent": [_safe_command_view(row) for row in rows],
-        "total": int(sum(row["count"] for row in counts)),
+        "total": int(sum(counts_by_state.values())),
     }
 
 
@@ -5165,6 +5170,7 @@ def telemetry_failures_view(
     failed_commands = _commands_view(
         conn,
         task_id=task_id,
+        run_id=run_id,
         only_failed=True,
         limit=limit,
         updated_since=updated_since,
@@ -5214,6 +5220,7 @@ def telemetry_failures_view(
             "commands": _commands_view(
                 conn,
                 task_id=task_id,
+                run_id=run_id,
                 limit=limit,
                 updated_since=updated_since,
                 active_only=active_only,

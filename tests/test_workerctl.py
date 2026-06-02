@@ -8371,6 +8371,134 @@ class CliTests(unittest.TestCase):
             self.assertEqual([row["id"] for row in scoped_view["failed_commands"]], [command_id])
             self.assertNotIn("other-failure-task", scoped.stdout)
 
+    def test_telemetry_failures_view_scopes_failed_commands_by_run(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                task_id = worker_db.create_task(conn, name="failure-run-scope-task", goal="Inspect one run.")
+                target_run_id = worker_db.create_ralph_loop_run(
+                    conn,
+                    task_id=task_id,
+                    name="target-loop-run",
+                    max_iterations=3,
+                    current_iteration=1,
+                    cleanup_policy="clear",
+                    required_before_continue=[],
+                    metadata={"template": "test_coverage_loop"},
+                )
+                other_run_id = worker_db.create_ralph_loop_run(
+                    conn,
+                    task_id=task_id,
+                    name="other-loop-run",
+                    max_iterations=3,
+                    current_iteration=1,
+                    cleanup_policy="clear",
+                    required_before_continue=[],
+                    metadata={"template": "test_coverage_loop"},
+                )
+                target_cycle = worker_db.create_manager_cycle(
+                    conn,
+                    task_id=task_id,
+                    manager_id=None,
+                    timestamp="2026-05-21T10:00:00Z",
+                )
+                worker_db.finish_manager_cycle(
+                    conn,
+                    cycle_id=target_cycle,
+                    state="failed",
+                    status={
+                        "kind": "session_cycle",
+                        "pane_signal": {"captured": False, "reason": "target run pane capture failed"},
+                    },
+                    error="target run associated cycle failed",
+                    timestamp="2026-05-21T10:00:05Z",
+                )
+                worker_db.insert_manager_cycle_span(
+                    conn,
+                    manager_cycle_id=target_cycle,
+                    task_id=task_id,
+                    run_id=target_run_id,
+                    phase="capture_pane_signal",
+                    started_at="2026-05-21T10:00:00Z",
+                    completed_at="2026-05-21T10:00:05Z",
+                    duration_ms=5000.0,
+                    state="failed",
+                    error_type="RuntimeError",
+                )
+                target_command_id = worker_db.create_command(
+                    conn,
+                    command_type="continue_iteration",
+                    payload={"message": "target command"},
+                    task_id=task_id,
+                    correlation_id="target-run-command",
+                    timestamp="2026-05-21T10:01:00Z",
+                )
+                worker_db.finish_command(
+                    conn,
+                    command_id=target_command_id,
+                    state="failed",
+                    result={"ralph_loop": {"run_id": target_run_id}},
+                    error="target run failed",
+                    timestamp="2026-05-21T10:01:05Z",
+                )
+                other_command_id = worker_db.create_command(
+                    conn,
+                    command_type="continue_iteration",
+                    payload={"loop_policy": {"run_id": other_run_id}},
+                    task_id=task_id,
+                    correlation_id="other-run-command",
+                    timestamp="2026-05-21T10:02:00Z",
+                )
+                worker_db.finish_command(
+                    conn,
+                    command_id=other_command_id,
+                    state="failed",
+                    result={"message": "other command"},
+                    error="other run failed",
+                    timestamp="2026-05-21T10:02:05Z",
+                )
+                conn.commit()
+
+            proc = self.run_workerctl(
+                "telemetry",
+                "failures",
+                "--run",
+                target_run_id,
+                "--json",
+                "--limit",
+                "10",
+                "--path",
+                str(db_path),
+            )
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            view = json.loads(proc.stdout)
+            self.assertEqual([row["id"] for row in view["failed_cycles"]], [target_cycle])
+            self.assertEqual([row["id"] for row in view["pane_capture_failures"]], [target_cycle])
+            self.assertEqual([row["id"] for row in view["failed_commands"]], [target_command_id])
+            self.assertNotIn(other_command_id, proc.stdout)
+            self.assertNotIn("other-run-command", proc.stdout)
+
+            task_scoped = self.run_workerctl(
+                "telemetry",
+                "failures",
+                "--task",
+                "failure-run-scope-task",
+                "--json",
+                "--limit",
+                "10",
+                "--path",
+                str(db_path),
+            )
+
+            self.assertEqual(task_scoped.returncode, 0, task_scoped.stderr)
+            task_view = json.loads(task_scoped.stdout)
+            self.assertEqual(
+                [row["id"] for row in task_view["failed_commands"]],
+                [other_command_id, target_command_id],
+            )
+
     def test_telemetry_failures_view_scopes_by_window_and_active_tasks(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "workerctl.db"
