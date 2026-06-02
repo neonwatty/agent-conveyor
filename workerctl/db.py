@@ -5049,9 +5049,20 @@ def query_telemetry_events(
     params: list[Any] = []
     from_sql = "telemetry_events te"
     if search:
-        from_sql = "telemetry_events te join telemetry_events_fts fts on fts.event_id = te.id"
-        clauses.append("telemetry_events_fts match ?")
+        clauses.append(
+            """
+            (
+                te.id in (
+                    select event_id
+                    from telemetry_events_fts
+                    where telemetry_events_fts match ?
+                )
+                or te.event_type = ?
+            )
+            """
+        )
         params.append(_telemetry_fts_query(search))
+        params.append(search)
     if run_id is not None:
         clauses.append("te.run_id = ?")
         params.append(run_id)

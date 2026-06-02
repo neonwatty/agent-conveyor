@@ -7484,6 +7484,22 @@ def _execute_dispatch_command(*, worker_db, worker_tmux, db_path: Path | None, c
                     "state": "pull_required",
                     "target_session": route["target_session_name"],
                 }
+                if loop_policy is not None:
+                    result.update(
+                        {
+                            "cleanup_policy": loop_policy.get("cleanup_policy"),
+                            "current_iteration": loop_policy["current_iteration"],
+                            "loop_policy": loop_policy.get("loop_policy"),
+                            "max_iterations": loop_policy["max_iterations"],
+                            "missing_evidence": loop_policy.get("missing_evidence") or [],
+                            "reason": loop_policy.get("reason"),
+                            "required_before_continue": loop_policy.get("required_before_continue") or [],
+                            "requested_iteration": loop_policy["requested_iteration"],
+                            "run_id": loop_policy["run_id"],
+                            "seed_prompt_sha256": loop_policy.get("seed_prompt_sha256"),
+                            "stop_conditions": loop_policy.get("stop_conditions") or [],
+                        }
+                    )
                 worker_db.finish_routed_notification(
                     conn,
                     notification_id=notification_id,
@@ -11337,10 +11353,20 @@ def _session_inbox_response(
             break
         time.sleep(min(interval, max(0.0, timeout - elapsed)))
     if consumed is not None:
+        run_id = _notification_loop_run_id(consumed)
+        if run_id is not None:
+            try:
+                run = worker_db.run_row(conn, run=run_id)
+            except WorkerError:
+                run_id = None
+            else:
+                if run["task_id"] != consumed["task_id"]:
+                    run_id = None
         worker_db.emit_telemetry_event(
             conn,
             actor="dispatch",
             event_type="dispatch_inbox_consumed",
+            run_id=run_id,
             task_id=consumed["task_id"],
             summary=f"{session['role']} session consumed dispatcher inbox item.",
             correlation={
@@ -11377,6 +11403,22 @@ def _session_inbox_response(
             "timeout_seconds": timeout,
         },
     }
+
+
+def _notification_loop_run_id(notification: dict[str, Any]) -> str | None:
+    payload = notification.get("payload") or {}
+    if not isinstance(payload, dict):
+        return None
+    for key in ("ralph_loop", "loop_policy"):
+        value = payload.get(key)
+        if isinstance(value, dict):
+            run_id = value.get("run_id")
+            if isinstance(run_id, str) and run_id:
+                return run_id
+    run_id = payload.get("ralph_loop_run_id")
+    if isinstance(run_id, str) and run_id:
+        return run_id
+    return None
 
 
 def _print_session_inbox_result(args: argparse.Namespace, result: dict[str, Any]) -> None:
