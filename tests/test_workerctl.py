@@ -6961,6 +6961,65 @@ class CliTests(unittest.TestCase):
         self.assertIn("Summarize a Ralph loop run", proc.stdout)
         self.assertIn("--run", proc.stdout)
 
+    def test_loop_status_resolves_run_name_within_task(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                first_task_id = worker_db.create_task(conn, name="first-task", goal="Inspect first run.")
+                second_task_id = worker_db.create_task(conn, name="second-task", goal="Inspect second run.")
+                first_run_id = worker_db.create_ralph_loop_run(
+                    conn,
+                    task_id=first_task_id,
+                    name="same-run-name",
+                    max_iterations=3,
+                    current_iteration=1,
+                    cleanup_policy="clear",
+                    required_before_continue=[],
+                    metadata={"template": "test_coverage_loop"},
+                )
+                second_run_id = worker_db.create_ralph_loop_run(
+                    conn,
+                    task_id=second_task_id,
+                    name="same-run-name",
+                    max_iterations=3,
+                    current_iteration=1,
+                    cleanup_policy="clear",
+                    required_before_continue=[],
+                    metadata={"template": "test_coverage_loop"},
+                )
+                conn.commit()
+
+            first = self.run_workerctl(
+                "loop-status",
+                "first-task",
+                "--run",
+                "same-run-name",
+                "--path",
+                str(db_path),
+                "--json",
+            )
+            second = self.run_workerctl(
+                "loop-status",
+                "second-task",
+                "--run",
+                "same-run-name",
+                "--path",
+                str(db_path),
+                "--json",
+            )
+
+            self.assertEqual(first.returncode, 0, first.stderr)
+            self.assertEqual(second.returncode, 0, second.stderr)
+            first_payload = json.loads(first.stdout)
+            second_payload = json.loads(second.stdout)
+            self.assertEqual(first_payload["task"]["name"], "first-task")
+            self.assertEqual(first_payload["run"]["id"], first_run_id)
+            self.assertEqual(first_payload["run"]["name"], "same-run-name")
+            self.assertEqual(second_payload["task"]["name"], "second-task")
+            self.assertEqual(second_payload["run"]["id"], second_run_id)
+            self.assertEqual(second_payload["run"]["name"], "same-run-name")
+
     def test_loop_status_summarizes_blocked_allowed_and_consumed_flow(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "workerctl.db"

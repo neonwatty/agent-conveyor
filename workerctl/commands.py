@@ -4125,6 +4125,23 @@ def _loop_status_command_matches_run(row: Any, *, run_id: str) -> bool:
     return _loop_status_mapping_run_id(payload) == run_id or _loop_status_mapping_run_id(result) == run_id
 
 
+def _loop_status_run_for_task(conn: Any, *, task: Any, run_ref: str) -> dict[str, Any]:
+    row = conn.execute(
+        """
+        select id
+        from runs
+        where task_id = ?
+          and (id = ? or name = ?)
+        order by started_at desc, id desc
+        limit 1
+        """,
+        (task["id"], run_ref, run_ref),
+    ).fetchone()
+    if row is None:
+        raise WorkerError(f"run {run_ref!r} does not belong to task {task['name']!r}")
+    return db_run_row(conn, run=row["id"])
+
+
 def _loop_status_summary(conn: Any, *, task: Any, run: dict[str, Any]) -> dict[str, Any]:
     from workerctl import db as worker_db
 
@@ -4250,9 +4267,7 @@ def command_loop_status(args: argparse.Namespace) -> int:
     with connect_db(db_path) as conn:
         initialize_database(conn)
         task = db_task_row(conn, task=args.task)
-        run = db_run_row(conn, run=args.run)
-        if run["task_id"] != task["id"]:
-            raise WorkerError(f"run {args.run!r} does not belong to task {task['name']!r}")
+        run = _loop_status_run_for_task(conn, task=task, run_ref=args.run)
         result = _loop_status_summary(conn, task=task, run=run)
     if args.json:
         print(json.dumps(result, indent=2, sort_keys=True, default=str))
