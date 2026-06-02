@@ -21,8 +21,9 @@ pass/fail evidence.
 - [Managed Ralph loop](ralph-loop.md) - repeated manager-led PR, CI, merge,
   handoff, worker clear, and same-prompt replay test.
 - [Adversarial triggers](adversarial-triggers.md) - natural-language trigger
-  phrases for Ralph-loop policy, Dispatch continuation gates, finish gates,
-  worker-proposed proof, and manager-created adversarial criteria.
+  phrases plus `loop-triggers --classify` and `qa-run adversarial-triggers`
+  receipt checks for Ralph-loop policy, Dispatch continuation gates, finish
+  gates, worker-proposed proof, and manager-created adversarial criteria.
 - [GoalBuddy conveyor live dogfood](goalbuddy-conveyor-live-dogfood.md) -
   two-child smoke for `satisfied_on_main`, one-active-child sequencing, and
   PR/CI/merge receipt rails.

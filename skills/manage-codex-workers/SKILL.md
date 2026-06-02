@@ -372,13 +372,16 @@ as blockers or explicit follow-ups.
 Natural-language requests such as "run this as an adversarially gated loop",
 "require adversarial proof before another worker iteration", or "do not finish
 until you have tried to disprove it" should be treated as operational gate
-requests. For Ralph-loop work, create or use a loop policy whose
-`required_before_continue` includes `adversarial_check`, then record each proof
-receipt with `scripts/workerctl loop-evidence adversarial-check <task>
---loop-run <run-id> --iteration <n> --failure-mode ... --check ... --result
-...`. For final completion, use `scripts/workerctl finish-task <task>
---require-adversarial-proof` so the task cannot be marked done until structured
-proof exists.
+requests only after `scripts/workerctl loop-triggers --classify "<prompt>"
+--json` matches a controlled trigger. For Ralph-loop work, create or use a loop
+policy whose `required_before_continue` includes `adversarial_check`, then
+record each proof receipt with `scripts/workerctl loop-evidence
+adversarial-check <task> --loop-run <run-id> --iteration <n> --failure-mode ...
+--check ... --result ...`. For final completion, use `scripts/workerctl
+finish-task <task> --require-adversarial-proof` so the task cannot be marked
+done until structured proof exists. Use `scripts/workerctl qa-run
+adversarial-triggers --receipt-output /tmp/adversarial-triggers-receipt.json
+--json` to verify the controlled trigger path.
 
 Natural-language requests such as "create an autonomous GoalBuddy conveyor" or
 "split this into vertical-slice child GoalBuddy boards and continue until all

@@ -8698,11 +8698,84 @@ Deferred follow-up criteria:
         self.assertIn("iteration-gate-trigger: Do not send the worker another iteration", proc.stdout)
         self.assertIn("worker-directed-trigger: Ask the worker to identify", proc.stdout)
 
+    def test_loop_triggers_classify_prompt_language_with_negative_controls(self):
+        proc = self.run_workerctl(
+            "loop-triggers",
+            "--classify",
+            "Run this as an adversarial gated Ralph loop.",
+            "--json",
+        )
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        payload = json.loads(proc.stdout)
+        self.assertTrue(payload["matched"])
+        self.assertEqual(payload["matched_trigger"]["name"], "loop-gate-trigger")
+        self.assertEqual(payload["matched_trigger"]["intent"], "create_loop_policy")
+        self.assertEqual(payload["matched_trigger"]["required_before_continue"], ["adversarial_check"])
+        self.assertIn("loop-templates --create-run", " ".join(payload["matched_trigger"]["operator_actions"]))
+
+        for phrase, trigger_name in (
+            ("Require adversarial proof before another worker iteration.", "iteration-gate-trigger"),
+            ("Do not let this finish until the manager has tried to disprove it.", "finish-gate-trigger"),
+            ("Before continuing, record the strongest realistic failure mode, the check, and the result.", "worker-directed-trigger"),
+        ):
+            alias = self.run_workerctl("loop-triggers", "--classify", phrase, "--json")
+            self.assertEqual(alias.returncode, 0, alias.stderr)
+            alias_payload = json.loads(alias.stdout)
+            self.assertTrue(alias_payload["matched"])
+            self.assertEqual(alias_payload["matched_trigger"]["name"], trigger_name)
+
+        negative = self.run_workerctl(
+            "loop-triggers",
+            "--classify",
+            "Please be careful, run tests, and summarize the risks before finishing.",
+            "--json",
+        )
+
+        self.assertEqual(negative.returncode, 0, negative.stderr)
+        negative_payload = json.loads(negative.stdout)
+        self.assertFalse(negative_payload["matched"])
+        self.assertIn("No approved loop trigger matched", negative_payload["guidance"])
+
+    def test_loop_triggers_list_exposes_all_controlled_trigger_phrases(self):
+        proc = self.run_workerctl("loop-triggers", "--list", "--json")
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        payload = json.loads(proc.stdout)
+        triggers = {trigger["name"]: trigger for trigger in payload["triggers"]}
+        self.assertEqual(
+            triggers["loop-gate-trigger"]["canonical_phrase"],
+            "Run this as an adversarially gated Ralph loop.",
+        )
+        self.assertEqual(
+            triggers["iteration-gate-trigger"]["canonical_phrase"],
+            "Do not send the worker another iteration until adversarial proof exists.",
+        )
+        self.assertEqual(
+            triggers["finish-gate-trigger"]["canonical_phrase"],
+            "Do not mark this done until you have tried to disprove it.",
+        )
+        self.assertEqual(
+            triggers["worker-directed-trigger"]["canonical_phrase"],
+            "Ask the worker to identify the strongest realistic failure mode and prove it is handled.",
+        )
+        self.assertEqual(
+            triggers["acceptance-criteria-trigger"]["canonical_phrase"],
+            "Each loop must include adversarial acceptance criteria from manager to worker.",
+        )
+        self.assertTrue(all(trigger["negative_controls"] for trigger in triggers.values()))
+
     def test_qa_run_help_lists_generic_loop_template_browser(self):
         proc = self.run_workerctl("qa-run", "--help")
 
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertIn("generic-loop-template-browser", proc.stdout)
+
+    def test_qa_run_help_lists_adversarial_triggers(self):
+        proc = self.run_workerctl("qa-run", "--help")
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("adversarial-triggers", proc.stdout)
 
     def test_qa_run_ralph_loop_guardrails_writes_replayable_receipt(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -8762,6 +8835,74 @@ Deferred follow-up criteria:
             self.assertIn("qa-plan adversarial-triggers", replay_commands)
             self.assertIn("dispatch --once --type continue_iteration", replay_commands)
             self.assertIn("loop-evidence adversarial-check", replay_commands)
+
+    def test_qa_run_adversarial_triggers_writes_replayable_receipt(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            receipt_path = Path(tmpdir) / "receipt.json"
+
+            proc = self.run_workerctl(
+                "qa-run",
+                "adversarial-triggers",
+                "--receipt-output",
+                str(receipt_path),
+                "--path",
+                str(db_path),
+                "--json",
+            )
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertTrue(receipt_path.exists())
+            summary = json.loads(proc.stdout)
+            receipt = json.loads(receipt_path.read_text())
+            self.assertEqual(summary["scenario"], "adversarial-triggers")
+            self.assertEqual(summary["result"], "passed")
+            self.assertEqual(receipt["scenario"], "adversarial-triggers")
+            self.assertEqual(Path(receipt["artifacts"]["db_path"]), db_path.resolve())
+
+            classifications = {item["name"]: item for item in receipt["trigger_classifications"]}
+            self.assertEqual(classifications["loop-gate-trigger"]["intent"], "create_loop_policy")
+            self.assertTrue(classifications["loop-gate-trigger"]["matched"])
+            self.assertFalse(receipt["negative_control"]["matched"])
+
+            checks = {check["name"]: check for check in receipt["checks"]}
+            policy = checks["loop_gate_trigger_creates_policy"]
+            self.assertEqual(policy["trigger"], "Run this as an adversarially gated Ralph loop.")
+            self.assertIn("adversarial_check", policy["run"]["required_before_continue"])
+            self.assertEqual(policy["correlation_id"], "nl-loop-gate-policy")
+
+            blocked = checks["iteration_gate_blocks_before_adversarial_proof"]
+            self.assertEqual(blocked["dispatch"]["state"], "blocked")
+            self.assertEqual(blocked["dispatch"]["reason"], "missing_adversarial_check_evidence")
+            self.assertEqual(blocked["dispatch"]["missing_evidence"], ["adversarial_check"])
+            self.assertFalse(blocked["dispatch"]["target_worker_notified"])
+            self.assertEqual(blocked["worker_inbox_count"], 0)
+
+            allowed = checks["iteration_gate_allows_fresh_retry_after_structured_proof"]
+            self.assertEqual(allowed["dispatch"]["state"], "pull_required")
+            self.assertEqual(allowed["worker_inbox_count"], 1)
+            self.assertEqual(allowed["worker_inbox"]["payload"]["ralph_loop"]["requested_iteration"], 2)
+
+            finish_gate = checks["finish_gate_requires_structured_adversarial_proof"]
+            self.assertEqual(finish_gate["premature_finish"]["returncode"], 1)
+            self.assertIn("adversarial proof is required", finish_gate["premature_finish"]["stderr"])
+            self.assertEqual(finish_gate["after_proof"]["returncode"], 0)
+
+            worker_directed = checks["worker_directed_trigger_records_worker_proposed_proof"]
+            self.assertEqual(worker_directed["evidence"]["source"], "worker_proposed")
+            self.assertIn("failure_mode", worker_directed["evidence"])
+            self.assertIn("check", worker_directed["evidence"])
+            self.assertIn("result", worker_directed["evidence"])
+
+            criteria = checks["acceptance_criteria_trigger_records_negative_manager_criteria"]
+            self.assertGreaterEqual(criteria["manager_inferred_criteria_count"], 3)
+            self.assertTrue(all("adversarial" in criterion["criterion"].lower() or "blocked dispatch" in criterion["criterion"].lower() for criterion in criteria["criteria"]))
+
+            replay_commands = "\n".join(receipt["replay_commands"])
+            self.assertIn("loop-triggers --classify", replay_commands)
+            self.assertIn("qa-plan adversarial-triggers", replay_commands)
+            self.assertIn("worker-inbox", replay_commands)
+            self.assertIn("export-task", replay_commands)
 
     def test_qa_run_generic_loop_template_writes_replayable_receipt(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -8944,7 +9085,7 @@ Deferred follow-up criteria:
                     )
 
     def test_qa_run_refuses_to_share_dirty_continue_iteration_queue(self):
-        for scenario in ("ralph-loop-guardrails", "generic-loop-template", "generic-loop-template-browser"):
+        for scenario in ("ralph-loop-guardrails", "generic-loop-template", "generic-loop-template-browser", "adversarial-triggers"):
             with self.subTest(scenario=scenario):
                 with tempfile.TemporaryDirectory() as tmpdir:
                     db_path = Path(tmpdir) / "workerctl.db"
@@ -9018,7 +9159,7 @@ Deferred follow-up criteria:
                         self.assertEqual(command["state"], "pending")
 
     def test_qa_run_refuses_stale_attempted_continue_iteration_queue(self):
-        for scenario in ("ralph-loop-guardrails", "generic-loop-template", "generic-loop-template-browser"):
+        for scenario in ("ralph-loop-guardrails", "generic-loop-template", "generic-loop-template-browser", "adversarial-triggers"):
             with self.subTest(scenario=scenario):
                 with tempfile.TemporaryDirectory() as tmpdir:
                     db_path = Path(tmpdir) / "workerctl.db"
@@ -19512,6 +19653,8 @@ class ManagerBootstrapPromptTests(unittest.TestCase):
 
         for document in (qa_doc, proof_doc, checklist, readme):
             self.assertIn("qa-plan adversarial-triggers", document)
+            self.assertIn("qa-run adversarial-triggers", document)
+            self.assertIn("loop-triggers --classify", document)
         self.assertIn("Adversarial triggers", qa_readme)
         self.assertIn("Run this as an adversarially gated Ralph loop.", qa_doc)
         self.assertIn("Do not send the worker another iteration until adversarial proof exists.", qa_doc)

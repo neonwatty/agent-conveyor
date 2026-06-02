@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
+import io
 import hashlib
-import os
 import json
+import os
 import re
 import shlex
 import shutil
@@ -71,6 +73,7 @@ from workerctl.state import (
 )
 from workerctl.lifecycle import manager_liveness_warnings, reconcile_rows
 from workerctl.output_safety import redact_audit, redact_capture_result, redact_payload, redact_transcript_segments
+from workerctl.loop_triggers import classify_loop_trigger, list_loop_triggers
 from workerctl.loop_templates import list_loop_templates, loop_template, loop_template_metadata
 from workerctl.ralph_loop_presets import list_ralph_loop_presets, ralph_loop_preset, ralph_loop_preset_metadata
 from workerctl.tmux import (
@@ -1957,6 +1960,30 @@ def command_qa_plan(args: argparse.Namespace) -> int:
     return 0
 
 
+def command_loop_triggers(args: argparse.Namespace) -> int:
+    if getattr(args, "classify", None) is not None:
+        payload = classify_loop_trigger(args.classify)
+    else:
+        payload = {"triggers": list_loop_triggers()}
+    if getattr(args, "json", False):
+        print(json.dumps(payload, indent=2, sort_keys=True))
+    elif getattr(args, "classify", None) is not None:
+        if payload["matched"]:
+            trigger = payload["matched_trigger"]
+            print(f"Matched {trigger['name']}: {trigger['canonical_phrase']}")
+            print(f"Intent: {trigger['intent']}")
+            print("Operator actions:")
+            for action in trigger["operator_actions"]:
+                print(f"- {action}")
+        else:
+            print(payload["guidance"])
+    else:
+        print("Controlled loop triggers:")
+        for trigger in payload["triggers"]:
+            print(f"- {trigger['name']}: {trigger['canonical_phrase']}")
+    return 0
+
+
 def _qa_run_db_path(args: argparse.Namespace) -> Path:
     if getattr(args, "path", None):
         return Path(args.path).expanduser().resolve()
@@ -2143,6 +2170,43 @@ def _qa_run_record_loop_evidence(
         )
         conn.commit()
         return result
+
+
+def _qa_run_finish_task_attempt(
+    *,
+    db_path: Path,
+    task_name: str,
+    require_adversarial_proof: bool,
+    require_criteria_audit: bool,
+    reason: str,
+) -> dict[str, Any]:
+    from workerctl.lifecycle import command_finish_task
+
+    stdout = io.StringIO()
+    ns = argparse.Namespace(
+        capture_transcript_before_stop=False,
+        capture_transcript_lines=DEFAULT_HISTORY_LINES,
+        capture_transcript_mode="segment",
+        decision_id=None,
+        message=None,
+        path=str(db_path),
+        reason=reason,
+        require_acks=False,
+        require_adversarial_proof=require_adversarial_proof,
+        require_criteria_audit=require_criteria_audit,
+        require_epilogue=False,
+        require_transcript_segment=False,
+        stop_manager=False,
+        stop_worker=False,
+        strict_decisions=False,
+        task=task_name,
+    )
+    try:
+        with contextlib.redirect_stdout(stdout):
+            returncode = command_finish_task(ns)
+        return {"returncode": returncode, "stderr": "", "stdout": stdout.getvalue()}
+    except WorkerError as exc:
+        return {"returncode": 1, "stderr": str(exc), "stdout": stdout.getvalue()}
 
 
 def _qa_run_png_chunk(kind: bytes, payload: bytes) -> bytes:
@@ -3173,12 +3237,343 @@ def _qa_run_generic_loop_template_browser(args: argparse.Namespace) -> dict[str,
     }
 
 
+def _qa_run_adversarial_triggers(args: argparse.Namespace) -> dict[str, Any]:
+    from workerctl import db as worker_db
+
+    db_path = _qa_run_db_path(args)
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    slug = uuid.uuid4().hex[:8]
+    dispatcher_id = getattr(args, "dispatcher_id", None) or f"qa-run-{slug}"
+    triggers = list_loop_triggers()
+    triggers_by_name = {trigger["name"]: trigger for trigger in triggers}
+    trigger_classifications: list[dict[str, Any]] = []
+    for trigger in triggers:
+        classification = classify_loop_trigger(trigger["canonical_phrase"])
+        matched_trigger = classification.get("matched_trigger") or {}
+        trigger_classifications.append(
+            {
+                "canonical_phrase": trigger["canonical_phrase"],
+                "intent": matched_trigger.get("intent"),
+                "matched": classification["matched"],
+                "name": trigger["name"],
+            }
+        )
+    negative_control = classify_loop_trigger(
+        "Please be careful, run tests, and summarize the risks before finishing."
+    )
+    _qa_run_require(
+        all(item["matched"] for item in trigger_classifications),
+        "not all controlled adversarial trigger phrases classified as matches",
+    )
+    _qa_run_require(not negative_control["matched"], "generic caution prompt matched a controlled loop trigger")
+
+    checks: list[dict[str, Any]] = []
+    with worker_db.connect(db_path) as conn:
+        worker_db.initialize_database(conn)
+        _qa_run_require_clean_continue_queue(conn, worker_db=worker_db)
+        loop_task = _qa_run_bound_task(conn, slug=slug, suffix="adversarial-triggers-loop")
+        loop_run_id = worker_db.create_ralph_loop_run(
+            conn,
+            task_id=loop_task["task_id"],
+            name=f"{loop_task['task_name']}-run",
+            max_iterations=3,
+            current_iteration=1,
+            cleanup_policy="clear",
+            required_before_continue=["adversarial_check"],
+            stop_conditions=["max_iterations", "required_evidence"],
+            seed_prompt_sha256="qa-run-nl-loop-trigger-seed",
+            metadata={
+                "correlation_id": "nl-loop-gate-policy",
+                "required_before_continue": ["adversarial_check"],
+                "trigger": triggers_by_name["loop-gate-trigger"]["canonical_phrase"],
+                "trigger_intent": "create_loop_policy",
+            },
+        )
+        loop_run = worker_db.ralph_loop_run(conn, run=loop_run_id)
+        worker_db.enqueue_continue_iteration(
+            conn,
+            task_id=loop_task["task_id"],
+            message="Run iteration 2 before adversarial proof.",
+            loop_run_id=loop_run_id,
+            requested_iteration=2,
+            correlation_id="nl-iteration-gate-missing-proof",
+        )
+        conn.commit()
+
+    checks.append(
+        {
+            "correlation_id": "nl-loop-gate-policy",
+            "name": "loop_gate_trigger_creates_policy",
+            "run": {
+                "current_iteration": loop_run["current_iteration"],
+                "id": loop_run["id"],
+                "max_iterations": loop_run["max_iterations"],
+                "required_before_continue": loop_run.get("required_before_continue") or [],
+            },
+            "status": "passed",
+            "trigger": triggers_by_name["loop-gate-trigger"]["canonical_phrase"],
+        }
+    )
+
+    missing_dispatch = _qa_run_dispatch_continue_once(
+        db_path=db_path,
+        dispatcher_id=dispatcher_id,
+        expected_correlation_id="nl-iteration-gate-missing-proof",
+    )
+    missing_counts = _qa_run_delivery_counts(
+        db_path=db_path,
+        task_id=loop_task["task_id"],
+        worker_name=loop_task["worker_name"],
+    )
+    _qa_run_require(missing_dispatch.get("state") == "blocked", "natural-language iteration gate did not block")
+    _qa_run_require(
+        missing_dispatch.get("reason") == "missing_adversarial_check_evidence",
+        "natural-language iteration gate used the wrong block reason",
+    )
+    _qa_run_require(
+        missing_dispatch.get("missing_evidence") == ["adversarial_check"],
+        "natural-language iteration gate reported the wrong missing evidence",
+    )
+    _qa_run_require(
+        not missing_dispatch.get("target_worker_notified"),
+        "natural-language iteration gate notified the worker before proof",
+    )
+    _qa_run_require(missing_counts["worker_inbox_count"] == 0, "blocked iteration left worker inbox mail")
+    checks.append(
+        _qa_run_check_result(
+            name="iteration_gate_blocks_before_adversarial_proof",
+            dispatch=missing_dispatch,
+            counts=missing_counts,
+            command="workerctl dispatch --once --type continue_iteration --dispatcher-id qa-adversarial-triggers",
+        )
+    )
+
+    _qa_run_record_loop_evidence(
+        db_path=db_path,
+        task_name=loop_task["task_name"],
+        loop_run_id=loop_run_id,
+        evidence_type="adversarial_check",
+        correlation_id="nl-iteration-gate-adversarial-proof",
+        metadata=_adversarial_check_metadata(
+            {
+                "failure_mode": "A manager's natural-language retry could reach the worker before adversarial proof exists.",
+                "check": "Inspect blocked Dispatch result, empty worker inbox, and structured adversarial_check receipt.",
+                "result": "The first continuation was blocked before worker delivery; only a fresh retry after proof is allowed.",
+            }
+        ),
+    )
+    with worker_db.connect(db_path) as conn:
+        worker_db.initialize_database(conn)
+        worker_db.enqueue_continue_iteration(
+            conn,
+            task_id=loop_task["task_id"],
+            message="Run iteration 2 after adversarial proof.",
+            loop_run_id=loop_run_id,
+            requested_iteration=2,
+            correlation_id="nl-iteration-gate-allowed",
+        )
+        conn.commit()
+    allowed_dispatch = _qa_run_dispatch_continue_once(
+        db_path=db_path,
+        dispatcher_id=dispatcher_id,
+        expected_correlation_id="nl-iteration-gate-allowed",
+    )
+    allowed_counts = _qa_run_delivery_counts(
+        db_path=db_path,
+        task_id=loop_task["task_id"],
+        worker_name=loop_task["worker_name"],
+    )
+    _qa_run_require(allowed_dispatch.get("state") == "pull_required", "post-proof fresh retry did not reach pull inbox")
+    _qa_run_require(allowed_counts["worker_inbox_count"] == 1, "post-proof fresh retry did not create exactly one inbox item")
+    with worker_db.connect(db_path) as conn:
+        worker_db.initialize_database(conn)
+        consumed = worker_db.consume_next_session_inbox_item(conn, session_name=loop_task["worker_name"])
+        conn.commit()
+    _qa_run_require(consumed is not None, "post-proof worker inbox item could not be consumed")
+    allowed_check = _qa_run_check_result(
+        name="iteration_gate_allows_fresh_retry_after_structured_proof",
+        dispatch=allowed_dispatch,
+        counts=allowed_counts,
+        command="workerctl loop-evidence adversarial-check ... && workerctl dispatch --once --type continue_iteration",
+    )
+    allowed_check["worker_inbox"] = consumed
+    checks.append(allowed_check)
+
+    with worker_db.connect(db_path) as conn:
+        worker_db.initialize_database(conn)
+        finish_task_name = f"qa-adversarial-triggers-finish-{slug}"
+        finish_task_id = worker_db.create_task(
+            conn,
+            name=finish_task_name,
+            goal="Executable QA run for natural-language finish gate.",
+            summary="Disposable unbound task for finish-task adversarial proof verification.",
+        )
+        finish_task = {"task_id": finish_task_id, "task_name": finish_task_name}
+        conn.commit()
+    premature_finish = _qa_run_finish_task_attempt(
+        db_path=db_path,
+        task_name=finish_task["task_name"],
+        require_adversarial_proof=True,
+        require_criteria_audit=False,
+        reason="premature natural-language finish drill",
+    )
+    _qa_run_require(premature_finish["returncode"] == 1, "finish gate did not fail before proof")
+    _qa_run_require(
+        "adversarial proof is required" in premature_finish["stderr"],
+        "finish gate failed with the wrong error",
+    )
+    with worker_db.connect(db_path) as conn:
+        worker_db.initialize_database(conn)
+        evidence = _adversarial_check_metadata(
+            {
+                "failure_mode": "The manager could mark the task done based only on a worker claim.",
+                "check": "Run finish-task --require-adversarial-proof before and after a structured satisfied criterion.",
+                "result": "Premature finish failed closed; structured proof allowed the final finish.",
+            }
+        )
+        evidence.update(
+            {
+                "correlation_id": "nl-finish-gate-proof",
+                "evidence_type": "adversarial_check",
+                "status": "pass",
+            }
+        )
+        worker_db.insert_acceptance_criterion(
+            conn,
+            task_id=finish_task["task_id"],
+            criterion="Natural-language finish gate has structured adversarial proof.",
+            status="satisfied",
+            source="manager_inferred",
+            proof="finish-task --require-adversarial-proof fails closed before proof and succeeds after proof.",
+            evidence=evidence,
+        )
+        conn.commit()
+    after_proof_finish = _qa_run_finish_task_attempt(
+        db_path=db_path,
+        task_name=finish_task["task_name"],
+        require_adversarial_proof=True,
+        require_criteria_audit=True,
+        reason="natural-language finish drill complete",
+    )
+    _qa_run_require(
+        after_proof_finish["returncode"] == 0,
+        f"finish gate did not succeed after structured proof: {after_proof_finish['stderr']}",
+    )
+    checks.append(
+        {
+            "after_proof": after_proof_finish,
+            "name": "finish_gate_requires_structured_adversarial_proof",
+            "premature_finish": premature_finish,
+            "status": "passed",
+            "trigger": triggers_by_name["finish-gate-trigger"]["canonical_phrase"],
+        }
+    )
+
+    with worker_db.connect(db_path) as conn:
+        worker_db.initialize_database(conn)
+        worker_task = _qa_run_bound_task(conn, slug=slug, suffix="adversarial-triggers-worker")
+        worker_run_id = worker_db.create_ralph_loop_run(
+            conn,
+            task_id=worker_task["task_id"],
+            name=f"{worker_task['task_name']}-run",
+            max_iterations=2,
+            current_iteration=1,
+            cleanup_policy="clear",
+            required_before_continue=["adversarial_check"],
+            stop_conditions=["required_evidence"],
+            seed_prompt_sha256="qa-run-worker-directed-seed",
+        )
+        worker_result = _record_loop_evidence(
+            conn,
+            task=dict(worker_db.task_row(conn, task=worker_task["task_name"])),
+            loop_run=worker_run_id,
+            iteration=1,
+            evidence_type="adversarial_check",
+            status="pass",
+            source="worker_proposed",
+            proof="Worker proposed strongest realistic failure mode with proof fields.",
+            artifact_path=None,
+            correlation_id="nl-worker-directed-proof",
+            metadata=_adversarial_check_metadata(
+                {
+                    "failure_mode": "The worker could claim completion without checking the dispatcher gate.",
+                    "check": "Inspect the blocked dispatch receipt and the post-proof worker inbox delivery.",
+                    "result": "The receipt chain proves blocked-before-proof and delivered-after-proof behavior.",
+                }
+            ),
+        )
+        conn.commit()
+    worker_evidence = dict(worker_result["evidence"])
+    worker_evidence["source"] = worker_result["criterion"]["source"]
+    checks.append(
+        {
+            "evidence": worker_evidence,
+            "name": "worker_directed_trigger_records_worker_proposed_proof",
+            "status": "passed",
+            "trigger": triggers_by_name["worker-directed-trigger"]["canonical_phrase"],
+        }
+    )
+
+    with worker_db.connect(db_path) as conn:
+        worker_db.initialize_database(conn)
+        criteria_task = _qa_run_bound_task(conn, slug=slug, suffix="adversarial-triggers-criteria")
+        criteria_texts = [
+            "Blocked Dispatch before adversarial proof exists is required.",
+            "Blocked Dispatch must leave the worker inbox empty.",
+            "Structured adversarial evidence is present before a fresh retry is delivered.",
+        ]
+        for criterion in criteria_texts:
+            worker_db.insert_acceptance_criterion(
+                conn,
+                task_id=criteria_task["task_id"],
+                criterion=criterion,
+                status="accepted",
+                source="manager_inferred",
+                proof=None,
+                rationale="Natural-language acceptance criteria trigger drill.",
+                evidence={"correlation_id": "nl-manager-criteria-negative-checks"},
+            )
+        criteria = [
+            dict(row)
+            for row in worker_db.acceptance_criteria_for_task(conn, task_id=criteria_task["task_id"])
+            if row["source"] == "manager_inferred"
+        ]
+        conn.commit()
+    checks.append(
+        {
+            "criteria": criteria,
+            "manager_inferred_criteria_count": len(criteria),
+            "name": "acceptance_criteria_trigger_records_negative_manager_criteria",
+            "status": "passed",
+            "trigger": triggers_by_name["acceptance-criteria-trigger"]["canonical_phrase"],
+        }
+    )
+
+    return {
+        "artifacts": {"db_path": str(db_path)},
+        "checks": checks,
+        "generated_at": now_iso(),
+        "negative_control": negative_control,
+        "replay_commands": [
+            'scripts/workerctl loop-triggers --classify "Run this as an adversarially gated Ralph loop." --json',
+            "scripts/workerctl qa-plan adversarial-triggers --json",
+            f"scripts/workerctl dispatch --once --type continue_iteration --dispatcher-id {dispatcher_id} --path {db_path}",
+            f"scripts/workerctl worker-inbox {loop_task['task_name']} --path {db_path} --json",
+            f"scripts/workerctl export-task {loop_task['task_name']} --path {db_path}",
+        ],
+        "result": "passed",
+        "scenario": "adversarial-triggers",
+        "trigger_classifications": trigger_classifications,
+    }
+
+
 def command_qa_run(args: argparse.Namespace) -> int:
     scenario = getattr(args, "scenario", "ralph-loop-guardrails")
     scenarios = {
         "ralph-loop-guardrails": _qa_run_ralph_loop_guardrails,
         "generic-loop-template": _qa_run_generic_loop_template,
         "generic-loop-template-browser": _qa_run_generic_loop_template_browser,
+        "adversarial-triggers": _qa_run_adversarial_triggers,
     }
     try:
         runner = scenarios[scenario]
