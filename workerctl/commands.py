@@ -5106,6 +5106,17 @@ def telemetry_failures_view(
         cycle_params.append(task_id)
         pane_filters.append("mc.task_id = ?")
         pane_params.append(task_id)
+    if run_id is not None:
+        run_filter = (
+            "exists ("
+            "select 1 from manager_cycle_spans mcs "
+            "where mcs.manager_cycle_id = mc.id and mcs.run_id = ?"
+            ")"
+        )
+        cycle_filters.append(run_filter)
+        cycle_params.append(run_id)
+        pane_filters.append(run_filter)
+        pane_params.append(run_id)
     if updated_since is not None:
         cycle_filters.append("coalesce(mc.completed_at, mc.started_at) >= ?")
         cycle_params.append(updated_since)

@@ -7077,6 +7077,146 @@ class CliTests(unittest.TestCase):
             self.assertEqual(payload["failures"]["failed_commands"], 0)
             self.assertEqual(payload["recommendation"], "ready_for_manager_review")
 
+    def test_loop_status_ignores_unassociated_cycle_and_pane_failures_for_target_run(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                task_id = worker_db.create_task(conn, name="loop-status-cycle-scope-task", goal="Inspect one run.")
+                target_run_id = worker_db.create_ralph_loop_run(
+                    conn,
+                    task_id=task_id,
+                    name="target-clean-loop-run",
+                    max_iterations=3,
+                    current_iteration=1,
+                    cleanup_policy="clear",
+                    required_before_continue=[],
+                    metadata={"template": "test_coverage_loop"},
+                )
+                worker_db.create_ralph_loop_run(
+                    conn,
+                    task_id=task_id,
+                    name="other-loop-run",
+                    max_iterations=3,
+                    current_iteration=1,
+                    cleanup_policy="clear",
+                    required_before_continue=[],
+                    metadata={"template": "test_coverage_loop"},
+                )
+                target_command_id = worker_db.create_command(
+                    conn,
+                    command_type="continue_iteration",
+                    payload={"loop_policy": {"run_id": target_run_id}},
+                    task_id=task_id,
+                    correlation_id="target-clean-run-command",
+                )
+                worker_db.finish_command(
+                    conn,
+                    command_id=target_command_id,
+                    state="succeeded",
+                    result={"run_id": target_run_id},
+                )
+                failed_cycle = worker_db.create_manager_cycle(
+                    conn,
+                    task_id=task_id,
+                    manager_id=None,
+                    timestamp="2026-05-21T10:00:00Z",
+                )
+                worker_db.finish_manager_cycle(
+                    conn,
+                    cycle_id=failed_cycle,
+                    state="failed",
+                    status={
+                        "kind": "session_cycle",
+                        "pane_signal": {"captured": True, "notable_pattern": None},
+                    },
+                    error="unassociated task-wide cycle failed",
+                    timestamp="2026-05-21T10:00:05Z",
+                )
+                pane_failure = worker_db.create_manager_cycle(
+                    conn,
+                    task_id=task_id,
+                    manager_id=None,
+                    timestamp="2026-05-21T10:01:00Z",
+                )
+                worker_db.finish_manager_cycle(
+                    conn,
+                    cycle_id=pane_failure,
+                    state="succeeded",
+                    status={
+                        "kind": "session_cycle",
+                        "pane_signal": {"captured": False, "reason": "other run pane capture failed"},
+                    },
+                    timestamp="2026-05-21T10:01:05Z",
+                )
+                conn.commit()
+
+            proc = self.run_workerctl(
+                "loop-status",
+                "loop-status-cycle-scope-task",
+                "--run",
+                target_run_id,
+                "--path",
+                str(db_path),
+                "--json",
+            )
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            payload = json.loads(proc.stdout)
+            self.assertEqual(payload["commands"]["states"], {"succeeded": 1})
+            self.assertEqual(payload["failures"]["failed_commands"], 0)
+            self.assertEqual(payload["failures"]["failed_cycles"], 0)
+            self.assertEqual(payload["failures"]["pane_capture_failures"], 0)
+            self.assertEqual(payload["recommendation"], "ready_for_manager_review")
+
+            with worker_db.connect(db_path) as conn:
+                associated_cycle = worker_db.create_manager_cycle(
+                    conn,
+                    task_id=task_id,
+                    manager_id=None,
+                    timestamp="2026-05-21T10:02:00Z",
+                )
+                worker_db.finish_manager_cycle(
+                    conn,
+                    cycle_id=associated_cycle,
+                    state="failed",
+                    status={
+                        "kind": "session_cycle",
+                        "pane_signal": {"captured": False, "reason": "target run pane capture failed"},
+                    },
+                    error="target run associated cycle failed",
+                    timestamp="2026-05-21T10:02:05Z",
+                )
+                worker_db.insert_manager_cycle_span(
+                    conn,
+                    manager_cycle_id=associated_cycle,
+                    task_id=task_id,
+                    run_id=target_run_id,
+                    phase="capture_pane_signal",
+                    started_at="2026-05-21T10:02:00Z",
+                    completed_at="2026-05-21T10:02:05Z",
+                    duration_ms=5000.0,
+                    state="failed",
+                    error_type="RuntimeError",
+                )
+                conn.commit()
+
+            associated = self.run_workerctl(
+                "loop-status",
+                "loop-status-cycle-scope-task",
+                "--run",
+                target_run_id,
+                "--path",
+                str(db_path),
+                "--json",
+            )
+
+            self.assertEqual(associated.returncode, 0, associated.stderr)
+            associated_payload = json.loads(associated.stdout)
+            self.assertEqual(associated_payload["failures"]["failed_cycles"], 1)
+            self.assertEqual(associated_payload["failures"]["pane_capture_failures"], 1)
+            self.assertEqual(associated_payload["recommendation"], "inspect_failures")
+
     def test_loop_status_queries_target_run_telemetry_without_task_limit_loss(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "workerctl.db"
