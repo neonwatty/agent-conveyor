@@ -2840,6 +2840,70 @@ class DispatchTests(unittest.TestCase):
             self.assertEqual(worker_db.routed_notifications(conn, task_id="task-dispatch"), [])
             send.assert_not_called()
 
+    def test_dispatch_blocks_stale_continue_iteration_even_if_directly_queued(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn, db_path = self.open_db(tmpdir)
+            worker_id, _manager_id = self.setup_bound_task(conn)
+            conn.execute("update sessions set tmux_session = null where id = ?", (worker_id,))
+            loop_run_id = worker_db.create_ralph_loop_run(
+                conn,
+                task_id="task-dispatch",
+                name="qa-loop",
+                max_iterations=4,
+                current_iteration=2,
+                cleanup_policy="compact",
+                stop_conditions=["max_iterations", "required_evidence"],
+            )
+            command_id = worker_db.enqueue_continue_iteration(
+                conn,
+                task_id="task-dispatch",
+                message="Run iteration 2 again.",
+                loop_run_id=loop_run_id,
+                requested_iteration=2,
+                correlation_id="ralph-loop-stale-request",
+            )
+            conn.commit()
+
+            args = argparse.Namespace(
+                dispatcher_id="dispatch-test",
+                dry_run=False,
+                json=True,
+                limit=10,
+                once=True,
+                path=str(db_path),
+                type="continue_iteration",
+                watch=False,
+            )
+            with mock.patch.object(worker_tmux, "send_text_to_session") as send:
+                with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                    commands.command_dispatch(args)
+
+            payload = json.loads(stdout.getvalue())
+            processed = payload["processed"][0]
+            command_row = conn.execute(
+                "select state, result_json, error from commands where id = ?",
+                (command_id,),
+            ).fetchone()
+            attempt_row = conn.execute(
+                "select state, result_json, error, side_effect_started, side_effect_completed from command_attempts"
+            ).fetchone()
+            attempt_result = json.loads(attempt_row["result_json"])
+
+            self.assertEqual(processed["state"], "blocked")
+            self.assertEqual(processed["reason"], "stale_requested_iteration")
+            self.assertEqual(processed["current_iteration"], 2)
+            self.assertEqual(processed["requested_iteration"], 2)
+            self.assertFalse(processed["target_worker_notified"])
+            self.assertEqual(command_row["state"], "failed")
+            self.assertIn("stale_requested_iteration", command_row["error"])
+            self.assertEqual(attempt_row["state"], "failed")
+            self.assertEqual(attempt_result["reason"], "stale_requested_iteration")
+            self.assertEqual(attempt_row["side_effect_started"], 0)
+            self.assertEqual(attempt_row["side_effect_completed"], 0)
+            self.assertEqual(worker_db.routed_notifications(conn, task_id="task-dispatch"), [])
+            self.assertEqual(worker_db.session_inbox(conn, session_name="worker-session"), [])
+            send.assert_not_called()
+
     def test_dispatch_blocks_continue_iteration_missing_ci_green_before_no_tmux_worker_inbox(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             conn, db_path = self.open_db(tmpdir)
@@ -4171,18 +4235,25 @@ class DispatchTests(unittest.TestCase):
             self.assertEqual(attempt_entry["details"]["error"].split()[0], "missing_ci_green_evidence")
 
     def test_dispatch_allows_continue_iteration_within_max_to_no_tmux_worker_inbox(self):
+        from workerctl.loop_templates import loop_template_metadata
+
         with tempfile.TemporaryDirectory() as tmpdir:
             conn, db_path = self.open_db(tmpdir)
             worker_id, _manager_id = self.setup_bound_task(conn)
             conn.execute("update sessions set tmux_session = null where id = ?", (worker_id,))
+            metadata = loop_template_metadata("visual_diff_loop", current_iteration=0, seed_prompt_sha256="visual-seed")
             loop_run_id = worker_db.create_ralph_loop_run(
                 conn,
                 task_id="task-dispatch",
                 name="qa-loop",
-                max_iterations=1,
-                current_iteration=0,
-                cleanup_policy="clear",
-                stop_conditions=["max_iterations"],
+                max_iterations=metadata["max_iterations"],
+                current_iteration=metadata["current_iteration"],
+                cleanup_policy=metadata["cleanup_policy"],
+                required_before_continue=metadata["required_before_continue"],
+                stop_conditions=metadata["stop_conditions"],
+                seed_prompt_sha256=metadata["seed_prompt_sha256"],
+                preset=metadata["preset"],
+                metadata=metadata,
             )
             command_id = worker_db.enqueue_continue_iteration(
                 conn,
@@ -4220,8 +4291,110 @@ class DispatchTests(unittest.TestCase):
             self.assertEqual(notification["delivery_mode"], "pull_required")
             self.assertEqual(notification["payload"]["ralph_loop"]["run_id"], loop_run_id)
             self.assertEqual(notification["payload"]["ralph_loop"]["requested_iteration"], 1)
+            self.assertEqual(notification["payload"]["ralph_loop"]["template"], "visual_diff_loop")
+            self.assertEqual(notification["payload"]["ralph_loop"]["recommended_tools"], ["browser", "playwright", "pixelmatch"])
+            self.assertEqual(notification["payload"]["loop_policy"]["run_id"], loop_run_id)
+            self.assertEqual(notification["payload"]["loop_policy"]["template"], "visual_diff_loop")
+            self.assertEqual(notification["payload"]["loop_policy"]["cleanup_policy"], "compact")
+            self.assertEqual(notification["payload"]["loop_policy"]["max_iterations"], 4)
+            self.assertEqual(notification["payload"]["loop_policy"]["artifact_requirements"]["viewport"]["type"], "string")
             self.assertEqual(consumed["payload"]["message"], "Run iteration 1.")
+            self.assertEqual(consumed["payload"]["loop_policy"]["run_id"], loop_run_id)
+            self.assertEqual(consumed["payload"]["loop_policy"]["template"], "visual_diff_loop")
             send.assert_not_called()
+
+    def test_dispatch_pushes_continue_iteration_loop_policy_to_tmux_worker(self):
+        from workerctl.loop_templates import loop_template_metadata
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn, db_path = self.open_db(tmpdir)
+            self.setup_bound_task(conn)
+            metadata = loop_template_metadata("visual_diff_loop", current_iteration=1, seed_prompt_sha256="visual-seed")
+            loop_run_id = worker_db.create_ralph_loop_run(
+                conn,
+                task_id="task-dispatch",
+                name="qa-loop",
+                max_iterations=metadata["max_iterations"],
+                current_iteration=metadata["current_iteration"],
+                cleanup_policy=metadata["cleanup_policy"],
+                required_before_continue=metadata["required_before_continue"],
+                stop_conditions=metadata["stop_conditions"],
+                seed_prompt_sha256=metadata["seed_prompt_sha256"],
+                preset=metadata["preset"],
+                metadata=metadata,
+            )
+            for evidence_type in metadata["required_before_continue"]:
+                evidence = {
+                    "correlation_id": f"visual-loop-{evidence_type}",
+                    "evidence_type": evidence_type,
+                    "iteration": 1,
+                    "ralph_loop_run_id": loop_run_id,
+                    "status": "pass",
+                }
+                if evidence_type == "adversarial_check":
+                    evidence.update(
+                        {
+                            "failure_mode": "Visual loop could continue without inspecting the diff.",
+                            "check": "Inspect the candidate screenshot and visual diff before retry.",
+                            "result": "Visual proof is present and no blocker remains.",
+                        }
+                    )
+                worker_db.insert_acceptance_criterion(
+                    conn,
+                    task_id="task-dispatch",
+                    criterion=f"Iteration 1 {evidence_type} evidence",
+                    status="satisfied",
+                    source="manager_inferred",
+                    proof=f"{evidence_type} receipt recorded.",
+                    evidence=evidence,
+                )
+            command_id = worker_db.enqueue_continue_iteration(
+                conn,
+                task_id="task-dispatch",
+                message="Run visual iteration 2.",
+                loop_run_id=loop_run_id,
+                requested_iteration=2,
+                correlation_id="visual-loop-tmux-allowed",
+            )
+            conn.commit()
+
+            sent: list[dict[str, Any]] = []
+
+            def fake_send(conn, *, session_name, text, dry_run=False, side_effect_audit=None, side_effect_started_callback=None):
+                sent.append({"session_name": session_name, "text": text, "dry_run": dry_run})
+                if side_effect_audit is not None:
+                    side_effect_audit["side_effect_started"] = True
+                    side_effect_audit["side_effect_completed"] = True
+                return {"target": "tmux-worker:0.0", "text": text}
+
+            args = argparse.Namespace(
+                dispatcher_id="dispatch-test",
+                dry_run=False,
+                json=True,
+                limit=10,
+                once=True,
+                path=str(db_path),
+                type="continue_iteration",
+                watch=False,
+            )
+            with mock.patch.object(worker_tmux, "send_text_to_session", side_effect=fake_send):
+                with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                    commands.command_dispatch(args)
+
+            payload = json.loads(stdout.getvalue())
+            notification = worker_db.routed_notifications(conn, task_id="task-dispatch")[0]
+
+            self.assertEqual(payload["processed"][0]["state"], "delivered")
+            self.assertEqual(notification["command_id"], command_id)
+            self.assertEqual(notification["payload"]["loop_policy"]["template"], "visual_diff_loop")
+            self.assertEqual(sent[0]["session_name"], "worker-session")
+            self.assertIn("Run visual iteration 2.", sent[0]["text"])
+            self.assertIn("Loop policy:", sent[0]["text"])
+            self.assertIn("- template: visual_diff_loop", sent[0]["text"])
+            self.assertIn("- iteration: requested 2 (current 1 of 4)", sent[0]["text"])
+            self.assertIn("reference_artifact", sent[0]["text"])
+            self.assertIn("candidate_screenshot", sent[0]["text"])
+            self.assertIn("- recommended_tools: browser, playwright, pixelmatch", sent[0]["text"])
 
     def test_dispatch_command_send_runs_after_claim_transaction_commits(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -5470,6 +5643,10 @@ class CliTests(unittest.TestCase):
             payload = json.loads(proc.stdout)
             self.assertEqual(payload["command_type"], "continue_iteration")
             self.assertEqual(payload["loop_run_id"], loop_run_id)
+            self.assertEqual(payload["loop_policy"]["run_id"], loop_run_id)
+            self.assertEqual(payload["loop_policy"]["cleanup_policy"], "compact")
+            self.assertEqual(payload["loop_policy"]["current_iteration"], 1)
+            self.assertEqual(payload["loop_policy"]["max_iterations"], 2)
             self.assertEqual(payload["manager_decision_id"], decision_id)
             with worker_db.connect(db_path) as conn:
                 command = conn.execute(
@@ -5481,7 +5658,117 @@ class CliTests(unittest.TestCase):
             self.assertEqual(command["correlation_id"], "ralph-loop-cli")
             self.assertEqual(command_payload["ralph_loop"]["run_id"], loop_run_id)
             self.assertEqual(command_payload["ralph_loop"]["requested_iteration"], 2)
+            self.assertEqual(command_payload["loop_policy"]["run_id"], loop_run_id)
+            self.assertEqual(command_payload["loop_policy"]["cleanup_policy"], "compact")
             self.assertEqual(command_payload["manager_decision"]["decision_id"], decision_id)
+
+    def test_enqueue_continue_iteration_cli_surfaces_template_policy_metadata(self):
+        from workerctl.loop_templates import loop_template_metadata
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            metadata = loop_template_metadata(
+                "visual_diff_loop",
+                max_iterations=4,
+                current_iteration=1,
+                seed_prompt_sha256="visual-seed",
+            )
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                task_id = worker_db.create_task(conn, name="enqueue-template-task", goal="Queue template work.")
+                loop_run_id = worker_db.create_ralph_loop_run(
+                    conn,
+                    task_id=task_id,
+                    name="enqueue-template-loop",
+                    max_iterations=metadata["max_iterations"],
+                    current_iteration=metadata["current_iteration"],
+                    cleanup_policy=metadata["cleanup_policy"],
+                    required_before_continue=metadata["required_before_continue"],
+                    stop_conditions=metadata["stop_conditions"],
+                    seed_prompt_sha256=metadata["seed_prompt_sha256"],
+                    preset=metadata["preset"],
+                    metadata=metadata,
+                )
+                conn.commit()
+
+            proc = self.run_workerctl(
+                "enqueue-continue-iteration",
+                "enqueue-template-task",
+                "--message",
+                "run visual iteration 2",
+                "--loop-run",
+                loop_run_id,
+                "--requested-iteration",
+                "2",
+                "--correlation-id",
+                "visual-template-cli",
+                "--json",
+                "--path",
+                str(db_path),
+            )
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            payload = json.loads(proc.stdout)
+            self.assertEqual(payload["loop_policy"]["template"], "visual_diff_loop")
+            self.assertEqual(payload["loop_policy"]["preset"], "visual_diff_loop")
+            self.assertEqual(payload["loop_policy"]["recommended_tools"], ["browser", "playwright", "pixelmatch"])
+            self.assertEqual(payload["loop_policy"]["artifact_requirements"]["candidate_screenshot"]["type"], "path")
+            self.assertEqual(
+                payload["loop_policy"]["required_before_continue"],
+                [
+                    "reference_artifact",
+                    "candidate_screenshot",
+                    "visual_diff_report",
+                    "diff_below_threshold",
+                    "adversarial_check",
+                ],
+            )
+            with worker_db.connect(db_path) as conn:
+                command_payload = json.loads(
+                    conn.execute(
+                        "select payload_json from commands where id = ?",
+                        (payload["command_id"],),
+                    ).fetchone()["payload_json"]
+                )
+            self.assertEqual(command_payload["loop_policy"]["template"], "visual_diff_loop")
+            self.assertEqual(command_payload["loop_policy"]["artifact_requirements"]["viewport"]["type"], "string")
+
+    def test_enqueue_continue_iteration_cli_rejects_current_iteration_without_queueing(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                task_id = worker_db.create_task(conn, name="enqueue-stale-iteration-task", goal="Reject stale loop work.")
+                loop_run_id = worker_db.create_ralph_loop_run(
+                    conn,
+                    task_id=task_id,
+                    name="enqueue-stale-loop",
+                    max_iterations=4,
+                    current_iteration=2,
+                    cleanup_policy="compact",
+                )
+                conn.commit()
+
+            proc = self.run_workerctl(
+                "enqueue-continue-iteration",
+                "enqueue-stale-iteration-task",
+                "--message",
+                "run iteration 2 again",
+                "--loop-run",
+                loop_run_id,
+                "--requested-iteration",
+                "2",
+                "--json",
+                "--path",
+                str(db_path),
+            )
+
+            self.assertEqual(proc.returncode, 1)
+            self.assertIn("requested_iteration must be greater than current_iteration", proc.stderr)
+            self.assertNotIn("Traceback", proc.stderr)
+            with worker_db.connect(db_path) as conn:
+                command_count = conn.execute("select count(*) from commands").fetchone()[0]
+            self.assertEqual(command_count, 0)
 
     def test_ralph_loop_presets_cli_lists_and_shows_presets(self):
         list_proc = self.run_workerctl("ralph-loop-presets", "--list", "--json")

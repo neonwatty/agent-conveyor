@@ -123,9 +123,13 @@ scripts/workerctl worker-inbox qa-general-loop-template --json --path "$WORKERCT
 
 Acceptance criteria:
 
+- The enqueue JSON includes `loop_policy.template=visual_diff_loop`,
+  `loop_policy.cleanup_policy=compact`, and all required evidence names.
 - Dispatch result includes `state=blocked`.
 - Dispatch result includes `reason=missing_required_evidence`.
 - Dispatch result includes all five missing evidence names in order.
+- Dispatch result includes `loop_policy.template=visual_diff_loop`, proving the
+  manager request stayed linked to the generic template policy.
 - Dispatch result includes `delivered=false` and `target_worker_notified=false`.
 - `scripts/workerctl worker-inbox qa-general-loop-template --json --path "$WORKERCTL_DB"`
   returns no items.
@@ -198,6 +202,9 @@ scripts/workerctl telemetry --task qa-general-loop-template --event-type dispatc
 Acceptance criteria:
 
 - Dispatch result includes `state=pull_required` for a non-tmux worker.
+- The consumed `worker-inbox` item includes `loop_policy.template=visual_diff_loop`,
+  `loop_policy.artifact_requirements`, `loop_policy.recommended_tools`, and the
+  same `requested_iteration=2` under `ralph_loop`.
 - `loop-evidence visual-diff` records `visual_diff_report` and marks
   `diff_below_threshold` satisfied only when the computed
   `diff_score <= threshold`.

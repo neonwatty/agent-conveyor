@@ -289,10 +289,10 @@ def build_parser() -> argparse.ArgumentParser:
     enqueue_nudge.add_argument("--path", help="Override the workerctl database path.")
     enqueue_nudge.set_defaults(func=command_enqueue_nudge_worker)
 
-    enqueue_continue = subparsers.add_parser("enqueue-continue-iteration", help="Queue a Ralph-loop continue_iteration command for Dispatch.")
+    enqueue_continue = subparsers.add_parser("enqueue-continue-iteration", help="Queue a template-backed continue_iteration command for Dispatch.")
     enqueue_continue.add_argument("task", help="Task name or ID.")
     enqueue_continue.add_argument("--message", required=True, help="Message Dispatch should deliver to the bound worker.")
-    enqueue_continue.add_argument("--loop-run", required=True, help="Ralph-loop run id or name containing the continuation policy.")
+    enqueue_continue.add_argument("--loop-run", required=True, help="Loop run id or name containing the continuation policy.")
     enqueue_continue.add_argument("--requested-iteration", required=True, type=int, help="Iteration number the manager is requesting.")
     enqueue_continue.add_argument("--manager-decision-id", type=int, help="Manager decision id that requested this continuation.")
     enqueue_continue.add_argument("--correlation-id", help="Optional correlation id for dashboard/replay grouping.")

@@ -612,6 +612,15 @@ tmux attach -t codex-live-test
   `test_coverage_loop`, and `visual_diff_loop`) also expose an
   `artifact_requirements["adversarial_check"]` object requiring
   `failure_mode`, `check`, and `result` fields.
+- `enqueue-continue-iteration TASK --loop-run RUN --requested-iteration N` —
+  Queue a manager-requested next loop pass for Dispatch. The command refuses
+  same/current iteration requests before they become pending queue rows, while
+  Dispatch also blocks any stale same/current iteration command that reaches
+  the queue. Max-iteration and missing-evidence refusals remain Dispatch policy receipts.
+  JSON output includes `loop_policy`; delivered manager/worker inbox payloads
+  include the same `loop_policy` plus enriched `ralph_loop` metadata so tmux and
+  Codex app sessions can see the template, cleanup policy, required evidence,
+  artifact requirements, and recommended tools.
 - `loop-evidence add TASK --loop-run RUN --iteration N --evidence-type TYPE` —
   Record a run-qualified evidence receipt for a loop policy. Use
   `loop-evidence visual-diff` to compare PNG screenshots, write an optional
@@ -849,6 +858,11 @@ Current dispatch state:
   `target_session_id`: tmux push is optional transport. Codex app-based sessions
   should long-poll with `manager-inbox --consume-next --wait --json` or
   `worker-inbox --consume-next --wait --json`.
+- Template-backed `continue_iteration` deliveries include `loop_policy` in the
+  inbox payload, with template name, current/max iteration, cleanup policy,
+  required evidence, artifact requirements, and recommended tools. Codex
+  app-based workers receive the same policy context by polling that tmux workers
+  receive by push.
 - A target with a tmux session records `delivery_mode='push'` after successful
   tmux delivery. A target without tmux records `delivery_mode='pull_required'`
   and remains unconsumed until the addressed session polls and consumes it.
