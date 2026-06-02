@@ -237,6 +237,22 @@ The saved receipt must include the generated candidate HTML, browser backend,
 `diff_below_threshold`, and structured `adversarial_check` evidence before a
 fresh continuation reaches the worker inbox.
 
+### Non-coverage build/clear QA
+
+Use the build/clear receipt when you need to prove a generic Ralph-loop
+template that is not test-coverage or visual-diff specific:
+
+```bash
+scripts/workerctl qa-run build-clear-loop \
+  --receipt-output /tmp/build-clear-loop-receipt.json \
+  --json
+```
+
+The saved receipt must show `build_then_clear` metadata, blocked continuation
+while `build_passed` and `cleanup` are missing, continued blocking after build
+evidence alone, and fresh worker inbox delivery only after both build and
+cleanup receipts exist.
+
 ## Max Iteration Cutoff
 
 Create a second run at its max:

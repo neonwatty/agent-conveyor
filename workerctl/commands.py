@@ -3520,6 +3520,246 @@ def _qa_run_test_coverage_loop(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
+def _qa_run_build_clear_loop(args: argparse.Namespace) -> dict[str, Any]:
+    from workerctl import db as worker_db
+
+    db_path = _qa_run_db_path(args)
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    slug = uuid.uuid4().hex[:8]
+    dispatcher_id = getattr(args, "dispatcher_id", None) or f"qa-run-{slug}"
+    template_metadata = loop_template_metadata(
+        "build_then_clear",
+        max_iterations=2,
+        current_iteration=1,
+        seed_prompt_sha256="qa-run-build-clear-seed",
+    )
+    required_evidence = template_metadata["required_before_continue"]
+    checks: list[dict[str, Any]] = []
+
+    with worker_db.connect(db_path) as conn:
+        worker_db.initialize_database(conn)
+        _qa_run_require_clean_continue_queue(conn, worker_db=worker_db)
+        build_task = _qa_run_bound_task(conn, slug=slug, suffix="build-clear-loop")
+        build_run_id = worker_db.create_ralph_loop_run(
+            conn,
+            task_id=build_task["task_id"],
+            name=f"{build_task['task_name']}-run",
+            max_iterations=template_metadata["max_iterations"],
+            current_iteration=template_metadata["current_iteration"],
+            cleanup_policy=template_metadata["cleanup_policy"],
+            required_before_continue=required_evidence,
+            stop_conditions=template_metadata["stop_conditions"],
+            seed_prompt_sha256=template_metadata["seed_prompt_sha256"],
+            preset=template_metadata.get("preset"),
+            metadata=template_metadata,
+        )
+        worker_db.enqueue_continue_iteration(
+            conn,
+            task_id=build_task["task_id"],
+            message="Run build/clear template iteration 2 before build or cleanup evidence.",
+            loop_run_id=build_run_id,
+            requested_iteration=2,
+            correlation_id="qa-run-build-clear-missing",
+        )
+        conn.commit()
+
+    missing_dispatch = _qa_run_dispatch_continue_once(
+        db_path=db_path,
+        dispatcher_id=dispatcher_id,
+        expected_correlation_id="qa-run-build-clear-missing",
+    )
+    missing_counts = _qa_run_delivery_counts(
+        db_path=db_path,
+        task_id=build_task["task_id"],
+        worker_name=build_task["worker_name"],
+    )
+    _qa_run_require(missing_dispatch.get("state") == "blocked", "build_then_clear did not block before evidence")
+    _qa_run_require(
+        missing_dispatch.get("reason") == "missing_required_evidence",
+        "build_then_clear used the wrong block reason before evidence",
+    )
+    _qa_run_require(
+        missing_dispatch.get("missing_evidence") == required_evidence,
+        "build_then_clear reported the wrong missing evidence before evidence",
+    )
+    _qa_run_require(missing_counts["worker_inbox_count"] == 0, "build_then_clear left worker inbox mail before evidence")
+    checks.append(
+        _qa_run_check_result(
+            name="build_clear_blocks_before_build_or_cleanup_evidence",
+            dispatch=missing_dispatch,
+            counts=missing_counts,
+            command="workerctl dispatch --once --type continue_iteration --dispatcher-id qa-run",
+        )
+    )
+
+    artifact_dir = _qa_run_receipt_artifact_dir(
+        args,
+        db_path=db_path,
+        scenario="build-clear-loop",
+        slug=slug,
+        run_id=build_run_id,
+    )
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    build_receipt = artifact_dir / "build-passed.json"
+    build_receipt.write_text(
+        json.dumps(
+            {
+                "command": "scripts/run-unittests-isolated -k build_clear_loop",
+                "result": "pass",
+                "status": "build_passed",
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n"
+    )
+    _qa_run_record_loop_evidence(
+        db_path=db_path,
+        task_name=build_task["task_name"],
+        loop_run_id=build_run_id,
+        evidence_type="build_passed",
+        correlation_id="qa-run-build-clear-build-passed",
+        artifact_path=build_receipt,
+        metadata={
+            "command": "scripts/run-unittests-isolated -k build_clear_loop",
+            "result": "Focused build/test command passed before retry.",
+        },
+    )
+    with worker_db.connect(db_path) as conn:
+        worker_db.initialize_database(conn)
+        worker_db.enqueue_continue_iteration(
+            conn,
+            task_id=build_task["task_id"],
+            message="Run build/clear template iteration 2 after build evidence only.",
+            loop_run_id=build_run_id,
+            requested_iteration=2,
+            correlation_id="qa-run-build-clear-build-only",
+        )
+        conn.commit()
+
+    build_only_dispatch = _qa_run_dispatch_continue_once(
+        db_path=db_path,
+        dispatcher_id=dispatcher_id,
+        expected_correlation_id="qa-run-build-clear-build-only",
+    )
+    build_only_counts = _qa_run_delivery_counts(
+        db_path=db_path,
+        task_id=build_task["task_id"],
+        worker_name=build_task["worker_name"],
+    )
+    _qa_run_require(build_only_dispatch.get("state") == "blocked", "build_then_clear delivered before cleanup evidence")
+    _qa_run_require(
+        build_only_dispatch.get("reason") == "missing_cleanup_evidence",
+        "build_then_clear used the wrong block reason before cleanup evidence",
+    )
+    _qa_run_require(
+        build_only_dispatch.get("missing_evidence") == ["cleanup"],
+        "build_then_clear reported the wrong missing evidence before cleanup evidence",
+    )
+    _qa_run_require(build_only_counts["worker_inbox_count"] == 0, "build_then_clear left worker inbox mail before cleanup evidence")
+    checks.append(
+        _qa_run_check_result(
+            name="build_clear_still_blocks_before_cleanup_evidence",
+            dispatch=build_only_dispatch,
+            counts=build_only_counts,
+            command="workerctl loop-evidence add --evidence-type build_passed ... && workerctl dispatch --once --type continue_iteration",
+        )
+    )
+
+    cleanup_receipt = artifact_dir / "cleanup.json"
+    cleanup_receipt.write_text(
+        json.dumps(
+            {
+                "cleanup_policy": "clear",
+                "result": "pass",
+                "status": "cleanup",
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n"
+    )
+    _qa_run_record_loop_evidence(
+        db_path=db_path,
+        task_name=build_task["task_name"],
+        loop_run_id=build_run_id,
+        evidence_type="cleanup",
+        correlation_id="qa-run-build-clear-cleanup",
+        artifact_path=cleanup_receipt,
+        metadata={
+            "cleanup_policy": "clear",
+            "result": "Worker context clear receipt recorded before retry.",
+        },
+    )
+    with worker_db.connect(db_path) as conn:
+        worker_db.initialize_database(conn)
+        worker_db.enqueue_continue_iteration(
+            conn,
+            task_id=build_task["task_id"],
+            message="Run build/clear template iteration 2 after build and cleanup evidence.",
+            loop_run_id=build_run_id,
+            requested_iteration=2,
+            correlation_id="qa-run-build-clear-allowed",
+        )
+        conn.commit()
+
+    allowed_dispatch = _qa_run_dispatch_continue_once(
+        db_path=db_path,
+        dispatcher_id=dispatcher_id,
+        expected_correlation_id="qa-run-build-clear-allowed",
+    )
+    allowed_counts = _qa_run_delivery_counts(
+        db_path=db_path,
+        task_id=build_task["task_id"],
+        worker_name=build_task["worker_name"],
+    )
+    _qa_run_require(allowed_dispatch.get("state") == "pull_required", "build_then_clear retry did not deliver")
+    _qa_run_require(
+        allowed_counts["worker_inbox_count"] == 1,
+        "build_then_clear retry did not create exactly one worker inbox item",
+    )
+    checks.append(
+        _qa_run_check_result(
+            name="build_clear_retry_delivers_after_build_and_cleanup_evidence",
+            dispatch=allowed_dispatch,
+            counts=allowed_counts,
+            command="workerctl loop-evidence add --evidence-type cleanup ... && workerctl dispatch --once --type continue_iteration",
+        )
+    )
+
+    return {
+        "artifacts": {
+            "build_receipt": str(build_receipt),
+            "cleanup_receipt": str(cleanup_receipt),
+            "db_path": str(db_path),
+        },
+        "checks": checks,
+        "generated_at": now_iso(),
+        "generated_tasks": [_qa_run_generated_task(build_task, suffix="build-clear-loop")],
+        "replay_commands": [
+            "scripts/workerctl loop-templates --show build_then_clear --json",
+            (
+                "scripts/workerctl loop-templates --create-run <task> --template build_then_clear "
+                "--max-iterations 2 --current-iteration 1 --seed-prompt-sha256 qa-run-build-clear-seed"
+            ),
+            (
+                "scripts/workerctl loop-evidence add <task> --loop-run <run-id> --iteration 1 "
+                "--evidence-type build_passed --artifact-path <build-passed.json>"
+            ),
+            (
+                "scripts/workerctl loop-evidence add <task> --loop-run <run-id> --iteration 1 "
+                "--evidence-type cleanup --artifact-path <cleanup.json>"
+            ),
+            f"scripts/workerctl dispatch --once --type continue_iteration --dispatcher-id {dispatcher_id} --path {db_path}",
+            "scripts/workerctl worker-inbox <task> --consume-next --wait --json",
+        ],
+        "result": "passed",
+        "scenario": "build-clear-loop",
+        "template": "build_then_clear",
+        "template_metadata": template_metadata,
+    }
+
+
 def _qa_run_adversarial_triggers(args: argparse.Namespace) -> dict[str, Any]:
     from workerctl import db as worker_db
 
@@ -3864,6 +4104,7 @@ def command_qa_run(args: argparse.Namespace) -> int:
         "generic-loop-template-browser": _qa_run_generic_loop_template_browser,
         "test-coverage-loop": _qa_run_test_coverage_loop,
         "adversarial-triggers": _qa_run_adversarial_triggers,
+        "build-clear-loop": _qa_run_build_clear_loop,
     }
     try:
         runner = scenarios[scenario]

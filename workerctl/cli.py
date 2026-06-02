@@ -469,6 +469,7 @@ def build_parser() -> argparse.ArgumentParser:
             "generic-loop-template-browser",
             "test-coverage-loop",
             "adversarial-triggers",
+            "build-clear-loop",
         ),
     )
     qa_run.add_argument("--receipt-output", required=True, help="Path to write the JSON QA receipt.")

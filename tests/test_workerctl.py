@@ -9814,6 +9814,12 @@ Deferred follow-up criteria:
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertIn("test-coverage-loop", proc.stdout)
 
+    def test_qa_run_help_lists_build_clear_loop(self):
+        proc = self.run_workerctl("qa-run", "--help")
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("build-clear-loop", proc.stdout)
+
     def test_qa_run_ralph_loop_guardrails_writes_replayable_receipt(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "db" / "workerctl.db"
@@ -9961,6 +9967,69 @@ Deferred follow-up criteria:
             self.assertIn("qa-plan adversarial-triggers", replay_commands)
             self.assertIn("worker-inbox", replay_commands)
             self.assertIn("export-task", replay_commands)
+
+    def test_qa_run_build_clear_loop_writes_replayable_receipt(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "db" / "workerctl.db"
+            receipt_path = Path(tmpdir) / "receipts" / "receipt.json"
+
+            proc = self.run_workerctl(
+                "qa-run",
+                "build-clear-loop",
+                "--receipt-output",
+                str(receipt_path),
+                "--path",
+                str(db_path),
+                "--json",
+            )
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            summary = json.loads(proc.stdout)
+            receipt = json.loads(receipt_path.read_text())
+            self.assertEqual(summary["scenario"], "build-clear-loop")
+            self.assertEqual(summary["result"], "passed")
+            self.assertEqual(summary["checks"], 3)
+            self.assertEqual(receipt["scenario"], "build-clear-loop")
+            self.assertEqual(receipt["template"], "build_then_clear")
+            self.assertEqual(receipt["result"], "passed")
+            self.assertEqual(Path(receipt["artifacts"]["db_path"]), db_path.resolve())
+            self.assertEqual(receipt["template_metadata"]["template"], "build_then_clear")
+            self.assertEqual(receipt["template_metadata"]["cleanup_policy"], "clear")
+            self.assertEqual(receipt["template_metadata"]["required_before_continue"], ["build_passed", "cleanup"])
+
+            generated_task = receipt["generated_tasks"][0]
+            self.assertEqual(generated_task["suffix"], "build-clear-loop")
+            self.assertTrue(generated_task["task_name"].startswith("qa-build-clear-loop-"))
+            self.assertTrue(generated_task["worker_name"].endswith("-worker"))
+
+            checks = {check["name"]: check for check in receipt["checks"]}
+            missing = checks["build_clear_blocks_before_build_or_cleanup_evidence"]
+            self.assertEqual(missing["dispatch"]["state"], "blocked")
+            self.assertEqual(missing["dispatch"]["reason"], "missing_required_evidence")
+            self.assertEqual(missing["dispatch"]["missing_evidence"], ["build_passed", "cleanup"])
+            self.assertEqual(missing["worker_inbox_count"], 0)
+            self.assertEqual(missing["routed_notifications_count"], 0)
+
+            build_only = checks["build_clear_still_blocks_before_cleanup_evidence"]
+            self.assertEqual(build_only["dispatch"]["state"], "blocked")
+            self.assertEqual(build_only["dispatch"]["reason"], "missing_cleanup_evidence")
+            self.assertEqual(build_only["dispatch"]["missing_evidence"], ["cleanup"])
+            self.assertEqual(build_only["worker_inbox_count"], 0)
+
+            allowed = checks["build_clear_retry_delivers_after_build_and_cleanup_evidence"]
+            self.assertEqual(allowed["dispatch"]["state"], "pull_required")
+            self.assertEqual(allowed["dispatch"]["loop_policy"]["template"], "build_then_clear")
+            self.assertEqual(allowed["dispatch"]["requested_iteration"], 2)
+            self.assertEqual(allowed["dispatch"]["current_iteration"], 1)
+            self.assertEqual(allowed["dispatch"]["max_iterations"], 2)
+            self.assertEqual(allowed["dispatch"]["missing_evidence"], [])
+            self.assertEqual(allowed["worker_inbox_count"], 1)
+
+            replay_commands = "\n".join(receipt["replay_commands"])
+            self.assertIn("loop-templates --show build_then_clear", replay_commands)
+            self.assertIn("--evidence-type build_passed", replay_commands)
+            self.assertIn("--evidence-type cleanup", replay_commands)
+            self.assertIn("worker-inbox", replay_commands)
 
     def test_qa_run_generic_loop_template_writes_replayable_receipt(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -20739,10 +20808,13 @@ class ManagerBootstrapPromptTests(unittest.TestCase):
         self.assertIn("generic-loop-template-browser-receipt.json", readme)
         self.assertIn("qa-run test-coverage-loop", readme)
         self.assertIn("test-coverage-loop-receipt.json", readme)
+        self.assertIn("qa-run build-clear-loop", readme)
+        self.assertIn("build-clear-loop-receipt.json", readme)
         self.assertIn("Playwright dependency", readme)
         self.assertIn("Chromium", readme)
         self.assertIn("qa-run generic-loop-template-browser", checklist)
         self.assertIn("qa-run test-coverage-loop", checklist)
+        self.assertIn("qa-run build-clear-loop", checklist)
         self.assertIn("Playwright dependency", checklist)
         self.assertIn("Chromium", checklist)
         self.assertIn("browser-backed QA helper message", checklist)
