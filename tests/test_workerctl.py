@@ -8411,6 +8411,12 @@ Deferred follow-up criteria:
         self.assertIn("iteration-gate-trigger: Do not send the worker another iteration", proc.stdout)
         self.assertIn("worker-directed-trigger: Ask the worker to identify", proc.stdout)
 
+    def test_qa_run_help_lists_generic_loop_template_browser(self):
+        proc = self.run_workerctl("qa-run", "--help")
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("generic-loop-template-browser", proc.stdout)
+
     def test_qa_run_ralph_loop_guardrails_writes_replayable_receipt(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "workerctl.db"
@@ -8545,8 +8551,113 @@ Deferred follow-up criteria:
             self.assertIn("loop-evidence visual-diff", replay_commands)
             self.assertIn("loop-evidence adversarial-check", replay_commands)
 
+    def test_qa_run_generic_loop_template_browser_writes_replayable_receipt(self):
+        def fake_capture(*, html_path, screenshot_path, viewport):
+            self.assertTrue(Path(html_path).exists())
+            html = Path(html_path).read_text()
+            self.assertIn("qa-pixel-0", html)
+            self.assertEqual(viewport, {"width": 2, "height": 2})
+            commands._qa_run_write_png_rgba(
+                Path(screenshot_path),
+                2,
+                2,
+                [
+                    (18, 24, 38, 255),
+                    (44, 92, 152, 255),
+                    (218, 226, 236, 255),
+                    (246, 248, 251, 255),
+                ],
+            )
+            return {
+                "backend": "fake-playwright-chromium",
+                "html_path": str(html_path),
+                "screenshot_path": str(screenshot_path),
+                "viewport": "2x2",
+            }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            receipt_path = Path(tmpdir) / "receipt.json"
+            args = argparse.Namespace(
+                dispatcher_id=None,
+                json=True,
+                path=str(db_path),
+                receipt_output=str(receipt_path),
+                scenario="generic-loop-template-browser",
+            )
+
+            with mock.patch("workerctl.commands._qa_run_capture_browser_screenshot", side_effect=fake_capture):
+                with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                    commands.command_qa_run(args)
+
+            summary = json.loads(stdout.getvalue())
+            receipt = json.loads(receipt_path.read_text())
+            self.assertEqual(summary["scenario"], "generic-loop-template-browser")
+            self.assertEqual(summary["result"], "passed")
+            self.assertEqual(summary["checks"], 3)
+            self.assertEqual(receipt["scenario"], "generic-loop-template-browser")
+            self.assertEqual(receipt["template"], "visual_diff_loop")
+            self.assertEqual(receipt["result"], "passed")
+            self.assertEqual(receipt["browser"]["backend"], "fake-playwright-chromium")
+            self.assertEqual(receipt["browser"]["viewport"], "2x2")
+            self.assertTrue(Path(receipt["artifacts"]["candidate_html"]).exists())
+            self.assertTrue(Path(receipt["artifacts"]["candidate_screenshot"]).exists())
+            self.assertTrue(Path(receipt["artifacts"]["reference_artifact"]).exists())
+            self.assertTrue(Path(receipt["artifacts"]["visual_diff_report"]).exists())
+            self.assertTrue(receipt["visual_diff"]["below_threshold"])
+            self.assertEqual(receipt["visual_diff"]["diff_score"], 0.0)
+
+            checks = {check["name"]: check for check in receipt["checks"]}
+            missing = checks["browser_visual_template_blocks_before_visual_evidence"]
+            self.assertEqual(missing["dispatch"]["state"], "blocked")
+            self.assertEqual(missing["dispatch"]["reason"], "missing_required_evidence")
+            self.assertEqual(
+                missing["dispatch"]["missing_evidence"],
+                [
+                    "reference_artifact",
+                    "candidate_screenshot",
+                    "visual_diff_report",
+                    "diff_below_threshold",
+                    "adversarial_check",
+                ],
+            )
+            self.assertEqual(missing["routed_notifications_count"], 0)
+            self.assertEqual(missing["worker_inbox_count"], 0)
+
+            unstructured = checks["browser_unstructured_adversarial_check_still_blocks"]
+            self.assertEqual(unstructured["dispatch"]["state"], "blocked")
+            self.assertEqual(unstructured["dispatch"]["reason"], "missing_adversarial_check_evidence")
+            self.assertEqual(unstructured["dispatch"]["missing_evidence"], ["adversarial_check"])
+            self.assertEqual(unstructured["worker_inbox_count"], 0)
+
+            allowed = checks["browser_structured_visual_evidence_retry_delivers"]
+            self.assertEqual(allowed["dispatch"]["state"], "pull_required")
+            self.assertEqual(allowed["worker_inbox_count"], 1)
+
+            replay_commands = "\n".join(receipt["replay_commands"])
+            self.assertIn("capture-static-html-screenshot.mjs", replay_commands)
+            self.assertIn("--evidence-type reference_artifact", replay_commands)
+            self.assertIn("--evidence-type candidate_screenshot", replay_commands)
+            self.assertIn("loop-evidence visual-diff", replay_commands)
+            self.assertIn("loop-evidence adversarial-check", replay_commands)
+
+    def test_qa_run_browser_screenshot_reports_missing_node_as_worker_error(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+
+            with mock.patch("workerctl.commands.subprocess.run", side_effect=FileNotFoundError("node")):
+                with self.assertRaisesRegex(
+                    WorkerError,
+                    "browser-backed QA requires Playwright/Chromium or a configured browser capture helper",
+                ):
+                    commands._qa_run_capture_browser_screenshot(
+                        html_path=tmp_path / "candidate.html",
+                        screenshot_path=tmp_path / "candidate.png",
+                        viewport={"width": 2, "height": 2},
+                    )
+
     def test_qa_run_refuses_to_share_dirty_continue_iteration_queue(self):
-        for scenario in ("ralph-loop-guardrails", "generic-loop-template"):
+        for scenario in ("ralph-loop-guardrails", "generic-loop-template", "generic-loop-template-browser"):
             with self.subTest(scenario=scenario):
                 with tempfile.TemporaryDirectory() as tmpdir:
                     db_path = Path(tmpdir) / "workerctl.db"
@@ -8620,7 +8731,7 @@ Deferred follow-up criteria:
                         self.assertEqual(command["state"], "pending")
 
     def test_qa_run_refuses_stale_attempted_continue_iteration_queue(self):
-        for scenario in ("ralph-loop-guardrails", "generic-loop-template"):
+        for scenario in ("ralph-loop-guardrails", "generic-loop-template", "generic-loop-template-browser"):
             with self.subTest(scenario=scenario):
                 with tempfile.TemporaryDirectory() as tmpdir:
                     db_path = Path(tmpdir) / "workerctl.db"
@@ -19041,6 +19152,7 @@ class ManagerBootstrapPromptTests(unittest.TestCase):
 
     def test_readme_documents_generic_loop_templates(self):
         readme = (ROOT / "README.md").read_text()
+        checklist = (ROOT / "docs" / "manual-qa-checklist.md").read_text()
 
         self.assertIn("loop-templates", readme)
         self.assertIn("visual_diff_loop", readme)
@@ -19049,6 +19161,14 @@ class ManagerBootstrapPromptTests(unittest.TestCase):
         self.assertIn("failure_mode", readme)
         self.assertIn("result", readme)
         self.assertIn("ralph-loop-presets", readme)
+        self.assertIn("qa-run generic-loop-template-browser", readme)
+        self.assertIn("generic-loop-template-browser-receipt.json", readme)
+        self.assertIn("Playwright dependency", readme)
+        self.assertIn("Chromium", readme)
+        self.assertIn("qa-run generic-loop-template-browser", checklist)
+        self.assertIn("Playwright dependency", checklist)
+        self.assertIn("Chromium", checklist)
+        self.assertIn("browser-backed QA helper message", checklist)
 
     def test_general_loop_template_qa_documents_visual_drill(self):
         qa_doc = (ROOT / "docs" / "qa" / "general-loop-templates.md").read_text()
@@ -19061,6 +19181,11 @@ class ManagerBootstrapPromptTests(unittest.TestCase):
         self.assertIn("diff_below_threshold", qa_doc)
         self.assertIn("worker-inbox", qa_doc)
         self.assertIn("dispatch_inbox_consumed", qa_doc)
+        self.assertIn("generic-loop-template-browser", qa_doc)
+        self.assertIn("generic-loop-template-browser-receipt.json", qa_doc)
+        self.assertIn("browser-rendered `candidate_screenshot`", qa_doc)
+        self.assertIn("Playwright dependency", qa_doc)
+        self.assertIn("Chromium", qa_doc)
         self.assertIn("WORKER_ROLLOUT", qa_doc)
         self.assertIn("MANAGER_ROLLOUT", qa_doc)
         self.assertIn('export WORKERCTL_DB="$QA_TMPDIR/workerctl.db"', qa_doc)

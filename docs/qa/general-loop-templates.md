@@ -210,6 +210,26 @@ Acceptance criteria:
   notification, worker inbox item, consumption event, and the
   `visual-loop-adversarial` proof criterion.
 
+### Browser-backed generic loop QA
+
+Use the browser-backed receipt when you need to prove that `visual_diff_loop`
+works with a real rendered HTML artifact:
+
+```bash
+scripts/workerctl qa-run generic-loop-template-browser \
+  --receipt-output /tmp/generic-loop-template-browser-receipt.json \
+  --json
+```
+
+This command uses the repo's Node Playwright dependency and requires Chromium
+to be installed and launchable; if unavailable, it fails with the
+browser-backed QA helper message.
+
+The saved receipt must include the generated candidate HTML, browser backend,
+2x2 viewport, browser-rendered `candidate_screenshot`, `visual_diff_report`,
+`diff_below_threshold`, and structured `adversarial_check` evidence before a
+fresh continuation reaches the worker inbox.
+
 ## Max Iteration Cutoff
 
 Create a second run at its max:
