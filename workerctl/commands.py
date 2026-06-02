@@ -4387,7 +4387,7 @@ def _loop_status_worker_inbox_count(conn: Any, *, task: Any, worker_session_id: 
     return sum(1 for row in rows if _loop_status_inbox_item_matches_run(row, run_id=run_id))
 
 
-def _loop_status_run_for_task(conn: Any, *, task: Any, run_ref: str) -> dict[str, Any]:
+def _ralph_loop_run_for_task(conn: Any, *, worker_db: Any, task: Any, run_ref: str) -> dict[str, Any]:
     row = conn.execute(
         """
         select id
@@ -4401,7 +4401,7 @@ def _loop_status_run_for_task(conn: Any, *, task: Any, run_ref: str) -> dict[str
     ).fetchone()
     if row is None:
         raise WorkerError(f"run {run_ref!r} does not belong to task {task['name']!r}")
-    return db_run_row(conn, run=row["id"])
+    return worker_db.ralph_loop_run(conn, run=row["id"])
 
 
 def _loop_status_summary(conn: Any, *, task: Any, run: dict[str, Any]) -> dict[str, Any]:
@@ -4522,11 +4522,13 @@ def _loop_status_summary(conn: Any, *, task: Any, run: dict[str, Any]) -> dict[s
 
 
 def command_loop_status(args: argparse.Namespace) -> int:
+    from workerctl import db as worker_db
+
     db_path = Path(args.path).expanduser().resolve() if args.path else None
     with connect_db(db_path) as conn:
         initialize_database(conn)
         task = db_task_row(conn, task=args.task)
-        run = _loop_status_run_for_task(conn, task=task, run_ref=args.run)
+        run = _ralph_loop_run_for_task(conn, worker_db=worker_db, task=task, run_ref=args.run)
         result = _loop_status_summary(conn, task=task, run=run)
     if args.json:
         print(json.dumps(result, indent=2, sort_keys=True, default=str))
@@ -6150,10 +6152,17 @@ def command_telemetry(args: argparse.Namespace) -> int:
                     print(f"{alert['severity']}: {alert['type']}: {alert['message']}")
             return 0
         if getattr(args, "view", None) == "failures":
+            from workerctl import db as worker_db
+
             run_id = None
-            task_id = db_task_row(conn, task=args.task)["id"] if args.task else None
+            task = db_task_row(conn, task=args.task) if args.task else None
+            task_id = task["id"] if task is not None else None
             if args.run:
-                run = db_run_row(conn, run=args.run)
+                run = (
+                    _ralph_loop_run_for_task(conn, worker_db=worker_db, task=task, run_ref=args.run)
+                    if task is not None
+                    else worker_db.ralph_loop_run(conn, run=args.run)
+                )
                 run_id = run["id"]
                 if task_id is not None and task_id != run["task_id"]:
                     raise WorkerError("--run and --task refer to different tasks")

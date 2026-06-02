@@ -7020,6 +7020,34 @@ class CliTests(unittest.TestCase):
             self.assertEqual(second_payload["run"]["id"], second_run_id)
             self.assertEqual(second_payload["run"]["name"], "same-run-name")
 
+    def test_loop_status_rejects_non_ralph_loop_run(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                task_id = worker_db.create_task(conn, name="nonralph-task", goal="Inspect plain run.")
+                worker_db.create_run(
+                    conn,
+                    task_id=task_id,
+                    name="plain-run",
+                    purpose="ordinary",
+                    metadata={"kind": "ordinary"},
+                )
+                conn.commit()
+
+            proc = self.run_workerctl(
+                "loop-status",
+                "nonralph-task",
+                "--run",
+                "plain-run",
+                "--path",
+                str(db_path),
+                "--json",
+            )
+
+            self.assertEqual(proc.returncode, 1)
+            self.assertIn("is not a Ralph loop run", proc.stderr)
+
     def test_loop_status_summarizes_blocked_allowed_and_consumed_flow(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "workerctl.db"
@@ -8727,6 +8755,85 @@ class CliTests(unittest.TestCase):
             )
             self.assertEqual([row["id"] for row in task_view["ingest"]["cycle_errors"]], [other_ingest_cycle])
             self.assertEqual(task_view["open_criteria"]["open_accepted_count"], 1)
+
+    def test_telemetry_failures_resolves_run_name_within_task(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                first_task_id = worker_db.create_task(conn, name="telemetry-first-task", goal="Inspect first run.")
+                second_task_id = worker_db.create_task(conn, name="telemetry-second-task", goal="Inspect second run.")
+                first_run_id = worker_db.create_ralph_loop_run(
+                    conn,
+                    task_id=first_task_id,
+                    name="same-telemetry-run",
+                    max_iterations=3,
+                    current_iteration=1,
+                    cleanup_policy="clear",
+                    required_before_continue=[],
+                    metadata={"template": "test_coverage_loop"},
+                )
+                second_run_id = worker_db.create_ralph_loop_run(
+                    conn,
+                    task_id=second_task_id,
+                    name="same-telemetry-run",
+                    max_iterations=3,
+                    current_iteration=1,
+                    cleanup_policy="clear",
+                    required_before_continue=[],
+                    metadata={"template": "test_coverage_loop"},
+                )
+                second_command_id = worker_db.create_command(
+                    conn,
+                    command_type="continue_iteration",
+                    payload={"loop_policy": {"run_id": second_run_id}},
+                    task_id=second_task_id,
+                    correlation_id="second-run-failure",
+                    timestamp="2026-05-21T10:00:00Z",
+                )
+                worker_db.finish_command(
+                    conn,
+                    command_id=second_command_id,
+                    state="failed",
+                    result={"run_id": second_run_id},
+                    error="second run failed",
+                    timestamp="2026-05-21T10:00:05Z",
+                )
+                conn.commit()
+
+            first = self.run_workerctl(
+                "telemetry",
+                "failures",
+                "--task",
+                "telemetry-first-task",
+                "--run",
+                "same-telemetry-run",
+                "--path",
+                str(db_path),
+                "--json",
+            )
+            second = self.run_workerctl(
+                "telemetry",
+                "failures",
+                "--task",
+                "telemetry-second-task",
+                "--run",
+                "same-telemetry-run",
+                "--path",
+                str(db_path),
+                "--json",
+            )
+
+            self.assertEqual(first.returncode, 0, first.stderr)
+            self.assertEqual(second.returncode, 0, second.stderr)
+            first_payload = json.loads(first.stdout)
+            second_payload = json.loads(second.stdout)
+            self.assertEqual(first_payload["filters"]["task_id"], first_task_id)
+            self.assertEqual(first_payload["filters"]["run_id"], first_run_id)
+            self.assertEqual(first_payload["failed_commands"], [])
+            self.assertEqual(second_payload["filters"]["task_id"], second_task_id)
+            self.assertEqual(second_payload["filters"]["run_id"], second_run_id)
+            self.assertEqual([row["id"] for row in second_payload["failed_commands"]], [second_command_id])
 
     def test_telemetry_failures_view_scopes_by_window_and_active_tasks(self):
         with tempfile.TemporaryDirectory() as tmpdir:
