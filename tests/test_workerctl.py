@@ -7006,6 +7006,137 @@ class CliTests(unittest.TestCase):
             self.assertEqual(after_payload["failures"]["failed_commands"], 0)
             self.assertEqual(after_payload["recommendation"], "ready_for_manager_review")
 
+    def test_loop_status_ignores_failed_commands_from_other_runs(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                task_id = worker_db.create_task(conn, name="loop-status-scope-task", goal="Inspect one run.")
+                target_run_id = worker_db.create_ralph_loop_run(
+                    conn,
+                    task_id=task_id,
+                    name="target-loop-run",
+                    max_iterations=3,
+                    current_iteration=1,
+                    cleanup_policy="clear",
+                    required_before_continue=[],
+                    metadata={"template": "test_coverage_loop"},
+                )
+                other_run_id = worker_db.create_ralph_loop_run(
+                    conn,
+                    task_id=task_id,
+                    name="other-loop-run",
+                    max_iterations=3,
+                    current_iteration=1,
+                    cleanup_policy="clear",
+                    required_before_continue=[],
+                    metadata={"template": "test_coverage_loop"},
+                )
+                target_command_id = worker_db.create_command(
+                    conn,
+                    command_type="continue_iteration",
+                    payload={"loop_policy": {"run_id": target_run_id}},
+                    task_id=task_id,
+                    correlation_id="target-run-command",
+                )
+                worker_db.finish_command(
+                    conn,
+                    command_id=target_command_id,
+                    state="succeeded",
+                    result={"run_id": target_run_id},
+                )
+                other_command_id = worker_db.create_command(
+                    conn,
+                    command_type="continue_iteration",
+                    payload={"loop_policy": {"run_id": other_run_id}},
+                    task_id=task_id,
+                    correlation_id="other-run-command",
+                )
+                worker_db.finish_command(
+                    conn,
+                    command_id=other_command_id,
+                    state="failed",
+                    result={"run_id": other_run_id},
+                    error="other run failed",
+                )
+                conn.commit()
+
+            proc = self.run_workerctl(
+                "loop-status",
+                "loop-status-scope-task",
+                "--run",
+                target_run_id,
+                "--path",
+                str(db_path),
+                "--json",
+            )
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            payload = json.loads(proc.stdout)
+            self.assertEqual(payload["commands"]["states"], {"succeeded": 1})
+            self.assertEqual(payload["failures"]["failed_commands"], 0)
+            self.assertEqual(payload["recommendation"], "ready_for_manager_review")
+
+    def test_loop_status_queries_target_run_telemetry_without_task_limit_loss(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "workerctl.db"
+            with worker_db.connect(db_path) as conn:
+                worker_db.initialize_database(conn)
+                task_id = worker_db.create_task(conn, name="loop-status-telemetry-task", goal="Inspect telemetry.")
+                target_run_id = worker_db.create_ralph_loop_run(
+                    conn,
+                    task_id=task_id,
+                    name="target-telemetry-run",
+                    max_iterations=3,
+                    current_iteration=1,
+                    cleanup_policy="clear",
+                    required_before_continue=[],
+                    metadata={"template": "test_coverage_loop"},
+                )
+                other_run_id = worker_db.create_ralph_loop_run(
+                    conn,
+                    task_id=task_id,
+                    name="other-telemetry-run",
+                    max_iterations=3,
+                    current_iteration=1,
+                    cleanup_policy="clear",
+                    required_before_continue=[],
+                    metadata={"template": "test_coverage_loop"},
+                )
+                for index in range(1005):
+                    worker_db.emit_telemetry_event(
+                        conn,
+                        actor="manager",
+                        event_type="manager_cycle_succeeded",
+                        run_id=other_run_id,
+                        summary=f"Other run event {index}.",
+                        timestamp=f"2026-05-20T11:{index // 60:02d}:{index % 60:02d}Z",
+                    )
+                worker_db.emit_telemetry_event(
+                    conn,
+                    actor="dispatch",
+                    event_type="dispatch_inbox_consumed",
+                    run_id=target_run_id,
+                    summary="Target run inbox consumed.",
+                    timestamp="2026-05-20T12:00:00Z",
+                )
+                conn.commit()
+
+            proc = self.run_workerctl(
+                "loop-status",
+                "loop-status-telemetry-task",
+                "--run",
+                target_run_id,
+                "--path",
+                str(db_path),
+                "--json",
+            )
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            payload = json.loads(proc.stdout)
+            self.assertEqual(payload["telemetry"]["dispatch_inbox_consumed"], 1)
+            self.assertEqual(payload["telemetry"]["by_event_type"], {"dispatch_inbox_consumed": 1})
+
     def test_telemetry_cli_outputs_run_events_and_search_results(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "workerctl.db"

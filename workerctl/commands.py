@@ -4179,19 +4179,34 @@ def _loop_status_summary(conn: Any, *, task: Any, run: dict[str, Any]) -> dict[s
         }
     )
 
-    telemetry_events = [
-        event
-        for event in query_telemetry_events(conn, task_id=task["id"], limit=1000)
-        if event["run_id"] == run["id"]
-    ]
+    telemetry_events = query_telemetry_events(
+        conn,
+        run_id=run["id"],
+        task_id=task["id"],
+        limit=1000,
+    )
     event_types = Counter(event["event_type"] for event in telemetry_events)
 
     failures = telemetry_failures_view(conn, task_id=task["id"], run_id=run["id"])
+    failed_command_count = command_states.get("failed", 0)
+    failed_cycle_count = len(failures["failed_cycles"])
+    pane_capture_failure_count = len(failures["pane_capture_failures"])
+    alert_count = 0
+    if failed_command_count:
+        alert_count += 1
+    if failed_cycle_count:
+        alert_count += 1
+    if pane_capture_failure_count:
+        alert_count += 1
+    if failures["ingest"]["error_count"]:
+        alert_count += 1
+    if failures["open_criteria"]["open_accepted_count"]:
+        alert_count += 1
     failure_counts = {
-        "alerts": len(failures["alerts"]),
-        "failed_commands": len(failures["failed_commands"]),
-        "failed_cycles": len(failures["failed_cycles"]),
-        "pane_capture_failures": len(failures["pane_capture_failures"]),
+        "alerts": alert_count,
+        "failed_commands": failed_command_count,
+        "failed_cycles": failed_cycle_count,
+        "pane_capture_failures": pane_capture_failure_count,
     }
     if failure_counts["alerts"] or failure_counts["failed_commands"] or failure_counts["failed_cycles"]:
         recommendation = "inspect_failures"
