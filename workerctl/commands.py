@@ -3751,7 +3751,7 @@ def _qa_run_build_clear_loop(args: argparse.Namespace) -> dict[str, Any]:
                 "--evidence-type cleanup --artifact-path <cleanup.json>"
             ),
             f"scripts/workerctl dispatch --once --type continue_iteration --dispatcher-id {dispatcher_id} --path {db_path}",
-            "scripts/workerctl worker-inbox <task> --consume-next --wait --json",
+            f"scripts/workerctl worker-inbox <task> --consume-next --wait --path {db_path} --json",
         ],
         "result": "passed",
         "scenario": "build-clear-loop",

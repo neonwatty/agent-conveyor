@@ -10030,6 +10030,7 @@ Deferred follow-up criteria:
             self.assertIn("--evidence-type build_passed", replay_commands)
             self.assertIn("--evidence-type cleanup", replay_commands)
             self.assertIn("worker-inbox", replay_commands)
+            self.assertIn(f"--path {db_path.resolve()}", replay_commands)
 
     def test_qa_run_generic_loop_template_writes_replayable_receipt(self):
         with tempfile.TemporaryDirectory() as tmpdir:
