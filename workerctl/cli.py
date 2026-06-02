@@ -1221,7 +1221,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     commands = subparsers.add_parser("commands", help="List durable side-effect commands from SQLite.")
     commands.add_argument("--task", help="Filter by task name or ID.")
-    commands.add_argument("--state", choices=("pending", "attempted", "succeeded", "failed"), help="Filter by command state.")
+    commands.add_argument("--state", choices=("pending", "attempted", "succeeded", "failed", "blocked"), help="Filter by command state.")
     commands.add_argument("--type", help="Filter by command type.")
     commands.add_argument("--worker", help="Filter by worker ID.")
     commands.add_argument("--manager", help="Filter by manager ID.")

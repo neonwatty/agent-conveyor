@@ -12,7 +12,7 @@ from workerctl.core import now_iso
 from workerctl.state import state_root
 
 
-SCHEMA_VERSION = 21
+SCHEMA_VERSION = 22
 REQUIRED_TABLES = {
     "acceptance_criteria",
     "agent_observations",
@@ -548,7 +548,7 @@ def migrate(conn: sqlite3.Connection, from_version: int) -> None:
           manager_id text references managers(id),
           correlation_id text,
           type text not null,
-          state text not null check (state in ('pending','attempted','succeeded','failed')),
+          state text not null check (state in ('pending','attempted','succeeded','failed','blocked')),
           available_at text,
           claimed_by text,
           claimed_at text,
@@ -568,7 +568,7 @@ def migrate(conn: sqlite3.Connection, from_version: int) -> None:
           dispatcher_id text not null,
           started_at text not null,
           finished_at text,
-          state text not null check (state in ('running','succeeded','failed','abandoned')),
+          state text not null check (state in ('running','succeeded','failed','abandoned','blocked')),
           result_json text check (result_json is null or json_valid(result_json)),
           error text,
           side_effect_started integer not null default 0 check (side_effect_started in (0, 1)),
@@ -774,6 +774,7 @@ def migrate(conn: sqlite3.Connection, from_version: int) -> None:
     migrate_to_v19_dispatch_consumption_and_ack_revisions(conn)
     migrate_to_v20_routed_notification_claims(conn)
     migrate_to_v21_session_inbox(conn)
+    migrate_to_v22_blocked_command_state(conn)
     sync_worker_ids_to_config_files(conn)
     conn.execute(
         "insert or ignore into schema_migrations(version, applied_at) values (?, ?)",
@@ -1266,6 +1267,120 @@ def migrate_to_v21_session_inbox(conn: sqlite3.Connection) -> None:
         on routed_notifications(target_session_id, consumed_at, state, created_at, id)
         """
     )
+
+
+def _table_sql(conn: sqlite3.Connection, table: str) -> str:
+    row = conn.execute(
+        "select sql from sqlite_master where type = 'table' and name = ?",
+        (table,),
+    ).fetchone()
+    return str(row["sql"] or "") if row is not None else ""
+
+
+def migrate_to_v22_blocked_command_state(conn: sqlite3.Connection) -> None:
+    """Allow policy-blocked dispatch commands to be represented distinctly from failures."""
+    commands_sql = _table_sql(conn, "commands")
+    attempts_sql = _table_sql(conn, "command_attempts")
+    if "'blocked'" in commands_sql and "'blocked'" in attempts_sql:
+        return
+
+    conn.commit()
+    conn.execute("PRAGMA foreign_keys = OFF")
+    try:
+        if "'blocked'" not in commands_sql:
+            conn.executescript(
+                """
+                create table commands_v22(
+                  id text primary key,
+                  idempotency_key text unique not null,
+                  created_at text not null,
+                  updated_at text not null,
+                  task_id text references tasks(id),
+                  worker_id text references workers(id),
+                  manager_id text references managers(id),
+                  correlation_id text,
+                  type text not null,
+                  state text not null check (state in ('pending','attempted','succeeded','failed','blocked')),
+                  available_at text,
+                  claimed_by text,
+                  claimed_at text,
+                  claim_expires_at text,
+                  attempts integer not null default 0 check (attempts >= 0),
+                  max_attempts integer not null default 1 check (max_attempts > 0),
+                  required_permission text,
+                  payload_json text not null check (json_valid(payload_json)),
+                  result_json text check (result_json is null or json_valid(result_json)),
+                  error text
+                );
+
+                insert into commands_v22(
+                  id, idempotency_key, created_at, updated_at, task_id, worker_id,
+                  manager_id, correlation_id, type, state, available_at, claimed_by,
+                  claimed_at, claim_expires_at, attempts, max_attempts,
+                  required_permission, payload_json, result_json, error
+                )
+                select id, idempotency_key, created_at, updated_at, task_id, worker_id,
+                       manager_id, correlation_id, type, state, available_at, claimed_by,
+                       claimed_at, claim_expires_at, attempts, max_attempts,
+                       required_permission, payload_json, result_json, error
+                from commands;
+
+                drop table commands;
+                alter table commands_v22 rename to commands;
+                """
+            )
+        if "'blocked'" not in attempts_sql:
+            conn.executescript(
+                """
+                create table command_attempts_v22(
+                  id integer primary key autoincrement,
+                  command_id text not null references commands(id),
+                  correlation_id text not null,
+                  dispatcher_id text not null,
+                  started_at text not null,
+                  finished_at text,
+                  state text not null check (state in ('running','succeeded','failed','abandoned','blocked')),
+                  result_json text check (result_json is null or json_valid(result_json)),
+                  error text,
+                  side_effect_started integer not null default 0 check (side_effect_started in (0, 1)),
+                  side_effect_completed integer not null default 0 check (side_effect_completed in (0, 1))
+                );
+
+                insert into command_attempts_v22(
+                  id, command_id, correlation_id, dispatcher_id, started_at,
+                  finished_at, state, result_json, error, side_effect_started,
+                  side_effect_completed
+                )
+                select id, command_id, correlation_id, dispatcher_id, started_at,
+                       finished_at, state, result_json, error, side_effect_started,
+                       side_effect_completed
+                from command_attempts;
+
+                drop table command_attempts;
+                alter table command_attempts_v22 rename to command_attempts;
+                """
+            )
+        conn.executescript(
+            """
+            create index if not exists commands_task_state_created
+            on commands(task_id, state, created_at);
+
+            create index if not exists commands_claimable
+            on commands(state, type, available_at, created_at, id);
+
+            create index if not exists command_attempts_command_id
+            on command_attempts(command_id, id);
+
+            create index if not exists command_attempts_correlation_id
+            on command_attempts(correlation_id);
+            """
+        )
+        conn.commit()
+    finally:
+        conn.execute("PRAGMA foreign_keys = ON")
+        foreign_keys = conn.execute("PRAGMA foreign_keys").fetchone()[0]
+        if foreign_keys != 1:
+            raise RuntimeError("SQLite foreign key enforcement is not enabled after migration v22")
 
 
 def sync_worker_ids_to_config_files(conn: sqlite3.Connection) -> None:
@@ -1977,7 +2092,7 @@ def finish_command_attempt(
     side_effect_completed: bool = False,
     timestamp: str | None = None,
 ) -> dict[str, Any]:
-    if state not in {"succeeded", "failed", "abandoned"}:
+    if state not in {"succeeded", "failed", "abandoned", "blocked"}:
         raise ValueError(f"invalid command attempt finish state: {state}")
     now = timestamp or now_iso()
     cursor = conn.execute(
@@ -2026,7 +2141,7 @@ def finish_command_attempt(
     ).fetchone()
     if attempt is None:
         raise WorkerError(f"Unknown command attempt: {attempt_id}")
-    command_state = "succeeded" if state == "succeeded" else "failed"
+    command_state = "succeeded" if state == "succeeded" else "blocked" if state == "blocked" else "failed"
     conn.execute(
         """
         update commands
@@ -2045,21 +2160,35 @@ def finish_command_attempt(
         "succeeded": "dispatch_command_succeeded",
         "failed": "dispatch_command_failed",
         "abandoned": "dispatch_command_abandoned",
+        "blocked": "dispatch_command_blocked",
     }[state]
+    severity = {
+        "abandoned": "warning",
+        "blocked": "warning",
+        "failed": "error",
+        "succeeded": "info",
+    }[state]
+    telemetry_correlation = {
+        "attempt_id": attempt_id,
+        "command_id": attempt["command_id"],
+        "command_type": attempt["command_type"],
+        "correlation_id": attempt["correlation_id"],
+        "dispatcher_id": attempt["dispatcher_id"],
+    }
+    if isinstance(result, dict):
+        if result.get("run_id") is not None:
+            telemetry_correlation["run_id"] = result.get("run_id")
+        if result.get("manager_decision_id") is not None:
+            telemetry_correlation["manager_decision_id"] = result.get("manager_decision_id")
+
     emit_telemetry_event(
         conn,
         actor="dispatch",
         event_type=event_type,
-        severity="error" if state == "failed" else "warning" if state == "abandoned" else "info",
+        severity=severity,
         task_id=attempt["task_id"],
         summary=f"Dispatch command {attempt['command_type']} {state}.",
-        correlation={
-            "attempt_id": attempt_id,
-            "command_id": attempt["command_id"],
-            "command_type": attempt["command_type"],
-            "correlation_id": attempt["correlation_id"],
-            "dispatcher_id": attempt["dispatcher_id"],
-        },
+        correlation=telemetry_correlation,
         attributes={
             "error": error,
             "manager_id": attempt["manager_id"],
