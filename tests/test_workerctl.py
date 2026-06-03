@@ -13813,6 +13813,8 @@ Deferred follow-up criteria:
             self.assertTrue(os.access(review_helper, os.X_OK))
             self.assertIn("One-Prompt Codex App Ralph Loop", manage_skill.read_text())
             self.assertIn("Set up a Codex app Ralph loop", manage_skill.read_text())
+            self.assertIn("conveyor create-disposable-binding", manage_skill.read_text())
+            self.assertNotIn("scripts/workerctl", manage_skill.read_text())
             self.assertEqual(
                 [skill["name"] for skill in payload["skills"]],
                 ["manage-codex-workers", "codex-review"],
@@ -21098,7 +21100,6 @@ class ManagerBootstrapPromptTests(unittest.TestCase):
             self.assertIn("manager_context.acceptance_criteria", document)
             self.assertIn("manager_context.criteria_negotiation", document)
             self.assertIn('"criteria_negotiation"', document)
-            self.assertIn("criterion_id=$(scripts/workerctl criteria", document)
             self.assertIn('["affected_criterion"]["id"]', document)
             self.assertIn('--satisfy "$criterion_id"', document)
             self.assertNotIn('["criteria"][0]["id"]', document)
@@ -21107,6 +21108,8 @@ class ManagerBootstrapPromptTests(unittest.TestCase):
             self.assertIn('"satisfied": [...]', document)
             self.assertIn('"deferred": [...]', document)
             self.assertIn('"rejected": [...]', document)
+        self.assertIn("criterion_id=$(scripts/workerctl criteria", readme)
+        self.assertIn("criterion_id=$(conveyor criteria", skill)
 
     def test_docs_include_adversarial_burden_of_proof_guidance(self):
         documents = [
@@ -21148,9 +21151,11 @@ class ManagerBootstrapPromptTests(unittest.TestCase):
 
         self.assertIn("One-Prompt Codex App Ralph Loop", skill)
         self.assertIn("Set up a Codex app Ralph loop", skill)
-        self.assertIn("create-disposable-binding", skill)
-        self.assertIn("worker-inbox", skill)
-        self.assertIn("loop-status", skill)
+        self.assertIn("conveyor create-disposable-binding", skill)
+        self.assertIn("conveyor worker-inbox", skill)
+        self.assertIn("conveyor loop-status", skill)
+        self.assertIn("legacy `workerctl` command remains a compatibility alias", skill)
+        self.assertNotIn("scripts/workerctl", skill)
 
     def test_docs_include_local_telemetry_workflow(self):
         readme = (ROOT / "README.md").read_text()
