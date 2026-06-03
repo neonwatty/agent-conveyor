@@ -107,6 +107,20 @@ available in the current shell.
 `workerctl db-doctor` initializes and checks the SQLite control-plane
 database.
 
+After install, the intended Codex app entry point is natural language. Open a
+new Codex app session in the repo and say:
+
+```text
+Use the manage-codex-workers skill.
+
+Set up a Codex app Ralph loop for issue CTL.
+Require adversarial proof before another worker iteration.
+```
+
+The installed skill should choose names, create the no-tmux binding with
+`create-disposable-binding`, point the worker at `worker-inbox`, and use
+`loop-status` plus telemetry receipts before reporting that the loop is ready.
+
 Dispatch is core infrastructure for supervised worker/manager pairs. The
 `pair` workflow starts a detached Dispatch watch process by default so worker
 completion is routed to the bound manager mechanically. For manually bound

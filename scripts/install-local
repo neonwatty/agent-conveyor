@@ -97,6 +97,10 @@ if [[ "$write" == false ]]; then
   echo "  workerctl dispatch --watch --dispatcher-id dispatch-local"
   echo "  workerctl qa-plan dispatch-completion"
   echo
+  echo "Codex app quick start prompt:"
+  echo "  Use the manage-codex-workers skill."
+  echo "  Set up a Codex app Ralph loop for issue CTL."
+  echo
   echo "To install for zsh:"
   echo "  scripts/install-local --write"
   echo
@@ -142,6 +146,9 @@ echo "workerctl is available after opening a new shell, or immediately with:"
 echo "  $PATH_LINE"
 if [[ "$INSTALL_SKILL" == true ]]; then
   echo "Plain Codex sessions can use the installed manage-codex-workers and codex-review skills after starting a new session."
+  echo "In a new Codex app session, start with:"
+  echo "  Use the manage-codex-workers skill."
+  echo "  Set up a Codex app Ralph loop for issue CTL."
 fi
 echo "Start Dispatch when supervising a pair so worker completion wakes the manager:"
 echo "  workerctl dispatch --watch --dispatcher-id dispatch-local"

@@ -1,6 +1,6 @@
 ---
 name: manage-codex-workers
-description: Supervise a tmux-backed Codex worker session from a manager Codex session using the codex-terminal-manager workerctl tool. Use when the user asks to register an existing Codex session as a worker or manager, create a supervised task, bind the pair, run observation cycles, send nudges, interrupt busy-waits, finish a task, or audit/replay supervision history.
+description: Supervise Codex worker and manager sessions using the codex-terminal-manager workerctl tool. Use when the user asks to set up a Codex app Ralph loop, register an existing Codex session as a worker or manager, create a supervised task, bind a pair, run observation cycles, send nudges, interrupt busy-waits, finish a task, or audit/replay supervision history.
 ---
 
 # Manage Codex Workers
@@ -10,14 +10,60 @@ the user specifies another checkout. Prefer the repo script path
 (`scripts/workerctl ...`); after `scripts/install-local --write` the plain
 `workerctl` command works too.
 
+## One-Prompt Codex App Ralph Loop
+
+This is the preferred entry point when the user has installed this repo and
+wants to use another Codex app session without learning the low-level command
+sequence.
+
+User prompt:
+
+```text
+Use the manage-codex-workers skill.
+
+Set up a Codex app Ralph loop for issue CTL.
+Worker session: <worker-name or choose one>
+Manager session: <manager-name or choose one>
+Template: <template name, or choose the best one>
+Max iterations: <number, default 3>
+Require adversarial proof before another worker iteration.
+```
+
+Skill behavior:
+
+1. Work from `/Users/neonwatty/Desktop/codex-terminal-manager`.
+2. Run `scripts/workerctl doctor` and `scripts/workerctl db-doctor`; fix or
+   report blockers.
+3. Choose concise task, worker, manager, and run names when the user does not
+   provide them. Do not ask the user to invent generated names.
+4. Create the no-tmux binding with `scripts/workerctl create-disposable-binding`
+   using `--template` when a template is known, `--adversarial`, a bounded
+   `--max-iterations`, and `--json`.
+5. Ensure Dispatch is running or tell the user the single command to start it:
+   `workerctl dispatch --watch --dispatcher-id dispatch-local`.
+6. Tell the worker Codex app session to poll with
+   `workerctl worker-inbox <task> --consume-next --wait --timeout 60 --json`.
+7. After each worker pass, require concrete evidence and structured
+   `loop-evidence adversarial-check` proof before queueing another
+   `enqueue-continue-iteration`.
+8. Use `workerctl loop-status <task> --run <run> --json` and telemetry/audit
+   receipts before declaring the loop ready for manager review.
+
+Reference docs:
+
+- `README.md` command reference
+- `docs/qa/ralph-loop-operator-guide.md`
+- `docs/agent-evidence-playbook.md`
+
 ## Supervision Model
 
 Supervision is built on three primitives: **sessions**, **tasks**, and
 **bindings**.
 
-- A **worker session** is a Codex session running inside a named tmux session.
-  Its rollout JSONL on disk (`~/.codex/sessions/.../rollout-*.jsonl`) is the
-  source of truth for ingest.
+- A **worker session** is a Codex session registered with workerctl. It may be a
+  tmux-backed session or a Codex app/no-tmux session. Its rollout JSONL on disk
+  (`~/.codex/sessions/.../rollout-*.jsonl`, or a disposable rollout file) is
+  the source of truth for ingest.
 - A **manager session** is a Codex session that can run anywhere — Ghostty,
   iTerm2, Terminal.app, a web terminal. The manager does not need tmux. Its
   job is to call `workerctl` commands, read their JSON output, and decide what

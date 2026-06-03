@@ -13770,6 +13770,8 @@ Deferred follow-up criteria:
         self.assertIn("codex-review", proc.stdout)
         self.assertIn("workerctl dispatch --watch --dispatcher-id dispatch-local", proc.stdout)
         self.assertIn("workerctl qa-plan dispatch-completion", proc.stdout)
+        self.assertIn("Use the manage-codex-workers skill.", proc.stdout)
+        self.assertIn("Set up a Codex app Ralph loop", proc.stdout)
 
     def test_install_local_write_is_idempotent(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -13801,12 +13803,16 @@ Deferred follow-up criteria:
             self.assertTrue(review_skill_path.exists())
             self.assertTrue(review_helper_path.exists())
             self.assertTrue(os.access(review_helper_path, os.X_OK))
+            self.assertIn("One-Prompt Codex App Ralph Loop", manage_skill_path.read_text())
+            self.assertIn("Set up a Codex app Ralph loop", manage_skill_path.read_text())
             self.assertEqual(
                 review_helper_path.read_text(),
                 CODEX_REVIEW_HELPER_PATH.read_text(),
             )
             self.assertIn("workerctl dispatch --watch --dispatcher-id dispatch-local", proc.stdout)
             self.assertIn("workerctl qa-plan dispatch-completion", proc.stdout)
+            self.assertIn("Use the manage-codex-workers skill.", proc.stdout)
+            self.assertIn("Set up a Codex app Ralph loop", proc.stdout)
 
     def test_install_local_replaces_stale_codex_review_skill(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -21072,6 +21078,15 @@ class ManagerBootstrapPromptTests(unittest.TestCase):
         self.assertIn("older completion signals", readme)
         self.assertIn("scripts/workerctl sessions --name", checklist)
         self.assertIn("identity_token", checklist)
+
+    def test_skill_documents_simple_codex_app_ralph_loop_entrypoint(self):
+        skill = (ROOT / "skills" / "manage-codex-workers" / "SKILL.md").read_text()
+
+        self.assertIn("One-Prompt Codex App Ralph Loop", skill)
+        self.assertIn("Set up a Codex app Ralph loop", skill)
+        self.assertIn("create-disposable-binding", skill)
+        self.assertIn("worker-inbox", skill)
+        self.assertIn("loop-status", skill)
 
     def test_docs_include_local_telemetry_workflow(self):
         readme = (ROOT / "README.md").read_text()
