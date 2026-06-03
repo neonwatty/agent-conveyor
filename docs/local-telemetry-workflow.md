@@ -1,15 +1,15 @@
 # Local Telemetry Workflow
 
-This workflow is local-only. It uses the SQLite database behind `workerctl`; it does not send telemetry to a service.
+This workflow is local-only. It uses Agent Conveyor's SQLite database; it does not send telemetry to a service.
 
 ## Inspect A Run
 
-Use the run id from `workerctl runs --list`, `workerctl runs --show`, or the `workerctl pair` output.
+Use the run id from `conveyor runs --list`, `conveyor runs --show`, or the `conveyor pair` output.
 
 ```bash
-scripts/workerctl telemetry --summary --run <run_id>
-scripts/workerctl telemetry --run <run_id>
-scripts/workerctl telemetry --search manager --run <run_id>
+conveyor telemetry --summary --run <run_id>
+conveyor telemetry --run <run_id>
+conveyor telemetry --search manager --run <run_id>
 ```
 
 ## Inspect A Task For Dashboard Supervision
@@ -17,7 +17,7 @@ scripts/workerctl telemetry --search manager --run <run_id>
 Use the task-scoped snapshot when you need the same aggregate state the local dashboard cockpit consumes:
 
 ```bash
-scripts/workerctl telemetry snapshot --task <task> --json
+conveyor telemetry snapshot --task <task> --json
 ```
 
 The snapshot includes task, binding, worker/manager session, active run, latest cycle, acceptance criteria, recent telemetry, recent command receipts, diagnostics, and alert summaries. It does not include raw transcript content.
@@ -27,23 +27,23 @@ The snapshot includes task, binding, worker/manager session, active run, latest 
 The dashboard is a loopback-only supervision cockpit for a single task:
 
 ```bash
-scripts/workerctl dashboard --task <task>
+conveyor dashboard --task <task>
 ```
 
 For repeatable QA or scripted checks, inspect the launch command without starting the server:
 
 ```bash
-scripts/workerctl dashboard --task <task> --dry-run --json
+conveyor dashboard --task <task> --dry-run --json
 ```
 
-The TypeScript backend shells out to `workerctl` JSON commands for task state and attaches interactive terminal panes to registered tmux sessions with a WebSocket PTY bridge. The cockpit can create a task, start a worker/manager pair through `workerctl pair`, auto-attach both terminals, bind existing sessions, and show action receipts for cycle, nudge, interrupt, finish, and export, without returning raw transcript content in diagnostics JSON by default.
+The TypeScript backend shells out to `conveyor` JSON commands for task state and attaches interactive terminal panes to registered tmux sessions with a WebSocket PTY bridge. The cockpit can create a task, start a worker/manager pair through `conveyor pair`, auto-attach both terminals, bind existing sessions, and show action receipts for cycle, nudge, interrupt, finish, and export, without returning raw transcript content in diagnostics JSON by default.
 
 Use `--json` when saving durable evidence:
 
 ```bash
-scripts/workerctl telemetry --summary --run <run_id> --json > telemetry-summary.json
-scripts/workerctl telemetry --run <run_id> --json > telemetry-events.json
-scripts/workerctl telemetry --search manager --run <run_id> --json > telemetry-manager-search.json
+conveyor telemetry --summary --run <run_id> --json > telemetry-summary.json
+conveyor telemetry --run <run_id> --json > telemetry-events.json
+conveyor telemetry --search manager --run <run_id> --json > telemetry-manager-search.json
 ```
 
 ## Export Evidence
@@ -51,7 +51,7 @@ scripts/workerctl telemetry --search manager --run <run_id> --json > telemetry-m
 The task export includes telemetry artifacts by default:
 
 ```bash
-scripts/workerctl export-task <task> --zip --include-transcripts
+conveyor export-task <task> --zip --include-transcripts
 ```
 
 The export bundle writes:
@@ -67,12 +67,12 @@ Keep `replay.json`, `mutation-audit.json`, `manager-decisions.json`, and the tel
 For a manager/worker drill, capture these command outputs under the drill artifact directory:
 
 ```bash
-scripts/workerctl telemetry --summary --run <run_id>
-scripts/workerctl telemetry --run <run_id>
-scripts/workerctl telemetry --search manager --run <run_id>
-scripts/workerctl export-task <task> --zip --include-transcripts
-scripts/workerctl sessions --state active
-scripts/workerctl reconcile --stale-cycles-seconds 1
+conveyor telemetry --summary --run <run_id>
+conveyor telemetry --run <run_id>
+conveyor telemetry --search manager --run <run_id>
+conveyor export-task <task> --zip --include-transcripts
+conveyor sessions --state active
+conveyor reconcile --stale-cycles-seconds 1
 ```
 
 The drill is not complete until telemetry can reconstruct the run identity, manager cycles, decisions, commands, captures, handoffs, criteria changes, task finish, run finish, and any errors without reading raw Codex logs.

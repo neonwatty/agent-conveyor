@@ -13,7 +13,7 @@ usage() {
   cat <<EOF
 Usage: scripts/install-local [--write] [--profile PATH] [--codex-home PATH] [--no-skill]
 
-Print or install the local workerctl PATH setup and Codex skills.
+Print or install the local Agent Conveyor PATH setup and Codex skills.
 
 Options:
   --write           Append the PATH line and install Codex skills.
@@ -64,8 +64,13 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+if [[ ! -x "$BIN_DIR/conveyor" ]]; then
+  echo "install-local: expected executable not found: $BIN_DIR/conveyor" >&2
+  exit 1
+fi
+
 if [[ ! -x "$BIN_DIR/workerctl" ]]; then
-  echo "install-local: expected executable not found: $BIN_DIR/workerctl" >&2
+  echo "install-local: expected compatibility executable not found: $BIN_DIR/workerctl" >&2
   exit 1
 fi
 
@@ -94,8 +99,8 @@ if [[ "$write" == false ]]; then
     echo
   fi
   echo "Dispatch setup:"
-  echo "  workerctl dispatch --watch --dispatcher-id dispatch-local"
-  echo "  workerctl qa-plan dispatch-completion"
+  echo "  conveyor dispatch --watch --dispatcher-id dispatch-local"
+  echo "  conveyor qa-plan dispatch-completion"
   echo
   echo "Codex app quick start prompt:"
   echo "  Use the manage-codex-workers skill."
@@ -113,18 +118,18 @@ mkdir -p "$(dirname "$PROFILE")"
 touch "$PROFILE"
 
 if grep -Fqx "$PATH_LINE" "$PROFILE"; then
-  echo "workerctl PATH already installed in $PROFILE"
+  echo "Agent Conveyor PATH already installed in $PROFILE"
 else
   {
     echo
     echo "# codex-terminal-manager"
     echo "$PATH_LINE"
   } >> "$PROFILE"
-  echo "installed workerctl PATH in $PROFILE"
+  echo "installed Agent Conveyor PATH in $PROFILE"
 fi
 
-PATH="$BIN_DIR:$PATH" workerctl classify --text "workerctl install check" >/dev/null || {
-  echo "install-local: workerctl verification failed after PATH update" >&2
+PATH="$BIN_DIR:$PATH" conveyor classify --text "conveyor install check" >/dev/null || {
+  echo "install-local: conveyor verification failed after PATH update" >&2
   exit 1
 }
 
@@ -142,7 +147,7 @@ if [[ "$INSTALL_SKILL" == true ]]; then
   done
 fi
 
-echo "workerctl is available after opening a new shell, or immediately with:"
+echo "conveyor is available after opening a new shell, or immediately with:"
 echo "  $PATH_LINE"
 if [[ "$INSTALL_SKILL" == true ]]; then
   echo "Plain Codex sessions can use the installed manage-codex-workers and codex-review skills after starting a new session."
@@ -151,6 +156,6 @@ if [[ "$INSTALL_SKILL" == true ]]; then
   echo "  Set up a Codex app Ralph loop for issue CTL."
 fi
 echo "Start Dispatch when supervising a pair so worker completion wakes the manager:"
-echo "  workerctl dispatch --watch --dispatcher-id dispatch-local"
+echo "  conveyor dispatch --watch --dispatcher-id dispatch-local"
 echo "For a bounded verification flow:"
-echo "  workerctl qa-plan dispatch-completion"
+echo "  conveyor qa-plan dispatch-completion"

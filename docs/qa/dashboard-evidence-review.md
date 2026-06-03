@@ -9,7 +9,7 @@ Shared protocol: [shared-codex-chrome-protocol.md](shared-codex-chrome-protocol.
 - `LAB_SCENARIO=dashboard-evidence-review`
 - Lab repo: `/Users/neonwatty/Desktop/workerctl-dispatch-lab`
 - Expected worker focus: summarize dashboard evidence for realistic
-  `workerctl audit`-shaped fixtures, including worker completion, manager
+  `conveyor audit`-shaped fixtures, including worker completion, manager
   consumption, criteria state, relationship recovery, and finish ordering.
 
 ## Start
@@ -58,8 +58,8 @@ Run cycles until completion:
 Then audit:
 
 ```bash
-/Users/neonwatty/Desktop/codex-terminal-manager/scripts/workerctl audit "$TASK" --json
-/Users/neonwatty/Desktop/codex-terminal-manager/scripts/workerctl telemetry --actor dispatch --event-type dispatch_watch_heartbeat --newest --limit 1 --json
+conveyor audit "$TASK" --json
+conveyor telemetry --actor dispatch --event-type dispatch_watch_heartbeat --newest --limit 1 --json
 ```
 
 Required audit evidence:

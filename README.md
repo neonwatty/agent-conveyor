@@ -43,10 +43,10 @@ Supervision is built on three primitives: **sessions**, **tasks**, and
 
 - **Worker session.** A Codex session running inside a named `tmux` session.
   Workers own a rollout JSONL on disk (`~/.codex/sessions/.../rollout-*.jsonl`)
-  which `workerctl` ingests for state inference.
+  which Agent Conveyor ingests for state inference.
 - **Manager session.** A Codex session running anywhere — Ghostty, iTerm2,
   Terminal.app, or a web terminal. The manager does not need to run inside
-  tmux. Its job is to call `workerctl` commands, read their JSON output, and
+  tmux. Its job is to call `conveyor` commands, read their JSON output, and
   decide whether to nudge, interrupt, finish, or wait.
 - **Task.** A unit of supervised work. A task has a goal and optional
   summary/manager instructions.
@@ -54,7 +54,7 @@ Supervision is built on three primitives: **sessions**, **tasks**, and
   one task. Bindings are explicit and durable.
 
 The manager Codex drives the supervision loop by calling
-`workerctl cycle <task>` repeatedly. Each cycle ingests new events from the
+`conveyor cycle <task>` repeatedly. Each cycle ingests new events from the
 worker's rollout, captures the worker's tmux pane as a shadow signal, and
 returns structured JSON. The manager reads that JSON and decides what to do.
 
@@ -65,7 +65,7 @@ viewers, but they should not be the source of truth for orchestration.
 manager terminal
   Codex manager session
     |
-    | runs workerctl commands (cycle, session-nudge, ...)
+    | runs conveyor commands (cycle, session-nudge, ...)
     v
 tmux session: codex-worker-a
   pane 1: Codex worker session
@@ -134,21 +134,21 @@ completion is routed to the bound manager mechanically. For manually bound
 pairs, run Dispatch in a separate shell:
 
 ```bash
-workerctl dispatch --watch --dispatcher-id dispatch-local
+conveyor dispatch --watch --dispatcher-id dispatch-local
 ```
 
-Use `workerctl qa-plan dispatch-completion` for a bounded verification flow, or
-`workerctl qa-plan ralph-loop` for the repeated PR/CI/merge/context-clear
+Use `conveyor qa-plan dispatch-completion` for a bounded verification flow, or
+`conveyor qa-plan ralph-loop` for the repeated PR/CI/merge/context-clear
 dogfood loop.
-Use `workerctl qa-plan adversarial-triggers` to verify natural-language
+Use `conveyor qa-plan adversarial-triggers` to verify natural-language
 manager prompts activate Ralph-loop adversarial gates.
-Use `workerctl qa-plan goalbuddy-conveyor` when a broad request should become
+Use `conveyor qa-plan goalbuddy-conveyor` when a broad request should become
 sequential GoalBuddy child boards with PR/CI/merge receipts.
 For manual QA, launch the dashboard with Dispatch enforcement so the page can
 show live proof:
 
 ```bash
-workerctl dashboard --task <task> --ensure-dispatch --dispatcher-id qa-dispatch-dashboard
+conveyor dashboard --task <task> --ensure-dispatch --dispatcher-id qa-dispatch-dashboard
 ```
 
 ## Quickstart
@@ -157,30 +157,30 @@ The fastest way to start a worker and register it is a single command:
 
 ```bash
 # One command: spawn codex in tmux, wait for it to come up, register as worker
-workerctl start-worker --name foo --cwd "$PWD" --task "Refactor auth"
+conveyor start-worker --name foo --cwd "$PWD" --task "Refactor auth"
 
 # Register a manager. Managers do not need to run inside tmux.
 MGR_PID=$$   # if your current shell is the manager; otherwise find its pid
-workerctl register-manager --name foo-mgr --pid $MGR_PID --cwd "$PWD"
+conveyor register-manager --name foo-mgr --pid $MGR_PID --cwd "$PWD"
 
 # Create a task and bind the pair to it.
-workerctl tasks --create my-task --goal "Refactor auth"
-workerctl bind --task my-task --worker foo --manager foo-mgr
+conveyor tasks --create my-task --goal "Refactor auth"
+conveyor bind --task my-task --worker foo --manager foo-mgr
 
 # Start Dispatch in another shell so worker completion wakes the manager.
-workerctl dispatch --watch --dispatcher-id dispatch-local
+conveyor dispatch --watch --dispatcher-id dispatch-local
 
 # One observation cycle. Returns JSON.
-workerctl cycle my-task
+conveyor cycle my-task
 
 # Optionally nudge the worker through its tmux pane.
-workerctl session-nudge foo "What's your current state?"
+conveyor session-nudge foo "What's your current state?"
 
 # When the task is complete:
-workerctl finish-task my-task --reason "auth refactor merged" --capture-transcript-before-stop --stop-manager --stop-worker
-workerctl unbind --task my-task
-workerctl deregister foo
-workerctl deregister foo-mgr
+conveyor finish-task my-task --reason "auth refactor merged" --capture-transcript-before-stop --stop-manager --stop-worker
+conveyor unbind --task my-task
+conveyor deregister foo
+conveyor deregister foo-mgr
 ```
 
 For manual registration of a pre-existing Codex session:
@@ -193,7 +193,7 @@ tmux send-keys -t codex-foo "codex" Enter
 WORKER_PID=$(pgrep -f "codex.*--sandbox" | head -1)
 
 # Register the worker. lsof auto-discovers the rollout JSONL from the pid.
-workerctl register-worker --name foo --pid $WORKER_PID \
+conveyor register-worker --name foo --pid $WORKER_PID \
   --cwd "$PWD" --tmux-session codex-foo
 ```
 
@@ -205,26 +205,26 @@ To register a manager session that's already running:
 
 ```bash
 # If the codex is already running and you know its pid:
-workerctl register-manager --name my-mgr --pid 28975
+conveyor register-manager --name my-mgr --pid 28975
 
 # register-manager runs `lsof -p <pid>` to find the rollout JSONL.
 # If the codex hasn't written its rollout yet (no input typed),
 # you'll get a hint asking you to type something in the codex prompt and retry.
 
 # Or pass --codex-session explicitly to bypass the lsof probe:
-workerctl register-manager --name my-mgr --pid 28975 \
+conveyor register-manager --name my-mgr --pid 28975 \
     --codex-session /path/to/rollout.jsonl
 ```
 
 Note: `lsof` is the canonical pid→rollout lookup. `find -newermt` is unreliable because
 filesystem mtime resolution and parsing of "X minutes ago" varies — `lsof` reads the open fd directly.
 
-For low-risk verification without a real task, `workerctl start-test
+For low-risk verification without a real task, `conveyor start-test
 <name>` creates a worker, asks it to update only its ignored
 `status.json`, and leaves the tmux session attached:
 
 ```bash
-workerctl start-test live-test --cwd "$PWD" --accept-trust --open
+conveyor start-test live-test --cwd "$PWD" --accept-trust --open
 tmux attach -t codex-live-test
 ```
 
@@ -269,7 +269,7 @@ tmux attach -t codex-live-test
   starts the requested dispatcher so audit receipts keep the configured
   identity.
   If the manager or bind fails after the worker is spawned, the worker remains
-  registered and can be cleaned up with `workerctl deregister`.
+  registered and can be cleaned up with `conveyor deregister`.
   Use `--accept-trust` only for directories you intentionally trust; it retries
   Enter during startup discovery so fresh workspaces do not stall before
   registration.
@@ -283,11 +283,11 @@ tmux attach -t codex-live-test
   [--name N ...] [--redact-identity-token]` — List registered sessions.
   By default, `sessions` shows active registered sessions and hides Phase 1 backfill rows (legacy pre-redesign workers/managers, identified by `pid IS NULL`) plus rows marked `state='gone'`. Pass `--state all` to show every row, or `--state gone` to inspect only gone rows:
   ```bash
-  workerctl sessions                    # active registered sessions only
-  workerctl sessions --state active     # explicit equivalent of the default
-  workerctl sessions --state gone       # gone sessions only
-  workerctl sessions --state all        # active, gone, and legacy rows
-  workerctl sessions --name <session> --redact-identity-token
+  conveyor sessions                    # active registered sessions only
+  conveyor sessions --state active     # explicit equivalent of the default
+  conveyor sessions --state gone       # gone sessions only
+  conveyor sessions --state all        # active, gone, and legacy rows
+  conveyor sessions --name <session> --redact-identity-token
   ```
   For shareable QA evidence, prefer repeating `--name` for just the sessions in
   scope and include `--redact-identity-token`; unfiltered output can include
@@ -306,11 +306,11 @@ tmux attach -t codex-live-test
   present likely worker/manager/task connection options instead of asking the
   user for generated names:
   ```bash
-  workerctl discover dashboard
-  workerctl search "auth refactor"
+  conveyor discover dashboard
+  conveyor search "auth refactor"
   ```
   The output includes `tasks`, `sessions`, `bindings`, `telemetry`, and
-  `suggestions`; suggestions may include a ready-to-run `workerctl bind`
+  `suggestions`; suggestions may include a ready-to-run `conveyor bind`
   command or next-step prompts to register the missing worker or manager.
 - `handoff <task> --summary S [--next-step N ...] [--payload-json JSON]` —
   Persist a compact worker handoff for the task. Use this when a worker is
@@ -328,7 +328,7 @@ tmux attach -t codex-live-test
   Use `--questions` from a manager Codex session to get a stable JSON question
   schema to ask the user in chat, then save the answers with noninteractive
   flags. Use `--interactive` only as a terminal fallback when a human is
-  running `workerctl` directly.
+  running `conveyor` directly.
   `--permit` grants taxonomy permissions such as `repo.open_pr`,
   `verification.run_pytest`, `context.spawn_reviewer`,
   `communication.notify_operator`, or `worker_session.compact`. Use `--tool`
@@ -345,14 +345,14 @@ tmux attach -t codex-live-test
   items, defer follow-ups, and mark criteria satisfied only when worker
   receipts and verification cover them.
   ```bash
-  scripts/workerctl criteria my-task --list
-  scripts/workerctl criteria my-task --list --status accepted
-  scripts/workerctl criteria my-task --add --criterion "..." --source worker_proposed --status proposed
-  scripts/workerctl criteria my-task --add --criterion "..." --source manager_inferred --status accepted
-  scripts/workerctl criteria my-task --accept 12 --rationale "Must-have for this task"
-  scripts/workerctl criteria my-task --satisfy <id> --evidence-json '{"command":"...","status":"pass"}'
-  scripts/workerctl criteria my-task --defer 13 --rationale "Follow-up after this task"
-  scripts/workerctl criteria my-task --reject 14 --rationale "Duplicate or out of scope"
+  conveyor criteria my-task --list
+  conveyor criteria my-task --list --status accepted
+  conveyor criteria my-task --add --criterion "..." --source worker_proposed --status proposed
+  conveyor criteria my-task --add --criterion "..." --source manager_inferred --status accepted
+  conveyor criteria my-task --accept 12 --rationale "Must-have for this task"
+  conveyor criteria my-task --satisfy <id> --evidence-json '{"command":"...","status":"pass"}'
+  conveyor criteria my-task --defer 13 --rationale "Follow-up after this task"
+  conveyor criteria my-task --reject 14 --rationale "Duplicate or out of scope"
   ```
   Replace placeholder `...` values with the actual criterion and verification
   command. Use `worker_proposed` for criteria proposed by the worker. Use
@@ -360,8 +360,8 @@ tmux attach -t codex-live-test
   or manager inspection; `manager_config` is not a valid criteria source.
   To add a criterion and satisfy that same row after verification:
   ```bash
-  criterion_id=$(scripts/workerctl criteria my-task --add --criterion "Targeted prompt tests pass" --source worker_proposed --status proposed | python3 -c 'import json,sys; print(json.load(sys.stdin)["affected_criterion"]["id"])')
-  scripts/workerctl criteria my-task --satisfy "$criterion_id" --evidence-json '{"command":"python3 -m unittest tests.test_workerctl.ManagerBootstrapPromptTests -v","status":"pass"}'
+  criterion_id=$(conveyor criteria my-task --add --criterion "Targeted prompt tests pass" --source worker_proposed --status proposed | python3 -c 'import json,sys; print(json.load(sys.stdin)["affected_criterion"]["id"])')
+  conveyor criteria my-task --satisfy "$criterion_id" --evidence-json '{"command":"python3 -m unittest tests.test_workerctl.ManagerBootstrapPromptTests -v","status":"pass"}'
   ```
   For mutation responses, treat `affected_criterion` as the authoritative
   receipt for the row changed by that command. When a manager applies multiple
@@ -373,7 +373,7 @@ tmux attach -t codex-live-test
   helper is read-only: it resolves the task and prints suggestions, but does not
   mutate acceptance criteria, events, or commands.
   ```bash
-  scripts/workerctl criteria-plan my-task --from-worker-response response.md --json
+  conveyor criteria-plan my-task --from-worker-response response.md --json
   ```
 - `manager-permission <task> <CATEGORY.ACTION|CATEGORY> [--list]
   [--require] [--require-handoff]` — Check and audit whether the saved manager
@@ -405,7 +405,7 @@ tmux attach -t codex-live-test
   does not include manager rollout context. Reviewer commands run from an
   isolated temporary cwd with a stripped environment and, on macOS, through
   `sandbox-exec`. The sandbox keeps the targeted denial of bound
-  worker/manager rollout files plus the active workerctl database and sidecars,
+  worker/manager rollout files plus the active control database and sidecars,
   and also denies direct reads of the active `.codex-workers` state root so
   legacy session files, transcripts, capture metadata, task state, and exports
   are not available through filesystem reads. The allowed reviewer context still
@@ -464,10 +464,10 @@ tmux attach -t codex-live-test
 - `dashboard [--task T] [--ensure-dispatch] [--dispatcher-id ID]
   [--host 127.0.0.1] [--port 8797]` — Launch the
   local live supervision cockpit. The dashboard binds to loopback by default,
-  uses the TypeScript backend to shell out to `workerctl` JSON commands, and
+  uses the TypeScript backend to shell out to `conveyor` JSON commands, and
   attaches interactive terminals to tmux-backed worker/manager sessions through
   a WebSocket PTY bridge. It includes browser bootstrap controls for creating a
-  task, starting a worker/manager pair with `workerctl pair`, auto-attaching the
+  task, starting a worker/manager pair with `conveyor pair`, auto-attaching the
   terminals, attach/bind controls, and audited action receipts for cycle,
   nudge, interrupt, finish, and export. With `--ensure-dispatch`, launch also
   ensures a Dispatch watch process using the supplied `--dispatcher-id` when
@@ -490,13 +490,13 @@ tmux attach -t codex-live-test
     accepted criteria that still need proof before finishing.
     `manager_context.criteria_negotiation` is advisory: when `needed` is true,
     the manager should ask the worker for must-have current-task criteria versus
-    follow-up criteria, then record the result with `workerctl criteria`. The
+    follow-up criteria, then record the result with `conveyor criteria`. The
     field does not send nudges or mutate criteria automatically.
   
   The `cycle` subcommand accepts `--busy-wait-seconds N` (default: 90) to tune the pane-signal classifier's stuck-busy threshold. Lower values flag stalls faster but increase false positives on long-running real work:
   ```bash
-  workerctl cycle my-task                          # default 90s threshold
-  workerctl cycle my-task --busy-wait-seconds 30   # tighter detection
+  conveyor cycle my-task                          # default 90s threshold
+  conveyor cycle my-task --busy-wait-seconds 30   # tighter detection
   ```
 - `ingest <session>` — Pull new events from a session's rollout JSONL into
   the `codex_events` table. Tracks a byte offset, so subsequent runs only
@@ -717,42 +717,42 @@ task/session/bind setup.
 Print repeatable live QA checklists from the CLI:
 
 ```bash
-scripts/workerctl qa-plan self-management
-scripts/workerctl qa-plan emergent-criteria
-scripts/workerctl qa-plan emergent-criteria --json
-scripts/workerctl qa-plan tmux-errors
-scripts/workerctl qa-plan dispatch-completion
-scripts/workerctl qa-plan ralph-loop
-scripts/workerctl qa-plan adversarial-triggers
-scripts/workerctl qa-plan goalbuddy-conveyor
-scripts/workerctl qa-run ralph-loop-guardrails --receipt-output /tmp/ralph-loop-guardrails-receipt.json --json
-scripts/workerctl qa-run generic-loop-template --receipt-output /tmp/generic-loop-template-receipt.json --json
-scripts/workerctl qa-run generic-loop-template-browser --receipt-output /tmp/generic-loop-template-browser-receipt.json --json
-scripts/workerctl qa-run test-coverage-loop --receipt-output /tmp/test-coverage-loop-receipt.json --json
-scripts/workerctl qa-run adversarial-triggers --receipt-output /tmp/adversarial-triggers-receipt.json --json
-scripts/workerctl qa-run build-clear-loop --receipt-output /tmp/build-clear-loop-receipt.json --json
-scripts/workerctl loop-triggers --classify "Run this as an adversarially gated Ralph loop." --json
-scripts/workerctl loop-templates --list --json
-scripts/workerctl loop-templates --show visual_diff_loop --json
-scripts/workerctl loop-evidence visual-diff qa-task --loop-run "$RUN_ID" --iteration 1 --reference reference.png --candidate candidate.png --threshold 0.02 --report-output visual-diff.json --diff-output visual-diff.png
-scripts/workerctl ralph-loop-presets --list --json
+conveyor qa-plan self-management
+conveyor qa-plan emergent-criteria
+conveyor qa-plan emergent-criteria --json
+conveyor qa-plan tmux-errors
+conveyor qa-plan dispatch-completion
+conveyor qa-plan ralph-loop
+conveyor qa-plan adversarial-triggers
+conveyor qa-plan goalbuddy-conveyor
+conveyor qa-run ralph-loop-guardrails --receipt-output /tmp/ralph-loop-guardrails-receipt.json --json
+conveyor qa-run generic-loop-template --receipt-output /tmp/generic-loop-template-receipt.json --json
+conveyor qa-run generic-loop-template-browser --receipt-output /tmp/generic-loop-template-browser-receipt.json --json
+conveyor qa-run test-coverage-loop --receipt-output /tmp/test-coverage-loop-receipt.json --json
+conveyor qa-run adversarial-triggers --receipt-output /tmp/adversarial-triggers-receipt.json --json
+conveyor qa-run build-clear-loop --receipt-output /tmp/build-clear-loop-receipt.json --json
+conveyor loop-triggers --classify "Run this as an adversarially gated Ralph loop." --json
+conveyor loop-templates --list --json
+conveyor loop-templates --show visual_diff_loop --json
+conveyor loop-evidence visual-diff qa-task --loop-run "$RUN_ID" --iteration 1 --reference reference.png --candidate candidate.png --threshold 0.02 --report-output visual-diff.json --diff-output visual-diff.png
+conveyor ralph-loop-presets --list --json
 ```
 
 General loop templates let operators create policy-backed runs without adding
 bespoke Dispatch behavior for each loop shape. For example,
-`scripts/workerctl loop-templates --create-run qa-task --template visual_diff_loop`
+`conveyor loop-templates --create-run qa-task --template visual_diff_loop`
 creates a visual-diff loop run whose `required_before_continue` evidence must
 be recorded before the manager's next visual pass can reach the worker.
 Existing `ralph-loop-presets` commands remain compatible aliases over the same
 template-backed guardrails.
 
-For natural-language control, run `scripts/workerctl loop-triggers --classify
+For natural-language control, run `conveyor loop-triggers --classify
 "<manager prompt>" --json` before automatically creating policy or
 continuation gates. Only a matched controlled trigger should create a
 Ralph-loop policy, require `adversarial_check` before continuation, require
 `finish-task --require-adversarial-proof`, or record worker-proposed
 adversarial proof. The executable receipt check is
-`scripts/workerctl qa-run adversarial-triggers --receipt-output
+`conveyor qa-run adversarial-triggers --receipt-output
 /tmp/adversarial-triggers-receipt.json --json`.
 
 The `emergent-criteria` scenario covers a real worker/manager pair, criteria
@@ -814,7 +814,7 @@ debugging.
 
 ## Manager Loop Pattern
 
-A manager Codex drives supervision by calling `workerctl cycle <task>`
+A manager Codex drives supervision by calling `conveyor cycle <task>`
 repeatedly. Each call:
 
 1. Runs `ingest` against the worker's rollout JSONL (idempotent; picks up only
@@ -828,14 +828,14 @@ repeatedly. Each call:
    `enter_to_confirm`, etc. as `notable_pane_pattern`. This is the shadow
    signal: best-effort and supplementary.
 4. Writes a row to `manager_cycles` so the full observation history is
-   replayable via `workerctl replay <task>`.
+   replayable via `conveyor replay <task>`.
 5. Returns a structured JSON dict.
 
 The manager parses the JSON, decides whether to act, and optionally calls
-`workerctl session-nudge` / `session-interrupt`. Then it loops.
+`conveyor session-nudge` / `session-interrupt`. Then it loops.
 
 ```bash
-workerctl cycle auth-refactor
+conveyor cycle auth-refactor
 # {
 #   "kind": "session_cycle",
 #   "task": "auth-refactor",
@@ -884,8 +884,8 @@ captures the attempt.
 `session-interrupt`) write to the `events` table. Observation and
 dedicated-table commands (`cycle`, `ingest`) write to their own tables
 (`manager_cycles`, `codex_events`) — those tables ARE the audit trail. The
-plain-text `workerctl audit <task>` lists `events` rows only; cycle
-observations show up via `workerctl replay <task>` and the `manager_cycles`
+plain-text `conveyor audit <task>` lists `events` rows only; cycle
+observations show up via `conveyor replay <task>` and the `manager_cycles`
 table.
 
 ## Phase 6 Polish
@@ -903,8 +903,8 @@ Recent additions to streamline worker setup and observability:
 
 Three quality-of-life additions following Phase 6 dogfood:
 
-- **`sessions --state`** — by default, `workerctl sessions` now hides Phase 1 backfill rows (`pid IS NULL`) and rows marked `state='gone'`. Use `--state all` to inspect every row, `--state gone` for completed/dead registrations, or `--state active` for the default view.
-- **`worker_alive` / `manager_alive` in cycle output** — every `workerctl cycle` JSON now includes these booleans, computed by `os.kill(pid, 0)` against the registered session pids. Surfaces silently-dead workers between cycles.
+- **`sessions --state`** — by default, `conveyor sessions` now hides Phase 1 backfill rows (`pid IS NULL`) and rows marked `state='gone'`. Use `--state all` to inspect every row, `--state gone` for completed/dead registrations, or `--state active` for the default view.
+- **`worker_alive` / `manager_alive` in cycle output** — every `conveyor cycle` JSON now includes these booleans, computed by `os.kill(pid, 0)` against the registered session pids. Surfaces silently-dead workers between cycles.
 - **`cycle --busy-wait-seconds N`** — exposes the pane-signal classifier's stuck-busy threshold (previously hard-coded at 90s) as a per-cycle flag.
 
 ## Phase 8 classifier improvements (2026-05-12)
@@ -940,10 +940,10 @@ Current dispatch state:
   notification id, signal type, delivery mode, target session role, and poll
   count, so manager/worker dispatcher handoffs are visible in audit evidence.
 - If `doctor-self --json` reports `workerctl_on_path=false` inside a Codex app
-  session, run `scripts/workerctl ...` from the repository root or install the
+  session, run `conveyor ...` from the repository root or install the
   local wrapper with `scripts/install-local --write`. Its `inside_tmux` check
   describes the shell running `doctor-self`; for Codex app evidence, prefer the
-  rollout JSONL path, `lsof` lookup, and the workerctl registration role.
+  rollout JSONL path, `lsof` lookup, and the registration role.
 - When a live drill ingests a whole rollout, Dispatch may route older completion
   signals before the target proof turn. Either ingest after the target worker
   turn or have the manager consume/review older completion signals before
@@ -964,7 +964,7 @@ Current dispatch state:
   inbox pending/consumed counts, decision/cycle ids, source event ids,
   suppressed-signal visibility, chronological ordering, and side-effect risk.
 - Dashboard manual QA should use
-  `workerctl dashboard --task <task> --ensure-dispatch --dispatcher-id qa-dispatch-dashboard`
+  `conveyor dashboard --task <task> --ensure-dispatch --dispatcher-id qa-dispatch-dashboard`
   and visually confirm the Dispatch active banner, dispatcher id, heartbeat age,
   iteration, processed count, dry-run/live state, completion/routing/cycle
   conversation lane entries, command claim/attempt/delivery entries, inbox
@@ -1013,7 +1013,7 @@ SQLite database at `.codex-workers/workerctl.db`. Key tables:
   proposals and reviewer verdicts for "what's next" review flows.
 - `workers`, `managers` — Legacy tables retained for read-only history.
 
-`workerctl db-doctor` reports schema health. `workerctl reconcile` reports
+`conveyor db-doctor` reports schema health. `conveyor reconcile` reports
 runtime drift (dead-pid sessions, dangling bindings, stuck tasks); add
 `--apply` to fix.
 

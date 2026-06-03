@@ -28,7 +28,7 @@ Open the printed `DASHBOARD_URL` in Chrome.
 
 Because this is the smallest smoke scenario, the manager config may not seed a
 Dispatch-specific criterion. The QA pass still must verify Dispatch routing via
-dashboard and `workerctl audit`.
+dashboard and `conveyor audit`.
 
 ## Chrome Checks
 
@@ -44,7 +44,7 @@ dashboard and `workerctl audit`.
 
 ```bash
 ./lab cycle
-/Users/neonwatty/Desktop/codex-terminal-manager/scripts/workerctl audit "$TASK" --json
+conveyor audit "$TASK" --json
 ```
 
 Required audit evidence:

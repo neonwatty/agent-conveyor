@@ -63,8 +63,8 @@ Run cycles until completion after manager attach:
 Then audit:
 
 ```bash
-/Users/neonwatty/Desktop/codex-terminal-manager/scripts/workerctl audit "$TASK" --json
-/Users/neonwatty/Desktop/codex-terminal-manager/scripts/workerctl telemetry --actor dispatch --event-type dispatch_watch_heartbeat --newest --limit 1 --json
+conveyor audit "$TASK" --json
+conveyor telemetry --actor dispatch --event-type dispatch_watch_heartbeat --newest --limit 1 --json
 ```
 
 Required audit evidence:

@@ -25,7 +25,7 @@ receipt shape used by quality-oriented loop templates.
 ## Setup
 
 ```bash
-QA_TMPDIR="$(mktemp -d -t workerctl-loop-template.XXXXXX)"
+QA_TMPDIR="$(mktemp -d -t conveyor-loop-template.XXXXXX)"
 export WORKERCTL_DB="$QA_TMPDIR/workerctl.db"
 export WORKER_ROLLOUT="$QA_TMPDIR/rollout-worker.jsonl"
 export MANAGER_ROLLOUT="$QA_TMPDIR/rollout-manager.jsonl"
@@ -52,12 +52,12 @@ for env_name, session_id in fixtures.items():
     )
 PY
 
-scripts/workerctl tasks --create qa-general-loop-template --goal "QA generic loop templates with visual-diff evidence." --path "$WORKERCTL_DB"
-scripts/workerctl register-worker --name qa-loop-worker --pid $$ --codex-session "$WORKER_ROLLOUT" --cwd "$PWD" --path "$WORKERCTL_DB"
-scripts/workerctl register-manager --name qa-loop-manager --pid $$ --codex-session "$MANAGER_ROLLOUT" --cwd "$PWD" --path "$WORKERCTL_DB"
-scripts/workerctl bind --task qa-general-loop-template --worker qa-loop-worker --manager qa-loop-manager --path "$WORKERCTL_DB"
-scripts/workerctl loop-templates --list --json
-scripts/workerctl loop-templates --show visual_diff_loop --json
+conveyor tasks --create qa-general-loop-template --goal "QA generic loop templates with visual-diff evidence." --path "$WORKERCTL_DB"
+conveyor register-worker --name qa-loop-worker --pid $$ --codex-session "$WORKER_ROLLOUT" --cwd "$PWD" --path "$WORKERCTL_DB"
+conveyor register-manager --name qa-loop-manager --pid $$ --codex-session "$MANAGER_ROLLOUT" --cwd "$PWD" --path "$WORKERCTL_DB"
+conveyor bind --task qa-general-loop-template --worker qa-loop-worker --manager qa-loop-manager --path "$WORKERCTL_DB"
+conveyor loop-templates --list --json
+conveyor loop-templates --show visual_diff_loop --json
 ```
 
 Acceptance criteria:
@@ -79,7 +79,7 @@ Acceptance criteria:
 Create the template-backed run:
 
 ```bash
-RUN_ID="$(scripts/workerctl loop-templates --create-run qa-general-loop-template \
+RUN_ID="$(conveyor loop-templates --create-run qa-general-loop-template \
   --template visual_diff_loop \
   --name qa-visual-template-run \
   --max-iterations 4 \
@@ -103,12 +103,12 @@ Acceptance criteria:
 Queue a manager continuation before visual evidence exists:
 
 ```bash
-DECISION_ID="$(scripts/workerctl record-decision qa-general-loop-template nudge \
+DECISION_ID="$(conveyor record-decision qa-general-loop-template nudge \
   --reason "Manager requests visual iteration 2 before visual evidence exists." \
   --payload-json "{\"loop_run_id\":\"$RUN_ID\",\"requested_iteration\":2,\"template\":\"visual_diff_loop\",\"correlation_id\":\"visual-loop-missing\"}" \
   --path "$WORKERCTL_DB" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')"
 
-scripts/workerctl enqueue-continue-iteration qa-general-loop-template \
+conveyor enqueue-continue-iteration qa-general-loop-template \
   --loop-run "$RUN_ID" \
   --requested-iteration 2 \
   --manager-decision-id "$DECISION_ID" \
@@ -117,8 +117,8 @@ scripts/workerctl enqueue-continue-iteration qa-general-loop-template \
   --json \
   --path "$WORKERCTL_DB"
 
-scripts/workerctl dispatch --once --type continue_iteration --dispatcher-id qa-loop-template --json --path "$WORKERCTL_DB"
-scripts/workerctl worker-inbox qa-general-loop-template --json --path "$WORKERCTL_DB"
+conveyor dispatch --once --type continue_iteration --dispatcher-id qa-loop-template --json --path "$WORKERCTL_DB"
+conveyor worker-inbox qa-general-loop-template --json --path "$WORKERCTL_DB"
 ```
 
 Acceptance criteria:
@@ -131,11 +131,11 @@ Acceptance criteria:
 - Dispatch result includes `loop_policy.template=visual_diff_loop`, proving the
   manager request stayed linked to the generic template policy.
 - Dispatch result includes `delivered=false` and `target_worker_notified=false`.
-- `scripts/workerctl worker-inbox qa-general-loop-template --json --path "$WORKERCTL_DB"`
+- `conveyor worker-inbox qa-general-loop-template --json --path "$WORKERCTL_DB"`
   returns no items.
 - Because `visual_diff_loop` requires `adversarial_check`, missing
   adversarial proof blocks worker delivery; do not queue the allowed retry until
-  `scripts/workerctl loop-evidence adversarial-check ...` records structured
+  `conveyor loop-evidence adversarial-check ...` records structured
   proof for the prior iteration.
 - Dashboard Dispatch panel shows the correlation `visual-loop-missing`,
   `0 notifications`, `Inbox 0`, and `Pull inbox 0`.
@@ -145,7 +145,7 @@ Acceptance criteria:
 Record visual evidence as satisfied criteria:
 
 ```bash
-scripts/workerctl loop-evidence add qa-general-loop-template \
+conveyor loop-evidence add qa-general-loop-template \
   --loop-run "$RUN_ID" \
   --iteration 1 \
   --evidence-type reference_artifact \
@@ -153,7 +153,7 @@ scripts/workerctl loop-evidence add qa-general-loop-template \
   --correlation-id visual-loop-reference \
   --path "$WORKERCTL_DB"
 
-scripts/workerctl loop-evidence add qa-general-loop-template \
+conveyor loop-evidence add qa-general-loop-template \
   --loop-run "$RUN_ID" \
   --iteration 1 \
   --evidence-type candidate_screenshot \
@@ -162,7 +162,7 @@ scripts/workerctl loop-evidence add qa-general-loop-template \
   --correlation-id visual-loop-candidate \
   --path "$WORKERCTL_DB"
 
-scripts/workerctl loop-evidence visual-diff qa-general-loop-template \
+conveyor loop-evidence visual-diff qa-general-loop-template \
   --loop-run "$RUN_ID" \
   --iteration 1 \
   --reference /tmp/reference.png \
@@ -173,7 +173,7 @@ scripts/workerctl loop-evidence visual-diff qa-general-loop-template \
   --correlation-id visual-loop-report \
   --path "$WORKERCTL_DB"
 
-scripts/workerctl loop-evidence adversarial-check qa-general-loop-template \
+conveyor loop-evidence adversarial-check qa-general-loop-template \
   --loop-run "$RUN_ID" \
   --iteration 1 \
   --failure-mode "visual pass still hides a regression after diff artifacts are present" \
@@ -186,7 +186,7 @@ scripts/workerctl loop-evidence adversarial-check qa-general-loop-template \
 Queue and dispatch a fresh retry:
 
 ```bash
-scripts/workerctl enqueue-continue-iteration qa-general-loop-template \
+conveyor enqueue-continue-iteration qa-general-loop-template \
   --loop-run "$RUN_ID" \
   --requested-iteration 2 \
   --correlation-id visual-loop-allowed \
@@ -194,9 +194,9 @@ scripts/workerctl enqueue-continue-iteration qa-general-loop-template \
   --json \
   --path "$WORKERCTL_DB"
 
-scripts/workerctl dispatch --once --type continue_iteration --dispatcher-id qa-loop-template --json --path "$WORKERCTL_DB"
-scripts/workerctl worker-inbox qa-general-loop-template --consume-next --wait --timeout 2 --json --path "$WORKERCTL_DB"
-scripts/workerctl telemetry --task qa-general-loop-template --event-type dispatch_inbox_consumed --json --path "$WORKERCTL_DB"
+conveyor dispatch --once --type continue_iteration --dispatcher-id qa-loop-template --json --path "$WORKERCTL_DB"
+conveyor worker-inbox qa-general-loop-template --consume-next --wait --timeout 2 --json --path "$WORKERCTL_DB"
+conveyor telemetry --task qa-general-loop-template --event-type dispatch_inbox_consumed --json --path "$WORKERCTL_DB"
 ```
 
 Acceptance criteria:
@@ -223,7 +223,7 @@ Use the browser-backed receipt when you need to prove that `visual_diff_loop`
 works with a real rendered HTML artifact:
 
 ```bash
-scripts/workerctl qa-run generic-loop-template-browser \
+conveyor qa-run generic-loop-template-browser \
   --receipt-output /tmp/generic-loop-template-browser-receipt.json \
   --json
 ```
@@ -243,7 +243,7 @@ Use the build/clear receipt when you need to prove a generic Ralph-loop
 template that is not test-coverage or visual-diff specific:
 
 ```bash
-scripts/workerctl qa-run build-clear-loop \
+conveyor qa-run build-clear-loop \
   --receipt-output /tmp/build-clear-loop-receipt.json \
   --json
 ```
@@ -258,7 +258,7 @@ cleanup receipts exist.
 Create a second run at its max:
 
 ```bash
-MAX_RUN_ID="$(scripts/workerctl loop-templates --create-run qa-general-loop-template \
+MAX_RUN_ID="$(conveyor loop-templates --create-run qa-general-loop-template \
   --template visual_diff_loop \
   --name qa-visual-max-run \
   --max-iterations 1 \
@@ -266,7 +266,7 @@ MAX_RUN_ID="$(scripts/workerctl loop-templates --create-run qa-general-loop-temp
   --json \
   --path "$WORKERCTL_DB" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')"
 
-scripts/workerctl enqueue-continue-iteration qa-general-loop-template \
+conveyor enqueue-continue-iteration qa-general-loop-template \
   --loop-run "$MAX_RUN_ID" \
   --requested-iteration 2 \
   --correlation-id visual-loop-max-block \
@@ -274,8 +274,8 @@ scripts/workerctl enqueue-continue-iteration qa-general-loop-template \
   --json \
   --path "$WORKERCTL_DB"
 
-scripts/workerctl dispatch --once --type continue_iteration --dispatcher-id qa-loop-template --json --path "$WORKERCTL_DB"
-scripts/workerctl worker-inbox qa-general-loop-template --json --path "$WORKERCTL_DB"
+conveyor dispatch --once --type continue_iteration --dispatcher-id qa-loop-template --json --path "$WORKERCTL_DB"
+conveyor worker-inbox qa-general-loop-template --json --path "$WORKERCTL_DB"
 ```
 
 Acceptance criteria:
@@ -290,9 +290,9 @@ Acceptance criteria:
 Export the task evidence for review:
 
 ```bash
-scripts/workerctl replay qa-general-loop-template --json --path "$WORKERCTL_DB" > /tmp/qa-general-loop-template-replay.json
-scripts/workerctl telemetry --task qa-general-loop-template --json --path "$WORKERCTL_DB" > /tmp/qa-general-loop-template-telemetry.json
-scripts/workerctl export-task qa-general-loop-template --zip --path "$WORKERCTL_DB"
+conveyor replay qa-general-loop-template --json --path "$WORKERCTL_DB" > /tmp/qa-general-loop-template-replay.json
+conveyor telemetry --task qa-general-loop-template --json --path "$WORKERCTL_DB" > /tmp/qa-general-loop-template-telemetry.json
+conveyor export-task qa-general-loop-template --zip --path "$WORKERCTL_DB"
 ```
 
 Acceptance criteria:

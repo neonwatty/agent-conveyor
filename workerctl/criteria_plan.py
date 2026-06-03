@@ -121,7 +121,7 @@ def parse_worker_criteria_response(text: str) -> tuple[list[CriteriaSuggestion],
 
 def suggestion_to_argv(task: str, suggestion: CriteriaSuggestion, *, path: str | None = None) -> list[str]:
     argv = [
-        "workerctl",
+        "conveyor",
         "criteria",
         task,
         "--add",

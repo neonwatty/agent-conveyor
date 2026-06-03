@@ -1,6 +1,6 @@
 # GoalBuddy Conveyor Live Dogfood
 
-Use this smoke after `workerctl qa-plan goalbuddy-conveyor` exists and you want
+Use this smoke after `conveyor qa-plan goalbuddy-conveyor` exists and you want
 to verify the conveyor rails with a tiny, repeatable run.
 
 ## Shape
@@ -20,7 +20,7 @@ records `satisfied_on_main: true`, activate only the implementation child.
 Start from the reusable plan:
 
 ```bash
-scripts/workerctl qa-plan goalbuddy-conveyor
+conveyor qa-plan goalbuddy-conveyor
 ```
 
 Verify board state after each receipt mutation:

@@ -570,8 +570,8 @@ def render_replay_text(result: dict[str, Any]) -> str:
             [
                 "Finished:",
                 f"- {final['summary']}",
-                "- Review: workerctl replay <task> --format compact",
-                "- Audit: workerctl mutation-audit <task> --json",
+                "- Review: conveyor replay <task> --format compact",
+                "- Audit: conveyor mutation-audit <task> --json",
                 "",
             ]
         )

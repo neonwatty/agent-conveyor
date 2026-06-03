@@ -65,7 +65,7 @@ A run passes only when all of these are true:
   baseline.
 
 Pane text alone is not enough. The run must include Dispatch chain evidence from
-the dashboard and/or `workerctl audit`.
+the dashboard and/or `conveyor audit`.
 
 For choosing the right proof for a change, see
 [`../agent-evidence-playbook.md`](../agent-evidence-playbook.md). QA reports

@@ -22,10 +22,10 @@ Pick evidence that matches the risk and surface area of the change.
 | Change type | Useful evidence |
 | --- | --- |
 | Agent instructions or docs | `git diff`, targeted `rg`, direct inspection of changed sections, rendered Markdown when formatting matters |
-| Python or CLI behavior | focused command output, focused unit test, `scripts/workerctl cycle <task>`, `scripts/rc-check` for broad behavior |
+| Python or CLI behavior | focused command output, focused unit test, `conveyor cycle <task>`, `scripts/rc-check` for broad behavior |
 | Dashboard or frontend behavior | `npm run build`, browser inspection, screenshot, visible Dispatch/dashboard state |
-| Worker, manager, or Dispatch behavior | `scripts/workerctl qa-plan dispatch-completion`, `scripts/workerctl qa-run adversarial-triggers --receipt-output /tmp/adversarial-triggers-receipt.json --json`, `scripts/workerctl audit <task> --json`, `scripts/workerctl replay <task>` |
-| Acceptance criteria | `scripts/workerctl criteria <task> --list`, satisfied criteria evidence JSON, deferred or rejected criteria rationale |
+| Worker, manager, or Dispatch behavior | `conveyor qa-plan dispatch-completion`, `conveyor qa-run adversarial-triggers --receipt-output /tmp/adversarial-triggers-receipt.json --json`, `conveyor audit <task> --json`, `conveyor replay <task>` |
+| Acceptance criteria | `conveyor criteria <task> --list`, satisfied criteria evidence JSON, deferred or rejected criteria rationale |
 | PR or ship loop | PR URL, CI-green receipt, merge or main-branch receipt, final diff inspection, guarded `codex-review` when requested or when review risk justifies it |
 
 Small documentation edits do not need full release-candidate checks. Broad CLI,
@@ -36,10 +36,10 @@ Dispatch, or dashboard changes usually do.
 Prefer structured receipts when a workflow already has them:
 
 ```bash
-scripts/workerctl criteria <task> --satisfy <id> \
+conveyor criteria <task> --satisfy <id> \
   --evidence-json '{"command":"<command run>","status":"pass","summary":"<what it proved>"}'
 
-scripts/workerctl loop-evidence adversarial-check <task> \
+conveyor loop-evidence adversarial-check <task> \
   --loop-run <run-id> \
   --iteration <n> \
   --failure-mode "<strongest realistic failure mode>" \
