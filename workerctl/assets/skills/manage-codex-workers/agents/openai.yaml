@@ -1,5 +1,5 @@
 interface:
   display_name: "Manage Codex Workers"
   short_description: "Manage tmux-backed Codex workers"
-  default_prompt: "Use $manage-codex-workers to start, supervise, or stop a Codex worker with workerctl."
+  default_prompt: "Use $manage-codex-workers to start, supervise, or stop a Codex worker with conveyor."
   brand_color: "#2563EB"
