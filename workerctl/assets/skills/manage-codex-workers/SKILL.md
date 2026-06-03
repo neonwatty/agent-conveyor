@@ -11,9 +11,9 @@ but skill-driven flows should prefer `conveyor`.
 
 ## One-Prompt Codex App Ralph Loop
 
-This is the preferred entry point when the user has installed this repo and
-wants to use another Codex app session without learning the low-level command
-sequence.
+This is the preferred entry point when the user has installed Agent Conveyor
+and wants to use another Codex app session without learning the low-level
+command sequence.
 
 User prompt:
 
