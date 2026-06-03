@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+TMP_ROOT="${TMPDIR:-/tmp}"
+SMOKE_DIR="$(mktemp -d "$TMP_ROOT/agent-conveyor-package-smoke.XXXXXX")"
+
+cleanup() {
+  rm -rf "$SMOKE_DIR"
+}
+trap cleanup EXIT
+
+python3 -m venv "$SMOKE_DIR/venv"
+PYTHON="$SMOKE_DIR/venv/bin/python"
+CONVEYOR="$SMOKE_DIR/venv/bin/conveyor"
+WORKERCTL="$SMOKE_DIR/venv/bin/workerctl"
+DIST_DIR="$SMOKE_DIR/dist"
+CODEX_HOME_DIR="$SMOKE_DIR/codex-home"
+
+"$PYTHON" -m pip install --upgrade pip
+"$PYTHON" -m pip wheel "$ROOT" -w "$DIST_DIR"
+"$PYTHON" -m pip install "$DIST_DIR"/*.whl
+
+conveyor_help="$("$CONVEYOR" --help | head -n 1)"
+workerctl_help="$("$WORKERCTL" --help | head -n 1)"
+
+case "$conveyor_help" in
+  "usage: conveyor"*) ;;
+  *)
+    echo "package-smoke: expected conveyor help to start with 'usage: conveyor', got: $conveyor_help" >&2
+    exit 1
+    ;;
+esac
+
+case "$workerctl_help" in
+  "usage: workerctl"*) ;;
+  *)
+    echo "package-smoke: expected workerctl help to start with 'usage: workerctl', got: $workerctl_help" >&2
+    exit 1
+    ;;
+esac
+
+"$CONVEYOR" install-skills --codex-home "$CODEX_HOME_DIR" --json > "$SMOKE_DIR/install-skills.json"
+
+"$PYTHON" - "$SMOKE_DIR/install-skills.json" "$CODEX_HOME_DIR" <<'PY'
+import json
+import os
+import re
+import sys
+from pathlib import Path
+
+receipt_path = Path(sys.argv[1])
+codex_home = Path(sys.argv[2])
+receipt = json.loads(receipt_path.read_text())
+skill_names = {row["name"] for row in receipt["skills"]}
+expected = {"manage-codex-workers", "codex-review"}
+missing = expected - skill_names
+if missing:
+    raise SystemExit(f"missing installed skills: {sorted(missing)}")
+
+manage_skill = codex_home / "skills" / "manage-codex-workers" / "SKILL.md"
+review_skill = codex_home / "skills" / "codex-review" / "SKILL.md"
+review_helper = codex_home / "skills" / "codex-review" / "scripts" / "codex-review"
+for path in (manage_skill, review_skill, review_helper):
+    if not path.exists():
+        raise SystemExit(f"expected installed asset missing: {path}")
+if not os.access(review_helper, os.X_OK):
+    raise SystemExit(f"expected executable helper: {review_helper}")
+
+copyable_legacy_command = re.compile(
+    r"scripts/(?:workerctl|conveyor)|converyor|"
+    r"workerctl\s+(?:"
+    r"dispatch|qa-plan|cycle|worker-inbox|manager-inbox|update-status|"
+    r"criteria|replay|audit|telemetry|export-task|bind|pair|status|list"
+    r")\b"
+)
+skill_text = manage_skill.read_text()
+match = copyable_legacy_command.search(skill_text)
+if match:
+    raise SystemExit(
+        f"installed manage-codex-workers skill contains stale command text: {match.group(0)!r}"
+    )
+PY
+
+echo "package-smoke: installed agent-conveyor wheel exposes conveyor and workerctl, and bundled skills are valid"

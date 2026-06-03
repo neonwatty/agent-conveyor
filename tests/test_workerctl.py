@@ -11482,6 +11482,20 @@ Deferred follow-up criteria:
 
         self.assertEqual(proc.returncode, 0, proc.stderr)
 
+    def test_package_smoke_script_has_valid_bash_syntax_and_is_in_ci(self):
+        proc = subprocess.run(
+            ["bash", "-n", str(ROOT / "scripts" / "package-smoke")],
+            cwd=ROOT,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        workflow = (ROOT / ".github" / "workflows" / "test.yml").read_text()
+        self.assertIn("scripts/package-smoke", workflow)
+
     def test_run_unittests_isolated_script_has_valid_bash_syntax(self):
         proc = subprocess.run(
             ["bash", "-n", str(ROOT / "scripts" / "run-unittests-isolated")],

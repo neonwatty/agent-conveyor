@@ -26,3 +26,6 @@ jobs:
 
       - name: Run release-candidate deterministic checks
         run: scripts/rc-check --skip-live-smoke-repeat
+
+      - name: Run package install smoke
+        run: scripts/package-smoke
