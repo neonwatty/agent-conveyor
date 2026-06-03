@@ -68,8 +68,8 @@ Run cycles until completion:
 Then audit:
 
 ```bash
-/Users/neonwatty/Desktop/codex-terminal-manager/scripts/workerctl audit "$TASK" --json
-/Users/neonwatty/Desktop/codex-terminal-manager/scripts/workerctl telemetry --actor dispatch --event-type dispatch_watch_heartbeat --newest --limit 1 --json
+conveyor audit "$TASK" --json
+conveyor telemetry --actor dispatch --event-type dispatch_watch_heartbeat --newest --limit 1 --json
 ```
 
 Required audit evidence:
@@ -94,7 +94,7 @@ If the run fails, capture:
 - run id
 - dashboard URL
 - relevant `./lab cycle` output
-- `workerctl audit "$TASK" --json` summary
+- `conveyor audit "$TASK" --json` summary
 - dashboard visible state
 - exact missing or wrong behavior
 

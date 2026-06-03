@@ -32,8 +32,8 @@ Copy this structure into the final QA report for each Codex + Chrome run.
 ```bash
 ./lab status
 ./lab cycle
-/Users/neonwatty/Desktop/codex-terminal-manager/scripts/workerctl audit <task> --json
-/Users/neonwatty/Desktop/codex-terminal-manager/scripts/workerctl telemetry --actor dispatch --event-type dispatch_watch_heartbeat --newest --limit 1 --json
+conveyor audit <task> --json
+conveyor telemetry --actor dispatch --event-type dispatch_watch_heartbeat --newest --limit 1 --json
 ```
 
 Record key values:

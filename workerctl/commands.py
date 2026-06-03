@@ -96,7 +96,7 @@ def attach_command(name: str) -> str:
 
 
 def stop_command(name: str) -> str:
-    return f"workerctl stop {name}"
+    return f"conveyor stop {name}"
 
 
 def cli_path_prefix() -> str:
@@ -298,14 +298,17 @@ def codex_arg_suffix(codex_args: list[str]) -> str:
 
 
 def workerctl_cli() -> str:
-    return sh_quote(str(PROJECT_ROOT / "scripts" / "workerctl"))
+    conveyor = PROJECT_ROOT / "bin" / "conveyor"
+    if conveyor.exists():
+        return sh_quote(str(conveyor))
+    return "conveyor"
 
 
 def raw_worker_start_prompt(session_name: str, cwd: Path, manager_codex_args: list[str] | None = None) -> str:
     manager_suffix = codex_arg_suffix(manager_codex_args or [])
     workerctl = workerctl_cli()
     start_manager_template = f"{workerctl} start-manager --name <manager-name> --cwd {sh_quote(str(cwd))}{manager_suffix}"
-    return f"""You are a raw worker candidate running inside workerctl tmux session {session_name}.
+    return f"""You are a raw worker candidate running inside Agent Conveyor tmux session {session_name}.
 
 Current working directory: {cwd}
 
@@ -423,10 +426,10 @@ Acknowledgement:
 1. Run `{setup_command}`.
 2. Ask the user the returned setup questions in this manager Codex chat.
 3. Persist the answers with `{workerctl} manager-config`.
-4. Use `workerctl manager-config --interactive` only when a human is directly
-   running workerctl in a terminal.{ack_setup}"""
+4. Use `conveyor manager-config --interactive` only when a human is directly
+   running conveyor in a terminal.{ack_setup}"""
 
-    return f"""You are a Codex manager session for workerctl.
+    return f"""You are a Codex manager session for Agent Conveyor.
 
 Working directory: {cwd}
 Manager session name: {manager_name}
@@ -474,9 +477,9 @@ Supervision loop:
 - Before finishing, compare worker receipts/verification against accepted open criteria.
 - When all accepted criteria are satisfied, deferred, or rejected, finish the task with
   `{workerctl} finish-task {task_line} --reason "Accepted criteria satisfied" --require-criteria-audit`.
-- Communicate with the worker only through workerctl session/task commands.
+- Communicate with the worker only through conveyor session/task commands.
 - Do not edit project files unless the user explicitly asks this manager
-  session to change workerctl itself.
+  session to change Agent Conveyor itself.
 """
 
 
@@ -499,7 +502,7 @@ def open_worker_window(name: str, *, terminal: str, dry_run: bool, force: bool) 
     require_worker(name)
     validate_name(name)
     if sys.platform != "darwin":
-        raise WorkerError("workerctl open is currently implemented for macOS only.")
+        raise WorkerError("conveyor open is currently implemented for macOS only.")
     if not session_exists(name):
         raise WorkerError(f"tmux session is not running for worker {name}: {tmux_target(name)}")
 
@@ -540,7 +543,7 @@ def open_worker_window(name: str, *, terminal: str, dry_run: bool, force: bool) 
 
 def open_tmux_session_window(session_name: str, *, terminal: str, dry_run: bool) -> dict[str, Any]:
     if sys.platform != "darwin":
-        raise WorkerError("workerctl terminal opening commands are currently implemented for macOS only.")
+        raise WorkerError("conveyor terminal opening commands are currently implemented for macOS only.")
     proc = run(["tmux", "has-session", "-t", session_name], check=False)
     raise_for_tmux_permission_failure(proc)
     if proc.returncode != 0:
@@ -698,10 +701,10 @@ def command_start(args: argparse.Namespace) -> int:
     result = {
         "attach_command": attach_session_command(session_name),
         "cwd": str(directory),
-        "register_worker_command_template": f"workerctl register-worker --name <worker-name> --pid <pid> --codex-session <rollout.jsonl> --cwd {sh_quote(str(directory))} --tmux-session {session_name}",
-        "start_manager_command_template": f"workerctl start-manager --name <manager-name> --cwd {sh_quote(str(directory))}{manager_suffix}",
-        "bind_command_template": "workerctl bind --task <task-name> --worker <worker-name> --manager <manager-name>",
-        "manager_config_questions_command_template": "workerctl manager-config <task-name> --questions",
+        "register_worker_command_template": f"conveyor register-worker --name <worker-name> --pid <pid> --codex-session <rollout.jsonl> --cwd {sh_quote(str(directory))} --tmux-session {session_name}",
+        "start_manager_command_template": f"conveyor start-manager --name <manager-name> --cwd {sh_quote(str(directory))}{manager_suffix}",
+        "bind_command_template": "conveyor bind --task <task-name> --worker <worker-name> --manager <manager-name>",
+        "manager_config_questions_command_template": "conveyor manager-config <task-name> --questions",
         "session": session_name,
         "start_prompt_path": str(prompt_path) if prompt_path else None,
         "start_prompt_sent": bool(prompt_path),
@@ -905,7 +908,7 @@ def command_create(args: argparse.Namespace) -> int:
     if args.initial_prompt:
         print("contract provided as initial Codex prompt")
     else:
-        print("contract saved but not provided; run workerctl nudge to provide instructions")
+        print("contract saved but not provided; run conveyor nudge to provide instructions")
     if args.accept_trust:
         if args.wait_ready and startup:
             print(f"trust handling: accepted={startup['trust_accepted']}")
@@ -944,7 +947,7 @@ def command_create(args: argparse.Namespace) -> int:
 def command_start_test(args: argparse.Namespace) -> int:
     name = args.name
     task = args.task or (
-        f"Read README.md and run workerctl update-status {name} with a short summary. "
+        f"Read README.md and run conveyor update-status {name} with a short summary. "
         "Do not edit tracked files."
     )
     create_args = argparse.Namespace(
@@ -1353,17 +1356,17 @@ def new_path_payload(*, session: str | None = None) -> dict[str, Any]:
 
     The new path is: register an already-running Codex session as a worker (or
     manager), create a task, bind the pair, and let the manager Codex drive
-    `workerctl cycle <task>` to observe progress.
+    `conveyor cycle <task>` to observe progress.
     """
     return {
         "command_template": (
-            "workerctl register-worker --name <NAME> --pid <PID> "
+            "conveyor register-worker --name <NAME> --pid <PID> "
             "--cwd <CWD> --tmux-session <SESSION>"
         ),
         "follow_up": [
-            "Have a manager Codex session register itself via `workerctl register-manager --name <MGR_NAME> --pid <MGR_PID> --cwd <CWD>`.",
-            "Create a task and bind the pair: `workerctl tasks --create <TASK> --goal \"<goal>\"` then `workerctl bind --task <TASK> --worker <NAME> --manager <MGR_NAME>`.",
-            "The manager Codex drives the supervision loop by calling `workerctl cycle <TASK>` repeatedly and reading the returned JSON.",
+            "Have a manager Codex session register itself via `conveyor register-manager --name <MGR_NAME> --pid <MGR_PID> --cwd <CWD>`.",
+            "Create a task and bind the pair: `conveyor tasks --create <TASK> --goal \"<goal>\"` then `conveyor bind --task <TASK> --worker <NAME> --manager <MGR_NAME>`.",
+            "The manager Codex drives the supervision loop by calling `conveyor cycle <TASK>` repeatedly and reading the returned JSON.",
         ],
     }
 
@@ -1376,7 +1379,7 @@ def command_doctor_self(args: argparse.Namespace) -> int:
     """Verify the current Codex session can register itself as a worker.
 
     The new path does not require an in-place promotion: it simply needs a
-    workerctl binary on PATH and, if the session is to be nudged via tmux, a
+    conveyor binary on PATH and, if the session is to be nudged via tmux, a
     live tmux session. Managers do not require tmux at all.
     """
     session_error = None
@@ -1420,10 +1423,10 @@ def command_doctor_self(args: argparse.Namespace) -> int:
         except WorkerError as exc:
             checks.append({"name": "current_tmux_session_live", "ok": False, "session": session, "error": str(exc)})
     if workerctl_path:
-        proc = run(["workerctl", "classify", "--text", "workerctl self doctor"], check=False)
+        proc = run(["workerctl", "classify", "--text", "conveyor self doctor"], check=False)
         checks.append({"name": "workerctl_executable", "ok": proc.returncode == 0, "path": workerctl_path})
 
-    # A session can register itself as a worker if workerctl is on PATH, tmux is
+    # A session can register itself as a worker if conveyor is on PATH, tmux is
     # available, and the current process is inside a live tmux session that the
     # manager can later nudge through. Managers do not strictly need tmux, but
     # for this preflight we require the same minimums.
@@ -1436,13 +1439,13 @@ def command_doctor_self(args: argparse.Namespace) -> int:
     payload["supported"] = supported
     if supported:
         why_or_why_not = (
-            "This Codex session is inside a live tmux session and workerctl is on PATH; "
-            "it can register itself as a worker via `workerctl register-worker`."
+            "This Codex session is inside a live tmux session and conveyor is on PATH; "
+            "it can register itself as a worker via `conveyor register-worker`."
         )
     else:
         failed = [check["name"] for check in checks if not check["ok"]]
         workerctl_hint = (
-            " Use `scripts/workerctl` from the repository root or run "
+            " Use `bin/conveyor` from the repository root or run "
             "`scripts/install-local --write` if workerctl_on_path failed."
             if not workerctl_path and workerctl_script.exists()
             else ""
@@ -1451,7 +1454,7 @@ def command_doctor_self(args: argparse.Namespace) -> int:
             "This Codex session cannot register itself as a tmux-backed worker. "
             f"Failed checks: {', '.join(failed) if failed else 'unknown'}. "
             "A Codex session running outside tmux can still register itself as a "
-            "manager via `workerctl register-manager`."
+            "manager via `conveyor register-manager`."
             f"{workerctl_hint}"
         )
     workerctl_invocation = "workerctl" if workerctl_path else ("scripts/workerctl" if workerctl_script.exists() else None)
@@ -1491,28 +1494,28 @@ def command_qa_plan(args: argparse.Namespace) -> int:
                 "register-worker resolves the rollout JSONL via lsof (or accepts --codex-session) and records the session as a worker",
                 "register-manager records the manager session without requiring tmux",
                 "tasks --create returns a task row; bind links it to the worker and manager sessions",
-                "workerctl cycle <task> returns JSON with keys kind, state, pane_signal, notable_pane_pattern, ingest, cycle_id",
+                "conveyor cycle <task> returns JSON with keys kind, state, pane_signal, notable_pane_pattern, ingest, cycle_id",
                 "session-nudge delivers text to the worker tmux pane and is observable in subsequent captures",
                 "a follow-up cycle ingests new events (ingest.new_events > 0) when the worker responds",
-                "a divergence (e.g., trust_prompt) surfaces in workerctl divergences <task>",
+                "a divergence (e.g., trust_prompt) surfaces in conveyor divergences <task>",
                 "unbind, deregister leave the SQLite control plane clean",
-                "workerctl reconcile reports no dead-pid sessions, dangling bindings, or stuck tasks after cleanup",
+                "conveyor reconcile reports no dead-pid sessions, dangling bindings, or stuck tasks after cleanup",
             ],
             "steps": [
                 'Start a Codex worker inside tmux: tmux new-session -d -s codex-foo && tmux send-keys -t codex-foo "codex" Enter.',
                 "Capture the worker pid (e.g., pgrep -f 'codex.*--sandbox' | head -1) and confirm the rollout JSONL exists under ~/.codex/sessions/.",
-                'Register the worker: workerctl register-worker --name foo --pid <WORKER_PID> --cwd "$PWD" --tmux-session codex-foo.',
-                'Register the manager (its own Codex session pid): workerctl register-manager --name foo-mgr --pid <MGR_PID> --cwd "$PWD".',
-                'Create the task: workerctl tasks --create my-task --goal "QA: cycle and nudge flow".',
-                "Bind the pair: workerctl bind --task my-task --worker foo --manager foo-mgr.",
-                "Run one observation cycle: workerctl cycle my-task. Verify JSON output includes kind, state, pane_signal, notable_pane_pattern, ingest, and cycle_id.",
-                'Send a nudge: workerctl session-nudge foo "Status?". Verify the worker tmux pane shows the text.',
-                "Run another cycle: workerctl cycle my-task. Verify ingest.new_events > 0 if the worker responded.",
-                "Trigger a divergence: leave the worker at a trust prompt or rate-limit prompt, run workerctl cycle my-task, and run workerctl divergences my-task to confirm the row appears.",
-                'Clean up the binding: workerctl unbind --task my-task. (Optionally: workerctl finish-task my-task --reason "QA complete".)',
-                "Deregister both sessions: workerctl deregister foo && workerctl deregister foo-mgr.",
-                "Run workerctl reconcile and confirm dead_pid_sessions, dangling_bindings, and stuck_tasks are all empty for this task. Add --apply if anything drifted.",
-                "Run workerctl audit my-task and workerctl replay my-task to confirm the observation and actuation history is present.",
+                'Register the worker: conveyor register-worker --name foo --pid <WORKER_PID> --cwd "$PWD" --tmux-session codex-foo.',
+                'Register the manager (its own Codex session pid): conveyor register-manager --name foo-mgr --pid <MGR_PID> --cwd "$PWD".',
+                'Create the task: conveyor tasks --create my-task --goal "QA: cycle and nudge flow".',
+                "Bind the pair: conveyor bind --task my-task --worker foo --manager foo-mgr.",
+                "Run one observation cycle: conveyor cycle my-task. Verify JSON output includes kind, state, pane_signal, notable_pane_pattern, ingest, and cycle_id.",
+                'Send a nudge: conveyor session-nudge foo "Status?". Verify the worker tmux pane shows the text.',
+                "Run another cycle: conveyor cycle my-task. Verify ingest.new_events > 0 if the worker responded.",
+                "Trigger a divergence: leave the worker at a trust prompt or rate-limit prompt, run conveyor cycle my-task, and run conveyor divergences my-task to confirm the row appears.",
+                'Clean up the binding: conveyor unbind --task my-task. (Optionally: conveyor finish-task my-task --reason "QA complete".)',
+                "Deregister both sessions: conveyor deregister foo && conveyor deregister foo-mgr.",
+                "Run conveyor reconcile and confirm dead_pid_sessions, dangling_bindings, and stuck_tasks are all empty for this task. Add --apply if anything drifted.",
+                "Run conveyor audit my-task and conveyor replay my-task to confirm the observation and actuation history is present.",
             ],
         },
         "emergent-criteria": {
@@ -1520,11 +1523,11 @@ def command_qa_plan(args: argparse.Namespace) -> int:
                 "manager cycle output includes manager_context.acceptance_criteria with summary/open/proposed/satisfied/deferred/rejected",
                 "criteria_negotiation.needed starts true before active current-task criteria exist and turns false after proposed, accepted, or satisfied criteria exist",
                 "the manager asks the worker for must-have current-task criteria versus deferred follow-up criteria",
-                "criteria-plan can draft reviewed workerctl criteria --add commands from separated worker criteria text without mutating task state",
-                "worker-proposed and manager-inferred criteria are visible through workerctl criteria --list",
+                "criteria-plan can draft reviewed conveyor criteria --add commands from separated worker criteria text without mutating task state",
+                "worker-proposed and manager-inferred criteria are visible through conveyor criteria --list",
                 "accepted criteria block finish-task --require-criteria-audit until satisfied, deferred, or rejected",
                 "satisfied criteria include evidence_json describing the verification receipt",
-                "after multiple criteria mutations, workerctl criteria --list is used as the canonical task state",
+                "after multiple criteria mutations, conveyor criteria --list is used as the canonical task state",
                 "replay shows acceptance_criterion_added and acceptance_criterion_updated transitions",
                 "export-task writes acceptance-criteria.json and includes it in manifest.json",
                 "finish-task --stop-manager --stop-worker reports killed_worker and killed_manager true for the session-bound pair",
@@ -1532,26 +1535,26 @@ def command_qa_plan(args: argparse.Namespace) -> int:
                 "after cleanup, reconcile reports no dangling bindings, dead-pid sessions, or stuck tasks and git status remains clean",
             ],
             "steps": [
-                'Start a real pair: workerctl pair --task qa-emergent-criteria --worker-name qa-ec-worker --manager-name qa-ec-manager --cwd "$PWD" --task-goal "QA emergent acceptance criteria and cleanup lifecycle without tracked edits." --task-summary "Real worker/manager QA for criteria negotiation, finish cleanup, and tmux diagnostics." --task-prompt "Inspect README.md and workerctl help. Do not edit tracked files. Wait for manager instructions. When asked, propose 2-4 acceptance criteria for this QA slice, separating must-have criteria from follow-up criteria."',
-                "Run workerctl cycle qa-emergent-criteria and verify manager_context.acceptance_criteria is present with empty status buckets.",
+                'Start a real pair: conveyor pair --task qa-emergent-criteria --worker-name qa-ec-worker --manager-name qa-ec-manager --cwd "$PWD" --task-goal "QA emergent acceptance criteria and cleanup lifecycle without tracked edits." --task-summary "Real worker/manager QA for criteria negotiation, finish cleanup, and tmux diagnostics." --task-prompt "Inspect README.md and conveyor help. Do not edit tracked files. Wait for manager instructions. When asked, propose 2-4 acceptance criteria for this QA slice, separating must-have criteria from follow-up criteria."',
+                "Run conveyor cycle qa-emergent-criteria and verify manager_context.acceptance_criteria is present with empty status buckets.",
                 "Verify manager_context.criteria_negotiation.needed is true and reason is no_criteria on the first cycle.",
-                'Nudge the worker: workerctl session-nudge qa-ec-worker "Propose 2-4 acceptance criteria for this QA slice. Separate must-have current-task criteria from deferred follow-up criteria. Keep this status-only: do not edit tracked files."',
-                "Optionally save the worker response and run workerctl criteria-plan qa-emergent-criteria --from-worker-response response.md --json; review suggestions before running any criteria mutations.",
-                "Record at least one worker-proposed must-have criterion as accepted with workerctl criteria qa-emergent-criteria --add --criterion \"...\" --source worker_proposed --status accepted.",
-                "Record at least one follow-up criterion as deferred with workerctl criteria qa-emergent-criteria --add --criterion \"...\" --source worker_proposed --status deferred --rationale \"Follow-up after this QA slice\".",
-                "Run workerctl cycle qa-emergent-criteria again and verify open contains the accepted criterion while deferred contains the follow-up.",
-                "Run workerctl cycle qa-emergent-criteria again and verify manager_context.criteria_negotiation.needed is false after active criteria exist.",
+                'Nudge the worker: conveyor session-nudge qa-ec-worker "Propose 2-4 acceptance criteria for this QA slice. Separate must-have current-task criteria from deferred follow-up criteria. Keep this status-only: do not edit tracked files."',
+                "Optionally save the worker response and run conveyor criteria-plan qa-emergent-criteria --from-worker-response response.md --json; review suggestions before running any criteria mutations.",
+                "Record at least one worker-proposed must-have criterion as accepted with conveyor criteria qa-emergent-criteria --add --criterion \"...\" --source worker_proposed --status accepted.",
+                "Record at least one follow-up criterion as deferred with conveyor criteria qa-emergent-criteria --add --criterion \"...\" --source worker_proposed --status deferred --rationale \"Follow-up after this QA slice\".",
+                "Run conveyor cycle qa-emergent-criteria again and verify open contains the accepted criterion while deferred contains the follow-up.",
+                "Run conveyor cycle qa-emergent-criteria again and verify manager_context.criteria_negotiation.needed is false after active criteria exist.",
                 "Check git status --short --branch and verify the status-only worker has not edited tracked files.",
-                "If the worker omits a useful proof, add a manager-inferred accepted criterion with workerctl criteria qa-emergent-criteria --add --criterion \"...\" --source manager_inferred --status accepted.",
-                "Attempt workerctl finish-task qa-emergent-criteria --reason \"QA premature finish\" --require-criteria-audit and verify it fails while accepted criteria remain open.",
-                "Satisfy each accepted criterion with workerctl criteria qa-emergent-criteria --satisfy <id> --evidence-json '{\"command\":\"...\",\"status\":\"pass\"}' --proof \"...\".",
-                "Run workerctl criteria qa-emergent-criteria --list and verify accepted is 0 before attempting the final audited finish.",
-                "Run workerctl replay qa-emergent-criteria and verify criteria add/update transitions appear in chronological order.",
-                "Run workerctl export-task qa-emergent-criteria --output /tmp/qa-emergent-criteria-export and verify acceptance-criteria.json exists and manifest.json lists it.",
-                "Finish with workerctl finish-task qa-emergent-criteria --reason \"QA criteria flow complete\" --require-criteria-audit --stop-manager --stop-worker and verify killed_worker and killed_manager are true.",
+                "If the worker omits a useful proof, add a manager-inferred accepted criterion with conveyor criteria qa-emergent-criteria --add --criterion \"...\" --source manager_inferred --status accepted.",
+                "Attempt conveyor finish-task qa-emergent-criteria --reason \"QA premature finish\" --require-criteria-audit and verify it fails while accepted criteria remain open.",
+                "Satisfy each accepted criterion with conveyor criteria qa-emergent-criteria --satisfy <id> --evidence-json '{\"command\":\"...\",\"status\":\"pass\"}' --proof \"...\".",
+                "Run conveyor criteria qa-emergent-criteria --list and verify accepted is 0 before attempting the final audited finish.",
+                "Run conveyor replay qa-emergent-criteria and verify criteria add/update transitions appear in chronological order.",
+                "Run conveyor export-task qa-emergent-criteria --output /tmp/qa-emergent-criteria-export and verify acceptance-criteria.json exists and manifest.json lists it.",
+                "Finish with conveyor finish-task qa-emergent-criteria --reason \"QA criteria flow complete\" --require-criteria-audit --stop-manager --stop-worker and verify killed_worker and killed_manager are true.",
                 "Run tmux list-sessions 2>/dev/null | rg 'qa-ec-(worker|manager)|codex-qa-ec' || true and verify no matching tmux sessions remain.",
-                "Run workerctl sessions --state all and verify qa-ec-worker and qa-ec-manager are both state gone.",
-                "Run workerctl reconcile --stale-cycles-seconds 1 and confirm dead_pid_sessions, dangling_bindings, and stuck_tasks are empty.",
+                "Run conveyor sessions --state all and verify qa-ec-worker and qa-ec-manager are both state gone.",
+                "Run conveyor reconcile --stale-cycles-seconds 1 and confirm dead_pid_sessions, dangling_bindings, and stuck_tasks are empty.",
                 "Run git status --short --branch and verify tracked status remains clean.",
             ],
         },
@@ -1566,17 +1569,17 @@ def command_qa_plan(args: argparse.Namespace) -> int:
                 "live failure simulations are isolated to disposable sessions or a controlled PATH/env override and do not disturb active user sessions",
             ],
             "steps": [
-                "Record a clean preflight: workerctl doctor-self --json, workerctl sessions --state active, tmux list-sessions, and git status --short --branch.",
-                "Run a read-only missing-tmux simulation, for example PATH=/usr/bin:/bin workerctl doctor-self --json, and verify the output remains parseable JSON with tmux_available false or an actionable tmux error field.",
-                "Run workerctl list --json and workerctl status <disposable-worker> under the same missing-tmux simulation, if a disposable worker exists, and verify JSON shape is preserved rather than replaced by a traceback.",
+                "Record a clean preflight: conveyor doctor-self --json, conveyor sessions --state active, tmux list-sessions, and git status --short --branch.",
+                "Run a read-only missing-tmux simulation, for example PATH=/usr/bin:/bin conveyor doctor-self --json, and verify the output remains parseable JSON with tmux_available false or an actionable tmux error field.",
+                "Run conveyor list --json and conveyor status <disposable-worker> under the same missing-tmux simulation, if a disposable worker exists, and verify JSON shape is preserved rather than replaced by a traceback.",
                 "Create or reuse only a disposable pair for mutation checks; do not target active project work sessions.",
-                "Force a tmux send failure for workerctl session-nudge <disposable-worker> by using a missing tmux binary, killed tmux session, or invalid disposable tmux target; verify nonzero exit and actionable stderr.",
-                "After the failed nudge, run workerctl audit <task> and workerctl replay <task>; verify no misleading successful session_nudged event was recorded for the failed send.",
-                "Run workerctl cycle <task> with the disposable worker's tmux pane unavailable and verify pane_signal.degraded is true, terminal capture failure details are present, and worker_alive/manager_alive still describe registered process liveness.",
+                "Force a tmux send failure for conveyor session-nudge <disposable-worker> by using a missing tmux binary, killed tmux session, or invalid disposable tmux target; verify nonzero exit and actionable stderr.",
+                "After the failed nudge, run conveyor audit <task> and conveyor replay <task>; verify no misleading successful session_nudged event was recorded for the failed send.",
+                "Run conveyor cycle <task> with the disposable worker's tmux pane unavailable and verify pane_signal.degraded is true, terminal capture failure details are present, and worker_alive/manager_alive still describe registered process liveness.",
                 "Exercise finish-task --stop-manager --stop-worker against a disposable pair where one tmux session is already gone; verify the command reports which stop failed or was already unavailable instead of silently claiming full cleanup.",
-                "Run workerctl reconcile --stale-cycles-seconds 1 after each simulated failure and verify dead_pid_sessions, dangling_bindings, and stuck_tasks are understandable and recoverable.",
-                "Run workerctl reconcile --apply only after inspecting the dry-run output and only for disposable sessions created by this QA.",
-                "Verify cleanup with tmux list-sessions, workerctl sessions --state all, workerctl reconcile --stale-cycles-seconds 1, and git status --short --branch.",
+                "Run conveyor reconcile --stale-cycles-seconds 1 after each simulated failure and verify dead_pid_sessions, dangling_bindings, and stuck_tasks are understandable and recoverable.",
+                "Run conveyor reconcile --apply only after inspecting the dry-run output and only for disposable sessions created by this QA.",
+                "Verify cleanup with tmux list-sessions, conveyor sessions --state all, conveyor reconcile --stale-cycles-seconds 1, and git status --short --branch.",
                 "If any live simulation would require disrupting real tmux or active Codex sessions, stop at the generated plan and cover that case with unit tests or dependency injection instead.",
             ],
         },
@@ -1592,17 +1595,17 @@ def command_qa_plan(args: argparse.Namespace) -> int:
                 "the Dispatch panel surfaces queued, failed, stale, risky, and suppressed dispatch state without presenting Dispatch as a decision maker",
             ],
             "steps": [
-                'Create a disposable pair: workerctl pair --task qa-dispatch-completion --worker-name qa-dispatch-worker --manager-name qa-dispatch-manager --cwd "$PWD" --task-goal "QA dispatch completion routing without tracked edits." --task-summary "Verify dispatch observes worker completion and wakes the manager mechanically." --task-prompt "Do not edit tracked files. Complete a short status-only response, then stop."',
-                "Run workerctl cycle qa-dispatch-completion until the worker session has ingested codex_events with last_event_subtype task_complete.",
-                "Run workerctl dispatch --once --type worker_task_complete --dispatcher-id qa-dispatch --json and verify processed_count is 1 and state is delivered.",
-                "Inspect workerctl audit qa-dispatch-completion --json and verify routed_notifications has signal_type worker_task_complete, source_event_id, correlation_id, delivered state, and a dedupe_key containing the source event id.",
+                'Create a disposable pair: conveyor pair --task qa-dispatch-completion --worker-name qa-dispatch-worker --manager-name qa-dispatch-manager --cwd "$PWD" --task-goal "QA dispatch completion routing without tracked edits." --task-summary "Verify dispatch observes worker completion and wakes the manager mechanically." --task-prompt "Do not edit tracked files. Complete a short status-only response, then stop."',
+                "Run conveyor cycle qa-dispatch-completion until the worker session has ingested codex_events with last_event_subtype task_complete.",
+                "Run conveyor dispatch --once --type worker_task_complete --dispatcher-id qa-dispatch --json and verify processed_count is 1 and state is delivered.",
+                "Inspect conveyor audit qa-dispatch-completion --json and verify routed_notifications has signal_type worker_task_complete, source_event_id, correlation_id, delivered state, and a dedupe_key containing the source event id.",
                 "Inspect the manager tmux pane and verify it received a notification telling the manager the worker appears to have completed a turn and must inspect evidence before deciding what completion means.",
-                "Run workerctl replay qa-dispatch-completion and verify routed_notifications and correlation_chains entries use the notification timestamp/source event rather than falling back to task creation time.",
+                "Run conveyor replay qa-dispatch-completion and verify routed_notifications and correlation_chains entries use the notification timestamp/source event rather than falling back to task creation time.",
                 "Open the dashboard for the bound task and verify the Dispatch chain row uses a readable notification label, shows one notification, and does not replace the label with only the correlation id.",
-                "Create or simulate a second worker task_complete event, run workerctl dispatch --once again, and verify a second routed notification appears because dedupe includes source_event_id.",
+                "Create or simulate a second worker task_complete event, run conveyor dispatch --once again, and verify a second routed notification appears because dedupe includes source_event_id.",
                 "Simulate a duplicate-route race only against the disposable task or with a patched test double; verify dispatch_signal_suppressed telemetry is recorded and no extra manager send occurs.",
                 "Verify the dashboard Dispatch health shows any recent suppressed dispatch signal count, and that mixed command-backed and completion-only chains are ordered by event time.",
-                "Finish or clean up only the disposable pair, then run workerctl reconcile --stale-cycles-seconds 1 and git status --short --branch.",
+                "Finish or clean up only the disposable pair, then run conveyor reconcile --stale-cycles-seconds 1 and git status --short --branch.",
             ],
         },
         "adversarial-triggers": {
@@ -1677,19 +1680,19 @@ def command_qa_plan(args: argparse.Namespace) -> int:
             ],
             "steps": [
                 "Create a disposable WORKERCTL_DB and record git status --short --branch before the drill; all trigger tasks must be read-only against tracked files.",
-                "Run the loop gate trigger task: create or pair a disposable task with task prompt \"Run this as an adversarially gated Ralph loop.\" Then verify workerctl runs --list --task <task> shows a purpose=ralph_loop run with metadata.required_before_continue containing adversarial_check; use correlation nl-loop-gate-policy.",
+                "Run the loop gate trigger task: create or pair a disposable task with task prompt \"Run this as an adversarially gated Ralph loop.\" Then verify conveyor runs --list --task <task> shows a purpose=ralph_loop run with metadata.required_before_continue containing adversarial_check; use correlation nl-loop-gate-policy.",
                 "For the loop gate trigger, verify the policy is not just generic burden-of-proof prose: audit/replay must show a Ralph-loop run or template/preset record before any continue_iteration request.",
                 "Run the iteration gate trigger task with prompt \"Do not send the worker another iteration until adversarial proof exists.\" Create a no-tmux worker/manager binding, a Ralph-loop run with required_before_continue=[\"adversarial_check\"], and enqueue continue_iteration for requested iteration 2 with correlation nl-iteration-gate-missing-proof.",
-                "Run workerctl dispatch --once --type continue_iteration --dispatcher-id qa-adversarial-triggers --json and verify state=blocked, missing_evidence=[adversarial_check], delivered=false, target_worker_notified=false, and no worker inbox item.",
-                "Record proof with workerctl loop-evidence adversarial-check <task> --loop-run <run-id> --iteration 1 --failure-mode \"iteration 2 could be delivered after only a manager request\" --check \"dispatch result, worker inbox, and command receipt inspection\" --result \"blocked command produced no worker delivery before proof\" --correlation-id nl-iteration-gate-adversarial-proof.",
+                "Run conveyor dispatch --once --type continue_iteration --dispatcher-id qa-adversarial-triggers --json and verify state=blocked, missing_evidence=[adversarial_check], delivered=false, target_worker_notified=false, and no worker inbox item.",
+                "Record proof with conveyor loop-evidence adversarial-check <task> --loop-run <run-id> --iteration 1 --failure-mode \"iteration 2 could be delivered after only a manager request\" --check \"dispatch result, worker inbox, and command receipt inspection\" --result \"blocked command produced no worker delivery before proof\" --correlation-id nl-iteration-gate-adversarial-proof.",
                 "Enqueue a fresh continue_iteration command with correlation nl-iteration-gate-allowed, run Dispatch again, and verify the fresh retry is delivered to the worker inbox or tmux target.",
-                "Run the finish gate trigger task with prompt \"Do not mark this done until you have tried to disprove it.\" First run workerctl finish-task <task> --require-adversarial-proof --reason \"premature natural-language finish drill\" and verify it fails with adversarial proof is required, task remains non-done, and no succeeded finish_task command exists.",
-                "Record a satisfied manager_inferred criterion with evidence_type=adversarial_check plus non-empty failure_mode, check, and result using correlation nl-finish-gate-proof; then run workerctl finish-task <task> --require-adversarial-proof --require-criteria-audit and verify it succeeds.",
+                "Run the finish gate trigger task with prompt \"Do not mark this done until you have tried to disprove it.\" First run conveyor finish-task <task> --require-adversarial-proof --reason \"premature natural-language finish drill\" and verify it fails with adversarial proof is required, task remains non-done, and no succeeded finish_task command exists.",
+                "Record a satisfied manager_inferred criterion with evidence_type=adversarial_check plus non-empty failure_mode, check, and result using correlation nl-finish-gate-proof; then run conveyor finish-task <task> --require-adversarial-proof --require-criteria-audit and verify it succeeds.",
                 "Run the worker-directed trigger task: nudge the worker with \"Ask the worker to identify the strongest realistic failure mode and prove it is handled. Reply with exactly three labeled fields: failure_mode, check, result.\" Verify the worker response contains all three labels.",
-                "Record the worker response with workerctl loop-evidence adversarial-check <task> --loop-run <run-id> --iteration 1 --failure-mode \"<worker failure_mode>\" --check \"<worker check>\" --result \"<worker result>\" --source worker_proposed --correlation-id nl-worker-directed-proof; verify audit/replay/export preserve source=worker_proposed.",
+                "Record the worker response with conveyor loop-evidence adversarial-check <task> --loop-run <run-id> --iteration 1 --failure-mode \"<worker failure_mode>\" --check \"<worker check>\" --result \"<worker result>\" --source worker_proposed --correlation-id nl-worker-directed-proof; verify audit/replay/export preserve source=worker_proposed.",
                 "Run the acceptance-criteria trigger task with prompt \"Each loop must include adversarial acceptance criteria from manager to worker.\" Add manager_inferred accepted criteria that require blocked Dispatch before proof, empty worker inbox on blocked continuation, and structured adversarial_check evidence before retry.",
-                "Satisfy the manager-created adversarial criteria only after audit, replay, workerctl commands --task <task> --attempts, worker-inbox, and loop-evidence receipts prove the negative checks; use correlation nl-manager-criteria-negative-checks.",
-                "Run workerctl replay <task>, workerctl audit <task>, workerctl commands --task <task> --attempts, workerctl worker-inbox <task>, and workerctl export-task <task> for each disposable trigger task; verify the correlation markers connect natural-language prompt, policy/criteria, blocked attempt, proof receipt, and allowed retry or finish.",
+                "Satisfy the manager-created adversarial criteria only after audit, replay, conveyor commands --task <task> --attempts, worker-inbox, and loop-evidence receipts prove the negative checks; use correlation nl-manager-criteria-negative-checks.",
+                "Run conveyor replay <task>, conveyor audit <task>, conveyor commands --task <task> --attempts, conveyor worker-inbox <task>, and conveyor export-task <task> for each disposable trigger task; verify the correlation markers connect natural-language prompt, policy/criteria, blocked attempt, proof receipt, and allowed retry or finish.",
                 "Run git status --short --branch after cleanup and verify no tracked-file edits came from the live QA run.",
             ],
         },
@@ -1715,7 +1718,7 @@ def command_qa_plan(args: argparse.Namespace) -> int:
             "acceptance_criteria": [
                 "Parent state.yaml records conveyor rules, one active child, child board paths, and a final oracle requiring merged/proven/blocker receipts for every child.",
                 "Each child state.yaml has a measurable completion proof, verification plan, adversarial review gate, and receipt schema that can survive thread compaction.",
-                "A reusable natural-language starter prompt is present in docs and in workerctl qa-plan goalbuddy-conveyor output.",
+                "A reusable natural-language starter prompt is present in docs and in conveyor qa-plan goalbuddy-conveyor output.",
                 "A negative QA check proves the conveyor does not activate two child boards or mark a child complete without PR/CI/merge or satisfied_on_main evidence.",
                 "GoalBuddy checker passes for the parent and all active/done child boards after each receipt update.",
             ],
@@ -1877,42 +1880,42 @@ def command_qa_plan(args: argparse.Namespace) -> int:
             "steps": [
                 "Choose a disposable target repo, seed prompt, cleanup policy, CI provider expectation, and max iterations value. Max iterations must be at least 2; use max iterations 2 for the standard smoke.",
                 "Compute and preserve the exact seed prompt SHA-256, then reuse the listed correlation markers for manager decisions, epilogues, commands, handoffs, and evidence searches.",
-                "List preset policies with workerctl ralph-loop-presets --list --json and verify test_coverage_loop, build_then_clear, pr_ci_merge_loop, and compact_then_continue are present with their required_before_continue evidence lists.",
-                "Start Dispatch for the run if it is not already active: workerctl dispatch --watch --dispatcher-id qa-ralph-loop.",
-                "Create iteration 1 with the same seed prompt that will later be replayed; for trusted disposable repos include --accept-trust so startup cannot stall at the Codex trust prompt: workerctl pair --task qa-ralph-loop-iter-1 --worker-name qa-ralph-worker-1 --manager-name qa-ralph-manager --cwd <target-repo> --task-goal \"Managed Ralph loop iteration 1\" --task-summary \"PR/CI/merge/context-clear QA\" --task-prompt \"<same seed prompt>\" --accept-trust.",
-                "Configure manager policy for iteration 1 with required epilogues but without permissions first; verify repo.open_pr, repo.merge_green_pr, and worker_compact_clear are denied by workerctl manager-permission before enabling them.",
-                "Enable the allowed run explicitly: workerctl manager-config qa-ralph-loop-iter-1 --allow-pr --allow-merge-green --allow-worker-compact-clear --epilogue draft-pr --epilogue record-handoff --tool verification.run_tests --tool context.fetch_prs.",
-                "Run workerctl cycle qa-ralph-loop-iter-1 until the worker reports completion, then ask what remains or what the next useful slice is before deciding whether the iteration is PR-worthy.",
-                "Require accepted criteria closure and verification evidence before PR work: workerctl finish-task qa-ralph-loop-iter-1 --require-criteria-audit --require-epilogue should fail while criteria or epilogue steps are incomplete.",
-                "At each PR, CI-fix, merge, handoff, and clear checkpoint, capture liveness receipts: workerctl telemetry task qa-ralph-loop-iter-1 --json and workerctl telemetry --event-type dispatch_watch_heartbeat --newest --limit 1 --json. Preserve the worker_alive, manager_alive, latest_cycle, and dispatch heartbeat fields with the same correlation marker used for that phase.",
+                "List preset policies with conveyor ralph-loop-presets --list --json and verify test_coverage_loop, build_then_clear, pr_ci_merge_loop, and compact_then_continue are present with their required_before_continue evidence lists.",
+                "Start Dispatch for the run if it is not already active: conveyor dispatch --watch --dispatcher-id qa-ralph-loop.",
+                "Create iteration 1 with the same seed prompt that will later be replayed; for trusted disposable repos include --accept-trust so startup cannot stall at the Codex trust prompt: conveyor pair --task qa-ralph-loop-iter-1 --worker-name qa-ralph-worker-1 --manager-name qa-ralph-manager --cwd <target-repo> --task-goal \"Managed Ralph loop iteration 1\" --task-summary \"PR/CI/merge/context-clear QA\" --task-prompt \"<same seed prompt>\" --accept-trust.",
+                "Configure manager policy for iteration 1 with required epilogues but without permissions first; verify repo.open_pr, repo.merge_green_pr, and worker_compact_clear are denied by conveyor manager-permission before enabling them.",
+                "Enable the allowed run explicitly: conveyor manager-config qa-ralph-loop-iter-1 --allow-pr --allow-merge-green --allow-worker-compact-clear --epilogue draft-pr --epilogue record-handoff --tool verification.run_tests --tool context.fetch_prs.",
+                "Run conveyor cycle qa-ralph-loop-iter-1 until the worker reports completion, then ask what remains or what the next useful slice is before deciding whether the iteration is PR-worthy.",
+                "Require accepted criteria closure and verification evidence before PR work: conveyor finish-task qa-ralph-loop-iter-1 --require-criteria-audit --require-epilogue should fail while criteria or epilogue steps are incomplete.",
+                "At each PR, CI-fix, merge, handoff, and clear checkpoint, capture liveness receipts: conveyor telemetry task qa-ralph-loop-iter-1 --json and conveyor telemetry --event-type dispatch_watch_heartbeat --newest --limit 1 --json. Preserve the worker_alive, manager_alive, latest_cycle, and dispatch heartbeat fields with the same correlation marker used for that phase.",
                 "Record the PR-readiness manager decision with payload ralph_loop.iteration=1, phase=pr, correlation_id=ralph-iter-1-pr, and seed_prompt_sha256 before asking for PR work. The seed prompt should ask the worker to stop after local verification and branch evidence, not to open or merge a PR unilaterally.",
-                "Use a manager-routed PR instruction only after repo.open_pr is permitted: workerctl session-nudge qa-ralph-worker-1 \"correlation_id=ralph-iter-1-pr; open the PR now, then report the PR URL and evidence.\" Run workerctl epilogue qa-ralph-loop-iter-1 --step draft-pr --correlation-id ralph-iter-1-pr as the PR-readiness checkpoint, then record the actual PR URL in accepted criterion evidence, a manager decision payload, a handoff payload, or a command receipt.",
+                "Use a manager-routed PR instruction only after repo.open_pr is permitted: conveyor session-nudge qa-ralph-worker-1 \"correlation_id=ralph-iter-1-pr; open the PR now, then report the PR URL and evidence.\" Run conveyor epilogue qa-ralph-loop-iter-1 --step draft-pr --correlation-id ralph-iter-1-pr as the PR-readiness checkpoint, then record the actual PR URL in accepted criterion evidence, a manager decision payload, a handoff payload, or a command receipt.",
                 "Monitor CI for the PR and record the CI state. In one iteration, force or simulate a CI fail result, then route a CI-fix nudge to the worker and require an updated PR before continuing.",
-                "Record the CI-fix manager decision with payload ralph_loop.iteration=1, phase=ci_fix, correlation_id=ralph-iter-1-ci-fix when the failure path is exercised, then route the retry with workerctl session-nudge qa-ralph-worker-1 \"correlation_id=ralph-iter-1-ci-fix; inspect CI, push a fix, and report the fresh CI URL.\".",
+                "Record the CI-fix manager decision with payload ralph_loop.iteration=1, phase=ci_fix, correlation_id=ralph-iter-1-ci-fix when the failure path is exercised, then route the retry with conveyor session-nudge qa-ralph-worker-1 \"correlation_id=ralph-iter-1-ci-fix; inspect CI, push a fix, and report the fresh CI URL.\".",
                 "Before merging, verify the disposable target has required checks or branch protection configured, or explicitly verify gh pr checks shows all required jobs green. Do not treat gh pr merge --auto as a green gate by itself, because it can merge immediately when no checks are required.",
                 "After CI is green, verify repo.merge_green_pr permission and have the manager record the green merge decision before merge; merge only the disposable PR and record the merge result as accepted criterion evidence, a manager decision payload, a handoff payload, or a command receipt.",
-                "Record an iteration handoff with workerctl handoff qa-ralph-loop-iter-1 --summary \"...\" --next-step \"Replay same seed prompt after clear\" --payload-json '{\"iteration\":1,\"pr\":\"<url>\",\"ci\":\"green\",\"merge\":\"merged\",\"clear_correlation_id\":\"ralph-iter-1-clear\"}'.",
-                "Use the audited clear path only after handoff and worker_compact_clear permission: workerctl compact-worker qa-ralph-loop-iter-1 --clear --reason \"Clear worker context between Ralph loop iterations; correlation_id=ralph-iter-1-clear\" --message \"correlation_id=ralph-iter-1-clear; clear worker context between Ralph loop iterations after saved handoff\".",
-                "Start iteration 2 with a fresh task/worker/manager after the audited clear receipt and the same seed prompt, but wrap the replay with an inspect first guard: if the iteration 1 work is already merged, the worker must report the already merged state and avoid edits, commits, or PR work unless something is actually missing. For trusted disposable repos include --accept-trust again: workerctl pair --task qa-ralph-loop-iter-2 --worker-name qa-ralph-worker-2 --manager-name qa-ralph-manager-2 --cwd <target-repo> --task-goal \"Managed Ralph loop iteration 2\" --task-summary \"Replay after audited clear with fresh-worker isolation\" --task-prompt \"<same seed prompt plus inspect-first already-merged guard>\" --accept-trust.",
+                "Record an iteration handoff with conveyor handoff qa-ralph-loop-iter-1 --summary \"...\" --next-step \"Replay same seed prompt after clear\" --payload-json '{\"iteration\":1,\"pr\":\"<url>\",\"ci\":\"green\",\"merge\":\"merged\",\"clear_correlation_id\":\"ralph-iter-1-clear\"}'.",
+                "Use the audited clear path only after handoff and worker_compact_clear permission: conveyor compact-worker qa-ralph-loop-iter-1 --clear --reason \"Clear worker context between Ralph loop iterations; correlation_id=ralph-iter-1-clear\" --message \"correlation_id=ralph-iter-1-clear; clear worker context between Ralph loop iterations after saved handoff\".",
+                "Start iteration 2 with a fresh task/worker/manager after the audited clear receipt and the same seed prompt, but wrap the replay with an inspect first guard: if the iteration 1 work is already merged, the worker must report the already merged state and avoid edits, commits, or PR work unless something is actually missing. For trusted disposable repos include --accept-trust again: conveyor pair --task qa-ralph-loop-iter-2 --worker-name qa-ralph-worker-2 --manager-name qa-ralph-manager-2 --cwd <target-repo> --task-goal \"Managed Ralph loop iteration 2\" --task-summary \"Replay after audited clear with fresh-worker isolation\" --task-prompt \"<same seed prompt plus inspect-first already-merged guard>\" --accept-trust.",
                 "Prove iteration 2 starts in fresh-worker isolation by capturing the initial worker pane/transcript and verifying it does not rely on stale local chat state from iteration 1; use the iteration 1 clear command receipt as the audited clear proof.",
                 "Repeat the manager-led delivery loop for iteration 2: completion judgment, what-remains probe, criteria closure, PR action, CI monitor/fix if needed, green merge decision, handoff, and audited clear or cleanup.",
-                "Run workerctl audit, workerctl replay, workerctl commands --task, and workerctl telemetry --task for both iterations; verify dispatcher telemetry includes PR, CI monitor/fix, merge, handoff, and clear transitions, and use audit/replay/commands output for marker linkage.",
-                "Export final evidence with workerctl export-task for both iteration tasks and preserve telemetry summary artifacts, PR URLs, CI result, merge result, worker clear receipt, fresh-worker isolation proof, replay, and audit output.",
-                "Stop after max iterations or when the manager records no useful remaining work; run workerctl reconcile --stale-cycles-seconds 1 and git status --short --branch in the manager repo and target repo.",
-                "Run the negative max-iteration browser drill in a disposable task: create a Ralph-loop run with max_iterations=1 and current_iteration=1, record a manager decision requesting iteration 2, then queue it with workerctl enqueue-continue-iteration <task> --loop-run <run-id> --requested-iteration 2 --message \"run iteration 2\" --manager-decision-id <id> --correlation-id ralph-loop-max-block. Preserve max_iterations=1 in the receipt.",
-                "Run workerctl dispatch --once --type continue_iteration --dispatcher-id qa-ralph-loop --json and verify the processed item returns state=blocked, reason=max_iterations_reached, delivered=false, target_worker_notified=false, current_iteration=1, max_iterations=1, requested_iteration=2, and no routed notification id.",
+                "Run conveyor audit, conveyor replay, conveyor commands --task, and conveyor telemetry --task for both iterations; verify dispatcher telemetry includes PR, CI monitor/fix, merge, handoff, and clear transitions, and use audit/replay/commands output for marker linkage.",
+                "Export final evidence with conveyor export-task for both iteration tasks and preserve telemetry summary artifacts, PR URLs, CI result, merge result, worker clear receipt, fresh-worker isolation proof, replay, and audit output.",
+                "Stop after max iterations or when the manager records no useful remaining work; run conveyor reconcile --stale-cycles-seconds 1 and git status --short --branch in the manager repo and target repo.",
+                "Run the negative max-iteration browser drill in a disposable task: create a Ralph-loop run with max_iterations=1 and current_iteration=1, record a manager decision requesting iteration 2, then queue it with conveyor enqueue-continue-iteration <task> --loop-run <run-id> --requested-iteration 2 --message \"run iteration 2\" --manager-decision-id <id> --correlation-id ralph-loop-max-block. Preserve max_iterations=1 in the receipt.",
+                "Run conveyor dispatch --once --type continue_iteration --dispatcher-id qa-ralph-loop --json and verify the processed item returns state=blocked, reason=max_iterations_reached, delivered=false, target_worker_notified=false, current_iteration=1, max_iterations=1, requested_iteration=2, and no routed notification id.",
                 "Open the dashboard for the bound task and verify the Dispatch panel shows continue_iteration, max_iterations_reached, iteration 1/1, 0 notifications, Inbox 0, and Pull inbox 0 for correlation ralph-loop-max-block.",
-                "Run workerctl replay <task>, workerctl audit <task>, workerctl commands --task <task> --attempts, and workerctl worker-inbox <task> for the negative drill; verify the manager-visible refusal receipt is present and the worker inbox remains empty.",
-                "Run the missing-evidence browser drill in a disposable task: create a Ralph-loop run with max_iterations=3, current_iteration=1, and required_before_continue=[\"ci_green\",\"adversarial_check\"], record a manager decision requesting iteration 2, then queue it with workerctl enqueue-continue-iteration <task> --loop-run <run-id> --requested-iteration 2 --message \"run iteration 2\" --manager-decision-id <id> --correlation-id ralph-loop-missing-ci.",
-                "Run workerctl dispatch --once --type continue_iteration --dispatcher-id qa-ralph-loop --json and verify the processed item returns state=blocked, reason=missing_required_evidence, missing_evidence=[ci_green,adversarial_check], delivered=false, target_worker_notified=false, current_iteration=1, max_iterations=3, requested_iteration=2, and no routed notification id.",
+                "Run conveyor replay <task>, conveyor audit <task>, conveyor commands --task <task> --attempts, and conveyor worker-inbox <task> for the negative drill; verify the manager-visible refusal receipt is present and the worker inbox remains empty.",
+                "Run the missing-evidence browser drill in a disposable task: create a Ralph-loop run with max_iterations=3, current_iteration=1, and required_before_continue=[\"ci_green\",\"adversarial_check\"], record a manager decision requesting iteration 2, then queue it with conveyor enqueue-continue-iteration <task> --loop-run <run-id> --requested-iteration 2 --message \"run iteration 2\" --manager-decision-id <id> --correlation-id ralph-loop-missing-ci.",
+                "Run conveyor dispatch --once --type continue_iteration --dispatcher-id qa-ralph-loop --json and verify the processed item returns state=blocked, reason=missing_required_evidence, missing_evidence=[ci_green,adversarial_check], delivered=false, target_worker_notified=false, current_iteration=1, max_iterations=3, requested_iteration=2, and no routed notification id.",
                 "Open the dashboard for the bound task and verify the Dispatch panel shows continue_iteration, missing_required_evidence, missing ci_green, adversarial_check, iteration 1/3, requested 2, 0 notifications, Inbox 0, and Pull inbox 0 for correlation ralph-loop-missing-ci.",
-                "Record ci_green as run-qualified evidence with workerctl loop-evidence add <task> --loop-run <run-id> --iteration 1 --evidence-type ci_green --status green --correlation-id ralph-loop-ci-green; record structured proof with workerctl loop-evidence adversarial-check <task> --loop-run <run-id> --iteration 1 --failure-mode \"iteration 2 could continue even though CI-green hides an unreviewed regression\" --check \"inspect the CI result, diff, and manager receipt before retry\" --result \"CI-green and direct inspection leave no unresolved blocker for iteration 2\" --correlation-id ralph-loop-ci-adversarial; then enqueue a fresh continue_iteration command for requested iteration 2 with correlation ralph-loop-ci-allowed.",
-                "Run workerctl dispatch --once --type continue_iteration --dispatcher-id qa-ralph-loop --json again and verify the fresh retry is delivered, the routed notification signal_type is continue_iteration, and worker-inbox contains the iteration 2 message.",
-                "Run the preset evidence browser drill in a disposable task: create a preset-backed run with workerctl ralph-loop-presets --create-run <task> --preset pr_ci_merge_loop --name qa-ralph-loop-preset --max-iterations 3 --current-iteration 1 --seed-prompt-sha256 <seed-sha256> --json, then queue requested iteration 2 with correlation ralph-loop-preset-missing.",
-                "Run workerctl dispatch --once --type continue_iteration --dispatcher-id qa-ralph-loop --json and verify the processed item returns state=blocked, reason=missing_required_evidence, missing_evidence=[pr_url,ci_green,merge,adversarial_check], delivered=false, target_worker_notified=false, current_iteration=1, max_iterations=3, requested_iteration=2, and no routed notification id.",
+                "Record ci_green as run-qualified evidence with conveyor loop-evidence add <task> --loop-run <run-id> --iteration 1 --evidence-type ci_green --status green --correlation-id ralph-loop-ci-green; record structured proof with conveyor loop-evidence adversarial-check <task> --loop-run <run-id> --iteration 1 --failure-mode \"iteration 2 could continue even though CI-green hides an unreviewed regression\" --check \"inspect the CI result, diff, and manager receipt before retry\" --result \"CI-green and direct inspection leave no unresolved blocker for iteration 2\" --correlation-id ralph-loop-ci-adversarial; then enqueue a fresh continue_iteration command for requested iteration 2 with correlation ralph-loop-ci-allowed.",
+                "Run conveyor dispatch --once --type continue_iteration --dispatcher-id qa-ralph-loop --json again and verify the fresh retry is delivered, the routed notification signal_type is continue_iteration, and worker-inbox contains the iteration 2 message.",
+                "Run the preset evidence browser drill in a disposable task: create a preset-backed run with conveyor ralph-loop-presets --create-run <task> --preset pr_ci_merge_loop --name qa-ralph-loop-preset --max-iterations 3 --current-iteration 1 --seed-prompt-sha256 <seed-sha256> --json, then queue requested iteration 2 with correlation ralph-loop-preset-missing.",
+                "Run conveyor dispatch --once --type continue_iteration --dispatcher-id qa-ralph-loop --json and verify the processed item returns state=blocked, reason=missing_required_evidence, missing_evidence=[pr_url,ci_green,merge,adversarial_check], delivered=false, target_worker_notified=false, current_iteration=1, max_iterations=3, requested_iteration=2, and no routed notification id.",
                 "Open the dashboard for the bound task and verify the Dispatch panel shows continue_iteration, missing_required_evidence, missing pr_url, ci_green, merge, adversarial_check, iteration 1/3, requested 2, 0 notifications, Inbox 0, and Pull inbox 0 for correlation ralph-loop-preset-missing.",
-                "Record pr_url, ci_green, and merge as run-qualified evidence with workerctl loop-evidence add <task> --loop-run <run-id> --iteration 1 --evidence-type <type> and matching correlation receipts; record structured proof with workerctl loop-evidence adversarial-check <task> --loop-run <run-id> --iteration 1 --failure-mode \"PR, CI, and merge receipts could hide an unverified regression\" --check \"inspect PR URL, CI result, merge receipt, and final diff before retry\" --result \"all receipts and direct inspection are present with no unresolved blocker\" --correlation-id ralph-loop-preset-adversarial; then enqueue a fresh continue_iteration command for requested iteration 2 with correlation ralph-loop-preset-allowed.",
-                "Run workerctl dispatch --once --type continue_iteration --dispatcher-id qa-ralph-loop --json again and verify the fresh preset-backed retry is delivered, the routed notification signal_type is continue_iteration, and worker-inbox contains the iteration 2 message.",
+                "Record pr_url, ci_green, and merge as run-qualified evidence with conveyor loop-evidence add <task> --loop-run <run-id> --iteration 1 --evidence-type <type> and matching correlation receipts; record structured proof with conveyor loop-evidence adversarial-check <task> --loop-run <run-id> --iteration 1 --failure-mode \"PR, CI, and merge receipts could hide an unverified regression\" --check \"inspect PR URL, CI result, merge receipt, and final diff before retry\" --result \"all receipts and direct inspection are present with no unresolved blocker\" --correlation-id ralph-loop-preset-adversarial; then enqueue a fresh continue_iteration command for requested iteration 2 with correlation ralph-loop-preset-allowed.",
+                "Run conveyor dispatch --once --type continue_iteration --dispatcher-id qa-ralph-loop --json again and verify the fresh preset-backed retry is delivered, the routed notification signal_type is continue_iteration, and worker-inbox contains the iteration 2 message.",
             ],
         },
     }
@@ -2057,7 +2060,7 @@ def _write_disposable_rollout(*, session_dir: Path, session_name: str, cwd: str)
         "payload": {
             "cwd": cwd,
             "id": session_id,
-            "originator": "workerctl create-disposable-binding",
+            "originator": "conveyor create-disposable-binding",
         },
     }
     rollout_path.write_text(json.dumps(payload, sort_keys=True) + "\n")
@@ -2865,7 +2868,7 @@ def _qa_run_ralph_loop_guardrails(args: argparse.Namespace) -> dict[str, Any]:
             name="max_iteration_blocks_before_worker_delivery",
             dispatch=max_dispatch,
             counts=max_counts,
-            command="workerctl dispatch --once --type continue_iteration --dispatcher-id qa-run",
+            command="conveyor dispatch --once --type continue_iteration --dispatcher-id qa-run",
         )
     )
 
@@ -2909,7 +2912,7 @@ def _qa_run_ralph_loop_guardrails(args: argparse.Namespace) -> dict[str, Any]:
             name="missing_evidence_blocks_before_worker_delivery",
             dispatch=missing_dispatch,
             counts=missing_counts,
-            command="workerctl dispatch --once --type continue_iteration --dispatcher-id qa-run",
+            command="conveyor dispatch --once --type continue_iteration --dispatcher-id qa-run",
         )
     )
 
@@ -2959,7 +2962,7 @@ def _qa_run_ralph_loop_guardrails(args: argparse.Namespace) -> dict[str, Any]:
             name="fresh_retry_delivers_after_structured_evidence",
             dispatch=allowed_dispatch,
             counts=allowed_counts,
-            command="workerctl loop-evidence adversarial-check ... && workerctl dispatch --once --type continue_iteration",
+            command="conveyor loop-evidence adversarial-check ... && conveyor dispatch --once --type continue_iteration",
         )
     )
 
@@ -3004,7 +3007,7 @@ def _qa_run_ralph_loop_guardrails(args: argparse.Namespace) -> dict[str, Any]:
             name="preset_requires_pr_ci_merge_and_adversarial_evidence",
             dispatch=preset_block_dispatch,
             counts=preset_block_counts,
-            command="workerctl ralph-loop-presets --create-run <task> --preset pr_ci_merge_loop && workerctl dispatch --once --type continue_iteration",
+            command="conveyor ralph-loop-presets --create-run <task> --preset pr_ci_merge_loop && conveyor dispatch --once --type continue_iteration",
         )
     )
 
@@ -3055,7 +3058,7 @@ def _qa_run_ralph_loop_guardrails(args: argparse.Namespace) -> dict[str, Any]:
             name="preset_retry_delivers_after_all_required_evidence",
             dispatch=preset_allowed_dispatch,
             counts=preset_allowed_counts,
-            command="workerctl loop-evidence adversarial-check ... && workerctl dispatch --once --type continue_iteration",
+            command="conveyor loop-evidence adversarial-check ... && conveyor dispatch --once --type continue_iteration",
         )
     )
 
@@ -3089,10 +3092,10 @@ def _qa_run_ralph_loop_guardrails(args: argparse.Namespace) -> dict[str, Any]:
             _qa_run_generated_task(preset_task, suffix="preset"),
         ],
         "replay_commands": [
-            "scripts/workerctl qa-plan ralph-loop --json",
-            "scripts/workerctl qa-plan adversarial-triggers --json",
-            f"scripts/workerctl dispatch --once --type continue_iteration --dispatcher-id {dispatcher_id} --path {db_path}",
-            "scripts/workerctl loop-evidence adversarial-check <task> --loop-run <run-id> --iteration 1 --failure-mode <failure> --check <check> --result <result>",
+            "conveyor qa-plan ralph-loop --json",
+            "conveyor qa-plan adversarial-triggers --json",
+            f"conveyor dispatch --once --type continue_iteration --dispatcher-id {dispatcher_id} --path {db_path}",
+            "conveyor loop-evidence adversarial-check <task> --loop-run <run-id> --iteration 1 --failure-mode <failure> --check <check> --result <result>",
         ],
         "result": "passed",
         "scenario": "ralph-loop-guardrails",
@@ -3168,7 +3171,7 @@ def _qa_run_generic_loop_template(args: argparse.Namespace) -> dict[str, Any]:
             name="visual_template_blocks_before_visual_evidence",
             dispatch=missing_dispatch,
             counts=missing_counts,
-            command="workerctl dispatch --once --type continue_iteration --dispatcher-id qa-run",
+            command="conveyor dispatch --once --type continue_iteration --dispatcher-id qa-run",
         )
     )
 
@@ -3233,7 +3236,7 @@ def _qa_run_generic_loop_template(args: argparse.Namespace) -> dict[str, Any]:
             name="unstructured_adversarial_check_still_blocks",
             dispatch=unstructured_dispatch,
             counts=unstructured_counts,
-            command="workerctl loop-evidence add --evidence-type adversarial_check ... && workerctl dispatch --once --type continue_iteration",
+            command="conveyor loop-evidence add --evidence-type adversarial_check ... && conveyor dispatch --once --type continue_iteration",
         )
     )
 
@@ -3280,7 +3283,7 @@ def _qa_run_generic_loop_template(args: argparse.Namespace) -> dict[str, Any]:
             name="structured_visual_evidence_retry_delivers",
             dispatch=allowed_dispatch,
             counts=allowed_counts,
-            command="workerctl loop-evidence adversarial-check ... && workerctl dispatch --once --type continue_iteration",
+            command="conveyor loop-evidence adversarial-check ... && conveyor dispatch --once --type continue_iteration",
         )
     )
 
@@ -3293,29 +3296,29 @@ def _qa_run_generic_loop_template(args: argparse.Namespace) -> dict[str, Any]:
         "generated_at": now_iso(),
         "generated_tasks": [_qa_run_generated_task(template_task, suffix="generic-loop-template")],
         "replay_commands": [
-            "scripts/workerctl loop-templates --show visual_diff_loop --json",
+            "conveyor loop-templates --show visual_diff_loop --json",
             (
-                "scripts/workerctl loop-templates --create-run <task> --template visual_diff_loop "
+                "conveyor loop-templates --create-run <task> --template visual_diff_loop "
                 "--max-iterations 4 --current-iteration 1 --seed-prompt-sha256 qa-run-generic-template-seed"
             ),
             (
-                "scripts/workerctl loop-evidence add <task> --loop-run <run-id> --iteration 1 "
+                "conveyor loop-evidence add <task> --loop-run <run-id> --iteration 1 "
                 "--evidence-type reference_artifact --artifact-path <reference.png>"
             ),
             (
-                "scripts/workerctl loop-evidence add <task> --loop-run <run-id> --iteration 1 "
+                "conveyor loop-evidence add <task> --loop-run <run-id> --iteration 1 "
                 "--evidence-type candidate_screenshot --artifact-path <candidate.png> "
                 "--metadata-json '{\"viewport\":\"2x2\"}'"
             ),
             (
-                "scripts/workerctl loop-evidence visual-diff <task> --loop-run <run-id> --iteration 1 "
+                "conveyor loop-evidence visual-diff <task> --loop-run <run-id> --iteration 1 "
                 "--reference <reference.png> --candidate <candidate.png> --threshold 0 --diff-output <diff.png> --report-output <report.json>"
             ),
             (
-                "scripts/workerctl loop-evidence adversarial-check <task> --loop-run <run-id> --iteration 1 "
+                "conveyor loop-evidence adversarial-check <task> --loop-run <run-id> --iteration 1 "
                 "--failure-mode <failure> --check <check> --result <result>"
             ),
-            f"scripts/workerctl dispatch --once --type continue_iteration --dispatcher-id {dispatcher_id} --path {db_path}",
+            f"conveyor dispatch --once --type continue_iteration --dispatcher-id {dispatcher_id} --path {db_path}",
         ],
         "result": "passed",
         "scenario": "generic-loop-template",
@@ -3396,7 +3399,7 @@ def _qa_run_generic_loop_template_browser(args: argparse.Namespace) -> dict[str,
             name="browser_visual_template_blocks_before_visual_evidence",
             dispatch=missing_dispatch,
             counts=missing_counts,
-            command="workerctl dispatch --once --type continue_iteration --dispatcher-id qa-run",
+            command="conveyor dispatch --once --type continue_iteration --dispatcher-id qa-run",
         )
     )
 
@@ -3464,7 +3467,7 @@ def _qa_run_generic_loop_template_browser(args: argparse.Namespace) -> dict[str,
             name="browser_unstructured_adversarial_check_still_blocks",
             dispatch=unstructured_dispatch,
             counts=unstructured_counts,
-            command="workerctl loop-evidence add --evidence-type adversarial_check ... && workerctl dispatch --once --type continue_iteration",
+            command="conveyor loop-evidence add --evidence-type adversarial_check ... && conveyor dispatch --once --type continue_iteration",
         )
     )
 
@@ -3514,7 +3517,7 @@ def _qa_run_generic_loop_template_browser(args: argparse.Namespace) -> dict[str,
             name="browser_structured_visual_evidence_retry_delivers",
             dispatch=allowed_dispatch,
             counts=allowed_counts,
-            command="workerctl loop-evidence adversarial-check ... && workerctl dispatch --once --type continue_iteration",
+            command="conveyor loop-evidence adversarial-check ... && conveyor dispatch --once --type continue_iteration",
         )
     )
 
@@ -3528,9 +3531,9 @@ def _qa_run_generic_loop_template_browser(args: argparse.Namespace) -> dict[str,
         "generated_at": now_iso(),
         "generated_tasks": [_qa_run_generated_task(template_task, suffix="generic-loop-template-browser")],
         "replay_commands": [
-            "scripts/workerctl loop-templates --show visual_diff_loop --json",
+            "conveyor loop-templates --show visual_diff_loop --json",
             (
-                "scripts/workerctl loop-templates --create-run <task> --template visual_diff_loop "
+                "conveyor loop-templates --create-run <task> --template visual_diff_loop "
                 "--max-iterations 4 --current-iteration 1 --seed-prompt-sha256 qa-run-generic-template-browser-seed"
             ),
             (
@@ -3538,23 +3541,23 @@ def _qa_run_generic_loop_template_browser(args: argparse.Namespace) -> dict[str,
                 "--output <candidate-browser.png> --width 2 --height 2"
             ),
             (
-                "scripts/workerctl loop-evidence add <task> --loop-run <run-id> --iteration 1 "
+                "conveyor loop-evidence add <task> --loop-run <run-id> --iteration 1 "
                 "--evidence-type reference_artifact --artifact-path <reference.png>"
             ),
             (
-                "scripts/workerctl loop-evidence add <task> --loop-run <run-id> --iteration 1 "
+                "conveyor loop-evidence add <task> --loop-run <run-id> --iteration 1 "
                 "--evidence-type candidate_screenshot --artifact-path <candidate-browser.png> "
                 "--metadata-json '{\"browser_backend\":\"playwright-chromium\",\"candidate_html\":\"<candidate.html>\",\"viewport\":\"2x2\"}'"
             ),
             (
-                "scripts/workerctl loop-evidence visual-diff <task> --loop-run <run-id> --iteration 1 "
+                "conveyor loop-evidence visual-diff <task> --loop-run <run-id> --iteration 1 "
                 "--reference <reference.png> --candidate <candidate-browser.png> --threshold 0 --diff-output <diff.png> --report-output <report.json>"
             ),
             (
-                "scripts/workerctl loop-evidence adversarial-check <task> --loop-run <run-id> --iteration 1 "
+                "conveyor loop-evidence adversarial-check <task> --loop-run <run-id> --iteration 1 "
                 "--failure-mode <failure> --check <check> --result <result>"
             ),
-            f"scripts/workerctl dispatch --once --type continue_iteration --dispatcher-id {dispatcher_id} --path {db_path}",
+            f"conveyor dispatch --once --type continue_iteration --dispatcher-id {dispatcher_id} --path {db_path}",
         ],
         "result": "passed",
         "scenario": "generic-loop-template-browser",
@@ -3632,7 +3635,7 @@ def _qa_run_test_coverage_loop(args: argparse.Namespace) -> dict[str, Any]:
             name="test_coverage_template_blocks_before_coverage_evidence",
             dispatch=missing_dispatch,
             counts=missing_counts,
-            command="workerctl dispatch --once --type continue_iteration --dispatcher-id qa-run",
+            command="conveyor dispatch --once --type continue_iteration --dispatcher-id qa-run",
         )
     )
 
@@ -3716,7 +3719,7 @@ def _qa_run_test_coverage_loop(args: argparse.Namespace) -> dict[str, Any]:
             name="test_coverage_unstructured_adversarial_check_still_blocks",
             dispatch=unstructured_dispatch,
             counts=unstructured_counts,
-            command="workerctl loop-evidence add --evidence-type adversarial_check ... && workerctl dispatch --once --type continue_iteration",
+            command="conveyor loop-evidence add --evidence-type adversarial_check ... && conveyor dispatch --once --type continue_iteration",
         )
     )
 
@@ -3766,7 +3769,7 @@ def _qa_run_test_coverage_loop(args: argparse.Namespace) -> dict[str, Any]:
             name="structured_test_coverage_retry_delivers",
             dispatch=allowed_dispatch,
             counts=allowed_counts,
-            command="workerctl loop-evidence adversarial-check ... && workerctl dispatch --once --type continue_iteration",
+            command="conveyor loop-evidence adversarial-check ... && conveyor dispatch --once --type continue_iteration",
         )
     )
 
@@ -3779,20 +3782,20 @@ def _qa_run_test_coverage_loop(args: argparse.Namespace) -> dict[str, Any]:
         "generated_at": now_iso(),
         "generated_tasks": [_qa_run_generated_task(coverage_task, suffix="test-coverage-loop")],
         "replay_commands": [
-            "scripts/workerctl loop-templates --show test_coverage_loop --json",
+            "conveyor loop-templates --show test_coverage_loop --json",
             (
-                "scripts/workerctl loop-templates --create-run <task> --template test_coverage_loop "
+                "conveyor loop-templates --create-run <task> --template test_coverage_loop "
                 "--max-iterations 3 --current-iteration 1 --seed-prompt-sha256 qa-run-test-coverage-seed"
             ),
             (
-                "scripts/workerctl loop-evidence add <task> --loop-run <run-id> --iteration 1 "
+                "conveyor loop-evidence add <task> --loop-run <run-id> --iteration 1 "
                 "--evidence-type test_coverage --artifact-path <coverage-summary.json>"
             ),
             (
-                "scripts/workerctl loop-evidence adversarial-check <task> --loop-run <run-id> --iteration 1 "
+                "conveyor loop-evidence adversarial-check <task> --loop-run <run-id> --iteration 1 "
                 "--failure-mode <failure> --check <check> --result <result>"
             ),
-            f"scripts/workerctl dispatch --once --type continue_iteration --dispatcher-id {dispatcher_id} --path {db_path}",
+            f"conveyor dispatch --once --type continue_iteration --dispatcher-id {dispatcher_id} --path {db_path}",
         ],
         "result": "passed",
         "scenario": "test-coverage-loop",
@@ -3869,7 +3872,7 @@ def _qa_run_build_clear_loop(args: argparse.Namespace) -> dict[str, Any]:
             name="build_clear_blocks_before_build_or_cleanup_evidence",
             dispatch=missing_dispatch,
             counts=missing_counts,
-            command="workerctl dispatch --once --type continue_iteration --dispatcher-id qa-run",
+            command="conveyor dispatch --once --type continue_iteration --dispatcher-id qa-run",
         )
     )
 
@@ -3943,7 +3946,7 @@ def _qa_run_build_clear_loop(args: argparse.Namespace) -> dict[str, Any]:
             name="build_clear_still_blocks_before_cleanup_evidence",
             dispatch=build_only_dispatch,
             counts=build_only_counts,
-            command="workerctl loop-evidence add --evidence-type build_passed ... && workerctl dispatch --once --type continue_iteration",
+            command="conveyor loop-evidence add --evidence-type build_passed ... && conveyor dispatch --once --type continue_iteration",
         )
     )
 
@@ -4004,7 +4007,7 @@ def _qa_run_build_clear_loop(args: argparse.Namespace) -> dict[str, Any]:
             name="build_clear_retry_delivers_after_build_and_cleanup_evidence",
             dispatch=allowed_dispatch,
             counts=allowed_counts,
-            command="workerctl loop-evidence add --evidence-type cleanup ... && workerctl dispatch --once --type continue_iteration",
+            command="conveyor loop-evidence add --evidence-type cleanup ... && conveyor dispatch --once --type continue_iteration",
         )
     )
 
@@ -4018,21 +4021,21 @@ def _qa_run_build_clear_loop(args: argparse.Namespace) -> dict[str, Any]:
         "generated_at": now_iso(),
         "generated_tasks": [_qa_run_generated_task(build_task, suffix="build-clear-loop")],
         "replay_commands": [
-            "scripts/workerctl loop-templates --show build_then_clear --json",
+            "conveyor loop-templates --show build_then_clear --json",
             (
-                "scripts/workerctl loop-templates --create-run <task> --template build_then_clear "
+                "conveyor loop-templates --create-run <task> --template build_then_clear "
                 "--max-iterations 2 --current-iteration 1 --seed-prompt-sha256 qa-run-build-clear-seed"
             ),
             (
-                "scripts/workerctl loop-evidence add <task> --loop-run <run-id> --iteration 1 "
+                "conveyor loop-evidence add <task> --loop-run <run-id> --iteration 1 "
                 "--evidence-type build_passed --artifact-path <build-passed.json>"
             ),
             (
-                "scripts/workerctl loop-evidence add <task> --loop-run <run-id> --iteration 1 "
+                "conveyor loop-evidence add <task> --loop-run <run-id> --iteration 1 "
                 "--evidence-type cleanup --artifact-path <cleanup.json>"
             ),
-            f"scripts/workerctl dispatch --once --type continue_iteration --dispatcher-id {dispatcher_id} --path {db_path}",
-            f"scripts/workerctl worker-inbox <task> --consume-next --wait --path {db_path} --json",
+            f"conveyor dispatch --once --type continue_iteration --dispatcher-id {dispatcher_id} --path {db_path}",
+            f"conveyor worker-inbox <task> --consume-next --wait --path {db_path} --json",
         ],
         "result": "passed",
         "scenario": "build-clear-loop",
@@ -4148,7 +4151,7 @@ def _qa_run_adversarial_triggers(args: argparse.Namespace) -> dict[str, Any]:
             name="iteration_gate_blocks_before_adversarial_proof",
             dispatch=missing_dispatch,
             counts=missing_counts,
-            command="workerctl dispatch --once --type continue_iteration --dispatcher-id qa-adversarial-triggers",
+            command="conveyor dispatch --once --type continue_iteration --dispatcher-id qa-adversarial-triggers",
         )
     )
 
@@ -4198,7 +4201,7 @@ def _qa_run_adversarial_triggers(args: argparse.Namespace) -> dict[str, Any]:
         name="iteration_gate_allows_fresh_retry_after_structured_proof",
         dispatch=allowed_dispatch,
         counts=allowed_counts,
-        command="workerctl loop-evidence adversarial-check ... && workerctl dispatch --once --type continue_iteration",
+        command="conveyor loop-evidence adversarial-check ... && conveyor dispatch --once --type continue_iteration",
     )
     allowed_check["worker_inbox"] = consumed
     checks.append(allowed_check)
@@ -4365,11 +4368,11 @@ def _qa_run_adversarial_triggers(args: argparse.Namespace) -> dict[str, Any]:
         ],
         "negative_control": negative_control,
         "replay_commands": [
-            'scripts/workerctl loop-triggers --classify "Run this as an adversarially gated Ralph loop." --json',
-            "scripts/workerctl qa-plan adversarial-triggers --json",
-            f"scripts/workerctl dispatch --once --type continue_iteration --dispatcher-id {dispatcher_id} --path {db_path}",
-            f"scripts/workerctl worker-inbox {loop_task['task_name']} --path {db_path} --json",
-            f"scripts/workerctl export-task {loop_task['task_name']} --path {db_path}",
+            'conveyor loop-triggers --classify "Run this as an adversarially gated Ralph loop." --json',
+            "conveyor qa-plan adversarial-triggers --json",
+            f"conveyor dispatch --once --type continue_iteration --dispatcher-id {dispatcher_id} --path {db_path}",
+            f"conveyor worker-inbox {loop_task['task_name']} --path {db_path} --json",
+            f"conveyor export-task {loop_task['task_name']} --path {db_path}",
         ],
         "result": "passed",
         "scenario": "adversarial-triggers",
@@ -7758,7 +7761,7 @@ def command_continuation(args: argparse.Namespace) -> int:
 def _dispatch_completion_message(*, worker_name: str, task_name: str) -> str:
     return (
         f"Worker {worker_name} appears to have completed a turn for task {task_name}. "
-        "Run/inspect workerctl cycle, review evidence and acceptance criteria, then decide "
+        "Run/inspect conveyor cycle, review evidence and acceptance criteria, then decide "
         "whether to finish, request fixes, or continue observing."
     )
 
@@ -9709,7 +9712,7 @@ def worker_compact_request_text(task_name: str, handoff: dict[str, Any]) -> str:
         f"Saved handoff id: {handoff['id']}\n"
         f"Saved handoff summary: {handoff['summary']}\n\n"
         "Before compacting or clearing visible context, verify the saved handoff still captures current progress. "
-        "If it is stale, update it with `scripts/workerctl handoff` first. "
+        "If it is stale, update it with `conveyor handoff` first. "
         "Then run the Codex compact/clear action only if supported and appropriate. "
         "Afterward, report whether compaction happened and what the next concrete step is. "
         "Do not edit project files as part of this request."
@@ -9947,7 +9950,7 @@ def command_manager_config(args: argparse.Namespace) -> int:
         if args.questions:
             print(json.dumps({
                 "recommended_collection": "manager_codex_chat",
-                "fallback_collection": "workerctl manager-config --interactive",
+                "fallback_collection": "conveyor manager-config --interactive",
                 "questions": manager_config_questions(existing),
                 "task": {"id": task["id"], "name": task["name"]},
             }, indent=2, sort_keys=True))
@@ -10761,7 +10764,7 @@ def command_nudge(args: argparse.Namespace) -> int:
             raise WorkerError(
                 f"Unknown worker: {args.name}; also failed to resolve registered session "
                 f"{args.name!r}. For session-backed workers, use "
-                f"`workerctl session-nudge {args.name} \"...\"`. "
+                f"`conveyor session-nudge {args.name} \"...\"`. "
                 f"Session lookup error: {session_exc}"
             ) from session_exc
         worker_db.insert_event(
@@ -11162,7 +11165,7 @@ def _spawn_codex_and_register(
         if existing is not None:
             raise WorkerError(
                 f"a session named {name!r} is already registered; "
-                f"choose a different name or `workerctl deregister {name}` first"
+                f"choose a different name or `conveyor deregister {name}` first"
             )
     finally:
         conn.close()
@@ -11209,10 +11212,10 @@ def _spawn_codex_and_register(
             f"Recovery: tmux session {tmux_session_name!r} may still be alive. "
             f"Inspect it with `tmux attach -t {tmux_session_name}`. If Codex is visible, "
             "submit a prompt or press Enter, then register it with "
-            f"`workerctl register-{role} --name {name} --pid <pid> "
+            f"`conveyor register-{role} --name {name} --pid <pid> "
             f"--codex-session <rollout.jsonl> --cwd {shlex.quote(str(cwd or ''))} "
             f"--tmux-session {tmux_session_name}`. To clean up, run "
-            f"`tmux kill-session -t {tmux_session_name}` and `workerctl deregister {name}` "
+            f"`tmux kill-session -t {tmux_session_name}` and `conveyor deregister {name}` "
             "if it was registered."
         ) from exc
 
@@ -11259,7 +11262,7 @@ def command_start_worker(args: argparse.Namespace) -> int:
     """Spawn codex in a fresh tmux session and register it as a worker in one call.
 
     Equivalent to: `tmux new-session -d -s codex-<name>` running `codex <flags>`,
-    followed by `workerctl register-worker --pid <discovered>`. Polls for codex's
+    followed by `conveyor register-worker --pid <discovered>`. Polls for codex's
     open rollout file to confirm the session is up before registering.
 
     Refuses if either the tmux session `codex-<name>` already exists or the DB
@@ -11289,7 +11292,7 @@ def command_start_manager(args: argparse.Namespace) -> int:
 
     Mirrors command_start_worker but with role="manager" and a manager bootstrap
     prompt. Managers supervise rather than execute; optional task context only
-    teaches the bootstrap prompt which workerctl commands to run.
+    teaches the bootstrap prompt which conveyor commands to run.
 
     Refuses if either the tmux session `codex-<name>` already exists or the DB
     already has a session named `<name>`.
@@ -11441,7 +11444,7 @@ def command_pair(args: argparse.Namespace) -> int:
             if not args.task_goal:
                 raise WorkerError(
                     f"Task '{args.task}' does not exist. Pass --task-goal to "
-                    "create it, or run `workerctl tasks --create ...` first."
+                    "create it, or run `conveyor tasks --create ...` first."
                 )
             task_id = worker_db.create_task(
                 conn,
@@ -11795,7 +11798,7 @@ def command_pair(args: argparse.Namespace) -> int:
         except Exception:
             pass
         # If binding or manager spawn fails, worker is left registered.
-        # User can clean up with `workerctl deregister`.
+        # User can clean up with `conveyor deregister`.
         raise
 
 
@@ -11960,7 +11963,7 @@ def _discover_suggestions(tasks: list[dict[str, Any]], sessions: list[dict[str, 
         if workers and managers:
             suggestions.append({
                 "command": (
-                    f"workerctl bind --task {sh_quote(str(task['name']))} "
+                    f"conveyor bind --task {sh_quote(str(task['name']))} "
                     f"--worker {sh_quote(str(workers[0]['name']))} "
                     f"--manager {sh_quote(str(managers[0]['name']))}"
                 ),

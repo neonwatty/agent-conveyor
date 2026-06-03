@@ -8,7 +8,7 @@ The manager can request another worker iteration, but Dispatch blocks delivery u
 
 ## Natural-language triggers
 
-Use `scripts/workerctl loop-triggers --classify "<prompt>" --json` before turning operator prose into loop policy.
+Use `conveyor loop-triggers --classify "<prompt>" --json` before turning operator prose into loop policy.
 
 Controlled trigger examples:
 
@@ -25,7 +25,7 @@ Generic caution does not arm a loop gate. For example, `be careful, run tests, a
 For no-tmux managers/workers, create the disposable task/session binding first:
 
 ```bash
-scripts/workerctl create-disposable-binding <task> --worker <worker-session> --manager <manager-session> --template <template> --adversarial --json
+conveyor create-disposable-binding <task> --worker <worker-session> --manager <manager-session> --template <template> --adversarial --json
 ```
 
 This writes real Codex rollout JSONL files, registers both sessions, binds them
@@ -36,13 +36,13 @@ to the task, and prints replay commands for Dispatch, inbox polling, and
 1. Classify the prompt:
 
    ```bash
-   scripts/workerctl loop-triggers --classify "Run this as an adversarially gated Ralph loop." --json
+   conveyor loop-triggers --classify "Run this as an adversarially gated Ralph loop." --json
    ```
 
 2. Create a template-backed loop run:
 
    ```bash
-   scripts/workerctl loop-templates --create-run <task> --template <template> --max-iterations 3 --current-iteration 1 --json
+   conveyor loop-templates --create-run <task> --template <template> --max-iterations 3 --current-iteration 1 --json
    ```
 
 3. Ask the worker for the first iteration through the normal manager/worker task flow.
@@ -50,33 +50,33 @@ to the task, and prints replay commands for Dispatch, inbox polling, and
 4. Record required evidence before another iteration:
 
    ```bash
-   scripts/workerctl loop-evidence add <task> --loop-run <run> --iteration 1 --evidence-type <evidence_type> --artifact-path <path>
-   scripts/workerctl loop-evidence adversarial-check <task> --loop-run <run> --iteration 1 --failure-mode "<risk>" --check "<command or inspection>" --result "<why handled>"
+   conveyor loop-evidence add <task> --loop-run <run> --iteration 1 --evidence-type <evidence_type> --artifact-path <path>
+   conveyor loop-evidence adversarial-check <task> --loop-run <run> --iteration 1 --failure-mode "<risk>" --check "<command or inspection>" --result "<why handled>"
    ```
 
 5. Queue the manager-requested continuation:
 
    ```bash
-   scripts/workerctl enqueue-continue-iteration <task> --loop-run <run> --requested-iteration 2 --message "Run the next bounded iteration." --json
+   conveyor enqueue-continue-iteration <task> --loop-run <run> --requested-iteration 2 --message "Run the next bounded iteration." --json
    ```
 
 6. Let Dispatch enforce policy:
 
    ```bash
-   scripts/workerctl dispatch --once --type continue_iteration --json
+   conveyor dispatch --once --type continue_iteration --json
    ```
 
 7. For Codex app or no-tmux sessions, poll and consume the inbox:
 
    ```bash
-   scripts/workerctl worker-inbox <task> --consume-next --wait --timeout 30 --json
+   conveyor worker-inbox <task> --consume-next --wait --timeout 30 --json
    ```
 
 8. Review status and telemetry before continuing:
 
    ```bash
-   scripts/workerctl loop-status <task> --run <run> --json
-   scripts/workerctl telemetry failures --task <task> --json
+   conveyor loop-status <task> --run <run> --json
+   conveyor telemetry failures --task <task> --json
    ```
 
 `loop-status` is the compact manager review command. A run is ready for review

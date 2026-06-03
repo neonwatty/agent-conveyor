@@ -38,7 +38,7 @@ remembering command flags:
 - "Before continuing, record the strongest realistic failure mode, the check,
   and the result."
 
-The manager should first run `workerctl loop-triggers --classify "<prompt>"
+The manager should first run `conveyor loop-triggers --classify "<prompt>"
 --json`. A matched controlled trigger should then be translated into:
 
 - a loop policy whose `required_before_continue` includes `adversarial_check`;
@@ -47,8 +47,8 @@ The manager should first run `workerctl loop-triggers --classify "<prompt>"
   be blocked until proof exists.
 
 Unmatched generic caution stays ordinary guidance. Use
-`workerctl qa-plan adversarial-triggers`,
-`workerctl qa-run adversarial-triggers`, and
+`conveyor qa-plan adversarial-triggers`,
+`conveyor qa-run adversarial-triggers`, and
 `docs/qa/adversarial-triggers.md` to run the natural-language trigger QA suite.
 
 ## GoalBuddy Usage

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from textwrap import dedent
 
@@ -108,6 +109,16 @@ from workerctl.replay import command_replay
 from workerctl.skill_installer import command_install_skills
 
 
+def cli_program_name() -> str:
+    override = os.environ.get("CONVEYOR_CLI_PROG")
+    if override in {"conveyor", "workerctl"}:
+        return override
+    invoked_as = sys.argv[0].rsplit("/", 1)[-1]
+    if invoked_as in {"conveyor", "workerctl"}:
+        return invoked_as
+    return "conveyor"
+
+
 def add_manager_codex_arg_options(command: argparse.ArgumentParser) -> None:
     command.add_argument(
         "--no-manager-codex-args",
@@ -127,7 +138,7 @@ def add_codex_startup_options(command: argparse.ArgumentParser) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="workerctl",
+        prog=cli_program_name(),
         description="Control tmux-backed Codex worker sessions.",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -246,8 +257,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="Loopback host to bind the dashboard server. Default: 127.0.0.1.",
     )
     dashboard.add_argument("--port", type=int, default=8797, help="Dashboard port. Default: 8797.")
-    dashboard.add_argument("--workerctl-path", default="scripts/workerctl", help="workerctl executable for the dashboard backend.")
-    dashboard.add_argument("--db-path", help="Optional workerctl database path passed to dashboard commands.")
+    dashboard.add_argument("--workerctl-path", default="scripts/workerctl", help="Agent Conveyor executable for the dashboard backend.")
+    dashboard.add_argument("--db-path", help="Optional Agent Conveyor database path passed to dashboard commands.")
     dashboard.add_argument("--ensure-dispatch", action="store_true", help="Start a local Dispatch watch process for this dashboard if one is not observed.")
     dashboard.add_argument("--dispatcher-id", default="dispatch-dashboard", help="Dispatcher id used with --ensure-dispatch.")
     dashboard.add_argument("--dry-run", action="store_true", help="Print the launch command without starting the dashboard.")
@@ -270,7 +281,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     dispatch.add_argument("--dry-run", action="store_true", help="Report planned dispatch work without writing or sending.")
     dispatch.add_argument("--json", action="store_true", help="Print dispatch results as JSON.")
-    dispatch.add_argument("--path", help="Override the workerctl database path.")
+    dispatch.add_argument("--path", help="Override the Agent Conveyor database path.")
     dispatch.set_defaults(func=command_dispatch)
 
     enqueue_notify = subparsers.add_parser("enqueue-notify-manager", help="Queue a notify_manager command for Dispatch.")
@@ -280,7 +291,7 @@ def build_parser() -> argparse.ArgumentParser:
     enqueue_notify.add_argument("--required-permission", help="Manager permission required before Dispatch may send.")
     enqueue_notify.add_argument("--idempotency-key", help="Optional idempotency key for this queued command.")
     enqueue_notify.add_argument("--json", action="store_true", help="Print JSON output.")
-    enqueue_notify.add_argument("--path", help="Override the workerctl database path.")
+    enqueue_notify.add_argument("--path", help="Override the Agent Conveyor database path.")
     enqueue_notify.set_defaults(func=command_enqueue_notify_manager)
 
     enqueue_nudge = subparsers.add_parser("enqueue-nudge-worker", help="Queue a nudge_worker command for Dispatch.")
@@ -290,7 +301,7 @@ def build_parser() -> argparse.ArgumentParser:
     enqueue_nudge.add_argument("--required-permission", help="Manager permission required before Dispatch may send.")
     enqueue_nudge.add_argument("--idempotency-key", help="Optional idempotency key for this queued command.")
     enqueue_nudge.add_argument("--json", action="store_true", help="Print JSON output.")
-    enqueue_nudge.add_argument("--path", help="Override the workerctl database path.")
+    enqueue_nudge.add_argument("--path", help="Override the Agent Conveyor database path.")
     enqueue_nudge.set_defaults(func=command_enqueue_nudge_worker)
 
     enqueue_continue = subparsers.add_parser("enqueue-continue-iteration", help="Queue a template-backed continue_iteration command for Dispatch.")
@@ -303,7 +314,7 @@ def build_parser() -> argparse.ArgumentParser:
     enqueue_continue.add_argument("--required-permission", help="Manager permission required before Dispatch may send.")
     enqueue_continue.add_argument("--idempotency-key", help="Optional idempotency key for this queued command.")
     enqueue_continue.add_argument("--json", action="store_true", help="Print JSON output.")
-    enqueue_continue.add_argument("--path", help="Override the workerctl database path.")
+    enqueue_continue.add_argument("--path", help="Override the Agent Conveyor database path.")
     enqueue_continue.set_defaults(func=command_enqueue_continue_iteration)
 
     loop_templates = subparsers.add_parser(
@@ -328,7 +339,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     loop_templates.add_argument("--seed-prompt-sha256", help="Seed prompt hash to store with the policy run.")
     loop_templates.add_argument("--json", action="store_true", help="Print stable JSON output.")
-    loop_templates.add_argument("--path", help="Override the workerctl database path.")
+    loop_templates.add_argument("--path", help="Override the Agent Conveyor database path.")
     loop_templates.set_defaults(func=command_loop_templates)
 
     loop_status = subparsers.add_parser(
@@ -339,7 +350,7 @@ def build_parser() -> argparse.ArgumentParser:
     loop_status.add_argument("task", help="Task name or ID.")
     loop_status.add_argument("--run", required=True, help="Loop run name or ID.")
     loop_status.add_argument("--json", action="store_true", help="Print JSON output.")
-    loop_status.add_argument("--path", help="Override the workerctl database path.")
+    loop_status.add_argument("--path", help="Override the Agent Conveyor database path.")
     loop_status.set_defaults(func=command_loop_status)
 
     loop_triggers = subparsers.add_parser(
@@ -369,7 +380,7 @@ def build_parser() -> argparse.ArgumentParser:
     loop_evidence_add.add_argument("--correlation-id", help="Optional correlation id for replay and dashboard linkage.")
     loop_evidence_add.add_argument("--metadata-json", help="Optional JSON object merged into the evidence receipt.")
     loop_evidence_add.add_argument("--json", action="store_true", help="Print stable JSON output.")
-    loop_evidence_add.add_argument("--path", help="Override the workerctl database path.")
+    loop_evidence_add.add_argument("--path", help="Override the Agent Conveyor database path.")
     loop_evidence_add.set_defaults(func=command_loop_evidence)
 
     loop_evidence_visual = loop_evidence_actions.add_parser(
@@ -387,7 +398,7 @@ def build_parser() -> argparse.ArgumentParser:
     loop_evidence_visual.add_argument("--source", default="manager_inferred", choices=("manager_inferred", "worker_proposed", "user_requested", "final_audit"))
     loop_evidence_visual.add_argument("--correlation-id", help="Optional correlation id for replay and dashboard linkage.")
     loop_evidence_visual.add_argument("--json", action="store_true", help="Print stable JSON output.")
-    loop_evidence_visual.add_argument("--path", help="Override the workerctl database path.")
+    loop_evidence_visual.add_argument("--path", help="Override the Agent Conveyor database path.")
     loop_evidence_visual.set_defaults(func=command_loop_evidence)
 
     loop_evidence_adversarial = loop_evidence_actions.add_parser(
@@ -405,7 +416,7 @@ def build_parser() -> argparse.ArgumentParser:
     loop_evidence_adversarial.add_argument("--artifact-path", help="Optional artifact backing this evidence.")
     loop_evidence_adversarial.add_argument("--correlation-id", help="Optional correlation id for replay and dashboard linkage.")
     loop_evidence_adversarial.add_argument("--json", action="store_true", help="Print stable JSON output.")
-    loop_evidence_adversarial.add_argument("--path", help="Override the workerctl database path.")
+    loop_evidence_adversarial.add_argument("--path", help="Override the Agent Conveyor database path.")
     loop_evidence_adversarial.set_defaults(func=command_loop_evidence)
 
     ralph_loop_presets = subparsers.add_parser(
@@ -430,7 +441,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     ralph_loop_presets.add_argument("--seed-prompt-sha256", help="Seed prompt hash to store with the policy run.")
     ralph_loop_presets.add_argument("--json", action="store_true", help="Print stable JSON output.")
-    ralph_loop_presets.add_argument("--path", help="Override the workerctl database path.")
+    ralph_loop_presets.add_argument("--path", help="Override the Agent Conveyor database path.")
     ralph_loop_presets.set_defaults(func=command_ralph_loop_presets)
 
     doctor = subparsers.add_parser("doctor", help="Check local dependencies and worker state.")
@@ -476,7 +487,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     qa_run.add_argument("--receipt-output", required=True, help="Path to write the JSON QA receipt.")
     qa_run.add_argument("--dispatcher-id", help="Dispatcher id to record in the receipt.")
-    qa_run.add_argument("--path", help="Override the workerctl database path; defaults to a temp QA database.")
+    qa_run.add_argument("--path", help="Override the Agent Conveyor database path; defaults to a temp QA database.")
     qa_run.add_argument("--json", action="store_true", help="Print stable JSON summary.")
     qa_run.set_defaults(func=command_qa_run)
 
@@ -517,7 +528,7 @@ def build_parser() -> argparse.ArgumentParser:
         default="clear",
         help="Cleanup policy for custom Ralph-loop runs; defaults to clear.",
     )
-    create_disposable_binding.add_argument("--path", help="Override the workerctl database path.")
+    create_disposable_binding.add_argument("--path", help="Override the Agent Conveyor database path.")
     create_disposable_binding.add_argument("--json", action="store_true", help="Print stable JSON output.")
     create_disposable_binding.set_defaults(func=command_create_disposable_binding)
 
@@ -534,7 +545,7 @@ def build_parser() -> argparse.ArgumentParser:
     db_doctor = subparsers.add_parser(
         "db-doctor",
         help="Schema health check; legacy-table reconciliation. For session-based "
-             "runtime drift use `workerctl reconcile`.",
+             "runtime drift use `conveyor reconcile`.",
     )
     db_doctor.add_argument("--live", action="store_true", help="Also report read-only live tmux reconciliation drift.")
     db_doctor.add_argument(
@@ -543,7 +554,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_MANAGER_STALE_SECONDS,
         help="Warn when a live manager heartbeat is older than this many seconds during --live.",
     )
-    db_doctor.add_argument("--path", help="Override the workerctl database path.")
+    db_doctor.add_argument("--path", help="Override the Agent Conveyor database path.")
     db_doctor.set_defaults(func=command_db_doctor)
 
     import_compat = subparsers.add_parser(
@@ -553,7 +564,7 @@ def build_parser() -> argparse.ArgumentParser:
     import_compat.add_argument("--apply", action="store_true", help="Apply the import. Default is dry-run.")
     import_compat.add_argument("--worker", help="Import only one compatibility worker directory.")
     import_compat.add_argument("--root", help="Override the compatibility artifact root.")
-    import_compat.add_argument("--path", help="Override the workerctl database path.")
+    import_compat.add_argument("--path", help="Override the Agent Conveyor database path.")
     import_compat.set_defaults(func=command_import_compat)
 
     tasks = subparsers.add_parser("tasks", help="List or create SQLite task records.")
@@ -562,7 +573,7 @@ def build_parser() -> argparse.ArgumentParser:
     tasks.add_argument("--create", metavar="NAME", help="Create a task with this display name.")
     tasks.add_argument("--goal", help="Goal text when creating a task.")
     tasks.add_argument("--summary", help="Optional summary text when creating a task.")
-    tasks.add_argument("--path", help="Override the workerctl database path.")
+    tasks.add_argument("--path", help="Override the Agent Conveyor database path.")
     tasks.set_defaults(func=command_tasks)
 
     criteria = subparsers.add_parser(
@@ -588,7 +599,7 @@ def build_parser() -> argparse.ArgumentParser:
     criteria.add_argument("--proof", help="Optional proof text for add/update actions.")
     criteria.add_argument("--rationale", help="Optional rationale text for add/update actions.")
     criteria.add_argument("--evidence-json", help="Optional structured JSON object for add/update actions.")
-    criteria.add_argument("--path", help="Override the workerctl database path.")
+    criteria.add_argument("--path", help="Override the Agent Conveyor database path.")
     criteria.set_defaults(func=command_criteria)
 
     criteria_plan = subparsers.add_parser(
@@ -601,7 +612,7 @@ def build_parser() -> argparse.ArgumentParser:
     criteria_plan_input.add_argument("--from-text", help="Use this worker response text directly.")
     criteria_plan_input.add_argument("--from-stdin", action="store_true", help="Read worker response text from stdin.")
     criteria_plan.add_argument("--json", action="store_true", help="Print stable JSON output.")
-    criteria_plan.add_argument("--path", help="Override the workerctl database path.")
+    criteria_plan.add_argument("--path", help="Override the Agent Conveyor database path.")
     criteria_plan.set_defaults(func=command_criteria_plan)
 
     handoff = subparsers.add_parser(
@@ -617,7 +628,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Next step to preserve for manager/worker continuation. May be repeated.",
     )
     handoff.add_argument("--payload-json", help="Optional structured JSON object to store with the handoff.")
-    handoff.add_argument("--path", help="Override the workerctl database path.")
+    handoff.add_argument("--path", help="Override the Agent Conveyor database path.")
     handoff.set_defaults(func=command_handoff)
 
     worker_ack = subparsers.add_parser("worker-ack", help="Record or read the worker acknowledgement for a task.")
@@ -625,7 +636,7 @@ def build_parser() -> argparse.ArgumentParser:
     worker_ack.add_argument("--from-stdin", action="store_true", help="Read acknowledgement JSON object from stdin and persist it.")
     worker_ack.add_argument("--json", action="store_true", help="Read the latest acknowledgement as JSON.")
     worker_ack.add_argument("--correlation-id", help="Optional correlation id linking the acknowledgement to a decision or request.")
-    worker_ack.add_argument("--path", help="Override the workerctl database path.")
+    worker_ack.add_argument("--path", help="Override the Agent Conveyor database path.")
     worker_ack.set_defaults(func=command_worker_ack)
 
     manager_ack = subparsers.add_parser("manager-ack", help="Record or read the manager acknowledgement for a task.")
@@ -633,7 +644,7 @@ def build_parser() -> argparse.ArgumentParser:
     manager_ack.add_argument("--from-stdin", action="store_true", help="Read acknowledgement JSON object from stdin and persist it.")
     manager_ack.add_argument("--json", action="store_true", help="Read the latest acknowledgement as JSON.")
     manager_ack.add_argument("--correlation-id", help="Optional correlation id linking the acknowledgement to a decision or request.")
-    manager_ack.add_argument("--path", help="Override the workerctl database path.")
+    manager_ack.add_argument("--path", help="Override the Agent Conveyor database path.")
     manager_ack.set_defaults(func=command_manager_ack)
 
     runs = subparsers.add_parser(
@@ -654,7 +665,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     runs.add_argument("--task", help="Filter --list output by task name or ID.")
     runs.add_argument("--metadata-json", help="Optional JSON object stored with a created run.")
-    runs.add_argument("--path", help="Override the workerctl database path.")
+    runs.add_argument("--path", help="Override the Agent Conveyor database path.")
     runs.set_defaults(func=command_runs)
 
     telemetry = subparsers.add_parser(
@@ -684,8 +695,8 @@ def build_parser() -> argparse.ArgumentParser:
     telemetry.add_argument("--worker-staleness-seconds", type=float, default=3600.0, help="Flag active sessions whose last heartbeat is older than this threshold.")
     telemetry.add_argument("--max-unfinished-commands", type=int, default=0, help="Maximum allowed pending or attempted commands for telemetry check.")
     telemetry.add_argument("--max-open-criteria", type=int, default=0, help="Maximum allowed open accepted criteria for telemetry check.")
-    telemetry.add_argument("--max-storage-bytes", type=int, help="Maximum allowed local workerctl storage bytes for telemetry check.")
-    telemetry.add_argument("--path", help="Override the workerctl database path.")
+    telemetry.add_argument("--max-storage-bytes", type=int, help="Maximum allowed local Agent Conveyor storage bytes for telemetry check.")
+    telemetry.add_argument("--path", help="Override the Agent Conveyor database path.")
     telemetry.set_defaults(func=command_telemetry)
 
     manager_config = subparsers.add_parser(
@@ -766,7 +777,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Allow the manager to instruct the worker to run compact/clear style cleanup when supported.",
     )
     manager_config.add_argument("--permissions-json", help="Optional structured JSON object merged into permissions.")
-    manager_config.add_argument("--path", help="Override the workerctl database path.")
+    manager_config.add_argument("--path", help="Override the Agent Conveyor database path.")
     manager_config.set_defaults(func=command_manager_config)
 
     manager_permission = subparsers.add_parser(
@@ -786,7 +797,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Exit non-zero when the action is not currently allowed.",
     )
-    manager_permission.add_argument("--path", help="Override the workerctl database path.")
+    manager_permission.add_argument("--path", help="Override the Agent Conveyor database path.")
     manager_permission.set_defaults(func=command_manager_permission)
 
     epilogue = subparsers.add_parser("epilogue", help="Run or inspect configured task epilogue steps.")
@@ -796,7 +807,7 @@ def build_parser() -> argparse.ArgumentParser:
     epilogue.add_argument("--status", action="store_true", help="Print pass/fail/pending status for configured epilogue steps.")
     epilogue.add_argument("--json", action="store_true", help="Print JSON output.")
     epilogue.add_argument("--correlation-id", help="Optional correlation id for the epilogue run.")
-    epilogue.add_argument("--path", help="Override the workerctl database path.")
+    epilogue.add_argument("--path", help="Override the Agent Conveyor database path.")
     epilogue.set_defaults(func=command_epilogue)
 
     continuation = subparsers.add_parser("continuation", help="Submit, list, or review independent task continuation proposals.")
@@ -808,7 +819,7 @@ def build_parser() -> argparse.ArgumentParser:
     continuation.add_argument("--correlation-id", help="Shared correlation id for a worker/manager continuation turn.")
     continuation.add_argument("--as-role", choices=("all", "worker", "manager", "reviewer"), default="all", help="Role perspective for list redaction.")
     continuation.add_argument("--include-payload", action="store_true", help="Include proposal payloads when allowed for the selected role.")
-    continuation.add_argument("--path", help="Override the workerctl database path.")
+    continuation.add_argument("--path", help="Override the Agent Conveyor database path.")
     continuation.set_defaults(func=command_continuation)
 
     continuation_reviewer = subparsers.add_parser(
@@ -822,7 +833,7 @@ def build_parser() -> argparse.ArgumentParser:
     continuation_reviewer.add_argument("--timeout", type=float, default=120.0, help="Seconds to wait for the reviewer command.")
     continuation_reviewer.add_argument("--dry-run", action="store_true", help="Print the allowed reviewer context without running a command.")
     continuation_reviewer.add_argument("--json", action="store_true", help="Accepted for consistency; output is always JSON.")
-    continuation_reviewer.add_argument("--path", help="Override the workerctl database path.")
+    continuation_reviewer.add_argument("--path", help="Override the Agent Conveyor database path.")
     continuation_reviewer.add_argument(
         "--reviewer-command",
         nargs=argparse.REMAINDER,
@@ -843,7 +854,7 @@ def build_parser() -> argparse.ArgumentParser:
     record_decision.add_argument("--reason", required=True, help="Human-readable reason for the decision.")
     record_decision.add_argument("--cycle-id", type=int, help="Optional manager cycle id this decision came from.")
     record_decision.add_argument("--payload-json", help="Optional structured JSON object to store with the decision.")
-    record_decision.add_argument("--path", help="Override the workerctl database path.")
+    record_decision.add_argument("--path", help="Override the Agent Conveyor database path.")
     record_decision.set_defaults(func=command_record_decision)
 
     register_worker = subparsers.add_parser(
@@ -855,7 +866,7 @@ def build_parser() -> argparse.ArgumentParser:
     register_worker.add_argument("--codex-session", help="Path to the rollout-*.jsonl file (skips lsof discovery).")
     register_worker.add_argument("--cwd", help="Working directory; defaults to value in session_meta.")
     register_worker.add_argument("--tmux-session", help="Optional tmux session name if the worker is in tmux.")
-    register_worker.add_argument("--path", help="Override the workerctl database path.")
+    register_worker.add_argument("--path", help="Override the Agent Conveyor database path.")
     register_worker.set_defaults(func=command_register_worker)
 
     start_worker = subparsers.add_parser(
@@ -1082,7 +1093,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     pair.add_argument(
         "--path",
-        help="Override the workerctl database path.",
+        help="Override the Agent Conveyor database path.",
     )
     pair.add_argument(
         "--no-dispatch",
@@ -1107,7 +1118,7 @@ def build_parser() -> argparse.ArgumentParser:
     register_manager.add_argument("--codex-session")
     register_manager.add_argument("--cwd")
     register_manager.add_argument("--tmux-session")
-    register_manager.add_argument("--path", help="Override the workerctl database path.")
+    register_manager.add_argument("--path", help="Override the Agent Conveyor database path.")
     register_manager.set_defaults(func=command_register_manager)
 
     deregister = subparsers.add_parser(
@@ -1148,7 +1159,7 @@ def build_parser() -> argparse.ArgumentParser:
     discover.add_argument("query", nargs="?", default="", help="Text to search across tasks, sessions, and telemetry.")
     discover.add_argument("--all", action="store_true", help="Include done tasks and gone sessions.")
     discover.add_argument("--limit", type=int, default=10, help="Maximum matches per section.")
-    discover.add_argument("--path", help="Override the workerctl database path.")
+    discover.add_argument("--path", help="Override the Agent Conveyor database path.")
     discover.set_defaults(func=command_discover)
 
     bind = subparsers.add_parser(
@@ -1158,7 +1169,7 @@ def build_parser() -> argparse.ArgumentParser:
     bind.add_argument("--task", required=True, help="Task name.")
     bind.add_argument("--worker", required=True, help="Worker session name.")
     bind.add_argument("--manager", required=True, help="Manager session name.")
-    bind.add_argument("--path", help="Override the workerctl database path.")
+    bind.add_argument("--path", help="Override the Agent Conveyor database path.")
     bind.set_defaults(func=command_bind)
 
     unbind = subparsers.add_parser(
@@ -1196,7 +1207,7 @@ def build_parser() -> argparse.ArgumentParser:
         parser.add_argument("--interval", type=float, default=2.0, help="Seconds between polls with --wait. Default: 2.")
         parser.add_argument("--limit", type=int, default=10, help="Maximum unconsumed inbox items to list.")
         parser.add_argument("--json", action="store_true", help="Print JSON output.")
-        parser.add_argument("--path", help="Override the workerctl database path.")
+        parser.add_argument("--path", help="Override the Agent Conveyor database path.")
 
     session_inbox = subparsers.add_parser(
         "session-inbox",
@@ -1229,7 +1240,7 @@ def build_parser() -> argparse.ArgumentParser:
     session_nudge.add_argument("name", help="Session name.")
     session_nudge.add_argument("text", help="Text to send.")
     session_nudge.add_argument("--dry-run", action="store_true", help="Resolve target without sending.")
-    session_nudge.add_argument("--path", help="Override the workerctl database path.")
+    session_nudge.add_argument("--path", help="Override the Agent Conveyor database path.")
     session_nudge.set_defaults(func=command_session_nudge)
 
     session_interrupt = subparsers.add_parser(
@@ -1240,7 +1251,7 @@ def build_parser() -> argparse.ArgumentParser:
     session_interrupt.add_argument("--key", default="C-c", help="Key chord (tmux format).")
     session_interrupt.add_argument("--followup", default=None, help="Optional text to send after the interrupt.")
     session_interrupt.add_argument("--dry-run", action="store_true", help="Resolve target without sending.")
-    session_interrupt.add_argument("--path", help="Override the workerctl database path.")
+    session_interrupt.add_argument("--path", help="Override the Agent Conveyor database path.")
     session_interrupt.set_defaults(func=command_session_interrupt)
 
     request_worker_compact = subparsers.add_parser(
@@ -1254,7 +1265,7 @@ def build_parser() -> argparse.ArgumentParser:
     request_worker_compact.add_argument("--prompt-only", action="store_true", help="Send an explanatory prompt instead of a Codex slash command.")
     request_worker_compact.add_argument("--message", help="Override the prompt used with --prompt-only; audit metadata only otherwise.")
     request_worker_compact.add_argument("--dry-run", action="store_true", help="Resolve and audit without sending text to the worker.")
-    request_worker_compact.add_argument("--path", help="Override the workerctl database path.")
+    request_worker_compact.add_argument("--path", help="Override the Agent Conveyor database path.")
     request_worker_compact.set_defaults(func=command_request_worker_compact)
 
     compact_worker = subparsers.add_parser(
@@ -1268,7 +1279,7 @@ def build_parser() -> argparse.ArgumentParser:
     compact_worker.add_argument("--prompt-only", action="store_true", help="Send an explanatory prompt instead of a Codex slash command.")
     compact_worker.add_argument("--message", help="Override the prompt used with --prompt-only; audit metadata only otherwise.")
     compact_worker.add_argument("--dry-run", action="store_true", help="Resolve and audit without sending text to the worker.")
-    compact_worker.add_argument("--path", help="Override the workerctl database path.")
+    compact_worker.add_argument("--path", help="Override the Agent Conveyor database path.")
     compact_worker.set_defaults(func=command_compact_worker)
 
     cycle = subparsers.add_parser(
@@ -1280,7 +1291,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--busy-wait-seconds", type=int, default=DEFAULT_BUSY_WAIT_SECONDS,
         help="Seconds the pane signal classifier waits before flagging a stuck-busy pane (default: %(default)s).",
     )
-    cycle.add_argument("--path", help="Override the workerctl database path.")
+    cycle.add_argument("--path", help="Override the Agent Conveyor database path.")
     cycle.set_defaults(func=command_cycle)
 
     divergences = subparsers.add_parser(
@@ -1299,13 +1310,13 @@ def build_parser() -> argparse.ArgumentParser:
     commands.add_argument("--manager", help="Filter by manager ID.")
     commands.add_argument("--attempts", action="store_true", help="Include command attempt history.")
     commands.add_argument("--json", action="store_true", help="Print commands as JSON.")
-    commands.add_argument("--path", help="Override the workerctl database path.")
+    commands.add_argument("--path", help="Override the Agent Conveyor database path.")
     commands.set_defaults(func=command_commands)
 
     prune = subparsers.add_parser("prune", help="Drop old hot transcript capture content while preserving metadata.")
     prune.add_argument("--keep-latest", type=int, default=20, help="Number of content-bearing captures to retain per worker.")
     prune.add_argument("--dry-run", action="store_true", help="Report how many captures would be pruned.")
-    prune.add_argument("--path", help="Override the workerctl database path.")
+    prune.add_argument("--path", help="Override the Agent Conveyor database path.")
     prune.set_defaults(func=command_prune)
 
     stop_task = subparsers.add_parser("stop-task", help="Stop a task manager, optionally stop the worker, and mark the task done.")
@@ -1319,7 +1330,7 @@ def build_parser() -> argparse.ArgumentParser:
         default="Task stopped by operator.",
         help="Reason recorded in the stop command audit payload.",
     )
-    stop_task.add_argument("--path", help="Override the workerctl database path.")
+    stop_task.add_argument("--path", help="Override the Agent Conveyor database path.")
     stop_task.set_defaults(func=command_stop_task)
 
     finish_task = subparsers.add_parser(
@@ -1379,14 +1390,14 @@ def build_parser() -> argparse.ArgumentParser:
         default="Task finished by operator.",
         help="Reason recorded as the final manager decision.",
     )
-    finish_task.add_argument("--path", help="Override the workerctl database path.")
+    finish_task.add_argument("--path", help="Override the Agent Conveyor database path.")
     finish_task.set_defaults(func=command_finish_task)
 
     reconcile = subparsers.add_parser(
         "reconcile",
         help="Report (and optionally apply) reconciliation actions on session-based "
              "bindings: dead-pid sessions, dangling bindings, stuck tasks. "
-             "For legacy worker_id-based drift use `workerctl db-doctor --live`.",
+             "For legacy worker_id-based drift use `conveyor db-doctor --live`.",
     )
     reconcile.add_argument("--apply", action="store_true",
                           help="Mark dead-pid sessions gone and dangling bindings invalid.")
@@ -1412,7 +1423,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Include raw captured terminal output in JSON. Use only with intentional stdout capture.",
     )
-    transcript_capture.add_argument("--path", help="Override the workerctl database path.")
+    transcript_capture.add_argument("--path", help="Override the Agent Conveyor database path.")
     transcript_capture.set_defaults(func=command_transcript_capture)
 
     transcript_show = subparsers.add_parser("transcript-show", help="Show stored transcript segments for a task.")
@@ -1425,14 +1436,14 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Print raw transcript segment text. Use only with intentional stdout capture.",
     )
-    transcript_show.add_argument("--path", help="Override the workerctl database path.")
+    transcript_show.add_argument("--path", help="Override the Agent Conveyor database path.")
     transcript_show.set_defaults(func=command_transcript_show)
 
     transcript_prune = subparsers.add_parser("transcript-prune", help="Prune stored transcript segment text to metadata.")
     transcript_prune.add_argument("task", help="Task name or ID.")
     transcript_prune.add_argument("--keep-latest", type=int, default=20)
     transcript_prune.add_argument("--dry-run", action="store_true")
-    transcript_prune.add_argument("--path", help="Override the workerctl database path.")
+    transcript_prune.add_argument("--path", help="Override the Agent Conveyor database path.")
     transcript_prune.set_defaults(func=command_transcript_prune)
 
     audit = subparsers.add_parser("audit", help="Print SQLite audit history for a task.")
@@ -1443,13 +1454,13 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Include raw terminal capture and transcript text in JSON output.",
     )
-    audit.add_argument("--path", help="Override the workerctl database path.")
+    audit.add_argument("--path", help="Override the Agent Conveyor database path.")
     audit.set_defaults(func=command_audit)
 
     mutation_audit = subparsers.add_parser("mutation-audit", help="Show manager decisions linked to task mutations.")
     mutation_audit.add_argument("task", help="Task name or ID.")
     mutation_audit.add_argument("--json", action="store_true", help="Print mutation audit records as JSON.")
-    mutation_audit.add_argument("--path", help="Override the workerctl database path.")
+    mutation_audit.add_argument("--path", help="Override the Agent Conveyor database path.")
     mutation_audit.set_defaults(func=command_mutation_audit)
 
     replay = subparsers.add_parser("replay", help="Replay a task's worker-manager timeline.")
@@ -1463,7 +1474,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Allow full-transcript mode to print raw transcript text.",
     )
-    replay.add_argument("--path", help="Override the workerctl database path.")
+    replay.add_argument("--path", help="Override the Agent Conveyor database path.")
     replay.set_defaults(func=command_replay)
 
     export_task = subparsers.add_parser("export-task", help="Export task status, audit, prompts, and transcript metadata.")
@@ -1472,7 +1483,7 @@ def build_parser() -> argparse.ArgumentParser:
     export_task.add_argument("--zip", action="store_true", help="Also write a zip archive next to the export directory.")
     export_task.add_argument("--include-transcripts", action="store_true", help="Include deduplicated transcript segment metadata/content.")
     export_task.add_argument("--include-full-transcripts", action="store_true", help="Include role-tagged full transcript text files and full-transcript replay.")
-    export_task.add_argument("--path", help="Override the workerctl database path.")
+    export_task.add_argument("--path", help="Override the Agent Conveyor database path.")
     export_task.set_defaults(func=command_export_task)
 
     list_cmd = subparsers.add_parser("list", help="List known workers.")
@@ -1568,7 +1579,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Terminal app to use.",
     )
     open_worker.add_argument("--dry-run", action="store_true", help="Print the launch command without opening a window.")
-    open_worker.add_argument("--path", help="Override the workerctl database path.")
+    open_worker.add_argument("--path", help="Override the Agent Conveyor database path.")
     open_worker.set_defaults(func=command_open_worker)
 
     open_manager = subparsers.add_parser("open-manager", help="Open a terminal window attached to a task's manager.")
@@ -1580,7 +1591,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Terminal app to use.",
     )
     open_manager.add_argument("--dry-run", action="store_true", help="Print the launch command without opening a window.")
-    open_manager.add_argument("--path", help="Override the workerctl database path.")
+    open_manager.add_argument("--path", help="Override the Agent Conveyor database path.")
     open_manager.set_defaults(func=command_open_manager)
 
     stop = subparsers.add_parser("stop", help="Stop a tmux-backed worker or manager session.")
@@ -1600,7 +1611,7 @@ def main() -> int:
     try:
         return args.func(args)
     except (WorkerError, CodexSessionError, IngestError) as exc:
-        print(f"workerctl: {exc}", file=sys.stderr)
+        print(f"{parser.prog}: {exc}", file=sys.stderr)
         return 1
 
 

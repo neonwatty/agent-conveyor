@@ -179,9 +179,9 @@ Task:
 {identity_section}
 
 Report status whenever you start a new phase, become blocked, begin long-running
-verification, or finish. Use workerctl as the primary status path:
+verification, or finish. Use Agent Conveyor as the primary status path:
 
-workerctl update-status {name} \\
+conveyor update-status {name} \\
   --state planning \\
   --current-task "short description" \\
   --next-action "short description"
@@ -191,7 +191,7 @@ planning, editing, running_tests, blocked, waiting, done, unknown
 
 If you are blocked, include --blocker:
 
-workerctl update-status {name} \\
+conveyor update-status {name} \\
   --state blocked \\
   --current-task "short description" \\
   --next-action "wait for direction" \\
@@ -204,10 +204,10 @@ Dispatcher inbox:
 - If this worker is registered without a tmux session, manager nudges are
   pull-required dispatcher signals. Poll for them with:
 
-  workerctl worker-inbox <task-name> --consume-next --wait --timeout 60 --json
+  conveyor worker-inbox <task-name> --consume-next --wait --timeout 60 --json
 
 - Treat a consumed inbox item as the next manager instruction, then update
-  status with workerctl. Each consumed item records `dispatch_inbox_consumed`
+  status with conveyor. Each consumed item records `dispatch_inbox_consumed`
   telemetry so the dispatcher-to-session handoff is auditable.
 
 Compatibility JSON shape:

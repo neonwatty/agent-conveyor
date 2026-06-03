@@ -49,6 +49,7 @@ from workerctl.state import (
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKERCTL_PATH = ROOT / "scripts" / "workerctl"
+CONVEYOR_SHIM_PATH = ROOT / "bin" / "conveyor"
 WORKERCTL_SHIM_PATH = ROOT / "bin" / "workerctl"
 INSTALL_LOCAL_PATH = ROOT / "scripts" / "install-local"
 CODEX_REVIEW_HELPER_PATH = ROOT / "skills" / "codex-review" / "scripts" / "codex-review"
@@ -5142,7 +5143,7 @@ class ContractTests(unittest.TestCase):
     def test_worker_contract_uses_update_status_command(self):
         contract = worker_contract("worker-a", "Do the task.")
 
-        self.assertIn("workerctl update-status worker-a", contract)
+        self.assertIn("conveyor update-status worker-a", contract)
         self.assertIn("--state planning", contract)
         self.assertIn("--blocker", contract)
         self.assertIn("compatibility file", contract)
@@ -5151,7 +5152,7 @@ class ContractTests(unittest.TestCase):
     def test_worker_contract_tells_app_workers_to_poll_worker_inbox(self):
         contract = worker_contract("worker-a", "Do the task.")
 
-        self.assertIn("workerctl worker-inbox <task-name> --consume-next --wait --timeout 60 --json", contract)
+        self.assertIn("conveyor worker-inbox <task-name> --consume-next --wait --timeout 60 --json", contract)
         self.assertIn("dispatch_inbox_consumed", contract)
         self.assertIn("registered without a tmux session", contract)
         self.assertIn("pull-required dispatcher signals", contract)
@@ -5350,6 +5351,16 @@ class CliTests(unittest.TestCase):
         command = [str(WORKERCTL_SHIM_PATH), *args] if via_shim else [sys.executable, str(WORKERCTL_PATH), *args]
         return subprocess.run(
             command,
+            cwd=ROOT,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+
+    def run_conveyor(self, *args):
+        return subprocess.run(
+            [str(CONVEYOR_SHIM_PATH), *args],
             cwd=ROOT,
             text=True,
             stdout=subprocess.PIPE,
@@ -9436,14 +9447,14 @@ class CliTests(unittest.TestCase):
                 self.assertEqual(result, 0)
                 self.assertTrue(payload["supported"])
                 self.assertTrue(payload["ok"])
-                self.assertIn("workerctl register-worker", payload["command_template"])
+                self.assertIn("conveyor register-worker", payload["command_template"])
                 self.assertIn("--name <NAME>", payload["command_template"])
                 self.assertIn("--pid <PID>", payload["command_template"])
                 self.assertIn("--cwd <CWD>", payload["command_template"])
                 self.assertIn("--tmux-session <SESSION>", payload["command_template"])
                 self.assertTrue(any("register-manager" in step for step in payload["follow_up"]))
-                self.assertTrue(any("workerctl bind" in step for step in payload["follow_up"]))
-                self.assertTrue(any("workerctl cycle" in step for step in payload["follow_up"]))
+                self.assertTrue(any("conveyor bind" in step for step in payload["follow_up"]))
+                self.assertTrue(any("conveyor cycle" in step for step in payload["follow_up"]))
                 self.assertIn("live tmux session", payload["why_or_why_not"])
                 serialized = json.dumps(payload)
                 for retired in ("become-managed", "manager-observe", "manager-decision", "close-manager", "unmanage", "remanage", "task-status", "task-health"):
@@ -9482,7 +9493,7 @@ class CliTests(unittest.TestCase):
                 self.assertTrue(any(check["name"] == "workerctl_script" and check["ok"] for check in payload["checks"]))
                 self.assertIn("command environment", payload["command_context_note"])
                 self.assertIn("Codex app", payload["codex_app_inbox_guidance"])
-                self.assertIn("scripts/workerctl", payload["why_or_why_not"])
+                self.assertIn("bin/conveyor", payload["why_or_why_not"])
         finally:
             commands.current_session_name = original_current_session_name
             commands.shutil.which = original_which
@@ -9540,10 +9551,10 @@ class CliTests(unittest.TestCase):
         self.assertEqual(payload["scenario"], "self-management")
         self.assertTrue(any("register-worker" in step for step in payload["steps"]))
         self.assertTrue(any("register-manager" in step for step in payload["steps"]))
-        self.assertTrue(any("workerctl bind" in step for step in payload["steps"]))
-        self.assertTrue(any("workerctl cycle" in step for step in payload["steps"]))
+        self.assertTrue(any("conveyor bind" in step for step in payload["steps"]))
+        self.assertTrue(any("conveyor cycle" in step for step in payload["steps"]))
         self.assertTrue(any("session-nudge" in step for step in payload["steps"]))
-        self.assertTrue(any("workerctl reconcile" in step for step in payload["steps"]))
+        self.assertTrue(any("conveyor reconcile" in step for step in payload["steps"]))
         self.assertTrue(any("kind, state, pane_signal" in observation for observation in payload["expected_observations"]))
         joined = " ".join(payload["steps"] + payload["expected_observations"])
         for retired in ("become-managed", "manager-observe", "manager-decision", "task-status", "task-health", "extend-nudge-budget", "task-nudge", "task-interrupt", "mutation-audit", "close-manager"):
@@ -9555,7 +9566,7 @@ class CliTests(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stderr)
         payload = json.loads(proc.stdout)
         self.assertEqual(payload["scenario"], "emergent-criteria")
-        self.assertTrue(any("workerctl pair" in step for step in payload["steps"]))
+        self.assertTrue(any("conveyor pair" in step for step in payload["steps"]))
         self.assertTrue(any("manager_context.acceptance_criteria" in step for step in payload["steps"]))
         self.assertTrue(any("manager_context.criteria_negotiation" in step for step in payload["steps"]))
         self.assertTrue(any("worker_proposed" in step for step in payload["steps"]))
@@ -9568,7 +9579,7 @@ class CliTests(unittest.TestCase):
         self.assertTrue(any("tmux list-sessions" in step for step in payload["steps"]))
         self.assertTrue(any("sessions --state all" in step for step in payload["steps"]))
         self.assertTrue(any("acceptance-criteria.json" in step for step in payload["steps"]))
-        self.assertTrue(any("workerctl reconcile" in step for step in payload["steps"]))
+        self.assertTrue(any("conveyor reconcile" in step for step in payload["steps"]))
         self.assertTrue(any("git status --short --branch" in step for step in payload["steps"]))
         self.assertTrue(
             any("accepted criteria block finish-task --require-criteria-audit" in observation
@@ -9667,12 +9678,12 @@ Deferred follow-up criteria:
 Must-have current-task criteria:
 
 - A durable worker handoff records current status, next steps, and known risks.
-  Verification: `workerctl handoff` output and replay/export include the handoff.
+  Verification: `conveyor handoff` output and replay/export include the handoff.
 - The current task has accepted criteria for resume safety and a deferred
-  follow-up for optional compact/clear coverage. Verification: `workerctl
+  follow-up for optional compact/clear coverage. Verification: `conveyor
   criteria --list` shows accepted and deferred criteria.
 - A resumed manager records a decision based on durable replay/export/handoff
-  state, not live chat memory. Verification: `workerctl record-decision` payload
+  state, not live chat memory. Verification: `conveyor record-decision` payload
   names replay, export, handoff, and criteria as evidence.
 
 Follow-up criteria:
@@ -9688,13 +9699,13 @@ Follow-up criteria:
         self.assertEqual(
             suggestions[1].criterion,
             "The current task has accepted criteria for resume safety and a deferred "
-            "follow-up for optional compact/clear coverage. Verification: `workerctl "
+            "follow-up for optional compact/clear coverage. Verification: `conveyor "
             "criteria --list` shows accepted and deferred criteria.",
         )
         self.assertEqual(
             suggestions[2].criterion,
             "A resumed manager records a decision based on durable replay/export/handoff "
-            "state, not live chat memory. Verification: `workerctl record-decision` payload "
+            "state, not live chat memory. Verification: `conveyor record-decision` payload "
             "names replay, export, handoff, and criteria as evidence.",
         )
         self.assertEqual(
@@ -9768,7 +9779,7 @@ Deferred follow-up criteria:
             self.assertEqual(len(payload["suggestions"]), 2)
             self.assertEqual(payload["suggestions"][0]["source"], "worker_proposed")
             self.assertEqual(payload["suggestions"][0]["status"], "accepted")
-            self.assertEqual(payload["suggestions"][0]["command"][:4], ["workerctl", "criteria", "criteria-task", "--add"])
+            self.assertEqual(payload["suggestions"][0]["command"][:4], ["conveyor", "criteria", "criteria-task", "--add"])
             self.assertEqual(payload["suggestions"][0]["command"][-2:], ["--path", str(db_path.resolve())])
             self.assertEqual(payload["suggestions"][1]["status"], "deferred")
             self.assertIn("--rationale", payload["suggestions"][1]["command"])
@@ -9812,7 +9823,7 @@ Deferred follow-up criteria:
 
             self.assertEqual(proc.returncode, 0, proc.stderr)
             self.assertIn("Suggested criteria commands for criteria-task", proc.stdout)
-            self.assertIn("workerctl criteria criteria-task --add --criterion", proc.stdout)
+            self.assertIn("conveyor criteria criteria-task --add --criterion", proc.stdout)
             self.assertIn(f"--path {db_path.resolve()}", proc.stdout)
             self.assertIn("Review these commands before running them.", proc.stdout)
 
@@ -9824,14 +9835,14 @@ Deferred follow-up criteria:
         self.assertEqual(payload["scenario"], "tmux-errors")
         self.assertTrue(any("doctor-self --json" in step for step in payload["steps"]))
         self.assertTrue(any("PATH=/usr/bin:/bin" in step for step in payload["steps"]))
-        self.assertTrue(any("workerctl list --json" in step for step in payload["steps"]))
-        self.assertTrue(any("workerctl status" in step for step in payload["steps"]))
+        self.assertTrue(any("conveyor list --json" in step for step in payload["steps"]))
+        self.assertTrue(any("conveyor status" in step for step in payload["steps"]))
         self.assertTrue(any("session-nudge" in step for step in payload["steps"]))
-        self.assertTrue(any("workerctl audit" in step for step in payload["steps"]))
-        self.assertTrue(any("workerctl replay" in step for step in payload["steps"]))
-        self.assertTrue(any("workerctl cycle" in step for step in payload["steps"]))
+        self.assertTrue(any("conveyor audit" in step for step in payload["steps"]))
+        self.assertTrue(any("conveyor replay" in step for step in payload["steps"]))
+        self.assertTrue(any("conveyor cycle" in step for step in payload["steps"]))
         self.assertTrue(any("finish-task --stop-manager --stop-worker" in step for step in payload["steps"]))
-        self.assertTrue(any("workerctl reconcile --stale-cycles-seconds 1" in step for step in payload["steps"]))
+        self.assertTrue(any("conveyor reconcile --stale-cycles-seconds 1" in step for step in payload["steps"]))
         self.assertTrue(any("reconcile --apply" in step for step in payload["steps"]))
         self.assertTrue(any("git status --short --branch" in step for step in payload["steps"]))
         self.assertTrue(
@@ -9866,10 +9877,10 @@ Deferred follow-up criteria:
         self.assertEqual(proc.returncode, 0, proc.stderr)
         payload = json.loads(proc.stdout)
         self.assertEqual(payload["scenario"], "dispatch-completion")
-        self.assertTrue(any("workerctl pair" in step for step in payload["steps"]))
-        self.assertTrue(any("workerctl dispatch --once --type worker_task_complete" in step for step in payload["steps"]))
-        self.assertTrue(any("workerctl audit" in step for step in payload["steps"]))
-        self.assertTrue(any("workerctl replay" in step for step in payload["steps"]))
+        self.assertTrue(any("conveyor pair" in step for step in payload["steps"]))
+        self.assertTrue(any("conveyor dispatch --once --type worker_task_complete" in step for step in payload["steps"]))
+        self.assertTrue(any("conveyor audit" in step for step in payload["steps"]))
+        self.assertTrue(any("conveyor replay" in step for step in payload["steps"]))
         self.assertTrue(any("dashboard" in step.lower() for step in payload["steps"]))
         self.assertTrue(any("dispatch_signal_suppressed" in step for step in payload["steps"]))
         self.assertTrue(any("source_event_id" in observation for observation in payload["expected_observations"]))
@@ -9917,7 +9928,7 @@ Deferred follow-up criteria:
         self.assertTrue(any("dispatch_watch_heartbeat" in step and "--newest --limit 1" in step for step in payload["steps"]))
         self.assertTrue(any("enqueue-continue-iteration" in step and "max_iterations=1" in step for step in payload["steps"]))
         self.assertTrue(any("dispatch --once --type continue_iteration" in step for step in payload["steps"]))
-        self.assertTrue(any("workerctl commands --task <task> --attempts" in step for step in payload["steps"]))
+        self.assertTrue(any("conveyor commands --task <task> --attempts" in step for step in payload["steps"]))
         self.assertFalse(any("workerctl commands --task --attempts" in step for step in payload["steps"]))
         self.assertTrue(any("dashboard" in step.lower() and "Inbox 0" in step for step in payload["steps"]))
         self.assertTrue(any("max_iterations_reached" in observation for observation in payload["expected_observations"]))
@@ -9988,9 +9999,9 @@ Deferred follow-up criteria:
         )
         joined_steps = " ".join(payload["steps"])
         joined_observations = " ".join(payload["expected_observations"])
-        self.assertIn("workerctl runs --list --task <task>", joined_steps)
+        self.assertIn("conveyor runs --list --task <task>", joined_steps)
         self.assertNotIn("workerctl runs --task <task> --json", joined_steps)
-        self.assertIn("workerctl commands --task <task> --attempts", joined_steps)
+        self.assertIn("conveyor commands --task <task> --attempts", joined_steps)
         self.assertNotIn("workerctl commands --task --attempts", joined_steps)
         self.assertIn('required_before_continue=["adversarial_check"]', joined_steps)
         self.assertIn("missing_evidence=[adversarial_check]", joined_steps)
@@ -10997,14 +11008,14 @@ Deferred follow-up criteria:
                 self.assertEqual(result, 0)
                 self.assertEqual(payload["session"], "qa-raw")
                 self.assertEqual(payload["attach_command"], "tmux attach -t qa-raw")
-                self.assertEqual(payload["register_worker_command_template"], f"workerctl register-worker --name <worker-name> --pid <pid> --codex-session <rollout.jsonl> --cwd '{ROOT}' --tmux-session qa-raw")
-                self.assertEqual(payload["start_manager_command_template"], f"workerctl start-manager --name <manager-name> --cwd '{ROOT}' -- '--model' 'gpt-5.4-mini'")
-                self.assertEqual(payload["bind_command_template"], "workerctl bind --task <task-name> --worker <worker-name> --manager <manager-name>")
-                self.assertEqual(payload["manager_config_questions_command_template"], "workerctl manager-config <task-name> --questions")
+                self.assertEqual(payload["register_worker_command_template"], f"conveyor register-worker --name <worker-name> --pid <pid> --codex-session <rollout.jsonl> --cwd '{ROOT}' --tmux-session qa-raw")
+                self.assertEqual(payload["start_manager_command_template"], f"conveyor start-manager --name <manager-name> --cwd '{ROOT}' -- '--model' 'gpt-5.4-mini'")
+                self.assertEqual(payload["bind_command_template"], "conveyor bind --task <task-name> --worker <worker-name> --manager <manager-name>")
+                self.assertEqual(payload["manager_config_questions_command_template"], "conveyor manager-config <task-name> --questions")
                 self.assertTrue(payload["start_prompt_sent"])
                 self.assertTrue(Path(payload["start_prompt_path"]).exists())
                 prompt = Path(payload["start_prompt_path"]).read_text()
-                self.assertIn("workerctl tmux session qa-raw", prompt)
+                self.assertIn("Agent Conveyor tmux session qa-raw", prompt)
                 workerctl = commands.workerctl_cli()
                 self.assertIn(f"{workerctl} register-worker --name <worker-name>", prompt)
                 self.assertIn(f"{workerctl} start-manager --name <manager-name>", prompt)
@@ -13673,6 +13684,19 @@ Deferred follow-up criteria:
         self.assertIn("transcript-prune", proc.stdout)
         self.assertIn("transcript-show", proc.stdout)
 
+    def test_conveyor_shim_help_uses_conveyor_program_name(self):
+        proc = self.run_conveyor("--help")
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("usage: conveyor", proc.stdout)
+        self.assertNotIn("usage: workerctl", proc.stdout)
+
+    def test_workerctl_shim_keeps_compatibility_program_name(self):
+        proc = self.run_workerctl("--help", via_shim=True)
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("usage: workerctl", proc.stdout)
+
     def test_stop_task_help_includes_reason(self):
         proc = self.run_workerctl("stop-task", "--help")
 
@@ -13834,8 +13858,9 @@ Deferred follow-up criteria:
         self.assertIn(str(ROOT / "bin"), proc.stdout)
         self.assertIn("manage-codex-workers", proc.stdout)
         self.assertIn("codex-review", proc.stdout)
-        self.assertIn("workerctl dispatch --watch --dispatcher-id dispatch-local", proc.stdout)
-        self.assertIn("workerctl qa-plan dispatch-completion", proc.stdout)
+        self.assertTrue(os.access(CONVEYOR_SHIM_PATH, os.X_OK))
+        self.assertIn("conveyor dispatch --watch --dispatcher-id dispatch-local", proc.stdout)
+        self.assertIn("conveyor qa-plan dispatch-completion", proc.stdout)
         self.assertIn("Use the manage-codex-workers skill.", proc.stdout)
         self.assertIn("Set up a Codex app Ralph loop", proc.stdout)
 
@@ -13875,8 +13900,8 @@ Deferred follow-up criteria:
                 review_helper_path.read_text(),
                 CODEX_REVIEW_HELPER_PATH.read_text(),
             )
-            self.assertIn("workerctl dispatch --watch --dispatcher-id dispatch-local", proc.stdout)
-            self.assertIn("workerctl qa-plan dispatch-completion", proc.stdout)
+            self.assertIn("conveyor dispatch --watch --dispatcher-id dispatch-local", proc.stdout)
+            self.assertIn("conveyor qa-plan dispatch-completion", proc.stdout)
             self.assertIn("Use the manage-codex-workers skill.", proc.stdout)
             self.assertIn("Set up a Codex app Ralph loop", proc.stdout)
 
@@ -16181,7 +16206,7 @@ class RegisterCommandsTests(unittest.TestCase):
             self.assertEqual(bind["task"], "dashboard-search-demo")
             self.assertEqual(bind["worker"], "dashboard-search-worker")
             self.assertEqual(bind["manager"], "dashboard-search-manager")
-            self.assertIn("workerctl bind", bind["command"])
+            self.assertIn("conveyor bind", bind["command"])
 
     def test_cli_search_alias_matches_discover(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -16270,7 +16295,7 @@ class RegisterCommandsTests(unittest.TestCase):
             )
             self.assertEqual(proc.returncode, 1)
             self.assertNotIn("Traceback", proc.stderr)
-            self.assertIn("workerctl:", proc.stderr)
+            self.assertIn("conveyor:", proc.stderr)
 
     def test_register_session_re_register_resets_ingest_offset(self):
         """Re-registering a session (e.g. pointing at a new rollout file) must
@@ -17334,7 +17359,7 @@ class IngestCliTests(unittest.TestCase):
             )
             self.assertEqual(proc.returncode, 1)
             self.assertNotIn("Traceback", proc.stderr)
-            self.assertIn("workerctl:", proc.stderr)
+            self.assertIn("conveyor:", proc.stderr)
 
 
 class StalenessTests(unittest.TestCase):
@@ -17860,7 +17885,7 @@ class SessionActionCliTests(unittest.TestCase):
             )
             self.assertEqual(proc.returncode, 1)
             self.assertNotIn("Traceback", proc.stderr)
-            self.assertIn("workerctl:", proc.stderr)
+            self.assertIn("conveyor:", proc.stderr)
 
     def test_cli_session_interrupt_dry_run(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -17919,7 +17944,7 @@ class SessionActionCliTests(unittest.TestCase):
             # Should exit non-zero with a clean error.
             self.assertNotEqual(proc.returncode, 0)
             self.assertNotIn("Traceback", proc.stderr)
-            self.assertIn("workerctl:", proc.stderr)
+            self.assertIn("conveyor:", proc.stderr)
 
             # And the audit event must be present with success=False.
             conn = worker_db.connect(state_dir / "workerctl.db")
@@ -19331,7 +19356,7 @@ class SuperviseCycleCriteriaTests(unittest.TestCase):
             self.assertIn("must-have current-task criteria", negotiation["prompt"])
             self.assertIn("follow-up criteria", negotiation["prompt"])
             self.assertTrue(
-                any("workerctl criteria criteria-cycle --add" in action for action in negotiation["suggested_actions"])
+                any("conveyor criteria criteria-cycle --add" in action for action in negotiation["suggested_actions"])
             )
 
             row = conn.execute(
@@ -19387,8 +19412,8 @@ class SuperviseCycleCriteriaTests(unittest.TestCase):
         )
 
         joined_actions = " ".join(negotiation["suggested_actions"])
-        self.assertIn("workerctl criteria 'criteria cycle; echo bad' --add", joined_actions)
-        self.assertNotIn("workerctl criteria criteria cycle; echo bad --add", joined_actions)
+        self.assertIn("conveyor criteria 'criteria cycle; echo bad' --add", joined_actions)
+        self.assertNotIn("conveyor criteria criteria cycle; echo bad --add", joined_actions)
 
     def test_run_cycle_does_not_recommend_criteria_negotiation_when_active_criteria_exist(self):
         from workerctl import supervise_cycle
@@ -19513,7 +19538,7 @@ class CycleCliTests(unittest.TestCase):
             )
             self.assertEqual(proc.returncode, 1)
             self.assertNotIn("Traceback", proc.stderr)
-            self.assertIn("workerctl:", proc.stderr)
+            self.assertIn("conveyor:", proc.stderr)
 
 
 class ShadowStateTests(unittest.TestCase):
@@ -20012,7 +20037,7 @@ class DivergencesCliTests(unittest.TestCase):
             )
             self.assertEqual(proc.returncode, 1)
             self.assertNotIn("Traceback", proc.stderr)
-            self.assertIn("workerctl:", proc.stderr)
+            self.assertIn("conveyor:", proc.stderr)
 
     def test_cli_divergences_empty_when_no_pane_patterns(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -21108,7 +21133,7 @@ class ManagerBootstrapPromptTests(unittest.TestCase):
             self.assertIn('"satisfied": [...]', document)
             self.assertIn('"deferred": [...]', document)
             self.assertIn('"rejected": [...]', document)
-        self.assertIn("criterion_id=$(scripts/workerctl criteria", readme)
+        self.assertIn("criterion_id=$(conveyor criteria", readme)
         self.assertIn("criterion_id=$(conveyor criteria", skill)
 
     def test_docs_include_adversarial_burden_of_proof_guidance(self):
@@ -21143,7 +21168,7 @@ class ManagerBootstrapPromptTests(unittest.TestCase):
         self.assertIn("workerctl_on_path", readme)
         self.assertIn("whole rollout", readme)
         self.assertIn("older completion signals", readme)
-        self.assertIn("scripts/workerctl sessions --name", checklist)
+        self.assertIn("conveyor sessions --name", checklist)
         self.assertIn("identity_token", checklist)
 
     def test_skill_documents_simple_codex_app_ralph_loop_entrypoint(self):
@@ -21165,10 +21190,10 @@ class ManagerBootstrapPromptTests(unittest.TestCase):
         self.assertIn("telemetry [--run RUN]", readme)
         self.assertIn("docs/local-telemetry-workflow.md", readme)
         for document in (checklist, workflow):
-            self.assertIn("scripts/workerctl telemetry --summary --run <run_id>", document)
-            self.assertIn("scripts/workerctl telemetry --run <run_id>", document)
-            self.assertIn("scripts/workerctl telemetry --search manager --run <run_id>", document)
-            self.assertIn("scripts/workerctl export-task <task> --zip --include-transcripts", document)
+            self.assertIn("conveyor telemetry --summary --run <run_id>", document)
+            self.assertIn("conveyor telemetry --run <run_id>", document)
+            self.assertIn("conveyor telemetry --search manager --run <run_id>", document)
+            self.assertIn("conveyor export-task <task> --zip --include-transcripts", document)
         self.assertIn("telemetry-events.json", workflow)
         self.assertIn("telemetry-report.md", workflow)
 
@@ -21221,8 +21246,8 @@ class ManagerBootstrapPromptTests(unittest.TestCase):
         self.assertIn('export MANAGER_ROLLOUT="$QA_TMPDIR/rollout-manager.jsonl"', qa_doc)
         self.assertIn('--codex-session "$WORKER_ROLLOUT"', qa_doc)
         self.assertIn('--codex-session "$MANAGER_ROLLOUT"', qa_doc)
-        self.assertIn("scripts/workerctl loop-templates --list --json", qa_doc)
-        self.assertIn("scripts/workerctl loop-templates --show visual_diff_loop --json", qa_doc)
+        self.assertIn("conveyor loop-templates --list --json", qa_doc)
+        self.assertIn("conveyor loop-templates --show visual_diff_loop --json", qa_doc)
         self.assertNotIn('loop-templates --list --json --path "$WORKERCTL_DB"', qa_doc)
         self.assertNotIn('loop-templates --show visual_diff_loop --json --path "$WORKERCTL_DB"', qa_doc)
         self.assertIn("loop-evidence adversarial-check qa-general-loop-template", qa_doc)
@@ -21530,7 +21555,7 @@ class StartManagerTests(unittest.TestCase):
                     self.assertIn("acceptance criteria as living supervision state", codex_cmd)
                     self.assertIn("manager_context.acceptance_criteria", codex_cmd)
                     self.assertIn("must-have vs follow-up criteria", codex_cmd)
-                    self.assertIn(str(ROOT / "scripts" / "workerctl"), codex_cmd)
+                    self.assertIn(str(ROOT / "bin" / "conveyor"), codex_cmd)
                     self.assertIn("criteria", codex_cmd)
                     self.assertIn("compare worker receipts/verification against accepted open criteria", codex_cmd)
                     self.assertNotIn("Do not edit files. Wait for manager instruction.", codex_cmd)

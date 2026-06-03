@@ -8,7 +8,7 @@ Shared protocol: [shared-codex-chrome-protocol.md](shared-codex-chrome-protocol.
 
 ## Scenario
 
-- `workerctl qa-plan ralph-loop`
+- `conveyor qa-plan ralph-loop`
 - Target repo: a disposable repo with real or simulated CI.
 - Seed prompt: supplied by the operator and reused exactly for every iteration.
 - Default max iterations: `2`.
@@ -27,13 +27,13 @@ Pick a disposable target repo and seed prompt. Then print the canonical CLI
 checklist:
 
 ```bash
-scripts/workerctl qa-plan ralph-loop
+conveyor qa-plan ralph-loop
 ```
 
 Start Dispatch if it is not already active:
 
 ```bash
-scripts/workerctl dispatch --watch --dispatcher-id qa-ralph-loop
+conveyor dispatch --watch --dispatcher-id qa-ralph-loop
 ```
 
 Record the exact seed prompt hash before iteration 1:
@@ -45,7 +45,7 @@ SEED_PROMPT_SHA256="$(printf '%s' "$SEED_PROMPT" | shasum -a 256 | awk '{print $
 Create the first managed pair with the seed prompt:
 
 ```bash
-scripts/workerctl pair \
+conveyor pair \
   --task qa-ralph-loop-iter-1 \
   --worker-name qa-ralph-worker-1 \
   --manager-name qa-ralph-manager \
@@ -90,8 +90,8 @@ At each PR, CI-fix, merge, handoff, and clear checkpoint, capture both the
 task-scoped worker/manager liveness view and the latest dispatch heartbeat:
 
 ```bash
-scripts/workerctl telemetry task qa-ralph-loop-iter-1 --json
-scripts/workerctl telemetry --event-type dispatch_watch_heartbeat --newest --limit 1 --json
+conveyor telemetry task qa-ralph-loop-iter-1 --json
+conveyor telemetry --event-type dispatch_watch_heartbeat --newest --limit 1 --json
 ```
 
 Preserve the `worker_alive`, `manager_alive`, latest-cycle, and dispatch
@@ -144,7 +144,7 @@ uses `max_iterations=1` and `current_iteration=1`, then asks for iteration 2.
 Create a Ralph-loop run record:
 
 ```bash
-RALPH_LOOP_RUN_ID="$(scripts/workerctl runs \
+RALPH_LOOP_RUN_ID="$(conveyor runs \
   --create qa-ralph-loop-guardrail \
   --name qa-ralph-loop-max-block \
   --purpose ralph_loop \
@@ -155,7 +155,7 @@ RALPH_LOOP_RUN_ID="$(scripts/workerctl runs \
 Record the manager request for one more iteration:
 
 ```bash
-MANAGER_DECISION_ID="$(scripts/workerctl record-decision qa-ralph-loop-guardrail nudge \
+MANAGER_DECISION_ID="$(conveyor record-decision qa-ralph-loop-guardrail nudge \
   --reason "Manager requests iteration 2 for max-iteration refusal QA." \
   --payload-json "{\"ralph_loop_run_id\":\"$RALPH_LOOP_RUN_ID\",\"requested_iteration\":2,\"correlation_id\":\"ralph-loop-max-block\"}" \
   --path "$WORKERCTL_DB" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')"
@@ -164,7 +164,7 @@ MANAGER_DECISION_ID="$(scripts/workerctl record-decision qa-ralph-loop-guardrail
 Queue and dispatch the continuation request:
 
 ```bash
-scripts/workerctl enqueue-continue-iteration qa-ralph-loop-guardrail \
+conveyor enqueue-continue-iteration qa-ralph-loop-guardrail \
   --loop-run "$RALPH_LOOP_RUN_ID" \
   --requested-iteration 2 \
   --manager-decision-id "$MANAGER_DECISION_ID" \
@@ -173,7 +173,7 @@ scripts/workerctl enqueue-continue-iteration qa-ralph-loop-guardrail \
   --json \
   --path "$WORKERCTL_DB"
 
-scripts/workerctl dispatch \
+conveyor dispatch \
   --once \
   --type continue_iteration \
   --dispatcher-id qa-ralph-loop \
@@ -200,10 +200,10 @@ Open the dashboard for the bound task and verify the Dispatch panel shows
 Then verify the non-delivery evidence from the CLI:
 
 ```bash
-scripts/workerctl replay qa-ralph-loop-guardrail
-scripts/workerctl audit qa-ralph-loop-guardrail --json --path "$WORKERCTL_DB"
-scripts/workerctl commands --task qa-ralph-loop-guardrail --attempts --json --path "$WORKERCTL_DB"
-scripts/workerctl worker-inbox qa-ralph-loop-guardrail --json --path "$WORKERCTL_DB"
+conveyor replay qa-ralph-loop-guardrail
+conveyor audit qa-ralph-loop-guardrail --json --path "$WORKERCTL_DB"
+conveyor commands --task qa-ralph-loop-guardrail --attempts --json --path "$WORKERCTL_DB"
+conveyor worker-inbox qa-ralph-loop-guardrail --json --path "$WORKERCTL_DB"
 ```
 
 The manager-visible refusal receipt must appear in command output, replay, or
@@ -220,7 +220,7 @@ iteration 2 before CI evidence and adversarial proof exist.
 Create the evidence-gated Ralph-loop run record:
 
 ```bash
-RALPH_LOOP_RUN_ID="$(scripts/workerctl runs \
+RALPH_LOOP_RUN_ID="$(conveyor runs \
   --create qa-ralph-loop-evidence-gate \
   --name qa-ralph-loop-ci-gate \
   --purpose ralph_loop \
@@ -231,12 +231,12 @@ RALPH_LOOP_RUN_ID="$(scripts/workerctl runs \
 Record the manager request before CI-green evidence exists, then dispatch:
 
 ```bash
-MANAGER_DECISION_ID="$(scripts/workerctl record-decision qa-ralph-loop-evidence-gate nudge \
+MANAGER_DECISION_ID="$(conveyor record-decision qa-ralph-loop-evidence-gate nudge \
   --reason "Manager requests iteration 2 before CI-green evidence exists." \
   --payload-json "{\"ralph_loop_run_id\":\"$RALPH_LOOP_RUN_ID\",\"requested_iteration\":2,\"correlation_id\":\"ralph-loop-missing-ci\"}" \
   --path "$WORKERCTL_DB" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')"
 
-scripts/workerctl enqueue-continue-iteration qa-ralph-loop-evidence-gate \
+conveyor enqueue-continue-iteration qa-ralph-loop-evidence-gate \
   --loop-run "$RALPH_LOOP_RUN_ID" \
   --requested-iteration 2 \
   --manager-decision-id "$MANAGER_DECISION_ID" \
@@ -245,7 +245,7 @@ scripts/workerctl enqueue-continue-iteration qa-ralph-loop-evidence-gate \
   --json \
   --path "$WORKERCTL_DB"
 
-scripts/workerctl dispatch \
+conveyor dispatch \
   --once \
   --type continue_iteration \
   --dispatcher-id qa-ralph-loop \
@@ -276,20 +276,20 @@ using `loop-evidence adversarial-check` for the proof receipt, and retry with a
 fresh command:
 
 ```bash
-CI_GREEN_CRITERION_ID="$(scripts/workerctl criteria qa-ralph-loop-evidence-gate \
+CI_GREEN_CRITERION_ID="$(conveyor criteria qa-ralph-loop-evidence-gate \
   --add \
   --criterion "Iteration 1 CI is green" \
   --source manager_inferred \
   --status accepted \
   --path "$WORKERCTL_DB" | python3 -c 'import json,sys; print(json.load(sys.stdin)["affected_criterion"]["id"])')"
 
-scripts/workerctl criteria qa-ralph-loop-evidence-gate \
+conveyor criteria qa-ralph-loop-evidence-gate \
   --satisfy "$CI_GREEN_CRITERION_ID" \
   --proof "CI-green receipt recorded." \
   --evidence-json "{\"correlation_id\":\"ralph-loop-ci-green\",\"evidence_type\":\"ci_green\",\"iteration\":1,\"ralph_loop_run_id\":\"$RALPH_LOOP_RUN_ID\",\"status\":\"green\"}" \
   --path "$WORKERCTL_DB"
 
-scripts/workerctl loop-evidence adversarial-check qa-ralph-loop-evidence-gate \
+conveyor loop-evidence adversarial-check qa-ralph-loop-evidence-gate \
   --loop-run "$RALPH_LOOP_RUN_ID" \
   --iteration 1 \
   --failure-mode "iteration 2 could continue even though CI-green hides an unreviewed regression" \
@@ -298,12 +298,12 @@ scripts/workerctl loop-evidence adversarial-check qa-ralph-loop-evidence-gate \
   --correlation-id ralph-loop-ci-adversarial \
   --path "$WORKERCTL_DB"
 
-MANAGER_DECISION_ID="$(scripts/workerctl record-decision qa-ralph-loop-evidence-gate nudge \
+MANAGER_DECISION_ID="$(conveyor record-decision qa-ralph-loop-evidence-gate nudge \
   --reason "CI-green and adversarial proof exist; retry iteration 2." \
   --payload-json "{\"ralph_loop_run_id\":\"$RALPH_LOOP_RUN_ID\",\"requested_iteration\":2,\"correlation_id\":\"ralph-loop-ci-allowed\"}" \
   --path "$WORKERCTL_DB" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')"
 
-scripts/workerctl enqueue-continue-iteration qa-ralph-loop-evidence-gate \
+conveyor enqueue-continue-iteration qa-ralph-loop-evidence-gate \
   --loop-run "$RALPH_LOOP_RUN_ID" \
   --requested-iteration 2 \
   --manager-decision-id "$MANAGER_DECISION_ID" \
@@ -312,7 +312,7 @@ scripts/workerctl enqueue-continue-iteration qa-ralph-loop-evidence-gate \
   --json \
   --path "$WORKERCTL_DB"
 
-scripts/workerctl dispatch \
+conveyor dispatch \
   --once \
   --type continue_iteration \
   --dispatcher-id qa-ralph-loop \
@@ -338,7 +338,7 @@ to prove Dispatch blocks a manager continuation until every required
 List available presets first:
 
 ```bash
-scripts/workerctl ralph-loop-presets --list --json
+conveyor ralph-loop-presets --list --json
 ```
 
 Verify the output includes `test_coverage_loop`, `build_then_clear`,
@@ -347,7 +347,7 @@ Verify the output includes `test_coverage_loop`, `build_then_clear`,
 Create the preset-backed Ralph-loop run record:
 
 ```bash
-RALPH_LOOP_RUN_ID="$(scripts/workerctl ralph-loop-presets \
+RALPH_LOOP_RUN_ID="$(conveyor ralph-loop-presets \
   --create-run qa-ralph-loop-preset \
   --preset pr_ci_merge_loop \
   --name qa-ralph-loop-preset-policy \
@@ -362,12 +362,12 @@ Record the manager request before PR, CI, merge, and adversarial proof evidence
 exists, then dispatch:
 
 ```bash
-MANAGER_DECISION_ID="$(scripts/workerctl record-decision qa-ralph-loop-preset nudge \
+MANAGER_DECISION_ID="$(conveyor record-decision qa-ralph-loop-preset nudge \
   --reason "Manager requests iteration 2 before PR, CI, merge, and adversarial proof evidence exists." \
   --payload-json "{\"ralph_loop_run_id\":\"$RALPH_LOOP_RUN_ID\",\"requested_iteration\":2,\"correlation_id\":\"ralph-loop-preset-missing\"}" \
   --path "$WORKERCTL_DB" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')"
 
-scripts/workerctl enqueue-continue-iteration qa-ralph-loop-preset \
+conveyor enqueue-continue-iteration qa-ralph-loop-preset \
   --loop-run "$RALPH_LOOP_RUN_ID" \
   --requested-iteration 2 \
   --manager-decision-id "$MANAGER_DECISION_ID" \
@@ -376,7 +376,7 @@ scripts/workerctl enqueue-continue-iteration qa-ralph-loop-preset \
   --json \
   --path "$WORKERCTL_DB"
 
-scripts/workerctl dispatch \
+conveyor dispatch \
   --once \
   --type continue_iteration \
   --dispatcher-id qa-ralph-loop \
@@ -408,20 +408,20 @@ retry with a fresh command:
 
 ```bash
 for EVIDENCE_TYPE in pr_url ci_green merge; do
-  CRITERION_ID="$(scripts/workerctl criteria qa-ralph-loop-preset \
+  CRITERION_ID="$(conveyor criteria qa-ralph-loop-preset \
     --add \
     --criterion "Iteration 1 ${EVIDENCE_TYPE} evidence" \
     --source manager_inferred \
     --status accepted \
     --path "$WORKERCTL_DB" | python3 -c 'import json,sys; print(json.load(sys.stdin)["affected_criterion"]["id"])')"
-  scripts/workerctl criteria qa-ralph-loop-preset \
+  conveyor criteria qa-ralph-loop-preset \
     --satisfy "$CRITERION_ID" \
     --proof "${EVIDENCE_TYPE} receipt recorded." \
     --evidence-json "{\"correlation_id\":\"ralph-loop-${EVIDENCE_TYPE}\",\"evidence_type\":\"${EVIDENCE_TYPE}\",\"iteration\":1,\"ralph_loop_run_id\":\"$RALPH_LOOP_RUN_ID\",\"status\":\"recorded\"}" \
     --path "$WORKERCTL_DB"
 done
 
-scripts/workerctl loop-evidence adversarial-check qa-ralph-loop-preset \
+conveyor loop-evidence adversarial-check qa-ralph-loop-preset \
   --loop-run "$RALPH_LOOP_RUN_ID" \
   --iteration 1 \
   --failure-mode "PR, CI, and merge receipts could hide an unverified regression" \
@@ -430,12 +430,12 @@ scripts/workerctl loop-evidence adversarial-check qa-ralph-loop-preset \
   --correlation-id ralph-loop-preset-adversarial \
   --path "$WORKERCTL_DB"
 
-MANAGER_DECISION_ID="$(scripts/workerctl record-decision qa-ralph-loop-preset nudge \
+MANAGER_DECISION_ID="$(conveyor record-decision qa-ralph-loop-preset nudge \
   --reason "PR, CI, merge, and adversarial proof evidence exists; retry iteration 2." \
   --payload-json "{\"ralph_loop_run_id\":\"$RALPH_LOOP_RUN_ID\",\"requested_iteration\":2,\"correlation_id\":\"ralph-loop-preset-allowed\"}" \
   --path "$WORKERCTL_DB" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')"
 
-scripts/workerctl enqueue-continue-iteration qa-ralph-loop-preset \
+conveyor enqueue-continue-iteration qa-ralph-loop-preset \
   --loop-run "$RALPH_LOOP_RUN_ID" \
   --requested-iteration 2 \
   --manager-decision-id "$MANAGER_DECISION_ID" \
@@ -444,7 +444,7 @@ scripts/workerctl enqueue-continue-iteration qa-ralph-loop-preset \
   --json \
   --path "$WORKERCTL_DB"
 
-scripts/workerctl dispatch \
+conveyor dispatch \
   --once \
   --type continue_iteration \
   --dispatcher-id qa-ralph-loop \
@@ -466,15 +466,15 @@ Required retry evidence:
 Before enabling permissions, verify the manager permission gates fail closed:
 
 ```bash
-scripts/workerctl manager-permission qa-ralph-loop-iter-1 repo.open_pr --require
-scripts/workerctl manager-permission qa-ralph-loop-iter-1 repo.merge_green_pr --require
-scripts/workerctl manager-permission qa-ralph-loop-iter-1 worker_compact_clear --require --require-handoff
+conveyor manager-permission qa-ralph-loop-iter-1 repo.open_pr --require
+conveyor manager-permission qa-ralph-loop-iter-1 repo.merge_green_pr --require
+conveyor manager-permission qa-ralph-loop-iter-1 worker_compact_clear --require --require-handoff
 ```
 
 Then enable the allowed run explicitly:
 
 ```bash
-scripts/workerctl manager-config qa-ralph-loop-iter-1 \
+conveyor manager-config qa-ralph-loop-iter-1 \
   --allow-pr \
   --allow-merge-green \
   --allow-worker-compact-clear \
@@ -489,11 +489,11 @@ scripts/workerctl manager-config qa-ralph-loop-iter-1 \
 Record manager decisions with the iteration marker in structured payloads:
 
 ```bash
-scripts/workerctl record-decision qa-ralph-loop-iter-1 inspect \
+conveyor record-decision qa-ralph-loop-iter-1 inspect \
   --reason "Iteration 1 is PR-ready after criteria and verification evidence." \
   --payload-json "{\"ralph_loop\":{\"iteration\":1,\"phase\":\"pr\",\"correlation_id\":\"ralph-iter-1-pr\",\"seed_prompt_sha256\":\"$SEED_PROMPT_SHA256\"}}"
 
-scripts/workerctl epilogue qa-ralph-loop-iter-1 \
+conveyor epilogue qa-ralph-loop-iter-1 \
   --step draft-pr \
   --correlation-id ralph-iter-1-pr
 ```
@@ -502,13 +502,13 @@ The `draft-pr` epilogue is a PR-readiness checkpoint. Record the actual PR URL
 separately, for example as accepted criterion evidence:
 
 ```bash
-PR_URL_CRITERION_ID="$(scripts/workerctl criteria qa-ralph-loop-iter-1 \
+PR_URL_CRITERION_ID="$(conveyor criteria qa-ralph-loop-iter-1 \
   --add \
   --criterion "Iteration 1 PR URL is recorded" \
   --source manager_inferred \
   --status accepted | python3 -c 'import json,sys; print(json.load(sys.stdin)["affected_criterion"]["id"])')"
 
-scripts/workerctl criteria qa-ralph-loop-iter-1 \
+conveyor criteria qa-ralph-loop-iter-1 \
   --satisfy "$PR_URL_CRITERION_ID" \
   --evidence-json "{\"correlation_id\":\"ralph-iter-1-pr\",\"pr_url\":\"<url>\"}"
 ```
@@ -517,14 +517,14 @@ Route the PR action through the manager-to-worker channel after the readiness
 decision:
 
 ```bash
-scripts/workerctl session-nudge qa-ralph-worker-1 \
+conveyor session-nudge qa-ralph-worker-1 \
   "correlation_id=ralph-iter-1-pr; open the PR now, then report the PR URL and evidence."
 ```
 
 For the forced or simulated CI failure path:
 
 ```bash
-scripts/workerctl record-decision qa-ralph-loop-iter-1 nudge \
+conveyor record-decision qa-ralph-loop-iter-1 nudge \
   --reason "CI failed; route a focused CI-fix retry to the worker." \
   --payload-json "{\"ralph_loop\":{\"iteration\":1,\"phase\":\"ci_fix\",\"correlation_id\":\"ralph-iter-1-ci-fix\",\"seed_prompt_sha256\":\"$SEED_PROMPT_SHA256\"}}"
 ```
@@ -533,14 +533,14 @@ Then route the retry with `session-nudge`, not the legacy task-scoped `nudge`
 path:
 
 ```bash
-scripts/workerctl session-nudge qa-ralph-worker-1 \
+conveyor session-nudge qa-ralph-worker-1 \
   "correlation_id=ralph-iter-1-ci-fix; inspect CI, push a fix, and report the fresh CI URL."
 ```
 
 For the green merge decision:
 
 ```bash
-scripts/workerctl record-decision qa-ralph-loop-iter-1 inspect \
+conveyor record-decision qa-ralph-loop-iter-1 inspect \
   --reason "CI is green and repo.merge_green_pr permission is present." \
   --payload-json "{\"ralph_loop\":{\"iteration\":1,\"phase\":\"merge\",\"correlation_id\":\"ralph-iter-1-merge\",\"seed_prompt_sha256\":\"$SEED_PROMPT_SHA256\"}}"
 ```
@@ -566,7 +566,7 @@ decision, handoff, command, or evidence-template receipts before final finish.
 Before those accepted criteria or epilogues are complete, finish must fail:
 
 ```bash
-scripts/workerctl finish-task qa-ralph-loop-iter-1 \
+conveyor finish-task qa-ralph-loop-iter-1 \
   --reason "Premature Ralph loop finish should fail" \
   --require-criteria-audit \
   --require-epilogue
@@ -581,7 +581,7 @@ in the run receipts.
 Record the handoff:
 
 ```bash
-scripts/workerctl handoff qa-ralph-loop-iter-1 \
+conveyor handoff qa-ralph-loop-iter-1 \
   --summary "Iteration 1 merged; replay same seed prompt after clear." \
   --next-step "Start iteration 2 after audited clear in fresh-worker isolation." \
   --payload-json "{\"iteration\":1,\"pr\":\"<url>\",\"ci\":\"green\",\"merge\":\"merged\",\"clear_correlation_id\":\"ralph-iter-1-clear\",\"seed_prompt_sha256\":\"$SEED_PROMPT_SHA256\",\"correlation_ids\":[\"ralph-iter-1-pr\",\"ralph-iter-1-ci\",\"ralph-iter-1-ci-fix\",\"ralph-iter-1-merge\",\"ralph-iter-1-clear\"]}"
@@ -590,7 +590,7 @@ scripts/workerctl handoff qa-ralph-loop-iter-1 \
 Clear through the audited path:
 
 ```bash
-scripts/workerctl compact-worker qa-ralph-loop-iter-1 \
+conveyor compact-worker qa-ralph-loop-iter-1 \
   --clear \
   --reason "Clear worker context between Ralph loop iterations; correlation_id=ralph-iter-1-clear" \
   --message "correlation_id=ralph-iter-1-clear; clear worker context between Ralph loop iterations after saved handoff"
@@ -608,12 +608,12 @@ semantics.
 For each iteration, capture:
 
 ```bash
-scripts/workerctl replay "$TASK"
-scripts/workerctl audit "$TASK" --json
-scripts/workerctl commands --task "$TASK" --json
-scripts/workerctl telemetry --task "$TASK" --json
-scripts/workerctl telemetry --task "$TASK" --summary --json
-scripts/workerctl export-task "$TASK" --zip --include-transcripts
+conveyor replay "$TASK"
+conveyor audit "$TASK" --json
+conveyor commands --task "$TASK" --json
+conveyor telemetry --task "$TASK" --json
+conveyor telemetry --task "$TASK" --summary --json
+conveyor export-task "$TASK" --zip --include-transcripts
 ```
 
 Required evidence:
@@ -692,7 +692,7 @@ Clean up disposable sessions, target repo branches, and lab processes according
 to the operator cleanup policy. Then run:
 
 ```bash
-scripts/workerctl reconcile --stale-cycles-seconds 1
+conveyor reconcile --stale-cycles-seconds 1
 git status --short --branch
 ```
 

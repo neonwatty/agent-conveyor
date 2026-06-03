@@ -6,10 +6,10 @@ adversarial gates, not just the general burden-of-proof guidance.
 Run the generated plan first:
 
 ```bash
-scripts/workerctl qa-plan adversarial-triggers
-scripts/workerctl qa-plan adversarial-triggers --json
-scripts/workerctl loop-triggers --classify "Run this as an adversarially gated Ralph loop." --json
-scripts/workerctl qa-run adversarial-triggers \
+conveyor qa-plan adversarial-triggers
+conveyor qa-plan adversarial-triggers --json
+conveyor loop-triggers --classify "Run this as an adversarially gated Ralph loop." --json
+conveyor qa-run adversarial-triggers \
   --receipt-output /tmp/adversarial-triggers-receipt.json \
   --json
 ```

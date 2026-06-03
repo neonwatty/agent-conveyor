@@ -31,13 +31,13 @@ vertical-slice child boards. Only one child may be active at a time.
 Run:
 
 ```bash
-scripts/workerctl qa-plan goalbuddy-conveyor
+conveyor qa-plan goalbuddy-conveyor
 ```
 
 For machine-readable output:
 
 ```bash
-scripts/workerctl qa-plan goalbuddy-conveyor --json
+conveyor qa-plan goalbuddy-conveyor --json
 ```
 
 The plan includes the starter prompt, authority boundaries, acceptance

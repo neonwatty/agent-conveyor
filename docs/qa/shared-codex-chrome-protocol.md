@@ -86,8 +86,8 @@ Use these after the worker completes:
 
 ```bash
 ./lab status
-/Users/neonwatty/Desktop/codex-terminal-manager/scripts/workerctl audit "$TASK" --json
-/Users/neonwatty/Desktop/codex-terminal-manager/scripts/workerctl telemetry --actor dispatch --event-type dispatch_watch_heartbeat --newest --limit 1 --json
+conveyor audit "$TASK" --json
+conveyor telemetry --actor dispatch --event-type dispatch_watch_heartbeat --newest --limit 1 --json
 ```
 
 The audit must show:
