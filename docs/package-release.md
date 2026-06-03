@@ -12,6 +12,34 @@ the checkout works.
 - The release candidate has passed CI, including `scripts/package-smoke`.
 - You have TestPyPI and PyPI credentials or trusted-publisher access ready.
 
+## Trusted Publishing Setup
+
+Prefer Trusted Publishing for TestPyPI and PyPI releases. It uses GitHub
+Actions OIDC and PyPI-issued short-lived credentials instead of long-lived local
+or repository secrets.
+
+Configure these GitHub Actions trusted publisher values on TestPyPI and PyPI:
+
+- Repository owner: `neonwatty`
+- Repository name: `codex-terminal-manager`
+- Workflow filename: `publish.yml`
+- Environment name: `testpypi` for TestPyPI
+- Environment name: `pypi` for PyPI
+
+The repository workflow is `.github/workflows/publish.yml`. It is a manual
+`workflow_dispatch` workflow with a `target` choice of `testpypi` or `pypi`.
+Each publish job grants job-scoped `id-token: write`, builds and checks the
+distributions, and uses `pypa/gh-action-pypi-publish@release/v1`.
+
+Only dispatch the workflow for a version that has not already been uploaded to
+the target index. TestPyPI and PyPI files cannot be overwritten.
+
+The TestPyPI publish step uses:
+
+```yaml
+repository-url: https://test.pypi.org/legacy/
+```
+
 ## Version And Build
 
 1. Update `version` in `pyproject.toml`.
@@ -56,13 +84,16 @@ the checkout works.
 
 ## TestPyPI
 
-1. Upload to TestPyPI:
+1. If using Trusted Publishing, run the `Publish Package` workflow with
+   `target=testpypi`.
+
+2. If using a local token fallback, upload to TestPyPI:
 
    ```bash
    python3 -m twine upload --repository testpypi dist/*
    ```
 
-2. In a clean shell, install the exact version from TestPyPI with PyPI as the
+3. In a clean shell, install the exact version from TestPyPI with PyPI as the
    dependency fallback:
 
    ```bash
@@ -72,7 +103,7 @@ the checkout works.
    workerctl --help
    ```
 
-3. Verify skill installation from the TestPyPI package:
+4. Verify skill installation from the TestPyPI package:
 
    ```bash
    tmp_home="$(mktemp -d)"
@@ -84,13 +115,16 @@ the checkout works.
 
 ## PyPI
 
-1. Upload the exact checked distributions:
+1. If using Trusted Publishing, run the `Publish Package` workflow with
+   `target=pypi`.
+
+2. If using a local token fallback, upload the exact checked distributions:
 
    ```bash
    python3 -m twine upload dist/*
    ```
 
-2. Verify the real install path:
+3. Verify the real install path:
 
    ```bash
    pipx uninstall agent-conveyor || true
@@ -101,7 +135,7 @@ the checkout works.
    conveyor doctor
    ```
 
-3. Record the release receipt:
+4. Record the release receipt:
 
    - version
    - git tag or commit SHA
