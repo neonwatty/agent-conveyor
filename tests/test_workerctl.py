@@ -5151,8 +5151,11 @@ class ContractTests(unittest.TestCase):
 
     def test_worker_contract_tells_app_workers_to_poll_worker_inbox(self):
         contract = worker_contract("worker-a", "Do the task.")
+        normalized_contract = " ".join(contract.split())
 
         self.assertIn("conveyor worker-inbox <task-name> --consume-next --wait --timeout 60 --json", contract)
+        self.assertIn("Keep polling this inbox through the bounded manager loop", contract)
+        self.assertIn("until there are no items left or the loop reaches max_iterations", normalized_contract)
         self.assertIn("dispatch_inbox_consumed", contract)
         self.assertIn("registered without a tmux session", contract)
         self.assertIn("pull-required dispatcher signals", contract)
@@ -5458,14 +5461,49 @@ class CliTests(unittest.TestCase):
             self.assertEqual(payload["task"]["name"], "real-slice")
             self.assertTrue(payload["task"]["created"])
             self.assertEqual(payload["task"]["state"], "managed")
+            quoted_db_path = worker_core.sh_quote(str(db_path.resolve()))
+            quoted_task = worker_core.sh_quote("real-slice")
             self.assertEqual(payload["worker"]["name"], "real-worker")
             self.assertIsNone(payload["worker"]["tmux_session"])
+            self.assertEqual(payload["worker"]["communication"]["session_kind"], "codex_app")
+            self.assertEqual(payload["worker"]["communication"]["receive_style"], "pull")
+            self.assertEqual(payload["worker"]["communication"]["delivery_mode"], "pull_required")
+            self.assertEqual(
+                payload["worker"]["communication"]["poll_command"],
+                f"conveyor worker-inbox {quoted_task} --consume-next --wait --timeout 60 --path {quoted_db_path} --json",
+            )
             self.assertEqual(payload["manager"]["name"], "real-manager")
             self.assertIsNone(payload["manager"]["tmux_session"])
+            self.assertEqual(payload["manager"]["communication"]["session_kind"], "codex_app")
+            self.assertEqual(payload["manager"]["communication"]["receive_style"], "pull")
+            self.assertEqual(payload["manager"]["communication"]["delivery_mode"], "pull_required")
+            self.assertEqual(
+                payload["manager"]["communication"]["poll_command"],
+                f"conveyor manager-inbox {quoted_task} --consume-next --wait --timeout 60 --path {quoted_db_path} --json",
+            )
             self.assertIn("enqueue-continue-iteration", "\n".join(payload["replay_commands"]))
             self.assertIn("worker-inbox", "\n".join(payload["replay_commands"]))
             self.assertIn("loop-status", "\n".join(payload["replay_commands"]))
             self.assertIn(str(db_path.resolve()), "\n".join(payload["replay_commands"]))
+            self.assertIn("worker_handoff", payload)
+            self.assertIn("Keep polling your Conveyor worker inbox", payload["worker_handoff"])
+            self.assertIn("until there are no items left or the loop reaches max_iterations", payload["worker_handoff"])
+            self.assertIn(
+                f"conveyor worker-inbox {quoted_task} --consume-next --wait --timeout 60 --path {quoted_db_path} --json",
+                payload["worker_handoff"],
+            )
+            self.assertEqual(
+                commands._session_poll_command("worker", task_name="two words", db_path=db_path.resolve()),
+                f"conveyor worker-inbox 'two words' --consume-next --wait --timeout 60 --path {quoted_db_path} --json",
+            )
+            self.assertIn(
+                f"conveyor worker-inbox 'two words' --consume-next --wait --timeout 60 --path {quoted_db_path} --json",
+                commands._disposable_worker_handoff(
+                    task_name="two words",
+                    run_name=None,
+                    db_path=db_path.resolve(),
+                ),
+            )
 
             for key in ("worker", "manager"):
                 rollout_path = Path(payload[key]["rollout_path"])
@@ -16192,6 +16230,7 @@ class RegisterCommandsTests(unittest.TestCase):
 
             state_dir = Path(tmpdir) / "state"
             state_dir.mkdir()
+            db_path = state_dir / "workerctl.db"
 
             proc = self.run_cli(
                 "register-worker",
@@ -16199,11 +16238,22 @@ class RegisterCommandsTests(unittest.TestCase):
                 "--codex-session", str(rollout),
                 "--pid", "12345",
                 "--cwd", str(ROOT),
-                env_extra={"WORKERCTL_STATE_ROOT": str(state_dir)},
+                "--path", str(db_path),
             )
             self.assertEqual(proc.returncode, 0, proc.stderr)
+            payload = json.loads(proc.stdout)
+            self.assertEqual(payload["communication"]["session_kind"], "codex_app")
+            self.assertEqual(payload["communication"]["receive_style"], "pull")
+            self.assertEqual(payload["communication"]["delivery_mode"], "pull_required")
+            self.assertFalse(payload["communication"]["can_receive_push"])
+            self.assertTrue(payload["communication"]["can_receive_pull"])
+            self.assertTrue(payload["communication"]["requires_polling"])
+            self.assertEqual(
+                payload["communication"]["poll_command_template"],
+                f"conveyor worker-inbox <task> --consume-next --wait --timeout 60 --path {worker_core.sh_quote(str(db_path.resolve()))} --json",
+            )
 
-            conn = worker_db.connect(state_dir / "workerctl.db")
+            conn = worker_db.connect(db_path)
             self.addCleanup(conn.close)
             row = conn.execute(
                 "select role, pid, codex_session_id from sessions where name='test-w'"
@@ -16232,6 +16282,14 @@ class RegisterCommandsTests(unittest.TestCase):
                 env_extra={"WORKERCTL_STATE_ROOT": str(state_dir)},
             )
             self.assertEqual(proc.returncode, 0, proc.stderr)
+            payload = json.loads(proc.stdout)
+            self.assertEqual(payload["communication"]["session_kind"], "codex_app")
+            self.assertEqual(payload["communication"]["receive_style"], "pull")
+            self.assertEqual(payload["communication"]["delivery_mode"], "pull_required")
+            self.assertEqual(
+                payload["communication"]["poll_command_template"],
+                "conveyor manager-inbox <task> --consume-next --wait --timeout 60 --json",
+            )
 
             conn = worker_db.connect(state_dir / "workerctl.db")
             self.addCleanup(conn.close)
@@ -16241,6 +16299,37 @@ class RegisterCommandsTests(unittest.TestCase):
             self.assertEqual(row["role"], "manager")
             self.assertIsNone(row["tmux_session"])
             self.assertEqual(row["codex_session_id"], "mgr-uuid")
+
+    def test_cli_register_manager_with_tmux_reports_push_receive_style(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            rollout = Path(tmpdir) / "rollout-fake-tmux-mgr.jsonl"
+            rollout.write_text(json.dumps({
+                "type": "session_meta",
+                "payload": {"id": "tmux-mgr-uuid", "cwd": str(ROOT), "originator": "codex-tui"},
+            }) + "\n")
+            state_dir = Path(tmpdir) / "state"
+            state_dir.mkdir()
+
+            proc = self.run_cli(
+                "register-manager",
+                "--name", "test-tmux-m",
+                "--codex-session", str(rollout),
+                "--pid", "88888",
+                "--cwd", str(ROOT),
+                "--tmux-session", "codex-test-tmux-m",
+                env_extra={"WORKERCTL_STATE_ROOT": str(state_dir)},
+            )
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            payload = json.loads(proc.stdout)
+            self.assertEqual(payload["tmux_session"], "codex-test-tmux-m")
+            self.assertEqual(payload["communication"]["session_kind"], "tmux")
+            self.assertEqual(payload["communication"]["receive_style"], "push")
+            self.assertEqual(payload["communication"]["delivery_mode"], "push")
+            self.assertTrue(payload["communication"]["can_receive_push"])
+            self.assertTrue(payload["communication"]["can_receive_pull"])
+            self.assertFalse(payload["communication"]["requires_polling"])
+            self.assertEqual(payload["communication"]["tmux_session"], "codex-test-tmux-m")
 
     def test_cli_sessions_lists_registered(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -16263,6 +16352,21 @@ class RegisterCommandsTests(unittest.TestCase):
             rows = json.loads(proc.stdout)
             names = {r["name"] for r in rows}
             self.assertEqual(names, {"w", "m"})
+            by_name = {row["name"]: row for row in rows}
+            self.assertEqual(by_name["w"]["communication"]["session_kind"], "codex_app")
+            self.assertEqual(by_name["w"]["communication"]["receive_style"], "pull")
+            self.assertEqual(by_name["w"]["communication"]["delivery_mode"], "pull_required")
+            self.assertEqual(by_name["m"]["communication"]["session_kind"], "codex_app")
+            self.assertEqual(by_name["m"]["communication"]["poll_command_template"], "conveyor manager-inbox <task> --consume-next --wait --timeout 60 --json")
+
+            self.run_cli("register-worker", "--name", "tmux-w", "--codex-session", str(rollout),
+                         "--pid", "3", "--cwd", str(ROOT), "--tmux-session", "codex-tmux-w", env_extra=env)
+            tmux_proc = self.run_cli("sessions", "--name", "tmux-w", env_extra=env)
+            self.assertEqual(tmux_proc.returncode, 0, tmux_proc.stderr)
+            tmux_rows = json.loads(tmux_proc.stdout)
+            self.assertEqual(tmux_rows[0]["communication"]["session_kind"], "tmux")
+            self.assertEqual(tmux_rows[0]["communication"]["receive_style"], "push")
+            self.assertEqual(tmux_rows[0]["communication"]["delivery_mode"], "push")
 
     def test_cli_sessions_can_emit_narrow_redacted_evidence(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -16321,6 +16425,11 @@ class RegisterCommandsTests(unittest.TestCase):
                 {session["name"] for session in payload["sessions"]},
                 {"dashboard-search-worker", "dashboard-search-manager"},
             )
+            sessions_by_name = {session["name"]: session for session in payload["sessions"]}
+            self.assertEqual(sessions_by_name["dashboard-search-worker"]["communication"]["session_kind"], "tmux")
+            self.assertEqual(sessions_by_name["dashboard-search-worker"]["communication"]["receive_style"], "push")
+            self.assertEqual(sessions_by_name["dashboard-search-manager"]["communication"]["session_kind"], "codex_app")
+            self.assertEqual(sessions_by_name["dashboard-search-manager"]["communication"]["receive_style"], "pull")
             bind = [item for item in payload["suggestions"] if item["kind"] == "bind"][0]
             self.assertEqual(bind["task"], "dashboard-search-demo")
             self.assertEqual(bind["worker"], "dashboard-search-worker")
@@ -21282,6 +21391,9 @@ class ManagerBootstrapPromptTests(unittest.TestCase):
         self.assertIn("delivery_mode='pull_required'", readme)
         self.assertIn("tmux push is optional transport", readme)
         self.assertIn("Codex app-based sessions", readme)
+        self.assertIn("communication.session_kind='tmux'", readme)
+        self.assertIn("receive_style='pull'", readme)
+        self.assertIn("session_kind='codex_app'", readme)
         self.assertIn("dispatch_inbox_consumed", readme)
         self.assertIn("sessions --name <session> --redact-identity-token", readme)
         self.assertIn("workerctl_on_path", readme)
@@ -21297,6 +21409,9 @@ class ManagerBootstrapPromptTests(unittest.TestCase):
         self.assertIn("Set up a Codex app Ralph loop", skill)
         self.assertIn("conveyor create-disposable-binding", skill)
         self.assertIn("conveyor worker-inbox", skill)
+        self.assertIn("communication", skill)
+        self.assertIn("receive_style=push", skill)
+        self.assertIn("receive_style=pull", skill)
         self.assertIn("conveyor loop-status", skill)
         self.assertIn("legacy `workerctl` command remains a compatibility alias", skill)
         self.assertNotIn("scripts/workerctl", skill)

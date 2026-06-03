@@ -40,12 +40,18 @@ Skill behavior:
    `--max-iterations`, and `--json`.
 5. Ensure Dispatch is running or tell the user the single command to start it:
    `conveyor dispatch --watch --dispatcher-id dispatch-local`.
-6. Tell the worker Codex app session to poll with
-   `conveyor worker-inbox <task> --consume-next --wait --timeout 60 --json`.
-7. After each worker pass, require concrete evidence and structured
+6. Read the returned `communication` blocks. A worker or manager with
+   `session_kind=tmux` and `receive_style=push` can receive direct tmux pushes;
+   one with `session_kind=codex_app` and `receive_style=pull` must poll the
+   printed inbox command.
+7. Give the worker Codex app session the generated `worker_handoff` prompt.
+   It should keep polling `conveyor worker-inbox <task> --consume-next --wait
+   --timeout 60 --json` through the bounded loop until no inbox item remains
+   or `max_iterations` is reached.
+8. After each worker pass, require concrete evidence and structured
    `loop-evidence adversarial-check` proof before queueing another
    `enqueue-continue-iteration`.
-8. Use `conveyor loop-status <task> --run <run> --json` and telemetry/audit
+9. Use `conveyor loop-status <task> --run <run> --json` and telemetry/audit
    receipts before declaring the loop ready for manager review.
 
 Reference docs:
@@ -67,6 +73,10 @@ Supervision is built on three primitives: **sessions**, **tasks**, and
   iTerm2, Terminal.app, a web terminal. The manager does not need tmux. Its
   job is to call `conveyor` commands, read their JSON output, and decide what
   to do next.
+- Registration, `sessions`, `discover`, and disposable binding JSON include a
+  `communication` block. Use it to decide the receive style for both worker and
+  manager: tmux sessions are push-capable, while Codex app/no-tmux sessions
+  receive through `manager-inbox` or `worker-inbox` polling.
 - A **task** is a unit of supervised work with a goal.
 - A **binding** ties one worker session and one manager session to one task.
 

@@ -287,6 +287,12 @@ tmux attach -t codex-live-test
   Register an already-running Codex session as a worker. Rollout JSONL is
   auto-discovered from the pid via `lsof` unless `--codex-session` is given.
 - `register-manager --name N ...` — Same arguments; tmux is not required.
+  Both registration commands print a `communication` object. When
+  `--tmux-session` is present, `communication.session_kind='tmux'`,
+  `receive_style='push'`, and `delivery_mode='push'`; without tmux but with a
+  Codex rollout identity, `session_kind='codex_app'`, `receive_style='pull'`,
+  and `delivery_mode='pull_required'`, with the role-specific inbox polling
+  command template.
 - `deregister <name>` — Mark a session gone. Refuses if the session is bound
   to an active task.
 - `sessions [--role worker|manager] [--state active|gone|all] [--include-legacy]
@@ -302,6 +308,9 @@ tmux attach -t codex-live-test
   For shareable QA evidence, prefer repeating `--name` for just the sessions in
   scope and include `--redact-identity-token`; unfiltered output can include
   unrelated active sessions and their registration tokens.
+  Each session row includes the same `communication` block emitted by
+  registration, so managers can detect whether a worker or manager is
+  tmux-push capable or must poll its mailbox.
 - `tasks [--create NAME --goal G --summary S]` — List or create tasks.
 - `create-disposable-binding TASK [--worker NAME] [--manager NAME] [--template TEMPLATE | --required-before-continue TYPE] [--adversarial]` —
   Create a no-tmux manager/worker binding for real Ralph-loop slices. The
@@ -309,7 +318,9 @@ tmux attach -t codex-live-test
   rollout JSONL files, registers worker and manager sessions with
   `tmux_session=null`, binds them, optionally creates a template-backed or
   custom Ralph-loop policy run, and prints replay commands for Dispatch,
-  worker inbox polling, and `loop-status`.
+  `loop-status`, per-session `communication` metadata, plus a `worker_handoff`
+  prompt that tells Codex app workers to keep polling their worker inbox
+  through the bounded loop.
 - `discover [QUERY] [--all] [--limit N]` / `search [QUERY]` — Search tasks,
   registered sessions, active bindings, and recent telemetry in one JSON result.
   Use this for conversational setup when a manager or Codex session needs to
@@ -937,7 +948,15 @@ Current dispatch state:
 - The session inbox is the same `routed_notifications` stream addressed by
   `target_session_id`: tmux push is optional transport. Codex app-based sessions
   should long-poll with `manager-inbox --consume-next --wait --json` or
-  `worker-inbox --consume-next --wait --json`.
+  `worker-inbox --consume-next --wait --json`. For disposable Ralph loops, use
+  the generated `worker_handoff` prompt so the worker keeps polling until no
+  inbox item remains or the loop reaches `max_iterations`.
+- `register-worker`, `register-manager`, `sessions`, `discover`, and
+  `create-disposable-binding --json` expose a `communication` block per
+  session. Treat `session_kind='tmux'` plus `receive_style='push'` as direct
+  tmux-delivery capable; treat `session_kind='codex_app'` plus
+  `receive_style='pull'` as mailbox polling required for that worker or
+  manager.
 - Template-backed `continue_iteration` deliveries include `loop_policy` in the
   inbox payload, with template name, current/max iteration, cleanup policy,
   required evidence, artifact requirements, and recommended tools. Codex

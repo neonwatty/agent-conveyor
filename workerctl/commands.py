@@ -2138,6 +2138,97 @@ def _disposable_replay_commands(
     return commands
 
 
+def _poll_path_suffix(db_path: Path | str | None) -> str:
+    return f" --path {sh_quote(str(db_path))}" if db_path is not None else ""
+
+
+def _poll_task_arg(task_name: str | None) -> str:
+    return sh_quote(task_name) if task_name else "<task>"
+
+
+def _disposable_worker_handoff(*, task_name: str, run_name: str | None, db_path: Path | str | None = None) -> str:
+    loop_clause = (
+        f" for Ralph loop run {run_name}"
+        if run_name
+        else " for this disposable no-tmux binding"
+    )
+    return (
+        "Use the manage-codex-workers skill.\n\n"
+        f"You are the worker for task {task_name}{loop_clause}.\n"
+        "Keep polling your Conveyor worker inbox until there are no items left "
+        "or the loop reaches max_iterations. Consume the next item now, treat "
+        "each consumed item as the manager's next instruction, complete the "
+        "requested work, and report changed files, exact commands run, evidence, "
+        "and any residual risk.\n\n"
+        f"Run: conveyor worker-inbox {_poll_task_arg(task_name)} --consume-next --wait --timeout 60"
+        f"{_poll_path_suffix(db_path)} --json"
+    )
+
+
+def _session_poll_command(
+    role: str | None,
+    *,
+    task_name: str | None = None,
+    db_path: Path | str | None = None,
+) -> str | None:
+    if role == "worker":
+        task = _poll_task_arg(task_name)
+        return f"conveyor worker-inbox {task} --consume-next --wait --timeout 60{_poll_path_suffix(db_path)} --json"
+    if role == "manager":
+        task = _poll_task_arg(task_name)
+        return f"conveyor manager-inbox {task} --consume-next --wait --timeout 60{_poll_path_suffix(db_path)} --json"
+    return None
+
+
+def _session_communication(
+    session: Any,
+    *,
+    task_name: str | None = None,
+    db_path: Path | str | None = None,
+) -> dict[str, Any]:
+    data = dict(session)
+    role = data.get("role")
+    tmux_session = data.get("tmux_session")
+    has_tmux = bool(tmux_session)
+    has_codex_identity = bool(data.get("codex_session_path") or data.get("codex_session_id"))
+    if has_tmux:
+        session_kind = "tmux"
+        detection_source = "tmux_session"
+    elif has_codex_identity:
+        session_kind = "codex_app"
+        detection_source = "codex_session_without_tmux"
+    else:
+        session_kind = "no_tmux"
+        detection_source = "missing_tmux_session"
+
+    poll_command = _session_poll_command(role, task_name=task_name, db_path=db_path)
+    communication = {
+        "can_receive_pull": poll_command is not None,
+        "can_receive_push": has_tmux,
+        "delivery_mode": "push" if has_tmux else "pull_required",
+        "detection_source": detection_source,
+        "poll_command_template": _session_poll_command(role, db_path=db_path),
+        "receive_style": "push" if has_tmux else "pull",
+        "requires_polling": not has_tmux,
+        "session_kind": session_kind,
+        "tmux_session": tmux_session,
+    }
+    if task_name is not None:
+        communication["poll_command"] = poll_command
+    return communication
+
+
+def _session_with_communication(
+    session: Any,
+    *,
+    task_name: str | None = None,
+    db_path: Path | str | None = None,
+) -> dict[str, Any]:
+    row = dict(session)
+    row["communication"] = _session_communication(row, task_name=task_name, db_path=db_path)
+    return row
+
+
 def command_create_disposable_binding(args: argparse.Namespace) -> int:
     from workerctl import db as worker_db
 
@@ -2284,6 +2375,16 @@ def command_create_disposable_binding(args: argparse.Namespace) -> int:
         "manager": {
             "id": manager_id,
             "name": manager_name,
+            "communication": _session_communication(
+                {
+                    "role": "manager",
+                    "tmux_session": None,
+                    "codex_session_path": str(manager_rollout_path),
+                    "codex_session_id": manager_codex_session_id,
+                },
+                task_name=task_row["name"],
+                db_path=db_path,
+            ),
             "rollout_path": str(manager_rollout_path),
             "tmux_session": None,
         },
@@ -2308,9 +2409,24 @@ def command_create_disposable_binding(args: argparse.Namespace) -> int:
         "worker": {
             "id": worker_id,
             "name": worker_name,
+            "communication": _session_communication(
+                {
+                    "role": "worker",
+                    "tmux_session": None,
+                    "codex_session_path": str(worker_rollout_path),
+                    "codex_session_id": worker_codex_session_id,
+                },
+                task_name=task_row["name"],
+                db_path=db_path,
+            ),
             "rollout_path": str(worker_rollout_path),
             "tmux_session": None,
         },
+        "worker_handoff": _disposable_worker_handoff(
+            task_name=task_row["name"],
+            run_name=run["name"] if run else None,
+            db_path=db_path,
+        ),
     }
     if getattr(args, "json", False):
         print(json.dumps(result, indent=2, sort_keys=True))
@@ -2323,6 +2439,8 @@ def command_create_disposable_binding(args: argparse.Namespace) -> int:
         print("Replay commands:")
         for command in result["replay_commands"]:
             print(f"  {command}")
+        print("Worker handoff:")
+        print(result["worker_handoff"])
     return 0
 
 
@@ -10950,12 +11068,16 @@ def _register_session_from_args(args: argparse.Namespace, *, role: str) -> dict:
                 "pid": pid, "codex_session_id": codex_session_id,
             },
         )
+        session = worker_db.session_row(conn, name=args.name, role=role)
         conn.commit()
-        return {
+        result = {
             "session_id": session_id, "name": args.name, "role": role,
             "pid": pid, "codex_session_id": codex_session_id,
             "codex_session_path": codex_session_path, "cwd": cwd,
+            "tmux_session": session["tmux_session"],
         }
+        result["communication"] = _session_communication(session, db_path=db_path)
+        return result
     finally:
         conn.close()
 
@@ -11907,6 +12029,7 @@ def command_sessions(args: argparse.Namespace) -> int:
     names = set(getattr(args, "name", []) or [])
     if names:
         rows = [row for row in rows if row.get("name") in names]
+    rows = [_session_with_communication(row) for row in rows]
     if getattr(args, "redact_identity_token", False):
         rows = [
             {**row, "identity_token": "[REDACTED]" if row.get("identity_token") is not None else None}
@@ -11994,7 +12117,10 @@ def command_discover(args: argparse.Namespace) -> int:
     with worker_db.connect(db_path) as conn:
         worker_db.initialize_database(conn)
         tasks = worker_db.list_tasks(conn, active_only=not args.all)
-        sessions = worker_db.list_sessions(conn, state="all" if args.all else "active")
+        sessions = [
+            _session_with_communication(session, db_path=db_path)
+            for session in worker_db.list_sessions(conn, state="all" if args.all else "active")
+        ]
         bindings = _active_bindings(conn)
         telemetry = worker_db.query_telemetry_events(conn, search=query or None, limit=args.limit) if query else []
 
