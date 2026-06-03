@@ -1051,6 +1051,7 @@ Underlying deterministic checks:
 python3 -m unittest discover -s tests -v
 scripts/check-resource-warnings
 python3 -m py_compile scripts/workerctl scripts/check-resource-warnings workerctl/*.py
+scripts/package-smoke
 ```
 
 For local parallel experiments, prefer:
@@ -1062,9 +1063,9 @@ scripts/run-unittests-isolated
 This gives the process a temporary `WORKERCTL_STATE_ROOT` and a test namespace.
 The standard CI job remains serial.
 
-GitHub Actions runs `scripts/rc-check --skip-live-smoke-repeat` on every push
-and pull request. The live smoke repeat remains local/manual because hosted
-runners may not have `codex`.
+GitHub Actions runs `scripts/rc-check --skip-live-smoke-repeat` and
+`scripts/package-smoke` on every push and pull request. The live smoke repeat
+remains local/manual because hosted runners may not have `codex`.
 The ResourceWarning gate intentionally fails on any `ResourceWarning` text in
 test output so finalization-time resource warnings cannot be hidden by a zero
 `unittest` exit status.
