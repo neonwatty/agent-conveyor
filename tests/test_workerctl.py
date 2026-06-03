@@ -11496,6 +11496,35 @@ Deferred follow-up criteria:
         workflow = (ROOT / ".github" / "workflows" / "test.yml").read_text()
         self.assertIn("scripts/package-smoke", workflow)
 
+    def test_package_release_metadata_and_checklist_are_documented(self):
+        pyproject = (ROOT / "pyproject.toml").read_text()
+        release_doc = (ROOT / "docs" / "package-release.md").read_text()
+
+        for expected in (
+            'requires = ["setuptools>=77", "wheel"]',
+            'license = "MIT"',
+            'authors = [{ name = "NeonWatty" }]',
+            'keywords = ["agent", "codex", "conveyor", "manager-worker", "workflow-automation"]',
+            '"Homepage" = "https://github.com/neonwatty/codex-terminal-manager"',
+            '"Source" = "https://github.com/neonwatty/codex-terminal-manager"',
+            '"Issues" = "https://github.com/neonwatty/codex-terminal-manager/issues"',
+            'packages = ["workerctl", "workerctl.assets", "workerctl.assets.skills"]',
+        ):
+            self.assertIn(expected, pyproject)
+
+        for expected in (
+            "python3 -m pip install --upgrade build twine",
+            "python3 -m build",
+            "python3 -m twine check dist/*",
+            "python3 -m twine upload --repository testpypi dist/*",
+            "pipx install --pip-args '--index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/' 'agent-conveyor==<version>'",
+            "python3 -m twine upload dist/*",
+            "pipx install agent-conveyor",
+            "conveyor install-skills",
+            "scripts/package-smoke",
+        ):
+            self.assertIn(expected, release_doc)
+
     def test_run_unittests_isolated_script_has_valid_bash_syntax(self):
         proc = subprocess.run(
             ["bash", "-n", str(ROOT / "scripts" / "run-unittests-isolated")],
