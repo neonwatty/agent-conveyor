@@ -89,10 +89,10 @@ tmux session: codex-worker-a
 
 ## Install
 
-For users, install Agent Conveyor with `pipx`:
+For users, install the published Agent Conveyor package with `pipx`:
 
 ```bash
-pipx install git+https://github.com/neonwatty/codex-terminal-manager.git
+pipx install agent-conveyor
 conveyor install-skills
 conveyor doctor
 ```
@@ -110,6 +110,13 @@ scripts/install-local --write
 export PATH="$PWD/bin:$PATH"
 ```
 
+To test unreleased packaging changes before PyPI publish, install the checkout
+directly:
+
+```bash
+pipx install git+https://github.com/neonwatty/codex-terminal-manager.git
+```
+
 `conveyor doctor` reports local dependency health (tmux, codex, etc.).
 `conveyor db-doctor` initializes and checks the SQLite control-plane
 database.
@@ -117,7 +124,7 @@ Before publishing `agent-conveyor` to TestPyPI or PyPI, use
 [`docs/package-release.md`](docs/package-release.md).
 
 After install, the intended Codex app entry point is natural language. Open a
-new Codex app session in the repo and say:
+new Codex app session in the target repo and say:
 
 ```text
 Use the manage-codex-workers skill.
@@ -126,9 +133,10 @@ Set up a Codex app Ralph loop for issue CTL.
 Require adversarial proof before another worker iteration.
 ```
 
-The installed skill should choose names, create the no-tmux binding with
-`create-disposable-binding`, point the worker at `worker-inbox`, and use
-`loop-status` plus telemetry receipts before reporting that the loop is ready.
+The installed skill should call the `conveyor` CLI, choose names, create the
+no-tmux binding with `create-disposable-binding`, point the worker at
+`worker-inbox`, and use `loop-status` plus telemetry receipts before reporting
+that the loop is ready.
 
 Dispatch is core infrastructure for supervised worker/manager pairs. The
 `pair` workflow starts a detached Dispatch watch process by default so worker

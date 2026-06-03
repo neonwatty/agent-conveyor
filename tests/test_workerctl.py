@@ -11592,6 +11592,14 @@ Deferred follow-up criteria:
             self.assertIn(expected, release_doc)
 
         self.assertIn("docs/package-release.md", readme)
+        self.assertIn("pipx install agent-conveyor", readme)
+        self.assertIn("conveyor install-skills", readme)
+        self.assertIn("conveyor doctor", readme)
+        self.assertIn("pipx install git+https://github.com/neonwatty/codex-terminal-manager.git", readme)
+        self.assertLess(
+            readme.index("pipx install agent-conveyor"),
+            readme.index("pipx install git+https://github.com/neonwatty/codex-terminal-manager.git"),
+        )
 
     def test_run_unittests_isolated_script_has_valid_bash_syntax(self):
         proc = subprocess.run(
