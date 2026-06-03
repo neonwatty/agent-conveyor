@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agent-conveyor"
+version = "0.1.0"
+description = "Local agent manager/worker conveyor control plane for Codex sessions."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Software Development",
+]
+
+[project.scripts]
+conveyor = "workerctl.cli:main"
+workerctl = "workerctl.cli:main"
+
+[tool.setuptools]
+packages = ["workerctl"]
+
+[tool.setuptools.package-data]
+# Bundles workerctl/assets/skills/... into the agent-conveyor wheel.
+workerctl = ["assets/skills/**/*"]

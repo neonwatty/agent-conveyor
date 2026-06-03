@@ -89,23 +89,44 @@ tmux session: codex-worker-a
 
 ## Install
 
-From the repo root:
+For users, install Agent Conveyor with `pipx`:
+
+```bash
+pipx install git+https://github.com/neonwatty/codex-terminal-manager.git
+conveyor install-skills
+conveyor doctor
+```
+
+The package name is `agent-conveyor`. The installed CLI exposes both
+`conveyor` and the compatibility command `workerctl`. `conveyor install-skills`
+installs the `manage-codex-workers` and `codex-review` skills into
+`$CODEX_HOME/skills` or `~/.codex/skills`. The `codex-review` install includes
+the guarded review helper used by the QA and PR closeout flows.
+
+For contributors working from this checkout, use the local installer instead:
 
 ```bash
 scripts/install-local --write
 export PATH="$PWD/bin:$PATH"
-workerctl doctor
 ```
 
-`scripts/install-local --write` updates future shells and installs the
-`manage-codex-workers` and `codex-review` skills into `$CODEX_HOME/skills` or
-`~/.codex/skills`. The `codex-review` install includes the guarded review helper
-used by the QA and PR closeout flows. The `export` line makes `workerctl`
-available in the current shell.
-
-`workerctl doctor` reports local dependency health (tmux, codex, etc.).
-`workerctl db-doctor` initializes and checks the SQLite control-plane
+`conveyor doctor` reports local dependency health (tmux, codex, etc.).
+`conveyor db-doctor` initializes and checks the SQLite control-plane
 database.
+
+After install, the intended Codex app entry point is natural language. Open a
+new Codex app session in the repo and say:
+
+```text
+Use the manage-codex-workers skill.
+
+Set up a Codex app Ralph loop for issue CTL.
+Require adversarial proof before another worker iteration.
+```
+
+The installed skill should choose names, create the no-tmux binding with
+`create-disposable-binding`, point the worker at `worker-inbox`, and use
+`loop-status` plus telemetry receipts before reporting that the loop is ready.
 
 Dispatch is core infrastructure for supervised worker/manager pairs. The
 `pair` workflow starts a detached Dispatch watch process by default so worker

@@ -105,6 +105,7 @@ from workerctl.lifecycle import (
     command_stop_task,
 )
 from workerctl.replay import command_replay
+from workerctl.skill_installer import command_install_skills
 
 
 def add_manager_codex_arg_options(command: argparse.ArgumentParser) -> None:
@@ -519,6 +520,16 @@ def build_parser() -> argparse.ArgumentParser:
     create_disposable_binding.add_argument("--path", help="Override the workerctl database path.")
     create_disposable_binding.add_argument("--json", action="store_true", help="Print stable JSON output.")
     create_disposable_binding.set_defaults(func=command_create_disposable_binding)
+
+    install_skills = subparsers.add_parser(
+        "install-skills",
+        help="Install bundled Agent Conveyor skills into Codex.",
+        description="Install bundled Agent Conveyor skills into $CODEX_HOME/skills or ~/.codex/skills.",
+    )
+    install_skills.add_argument("--codex-home", help="Codex home directory. Defaults to $CODEX_HOME or ~/.codex.")
+    install_skills.add_argument("--dry-run", action="store_true", help="Print install targets without copying files.")
+    install_skills.add_argument("--json", action="store_true", help="Print stable JSON output.")
+    install_skills.set_defaults(func=command_install_skills)
 
     db_doctor = subparsers.add_parser(
         "db-doctor",

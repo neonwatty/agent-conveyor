@@ -13754,6 +13754,70 @@ Deferred follow-up criteria:
         data = json.loads(proc.stdout)
         self.assertEqual(data["busy_wait"]["pattern"], "mcp_startup")
 
+    def test_pyproject_declares_agent_conveyor_console_scripts(self):
+        pyproject = (ROOT / "pyproject.toml").read_text()
+
+        self.assertIn('name = "agent-conveyor"', pyproject)
+        self.assertIn('conveyor = "workerctl.cli:main"', pyproject)
+        self.assertIn('workerctl = "workerctl.cli:main"', pyproject)
+        self.assertIn("workerctl/assets/skills", pyproject)
+
+    def test_install_skills_help_is_available(self):
+        proc = self.run_workerctl("install-skills", "--help")
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("Install bundled Agent Conveyor skills", proc.stdout)
+        self.assertIn("--codex-home", proc.stdout)
+        self.assertIn("--dry-run", proc.stdout)
+
+    def test_install_skills_dry_run_lists_targets_without_copying(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            codex_home = Path(tmpdir) / "codex-home"
+            proc = self.run_workerctl(
+                "install-skills",
+                "--codex-home",
+                str(codex_home),
+                "--dry-run",
+                "--json",
+            )
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            payload = json.loads(proc.stdout)
+            self.assertTrue(payload["dry_run"])
+            self.assertEqual(payload["codex_home"], str(codex_home.resolve()))
+            self.assertEqual(
+                [skill["name"] for skill in payload["skills"]],
+                ["manage-codex-workers", "codex-review"],
+            )
+            self.assertFalse((codex_home / "skills").exists())
+
+    def test_install_skills_copies_bundled_skills(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            codex_home = Path(tmpdir) / "codex-home"
+            proc = self.run_workerctl(
+                "install-skills",
+                "--codex-home",
+                str(codex_home),
+                "--json",
+            )
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            payload = json.loads(proc.stdout)
+            self.assertFalse(payload["dry_run"])
+            manage_skill = codex_home / "skills" / "manage-codex-workers" / "SKILL.md"
+            review_skill = codex_home / "skills" / "codex-review" / "SKILL.md"
+            review_helper = codex_home / "skills" / "codex-review" / "scripts" / "codex-review"
+            self.assertTrue(manage_skill.exists())
+            self.assertTrue(review_skill.exists())
+            self.assertTrue(review_helper.exists())
+            self.assertTrue(os.access(review_helper, os.X_OK))
+            self.assertIn("One-Prompt Codex App Ralph Loop", manage_skill.read_text())
+            self.assertIn("Set up a Codex app Ralph loop", manage_skill.read_text())
+            self.assertEqual(
+                [skill["name"] for skill in payload["skills"]],
+                ["manage-codex-workers", "codex-review"],
+            )
+
     def test_install_local_prints_path_line(self):
         proc = subprocess.run(
             [str(INSTALL_LOCAL_PATH)],
@@ -13770,6 +13834,8 @@ Deferred follow-up criteria:
         self.assertIn("codex-review", proc.stdout)
         self.assertIn("workerctl dispatch --watch --dispatcher-id dispatch-local", proc.stdout)
         self.assertIn("workerctl qa-plan dispatch-completion", proc.stdout)
+        self.assertIn("Use the manage-codex-workers skill.", proc.stdout)
+        self.assertIn("Set up a Codex app Ralph loop", proc.stdout)
 
     def test_install_local_write_is_idempotent(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -13801,12 +13867,16 @@ Deferred follow-up criteria:
             self.assertTrue(review_skill_path.exists())
             self.assertTrue(review_helper_path.exists())
             self.assertTrue(os.access(review_helper_path, os.X_OK))
+            self.assertIn("One-Prompt Codex App Ralph Loop", manage_skill_path.read_text())
+            self.assertIn("Set up a Codex app Ralph loop", manage_skill_path.read_text())
             self.assertEqual(
                 review_helper_path.read_text(),
                 CODEX_REVIEW_HELPER_PATH.read_text(),
             )
             self.assertIn("workerctl dispatch --watch --dispatcher-id dispatch-local", proc.stdout)
             self.assertIn("workerctl qa-plan dispatch-completion", proc.stdout)
+            self.assertIn("Use the manage-codex-workers skill.", proc.stdout)
+            self.assertIn("Set up a Codex app Ralph loop", proc.stdout)
 
     def test_install_local_replaces_stale_codex_review_skill(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -21072,6 +21142,15 @@ class ManagerBootstrapPromptTests(unittest.TestCase):
         self.assertIn("older completion signals", readme)
         self.assertIn("scripts/workerctl sessions --name", checklist)
         self.assertIn("identity_token", checklist)
+
+    def test_skill_documents_simple_codex_app_ralph_loop_entrypoint(self):
+        skill = (ROOT / "skills" / "manage-codex-workers" / "SKILL.md").read_text()
+
+        self.assertIn("One-Prompt Codex App Ralph Loop", skill)
+        self.assertIn("Set up a Codex app Ralph loop", skill)
+        self.assertIn("create-disposable-binding", skill)
+        self.assertIn("worker-inbox", skill)
+        self.assertIn("loop-status", skill)
 
     def test_docs_include_local_telemetry_workflow(self):
         readme = (ROOT / "README.md").read_text()
