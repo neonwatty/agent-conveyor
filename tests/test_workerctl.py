@@ -11528,9 +11528,37 @@ Deferred follow-up criteria:
         self.assertIn("scripts/release-check", release_doc)
         self.assertIn("fails on packaging warnings", release_doc)
 
+    def test_publish_workflow_uses_trusted_publishing(self):
+        workflow_path = ROOT / ".github" / "workflows" / "publish.yml"
+        workflow = workflow_path.read_text()
+        release_doc = (ROOT / "docs" / "package-release.md").read_text()
+
+        for expected in (
+            "workflow_dispatch:",
+            "environment:",
+            "id-token: write",
+            "python -m build",
+            "python -m twine check dist/*",
+            "pypa/gh-action-pypi-publish@release/v1",
+            "repository-url: https://test.pypi.org/legacy/",
+        ):
+            self.assertIn(expected, workflow)
+
+        for expected in (
+            "Trusted Publishing",
+            "Repository owner: `neonwatty`",
+            "Repository name: `codex-terminal-manager`",
+            "Workflow filename: `publish.yml`",
+            "Environment name: `testpypi`",
+            "Environment name: `pypi`",
+            "https://test.pypi.org/legacy/",
+        ):
+            self.assertIn(expected, release_doc)
+
     def test_package_release_metadata_and_checklist_are_documented(self):
         pyproject = (ROOT / "pyproject.toml").read_text()
         release_doc = (ROOT / "docs" / "package-release.md").read_text()
+        readme = (ROOT / "README.md").read_text()
 
         for expected in (
             'requires = ["setuptools>=77", "wheel"]',
@@ -11556,6 +11584,8 @@ Deferred follow-up criteria:
             "scripts/package-smoke",
         ):
             self.assertIn(expected, release_doc)
+
+        self.assertIn("docs/package-release.md", readme)
 
     def test_run_unittests_isolated_script_has_valid_bash_syntax(self):
         proc = subprocess.run(
