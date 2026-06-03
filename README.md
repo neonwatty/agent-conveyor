@@ -113,6 +113,8 @@ export PATH="$PWD/bin:$PATH"
 `conveyor doctor` reports local dependency health (tmux, codex, etc.).
 `conveyor db-doctor` initializes and checks the SQLite control-plane
 database.
+Before publishing `agent-conveyor` to TestPyPI or PyPI, use
+[`docs/package-release.md`](docs/package-release.md).
 
 After install, the intended Codex app entry point is natural language. Open a
 new Codex app session in the repo and say:
