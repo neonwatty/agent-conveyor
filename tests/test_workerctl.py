@@ -11541,6 +11541,7 @@ Deferred follow-up criteria:
             "python -m twine check dist/*",
             "pypa/gh-action-pypi-publish@release/v1",
             "repository-url: https://test.pypi.org/legacy/",
+            "skip-existing: true",
         ):
             self.assertIn(expected, workflow)
 
