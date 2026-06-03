@@ -206,6 +206,10 @@ Dispatcher inbox:
 
   conveyor worker-inbox <task-name> --consume-next --wait --timeout 60 --json
 
+- Keep polling this inbox through the bounded manager loop until there are no
+  items left or the loop reaches max_iterations. The manager is responsible for
+  queueing only policy-approved continuation items.
+
 - Treat a consumed inbox item as the next manager instruction, then update
   status with conveyor. Each consumed item records `dispatch_inbox_consumed`
   telemetry so the dispatcher-to-session handoff is auditable.
