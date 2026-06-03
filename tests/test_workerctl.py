@@ -11496,6 +11496,38 @@ Deferred follow-up criteria:
         workflow = (ROOT / ".github" / "workflows" / "test.yml").read_text()
         self.assertIn("scripts/package-smoke", workflow)
 
+    def test_release_check_script_builds_clean_artifact_gate(self):
+        script_path = ROOT / "scripts" / "release-check"
+        proc = subprocess.run(
+            ["bash", "-n", str(script_path)],
+            cwd=ROOT,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        script = script_path.read_text()
+        release_doc = (ROOT / "docs" / "package-release.md").read_text()
+
+        for expected in (
+            "python3 -m venv",
+            "-m pip install --upgrade pip build twine",
+            "-m build --outdir",
+            "-m twine check",
+            "SetuptoolsDeprecationWarning",
+            "Package would be ignored",
+            "expected conveyor --help",
+            "expected workerctl --help",
+            "install-skills",
+            "Release check receipt",
+        ):
+            self.assertIn(expected, script)
+
+        self.assertIn("scripts/release-check", release_doc)
+        self.assertIn("fails on packaging warnings", release_doc)
+
     def test_package_release_metadata_and_checklist_are_documented(self):
         pyproject = (ROOT / "pyproject.toml").read_text()
         release_doc = (ROOT / "docs" / "package-release.md").read_text()

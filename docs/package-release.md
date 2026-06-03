@@ -22,7 +22,21 @@ the checkout works.
    scripts/package-smoke
    ```
 
-3. Build clean distributions:
+3. Run the deterministic release artifact gate:
+
+   ```bash
+   scripts/release-check
+   ```
+
+   This builds clean wheel/sdist artifacts in a temporary directory.
+   It fails on packaging warnings. Specifically, it catches
+   `SetuptoolsDeprecationWarning` and `Package would be ignored`, runs
+   `twine check`, installs the exact built wheel into a fresh virtualenv,
+   verifies `conveyor` and `workerctl`, and confirms bundled skill
+   installation.
+
+4. If you need to debug the release gate manually, the equivalent core commands
+   are:
 
    ```bash
    rm -rf dist build agent_conveyor.egg-info
@@ -31,7 +45,7 @@ the checkout works.
    python3 -m twine check dist/*
    ```
 
-4. Inspect the generated files:
+5. Inspect the generated files:
 
    ```bash
    ls -lh dist/

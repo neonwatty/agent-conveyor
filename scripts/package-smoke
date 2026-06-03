@@ -4,8 +4,24 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP_ROOT="${TMPDIR:-/tmp}"
 SMOKE_DIR="$(mktemp -d "$TMP_ROOT/agent-conveyor-package-smoke.XXXXXX")"
+ROOT_BUILD="$ROOT/build"
+ROOT_EGG_INFO="$ROOT/agent_conveyor.egg-info"
+ROOT_BUILD_PREEXISTED=0
+ROOT_EGG_INFO_PREEXISTED=0
+if [[ -e "$ROOT_BUILD" ]]; then
+  ROOT_BUILD_PREEXISTED=1
+fi
+if [[ -e "$ROOT_EGG_INFO" ]]; then
+  ROOT_EGG_INFO_PREEXISTED=1
+fi
 
 cleanup() {
+  if [[ "$ROOT_BUILD_PREEXISTED" == "0" ]]; then
+    rm -rf "$ROOT_BUILD"
+  fi
+  if [[ "$ROOT_EGG_INFO_PREEXISTED" == "0" ]]; then
+    rm -rf "$ROOT_EGG_INFO"
+  fi
   rm -rf "$SMOKE_DIR"
 }
 trap cleanup EXIT

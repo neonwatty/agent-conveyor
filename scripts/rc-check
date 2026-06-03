@@ -45,6 +45,8 @@ npm run build
 echo "== shell syntax =="
 bash -n scripts/live-smoke
 bash -n scripts/live-smoke-repeat
+bash -n scripts/package-smoke
+bash -n scripts/release-check
 
 if [[ "$RUN_LIVE_SMOKE_REPEAT" == "1" ]]; then
   echo "== repeat live smoke =="
