@@ -11539,11 +11539,16 @@ Deferred follow-up criteria:
             "id-token: write",
             "python -m build",
             "python -m twine check dist/*",
+            "actions/upload-artifact@v6",
+            "actions/download-artifact@v7",
             "pypa/gh-action-pypi-publish@release/v1",
             "repository-url: https://test.pypi.org/legacy/",
             "skip-existing: true",
         ):
             self.assertIn(expected, workflow)
+
+        self.assertNotIn("actions/upload-artifact@v5", workflow)
+        self.assertNotIn("actions/download-artifact@v5", workflow)
 
         for expected in (
             "Trusted Publishing",
