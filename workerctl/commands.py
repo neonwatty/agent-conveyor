@@ -22,7 +22,7 @@ from urllib.parse import urlencode
 
 from workerctl.classify import classify_busy_wait, classify_startup_output
 from workerctl.audit import mutation_audit_result
-from workerctl.constants import CODEX_STARTUP_PROFILES, DEFAULT_HISTORY_LINES, DEFAULT_MANAGER_STALE_SECONDS, PROJECT_ROOT, VALID_STATES
+from workerctl.constants import CODEX_STARTUP_PROFILES, DEFAULT_HISTORY_LINES, DEFAULT_MANAGER_STALE_SECONDS, INVOCATION_CWD, PROJECT_ROOT, VALID_STATES
 from workerctl.core import WorkerError, age_seconds, ensure_tool, now_iso, raise_for_tmux_permission_failure, run, sh_quote
 from workerctl.criteria_plan import plan_criteria_commands
 from workerctl.db import active_binding_for_task, active_manager, active_task_worker
@@ -2144,7 +2144,7 @@ def command_create_disposable_binding(args: argparse.Namespace) -> int:
         if getattr(args, "session_dir", None)
         else db_path.parent / "disposable-sessions"
     )
-    cwd = str(Path(args.cwd).expanduser().resolve()) if getattr(args, "cwd", None) else str(PROJECT_ROOT)
+    cwd = str(Path(args.cwd).expanduser().resolve()) if getattr(args, "cwd", None) else str(INVOCATION_CWD)
     task_name = args.task
     worker_name = args.worker or f"{task_name}-worker"
     manager_name = args.manager or f"{task_name}-manager"
