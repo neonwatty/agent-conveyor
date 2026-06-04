@@ -4,41 +4,63 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP_ROOT="${TMPDIR:-/tmp}"
 SMOKE_DIR="$(mktemp -d "$TMP_ROOT/agent-conveyor-package-smoke.XXXXXX")"
-ROOT_BUILD="$ROOT/build"
-ROOT_EGG_INFO="$ROOT/agent_conveyor.egg-info"
-ROOT_BUILD_PREEXISTED=0
-ROOT_EGG_INFO_PREEXISTED=0
-if [[ -e "$ROOT_BUILD" ]]; then
-  ROOT_BUILD_PREEXISTED=1
-fi
-if [[ -e "$ROOT_EGG_INFO" ]]; then
-  ROOT_EGG_INFO_PREEXISTED=1
-fi
 
 cleanup() {
-  if [[ "$ROOT_BUILD_PREEXISTED" == "0" ]]; then
-    rm -rf "$ROOT_BUILD"
-  fi
-  if [[ "$ROOT_EGG_INFO_PREEXISTED" == "0" ]]; then
-    rm -rf "$ROOT_EGG_INFO"
-  fi
   rm -rf "$SMOKE_DIR"
 }
 trap cleanup EXIT
 
-python3 -m venv "$SMOKE_DIR/venv"
-PYTHON="$SMOKE_DIR/venv/bin/python"
-CONVEYOR="$SMOKE_DIR/venv/bin/conveyor"
-WORKERCTL="$SMOKE_DIR/venv/bin/workerctl"
-DIST_DIR="$SMOKE_DIR/dist"
+PACK_JSON="$SMOKE_DIR/npm-pack.json"
+PREFIX="$SMOKE_DIR/prefix"
 CODEX_HOME_DIR="$SMOKE_DIR/codex-home"
 
-"$PYTHON" -m pip install --upgrade pip
-"$PYTHON" -m pip wheel "$ROOT" -w "$DIST_DIR"
-"$PYTHON" -m pip install "$DIST_DIR"/*.whl
+(
+  cd "$SMOKE_DIR"
+  npm pack "$ROOT" --json > "$PACK_JSON"
+)
 
-conveyor_help="$("$CONVEYOR" --help | head -n 1)"
-workerctl_help="$("$WORKERCTL" --help | head -n 1)"
+TARBALL="$SMOKE_DIR/$(node - "$PACK_JSON" <<'NODE'
+const fs = require("node:fs");
+const pack = JSON.parse(fs.readFileSync(process.argv[2], "utf8"))[0];
+process.stdout.write(pack.filename);
+NODE
+)"
+
+node - "$PACK_JSON" <<'NODE'
+const fs = require("node:fs");
+const pack = JSON.parse(fs.readFileSync(process.argv[2], "utf8"))[0];
+const files = new Map(pack.files.map((file) => [file.path, file]));
+const required = [
+  "dist/cli/main.js",
+  "dist/index.js",
+  "scripts/workerctl",
+  "workerctl/cli.py",
+  "workerctl/assets/skills/manage-codex-workers/SKILL.md",
+  "workerctl/assets/skills/codex-review/SKILL.md",
+  "workerctl/assets/skills/codex-review/scripts/codex-review",
+];
+for (const path of required) {
+  if (!files.has(path)) {
+    throw new Error(`npm tarball missing required file: ${path}`);
+  }
+}
+for (const path of [
+  "scripts/workerctl",
+  "workerctl/assets/skills/codex-review/scripts/codex-review",
+]) {
+  if (files.get(path).mode !== 0o755) {
+    throw new Error(`npm tarball file is not executable: ${path}`);
+  }
+}
+NODE
+
+npm install -g --prefix "$PREFIX" "$TARBALL"
+
+CONVEYOR="$PREFIX/bin/conveyor"
+WORKERCTL="$PREFIX/bin/workerctl"
+
+conveyor_help="$(PATH="$PREFIX/bin:$PATH" "$CONVEYOR" --help | head -n 1)"
+workerctl_help="$(PATH="$PREFIX/bin:$PATH" "$WORKERCTL" --help | head -n 1)"
 
 case "$conveyor_help" in
   "usage: conveyor"*) ;;
@@ -56,9 +78,9 @@ case "$workerctl_help" in
     ;;
 esac
 
-"$CONVEYOR" install-skills --codex-home "$CODEX_HOME_DIR" --json > "$SMOKE_DIR/install-skills.json"
+CODEX_HOME="$CODEX_HOME_DIR" PATH="$PREFIX/bin:$PATH" "$CONVEYOR" install-skills --codex-home "$CODEX_HOME_DIR" --json > "$SMOKE_DIR/install-skills.json"
 
-"$PYTHON" - "$SMOKE_DIR/install-skills.json" "$CODEX_HOME_DIR" <<'PY'
+python3 - "$SMOKE_DIR/install-skills.json" "$CODEX_HOME_DIR" <<'PY'
 import json
 import os
 import re
@@ -98,4 +120,4 @@ if match:
     )
 PY
 
-echo "package-smoke: installed agent-conveyor wheel exposes conveyor and workerctl, and bundled skills are valid"
+echo "package-smoke: npm tarball exposes conveyor and workerctl, and bundled skills are valid"

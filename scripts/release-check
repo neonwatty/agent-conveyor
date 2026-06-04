@@ -4,72 +4,80 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP_ROOT="${TMPDIR:-/tmp}"
 WORK_DIR="$(mktemp -d "$TMP_ROOT/agent-conveyor-release-check.XXXXXX")"
-ROOT_EGG_INFO="$ROOT/agent_conveyor.egg-info"
-ROOT_EGG_INFO_PREEXISTED=0
-if [[ -e "$ROOT_EGG_INFO" ]]; then
-  ROOT_EGG_INFO_PREEXISTED=1
-fi
 
 cleanup() {
-  if [[ "$ROOT_EGG_INFO_PREEXISTED" == "0" ]]; then
-    rm -rf "$ROOT_EGG_INFO"
-  fi
   rm -rf "$WORK_DIR"
 }
 trap cleanup EXIT
 
-BUILD_VENV="$WORK_DIR/build-venv"
-INSTALL_VENV="$WORK_DIR/install-venv"
-DIST_DIR="$WORK_DIR/dist"
+PACK_JSON="$WORK_DIR/npm-pack.json"
+PREFIX="$WORK_DIR/prefix"
 CODEX_HOME_DIR="$WORK_DIR/codex-home"
-BUILD_LOG="$WORK_DIR/build.log"
 
-python3 -m venv "$BUILD_VENV"
-BUILD_PYTHON="$BUILD_VENV/bin/python"
-"$BUILD_PYTHON" -m pip install --upgrade pip build twine
+echo "== npm build =="
+npm --prefix "$ROOT" run build
 
-echo "== build clean distributions =="
-set +e
-"$BUILD_PYTHON" -m build --outdir "$DIST_DIR" "$ROOT" >"$BUILD_LOG" 2>&1
-build_status=$?
-set -e
-cat "$BUILD_LOG"
-if [[ "$build_status" -ne 0 ]]; then
-  echo "release-check: build failed" >&2
-  exit "$build_status"
-fi
+echo "== npm pack =="
+(
+  cd "$WORK_DIR"
+  npm pack "$ROOT" --json > "$PACK_JSON"
+)
 
-if grep -E "SetuptoolsDeprecationWarning|Package would be ignored" "$BUILD_LOG" >/dev/null; then
-  echo "release-check: build produced packaging warnings" >&2
-  exit 1
-fi
+TARBALL="$WORK_DIR/$(node - "$PACK_JSON" <<'NODE'
+const fs = require("node:fs");
+const pack = JSON.parse(fs.readFileSync(process.argv[2], "utf8"))[0];
+process.stdout.write(pack.filename);
+NODE
+)"
 
-echo "== twine check =="
-"$BUILD_PYTHON" -m twine check "$DIST_DIR"/*
+node - "$PACK_JSON" "$ROOT/package.json" <<'NODE'
+const fs = require("node:fs");
+const pack = JSON.parse(fs.readFileSync(process.argv[2], "utf8"))[0];
+const manifest = JSON.parse(fs.readFileSync(process.argv[3], "utf8"));
+if (manifest.private === true) {
+  throw new Error("package.json is still private");
+}
+if (manifest.name !== "agent-conveyor") {
+  throw new Error(`unexpected package name: ${manifest.name}`);
+}
+if (manifest.scripts?.prepublishOnly !== "node scripts/prepublish-guard.mjs") {
+  throw new Error("prepublishOnly guard is missing or changed");
+}
+if (!manifest.bin?.conveyor || !manifest.bin?.workerctl) {
+  throw new Error("package bins must expose conveyor and workerctl");
+}
+const files = new Map(pack.files.map((file) => [file.path, file]));
+const required = [
+  manifest.bin.conveyor.replace(/^\.\//, ""),
+  manifest.bin.workerctl.replace(/^\.\//, ""),
+  "scripts/workerctl",
+  "workerctl/assets/skills/manage-codex-workers/SKILL.md",
+  "workerctl/assets/skills/codex-review/SKILL.md",
+  "workerctl/assets/skills/codex-review/scripts/codex-review",
+];
+for (const path of required) {
+  if (!files.has(path)) {
+    throw new Error(`release tarball missing required file: ${path}`);
+  }
+}
+for (const path of [
+  "scripts/workerctl",
+  "workerctl/assets/skills/codex-review/scripts/codex-review",
+]) {
+  if (files.get(path).mode !== 0o755) {
+    throw new Error(`release tarball file is not executable: ${path}`);
+  }
+}
+NODE
 
-shopt -s nullglob
-wheels=("$DIST_DIR"/*.whl)
-sdists=("$DIST_DIR"/*.tar.gz)
-shopt -u nullglob
-if [[ "${#wheels[@]}" -ne 1 ]]; then
-  echo "release-check: expected exactly one wheel, found ${#wheels[@]}" >&2
-  exit 1
-fi
-if [[ "${#sdists[@]}" -ne 1 ]]; then
-  echo "release-check: expected exactly one sdist, found ${#sdists[@]}" >&2
-  exit 1
-fi
+echo "== clean npm install smoke =="
+npm install -g --prefix "$PREFIX" "$TARBALL"
 
-python3 -m venv "$INSTALL_VENV"
-INSTALL_PYTHON="$INSTALL_VENV/bin/python"
-CONVEYOR="$INSTALL_VENV/bin/conveyor"
-WORKERCTL="$INSTALL_VENV/bin/workerctl"
-"$INSTALL_PYTHON" -m pip install --upgrade pip
-"$INSTALL_PYTHON" -m pip install "${wheels[0]}"
+CONVEYOR="$PREFIX/bin/conveyor"
+WORKERCTL="$PREFIX/bin/workerctl"
 
-echo "== installed CLI smoke =="
-conveyor_help="$("$CONVEYOR" --help | head -n 1)"
-workerctl_help="$("$WORKERCTL" --help | head -n 1)"
+conveyor_help="$(PATH="$PREFIX/bin:$PATH" "$CONVEYOR" --help | head -n 1)"
+workerctl_help="$(PATH="$PREFIX/bin:$PATH" "$WORKERCTL" --help | head -n 1)"
 
 case "$conveyor_help" in
   "usage: conveyor"*) ;;
@@ -87,9 +95,9 @@ case "$workerctl_help" in
     ;;
 esac
 
-"$CONVEYOR" install-skills --codex-home "$CODEX_HOME_DIR" --json > "$WORK_DIR/install-skills.json"
+CODEX_HOME="$CODEX_HOME_DIR" PATH="$PREFIX/bin:$PATH" "$CONVEYOR" install-skills --codex-home "$CODEX_HOME_DIR" --json > "$WORK_DIR/install-skills.json"
 
-"$INSTALL_PYTHON" - "$WORK_DIR/install-skills.json" "$CODEX_HOME_DIR" <<'PY'
+python3 - "$WORK_DIR/install-skills.json" "$CODEX_HOME_DIR" <<'PY'
 import json
 import os
 import sys
@@ -117,8 +125,7 @@ if not os.access(review_helper, os.X_OK):
 PY
 
 echo "== Release check receipt =="
-printf 'wheel=%s\n' "${wheels[0]}"
-printf 'sdist=%s\n' "${sdists[0]}"
+printf 'tarball=%s\n' "$TARBALL"
 printf 'conveyor_help=%s\n' "$conveyor_help"
 printf 'workerctl_help=%s\n' "$workerctl_help"
-echo "release-check: built clean distributions, passed twine check, installed the wheel, and verified bundled skills"
+echo "release-check: packed npm tarball, installed it in a clean prefix, and verified bundled skills without publishing"

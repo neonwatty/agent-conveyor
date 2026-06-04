@@ -1,12 +1,60 @@
 {
-  "name": "codex-terminal-manager",
-  "private": true,
+  "name": "agent-conveyor",
+  "version": "0.1.0",
+  "description": "Local agent manager/worker conveyor control plane for Codex sessions.",
+  "license": "MIT",
   "type": "module",
+  "bin": {
+    "conveyor": "./dist/cli/main.js",
+    "workerctl": "./dist/cli/main.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./cli": {
+      "types": "./dist/cli/python-bridge.d.ts",
+      "default": "./dist/cli/python-bridge.js"
+    }
+  },
+  "files": [
+    "dist/",
+    "scripts/workerctl",
+    "workerctl/**/*.py",
+    "workerctl/assets/skills/**/*",
+    "README.md",
+    "docs/typescript-migration/*.md"
+  ],
   "scripts": {
     "test": "node dashboard/scripts/run-tests.mjs",
-    "build": "tsc -p dashboard/tsconfig.json && vite build --config dashboard/vite.config.ts",
-    "dashboard": "tsx dashboard/server/index.ts"
+    "build": "npm run build:cli && npm run build:dashboard",
+    "build:cli": "tsc -p tsconfig.cli.json",
+    "build:dashboard": "tsc -p dashboard/tsconfig.json && vite build --config dashboard/vite.config.ts",
+    "dashboard": "tsx dashboard/server/index.ts",
+    "prepack": "npm run build:cli",
+    "prepublishOnly": "node scripts/prepublish-guard.mjs"
   },
+  "engines": {
+    "node": ">=20.19"
+  },
+  "keywords": [
+    "agent",
+    "codex",
+    "conveyor",
+    "manager-worker",
+    "workflow-automation"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/neonwatty/codex-terminal-manager.git"
+  },
+  "bugs": {
+    "url": "https://github.com/neonwatty/codex-terminal-manager/issues"
+  },
+  "homepage": "https://github.com/neonwatty/codex-terminal-manager#readme",
   "dependencies": {
     "@homebridge/node-pty-prebuilt-multiarch": "^0.13.1",
     "@vitejs/plugin-react": "^5.1.0",
