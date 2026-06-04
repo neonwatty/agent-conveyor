@@ -123,6 +123,9 @@ export function runTypescriptRuntimeCommand(options: {
     if (parsed.command === "unbind") {
       return runUnbindCommand(parsed, options);
     }
+    if (parsed.command === "create-disposable-binding") {
+      return runCreateDisposableBindingCommand(parsed, options);
+    }
     if (parsed.command === "register-worker") {
       return runRegisterSessionCommand(parsed, options, "worker");
     }
@@ -199,6 +202,7 @@ interface ParsedRuntimeArgs {
     codexSession: string | null;
     create: string | null;
     currentTask: string | null;
+    currentIteration: number;
     cwd: string | null;
     dryRun: boolean;
     eventType: string | null;
@@ -230,7 +234,15 @@ interface ParsedRuntimeArgs {
     requireSegment: boolean;
     worker: string | null;
     manager: string | null;
+    maxIterations: number | null;
     zip: boolean;
+    requiredBeforeContinue: string[];
+    runName: string | null;
+    seedPromptSha256: string | null;
+    sessionDir: string | null;
+    template: string | null;
+    adversarial: boolean;
+    cleanupPolicy: string;
   };
   defaultRuntime?: boolean;
   explicit: boolean;
@@ -253,6 +265,7 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
     codexSession: null,
     create: null,
     currentTask: null,
+    currentIteration: 1,
     cwd: null,
     dryRun: false,
     eventType: null,
@@ -284,7 +297,15 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
     requireSegment: false,
     worker: null,
     manager: null,
+    maxIterations: null,
     zip: false,
+    requiredBeforeContinue: [],
+    runName: null,
+    seedPromptSha256: null,
+    sessionDir: null,
+    template: null,
+    adversarial: false,
+    cleanupPolicy: "clear",
   };
   const queue = [...args];
   let explicit = false;
@@ -318,6 +339,11 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       flags.includeFullTranscripts = true;
     } else if (arg === "--dry-run") {
       flags.dryRun = true;
+    } else if (arg === "--adversarial") {
+      if (command !== "create-disposable-binding") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --adversarial", explicit, flags, task };
+      }
+      flags.adversarial = true;
     } else if (arg === "--require-segment") {
       if (command !== "transcript-capture") {
         return { command, enabled, error: "Unsupported TypeScript runtime option: --require-segment", explicit, flags, task };
@@ -388,6 +414,16 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       }
       flags.cwd = value.value;
       index += 1;
+    } else if (arg === "--session-dir") {
+      if (command !== "create-disposable-binding") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --session-dir", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.sessionDir = value.value;
+      index += 1;
     } else if (arg === "--current-task") {
       const value = valueAfter(queue, index, arg);
       if (value.error) {
@@ -457,6 +493,56 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
         return { command, enabled, error: value.error, explicit, flags, task };
       }
       flags.manager = value.value;
+      index += 1;
+    } else if (arg === "--template") {
+      if (command !== "create-disposable-binding") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --template", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.template = value.value;
+      index += 1;
+    } else if (arg === "--run-name") {
+      if (command !== "create-disposable-binding") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --run-name", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.runName = value.value;
+      index += 1;
+    } else if (arg === "--seed-prompt-sha256") {
+      if (command !== "create-disposable-binding") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --seed-prompt-sha256", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.seedPromptSha256 = value.value;
+      index += 1;
+    } else if (arg === "--required-before-continue") {
+      if (command !== "create-disposable-binding") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --required-before-continue", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.requiredBeforeContinue.push(value.value);
+      index += 1;
+    } else if (arg === "--cleanup-policy") {
+      if (command !== "create-disposable-binding") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --cleanup-policy", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.cleanupPolicy = value.value;
       index += 1;
     } else if (arg === "--format") {
       const parsedValue = valueAfter(queue, index, arg);
@@ -614,6 +700,34 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
         return { command, enabled, error: "--limit must be a non-negative integer.", explicit, flags, task };
       }
       flags.limit = value;
+      index += 1;
+    } else if (arg === "--max-iterations") {
+      if (command !== "create-disposable-binding") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --max-iterations", explicit, flags, task };
+      }
+      const parsedValue = valueAfter(queue, index, arg);
+      if (parsedValue.error) {
+        return { command, enabled, error: parsedValue.error, explicit, flags, task };
+      }
+      const value = Number(parsedValue.value);
+      if (!Number.isInteger(value)) {
+        return { command, enabled, error: "--max-iterations must be an integer.", explicit, flags, task };
+      }
+      flags.maxIterations = value;
+      index += 1;
+    } else if (arg === "--current-iteration") {
+      if (command !== "create-disposable-binding") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --current-iteration", explicit, flags, task };
+      }
+      const parsedValue = valueAfter(queue, index, arg);
+      if (parsedValue.error) {
+        return { command, enabled, error: parsedValue.error, explicit, flags, task };
+      }
+      const value = Number(parsedValue.value);
+      if (!Number.isInteger(value)) {
+        return { command, enabled, error: "--current-iteration must be an integer.", explicit, flags, task };
+      }
+      flags.currentIteration = value;
       index += 1;
     } else if (arg.startsWith("--")) {
       return { command, enabled, error: `Unsupported TypeScript runtime option: ${arg}`, explicit, flags, task };
@@ -792,6 +906,133 @@ function runUnbindCommand(
       type: "binding_ended",
     });
     return unbindJsonResult(parsed.flags.taskName);
+  } finally {
+    database.close();
+  }
+}
+
+function runCreateDisposableBindingCommand(
+  parsed: ParsedRuntimeArgs,
+  options: { cwd?: string; env?: NodeJS.ProcessEnv },
+): TypescriptRuntimeResult {
+  const unsupported = unsupportedCreateDisposableBindingOptions(parsed);
+  if (unsupported) {
+    return unsupportedRuntimeResult(parsed, unsupported);
+  }
+  const taskName = requireTask(parsed);
+  const dbPath = runtimeDbPath(parsed, options);
+  const sessionDir = resolve(parsed.flags.sessionDir ?? join(dirname(dbPath), "disposable-sessions"));
+  const cwd = resolve(parsed.flags.cwd ?? options.cwd ?? process.cwd());
+  const workerName = parsed.flags.worker ?? `${taskName}-worker`;
+  const managerName = parsed.flags.manager ?? `${taskName}-manager`;
+  const requiredBeforeContinue = uniqueRequiredEvidence([
+    ...parsed.flags.requiredBeforeContinue,
+    ...(parsed.flags.adversarial ? ["adversarial_check"] : []),
+  ]);
+  const database = openRuntimeDatabase(parsed, options);
+  try {
+    let task = taskRowForLifecycle(database, taskName);
+    const createdTask = task === null;
+    if (createdTask) {
+      const taskId = createTaskSync(database, {
+        goal: parsed.flags.goal ?? "Disposable no-tmux Ralph-loop task.",
+        name: taskName,
+        summary: parsed.flags.summary,
+      });
+      task = taskRowById(database, taskId);
+    }
+    if (task === null) {
+      throw new Error(`Unknown task: ${taskName}`);
+    }
+    database.prepare("update tasks set state = 'managed', updated_at = ? where id = ?")
+      .run(new Date().toISOString(), task.id);
+    task = taskRowById(database, task.id);
+
+    const workerRollout = writeDisposableRollout(sessionDir, workerName, cwd);
+    const managerRollout = writeDisposableRollout(sessionDir, managerName, cwd);
+    const worker = registerSessionSync(database, {
+      codexSessionPath: workerRollout.path,
+      cwd,
+      name: workerName,
+      pid: process.pid,
+      role: "worker",
+      tmuxSession: null,
+    });
+    const manager = registerSessionSync(database, {
+      codexSessionPath: managerRollout.path,
+      cwd,
+      name: managerName,
+      pid: process.pid,
+      role: "manager",
+      tmuxSession: null,
+    });
+    const bindingId = bindSessionsSync(database, {
+      managerSessionName: managerName,
+      taskName: task.name,
+      workerSessionName: workerName,
+    });
+    const run = requiredBeforeContinue.length > 0
+      ? createRalphLoopRunSync(database, {
+        cleanupPolicy: parsed.flags.cleanupPolicy,
+        currentIteration: parsed.flags.currentIteration,
+        maxIterations: parsed.flags.maxIterations ?? 2,
+        requiredBeforeContinue,
+        runName: parsed.flags.runName,
+        seedPromptSha256: parsed.flags.seedPromptSha256,
+        taskId: task.id,
+        taskName: task.name,
+      })
+      : null;
+    insertEventSync(database, {
+      payload: {
+        binding_id: bindingId,
+        manager: managerName,
+        run: run?.name ?? null,
+        worker: workerName,
+      },
+      taskId: task.id,
+      type: "disposable_binding_created",
+    });
+    const result = {
+      binding: { id: bindingId },
+      db_path: dbPath,
+      manager: {
+        communication: disposableSessionCommunication("manager", task.name, dbPath),
+        id: manager.session_id,
+        name: managerName,
+        rollout_path: managerRollout.path,
+        tmux_session: null,
+      },
+      replay_commands: disposableReplayCommands({
+        adversarial: parsed.flags.adversarial,
+        dbPath,
+        managerName,
+        requiredBeforeContinue,
+        runName: run?.name ?? null,
+        sessionDir,
+        taskName: task.name,
+        workerName,
+      }),
+      run,
+      task: {
+        created: createdTask,
+        id: task.id,
+        name: task.name,
+        state: task.state,
+      },
+      worker: {
+        communication: disposableSessionCommunication("worker", task.name, dbPath),
+        id: worker.session_id,
+        name: workerName,
+        rollout_path: workerRollout.path,
+        tmux_session: null,
+      },
+      worker_handoff: disposableWorkerHandoff(task.name, run?.name ?? null, dbPath),
+    };
+    if (parsed.flags.json) {
+      return jsonResult(result);
+    }
+    return { exitCode: 0, handled: true, stdout: renderDisposableBindingText(result) };
   } finally {
     database.close();
   }
@@ -1374,9 +1615,13 @@ function openRuntimeDatabase(
   parsed: ParsedRuntimeArgs,
   options: { cwd?: string; env?: NodeJS.ProcessEnv },
 ) {
-  const database = openDatabaseSync(parsed.flags.path ?? defaultDbPath({ cwd: options.cwd, env: options.env }));
+  const database = openDatabaseSync(runtimeDbPath(parsed, options));
   initializeDatabaseSync(database);
   return database;
+}
+
+function runtimeDbPath(parsed: ParsedRuntimeArgs, options: { cwd?: string; env?: NodeJS.ProcessEnv }): string {
+  return resolve(parsed.flags.path ?? defaultDbPath({ cwd: options.cwd, env: options.env }));
 }
 
 function requireTask(parsed: ParsedRuntimeArgs): string {
@@ -1394,6 +1639,7 @@ function isDefaultRuntimeCommand(command: string | null): boolean {
     || command === "tasks"
     || command === "bind"
     || command === "unbind"
+    || command === "create-disposable-binding"
     || command === "register-worker"
     || command === "register-manager"
     || command === "sessions"
@@ -1493,6 +1739,42 @@ function unsupportedUnbindOptions(parsed: ParsedRuntimeArgs): string | null {
   }
   if (parsed.flags.worker !== null || parsed.flags.manager !== null) {
     return "Unsupported TypeScript runtime option for unbind.";
+  }
+  return null;
+}
+
+function unsupportedCreateDisposableBindingOptions(parsed: ParsedRuntimeArgs): string | null {
+  if (parsed.flags.template !== null) {
+    return "TypeScript runtime create-disposable-binding does not yet support --template.";
+  }
+  if (
+    parsed.flags.active
+    || parsed.flags.all
+    || parsed.flags.create !== null
+    || parsed.flags.dryRun
+    || parsed.flags.eventType !== null
+    || parsed.flags.file !== null
+    || parsed.flags.includeContent
+    || parsed.flags.includeFullTranscripts
+    || parsed.flags.includeLegacy
+    || parsed.flags.includeTranscripts
+    || parsed.flags.limit !== null
+    || parsed.flags.names.length > 0
+    || parsed.flags.output !== null
+    || parsed.flags.pid !== null
+    || parsed.flags.codexSession !== null
+    || parsed.flags.redactIdentityToken
+    || parsed.flags.roleProvided
+    || parsed.flags.sessionRole !== null
+    || parsed.flags.sessionState !== null
+    || parsed.flags.statusState !== null
+    || parsed.flags.subtype !== null
+    || parsed.flags.taskName !== null
+    || parsed.flags.text !== null
+    || parsed.flags.tmuxSession !== null
+    || parsed.flags.zip
+  ) {
+    return "Unsupported TypeScript runtime option for create-disposable-binding.";
   }
   return null;
 }
@@ -2236,6 +2518,278 @@ function insertEventSync(
     options.type,
     stableJson(options.payload),
   );
+}
+
+interface DisposableRollout {
+  codexSessionId: string;
+  path: string;
+}
+
+interface LifecycleTaskRow {
+  id: string;
+  name: string;
+  state: string;
+}
+
+interface RalphLoopRunRow {
+  ended_at: string | null;
+  id: string;
+  metadata: Record<string, unknown>;
+  name: string;
+  purpose: string | null;
+  started_at: string;
+  status: string;
+  task_id: string;
+}
+
+function taskRowForLifecycle(database: ReturnType<typeof openRuntimeDatabase>, taskName: string): LifecycleTaskRow | null {
+  const row = database.prepare(`
+    select id, name, state
+    from tasks
+    where id = ? or name = ?
+    order by created_at desc
+    limit 1
+  `).get(taskName, taskName) as LifecycleTaskRow | undefined;
+  return row ?? null;
+}
+
+function taskRowById(database: ReturnType<typeof openRuntimeDatabase>, taskId: string): LifecycleTaskRow {
+  const row = database.prepare("select id, name, state from tasks where id = ?")
+    .get(taskId) as LifecycleTaskRow | undefined;
+  if (!row) {
+    throw new Error(`Unknown task id: ${taskId}`);
+  }
+  return row;
+}
+
+function disposableSessionSlug(name: string): string {
+  return name.replace(/[^A-Za-z0-9_.-]+/g, "-").replace(/^[.-]+|[.-]+$/g, "") || "session";
+}
+
+function writeDisposableRollout(sessionDir: string, sessionName: string, cwd: string): DisposableRollout {
+  mkdirSync(sessionDir, { recursive: true });
+  const slug = disposableSessionSlug(sessionName);
+  const codexSessionId = `codex-${slug}`;
+  const path = join(sessionDir, `rollout-${slug}.jsonl`);
+  writeFileSync(
+    path,
+    `${stableJson({
+      payload: {
+        cwd,
+        id: codexSessionId,
+        originator: "conveyor create-disposable-binding",
+      },
+      type: "session_meta",
+    })}\n`,
+  );
+  return { codexSessionId, path };
+}
+
+function uniqueRequiredEvidence(items: string[]): string[] {
+  const result: string[] = [];
+  const seen = new Set<string>();
+  for (const item of items) {
+    const evidence = item.trim();
+    if (!evidence) {
+      throw new Error("required evidence entries must be non-empty");
+    }
+    if (!seen.has(evidence)) {
+      seen.add(evidence);
+      result.push(evidence);
+    }
+  }
+  return result;
+}
+
+function createRalphLoopRunSync(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  options: {
+    cleanupPolicy: string;
+    currentIteration: number;
+    maxIterations: number;
+    requiredBeforeContinue: string[];
+    runName: string | null;
+    seedPromptSha256: string | null;
+    taskId: string;
+    taskName: string;
+  },
+): RalphLoopRunRow {
+  const active = database.prepare(`
+    select id
+    from runs
+    where task_id = ? and status = 'active'
+    order by started_at desc, id desc
+    limit 1
+  `).get(options.taskId) as { id: string } | undefined;
+  if (active) {
+    throw new Error(`task ${JSON.stringify(options.taskName)} already has active run ${JSON.stringify(active.id)}`);
+  }
+  const timestamp = new Date().toISOString();
+  const runId = `run-${randomUUID()}`;
+  const runName = options.runName ?? `${options.taskName}-${timestamp.replace(/:/g, "").replace(/\./g, "-")}`;
+  const metadata = {
+    cleanup_policy: options.cleanupPolicy,
+    current_iteration: options.currentIteration,
+    kind: "ralph_loop",
+    max_iterations: options.maxIterations,
+    required_before_continue: options.requiredBeforeContinue,
+    seed_prompt_sha256: options.seedPromptSha256,
+    source: "create-disposable-binding",
+    stop_conditions: ["max_iterations", "required_evidence"],
+  };
+  database.prepare(`
+    insert into runs(id, task_id, name, purpose, status, started_at, metadata_json)
+    values (?, ?, ?, 'ralph_loop', 'active', ?, ?)
+  `).run(runId, options.taskId, runName, timestamp, stableJson(metadata));
+  return runRowSync(database, runId);
+}
+
+function runRowSync(database: ReturnType<typeof openRuntimeDatabase>, run: string): RalphLoopRunRow {
+  const row = database.prepare(`
+    select id, task_id, name, purpose, status, started_at, ended_at, metadata_json
+    from runs
+    where id = ? or name = ?
+    order by started_at desc, id desc
+    limit 1
+  `).get(run, run) as {
+    ended_at: string | null;
+    id: string;
+    metadata_json: string;
+    name: string;
+    purpose: string | null;
+    started_at: string;
+    status: string;
+    task_id: string;
+  } | undefined;
+  if (!row) {
+    throw new Error(`Unknown run: ${run}`);
+  }
+  return {
+    ended_at: row.ended_at,
+    id: row.id,
+    metadata: JSON.parse(row.metadata_json) as Record<string, unknown>,
+    name: row.name,
+    purpose: row.purpose,
+    started_at: row.started_at,
+    status: row.status,
+    task_id: row.task_id,
+  };
+}
+
+function disposableSessionCommunication(
+  role: "manager" | "worker",
+  taskName: string,
+  dbPath: string,
+): Record<string, unknown> {
+  return {
+    can_receive_pull: true,
+    can_receive_push: false,
+    delivery_mode: "pull_required",
+    detection_source: "codex_session_without_tmux",
+    poll_command: sessionPollCommand(role, taskName, dbPath),
+    poll_command_template: sessionPollCommand(role, null, dbPath),
+    receive_style: "pull",
+    requires_polling: true,
+    session_kind: "codex_app",
+    tmux_session: null,
+  };
+}
+
+function disposableReplayCommands(options: {
+  adversarial: boolean;
+  dbPath: string;
+  managerName: string;
+  requiredBeforeContinue: string[];
+  runName: string | null;
+  sessionDir: string;
+  taskName: string;
+  workerName: string;
+}): string[] {
+  const pathSuffix = ` --path ${shellQuote(options.dbPath)}`;
+  const setupParts = [
+    "scripts/workerctl",
+    "create-disposable-binding",
+    shellQuote(options.taskName),
+    "--worker",
+    shellQuote(options.workerName),
+    "--manager",
+    shellQuote(options.managerName),
+    "--session-dir",
+    shellQuote(options.sessionDir),
+  ];
+  for (const evidence of options.requiredBeforeContinue) {
+    setupParts.push("--required-before-continue", shellQuote(evidence));
+  }
+  if (options.adversarial && !options.requiredBeforeContinue.includes("adversarial_check")) {
+    setupParts.push("--adversarial");
+  }
+  if (options.runName) {
+    setupParts.push("--run-name", shellQuote(options.runName));
+  }
+  setupParts.push("--json", "--path", shellQuote(options.dbPath));
+  const commands = [setupParts.join(" ")];
+  if (options.runName) {
+    const loopFlag = ` --loop-run ${shellQuote(options.runName)}`;
+    commands.push(
+      `scripts/workerctl enqueue-continue-iteration ${shellQuote(options.taskName)}${loopFlag} --requested-iteration 2 --message ${shellQuote("Run the next iteration.")}${pathSuffix}`,
+      `scripts/workerctl dispatch --once --type continue_iteration${pathSuffix}`,
+      `scripts/workerctl worker-inbox ${shellQuote(options.taskName)} --consume-next --wait${pathSuffix} --json`,
+      `scripts/workerctl loop-status ${shellQuote(options.taskName)} --run ${shellQuote(options.runName)}${pathSuffix} --json`,
+    );
+  } else {
+    commands.push(
+      `scripts/workerctl session-inbox WORKER_SESSION --wait${pathSuffix} --json`,
+      `scripts/workerctl manager-inbox MANAGER_SESSION --wait${pathSuffix} --json`,
+    );
+  }
+  return commands;
+}
+
+function disposableWorkerHandoff(taskName: string, runName: string | null, dbPath: string): string {
+  const loopClause = runName
+    ? ` for Ralph loop run ${runName}`
+    : " for this disposable no-tmux binding";
+  return [
+    "Use the manage-codex-workers skill.",
+    "",
+    `You are the worker for task ${taskName}${loopClause}.`,
+    "Keep polling your Conveyor worker inbox until there are no items left or the loop reaches max_iterations. Consume the next item now, treat each consumed item as the manager's next instruction, complete the requested work, and report changed files, exact commands run, evidence, and any residual risk.",
+    "",
+    `Run: ${sessionPollCommand("worker", taskName, dbPath)}`,
+  ].join("\n");
+}
+
+function renderDisposableBindingText(result: {
+  manager: { name: string; rollout_path: string };
+  replay_commands: string[];
+  run: { name: string } | null;
+  task: { name: string };
+  worker: { name: string; rollout_path: string };
+  worker_handoff: string;
+}): string {
+  const lines = [
+    `Created disposable binding for task ${JSON.stringify(result.task.name)}.`,
+    `Worker: ${result.worker.name} (${result.worker.rollout_path})`,
+    `Manager: ${result.manager.name} (${result.manager.rollout_path})`,
+  ];
+  if (result.run) {
+    lines.push(`Ralph loop run: ${result.run.name}`);
+  }
+  lines.push("Replay commands:");
+  lines.push(...result.replay_commands.map((command) => `  ${command}`));
+  lines.push("Worker handoff:");
+  lines.push(result.worker_handoff);
+  return `${lines.join("\n")}\n`;
+}
+
+function sessionPollCommand(role: "manager" | "worker", taskName: string | null, dbPath: string): string {
+  const inbox = role === "worker" ? "worker-inbox" : "manager-inbox";
+  const task = taskName ? shellQuote(taskName) : "<task>";
+  return `conveyor ${inbox} ${task} --consume-next --wait --timeout 60 --path ${shellQuote(dbPath)} --json`;
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, "'\"'\"'")}'`;
 }
 
 function emitTelemetrySync(

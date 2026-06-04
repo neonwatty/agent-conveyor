@@ -226,6 +226,154 @@ test("TypeScript runtime handles bind and unbind by default", () => {
   }
 });
 
+test("TypeScript runtime handles no-tmux create-disposable-binding by default", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-disposable."));
+  try {
+    const dbPath = join(root, "workerctl.db");
+    const sessionDir = join(root, "sessions");
+    const created = runTypescriptRuntimeCommand({
+      args: [
+        "create-disposable-binding",
+        "real-slice",
+        "--goal",
+        "Run a real no-tmux Ralph loop.",
+        "--worker",
+        "real-worker",
+        "--manager",
+        "real-manager",
+        "--run-name",
+        "real-slice-run",
+        "--required-before-continue",
+        "adversarial_check",
+        "--session-dir",
+        sessionDir,
+        "--path",
+        dbPath,
+        "--json",
+      ],
+      cwd: root,
+      env: {},
+    });
+    assert.equal(created.exitCode, 0, created.stderr);
+    assert.equal(created.handled, true);
+    const payload = JSON.parse(created.stdout ?? "{}") as {
+      binding: { id: string };
+      manager: {
+        communication: { delivery_mode: string; poll_command: string; receive_style: string; session_kind: string };
+        name: string;
+        rollout_path: string;
+        tmux_session: string | null;
+      };
+      replay_commands: string[];
+      run: {
+        metadata: { current_iteration: number; max_iterations: number; required_before_continue: string[] };
+        name: string;
+        purpose: string;
+        status: string;
+      };
+      task: { created: boolean; id: string; name: string; state: string };
+      worker: {
+        communication: { delivery_mode: string; poll_command: string; receive_style: string; session_kind: string };
+        name: string;
+        rollout_path: string;
+        tmux_session: string | null;
+      };
+      worker_handoff: string;
+    };
+    assert.equal(payload.task.name, "real-slice");
+    assert.equal(payload.task.created, true);
+    assert.equal(payload.task.state, "managed");
+    assert.equal(payload.worker.name, "real-worker");
+    assert.equal(payload.manager.name, "real-manager");
+    assert.equal(payload.worker.tmux_session, null);
+    assert.equal(payload.manager.tmux_session, null);
+    assert.equal(payload.worker.communication.session_kind, "codex_app");
+    assert.equal(payload.manager.communication.session_kind, "codex_app");
+    assert.equal(payload.worker.communication.receive_style, "pull");
+    assert.equal(payload.manager.communication.receive_style, "pull");
+    assert.equal(payload.worker.communication.delivery_mode, "pull_required");
+    assert.equal(payload.manager.communication.delivery_mode, "pull_required");
+    const quotedDbPath = `'${dbPath.replace(/'/g, "'\"'\"'")}'`;
+    assert.equal(
+      payload.worker.communication.poll_command,
+      `conveyor worker-inbox 'real-slice' --consume-next --wait --timeout 60 --path ${quotedDbPath} --json`,
+    );
+    assert.equal(
+      payload.manager.communication.poll_command,
+      `conveyor manager-inbox 'real-slice' --consume-next --wait --timeout 60 --path ${quotedDbPath} --json`,
+    );
+    assert.equal(payload.run.name, "real-slice-run");
+    assert.equal(payload.run.purpose, "ralph_loop");
+    assert.equal(payload.run.status, "active");
+    assert.deepEqual(payload.run.metadata.required_before_continue, ["adversarial_check"]);
+    assert.equal(payload.run.metadata.max_iterations, 2);
+    assert.equal(payload.run.metadata.current_iteration, 1);
+    assert.ok(payload.replay_commands.some((command) => command.includes("enqueue-continue-iteration")));
+    assert.ok(payload.replay_commands.some((command) => command.includes("worker-inbox")));
+    assert.ok(payload.replay_commands.some((command) => command.includes("loop-status")));
+    assert.ok(payload.worker_handoff.includes("Keep polling your Conveyor worker inbox"));
+    assert.ok(payload.worker_handoff.includes(payload.worker.communication.poll_command));
+
+    for (const key of ["worker", "manager"] as const) {
+      const rolloutLine = JSON.parse(readFileSync(payload[key].rollout_path, "utf8").split(/\r?\n/)[0] ?? "{}") as {
+        payload: { cwd: string; id: string };
+        type: string;
+      };
+      assert.equal(rolloutLine.type, "session_meta");
+      assert.equal(rolloutLine.payload.cwd, root);
+      assert.match(rolloutLine.payload.id, /^codex-real-/);
+    }
+
+    const database = openDatabaseSync(dbPath);
+    try {
+      const task = database.prepare("select id, name, goal, state from tasks where name = ?")
+        .get("real-slice") as { goal: string; id: string; name: string; state: string };
+      assert.equal(task.id, payload.task.id);
+      assert.equal(task.goal, "Run a real no-tmux Ralph loop.");
+      assert.equal(task.state, "managed");
+      const sessions = database.prepare("select name, role, tmux_session, state from sessions order by role")
+        .all() as Array<{ name: string; role: string; state: string; tmux_session: string | null }>;
+      assert.deepEqual(sessions.map((session) => ({ ...session })), [
+        { name: "real-manager", role: "manager", state: "active", tmux_session: null },
+        { name: "real-worker", role: "worker", state: "active", tmux_session: null },
+      ]);
+      const binding = database.prepare("select id, task_id, state from bindings")
+        .get() as { id: string; state: string; task_id: string };
+      assert.equal(binding.id, payload.binding.id);
+      assert.equal(binding.task_id, payload.task.id);
+      assert.equal(binding.state, "active");
+      const run = database.prepare("select name, purpose, status, metadata_json from runs")
+        .get() as { metadata_json: string; name: string; purpose: string; status: string };
+      assert.equal(run.name, "real-slice-run");
+      assert.equal(run.purpose, "ralph_loop");
+      assert.equal(run.status, "active");
+      assert.deepEqual(JSON.parse(run.metadata_json).required_before_continue, ["adversarial_check"]);
+      const event = database.prepare("select task_id, payload_json from events where type = 'disposable_binding_created'")
+        .get() as { payload_json: string; task_id: string };
+      assert.equal(event.task_id, payload.task.id);
+      assert.deepEqual(JSON.parse(event.payload_json), {
+        binding_id: payload.binding.id,
+        manager: "real-manager",
+        run: "real-slice-run",
+        worker: "real-worker",
+      });
+    } finally {
+      database.close();
+    }
+
+    assert.deepEqual(
+      runTypescriptRuntimeCommand({
+        args: ["create-disposable-binding", "templated-slice", "--template", "adversarial", "--path", dbPath],
+        cwd: root,
+        env: {},
+      }),
+      { exitCode: 0, handled: false },
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("TypeScript runtime handles deterministic session registry and discovery commands by default", () => {
   const root = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-sessions."));
   try {
