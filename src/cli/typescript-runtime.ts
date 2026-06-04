@@ -126,6 +126,12 @@ export function runTypescriptRuntimeCommand(options: {
     if (parsed.command === "create-disposable-binding") {
       return runCreateDisposableBindingCommand(parsed, options);
     }
+    if (parsed.command === "finish-task") {
+      return runLifecycleTaskCommand(parsed, options, true);
+    }
+    if (parsed.command === "stop-task") {
+      return runLifecycleTaskCommand(parsed, options, false);
+    }
     if (parsed.command === "register-worker") {
       return runRegisterSessionCommand(parsed, options, "worker");
     }
@@ -243,6 +249,20 @@ interface ParsedRuntimeArgs {
     template: string | null;
     adversarial: boolean;
     cleanupPolicy: string;
+    captureTranscriptBeforeStop: boolean;
+    captureTranscriptLines: number;
+    captureTranscriptMode: TranscriptCaptureMode;
+    decisionId: number | null;
+    message: string | null;
+    reason: string | null;
+    requireAcks: boolean;
+    requireAdversarialProof: boolean;
+    requireCriteriaAudit: boolean;
+    requireEpilogue: boolean;
+    requireTranscriptSegment: boolean;
+    stopManager: boolean;
+    stopWorker: boolean;
+    strictDecisions: boolean;
   };
   defaultRuntime?: boolean;
   explicit: boolean;
@@ -306,6 +326,20 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
     template: null,
     adversarial: false,
     cleanupPolicy: "clear",
+    captureTranscriptBeforeStop: false,
+    captureTranscriptLines: DEFAULT_HISTORY_LINES,
+    captureTranscriptMode: "segment",
+    decisionId: null,
+    message: null,
+    reason: null,
+    requireAcks: false,
+    requireAdversarialProof: false,
+    requireCriteriaAudit: false,
+    requireEpilogue: false,
+    requireTranscriptSegment: false,
+    stopManager: false,
+    stopWorker: false,
+    strictDecisions: false,
   };
   const queue = [...args];
   let explicit = false;
@@ -339,6 +373,51 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       flags.includeFullTranscripts = true;
     } else if (arg === "--dry-run") {
       flags.dryRun = true;
+    } else if (arg === "--stop-manager") {
+      if (command !== "finish-task") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --stop-manager", explicit, flags, task };
+      }
+      flags.stopManager = true;
+    } else if (arg === "--stop-worker") {
+      if (command !== "finish-task" && command !== "stop-task") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --stop-worker", explicit, flags, task };
+      }
+      flags.stopWorker = true;
+    } else if (arg === "--strict-decisions") {
+      if (command !== "finish-task" && command !== "stop-task") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --strict-decisions", explicit, flags, task };
+      }
+      flags.strictDecisions = true;
+    } else if (arg === "--capture-transcript-before-stop") {
+      if (command !== "finish-task") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --capture-transcript-before-stop", explicit, flags, task };
+      }
+      flags.captureTranscriptBeforeStop = true;
+    } else if (arg === "--require-transcript-segment") {
+      if (command !== "finish-task") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --require-transcript-segment", explicit, flags, task };
+      }
+      flags.requireTranscriptSegment = true;
+    } else if (arg === "--require-criteria-audit") {
+      if (command !== "finish-task") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --require-criteria-audit", explicit, flags, task };
+      }
+      flags.requireCriteriaAudit = true;
+    } else if (arg === "--require-acks") {
+      if (command !== "finish-task") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --require-acks", explicit, flags, task };
+      }
+      flags.requireAcks = true;
+    } else if (arg === "--require-epilogue") {
+      if (command !== "finish-task") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --require-epilogue", explicit, flags, task };
+      }
+      flags.requireEpilogue = true;
+    } else if (arg === "--require-adversarial-proof") {
+      if (command !== "finish-task") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --require-adversarial-proof", explicit, flags, task };
+      }
+      flags.requireAdversarialProof = true;
     } else if (arg === "--adversarial") {
       if (command !== "create-disposable-binding") {
         return { command, enabled, error: "Unsupported TypeScript runtime option: --adversarial", explicit, flags, task };
@@ -486,6 +565,40 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
         return { command, enabled, error: value.error, explicit, flags, task };
       }
       flags.worker = value.value;
+      index += 1;
+    } else if (arg === "--reason") {
+      if (command !== "finish-task" && command !== "stop-task") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --reason", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.reason = value.value;
+      index += 1;
+    } else if (arg === "--message") {
+      if (command !== "finish-task" && command !== "stop-task") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --message", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.message = value.value;
+      index += 1;
+    } else if (arg === "--decision-id") {
+      if (command !== "finish-task" && command !== "stop-task") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --decision-id", explicit, flags, task };
+      }
+      const parsedValue = valueAfter(queue, index, arg);
+      if (parsedValue.error) {
+        return { command, enabled, error: parsedValue.error, explicit, flags, task };
+      }
+      const value = Number(parsedValue.value);
+      if (!Number.isInteger(value)) {
+        return { command, enabled, error: "--decision-id must be an integer.", explicit, flags, task };
+      }
+      flags.decisionId = value;
       index += 1;
     } else if (arg === "--manager") {
       const value = valueAfter(queue, index, arg);
@@ -678,6 +791,34 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
         return { command, enabled, error: "--terminal-stale-seconds must be an integer.", explicit, flags, task };
       }
       flags.terminalStaleSeconds = value;
+      index += 1;
+    } else if (arg === "--capture-transcript-lines") {
+      if (command !== "finish-task") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --capture-transcript-lines", explicit, flags, task };
+      }
+      const parsedValue = valueAfter(queue, index, arg);
+      if (parsedValue.error) {
+        return { command, enabled, error: parsedValue.error, explicit, flags, task };
+      }
+      const value = Number(parsedValue.value);
+      if (!Number.isInteger(value)) {
+        return { command, enabled, error: "--capture-transcript-lines must be an integer.", explicit, flags, task };
+      }
+      flags.captureTranscriptLines = value;
+      index += 1;
+    } else if (arg === "--capture-transcript-mode") {
+      if (command !== "finish-task") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --capture-transcript-mode", explicit, flags, task };
+      }
+      const parsedValue = valueAfter(queue, index, arg);
+      if (parsedValue.error) {
+        return { command, enabled, error: parsedValue.error, explicit, flags, task };
+      }
+      const value = parsedValue.value;
+      if (!isTranscriptCaptureMode(value)) {
+        return { command, enabled, error: `Unsupported transcript capture mode: ${value}`, explicit, flags, task };
+      }
+      flags.captureTranscriptMode = value;
       index += 1;
     } else if (arg === "--keep-latest") {
       const parsedValue = valueAfter(queue, index, arg);
@@ -1033,6 +1174,172 @@ function runCreateDisposableBindingCommand(
       return jsonResult(result);
     }
     return { exitCode: 0, handled: true, stdout: renderDisposableBindingText(result) };
+  } finally {
+    database.close();
+  }
+}
+
+function runLifecycleTaskCommand(
+  parsed: ParsedRuntimeArgs,
+  options: { cwd?: string; env?: NodeJS.ProcessEnv },
+  finish: boolean,
+): TypescriptRuntimeResult {
+  const unsupported = unsupportedLifecycleTaskOptions(parsed, finish);
+  if (unsupported) {
+    return unsupportedRuntimeResult(parsed, unsupported);
+  }
+  const taskName = requireTask(parsed);
+  const commandType = finish ? "finish_task" : "stop_task";
+  const eventPrefix = finish ? "finish_task" : "stop_task";
+  const reason = parsed.flags.reason ?? (finish ? "Task finished by operator." : "Task stopped by operator.");
+  const stopManager = finish ? false : true;
+  const database = openRuntimeDatabase(parsed, options);
+  try {
+    const task = taskRowForLifecycle(database, taskName);
+    if (task === null) {
+      throw new Error(`Unknown task: ${taskName}`);
+    }
+    if (task.state === "done" || task.state === "failed") {
+      throw new Error(`Task ${task.name} is already ${task.state}`);
+    }
+    const binding = activeLifecycleBinding(database, task.id);
+    const managerDecision = missingManagerDecisionCheck();
+    const finalAudit = finish ? finalCriteriaAuditSync(database, task.id, false) : null;
+    const finalAckAudit = finish ? finalAckAuditSync(database, task.id, false) : null;
+    const finalEpilogueAudit = finish ? finalEpilogueAuditSync(false) : null;
+    const payload = {
+      ...(finish && finalAckAudit ? { final_ack_audit: finalAckAudit } : {}),
+      ...(finish && finalAudit ? { final_audit: finalAudit } : {}),
+      ...(finish && finalEpilogueAudit ? { final_epilogue_audit: finalEpilogueAudit } : {}),
+      already_done_followup: false,
+      capture_transcript_before_stop: false,
+      capture_transcript_lines: DEFAULT_HISTORY_LINES,
+      capture_transcript_mode: "segment",
+      finish,
+      manager_decision: managerDecision,
+      manager_session: binding?.manager_session_name ?? null,
+      message: null,
+      reason,
+      stop_manager: stopManager,
+      stop_worker: false,
+      task: task.name,
+      worker: binding?.worker_session_name ?? null,
+      worker_session: binding?.worker_session_name ?? null,
+    };
+    const commandId = createCommandSync(database, {
+      commandType,
+      payload,
+      taskId: task.id,
+    });
+    const finalDecisionId = finish
+      ? insertFinalManagerDecisionSync(database, {
+        commandId,
+        reason,
+        taskId: task.id,
+      })
+      : null;
+    const finalObservationId = finish
+      ? insertFinalAgentObservationSync(database, {
+        commandId,
+        decisionId: finalDecisionId,
+        message: reason,
+        taskId: task.id,
+      })
+      : null;
+    insertEventSync(database, {
+      commandId,
+      payload: {
+        ...(finish && finalAckAudit ? { final_ack_audit: finalAckAudit } : {}),
+        ...(finish && finalAudit ? { final_audit: finalAudit } : {}),
+        ...(finish && finalEpilogueAudit ? { final_epilogue_audit: finalEpilogueAudit } : {}),
+        capture_transcript_before_stop: false,
+        capture_transcript_lines: DEFAULT_HISTORY_LINES,
+        capture_transcript_mode: "segment",
+        final_decision_id: finalDecisionId,
+        final_observation_id: finalObservationId,
+        finish,
+        manager_decision: managerDecision,
+        message: null,
+        reason,
+        stop_manager: stopManager,
+        stop_worker: false,
+      },
+      taskId: task.id,
+      type: `${eventPrefix}_intent`,
+    });
+    markImmediateCommandAttemptedSync(database, commandId);
+    if (finish && finalAudit) {
+      insertEventSync(database, {
+        commandId,
+        payload: finalAudit,
+        taskId: task.id,
+        type: "finish_task_criteria_audit",
+      });
+    }
+    const stoppedAt = new Date().toISOString();
+    endActiveBindingForTaskSync(database, task.id, stoppedAt);
+    database.prepare("update tasks set state = 'done', updated_at = ? where id = ?")
+      .run(stoppedAt, task.id);
+    const finishedRun = finishActiveRunForTaskSync(database, {
+      status: finish ? "finished" : "abandoned",
+      taskId: task.id,
+      timestamp: stoppedAt,
+    });
+    const result = {
+      ...(finish && finalAckAudit ? { final_ack_audit: finalAckAudit } : {}),
+      ...(finish && finalAudit ? { final_audit: finalAudit } : {}),
+      ...(finish && finalEpilogueAudit ? { final_epilogue_audit: finalEpilogueAudit } : {}),
+      already_done_followup: false,
+      command_id: commandId,
+      final_decision_id: finalDecisionId,
+      final_observation_id: finalObservationId,
+      finish,
+      killed_manager: false,
+      killed_worker: false,
+      manager_decision: managerDecision,
+      manager_session: binding?.manager_session_name ?? null,
+      pre_stop_transcript_captures: [],
+      reason,
+      stop_manager: stopManager,
+      stop_worker: false,
+      task: task.name,
+      worker: binding?.worker_session_name ?? null,
+      worker_session: binding?.worker_session_name ?? null,
+    };
+    finishImmediateCommandSync(database, {
+      commandId,
+      result,
+      state: "succeeded",
+      timestamp: stoppedAt,
+    });
+    insertEventSync(database, {
+      commandId,
+      payload: result,
+      taskId: task.id,
+      type: `${eventPrefix}_succeeded`,
+    });
+    emitTelemetrySync(database, {
+      actor: "workerctl",
+      attributes: {
+        already_done_followup: false,
+        killed_manager: false,
+        killed_worker: false,
+        reason,
+        run_status: finishedRun?.status ?? null,
+        stop_manager: stopManager,
+        stop_worker: false,
+      },
+      correlation: {
+        command_id: commandId,
+        run_id: finishedRun?.id ?? null,
+      },
+      eventType: finish ? "task_finished" : "task_stopped",
+      severity: "info",
+      summary: `${finish ? "Finished" : "Stopped"} task ${task.name}.`,
+      taskId: task.id,
+      timestamp: stoppedAt,
+    });
+    return jsonResult(result);
   } finally {
     database.close();
   }
@@ -1640,6 +1947,8 @@ function isDefaultRuntimeCommand(command: string | null): boolean {
     || command === "bind"
     || command === "unbind"
     || command === "create-disposable-binding"
+    || command === "finish-task"
+    || command === "stop-task"
     || command === "register-worker"
     || command === "register-manager"
     || command === "sessions"
@@ -1775,6 +2084,65 @@ function unsupportedCreateDisposableBindingOptions(parsed: ParsedRuntimeArgs): s
     || parsed.flags.zip
   ) {
     return "Unsupported TypeScript runtime option for create-disposable-binding.";
+  }
+  return null;
+}
+
+function unsupportedLifecycleTaskOptions(parsed: ParsedRuntimeArgs, finish: boolean): string | null {
+  if (
+    parsed.flags.active
+    || parsed.flags.all
+    || parsed.flags.create !== null
+    || parsed.flags.dryRun
+    || parsed.flags.eventType !== null
+    || parsed.flags.file !== null
+    || parsed.flags.goal !== null
+    || parsed.flags.includeContent
+    || parsed.flags.includeFullTranscripts
+    || parsed.flags.includeLegacy
+    || parsed.flags.includeTranscripts
+    || parsed.flags.json
+    || parsed.flags.limit !== null
+    || parsed.flags.names.length > 0
+    || parsed.flags.output !== null
+    || parsed.flags.pid !== null
+    || parsed.flags.codexSession !== null
+    || parsed.flags.redactIdentityToken
+    || parsed.flags.roleProvided
+    || parsed.flags.sessionRole !== null
+    || parsed.flags.sessionState !== null
+    || parsed.flags.statusState !== null
+    || parsed.flags.subtype !== null
+    || parsed.flags.summary !== null
+    || parsed.flags.taskName !== null
+    || parsed.flags.text !== null
+    || parsed.flags.tmuxSession !== null
+    || parsed.flags.worker !== null
+    || parsed.flags.manager !== null
+    || parsed.flags.zip
+  ) {
+    return `Unsupported TypeScript runtime option for ${finish ? "finish-task" : "stop-task"}.`;
+  }
+  if (
+    parsed.flags.message !== null
+    || parsed.flags.decisionId !== null
+    || parsed.flags.strictDecisions
+    || parsed.flags.stopWorker
+    || parsed.flags.stopManager
+  ) {
+    return `TypeScript runtime ${finish ? "finish-task" : "stop-task"} currently supports state-only lifecycle without live session control.`;
+  }
+  if (finish && (
+    parsed.flags.captureTranscriptBeforeStop
+    || parsed.flags.captureTranscriptLines !== DEFAULT_HISTORY_LINES
+    || parsed.flags.captureTranscriptMode !== "segment"
+    || parsed.flags.requireTranscriptSegment
+    || parsed.flags.requireCriteriaAudit
+    || parsed.flags.requireAcks
+    || parsed.flags.requireEpilogue
+    || parsed.flags.requireAdversarialProof
+  )) {
+    return "TypeScript runtime finish-task currently supports state-only lifecycle without transcript capture or finish gates.";
   }
   return null;
 }
@@ -2531,6 +2899,11 @@ interface LifecycleTaskRow {
   state: string;
 }
 
+interface LifecycleBindingRow {
+  manager_session_name: string | null;
+  worker_session_name: string | null;
+}
+
 interface RalphLoopRunRow {
   ended_at: string | null;
   id: string;
@@ -2676,6 +3049,317 @@ function runRowSync(database: ReturnType<typeof openRuntimeDatabase>, run: strin
   };
 }
 
+function activeLifecycleBinding(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  taskId: string,
+): LifecycleBindingRow | null {
+  const row = database.prepare(`
+    select ws.name as worker_session_name,
+           ms.name as manager_session_name
+    from bindings b
+    left join sessions ws on ws.id = b.worker_session_id
+    left join sessions ms on ms.id = b.manager_session_id
+    where b.task_id = ?
+      and b.state in ('active', 'ending')
+    order by b.created_at desc, b.id desc
+    limit 1
+  `).get(taskId) as LifecycleBindingRow | undefined;
+  return row ?? null;
+}
+
+function missingManagerDecisionCheck(): Record<string, unknown> {
+  return {
+    allowed_decisions: ["stop"],
+    decision: null,
+    decision_id: null,
+    ok: false,
+    warnings: ["missing_decision_id"],
+  };
+}
+
+function finalCriteriaAuditSync(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  taskId: string,
+  requireCriteriaAudit: boolean,
+): Record<string, unknown> {
+  const rows = database.prepare(`
+    select id, criterion, status
+    from acceptance_criteria
+    where task_id = ?
+    order by id
+  `).all(taskId) as Array<{ criterion: string; id: number; status: string }>;
+  const summary: Record<string, number> = {
+    accepted: 0,
+    deferred: 0,
+    proposed: 0,
+    rejected: 0,
+    satisfied: 0,
+  };
+  for (const row of rows) {
+    summary[row.status] = (summary[row.status] ?? 0) + 1;
+  }
+  return {
+    open_criteria: rows
+      .filter((row) => row.status === "accepted")
+      .map((row) => ({ criterion: row.criterion, id: row.id })),
+    require_criteria_audit: requireCriteriaAudit,
+    summary,
+    total: rows.length,
+  };
+}
+
+function finalAckAuditSync(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  taskId: string,
+  requireAcks: boolean,
+): Record<string, unknown> {
+  const workerAck = latestAckIdForRole(database, taskId, "worker");
+  const managerAck = latestAckIdForRole(database, taskId, "manager");
+  const missing = [
+    ...(workerAck === null ? ["worker"] : []),
+    ...(managerAck === null ? ["manager"] : []),
+  ];
+  return {
+    manager_ack_id: managerAck,
+    missing,
+    ok: missing.length === 0,
+    require_acks: requireAcks,
+    worker_ack_id: workerAck,
+  };
+}
+
+function latestAckIdForRole(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  taskId: string,
+  role: "manager" | "worker",
+): number | null {
+  const row = database.prepare(`
+    select id
+    from task_acknowledgements
+    where task_id = ? and role = ?
+    order by revision desc, id desc
+    limit 1
+  `).get(taskId, role) as { id: number } | undefined;
+  return row?.id ?? null;
+}
+
+function finalEpilogueAuditSync(requireEpilogue: boolean): Record<string, unknown> {
+  return {
+    missing_or_incomplete: [],
+    ok: true,
+    require_epilogue: requireEpilogue,
+    required_steps: [],
+    steps: [],
+  };
+}
+
+function insertFinalManagerDecisionSync(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  options: { commandId: string; reason: string; taskId: string },
+): number {
+  const timestamp = new Date().toISOString();
+  const result = database.prepare(`
+    insert into manager_decisions(
+      task_id, manager_id, manager_cycle_id, decision, reason, created_at, payload_json
+    )
+    values (?, null, null, 'stop', ?, ?, ?)
+  `).run(
+    options.taskId,
+    options.reason,
+    timestamp,
+    stableJson({ command_id: options.commandId, source: "finish_task" }),
+  );
+  const decisionId = Number(result.lastInsertRowid);
+  emitTelemetrySync(database, {
+    actor: "workerctl",
+    attributes: {
+      decision: "stop",
+      payload: { command_id: options.commandId, source: "finish_task" },
+      reason: options.reason,
+    },
+    correlation: {
+      decision_id: decisionId,
+      manager_cycle_id: null,
+      manager_id: null,
+    },
+    eventType: "manager_decision_recorded",
+    severity: "info",
+    summary: "Recorded manager decision stop.",
+    taskId: options.taskId,
+    timestamp,
+  });
+  return decisionId;
+}
+
+function insertFinalAgentObservationSync(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  options: { commandId: string; decisionId: number | null; message: string; taskId: string },
+): number {
+  const result = database.prepare(`
+    insert into agent_observations(
+      task_id, worker_id, manager_id, role, observation_type, severity,
+      source_capture_id, command_id, created_at, message, payload_json
+    )
+    values (?, null, null, 'manager', 'decision', 'info', null, ?, ?, ?, ?)
+  `).run(
+    options.taskId,
+    options.commandId,
+    new Date().toISOString(),
+    options.message,
+    stableJson({
+      decision: "stop",
+      decision_id: options.decisionId,
+      source: "finish_task",
+    }),
+  );
+  return Number(result.lastInsertRowid);
+}
+
+function markImmediateCommandAttemptedSync(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  commandId: string,
+): void {
+  const timestamp = new Date().toISOString();
+  database.prepare(`
+    update commands
+    set state = 'attempted', updated_at = ?
+    where id = ? and state = 'pending'
+  `).run(timestamp, commandId);
+  const row = database.prepare(`
+    select task_id, worker_id, manager_id, type, state
+    from commands
+    where id = ?
+  `).get(commandId) as {
+    manager_id: string | null;
+    state: string;
+    task_id: string | null;
+    type: string;
+    worker_id: string | null;
+  } | undefined;
+  if (!row) {
+    return;
+  }
+  emitTelemetrySync(database, {
+    actor: "workerctl",
+    attributes: {
+      manager_id: row.manager_id,
+      state: row.state,
+      worker_id: row.worker_id,
+    },
+    correlation: {
+      command_id: commandId,
+      command_type: row.type,
+    },
+    eventType: "command_attempted",
+    severity: "info",
+    summary: `Attempted command ${row.type}.`,
+    taskId: row.task_id,
+    timestamp,
+  });
+}
+
+function finishImmediateCommandSync(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  options: {
+    commandId: string;
+    error?: string | null;
+    result: Record<string, unknown>;
+    state: "failed" | "succeeded";
+    timestamp: string;
+  },
+): void {
+  database.prepare(`
+    update commands
+    set state = ?, updated_at = ?, result_json = ?, error = ?
+    where id = ?
+  `).run(
+    options.state,
+    options.timestamp,
+    stableJson(options.result),
+    options.error ?? null,
+    options.commandId,
+  );
+  const row = database.prepare(`
+    select task_id, worker_id, manager_id, type, state
+    from commands
+    where id = ?
+  `).get(options.commandId) as {
+    manager_id: string | null;
+    state: string;
+    task_id: string | null;
+    type: string;
+    worker_id: string | null;
+  } | undefined;
+  if (!row) {
+    return;
+  }
+  emitTelemetrySync(database, {
+    actor: "workerctl",
+    attributes: {
+      error: options.error ?? null,
+      manager_id: row.manager_id,
+      result: options.result,
+      state: row.state,
+      worker_id: row.worker_id,
+    },
+    correlation: {
+      command_id: options.commandId,
+      command_type: row.type,
+    },
+    eventType: `command_${options.state}`,
+    severity: options.state === "failed" ? "error" : "info",
+    summary: `Command ${row.type} ${options.state}.`,
+    taskId: row.task_id,
+    timestamp: options.timestamp,
+  });
+}
+
+function endActiveBindingForTaskSync(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  taskId: string,
+  timestamp: string,
+): void {
+  database.prepare(`
+    update bindings
+    set state = 'ended', ended_at = ?
+    where task_id = ?
+      and state in ('active', 'ending')
+  `).run(timestamp, taskId);
+}
+
+function finishActiveRunForTaskSync(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  options: { status: "abandoned" | "finished"; taskId: string; timestamp: string },
+): RalphLoopRunRow | null {
+  const active = database.prepare(`
+    select id, name
+    from runs
+    where task_id = ? and status = 'active'
+    order by started_at desc, id desc
+    limit 1
+  `).get(options.taskId) as { id: string; name: string } | undefined;
+  if (!active) {
+    return null;
+  }
+  database.prepare("update runs set status = ?, ended_at = ? where id = ?")
+    .run(options.status, options.timestamp, active.id);
+  emitTelemetrySync(database, {
+    actor: "workerctl",
+    attributes: { status: options.status },
+    correlation: {
+      run_id: active.id,
+      run_name: active.name,
+    },
+    eventType: "run_finished",
+    runId: active.id,
+    severity: "info",
+    summary: `Run ${active.name} marked ${options.status}.`,
+    taskId: options.taskId,
+    timestamp: options.timestamp,
+  });
+  return runRowSync(database, active.id);
+}
+
 function disposableSessionCommunication(
   role: "manager" | "worker",
   taskName: string,
@@ -2799,6 +3483,7 @@ function emitTelemetrySync(
     attributes: Record<string, unknown>;
     correlation: Record<string, unknown>;
     eventType: string;
+    runId?: string | null;
     severity: string;
     summary: string;
     taskId?: string | null;
@@ -2812,9 +3497,10 @@ function emitTelemetrySync(
       id, run_id, task_id, timestamp, actor, event_type, severity,
       summary, correlation_json, attributes_json
     )
-    values (?, null, ?, ?, ?, ?, ?, ?, ?, ?)
+    values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     eventId,
+    options.runId ?? null,
     options.taskId ?? null,
     options.timestamp,
     options.actor,
@@ -2828,10 +3514,11 @@ function emitTelemetrySync(
     insert into telemetry_events_fts(
       event_id, task_id, run_id, actor, event_type, summary, attributes
     )
-    values (?, ?, null, ?, ?, ?, ?)
+    values (?, ?, ?, ?, ?, ?, ?)
   `).run(
     eventId,
     options.taskId ?? null,
+    options.runId ?? null,
     options.actor,
     options.eventType,
     options.summary,
