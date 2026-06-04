@@ -9,8 +9,11 @@ import {
   type ReplayRole,
 } from "../runtime/replay.js";
 import {
+  activeBindingForTaskSync,
+  bindSessionsSync,
   createTaskSync,
   listTasksSync,
+  unbindTaskSync,
   type TaskRecord,
 } from "../runtime/tasks.js";
 import { defaultDbPath, stateRoot } from "../state/files.js";
@@ -63,6 +66,12 @@ export function runTypescriptRuntimeCommand(options: {
     if (parsed.command === "tasks") {
       return runTasksCommand(parsed, options);
     }
+    if (parsed.command === "bind") {
+      return runBindCommand(parsed, options);
+    }
+    if (parsed.command === "unbind") {
+      return runUnbindCommand(parsed, options);
+    }
     if (parsed.explicit) {
       return errorResult(`Unsupported TypeScript runtime command: ${parsed.command}`);
     }
@@ -90,6 +99,9 @@ interface ParsedRuntimeArgs {
     path: string | null;
     role: ReplayRole;
     summary: string | null;
+    taskName: string | null;
+    worker: string | null;
+    manager: string | null;
     zip: boolean;
   };
   defaultRuntime?: boolean;
@@ -112,6 +124,9 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
     path: null,
     role: "all",
     summary: null,
+    taskName: null,
+    worker: null,
+    manager: null,
     zip: false,
   };
   const queue = [...args];
@@ -172,6 +187,27 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
         return { command, enabled, error: value.error, explicit, flags, task };
       }
       flags.summary = value.value;
+      index += 1;
+    } else if (arg === "--task") {
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.taskName = value.value;
+      index += 1;
+    } else if (arg === "--worker") {
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.worker = value.value;
+      index += 1;
+    } else if (arg === "--manager") {
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.manager = value.value;
       index += 1;
     } else if (arg === "--format") {
       const parsedValue = valueAfter(queue, index, arg);
@@ -322,6 +358,72 @@ function runTasksCommand(
   }
 }
 
+function runBindCommand(
+  parsed: ParsedRuntimeArgs,
+  options: { cwd?: string; env?: NodeJS.ProcessEnv },
+): TypescriptRuntimeResult {
+  const unsupported = unsupportedBindOptions(parsed);
+  if (unsupported) {
+    return unsupportedRuntimeResult(parsed, unsupported);
+  }
+  if (!parsed.flags.taskName || !parsed.flags.worker || !parsed.flags.manager) {
+    return unsupportedRuntimeResult(parsed, "bind requires --task, --worker, and --manager.");
+  }
+  const database = openRuntimeDatabase(parsed, options);
+  try {
+    const bindingId = bindSessionsSync(database, {
+      managerSessionName: parsed.flags.manager,
+      taskName: parsed.flags.taskName,
+      workerSessionName: parsed.flags.worker,
+    });
+    const binding = activeBindingForTaskSync(database, parsed.flags.taskName);
+    insertEventSync(database, {
+      payload: {
+        binding_id: bindingId,
+        manager: parsed.flags.manager,
+        task: parsed.flags.taskName,
+        worker: parsed.flags.worker,
+      },
+      taskId: binding.task_id,
+      type: "binding_created",
+    });
+    return jsonResult({
+      binding_id: bindingId,
+      manager: parsed.flags.manager,
+      task: parsed.flags.taskName,
+      worker: parsed.flags.worker,
+    });
+  } finally {
+    database.close();
+  }
+}
+
+function runUnbindCommand(
+  parsed: ParsedRuntimeArgs,
+  options: { cwd?: string; env?: NodeJS.ProcessEnv },
+): TypescriptRuntimeResult {
+  const unsupported = unsupportedUnbindOptions(parsed);
+  if (unsupported) {
+    return unsupportedRuntimeResult(parsed, unsupported);
+  }
+  if (!parsed.flags.taskName) {
+    return unsupportedRuntimeResult(parsed, "unbind requires --task.");
+  }
+  const database = openRuntimeDatabase(parsed, options);
+  try {
+    const taskId = taskIdForTask(database, parsed.flags.taskName);
+    unbindTaskSync(database, { taskName: parsed.flags.taskName });
+    insertEventSync(database, {
+      payload: { task: parsed.flags.taskName },
+      taskId,
+      type: "binding_ended",
+    });
+    return unbindJsonResult(parsed.flags.taskName);
+  } finally {
+    database.close();
+  }
+}
+
 function openRuntimeDatabase(
   parsed: ParsedRuntimeArgs,
   options: { cwd?: string; env?: NodeJS.ProcessEnv },
@@ -339,7 +441,14 @@ function requireTask(parsed: ParsedRuntimeArgs): string {
 }
 
 function isDefaultRuntimeCommand(command: string | null): boolean {
-  return command === "audit" || command === "replay" || command === "export-task" || command === "tasks";
+  return (
+    command === "audit"
+    || command === "replay"
+    || command === "export-task"
+    || command === "tasks"
+    || command === "bind"
+    || command === "unbind"
+  );
 }
 
 function valueAfter(args: readonly string[], index: number, flag: string): { error?: string; value: string } {
@@ -358,12 +467,91 @@ function jsonResult(payload: unknown): TypescriptRuntimeResult {
   };
 }
 
+function unbindJsonResult(taskName: string): TypescriptRuntimeResult {
+  return {
+    exitCode: 0,
+    handled: true,
+    stdout: `{"task": ${JSON.stringify(taskName)}, "state": "ended"}\n`,
+  };
+}
+
 function errorResult(message: string): TypescriptRuntimeResult {
   return {
     exitCode: 2,
     handled: true,
     stderr: `${message}\n`,
   };
+}
+
+function unsupportedRuntimeResult(parsed: ParsedRuntimeArgs, message: string): TypescriptRuntimeResult {
+  if (parsed.defaultRuntime) {
+    return { exitCode: 0, handled: false };
+  }
+  return errorResult(message);
+}
+
+function unsupportedBindOptions(parsed: ParsedRuntimeArgs): string | null {
+  if (parsed.task) {
+    return `Unexpected argument: ${parsed.task}`;
+  }
+  if (
+    parsed.flags.active
+    || parsed.flags.create !== null
+    || parsed.flags.goal !== null
+    || parsed.flags.json
+    || parsed.flags.limit !== null
+    || parsed.flags.output !== null
+    || parsed.flags.summary !== null
+    || parsed.flags.zip
+    || parsed.flags.includeContent
+    || parsed.flags.includeTranscripts
+    || parsed.flags.includeFullTranscripts
+  ) {
+    return "Unsupported TypeScript runtime option for bind.";
+  }
+  return null;
+}
+
+function unsupportedUnbindOptions(parsed: ParsedRuntimeArgs): string | null {
+  const unsupported = unsupportedBindOptions(parsed);
+  if (unsupported) {
+    return unsupported;
+  }
+  if (parsed.flags.path !== null) {
+    return "Unsupported TypeScript runtime option for unbind: --path";
+  }
+  if (parsed.flags.worker !== null || parsed.flags.manager !== null) {
+    return "Unsupported TypeScript runtime option for unbind.";
+  }
+  return null;
+}
+
+function taskIdForTask(database: ReturnType<typeof openRuntimeDatabase>, taskName: string): string {
+  const row = database.prepare(`
+    select id
+    from tasks
+    where id = ? or name = ?
+    order by created_at desc
+    limit 1
+  `).get(taskName, taskName) as { id: string } | undefined;
+  if (!row) {
+    throw new Error(`Unknown task: ${taskName}`);
+  }
+  return row.id;
+}
+
+function insertEventSync(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  options: { payload: Record<string, unknown>; taskId: string; type: string },
+): void {
+  database.prepare(`
+    insert into events(created_at, actor, task_id, type, payload_json)
+    values (?, 'workerctl', ?, ?, ?)
+  `).run(new Date().toISOString(), options.taskId, options.type, stableJson(options.payload));
+}
+
+function stableJson(payload: unknown): string {
+  return JSON.stringify(sortJson(payload));
 }
 
 function renderTasksText(tasks: TaskRecord[]): string {
