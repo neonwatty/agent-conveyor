@@ -20,7 +20,12 @@ import {
   initializeDatabaseSync,
   openDatabaseSync,
 } from "../state/database.js";
-import { defaultDbPath } from "../state/files.js";
+import {
+  configPath,
+  defaultDbPath,
+  eventsPath,
+  statusPath,
+} from "../state/files.js";
 
 test("unmigrated TypeScript runtime command falls back when disabled", () => {
   assert.deepEqual(
@@ -626,6 +631,247 @@ test("TypeScript runtime handles classify ingest and tail by default", () => {
   }
 });
 
+test("TypeScript runtime handles events update-status and transcript commands by default", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-events."));
+  try {
+    mkdirSync(join(root, ".codex-workers"));
+    mkdirSync(join(root, ".codex-workers", "worker-status"), { recursive: true });
+    writeFileSync(configPath("worker-status", { cwd: root, env: {} }), `${JSON.stringify({
+      cwd: "/repo",
+      identity_token: "worker-token",
+      tmux_pane_id: "%1",
+      tmux_session: "codex-worker-status",
+    }, null, 2)}\n`);
+
+    const updated = runTypescriptRuntimeCommand({
+      args: [
+        "update-status",
+        "worker-status",
+        "--state",
+        "editing",
+        "--current-task",
+        "Port deterministic commands.",
+        "--next-action",
+        "Run transcript tests.",
+        "--blocker",
+        "none",
+      ],
+      cwd: root,
+      env: {},
+    });
+    assert.equal(updated.exitCode, 0);
+    assert.equal(updated.handled, true);
+    const updatedPayload = JSON.parse(updated.stdout ?? "{}") as {
+      blocker: string;
+      current_task: string;
+      last_update: string;
+      next_action: string;
+      state: string;
+    };
+    assert.deepEqual(
+      {
+        blocker: updatedPayload.blocker,
+        current_task: updatedPayload.current_task,
+        next_action: updatedPayload.next_action,
+        state: updatedPayload.state,
+      },
+      {
+        blocker: "none",
+        current_task: "Port deterministic commands.",
+        next_action: "Run transcript tests.",
+        state: "editing",
+      },
+    );
+    assert.match(updatedPayload.last_update, /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/);
+    assert.deepEqual(JSON.parse(readFileSync(statusPath("worker-status", { cwd: root, env: {} }), "utf8")), updatedPayload);
+
+    writeFileSync(eventsPath("worker-status", { cwd: root, env: {} }), "{bad-json}\n", { flag: "a" });
+    writeFileSync(
+      eventsPath("worker-status", { cwd: root, env: {} }),
+      `${JSON.stringify({ time: "2026-06-04T12:00:00Z", type: "note", value: 1 })}\n`,
+      { flag: "a" },
+    );
+    const events = runTypescriptRuntimeCommand({
+      args: ["events", "worker-status", "--type", "status_updated", "--limit", "1"],
+      cwd: root,
+      env: {},
+    });
+    assert.equal(events.exitCode, 0);
+    assert.equal(events.handled, true);
+    assert.equal(events.stderr, "workerctl: 1 malformed event line(s) skipped\n");
+    const eventLines = (events.stdout ?? "").trim().split("\n");
+    assert.equal(eventLines.length, 1);
+    assert.deepEqual(JSON.parse(eventLines[0]), {
+      blocker: "none",
+      current_task: "Port deterministic commands.",
+      next_action: "Run transcript tests.",
+      state: "editing",
+      time: updatedPayload.last_update,
+      type: "status_updated",
+    });
+
+    const dbPath = defaultDbPath({ cwd: root, env: {} });
+    const database = openDatabaseSync(dbPath);
+    try {
+      const worker = database.prepare("select id, cwd, tmux_session, tmux_pane_id, identity_token, state from workers where name = ?")
+        .get("worker-status") as {
+          cwd: string;
+          id: string;
+          identity_token: string;
+          state: string;
+          tmux_pane_id: string;
+          tmux_session: string;
+        };
+      assert.equal(worker.cwd, "/repo");
+      assert.equal(worker.tmux_session, "codex-worker-status");
+      assert.equal(worker.tmux_pane_id, "%1");
+      assert.equal(worker.identity_token, "worker-token");
+      assert.equal(worker.state, "active");
+      const status = database.prepare("select state, current_task, next_action, blocker from statuses where worker_id = ?")
+        .get(worker.id) as {
+          blocker: string;
+          current_task: string;
+          next_action: string;
+          state: string;
+        };
+      assert.deepEqual(Object.fromEntries(Object.entries(status)), {
+        blocker: "none",
+        current_task: "Port deterministic commands.",
+        next_action: "Run transcript tests.",
+        state: "editing",
+      });
+
+      createTaskSync(database, {
+        goal: "Exercise transcript commands.",
+        name: "transcript-task",
+        now: "2026-06-04T12:00:00Z",
+        taskId: "task-transcript",
+      });
+      const captureWorker1 = insertTerminalCapture(database, "task-transcript", "worker", "2026-06-04T12:01:00Z", "old\nworker");
+      const captureWorker2 = insertTerminalCapture(database, "task-transcript", "worker", "2026-06-04T12:02:00Z", "new\nworker\n");
+      const captureManager = insertTerminalCapture(database, "task-transcript", "manager", "2026-06-04T12:03:00Z", "manager");
+      insertTranscriptSegment(database, {
+        capturedAt: "2026-06-04T12:01:00Z",
+        role: "worker",
+        segmentId: captureWorker1,
+        text: "old\nworker",
+      });
+      insertTranscriptSegment(database, {
+        capturedAt: "2026-06-04T12:02:00Z",
+        role: "worker",
+        segmentId: captureWorker2,
+        text: "new\nworker\n",
+      });
+      insertTranscriptSegment(database, {
+        capturedAt: "2026-06-04T12:03:00Z",
+        role: "manager",
+        segmentId: captureManager,
+        text: null,
+      });
+    } finally {
+      database.close();
+    }
+
+    const transcriptJson = runTypescriptRuntimeCommand({
+      args: ["transcript-show", "transcript-task", "--json"],
+      cwd: root,
+      env: {},
+    });
+    assert.equal(transcriptJson.exitCode, 0);
+    const transcriptPayload = JSON.parse(transcriptJson.stdout ?? "{}") as {
+      segments: Array<Record<string, unknown>>;
+      task: { id: string; name: string; state: string };
+    };
+    assert.deepEqual(transcriptPayload.task, {
+      id: "task-transcript",
+      name: "transcript-task",
+      state: "candidate",
+    });
+    assert.deepEqual(
+      transcriptPayload.segments.map((segment) => ({
+        byteCount: segment.segment_text_byte_count,
+        hasText: Object.hasOwn(segment, "segment_text"),
+        lineCount: segment.segment_text_line_count,
+        redacted: segment.segment_text_redacted,
+        role: segment.role,
+      })),
+      [
+        { byteCount: 10, hasText: false, lineCount: 2, redacted: true, role: "worker" },
+        { byteCount: 11, hasText: false, lineCount: 2, redacted: true, role: "worker" },
+        { byteCount: undefined, hasText: false, lineCount: undefined, redacted: undefined, role: "manager" },
+      ],
+    );
+
+    const transcriptText = runTypescriptRuntimeCommand({
+      args: ["transcript-show", "transcript-task", "--role", "worker", "--limit", "1"],
+      cwd: root,
+      env: {},
+    });
+    assert.equal(transcriptText.exitCode, 0);
+    assert.match(transcriptText.stdout ?? "", /worker transcript segment 2 12:02:00/);
+    assert.match(transcriptText.stdout ?? "", /\[content redacted: 2 lines, 11 bytes\]/);
+
+    const transcriptRaw = runTypescriptRuntimeCommand({
+      args: ["transcript-show", "transcript-task", "--role", "worker", "--limit", "1", "--json", "--include-content"],
+      cwd: root,
+      env: {},
+    });
+    const rawPayload = JSON.parse(transcriptRaw.stdout ?? "{}") as { segments: Array<{ segment_text: string }> };
+    assert.equal(rawPayload.segments[0].segment_text, "new\nworker\n");
+
+    const dryPrune = runTypescriptRuntimeCommand({
+      args: ["transcript-prune", "transcript-task", "--keep-latest", "1", "--dry-run"],
+      cwd: root,
+      env: {},
+    });
+    assert.deepEqual(JSON.parse(dryPrune.stdout ?? "{}"), {
+      dry_run: true,
+      keep_latest: 1,
+      pruned_count: 0,
+      would_prune_count: 1,
+    });
+
+    const pruned = runTypescriptRuntimeCommand({
+      args: ["transcript-prune", "transcript-task", "--keep-latest", "1"],
+      cwd: root,
+      env: {},
+    });
+    assert.deepEqual(JSON.parse(pruned.stdout ?? "{}"), {
+      dry_run: false,
+      keep_latest: 1,
+      pruned_count: 1,
+      would_prune_count: 1,
+    });
+    const afterPrune = openDatabaseSync(dbPath);
+    try {
+      const prunedSegment = afterPrune.prepare("select segment_text, retention_class, segment_kind from transcript_segments where id = 1")
+        .get() as { retention_class: string; segment_kind: string; segment_text: string | null };
+      assert.deepEqual(Object.fromEntries(Object.entries(prunedSegment)), {
+        retention_class: "cold",
+        segment_kind: "metadata",
+        segment_text: null,
+      });
+      const event = afterPrune.prepare("select task_id, payload_json from events where type = 'transcript_segments_pruned'")
+        .get() as { payload_json: string; task_id: string };
+      assert.equal(event.task_id, "task-transcript");
+      assert.deepEqual(JSON.parse(event.payload_json), { keep_latest: 1, segment_ids: [1] });
+    } finally {
+      afterPrune.close();
+    }
+
+    assert.deepEqual(
+      runTypescriptRuntimeCommand({
+        args: ["transcript-prune", "transcript-task", "--role", "all"],
+        cwd: root,
+        env: {},
+      }),
+      { exitCode: 0, handled: false },
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("TypeScript runtime handles migrated audit replay and subset export commands by default", () => {
   const root = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-cli."));
   try {
@@ -785,6 +1031,76 @@ function insertSession(
     "2026-05-23T10:00:00Z",
     "active",
   );
+}
+
+function insertTerminalCapture(
+  database: DatabaseSync,
+  taskId: string,
+  role: "manager" | "worker",
+  capturedAt: string,
+  content: string,
+): number {
+  const result = database.prepare(`
+    insert into terminal_captures(
+      task_id, role, tmux_session, captured_at, history_lines, content_sha256,
+      content, byte_count, line_count, classifier_json, source
+    )
+    values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    taskId,
+    role,
+    `codex-${role}`,
+    capturedAt,
+    200,
+    `${role}-sha`,
+    content,
+    Buffer.byteLength(content),
+    pythonSplitlinesCountForTest(content),
+    "{}",
+    "test",
+  );
+  return Number(result.lastInsertRowid);
+}
+
+function insertTranscriptSegment(
+  database: DatabaseSync,
+  options: {
+    capturedAt: string;
+    role: "manager" | "worker";
+    segmentId: number;
+    text: string | null;
+  },
+): number {
+  const result = database.prepare(`
+    insert into transcript_segments(
+      task_id, role, source_capture_id, previous_capture_id, captured_at,
+      content_sha256, segment_text, segment_start_line, segment_end_line,
+      byte_count, line_count, retention_class, segment_kind, created_at
+    )
+    values (?, ?, ?, null, ?, ?, ?, ?, ?, ?, ?, 'hot', ?, ?)
+  `).run(
+    "task-transcript",
+    options.role,
+    options.segmentId,
+    options.capturedAt,
+    `${options.role}-segment-sha-${options.segmentId}`,
+    options.text,
+    options.text === null ? null : 1,
+    options.text === null ? null : pythonSplitlinesCountForTest(options.text),
+    Buffer.byteLength(options.text ?? ""),
+    pythonSplitlinesCountForTest(options.text ?? ""),
+    options.text === null ? "metadata" : "segment",
+    options.capturedAt,
+  );
+  return Number(result.lastInsertRowid);
+}
+
+function pythonSplitlinesCountForTest(value: string): number {
+  if (value.length === 0) {
+    return 0;
+  }
+  const lineBreaks = value.match(/\r\n|\r|\n/g)?.length ?? 0;
+  return lineBreaks + (/(?:\r\n|\r|\n)$/.test(value) ? 0 : 1);
 }
 
 function insertRalphLoopRun(

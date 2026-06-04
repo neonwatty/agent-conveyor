@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 
 import { taskAuditSync } from "../runtime/audit.js";
 import { classifyBusyWait, classifyStartupOutput } from "../runtime/classify.js";
@@ -30,7 +30,15 @@ import {
   unbindTaskSync,
   type TaskRecord,
 } from "../runtime/tasks.js";
-import { defaultDbPath, stateRoot } from "../state/files.js";
+import {
+  configPath,
+  defaultDbPath,
+  eventsPath,
+  loadJsonSync,
+  stateRoot,
+  statusPath,
+  writeJsonSync,
+} from "../state/files.js";
 import {
   initializeDatabaseSync,
   openDatabaseSync,
@@ -44,6 +52,15 @@ export interface TypescriptRuntimeResult {
 }
 
 const DEFAULT_BUSY_WAIT_SECONDS = 90;
+const VALID_WORKER_STATUS_STATES = new Set([
+  "planning",
+  "editing",
+  "running_tests",
+  "blocked",
+  "waiting",
+  "done",
+  "unknown",
+]);
 
 export function runTypescriptRuntimeCommand(options: {
   args: readonly string[];
@@ -112,6 +129,18 @@ export function runTypescriptRuntimeCommand(options: {
     if (parsed.command === "tail") {
       return runTailCommand(parsed, options);
     }
+    if (parsed.command === "events") {
+      return runEventsCommand(parsed, options);
+    }
+    if (parsed.command === "update-status") {
+      return runUpdateStatusCommand(parsed, options);
+    }
+    if (parsed.command === "transcript-show") {
+      return runTranscriptShowCommand(parsed, options);
+    }
+    if (parsed.command === "transcript-prune") {
+      return runTranscriptPruneCommand(parsed, options);
+    }
     if (parsed.explicit) {
       return errorResult(`Unsupported TypeScript runtime command: ${parsed.command}`);
     }
@@ -135,21 +164,29 @@ interface ParsedRuntimeArgs {
     includeLegacy: boolean;
     redactIdentityToken: boolean;
     active: boolean;
+    blocker: string | null;
     busyWaitSeconds: number;
     codexSession: string | null;
     create: string | null;
+    currentTask: string | null;
     cwd: string | null;
+    dryRun: boolean;
+    eventType: string | null;
     file: string | null;
     goal: string | null;
+    keepLatest: number;
     limit: number | null;
     names: string[];
+    nextAction: string | null;
     output: string | null;
     path: string | null;
     pid: number | null;
     role: ReplayRole;
+    roleProvided: boolean;
     sessionRole: "manager" | "worker" | null;
     sessionState: "active" | "all" | "gone" | null;
     statusAgeSeconds: number;
+    statusState: string | null;
     subtype: string | null;
     summary: string | null;
     taskName: string | null;
@@ -175,21 +212,29 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
     includeLegacy: false,
     redactIdentityToken: false,
     active: false,
+    blocker: null,
     busyWaitSeconds: DEFAULT_BUSY_WAIT_SECONDS,
     codexSession: null,
     create: null,
+    currentTask: null,
     cwd: null,
+    dryRun: false,
+    eventType: null,
     file: null,
     goal: null,
+    keepLatest: 20,
     limit: null,
     names: [],
+    nextAction: null,
     output: null,
     path: null,
     pid: null,
     role: "all",
+    roleProvided: false,
     sessionRole: null,
     sessionState: null,
     statusAgeSeconds: DEFAULT_BUSY_WAIT_SECONDS,
+    statusState: null,
     subtype: null,
     summary: null,
     taskName: null,
@@ -229,6 +274,8 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       flags.includeTranscripts = true;
     } else if (arg === "--include-full-transcripts") {
       flags.includeFullTranscripts = true;
+    } else if (arg === "--dry-run") {
+      flags.dryRun = true;
     } else if (arg === "--path") {
       const value = valueAfter(queue, index, arg);
       if (value.error) {
@@ -288,6 +335,27 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
         return { command, enabled, error: value.error, explicit, flags, task };
       }
       flags.cwd = value.value;
+      index += 1;
+    } else if (arg === "--current-task") {
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.currentTask = value.value;
+      index += 1;
+    } else if (arg === "--next-action") {
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.nextAction = value.value;
+      index += 1;
+    } else if (arg === "--blocker") {
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.blocker = value.value;
       index += 1;
     } else if (arg === "--file") {
       const value = valueAfter(queue, index, arg);
@@ -355,6 +423,7 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
         return { command, enabled, error: parsedValue.error, explicit, flags, task };
       }
       const value = parsedValue.value;
+      flags.roleProvided = true;
       if (command === "sessions") {
         if (!isSessionRole(value)) {
           return { command, enabled, error: `Unsupported sessions role: ${value}`, explicit, flags, task };
@@ -372,10 +441,23 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
         return { command, enabled, error: parsedValue.error, explicit, flags, task };
       }
       const value = parsedValue.value;
-      if (!isSessionState(value)) {
+      if (command === "update-status") {
+        if (!VALID_WORKER_STATUS_STATES.has(value)) {
+          return { command, enabled, error: `Unsupported worker status state: ${value}`, explicit, flags, task };
+        }
+        flags.statusState = value;
+      } else if (!isSessionState(value)) {
         return { command, enabled, error: `Unsupported sessions state: ${value}`, explicit, flags, task };
+      } else {
+        flags.sessionState = value;
       }
-      flags.sessionState = value;
+      index += 1;
+    } else if (arg === "--type") {
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.eventType = value.value;
       index += 1;
     } else if (arg === "--subtype") {
       const value = valueAfter(queue, index, arg);
@@ -405,6 +487,17 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
         return { command, enabled, error: "--busy-wait-seconds must be an integer.", explicit, flags, task };
       }
       flags.busyWaitSeconds = value;
+      index += 1;
+    } else if (arg === "--keep-latest") {
+      const parsedValue = valueAfter(queue, index, arg);
+      if (parsedValue.error) {
+        return { command, enabled, error: parsedValue.error, explicit, flags, task };
+      }
+      const value = Number(parsedValue.value);
+      if (!Number.isInteger(value)) {
+        return { command, enabled, error: "--keep-latest must be an integer.", explicit, flags, task };
+      }
+      flags.keepLatest = value;
       index += 1;
     } else if (arg === "--limit") {
       const parsedValue = valueAfter(queue, index, arg);
@@ -835,6 +928,179 @@ function runTailCommand(
   }
 }
 
+function runEventsCommand(
+  parsed: ParsedRuntimeArgs,
+  options: { cwd?: string; env?: NodeJS.ProcessEnv },
+): TypescriptRuntimeResult {
+  const unsupported = unsupportedEventsOptions(parsed);
+  if (unsupported) {
+    return unsupportedRuntimeResult(parsed, unsupported);
+  }
+  if (!parsed.task) {
+    return unsupportedRuntimeResult(parsed, "events requires a worker or session name.");
+  }
+  requireWorkerConfigOrSession(parsed.task, parsed, options);
+  const { events, skipped } = readCompatibilityEvents(parsed.task, options);
+  const filtered = parsed.flags.eventType
+    ? events.filter((event) => event.type === parsed.flags.eventType)
+    : events;
+  const limited = parsed.flags.limit ? filtered.slice(-parsed.flags.limit) : filtered;
+  return {
+    exitCode: 0,
+    handled: true,
+    stderr: skipped > 0 ? `workerctl: ${skipped} malformed event line(s) skipped\n` : undefined,
+    stdout: limited.map((event) => `${JSON.stringify(sortJson(event))}\n`).join(""),
+  };
+}
+
+function runUpdateStatusCommand(
+  parsed: ParsedRuntimeArgs,
+  options: { cwd?: string; env?: NodeJS.ProcessEnv },
+): TypescriptRuntimeResult {
+  const unsupported = unsupportedUpdateStatusOptions(parsed);
+  if (unsupported) {
+    return unsupportedRuntimeResult(parsed, unsupported);
+  }
+  if (!parsed.task || !parsed.flags.statusState || !parsed.flags.currentTask || !parsed.flags.nextAction) {
+    return unsupportedRuntimeResult(parsed, "update-status requires a name, --state, --current-task, and --next-action.");
+  }
+  const config = requireWorkerConfig(parsed.task, options);
+  const timestamp = nowIsoSeconds();
+  const payload = {
+    blocker: parsed.flags.blocker,
+    current_task: parsed.flags.currentTask,
+    last_update: timestamp,
+    next_action: parsed.flags.nextAction,
+    state: parsed.flags.statusState,
+  };
+  const eventPayload = {
+    blocker: parsed.flags.blocker,
+    current_task: parsed.flags.currentTask,
+    next_action: parsed.flags.nextAction,
+    state: parsed.flags.statusState,
+  };
+  const database = openRuntimeDatabase(parsed, options);
+  try {
+    const workerId = upsertWorkerSync(database, {
+      config,
+      name: parsed.task,
+      timestamp,
+    });
+    database.prepare(`
+      insert into statuses(worker_id, state, current_task, next_action, blocker, created_at)
+      values (?, ?, ?, ?, ?, ?)
+    `).run(
+      workerId,
+      payload.state,
+      payload.current_task,
+      payload.next_action,
+      payload.blocker,
+      timestamp,
+    );
+    database.prepare(`
+      insert into events(created_at, actor, worker_id, type, payload_json)
+      values (?, 'workerctl', ?, 'status_updated', ?)
+    `).run(timestamp, workerId, stableJson(eventPayload));
+  } finally {
+    database.close();
+  }
+  writeJsonSync(statusPath(parsed.task, options), payload);
+  appendCompatibilityEvent(parsed.task, "status_updated", eventPayload, options, timestamp);
+  return jsonResult(payload);
+}
+
+function runTranscriptShowCommand(
+  parsed: ParsedRuntimeArgs,
+  options: { cwd?: string; env?: NodeJS.ProcessEnv },
+): TypescriptRuntimeResult {
+  const unsupported = unsupportedTranscriptShowOptions(parsed);
+  if (unsupported) {
+    return unsupportedRuntimeResult(parsed, unsupported);
+  }
+  const task = requireTask(parsed);
+  const database = openRuntimeDatabase(parsed, options);
+  try {
+    const result = transcriptSegmentsSync(database, {
+      limit: parsed.flags.limit,
+      role: transcriptRole(parsed),
+      task,
+    });
+    if (parsed.flags.json) {
+      return jsonResult(parsed.flags.includeContent ? result : redactTranscriptSegments(result));
+    }
+    const lines = result.segments.flatMap((segment) => {
+      const timestamp = segment.captured_at.split("T", 2).at(1)?.replace(/Z$/, "") ?? segment.captured_at;
+      const header = `--- ${segment.role} transcript segment ${segment.id} ${timestamp} (${segment.segment_kind}) ---`;
+      if (segment.segment_text && parsed.flags.includeContent) {
+        return [header, segment.segment_text];
+      }
+      if (segment.segment_text) {
+        return [
+          header,
+          `[content redacted: ${pythonSplitlinesCount(segment.segment_text)} lines, ${Buffer.byteLength(segment.segment_text)} bytes]`,
+        ];
+      }
+      return [header, "[metadata only]"];
+    });
+    return { exitCode: 0, handled: true, stdout: lines.length ? `${lines.join("\n")}\n` : "" };
+  } finally {
+    database.close();
+  }
+}
+
+function runTranscriptPruneCommand(
+  parsed: ParsedRuntimeArgs,
+  options: { cwd?: string; env?: NodeJS.ProcessEnv },
+): TypescriptRuntimeResult {
+  const unsupported = unsupportedTranscriptPruneOptions(parsed);
+  if (unsupported) {
+    return unsupportedRuntimeResult(parsed, unsupported);
+  }
+  const task = requireTask(parsed);
+  const database = openRuntimeDatabase(parsed, options);
+  try {
+    const snapshot = taskSnapshot(database, task);
+    const rows = database.prepare(`
+      select id, role
+      from transcript_segments
+      where task_id = ? and segment_text is not null
+      order by role, id desc
+    `).all(snapshot.id) as Array<{ id: number; role: string }>;
+    const seen = new Map<string, number>();
+    const pruneIds: number[] = [];
+    for (const row of rows) {
+      const count = (seen.get(row.role) ?? 0) + 1;
+      seen.set(row.role, count);
+      if (count > parsed.flags.keepLatest) {
+        pruneIds.push(row.id);
+      }
+    }
+    if (pruneIds.length > 0 && !parsed.flags.dryRun) {
+      const update = database.prepare(`
+        update transcript_segments
+        set segment_text = null, retention_class = 'cold', segment_kind = 'metadata'
+        where id = ?
+      `);
+      for (const segmentId of pruneIds) {
+        update.run(segmentId);
+      }
+      insertEventSync(database, {
+        payload: { keep_latest: parsed.flags.keepLatest, segment_ids: pruneIds },
+        taskId: snapshot.id,
+        type: "transcript_segments_pruned",
+      });
+    }
+    return jsonResult({
+      dry_run: parsed.flags.dryRun,
+      keep_latest: parsed.flags.keepLatest,
+      pruned_count: parsed.flags.dryRun ? 0 : pruneIds.length,
+      would_prune_count: pruneIds.length,
+    });
+  } finally {
+    database.close();
+  }
+}
+
 function openRuntimeDatabase(
   parsed: ParsedRuntimeArgs,
   options: { cwd?: string; env?: NodeJS.ProcessEnv },
@@ -868,6 +1134,10 @@ function isDefaultRuntimeCommand(command: string | null): boolean {
     || command === "classify"
     || command === "ingest"
     || command === "tail"
+    || command === "events"
+    || command === "update-status"
+    || command === "transcript-show"
+    || command === "transcript-prune"
   );
 }
 
@@ -1190,6 +1460,179 @@ function unsupportedTailOptions(parsed: ParsedRuntimeArgs): string | null {
   return null;
 }
 
+function unsupportedEventsOptions(parsed: ParsedRuntimeArgs): string | null {
+  if (
+    parsed.flags.active
+    || parsed.flags.all
+    || parsed.flags.blocker !== null
+    || parsed.flags.busyWaitSeconds !== DEFAULT_BUSY_WAIT_SECONDS
+    || parsed.flags.codexSession !== null
+    || parsed.flags.create !== null
+    || parsed.flags.currentTask !== null
+    || parsed.flags.cwd !== null
+    || parsed.flags.dryRun
+    || parsed.flags.file !== null
+    || parsed.flags.goal !== null
+    || parsed.flags.includeContent
+    || parsed.flags.includeFullTranscripts
+    || parsed.flags.includeLegacy
+    || parsed.flags.includeTranscripts
+    || parsed.flags.json
+    || parsed.flags.keepLatest !== 20
+    || parsed.flags.names.length > 0
+    || parsed.flags.nextAction !== null
+    || parsed.flags.output !== null
+    || parsed.flags.path !== null
+    || parsed.flags.pid !== null
+    || parsed.flags.redactIdentityToken
+    || parsed.flags.roleProvided
+    || parsed.flags.sessionRole !== null
+    || parsed.flags.sessionState !== null
+    || parsed.flags.statusAgeSeconds !== DEFAULT_BUSY_WAIT_SECONDS
+    || parsed.flags.statusState !== null
+    || parsed.flags.subtype !== null
+    || parsed.flags.summary !== null
+    || parsed.flags.taskName !== null
+    || parsed.flags.text !== null
+    || parsed.flags.tmuxSession !== null
+    || parsed.flags.worker !== null
+    || parsed.flags.manager !== null
+    || parsed.flags.zip
+  ) {
+    return "Unsupported TypeScript runtime option for events.";
+  }
+  return null;
+}
+
+function unsupportedUpdateStatusOptions(parsed: ParsedRuntimeArgs): string | null {
+  if (
+    parsed.flags.active
+    || parsed.flags.all
+    || parsed.flags.busyWaitSeconds !== DEFAULT_BUSY_WAIT_SECONDS
+    || parsed.flags.codexSession !== null
+    || parsed.flags.create !== null
+    || parsed.flags.cwd !== null
+    || parsed.flags.dryRun
+    || parsed.flags.eventType !== null
+    || parsed.flags.file !== null
+    || parsed.flags.goal !== null
+    || parsed.flags.includeContent
+    || parsed.flags.includeFullTranscripts
+    || parsed.flags.includeLegacy
+    || parsed.flags.includeTranscripts
+    || parsed.flags.json
+    || parsed.flags.keepLatest !== 20
+    || parsed.flags.limit !== null
+    || parsed.flags.names.length > 0
+    || parsed.flags.output !== null
+    || parsed.flags.path !== null
+    || parsed.flags.pid !== null
+    || parsed.flags.redactIdentityToken
+    || parsed.flags.roleProvided
+    || parsed.flags.sessionRole !== null
+    || parsed.flags.sessionState !== null
+    || parsed.flags.statusAgeSeconds !== DEFAULT_BUSY_WAIT_SECONDS
+    || parsed.flags.subtype !== null
+    || parsed.flags.summary !== null
+    || parsed.flags.taskName !== null
+    || parsed.flags.text !== null
+    || parsed.flags.tmuxSession !== null
+    || parsed.flags.worker !== null
+    || parsed.flags.manager !== null
+    || parsed.flags.zip
+  ) {
+    return "Unsupported TypeScript runtime option for update-status.";
+  }
+  return null;
+}
+
+function unsupportedTranscriptShowOptions(parsed: ParsedRuntimeArgs): string | null {
+  if (
+    parsed.flags.active
+    || parsed.flags.all
+    || parsed.flags.blocker !== null
+    || parsed.flags.busyWaitSeconds !== DEFAULT_BUSY_WAIT_SECONDS
+    || parsed.flags.codexSession !== null
+    || parsed.flags.create !== null
+    || parsed.flags.currentTask !== null
+    || parsed.flags.cwd !== null
+    || parsed.flags.dryRun
+    || parsed.flags.eventType !== null
+    || parsed.flags.file !== null
+    || parsed.flags.goal !== null
+    || parsed.flags.includeFullTranscripts
+    || parsed.flags.includeLegacy
+    || parsed.flags.includeTranscripts
+    || parsed.flags.keepLatest !== 20
+    || parsed.flags.names.length > 0
+    || parsed.flags.nextAction !== null
+    || parsed.flags.output !== null
+    || parsed.flags.pid !== null
+    || parsed.flags.redactIdentityToken
+    || parsed.flags.sessionRole !== null
+    || parsed.flags.sessionState !== null
+    || parsed.flags.statusAgeSeconds !== DEFAULT_BUSY_WAIT_SECONDS
+    || parsed.flags.statusState !== null
+    || parsed.flags.subtype !== null
+    || parsed.flags.summary !== null
+    || parsed.flags.taskName !== null
+    || parsed.flags.text !== null
+    || parsed.flags.tmuxSession !== null
+    || parsed.flags.worker !== null
+    || parsed.flags.manager !== null
+    || parsed.flags.zip
+  ) {
+    return "Unsupported TypeScript runtime option for transcript-show.";
+  }
+  if (!["all", "worker", "manager"].includes(parsed.flags.role)) {
+    return "Unsupported TypeScript runtime role for transcript-show.";
+  }
+  return null;
+}
+
+function unsupportedTranscriptPruneOptions(parsed: ParsedRuntimeArgs): string | null {
+  if (
+    parsed.flags.active
+    || parsed.flags.all
+    || parsed.flags.blocker !== null
+    || parsed.flags.busyWaitSeconds !== DEFAULT_BUSY_WAIT_SECONDS
+    || parsed.flags.codexSession !== null
+    || parsed.flags.create !== null
+    || parsed.flags.currentTask !== null
+    || parsed.flags.cwd !== null
+    || parsed.flags.eventType !== null
+    || parsed.flags.file !== null
+    || parsed.flags.goal !== null
+    || parsed.flags.includeContent
+    || parsed.flags.includeFullTranscripts
+    || parsed.flags.includeLegacy
+    || parsed.flags.includeTranscripts
+    || parsed.flags.json
+    || parsed.flags.limit !== null
+    || parsed.flags.names.length > 0
+    || parsed.flags.nextAction !== null
+    || parsed.flags.output !== null
+    || parsed.flags.pid !== null
+    || parsed.flags.redactIdentityToken
+    || parsed.flags.roleProvided
+    || parsed.flags.sessionRole !== null
+    || parsed.flags.sessionState !== null
+    || parsed.flags.statusAgeSeconds !== DEFAULT_BUSY_WAIT_SECONDS
+    || parsed.flags.statusState !== null
+    || parsed.flags.subtype !== null
+    || parsed.flags.summary !== null
+    || parsed.flags.taskName !== null
+    || parsed.flags.text !== null
+    || parsed.flags.tmuxSession !== null
+    || parsed.flags.worker !== null
+    || parsed.flags.manager !== null
+    || parsed.flags.zip
+  ) {
+    return "Unsupported TypeScript runtime option for transcript-prune.";
+  }
+  return null;
+}
+
 function singleName(parsed: ParsedRuntimeArgs): string | null {
   return parsed.flags.names.length === 1 ? parsed.flags.names[0] : null;
 }
@@ -1399,6 +1842,250 @@ function latestCodexEventsForSession(
     timestamp: row.timestamp,
     type: row.type,
   }));
+}
+
+interface TranscriptSegmentRecord {
+  byte_count: number;
+  captured_at: string;
+  content_sha256: string;
+  created_at: string;
+  id: number;
+  line_count: number;
+  previous_capture_id: number | null;
+  redacted: boolean;
+  retention_class: string;
+  role: string;
+  segment_end_line: number | null;
+  segment_kind: string;
+  segment_start_line: number | null;
+  segment_text: string | null;
+  source_capture_id: number;
+  task_id: string;
+}
+
+interface TranscriptSegmentsResult {
+  segments: TranscriptSegmentRecord[];
+  task: { id: string; name: string; state: string };
+}
+
+function transcriptSegmentsSync(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  options: { limit: number | null; role: "all" | "manager" | "worker"; task: string },
+): TranscriptSegmentsResult {
+  const snapshot = taskSnapshot(database, options.task);
+  const clauses = ["task_id = ?"];
+  const params: Array<number | string> = [snapshot.id];
+  if (options.role !== "all") {
+    clauses.push("role = ?");
+    params.push(options.role);
+  }
+  const limitClause = options.limit ? "limit ?" : "";
+  if (options.limit) {
+    params.push(options.limit);
+  }
+  const rows = database.prepare(`
+    select *
+    from (
+      select id, task_id, role, source_capture_id, previous_capture_id,
+             captured_at, content_sha256, segment_text, segment_start_line,
+             segment_end_line, byte_count, line_count, retention_class,
+             segment_kind, redacted, created_at
+      from transcript_segments
+      where ${clauses.join(" and ")}
+      order by id desc
+      ${limitClause}
+    )
+    order by id
+  `).all(...params) as Array<{
+    byte_count: number;
+    captured_at: string;
+    content_sha256: string;
+    created_at: string;
+    id: number;
+    line_count: number;
+    previous_capture_id: number | null;
+    redacted: 0 | 1;
+    retention_class: string;
+    role: string;
+    segment_end_line: number | null;
+    segment_kind: string;
+    segment_start_line: number | null;
+    segment_text: string | null;
+    source_capture_id: number;
+    task_id: string;
+  }>;
+  return {
+    segments: rows.map((row) => ({
+      byte_count: row.byte_count,
+      captured_at: row.captured_at,
+      content_sha256: row.content_sha256,
+      created_at: row.created_at,
+      id: row.id,
+      line_count: row.line_count,
+      previous_capture_id: row.previous_capture_id,
+      redacted: Boolean(row.redacted),
+      retention_class: row.retention_class,
+      role: row.role,
+      segment_end_line: row.segment_end_line,
+      segment_kind: row.segment_kind,
+      segment_start_line: row.segment_start_line,
+      segment_text: row.segment_text,
+      source_capture_id: row.source_capture_id,
+      task_id: row.task_id,
+    })),
+    task: snapshot,
+  };
+}
+
+function redactTranscriptSegments(result: TranscriptSegmentsResult): unknown {
+  return {
+    segments: result.segments.map((segment) => {
+      const { segment_text: segmentText, ...rest } = segment;
+      if (typeof segmentText !== "string") {
+        return rest;
+      }
+      return {
+        ...rest,
+        segment_text_byte_count: Buffer.byteLength(segmentText),
+        segment_text_line_count: pythonSplitlinesCount(segmentText),
+        segment_text_redacted: true,
+      };
+    }),
+    task: result.task,
+  };
+}
+
+function taskSnapshot(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  task: string,
+): { id: string; name: string; state: string } {
+  const row = database.prepare(`
+    select id, name, state
+    from tasks
+    where id = ? or name = ?
+    order by created_at desc
+    limit 1
+  `).get(task, task) as { id: string; name: string; state: string } | undefined;
+  if (!row) {
+    throw new Error(`Unknown task: ${task}`);
+  }
+  return row;
+}
+
+function transcriptRole(parsed: ParsedRuntimeArgs): "all" | "manager" | "worker" {
+  if (parsed.flags.role === "manager" || parsed.flags.role === "worker") {
+    return parsed.flags.role;
+  }
+  return "all";
+}
+
+function readCompatibilityEvents(
+  name: string,
+  options: { cwd?: string; env?: NodeJS.ProcessEnv },
+): { events: Array<Record<string, unknown>>; skipped: number } {
+  const path = eventsPath(name, options);
+  if (!existsSync(path)) {
+    return { events: [], skipped: 0 };
+  }
+  const events: Array<Record<string, unknown>> = [];
+  let skipped = 0;
+  for (const line of readFileSync(path, "utf8").split(/\r?\n/)) {
+    if (!line.trim()) {
+      continue;
+    }
+    try {
+      const event = JSON.parse(line) as unknown;
+      if (event !== null && typeof event === "object" && !Array.isArray(event)) {
+        events.push(event as Record<string, unknown>);
+      } else {
+        skipped += 1;
+      }
+    } catch {
+      skipped += 1;
+    }
+  }
+  return { events, skipped };
+}
+
+function appendCompatibilityEvent(
+  name: string,
+  type: string,
+  payload: Record<string, unknown>,
+  options: { cwd?: string; env?: NodeJS.ProcessEnv },
+  timestamp = nowIsoSeconds(),
+): void {
+  const path = eventsPath(name, options);
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, `${JSON.stringify(sortJson({ time: timestamp, type, ...payload }))}\n`, { flag: "a" });
+}
+
+function requireWorkerConfig(
+  name: string,
+  options: { cwd?: string; env?: NodeJS.ProcessEnv },
+): Record<string, unknown> {
+  const path = configPath(name, options);
+  const config = loadJsonSync<Record<string, unknown> | null>(path, null);
+  if (config === null) {
+    throw new Error(`Unknown worker: ${name}`);
+  }
+  return config;
+}
+
+function requireWorkerConfigOrSession(
+  name: string,
+  parsed: ParsedRuntimeArgs,
+  options: { cwd?: string; env?: NodeJS.ProcessEnv },
+): void {
+  if (existsSync(configPath(name, options))) {
+    return;
+  }
+  const database = openRuntimeDatabase(parsed, options);
+  try {
+    sessionRow(database, name);
+  } finally {
+    database.close();
+  }
+}
+
+function upsertWorkerSync(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  options: { config: Record<string, unknown>; name: string; timestamp: string },
+): string {
+  const existing = database.prepare("select id, identity_token from workers where name = ?")
+    .get(options.name) as { id: string; identity_token: string } | undefined;
+  const workerId = existing?.id ?? `worker-${randomUUID()}`;
+  const identityToken = typeof options.config.identity_token === "string"
+    ? options.config.identity_token
+    : existing?.identity_token ?? `workerctl-${randomUUID()}`;
+  database.prepare(`
+    insert into workers(
+      id, name, tmux_session, tmux_pane_id, identity_token, cwd, state, created_at, updated_at
+    )
+    values (?, ?, ?, ?, ?, ?, 'active', ?, ?)
+    on conflict(name) do update set
+      tmux_session = excluded.tmux_session,
+      tmux_pane_id = coalesce(excluded.tmux_pane_id, workers.tmux_pane_id),
+      cwd = excluded.cwd,
+      state = excluded.state,
+      updated_at = excluded.updated_at,
+      exit_detected_at = null,
+      exit_reason = null
+  `).run(
+    workerId,
+    options.name,
+    typeof options.config.tmux_session === "string" ? options.config.tmux_session : `codex-${options.name}`,
+    typeof options.config.tmux_pane_id === "string" ? options.config.tmux_pane_id : null,
+    identityToken,
+    typeof options.config.cwd === "string" ? options.config.cwd : "",
+    options.timestamp,
+    options.timestamp,
+  );
+  const row = database.prepare("select id from workers where name = ?").get(options.name) as { id: string };
+  return row.id;
+}
+
+function nowIsoSeconds(): string {
+  return new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
 }
 
 const CONTENT_KEYS = new Set(["content", "message", "output", "segment_text", "text"]);
