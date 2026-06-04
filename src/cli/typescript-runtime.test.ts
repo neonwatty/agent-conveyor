@@ -1128,6 +1128,340 @@ test("TypeScript runtime handles deterministic session registry and discovery co
   }
 });
 
+test("TypeScript runtime handles start-worker spawn and register with fake tmux", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-start-worker."));
+  const calls: string[][] = [];
+  const runner: TmuxRunner = (args) => {
+    calls.push(args);
+    if (args.join(" ") === "tmux has-session -t codex-auto-foo") {
+      return { status: 1, stderr: "no session" };
+    }
+    return { status: 0, stdout: "" };
+  };
+  try {
+    const dbPath = join(root, "workerctl.db");
+    const rolloutDir = join(root, ".codex", "sessions", "2026");
+    mkdirSync(rolloutDir, { recursive: true });
+    const rollout = join(rolloutDir, "rollout-worker.jsonl");
+    writeFileSync(rollout, `${JSON.stringify({
+      payload: { cwd: "/repo", id: "cuid-worker", originator: "codex-tui" },
+      type: "session_meta",
+    })}\n`);
+
+    const result = runTypescriptRuntimeCommand({
+      args: [
+        "start-worker",
+        "--name",
+        "auto-foo",
+        "--cwd",
+        "/repo",
+        "--task",
+        "Do work",
+        "--codex-profile",
+        "yolo",
+        "--accept-trust",
+        "--timeout-seconds",
+        "7",
+        "--path",
+        dbPath,
+      ],
+      codexCommandResolver: () => "/opt/test/bin/codex",
+      cwd: root,
+      discoverSpawnedCodexSession: (options) => {
+        assert.equal(options.acceptTrust, true);
+        assert.equal(options.timeoutSeconds, 7);
+        assert.equal(options.tmuxSessionName, "codex-auto-foo");
+        assert.ok(options.minimumSessionTimestamp instanceof Date);
+        return {
+          codex_session_id: "cuid-worker",
+          codex_session_path: rollout,
+          cwd: "/repo",
+          native_pid: 99999,
+          originator: "codex-tui",
+        };
+      },
+      env: {},
+      tmuxRunner: runner,
+    });
+
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.equal(result.handled, true);
+    const payload = JSON.parse(result.stdout ?? "{}") as {
+      codex_session_id: string;
+      codex_session_path: string;
+      cwd: string;
+      name: string;
+      pid: number;
+      role: string;
+      session_id: string;
+      tmux_session: string;
+    };
+    assert.equal(payload.name, "auto-foo");
+    assert.equal(payload.role, "worker");
+    assert.equal(payload.pid, 99999);
+    assert.equal(payload.codex_session_id, "cuid-worker");
+    assert.equal(payload.codex_session_path, rollout);
+    assert.equal(payload.cwd, "/repo");
+    assert.match(payload.session_id, /^session-/);
+    assert.equal(payload.tmux_session, "codex-auto-foo");
+    assert.equal(calls.length, 3);
+    assert.deepEqual(calls[0], ["tmux", "has-session", "-t", "codex-auto-foo"]);
+    assert.deepEqual(calls[1].slice(0, 7), ["tmux", "new-session", "-d", "-s", "codex-auto-foo", "-c", "/repo"]);
+    const codexShell = calls[1][7] ?? "";
+    assert.match(codexShell, /unset "\$name"/);
+    assert.match(codexShell, /PNPM_SCRIPT_SRC_DIR/);
+    assert.match(codexShell, /exec \/opt\/test\/bin\/codex --sandbox danger-full-access --ask-for-approval never 'Do work'/);
+    assert.deepEqual(calls[2], ["tmux", "send-keys", "-t", "codex-auto-foo", "Enter"]);
+
+    const database = openDatabaseSync(dbPath);
+    try {
+      const session = database.prepare("select name, role, pid, codex_session_id, tmux_session from sessions where name = 'auto-foo'")
+        .get() as { codex_session_id: string; name: string; pid: number; role: string; tmux_session: string };
+      assert.equal(session.codex_session_id, "cuid-worker");
+      assert.equal(session.name, "auto-foo");
+      assert.equal(session.pid, 99999);
+      assert.equal(session.role, "worker");
+      assert.equal(session.tmux_session, "codex-auto-foo");
+      const event = database.prepare("select payload_json from events where type = 'session_registered'")
+        .get() as { payload_json: string };
+      assert.deepEqual(JSON.parse(event.payload_json), {
+        codex_session_id: "cuid-worker",
+        name: "auto-foo",
+        pid: 99999,
+        role: "worker",
+        session_id: payload.session_id,
+        via: "start-worker",
+      });
+    } finally {
+      database.close();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("TypeScript runtime handles start-manager bootstrap with seeded manager config", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-start-manager."));
+  const calls: string[][] = [];
+  const runner: TmuxRunner = (args) => {
+    calls.push(args);
+    if (args.join(" ") === "tmux has-session -t codex-auto-mgr") {
+      return { status: 1, stderr: "no session" };
+    }
+    return { status: 0, stdout: "" };
+  };
+  try {
+    const dbPath = join(root, "workerctl.db");
+    const rolloutDir = join(root, ".codex", "sessions", "2026");
+    mkdirSync(rolloutDir, { recursive: true });
+    const rollout = join(rolloutDir, "rollout-manager.jsonl");
+    writeFileSync(rollout, `${JSON.stringify({
+      payload: { cwd: "/repo", id: "cuid-manager", originator: "codex-tui" },
+      type: "session_meta",
+    })}\n`);
+    const database = openDatabaseSync(dbPath);
+    try {
+      initializeDatabaseSync(database);
+      createTaskSync(database, {
+        goal: "Ship the support queue reporter",
+        name: "late-task",
+        taskId: "task-late",
+      });
+      database.prepare(`
+        insert into manager_configs(
+          task_id, supervision_mode, objective, guidelines_json, acceptance_criteria_json, reference_paths_json,
+          permissions_json, tools_json, epilogues_json, nudge_on_completion, require_acks, revision, created_at, updated_at
+        )
+        values (?, 'strict', ?, '[]', ?, '[]', '{}', ?, '[]', 'ask-operator', 0, 1, ?, ?)
+      `).run(
+        "task-late",
+        "Verify the reporter with pytest evidence.",
+        JSON.stringify(["pytest passes"]),
+        JSON.stringify(["pytest"]),
+        "2026-06-04T14:00:00Z",
+        "2026-06-04T14:00:00Z",
+      );
+    } finally {
+      database.close();
+    }
+
+    const result = runTypescriptRuntimeCommand({
+      args: [
+        "start-manager",
+        "--name",
+        "auto-mgr",
+        "--cwd",
+        "/repo",
+        "--task",
+        "late-task",
+        "--worker",
+        "late-worker",
+        "--path",
+        dbPath,
+      ],
+      codexCommandResolver: () => "codex",
+      cwd: root,
+      discoverSpawnedCodexSession: () => ({
+        codex_session_id: "cuid-manager",
+        codex_session_path: rollout,
+        cwd: "/repo",
+        native_pid: 88888,
+        originator: "codex-tui",
+      }),
+      env: {},
+      tmuxRunner: runner,
+    });
+
+    assert.equal(result.exitCode, 0, result.stderr);
+    const payload = JSON.parse(result.stdout ?? "{}") as { name: string; role: string; tmux_session: string };
+    assert.equal(payload.name, "auto-mgr");
+    assert.equal(payload.role, "manager");
+    assert.equal(payload.tmux_session, "codex-auto-mgr");
+    assert.deepEqual(calls[0], ["tmux", "has-session", "-t", "codex-auto-mgr"]);
+    const codexShell = calls[1][7] ?? "";
+    assert.match(codexShell, /You are a Codex manager session/);
+    assert.match(codexShell, /Task: late-task/);
+    assert.match(codexShell, /Task goal: Ship the support queue reporter/);
+    assert.match(codexShell, /Worker session: late-worker/);
+    assert.match(codexShell, /Manager config has already been recorded/);
+    assert.match(codexShell, /cycle late-task/);
+    assert.match(codexShell, /Expected tools: pytest\./);
+    assert.match(codexShell, /finish-task late-task --reason "Accepted criteria satisfied" --require-criteria-audit/);
+
+    const after = openDatabaseSync(dbPath);
+    try {
+      const session = after.prepare("select role, pid, tmux_session from sessions where name = 'auto-mgr'")
+        .get() as { pid: number; role: string; tmux_session: string };
+      assert.equal(session.pid, 88888);
+      assert.equal(session.role, "manager");
+      assert.equal(session.tmux_session, "codex-auto-mgr");
+    } finally {
+      after.close();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("TypeScript runtime default start-worker discovery polls process tree before register", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-start-discovery."));
+  const calls: string[][] = [];
+  let lsofAttempts = 0;
+  const runner: TmuxRunner = (args) => {
+    calls.push(args);
+    if (args.join(" ") === "tmux has-session -t codex-poll-worker") {
+      return { status: 1, stderr: "no session" };
+    }
+    if (args.join(" ") === "tmux list-panes -t codex-poll-worker -F #{pane_pid}") {
+      return { status: 0, stdout: "101\n" };
+    }
+    return { status: 0, stdout: "" };
+  };
+  try {
+    const dbPath = join(root, "workerctl.db");
+    const rolloutDir = join(root, ".codex", "sessions", "2026");
+    mkdirSync(rolloutDir, { recursive: true });
+    const rollout = join(rolloutDir, "rollout-polled.jsonl");
+    writeFileSync(rollout, `${JSON.stringify({
+      payload: {
+        cwd: "/repo",
+        id: "cuid-polled",
+        originator: "codex-tui",
+        timestamp: "2026-06-04T14:00:05.000Z",
+      },
+      type: "session_meta",
+    })}\n`);
+
+    const result = runTypescriptRuntimeCommand({
+      args: [
+        "start-worker",
+        "--name",
+        "poll-worker",
+        "--cwd",
+        "/repo",
+        "--task",
+        "Poll work",
+        "--timeout-seconds",
+        "1",
+        "--path",
+        dbPath,
+      ],
+      childrenForPid: (pid) => (pid === 101 ? [202] : []),
+      cwd: root,
+      env: {},
+      lsofForPid: (pid) => {
+        if (pid !== 202) {
+          throw new Error(`no rollout for ${pid}`);
+        }
+        lsofAttempts += 1;
+        if (lsofAttempts === 1) {
+          throw new Error("native process has not opened rollout yet");
+        }
+        return `codex ${pid} neon txt REG 1,2 3 4 ${rollout}\n`;
+      },
+      now: () => new Date("2026-06-04T14:00:00.000Z"),
+      sleepMilliseconds: () => {},
+      tmuxRunner: runner,
+    });
+
+    assert.equal(result.exitCode, 0, result.stderr);
+    const payload = JSON.parse(result.stdout ?? "{}") as { codex_session_id: string; name: string; pid: number };
+    assert.equal(payload.name, "poll-worker");
+    assert.equal(payload.pid, 202);
+    assert.equal(payload.codex_session_id, "cuid-polled");
+    assert.equal(lsofAttempts, 2);
+    assert.deepEqual(calls[0], ["tmux", "has-session", "-t", "codex-poll-worker"]);
+    assert.deepEqual(calls[1].slice(0, 7), ["tmux", "new-session", "-d", "-s", "codex-poll-worker", "-c", "/repo"]);
+    assert.deepEqual(calls[2], ["tmux", "list-panes", "-t", "codex-poll-worker", "-F", "#{pane_pid}"]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("TypeScript runtime refuses start-worker duplicate session before tmux spawn", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-start-duplicate."));
+  const calls: string[][] = [];
+  const runner: TmuxRunner = (args) => {
+    calls.push(args);
+    return { status: 0, stdout: "" };
+  };
+  try {
+    const dbPath = join(root, "workerctl.db");
+    const database = openDatabaseSync(dbPath);
+    try {
+      initializeDatabaseSync(database);
+      insertSession(database, {
+        id: "session-taken-id",
+        name: "taken",
+        role: "worker",
+      });
+    } finally {
+      database.close();
+    }
+
+    const result = runTypescriptRuntimeCommand({
+      args: ["start-worker", "--name", "taken", "--path", dbPath],
+      cwd: root,
+      env: {},
+      tmuxRunner: runner,
+    });
+
+    assert.equal(result.exitCode, 1);
+    assert.match(result.stderr ?? "", /a session named "taken" is already registered/);
+    assert.deepEqual(calls, []);
+    const after = openDatabaseSync(dbPath);
+    try {
+      const eventCount = after.prepare("select count(*) as count from events where type = 'session_registered'")
+        .get() as { count: number };
+      assert.equal(eventCount.count, 0);
+    } finally {
+      after.close();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("TypeScript runtime handles classify ingest and tail by default", () => {
   const root = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-ingest."));
   try {

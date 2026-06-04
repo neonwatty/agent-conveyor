@@ -19,10 +19,13 @@ import {
 import {
   deregisterSessionSync,
   discoverRegistrySync,
+  findRolloutPathForPid,
   listRegisteredSessionsSync,
   registerSessionSync,
+  readSessionMeta,
   sessionRow,
 } from "../runtime/codex-session.js";
+import { managerConfigSync, type ManagerConfigRecord } from "../runtime/manager-config.js";
 import {
   activeBindingForTaskSync,
   bindSessionsSync,
@@ -36,7 +39,10 @@ import {
   captureTranscriptTmuxTargetWithRunner,
   currentPaneIdWithRunner,
   killTmuxSessionWithRunner,
+  sendEnterToTmuxSessionWithRunner,
   sendTextToSessionWithRunner,
+  sessionExists,
+  startTmuxSessionWithRunner,
   tmuxSession,
   tmuxSessionRunning,
   type TmuxRunner,
@@ -80,13 +86,40 @@ const VALID_WORKER_STATUS_STATES = new Set([
   "unknown",
 ]);
 
-export function runTypescriptRuntimeCommand(options: {
-  args: readonly string[];
+interface SpawnedCodexSessionDiscovery {
+  cli_version?: string;
+  codex_session_id: string;
+  codex_session_path: string;
   cwd?: string;
-  env?: NodeJS.ProcessEnv;
-  now?: () => Date;
+  native_pid: number;
+  originator?: string;
+}
+
+interface SpawnedCodexSessionDiscoveryOptions {
+  acceptTrust: boolean;
+  childrenForPid?: (pid: number) => number[];
+  lsofForPid?: (pid: number) => string;
+  minimumSessionTimestamp: Date;
+  sleepMilliseconds?: (milliseconds: number) => void;
+  timeoutSeconds: number;
   tmuxRunner?: TmuxRunner;
-}): TypescriptRuntimeResult {
+  tmuxSessionName: string;
+}
+
+type TypescriptRuntimeOptions = {
+  args: readonly string[];
+  codexCommandResolver?: (name: string) => string | null;
+  cwd?: string;
+  discoverSpawnedCodexSession?: (options: SpawnedCodexSessionDiscoveryOptions) => SpawnedCodexSessionDiscovery;
+  env?: NodeJS.ProcessEnv;
+  childrenForPid?: (pid: number) => number[];
+  lsofForPid?: (pid: number) => string;
+  now?: () => Date;
+  sleepMilliseconds?: (milliseconds: number) => void;
+  tmuxRunner?: TmuxRunner;
+};
+
+export function runTypescriptRuntimeCommand(options: TypescriptRuntimeOptions): TypescriptRuntimeResult {
   const parsed = parseRuntimeArgs(options.args, options.env ?? process.env);
   const defaultRuntime = !parsed.enabled && isDefaultRuntimeCommand(parsed.command);
   if (defaultRuntime) {
@@ -133,6 +166,12 @@ export function runTypescriptRuntimeCommand(options: {
     }
     if (parsed.command === "stop-task") {
       return runLifecycleTaskCommand(parsed, options, false);
+    }
+    if (parsed.command === "start-worker") {
+      return runStartSessionCommand(parsed, options, "worker");
+    }
+    if (parsed.command === "start-manager") {
+      return runStartSessionCommand(parsed, options, "manager");
     }
     if (parsed.command === "register-worker") {
       return runRegisterSessionCommand(parsed, options, "worker");
@@ -262,9 +301,15 @@ interface ParsedRuntimeArgs {
     requireCriteriaAudit: boolean;
     requireEpilogue: boolean;
     requireTranscriptSegment: boolean;
+    sandbox: string | null;
     stopManager: boolean;
     stopWorker: boolean;
     strictDecisions: boolean;
+    taskGoal: string | null;
+    timeoutSeconds: number;
+    acceptTrust: boolean;
+    askForApproval: string | null;
+    codexProfile: string | null;
   };
   defaultRuntime?: boolean;
   explicit: boolean;
@@ -339,9 +384,15 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
     requireCriteriaAudit: false,
     requireEpilogue: false,
     requireTranscriptSegment: false,
+    sandbox: null,
     stopManager: false,
     stopWorker: false,
     strictDecisions: false,
+    taskGoal: null,
+    timeoutSeconds: 15,
+    acceptTrust: false,
+    askForApproval: null,
+    codexProfile: null,
   };
   const queue = [...args];
   let explicit = false;
@@ -375,6 +426,11 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       flags.includeFullTranscripts = true;
     } else if (arg === "--dry-run") {
       flags.dryRun = true;
+    } else if (arg === "--accept-trust") {
+      if (command !== "start-worker" && command !== "start-manager") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --accept-trust", explicit, flags, task };
+      }
+      flags.acceptTrust = true;
     } else if (arg === "--stop-manager") {
       if (command !== "finish-task") {
         return { command, enabled, error: "Unsupported TypeScript runtime option: --stop-manager", explicit, flags, task };
@@ -495,6 +551,36 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       }
       flags.cwd = value.value;
       index += 1;
+    } else if (arg === "--sandbox") {
+      if (command !== "start-worker" && command !== "start-manager") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --sandbox", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.sandbox = value.value;
+      index += 1;
+    } else if (arg === "--ask-for-approval") {
+      if (command !== "start-worker" && command !== "start-manager") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --ask-for-approval", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.askForApproval = value.value;
+      index += 1;
+    } else if (arg === "--codex-profile") {
+      if (command !== "start-worker" && command !== "start-manager") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --codex-profile", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.codexProfile = value.value;
+      index += 1;
     } else if (arg === "--session-dir") {
       if (command !== "create-disposable-binding") {
         return { command, enabled, error: "Unsupported TypeScript runtime option: --session-dir", explicit, flags, task };
@@ -560,6 +646,16 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
         return { command, enabled, error: value.error, explicit, flags, task };
       }
       flags.taskName = value.value;
+      index += 1;
+    } else if (arg === "--task-goal") {
+      if (command !== "start-manager") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --task-goal", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.taskGoal = value.value;
       index += 1;
     } else if (arg === "--worker") {
       const value = valueAfter(queue, index, arg);
@@ -871,6 +967,20 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
         return { command, enabled, error: "--current-iteration must be an integer.", explicit, flags, task };
       }
       flags.currentIteration = value;
+      index += 1;
+    } else if (arg === "--timeout-seconds") {
+      if (command !== "start-worker" && command !== "start-manager") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --timeout-seconds", explicit, flags, task };
+      }
+      const parsedValue = valueAfter(queue, index, arg);
+      if (parsedValue.error) {
+        return { command, enabled, error: parsedValue.error, explicit, flags, task };
+      }
+      const value = Number(parsedValue.value);
+      if (!Number.isInteger(value) || value <= 0) {
+        return { command, enabled, error: "--timeout-seconds must be a positive integer.", explicit, flags, task };
+      }
+      flags.timeoutSeconds = value;
       index += 1;
     } else if (arg.startsWith("--")) {
       return { command, enabled, error: `Unsupported TypeScript runtime option: ${arg}`, explicit, flags, task };
@@ -1531,6 +1641,122 @@ function runLifecycleTaskCommand(
   }
 }
 
+function runStartSessionCommand(
+  parsed: ParsedRuntimeArgs,
+  options: TypescriptRuntimeOptions,
+  role: "manager" | "worker",
+): TypescriptRuntimeResult {
+  const unsupported = unsupportedStartSessionOptions(parsed, role);
+  if (unsupported) {
+    return unsupportedRuntimeResult(parsed, unsupported);
+  }
+  const name = parsed.flags.names[0];
+  if (!name) {
+    return errorResult(`start-${role} requires --name.`);
+  }
+  const cwd = parsed.flags.cwd ?? options.cwd ?? process.cwd();
+  const tmuxSessionName = tmuxSession(name);
+  const database = openRuntimeDatabase(parsed, options);
+  try {
+    const existing = database.prepare("select id from sessions where name = ?").get(name) as { id: string } | undefined;
+    if (existing) {
+      return lifecycleWorkerErrorResult(
+        `a session named ${JSON.stringify(name)} is already registered; choose a different name or \`conveyor deregister ${name}\` first`,
+      );
+    }
+    const runner = options.tmuxRunner ?? defaultTmuxRunner;
+    if (sessionExists(name, runner)) {
+      return lifecycleWorkerErrorResult(
+        `tmux session ${JSON.stringify(tmuxSessionName)} already exists; choose a different name or \`tmux kill-session -t ${tmuxSessionName}\` first`,
+      );
+    }
+    const startup = resolveCodexStartupOptions({
+      askForApproval: parsed.flags.askForApproval,
+      profile: parsed.flags.codexProfile,
+      sandbox: parsed.flags.sandbox,
+    });
+    const initialPrompt = role === "manager"
+      ? startManagerBootstrapPrompt(database, {
+        cwd,
+        managerName: name,
+        taskGoal: parsed.flags.taskGoal,
+        taskName: parsed.flags.taskName,
+        workerName: parsed.flags.worker,
+      })
+      : parsed.flags.taskName;
+    const codexExecutable = options.codexCommandResolver?.("codex") ?? "codex";
+    const codexArgs = [codexExecutable];
+    if (startup.sandbox) {
+      codexArgs.push("--sandbox", startup.sandbox);
+    }
+    if (startup.askForApproval) {
+      codexArgs.push("--ask-for-approval", startup.askForApproval);
+    }
+    if (initialPrompt) {
+      codexArgs.push(initialPrompt);
+    }
+    const shellCommand = codexTmuxShellCommand(codexArgs);
+    const minimumSessionTimestamp = options.now?.() ?? new Date();
+    startTmuxSessionWithRunner({ cwd, shellCommand, tmuxSessionName }, runner);
+    if (parsed.flags.acceptTrust) {
+      sendEnterToTmuxSessionWithRunner(tmuxSessionName, runner);
+    }
+    let discovery: SpawnedCodexSessionDiscovery;
+    try {
+      discovery = (options.discoverSpawnedCodexSession ?? defaultDiscoverSpawnedCodexSession)({
+        acceptTrust: parsed.flags.acceptTrust,
+        childrenForPid: options.childrenForPid,
+        lsofForPid: options.lsofForPid,
+        minimumSessionTimestamp,
+        sleepMilliseconds: options.sleepMilliseconds,
+        timeoutSeconds: parsed.flags.timeoutSeconds,
+        tmuxRunner: runner,
+        tmuxSessionName,
+      });
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      return lifecycleWorkerErrorResult(
+        `${detail}\nRecovery: tmux session ${JSON.stringify(tmuxSessionName)} may still be alive. `
+        + `Inspect it with \`tmux attach -t ${tmuxSessionName}\`. If Codex is visible, submit a prompt or press Enter, `
+        + `then register it with \`conveyor register-${role} --name ${name} --pid <pid> --codex-session <rollout.jsonl> `
+        + `--cwd ${shellQuote(cwd)} --tmux-session ${tmuxSessionName}\`. To clean up, run `
+        + `\`tmux kill-session -t ${tmuxSessionName}\` and \`conveyor deregister ${name}\` if it was registered.`,
+      );
+    }
+    const registered = registerSessionSync(database, {
+      codexSessionPath: discovery.codex_session_path,
+      cwd,
+      name,
+      pid: discovery.native_pid,
+      role,
+      tmuxSession: tmuxSessionName,
+    });
+    insertEventSync(database, {
+      payload: {
+        codex_session_id: registered.codex_session_id,
+        name,
+        pid: registered.pid,
+        role,
+        session_id: registered.session_id,
+        via: `start-${role}`,
+      },
+      type: "session_registered",
+    });
+    return jsonResult({
+      codex_session_id: registered.codex_session_id,
+      codex_session_path: registered.codex_session_path,
+      cwd: registered.cwd,
+      name: registered.name,
+      pid: registered.pid,
+      role: registered.role,
+      session_id: registered.session_id,
+      tmux_session: registered.tmux_session,
+    });
+  } finally {
+    database.close();
+  }
+}
+
 function runRegisterSessionCommand(
   parsed: ParsedRuntimeArgs,
   options: { cwd?: string; env?: NodeJS.ProcessEnv },
@@ -2135,6 +2361,8 @@ function isDefaultRuntimeCommand(command: string | null): boolean {
     || command === "create-disposable-binding"
     || command === "finish-task"
     || command === "stop-task"
+    || command === "start-worker"
+    || command === "start-manager"
     || command === "register-worker"
     || command === "register-manager"
     || command === "sessions"
@@ -2313,6 +2541,75 @@ function unsupportedLifecycleTaskOptions(parsed: ParsedRuntimeArgs, finish: bool
     || parsed.flags.requireTranscriptSegment
   )) {
     return "Unsupported TypeScript runtime option for stop-task.";
+  }
+  return null;
+}
+
+function unsupportedStartSessionOptions(parsed: ParsedRuntimeArgs, role: "manager" | "worker"): string | null {
+  if (parsed.task) {
+    return `Unexpected argument: ${parsed.task}`;
+  }
+  if (parsed.flags.names.length !== 1) {
+    return `start-${role} requires exactly one --name.`;
+  }
+  if (
+    parsed.flags.active
+    || parsed.flags.all
+    || parsed.flags.blocker !== null
+    || parsed.flags.captureTranscriptBeforeStop
+    || parsed.flags.captureTranscriptLines !== DEFAULT_HISTORY_LINES
+    || parsed.flags.captureTranscriptMode !== "segment"
+    || parsed.flags.cleanupPolicy !== "clear"
+    || parsed.flags.codexSession !== null
+    || parsed.flags.create !== null
+    || parsed.flags.currentTask !== null
+    || parsed.flags.decisionId !== null
+    || parsed.flags.dryRun
+    || parsed.flags.eventType !== null
+    || parsed.flags.file !== null
+    || parsed.flags.goal !== null
+    || parsed.flags.includeContent
+    || parsed.flags.includeFullTranscripts
+    || parsed.flags.includeLegacy
+    || parsed.flags.includeTranscripts
+    || parsed.flags.json
+    || parsed.flags.limit !== null
+    || parsed.flags.manager !== null
+    || parsed.flags.maxIterations !== null
+    || parsed.flags.message !== null
+    || parsed.flags.nextAction !== null
+    || parsed.flags.output !== null
+    || parsed.flags.pid !== null
+    || parsed.flags.reason !== null
+    || parsed.flags.redactIdentityToken
+    || parsed.flags.requiredBeforeContinue.length > 0
+    || parsed.flags.requireAcks
+    || parsed.flags.requireAdversarialProof
+    || parsed.flags.requireCriteriaAudit
+    || parsed.flags.requireEpilogue
+    || parsed.flags.requireSegment
+    || parsed.flags.requireTranscriptSegment
+    || parsed.flags.roleProvided
+    || parsed.flags.runName !== null
+    || parsed.flags.seedPromptSha256 !== null
+    || parsed.flags.sessionDir !== null
+    || parsed.flags.sessionRole !== null
+    || parsed.flags.sessionState !== null
+    || parsed.flags.statusState !== null
+    || parsed.flags.stopManager
+    || parsed.flags.stopWorker
+    || parsed.flags.strictDecisions
+    || parsed.flags.subtype !== null
+    || parsed.flags.summary !== null
+    || parsed.flags.template !== null
+    || parsed.flags.text !== null
+    || parsed.flags.tmuxSession !== null
+    || parsed.flags.zip
+  ) {
+    return `Unsupported TypeScript runtime option for start-${role}.`;
+  }
+  if (role === "worker" && (parsed.flags.taskGoal !== null || parsed.flags.worker !== null)) {
+    return "Unsupported TypeScript runtime option for start-worker.";
   }
   return null;
 }
@@ -4158,6 +4455,270 @@ function sessionPollCommand(role: "manager" | "worker", taskName: string | null,
   const inbox = role === "worker" ? "worker-inbox" : "manager-inbox";
   const task = taskName ? shellQuote(taskName) : "<task>";
   return `conveyor ${inbox} ${task} --consume-next --wait --timeout 60 --path ${shellQuote(dbPath)} --json`;
+}
+
+function resolveCodexStartupOptions(options: {
+  askForApproval: string | null;
+  profile: string | null;
+  sandbox: string | null;
+}): { askForApproval: string | null; sandbox: string | null } {
+  const defaults = {
+    askForApproval: options.askForApproval ?? "never",
+    sandbox: options.sandbox ?? "danger-full-access",
+  };
+  if (options.profile === null) {
+    return defaults;
+  }
+  if (options.profile !== "yolo") {
+    throw new Error(`Unknown Codex startup profile: ${options.profile}`);
+  }
+  return {
+    askForApproval: options.askForApproval ?? "never",
+    sandbox: options.sandbox ?? "danger-full-access",
+  };
+}
+
+function codexTmuxShellCommand(codexArgs: string[]): string {
+  const codexCommand = codexArgs.map(shellQuoteLikePython).join(" ");
+  const npmEnvCleanup = "for name in $(env | awk -F= '/^(npm|NPM)_/ {print $1}'); do unset \"$name\"; done; unset PNPM_SCRIPT_SRC_DIR";
+  return `${npmEnvCleanup}; exec ${codexCommand}`;
+}
+
+function shellQuoteLikePython(value: string): string {
+  if (value.length > 0 && /^[A-Za-z0-9_@%+=:,./-]+$/.test(value)) {
+    return value;
+  }
+  return shellQuote(value);
+}
+
+function defaultDiscoverSpawnedCodexSession(
+  options: SpawnedCodexSessionDiscoveryOptions,
+): SpawnedCodexSessionDiscovery {
+  const deadline = Date.now() + options.timeoutSeconds * 1000;
+  const childrenForPid = options.childrenForPid ?? defaultChildrenForPid;
+  const lsofForPid = options.lsofForPid ?? defaultLsofForPid;
+  const sleepMilliseconds = options.sleepMilliseconds ?? sleepSync;
+  const tmuxRunner = options.tmuxRunner ?? defaultTmuxRunner;
+  let lastError = "no discovery attempt completed";
+  while (Date.now() < deadline) {
+    try {
+      const discovery = discoverCodexSessionInTmuxOnce({
+        childrenForPid,
+        lsofForPid,
+        minimumSessionTimestamp: options.minimumSessionTimestamp,
+        tmuxRunner,
+        tmuxSessionName: options.tmuxSessionName,
+      });
+      return discovery;
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : String(error);
+      if (options.acceptTrust && Date.now() < deadline) {
+        try {
+          sendEnterToTmuxSessionWithRunner(options.tmuxSessionName, tmuxRunner);
+        } catch (enterError) {
+          lastError = enterError instanceof Error ? enterError.message : String(enterError);
+        }
+      }
+      sleepMilliseconds(500);
+    }
+  }
+  throw new Error(
+    `codex did not write session_meta within ${options.timeoutSeconds}s `
+    + `in tmux session ${JSON.stringify(options.tmuxSessionName)}: ${lastError}`,
+  );
+}
+
+function discoverCodexSessionInTmuxOnce(options: {
+  childrenForPid: (pid: number) => number[];
+  lsofForPid: (pid: number) => string;
+  minimumSessionTimestamp: Date;
+  tmuxRunner: TmuxRunner;
+  tmuxSessionName: string;
+}): SpawnedCodexSessionDiscovery {
+  const panePidResult = options.tmuxRunner(["tmux", "list-panes", "-t", options.tmuxSessionName, "-F", "#{pane_pid}"], { check: false });
+  if (panePidResult.status !== 0) {
+    const detail = (panePidResult.stderr || panePidResult.stdout || `exit code ${panePidResult.status}`).trim();
+    throw new Error(`tmux list-panes failed: ${detail}`);
+  }
+  const shellPidText = (panePidResult.stdout ?? "").split(/\r?\n/).find((line) => line.trim())?.trim() ?? "";
+  if (!shellPidText) {
+    throw new Error("tmux pane has no pid yet");
+  }
+  const shellPid = Number(shellPidText);
+  if (!Number.isInteger(shellPid)) {
+    throw new Error(`tmux pane pid is not an integer: ${JSON.stringify(shellPidText)}`);
+  }
+
+  const queue = [shellPid];
+  const visited = new Set<number>();
+  let lastError = "no codex rollout open in tmux pane process tree yet";
+  while (queue.length > 0) {
+    const pid = queue.shift();
+    if (pid === undefined || visited.has(pid)) {
+      continue;
+    }
+    visited.add(pid);
+    try {
+      const rolloutPath = findRolloutPathForPid(pid, options.lsofForPid);
+      const meta = readSessionMeta(rolloutPath);
+      const timestamp = parseRolloutTimestamp(meta.timestamp);
+      if (timestamp === null) {
+        lastError = `found codex rollout ${rolloutPath} without parseable session timestamp; waiting for fresh session_meta`;
+        continue;
+      }
+      if (timestamp < options.minimumSessionTimestamp) {
+        lastError = `found stale codex rollout ${rolloutPath} from ${timestamp.toISOString()}; waiting for fresh session_meta`;
+        continue;
+      }
+      return {
+        cli_version: meta.cli_version ?? "",
+        codex_session_id: meta.id,
+        codex_session_path: rolloutPath,
+        cwd: meta.cwd ?? "",
+        native_pid: pid,
+        originator: meta.originator ?? "",
+      };
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : String(error);
+      queue.push(...options.childrenForPid(pid));
+    }
+  }
+  throw new Error(lastError);
+}
+
+function parseRolloutTimestamp(value: string | undefined): Date | null {
+  if (!value) {
+    return null;
+  }
+  const timestamp = new Date(value);
+  return Number.isNaN(timestamp.getTime()) ? null : timestamp;
+}
+
+function sleepSync(milliseconds: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds);
+}
+
+function defaultChildrenForPid(pid: number): number[] {
+  const result = spawnSync("pgrep", ["-P", String(pid)], { encoding: "utf8" });
+  if (result.error || result.status !== 0) {
+    return [];
+  }
+  return result.stdout
+    .split(/\r?\n/)
+    .map((line) => Number(line.trim()))
+    .filter((value) => Number.isInteger(value));
+}
+
+function defaultLsofForPid(pid: number): string {
+  const result = spawnSync("lsof", ["-p", String(pid)], { encoding: "utf8" });
+  if (result.error) {
+    throw result.error;
+  }
+  if (result.status !== 0) {
+    throw new Error((result.stderr || result.stdout || `lsof failed for pid ${pid}`).trim());
+  }
+  return result.stdout;
+}
+
+function startManagerBootstrapPrompt(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  options: {
+    cwd: string;
+    managerName: string;
+    taskGoal: string | null;
+    taskName: string | null;
+    workerName: string | null;
+  },
+): string {
+  const context = startManagerTaskContext(database, options.taskName);
+  const taskLine = options.taskName ?? "<unbound-task>";
+  const goalLine = options.taskGoal ?? context?.goal ?? "No task goal supplied yet.";
+  const workerLine = options.workerName ?? "No worker session supplied yet.";
+  const workerctl = "conveyor";
+  const setupCommand = options.taskName
+    ? `${workerctl} manager-config ${taskLine} --questions`
+    : `${workerctl} manager-config <task> --questions`;
+  const cycleCommand = options.taskName ? `${workerctl} cycle ${taskLine}` : `${workerctl} cycle <task>`;
+  const managerAckCommand = options.taskName
+    ? `${workerctl} manager-ack ${taskLine} --from-stdin`
+    : `${workerctl} manager-ack <task> --from-stdin`;
+  const workerAckCommand = options.taskName
+    ? `${workerctl} worker-ack ${taskLine} --json`
+    : `${workerctl} worker-ack <task> --json`;
+  const config = context ? managerConfigSync(database, context.id) : null;
+  const initialSetup = config
+    ? seededManagerConfigSetup({ config, cycleCommand, managerAckCommand, workerAckCommand })
+    : [
+      "Initial setup:",
+      `1. Run \`${setupCommand}\`.`,
+      "2. Ask the user the returned setup questions in this manager Codex chat.",
+      `3. Persist the answers with \`${workerctl} manager-config\`.`,
+      "4. Use `conveyor manager-config --interactive` only when a human is directly running conveyor in a terminal.",
+      "",
+      "Acknowledgement:",
+      `- Before your first cycle, record the supervision contract you are committing to with \`${managerAckCommand}\`.`,
+      `- Before nudging or finishing, inspect the worker acknowledgement with \`${workerAckCommand}\` when available.`,
+    ].join("\n");
+  return [
+    "You are a Codex manager session for Agent Conveyor.",
+    "",
+    `Working directory: ${options.cwd}`,
+    `Manager session name: ${options.managerName}`,
+    `Task: ${taskLine}`,
+    `Task goal: ${goalLine}`,
+    `Worker session: ${workerLine}`,
+    "",
+    "Your role is to supervise, not to implement the worker task.",
+    "",
+    initialSetup,
+    "",
+    "Supervision loop:",
+    `- Start observations with \`${cycleCommand}\`.`,
+    "- Read `manager_context.manager_config` in cycle output before nudging.",
+    "- Treat acceptance criteria as living supervision state.",
+    "- Inspect `manager_context.acceptance_criteria` each cycle.",
+    "- If worker progress reveals new edge cases, tests, polish, or scope boundaries, ask the worker to propose must-have vs follow-up criteria.",
+    "- Before finishing, compare worker receipts/verification against accepted open criteria.",
+    `- When all accepted criteria are satisfied, deferred, or rejected, finish the task with \`${workerctl} finish-task ${taskLine} --reason "Accepted criteria satisfied" --require-criteria-audit\`.`,
+    "- Communicate with the worker only through conveyor session/task commands.",
+    "- Do not edit project files unless the user explicitly asks this manager session to change Agent Conveyor itself.",
+  ].join("\n");
+}
+
+function seededManagerConfigSetup(options: {
+  config: ManagerConfigRecord;
+  cycleCommand: string;
+  managerAckCommand: string;
+  workerAckCommand: string;
+}): string {
+  const lines = [
+    "Initial setup:",
+    "- Manager config has already been recorded for this task.",
+    `- Start with \`${options.cycleCommand}\` and inspect \`manager_context.manager_config\`.`,
+    "- Ask setup questions only if the cycle output shows missing or unsuitable manager config.",
+  ];
+  if (options.config.tools.length > 0) {
+    lines.push(`Expected tools: ${options.config.tools.join(", ")}.`);
+  }
+  lines.push(
+    "",
+    "Acknowledgement:",
+    `- Before your first cycle, record the supervision contract you are committing to with \`${options.managerAckCommand}\`.`,
+    `- Before nudging or finishing, inspect the worker acknowledgement with \`${options.workerAckCommand}\` when available.`,
+  );
+  return lines.join("\n");
+}
+
+function startManagerTaskContext(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  taskName: string | null,
+): { goal: string; id: string; name: string } | null {
+  if (!taskName) {
+    return null;
+  }
+  const row = database.prepare("select id, name, goal from tasks where id = ? or name = ? order by created_at desc limit 1")
+    .get(taskName, taskName) as { goal: string; id: string; name: string } | undefined;
+  return row ?? null;
 }
 
 function shellQuote(value: string): string {
