@@ -1206,10 +1206,71 @@ function runLifecycleTaskCommand(
       throw new Error(`Task ${task.name} is already ${task.state}`);
     }
     const binding = activeLifecycleBinding(database, task.id);
+    const requireCriteriaAudit = finish && parsed.flags.requireCriteriaAudit;
+    const requireAcks = finish && parsed.flags.requireAcks;
+    const requireEpilogue = finish && parsed.flags.requireEpilogue;
+    const requireAdversarialProof = finish && parsed.flags.requireAdversarialProof;
+    if (requireAdversarialProof && !taskHasSatisfiedAdversarialProofSync(database, task.id)) {
+      return lifecycleWorkerErrorResult(adversarialProofError(task.name));
+    }
     const managerDecision = missingManagerDecisionCheck();
-    const finalAudit = finish ? finalCriteriaAuditSync(database, task.id, false) : null;
-    const finalAckAudit = finish ? finalAckAuditSync(database, task.id, false) : null;
-    const finalEpilogueAudit = finish ? finalEpilogueAuditSync(false) : null;
+    const finalAudit = finish ? finalCriteriaAuditSync(database, task.id, requireCriteriaAudit) : null;
+    const finalAckAudit = finish ? finalAckAuditSync(database, task.id, requireAcks) : null;
+    const finalEpilogueAudit = finish ? finalEpilogueAuditSync(database, task.id, requireEpilogue) : null;
+    if (finish && finalAudit && requireCriteriaAudit) {
+      const auditError = finalCriteriaAuditError(finalAudit, task.name);
+      if (auditError !== null) {
+        return failLifecycleGateSync(database, {
+          audit: finalAudit,
+          auditKey: "final_audit",
+          commandType,
+          error: auditError,
+          eventPrefix,
+          failureStage: "final_criteria_audit",
+          finish,
+          reason,
+          stopManager,
+          taskId: task.id,
+          taskName: task.name,
+        });
+      }
+    }
+    if (finish && finalAckAudit && requireAcks) {
+      const ackError = finalAckAuditError(finalAckAudit, task.name);
+      if (ackError !== null) {
+        return failLifecycleGateSync(database, {
+          audit: finalAckAudit,
+          auditKey: "final_ack_audit",
+          commandType,
+          error: ackError,
+          eventPrefix,
+          failureStage: "final_ack_audit",
+          finish,
+          reason,
+          stopManager,
+          taskId: task.id,
+          taskName: task.name,
+        });
+      }
+    }
+    if (finish && finalEpilogueAudit && requireEpilogue) {
+      const epilogueError = finalEpilogueAuditError(finalEpilogueAudit, task.name);
+      if (epilogueError !== null) {
+        return failLifecycleGateSync(database, {
+          audit: finalEpilogueAudit,
+          auditKey: "final_epilogue_audit",
+          commandType,
+          error: epilogueError,
+          eventPrefix,
+          failureStage: "final_epilogue_audit",
+          finish,
+          reason,
+          stopManager,
+          taskId: task.id,
+          taskName: task.name,
+        });
+      }
+    }
     const payload = {
       ...(finish && finalAckAudit ? { final_ack_audit: finalAckAudit } : {}),
       ...(finish && finalAudit ? { final_audit: finalAudit } : {}),
@@ -2137,10 +2198,6 @@ function unsupportedLifecycleTaskOptions(parsed: ParsedRuntimeArgs, finish: bool
     || parsed.flags.captureTranscriptLines !== DEFAULT_HISTORY_LINES
     || parsed.flags.captureTranscriptMode !== "segment"
     || parsed.flags.requireTranscriptSegment
-    || parsed.flags.requireCriteriaAudit
-    || parsed.flags.requireAcks
-    || parsed.flags.requireEpilogue
-    || parsed.flags.requireAdversarialProof
   )) {
     return "TypeScript runtime finish-task currently supports state-only lifecycle without transcript capture or finish gates.";
   }
@@ -3345,6 +3402,20 @@ function finalCriteriaAuditSync(
   };
 }
 
+function finalCriteriaAuditError(finalAudit: Record<string, unknown>, taskName: string): string | null {
+  const openCriteria = Array.isArray(finalAudit.open_criteria) ? finalAudit.open_criteria : [];
+  if (openCriteria.length === 0) {
+    return null;
+  }
+  const details = openCriteria
+    .map((criterion) => {
+      const row = criterion as { criterion?: unknown; id?: unknown };
+      return `#${String(row.id)}: ${String(row.criterion)}`;
+    })
+    .join("; ");
+  return `Task ${taskName} has accepted acceptance criteria still open; satisfy, defer, or reject them before finishing: ${details}`;
+}
+
 function finalAckAuditSync(
   database: ReturnType<typeof openRuntimeDatabase>,
   taskId: string,
@@ -3365,6 +3436,14 @@ function finalAckAuditSync(
   };
 }
 
+function finalAckAuditError(finalAckAudit: Record<string, unknown>, taskName: string): string | null {
+  const missing = Array.isArray(finalAckAudit.missing) ? finalAckAudit.missing : [];
+  if (missing.length === 0) {
+    return null;
+  }
+  return `Task ${taskName} is missing required acknowledgement(s): ${missing.join(", ")}`;
+}
+
 function latestAckIdForRole(
   database: ReturnType<typeof openRuntimeDatabase>,
   taskId: string,
@@ -3380,13 +3459,188 @@ function latestAckIdForRole(
   return row?.id ?? null;
 }
 
-function finalEpilogueAuditSync(requireEpilogue: boolean): Record<string, unknown> {
+function finalEpilogueAuditSync(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  taskId: string,
+  requireEpilogue: boolean,
+): Record<string, unknown> {
+  const config = database.prepare("select epilogues_json from manager_configs where task_id = ?")
+    .get(taskId) as { epilogues_json: string } | undefined;
+  const requiredSteps = asStringArray(config ? JSON.parse(config.epilogues_json) as unknown : []);
+  const steps = requiredSteps.map((step) => {
+    const run = latestEpilogueRunForStepSync(database, taskId, step);
+    return {
+      latest_run: run,
+      ok: run?.state === "succeeded",
+      state: run?.state ?? "pending",
+      step_name: step,
+    };
+  });
+  const missingOrIncomplete = steps
+    .filter((step) => !step.ok)
+    .map((step) => step.step_name);
   return {
-    missing_or_incomplete: [],
-    ok: true,
+    missing_or_incomplete: missingOrIncomplete,
+    ok: missingOrIncomplete.length === 0,
     require_epilogue: requireEpilogue,
-    required_steps: [],
-    steps: [],
+    required_steps: requiredSteps,
+    steps,
+  };
+}
+
+function latestEpilogueRunForStepSync(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  taskId: string,
+  stepName: string,
+): Record<string, unknown> | null {
+  const row = database.prepare(`
+    select id, task_id, step_name, state, started_at, finished_at, result_json, error, correlation_id
+    from epilogue_runs
+    where task_id = ? and step_name = ?
+    order by id desc
+    limit 1
+  `).get(taskId, stepName) as {
+    correlation_id: string | null;
+    error: string | null;
+    finished_at: string | null;
+    id: number;
+    result_json: string | null;
+    started_at: string;
+    state: string;
+    step_name: string;
+    task_id: string;
+  } | undefined;
+  if (!row) {
+    return null;
+  }
+  return {
+    correlation_id: row.correlation_id,
+    error: row.error,
+    finished_at: row.finished_at,
+    id: row.id,
+    result: row.result_json ? JSON.parse(row.result_json) as unknown : null,
+    started_at: row.started_at,
+    state: row.state,
+    step_name: row.step_name,
+    task_id: row.task_id,
+  };
+}
+
+function finalEpilogueAuditError(finalEpilogueAudit: Record<string, unknown>, taskName: string): string | null {
+  const missing = Array.isArray(finalEpilogueAudit.missing_or_incomplete)
+    ? finalEpilogueAudit.missing_or_incomplete
+    : [];
+  if (missing.length === 0) {
+    return null;
+  }
+  return `Task ${taskName} has incomplete required epilogue step(s): ${missing.join(", ")}`;
+}
+
+const FAILING_ADVERSARIAL_PROOF_STATUSES = new Set(["error", "errored", "fail", "failed", "failure", "rejected"]);
+
+function taskHasSatisfiedAdversarialProofSync(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  taskId: string,
+): boolean {
+  const rows = database.prepare(`
+    select evidence_json
+    from acceptance_criteria
+    where task_id = ? and status = 'satisfied'
+    order by id
+  `).all(taskId) as Array<{ evidence_json: string }>;
+  return rows.some((row) => isStructuredAdversarialProof(JSON.parse(row.evidence_json) as Record<string, unknown>));
+}
+
+function isStructuredAdversarialProof(evidence: Record<string, unknown>): boolean {
+  if (evidence.evidence_type !== "adversarial_check") {
+    return false;
+  }
+  for (const key of ["failure_mode", "check", "result"] as const) {
+    const value = evidence[key];
+    if (typeof value !== "string" || value.trim() === "") {
+      return false;
+    }
+  }
+  if (evidence.status === undefined || evidence.status === null) {
+    return true;
+  }
+  if (typeof evidence.status !== "string") {
+    return false;
+  }
+  return !FAILING_ADVERSARIAL_PROOF_STATUSES.has(evidence.status.trim().toLowerCase());
+}
+
+function adversarialProofError(taskName: string): string {
+  return `Task ${taskName}: adversarial proof is required before finish; record satisfied evidence_type=adversarial_check with non-empty failure_mode, check, result, and a non-failing evidence status`;
+}
+
+function failLifecycleGateSync(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  options: {
+    audit: Record<string, unknown>;
+    auditKey: "final_ack_audit" | "final_audit" | "final_epilogue_audit";
+    commandType: string;
+    error: string;
+    eventPrefix: string;
+    failureStage: string;
+    finish: boolean;
+    reason: string;
+    stopManager: boolean;
+    taskId: string;
+    taskName: string;
+  },
+): TypescriptRuntimeResult {
+  const payload = {
+    [options.auditKey]: options.audit,
+    capture_transcript_before_stop: false,
+    expected_failure: true,
+    failure_stage: options.failureStage,
+    finish: options.finish,
+    message: null,
+    reason: options.reason,
+    stop_manager: options.stopManager,
+    stop_worker: false,
+    task: options.taskName,
+  };
+  const commandId = createCommandSync(database, {
+    commandType: options.commandType,
+    payload,
+    taskId: options.taskId,
+  });
+  markImmediateCommandAttemptedSync(database, commandId);
+  const result = {
+    [options.auditKey]: options.audit,
+    command_id: commandId,
+    expected_failure: true,
+    failure_stage: options.failureStage,
+    finish: options.finish,
+    task: options.taskName,
+  };
+  finishImmediateCommandSync(database, {
+    commandId,
+    error: options.error,
+    result,
+    state: "failed",
+    timestamp: new Date().toISOString(),
+  });
+  insertEventSync(database, {
+    commandId,
+    payload: {
+      ...result,
+      error: options.error,
+      error_type: "WorkerError",
+    },
+    taskId: options.taskId,
+    type: `${options.eventPrefix}_failed`,
+  });
+  return lifecycleWorkerErrorResult(options.error);
+}
+
+function lifecycleWorkerErrorResult(message: string): TypescriptRuntimeResult {
+  return {
+    exitCode: 1,
+    handled: true,
+    stderr: `${message}\n`,
   };
 }
 

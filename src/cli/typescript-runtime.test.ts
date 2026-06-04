@@ -745,7 +745,7 @@ test("TypeScript runtime handles state-only finish-task and stop-task by default
     assert.match(explicitLive.stderr ?? "", /state-only lifecycle without live session control/);
     assert.deepEqual(
       runTypescriptRuntimeCommand({
-        args: ["finish-task", "needs-gates", "--require-criteria-audit", "--path", dbPath],
+        args: ["finish-task", "needs-capture", "--capture-transcript-before-stop", "--path", dbPath],
         cwd: root,
         env: {},
       }),
@@ -759,6 +759,176 @@ test("TypeScript runtime handles state-only finish-task and stop-task by default
       }),
       { exitCode: 0, handled: false },
     );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("TypeScript runtime handles finish-task final gates by default", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-finish-gates."));
+  try {
+    const dbPath = join(root, "workerctl.db");
+    const database = openDatabaseSync(dbPath);
+    try {
+      initializeDatabaseSync(database);
+      const timestamp = new Date().toISOString();
+      const criteriaTaskId = createTaskSync(database, {
+        goal: "Finish only after criteria are audited.",
+        name: "gate-criteria",
+      });
+      const ackTaskId = createTaskSync(database, {
+        goal: "Finish only after acknowledgements exist.",
+        name: "gate-acks",
+      });
+      const epilogueTaskId = createTaskSync(database, {
+        goal: "Finish only after epilogue succeeds.",
+        name: "gate-epilogue",
+      });
+      const proofTaskId = createTaskSync(database, {
+        goal: "Finish only after adversarial proof exists.",
+        name: "gate-proof",
+      });
+      const proofOkTaskId = createTaskSync(database, {
+        goal: "Finish after structured adversarial proof exists.",
+        name: "gate-proof-ok",
+      });
+      database.prepare("update tasks set state = 'managed', updated_at = ? where id in (?, ?, ?, ?, ?)")
+        .run(timestamp, criteriaTaskId, ackTaskId, epilogueTaskId, proofTaskId, proofOkTaskId);
+      database.prepare(`
+        insert into acceptance_criteria(
+          task_id, criterion, status, source, proof, rationale, evidence_json, created_at, updated_at
+        )
+        values (?, ?, 'accepted', 'manager_inferred', null, null, '{}', ?, ?)
+      `).run(criteriaTaskId, "Run final regression tests", timestamp, timestamp);
+      for (const role of ["worker", "manager"]) {
+        database.prepare(`
+          insert into task_acknowledgements(
+            task_id, binding_id, role, payload_json, revision, manager_config_revision, created_at, correlation_id
+          )
+          values (?, null, ?, '{}', 1, null, ?, null)
+        `).run(ackTaskId, role, timestamp);
+      }
+      database.prepare(`
+        insert into manager_configs(
+          task_id, supervision_mode, objective, guidelines_json, acceptance_criteria_json, reference_paths_json,
+          permissions_json, tools_json, epilogues_json, nudge_on_completion, require_acks, revision, created_at, updated_at
+        )
+        values (?, 'guided', null, '[]', '[]', '[]', '{}', '[]', '["draft-pr"]', 'ask-operator', 0, 1, ?, ?)
+      `).run(epilogueTaskId, timestamp, timestamp);
+      database.prepare(`
+        insert into epilogue_runs(
+          task_id, step_name, state, started_at, finished_at, result_json, error, correlation_id
+        )
+        values (?, 'draft-pr', 'succeeded', ?, ?, '{"summary":"ready"}', null, 'corr-epilogue')
+      `).run(epilogueTaskId, timestamp, timestamp);
+      database.prepare(`
+        insert into acceptance_criteria(
+          task_id, criterion, status, source, proof, rationale, evidence_json, created_at, updated_at
+        )
+        values (?, ?, 'satisfied', 'manager_inferred', ?, null, ?, ?, ?)
+      `).run(
+        proofOkTaskId,
+        "Adversarial proof recorded",
+        "Tried to disprove the change.",
+        JSON.stringify({
+          check: "negative test",
+          evidence_type: "adversarial_check",
+          failure_mode: "Happy-path only verification.",
+          result: "negative test passed",
+        }),
+        timestamp,
+        timestamp,
+      );
+    } finally {
+      database.close();
+    }
+
+    const criteriaFailure = runTypescriptRuntimeCommand({
+      args: ["finish-task", "gate-criteria", "--require-criteria-audit", "--reason", "Done too early.", "--path", dbPath],
+      cwd: root,
+      env: {},
+    });
+    assert.equal(criteriaFailure.exitCode, 1);
+    assert.match(criteriaFailure.stderr ?? "", /accepted acceptance criteria still open/);
+    const proofFailure = runTypescriptRuntimeCommand({
+      args: ["finish-task", "gate-proof", "--require-adversarial-proof", "--reason", "Done without proof.", "--path", dbPath],
+      cwd: root,
+      env: {},
+    });
+    assert.equal(proofFailure.exitCode, 1);
+    assert.match(proofFailure.stderr ?? "", /adversarial proof is required/);
+
+    const ackSuccess = runTypescriptRuntimeCommand({
+      args: ["finish-task", "gate-acks", "--require-acks", "--reason", "Acks present.", "--path", dbPath],
+      cwd: root,
+      env: {},
+    });
+    assert.equal(ackSuccess.exitCode, 0, ackSuccess.stderr);
+    const ackPayload = JSON.parse(ackSuccess.stdout ?? "{}") as {
+      final_ack_audit: { missing: string[]; require_acks: boolean };
+      finish: boolean;
+    };
+    assert.equal(ackPayload.finish, true);
+    assert.equal(ackPayload.final_ack_audit.require_acks, true);
+    assert.deepEqual(ackPayload.final_ack_audit.missing, []);
+
+    const epilogueSuccess = runTypescriptRuntimeCommand({
+      args: ["finish-task", "gate-epilogue", "--require-epilogue", "--reason", "Epilogue present.", "--path", dbPath],
+      cwd: root,
+      env: {},
+    });
+    assert.equal(epilogueSuccess.exitCode, 0, epilogueSuccess.stderr);
+    const epiloguePayload = JSON.parse(epilogueSuccess.stdout ?? "{}") as {
+      final_epilogue_audit: { missing_or_incomplete: string[]; require_epilogue: boolean; required_steps: string[] };
+    };
+    assert.equal(epiloguePayload.final_epilogue_audit.require_epilogue, true);
+    assert.deepEqual(epiloguePayload.final_epilogue_audit.required_steps, ["draft-pr"]);
+    assert.deepEqual(epiloguePayload.final_epilogue_audit.missing_or_incomplete, []);
+
+    const proofSuccess = runTypescriptRuntimeCommand({
+      args: ["finish-task", "gate-proof-ok", "--require-adversarial-proof", "--reason", "Proof exists.", "--path", dbPath],
+      cwd: root,
+      env: {},
+    });
+    assert.equal(proofSuccess.exitCode, 0, proofSuccess.stderr);
+    const proofPayload = JSON.parse(proofSuccess.stdout ?? "{}") as { finish: boolean };
+    assert.equal(proofPayload.finish, true);
+
+    const afterGates = openDatabaseSync(dbPath);
+    try {
+      const criteriaTask = afterGates.prepare("select state from tasks where name = 'gate-criteria'")
+        .get() as { state: string };
+      assert.equal(criteriaTask.state, "managed");
+      const failedCommand = afterGates.prepare("select state, result_json, error from commands where task_id = (select id from tasks where name = 'gate-criteria')")
+        .get() as { error: string; result_json: string; state: string };
+      assert.equal(failedCommand.state, "failed");
+      assert.match(failedCommand.error, /accepted acceptance criteria still open/);
+      const failedResult = JSON.parse(failedCommand.result_json) as {
+        expected_failure: boolean;
+        failure_stage: string;
+        final_audit: { open_criteria: Array<{ criterion: string }> };
+      };
+      assert.equal(failedResult.expected_failure, true);
+      assert.equal(failedResult.failure_stage, "final_criteria_audit");
+      assert.deepEqual(failedResult.final_audit.open_criteria.map((criterion) => criterion.criterion), [
+        "Run final regression tests",
+      ]);
+      const failedEvent = afterGates.prepare("select payload_json from events where type = 'finish_task_failed'")
+        .get() as { payload_json: string };
+      assert.equal(JSON.parse(failedEvent.payload_json).failure_stage, "final_criteria_audit");
+      const proofCommands = afterGates.prepare("select count(*) as count from commands where task_id = (select id from tasks where name = 'gate-proof')")
+        .get() as { count: number };
+      assert.equal(proofCommands.count, 0);
+      const doneTasks = afterGates.prepare("select name, state from tasks where name in ('gate-acks', 'gate-epilogue', 'gate-proof-ok') order by name")
+        .all() as Array<{ name: string; state: string }>;
+      assert.deepEqual(doneTasks.map((task) => ({ ...task })), [
+        { name: "gate-acks", state: "done" },
+        { name: "gate-epilogue", state: "done" },
+        { name: "gate-proof-ok", state: "done" },
+      ]);
+    } finally {
+      afterGates.close();
+    }
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
