@@ -24,11 +24,89 @@ import {
 test("unmigrated TypeScript runtime command falls back when disabled", () => {
   assert.deepEqual(
     runTypescriptRuntimeCommand({
-      args: ["tasks", "--json"],
+      args: ["commands", "--json"],
       env: {},
     }),
     { exitCode: 0, handled: false },
   );
+});
+
+test("TypeScript runtime handles task create list and active filtering by default", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-tasks."));
+  try {
+    const dbPath = join(root, "workerctl.db");
+    const created = runTypescriptRuntimeCommand({
+      args: [
+        "tasks",
+        "--path",
+        dbPath,
+        "--create",
+        "auth-refactor",
+        "--goal",
+        "Finish auth refactor.",
+        "--summary",
+        "Middleware replaced.",
+      ],
+      env: {},
+    });
+    assert.equal(created.exitCode, 0);
+    assert.equal(created.handled, true);
+    const createdPayload = JSON.parse(created.stdout ?? "{}") as {
+      created: boolean;
+      id: string;
+      name: string;
+    };
+    assert.equal(createdPayload.created, true);
+    assert.match(createdPayload.id, /^task-/);
+    assert.equal(createdPayload.name, "auth-refactor");
+
+    const listed = runTypescriptRuntimeCommand({
+      args: ["tasks", "--path", dbPath, "--json"],
+      env: {},
+    });
+    assert.equal(listed.exitCode, 0);
+    const tasks = JSON.parse(listed.stdout ?? "[]") as Array<{
+      budget: null;
+      goal: string;
+      name: string;
+      state: string;
+      summary: string | null;
+    }>;
+    assert.equal(tasks.length, 1);
+    assert.equal(tasks[0].budget, null);
+    assert.equal(tasks[0].goal, "Finish auth refactor.");
+    assert.equal(tasks[0].name, "auth-refactor");
+    assert.equal(tasks[0].state, "candidate");
+    assert.equal(tasks[0].summary, "Middleware replaced.");
+
+    const text = runTypescriptRuntimeCommand({
+      args: ["tasks", "--path", dbPath],
+      env: {},
+    });
+    assert.equal(text.stdout, "auth-refactor\tcandidate\tFinish auth refactor.\n");
+
+    const database = openDatabaseSync(dbPath);
+    try {
+      database.prepare("update tasks set state = 'done' where name = ?").run("auth-refactor");
+    } finally {
+      database.close();
+    }
+
+    const active = runTypescriptRuntimeCommand({
+      args: ["tasks", "--path", dbPath, "--active", "--json"],
+      env: {},
+    });
+    assert.equal(active.stdout, "[]\n");
+
+    const missingGoal = runTypescriptRuntimeCommand({
+      args: ["tasks", "--path", dbPath, "--create", "missing-goal"],
+      env: {},
+    });
+    assert.equal(missingGoal.exitCode, 2);
+    assert.match(missingGoal.stderr ?? "", /--goal is required with tasks --create/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("TypeScript runtime handles migrated audit replay and subset export commands by default", () => {
