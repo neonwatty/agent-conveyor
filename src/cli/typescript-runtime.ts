@@ -33,6 +33,7 @@ import {
 } from "../runtime/tasks.js";
 import {
   captureTmuxTargetWithRunner,
+  captureTranscriptTmuxTargetWithRunner,
   currentPaneIdWithRunner,
   tmuxSession,
   tmuxSessionRunning,
@@ -66,6 +67,7 @@ const DEFAULT_BUSY_WAIT_SECONDS = 90;
 const DEFAULT_HISTORY_LINES = 200;
 const DEFAULT_STATUS_STALE_SECONDS = 300;
 const DEFAULT_TERMINAL_STALE_SECONDS = 300;
+type TranscriptCaptureMode = "excerpt" | "full" | "metadata" | "segment" | "snapshot";
 const VALID_WORKER_STATUS_STATES = new Set([
   "planning",
   "editing",
@@ -157,6 +159,9 @@ export function runTypescriptRuntimeCommand(options: {
     if (parsed.command === "transcript-prune") {
       return runTranscriptPruneCommand(parsed, options);
     }
+    if (parsed.command === "transcript-capture") {
+      return runTranscriptCaptureCommand(parsed, options);
+    }
     if (parsed.command === "capture") {
       return runCaptureCommand(parsed, options);
     }
@@ -221,6 +226,8 @@ interface ParsedRuntimeArgs {
     text: string | null;
     terminalStaleSeconds: number;
     tmuxSession: string | null;
+    transcriptMode: TranscriptCaptureMode;
+    requireSegment: boolean;
     worker: string | null;
     manager: string | null;
     zip: boolean;
@@ -273,6 +280,8 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
     text: null,
     terminalStaleSeconds: DEFAULT_TERMINAL_STALE_SECONDS,
     tmuxSession: null,
+    transcriptMode: "segment",
+    requireSegment: false,
     worker: null,
     manager: null,
     zip: false,
@@ -309,6 +318,11 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       flags.includeFullTranscripts = true;
     } else if (arg === "--dry-run") {
       flags.dryRun = true;
+    } else if (arg === "--require-segment") {
+      if (command !== "transcript-capture") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --require-segment", explicit, flags, task };
+      }
+      flags.requireSegment = true;
     } else if (arg === "--no-refresh") {
       if (command !== "status" && command !== "idle-check") {
         return { command, enabled, error: "Unsupported TypeScript runtime option: --no-refresh", explicit, flags, task };
@@ -454,6 +468,17 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
         return { command, enabled, error: `Unsupported replay format: ${value}`, explicit, flags, task };
       }
       flags.format = value;
+      index += 1;
+    } else if (arg === "--mode") {
+      const parsedValue = valueAfter(queue, index, arg);
+      if (parsedValue.error) {
+        return { command, enabled, error: parsedValue.error, explicit, flags, task };
+      }
+      const value = parsedValue.value;
+      if (!isTranscriptCaptureMode(value)) {
+        return { command, enabled, error: `Unsupported transcript capture mode: ${value}`, explicit, flags, task };
+      }
+      flags.transcriptMode = value;
       index += 1;
     } else if (arg === "--role") {
       const parsedValue = valueAfter(queue, index, arg);
@@ -1181,6 +1206,47 @@ function runTranscriptPruneCommand(
   }
 }
 
+function runTranscriptCaptureCommand(
+  parsed: ParsedRuntimeArgs,
+  options: { cwd?: string; env?: NodeJS.ProcessEnv; now?: () => Date; tmuxRunner?: TmuxRunner },
+): TypescriptRuntimeResult {
+  const unsupported = unsupportedTranscriptCaptureOptions(parsed);
+  if (unsupported) {
+    return unsupportedRuntimeResult(parsed, unsupported);
+  }
+  const task = requireTask(parsed);
+  const database = openRuntimeDatabase(parsed, options);
+  try {
+    const context = sessionTranscriptCaptureContext(database, task, "worker");
+    if (!context) {
+      return unsupportedRuntimeResult(parsed, "transcript-capture worker role requires a session-bound worker binding.");
+    }
+    const capture = captureTaskTerminalSync(database, {
+      context,
+      historyLines: parsed.flags.lines,
+      mode: parsed.flags.transcriptMode,
+      now: nowIsoSeconds(options),
+      runner: options.tmuxRunner ?? defaultTmuxRunner,
+      source: "transcript_capture",
+    });
+    if (parsed.flags.requireSegment) {
+      const segment = capture.transcript_segment;
+      if (!segment || Number(segment.line_count ?? 0) <= 0) {
+        throw new Error("no non-empty transcript segment captured for role(s): worker");
+      }
+    }
+    const result = {
+      captures: [capture],
+      mode: parsed.flags.transcriptMode,
+      role: parsed.flags.role,
+      task,
+    };
+    return jsonResult(parsed.flags.includeContent ? result : redactCaptureResult(result));
+  } finally {
+    database.close();
+  }
+}
+
 function runCaptureCommand(
   parsed: ParsedRuntimeArgs,
   options: { cwd?: string; env?: NodeJS.ProcessEnv; now?: () => Date; tmuxRunner?: TmuxRunner },
@@ -1313,6 +1379,7 @@ function isDefaultRuntimeCommand(command: string | null): boolean {
     || command === "update-status"
     || command === "transcript-show"
     || command === "transcript-prune"
+    || command === "transcript-capture"
     || command === "capture"
     || command === "status"
     || command === "idle-check"
@@ -1952,6 +2019,56 @@ function unsupportedTranscriptPruneOptions(parsed: ParsedRuntimeArgs): string | 
   return null;
 }
 
+function unsupportedTranscriptCaptureOptions(parsed: ParsedRuntimeArgs): string | null {
+  if (
+    parsed.flags.active
+    || parsed.flags.all
+    || parsed.flags.blocker !== null
+    || parsed.flags.busyWaitSeconds !== DEFAULT_BUSY_WAIT_SECONDS
+    || parsed.flags.codexSession !== null
+    || parsed.flags.create !== null
+    || parsed.flags.currentTask !== null
+    || parsed.flags.cwd !== null
+    || parsed.flags.dryRun
+    || parsed.flags.eventType !== null
+    || parsed.flags.file !== null
+    || parsed.flags.goal !== null
+    || parsed.flags.includeFullTranscripts
+    || parsed.flags.includeLegacy
+    || parsed.flags.includeTranscripts
+    || parsed.flags.keepLatest !== 20
+    || parsed.flags.limit !== null
+    || parsed.flags.names.length > 0
+    || parsed.flags.nextAction !== null
+    || parsed.flags.output !== null
+    || parsed.flags.pid !== null
+    || parsed.flags.redactIdentityToken
+    || parsed.flags.sessionRole !== null
+    || parsed.flags.sessionState !== null
+    || parsed.flags.statusAgeSeconds !== DEFAULT_BUSY_WAIT_SECONDS
+    || parsed.flags.statusState !== null
+    || parsed.flags.statusStaleSeconds !== DEFAULT_STATUS_STALE_SECONDS
+    || parsed.flags.subtype !== null
+    || parsed.flags.summary !== null
+    || parsed.flags.taskName !== null
+    || parsed.flags.terminalStaleSeconds !== DEFAULT_TERMINAL_STALE_SECONDS
+    || parsed.flags.text !== null
+    || parsed.flags.tmuxSession !== null
+    || parsed.flags.worker !== null
+    || parsed.flags.manager !== null
+    || parsed.flags.zip
+  ) {
+    return "Unsupported TypeScript runtime option for transcript-capture.";
+  }
+  if (!parsed.flags.json) {
+    return "TypeScript runtime transcript-capture currently requires --json.";
+  }
+  if (parsed.flags.role !== "worker") {
+    return "TypeScript runtime transcript-capture currently supports --role worker only.";
+  }
+  return null;
+}
+
 function singleName(parsed: ParsedRuntimeArgs): string | null {
   return parsed.flags.names.length === 1 ? parsed.flags.names[0] : null;
 }
@@ -2187,6 +2304,52 @@ interface TranscriptSegmentsResult {
   task: { id: string; name: string; state: string };
 }
 
+interface SessionTranscriptCaptureContext {
+  binding: {
+    binding_id: string;
+    created_at: string;
+    ended_at: string | null;
+    manager_session_id: string;
+    manager_session_name: string;
+    state: string;
+    task_id: string;
+    worker_session_id: string;
+    worker_session_name: string;
+  };
+  role: "manager" | "worker";
+  session: {
+    id: string;
+    name: string;
+    role: "manager" | "worker";
+    state: string;
+    tmux_pane_id: string | null;
+    tmux_session: string | null;
+  };
+  task: { id: string; name: string; state: string };
+}
+
+interface TerminalCaptureRecord {
+  classifier: {
+    busy_wait: ReturnType<typeof classifyBusyWait>;
+    startup: ReturnType<typeof classifyStartupOutput>;
+  };
+  content_sha256: string;
+  history_lines: number;
+  id: number;
+  line_count: number;
+  output: string;
+  source: string;
+}
+
+interface TranscriptSegmentSummary {
+  id: number;
+  line_count: number;
+  mode: TranscriptCaptureMode;
+  previous_capture_id: number | null;
+  segment_kind: string;
+  source_capture_id: number;
+}
+
 function transcriptSegmentsSync(
   database: ReturnType<typeof openRuntimeDatabase>,
   options: { limit: number | null; role: "all" | "manager" | "worker"; task: string },
@@ -2253,6 +2416,463 @@ function transcriptSegmentsSync(
       task_id: row.task_id,
     })),
     task: snapshot,
+  };
+}
+
+function sessionTranscriptCaptureContext(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  task: string,
+  role: "manager" | "worker",
+): SessionTranscriptCaptureContext | null {
+  const snapshot = taskSnapshot(database, task);
+  const binding = database.prepare(`
+    select
+      b.id as binding_id,
+      b.task_id as task_id,
+      b.worker_session_id as worker_session_id,
+      b.manager_session_id as manager_session_id,
+      ws.name as worker_session_name,
+      ms.name as manager_session_name,
+      b.state as state,
+      b.created_at as created_at,
+      b.ended_at as ended_at
+    from bindings b
+    join sessions ws on ws.id = b.worker_session_id
+    join sessions ms on ms.id = b.manager_session_id
+    where b.task_id = ?
+      and b.worker_session_id is not null
+      and b.manager_session_id is not null
+    order by case when b.state in ('active', 'ending') then 0 else 1 end,
+             b.created_at desc
+    limit 1
+  `).get(snapshot.id) as SessionTranscriptCaptureContext["binding"] | undefined;
+  if (!binding) {
+    return null;
+  }
+  const sessionId = role === "worker" ? binding.worker_session_id : binding.manager_session_id;
+  const session = database.prepare(`
+    select id, name, role, state, tmux_session, tmux_pane_id
+    from sessions
+    where id = ?
+  `).get(sessionId) as SessionTranscriptCaptureContext["session"] | undefined;
+  if (!session || session.role !== role) {
+    return null;
+  }
+  return { binding, role, session, task: snapshot };
+}
+
+function captureTaskTerminalSync(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  options: {
+    context: SessionTranscriptCaptureContext;
+    historyLines: number;
+    mode: TranscriptCaptureMode;
+    now: string;
+    runner: TmuxRunner;
+    source: string;
+  },
+): {
+  binding_id: null;
+  capture: TerminalCaptureRecord;
+  observation_id: number;
+  role: "manager" | "worker";
+  task: { id: string; name: string; state: string };
+  transcript_segment: TranscriptSegmentSummary | null;
+  worker: {
+    id: string;
+    name: string;
+    state: string;
+    tmux_pane_id: string | null;
+    tmux_session: string | null;
+  };
+} {
+  const paneId = verifySessionCaptureIdentity(options.context, options.runner);
+  const tmuxSessionName = options.context.session.tmux_session;
+  if (!tmuxSessionName) {
+    throw new Error(`Session identity verification failed for ${options.context.session.name}: tmux_session_missing`);
+  }
+  const output = captureTranscriptTmuxTargetWithRunner(tmuxSessionName, options.historyLines, options.runner);
+  const contentSha256 = createHash("sha256").update(output).digest("hex");
+  const startup = classifyStartupOutput(output);
+  const classifier = {
+    busy_wait: classifyBusyWait(output, 10 ** 9, 0),
+    startup,
+  };
+  const previousCapture = latestTerminalCaptureForRoleSync(database, {
+    role: options.context.role,
+    taskId: options.context.task.id,
+  });
+  const captureId = insertTerminalCaptureSync(database, {
+    classifier,
+    contentSha256,
+    historyLines: options.historyLines,
+    output,
+    role: options.context.role,
+    source: options.source,
+    taskId: options.context.task.id,
+    timestamp: options.now,
+    tmuxPaneId: paneId ?? options.context.session.tmux_pane_id,
+    tmuxSession: tmuxSessionName,
+  });
+  const transcriptSegment = recordTranscriptSegmentSync(database, {
+    content: output,
+    contentSha256,
+    mode: options.mode,
+    previousCapture,
+    role: options.context.role,
+    sourceCaptureId: captureId,
+    taskId: options.context.task.id,
+    timestamp: options.now,
+  });
+  insertEventSync(database, {
+    payload: {
+      capture_id: captureId,
+      content_sha256: contentSha256,
+      history_lines: options.historyLines,
+      source: options.source,
+    },
+    taskId: options.context.task.id,
+    type: `${options.context.role}_terminal_captured`,
+  });
+  const observationId = insertAgentObservationSync(database, {
+    message: `${options.context.role} terminal captured`,
+    payload: {
+      content_sha256: contentSha256,
+      history_lines: options.historyLines,
+      source: options.source,
+      transcript_segment_id: transcriptSegment?.id ?? null,
+    },
+    role: options.context.role,
+    sourceCaptureId: captureId,
+    taskId: options.context.task.id,
+    timestamp: options.now,
+  });
+  return {
+    binding_id: null,
+    capture: {
+      classifier,
+      content_sha256: contentSha256,
+      history_lines: options.historyLines,
+      id: captureId,
+      line_count: pythonSplitlinesCount(output),
+      output,
+      source: options.source,
+    },
+    observation_id: observationId,
+    role: options.context.role,
+    task: options.context.task,
+    transcript_segment: transcriptSegment,
+    worker: {
+      id: options.context.session.id,
+      name: options.context.session.name,
+      state: options.context.session.state,
+      tmux_pane_id: paneId ?? options.context.session.tmux_pane_id,
+      tmux_session: tmuxSessionName,
+    },
+  };
+}
+
+function verifySessionCaptureIdentity(
+  context: SessionTranscriptCaptureContext,
+  runner: TmuxRunner,
+): string | null {
+  const sessionName = context.session.tmux_session;
+  const mismatches: string[] = [];
+  let livePaneId: string | null = null;
+  if (!sessionName) {
+    mismatches.push("tmux_session_missing");
+  } else {
+    const live = tmuxSessionRunning(sessionName, runner);
+    if (live) {
+      livePaneId = currentPaneIdWithRunner(sessionName, runner);
+    } else {
+      mismatches.push("tmux_session_missing");
+    }
+  }
+  if (context.session.tmux_pane_id && livePaneId && context.session.tmux_pane_id !== livePaneId) {
+    mismatches.push("tmux_pane_mismatch");
+  }
+  if (mismatches.length > 0) {
+    throw new Error(
+      `Session identity verification failed for ${context.session.name}: ${mismatches.join(", ")}`,
+    );
+  }
+  return livePaneId;
+}
+
+function latestTerminalCaptureForRoleSync(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  options: { role: "manager" | "worker"; taskId: string },
+): { content: string | null; content_sha256: string; id: number } | null {
+  const row = database.prepare(`
+    select id, content_sha256, content
+    from terminal_captures
+    where task_id = ? and role = ?
+    order by id desc
+    limit 1
+  `).get(options.taskId, options.role) as { content: string | null; content_sha256: string; id: number } | undefined;
+  return row ?? null;
+}
+
+function insertTerminalCaptureSync(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  options: {
+    classifier: TerminalCaptureRecord["classifier"];
+    contentSha256: string;
+    historyLines: number;
+    output: string;
+    role: "manager" | "worker";
+    source: string;
+    taskId: string;
+    timestamp: string;
+    tmuxPaneId: string | null;
+    tmuxSession: string;
+  },
+): number {
+  const result = database.prepare(`
+    insert into terminal_captures(
+      task_id, worker_id, manager_id, role, tmux_session, tmux_pane_id,
+      command_id, captured_at, history_lines, content_sha256, content,
+      content_path, byte_count, line_count, classifier_json, source
+    )
+    values (?, null, null, ?, ?, ?, null, ?, ?, ?, ?, null, ?, ?, ?, ?)
+  `).run(
+    options.taskId,
+    options.role,
+    options.tmuxSession,
+    options.tmuxPaneId,
+    options.timestamp,
+    options.historyLines,
+    options.contentSha256,
+    options.output,
+    Buffer.byteLength(options.output),
+    pythonSplitlinesCount(options.output),
+    stableJson(options.classifier),
+    options.source,
+  );
+  const captureId = Number(result.lastInsertRowid);
+  emitTelemetrySync(database, {
+    actor: "workerctl",
+    attributes: {
+      byte_count: Buffer.byteLength(options.output),
+      classifier: options.classifier,
+      content_path: null,
+      history_lines: options.historyLines,
+      line_count: pythonSplitlinesCount(options.output),
+      tmux_pane_id: options.tmuxPaneId,
+      tmux_session: options.tmuxSession,
+    },
+    correlation: {
+      capture_id: captureId,
+      command_id: null,
+      manager_id: null,
+      role: options.role,
+      source: options.source,
+      worker_id: null,
+    },
+    eventType: "terminal_capture_recorded",
+    severity: "info",
+    summary: `Recorded ${options.role} terminal capture.`,
+    taskId: options.taskId,
+    timestamp: options.timestamp,
+  });
+  return captureId;
+}
+
+function recordTranscriptSegmentSync(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  options: {
+    content: string;
+    contentSha256: string;
+    mode: TranscriptCaptureMode;
+    previousCapture: { content: string | null; content_sha256: string; id: number } | null;
+    role: "manager" | "worker";
+    sourceCaptureId: number;
+    taskId: string;
+    timestamp: string;
+  },
+): TranscriptSegmentSummary | null {
+  if (
+    options.previousCapture
+    && options.previousCapture.content_sha256 === options.contentSha256
+    && options.mode !== "metadata"
+  ) {
+    return null;
+  }
+  const delta = segmentTextDelta(options.previousCapture?.content ?? null, options.content);
+  let segmentText = delta.segmentText;
+  let startLine = delta.startLine;
+  let endLine = delta.endLine;
+  let segmentKind = delta.segmentKind;
+  if (segmentText === null && options.mode !== "metadata") {
+    return null;
+  }
+  if (options.mode === "metadata") {
+    segmentText = null;
+    startLine = null;
+    endLine = null;
+    segmentKind = "metadata";
+  } else if (options.mode === "excerpt") {
+    const sourceLines = (segmentText ?? options.content).split(/\r?\n/);
+    const excerptLines = sourceLines.slice(-40);
+    segmentText = excerptLines.join("\n");
+    endLine ??= pythonSplitlinesCount(options.content);
+    startLine = Math.max(1, (endLine || 0) - excerptLines.length + 1);
+    segmentKind = "excerpt";
+  } else if (options.mode === "snapshot") {
+    segmentText = options.content;
+    startLine = 1;
+    endLine = pythonSplitlinesCount(options.content);
+    segmentKind = "snapshot";
+  } else if (options.mode === "full") {
+    segmentKind = segmentKind === "reset" ? "reset" : "segment";
+  }
+  const result = database.prepare(`
+    insert into transcript_segments(
+      task_id, role, source_capture_id, previous_capture_id, captured_at,
+      content_sha256, segment_text, segment_start_line, segment_end_line,
+      byte_count, line_count, retention_class, segment_kind, created_at
+    )
+    values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'hot', ?, ?)
+  `).run(
+    options.taskId,
+    options.role,
+    options.sourceCaptureId,
+    options.previousCapture?.id ?? null,
+    options.timestamp,
+    options.contentSha256,
+    segmentText,
+    startLine,
+    endLine,
+    Buffer.byteLength(segmentText ?? ""),
+    pythonSplitlinesCount(segmentText ?? ""),
+    segmentKind,
+    options.timestamp,
+  );
+  const segmentId = Number(result.lastInsertRowid);
+  emitTelemetrySync(database, {
+    actor: "workerctl",
+    attributes: {
+      byte_count: Buffer.byteLength(segmentText ?? ""),
+      line_count: pythonSplitlinesCount(segmentText ?? ""),
+      retention_class: "hot",
+      segment_end_line: endLine,
+      segment_kind: segmentKind,
+      segment_start_line: startLine,
+    },
+    correlation: {
+      previous_capture_id: options.previousCapture?.id ?? null,
+      role: options.role,
+      segment_id: segmentId,
+      source_capture_id: options.sourceCaptureId,
+    },
+    eventType: "transcript_segment_recorded",
+    severity: "info",
+    summary: `Recorded ${options.role} transcript segment.`,
+    taskId: options.taskId,
+    timestamp: options.timestamp,
+  });
+  return {
+    id: segmentId,
+    line_count: pythonSplitlinesCount(segmentText ?? ""),
+    mode: options.mode,
+    previous_capture_id: options.previousCapture?.id ?? null,
+    segment_kind: segmentKind,
+    source_capture_id: options.sourceCaptureId,
+  };
+}
+
+function segmentTextDelta(
+  previous: string | null,
+  current: string,
+): { endLine: number | null; segmentKind: string; segmentText: string | null; startLine: number | null } {
+  const currentLines = current.split(/\r?\n/).filter((_, index, lines) => index < lines.length - 1 || lines[index] !== "");
+  if (previous === null) {
+    if (currentLines.length === 0) {
+      return { endLine: 0, segmentKind: "reset", segmentText: "", startLine: 1 };
+    }
+    return { endLine: currentLines.length, segmentKind: "reset", segmentText: current, startLine: 1 };
+  }
+  const previousLines = previous.split(/\r?\n/).filter((_, index, lines) => index < lines.length - 1 || lines[index] !== "");
+  if (JSON.stringify(previousLines) === JSON.stringify(currentLines)) {
+    return { endLine: null, segmentKind: "metadata", segmentText: null, startLine: null };
+  }
+  const maxOverlap = Math.min(previousLines.length, currentLines.length);
+  let overlap = 0;
+  for (let size = maxOverlap; size > 0; size -= 1) {
+    const previousTail = previousLines.slice(previousLines.length - size);
+    const currentHead = currentLines.slice(0, size);
+    if (JSON.stringify(previousTail) === JSON.stringify(currentHead)) {
+      overlap = size;
+      break;
+    }
+  }
+  if (overlap > 0) {
+    const newLines = currentLines.slice(overlap);
+    if (newLines.length === 0) {
+      return { endLine: null, segmentKind: "metadata", segmentText: null, startLine: null };
+    }
+    return {
+      endLine: currentLines.length,
+      segmentKind: "segment",
+      segmentText: newLines.join("\n"),
+      startLine: overlap + 1,
+    };
+  }
+  return { endLine: currentLines.length, segmentKind: "reset", segmentText: current, startLine: 1 };
+}
+
+function insertAgentObservationSync(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  options: {
+    message: string;
+    payload: Record<string, unknown>;
+    role: "manager" | "worker";
+    sourceCaptureId: number;
+    taskId: string;
+    timestamp: string;
+  },
+): number {
+  const result = database.prepare(`
+    insert into agent_observations(
+      task_id, worker_id, manager_id, role, observation_type, severity,
+      source_capture_id, command_id, created_at, message, payload_json
+    )
+    values (?, null, null, ?, 'capture', 'info', ?, null, ?, ?, ?)
+  `).run(
+    options.taskId,
+    options.role,
+    options.sourceCaptureId,
+    options.timestamp,
+    options.message,
+    stableJson(options.payload),
+  );
+  return Number(result.lastInsertRowid);
+}
+
+function redactCaptureResult(result: {
+  captures: Array<{ capture?: { output?: unknown } }>;
+  mode: TranscriptCaptureMode;
+  role: ReplayRole;
+  task: string;
+}): unknown {
+  return {
+    ...result,
+    captures: result.captures.map((capture) => {
+      if (!capture.capture || typeof capture.capture.output !== "string") {
+        return capture;
+      }
+      const { output, ...capturePayload } = capture.capture;
+      return {
+        ...capture,
+        capture: {
+          ...capturePayload,
+          output_byte_count: Buffer.byteLength(output),
+          output_line_count: pythonSplitlinesCount(output),
+          output_redacted: true,
+        },
+      };
+    }),
   };
 }
 
@@ -2762,6 +3382,10 @@ function isSessionRole(value: string): value is "manager" | "worker" {
 
 function isSessionState(value: string): value is "active" | "all" | "gone" {
   return value === "active" || value === "all" || value === "gone";
+}
+
+function isTranscriptCaptureMode(value: string): value is TranscriptCaptureMode {
+  return value === "metadata" || value === "excerpt" || value === "snapshot" || value === "segment" || value === "full";
 }
 
 function sortJson(value: unknown): unknown {
