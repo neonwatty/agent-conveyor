@@ -46,6 +46,30 @@ export function capturePaneArgs(target: string, historyLines: number): string[] 
   return ["tmux", "capture-pane", "-p", "-S", `-${historyLines}`, "-t", target];
 }
 
+export function currentPaneIdWithRunner(target: string, runner: TmuxRunner): string | null {
+  const result = runTmuxChecked(runner, listPanesArgs(target), { check: false });
+  raiseForTmuxPermissionFailure(result);
+  if (result.status !== 0) {
+    return null;
+  }
+  for (const line of (result.stdout ?? "").split(/\r?\n/)) {
+    const paneId = line.trim();
+    if (paneId) {
+      return paneId;
+    }
+  }
+  return null;
+}
+
+export function captureTmuxTargetWithRunner(
+  target: string,
+  historyLines: number,
+  runner: TmuxRunner,
+): string {
+  const result = runTmuxChecked(runner, capturePaneArgs(target, historyLines));
+  return (result.stdout ?? "").replace(/\n+$/, "");
+}
+
 export function isTmuxPermissionError(detail: string): boolean {
   const lowered = detail.toLowerCase();
   return TMUX_PERMISSION_MARKERS.some((marker) => lowered.includes(marker));
