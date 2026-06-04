@@ -130,6 +130,10 @@ export function tmuxSessionRunning(tmuxSessionName: string, runner: TmuxRunner):
   return result.status === 0;
 }
 
+export function killTmuxSessionWithRunner(tmuxSessionName: string, runner: TmuxRunner): void {
+  runTmuxChecked(runner, ["tmux", "kill-session", "-t", tmuxSessionName]);
+}
+
 export function sessionExists(name: string, runner: TmuxRunner): boolean {
   const result = runTmuxChecked(runner, hasSessionArgs(name), { check: false });
   raiseForTmuxPermissionFailure(result);

@@ -728,37 +728,27 @@ test("TypeScript runtime handles state-only finish-task and stop-task by default
       }),
       { exitCode: 0, handled: false },
     );
-    assert.deepEqual(
-      runTypescriptRuntimeCommand({
-        args: ["finish-task", "needs-live", "--stop-worker", "--path", dbPath],
-        cwd: root,
-        env: {},
-      }),
-      { exitCode: 0, handled: false },
-    );
     const explicitLive = runTypescriptRuntimeCommand({
       args: ["--ts-runtime", "finish-task", "needs-live", "--stop-worker", "--path", dbPath],
       cwd: root,
       env: {},
     });
     assert.equal(explicitLive.exitCode, 2);
-    assert.match(explicitLive.stderr ?? "", /state-only lifecycle without live session control/);
-    assert.deepEqual(
-      runTypescriptRuntimeCommand({
-        args: ["finish-task", "needs-capture", "--capture-transcript-before-stop", "--path", dbPath],
-        cwd: root,
-        env: {},
-      }),
-      { exitCode: 0, handled: false },
-    );
-    assert.deepEqual(
-      runTypescriptRuntimeCommand({
-        args: ["stop-task", "needs-worker-stop", "--stop-worker", "--path", dbPath],
-        cwd: root,
-        env: {},
-      }),
-      { exitCode: 0, handled: false },
-    );
+    assert.match(explicitLive.stderr ?? "", /Unknown task: needs-live/);
+    const needsCapture = runTypescriptRuntimeCommand({
+      args: ["finish-task", "needs-capture", "--capture-transcript-before-stop", "--path", dbPath],
+      cwd: root,
+      env: {},
+    });
+    assert.equal(needsCapture.exitCode, 2);
+    assert.match(needsCapture.stderr ?? "", /Unknown task: needs-capture/);
+    const needsWorkerStop = runTypescriptRuntimeCommand({
+      args: ["stop-task", "needs-worker-stop", "--stop-worker", "--path", dbPath],
+      cwd: root,
+      env: {},
+    });
+    assert.equal(needsWorkerStop.exitCode, 2);
+    assert.match(needsWorkerStop.stderr ?? "", /Unknown task: needs-worker-stop/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -1577,6 +1567,344 @@ test("TypeScript runtime handles events update-status and transcript commands by
       }),
       { exitCode: 0, handled: false },
     );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("TypeScript runtime handles live finish-task stop and strict decisions with fake tmux", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-lifecycle-live."));
+  const calls: string[][] = [];
+  const runner: TmuxRunner = (args) => {
+    calls.push(args);
+    const command = args.join(" ");
+    if (command === "tmux has-session -t session-live-worker" || command === "tmux has-session -t session-live-manager") {
+      return { status: 0, stdout: "" };
+    }
+    if (command === "tmux list-panes -t session-live-worker -F #{pane_id}") {
+      return { status: 0, stdout: "%11\n" };
+    }
+    if (command === "tmux list-panes -t session-live-manager -F #{pane_id}") {
+      return { status: 0, stdout: "%22\n" };
+    }
+    if (command === "tmux capture-pane -p -t session-live-worker -S -33") {
+      return { status: 0, stdout: "worker before stop\nmore worker\n" };
+    }
+    if (command === "tmux capture-pane -p -t session-live-manager -S -33") {
+      return { status: 0, stdout: "manager before stop\nmore manager\n" };
+    }
+    if (command === "tmux set-buffer -b workerctl-session-live-worker final note") {
+      return { status: 0, stdout: "" };
+    }
+    if (command === "tmux paste-buffer -b workerctl-session-live-worker -t session-live-worker:%11") {
+      return { status: 0, stdout: "" };
+    }
+    if (command === "tmux send-keys -t session-live-worker:%11 C-m") {
+      return { status: 0, stdout: "" };
+    }
+    if (command === "tmux delete-buffer -b workerctl-session-live-worker") {
+      return { status: 0, stdout: "" };
+    }
+    if (command === "tmux kill-session -t session-live-worker" || command === "tmux kill-session -t session-live-manager") {
+      return { status: 0, stdout: "" };
+    }
+    return { status: 1, stderr: `unexpected tmux command: ${command}` };
+  };
+  try {
+    const dbPath = join(root, "workerctl.db");
+    const database = openDatabaseSync(dbPath);
+    let decisionId: number;
+    try {
+      initializeDatabaseSync(database);
+      const taskId = createTaskSync(database, {
+        goal: "Finish with live cleanup.",
+        name: "live-finish",
+        now: "2026-06-04T13:00:00Z",
+        taskId: "task-live-finish",
+      });
+      insertSession(database, {
+        id: "session-live-worker-id",
+        name: "live-worker",
+        role: "worker",
+        tmuxPaneId: "%11",
+        tmuxSession: "session-live-worker",
+      });
+      insertSession(database, {
+        id: "session-live-manager-id",
+        name: "live-manager",
+        role: "manager",
+        tmuxPaneId: "%22",
+        tmuxSession: "session-live-manager",
+      });
+      bindSessionsSync(database, {
+        bindingId: "binding-live-finish",
+        managerSessionName: "live-manager",
+        taskName: "live-finish",
+        workerSessionName: "live-worker",
+      });
+      const decision = database.prepare(`
+        insert into manager_decisions(task_id, manager_id, manager_cycle_id, decision, reason, created_at, payload_json)
+        values (?, null, null, 'stop', 'Approved stop.', ?, '{}')
+      `).run(taskId, new Date().toISOString());
+      decisionId = Number(decision.lastInsertRowid);
+    } finally {
+      database.close();
+    }
+
+    const result = runTypescriptRuntimeCommand({
+      args: [
+        "finish-task",
+        "live-finish",
+        "--stop-manager",
+        "--stop-worker",
+        "--message",
+        "final note",
+        "--capture-transcript-before-stop",
+        "--capture-transcript-lines",
+        "33",
+        "--require-transcript-segment",
+        "--decision-id",
+        String(decisionId),
+        "--strict-decisions",
+        "--reason",
+        "Live cleanup complete.",
+        "--path",
+        dbPath,
+      ],
+      cwd: root,
+      env: {},
+      tmuxRunner: runner,
+    });
+
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.equal(result.handled, true);
+    const payload = JSON.parse(result.stdout ?? "{}") as {
+      killed_manager: boolean;
+      killed_worker: boolean;
+      manager_decision: { ok: boolean; warnings: string[] };
+      manager_session: string;
+      pre_stop_transcript_captures: Array<{ role: string; transcript_segment: { line_count: number } | null }>;
+      stop_manager: boolean;
+      stop_worker: boolean;
+      worker_session: string;
+    };
+    assert.equal(payload.stop_manager, true);
+    assert.equal(payload.stop_worker, true);
+    assert.equal(payload.killed_manager, true);
+    assert.equal(payload.killed_worker, true);
+    assert.equal(payload.worker_session, "live-worker");
+    assert.equal(payload.manager_session, "live-manager");
+    assert.equal(payload.manager_decision.ok, true);
+    assert.deepEqual(payload.manager_decision.warnings, []);
+    assert.deepEqual(
+      payload.pre_stop_transcript_captures.map((capture) => ({
+        line_count: capture.transcript_segment?.line_count,
+        role: capture.role,
+      })),
+      [
+        { line_count: 2, role: "worker" },
+        { line_count: 2, role: "manager" },
+      ],
+    );
+    assert.deepEqual(calls, [
+      ["tmux", "has-session", "-t", "session-live-worker"],
+      ["tmux", "list-panes", "-t", "session-live-worker", "-F", "#{pane_id}"],
+      ["tmux", "capture-pane", "-p", "-t", "session-live-worker", "-S", "-33"],
+      ["tmux", "has-session", "-t", "session-live-manager"],
+      ["tmux", "list-panes", "-t", "session-live-manager", "-F", "#{pane_id}"],
+      ["tmux", "capture-pane", "-p", "-t", "session-live-manager", "-S", "-33"],
+      ["tmux", "has-session", "-t", "session-live-worker"],
+      ["tmux", "set-buffer", "-b", "workerctl-session-live-worker", "final note"],
+      ["tmux", "paste-buffer", "-b", "workerctl-session-live-worker", "-t", "session-live-worker:%11"],
+      ["tmux", "send-keys", "-t", "session-live-worker:%11", "C-m"],
+      ["tmux", "delete-buffer", "-b", "workerctl-session-live-worker"],
+      ["tmux", "kill-session", "-t", "session-live-worker"],
+      ["tmux", "kill-session", "-t", "session-live-manager"],
+    ]);
+
+    const after = openDatabaseSync(dbPath);
+    try {
+      const states = after.prepare("select name, state from sessions order by name")
+        .all() as Array<{ name: string; state: string }>;
+      assert.deepEqual(states.map((state) => ({ ...state })), [
+        { name: "live-manager", state: "gone" },
+        { name: "live-worker", state: "gone" },
+      ]);
+      const task = after.prepare("select state from tasks where name = 'live-finish'")
+        .get() as { state: string };
+      assert.equal(task.state, "done");
+      const captureCount = after.prepare("select count(*) as count from terminal_captures where task_id = 'task-live-finish'")
+        .get() as { count: number };
+      assert.equal(captureCount.count, 2);
+      const eventTypes = after.prepare("select type from events where task_id = 'task-live-finish' order by id")
+        .all() as Array<{ type: string }>;
+      assert.ok(eventTypes.some((event) => event.type === "finish_task_pre_stop_transcript_captured"));
+      assert.ok(eventTypes.some((event) => event.type === "finish_task_succeeded"));
+    } finally {
+      after.close();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("TypeScript runtime records failed live lifecycle side effects without completing task", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-lifecycle-fail."));
+  const calls: string[][] = [];
+  const runner: TmuxRunner = (args) => {
+    calls.push(args);
+    if (args.join(" ") === "tmux kill-session -t session-fail-manager") {
+      return { status: 1, stderr: "manager still busy" };
+    }
+    return { status: 0, stdout: "" };
+  };
+  try {
+    const dbPath = join(root, "workerctl.db");
+    const database = openDatabaseSync(dbPath);
+    try {
+      initializeDatabaseSync(database);
+      createTaskSync(database, {
+        goal: "Stay active if stop side effects fail.",
+        name: "fail-stop",
+        taskId: "task-fail-stop",
+      });
+      insertSession(database, {
+        id: "session-fail-worker-id",
+        name: "fail-worker",
+        role: "worker",
+      });
+      insertSession(database, {
+        id: "session-fail-manager-id",
+        name: "fail-manager",
+        role: "manager",
+        tmuxSession: "session-fail-manager",
+      });
+      bindSessionsSync(database, {
+        bindingId: "binding-fail-stop",
+        managerSessionName: "fail-manager",
+        taskName: "fail-stop",
+        workerSessionName: "fail-worker",
+      });
+    } finally {
+      database.close();
+    }
+
+    const result = runTypescriptRuntimeCommand({
+      args: ["stop-task", "fail-stop", "--reason", "Stop failed live manager.", "--path", dbPath],
+      cwd: root,
+      env: {},
+      tmuxRunner: runner,
+    });
+
+    assert.equal(result.exitCode, 1);
+    assert.match(result.stderr ?? "", /tmux kill-session -t session-fail-manager failed: manager still busy/);
+    assert.deepEqual(calls, [
+      ["tmux", "kill-session", "-t", "session-fail-manager"],
+    ]);
+
+    const after = openDatabaseSync(dbPath);
+    try {
+      const task = after.prepare("select state from tasks where name = 'fail-stop'")
+        .get() as { state: string };
+      assert.equal(task.state, "candidate");
+      const binding = after.prepare("select state from bindings where id = 'binding-fail-stop'")
+        .get() as { state: string };
+      assert.equal(binding.state, "active");
+      const managerSession = after.prepare("select state from sessions where name = 'fail-manager'")
+        .get() as { state: string };
+      assert.equal(managerSession.state, "active");
+      const command = after.prepare(`
+        select state, result_json, error
+        from commands
+        where task_id = 'task-fail-stop'
+      `).get() as { error: string; result_json: string; state: string };
+      assert.equal(command.state, "failed");
+      assert.match(command.error, /tmux kill-session -t session-fail-manager failed: manager still busy/);
+      const commandResult = JSON.parse(command.result_json) as {
+        expected_failure: boolean;
+        failure_stage: string;
+        stop_manager: boolean;
+        stop_worker: boolean;
+      };
+      assert.equal(commandResult.expected_failure, true);
+      assert.equal(commandResult.failure_stage, "live_lifecycle_side_effects");
+      assert.equal(commandResult.stop_manager, true);
+      assert.equal(commandResult.stop_worker, false);
+      const failedEvent = after.prepare("select payload_json from events where type = 'stop_task_failed'")
+        .get() as { payload_json: string };
+      const failedPayload = JSON.parse(failedEvent.payload_json) as { failure_stage: string };
+      assert.equal(failedPayload.failure_stage, "live_lifecycle_side_effects");
+    } finally {
+      after.close();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("TypeScript runtime rejects strict stop-task decision before mutating state", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-lifecycle-strict."));
+  const calls: string[][] = [];
+  const runner: TmuxRunner = (args) => {
+    calls.push(args);
+    return { status: 0, stdout: "" };
+  };
+  try {
+    const dbPath = join(root, "workerctl.db");
+    const database = openDatabaseSync(dbPath);
+    try {
+      initializeDatabaseSync(database);
+      createTaskSync(database, {
+        goal: "Reject missing strict decision.",
+        name: "strict-stop",
+        taskId: "task-strict-stop",
+      });
+      insertSession(database, {
+        id: "session-strict-worker-id",
+        name: "strict-worker",
+        role: "worker",
+        tmuxSession: "session-strict-worker",
+      });
+      insertSession(database, {
+        id: "session-strict-manager-id",
+        name: "strict-manager",
+        role: "manager",
+        tmuxSession: "session-strict-manager",
+      });
+      bindSessionsSync(database, {
+        bindingId: "binding-strict-stop",
+        managerSessionName: "strict-manager",
+        taskName: "strict-stop",
+        workerSessionName: "strict-worker",
+      });
+    } finally {
+      database.close();
+    }
+
+    const result = runTypescriptRuntimeCommand({
+      args: ["stop-task", "strict-stop", "--strict-decisions", "--path", dbPath],
+      cwd: root,
+      env: {},
+      tmuxRunner: runner,
+    });
+
+    assert.equal(result.exitCode, 1);
+    assert.match(result.stderr ?? "", /strict manager decision validation failed/);
+    assert.deepEqual(calls, []);
+    const after = openDatabaseSync(dbPath);
+    try {
+      const task = after.prepare("select state from tasks where name = 'strict-stop'")
+        .get() as { state: string };
+      assert.equal(task.state, "candidate");
+      const commandCount = after.prepare("select count(*) as count from commands")
+        .get() as { count: number };
+      assert.equal(commandCount.count, 0);
+      const binding = after.prepare("select state from bindings where id = 'binding-strict-stop'")
+        .get() as { state: string };
+      assert.equal(binding.state, "active");
+    } finally {
+      after.close();
+    }
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
