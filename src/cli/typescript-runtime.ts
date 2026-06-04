@@ -1,7 +1,11 @@
+import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 import { taskAuditSync } from "../runtime/audit.js";
+import { classifyBusyWait, classifyStartupOutput } from "../runtime/classify.js";
 import { exportTaskAuditSubsetSync } from "../runtime/export.js";
+import { ingestSessionSync } from "../runtime/ingest.js";
 import {
   renderReplayText,
   replayResultFromAudit,
@@ -38,6 +42,8 @@ export interface TypescriptRuntimeResult {
   stderr?: string;
   stdout?: string;
 }
+
+const DEFAULT_BUSY_WAIT_SECONDS = 90;
 
 export function runTypescriptRuntimeCommand(options: {
   args: readonly string[];
@@ -97,6 +103,15 @@ export function runTypescriptRuntimeCommand(options: {
     if (parsed.command === "discover" || parsed.command === "search") {
       return runDiscoverCommand(parsed, options);
     }
+    if (parsed.command === "classify") {
+      return runClassifyCommand(parsed);
+    }
+    if (parsed.command === "ingest") {
+      return runIngestCommand(parsed, options);
+    }
+    if (parsed.command === "tail") {
+      return runTailCommand(parsed, options);
+    }
     if (parsed.explicit) {
       return errorResult(`Unsupported TypeScript runtime command: ${parsed.command}`);
     }
@@ -120,9 +135,11 @@ interface ParsedRuntimeArgs {
     includeLegacy: boolean;
     redactIdentityToken: boolean;
     active: boolean;
+    busyWaitSeconds: number;
     codexSession: string | null;
     create: string | null;
     cwd: string | null;
+    file: string | null;
     goal: string | null;
     limit: number | null;
     names: string[];
@@ -132,8 +149,11 @@ interface ParsedRuntimeArgs {
     role: ReplayRole;
     sessionRole: "manager" | "worker" | null;
     sessionState: "active" | "all" | "gone" | null;
+    statusAgeSeconds: number;
+    subtype: string | null;
     summary: string | null;
     taskName: string | null;
+    text: string | null;
     tmuxSession: string | null;
     worker: string | null;
     manager: string | null;
@@ -155,9 +175,11 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
     includeLegacy: false,
     redactIdentityToken: false,
     active: false,
+    busyWaitSeconds: DEFAULT_BUSY_WAIT_SECONDS,
     codexSession: null,
     create: null,
     cwd: null,
+    file: null,
     goal: null,
     limit: null,
     names: [],
@@ -167,8 +189,11 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
     role: "all",
     sessionRole: null,
     sessionState: null,
+    statusAgeSeconds: DEFAULT_BUSY_WAIT_SECONDS,
+    subtype: null,
     summary: null,
     taskName: null,
+    text: null,
     tmuxSession: null,
     worker: null,
     manager: null,
@@ -264,6 +289,20 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       }
       flags.cwd = value.value;
       index += 1;
+    } else if (arg === "--file") {
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.file = value.value;
+      index += 1;
+    } else if (arg === "--text") {
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.text = value.value;
+      index += 1;
     } else if (arg === "--tmux-session") {
       const value = valueAfter(queue, index, arg);
       if (value.error) {
@@ -337,6 +376,35 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
         return { command, enabled, error: `Unsupported sessions state: ${value}`, explicit, flags, task };
       }
       flags.sessionState = value;
+      index += 1;
+    } else if (arg === "--subtype") {
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.subtype = value.value;
+      index += 1;
+    } else if (arg === "--status-age-seconds") {
+      const parsedValue = valueAfter(queue, index, arg);
+      if (parsedValue.error) {
+        return { command, enabled, error: parsedValue.error, explicit, flags, task };
+      }
+      const value = Number(parsedValue.value);
+      if (!Number.isInteger(value)) {
+        return { command, enabled, error: "--status-age-seconds must be an integer.", explicit, flags, task };
+      }
+      flags.statusAgeSeconds = value;
+      index += 1;
+    } else if (arg === "--busy-wait-seconds") {
+      const parsedValue = valueAfter(queue, index, arg);
+      if (parsedValue.error) {
+        return { command, enabled, error: parsedValue.error, explicit, flags, task };
+      }
+      const value = Number(parsedValue.value);
+      if (!Number.isInteger(value)) {
+        return { command, enabled, error: "--busy-wait-seconds must be an integer.", explicit, flags, task };
+      }
+      flags.busyWaitSeconds = value;
       index += 1;
     } else if (arg === "--limit") {
       const parsedValue = valueAfter(queue, index, arg);
@@ -689,6 +757,84 @@ function runDiscoverCommand(
   }
 }
 
+function runClassifyCommand(parsed: ParsedRuntimeArgs): TypescriptRuntimeResult {
+  const unsupported = unsupportedClassifyOptions(parsed);
+  if (unsupported) {
+    return unsupportedRuntimeResult(parsed, unsupported);
+  }
+  if (parsed.flags.text === null && parsed.flags.file === null) {
+    return unsupportedRuntimeResult(parsed, "TypeScript runtime classify requires --text or --file.");
+  }
+  const output = parsed.flags.text ?? readFileSync(parsed.flags.file ?? "", "utf8");
+  const [startup, startupReason] = classifyStartupOutput(output);
+  return jsonResult({
+    busy_wait: classifyBusyWait(output, parsed.flags.statusAgeSeconds, parsed.flags.busyWaitSeconds),
+    busy_wait_seconds: parsed.flags.busyWaitSeconds,
+    startup,
+    startup_reason: startupReason,
+    status_age_seconds: parsed.flags.statusAgeSeconds,
+  });
+}
+
+function runIngestCommand(
+  parsed: ParsedRuntimeArgs,
+  options: { cwd?: string; env?: NodeJS.ProcessEnv },
+): TypescriptRuntimeResult {
+  const unsupported = unsupportedIngestOptions(parsed);
+  if (unsupported) {
+    return unsupportedRuntimeResult(parsed, unsupported);
+  }
+  if (!parsed.task) {
+    return unsupportedRuntimeResult(parsed, "ingest requires a session name.");
+  }
+  const database = openRuntimeDatabase(parsed, options);
+  try {
+    return jsonResult({ session: parsed.task, ...ingestSessionSync(database, { sessionName: parsed.task }) });
+  } finally {
+    database.close();
+  }
+}
+
+function runTailCommand(
+  parsed: ParsedRuntimeArgs,
+  options: { cwd?: string; env?: NodeJS.ProcessEnv },
+): TypescriptRuntimeResult {
+  const unsupported = unsupportedTailOptions(parsed);
+  if (unsupported) {
+    return unsupportedRuntimeResult(parsed, unsupported);
+  }
+  if (!parsed.task) {
+    return unsupportedRuntimeResult(parsed, "tail requires a session name.");
+  }
+  const database = openRuntimeDatabase(parsed, options);
+  try {
+    const session = sessionRow(database, parsed.task);
+    const rows = latestCodexEventsForSession(database, {
+      includeContent: parsed.flags.includeContent,
+      limit: parsed.flags.limit ?? 50,
+      sessionId: session.id,
+      subtype: parsed.flags.subtype,
+    });
+    emitTelemetrySync(database, {
+      actor: "workerctl",
+      attributes: {
+        limit: parsed.flags.limit ?? 50,
+        returned_count: rows.length,
+        subtype: parsed.flags.subtype,
+      },
+      correlation: { session: parsed.task, session_id: session.id },
+      eventType: "codex_events_tail_read",
+      severity: "info",
+      summary: `Read recent Codex events for session ${parsed.task}.`,
+      taskId: null,
+      timestamp: new Date().toISOString(),
+    });
+    return jsonResult(rows);
+  } finally {
+    database.close();
+  }
+}
+
 function openRuntimeDatabase(
   parsed: ParsedRuntimeArgs,
   options: { cwd?: string; env?: NodeJS.ProcessEnv },
@@ -719,6 +865,9 @@ function isDefaultRuntimeCommand(command: string | null): boolean {
     || command === "deregister"
     || command === "discover"
     || command === "search"
+    || command === "classify"
+    || command === "ingest"
+    || command === "tail"
   );
 }
 
@@ -932,6 +1081,115 @@ function unsupportedDiscoverOptions(parsed: ParsedRuntimeArgs): string | null {
   return null;
 }
 
+function unsupportedClassifyOptions(parsed: ParsedRuntimeArgs): string | null {
+  if (parsed.task) {
+    return `Unexpected argument: ${parsed.task}`;
+  }
+  if (
+    parsed.flags.active
+    || parsed.flags.all
+    || parsed.flags.codexSession !== null
+    || parsed.flags.create !== null
+    || parsed.flags.cwd !== null
+    || parsed.flags.goal !== null
+    || parsed.flags.includeContent
+    || parsed.flags.includeFullTranscripts
+    || parsed.flags.includeLegacy
+    || parsed.flags.includeTranscripts
+    || parsed.flags.json
+    || parsed.flags.names.length > 0
+    || parsed.flags.output !== null
+    || parsed.flags.path !== null
+    || parsed.flags.pid !== null
+    || parsed.flags.redactIdentityToken
+    || parsed.flags.sessionRole !== null
+    || parsed.flags.sessionState !== null
+    || parsed.flags.subtype !== null
+    || parsed.flags.summary !== null
+    || parsed.flags.taskName !== null
+    || parsed.flags.tmuxSession !== null
+    || parsed.flags.worker !== null
+    || parsed.flags.manager !== null
+    || parsed.flags.zip
+  ) {
+    return "Unsupported TypeScript runtime option for classify.";
+  }
+  return null;
+}
+
+function unsupportedIngestOptions(parsed: ParsedRuntimeArgs): string | null {
+  if (
+    parsed.flags.active
+    || parsed.flags.all
+    || parsed.flags.busyWaitSeconds !== DEFAULT_BUSY_WAIT_SECONDS
+    || parsed.flags.codexSession !== null
+    || parsed.flags.create !== null
+    || parsed.flags.cwd !== null
+    || parsed.flags.file !== null
+    || parsed.flags.goal !== null
+    || parsed.flags.includeContent
+    || parsed.flags.includeFullTranscripts
+    || parsed.flags.includeLegacy
+    || parsed.flags.includeTranscripts
+    || parsed.flags.json
+    || parsed.flags.limit !== null
+    || parsed.flags.names.length > 0
+    || parsed.flags.output !== null
+    || parsed.flags.path !== null
+    || parsed.flags.pid !== null
+    || parsed.flags.redactIdentityToken
+    || parsed.flags.sessionRole !== null
+    || parsed.flags.sessionState !== null
+    || parsed.flags.statusAgeSeconds !== DEFAULT_BUSY_WAIT_SECONDS
+    || parsed.flags.subtype !== null
+    || parsed.flags.summary !== null
+    || parsed.flags.taskName !== null
+    || parsed.flags.text !== null
+    || parsed.flags.tmuxSession !== null
+    || parsed.flags.worker !== null
+    || parsed.flags.manager !== null
+    || parsed.flags.zip
+  ) {
+    return "Unsupported TypeScript runtime option for ingest.";
+  }
+  return null;
+}
+
+function unsupportedTailOptions(parsed: ParsedRuntimeArgs): string | null {
+  if (
+    parsed.flags.active
+    || parsed.flags.all
+    || parsed.flags.busyWaitSeconds !== DEFAULT_BUSY_WAIT_SECONDS
+    || parsed.flags.codexSession !== null
+    || parsed.flags.create !== null
+    || parsed.flags.cwd !== null
+    || parsed.flags.file !== null
+    || parsed.flags.goal !== null
+    || parsed.flags.includeFullTranscripts
+    || parsed.flags.includeLegacy
+    || parsed.flags.includeTranscripts
+    || parsed.flags.json
+    || parsed.flags.names.length > 0
+    || parsed.flags.output !== null
+    || parsed.flags.path !== null
+    || parsed.flags.pid !== null
+    || parsed.flags.redactIdentityToken
+    || parsed.flags.sessionRole !== null
+    || parsed.flags.sessionState !== null
+    || parsed.flags.statusAgeSeconds !== DEFAULT_BUSY_WAIT_SECONDS
+    || parsed.flags.summary !== null
+    || parsed.flags.taskName !== null
+    || parsed.flags.text !== null
+    || parsed.flags.tmuxSession !== null
+    || parsed.flags.worker !== null
+    || parsed.flags.manager !== null
+    || parsed.flags.zip
+  ) {
+    return "Unsupported TypeScript runtime option for tail.";
+  }
+  return null;
+}
+
 function singleName(parsed: ParsedRuntimeArgs): string | null {
   return parsed.flags.names.length === 1 ? parsed.flags.names[0] : null;
 }
@@ -1074,13 +1332,16 @@ function emitTelemetrySync(
     timestamp: string;
   },
 ): void {
+  const eventId = `telemetry-${randomUUID()}`;
+  const attributesJson = stableJson(options.attributes);
   database.prepare(`
     insert into telemetry_events(
-      run_id, task_id, timestamp, actor, event_type, severity,
+      id, run_id, task_id, timestamp, actor, event_type, severity,
       summary, correlation_json, attributes_json
     )
-    values (null, ?, ?, ?, ?, ?, ?, ?, ?)
+    values (?, null, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
+    eventId,
     options.taskId ?? null,
     options.timestamp,
     options.actor,
@@ -1088,8 +1349,86 @@ function emitTelemetrySync(
     options.severity,
     options.summary,
     stableJson(options.correlation),
-    stableJson(options.attributes),
+    attributesJson,
   );
+  database.prepare(`
+    insert into telemetry_events_fts(
+      event_id, task_id, run_id, actor, event_type, summary, attributes
+    )
+    values (?, ?, null, ?, ?, ?, ?)
+  `).run(
+    eventId,
+    options.taskId ?? null,
+    options.actor,
+    options.eventType,
+    options.summary,
+    attributesJson,
+  );
+}
+
+function latestCodexEventsForSession(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  options: { includeContent: boolean; limit: number; sessionId: string; subtype: string | null },
+): Array<Record<string, unknown>> {
+  const clauses = ["session_id = ?"];
+  const params: Array<number | string> = [options.sessionId];
+  if (options.subtype !== null) {
+    clauses.push("subtype = ?");
+    params.push(options.subtype);
+  }
+  params.push(options.limit);
+  const rows = database.prepare(`
+    select id, timestamp, type, subtype, byte_offset, payload_json
+    from codex_events
+    where ${clauses.join(" and ")}
+    order by id desc
+    limit ?
+  `).all(...params) as Array<{
+    byte_offset: number;
+    id: number;
+    payload_json: string;
+    subtype: string | null;
+    timestamp: string;
+    type: string;
+  }>;
+  return rows.map((row) => ({
+    byte_offset: row.byte_offset,
+    id: row.id,
+    payload: options.includeContent ? JSON.parse(row.payload_json) : redactPayload(JSON.parse(row.payload_json)),
+    subtype: row.subtype,
+    timestamp: row.timestamp,
+    type: row.type,
+  }));
+}
+
+const CONTENT_KEYS = new Set(["content", "message", "output", "segment_text", "text"]);
+
+function redactPayload(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(redactPayload);
+  }
+  if (value === null || typeof value !== "object") {
+    return value;
+  }
+  const redacted: Record<string, unknown> = {};
+  for (const [key, child] of Object.entries(value)) {
+    if (CONTENT_KEYS.has(key) && typeof child === "string") {
+      redacted[`${key}_redacted`] = true;
+      redacted[`${key}_byte_count`] = Buffer.byteLength(child);
+      redacted[`${key}_line_count`] = pythonSplitlinesCount(child);
+      continue;
+    }
+    redacted[key] = redactPayload(child);
+  }
+  return redacted;
+}
+
+function pythonSplitlinesCount(value: string): number {
+  if (value.length === 0) {
+    return 0;
+  }
+  const lineBreaks = value.match(/\r\n|\r|\n/g)?.length ?? 0;
+  return lineBreaks + (/(?:\r\n|\r|\n)$/.test(value) ? 0 : 1);
 }
 
 function stableJson(payload: unknown): string {
