@@ -266,7 +266,12 @@ test("TypeScript runtime handles no-tmux create-disposable-binding by default", 
       };
       replay_commands: string[];
       run: {
-        metadata: { current_iteration: number; max_iterations: number; required_before_continue: string[] };
+        metadata: {
+          current_iteration: number;
+          max_iterations: number;
+          policy_record: boolean;
+          required_before_continue: string[];
+        };
         name: string;
         purpose: string;
         status: string;
@@ -304,10 +309,11 @@ test("TypeScript runtime handles no-tmux create-disposable-binding by default", 
     );
     assert.equal(payload.run.name, "real-slice-run");
     assert.equal(payload.run.purpose, "ralph_loop");
-    assert.equal(payload.run.status, "active");
+    assert.equal(payload.run.status, "finished");
     assert.deepEqual(payload.run.metadata.required_before_continue, ["adversarial_check"]);
     assert.equal(payload.run.metadata.max_iterations, 2);
     assert.equal(payload.run.metadata.current_iteration, 1);
+    assert.equal(payload.run.metadata.policy_record, true);
     assert.ok(payload.replay_commands.some((command) => command.includes("enqueue-continue-iteration")));
     assert.ok(payload.replay_commands.some((command) => command.includes("worker-inbox")));
     assert.ok(payload.replay_commands.some((command) => command.includes("loop-status")));
@@ -346,8 +352,13 @@ test("TypeScript runtime handles no-tmux create-disposable-binding by default", 
         .get() as { metadata_json: string; name: string; purpose: string; status: string };
       assert.equal(run.name, "real-slice-run");
       assert.equal(run.purpose, "ralph_loop");
-      assert.equal(run.status, "active");
-      assert.deepEqual(JSON.parse(run.metadata_json).required_before_continue, ["adversarial_check"]);
+      assert.equal(run.status, "finished");
+      const runMetadata = JSON.parse(run.metadata_json) as {
+        policy_record: boolean;
+        required_before_continue: string[];
+      };
+      assert.deepEqual(runMetadata.required_before_continue, ["adversarial_check"]);
+      assert.equal(runMetadata.policy_record, true);
       const event = database.prepare("select task_id, payload_json from events where type = 'disposable_binding_created'")
         .get() as { payload_json: string; task_id: string };
       assert.equal(event.task_id, payload.task.id);
@@ -361,14 +372,95 @@ test("TypeScript runtime handles no-tmux create-disposable-binding by default", 
       database.close();
     }
 
-    assert.deepEqual(
-      runTypescriptRuntimeCommand({
-        args: ["create-disposable-binding", "templated-slice", "--template", "adversarial", "--path", dbPath],
-        cwd: root,
-        env: {},
-      }),
-      { exitCode: 0, handled: false },
-    );
+    const templated = runTypescriptRuntimeCommand({
+      args: [
+        "create-disposable-binding",
+        "templated-slice",
+        "--worker",
+        "templated-worker",
+        "--manager",
+        "templated-manager",
+        "--template",
+        "visual_diff_loop",
+        "--max-iterations",
+        "5",
+        "--current-iteration",
+        "2",
+        "--seed-prompt-sha256",
+        "seed-template",
+        "--required-before-continue",
+        "manual_review",
+        "--run-name",
+        "templated-run",
+        "--path",
+        dbPath,
+        "--json",
+      ],
+      cwd: root,
+      env: {},
+    });
+    assert.equal(templated.exitCode, 0, templated.stderr);
+    assert.equal(templated.handled, true);
+    const templatedPayload = JSON.parse(templated.stdout ?? "{}") as {
+      replay_commands: string[];
+      run: {
+        metadata: {
+          artifact_requirements: Record<string, unknown>;
+          cleanup_policy: string;
+          current_iteration: number;
+          max_iterations: number;
+          policy_record: boolean;
+          recommended_tools: string[];
+          required_before_continue: string[];
+          seed_prompt_sha256: string;
+          stop_conditions: string[];
+          tags: string[];
+          template: string;
+        };
+        name: string;
+        status: string;
+      };
+    };
+    assert.equal(templatedPayload.run.name, "templated-run");
+    assert.equal(templatedPayload.run.status, "finished");
+    assert.equal(templatedPayload.run.metadata.template, "visual_diff_loop");
+    assert.equal(templatedPayload.run.metadata.max_iterations, 5);
+    assert.equal(templatedPayload.run.metadata.current_iteration, 2);
+    assert.equal(templatedPayload.run.metadata.cleanup_policy, "compact");
+    assert.equal(templatedPayload.run.metadata.seed_prompt_sha256, "seed-template");
+    assert.equal(templatedPayload.run.metadata.policy_record, true);
+    assert.deepEqual(templatedPayload.run.metadata.stop_conditions, [
+      "max_iterations",
+      "required_evidence",
+      "manager_accepts",
+    ]);
+    assert.deepEqual(templatedPayload.run.metadata.required_before_continue, [
+      "reference_artifact",
+      "candidate_screenshot",
+      "visual_diff_report",
+      "diff_below_threshold",
+      "adversarial_check",
+      "manual_review",
+    ]);
+    assert.deepEqual(templatedPayload.run.metadata.recommended_tools, ["browser", "playwright", "pixelmatch"]);
+    assert.deepEqual(templatedPayload.run.metadata.tags, ["visual", "frontend", "qa"]);
+    assert.ok("visual_diff_report" in templatedPayload.run.metadata.artifact_requirements);
+    assert.ok(templatedPayload.replay_commands[0].includes("--template"));
+    assert.ok(templatedPayload.replay_commands[0].includes("visual_diff_loop"));
+    const unknownTemplate = runTypescriptRuntimeCommand({
+      args: ["create-disposable-binding", "unknown-template", "--template", "not_real", "--path", dbPath],
+      cwd: root,
+      env: {},
+    });
+    assert.equal(unknownTemplate.exitCode, 2);
+    assert.match(unknownTemplate.stderr ?? "", /Unknown loop template: not_real/);
+    const partialTask = openDatabaseSync(dbPath);
+    try {
+      const row = partialTask.prepare("select id from tasks where name = 'unknown-template'").get();
+      assert.equal(row, undefined);
+    } finally {
+      partialTask.close();
+    }
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -497,7 +589,6 @@ test("TypeScript runtime handles state-only finish-task and stop-task by default
       assert.ok(telemetryTypes.some((event) => event.event_type === "command_attempted"));
       assert.ok(telemetryTypes.some((event) => event.event_type === "command_succeeded"));
       assert.ok(telemetryTypes.some((event) => event.event_type === "manager_decision_recorded"));
-      assert.ok(telemetryTypes.some((event) => event.event_type === "run_finished"));
       assert.ok(telemetryTypes.some((event) => event.event_type === "task_finished"));
     } finally {
       afterFinish.close();
@@ -554,7 +645,7 @@ test("TypeScript runtime handles state-only finish-task and stop-task by default
       assert.equal(task.state, "done");
       const run = afterStop.prepare("select status from runs where name = 'stop-run'")
         .get() as { status: string };
-      assert.equal(run.status, "abandoned");
+      assert.equal(run.status, "finished");
       const command = afterStop.prepare("select type, state from commands where id = ?")
         .get(stopPayload.command_id) as { state: string; type: string };
       assert.equal(command.type, "stop_task");
@@ -565,10 +656,68 @@ test("TypeScript runtime handles state-only finish-task and stop-task by default
       assert.ok(eventTypes.some((event) => event.type === "stop_task_succeeded"));
       const telemetryTypes = afterStop.prepare("select event_type from telemetry_events where task_id = (select id from tasks where name = 'stop-slice')")
         .all() as Array<{ event_type: string }>;
-      assert.ok(telemetryTypes.some((event) => event.event_type === "run_finished"));
       assert.ok(telemetryTypes.some((event) => event.event_type === "task_stopped"));
     } finally {
       afterStop.close();
+    }
+
+    const activeRunDb = openDatabaseSync(dbPath);
+    try {
+      const finishTaskId = createTaskSync(activeRunDb, {
+        goal: "Close an active run on finish.",
+        name: "active-run-finish",
+      });
+      const stopTaskId = createTaskSync(activeRunDb, {
+        goal: "Close an active run on stop.",
+        name: "active-run-stop",
+      });
+      const startedAt = new Date().toISOString();
+      activeRunDb.prepare(`
+        insert into runs(id, task_id, name, purpose, status, started_at, ended_at, metadata_json)
+        values (?, ?, ?, 'ralph_loop', 'active', ?, null, ?)
+      `).run("run-active-finish", finishTaskId, "active-run-finish-run", startedAt, "{}");
+      activeRunDb.prepare(`
+        insert into runs(id, task_id, name, purpose, status, started_at, ended_at, metadata_json)
+        values (?, ?, ?, 'ralph_loop', 'active', ?, null, ?)
+      `).run("run-active-stop", stopTaskId, "active-run-stop-run", startedAt, "{}");
+    } finally {
+      activeRunDb.close();
+    }
+
+    const activeFinish = runTypescriptRuntimeCommand({
+      args: ["finish-task", "active-run-finish", "--reason", "Active run finished.", "--path", dbPath],
+      cwd: root,
+      env: {},
+    });
+    assert.equal(activeFinish.exitCode, 0, activeFinish.stderr);
+    const activeStop = runTypescriptRuntimeCommand({
+      args: ["stop-task", "active-run-stop", "--reason", "Active run stopped.", "--path", dbPath],
+      cwd: root,
+      env: {},
+    });
+    assert.equal(activeStop.exitCode, 0, activeStop.stderr);
+    const activeRunCheck = openDatabaseSync(dbPath);
+    try {
+      const activeRuns = activeRunCheck.prepare("select name, status, ended_at from runs where name in ('active-run-finish-run', 'active-run-stop-run') order by name")
+        .all() as Array<{ ended_at: string | null; name: string; status: string }>;
+      assert.deepEqual(activeRuns.map((run) => ({ name: run.name, status: run.status })), [
+        { name: "active-run-finish-run", status: "finished" },
+        { name: "active-run-stop-run", status: "abandoned" },
+      ]);
+      assert.ok(activeRuns.every((run) => run.ended_at));
+      const activeRunTelemetry = activeRunCheck.prepare(`
+        select r.name, t.event_type
+        from telemetry_events t
+        join runs r on r.id = t.run_id
+        where r.name in ('active-run-finish-run', 'active-run-stop-run')
+        order by r.name, t.event_type
+      `).all() as Array<{ event_type: string; name: string }>;
+      assert.deepEqual(activeRunTelemetry.map((event) => ({ ...event })), [
+        { name: "active-run-finish-run", event_type: "run_finished" },
+        { name: "active-run-stop-run", event_type: "run_finished" },
+      ]);
+    } finally {
+      activeRunCheck.close();
     }
 
     assert.deepEqual(
