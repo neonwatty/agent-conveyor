@@ -423,6 +423,209 @@ test("TypeScript runtime handles deterministic session registry and discovery co
   }
 });
 
+test("TypeScript runtime handles classify ingest and tail by default", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-ingest."));
+  try {
+    mkdirSync(join(root, ".codex-workers"));
+    const rolloutDir = join(root, ".codex", "sessions", "2026");
+    mkdirSync(rolloutDir, { recursive: true });
+    const rollout = join(rolloutDir, "rollout-tail.jsonl");
+    writeFileSync(rollout, [
+      JSON.stringify({
+        payload: { cli_version: "1.2.3", cwd: root, id: "codex-tail", originator: "codex" },
+        timestamp: "2026-06-04T12:00:00Z",
+        type: "session_meta",
+      }),
+      "{not-json}",
+      JSON.stringify({
+        payload: {
+          message: "hello\nthere",
+          nested: { content: "" },
+          output: "screen",
+          type: "user_message",
+        },
+        timestamp: "2026-06-04T12:01:00Z",
+        type: "event_msg",
+      }),
+      JSON.stringify({
+        payload: { text: "model line\n", type: "assistant_message" },
+        timestamp: "2026-06-04T12:02:00Z",
+        type: "response_item",
+      }),
+      JSON.stringify({
+        payload: { content: "complete", type: "task_complete" },
+        timestamp: "2026-06-04T12:03:00Z",
+        type: "event_msg",
+      }),
+    ].join("\n") + "\n");
+
+    const classified = runTypescriptRuntimeCommand({
+      args: ["classify", "--text", "OpenAI Codex\n›"],
+      cwd: root,
+      env: {},
+    });
+    assert.equal(classified.exitCode, 0);
+    assert.equal(classified.handled, true);
+    assert.deepEqual(JSON.parse(classified.stdout ?? "{}"), {
+      busy_wait: null,
+      busy_wait_seconds: 90,
+      startup: "ready",
+      startup_reason: "Codex input prompt is visible",
+      status_age_seconds: 90,
+    });
+
+    const classifyInput = join(root, "capture.txt");
+    writeFileSync(classifyInput, "Starting MCP servers\n");
+    const classifiedFile = runTypescriptRuntimeCommand({
+      args: ["classify", "--file", classifyInput, "--status-age-seconds", "120", "--busy-wait-seconds", "60"],
+      cwd: root,
+      env: {},
+    });
+    const classifiedFilePayload = JSON.parse(classifiedFile.stdout ?? "{}") as {
+      busy_wait: { pattern: string; recommended_action: string } | null;
+      startup: string;
+    };
+    assert.equal(classifiedFile.exitCode, 0);
+    assert.equal(classifiedFilePayload.startup, "starting");
+    assert.deepEqual(classifiedFilePayload.busy_wait, {
+      pattern: "mcp_startup",
+      reason: "terminal shows Codex waiting on MCP server startup",
+      recommended_action: "inspect_or_interrupt",
+    });
+
+    assert.deepEqual(
+      runTypescriptRuntimeCommand({
+        args: ["classify"],
+        cwd: root,
+        env: {},
+      }),
+      { exitCode: 0, handled: false },
+    );
+
+    const registered = runTypescriptRuntimeCommand({
+      args: [
+        "register-worker",
+        "--name",
+        "worker-tail",
+        "--pid",
+        "789",
+        "--codex-session",
+        rollout,
+      ],
+      cwd: root,
+      env: {},
+    });
+    assert.equal(registered.exitCode, 0);
+
+    const ingested = runTypescriptRuntimeCommand({
+      args: ["ingest", "worker-tail"],
+      cwd: root,
+      env: {},
+    });
+    assert.equal(ingested.exitCode, 0);
+    assert.equal(ingested.handled, true);
+    const ingestPayload = JSON.parse(ingested.stdout ?? "{}") as {
+      new_events: number;
+      new_offset: number;
+      session: string;
+      skipped_lines: number;
+    };
+    assert.equal(ingestPayload.session, "worker-tail");
+    assert.equal(ingestPayload.new_events, 4);
+    assert.equal(ingestPayload.skipped_lines, 1);
+    assert.ok(ingestPayload.new_offset > 0);
+
+    const redactedTail = runTypescriptRuntimeCommand({
+      args: ["tail", "worker-tail", "--subtype", "user_message", "--limit", "10"],
+      cwd: root,
+      env: {},
+    });
+    assert.equal(redactedTail.exitCode, 0);
+    assert.equal(redactedTail.handled, true);
+    const redactedEvents = JSON.parse(redactedTail.stdout ?? "[]") as Array<{
+      payload: Record<string, unknown>;
+      subtype: string;
+    }>;
+    assert.equal(redactedEvents.length, 1);
+    assert.equal(redactedEvents[0].subtype, "user_message");
+    assert.deepEqual(redactedEvents[0].payload, {
+      message_byte_count: 11,
+      message_line_count: 2,
+      message_redacted: true,
+      nested: {
+        content_byte_count: 0,
+        content_line_count: 0,
+        content_redacted: true,
+      },
+      output_byte_count: 6,
+      output_line_count: 1,
+      output_redacted: true,
+      type: "user_message",
+    });
+
+    const rawTail = runTypescriptRuntimeCommand({
+      args: ["tail", "worker-tail", "--limit", "2", "--include-content"],
+      cwd: root,
+      env: {},
+    });
+    assert.equal(rawTail.exitCode, 0);
+    const rawEvents = JSON.parse(rawTail.stdout ?? "[]") as Array<{
+      byte_offset: number;
+      payload: Record<string, unknown>;
+      subtype: string | null;
+      type: string;
+    }>;
+    assert.deepEqual(rawEvents.map((event) => event.subtype), ["task_complete", null]);
+    assert.deepEqual(rawEvents.map((event) => event.type), ["event_msg", "response_item"]);
+    assert.equal(rawEvents[0].payload.content, "complete");
+    assert.equal(rawEvents[1].payload.text, "model line\n");
+    assert.ok(rawEvents[0].byte_offset > rawEvents[1].byte_offset);
+
+    const dbPath = defaultDbPath({ cwd: root, env: {} });
+    const database = openDatabaseSync(dbPath);
+    try {
+      const telemetry = database.prepare(`
+        select event_type, correlation_json, attributes_json
+        from telemetry_events
+        where event_type = 'codex_events_tail_read'
+        order by timestamp desc
+        limit 1
+      `).get() as { attributes_json: string; correlation_json: string; event_type: string };
+      assert.equal(telemetry.event_type, "codex_events_tail_read");
+      assert.deepEqual(JSON.parse(telemetry.correlation_json), {
+        session: "worker-tail",
+        session_id: JSON.parse(registered.stdout ?? "{}").session_id,
+      });
+      assert.deepEqual(JSON.parse(telemetry.attributes_json), {
+        limit: 2,
+        returned_count: 2,
+        subtype: null,
+      });
+    } finally {
+      database.close();
+    }
+
+    assert.deepEqual(
+      runTypescriptRuntimeCommand({
+        args: ["ingest", "worker-tail", "--path", dbPath],
+        cwd: root,
+        env: {},
+      }),
+      { exitCode: 0, handled: false },
+    );
+    assert.deepEqual(
+      runTypescriptRuntimeCommand({
+        args: ["tail", "worker-tail", "--path", dbPath],
+        cwd: root,
+        env: {},
+      }),
+      { exitCode: 0, handled: false },
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("TypeScript runtime handles migrated audit replay and subset export commands by default", () => {
   const root = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-cli."));
   try {
