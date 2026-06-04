@@ -11550,93 +11550,106 @@ Deferred follow-up criteria:
         release_doc = (ROOT / "docs" / "package-release.md").read_text()
 
         for expected in (
-            "python3 -m venv",
-            "-m pip install --upgrade pip build twine",
-            "-m build --outdir",
-            "-m twine check",
-            "SetuptoolsDeprecationWarning",
-            "Package would be ignored",
+            "npm --prefix",
+            "npm pack",
+            "npm install -g --prefix",
+            "prepublishOnly",
+            "agent-conveyor",
+            "package bins must expose conveyor and workerctl",
+            "scripts/workerctl",
+            "workerctl/assets/skills/codex-review/scripts/codex-review",
             "expected conveyor --help",
             "expected workerctl --help",
             "install-skills",
             "Release check receipt",
+            "without publishing",
         ):
             self.assertIn(expected, script)
 
         self.assertIn("scripts/release-check", release_doc)
-        self.assertIn("fails on packaging warnings", release_doc)
+        self.assertIn("It does not publish", release_doc)
 
-    def test_publish_workflow_uses_trusted_publishing(self):
+    def test_publish_workflow_verifies_npm_tarball_without_publishing(self):
         workflow_path = ROOT / ".github" / "workflows" / "publish.yml"
         workflow = workflow_path.read_text()
         release_doc = (ROOT / "docs" / "package-release.md").read_text()
 
         for expected in (
             "workflow_dispatch:",
-            "environment:",
-            "id-token: write",
-            "python -m build",
-            "python -m twine check dist/*",
+            "runs-on: macos-latest",
+            "contents: read",
+            "actions/setup-node@v4",
+            "node-version: 24",
+            "npm ci",
+            "npm test -- --runInBand",
+            "scripts/package-smoke",
+            "scripts/release-check",
+            "npm pack --json",
             "actions/upload-artifact@v6",
-            "actions/download-artifact@v7",
-            "pypa/gh-action-pypi-publish@release/v1",
-            "repository-url: https://test.pypi.org/legacy/",
-            "skip-existing: true",
+            "agent-conveyor-npm-tarball",
         ):
             self.assertIn(expected, workflow)
 
         self.assertNotIn("actions/upload-artifact@v5", workflow)
-        self.assertNotIn("actions/download-artifact@v5", workflow)
+        self.assertNotIn("pypa/gh-action-pypi-publish", workflow)
+        self.assertNotIn("repository-url: https://test.pypi.org/legacy/", workflow)
+        self.assertNotIn("npm publish", workflow)
 
         for expected in (
-            "Trusted Publishing",
-            "Repository owner: `neonwatty`",
-            "Repository name: `codex-terminal-manager`",
-            "Workflow filename: `publish.yml`",
-            "Environment name: `testpypi`",
-            "Environment name: `pypi`",
-            "https://test.pypi.org/legacy/",
+            "manual package",
+            "artifact verification workflow",
+            ".github/workflows/publish.yml",
+            "agent-conveyor-npm-tarball",
+            "It intentionally does not",
         ):
             self.assertIn(expected, release_doc)
 
     def test_package_release_metadata_and_checklist_are_documented(self):
-        pyproject = (ROOT / "pyproject.toml").read_text()
+        package_json = json.loads((ROOT / "package.json").read_text())
         release_doc = (ROOT / "docs" / "package-release.md").read_text()
         readme = (ROOT / "README.md").read_text()
 
-        for expected in (
-            'requires = ["setuptools>=77", "wheel"]',
-            'license = "MIT"',
-            'authors = [{ name = "NeonWatty" }]',
-            'keywords = ["agent", "codex", "conveyor", "manager-worker", "workflow-automation"]',
-            '"Homepage" = "https://github.com/neonwatty/codex-terminal-manager"',
-            '"Source" = "https://github.com/neonwatty/codex-terminal-manager"',
-            '"Issues" = "https://github.com/neonwatty/codex-terminal-manager/issues"',
-            'packages = ["workerctl", "workerctl.assets", "workerctl.assets.skills"]',
-        ):
-            self.assertIn(expected, pyproject)
+        self.assertEqual(package_json["name"], "agent-conveyor")
+        self.assertEqual(package_json["license"], "MIT")
+        self.assertEqual(package_json["bin"]["conveyor"], "./dist/cli/main.js")
+        self.assertEqual(package_json["bin"]["workerctl"], "./dist/cli/main.js")
+        self.assertEqual(
+            package_json["repository"]["url"],
+            "git+https://github.com/neonwatty/codex-terminal-manager.git",
+        )
+        self.assertEqual(
+            package_json["bugs"]["url"],
+            "https://github.com/neonwatty/codex-terminal-manager/issues",
+        )
+        self.assertIn("workerctl/assets/skills/**/*", package_json["files"])
+        self.assertEqual(
+            package_json["scripts"]["prepublishOnly"],
+            "node scripts/prepublish-guard.mjs",
+        )
+        self.assertIn("conveyor", package_json["keywords"])
 
         for expected in (
-            "python3 -m pip install --upgrade build twine",
-            "python3 -m build",
-            "python3 -m twine check dist/*",
-            "python3 -m twine upload --repository testpypi dist/*",
-            "pipx install --pip-args '--index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/' 'agent-conveyor==<version>'",
-            "python3 -m twine upload dist/*",
-            "pipx install agent-conveyor",
+            "npm ci",
+            "npm run build",
+            "npm pack --json",
+            "npm install -g --prefix \"$tmp_prefix\" ./agent-conveyor-*.tgz",
+            "npm publish ./agent-conveyor-<version>.tgz --access public",
+            "npm install -g --prefix \"$tmp_prefix\" agent-conveyor@<version>",
             "conveyor install-skills",
             "scripts/package-smoke",
+            "scripts/release-check",
+            "prepublish guard",
         ):
             self.assertIn(expected, release_doc)
 
         self.assertIn("docs/package-release.md", readme)
-        self.assertIn("pipx install agent-conveyor", readme)
+        self.assertIn("npm install -g agent-conveyor", readme)
         self.assertIn("conveyor install-skills", readme)
         self.assertIn("conveyor doctor", readme)
-        self.assertIn("pipx install git+https://github.com/neonwatty/codex-terminal-manager.git", readme)
+        self.assertIn("npm install -g --prefix \"$tmp_prefix\" ./agent-conveyor-*.tgz", readme)
         self.assertLess(
-            readme.index("pipx install agent-conveyor"),
-            readme.index("pipx install git+https://github.com/neonwatty/codex-terminal-manager.git"),
+            readme.index("npm install -g agent-conveyor"),
+            readme.index("npm install -g --prefix \"$tmp_prefix\" ./agent-conveyor-*.tgz"),
         )
 
     def test_run_unittests_isolated_script_has_valid_bash_syntax(self):

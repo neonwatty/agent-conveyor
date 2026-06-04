@@ -1,0 +1,1424 @@
+# GoalBuddy v2 state.yaml
+# Board truth lives here. goal.md is the editable charter; notes/ holds long receipts only.
+
+version: 2
+
+goal:
+  title: "Agent Conveyor TypeScript Migration"
+  slug: "agent-conveyor-ts-migration"
+  kind: existing_plan
+  tranche: "Coordinate the overnight TypeScript migration from Python package/CLI to npm package/Node CLI using verified compatibility slices and green PRs."
+  status: active
+  oracle:
+    signal: "Final Judge/PM audit maps Python CLI/package behavior to TypeScript implementation, compatibility shim, or explicit follow-up; local and CI gates are green; npm tarball install smoke proves `conveyor` and `workerctl`; PRs are merged only when green; no automatic npm publish occurred."
+    cadence: "after each Worker package, before each PR/merge decision, and at final audit"
+    final_proof: "Receipts include contract inventory diff, schema parity evidence, state/DB/tmux/Codex/Dispatch parity tests, package tarball smoke, dashboard build/test, deterministic rc/package gates, CI-green PR links, merge receipts, and final full_outcome_complete true."
+  intake:
+    original_request: "Convert the Python app to TypeScript, use independent agents for full analysis including QA tests, queue GoalBuddy boards for overnight autonomous execution, PR/CI/merge green PRs, and use npm package name agent-conveyor."
+    interpreted_outcome: "Ship a TypeScript/Node Agent Conveyor with npm package path while preserving current CLI, state, QA, dashboard, skill-install, and release confidence contracts."
+    input_shape: existing_plan
+    audience: "Agent Conveyor users, repo maintainers, local Codex operators, and future npm consumers"
+    authority: approved
+    proof_type: test
+    completion_proof: "The migrated TS implementation/package passes local deterministic gates and CI, installs from an npm tarball with `conveyor` and `workerctl`, preserves or explicitly adjudicates every frozen contract, and merges green PRs without automatic npm publish."
+    likely_misfire: "Rewrite code in TS but drop or weaken Python-era CLI flags, output, SQLite behavior, skill assets, package smoke, dashboard integration, or live-smoke cleanup."
+    blind_spots_considered:
+      - "The npm name can be claimed before publish; re-check before package tasks and before final publish handoff."
+      - "npm auth can expire; block only tasks that require auth and continue safe local work."
+      - "Current TS config is dashboard-only and noEmit; distributable CLI needs its own build/package boundary."
+      - "The Python package remains the installed release path until package smoke is replaced."
+      - "Live smoke depends on tmux and Codex availability and can be skipped in hosted CI."
+      - "Publishing to npm should remain a human-approved final step."
+      - "Unrelated existing dirty files must not be reverted."
+    existing_plan_facts:
+      - "Independent scouts completed architecture, QA, TS dashboard, and packaging investigations."
+      - "Use npm package name `agent-conveyor`."
+      - "Local npm CLI auth was verified with `npm whoami` returning `neonwatty`."
+      - "`npm view agent-conveyor name version --json` returned E404 during investigation."
+      - "Baseline local deterministic gates passed before board creation; see notes/investigation-summary.md."
+      - "A single parent board should coordinate child-board-style tranches because the later slices depend on contract-freeze artifacts."
+
+rules:
+  pm_owns_state: true
+  one_active_task: true
+  max_write_workers: 1
+  no_implementation_without_worker_or_pm_task: true
+  no_completion_without_judge_or_pm_audit: true
+  planning_is_not_completion: true
+  queued_required_worker_blocks_completion: true
+  continuous_until_full_outcome: true
+  missing_input_or_credentials_do_not_stop_goal: true
+  preserve_and_validate_existing_plan: true
+  intake_misfire_must_be_audited: true
+  goal_pressure_requires_oracle: true
+  no_completion_on_weak_proof: true
+  no_automatic_publish: true
+  slice_policy:
+    max_consecutive_tiny_tasks: 2
+    prefer_vertical_slices: true
+    judge_picks_largest_safe_slice: true
+    worker_completes_whole_slice: true
+
+agents:
+  scout: installed
+  worker: installed
+  judge: installed
+
+visual_board:
+  selected: local
+  local:
+    status: live
+    url: "http://goalbuddy.localhost:41737/agent-conveyor-ts-migration/"
+    command: "npx goalbuddy board /Users/neonwatty/Desktop/codex-terminal-manager/docs/goals/agent-conveyor-ts-migration"
+
+active_task: T009
+
+tasks:
+  - id: T001
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Validate the scout synthesis and approve the exact overnight execution order before implementation begins."
+    inputs:
+      - "docs/goals/agent-conveyor-ts-migration/goal.md"
+      - "docs/goals/agent-conveyor-ts-migration/state.yaml"
+      - "docs/goals/agent-conveyor-ts-migration/notes/investigation-summary.md"
+      - "Current git status"
+      - "package.json, pyproject.toml, scripts/rc-check, scripts/package-smoke, scripts/release-check, .github/workflows"
+    constraints:
+      - "Read-only."
+      - "Do not implement."
+      - "Preserve the npm package decision: `agent-conveyor`."
+      - "Reject automatic npm publish."
+      - "Confirm the first Worker task is the largest safe useful slice."
+    expected_output:
+      - "approved | revise"
+      - "Any missing contract-freeze requirement"
+      - "Final execution order"
+      - "First Worker objective, allowed_files, verify, and stop_if"
+      - "Parallelization warning if later tasks overlap"
+    receipt:
+      result: done
+      decision: approved
+      full_outcome_complete: false
+      summary: "Approved the overnight execution order. The board correctly starts with a contract-freeze Worker before any TS replacement because later slices depend on command, schema, QA, package, and dashboard baselines."
+      live_checks:
+        - cmd: "npm whoami"
+          status: pass
+          summary: "Authenticated as neonwatty."
+        - cmd: "npm view agent-conveyor name version --json"
+          status: pass
+          summary: "E404 from registry; package name still not present at check time."
+        - cmd: "node /Users/neonwatty/.codex/plugins/cache/goalbuddy/goalbuddy/0.3.8/skills/goalbuddy/scripts/check-goal-state.mjs docs/goals/agent-conveyor-ts-migration/state.yaml"
+          status: pass
+          summary: "Board valid with T001 active before this receipt; no warnings."
+        - cmd: "rg -n 'private|\"name\"|\"version\"|\"bin\"|project.scripts|agent-conveyor|conveyor|workerctl|pypi|twine|npm pack|npm publish' package.json pyproject.toml scripts/package-smoke scripts/release-check .github/workflows/test.yml .github/workflows/publish.yml README.md docs/package-release.md"
+          status: pass
+          summary: "Confirmed current release/install contract is still Python/PyPI-shaped while npm package.json is private dashboard-only."
+      final_execution_order:
+        - "T002 contract-freeze artifacts"
+        - "T003 TS CLI/package foundation"
+        - "T004 state and SQLite parity"
+        - "T005 tmux, Codex discovery, ingest, and classifier parity"
+        - "T006 lifecycle, Dispatch, audit/replay/export, and dashboard-facing CLI parity"
+        - "T007 npm packaging, install, release, CI, and docs conversion"
+        - "T008 readiness audit"
+        - "T009 PR, CI monitor, green merge work"
+        - "T999 final audit"
+      first_worker:
+        objective: "Create the contract-freeze artifacts that all TypeScript migration child-board tranches must use."
+        allowed_files:
+          - "docs/goals/agent-conveyor-ts-migration/**"
+          - "docs/typescript-migration/**"
+          - "scripts/**"
+          - "tests/**"
+          - "dashboard/scripts/run-tests.mjs"
+          - "package.json"
+          - "README.md"
+        verify:
+          - "git diff --check"
+          - "npm test -- --runInBand"
+          - "python3 -m unittest discover -s tests -v"
+          - "scripts/check-resource-warnings"
+          - "python3 -m py_compile scripts/workerctl scripts/check-resource-warnings workerctl/*.py"
+        stop_if:
+          - "Generating the inventory requires behavior decisions instead of observation."
+          - "A command/output diff cannot be categorized as preserve, intentional-diff, or follow-up."
+          - "Need to edit implementation files outside allowed_files."
+          - "Verification fails twice for unrelated baseline reasons."
+      missing_contract_freeze_requirements:
+        - "T002 should include a generated or checked CLI command/flag inventory from Python argparse."
+        - "T002 should include a schema baseline from Python-created SQLite, including user_version, tables, indexes, triggers, and important PRAGMAs."
+        - "T002 should include package/tarball expectations for future npm smoke, but must not publish."
+      parallelization_warning: "Do not parallelize T003-T007 until T002 artifacts exist. Later Workers overlap heavily on package.json, scripts, tests, and src; parallel child boards require Judge-approved disjoint write scopes."
+
+  - id: T002
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "Create the contract-freeze artifacts that all TypeScript migration child-board tranches must use."
+    allowed_files:
+      - "docs/goals/agent-conveyor-ts-migration/**"
+      - "docs/typescript-migration/**"
+      - "scripts/**"
+      - "tests/**"
+      - "dashboard/scripts/run-tests.mjs"
+      - "package.json"
+      - "README.md"
+    verify:
+      - "git diff --check"
+      - "npm test -- --runInBand"
+      - "python3 -m unittest discover -s tests -v"
+      - "scripts/check-resource-warnings"
+      - "python3 -m py_compile scripts/workerctl scripts/check-resource-warnings workerctl/*.py"
+    stop_if:
+      - "Generating the inventory requires behavior decisions instead of observation."
+      - "A command/output diff cannot be categorized as preserve, intentional-diff, or follow-up."
+      - "Need to edit implementation files outside allowed_files."
+      - "Verification fails twice for unrelated baseline reasons."
+    expected_output:
+      - "CLI command and flag inventory artifact."
+      - "SQLite schema baseline artifact."
+      - "QA gate matrix."
+      - "Package/install contract baseline."
+      - "Dashboard integration contract."
+      - "Receipt naming strongest contract-loss failure mode and disproof evidence."
+    receipt:
+      result: done
+      full_outcome_complete: false
+      summary: "Created the contract-freeze artifacts that later TypeScript migration slices must preserve or explicitly adjudicate: CLI inventory, SQLite/state contract, QA gate matrix, package/install contract, and dashboard integration contract."
+      changed_files:
+        - "docs/typescript-migration/cli-contract.md"
+        - "docs/typescript-migration/sqlite-state-contract.md"
+        - "docs/typescript-migration/qa-gate-matrix.md"
+        - "docs/typescript-migration/package-install-contract.md"
+        - "docs/typescript-migration/dashboard-contract.md"
+        - "docs/goals/agent-conveyor-ts-migration/state.yaml"
+      artifacts:
+        - path: "docs/typescript-migration/cli-contract.md"
+          summary: "Public entry points, command/flag inventory, behavioral requirements, and contract drift gate."
+        - path: "docs/typescript-migration/sqlite-state-contract.md"
+          summary: "State root, JSON compatibility files, SQLite schema/migration invariants, and parity fixture requirements."
+        - path: "docs/typescript-migration/qa-gate-matrix.md"
+          summary: "Deterministic local, RC, package, live, manual, and CI gates mapped to migration stages."
+        - path: "docs/typescript-migration/package-install-contract.md"
+          summary: "Current Python package behavior, target npm package behavior, tarball smoke expectations, docs/CI constraints, and no-publish rule."
+        - path: "docs/typescript-migration/dashboard-contract.md"
+          summary: "Dashboard workerctl integration boundaries, current TS patterns, test coverage, and verification requirements."
+      commands:
+        - cmd: "git diff --check"
+          status: pass
+          summary: "No whitespace errors in tracked diffs."
+        - cmd: "npm test -- --runInBand"
+          status: pass
+          summary: "Dashboard/Vitest gate passed: 40 tests."
+        - cmd: "python3 -m py_compile scripts/workerctl scripts/check-resource-warnings workerctl/*.py"
+          status: pass
+          summary: "Python entry points and workerctl modules compile cleanly."
+        - cmd: "scripts/run-unittests-isolated"
+          status: pass
+          summary: "Repo-native isolated unittest wrapper passed: 645 tests in 43.356s."
+        - cmd: "STATE_ROOT=\"$(mktemp -d \"${TMPDIR:-/tmp}/workerctl-rw-state.XXXXXX\")\"; WORKERCTL_STATE_ROOT=\"$STATE_ROOT\" scripts/check-resource-warnings"
+          status: pass
+          summary: "ResourceWarning gate passed under isolated state root, including 645 unittest tests in 36.880s."
+        - cmd: "rg -n '^# |^## |^### ' docs/typescript-migration/*.md"
+          status: pass
+          summary: "Confirmed all five contract-freeze artifacts exist with the expected migration headings."
+      observations:
+        - type: "baseline-state-isolation-hazard"
+          detail: "A concurrent shared-state run of `python3 -m unittest discover -s tests -v` and `scripts/check-resource-warnings` produced fixture collisions in `.codex-workers` around capture-error/capture-output/send-text tests. Isolated reruns passed, so this is recorded as a QA isolation requirement for future broad gates rather than as a T002 regression."
+      disproof:
+        strongest_failure_mode: "The contract docs could miss a current CLI/state/package/dashboard surface or later QA could be falsely green because live `.codex-workers` state contaminates tests."
+        evidence: "The docs enumerate the migration surfaces, while isolated unittest and ResourceWarning gates both passed 645 tests; the deliberately observed shared-state collision is recorded so future workers use isolated state for broad QA."
+        residual_risk: "Artifacts are documentation baselines, not a generated exhaustive argparse/schema dump. T003-T007 must prove parity against these contracts and add executable parity fixtures before any public CLI switch."
+
+  - id: T003
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "Build the TypeScript CLI/package foundation beside Python without changing the active public CLI yet."
+    allowed_files:
+      - "package.json"
+      - "package-lock.json"
+      - "tsconfig*.json"
+      - "src/**"
+      - "bin/**"
+      - "scripts/**"
+      - "dashboard/scripts/run-tests.mjs"
+      - "dashboard/server/workerctl.ts"
+      - "dashboard/server/workerctl.test.ts"
+      - "docs/typescript-migration/**"
+      - "docs/goals/agent-conveyor-ts-migration/**"
+    verify:
+      - "npm ci"
+      - "npm test -- --runInBand"
+      - "npm run build"
+      - "npm pack --dry-run --json"
+      - "git diff --check"
+    stop_if:
+      - "Dashboard tsconfig must be widened in a way that breaks Vite/dashboard build."
+      - "The TS CLI package imports dashboard server-only dependencies unnecessarily."
+      - "The public `conveyor` or `workerctl` wrappers would switch before parity gates exist."
+      - "Need to publish to npm."
+    expected_output:
+      - "Dedicated distributable TS CLI boundary."
+      - "Node test/build scripts for CLI foundation."
+      - "`agent-conveyor` package metadata drafted but not published."
+      - "No public CLI switch unless Judge-approved."
+    receipt:
+      result: done
+      full_outcome_complete: false
+      summary: "Built the TypeScript CLI/package foundation beside the Python implementation. The npm package is now named `agent-conveyor`, has Node bin metadata for `conveyor` and `workerctl`, emits a small TS CLI bridge, runs CLI bridge tests with the dashboard tests, builds CLI and dashboard separately, packs from a clean prepack path, and refuses publish by default."
+      changed_files:
+        - "package.json"
+        - "package-lock.json"
+        - "tsconfig.cli.json"
+        - "src/index.ts"
+        - "src/cli/main.ts"
+        - "src/cli/python-bridge.ts"
+        - "src/cli/python-bridge.test.ts"
+        - "dashboard/scripts/run-tests.mjs"
+        - "scripts/prepublish-guard.mjs"
+        - "docs/goals/agent-conveyor-ts-migration/state.yaml"
+      artifacts:
+        - path: "src/cli/main.ts"
+          summary: "Node bin entry point that resolves the package root and delegates to the current Python compatibility entry point."
+        - path: "src/cli/python-bridge.ts"
+          summary: "Typed bridge utilities for program-name detection, Python entrypoint construction, and process exit propagation."
+        - path: "src/cli/python-bridge.test.ts"
+          summary: "Node tests proving `conveyor` and `workerctl` program names and package-root resolution."
+        - path: "tsconfig.cli.json"
+          summary: "Dedicated distributable CLI TypeScript config emitting declarations and JS into root `dist`."
+        - path: "scripts/prepublish-guard.mjs"
+          summary: "Fails npm publish unless `AGENT_CONVEYOR_ALLOW_NPM_PUBLISH=1` is set during an approved release."
+      commands:
+        - cmd: "npm ci"
+          status: pass
+          summary: "Clean install from package-lock succeeded; npm reported an existing transitive deprecation warning for prebuild-install and zero vulnerabilities."
+        - cmd: "npm test -- --runInBand"
+          status: pass
+          summary: "Node test gate passed after clean install: 46 tests, including the new TS bridge tests."
+        - cmd: "npm run build"
+          status: pass
+          summary: "CLI TypeScript build and dashboard build both passed."
+        - cmd: "rm -rf dist && npm pack --dry-run --json"
+          status: pass
+          summary: "`prepack` rebuilt `dist/cli` from a clean root dist and dry-run tarball included 50 expected package entries."
+        - cmd: "temporary npm tarball install smoke from clean prepack output"
+          status: pass
+          summary: "Installed generated `agent-conveyor-0.1.0.tgz` into a temp project; `./node_modules/.bin/conveyor --help` began `usage: conveyor [-h]` and `workerctl --help` began `usage: workerctl [-h]`."
+        - cmd: "git diff --check"
+          status: pass
+          summary: "No whitespace errors."
+      observations:
+        - type: "publish-guard"
+          detail: "`npm publish --dry-run` exited 1 at `prepublishOnly` with the guard message refusing publish until final audit approval. This is expected and prevents accidental npm publish during migration."
+        - type: "public-wrapper-preservation"
+          detail: "Existing local `bin/conveyor`, `bin/workerctl`, and `scripts/workerctl` public wrappers were not changed; the new npm bin path is package metadata plus `dist/cli/main.js` generated by `prepack`."
+      disproof:
+        strongest_failure_mode: "The npm package could appear to pack but fail when installed, or the new package scripts could depend on stale generated `dist` output."
+        evidence: "The receipt includes a clean `rm -rf dist` pack dry-run that rebuilt via `prepack`, plus a temp-project install smoke that invoked both installed bins and verified their help program names."
+        residual_risk: "The TS CLI bridge still delegates to Python. T004-T007 must port state, lifecycle, tmux/Codex, Dispatch, packaging docs, and parity tests before any final audit can claim a TypeScript implementation."
+
+  - id: T004
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "Port state root, JSON compatibility files, status fallback, and SQLite schema initialization/migration parity to TypeScript."
+    allowed_files:
+      - "src/**"
+      - "tests/**"
+      - "scripts/**"
+      - "docs/typescript-migration/**"
+      - "docs/goals/agent-conveyor-ts-migration/**"
+      - "package.json"
+      - "package-lock.json"
+      - "tsconfig*.json"
+    verify:
+      - "npm test -- --runInBand"
+      - "npm run build"
+      - "python3 -m unittest discover -s tests -v"
+      - "WORKERCTL_STATE_ROOT=$(mktemp -d) scripts/workerctl db-doctor"
+      - "git diff --check"
+    stop_if:
+      - "TS-created DB schema differs from Python-created schema without Judge approval."
+      - "Legacy JSON-only status fallback cannot be reproduced."
+      - "A schema v23 change appears necessary."
+      - "Need destructive migration against real user state."
+    expected_output:
+      - "TS state model."
+      - "TS SQLite schema/migration parity."
+      - "Schema dump diff evidence."
+      - "Fixtures proving JSON compatibility fallback."
+    progress:
+      - summary: "Added TS state path helpers, sorted JSON compatibility helpers, read-side latest-status fallback, and schema contract constants compared against Python. T004 remains active because TS SQLite schema initialization/migration write-side parity is not implemented yet."
+        changed_files:
+          - "src/index.ts"
+          - "src/state/files.ts"
+          - "src/state/status.ts"
+          - "src/state/sqlite-contract.ts"
+          - "src/state/state.test.ts"
+        commands:
+          - cmd: "npm test -- --runInBand"
+            status: pass
+            summary: "Node test gate passed: 52 tests, including TS state path, JSON fallback, Python-created SQLite latest-status, and Python-vs-TS schema contract constants."
+          - cmd: "npm run build:cli"
+            status: pass
+            summary: "CLI TypeScript build passed after adjusting WorkerStatus to allow the Python-compatible empty fallback."
+          - cmd: "git diff --check"
+            status: pass
+            summary: "No whitespace errors."
+        remaining:
+          - "Implement or explicitly Judge-scope TS SQLite schema initialization/migration parity."
+          - "Produce schema dump diff evidence for TS-created versus Python-created DBs."
+          - "Run full T004 verification before closing the task."
+      - summary: "Added TS SQLite open/configure/init/health support backed by a generated v22 schema snapshot from a Python-created empty DB. Fresh TS-created DBs now match Python-created schema dumps and pass Python `database_health`; T004 remains active because lower-version legacy DB migrations are not ported and the TS initializer currently fails closed for non-empty unsupported schemas."
+        changed_files:
+          - "src/index.ts"
+          - "src/state/database.ts"
+          - "src/state/schema-v22.ts"
+          - "src/state/state.test.ts"
+          - "docs/goals/agent-conveyor-ts-migration/state.yaml"
+        commands:
+          - cmd: "npm test -- --runInBand"
+            status: pass
+            summary: "Node test gate passed: 55 tests, including TS-created DB health under Python `database_health`, TS-vs-Python schema dump equality, and newer-user_version refusal."
+          - cmd: "npm run build"
+            status: pass
+            summary: "CLI TypeScript build and dashboard build passed."
+          - cmd: "STATE_ROOT=\"$(mktemp -d \"${TMPDIR:-/tmp}/workerctl-unittest-state.XXXXXX\")\"; WORKERCTL_STATE_ROOT=\"$STATE_ROOT\" python3 -m unittest discover -s tests -v"
+            status: pass
+            summary: "Python suite passed under isolated state root: 645 tests in 35.489s."
+          - cmd: "STATE_ROOT=\"$(mktemp -d \"${TMPDIR:-/tmp}/workerctl-dbdoctor-state.XXXXXX\")\"; WORKERCTL_STATE_ROOT=\"$STATE_ROOT\" scripts/workerctl db-doctor"
+            status: pass
+            summary: "Corrected db-doctor gate passed with ok=true, schema_version=22, user_version=22, and no missing tables/indexes/triggers."
+          - cmd: "rm -rf dist && npm pack --dry-run --json"
+            status: pass
+            summary: "Prepack rebuilt CLI/state dist; dry-run tarball now includes compiled state database/schema modules."
+          - cmd: "git diff --check"
+            status: pass
+            summary: "No whitespace errors."
+        observations:
+          - type: "verify-command-drift"
+            detail: "The original T004 verify command `scripts/workerctl db-doctor --json` failed because the current CLI emits JSON by default and does not accept `--json`; board verify was corrected to `scripts/workerctl db-doctor`."
+          - type: "legacy-migration-gap"
+            detail: "TS `initializeDatabaseSync` initializes empty DBs to exact v22 parity and refuses newer versions, but lower-version/non-empty migration repair paths from Python are not ported yet."
+        remaining:
+          - "Port or explicitly re-scope legacy lower-version migration repair behavior before T004 can close."
+          - "Decide whether generated schema snapshot is acceptable for the migration phase or should be replaced with hand-maintained TS migrations in a later task."
+    receipt:
+      result: done
+      full_outcome_complete: false
+      summary: "Ported the state-root, compatibility JSON, latest-status fallback, and SQLite initialization/health boundary into TypeScript. Fresh TS-created DBs exactly match Python-created v22 schema dumps; Python health accepts TS-created DBs; older/non-empty DB migration parity is preserved through an explicit bundled-Python migration bridge until those legacy migration branches are replaced one by one."
+      changed_files:
+        - "src/index.ts"
+        - "src/state/files.ts"
+        - "src/state/status.ts"
+        - "src/state/database.ts"
+        - "src/state/sqlite-contract.ts"
+        - "src/state/schema-v22.ts"
+        - "src/state/state.test.ts"
+        - "docs/goals/agent-conveyor-ts-migration/state.yaml"
+      artifacts:
+        - path: "src/state/files.ts"
+          summary: "TypeScript state root, worker path, worker-name validation, and JSON compatibility helpers."
+        - path: "src/state/status.ts"
+          summary: "TypeScript latest-status reader that prefers SQLite status rows and falls back to status.json."
+        - path: "src/state/database.ts"
+          summary: "TypeScript SQLite open/configure/init/health boundary with exact fresh v22 schema creation and legacy migration bridge."
+        - path: "src/state/schema-v22.ts"
+          summary: "Generated schema snapshot from a Python-created v22 database."
+        - path: "src/state/state.test.ts"
+          summary: "Parity tests for paths, JSON fallback, Python-created status reads, schema constants, TS-vs-Python schema dumps, Python health on TS DBs, newer version refusal, and v21 legacy migration repair."
+      commands:
+        - cmd: "npm test -- --runInBand"
+          status: pass
+          summary: "Node test gate passed: 56 tests, including v21 legacy migration bridge coverage."
+        - cmd: "npm run build"
+          status: pass
+          summary: "CLI TypeScript build and dashboard build passed."
+        - cmd: "STATE_ROOT=\"$(mktemp -d \"${TMPDIR:-/tmp}/workerctl-unittest-state.XXXXXX\")\"; WORKERCTL_STATE_ROOT=\"$STATE_ROOT\" python3 -m unittest discover -s tests -v"
+          status: pass
+          summary: "Python suite passed under isolated state root: 645 tests in 36.637s."
+        - cmd: "STATE_ROOT=\"$(mktemp -d \"${TMPDIR:-/tmp}/workerctl-dbdoctor-state.XXXXXX\")\"; WORKERCTL_STATE_ROOT=\"$STATE_ROOT\" scripts/workerctl db-doctor"
+          status: pass
+          summary: "db-doctor passed with ok=true, schema_version=22, user_version=22, and no missing tables/indexes/triggers."
+        - cmd: "git diff --check"
+          status: pass
+          summary: "No whitespace errors."
+      observations:
+        - type: "verify-command-drift"
+          detail: "The original T004 verify command `scripts/workerctl db-doctor --json` failed because the current CLI emits JSON by default and does not accept `--json`; board verify was corrected to `scripts/workerctl db-doctor`."
+        - type: "legacy-migration-bridge"
+          detail: "TS initializes empty DBs directly and refuses newer DBs directly. For older/non-empty DBs, TS invokes the bundled Python migrator, then verifies user_version reaches 22. This preserves compatibility during the staged migration but is not pure TS yet."
+      disproof:
+        strongest_failure_mode: "The TS schema path could create a DB that looks initialized but differs from Python v22, fails Python health checks, or corrupts legacy migrations."
+        evidence: "Node tests compare TS-created and Python-created schema dumps, run Python `database_health` against TS-created DBs, and migrate a v21-style command table through TS initialization before inserting a v22-only `blocked` command state. Full Python unittest and db-doctor gates also passed under isolated state roots."
+        residual_risk: "Legacy migration implementation is still delegated to Python while the package includes Python compatibility payloads. Later migration work should replace this bridge with native TS migration functions before dropping Python from the tarball."
+
+  - id: T005
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "Port tmux adapter, Codex rollout discovery, JSONL ingest, and classifier parity to TypeScript."
+    allowed_files:
+      - "src/**"
+      - "tests/**"
+      - "scripts/**"
+      - "docs/typescript-migration/**"
+      - "docs/goals/agent-conveyor-ts-migration/**"
+      - "package.json"
+      - "package-lock.json"
+      - "tsconfig*.json"
+    verify:
+      - "npm test -- --runInBand"
+      - "npm run build"
+      - "python3 -m unittest discover -s tests -v"
+      - "bash -n scripts/live-smoke scripts/live-smoke-repeat"
+      - "git diff --check"
+    stop_if:
+      - "tmux command transcript differs in target, paste buffer cleanup, or permission error handling."
+      - "Codex rollout discovery cannot be tested without live state and no fixture path exists."
+      - "JSONL ingest reprocesses partial or malformed lines."
+      - "Need live Codex credentials to proceed."
+    expected_output:
+      - "TS tmux command builder/runner parity."
+      - "TS Codex rollout discovery helpers."
+      - "TS JSONL ingest with offset and malformed-line tests."
+      - "Classifier parity tests for approval, trust, startup, busy, and historical transcript negative controls."
+    progress:
+      - summary: "Added the first T005 TypeScript runtime foundation: tmux command builders, Codex rollout metadata/lsof parsing helpers, JSONL parser with offset/malformed/partial-line behavior, and classifier startup/busy-wait parity helpers. No live tmux or Codex side effects are introduced yet."
+        changed_files:
+          - "src/index.ts"
+          - "src/runtime/classify.ts"
+          - "src/runtime/codex-session.ts"
+          - "src/runtime/ingest.ts"
+          - "src/runtime/tmux.ts"
+          - "src/runtime/runtime.test.ts"
+          - "docs/goals/agent-conveyor-ts-migration/state.yaml"
+        commands:
+          - cmd: "npm test -- --runInBand"
+            status: pass
+            summary: "Node test gate passed: 61 tests, including tmux argument order, session tmux target, rollout meta/lsof parsing, JSONL offset/skipped/partial-line handling, and classifier prompt detection."
+          - cmd: "npm run build:cli"
+            status: pass
+            summary: "CLI TypeScript build passed."
+          - cmd: "bash -n scripts/live-smoke scripts/live-smoke-repeat"
+            status: pass
+            summary: "Live smoke shell scripts still parse."
+          - cmd: "git diff --check"
+            status: pass
+            summary: "No whitespace errors."
+        remaining:
+          - "Add live-safe tmux runner behavior with permission-error handling and paste-buffer cleanup tests."
+          - "Add DB-backed TS ingest cycle using the T004 state/database boundary."
+          - "Broaden classifier parity fixtures for every Python test scenario before closing T005."
+      - summary: "Advanced T005 with a DB-backed TypeScript ingest cycle, live-safe tmux runner behavior, and broader classifier parity fixtures. The ingest helper now persists complete rollout JSONL events into the v22 SQLite schema, updates session offsets and heartbeat timestamps, emits codex_events_ingested telemetry, ignores partial trailing writes, skips malformed complete lines, and refuses shrunk rollout files. The tmux helper now has injectable runner coverage for liveness checks, normalized permission guidance, paste-buffer cleanup on failure, session-keyed pane targets, and side-effect audit flags. The classifier tests now cover the Python startup states and busy-wait scenarios for MCP startup, rate limits, Enter confirmation, trust, plan prompt, active vs historical approval prompt text, fresh status suppression, and long-running interruptible suppression."
+        changed_files:
+          - "src/index.ts"
+          - "src/runtime/ingest.ts"
+          - "src/runtime/tmux.ts"
+          - "src/runtime/runtime.test.ts"
+          - "docs/goals/agent-conveyor-ts-migration/state.yaml"
+        commands:
+          - cmd: "npm test -- --runInBand"
+            status: pass
+            summary: "Node test gate passed: 66 tests, including DB-backed ingest offset/heartbeat/telemetry/shrink behavior and tmux runner permission-cleanup transcript tests."
+          - cmd: "npm run build"
+            status: pass
+            summary: "CLI TypeScript build and dashboard production build passed."
+          - cmd: "STATE_ROOT=\"$(mktemp -d \"${TMPDIR:-/tmp}/workerctl-t005-py-state.XXXXXX\")\"; WORKERCTL_STATE_ROOT=\"$STATE_ROOT\" python3 -m unittest discover -s tests -v"
+            status: pass
+            summary: "Python compatibility suite passed under isolated state root: 645 tests in 35.661s."
+          - cmd: "bash -n scripts/live-smoke scripts/live-smoke-repeat"
+            status: pass
+            summary: "Live smoke shell scripts still parse."
+          - cmd: "git diff --check"
+            status: pass
+            summary: "No whitespace errors."
+        observations:
+          - type: "test-adjustment"
+            detail: "An intermediate DB ingest test compared a Node SQLite row object with a null prototype to a plain object; the assertion was narrowed to compare the actual heartbeat and offset fields. The product values matched before the assertion change."
+          - type: "runner-scope"
+            detail: "The tmux runner is injectable and transcript-tested without touching live tmux. Public CLI commands still route through the Python bridge until later T005/T006 integration work migrates command handlers."
+        remaining:
+          - "Wire migrated runtime helpers into TypeScript command handlers or explicitly preserve the Python compatibility bridge for any not-yet-ported public command."
+          - "Perform final T005 audit against the contract-freeze artifacts before marking T005 done."
+    receipt:
+      result: done
+      full_outcome_complete: false
+      summary: "Ported and audited the TypeScript runtime helper layer for tmux, Codex rollout discovery, JSONL ingest, and classifier parity while intentionally preserving the Python compatibility bridge for public CLI command routing until T006/T007."
+      changed_files:
+        - "src/index.ts"
+        - "src/runtime/classify.ts"
+        - "src/runtime/codex-session.ts"
+        - "src/runtime/ingest.ts"
+        - "src/runtime/tmux.ts"
+        - "src/runtime/runtime.test.ts"
+        - "docs/typescript-migration/t005-runtime-parity.md"
+        - "docs/goals/agent-conveyor-ts-migration/state.yaml"
+      artifacts:
+        - path: "docs/typescript-migration/t005-runtime-parity.md"
+          summary: "Runtime parity audit mapping Python sources to TypeScript helpers, tests, bridge decision, strongest failure mode, and disproof evidence."
+      commands:
+        - cmd: "npm test -- --runInBand"
+          status: pass
+          summary: "Node test gate passed: 67 tests, including tmux runner, Codex discovery wrapper, DB ingest, classifier parity, state/SQLite parity, dashboard workerctl arguments, and CLI bridge smoke."
+        - cmd: "npm run build"
+          status: pass
+          summary: "CLI TypeScript build and dashboard production build passed."
+        - cmd: "STATE_ROOT=\"$(mktemp -d \"${TMPDIR:-/tmp}/workerctl-t005-final-state.XXXXXX\")\"; WORKERCTL_STATE_ROOT=\"$STATE_ROOT\" python3 -m unittest discover -s tests -v"
+          status: pass
+          summary: "Python compatibility suite passed under isolated state root: 645 tests in 35.893s."
+        - cmd: "bash -n scripts/live-smoke scripts/live-smoke-repeat"
+          status: pass
+          summary: "Live smoke shell scripts parse."
+        - cmd: "git diff --check"
+          status: pass
+          summary: "No whitespace errors."
+      bridge_decision: "Public `conveyor` and `workerctl` commands still route through `src/cli/python-bridge.ts` for T005. This is intentional: T005 proves the runtime helpers in TypeScript without changing public command behavior. T006/T007 own command-handler and packaging route migration."
+      disproof:
+        strongest_failure_mode: "The migration could appear to progress because TypeScript helpers pass while public command behavior silently drifts for tmux targets, rollout offsets, classifier decisions, or CLI error behavior."
+        evidence: "Node runtime tests directly exercise the migrated TS behavior; the full Python compatibility suite passed under isolated state to prove bridge-backed public CLI behavior did not regress; the T005 audit artifact records the bridge decision and keeps T006/T007 queued for public command and package migration."
+        residual_risk: "Live Codex/tmux command routing remains Python-backed until T006 integrates lifecycle/Dispatch command handlers and T007 completes npm package-routing proof."
+
+  - id: T006
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "Port task lifecycle, Dispatch command queue, inbox delivery, loop evidence, audit, replay, export, and dashboard-facing CLI behavior to TypeScript."
+    allowed_files:
+      - "src/**"
+      - "tests/**"
+      - "dashboard/**"
+      - "scripts/**"
+      - "docs/typescript-migration/**"
+      - "docs/goals/agent-conveyor-ts-migration/**"
+      - "package.json"
+      - "package-lock.json"
+      - "tsconfig*.json"
+      - "README.md"
+    verify:
+      - "npm test -- --runInBand"
+      - "npm run build"
+      - "python3 -m unittest discover -s tests -v"
+      - "scripts/rc-check --skip-live-smoke-repeat"
+      - "scripts/workerctl qa-run adversarial-triggers --receipt-output /tmp/adversarial-triggers-receipt.json --json"
+      - "git diff --check"
+    stop_if:
+      - "Dispatch logic would gain decision authority instead of mechanical routing."
+      - "Command claims, permission blocks, or inbox consumption telemetry differ without Judge approval."
+      - "Dashboard loses Dispatch chain, heartbeat, terminal safety, or action arg coverage."
+      - "Verification requires unavailable live tmux/Codex and no deterministic substitute exists."
+    expected_output:
+      - "TS lifecycle and Dispatch parity."
+      - "TS audit/replay/export parity for migrated surfaces."
+      - "Dashboard integration still green."
+      - "Adversarial proof receipt evidence."
+    progress:
+      - summary: "Started T006 with a narrow TypeScript task lifecycle helper slice. Added `createTaskSync` and `listTasksSync` over the v22 SQLite schema, preserving Python candidate-state creation, `task_created` event emission, active-only filtering, ordering, and budget output shape. This does not migrate Dispatch or public command handlers yet."
+        changed_files:
+          - "src/index.ts"
+          - "src/runtime/tasks.ts"
+          - "src/runtime/runtime.test.ts"
+          - "docs/goals/agent-conveyor-ts-migration/state.yaml"
+        commands:
+          - cmd: "npm test -- --runInBand"
+            status: pass
+            summary: "Node test gate passed: 69 tests, including task lifecycle event/budget behavior and a Python `db.list_tasks` parity check against a TS-created task."
+          - cmd: "npm run build:cli"
+            status: pass
+            summary: "CLI TypeScript build passed."
+          - cmd: "git diff --check"
+            status: pass
+            summary: "No whitespace errors."
+        remaining:
+          - "Port task status/binding helpers before replacing dashboard-facing task commands."
+          - "Port Dispatch command queue, command attempts, required permission checks, and routed notification behavior without adding decision authority."
+          - "Port inbox delivery/consumption, loop evidence, audit/replay/export surfaces, and dashboard-facing CLI parity."
+      - summary: "Extended T006 task lifecycle parity with session-based binding helpers for the Dispatch-safe path. Added `bindSessionsSync`, `unbindTaskSync`, `activeBindingForTaskSync`, and `latestSessionBindingForTaskSync`, including role validation, duplicate active binding refusal, active/ending/ended state handling, and Python active-binding output parity. Legacy worker-based task status snapshots remain intentionally untouched for a later dashboard-facing slice."
+        changed_files:
+          - "src/index.ts"
+          - "src/runtime/tasks.ts"
+          - "src/runtime/runtime.test.ts"
+          - "docs/goals/agent-conveyor-ts-migration/state.yaml"
+        commands:
+          - cmd: "npm test -- --runInBand"
+            status: pass
+            summary: "Node test gate passed: 71 tests, including session binding lifecycle behavior and Python `active_binding_for_task` parity against a TS-created binding."
+          - cmd: "npm run build:cli"
+            status: pass
+            summary: "CLI TypeScript build passed."
+          - cmd: "git diff --check"
+            status: pass
+            summary: "No whitespace errors."
+        observations:
+          - type: "parity-test-caught-shape-drift"
+            detail: "The first TS active-binding shape included `ended_at: null`, but Python `active_binding_for_task` omits `ended_at`; TS was corrected so only `latestSessionBindingForTaskSync` includes ended_at."
+        remaining:
+          - "Port legacy worker-based task status snapshot helpers needed by dashboard-facing task commands."
+          - "Port Dispatch command queue, command attempts, required permission checks, and routed notification behavior without adding decision authority."
+          - "Port inbox delivery/consumption, loop evidence, audit/replay/export surfaces, and dashboard-facing CLI parity."
+      - summary: "Added TypeScript command queue runtime helpers for T006: `createCommandSync`, `claimNextDispatchCommandSync`, and `finishCommandAttemptSync`. The slice preserves command creation, required-permission validation, claim leasing, attempt creation, terminal attempt updates, command state updates, side-effect flags, telemetry event/severity emission, and Python claimed-command record shape. It remains a mechanical queue layer only; Dispatch routing decisions and inbox delivery are still not migrated."
+        changed_files:
+          - "src/index.ts"
+          - "src/runtime/commands.ts"
+          - "src/runtime/runtime.test.ts"
+          - "docs/goals/agent-conveyor-ts-migration/state.yaml"
+        commands:
+          - cmd: "npm test -- --runInBand"
+            status: pass
+            summary: "Node test gate passed: 74 tests, including command create/claim/finish behavior and a Python `_command_record` parity check against a TS-created claimed command."
+          - cmd: "npm run build"
+            status: pass
+            summary: "Full TypeScript build passed, including CLI build and dashboard production build."
+          - cmd: "npm run build:cli"
+            status: pass
+            summary: "CLI TypeScript build passed after tightening command-finish telemetry severity literals."
+          - cmd: "git diff --check"
+            status: pass
+            summary: "No whitespace errors."
+        observations:
+          - type: "burden-of-proof"
+            detail: "Strongest realistic failure mode was TS claiming/updating commands with a shape or telemetry contract that Python/dashboard code would not understand. Disproof evidence: Node command queue tests include claim-once behavior, terminal blocked attempt update behavior, telemetry severity checks, and a Python `_command_record` parity check."
+          - type: "test-caught-row-wrapper-drift"
+            detail: "The first test run failed on SQLite row prototypes rather than values; assertions now normalize DB rows before strict comparison so the tests prove payloads instead of wrapper internals."
+        remaining:
+          - "Port claim recovery/claimable listing and any missing permission-block behavior needed by Dispatch workers."
+          - "Port routed notifications, inbox delivery/consumption, and loop evidence without granting Dispatch decision authority."
+          - "Port audit/replay/export surfaces and dashboard-facing CLI parity."
+      - summary: "Extended the TypeScript command queue runtime with dry-run claimable listing, stale claim recovery, and side-effect-start marking. The recovery branch mirrors Python safety semantics: expired claims before side effects are abandoned and requeued when attempts remain, while expired claims after side effects are failed for manual review. This still does not execute routing or tmux delivery."
+        changed_files:
+          - "src/index.ts"
+          - "src/runtime/commands.ts"
+          - "src/runtime/runtime.test.ts"
+          - "docs/goals/agent-conveyor-ts-migration/state.yaml"
+        commands:
+          - cmd: "npm test -- --runInBand"
+            status: pass
+            summary: "Node test gate passed: 76 tests, including claimable listing plus both stale-claim recovery branches."
+          - cmd: "npm run build"
+            status: pass
+            summary: "Full TypeScript build passed, including CLI build and dashboard production build."
+          - cmd: "npm run build:cli"
+            status: pass
+            summary: "CLI TypeScript build passed after the `node:sqlite` row-array casts were tightened."
+          - cmd: "git diff --check"
+            status: pass
+            summary: "No whitespace errors."
+        observations:
+          - type: "burden-of-proof"
+            detail: "Strongest realistic failure mode was retrying a command after a side effect may already have been sent. Disproof evidence: `command queue stale claim recovery fails claims after side effects started` proves TS fails the command and running attempt with the manual-review error, while the companion requeue test proves safe pre-side-effect claims return to pending."
+          - type: "compile-gate-caught-type-drift"
+            detail: "`npm run build:cli` rejected direct casts from `node:sqlite` row arrays to concrete row types; casts now go through `unknown` so the build remains explicit about this boundary."
+        remaining:
+          - "Port Dispatch route resolution, required manager-permission checks, routed notifications, and inbox delivery/consumption."
+          - "Port loop evidence, audit/replay/export surfaces, and dashboard-facing CLI parity."
+      - summary: "Ported the deterministic manager permission layer needed by Dispatch command routing. Added the TypeScript manager permission taxonomy/alias normalization, manager config reader, and `checkDispatchRequiredPermissionSync`, preserving Python behavior where missing manager config denies required permissions, aliases can require multiple canonical grants, every check emits `dispatch_command_permission_checked` telemetry, and denied checks throw before any side effect."
+        changed_files:
+          - "src/index.ts"
+          - "src/runtime/commands.ts"
+          - "src/runtime/dispatch.ts"
+          - "src/runtime/manager-config.ts"
+          - "src/runtime/manager-permissions.ts"
+          - "src/runtime/runtime.test.ts"
+          - "docs/goals/agent-conveyor-ts-migration/state.yaml"
+        commands:
+          - cmd: "npm test -- --runInBand"
+            status: pass
+            summary: "Node test gate passed: 79 tests, including permission alias normalization, manager config readback, missing-config denial telemetry, and configured alias allowance."
+          - cmd: "npm run build"
+            status: pass
+            summary: "Full TypeScript build passed, including CLI build and dashboard production build."
+          - cmd: "npm run build:cli"
+            status: pass
+            summary: "CLI TypeScript build passed."
+          - cmd: "git diff --check"
+            status: pass
+            summary: "No whitespace errors."
+        observations:
+          - type: "burden-of-proof"
+            detail: "Strongest realistic failure mode was allowing a required manager permission without config, or emitting telemetry in a shape the dashboard/Python schema cannot read. Disproof evidence: the missing-config test proves denial plus warning telemetry; the first run caught an invalid `search_text` column assumption, and the helper now writes base telemetry plus FTS rows using the v22 schema pattern."
+        remaining:
+          - "Port Dispatch route resolution for notify_manager, nudge_worker, and continue_iteration without tmux delivery."
+          - "Port routed notifications, inbox delivery/consumption, loop evidence, audit/replay/export surfaces, and dashboard-facing CLI parity."
+      - summary: "Added side-effect-free TypeScript Dispatch route resolution for claimed commands. `resolveDispatchCommandRouteSync` now mirrors Python `_dispatch_command_route`: `notify_manager` routes worker-to-manager, `nudge_worker` and `continue_iteration` route manager-to-worker, active session binding resolution is required, and unsupported command types fail before any delivery or tmux action."
+        changed_files:
+          - "src/index.ts"
+          - "src/runtime/dispatch.ts"
+          - "src/runtime/runtime.test.ts"
+          - "docs/goals/agent-conveyor-ts-migration/state.yaml"
+        commands:
+          - cmd: "npm test -- --runInBand"
+            status: pass
+            summary: "Node test gate passed: 81 tests, including route direction for notify_manager, nudge_worker, continue_iteration, and unsupported command rejection."
+          - cmd: "npm run build"
+            status: pass
+            summary: "Full TypeScript build passed, including CLI build and dashboard production build."
+          - cmd: "npm run build:cli"
+            status: pass
+            summary: "CLI TypeScript build passed."
+          - cmd: "git diff --check"
+            status: pass
+            summary: "No whitespace errors."
+        observations:
+          - type: "burden-of-proof"
+            detail: "Strongest realistic failure mode was silently reversing Dispatch direction or routing an unsupported command into a worker/manager session. Disproof evidence: the route test asserts full notify_manager worker-to-manager output and checks nudge_worker/continue_iteration manager-to-worker output, while unsupported_command throws before delivery."
+        remaining:
+          - "Port routed notifications, delivery-mode detection, pull-required inbox behavior, and inbox consumption."
+          - "Port loop evidence, audit/replay/export surfaces, and dashboard-facing CLI parity."
+      - summary: "Ported durable routed-notification and session-inbox primitives to TypeScript. Added delivery-mode detection from target session tmux metadata, routed notification insert/finish/defer/side-effect-start helpers, routed notification listing, session inbox listing, and consume-next behavior. The slice supports push and pull-required records without performing any tmux delivery."
+        changed_files:
+          - "src/index.ts"
+          - "src/runtime/notifications.ts"
+          - "src/runtime/runtime.test.ts"
+          - "docs/goals/agent-conveyor-ts-migration/state.yaml"
+        commands:
+          - cmd: "npm test -- --runInBand"
+            status: pass
+            summary: "Node test gate passed: 83 tests, including push routed notification inbox consumption and pull-required delivery without side effects."
+          - cmd: "npm run build"
+            status: pass
+            summary: "Full TypeScript build passed, including CLI build and dashboard production build."
+          - cmd: "npm run build:cli"
+            status: pass
+            summary: "CLI TypeScript build passed."
+          - cmd: "git diff --check"
+            status: pass
+            summary: "No whitespace errors."
+        observations:
+          - type: "burden-of-proof"
+            detail: "Strongest realistic failure mode was a no-tmux target being treated like a pushed delivery, which could mark side effects complete or leave no pull inbox evidence. Disproof evidence: `pull-required routed notifications are delivered without side effects` proves delivery_mode=pull_required, delivered state, side_effect_started=false, side_effect_completed=false, and an inbox item with the payload."
+        remaining:
+          - "Wire command execution to create/finish routed notifications while preserving dry-run, blocked-loop, permission, and pull-required behavior."
+          - "Port loop evidence, audit/replay/export surfaces, and dashboard-facing CLI parity."
+      - summary: "Wired the first safe TypeScript Dispatch command execution path. `executeDispatchCommandSync` now composes command text, resolves the session route, checks required manager permission, creates routed-notification payloads, records `dispatch_command_attempted` and `dispatch_signal_pull_required` telemetry, finishes pull-required notifications, and finishes the command attempt as succeeded. Dry-run planning returns without routed notification side effects, and push-mode delivery is refused before creating a notification until the tmux runner slice exists."
+        changed_files:
+          - "src/index.ts"
+          - "src/runtime/dispatch.ts"
+          - "src/runtime/runtime.test.ts"
+          - "docs/goals/agent-conveyor-ts-migration/state.yaml"
+        commands:
+          - cmd: "npm test -- --runInBand"
+            status: pass
+            summary: "Node test gate passed: 86 tests, including dry-run no-notification behavior, pull-required command-to-worker-inbox delivery and command attempt completion, and push-mode refusal before notification creation."
+          - cmd: "npm run build"
+            status: pass
+            summary: "Full TypeScript build passed, including CLI build and dashboard production build."
+          - cmd: "npm run build:cli"
+            status: pass
+            summary: "CLI TypeScript build passed."
+          - cmd: "git diff --check"
+            status: pass
+            summary: "No whitespace errors."
+        observations:
+          - type: "burden-of-proof"
+            detail: "Strongest realistic failure mode was the partial TS executor creating a durable notification for a push-mode command without having tmux delivery implemented, leaving a misleading pending side effect. Disproof evidence: `dispatch command execution refuses push delivery before creating notification` proves push mode throws before any routed_notifications row, while the pull-required test proves inbox delivery and command success only for no-tmux targets."
+        remaining:
+          - "Add the tmux-backed push delivery runner path with side-effect-start/finish/failure recovery semantics."
+          - "Port blocked Ralph-loop policy checks before delivering continue_iteration commands."
+          - "Port loop evidence, audit/replay/export surfaces, and dashboard-facing CLI parity."
+      - summary: "Added the tmux-backed TypeScript Dispatch push delivery path behind an injected `TmuxRunner`. Push commands now create the routed notification only when a runner is supplied, send through `sendTextToSessionWithRunner`, mark command attempt and routed notification side effects when tmux send begins, finish notifications/attempts on success, and defer pre-side-effect failures back to pending notification state while failing the command attempt. No real tmux process is touched in tests."
+        changed_files:
+          - "src/runtime/dispatch.ts"
+          - "src/runtime/runtime.test.ts"
+          - "docs/goals/agent-conveyor-ts-migration/state.yaml"
+        commands:
+          - cmd: "npm test -- --runInBand"
+            status: pass
+            summary: "Node test gate passed: 88 tests, including runner-backed push delivery success and pre-side-effect tmux failure deferral."
+          - cmd: "npm run build"
+            status: pass
+            summary: "Full TypeScript build passed, including CLI build and dashboard production build."
+          - cmd: "npm run build:cli"
+            status: pass
+            summary: "CLI TypeScript build passed after making the optional runner narrowing explicit inside the push branch."
+          - cmd: "git diff --check"
+            status: pass
+            summary: "No whitespace errors."
+        observations:
+          - type: "burden-of-proof"
+            detail: "Strongest realistic failure mode was marking push delivery as completed, or leaving a misleading delivered notification, when tmux failed before any side effect started. Disproof evidence: `dispatch command execution defers push notification when tmux fails before side effect` proves the notification returns to pending with side_effect_started=false and the command attempt fails; the success test proves started/completed flags only become true after the runner path succeeds."
+          - type: "compile-gate-caught-type-drift"
+            detail: "`npm run build:cli` caught that the optional tmux runner was still typed as possibly undefined after the delivery-mode guard; the push branch now narrows through a local runner variable."
+        remaining:
+          - "Port blocked Ralph-loop policy checks before delivering continue_iteration commands."
+          - "Port loop evidence, audit/replay/export surfaces, and dashboard-facing CLI parity."
+      - summary: "Ported the blocked Ralph-loop `continue_iteration` policy into the TypeScript Dispatch executor. The executor now validates `payload.ralph_loop`, reads Ralph-loop runs from `runs.metadata_json`, blocks stale/max-iteration/missing-required-evidence continuations before notification creation, preserves structured adversarial-check evidence requirements, records blocked command attempts with Python-compatible result fields, and includes loop policy payloads on allowed pull-required and push delivery paths."
+        changed_files:
+          - "src/runtime/dispatch.ts"
+          - "src/runtime/runtime.test.ts"
+          - "docs/goals/agent-conveyor-ts-migration/state.yaml"
+        commands:
+          - cmd: "npm test -- --runInBand"
+            status: pass
+            summary: "Node test gate passed: 91 tests, including missing loop evidence block, structured-evidence allowed retry, and unstructured adversarial_check rejection."
+          - cmd: "npm run build:cli"
+            status: pass
+            summary: "CLI TypeScript build passed after tightening JSON `unknown` narrowing around requested_iteration, manager_decision_id, and run metadata integers."
+          - cmd: "npm run build"
+            status: pass
+            summary: "Full TypeScript build passed, including CLI build and dashboard production build."
+          - cmd: "git diff --check"
+            status: pass
+            summary: "No whitespace errors."
+        observations:
+          - type: "burden-of-proof"
+            detail: "Strongest realistic failure mode was a blocked Ralph-loop continuation still creating a routed notification or worker inbox item, especially when a generic adversarial_check receipt existed. Disproof evidence: `dispatch command execution blocks continue_iteration before notification when loop evidence is missing` proves no routed_notifications or inbox rows are created and the attempt is blocked; `dispatch command execution rejects unstructured adversarial loop evidence` proves generic adversarial_check evidence still blocks without failure_mode/check/result."
+          - type: "compile-gate-caught-type-drift"
+            detail: "The first `npm run build:cli` failed because `Number.isInteger` did not narrow JSON `unknown` values; runtime validation now explicitly checks `typeof value === \"number\"` before using iteration or decision IDs."
+        remaining:
+          - "Port loop evidence creation/listing helpers and any audit/replay/export fields that depend on Ralph-loop receipts."
+          - "Port dashboard-facing CLI behavior for migrated Dispatch surfaces."
+      - summary: "Added TypeScript loop-evidence ledger primitives for Ralph-loop receipts. `recordLoopEvidenceSync`, `recordAdversarialLoopEvidenceSync`, and `acceptanceCriteriaForTaskSync` now create/update run-qualified acceptance criteria with Python-compatible criterion text, status normalization, structured adversarial proof validation, evidence payloads, telemetry, and acceptance_criterion event records. The slice intentionally excludes visual-diff image/report generation, which remains a later focused port."
+        changed_files:
+          - "src/index.ts"
+          - "src/runtime/loop-evidence.ts"
+          - "src/runtime/runtime.test.ts"
+          - "docs/goals/agent-conveyor-ts-migration/state.yaml"
+        commands:
+          - cmd: "npm test -- --runInBand"
+            status: pass
+            summary: "Node test gate passed: 94 tests, including loop evidence consumed by Dispatch, weak adversarial metadata rejection before criteria writes, and failed rerun update behavior."
+          - cmd: "npm run build:cli"
+            status: pass
+            summary: "CLI TypeScript build passed after making node:sqlite row casts and bind params explicit."
+          - cmd: "npm run build"
+            status: pass
+            summary: "Full TypeScript build passed, including CLI build and dashboard production build."
+          - cmd: "git diff --check"
+            status: pass
+            summary: "No whitespace errors."
+        observations:
+          - type: "burden-of-proof"
+            detail: "Strongest realistic failure mode was recording weak or failed proof as satisfied evidence, allowing a later continue_iteration through the Dispatch guard. Disproof evidence: `loop evidence rejects weak adversarial metadata before writing criteria` proves no acceptance_criterion mutation event or row is written for missing failure_mode/check/result; `loop evidence updates an existing receipt so failed reruns do not leave stale satisfied evidence` proves a failed rerun updates the same criterion to rejected and removes it from the satisfied set."
+          - type: "test-caught-assertion-scope"
+            detail: "The first test pass correctly showed a `task_created` event existed before failed evidence recording; the assertion now checks only `acceptance_criterion_%` events so the proof targets evidence writes rather than unrelated task setup."
+        remaining:
+          - "Port visual-diff loop evidence generation or defer it behind a dedicated image-processing slice."
+          - "Port audit/replay/export surfaces that depend on Ralph-loop receipts."
+          - "Port dashboard-facing CLI behavior for migrated Dispatch surfaces."
+      - summary: "Ported visual-diff loop evidence generation to TypeScript without adding image dependencies. Added a PNG read/write and comparison helper using Node core `zlib`, plus `recordVisualDiffLoopEvidenceSync` to validate Ralph-loop ownership before artifact writes, record `visual_diff_report`, record or reject `diff_below_threshold`, write optional diff PNG/report JSON artifacts, and keep failed reruns from leaving stale satisfied threshold receipts."
+        changed_files:
+          - "src/index.ts"
+          - "src/runtime/loop-evidence.ts"
+          - "src/runtime/runtime.test.ts"
+          - "src/runtime/visual-diff.ts"
+          - "docs/goals/agent-conveyor-ts-migration/state.yaml"
+        commands:
+          - cmd: "npm test -- --runInBand"
+            status: pass
+            summary: "Node test gate passed: 97 tests, including visual diff report/threshold receipts, failed rerun stale-threshold rejection, and bad-run validation before artifact writes."
+          - cmd: "npm run build:cli"
+            status: pass
+            summary: "CLI TypeScript build passed after converting `VisualDiffReport` to a plain metadata object at the ledger boundary."
+          - cmd: "npm run build"
+            status: pass
+            summary: "Full TypeScript build passed, including CLI build and dashboard production build."
+          - cmd: "git diff --check"
+            status: pass
+            summary: "No whitespace errors."
+        observations:
+          - type: "burden-of-proof"
+            detail: "Strongest realistic failure mode was a failed visual rerun leaving an old satisfied `diff_below_threshold` receipt, allowing Dispatch to continue a loop despite a regression. Disproof evidence: `visual diff loop evidence rejects stale threshold evidence on failed rerun` proves the threshold criterion id is reused, status becomes rejected, only one threshold row remains, and the satisfied evidence set contains only `visual_diff_report`."
+          - type: "artifact-safety-proof"
+            detail: "`visual diff loop evidence validates the run before writing artifacts` proves a non-Ralph run throws before creating diff/report files or acceptance criteria."
+        remaining:
+          - "Port audit/replay/export surfaces that depend on Ralph-loop receipts."
+          - "Port dashboard-facing CLI behavior for migrated Dispatch surfaces."
+      - summary: "Added a TypeScript task audit helper for the migrated Dispatch and loop-evidence surfaces. `taskAuditSync` now exposes task, events, commands, command attempts, routed notifications with session names, manager decisions, acceptance criteria, and Dispatch correlation chains for the records ported so far. This intentionally leaves legacy terminal capture/transcript/manager-cycle breadth for later slices."
+        changed_files:
+          - "src/index.ts"
+          - "src/runtime/audit.ts"
+          - "src/runtime/runtime.test.ts"
+          - "docs/goals/agent-conveyor-ts-migration/state.yaml"
+        commands:
+          - cmd: "npm test -- --runInBand"
+            status: pass
+            summary: "Node test gate passed: 98 tests, including a TS-created DB audited by both TS `taskAuditSync` and Python `worker_db.task_audit` for matching task, criteria, command states, command attempt states, correlation chains, and notification session names."
+          - cmd: "npm run build:cli"
+            status: pass
+            summary: "CLI TypeScript build passed."
+          - cmd: "npm run build"
+            status: pass
+            summary: "Full TypeScript build passed, including CLI build and dashboard production build."
+          - cmd: "git diff --check"
+            status: pass
+            summary: "No whitespace errors."
+        observations:
+          - type: "burden-of-proof"
+            detail: "Strongest realistic failure mode was the TS audit helper returning records that the Python/dashboard audit contract could not consume. Disproof evidence: `task audit exposes migrated Dispatch and loop evidence surfaces with Python-compatible records` creates loop evidence plus a delivered continue_iteration command, reads the same SQLite DB with TS and Python, and compares overlapping task, criteria, command state, attempt state, correlation-chain, and routed-notification session fields."
+          - type: "test-caught-row-wrapper-drift"
+            detail: "The first parity run caught `node:sqlite` returning a null-prototype task row; `taskAuditSync` now normalizes the task record into a plain object before returning it."
+        remaining:
+          - "Port replay/export file generation for the migrated audit subset."
+          - "Port dashboard-facing CLI behavior for migrated Dispatch surfaces."
+      - summary: "Added migrated-subset TypeScript task export generation. `exportTaskAuditSubsetSync` writes task-status, audit, acceptance criteria, commands, command attempts, routed notifications, manager decisions, correlation chains, and a manifest as sorted JSON with trailing newlines. This intentionally does not zip or include legacy transcript/prompt/telemetry surfaces yet."
+        changed_files:
+          - "src/index.ts"
+          - "src/runtime/export.ts"
+          - "src/runtime/runtime.test.ts"
+          - "docs/goals/agent-conveyor-ts-migration/state.yaml"
+        commands:
+          - cmd: "npm test -- --runInBand"
+            status: pass
+            summary: "Node test gate passed: 99 tests, including export manifest/files matching `taskAuditSync` records."
+          - cmd: "npm run build:cli"
+            status: pass
+            summary: "CLI TypeScript build passed."
+          - cmd: "npm run build"
+            status: pass
+            summary: "Full TypeScript build passed, including CLI build and dashboard production build."
+          - cmd: "git diff --check"
+            status: pass
+            summary: "No whitespace errors."
+        observations:
+          - type: "burden-of-proof"
+            detail: "Strongest realistic failure mode was an export manifest pointing at missing or stale JSON files that no longer matched the audit helper. Disproof evidence: `task export writes migrated audit subset files and manifest` reads every manifest-listed file back from disk and compares audit, criteria, commands, attempts, notifications, decisions, chains, and task status to the live `taskAuditSync` result."
+        remaining:
+          - "Port replay entries for the migrated audit subset."
+          - "Wire dashboard-facing CLI behavior for migrated Dispatch/audit/export surfaces."
+          - "Decide whether zip/transcript/prompt/telemetry export breadth remains Python-backed until a later T006/T007 slice."
+      - summary: "Added migrated-subset TypeScript replay entry generation. `replayEntriesFromAudit` and `replayResultFromAudit` now mirror Python replay ordering and summaries for commands, command attempts, routed notifications, Dispatch correlation chains, manager decisions, and acceptance-criterion events from the audited surfaces ported so far. Transcript, capture, manager-cycle, and continuation replay breadth remains outside this subset."
+        changed_files:
+          - "src/index.ts"
+          - "src/runtime/replay.ts"
+          - "src/runtime/runtime.test.ts"
+          - "docs/goals/agent-conveyor-ts-migration/state.yaml"
+        commands:
+          - cmd: "npm test -- --runInBand"
+            status: pass
+            summary: "Node test gate passed: 100 tests, including exact Python `workerctl.replay.replay_entries` parity for the migrated audit subset."
+          - cmd: "npm run build:cli"
+            status: pass
+            summary: "CLI TypeScript build passed."
+          - cmd: "npm run build"
+            status: pass
+            summary: "Full TypeScript build passed, including CLI build and dashboard production build."
+          - cmd: "git diff --check"
+            status: pass
+            summary: "No whitespace errors."
+        observations:
+          - type: "burden-of-proof"
+            detail: "Strongest realistic failure mode was TypeScript replay producing chronologically plausible but Python-incompatible entries, which would make dashboard/export replay evidence drift. Disproof evidence: `task replay entries mirror Python migrated audit subset` builds the same SQLite task, asks Python `workerctl.replay.replay_entries` for the authoritative migrated subset output, and deep-compares the TypeScript replay entries plus source ordering."
+        remaining:
+          - "Wire dashboard-facing CLI behavior for migrated Dispatch/audit/replay/export surfaces."
+          - "Decide whether zip/transcript/prompt/telemetry export breadth remains Python-backed until a later T006/T007 slice."
+      - summary: "Added an opt-in TypeScript CLI runtime path for the dashboard-facing migrated audit/replay/export surfaces. `src/cli/main.ts` now lets `--ts-runtime` or `AGENT_CONVEYOR_TS_RUNTIME=1` handle `audit`, `replay`, and non-zip subset `export-task` through the TypeScript runtime while preserving the Python bridge by default. The dashboard command builder can now produce guarded `--ts-runtime` audit/replay/export arguments for a Node bin path, and rejects TypeScript runtime routing for unrelated commands."
+        changed_files:
+          - "dashboard/server/workerctl.ts"
+          - "dashboard/server/workerctl.test.ts"
+          - "src/cli/main.ts"
+          - "src/cli/typescript-runtime.ts"
+          - "src/cli/typescript-runtime.test.ts"
+          - "src/runtime/replay.ts"
+          - "docs/goals/agent-conveyor-ts-migration/state.yaml"
+        commands:
+          - cmd: "npm test -- --runInBand"
+            status: pass
+            summary: "Node test gate passed: 103 tests, including opt-in TS runtime audit/replay/export execution, dashboard `--ts-runtime` arg construction, and rejection of unsupported TS runtime export zip/transcript flags."
+          - cmd: "npm run build:cli"
+            status: pass
+            summary: "CLI TypeScript build passed."
+          - cmd: "npm run build"
+            status: pass
+            summary: "Full TypeScript build passed, including CLI build and dashboard production build."
+          - cmd: "git diff --check"
+            status: pass
+            summary: "No whitespace errors."
+        observations:
+          - type: "burden-of-proof"
+            detail: "Strongest realistic failure mode was the dashboard or CLI silently treating the migrated subset export as full Python export parity, especially for zip/transcript bundles. Disproof evidence: `TypeScript runtime handles dashboard audit replay and subset export commands` verifies audit/replay/export JSON and manifest files through the opt-in TS handler, then proves `export-task --zip` exits with a migrated-subset-only error instead of producing a misleading archive."
+          - type: "test-caught-schema-drift"
+            detail: "Initial CLI fixture runs failed on stale imagined `sessions.created_at` and `runs.kind` columns. The fixture was corrected to the canonical v22 session and Ralph-loop run shapes, so the new CLI proof now exercises the actual schema contract rather than a loose mock."
+        remaining:
+          - "Decide whether the dashboard should flip its default workerctl path/runtime in T007 package wiring or keep Python-backed defaults until full export breadth is ported."
+          - "Decide whether zip/transcript/prompt/telemetry export breadth remains Python-backed until a later T006/T007 slice."
+      - summary: "Closed T006 with an explicit migration boundary decision. The dashboard-facing TypeScript runtime remains opt-in for migrated audit, replay, and non-zip subset export; default dashboard/package execution stays Python-backed until T007 proves npm tarball install behavior. Full zip/transcript/prompt/telemetry export breadth remains Python-backed until a later parity slice."
+        changed_files:
+          - "docs/typescript-migration/dashboard-contract.md"
+          - "docs/typescript-migration/package-install-contract.md"
+          - "docs/goals/agent-conveyor-ts-migration/state.yaml"
+        commands:
+          - cmd: "npm test -- --runInBand"
+            status: pass
+            summary: "Prior T006 final code gate passed: 103 tests, including opt-in TS runtime audit/replay/export execution and explicit subset-export rejection for zip/transcript flags."
+          - cmd: "npm run build"
+            status: pass
+            summary: "Prior T006 final code gate passed: full CLI and dashboard production build."
+          - cmd: "git diff --check"
+            status: pass
+            summary: "Whitespace check will be rerun after this receipt."
+        observations:
+          - type: "burden-of-proof"
+            detail: "Strongest realistic failure mode was letting T007 treat the opt-in migrated subset as a full CLI/package cutover. Disproof evidence: dashboard and package contract docs now explicitly require Python-backed defaults until tarball smoke passes and explicitly forbid treating subset export as full zip/transcript/prompt/telemetry parity."
+        remaining:
+          - "T007 must convert npm package/install/release/CI/docs paths while preserving the Python bridge default unless it proves a broader runtime cutover."
+    receipt:
+      result: done
+      full_outcome_complete: false
+      summary: "T006 is complete: TypeScript now covers task lifecycle, session binding, command queue, Dispatch permission/routing/delivery, inbox primitives, Ralph-loop evidence including visual diffs, migrated audit, replay, subset export, and an opt-in dashboard-facing CLI runtime for migrated audit/replay/export surfaces. Full npm package cutover remains queued in T007."
+      changed_files:
+        - "dashboard/server/workerctl.ts"
+        - "dashboard/server/workerctl.test.ts"
+        - "src/**"
+        - "docs/typescript-migration/dashboard-contract.md"
+        - "docs/typescript-migration/package-install-contract.md"
+        - "docs/goals/agent-conveyor-ts-migration/state.yaml"
+      commands:
+        - cmd: "npm test -- --runInBand"
+          status: pass
+          summary: "T006 final code gate passed 103 tests after fixing schema-fixture drift."
+        - cmd: "npm run build"
+          status: pass
+          summary: "T006 final code gate passed full CLI and dashboard build."
+        - cmd: "git diff --check"
+          status: pass
+          summary: "Whitespace check will be rerun after this receipt."
+      disproof:
+        strongest_failure_mode: "A partial TS runtime could silently replace Python behavior for unsupported commands or full export bundles."
+        evidence: "Tests prove TS runtime is opt-in, dashboard only builds guarded TS argv for audit/replay/export, unsupported dashboard TS commands are rejected, and `export-task --zip` through TS runtime errors instead of producing a misleading archive."
+        residual_risk: "Full export breadth, npm tarball install, docs/CI conversion, and any default runtime flip remain T007 work."
+
+  - id: T007
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "Convert package, install, release, CI, and docs paths from Python/PyPI to npm tarball semantics while preserving skill assets and CLI aliases."
+    allowed_files:
+      - "package.json"
+      - "package-lock.json"
+      - "bin/**"
+      - "scripts/**"
+      - ".github/workflows/**"
+      - "README.md"
+      - "docs/package-release.md"
+      - "docs/typescript-migration/**"
+      - "docs/goals/agent-conveyor-ts-migration/**"
+      - "skills/**"
+      - "workerctl/assets/**"
+      - "src/**"
+      - "tests/test_workerctl.py"
+    verify:
+      - "npm ci"
+      - "npm test -- --runInBand"
+      - "npm run build"
+      - "npm pack --json"
+      - "scripts/package-smoke"
+      - "scripts/release-check"
+      - "scripts/rc-check --skip-live-smoke-repeat"
+      - "git diff --check"
+    stop_if:
+      - "The package would publish automatically."
+      - "`conveyor` or `workerctl` are missing from a clean tarball install."
+      - "Installed skill assets are missing or `codex-review` loses executable mode."
+      - "Docs still contain copy-pastable PyPI/pipx publish/install commands as the primary path."
+      - "npm auth is required for anything except local tarball verification."
+    expected_output:
+      - "`agent-conveyor` npm package metadata and tarball contents."
+      - "Clean temp install proving both command aliases."
+      - "Node install-skills behavior with CODEX_HOME verification."
+      - "CI workflow changes for npm package smoke."
+      - "Docs updated from PyPI primary path to npm primary path."
+    progress:
+      - summary: "Converted the package smoke and release-check scripts from Python wheel/PyPI semantics to local npm tarball verification. `scripts/package-smoke` now runs `npm pack`, installs the resulting `.tgz` into a temp global prefix, proves `conveyor` and `workerctl` help from PATH, verifies required tarball contents and executable modes, and installs bundled skills into an isolated `CODEX_HOME`. `scripts/release-check` now builds, packs, asserts package name/bin/prepublish guard/tarball contents, performs a clean npm install smoke, and never publishes."
+        changed_files:
+          - "scripts/package-smoke"
+          - "scripts/release-check"
+          - "docs/goals/agent-conveyor-ts-migration/state.yaml"
+        commands:
+          - cmd: "npm pack --dry-run --json"
+            status: pass
+            summary: "Dry-run tarball listed Node dist files, Python compatibility modules, migration docs, `scripts/workerctl` mode 755, and `codex-review/scripts/codex-review` mode 755."
+          - cmd: "scripts/package-smoke"
+            status: pass
+            summary: "Packed and installed `agent-conveyor-0.1.0.tgz` into a temp npm prefix; `conveyor --help` and `workerctl --help` started with usage lines, and bundled skills installed with executable `codex-review` helper."
+          - cmd: "scripts/release-check"
+            status: pass
+            summary: "Ran npm build, npm pack, package manifest/bin/prepublish guard assertions, clean-prefix install, command help checks, and skill install verification without publishing."
+          - cmd: "npm test -- --runInBand"
+            status: pass
+            summary: "Node test gate passed: 103 tests after script changes."
+          - cmd: "git diff --check"
+            status: pass
+            summary: "No whitespace errors."
+        observations:
+          - type: "burden-of-proof"
+            detail: "Strongest realistic failure mode was a tarball that looked valid from `npm pack` but failed after install because bin aliases, Python bridge files, or skill asset modes were wrong. Disproof evidence: both smoke scripts install the packed `.tgz` into a clean temp prefix, run both command aliases from that prefix, install bundled skills into isolated `CODEX_HOME`, and assert executable mode for the packaged bridge/helper files."
+          - type: "expected-warning"
+            detail: "The clean npm install emits `prebuild-install@7.1.3` deprecation warnings from the node-pty dependency chain; the install and functional smoke still pass."
+        remaining:
+          - "Update README/docs from PyPI/pipx primary path to npm tarball/npm install primary path."
+          - "Update CI workflows from Python package smoke/release checks to npm tarball smoke where appropriate."
+          - "Run broader T007 gates including `npm ci`, `scripts/rc-check --skip-live-smoke-repeat`, and final `npm pack --json` after docs/CI edits."
+      - summary: "Converted README, package-release docs, the TypeScript migration package contract, and the manual package workflow to npm-primary semantics. `.github/workflows/publish.yml` is now a manual package verification workflow that runs npm gates, creates a review tarball, and uploads the `.tgz` artifact without publishing. Docs now treat PyPI/pipx only as historical migration context and preserve the no-automatic-publish rule."
+        changed_files:
+          - "README.md"
+          - "docs/package-release.md"
+          - ".github/workflows/publish.yml"
+          - "docs/typescript-migration/package-install-contract.md"
+          - "docs/goals/agent-conveyor-ts-migration/state.yaml"
+        commands:
+          - cmd: "rg -n \"pipx|PyPI|TestPyPI|twine|python3 -m build|python -m build|python3 -m twine|python -m twine|pip install|wheel|sdist|pypa/gh-action-pypi-publish|pypi\" README.md docs/package-release.md .github/workflows/publish.yml .github/workflows/test.yml docs/typescript-migration/package-install-contract.md scripts/release-check scripts/package-smoke package.json"
+            status: pass
+            summary: "Stale release-channel scan found only explicitly historical pipx/wheel references in the migration package contract."
+          - cmd: "git diff --check"
+            status: pass
+            summary: "No whitespace errors in tracked diffs."
+          - cmd: "npm test -- --runInBand"
+            status: pass
+            summary: "Node/Vitest gate passed: 103 tests."
+          - cmd: "npm run build"
+            status: pass
+            summary: "CLI TypeScript build and dashboard Vite build passed."
+          - cmd: "scripts/package-smoke"
+            status: pass
+            summary: "Packed and clean-prefix installed the npm tarball; `conveyor`, `workerctl`, bundled skills, and executable skill helper were verified."
+          - cmd: "scripts/release-check"
+            status: pass
+            summary: "Ran npm build, npm pack, package metadata/bin/prepublish guard assertions, clean-prefix install, command help checks, and skill install verification without publishing."
+          - cmd: "npm pack --json"
+            status: pass
+            summary: "Packed `agent-conveyor-0.1.0.tgz`; tarball includes compiled Node CLI/runtime files, Python compatibility modules, migration docs, `scripts/workerctl` mode 755, and `codex-review/scripts/codex-review` mode 755."
+          - cmd: "npm ci"
+            status: pass
+            summary: "Clean dependency install passed with 0 vulnerabilities."
+          - cmd: "scripts/rc-check --skip-live-smoke-repeat"
+            status: fail
+            summary: "Broad Python unittest gate ran 645 tests and failed only three stale release-contract tests that still assert the old PyPI/twine/trusted-publishing workflow."
+        observations:
+          - type: "burden-of-proof"
+            detail: "Strongest realistic failure mode was docs or CI still presenting copy-pastable PyPI/pipx publish/install commands as the primary path, or the manual workflow publishing automatically. Disproof evidence: the stale-channel scan found only historical migration-contract mentions, `.github/workflows/publish.yml` has no publish step, and the package smoke/release checks prove the npm tarball install path."
+          - type: "expected-warning"
+            detail: "Clean npm tarball installs emit `prebuild-install@7.1.3` deprecation warnings from the node-pty dependency chain and Node SQLite experimental warnings; installs and functional checks still pass."
+          - type: "blocked"
+            detail: "T007 could not close green because `tests/test_workerctl.py` still asserted PyPI/twine/trusted-publishing release docs and workflow strings. PM amended this task's allowed_files narrowly to include `tests/test_workerctl.py` because the original goal explicitly includes QA tests and the assertions were a stale contract, not a product decision."
+        remaining:
+          - "Judge or PM must approve a test-contract update for `tests/test_workerctl.py` so the old PyPI release assertions are replaced with npm tarball/publish-guard assertions."
+          - "After the stale tests are migrated, rerun `scripts/rc-check --skip-live-smoke-repeat` and close T007 only if it is green."
+      - summary: "Migrated the stale Python release QA assertions to the npm tarball contract. The focused release tests now assert npm package metadata, bin aliases, package files, prepublish guard, manual package workflow, no workflow publish step, npm README install order, and npm release docs."
+        changed_files:
+          - "tests/test_workerctl.py"
+          - "docs/goals/agent-conveyor-ts-migration/state.yaml"
+        commands:
+          - cmd: "python3 -m unittest tests.test_workerctl.CliTests.test_release_check_script_builds_clean_artifact_gate tests.test_workerctl.CliTests.test_publish_workflow_verifies_npm_tarball_without_publishing tests.test_workerctl.CliTests.test_package_release_metadata_and_checklist_are_documented -v"
+            status: pass
+            summary: "Focused migrated release-contract tests passed."
+          - cmd: "scripts/rc-check --skip-live-smoke-repeat"
+            status: pass
+            summary: "Full RC gate passed: 645 Python tests, ResourceWarning gate, Node/Vitest tests, dashboard build, shell syntax checks, and live-smoke-repeat intentionally skipped."
+        observations:
+          - type: "scope-amendment"
+            detail: "PM amended T007 allowed_files narrowly to include `tests/test_workerctl.py` after the rc gate proved the only blocker was stale PyPI release-contract assertions and the original goal explicitly included QA tests."
+          - type: "burden-of-proof"
+            detail: "Strongest realistic failure mode was that migrating tests would make the stale release assertions green while hiding a broader release or runtime regression. Disproof evidence: the focused release tests passed and the full `scripts/rc-check --skip-live-smoke-repeat` gate passed after the assertion migration."
+        remaining:
+          - "T008 readiness audit must review the full diff, task receipts, npm tarball evidence, no-publish guard, and PR/CI split before PR work begins."
+    receipt:
+      result: done
+      full_outcome_complete: false
+      summary: "Converted package, install, release, CI workflow, docs, and QA assertions from Python/PyPI primary semantics to npm tarball semantics while preserving CLI aliases, Python compatibility bridge, bundled skill assets, executable modes, and no-automatic-publish behavior."
+      changed_files:
+        - "package.json"
+        - "package-lock.json"
+        - "scripts/package-smoke"
+        - "scripts/release-check"
+        - "scripts/prepublish-guard.mjs"
+        - ".github/workflows/publish.yml"
+        - "README.md"
+        - "docs/package-release.md"
+        - "docs/typescript-migration/package-install-contract.md"
+        - "tests/test_workerctl.py"
+        - "docs/goals/agent-conveyor-ts-migration/state.yaml"
+      commands:
+        - cmd: "npm ci"
+          status: pass
+          summary: "Clean dependency install passed with 0 vulnerabilities."
+        - cmd: "npm test -- --runInBand"
+          status: pass
+          summary: "Node/Vitest gate passed: 103 tests."
+        - cmd: "npm run build"
+          status: pass
+          summary: "CLI TypeScript build and dashboard Vite build passed."
+        - cmd: "npm pack --json"
+          status: pass
+          summary: "Packed `agent-conveyor-0.1.0.tgz`; tarball includes compiled Node CLI/runtime files, Python compatibility modules, migration docs, `scripts/workerctl` mode 755, and `codex-review/scripts/codex-review` mode 755."
+        - cmd: "scripts/package-smoke"
+          status: pass
+          summary: "Clean-prefix tarball install verified `conveyor`, `workerctl`, bundled skills, and executable helper assets."
+        - cmd: "scripts/release-check"
+          status: pass
+          summary: "npm build/pack, manifest/bin/prepublish guard assertions, clean-prefix install, command help checks, and skill install verification passed without publishing."
+        - cmd: "python3 -m unittest tests.test_workerctl.CliTests.test_release_check_script_builds_clean_artifact_gate tests.test_workerctl.CliTests.test_publish_workflow_verifies_npm_tarball_without_publishing tests.test_workerctl.CliTests.test_package_release_metadata_and_checklist_are_documented -v"
+          status: pass
+          summary: "Focused migrated release-contract tests passed."
+        - cmd: "scripts/rc-check --skip-live-smoke-repeat"
+          status: pass
+          summary: "Full local RC gate passed with live-smoke-repeat intentionally skipped."
+        - cmd: "git diff --check"
+          status: pass
+          summary: "No whitespace errors in tracked diffs."
+      observations:
+        - type: "no-publish"
+          detail: "No `npm publish` was run. The manual workflow uploads a tarball artifact and the package keeps `prepublishOnly: node scripts/prepublish-guard.mjs`."
+        - type: "expected-warning"
+          detail: "Clean npm tarball installs emit `prebuild-install@7.1.3` deprecation warnings from the node-pty dependency chain and Node SQLite experimental warnings; functional checks passed."
+      disproof:
+        strongest_failure_mode: "The migration could appear complete while docs, CI, tests, or the tarball still depended on the old PyPI path, or while the npm artifact missed bin aliases or bundled skill executable assets."
+        evidence: "Stale-channel scan found only historical migration-contract references; package-smoke and release-check installed the packed npm tarball in clean prefixes and verified both bins and skill assets; `npm pack --json` showed the expected dist/Python/skill files and executable modes; `scripts/rc-check --skip-live-smoke-repeat` passed after QA assertions were migrated."
+        residual_risk: "No live npm publish occurred by design. Final T008/T009 still need readiness audit, PR/CI evidence, and green merge handling."
+
+  - id: T008
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Audit migration readiness before PR creation, CI monitoring, merge, or final handoff."
+    inputs:
+      - "All task receipts"
+      - "Contract-freeze artifacts"
+      - "Local verification output"
+      - "Current dirty diff"
+      - "npm package name/auth checks"
+    constraints:
+      - "Read-only."
+      - "Reject completion if any required Worker task is still queued, active, or weakly verified."
+      - "Reject automatic npm publish."
+      - "Require strongest realistic failure mode and disproof evidence."
+    expected_output:
+      - "ready_for_pr | not_ready"
+      - "full_outcome_complete: true | false"
+      - "Missing evidence or contract risks"
+      - "PR split recommendation"
+      - "Required CI/local commands before merge"
+    receipt:
+      result: done
+      decision: ready_for_pr
+      full_outcome_complete: false
+      summary: "Readiness audit accepts the migration for PR prep. All required Worker tasks T002-T007 are done with receipts, deterministic local gates are green, npm tarball smoke/release checks prove clean installs and bundled skills, release docs/tests/workflow are npm-primary, and no automatic npm publish path is wired."
+      missing_evidence_or_contract_risks:
+        - "No live npm publish occurred by design; final publish remains a human-approved handoff after PR/CI/merge."
+        - "Generated local artifacts `dist/` and `agent-conveyor-0.1.0.tgz` are present in the worktree and must not be accidentally staged unless a later task explicitly decides generated dist should be committed."
+        - "CI has not been run on a remote PR yet; T009 must create or update a PR and monitor GitHub Actions before merge."
+      pr_split_recommendation: "Use one cohesive migration PR for the TypeScript runtime/package/docs/test conversion. The touched files are coupled by package metadata, release gates, dashboard runtime selection, and migration docs; splitting now would increase CI and review drift."
+      required_ci_local_commands_before_merge:
+        - "npm ci"
+        - "npm test -- --runInBand"
+        - "npm run build"
+        - "scripts/package-smoke"
+        - "scripts/release-check"
+        - "scripts/rc-check --skip-live-smoke-repeat"
+        - "git diff --check"
+        - "GitHub Actions workflow green on PR"
+      commands:
+        - cmd: "node /Users/neonwatty/.codex/plugins/cache/goalbuddy/goalbuddy/0.3.8/skills/goalbuddy/scripts/check-goal-state.mjs docs/goals/agent-conveyor-ts-migration/state.yaml"
+          status: pass
+          summary: "Board valid with T008 active before this receipt."
+        - cmd: "git status --short"
+          status: pass
+          summary: "Reviewed tracked and untracked dirty files; noted generated `dist/` and `agent-conveyor-0.1.0.tgz` staging risk."
+        - cmd: "git diff --stat"
+          status: pass
+          summary: "Reviewed tracked diff scope across package metadata, release/docs/test surfaces, dashboard integration, and scripts."
+        - cmd: "rg -n \"npm publish|pypa/gh-action-pypi-publish|twine|TestPyPI|pipx install|python3 -m twine|python3 -m build|repository-url: https://test.pypi.org/legacy/\" README.md docs/package-release.md .github/workflows/publish.yml scripts/release-check scripts/package-smoke package.json docs/typescript-migration/package-install-contract.md"
+          status: pass
+          summary: "Only historical migration-contract pipx mention and explicit human-approved npm publish handoff remain; no PyPI primary path or workflow publish action found."
+        - cmd: "rg -n \"npm publish|pypa/gh-action-pypi-publish|repository-url|id-token|environment:|actions/download-artifact\" .github/workflows/publish.yml package.json scripts/prepublish-guard.mjs"
+          status: pass
+          summary: "No publish workflow, PyPI trusted-publish wiring, OIDC publish permissions, or npm publish script path found; prepublish guard is present."
+        - cmd: "git diff -- package.json .github/workflows/publish.yml scripts/prepublish-guard.mjs tests/test_workerctl.py | sed -n '1,260p'"
+          status: pass
+          summary: "Direct inspection confirmed package metadata/bin/files/prepublish guard, manual npm tarball workflow, and migrated QA assertions."
+        - cmd: "git diff -- README.md docs/package-release.md docs/typescript-migration/package-install-contract.md | sed -n '1,260p'"
+          status: pass
+          summary: "Direct inspection confirmed README and release docs use npm tarball/install path and treat pipx/PyPI as historical context."
+        - cmd: "git diff --check"
+          status: pass
+          summary: "No whitespace errors after the test and board edits."
+      disproof:
+        strongest_failure_mode: "The migration could be locally green but still unsafe to PR because publish automation remained wired, PyPI install commands remained the primary documented path, or generated tarball/dist artifacts could be staged accidentally."
+        evidence: "Workflow/script/package scans found no automatic publish path; docs diff and stale-channel scan found only historical pipx context and the explicit human-approved npm publish handoff; git status exposed generated artifacts so T009 can exclude/clean them before staging."
+        residual_risk: "Remote CI and PR merge evidence are still outstanding and belong to T009."
+
+  - id: T009
+    type: pm
+    assignee: PM
+    status: active
+    reasoning_hint: medium
+    objective: "Create PRs, monitor CI, fix failures through new bounded Worker tasks, and merge only green PRs when permitted."
+    inputs:
+      - "T008 receipt"
+      - "Current git branch and diff"
+      - "GitHub Actions status"
+    constraints:
+      - "Do not publish to npm."
+      - "Do not merge red CI."
+      - "Do not revert unrelated user changes."
+      - "Record PR URL, CI evidence, merge receipt, and any blocked permission."
+    expected_output:
+      - "PR URL(s)"
+      - "CI green receipt(s)"
+      - "Merge receipt(s) or explicit blocker"
+      - "Follow-up Worker tasks for CI failures if any"
+    receipt: null
+
+  - id: T999
+    type: judge
+    assignee: Judge
+    status: queued
+    reasoning_hint: high
+    objective: "Final audit: prove the full Python-to-TypeScript migration outcome is complete or name the exact remaining blockers."
+    inputs:
+      - "All done task receipts"
+      - "PR and merge receipts"
+      - "Last local verification"
+      - "CI status"
+      - "npm package/tarball smoke evidence"
+      - "Current dirty diff"
+    constraints:
+      - "Read-only."
+      - "Reject completion if Python runtime is still required for migrated command surfaces without an explicit compatibility decision."
+      - "Reject completion if npm publish is the only missing step but lacks operator approval; block publish separately and report migration readiness truthfully."
+      - "Reject completion if package name availability was not re-checked near final package handoff."
+    expected_output:
+      - "complete | not_complete"
+      - "full_outcome_complete: true | false"
+      - "Python contract coverage map"
+      - "Disproof attempt and evidence"
+      - "Residual risk or explicit follow-up"
+    receipt: null
+
+checks:
+  dirty_fingerprint: "pre-board dirty state included untracked docs/superpowers/plans/2026-06-02-agent-evidence-playbook.md"
+  last_verification:
+    result: pass
+    task: "baseline investigation"
+    commands:
+      - cmd: "python3 -m unittest discover -s tests -v"
+        status: pass
+        summary: "645 tests"
+      - cmd: "scripts/check-resource-warnings"
+        status: pass
+        summary: "645 tests with ResourceWarning gate"
+      - cmd: "python3 -m py_compile scripts/workerctl scripts/check-resource-warnings workerctl/*.py"
+        status: pass
+      - cmd: "npm test -- --runInBand"
+        status: pass
+        summary: "40 dashboard tests"
+      - cmd: "npm run build"
+        status: pass
+      - cmd: "bash -n scripts/live-smoke scripts/live-smoke-repeat scripts/package-smoke scripts/release-check scripts/rc-check"
+        status: pass
+      - cmd: "npm whoami"
+        status: pass
+        summary: "neonwatty"
+      - cmd: "npm view agent-conveyor name version --json"
+        status: pass
+        summary: "E404 indicates the package was not present at check time"

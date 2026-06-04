@@ -89,10 +89,10 @@ tmux session: codex-worker-a
 
 ## Install
 
-For users, install the published Agent Conveyor package with `pipx`:
+For users, install the published Agent Conveyor package with npm:
 
 ```bash
-pipx install agent-conveyor
+npm install -g agent-conveyor
 conveyor install-skills
 conveyor doctor
 ```
@@ -110,17 +110,22 @@ scripts/install-local --write
 export PATH="$PWD/bin:$PATH"
 ```
 
-To test unreleased packaging changes before PyPI publish, install the checkout
-directly:
+To test unreleased packaging changes before publish, install a local npm
+tarball into a temporary prefix:
 
 ```bash
-pipx install git+https://github.com/neonwatty/codex-terminal-manager.git
+npm run build
+npm pack
+tmp_prefix="$(mktemp -d)"
+npm install -g --prefix "$tmp_prefix" ./agent-conveyor-*.tgz
+PATH="$tmp_prefix/bin:$PATH" conveyor --help
+PATH="$tmp_prefix/bin:$PATH" workerctl --help
 ```
 
 `conveyor doctor` reports local dependency health (tmux, codex, etc.).
 `conveyor db-doctor` initializes and checks the SQLite control-plane
 database.
-Before publishing `agent-conveyor` to TestPyPI or PyPI, use
+Before publishing `agent-conveyor` to npm, use
 [`docs/package-release.md`](docs/package-release.md).
 
 After install, the intended Codex app entry point is natural language. Open a
@@ -1081,6 +1086,7 @@ python3 -m unittest discover -s tests -v
 scripts/check-resource-warnings
 python3 -m py_compile scripts/workerctl scripts/check-resource-warnings workerctl/*.py
 scripts/package-smoke
+scripts/release-check
 ```
 
 For local parallel experiments, prefer:

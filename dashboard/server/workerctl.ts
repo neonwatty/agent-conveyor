@@ -11,6 +11,7 @@ export type DashboardCommand =
   | "interrupt"
   | "nudge"
   | "pair"
+  | "replay"
   | "sessions"
   | "snapshot"
   | "start-manager"
@@ -41,6 +42,9 @@ export interface WorkerctlCommandOptions {
   dryRun?: boolean;
   followup?: string;
   includeAll?: boolean;
+  includeContent?: boolean;
+  includeFullTranscripts?: boolean;
+  includeTranscripts?: boolean;
   key?: string;
   limit?: number;
   manager?: string;
@@ -50,10 +54,13 @@ export interface WorkerctlCommandOptions {
   managerName?: string;
   managerObjective?: string;
   managerReference?: string[];
+  outputDir?: string;
   telemetryActor?: "dispatch" | "manager" | "operator" | "system" | "worker" | "workerctl";
   telemetryEventType?: string;
   telemetryNewest?: boolean;
   requireCriteriaAudit?: boolean;
+  replayFormat?: "compact" | "timeline" | "transcript" | "full-transcript";
+  replayRole?: "all" | "worker" | "manager" | "reviewer" | "workerctl";
   sandbox?: string;
   session?: string;
   task?: string;
@@ -62,6 +69,7 @@ export interface WorkerctlCommandOptions {
   taskSummary?: string;
   text?: string;
   timeoutSeconds?: number;
+  tsRuntime?: boolean;
   worker?: string;
   workerName?: string;
   workerctlPath: string;
@@ -81,6 +89,12 @@ export function normalizeServerOptions(options: PartialServerOptions): ServerOpt
 
 export function buildWorkerctlArgs(options: WorkerctlCommandOptions): string[] {
   const args = [options.workerctlPath];
+  if (options.tsRuntime) {
+    if (!commandSupportsTypescriptRuntime(options.command)) {
+      throw new Error(`${options.command} command does not support the TypeScript runtime yet.`);
+    }
+    args.push("--ts-runtime");
+  }
   if (options.command === "snapshot") {
     if (!options.task) {
       throw new Error("Snapshot command requires a task.");
@@ -112,6 +126,26 @@ export function buildWorkerctlArgs(options: WorkerctlCommandOptions): string[] {
       throw new Error("Audit command requires a task.");
     }
     args.push("audit", options.task, "--json");
+    if (options.includeContent) {
+      args.push("--include-content");
+    }
+  } else if (options.command === "replay") {
+    if (!options.task) {
+      throw new Error("Replay command requires a task.");
+    }
+    args.push("replay", options.task, "--json");
+    if (options.replayFormat) {
+      args.push("--format", options.replayFormat);
+    }
+    if (options.replayRole) {
+      args.push("--role", options.replayRole);
+    }
+    if (options.limit) {
+      args.push("--limit", String(options.limit));
+    }
+    if (options.includeContent) {
+      args.push("--include-content");
+    }
   } else if (options.command === "sessions") {
     args.push("sessions");
   } else if (options.command === "tasks") {
@@ -165,8 +199,17 @@ export function buildWorkerctlArgs(options: WorkerctlCommandOptions): string[] {
   } else if (options.command === "export") {
     requireFields(options, ["task"]);
     args.push("export-task", options.task!);
+    if (options.outputDir) {
+      args.push("--output", options.outputDir);
+    }
     if (options.zip) {
       args.push("--zip");
+    }
+    if (options.includeTranscripts) {
+      args.push("--include-transcripts");
+    }
+    if (options.includeFullTranscripts) {
+      args.push("--include-full-transcripts");
     }
   } else if (options.command === "start-worker") {
     requireFields(options, ["workerName"]);
@@ -226,10 +269,15 @@ function commandSupportsPath(command: DashboardCommand): boolean {
     "interrupt",
     "nudge",
     "pair",
+    "replay",
     "snapshot",
     "telemetry",
     "tasks",
   ].includes(command);
+}
+
+function commandSupportsTypescriptRuntime(command: DashboardCommand): boolean {
+  return ["audit", "export", "replay"].includes(command);
 }
 
 function appendCodexStartArgs(args: string[], options: WorkerctlCommandOptions): void {

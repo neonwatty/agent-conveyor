@@ -66,6 +66,66 @@ test("builds task audit workerctl arguments", () => {
   ]);
 });
 
+test("builds TypeScript runtime task audit and replay arguments", () => {
+  assert.deepEqual(
+    buildWorkerctlArgs({
+      command: "audit",
+      dbPath: "/tmp/workerctl.db",
+      includeContent: true,
+      task: "snapshot-task",
+      tsRuntime: true,
+      workerctlPath: "dist/cli/main.js",
+    }),
+    [
+      "dist/cli/main.js",
+      "--ts-runtime",
+      "audit",
+      "snapshot-task",
+      "--json",
+      "--include-content",
+      "--path",
+      "/tmp/workerctl.db",
+    ],
+  );
+  assert.deepEqual(
+    buildWorkerctlArgs({
+      command: "replay",
+      dbPath: "/tmp/workerctl.db",
+      includeContent: true,
+      limit: 10,
+      replayFormat: "full-transcript",
+      replayRole: "manager",
+      task: "snapshot-task",
+      tsRuntime: true,
+      workerctlPath: "dist/cli/main.js",
+    }),
+    [
+      "dist/cli/main.js",
+      "--ts-runtime",
+      "replay",
+      "snapshot-task",
+      "--json",
+      "--format",
+      "full-transcript",
+      "--role",
+      "manager",
+      "--limit",
+      "10",
+      "--include-content",
+      "--path",
+      "/tmp/workerctl.db",
+    ],
+  );
+  assert.throws(
+    () => buildWorkerctlArgs({
+      command: "tasks",
+      tsRuntime: true,
+      workerctlPath: "dist/cli/main.js",
+    }),
+    /does not support the TypeScript runtime yet/,
+  );
+});
+
 test("builds filtered telemetry workerctl arguments", () => {
   const args = buildWorkerctlArgs({
     command: "telemetry",
@@ -1110,10 +1170,31 @@ test("builds finish and export task arguments", () => {
   assert.deepEqual(
     buildWorkerctlArgs({
       command: "export",
+      outputDir: "/tmp/export",
       task: "task-a",
       workerctlPath: "scripts/workerctl",
       zip: true,
     }),
-    ["scripts/workerctl", "export-task", "task-a", "--zip"],
+    ["scripts/workerctl", "export-task", "task-a", "--output", "/tmp/export", "--zip"],
+  );
+  assert.deepEqual(
+    buildWorkerctlArgs({
+      command: "export",
+      dbPath: "/tmp/workerctl.db",
+      outputDir: "/tmp/export",
+      task: "task-a",
+      tsRuntime: true,
+      workerctlPath: "dist/cli/main.js",
+    }),
+    [
+      "dist/cli/main.js",
+      "--ts-runtime",
+      "export-task",
+      "task-a",
+      "--output",
+      "/tmp/export",
+      "--path",
+      "/tmp/workerctl.db",
+    ],
   );
 });
