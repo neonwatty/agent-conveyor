@@ -374,6 +374,247 @@ test("TypeScript runtime handles no-tmux create-disposable-binding by default", 
   }
 });
 
+test("TypeScript runtime handles state-only finish-task and stop-task by default", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-lifecycle."));
+  try {
+    const dbPath = join(root, "workerctl.db");
+    const finishCreated = runTypescriptRuntimeCommand({
+      args: [
+        "create-disposable-binding",
+        "finish-slice",
+        "--goal",
+        "Finish a state-only lifecycle task.",
+        "--worker",
+        "finish-worker",
+        "--manager",
+        "finish-manager",
+        "--run-name",
+        "finish-run",
+        "--required-before-continue",
+        "ci_green",
+        "--path",
+        dbPath,
+        "--json",
+      ],
+      cwd: root,
+      env: {},
+    });
+    assert.equal(finishCreated.exitCode, 0, finishCreated.stderr);
+
+    const finished = runTypescriptRuntimeCommand({
+      args: [
+        "finish-task",
+        "finish-slice",
+        "--reason",
+        "QA complete.",
+        "--path",
+        dbPath,
+      ],
+      cwd: root,
+      env: {},
+    });
+    assert.equal(finished.exitCode, 0, finished.stderr);
+    assert.equal(finished.handled, true);
+    const finishPayload = JSON.parse(finished.stdout ?? "{}") as {
+      command_id: string;
+      final_ack_audit: { missing: string[]; ok: boolean; require_acks: boolean };
+      final_audit: { open_criteria: unknown[]; require_criteria_audit: boolean; total: number };
+      final_decision_id: number;
+      final_epilogue_audit: { ok: boolean; required_steps: string[] };
+      finish: boolean;
+      killed_manager: boolean;
+      killed_worker: boolean;
+      manager_decision: { decision_id: null; ok: boolean; warnings: string[] };
+      manager_session: string;
+      pre_stop_transcript_captures: unknown[];
+      reason: string;
+      stop_manager: boolean;
+      stop_worker: boolean;
+      task: string;
+      worker: string;
+      worker_session: string;
+    };
+    assert.equal(finishPayload.finish, true);
+    assert.equal(finishPayload.task, "finish-slice");
+    assert.equal(finishPayload.reason, "QA complete.");
+    assert.equal(finishPayload.stop_manager, false);
+    assert.equal(finishPayload.stop_worker, false);
+    assert.equal(finishPayload.killed_manager, false);
+    assert.equal(finishPayload.killed_worker, false);
+    assert.deepEqual(finishPayload.pre_stop_transcript_captures, []);
+    assert.equal(finishPayload.worker, "finish-worker");
+    assert.equal(finishPayload.worker_session, "finish-worker");
+    assert.equal(finishPayload.manager_session, "finish-manager");
+    assert.deepEqual(finishPayload.manager_decision, {
+      allowed_decisions: ["stop"],
+      decision: null,
+      decision_id: null,
+      ok: false,
+      warnings: ["missing_decision_id"],
+    });
+    assert.equal(finishPayload.final_audit.require_criteria_audit, false);
+    assert.equal(finishPayload.final_audit.total, 0);
+    assert.deepEqual(finishPayload.final_audit.open_criteria, []);
+    assert.equal(finishPayload.final_ack_audit.require_acks, false);
+    assert.equal(finishPayload.final_ack_audit.ok, false);
+    assert.deepEqual(finishPayload.final_ack_audit.missing, ["worker", "manager"]);
+    assert.equal(finishPayload.final_epilogue_audit.ok, true);
+    assert.deepEqual(finishPayload.final_epilogue_audit.required_steps, []);
+
+    const afterFinish = openDatabaseSync(dbPath);
+    try {
+      const task = afterFinish.prepare("select state from tasks where name = 'finish-slice'")
+        .get() as { state: string };
+      assert.equal(task.state, "done");
+      const binding = afterFinish.prepare("select state, ended_at from bindings where task_id = (select id from tasks where name = 'finish-slice')")
+        .get() as { ended_at: string | null; state: string };
+      assert.equal(binding.state, "ended");
+      assert.ok(binding.ended_at);
+      const run = afterFinish.prepare("select status, ended_at from runs where name = 'finish-run'")
+        .get() as { ended_at: string | null; status: string };
+      assert.equal(run.status, "finished");
+      assert.ok(run.ended_at);
+      const command = afterFinish.prepare("select type, state, result_json from commands where id = ?")
+        .get(finishPayload.command_id) as { result_json: string; state: string; type: string };
+      assert.equal(command.type, "finish_task");
+      assert.equal(command.state, "succeeded");
+      assert.equal(JSON.parse(command.result_json).reason, "QA complete.");
+      const decision = afterFinish.prepare("select decision, reason, payload_json from manager_decisions where id = ?")
+        .get(finishPayload.final_decision_id) as { decision: string; payload_json: string; reason: string };
+      assert.equal(decision.decision, "stop");
+      assert.equal(decision.reason, "QA complete.");
+      assert.equal(JSON.parse(decision.payload_json).source, "finish_task");
+      const observation = afterFinish.prepare("select message from agent_observations where command_id = ?")
+        .get(finishPayload.command_id) as { message: string };
+      assert.equal(observation.message, "QA complete.");
+      const eventTypes = afterFinish.prepare("select type from events where task_id = (select id from tasks where name = 'finish-slice') order by id")
+        .all() as Array<{ type: string }>;
+      assert.ok(eventTypes.some((event) => event.type === "finish_task_intent"));
+      assert.ok(eventTypes.some((event) => event.type === "finish_task_criteria_audit"));
+      assert.ok(eventTypes.some((event) => event.type === "finish_task_succeeded"));
+      const telemetryTypes = afterFinish.prepare("select event_type from telemetry_events where task_id = (select id from tasks where name = 'finish-slice')")
+        .all() as Array<{ event_type: string }>;
+      assert.ok(telemetryTypes.some((event) => event.event_type === "command_attempted"));
+      assert.ok(telemetryTypes.some((event) => event.event_type === "command_succeeded"));
+      assert.ok(telemetryTypes.some((event) => event.event_type === "manager_decision_recorded"));
+      assert.ok(telemetryTypes.some((event) => event.event_type === "run_finished"));
+      assert.ok(telemetryTypes.some((event) => event.event_type === "task_finished"));
+    } finally {
+      afterFinish.close();
+    }
+
+    const stopCreated = runTypescriptRuntimeCommand({
+      args: [
+        "create-disposable-binding",
+        "stop-slice",
+        "--worker",
+        "stop-worker",
+        "--manager",
+        "stop-manager",
+        "--run-name",
+        "stop-run",
+        "--required-before-continue",
+        "manual_review",
+        "--path",
+        dbPath,
+        "--json",
+      ],
+      cwd: root,
+      env: {},
+    });
+    assert.equal(stopCreated.exitCode, 0, stopCreated.stderr);
+    const stopped = runTypescriptRuntimeCommand({
+      args: ["stop-task", "stop-slice", "--reason", "Operator stopped.", "--path", dbPath],
+      cwd: root,
+      env: {},
+    });
+    assert.equal(stopped.exitCode, 0, stopped.stderr);
+    const stopPayload = JSON.parse(stopped.stdout ?? "{}") as {
+      command_id: string;
+      final_decision_id: null;
+      final_observation_id: null;
+      finish: boolean;
+      reason: string;
+      stop_manager: boolean;
+      stop_worker: boolean;
+      task: string;
+    };
+    assert.equal(stopPayload.finish, false);
+    assert.equal(stopPayload.final_decision_id, null);
+    assert.equal(stopPayload.final_observation_id, null);
+    assert.equal(stopPayload.reason, "Operator stopped.");
+    assert.equal(stopPayload.stop_manager, true);
+    assert.equal(stopPayload.stop_worker, false);
+    assert.equal(stopPayload.task, "stop-slice");
+
+    const afterStop = openDatabaseSync(dbPath);
+    try {
+      const task = afterStop.prepare("select state from tasks where name = 'stop-slice'")
+        .get() as { state: string };
+      assert.equal(task.state, "done");
+      const run = afterStop.prepare("select status from runs where name = 'stop-run'")
+        .get() as { status: string };
+      assert.equal(run.status, "abandoned");
+      const command = afterStop.prepare("select type, state from commands where id = ?")
+        .get(stopPayload.command_id) as { state: string; type: string };
+      assert.equal(command.type, "stop_task");
+      assert.equal(command.state, "succeeded");
+      const eventTypes = afterStop.prepare("select type from events where task_id = (select id from tasks where name = 'stop-slice')")
+        .all() as Array<{ type: string }>;
+      assert.ok(eventTypes.some((event) => event.type === "stop_task_intent"));
+      assert.ok(eventTypes.some((event) => event.type === "stop_task_succeeded"));
+      const telemetryTypes = afterStop.prepare("select event_type from telemetry_events where task_id = (select id from tasks where name = 'stop-slice')")
+        .all() as Array<{ event_type: string }>;
+      assert.ok(telemetryTypes.some((event) => event.event_type === "run_finished"));
+      assert.ok(telemetryTypes.some((event) => event.event_type === "task_stopped"));
+    } finally {
+      afterStop.close();
+    }
+
+    assert.deepEqual(
+      runTypescriptRuntimeCommand({
+        args: ["finish-task", "needs-json", "--json", "--path", dbPath],
+        cwd: root,
+        env: {},
+      }),
+      { exitCode: 0, handled: false },
+    );
+    assert.deepEqual(
+      runTypescriptRuntimeCommand({
+        args: ["finish-task", "needs-live", "--stop-worker", "--path", dbPath],
+        cwd: root,
+        env: {},
+      }),
+      { exitCode: 0, handled: false },
+    );
+    const explicitLive = runTypescriptRuntimeCommand({
+      args: ["--ts-runtime", "finish-task", "needs-live", "--stop-worker", "--path", dbPath],
+      cwd: root,
+      env: {},
+    });
+    assert.equal(explicitLive.exitCode, 2);
+    assert.match(explicitLive.stderr ?? "", /state-only lifecycle without live session control/);
+    assert.deepEqual(
+      runTypescriptRuntimeCommand({
+        args: ["finish-task", "needs-gates", "--require-criteria-audit", "--path", dbPath],
+        cwd: root,
+        env: {},
+      }),
+      { exitCode: 0, handled: false },
+    );
+    assert.deepEqual(
+      runTypescriptRuntimeCommand({
+        args: ["stop-task", "needs-worker-stop", "--stop-worker", "--path", dbPath],
+        cwd: root,
+        env: {},
+      }),
+      { exitCode: 0, handled: false },
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("TypeScript runtime handles deterministic session registry and discovery commands by default", () => {
   const root = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-sessions."));
   try {
