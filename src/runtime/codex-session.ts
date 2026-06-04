@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 
-export class CodexSessionError extends Error {
+class CodexSessionError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "CodexSessionError";
@@ -41,7 +41,7 @@ export function readSessionMeta(path: string): CodexSessionMeta {
   let record: unknown;
   try {
     record = JSON.parse(firstLine);
-  } catch (error) {
+  } catch {
     throw new CodexSessionError(`rollout file first line is not JSON: ${path}`);
   }
   if (!isRecord(record) || record.type !== "session_meta") {

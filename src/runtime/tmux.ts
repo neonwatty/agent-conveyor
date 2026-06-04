@@ -1,5 +1,5 @@
-export const PASTE_SUBMIT_DELAY_SECONDS = 0.1;
-export const SUBMIT_KEY = "C-m";
+const PASTE_SUBMIT_DELAY_SECONDS = 0.1;
+const SUBMIT_KEY = "C-m";
 
 export interface TmuxCommandResult {
   status: number;
@@ -77,7 +77,7 @@ export function raiseForTmuxPermissionFailure(result: TmuxCommandResult): void {
   }
 }
 
-export function runTmuxChecked(runner: TmuxRunner, args: string[], options?: { check?: boolean }): TmuxCommandResult {
+function runTmuxChecked(runner: TmuxRunner, args: string[], options?: { check?: boolean }): TmuxCommandResult {
   const check = options?.check ?? true;
   const result = runner(args, { check });
   if (check && result.status !== 0) {

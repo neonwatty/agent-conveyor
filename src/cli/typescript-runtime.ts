@@ -27,10 +27,18 @@ export function runTypescriptRuntimeCommand(options: {
   env?: NodeJS.ProcessEnv;
 }): TypescriptRuntimeResult {
   const parsed = parseRuntimeArgs(options.args, options.env ?? process.env);
+  const defaultRuntime = !parsed.enabled && isDefaultRuntimeCommand(parsed.command);
+  if (defaultRuntime) {
+    parsed.enabled = true;
+    parsed.defaultRuntime = true;
+  }
   if (!parsed.enabled) {
     return { exitCode: 0, handled: false };
   }
   if (parsed.error) {
+    if (defaultRuntime) {
+      return { exitCode: 0, handled: false };
+    }
     return errorResult(parsed.error);
   }
   if (!parsed.command) {
@@ -72,6 +80,7 @@ interface ParsedRuntimeArgs {
     role: ReplayRole;
     zip: boolean;
   };
+  defaultRuntime?: boolean;
   explicit: boolean;
   task: string | null;
 }
@@ -225,6 +234,9 @@ function runExportTaskCommand(
 ): TypescriptRuntimeResult {
   const task = requireTask(parsed);
   if (parsed.flags.zip || parsed.flags.includeTranscripts || parsed.flags.includeFullTranscripts) {
+    if (parsed.defaultRuntime) {
+      return { exitCode: 0, handled: false };
+    }
     return errorResult(
       "TypeScript runtime export currently supports the migrated audit subset only; omit --zip and transcript flags or use the Python runtime.",
     );
@@ -255,6 +267,10 @@ function requireTask(parsed: ParsedRuntimeArgs): string {
     throw new Error(`${parsed.command ?? "runtime"} command requires a task.`);
   }
   return parsed.task;
+}
+
+function isDefaultRuntimeCommand(command: string | null): boolean {
+  return command === "audit" || command === "replay" || command === "export-task";
 }
 
 function valueAfter(args: readonly string[], index: number, flag: string): { error?: string; value: string } {

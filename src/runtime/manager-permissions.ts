@@ -2,7 +2,7 @@ export type ManagerPermissionCategory = "communication" | "context" | "repo" | "
 
 export type ManagerPermissions = Record<ManagerPermissionCategory, string[]>;
 
-export const MANAGER_PERMISSION_TAXONOMY: Record<ManagerPermissionCategory, Set<string>> = {
+const MANAGER_PERMISSION_TAXONOMY: Record<ManagerPermissionCategory, Set<string>> = {
   communication: new Set(["comment_on_pr", "notify_operator"]),
   context: new Set(["spawn_reviewer", "fetch_prs", "fetch_issues"]),
   repo: new Set(["open_pr", "push_branch", "merge_green_pr"]),
@@ -19,13 +19,13 @@ const MANAGER_PERMISSION_ALIASES = new Map<string, string | string[]>([
   ["worker_compact_clear", ["worker_session.compact", "worker_session.clear"]],
 ]);
 
-export const MANAGER_PERMISSION_ACTIONS = new Set(
+const MANAGER_PERMISSION_ACTIONS = new Set(
   Object.entries(MANAGER_PERMISSION_TAXONOMY).flatMap(([category, actions]) => (
     Array.from(actions).map((action) => `${category}.${action}`)
   )),
 );
 
-export function emptyManagerPermissions(): ManagerPermissions {
+function emptyManagerPermissions(): ManagerPermissions {
   return {
     communication: [],
     context: [],
@@ -51,7 +51,7 @@ export function normalizeManagerPermissions(permissions: Record<string, unknown>
       }
       continue;
     }
-    if (Boolean(value)) {
+    if (value) {
       grantManagerPermission(normalized, key);
     }
   }

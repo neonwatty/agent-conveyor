@@ -21,17 +21,17 @@ import {
   openDatabaseSync,
 } from "../state/database.js";
 
-test("TypeScript runtime command is opt-in and falls back when disabled", () => {
+test("unmigrated TypeScript runtime command falls back when disabled", () => {
   assert.deepEqual(
     runTypescriptRuntimeCommand({
-      args: ["audit", "task-a", "--json"],
+      args: ["tasks", "--json"],
       env: {},
     }),
     { exitCode: 0, handled: false },
   );
 });
 
-test("TypeScript runtime handles dashboard audit replay and subset export commands", () => {
+test("TypeScript runtime handles migrated audit replay and subset export commands by default", () => {
   const root = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-cli."));
   try {
     const dbPath = join(root, "workerctl.db");
@@ -45,7 +45,7 @@ test("TypeScript runtime handles dashboard audit replay and subset export comman
 
     const audit = runTypescriptRuntimeCommand({
       args: ["audit", "cli-task", "--json", "--path", dbPath],
-      env: { AGENT_CONVEYOR_TS_RUNTIME: "1" },
+      env: {},
     });
     assert.equal(audit.exitCode, 0);
     assert.equal(audit.handled, true);
@@ -70,7 +70,7 @@ test("TypeScript runtime handles dashboard audit replay and subset export comman
     ]);
 
     const exported = runTypescriptRuntimeCommand({
-      args: ["--ts-runtime", "export-task", "cli-task", "--output", outputDir, "--path", dbPath],
+      args: ["export-task", "cli-task", "--output", outputDir, "--path", dbPath],
       env: {},
     });
     assert.equal(exported.exitCode, 0);
@@ -89,6 +89,12 @@ test("TypeScript runtime handles dashboard audit replay and subset export comman
       "manager-decisions.json",
       "correlation-chains.json",
     ]);
+
+    const defaultUnsupportedZip = runTypescriptRuntimeCommand({
+      args: ["export-task", "cli-task", "--zip", "--path", dbPath],
+      env: {},
+    });
+    assert.deepEqual(defaultUnsupportedZip, { exitCode: 0, handled: false });
 
     const unsupportedZip = runTypescriptRuntimeCommand({
       args: ["--ts-runtime", "export-task", "cli-task", "--zip", "--path", dbPath],
