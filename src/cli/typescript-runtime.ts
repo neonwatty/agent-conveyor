@@ -1060,6 +1060,9 @@ function runCreateDisposableBindingCommand(
   if (unsupported) {
     return unsupportedRuntimeResult(parsed, unsupported);
   }
+  if (parsed.flags.template !== null) {
+    loopTemplate(parsed.flags.template);
+  }
   const taskName = requireTask(parsed);
   const dbPath = runtimeDbPath(parsed, options);
   const sessionDir = resolve(parsed.flags.sessionDir ?? join(dirname(dbPath), "disposable-sessions"));
@@ -1112,18 +1115,17 @@ function runCreateDisposableBindingCommand(
       taskName: task.name,
       workerSessionName: workerName,
     });
-    const run = requiredBeforeContinue.length > 0
-      ? createRalphLoopRunSync(database, {
-        cleanupPolicy: parsed.flags.cleanupPolicy,
-        currentIteration: parsed.flags.currentIteration,
-        maxIterations: parsed.flags.maxIterations ?? 2,
-        requiredBeforeContinue,
-        runName: parsed.flags.runName,
-        seedPromptSha256: parsed.flags.seedPromptSha256,
-        taskId: task.id,
-        taskName: task.name,
-      })
-      : null;
+    const run = createDisposablePolicyRunSync(database, {
+      cleanupPolicy: parsed.flags.cleanupPolicy,
+      currentIteration: parsed.flags.currentIteration,
+      maxIterations: parsed.flags.maxIterations,
+      requiredBeforeContinue,
+      runName: parsed.flags.runName,
+      seedPromptSha256: parsed.flags.seedPromptSha256,
+      taskId: task.id,
+      taskName: task.name,
+      templateName: parsed.flags.template,
+    });
     insertEventSync(database, {
       payload: {
         binding_id: bindingId,
@@ -1152,6 +1154,7 @@ function runCreateDisposableBindingCommand(
         runName: run?.name ?? null,
         sessionDir,
         taskName: task.name,
+        templateName: parsed.flags.template,
         workerName,
       }),
       run,
@@ -2053,9 +2056,6 @@ function unsupportedUnbindOptions(parsed: ParsedRuntimeArgs): string | null {
 }
 
 function unsupportedCreateDisposableBindingOptions(parsed: ParsedRuntimeArgs): string | null {
-  if (parsed.flags.template !== null) {
-    return "TypeScript runtime create-disposable-binding does not yet support --template.";
-  }
   if (
     parsed.flags.active
     || parsed.flags.all
@@ -2974,15 +2974,112 @@ function uniqueRequiredEvidence(items: string[]): string[] {
   return result;
 }
 
+function createDisposablePolicyRunSync(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  options: {
+    cleanupPolicy: string;
+    currentIteration: number;
+    maxIterations: number | null;
+    requiredBeforeContinue: string[];
+    runName: string | null;
+    seedPromptSha256: string | null;
+    taskId: string;
+    taskName: string;
+    templateName: string | null;
+  },
+): RalphLoopRunRow | null {
+  if (options.templateName === null && options.requiredBeforeContinue.length === 0) {
+    return null;
+  }
+  const metadata = options.templateName === null
+    ? customDisposablePolicyMetadata(options)
+    : templateDisposablePolicyMetadata(options);
+  return createRalphLoopRunSync(database, {
+    cleanupPolicy: asString(metadata.cleanup_policy),
+    currentIteration: asInteger(metadata.current_iteration, "current_iteration"),
+    maxIterations: asInteger(metadata.max_iterations, "max_iterations"),
+    metadata,
+    preset: typeof metadata.preset === "string" ? metadata.preset : null,
+    requiredBeforeContinue: asStringArray(metadata.required_before_continue),
+    runName: options.runName,
+    seedPromptSha256: typeof metadata.seed_prompt_sha256 === "string" ? metadata.seed_prompt_sha256 : null,
+    stopConditions: asStringArray(metadata.stop_conditions),
+    taskId: options.taskId,
+    taskName: options.taskName,
+  });
+}
+
+function customDisposablePolicyMetadata(options: {
+  cleanupPolicy: string;
+  currentIteration: number;
+  maxIterations: number | null;
+  requiredBeforeContinue: string[];
+  seedPromptSha256: string | null;
+}): Record<string, unknown> {
+  return {
+    cleanup_policy: options.cleanupPolicy,
+    current_iteration: options.currentIteration,
+    kind: "ralph_loop",
+    max_iterations: options.maxIterations ?? 2,
+    required_before_continue: options.requiredBeforeContinue,
+    seed_prompt_sha256: options.seedPromptSha256,
+    source: "create-disposable-binding",
+    stop_conditions: ["max_iterations", "required_evidence"],
+  };
+}
+
+function templateDisposablePolicyMetadata(options: {
+  currentIteration: number;
+  maxIterations: number | null;
+  requiredBeforeContinue: string[];
+  seedPromptSha256: string | null;
+  templateName: string | null;
+}): Record<string, unknown> {
+  if (options.templateName === null) {
+    throw new Error("template name is required.");
+  }
+  const template = loopTemplate(options.templateName);
+  const maxIterations = options.maxIterations ?? template.maxIterations;
+  if (maxIterations < 1) {
+    throw new Error("max_iterations must be at least 1");
+  }
+  if (options.currentIteration < 0) {
+    throw new Error("current_iteration must be non-negative");
+  }
+  if (options.currentIteration > maxIterations) {
+    throw new Error("current_iteration must not exceed max_iterations");
+  }
+  return {
+    artifact_requirements: structuredClone(template.artifactRequirements),
+    cleanup_policy: template.cleanupPolicy,
+    current_iteration: options.currentIteration,
+    kind: "ralph_loop",
+    max_iterations: maxIterations,
+    preset: template.name,
+    recommended_tools: [...template.recommendedTools],
+    required_before_continue: uniqueRequiredEvidence([
+      ...template.requiredBeforeContinue,
+      ...options.requiredBeforeContinue,
+    ]),
+    seed_prompt_sha256: options.seedPromptSha256,
+    stop_conditions: [...template.stopConditions],
+    tags: [...template.tags],
+    template: template.name,
+  };
+}
+
 function createRalphLoopRunSync(
   database: ReturnType<typeof openRuntimeDatabase>,
   options: {
     cleanupPolicy: string;
     currentIteration: number;
     maxIterations: number;
+    metadata: Record<string, unknown>;
+    preset: string | null;
     requiredBeforeContinue: string[];
     runName: string | null;
     seedPromptSha256: string | null;
+    stopConditions: string[];
     taskId: string;
     taskName: string;
   },
@@ -3001,20 +3098,160 @@ function createRalphLoopRunSync(
   const runId = `run-${randomUUID()}`;
   const runName = options.runName ?? `${options.taskName}-${timestamp.replace(/:/g, "").replace(/\./g, "-")}`;
   const metadata = {
+    ...options.metadata,
     cleanup_policy: options.cleanupPolicy,
     current_iteration: options.currentIteration,
     kind: "ralph_loop",
     max_iterations: options.maxIterations,
+    policy_record: true,
+    preset: options.preset,
     required_before_continue: options.requiredBeforeContinue,
     seed_prompt_sha256: options.seedPromptSha256,
-    source: "create-disposable-binding",
-    stop_conditions: ["max_iterations", "required_evidence"],
+    stop_conditions: options.stopConditions,
   };
   database.prepare(`
-    insert into runs(id, task_id, name, purpose, status, started_at, metadata_json)
-    values (?, ?, ?, 'ralph_loop', 'active', ?, ?)
-  `).run(runId, options.taskId, runName, timestamp, stableJson(metadata));
+    insert into runs(id, task_id, name, purpose, status, started_at, ended_at, metadata_json)
+    values (?, ?, ?, 'ralph_loop', 'finished', ?, ?, ?)
+  `).run(runId, options.taskId, runName, timestamp, timestamp, stableJson(metadata));
   return runRowSync(database, runId);
+}
+
+interface LoopTemplateDefinition {
+  artifactRequirements: Record<string, Record<string, unknown>>;
+  cleanupPolicy: string;
+  maxIterations: number;
+  name: string;
+  recommendedTools: string[];
+  requiredBeforeContinue: string[];
+  stopConditions: string[];
+  tags: string[];
+}
+
+const ADVERSARIAL_CHECK_REQUIREMENT = {
+  description: "Structured proof that the manager or worker tried to disprove the iteration before continuing.",
+  properties: {
+    check: {
+      description: "Command, test, trace, screenshot, audit, diff, or inspection used.",
+      type: "string",
+    },
+    failure_mode: {
+      description: "Strongest realistic failure mode considered.",
+      type: "string",
+    },
+    result: {
+      description: "Why the check rules out the failure mode or what remains unresolved.",
+      type: "string",
+    },
+  },
+  required: ["failure_mode", "check", "result"],
+  type: "object",
+} satisfies Record<string, unknown>;
+
+const LOOP_TEMPLATES: Record<string, LoopTemplateDefinition> = {
+  build_then_clear: {
+    artifactRequirements: {},
+    cleanupPolicy: "clear",
+    maxIterations: 2,
+    name: "build_then_clear",
+    recommendedTools: [],
+    requiredBeforeContinue: ["build_passed", "cleanup"],
+    stopConditions: ["max_iterations", "required_evidence"],
+    tags: ["build", "context"],
+  },
+  compact_then_continue: {
+    artifactRequirements: {},
+    cleanupPolicy: "compact",
+    maxIterations: 4,
+    name: "compact_then_continue",
+    recommendedTools: [],
+    requiredBeforeContinue: ["worker_completion", "cleanup"],
+    stopConditions: ["max_iterations", "required_evidence"],
+    tags: ["context"],
+  },
+  pr_ci_merge_loop: {
+    artifactRequirements: { adversarial_check: ADVERSARIAL_CHECK_REQUIREMENT },
+    cleanupPolicy: "clear",
+    maxIterations: 2,
+    name: "pr_ci_merge_loop",
+    recommendedTools: ["gh", "verification.run_tests"],
+    requiredBeforeContinue: ["pr_url", "ci_green", "merge", "adversarial_check"],
+    stopConditions: ["max_iterations", "required_evidence"],
+    tags: ["repo", "ci"],
+  },
+  test_coverage_loop: {
+    artifactRequirements: { adversarial_check: ADVERSARIAL_CHECK_REQUIREMENT },
+    cleanupPolicy: "clear",
+    maxIterations: 3,
+    name: "test_coverage_loop",
+    recommendedTools: ["coverage", "verification.run_tests"],
+    requiredBeforeContinue: ["test_coverage", "adversarial_check"],
+    stopConditions: ["max_iterations", "required_evidence"],
+    tags: ["tests"],
+  },
+  visual_diff_loop: {
+    artifactRequirements: {
+      adversarial_check: ADVERSARIAL_CHECK_REQUIREMENT,
+      candidate_screenshot: {
+        description: "Screenshot captured from the worker-produced HTML or app view.",
+        type: "path",
+      },
+      diff_score: {
+        description: "Numeric diff score where lower means closer to the reference.",
+        type: "number",
+      },
+      reference_artifact: {
+        description: "Desired UX screenshot or reference image path.",
+        type: "path",
+      },
+      viewport: {
+        description: "Viewport used for the candidate screenshot, such as 1440x900.",
+        type: "string",
+      },
+      visual_diff_report: {
+        description: "Readable report describing visual differences and screenshots compared.",
+        type: "path",
+      },
+    },
+    cleanupPolicy: "compact",
+    maxIterations: 4,
+    name: "visual_diff_loop",
+    recommendedTools: ["browser", "playwright", "pixelmatch"],
+    requiredBeforeContinue: [
+      "reference_artifact",
+      "candidate_screenshot",
+      "visual_diff_report",
+      "diff_below_threshold",
+      "adversarial_check",
+    ],
+    stopConditions: ["max_iterations", "required_evidence", "manager_accepts"],
+    tags: ["visual", "frontend", "qa"],
+  },
+};
+
+function loopTemplate(name: string): LoopTemplateDefinition {
+  const template = LOOP_TEMPLATES[name];
+  if (!template) {
+    throw new Error(`Unknown loop template: ${name}; expected one of: ${Object.keys(LOOP_TEMPLATES).sort().join(", ")}`);
+  }
+  return template;
+}
+
+function asInteger(value: unknown, field: string): number {
+  if (typeof value !== "number" || !Number.isInteger(value)) {
+    throw new Error(`${field} must be an integer.`);
+  }
+  return value;
+}
+
+function asString(value: unknown): string {
+  return typeof value === "string" ? value : "";
+}
+
+function asStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.filter((item): item is string => typeof item === "string");
 }
 
 function runRowSync(database: ReturnType<typeof openRuntimeDatabase>, run: string): RalphLoopRunRow {
@@ -3387,6 +3624,7 @@ function disposableReplayCommands(options: {
   runName: string | null;
   sessionDir: string;
   taskName: string;
+  templateName: string | null;
   workerName: string;
 }): string[] {
   const pathSuffix = ` --path ${shellQuote(options.dbPath)}`;
@@ -3401,6 +3639,9 @@ function disposableReplayCommands(options: {
     "--session-dir",
     shellQuote(options.sessionDir),
   ];
+  if (options.templateName) {
+    setupParts.push("--template", shellQuote(options.templateName));
+  }
   for (const evidence of options.requiredBeforeContinue) {
     setupParts.push("--required-before-continue", shellQuote(evidence));
   }
