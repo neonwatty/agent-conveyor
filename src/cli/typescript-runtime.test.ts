@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -213,6 +213,210 @@ test("TypeScript runtime handles bind and unbind by default", () => {
       assert.deepEqual(JSON.parse(event.payload_json), { task: "bind-task" });
     } finally {
       afterUnbind.close();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("TypeScript runtime handles deterministic session registry and discovery commands by default", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-sessions."));
+  try {
+    mkdirSync(join(root, ".codex-workers"));
+    const rolloutDir = join(root, ".codex", "sessions", "2026");
+    mkdirSync(rolloutDir, { recursive: true });
+    const workerRollout = join(rolloutDir, "rollout-worker.jsonl");
+    const managerRollout = join(rolloutDir, "rollout-manager.jsonl");
+    writeFileSync(workerRollout, `${JSON.stringify({
+      payload: { cli_version: "1.2.3", cwd: "/worker-cwd", id: "codex-worker-a", originator: "codex" },
+      type: "session_meta",
+    })}\n`);
+    writeFileSync(managerRollout, `${JSON.stringify({
+      payload: { cli_version: "1.2.3", cwd: "/manager-cwd", id: "codex-manager-a", originator: "codex" },
+      type: "session_meta",
+    })}\n`);
+
+    const pidOnlyFallback = runTypescriptRuntimeCommand({
+      args: ["register-worker", "--name", "pid-only", "--pid", "555"],
+      cwd: root,
+      env: {},
+    });
+    assert.deepEqual(pidOnlyFallback, { exitCode: 0, handled: false });
+
+    const worker = runTypescriptRuntimeCommand({
+      args: [
+        "register-worker",
+        "--name",
+        "worker-a",
+        "--pid",
+        "123",
+        "--codex-session",
+        workerRollout,
+        "--tmux-session",
+        "codex-worker-a",
+      ],
+      cwd: root,
+      env: {},
+    });
+    assert.equal(worker.exitCode, 0);
+    assert.equal(worker.handled, true);
+    const workerPayload = JSON.parse(worker.stdout ?? "{}") as {
+      codex_session_id: string;
+      communication: { can_receive_push: boolean; delivery_mode: string; session_kind: string };
+      cwd: string;
+      name: string;
+      pid: number;
+      role: string;
+      session_id: string;
+      tmux_session: string | null;
+    };
+    assert.equal(workerPayload.codex_session_id, "codex-worker-a");
+    assert.equal(workerPayload.cwd, "/worker-cwd");
+    assert.equal(workerPayload.name, "worker-a");
+    assert.equal(workerPayload.pid, 123);
+    assert.equal(workerPayload.role, "worker");
+    assert.match(workerPayload.session_id, /^session-/);
+    assert.equal(workerPayload.tmux_session, "codex-worker-a");
+    assert.deepEqual(workerPayload.communication, {
+      can_receive_pull: true,
+      can_receive_push: true,
+      delivery_mode: "push",
+      detection_source: "tmux_session",
+      poll_command_template: "conveyor worker-inbox <task> --consume-next --wait --timeout 60 --json",
+      receive_style: "push",
+      requires_polling: false,
+      session_kind: "tmux",
+      tmux_session: "codex-worker-a",
+    });
+
+    const manager = runTypescriptRuntimeCommand({
+      args: [
+        "register-manager",
+        "--name",
+        "manager-a",
+        "--pid",
+        "456",
+        "--codex-session",
+        managerRollout,
+        "--cwd",
+        "/override-manager-cwd",
+      ],
+      cwd: root,
+      env: {},
+    });
+    assert.equal(manager.exitCode, 0);
+    assert.equal(manager.handled, true);
+    const managerPayload = JSON.parse(manager.stdout ?? "{}") as {
+      communication: { can_receive_push: boolean; delivery_mode: string; session_kind: string };
+      cwd: string;
+      name: string;
+      role: string;
+      tmux_session: string | null;
+    };
+    assert.equal(managerPayload.cwd, "/override-manager-cwd");
+    assert.equal(managerPayload.name, "manager-a");
+    assert.equal(managerPayload.role, "manager");
+    assert.equal(managerPayload.tmux_session, null);
+    assert.equal(managerPayload.communication.can_receive_push, false);
+    assert.equal(managerPayload.communication.delivery_mode, "pull_required");
+    assert.equal(managerPayload.communication.session_kind, "codex_app");
+
+    const dbPath = defaultDbPath({ cwd: root, env: {} });
+    const database = openDatabaseSync(dbPath);
+    try {
+      createTaskSync(database, {
+        goal: "Exercise session discovery.",
+        name: "session-task",
+        now: "2026-06-04T10:00:00Z",
+        taskId: "task-session",
+      });
+      const events = database.prepare("select type, payload_json from events where type = 'session_registered' order by id")
+        .all() as Array<{ payload_json: string; type: string }>;
+      assert.equal(events.length, 2);
+      assert.deepEqual(events.map((event) => JSON.parse(event.payload_json).name), ["worker-a", "manager-a"]);
+    } finally {
+      database.close();
+    }
+
+    const sessions = runTypescriptRuntimeCommand({
+      args: ["sessions", "--role", "worker", "--redact-identity-token"],
+      cwd: root,
+      env: {},
+    });
+    assert.equal(sessions.exitCode, 0);
+    assert.equal(sessions.handled, true);
+    const sessionRows = JSON.parse(sessions.stdout ?? "[]") as Array<{
+      identity_token: string;
+      name: string;
+      role: string;
+    }>;
+    assert.deepEqual(sessionRows.map((session) => session.name), ["worker-a"]);
+    assert.equal(sessionRows[0].role, "worker");
+    assert.equal(sessionRows[0].identity_token, "[REDACTED]");
+
+    const sessionsPathFallback = runTypescriptRuntimeCommand({
+      args: ["sessions", "--path", dbPath],
+      cwd: root,
+      env: {},
+    });
+    assert.deepEqual(sessionsPathFallback, { exitCode: 0, handled: false });
+
+    const discovered = runTypescriptRuntimeCommand({
+      args: ["discover", "--limit", "5"],
+      cwd: root,
+      env: {},
+    });
+    assert.equal(discovered.exitCode, 0);
+    const discoverPayload = JSON.parse(discovered.stdout ?? "{}") as {
+      query: string;
+      sessions: Array<{ name: string }>;
+      suggestions: Array<{ command?: string; kind: string }>;
+      tasks: Array<{ name: string }>;
+    };
+    assert.equal(discoverPayload.query, "");
+    assert.deepEqual(discoverPayload.tasks.map((task) => task.name), ["session-task"]);
+    assert.deepEqual(discoverPayload.sessions.map((session) => session.name), ["worker-a", "manager-a"]);
+    assert.equal(discoverPayload.suggestions[0].kind, "bind");
+    assert.equal(
+      discoverPayload.suggestions[0].command,
+      "conveyor bind --task 'session-task' --worker 'worker-a' --manager 'manager-a'",
+    );
+
+    const deregisterPathFallback = runTypescriptRuntimeCommand({
+      args: ["deregister", "worker-a", "--path", dbPath],
+      cwd: root,
+      env: {},
+    });
+    assert.deepEqual(deregisterPathFallback, { exitCode: 0, handled: false });
+
+    const deregistered = runTypescriptRuntimeCommand({
+      args: ["deregister", "worker-a"],
+      cwd: root,
+      env: {},
+    });
+    assert.equal(deregistered.exitCode, 0);
+    assert.equal(deregistered.handled, true);
+    assert.equal(deregistered.stdout, "{\"name\": \"worker-a\", \"state\": \"gone\"}\n");
+
+    const afterDeregister = openDatabaseSync(dbPath);
+    try {
+      const workerState = afterDeregister.prepare("select state from sessions where name = 'worker-a'")
+        .get() as { state: string };
+      assert.equal(workerState.state, "gone");
+      const command = afterDeregister.prepare("select type, state, result_json from commands where type = 'deregister_session'")
+        .get() as { result_json: string; state: string; type: string };
+      assert.equal(command.state, "succeeded");
+      assert.deepEqual(JSON.parse(command.result_json), {
+        command_id: JSON.parse(command.result_json).command_id,
+        name: "worker-a",
+        state: "gone",
+      });
+      const event = afterDeregister.prepare("select command_id, payload_json from events where type = 'session_deregistered'")
+        .get() as { command_id: string; payload_json: string };
+      assert.ok(event.command_id);
+      assert.deepEqual(JSON.parse(event.payload_json), { name: "worker-a" });
+    } finally {
+      afterDeregister.close();
     }
   } finally {
     rmSync(root, { recursive: true, force: true });
