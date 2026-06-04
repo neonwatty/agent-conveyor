@@ -14,6 +14,7 @@ export interface CodexSessionMeta {
   cwd?: string;
   id: string;
   originator?: string;
+  timestamp?: string;
 }
 
 export interface CodexSessionDiscovery {

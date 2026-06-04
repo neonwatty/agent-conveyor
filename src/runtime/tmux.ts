@@ -134,6 +134,26 @@ export function killTmuxSessionWithRunner(tmuxSessionName: string, runner: TmuxR
   runTmuxChecked(runner, ["tmux", "kill-session", "-t", tmuxSessionName]);
 }
 
+export function startTmuxSessionWithRunner(
+  options: { cwd: string; shellCommand: string; tmuxSessionName: string },
+  runner: TmuxRunner,
+): void {
+  runTmuxChecked(runner, [
+    "tmux",
+    "new-session",
+    "-d",
+    "-s",
+    options.tmuxSessionName,
+    "-c",
+    options.cwd,
+    options.shellCommand,
+  ]);
+}
+
+export function sendEnterToTmuxSessionWithRunner(tmuxSessionName: string, runner: TmuxRunner): void {
+  runTmuxChecked(runner, ["tmux", "send-keys", "-t", tmuxSessionName, "Enter"]);
+}
+
 export function sessionExists(name: string, runner: TmuxRunner): boolean {
   const result = runTmuxChecked(runner, hasSessionArgs(name), { check: false });
   raiseForTmuxPermissionFailure(result);
