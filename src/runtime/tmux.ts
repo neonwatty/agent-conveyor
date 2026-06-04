@@ -46,6 +46,10 @@ export function capturePaneArgs(target: string, historyLines: number): string[] 
   return ["tmux", "capture-pane", "-p", "-S", `-${historyLines}`, "-t", target];
 }
 
+function transcriptCapturePaneArgs(target: string, historyLines: number): string[] {
+  return ["tmux", "capture-pane", "-p", "-t", target, "-S", `-${historyLines}`];
+}
+
 export function currentPaneIdWithRunner(target: string, runner: TmuxRunner): string | null {
   const result = runTmuxChecked(runner, listPanesArgs(target), { check: false });
   raiseForTmuxPermissionFailure(result);
@@ -68,6 +72,15 @@ export function captureTmuxTargetWithRunner(
 ): string {
   const result = runTmuxChecked(runner, capturePaneArgs(target, historyLines));
   return (result.stdout ?? "").replace(/\n+$/, "");
+}
+
+export function captureTranscriptTmuxTargetWithRunner(
+  target: string,
+  historyLines: number,
+  runner: TmuxRunner,
+): string {
+  const result = runTmuxChecked(runner, transcriptCapturePaneArgs(target, historyLines));
+  return result.stdout ?? "";
 }
 
 export function isTmuxPermissionError(detail: string): boolean {
