@@ -35,6 +35,8 @@ import {
   captureTmuxTargetWithRunner,
   captureTranscriptTmuxTargetWithRunner,
   currentPaneIdWithRunner,
+  killTmuxSessionWithRunner,
+  sendTextToSessionWithRunner,
   tmuxSession,
   tmuxSessionRunning,
   type TmuxRunner,
@@ -1184,7 +1186,7 @@ function runCreateDisposableBindingCommand(
 
 function runLifecycleTaskCommand(
   parsed: ParsedRuntimeArgs,
-  options: { cwd?: string; env?: NodeJS.ProcessEnv },
+  options: { cwd?: string; env?: NodeJS.ProcessEnv; now?: () => Date; tmuxRunner?: TmuxRunner },
   finish: boolean,
 ): TypescriptRuntimeResult {
   const unsupported = unsupportedLifecycleTaskOptions(parsed, finish);
@@ -1195,7 +1197,10 @@ function runLifecycleTaskCommand(
   const commandType = finish ? "finish_task" : "stop_task";
   const eventPrefix = finish ? "finish_task" : "stop_task";
   const reason = parsed.flags.reason ?? (finish ? "Task finished by operator." : "Task stopped by operator.");
-  const stopManager = finish ? false : true;
+  const stopManager = finish ? parsed.flags.stopManager : true;
+  const stopWorker = parsed.flags.stopWorker;
+  const message = parsed.flags.message;
+  const captureTranscriptBeforeStop = finish && parsed.flags.captureTranscriptBeforeStop;
   const database = openRuntimeDatabase(parsed, options);
   try {
     const task = taskRowForLifecycle(database, taskName);
@@ -1213,7 +1218,14 @@ function runLifecycleTaskCommand(
     if (requireAdversarialProof && !taskHasSatisfiedAdversarialProofSync(database, task.id)) {
       return lifecycleWorkerErrorResult(adversarialProofError(task.name));
     }
-    const managerDecision = missingManagerDecisionCheck();
+    const managerDecision = assessManagerDecisionSync(database, {
+      decisionId: parsed.flags.decisionId,
+      taskId: task.id,
+    });
+    const decisionError = strictManagerDecisionError(commandType, managerDecision, parsed.flags.strictDecisions);
+    if (decisionError !== null) {
+      return lifecycleWorkerErrorResult(decisionError);
+    }
     const finalAudit = finish ? finalCriteriaAuditSync(database, task.id, requireCriteriaAudit) : null;
     const finalAckAudit = finish ? finalAckAuditSync(database, task.id, requireAcks) : null;
     const finalEpilogueAudit = finish ? finalEpilogueAuditSync(database, task.id, requireEpilogue) : null;
@@ -1276,16 +1288,16 @@ function runLifecycleTaskCommand(
       ...(finish && finalAudit ? { final_audit: finalAudit } : {}),
       ...(finish && finalEpilogueAudit ? { final_epilogue_audit: finalEpilogueAudit } : {}),
       already_done_followup: false,
-      capture_transcript_before_stop: false,
-      capture_transcript_lines: DEFAULT_HISTORY_LINES,
-      capture_transcript_mode: "segment",
+      capture_transcript_before_stop: captureTranscriptBeforeStop,
+      capture_transcript_lines: parsed.flags.captureTranscriptLines,
+      capture_transcript_mode: parsed.flags.captureTranscriptMode,
       finish,
       manager_decision: managerDecision,
       manager_session: binding?.manager_session_name ?? null,
-      message: null,
+      message,
       reason,
       stop_manager: stopManager,
-      stop_worker: false,
+      stop_worker: stopWorker,
       task: task.name,
       worker: binding?.worker_session_name ?? null,
       worker_session: binding?.worker_session_name ?? null,
@@ -1316,94 +1328,204 @@ function runLifecycleTaskCommand(
         ...(finish && finalAckAudit ? { final_ack_audit: finalAckAudit } : {}),
         ...(finish && finalAudit ? { final_audit: finalAudit } : {}),
         ...(finish && finalEpilogueAudit ? { final_epilogue_audit: finalEpilogueAudit } : {}),
-        capture_transcript_before_stop: false,
-        capture_transcript_lines: DEFAULT_HISTORY_LINES,
-        capture_transcript_mode: "segment",
+        capture_transcript_before_stop: captureTranscriptBeforeStop,
+        capture_transcript_lines: parsed.flags.captureTranscriptLines,
+        capture_transcript_mode: parsed.flags.captureTranscriptMode,
         final_decision_id: finalDecisionId,
         final_observation_id: finalObservationId,
         finish,
         manager_decision: managerDecision,
-        message: null,
+        message,
         reason,
         stop_manager: stopManager,
-        stop_worker: false,
+        stop_worker: stopWorker,
       },
       taskId: task.id,
       type: `${eventPrefix}_intent`,
     });
     markImmediateCommandAttemptedSync(database, commandId);
-    if (finish && finalAudit) {
+    try {
+      if (finish && finalAudit) {
+        insertEventSync(database, {
+          commandId,
+          payload: finalAudit,
+          taskId: task.id,
+          type: "finish_task_criteria_audit",
+        });
+      }
+      const runner = options.tmuxRunner ?? defaultTmuxRunner;
+      const workerContext = stopWorker ? sessionTranscriptCaptureContext(database, task.name, "worker", options) : null;
+      const managerContext = stopManager ? sessionTranscriptCaptureContext(database, task.name, "manager", options) : null;
+      const preStopTranscriptCaptures: TranscriptCaptureCommandCapture[] = [];
+      if (captureTranscriptBeforeStop && parsed.flags.requireTranscriptSegment) {
+        const missing: string[] = [];
+        if (stopWorker && workerContext === null) {
+          missing.push("worker");
+        }
+        if (stopManager && managerContext === null) {
+          missing.push("manager");
+        }
+        if (missing.length > 0) {
+          throw new Error(`no non-empty transcript segment captured for role(s): ${missing.join(", ")}`);
+        }
+      }
+      if (captureTranscriptBeforeStop) {
+        for (const context of [workerContext, managerContext]) {
+          if (context === null) {
+            continue;
+          }
+          preStopTranscriptCaptures.push(captureTaskTerminalSync(database, {
+            context,
+            historyLines: parsed.flags.captureTranscriptLines,
+            mode: parsed.flags.captureTranscriptMode,
+            now: nowIsoSeconds(options),
+            parsed,
+            runner,
+            runtimeOptions: options,
+            source: "finish_task_pre_stop",
+          }));
+        }
+        if (parsed.flags.requireTranscriptSegment) {
+          const missing = preStopTranscriptCaptures
+            .filter((capture) => "error" in capture || !capture.transcript_segment || (capture.transcript_segment.line_count ?? 0) <= 0)
+            .map((capture) => capture.role);
+          if (missing.length > 0) {
+            throw new Error(`no non-empty transcript segment captured for role(s): ${missing.join(", ")}`);
+          }
+        }
+        if (preStopTranscriptCaptures.length > 0) {
+          insertEventSync(database, {
+            commandId,
+            payload: {
+              captures: preStopTranscriptCaptures,
+              lines: parsed.flags.captureTranscriptLines,
+              mode: parsed.flags.captureTranscriptMode,
+            },
+            taskId: task.id,
+            type: "finish_task_pre_stop_transcript_captured",
+          });
+        }
+      }
+      let killedWorker = false;
+      let killedManager = false;
+      if (stopWorker && workerContext?.session.tmux_session) {
+        if (message !== null) {
+          sendTextToSessionWithRunner(workerContext.session, message, runner);
+        }
+        killTmuxSessionWithRunner(workerContext.session.tmux_session, runner);
+        killedWorker = true;
+      }
+      if (stopManager && managerContext?.session.tmux_session) {
+        killTmuxSessionWithRunner(managerContext.session.tmux_session, runner);
+        killedManager = true;
+      }
+      const stoppedAt = new Date().toISOString();
+      if (stopWorker && workerContext?.session.id && killedWorker) {
+        database.prepare("update sessions set state = 'gone', last_heartbeat_at = ? where id = ?")
+          .run(stoppedAt, workerContext.session.id);
+      }
+      if (stopManager && managerContext?.session.id && killedManager) {
+        database.prepare("update sessions set state = 'gone', last_heartbeat_at = ? where id = ?")
+          .run(stoppedAt, managerContext.session.id);
+      }
+      endActiveBindingForTaskSync(database, task.id, stoppedAt);
+      database.prepare("update tasks set state = 'done', updated_at = ? where id = ?")
+        .run(stoppedAt, task.id);
+      const finishedRun = finishActiveRunForTaskSync(database, {
+        status: finish ? "finished" : "abandoned",
+        taskId: task.id,
+        timestamp: stoppedAt,
+      });
+      const result = {
+        ...(finish && finalAckAudit ? { final_ack_audit: finalAckAudit } : {}),
+        ...(finish && finalAudit ? { final_audit: finalAudit } : {}),
+        ...(finish && finalEpilogueAudit ? { final_epilogue_audit: finalEpilogueAudit } : {}),
+        already_done_followup: false,
+        command_id: commandId,
+        final_decision_id: finalDecisionId,
+        final_observation_id: finalObservationId,
+        finish,
+        killed_manager: killedManager,
+        killed_worker: killedWorker,
+        manager_decision: managerDecision,
+        manager_session: binding?.manager_session_name ?? null,
+        pre_stop_transcript_captures: preStopTranscriptCaptures,
+        reason,
+        stop_manager: stopManager,
+        stop_worker: stopWorker,
+        task: task.name,
+        worker: binding?.worker_session_name ?? null,
+        worker_session: binding?.worker_session_name ?? null,
+      };
+      finishImmediateCommandSync(database, {
+        commandId,
+        result,
+        state: "succeeded",
+        timestamp: stoppedAt,
+      });
       insertEventSync(database, {
         commandId,
-        payload: finalAudit,
+        payload: result,
         taskId: task.id,
-        type: "finish_task_criteria_audit",
+        type: `${eventPrefix}_succeeded`,
       });
-    }
-    const stoppedAt = new Date().toISOString();
-    endActiveBindingForTaskSync(database, task.id, stoppedAt);
-    database.prepare("update tasks set state = 'done', updated_at = ? where id = ?")
-      .run(stoppedAt, task.id);
-    const finishedRun = finishActiveRunForTaskSync(database, {
-      status: finish ? "finished" : "abandoned",
-      taskId: task.id,
-      timestamp: stoppedAt,
-    });
-    const result = {
-      ...(finish && finalAckAudit ? { final_ack_audit: finalAckAudit } : {}),
-      ...(finish && finalAudit ? { final_audit: finalAudit } : {}),
-      ...(finish && finalEpilogueAudit ? { final_epilogue_audit: finalEpilogueAudit } : {}),
-      already_done_followup: false,
-      command_id: commandId,
-      final_decision_id: finalDecisionId,
-      final_observation_id: finalObservationId,
-      finish,
-      killed_manager: false,
-      killed_worker: false,
-      manager_decision: managerDecision,
-      manager_session: binding?.manager_session_name ?? null,
-      pre_stop_transcript_captures: [],
-      reason,
-      stop_manager: stopManager,
-      stop_worker: false,
-      task: task.name,
-      worker: binding?.worker_session_name ?? null,
-      worker_session: binding?.worker_session_name ?? null,
-    };
-    finishImmediateCommandSync(database, {
-      commandId,
-      result,
-      state: "succeeded",
-      timestamp: stoppedAt,
-    });
-    insertEventSync(database, {
-      commandId,
-      payload: result,
-      taskId: task.id,
-      type: `${eventPrefix}_succeeded`,
-    });
-    emitTelemetrySync(database, {
-      actor: "workerctl",
-      attributes: {
+      emitTelemetrySync(database, {
+        actor: "workerctl",
+        attributes: {
+          already_done_followup: false,
+          killed_manager: killedManager,
+          killed_worker: killedWorker,
+          reason,
+          run_status: finishedRun?.status ?? null,
+          stop_manager: stopManager,
+          stop_worker: stopWorker,
+        },
+        correlation: {
+          command_id: commandId,
+          run_id: finishedRun?.id ?? null,
+        },
+        eventType: finish ? "task_finished" : "task_stopped",
+        severity: "info",
+        summary: `${finish ? "Finished" : "Stopped"} task ${task.name}.`,
+        taskId: task.id,
+        timestamp: stoppedAt,
+      });
+      return jsonResult(result);
+    } catch (error) {
+      const failedAt = new Date().toISOString();
+      const messageText = error instanceof Error ? error.message : String(error);
+      const result = {
         already_done_followup: false,
-        killed_manager: false,
-        killed_worker: false,
-        reason,
-        run_status: finishedRun?.status ?? null,
-        stop_manager: stopManager,
-        stop_worker: false,
-      },
-      correlation: {
         command_id: commandId,
-        run_id: finishedRun?.id ?? null,
-      },
-      eventType: finish ? "task_finished" : "task_stopped",
-      severity: "info",
-      summary: `${finish ? "Finished" : "Stopped"} task ${task.name}.`,
-      taskId: task.id,
-      timestamp: stoppedAt,
-    });
-    return jsonResult(result);
+        error: messageText,
+        error_type: "WorkerError",
+        expected_failure: true,
+        failure_stage: "live_lifecycle_side_effects",
+        finish,
+        manager_decision: managerDecision,
+        manager_session: binding?.manager_session_name ?? null,
+        reason,
+        stop_manager: stopManager,
+        stop_worker: stopWorker,
+        task: task.name,
+        worker: binding?.worker_session_name ?? null,
+        worker_session: binding?.worker_session_name ?? null,
+      };
+      finishImmediateCommandSync(database, {
+        commandId,
+        error: messageText,
+        result,
+        state: "failed",
+        timestamp: failedAt,
+      });
+      insertEventSync(database, {
+        commandId,
+        payload: result,
+        taskId: task.id,
+        type: `${eventPrefix}_failed`,
+      });
+      return lifecycleWorkerErrorResult(messageText);
+    }
   } finally {
     database.close();
   }
@@ -2184,22 +2306,13 @@ function unsupportedLifecycleTaskOptions(parsed: ParsedRuntimeArgs, finish: bool
   ) {
     return `Unsupported TypeScript runtime option for ${finish ? "finish-task" : "stop-task"}.`;
   }
-  if (
-    parsed.flags.message !== null
-    || parsed.flags.decisionId !== null
-    || parsed.flags.strictDecisions
-    || parsed.flags.stopWorker
-    || parsed.flags.stopManager
-  ) {
-    return `TypeScript runtime ${finish ? "finish-task" : "stop-task"} currently supports state-only lifecycle without live session control.`;
-  }
-  if (finish && (
+  if (!finish && (
     parsed.flags.captureTranscriptBeforeStop
     || parsed.flags.captureTranscriptLines !== DEFAULT_HISTORY_LINES
     || parsed.flags.captureTranscriptMode !== "segment"
     || parsed.flags.requireTranscriptSegment
   )) {
-    return "TypeScript runtime finish-task currently supports state-only lifecycle without transcript capture or finish gates.";
+    return "Unsupported TypeScript runtime option for stop-task.";
   }
   return null;
 }
@@ -3369,6 +3482,86 @@ function missingManagerDecisionCheck(): Record<string, unknown> {
     ok: false,
     warnings: ["missing_decision_id"],
   };
+}
+
+function assessManagerDecisionSync(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  options: { decisionId: number | null; taskId: string },
+): Record<string, unknown> {
+  if (options.decisionId === null) {
+    return missingManagerDecisionCheck();
+  }
+  const row = database.prepare(`
+    select id, task_id, manager_id, manager_cycle_id, decision, reason, created_at, payload_json
+    from manager_decisions
+    where id = ?
+  `).get(options.decisionId) as {
+    created_at: string;
+    decision: string;
+    id: number;
+    manager_cycle_id: number | null;
+    manager_id: string | null;
+    reason: string;
+    task_id: string;
+  } | undefined;
+  if (!row) {
+    return {
+      allowed_decisions: ["stop"],
+      decision: null,
+      decision_id: options.decisionId,
+      ok: false,
+      warnings: ["decision_not_found"],
+    };
+  }
+  const warnings: string[] = [];
+  if (row.task_id !== options.taskId) {
+    warnings.push("decision_task_mismatch");
+  }
+  if (row.decision !== "stop") {
+    warnings.push("decision_mismatch");
+  }
+  const createdAt = Date.parse(row.created_at);
+  let ageSeconds: number | null = null;
+  if (Number.isNaN(createdAt)) {
+    warnings.push("decision_timestamp_invalid");
+  } else {
+    ageSeconds = Math.trunc((Date.now() - createdAt) / 1000);
+    if (ageSeconds > 900) {
+      warnings.push("decision_stale");
+    }
+  }
+  return {
+    age_seconds: ageSeconds,
+    allowed_decisions: ["stop"],
+    decision: {
+      created_at: row.created_at,
+      decision: row.decision,
+      id: row.id,
+      manager_cycle_id: row.manager_cycle_id,
+      manager_id: row.manager_id,
+      reason: row.reason,
+      task_id: row.task_id,
+    },
+    decision_id: options.decisionId,
+    max_age_seconds: 900,
+    ok: warnings.length === 0,
+    warnings,
+  };
+}
+
+function strictManagerDecisionError(
+  commandType: string,
+  decisionCheck: Record<string, unknown>,
+  strict: boolean,
+): string | null {
+  if (!strict || decisionCheck.ok === true) {
+    return null;
+  }
+  return `strict manager decision validation failed: ${stableJson({
+    command_type: commandType,
+    error: "manager_decision_validation_failed",
+    manager_decision: decisionCheck,
+  })}`;
 }
 
 function finalCriteriaAuditSync(
