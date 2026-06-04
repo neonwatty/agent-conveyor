@@ -8,6 +8,11 @@ import {
   type ReplayMode,
   type ReplayRole,
 } from "../runtime/replay.js";
+import {
+  createTaskSync,
+  listTasksSync,
+  type TaskRecord,
+} from "../runtime/tasks.js";
 import { defaultDbPath, stateRoot } from "../state/files.js";
 import {
   initializeDatabaseSync,
@@ -55,6 +60,9 @@ export function runTypescriptRuntimeCommand(options: {
     if (parsed.command === "export-task") {
       return runExportTaskCommand(parsed, options);
     }
+    if (parsed.command === "tasks") {
+      return runTasksCommand(parsed, options);
+    }
     if (parsed.explicit) {
       return errorResult(`Unsupported TypeScript runtime command: ${parsed.command}`);
     }
@@ -74,10 +82,14 @@ interface ParsedRuntimeArgs {
     includeFullTranscripts: boolean;
     includeTranscripts: boolean;
     json: boolean;
+    active: boolean;
+    create: string | null;
+    goal: string | null;
     limit: number | null;
     output: string | null;
     path: string | null;
     role: ReplayRole;
+    summary: string | null;
     zip: boolean;
   };
   defaultRuntime?: boolean;
@@ -92,10 +104,14 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
     includeFullTranscripts: false,
     includeTranscripts: false,
     json: false,
+    active: false,
+    create: null,
+    goal: null,
     limit: null,
     output: null,
     path: null,
     role: "all",
+    summary: null,
     zip: false,
   };
   const queue = [...args];
@@ -112,6 +128,8 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
     const arg = queue[index];
     if (arg === "--json") {
       flags.json = true;
+    } else if (arg === "--active") {
+      flags.active = true;
     } else if (arg === "--zip") {
       flags.zip = true;
     } else if (arg === "--include-content") {
@@ -133,6 +151,27 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
         return { command, enabled, error: value.error, explicit, flags, task };
       }
       flags.output = value.value;
+      index += 1;
+    } else if (arg === "--create") {
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.create = value.value;
+      index += 1;
+    } else if (arg === "--goal") {
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.goal = value.value;
+      index += 1;
+    } else if (arg === "--summary") {
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.summary = value.value;
       index += 1;
     } else if (arg === "--format") {
       const parsedValue = valueAfter(queue, index, arg);
@@ -253,6 +292,36 @@ function runExportTaskCommand(
   }
 }
 
+function runTasksCommand(
+  parsed: ParsedRuntimeArgs,
+  options: { cwd?: string; env?: NodeJS.ProcessEnv },
+): TypescriptRuntimeResult {
+  if (parsed.task) {
+    return errorResult(`Unexpected argument: ${parsed.task}`);
+  }
+  if (parsed.flags.create && !parsed.flags.goal) {
+    return errorResult("--goal is required with tasks --create");
+  }
+  const database = openRuntimeDatabase(parsed, options);
+  try {
+    if (parsed.flags.create) {
+      const taskId = createTaskSync(database, {
+        goal: parsed.flags.goal ?? "",
+        name: parsed.flags.create,
+        summary: parsed.flags.summary,
+      });
+      return jsonResult({ created: true, id: taskId, name: parsed.flags.create });
+    }
+    const tasks = listTasksSync(database, { activeOnly: parsed.flags.active });
+    if (parsed.flags.json) {
+      return jsonResult(tasks);
+    }
+    return { exitCode: 0, handled: true, stdout: renderTasksText(tasks) };
+  } finally {
+    database.close();
+  }
+}
+
 function openRuntimeDatabase(
   parsed: ParsedRuntimeArgs,
   options: { cwd?: string; env?: NodeJS.ProcessEnv },
@@ -270,7 +339,7 @@ function requireTask(parsed: ParsedRuntimeArgs): string {
 }
 
 function isDefaultRuntimeCommand(command: string | null): boolean {
-  return command === "audit" || command === "replay" || command === "export-task";
+  return command === "audit" || command === "replay" || command === "export-task" || command === "tasks";
 }
 
 function valueAfter(args: readonly string[], index: number, flag: string): { error?: string; value: string } {
@@ -295,6 +364,13 @@ function errorResult(message: string): TypescriptRuntimeResult {
     handled: true,
     stderr: `${message}\n`,
   };
+}
+
+function renderTasksText(tasks: TaskRecord[]): string {
+  if (tasks.length === 0) {
+    return "";
+  }
+  return `${tasks.map((task) => `${task.name}\t${task.state}\t${task.goal}`).join("\n")}\n`;
 }
 
 function isReplayMode(value: string): value is ReplayMode {
