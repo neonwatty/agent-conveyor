@@ -1,4 +1,5 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 
@@ -31,14 +32,24 @@ import {
   type TaskRecord,
 } from "../runtime/tasks.js";
 import {
+  captureTmuxTargetWithRunner,
+  currentPaneIdWithRunner,
+  tmuxSession,
+  tmuxSessionRunning,
+  type TmuxRunner,
+} from "../runtime/tmux.js";
+import {
+  captureMetaPath,
   configPath,
   defaultDbPath,
   eventsPath,
   loadJsonSync,
   stateRoot,
   statusPath,
+  transcriptPath,
   writeJsonSync,
 } from "../state/files.js";
+import { latestStatusSync } from "../state/status.js";
 import {
   initializeDatabaseSync,
   openDatabaseSync,
@@ -52,6 +63,9 @@ export interface TypescriptRuntimeResult {
 }
 
 const DEFAULT_BUSY_WAIT_SECONDS = 90;
+const DEFAULT_HISTORY_LINES = 200;
+const DEFAULT_STATUS_STALE_SECONDS = 300;
+const DEFAULT_TERMINAL_STALE_SECONDS = 300;
 const VALID_WORKER_STATUS_STATES = new Set([
   "planning",
   "editing",
@@ -66,6 +80,8 @@ export function runTypescriptRuntimeCommand(options: {
   args: readonly string[];
   cwd?: string;
   env?: NodeJS.ProcessEnv;
+  now?: () => Date;
+  tmuxRunner?: TmuxRunner;
 }): TypescriptRuntimeResult {
   const parsed = parseRuntimeArgs(options.args, options.env ?? process.env);
   const defaultRuntime = !parsed.enabled && isDefaultRuntimeCommand(parsed.command);
@@ -141,6 +157,15 @@ export function runTypescriptRuntimeCommand(options: {
     if (parsed.command === "transcript-prune") {
       return runTranscriptPruneCommand(parsed, options);
     }
+    if (parsed.command === "capture") {
+      return runCaptureCommand(parsed, options);
+    }
+    if (parsed.command === "status") {
+      return runStatusCommand(parsed, options);
+    }
+    if (parsed.command === "idle-check") {
+      return runIdleCheckCommand(parsed, options);
+    }
     if (parsed.explicit) {
       return errorResult(`Unsupported TypeScript runtime command: ${parsed.command}`);
     }
@@ -175,6 +200,7 @@ interface ParsedRuntimeArgs {
     file: string | null;
     goal: string | null;
     keepLatest: number;
+    lines: number;
     limit: number | null;
     names: string[];
     nextAction: string | null;
@@ -183,14 +209,17 @@ interface ParsedRuntimeArgs {
     pid: number | null;
     role: ReplayRole;
     roleProvided: boolean;
+    refresh: boolean;
     sessionRole: "manager" | "worker" | null;
     sessionState: "active" | "all" | "gone" | null;
     statusAgeSeconds: number;
     statusState: string | null;
+    statusStaleSeconds: number;
     subtype: string | null;
     summary: string | null;
     taskName: string | null;
     text: string | null;
+    terminalStaleSeconds: number;
     tmuxSession: string | null;
     worker: string | null;
     manager: string | null;
@@ -223,6 +252,7 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
     file: null,
     goal: null,
     keepLatest: 20,
+    lines: DEFAULT_HISTORY_LINES,
     limit: null,
     names: [],
     nextAction: null,
@@ -231,14 +261,17 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
     pid: null,
     role: "all",
     roleProvided: false,
+    refresh: true,
     sessionRole: null,
     sessionState: null,
     statusAgeSeconds: DEFAULT_BUSY_WAIT_SECONDS,
     statusState: null,
+    statusStaleSeconds: DEFAULT_STATUS_STALE_SECONDS,
     subtype: null,
     summary: null,
     taskName: null,
     text: null,
+    terminalStaleSeconds: DEFAULT_TERMINAL_STALE_SECONDS,
     tmuxSession: null,
     worker: null,
     manager: null,
@@ -276,6 +309,11 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       flags.includeFullTranscripts = true;
     } else if (arg === "--dry-run") {
       flags.dryRun = true;
+    } else if (arg === "--no-refresh") {
+      if (command !== "status" && command !== "idle-check") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --no-refresh", explicit, flags, task };
+      }
+      flags.refresh = false;
     } else if (arg === "--path") {
       const value = valueAfter(queue, index, arg);
       if (value.error) {
@@ -487,6 +525,48 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
         return { command, enabled, error: "--busy-wait-seconds must be an integer.", explicit, flags, task };
       }
       flags.busyWaitSeconds = value;
+      index += 1;
+    } else if (arg === "--lines") {
+      if (command !== "capture" && command !== "status" && command !== "idle-check" && command !== "transcript-capture") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --lines", explicit, flags, task };
+      }
+      const parsedValue = valueAfter(queue, index, arg);
+      if (parsedValue.error) {
+        return { command, enabled, error: parsedValue.error, explicit, flags, task };
+      }
+      const value = Number(parsedValue.value);
+      if (!Number.isInteger(value)) {
+        return { command, enabled, error: "--lines must be an integer.", explicit, flags, task };
+      }
+      flags.lines = value;
+      index += 1;
+    } else if (arg === "--status-stale-seconds") {
+      if (command !== "idle-check") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --status-stale-seconds", explicit, flags, task };
+      }
+      const parsedValue = valueAfter(queue, index, arg);
+      if (parsedValue.error) {
+        return { command, enabled, error: parsedValue.error, explicit, flags, task };
+      }
+      const value = Number(parsedValue.value);
+      if (!Number.isInteger(value)) {
+        return { command, enabled, error: "--status-stale-seconds must be an integer.", explicit, flags, task };
+      }
+      flags.statusStaleSeconds = value;
+      index += 1;
+    } else if (arg === "--terminal-stale-seconds") {
+      if (command !== "idle-check") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --terminal-stale-seconds", explicit, flags, task };
+      }
+      const parsedValue = valueAfter(queue, index, arg);
+      if (parsedValue.error) {
+        return { command, enabled, error: parsedValue.error, explicit, flags, task };
+      }
+      const value = Number(parsedValue.value);
+      if (!Number.isInteger(value)) {
+        return { command, enabled, error: "--terminal-stale-seconds must be an integer.", explicit, flags, task };
+      }
+      flags.terminalStaleSeconds = value;
       index += 1;
     } else if (arg === "--keep-latest") {
       const parsedValue = valueAfter(queue, index, arg);
@@ -1101,6 +1181,101 @@ function runTranscriptPruneCommand(
   }
 }
 
+function runCaptureCommand(
+  parsed: ParsedRuntimeArgs,
+  options: { cwd?: string; env?: NodeJS.ProcessEnv; now?: () => Date; tmuxRunner?: TmuxRunner },
+): TypescriptRuntimeResult {
+  const unsupported = unsupportedCaptureOptions(parsed);
+  if (unsupported) {
+    return unsupportedRuntimeResult(parsed, unsupported);
+  }
+  if (!parsed.task) {
+    return unsupportedRuntimeResult(parsed, "capture requires a worker or session name.");
+  }
+  const { output } = captureOutputForConfig(parsed.task, workerConfigOrSession(parsed.task, parsed, options), parsed.flags.lines, parsed, options);
+  if (parsed.flags.includeContent) {
+    return { exitCode: 0, handled: true, stdout: output ? `${output}\n` : "" };
+  }
+  const captureMeta = loadJsonSync<Record<string, unknown>>(captureMetaPath(parsed.task, options), {});
+  return jsonResult({
+    byte_count: Buffer.byteLength(output),
+    content_redacted: true,
+    history_lines: parsed.flags.lines,
+    line_count: pythonSplitlinesCount(output),
+    name: parsed.task,
+    sha256: captureMeta.sha256 ?? null,
+    transcript_path: transcriptPath(parsed.task, options),
+  });
+}
+
+function runStatusCommand(
+  parsed: ParsedRuntimeArgs,
+  options: { cwd?: string; env?: NodeJS.ProcessEnv; now?: () => Date; tmuxRunner?: TmuxRunner },
+): TypescriptRuntimeResult {
+  const unsupported = unsupportedStatusOptions(parsed);
+  if (unsupported) {
+    return unsupportedRuntimeResult(parsed, unsupported);
+  }
+  if (!parsed.task) {
+    return unsupportedRuntimeResult(parsed, "status requires a worker or session name.");
+  }
+  const config = workerConfigOrSession(parsed.task, parsed, options);
+  const status = latestStatusSync(parsed.task, options);
+  let captureMeta = loadJsonSync<Record<string, unknown>>(captureMetaPath(parsed.task, options), {});
+  let terminalCaptureError: string | null = null;
+  let running: boolean;
+  try {
+    running = sessionExistsForConfig(parsed.task, config, options);
+  } catch (error) {
+    running = false;
+    terminalCaptureError = error instanceof Error ? error.message : String(error);
+  }
+  if (running && parsed.flags.refresh) {
+    try {
+      captureOutputForConfig(parsed.task, config, parsed.flags.lines, parsed, options);
+      captureMeta = loadJsonSync<Record<string, unknown>>(captureMetaPath(parsed.task, options), {});
+    } catch (error) {
+      terminalCaptureError = error instanceof Error ? error.message : String(error);
+      captureMeta = { error: terminalCaptureError };
+    }
+  } else if (terminalCaptureError === null && typeof captureMeta.error === "string") {
+    terminalCaptureError = captureMeta.error;
+  }
+  const state = typeof status.state === "string" && VALID_WORKER_STATUS_STATES.has(status.state)
+    ? status.state
+    : "unknown";
+  return jsonResult({
+    blocker: status.blocker ?? null,
+    current_task: status.current_task ?? null,
+    name: parsed.task,
+    next_action: status.next_action ?? null,
+    running,
+    startup: stringOrNull(config.startup),
+    startup_reason: stringOrNull(config.startup_reason),
+    startup_recommended_action: stringOrNull(config.startup_recommended_action),
+    state,
+    status_last_update: status.last_update ?? null,
+    terminal_capture_error: terminalCaptureError,
+    terminal_captured_at: stringOrNull(captureMeta.captured_at),
+    terminal_changed_at: stringOrNull(captureMeta.changed_at),
+    tmux_session: stringOrNull(config.tmux_session),
+  });
+}
+
+function runIdleCheckCommand(
+  parsed: ParsedRuntimeArgs,
+  options: { cwd?: string; env?: NodeJS.ProcessEnv; now?: () => Date; tmuxRunner?: TmuxRunner },
+): TypescriptRuntimeResult {
+  const unsupported = unsupportedIdleCheckOptions(parsed);
+  if (unsupported) {
+    return unsupportedRuntimeResult(parsed, unsupported);
+  }
+  if (!parsed.task) {
+    return unsupportedRuntimeResult(parsed, "idle-check requires a worker or session name.");
+  }
+  return jsonResult(idleSummary(parsed.task, parsed, options));
+}
+
 function openRuntimeDatabase(
   parsed: ParsedRuntimeArgs,
   options: { cwd?: string; env?: NodeJS.ProcessEnv },
@@ -1138,6 +1313,9 @@ function isDefaultRuntimeCommand(command: string | null): boolean {
     || command === "update-status"
     || command === "transcript-show"
     || command === "transcript-prune"
+    || command === "capture"
+    || command === "status"
+    || command === "idle-check"
   );
 }
 
@@ -1456,6 +1634,147 @@ function unsupportedTailOptions(parsed: ParsedRuntimeArgs): string | null {
     || parsed.flags.zip
   ) {
     return "Unsupported TypeScript runtime option for tail.";
+  }
+  return null;
+}
+
+function unsupportedCaptureOptions(parsed: ParsedRuntimeArgs): string | null {
+  if (
+    parsed.flags.active
+    || parsed.flags.all
+    || parsed.flags.blocker !== null
+    || parsed.flags.busyWaitSeconds !== DEFAULT_BUSY_WAIT_SECONDS
+    || parsed.flags.codexSession !== null
+    || parsed.flags.create !== null
+    || parsed.flags.currentTask !== null
+    || parsed.flags.cwd !== null
+    || parsed.flags.dryRun
+    || parsed.flags.eventType !== null
+    || parsed.flags.file !== null
+    || parsed.flags.goal !== null
+    || parsed.flags.includeFullTranscripts
+    || parsed.flags.includeLegacy
+    || parsed.flags.includeTranscripts
+    || parsed.flags.json
+    || parsed.flags.keepLatest !== 20
+    || parsed.flags.limit !== null
+    || parsed.flags.names.length > 0
+    || parsed.flags.nextAction !== null
+    || parsed.flags.output !== null
+    || parsed.flags.path !== null
+    || parsed.flags.pid !== null
+    || !parsed.flags.refresh
+    || parsed.flags.redactIdentityToken
+    || parsed.flags.roleProvided
+    || parsed.flags.sessionRole !== null
+    || parsed.flags.sessionState !== null
+    || parsed.flags.statusAgeSeconds !== DEFAULT_BUSY_WAIT_SECONDS
+    || parsed.flags.statusStaleSeconds !== DEFAULT_STATUS_STALE_SECONDS
+    || parsed.flags.statusState !== null
+    || parsed.flags.subtype !== null
+    || parsed.flags.summary !== null
+    || parsed.flags.taskName !== null
+    || parsed.flags.terminalStaleSeconds !== DEFAULT_TERMINAL_STALE_SECONDS
+    || parsed.flags.text !== null
+    || parsed.flags.tmuxSession !== null
+    || parsed.flags.worker !== null
+    || parsed.flags.manager !== null
+    || parsed.flags.zip
+  ) {
+    return "Unsupported TypeScript runtime option for capture.";
+  }
+  return null;
+}
+
+function unsupportedStatusOptions(parsed: ParsedRuntimeArgs): string | null {
+  if (
+    parsed.flags.active
+    || parsed.flags.all
+    || parsed.flags.blocker !== null
+    || parsed.flags.busyWaitSeconds !== DEFAULT_BUSY_WAIT_SECONDS
+    || parsed.flags.codexSession !== null
+    || parsed.flags.create !== null
+    || parsed.flags.currentTask !== null
+    || parsed.flags.cwd !== null
+    || parsed.flags.dryRun
+    || parsed.flags.eventType !== null
+    || parsed.flags.file !== null
+    || parsed.flags.goal !== null
+    || parsed.flags.includeContent
+    || parsed.flags.includeFullTranscripts
+    || parsed.flags.includeLegacy
+    || parsed.flags.includeTranscripts
+    || parsed.flags.json
+    || parsed.flags.keepLatest !== 20
+    || parsed.flags.limit !== null
+    || parsed.flags.names.length > 0
+    || parsed.flags.nextAction !== null
+    || parsed.flags.output !== null
+    || parsed.flags.path !== null
+    || parsed.flags.pid !== null
+    || parsed.flags.redactIdentityToken
+    || parsed.flags.roleProvided
+    || parsed.flags.sessionRole !== null
+    || parsed.flags.sessionState !== null
+    || parsed.flags.statusAgeSeconds !== DEFAULT_BUSY_WAIT_SECONDS
+    || parsed.flags.statusStaleSeconds !== DEFAULT_STATUS_STALE_SECONDS
+    || parsed.flags.statusState !== null
+    || parsed.flags.subtype !== null
+    || parsed.flags.summary !== null
+    || parsed.flags.taskName !== null
+    || parsed.flags.terminalStaleSeconds !== DEFAULT_TERMINAL_STALE_SECONDS
+    || parsed.flags.text !== null
+    || parsed.flags.tmuxSession !== null
+    || parsed.flags.worker !== null
+    || parsed.flags.manager !== null
+    || parsed.flags.zip
+  ) {
+    return "Unsupported TypeScript runtime option for status.";
+  }
+  return null;
+}
+
+function unsupportedIdleCheckOptions(parsed: ParsedRuntimeArgs): string | null {
+  if (
+    parsed.flags.active
+    || parsed.flags.all
+    || parsed.flags.blocker !== null
+    || parsed.flags.codexSession !== null
+    || parsed.flags.create !== null
+    || parsed.flags.currentTask !== null
+    || parsed.flags.cwd !== null
+    || parsed.flags.dryRun
+    || parsed.flags.eventType !== null
+    || parsed.flags.file !== null
+    || parsed.flags.goal !== null
+    || parsed.flags.includeContent
+    || parsed.flags.includeFullTranscripts
+    || parsed.flags.includeLegacy
+    || parsed.flags.includeTranscripts
+    || parsed.flags.json
+    || parsed.flags.keepLatest !== 20
+    || parsed.flags.limit !== null
+    || parsed.flags.names.length > 0
+    || parsed.flags.nextAction !== null
+    || parsed.flags.output !== null
+    || parsed.flags.path !== null
+    || parsed.flags.pid !== null
+    || parsed.flags.redactIdentityToken
+    || parsed.flags.roleProvided
+    || parsed.flags.sessionRole !== null
+    || parsed.flags.sessionState !== null
+    || parsed.flags.statusAgeSeconds !== DEFAULT_BUSY_WAIT_SECONDS
+    || parsed.flags.statusState !== null
+    || parsed.flags.subtype !== null
+    || parsed.flags.summary !== null
+    || parsed.flags.taskName !== null
+    || parsed.flags.text !== null
+    || parsed.flags.tmuxSession !== null
+    || parsed.flags.worker !== null
+    || parsed.flags.manager !== null
+    || parsed.flags.zip
+  ) {
+    return "Unsupported TypeScript runtime option for idle-check.";
   }
   return null;
 }
@@ -2047,6 +2366,272 @@ function requireWorkerConfigOrSession(
   }
 }
 
+interface LiveWorkerConfig extends Record<string, unknown> {
+  _workerctl_lookup_source: "legacy" | "session";
+}
+
+function workerConfigOrSession(
+  name: string,
+  parsed: ParsedRuntimeArgs,
+  options: { cwd?: string; env?: NodeJS.ProcessEnv },
+): LiveWorkerConfig {
+  if (existsSync(configPath(name, options))) {
+    return { ...requireWorkerConfig(name, options), _workerctl_lookup_source: "legacy" };
+  }
+  const database = openRuntimeDatabase(parsed, options);
+  try {
+    const session = sessionRow(database, name);
+    return { ...session, _workerctl_lookup_source: "session" };
+  } finally {
+    database.close();
+  }
+}
+
+function tmuxTargetForConfig(name: string, config: LiveWorkerConfig): string {
+  if (config._workerctl_lookup_source === "legacy") {
+    return tmuxSession(name);
+  }
+  if (typeof config.tmux_session !== "string" || !config.tmux_session) {
+    throw new Error(`tmux session is not registered for worker ${name}`);
+  }
+  return config.tmux_session;
+}
+
+function sessionExistsForConfig(
+  name: string,
+  config: LiveWorkerConfig,
+  options: { tmuxRunner?: TmuxRunner },
+): boolean {
+  const target = tmuxTargetForConfig(name, config);
+  return tmuxSessionRunning(target, options.tmuxRunner ?? defaultTmuxRunner);
+}
+
+function captureOutputForConfig(
+  name: string,
+  config: LiveWorkerConfig,
+  historyLines: number,
+  parsed: ParsedRuntimeArgs,
+  options: { cwd?: string; env?: NodeJS.ProcessEnv; now?: () => Date; tmuxRunner?: TmuxRunner },
+): { changed: boolean; changedAt: string; digest: string; output: string; workerId: string } {
+  const target = tmuxTargetForConfig(name, config);
+  const runner = options.tmuxRunner ?? defaultTmuxRunner;
+  if (!sessionExistsForConfig(name, config, { tmuxRunner: runner })) {
+    throw new Error(`tmux session is not running for worker ${name}: ${target}`);
+  }
+  const output = captureTmuxTargetWithRunner(target, historyLines, runner);
+  const digest = createHash("sha256").update(output).digest("hex");
+  const meta = loadJsonSync<Record<string, unknown>>(captureMetaPath(name, options), {});
+  const previousDigest = typeof meta.sha256 === "string" ? meta.sha256 : null;
+  const previousChangedAt = typeof meta.changed_at === "string" ? meta.changed_at : null;
+  const capturedAt = nowIsoSeconds(options);
+  const changed = digest !== previousDigest;
+  const changedAt = changed ? capturedAt : previousChangedAt ?? capturedAt;
+  writeJsonSync(captureMetaPath(name, options), {
+    captured_at: capturedAt,
+    changed_at: changedAt,
+    history_lines: historyLines,
+    sha256: digest,
+  });
+  writeFileSync(transcriptPath(name, options), output ? `${output}\n` : "");
+
+  const database = openRuntimeDatabase(parsed, options);
+  try {
+    const paneId = typeof config.tmux_pane_id === "string" && config.tmux_pane_id
+      ? config.tmux_pane_id
+      : currentPaneIdWithRunner(target, runner);
+    const workerId = upsertWorkerSync(database, {
+      config: {
+        ...config,
+        tmux_pane_id: paneId,
+        tmux_session: target,
+      },
+      name,
+      timestamp: capturedAt,
+    });
+    insertTranscriptCaptureSync(database, {
+      capturedAt,
+      changed,
+      changedAt,
+      digest,
+      historyLines,
+      output,
+      workerId,
+    });
+    return { changed, changedAt, digest, output, workerId };
+  } finally {
+    database.close();
+  }
+}
+
+function insertTranscriptCaptureSync(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  options: {
+    capturedAt: string;
+    changed: boolean;
+    changedAt: string;
+    digest: string;
+    historyLines: number;
+    output: string;
+    workerId: string;
+  },
+): number {
+  const result = database.prepare(`
+    insert into transcript_captures(
+      worker_id, sha256, content, captured_at, changed_at, history_lines,
+      byte_count, line_count, capture_kind, retention_class
+    )
+    values (?, ?, ?, ?, ?, ?, ?, ?, ?, 'hot')
+  `).run(
+    options.workerId,
+    options.digest,
+    options.changed ? options.output : null,
+    options.capturedAt,
+    options.changedAt,
+    options.historyLines,
+    Buffer.byteLength(options.output),
+    pythonSplitlinesCount(options.output),
+    options.changed ? "changed" : "metadata_only",
+  );
+  const captureId = Number(result.lastInsertRowid);
+  emitTelemetrySync(database, {
+    actor: "workerctl",
+    attributes: {
+      byte_count: Buffer.byteLength(options.output),
+      changed: options.changed,
+      history_lines: options.historyLines,
+      line_count: pythonSplitlinesCount(options.output),
+      retention_class: "hot",
+    },
+    correlation: { capture_id: captureId, worker_id: options.workerId },
+    eventType: "transcript_capture_recorded",
+    severity: "info",
+    summary: "Recorded transcript capture metadata.",
+    taskId: null,
+    timestamp: options.capturedAt,
+  });
+  return captureId;
+}
+
+function idleSummary(
+  name: string,
+  parsed: ParsedRuntimeArgs,
+  options: { cwd?: string; env?: NodeJS.ProcessEnv; now?: () => Date; tmuxRunner?: TmuxRunner },
+): Record<string, unknown> {
+  const config = workerConfigOrSession(name, parsed, options);
+  const status = latestStatusSync(name, options);
+  let captureMeta = loadJsonSync<Record<string, unknown>>(captureMetaPath(name, options), {});
+  let captureError: string | null = null;
+  let running: boolean;
+  try {
+    running = sessionExistsForConfig(name, config, options);
+  } catch (error) {
+    running = false;
+    captureError = error instanceof Error ? error.message : String(error);
+  }
+
+  if (running && parsed.flags.refresh) {
+    try {
+      captureOutputForConfig(name, config, parsed.flags.lines, parsed, options);
+      captureMeta = loadJsonSync<Record<string, unknown>>(captureMetaPath(name, options), {});
+    } catch (error) {
+      captureError = error instanceof Error ? error.message : String(error);
+    }
+  }
+
+  const state = typeof status.state === "string" && VALID_WORKER_STATUS_STATES.has(status.state)
+    ? status.state
+    : "unknown";
+  const now = options.now?.() ?? new Date();
+  const statusAge = ageSecondsAt(status.last_update, now);
+  const terminalAge = ageSecondsAt(stringOrNull(captureMeta.changed_at) ?? undefined, now);
+  const statusIsStale = statusAge === null || statusAge >= parsed.flags.statusStaleSeconds;
+  const terminalIsStale = terminalAge === null || terminalAge >= parsed.flags.terminalStaleSeconds;
+  let terminalOutput = "";
+  let terminalFresh = true;
+  if (running) {
+    try {
+      terminalOutput = captureTmuxTargetWithRunner(
+        tmuxTargetForConfig(name, config),
+        parsed.flags.lines,
+        options.tmuxRunner ?? defaultTmuxRunner,
+      );
+    } catch (error) {
+      terminalFresh = false;
+      captureError ??= error instanceof Error ? error.message : String(error);
+      const transcriptFile = transcriptPath(name, options);
+      terminalOutput = existsSync(transcriptFile) ? readFileSync(transcriptFile, "utf8") : "";
+    }
+  }
+  if (captureError !== null) {
+    terminalFresh = false;
+  }
+  const busyWait = classifyBusyWait(terminalOutput, statusAge, parsed.flags.busyWaitSeconds);
+
+  let health: string;
+  let recommendedAction: string;
+  let reason: string;
+  if (!running) {
+    health = "stopped";
+    recommendedAction = "none";
+    reason = "tmux session is not running";
+  } else if (state === "blocked") {
+    health = "blocked";
+    recommendedAction = "read_blocker";
+    reason = "worker status.json reports blocked";
+  } else if (state === "done") {
+    health = "done";
+    recommendedAction = "review_result";
+    reason = "worker status.json reports done";
+  } else if (captureError) {
+    health = "unknown";
+    recommendedAction = "inspect_terminal";
+    reason = captureError;
+  } else if (busyWait) {
+    health = "busy_wait";
+    recommendedAction = busyWait.recommended_action;
+    reason = busyWait.reason;
+  } else if (terminalIsStale && statusIsStale) {
+    health = "stale";
+    recommendedAction = "ask_for_status";
+    reason = "terminal output and status.json are both stale";
+  } else if (terminalIsStale) {
+    health = "quiet";
+    recommendedAction = "wait";
+    reason = "terminal output is stale but status.json is fresh";
+  } else if (statusIsStale) {
+    health = "status_stale";
+    recommendedAction = "wait";
+    reason = "terminal output changed recently but status.json is stale";
+  } else {
+    health = "active";
+    recommendedAction = "none";
+    reason = "terminal output and status.json are fresh";
+  }
+
+  return {
+    blocker: status.blocker ?? null,
+    busy_wait_pattern: busyWait?.pattern ?? null,
+    busy_wait_seconds: parsed.flags.busyWaitSeconds,
+    capture_error: captureError,
+    current_task: status.current_task ?? null,
+    health,
+    name,
+    next_action: status.next_action ?? null,
+    reason,
+    recommended_action: recommendedAction,
+    running,
+    state,
+    status_age_seconds: statusAge,
+    status_last_update: status.last_update ?? null,
+    status_stale_seconds: parsed.flags.statusStaleSeconds,
+    terminal_age_seconds: terminalAge,
+    terminal_changed_at: stringOrNull(captureMeta.changed_at),
+    terminal_fresh: terminalFresh,
+    terminal_stale_seconds: parsed.flags.terminalStaleSeconds,
+    tmux_session: stringOrNull(config.tmux_session),
+  };
+}
+
 function upsertWorkerSync(
   database: ReturnType<typeof openRuntimeDatabase>,
   options: { config: Record<string, unknown>; name: string; timestamp: string },
@@ -2084,8 +2669,42 @@ function upsertWorkerSync(
   return row.id;
 }
 
-function nowIsoSeconds(): string {
-  return new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
+function nowIsoSeconds(options: { now?: () => Date } = {}): string {
+  return (options.now?.() ?? new Date()).toISOString().replace(/\.\d{3}Z$/, "Z");
+}
+
+function stringOrNull(value: unknown): string | null {
+  return typeof value === "string" ? value : null;
+}
+
+function ageSecondsAt(value: string | undefined, now: Date): number | null {
+  if (!value) {
+    return null;
+  }
+  const parsed = new Date(value.replace(/Z$/, "+00:00"));
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+  return Math.max(0, Math.trunc((now.getTime() - parsed.getTime()) / 1000));
+}
+
+function defaultTmuxRunner(args: string[]): { status: number; stderr?: string; stdout?: string } {
+  const result = spawnSync(args[0] ?? "", args.slice(1), { encoding: "utf8" });
+  if (result.error) {
+    const code = (result.error as NodeJS.ErrnoException).code;
+    if ((args[0] ?? "") === "tmux" && code === "ENOENT") {
+      return { status: 127, stderr: "tmux is not installed or is not available on PATH" };
+    }
+    if ((args[0] ?? "") === "tmux" && code === "EACCES") {
+      return { status: 126, stderr: result.error.message };
+    }
+    return { status: 127, stderr: result.error.message };
+  }
+  return {
+    status: result.status ?? (result.signal ? 1 : 0),
+    stderr: result.stderr,
+    stdout: result.stdout,
+  };
 }
 
 const CONTENT_KEYS = new Set(["content", "message", "output", "segment_text", "text"]);

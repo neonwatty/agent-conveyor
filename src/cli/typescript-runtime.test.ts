@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -6,6 +7,7 @@ import { test } from "node:test";
 import type { DatabaseSync } from "node:sqlite";
 
 import { runTypescriptRuntimeCommand } from "./typescript-runtime.js";
+import type { TmuxRunner } from "../runtime/tmux.js";
 import {
   claimNextDispatchCommandSync,
   createCommandSync,
@@ -872,6 +874,212 @@ test("TypeScript runtime handles events update-status and transcript commands by
   }
 });
 
+test("TypeScript runtime handles live capture status and idle-check with a fake tmux runner", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-live."));
+  const calls: string[][] = [];
+  const runner: TmuxRunner = (args) => {
+    calls.push(args);
+    const command = args.join(" ");
+    if (command === "tmux has-session -t codex-worker-live") {
+      return { status: 0, stdout: "" };
+    }
+    if (command === "tmux capture-pane -p -S -42 -t codex-worker-live") {
+      return { status: 0, stdout: "OpenAI Codex\nPress enter to confirm\n" };
+    }
+    if (command === "tmux list-panes -t codex-worker-live -F #{pane_id}") {
+      return { status: 0, stdout: "%1\n" };
+    }
+    if (command === "tmux has-session -t custom-session") {
+      return { status: 0, stdout: "" };
+    }
+    if (command === "tmux capture-pane -p -S -5 -t custom-session") {
+      return { status: 0, stdout: "session output\n" };
+    }
+    if (command === "tmux list-panes -t custom-session -F #{pane_id}") {
+      return { status: 0, stdout: "%9\n" };
+    }
+    return { status: 1, stderr: `unexpected tmux command: ${command}` };
+  };
+  const now = () => new Date("2026-06-04T12:10:00Z");
+  try {
+    mkdirSync(join(root, ".codex-workers", "worker-live"), { recursive: true });
+    writeFileSync(configPath("worker-live", { cwd: root, env: {} }), `${JSON.stringify({
+      cwd: "/repo",
+      identity_token: "worker-token",
+      startup: "ready",
+      startup_reason: "Codex input prompt is visible",
+      startup_recommended_action: "none",
+      tmux_session: "codex-worker-live",
+    }, null, 2)}\n`);
+    writeFileSync(statusPath("worker-live", { cwd: root, env: {} }), `${JSON.stringify({
+      blocker: null,
+      current_task: "Watch terminal.",
+      last_update: "2026-06-04T12:00:00Z",
+      next_action: "Respond if prompted.",
+      state: "editing",
+    }, null, 2)}\n`);
+
+    const captured = runTypescriptRuntimeCommand({
+      args: ["capture", "worker-live", "--lines", "42"],
+      cwd: root,
+      env: {},
+      now,
+      tmuxRunner: runner,
+    });
+    assert.equal(captured.exitCode, 0);
+    assert.equal(captured.handled, true);
+    const output = "OpenAI Codex\nPress enter to confirm";
+    assert.deepEqual(JSON.parse(captured.stdout ?? "{}"), {
+      byte_count: Buffer.byteLength(output),
+      content_redacted: true,
+      history_lines: 42,
+      line_count: 2,
+      name: "worker-live",
+      sha256: createHash("sha256").update(output).digest("hex"),
+      transcript_path: join(root, ".codex-workers", "worker-live", "transcript.txt"),
+    });
+    assert.equal(readFileSync(join(root, ".codex-workers", "worker-live", "transcript.txt"), "utf8"), `${output}\n`);
+    assert.deepEqual(JSON.parse(readFileSync(join(root, ".codex-workers", "worker-live", "capture-meta.json"), "utf8")), {
+      captured_at: "2026-06-04T12:10:00Z",
+      changed_at: "2026-06-04T12:10:00Z",
+      history_lines: 42,
+      sha256: createHash("sha256").update(output).digest("hex"),
+    });
+    assert.deepEqual(calls.slice(0, 3), [
+      ["tmux", "has-session", "-t", "codex-worker-live"],
+      ["tmux", "capture-pane", "-p", "-S", "-42", "-t", "codex-worker-live"],
+      ["tmux", "list-panes", "-t", "codex-worker-live", "-F", "#{pane_id}"],
+    ]);
+
+    const database = openDatabaseSync(defaultDbPath({ cwd: root, env: {} }));
+    try {
+      const capture = database.prepare(`
+        select transcript_captures.content, transcript_captures.capture_kind,
+               transcript_captures.history_lines, transcript_captures.line_count,
+               workers.tmux_pane_id
+        from transcript_captures
+        join workers on workers.id = transcript_captures.worker_id
+      `).get() as {
+        capture_kind: string;
+        content: string;
+        history_lines: number;
+        line_count: number;
+        tmux_pane_id: string;
+      };
+      assert.deepEqual(Object.fromEntries(Object.entries(capture)), {
+        capture_kind: "changed",
+        content: output,
+        history_lines: 42,
+        line_count: 2,
+        tmux_pane_id: "%1",
+      });
+    } finally {
+      database.close();
+    }
+
+    const callCountBeforeStatus = calls.length;
+    const status = runTypescriptRuntimeCommand({
+      args: ["status", "worker-live", "--no-refresh"],
+      cwd: root,
+      env: {},
+      now,
+      tmuxRunner: runner,
+    });
+    assert.equal(status.exitCode, 0);
+    const statusPayload = JSON.parse(status.stdout ?? "{}") as Record<string, unknown>;
+    assert.deepEqual(statusPayload, {
+      blocker: null,
+      current_task: "Watch terminal.",
+      name: "worker-live",
+      next_action: "Respond if prompted.",
+      running: true,
+      startup: "ready",
+      startup_reason: "Codex input prompt is visible",
+      startup_recommended_action: "none",
+      state: "editing",
+      status_last_update: "2026-06-04T12:00:00Z",
+      terminal_capture_error: null,
+      terminal_captured_at: "2026-06-04T12:10:00Z",
+      terminal_changed_at: "2026-06-04T12:10:00Z",
+      tmux_session: "codex-worker-live",
+    });
+    assert.deepEqual(calls.slice(callCountBeforeStatus), [
+      ["tmux", "has-session", "-t", "codex-worker-live"],
+    ]);
+
+    const idle = runTypescriptRuntimeCommand({
+      args: [
+        "idle-check",
+        "worker-live",
+        "--no-refresh",
+        "--lines",
+        "42",
+        "--status-stale-seconds",
+        "60",
+        "--terminal-stale-seconds",
+        "60",
+        "--busy-wait-seconds",
+        "60",
+      ],
+      cwd: root,
+      env: {},
+      now,
+      tmuxRunner: runner,
+    });
+    const idlePayload = JSON.parse(idle.stdout ?? "{}") as Record<string, unknown>;
+    assert.deepEqual(
+      {
+        busy_wait_pattern: idlePayload.busy_wait_pattern,
+        health: idlePayload.health,
+        reason: idlePayload.reason,
+        recommended_action: idlePayload.recommended_action,
+        running: idlePayload.running,
+        status_age_seconds: idlePayload.status_age_seconds,
+        terminal_age_seconds: idlePayload.terminal_age_seconds,
+        terminal_fresh: idlePayload.terminal_fresh,
+      },
+      {
+        busy_wait_pattern: "enter_to_confirm",
+        health: "busy_wait",
+        reason: "terminal is waiting for Enter confirmation",
+        recommended_action: "inspect_or_confirm",
+        running: true,
+        status_age_seconds: 600,
+        terminal_age_seconds: 0,
+        terminal_fresh: true,
+      },
+    );
+
+    const sessionDb = openDatabaseSync(defaultDbPath({ cwd: root, env: {} }));
+    try {
+      insertSession(sessionDb, {
+        id: "session-live-id",
+        name: "session-live",
+        role: "worker",
+        tmuxSession: "custom-session",
+      });
+    } finally {
+      sessionDb.close();
+    }
+    const callCountBeforeSessionCapture = calls.length;
+    const sessionCapture = runTypescriptRuntimeCommand({
+      args: ["capture", "session-live", "--lines", "5", "--include-content"],
+      cwd: root,
+      env: {},
+      now,
+      tmuxRunner: runner,
+    });
+    assert.equal(sessionCapture.stdout, "session output\n");
+    assert.deepEqual(calls.slice(callCountBeforeSessionCapture, callCountBeforeSessionCapture + 3), [
+      ["tmux", "has-session", "-t", "custom-session"],
+      ["tmux", "capture-pane", "-p", "-S", "-5", "-t", "custom-session"],
+      ["tmux", "list-panes", "-t", "custom-session", "-F", "#{pane_id}"],
+    ]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("TypeScript runtime handles migrated audit replay and subset export commands by default", () => {
   const root = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-cli."));
   try {
@@ -1012,14 +1220,15 @@ function insertSession(
     id: string;
     name: string;
     role: "manager" | "worker";
+    tmuxSession?: string | null;
   },
 ): void {
   database.prepare(`
     insert into sessions(
       id, name, role, identity_token, codex_session_path, codex_session_id,
-      cwd, registered_at, state
+      cwd, registered_at, state, tmux_session
     )
-    values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     options.id,
     options.name,
@@ -1030,6 +1239,7 @@ function insertSession(
     "/repo",
     "2026-05-23T10:00:00Z",
     "active",
+    options.tmuxSession ?? null,
   );
 }
 
