@@ -1303,6 +1303,173 @@ test("TypeScript runtime captures session-bound worker transcript segments with 
   }
 });
 
+test("TypeScript runtime captures legacy worker and manager transcript paths with fake tmux", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-transcript-legacy."));
+  const dbPath = join(root, "workerctl.db");
+  const stateRoot = join(root, "state");
+  const env = { WORKERCTL_STATE_ROOT: stateRoot };
+  const calls: string[][] = [];
+  const runner: TmuxRunner = (args) => {
+    calls.push(args);
+    const command = args.join(" ");
+    if (command === "tmux has-session -t codex-legacy-worker" || command === "tmux has-session -t codex-legacy-manager") {
+      return { status: 0, stdout: "" };
+    }
+    if (command === "tmux list-panes -t codex-legacy-worker -F #{pane_id}") {
+      return { status: 0, stdout: "%10\n" };
+    }
+    if (command === "tmux list-panes -t codex-legacy-manager -F #{pane_id}") {
+      return { status: 0, stdout: "%20\n" };
+    }
+    if (command === "tmux capture-pane -p -S -80 -t codex-legacy-worker") {
+      return { status: 0, stdout: "legacy worker line\nlegacy worker next\n" };
+    }
+    if (command === "tmux capture-pane -p -t codex-legacy-manager -S -80") {
+      return { status: 0, stdout: "legacy manager line\nlegacy manager next" };
+    }
+    return { status: 1, stderr: `unexpected tmux command: ${command}` };
+  };
+  const now = () => new Date("2026-06-04T13:00:00Z");
+  try {
+    mkdirSync(join(stateRoot, "legacy-worker"), { recursive: true });
+    writeFileSync(configPath("legacy-worker", { env }), `${JSON.stringify({
+      cwd: root,
+      identity_token: "token-legacy-worker",
+      tmux_pane_id: "%10",
+      tmux_session: "codex-legacy-worker",
+    }, null, 2)}\n`);
+
+    const database = openDatabaseSync(dbPath);
+    try {
+      initializeDatabaseSync(database);
+      createTaskSync(database, {
+        goal: "Capture legacy transcript evidence.",
+        name: "legacy-task",
+        now: "2026-06-04T12:50:00Z",
+        taskId: "task-legacy",
+      });
+      insertLegacyWorker(database, {
+        identityToken: "token-legacy-worker",
+        name: "legacy-worker",
+        paneId: "%10",
+        workerId: "worker-legacy-id",
+      });
+      insertLegacyManager(database, {
+        managerId: "manager-legacy-id",
+        name: "legacy-manager",
+        paneId: "%20",
+        taskId: "task-legacy",
+      });
+      database.prepare(`
+        insert into bindings(id, task_id, worker_id, manager_id, state, created_at)
+        values ('binding-legacy', 'task-legacy', 'worker-legacy-id', 'manager-legacy-id', 'active', '2026-06-04T12:51:00Z')
+      `).run();
+    } finally {
+      database.close();
+    }
+
+    const result = runTypescriptRuntimeCommand({
+      args: ["transcript-capture", "legacy-task", "--role", "all", "--json", "--include-content", "--path", dbPath, "--lines", "80"],
+      env,
+      now,
+      tmuxRunner: runner,
+    });
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.handled, true);
+    const payload = JSON.parse(result.stdout ?? "{}") as {
+      captures: Array<{
+        binding_id: string | null;
+        capture: Record<string, unknown>;
+        manager?: Record<string, unknown>;
+        role: "manager" | "worker";
+        transcript_segment: Record<string, unknown>;
+        worker?: Record<string, unknown>;
+      }>;
+    };
+    const workerCapture = payload.captures.find((capture) => capture.role === "worker");
+    const managerCapture = payload.captures.find((capture) => capture.role === "manager");
+    assert.equal(workerCapture?.binding_id, "binding-legacy");
+    assert.equal(workerCapture?.worker?.id, "worker-legacy-id");
+    assert.equal(workerCapture?.worker?.tmux_pane_id, "%10");
+    assert.equal(workerCapture?.capture.output, "legacy worker line\nlegacy worker next");
+    assert.equal(workerCapture?.transcript_segment.segment_kind, "reset");
+    assert.equal(managerCapture?.manager?.id, "manager-legacy-id");
+    assert.equal(managerCapture?.manager?.tmux_pane_id, "%20");
+    assert.equal(managerCapture?.capture.output, "legacy manager line\nlegacy manager next");
+    assert.equal(managerCapture?.transcript_segment.segment_kind, "reset");
+
+    assert.deepEqual(calls, [
+      ["tmux", "has-session", "-t", "codex-legacy-worker"],
+      ["tmux", "list-panes", "-t", "codex-legacy-worker", "-F", "#{pane_id}"],
+      ["tmux", "has-session", "-t", "codex-legacy-worker"],
+      ["tmux", "capture-pane", "-p", "-S", "-80", "-t", "codex-legacy-worker"],
+      ["tmux", "has-session", "-t", "codex-legacy-manager"],
+      ["tmux", "list-panes", "-t", "codex-legacy-manager", "-F", "#{pane_id}"],
+      ["tmux", "capture-pane", "-p", "-t", "codex-legacy-manager", "-S", "-80"],
+    ]);
+
+    const verifyDb = openDatabaseSync(dbPath);
+    try {
+      const captures = verifyDb.prepare(`
+        select role, worker_id, manager_id, tmux_session, tmux_pane_id from terminal_captures order by id
+      `).all() as Array<{
+        manager_id: string | null;
+        role: string;
+        tmux_pane_id: string | null;
+        tmux_session: string;
+        worker_id: string | null;
+      }>;
+      assert.deepEqual(captures.map((row) => Object.fromEntries(Object.entries(row))), [
+        {
+          manager_id: null,
+          role: "worker",
+          tmux_pane_id: "%10",
+          tmux_session: "codex-legacy-worker",
+          worker_id: "worker-legacy-id",
+        },
+        {
+          manager_id: "manager-legacy-id",
+          role: "manager",
+          tmux_pane_id: "%20",
+          tmux_session: "codex-legacy-manager",
+          worker_id: null,
+        },
+      ]);
+      const eventRows = verifyDb.prepare(`
+        select type, worker_id, manager_id from events where type like '%_terminal_captured' order by id
+      `).all() as Array<{ manager_id: string | null; type: string; worker_id: string | null }>;
+      assert.deepEqual(eventRows.map((row) => Object.fromEntries(Object.entries(row))), [
+        { manager_id: null, type: "worker_terminal_captured", worker_id: "worker-legacy-id" },
+        { manager_id: "manager-legacy-id", type: "manager_terminal_captured", worker_id: null },
+      ]);
+      const observations = verifyDb.prepare(`
+        select role, worker_id, manager_id from agent_observations order by id
+      `).all() as Array<{ manager_id: string | null; role: string; worker_id: string | null }>;
+      assert.deepEqual(observations.map((row) => Object.fromEntries(Object.entries(row))), [
+        { manager_id: null, role: "worker", worker_id: "worker-legacy-id" },
+        { manager_id: "manager-legacy-id", role: "manager", worker_id: null },
+      ]);
+      const manager = verifyDb.prepare(`
+        select last_capture_sha256, last_seen_at from managers where id = 'manager-legacy-id'
+      `).get() as { last_capture_sha256: string | null; last_seen_at: string | null };
+      assert.equal(manager.last_seen_at, "2026-06-04T13:00:00Z");
+      assert.equal(manager.last_capture_sha256, createHash("sha256").update("legacy manager line\nlegacy manager next").digest("hex"));
+      const legacyCapture = verifyDb.prepare(`
+        select worker_id, content, line_count from transcript_captures
+      `).get() as { content: string | null; line_count: number; worker_id: string };
+      assert.equal(legacyCapture.worker_id, "worker-legacy-id");
+      assert.equal(legacyCapture.content, "legacy worker line\nlegacy worker next");
+      assert.equal(legacyCapture.line_count, 2);
+    } finally {
+      verifyDb.close();
+    }
+    assert.equal(readFileSync(join(stateRoot, "legacy-worker", "transcript.txt"), "utf8"), "legacy worker line\nlegacy worker next\n");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("TypeScript runtime handles migrated audit replay and subset export commands by default", () => {
   const root = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-cli."));
   try {
@@ -1465,6 +1632,42 @@ function insertSession(
     "active",
     options.tmuxSession ?? null,
     options.tmuxPaneId ?? null,
+  );
+}
+
+function insertLegacyWorker(
+  database: DatabaseSync,
+  options: { identityToken: string; name: string; paneId: string; workerId: string },
+): void {
+  database.prepare(`
+    insert into workers(
+      id, name, tmux_session, tmux_pane_id, identity_token, cwd, state, created_at, updated_at
+    )
+    values (?, ?, ?, ?, ?, '/repo', 'active', '2026-06-04T12:50:00Z', '2026-06-04T12:50:00Z')
+  `).run(
+    options.workerId,
+    options.name,
+    `codex-${options.name}`,
+    options.paneId,
+    options.identityToken,
+  );
+}
+
+function insertLegacyManager(
+  database: DatabaseSync,
+  options: { managerId: string; name: string; paneId: string; taskId: string },
+): void {
+  database.prepare(`
+    insert into managers(
+      id, name, task_id, tmux_session, tmux_pane_id, state, codex_args_json, started_at
+    )
+    values (?, ?, ?, ?, ?, 'ready', '[]', '2026-06-04T12:50:30Z')
+  `).run(
+    options.managerId,
+    options.name,
+    options.taskId,
+    `codex-${options.name}`,
+    options.paneId,
   );
 }
 

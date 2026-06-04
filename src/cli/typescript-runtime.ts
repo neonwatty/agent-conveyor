@@ -1223,7 +1223,7 @@ function runTranscriptCaptureCommand(
     const captures: TranscriptCaptureCommandCapture[] = [];
     for (const role of roles) {
       try {
-        const context = sessionTranscriptCaptureContext(database, task, role);
+        const context = sessionTranscriptCaptureContext(database, task, role, options);
         if (!context) {
           throw new Error(`transcript-capture ${role} role requires a session-bound ${role} binding.`);
         }
@@ -1232,7 +1232,9 @@ function runTranscriptCaptureCommand(
           historyLines: parsed.flags.lines,
           mode: parsed.flags.transcriptMode,
           now: nowIsoSeconds(options),
+          parsed,
           runner: options.tmuxRunner ?? defaultTmuxRunner,
+          runtimeOptions: options,
           source: "transcript_capture",
         }));
       } catch (error) {
@@ -2213,12 +2215,27 @@ function taskIdForTask(database: ReturnType<typeof openRuntimeDatabase>, taskNam
 
 function insertEventSync(
   database: ReturnType<typeof openRuntimeDatabase>,
-  options: { commandId?: string | null; payload: Record<string, unknown>; taskId?: string | null; type: string },
+  options: {
+    commandId?: string | null;
+    managerId?: string | null;
+    payload: Record<string, unknown>;
+    taskId?: string | null;
+    type: string;
+    workerId?: string | null;
+  },
 ): void {
   database.prepare(`
-    insert into events(created_at, actor, task_id, command_id, type, payload_json)
-    values (?, 'workerctl', ?, ?, ?, ?)
-  `).run(new Date().toISOString(), options.taskId ?? null, options.commandId ?? null, options.type, stableJson(options.payload));
+    insert into events(created_at, actor, worker_id, manager_id, task_id, command_id, type, payload_json)
+    values (?, 'workerctl', ?, ?, ?, ?, ?, ?)
+  `).run(
+    new Date().toISOString(),
+    options.workerId ?? null,
+    options.managerId ?? null,
+    options.taskId ?? null,
+    options.commandId ?? null,
+    options.type,
+    stableJson(options.payload),
+  );
 }
 
 function emitTelemetrySync(
@@ -2328,6 +2345,7 @@ interface TranscriptSegmentsResult {
 }
 
 interface SessionTranscriptCaptureContext {
+  bindingId: string | null;
   binding: {
     binding_id: string;
     created_at: string;
@@ -2339,6 +2357,8 @@ interface SessionTranscriptCaptureContext {
     worker_session_id: string;
     worker_session_name: string;
   };
+  legacyWorkerConfig?: LiveWorkerConfig;
+  managerId: string | null;
   role: "manager" | "worker";
   session: {
     id: string;
@@ -2348,7 +2368,10 @@ interface SessionTranscriptCaptureContext {
     tmux_pane_id: string | null;
     tmux_session: string | null;
   };
+  source: "legacy_manager" | "legacy_worker" | "session";
   task: { id: string; name: string; state: string };
+  workerIdentityToken?: string;
+  workerId: string | null;
 }
 
 interface TerminalCaptureRecord {
@@ -2375,7 +2398,7 @@ interface TranscriptSegmentSummary {
 
 type TranscriptCaptureCommandCapture =
   | {
-    binding_id: null;
+    binding_id: string | null;
     capture: TerminalCaptureRecord;
     observation_id: number;
     role: "manager" | "worker";
@@ -2474,8 +2497,20 @@ function sessionTranscriptCaptureContext(
   database: ReturnType<typeof openRuntimeDatabase>,
   task: string,
   role: "manager" | "worker",
+  options: { cwd?: string; env?: NodeJS.ProcessEnv },
 ): SessionTranscriptCaptureContext | null {
   const snapshot = taskSnapshot(database, task);
+  if (role === "worker") {
+    const legacyWorker = legacyWorkerTranscriptCaptureContext(database, snapshot, options);
+    if (legacyWorker) {
+      return legacyWorker;
+    }
+  } else {
+    const legacyManager = legacyManagerTranscriptCaptureContext(database, snapshot);
+    if (legacyManager) {
+      return legacyManager;
+    }
+  }
   const binding = database.prepare(`
     select
       b.id as binding_id,
@@ -2509,7 +2544,131 @@ function sessionTranscriptCaptureContext(
   if (!session || session.role !== role) {
     return null;
   }
-  return { binding, role, session, task: snapshot };
+  return {
+    binding,
+    bindingId: null,
+    managerId: null,
+    role,
+    session,
+    source: "session",
+    task: snapshot,
+    workerId: null,
+  };
+}
+
+function legacyWorkerTranscriptCaptureContext(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  snapshot: { id: string; name: string; state: string },
+  options: { cwd?: string; env?: NodeJS.ProcessEnv },
+): SessionTranscriptCaptureContext | null {
+  const row = database.prepare(`
+    select tasks.id as task_id, tasks.name as task_name, tasks.state as task_state,
+           bindings.id as binding_id, bindings.state as binding_state,
+           workers.id as worker_id, workers.name as worker_name,
+           workers.tmux_session, workers.tmux_pane_id, workers.identity_token,
+           workers.cwd, workers.state as worker_state
+    from tasks
+    left join bindings on bindings.task_id = tasks.id and bindings.state in ('active', 'ending')
+    left join workers on workers.id = bindings.worker_id
+    where tasks.id = ?
+    order by tasks.created_at desc
+    limit 1
+  `).get(snapshot.id) as {
+    binding_id: string | null;
+    binding_state: string | null;
+    cwd: string | null;
+    identity_token: string | null;
+    task_id: string;
+    task_name: string;
+    task_state: string;
+    tmux_pane_id: string | null;
+    tmux_session: string | null;
+    worker_id: string | null;
+    worker_name: string | null;
+    worker_state: string | null;
+  } | undefined;
+  if (!row?.worker_id || !row.worker_name || !row.tmux_session || !row.identity_token || !row.worker_state) {
+    return null;
+  }
+  const config = requireWorkerConfig(row.worker_name, options);
+  return {
+    binding: {
+      binding_id: row.binding_id ?? "",
+      created_at: "",
+      ended_at: null,
+      manager_session_id: "",
+      manager_session_name: "",
+      state: row.binding_state ?? "",
+      task_id: row.task_id,
+      worker_session_id: "",
+      worker_session_name: row.worker_name,
+    },
+    legacyWorkerConfig: { ...config, _workerctl_lookup_source: "legacy" },
+    bindingId: row.binding_id,
+    managerId: null,
+    role: "worker",
+    session: {
+      id: row.worker_id,
+      name: row.worker_name,
+      role: "worker",
+      state: row.worker_state,
+      tmux_pane_id: row.tmux_pane_id,
+      tmux_session: row.tmux_session,
+    },
+    source: "legacy_worker",
+    task: snapshot,
+    workerIdentityToken: row.identity_token,
+    workerId: row.worker_id,
+  };
+}
+
+function legacyManagerTranscriptCaptureContext(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  snapshot: { id: string; name: string; state: string },
+): SessionTranscriptCaptureContext | null {
+  const row = database.prepare(`
+    select id, name, tmux_session, tmux_pane_id, state
+    from managers
+    where task_id = ? and state in ('starting', 'ready', 'stopping')
+    order by started_at desc
+    limit 1
+  `).get(snapshot.id) as {
+    id: string;
+    name: string;
+    state: string;
+    tmux_pane_id: string | null;
+    tmux_session: string | null;
+  } | undefined;
+  if (!row?.tmux_session) {
+    return null;
+  }
+  return {
+    binding: {
+      binding_id: "",
+      created_at: "",
+      ended_at: null,
+      manager_session_id: "",
+      manager_session_name: row.name,
+      state: "",
+      task_id: snapshot.id,
+      worker_session_id: "",
+      worker_session_name: "",
+    },
+    bindingId: null,
+    managerId: row.id,
+    role: "manager",
+    session: {
+      id: row.id,
+      name: row.name,
+      role: "manager",
+      state: row.state,
+      tmux_pane_id: row.tmux_pane_id,
+      tmux_session: row.tmux_session,
+    },
+    source: "legacy_manager",
+    task: snapshot,
+    workerId: null,
+  };
 }
 
 function captureTaskTerminalSync(
@@ -2519,7 +2678,9 @@ function captureTaskTerminalSync(
     historyLines: number;
     mode: TranscriptCaptureMode;
     now: string;
+    parsed: ParsedRuntimeArgs;
     runner: TmuxRunner;
+    runtimeOptions: { cwd?: string; env?: NodeJS.ProcessEnv; now?: () => Date; tmuxRunner?: TmuxRunner };
     source: string;
   },
 ): Extract<TranscriptCaptureCommandCapture, { capture: TerminalCaptureRecord }> {
@@ -2528,7 +2689,15 @@ function captureTaskTerminalSync(
   if (!tmuxSessionName) {
     throw new Error(`Session identity verification failed for ${options.context.session.name}: tmux_session_missing`);
   }
-  const output = captureTranscriptTmuxTargetWithRunner(tmuxSessionName, options.historyLines, options.runner);
+  const output = options.context.source === "legacy_worker"
+    ? captureOutputForConfig(
+      options.context.session.name,
+      options.context.legacyWorkerConfig ?? workerConfigOrSession(options.context.session.name, options.parsed, options.runtimeOptions),
+      options.historyLines,
+      options.parsed,
+      options.runtimeOptions,
+    ).output
+    : captureTranscriptTmuxTargetWithRunner(tmuxSessionName, options.historyLines, options.runner);
   const contentSha256 = createHash("sha256").update(output).digest("hex");
   const startup = classifyStartupOutput(output);
   const classifier = {
@@ -2543,6 +2712,7 @@ function captureTaskTerminalSync(
     classifier,
     contentSha256,
     historyLines: options.historyLines,
+    managerId: options.context.managerId,
     output,
     role: options.context.role,
     source: options.source,
@@ -2550,6 +2720,7 @@ function captureTaskTerminalSync(
     timestamp: options.now,
     tmuxPaneId: paneId ?? options.context.session.tmux_pane_id,
     tmuxSession: tmuxSessionName,
+    workerId: options.context.workerId,
   });
   const transcriptSegment = recordTranscriptSegmentSync(database, {
     content: output,
@@ -2562,6 +2733,7 @@ function captureTaskTerminalSync(
     timestamp: options.now,
   });
   insertEventSync(database, {
+    managerId: options.context.managerId,
     payload: {
       capture_id: captureId,
       content_sha256: contentSha256,
@@ -2570,8 +2742,17 @@ function captureTaskTerminalSync(
     },
     taskId: options.context.task.id,
     type: `${options.context.role}_terminal_captured`,
+    workerId: options.context.workerId,
   });
+  if (options.context.role === "manager" && options.context.managerId) {
+    markManagerSeenSync(database, {
+      contentSha256,
+      managerId: options.context.managerId,
+      timestamp: options.now,
+    });
+  }
   const observationId = insertAgentObservationSync(database, {
+    managerId: options.context.managerId,
     message: `${options.context.role} terminal captured`,
     payload: {
       content_sha256: contentSha256,
@@ -2583,6 +2764,7 @@ function captureTaskTerminalSync(
     sourceCaptureId: captureId,
     taskId: options.context.task.id,
     timestamp: options.now,
+    workerId: options.context.workerId,
   });
   const sessionPayload = {
     id: options.context.session.id,
@@ -2608,8 +2790,8 @@ function captureTaskTerminalSync(
     transcript_segment: transcriptSegment,
   };
   return options.context.role === "manager"
-    ? { ...result, manager: sessionPayload }
-    : { ...result, worker: sessionPayload };
+    ? { ...result, binding_id: options.context.bindingId, manager: sessionPayload }
+    : { ...result, binding_id: options.context.bindingId, worker: sessionPayload };
 }
 
 function verifySessionCaptureIdentity(
@@ -2626,13 +2808,41 @@ function verifySessionCaptureIdentity(
     if (live) {
       livePaneId = currentPaneIdWithRunner(sessionName, runner);
     } else {
-      mismatches.push("tmux_session_missing");
+      mismatches.push(context.source === "legacy_manager" ? "manager_session_missing" : "tmux_session_missing");
     }
   }
   if (context.session.tmux_pane_id && livePaneId && context.session.tmux_pane_id !== livePaneId) {
-    mismatches.push("tmux_pane_mismatch");
+    mismatches.push(context.source === "legacy_manager" ? "manager_pane_mismatch" : "tmux_pane_mismatch");
+  }
+  if (context.source === "legacy_worker") {
+    const config = context.legacyWorkerConfig;
+    const configToken = typeof config?.identity_token === "string" ? config.identity_token : null;
+    const configSession = typeof config?.tmux_session === "string" ? config.tmux_session : null;
+    const configPane = typeof config?.tmux_pane_id === "string" ? config.tmux_pane_id : null;
+    if (!configToken) {
+      mismatches.push("config_identity_token_missing");
+    }
+    if (configToken && configToken !== context.workerIdentityToken) {
+      mismatches.push("identity_token_mismatch");
+    }
+    if (configSession !== context.session.tmux_session) {
+      mismatches.push("tmux_session_mismatch");
+    }
+    if (configPane && context.session.tmux_pane_id && configPane !== context.session.tmux_pane_id) {
+      mismatches.push("config_pane_mismatch");
+    }
   }
   if (mismatches.length > 0) {
+    if (context.source === "legacy_manager") {
+      throw new Error(
+        `Manager identity verification failed for ${context.session.name}: ${mismatches.join(", ")}`,
+      );
+    }
+    if (context.source === "legacy_worker") {
+      throw new Error(
+        `Worker identity verification failed for ${context.session.name}: ${mismatches.join(", ")}`,
+      );
+    }
     throw new Error(
       `Session identity verification failed for ${context.session.name}: ${mismatches.join(", ")}`,
     );
@@ -2660,6 +2870,7 @@ function insertTerminalCaptureSync(
     classifier: TerminalCaptureRecord["classifier"];
     contentSha256: string;
     historyLines: number;
+    managerId: string | null;
     output: string;
     role: "manager" | "worker";
     source: string;
@@ -2667,6 +2878,7 @@ function insertTerminalCaptureSync(
     timestamp: string;
     tmuxPaneId: string | null;
     tmuxSession: string;
+    workerId: string | null;
   },
 ): number {
   const result = database.prepare(`
@@ -2675,9 +2887,11 @@ function insertTerminalCaptureSync(
       command_id, captured_at, history_lines, content_sha256, content,
       content_path, byte_count, line_count, classifier_json, source
     )
-    values (?, null, null, ?, ?, ?, null, ?, ?, ?, ?, null, ?, ?, ?, ?)
+    values (?, ?, ?, ?, ?, ?, null, ?, ?, ?, ?, null, ?, ?, ?, ?)
   `).run(
     options.taskId,
+    options.workerId,
+    options.managerId,
     options.role,
     options.tmuxSession,
     options.tmuxPaneId,
@@ -2705,10 +2919,10 @@ function insertTerminalCaptureSync(
     correlation: {
       capture_id: captureId,
       command_id: null,
-      manager_id: null,
+      manager_id: options.managerId,
       role: options.role,
       source: options.source,
-      worker_id: null,
+      worker_id: options.workerId,
     },
     eventType: "terminal_capture_recorded",
     severity: "info",
@@ -2717,6 +2931,18 @@ function insertTerminalCaptureSync(
     timestamp: options.timestamp,
   });
   return captureId;
+}
+
+function markManagerSeenSync(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  options: { contentSha256: string; managerId: string; timestamp: string },
+): void {
+  database.prepare(`
+    update managers
+    set last_seen_at = ?,
+        last_capture_sha256 = coalesce(?, last_capture_sha256)
+    where id = ?
+  `).run(options.timestamp, options.contentSha256, options.managerId);
 }
 
 function recordTranscriptSegmentSync(
@@ -2866,11 +3092,13 @@ function insertAgentObservationSync(
   database: ReturnType<typeof openRuntimeDatabase>,
   options: {
     message: string;
+    managerId: string | null;
     payload: Record<string, unknown>;
     role: "manager" | "worker";
     sourceCaptureId: number;
     taskId: string;
     timestamp: string;
+    workerId: string | null;
   },
 ): number {
   const result = database.prepare(`
@@ -2878,9 +3106,11 @@ function insertAgentObservationSync(
       task_id, worker_id, manager_id, role, observation_type, severity,
       source_capture_id, command_id, created_at, message, payload_json
     )
-    values (?, null, null, ?, 'capture', 'info', ?, null, ?, ?, ?)
+    values (?, ?, ?, ?, 'capture', 'info', ?, null, ?, ?, ?)
   `).run(
     options.taskId,
+    options.workerId,
+    options.managerId,
     options.role,
     options.sourceCaptureId,
     options.timestamp,
