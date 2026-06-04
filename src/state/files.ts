@@ -1,17 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-export const STATE_ROOT_DIR = ".codex-workers";
-export const VALID_WORKER_STATES = new Set([
-  "planning",
-  "editing",
-  "running_tests",
-  "blocked",
-  "waiting",
-  "done",
-  "unknown",
-]);
-
+const STATE_ROOT_DIR = ".codex-workers";
 export class WorkerctlStateError extends Error {
   constructor(message: string) {
     super(message);

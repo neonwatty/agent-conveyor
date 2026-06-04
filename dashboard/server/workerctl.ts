@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 
-export type DashboardCommand =
+type DashboardCommand =
   | "audit"
   | "bind"
   | "cycle"
@@ -335,50 +335,6 @@ export async function runWorkerctlJson(options: WorkerctlCommandOptions): Promis
       } catch (error) {
         reject(error);
       }
-    });
-  });
-}
-
-export interface WorkerctlReceipt {
-  command: string[];
-  exitCode: number | null;
-  json: unknown | null;
-  stderr: string;
-  stdout: string;
-}
-
-export async function runWorkerctlReceipt(options: WorkerctlCommandOptions): Promise<WorkerctlReceipt> {
-  const [command, ...args] = buildWorkerctlArgs(options);
-  return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"] });
-    let stdout = "";
-    let stderr = "";
-    child.stdout.setEncoding("utf8");
-    child.stderr.setEncoding("utf8");
-    child.stdout.on("data", (chunk) => {
-      stdout += chunk;
-    });
-    child.stderr.on("data", (chunk) => {
-      stderr += chunk;
-    });
-    child.on("error", reject);
-    child.on("close", (exitCode) => {
-      const trimmed = stdout.trim();
-      let json: unknown | null = null;
-      if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
-        try {
-          json = JSON.parse(trimmed);
-        } catch {
-          json = null;
-        }
-      }
-      resolve({
-        command: [command, ...args],
-        exitCode,
-        json,
-        stderr,
-        stdout,
-      });
     });
   });
 }

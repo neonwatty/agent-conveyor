@@ -952,7 +952,7 @@ async function main(): Promise<void> {
         resize: (cols, rows) => ptyTerm.resize(cols, rows),
         write: (data) => ptyTerm.write(data),
       };
-    } catch (error) {
+    } catch {
       try {
         term = spawnScriptTmuxAttach(session);
       } catch (fallbackError) {

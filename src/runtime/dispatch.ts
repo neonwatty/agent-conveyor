@@ -546,7 +546,7 @@ function dispatchRalphLoopPolicySync(database: DatabaseSync, command: CommandRec
   if (run.task_id !== command.task_id) {
     throw new DispatchRoutingError("continue_iteration Ralph loop run does not belong to command task");
   }
-  let reason: string | null = null;
+  let reason: string | null;
   let missingEvidence: string[] = [];
   if (requestedIteration <= run.current_iteration) {
     reason = "stale_requested_iteration";

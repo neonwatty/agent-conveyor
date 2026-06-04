@@ -17,7 +17,7 @@ export interface IngestResult {
   skipped_lines: number;
 }
 
-export class IngestError extends Error {
+class IngestError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "IngestError";
