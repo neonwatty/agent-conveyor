@@ -1084,18 +1084,34 @@ test("TypeScript runtime captures session-bound worker transcript segments with 
   const root = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-transcript-capture."));
   const dbPath = join(root, "workerctl.db");
   const calls: string[][] = [];
-  const outputs = ["line one\nline two", "line one\nline two", "line one\nline two\nline three", "line one\nline two\nline three"];
+  const workerOutputs = [
+    "line one\nline two",
+    "line one\nline two",
+    "line one\nline two\nline three",
+    "line one\nline two\nline three",
+    "line one\nline two\nline three\nline four",
+  ];
+  const managerOutputs = [
+    "manager line one\nmanager line two",
+    "manager line one\nmanager line two\nmanager line three",
+  ];
   const runner: TmuxRunner = (args) => {
     calls.push(args);
     const command = args.join(" ");
-    if (command === "tmux has-session -t session-worker") {
+    if (command === "tmux has-session -t session-worker" || command === "tmux has-session -t session-manager") {
       return { status: 0, stdout: "" };
     }
     if (command === "tmux list-panes -t session-worker -F #{pane_id}") {
       return { status: 0, stdout: "%1\n" };
     }
+    if (command === "tmux list-panes -t session-manager -F #{pane_id}") {
+      return { status: 0, stdout: "%2\n" };
+    }
     if (command === "tmux capture-pane -p -t session-worker -S -80") {
-      return { status: 0, stdout: outputs.shift() ?? "" };
+      return { status: 0, stdout: workerOutputs.shift() ?? "" };
+    }
+    if (command === "tmux capture-pane -p -t session-manager -S -80") {
+      return { status: 0, stdout: managerOutputs.shift() ?? "" };
     }
     return { status: 1, stderr: `unexpected tmux command: ${command}` };
   };
@@ -1121,6 +1137,7 @@ test("TypeScript runtime captures session-bound worker transcript segments with 
         id: "session-manager-capture",
         name: "manager-capture",
         role: "manager",
+        tmuxPaneId: "%2",
         tmuxSession: "session-manager",
       });
       bindSessionsSync(database, {
@@ -1210,6 +1227,29 @@ test("TypeScript runtime captures session-bound worker transcript segments with 
     assert.equal(required.exitCode, 2);
     assert.match(required.stderr ?? "", /no non-empty transcript segment captured for role\(s\): worker/);
 
+    const managerCapture = runTypescriptRuntimeCommand({
+      args: ["transcript-capture", "capture-task", "--role", "manager", "--json", "--path", dbPath, "--lines", "80"],
+      env: {},
+      now,
+      tmuxRunner: runner,
+    });
+    assert.equal(managerCapture.exitCode, 0);
+    const managerPayload = JSON.parse(managerCapture.stdout ?? "{}") as {
+      captures: Array<{ manager: Record<string, unknown>; transcript_segment: Record<string, unknown> }>;
+    };
+    assert.equal(managerPayload.captures[0]?.manager.tmux_pane_id, "%2");
+    assert.equal(managerPayload.captures[0]?.transcript_segment.segment_kind, "reset");
+
+    const allText = runTypescriptRuntimeCommand({
+      args: ["transcript-capture", "capture-task", "--role", "all", "--path", dbPath, "--lines", "80"],
+      env: {},
+      now,
+      tmuxRunner: runner,
+    });
+    assert.equal(allText.exitCode, 0);
+    assert.match(allText.stdout ?? "", /worker: capture \d+ segment \d+ \(segment, 1 lines\)/);
+    assert.match(allText.stdout ?? "", /manager: capture \d+ segment \d+ \(segment, 1 lines\)/);
+
     assert.deepEqual(calls, [
       ["tmux", "has-session", "-t", "session-worker"],
       ["tmux", "list-panes", "-t", "session-worker", "-F", "#{pane_id}"],
@@ -1223,6 +1263,15 @@ test("TypeScript runtime captures session-bound worker transcript segments with 
       ["tmux", "has-session", "-t", "session-worker"],
       ["tmux", "list-panes", "-t", "session-worker", "-F", "#{pane_id}"],
       ["tmux", "capture-pane", "-p", "-t", "session-worker", "-S", "-80"],
+      ["tmux", "has-session", "-t", "session-manager"],
+      ["tmux", "list-panes", "-t", "session-manager", "-F", "#{pane_id}"],
+      ["tmux", "capture-pane", "-p", "-t", "session-manager", "-S", "-80"],
+      ["tmux", "has-session", "-t", "session-worker"],
+      ["tmux", "list-panes", "-t", "session-worker", "-F", "#{pane_id}"],
+      ["tmux", "capture-pane", "-p", "-t", "session-worker", "-S", "-80"],
+      ["tmux", "has-session", "-t", "session-manager"],
+      ["tmux", "list-panes", "-t", "session-manager", "-F", "#{pane_id}"],
+      ["tmux", "capture-pane", "-p", "-t", "session-manager", "-S", "-80"],
     ]);
 
     const verifyDb = openDatabaseSync(dbPath);
@@ -1233,16 +1282,19 @@ test("TypeScript runtime captures session-bound worker transcript segments with 
       assert.deepEqual(segmentRows.map((row) => Object.fromEntries(Object.entries(row))), [
         { segment_kind: "reset", segment_text: "line one\nline two" },
         { segment_kind: "segment", segment_text: "line three" },
+        { segment_kind: "reset", segment_text: "manager line one\nmanager line two" },
+        { segment_kind: "segment", segment_text: "line four" },
+        { segment_kind: "segment", segment_text: "manager line three" },
       ]);
       const telemetryRows = verifyDb.prepare(`
         select event_type from telemetry_events order by id
       `).all() as Array<{ event_type: string }>;
-      assert.equal(telemetryRows.filter((row) => row.event_type === "terminal_capture_recorded").length, 4);
-      assert.equal(telemetryRows.filter((row) => row.event_type === "transcript_segment_recorded").length, 2);
+      assert.equal(telemetryRows.filter((row) => row.event_type === "terminal_capture_recorded").length, 7);
+      assert.equal(telemetryRows.filter((row) => row.event_type === "transcript_segment_recorded").length, 5);
       const observation = verifyDb.prepare(`
         select count(*) as count from agent_observations where observation_type = 'capture'
       `).get() as { count: number };
-      assert.equal(observation.count, 4);
+      assert.equal(observation.count, 7);
     } finally {
       verifyDb.close();
     }
