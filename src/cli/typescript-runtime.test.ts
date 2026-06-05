@@ -819,6 +819,482 @@ test("TypeScript runtime handles loop evidence add adversarial and visual diff b
   }
 });
 
+test("TypeScript runtime handles loop templates presets and triggers by default", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-loop-templates."));
+  try {
+    const dbPath = join(root, "workerctl.db");
+    const database = openDatabaseSync(dbPath);
+    try {
+      initializeDatabaseSync(database);
+      createTaskSync(database, {
+        goal: "Run visual template loop.",
+        name: "visual-template-task",
+        now: "2026-05-23T10:00:00Z",
+        taskId: "task-visual-template",
+      });
+    } finally {
+      database.close();
+    }
+
+    const listTemplates = runTypescriptRuntimeCommand({
+      args: ["loop-templates", "--list", "--json"],
+      env: {},
+    });
+    assert.equal(listTemplates.exitCode, 0, listTemplates.stderr);
+    const templateList = JSON.parse(listTemplates.stdout ?? "{}") as { templates: Array<{ name: string }> };
+    assert.ok(templateList.templates.some((template) => template.name === "visual_diff_loop"));
+
+    const badListArg = runTypescriptRuntimeCommand({
+      args: ["loop-templates", "--list", "extra", "--json"],
+      env: { AGENT_CONVEYOR_TS_RUNTIME: "1" },
+    });
+    assert.equal(badListArg.exitCode, 2);
+    assert.match(badListArg.stderr ?? "", /Unexpected argument: extra/);
+
+    const showTemplate = runTypescriptRuntimeCommand({
+      args: ["loop-templates", "--show", "visual_diff_loop", "--json"],
+      env: {},
+    });
+    const template = JSON.parse(showTemplate.stdout ?? "{}") as {
+      artifact_requirements: Record<string, { type: string }>;
+      description: string;
+      required_before_continue: string[];
+    };
+    assert.match(template.description, /visual-diff passes/);
+    assert.equal(template.artifact_requirements.diff_score.type, "number");
+    assert.deepEqual(template.required_before_continue, [
+      "reference_artifact",
+      "candidate_screenshot",
+      "visual_diff_report",
+      "diff_below_threshold",
+      "adversarial_check",
+    ]);
+
+    const rejectCreateOnly = runTypescriptRuntimeCommand({
+      args: ["loop-templates", "--show", "visual_diff_loop", "--current-iteration", "1", "--json"],
+      env: {},
+    });
+    assert.equal(rejectCreateOnly.exitCode, 2);
+    assert.match(rejectCreateOnly.stderr ?? "", /--current-iteration is only valid with --create-run/);
+
+    const dryRunCreate = runTypescriptRuntimeCommand({
+      args: [
+        "loop-templates",
+        "--create-run",
+        "visual-template-task",
+        "--template",
+        "visual_diff_loop",
+        "--dry-run",
+        "--path",
+        dbPath,
+      ],
+      env: { AGENT_CONVEYOR_TS_RUNTIME: "1" },
+    });
+    assert.equal(dryRunCreate.exitCode, 2);
+    assert.match(dryRunCreate.stderr ?? "", /Unsupported TypeScript runtime option for loop-templates/);
+    const afterDryRun = openDatabaseSync(dbPath);
+    try {
+      const runs = afterDryRun.prepare("select count(*) as count from runs where task_id = ?")
+        .get("task-visual-template") as { count: number };
+      assert.equal(runs.count, 0);
+    } finally {
+      afterDryRun.close();
+    }
+
+    const malformedCreate = runTypescriptRuntimeCommand({
+      args: [
+        "loop-templates",
+        "--create-run",
+        "visual-template-task",
+        "--template",
+        "visual_diff_loop",
+        "extra",
+        "--json",
+        "--path",
+        dbPath,
+      ],
+      env: { AGENT_CONVEYOR_TS_RUNTIME: "1" },
+    });
+    assert.equal(malformedCreate.exitCode, 2);
+    assert.match(malformedCreate.stderr ?? "", /Unexpected argument: extra/);
+    const afterMalformedCreate = openDatabaseSync(dbPath);
+    try {
+      const runs = afterMalformedCreate.prepare("select count(*) as count from runs where task_id = ?")
+        .get("task-visual-template") as { count: number };
+      assert.equal(runs.count, 0);
+    } finally {
+      afterMalformedCreate.close();
+    }
+
+    const createTemplateRun = runTypescriptRuntimeCommand({
+      args: [
+        "loop-templates",
+        "--create-run",
+        "visual-template-task",
+        "--template",
+        "visual_diff_loop",
+        "--name",
+        "visual-policy",
+        "--max-iterations",
+        "4",
+        "--current-iteration",
+        "1",
+        "--seed-prompt-sha256",
+        "visual123",
+        "--json",
+        "--path",
+        dbPath,
+      ],
+      env: {},
+    });
+    assert.equal(createTemplateRun.exitCode, 0, createTemplateRun.stderr);
+    const createdTemplate = JSON.parse(createTemplateRun.stdout ?? "{}") as {
+      metadata: Record<string, unknown>;
+      purpose: string;
+      status: string;
+    };
+    assert.equal(createdTemplate.purpose, "ralph_loop");
+    assert.equal(createdTemplate.status, "finished");
+    assert.equal(createdTemplate.metadata.template, "visual_diff_loop");
+    assert.equal(createdTemplate.metadata.preset, "visual_diff_loop");
+    assert.equal(createdTemplate.metadata.current_iteration, 1);
+    assert.equal(createdTemplate.metadata.seed_prompt_sha256, "visual123");
+
+    const createPresetRun = runTypescriptRuntimeCommand({
+      args: [
+        "ralph-loop-presets",
+        "--create-run",
+        "visual-template-task",
+        "--preset",
+        "pr_ci_merge_loop",
+        "--name",
+        "preset-policy",
+        "--max-iterations",
+        "3",
+        "--json",
+        "--path",
+        dbPath,
+      ],
+      env: {},
+    });
+    assert.equal(createPresetRun.exitCode, 0, createPresetRun.stderr);
+    const createdPreset = JSON.parse(createPresetRun.stdout ?? "{}") as { metadata: Record<string, unknown> };
+    assert.equal(createdPreset.metadata.preset, "pr_ci_merge_loop");
+    assert.equal(createdPreset.metadata.current_iteration, 0);
+    assert.deepEqual(createdPreset.metadata.required_before_continue, ["pr_url", "ci_green", "merge", "adversarial_check"]);
+
+    const badPreset = runTypescriptRuntimeCommand({
+      args: ["ralph-loop-presets", "--show", "nope", "--json"],
+      env: {},
+    });
+    assert.equal(badPreset.exitCode, 2);
+    assert.match(badPreset.stderr ?? "", /Unknown Ralph loop preset: nope/);
+
+    const classify = runTypescriptRuntimeCommand({
+      args: ["loop-triggers", "--classify", "Run this as an adversarial gated Ralph loop.", "--json"],
+      env: {},
+    });
+    const classified = JSON.parse(classify.stdout ?? "{}") as {
+      matched: boolean;
+      matched_trigger: { name: string; operator_actions: string[]; required_before_continue: string[] };
+    };
+    assert.equal(classified.matched, true);
+    assert.equal(classified.matched_trigger.name, "loop-gate-trigger");
+    assert.deepEqual(classified.matched_trigger.required_before_continue, ["adversarial_check"]);
+    assert.ok(classified.matched_trigger.operator_actions.some((action) => action.includes("loop-templates --create-run")));
+
+    const negative = runTypescriptRuntimeCommand({
+      args: ["loop-triggers", "--classify", "Please be careful, run tests, and summarize risks.", "--json"],
+      env: {},
+    });
+    const negativePayload = JSON.parse(negative.stdout ?? "{}") as { guidance: string; matched: boolean };
+    assert.equal(negativePayload.matched, false);
+    assert.match(negativePayload.guidance, /No approved loop trigger matched/);
+
+    const badTriggerArg = runTypescriptRuntimeCommand({
+      args: ["loop-triggers", "--classify", "Run this as an adversarial gated Ralph loop.", "extra", "--json"],
+      env: { AGENT_CONVEYOR_TS_RUNTIME: "1" },
+    });
+    assert.equal(badTriggerArg.exitCode, 2);
+    assert.match(badTriggerArg.stderr ?? "", /Unexpected argument: extra/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("TypeScript runtime loop-status scopes commands inbox telemetry and failures to the requested run", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-loop-status."));
+  try {
+    const dbPath = join(root, "workerctl.db");
+    const database = openDatabaseSync(dbPath);
+    try {
+      initializeDatabaseSync(database);
+      createTaskSync(database, {
+        goal: "Inspect one loop run.",
+        name: "loop-status-task",
+        now: "2026-05-23T10:00:00Z",
+        taskId: "task-loop-status",
+      });
+      insertRalphLoopRun(database, {
+        currentIteration: 1,
+        maxIterations: 3,
+        requiredBeforeContinue: ["adversarial_check"],
+        runId: "run-loop-status-target",
+        runName: "target-loop",
+        taskId: "task-loop-status",
+      });
+      insertRalphLoopRun(database, {
+        currentIteration: 1,
+        maxIterations: 3,
+        requiredBeforeContinue: [],
+        runId: "run-loop-status-other",
+        runName: "other-loop",
+        taskId: "task-loop-status",
+      });
+      const targetCommand = createCommandSync(database, {
+        commandId: "command-target-loop",
+        commandType: "continue_iteration",
+        correlationId: "target-command",
+        payload: { loop_policy: { run_id: "run-loop-status-target" } },
+        taskId: "task-loop-status",
+      });
+      database.prepare("update commands set state = 'succeeded', result_json = ? where id = ?")
+        .run(JSON.stringify({ run_id: "run-loop-status-target" }), targetCommand);
+      const otherCommand = createCommandSync(database, {
+        commandId: "command-other-loop",
+        commandType: "continue_iteration",
+        correlationId: "other-command",
+        payload: { loop_policy: { run_id: "run-loop-status-other" } },
+        taskId: "task-loop-status",
+      });
+      database.prepare("update commands set state = 'failed', result_json = ?, error = 'other failed' where id = ?")
+        .run(JSON.stringify({ run_id: "run-loop-status-other" }), otherCommand);
+
+      database.prepare(`
+        insert into sessions(id, name, role, identity_token, cwd, registered_at, state)
+        values
+          ('session-worker-loop-status', 'loop-status-worker', 'worker', 'token-worker-loop-status', '/repo', '2026-05-23T10:00:00Z', 'active'),
+          ('session-manager-loop-status', 'loop-status-manager', 'manager', 'token-manager-loop-status', '/repo', '2026-05-23T10:00:00Z', 'active')
+      `).run();
+      database.prepare(`
+        insert into bindings(id, task_id, worker_session_id, manager_session_id, state, created_at)
+        values ('binding-loop-status', 'task-loop-status', 'session-worker-loop-status', 'session-manager-loop-status', 'active', '2026-05-23T10:00:00Z')
+      `).run();
+      for (let index = 0; index < 100; index += 1) {
+        const minute = String(Math.floor(index / 60) + 1).padStart(2, "0");
+        const second = String(index % 60).padStart(2, "0");
+        database.prepare(`
+          insert into routed_notifications(
+            task_id, binding_id, correlation_id, source_session_id, target_session_id,
+            signal_type, dedupe_key, created_at, state, payload_json, delivery_mode
+          )
+          values (?, ?, ?, ?, ?, 'continue_iteration', ?, ?, 'delivered', ?, 'pull_required')
+        `).run(
+          "task-loop-status",
+          "binding-loop-status",
+          `other-inbox-${index}`,
+          "session-manager-loop-status",
+          "session-worker-loop-status",
+          `other-inbox-${index}`,
+          `2026-05-23T10:${minute}:${second}Z`,
+          JSON.stringify({ ralph_loop: { run_id: "run-loop-status-other" } }),
+        );
+      }
+      database.prepare(`
+        insert into routed_notifications(
+          task_id, binding_id, correlation_id, source_session_id, target_session_id,
+          signal_type, dedupe_key, created_at, state, payload_json, delivery_mode
+        )
+        values (?, ?, ?, ?, ?, 'continue_iteration', ?, ?, 'delivered', ?, 'pull_required')
+      `).run(
+        "task-loop-status",
+        "binding-loop-status",
+        "target-inbox",
+        "session-manager-loop-status",
+        "session-worker-loop-status",
+        "target-inbox",
+        "2026-05-23T10:03:00Z",
+        JSON.stringify({ ralph_loop: { run_id: "run-loop-status-target" } }),
+      );
+      for (let index = 0; index < 1005; index += 1) {
+        const minute = String(Math.floor(index / 60)).padStart(2, "0");
+        const second = String(index % 60).padStart(2, "0");
+        database.prepare(`
+          insert into telemetry_events(
+            id, run_id, task_id, timestamp, actor, event_type, severity, summary, correlation_json, attributes_json
+          )
+          values (?, 'run-loop-status-other', 'task-loop-status', ?, 'manager', 'manager_cycle_succeeded', 'info', ?, '{}', '{}')
+        `).run(`telemetry-other-${index}`, `2026-05-23T09:${minute}:${second}Z`, `Other event ${index}.`);
+      }
+      database.prepare(`
+        insert into telemetry_events(
+          id, run_id, task_id, timestamp, actor, event_type, severity, summary, correlation_json, attributes_json
+        )
+        values ('telemetry-target-consumed', 'run-loop-status-target', 'task-loop-status', '2026-05-23T11:00:00Z', 'dispatch', 'dispatch_inbox_consumed', 'info', 'Target consumed.', '{}', '{}')
+      `).run();
+    } finally {
+      database.close();
+    }
+
+    const before = runTypescriptRuntimeCommand({
+      args: ["loop-status", "loop-status-task", "--run", "target-loop", "--path", dbPath, "--json"],
+      env: {},
+    });
+    assert.equal(before.exitCode, 0, before.stderr);
+    const beforePayload = JSON.parse(before.stdout ?? "{}") as {
+      commands: { states: Record<string, number> };
+      failures: { failed_commands: number };
+      inbox: { worker_unconsumed: number };
+      recommendation: string;
+      telemetry: { by_event_type: Record<string, number>; dispatch_inbox_consumed: number };
+    };
+    assert.deepEqual(beforePayload.commands.states, { succeeded: 1 });
+    assert.equal(beforePayload.failures.failed_commands, 0);
+    assert.equal(beforePayload.inbox.worker_unconsumed, 1);
+    assert.equal(beforePayload.telemetry.dispatch_inbox_consumed, 1);
+    assert.deepEqual(beforePayload.telemetry.by_event_type, { dispatch_inbox_consumed: 1 });
+    assert.equal(beforePayload.recommendation, "worker_should_consume_inbox");
+
+    const badStatusOption = runTypescriptRuntimeCommand({
+      args: ["loop-status", "loop-status-task", "--run", "target-loop", "--name", "ignored", "--path", dbPath, "--json"],
+      env: { AGENT_CONVEYOR_TS_RUNTIME: "1" },
+    });
+    assert.equal(badStatusOption.exitCode, 2);
+    assert.match(badStatusOption.stderr ?? "", /Unsupported TypeScript runtime option for loop-status/);
+
+    const afterConsumeDb = openDatabaseSync(dbPath);
+    try {
+      afterConsumeDb.prepare("update routed_notifications set consumed_at = '2026-05-23T11:01:00Z' where correlation_id = 'target-inbox'").run();
+    } finally {
+      afterConsumeDb.close();
+    }
+    const afterConsume = runTypescriptRuntimeCommand({
+      args: ["loop-status", "loop-status-task", "--run", "run-loop-status-target", "--path", dbPath, "--json"],
+      env: {},
+    });
+    const afterConsumePayload = JSON.parse(afterConsume.stdout ?? "{}") as {
+      inbox: { worker_unconsumed: number };
+      recommendation: string;
+    };
+    assert.equal(afterConsumePayload.inbox.worker_unconsumed, 0);
+    assert.equal(afterConsumePayload.recommendation, "ready_for_manager_review");
+
+    const openCriteriaDb = openDatabaseSync(dbPath);
+    try {
+      openCriteriaDb.prepare(`
+        insert into acceptance_criteria(
+          task_id, criterion, status, source, proof, rationale, evidence_json, created_at, updated_at
+        )
+        values (
+          'task-loop-status',
+          'Target run accepted criterion still open.',
+          'accepted',
+          'user_requested',
+          null,
+          null,
+          ?,
+          '2026-05-23T11:01:10Z',
+          '2026-05-23T11:01:10Z'
+        )
+      `).run(JSON.stringify({ evidence_type: "manual_review", ralph_loop_run_id: "run-loop-status-target" }));
+      openCriteriaDb.prepare(`
+        insert into acceptance_criteria(
+          task_id, criterion, status, source, proof, rationale, evidence_json, created_at, updated_at
+        )
+        values (
+          'task-loop-status',
+          'Other run accepted criterion still open.',
+          'accepted',
+          'user_requested',
+          null,
+          null,
+          ?,
+          '2026-05-23T11:01:11Z',
+          '2026-05-23T11:01:11Z'
+        )
+      `).run(JSON.stringify({ evidence_type: "manual_review", ralph_loop_run_id: "run-loop-status-other" }));
+      openCriteriaDb.prepare(`
+        insert into telemetry_events(
+          id, run_id, task_id, timestamp, actor, event_type, severity, summary, correlation_json, attributes_json
+        )
+        values (
+          'telemetry-target-ingest-warning',
+          'run-loop-status-target',
+          'task-loop-status',
+          '2026-05-23T11:01:12Z',
+          'workerctl',
+          'codex_ingest_failed',
+          'warning',
+          'Target ingest warning.',
+          '{}',
+          ?
+        )
+      `).run(JSON.stringify({ error: "bad rollout chunk" }));
+      openCriteriaDb.prepare(`
+        insert into telemetry_events(
+          id, run_id, task_id, timestamp, actor, event_type, severity, summary, correlation_json, attributes_json
+        )
+        values (
+          'telemetry-other-ingest-warning',
+          'run-loop-status-other',
+          'task-loop-status',
+          '2026-05-23T11:01:13Z',
+          'workerctl',
+          'codex_ingest_failed',
+          'warning',
+          'Other ingest warning.',
+          '{}',
+          ?
+        )
+      `).run(JSON.stringify({ error: "other bad rollout chunk" }));
+    } finally {
+      openCriteriaDb.close();
+    }
+    const afterOpenCriteria = runTypescriptRuntimeCommand({
+      args: ["loop-status", "loop-status-task", "--run", "run-loop-status-target", "--path", dbPath, "--json"],
+      env: {},
+    });
+    const openCriteriaPayload = JSON.parse(afterOpenCriteria.stdout ?? "{}") as {
+      failures: { alerts: number; ingest_errors: number; open_accepted_criteria: number };
+      recommendation: string;
+    };
+    assert.equal(openCriteriaPayload.failures.ingest_errors, 1);
+    assert.equal(openCriteriaPayload.failures.open_accepted_criteria, 1);
+    assert.equal(openCriteriaPayload.failures.alerts, 2);
+    assert.equal(openCriteriaPayload.recommendation, "inspect_failures");
+
+    const failureDb = openDatabaseSync(dbPath);
+    try {
+      failureDb.prepare(`
+        insert into manager_cycles(id, task_id, started_at, completed_at, state, status_json, health_json, error)
+        values (101, 'task-loop-status', '2026-05-23T11:02:00Z', '2026-05-23T11:02:05Z', 'failed', ?, '{}', 'target capture failed')
+      `).run(JSON.stringify({ kind: "session_cycle", pane_signal: { captured: false, reason: "target capture failed" } }));
+      failureDb.prepare(`
+        insert into manager_cycle_spans(
+          manager_cycle_id, task_id, run_id, phase, started_at, completed_at,
+          duration_ms, state, attributes_json, error_type
+        )
+        values (101, 'task-loop-status', 'run-loop-status-target', 'capture_pane_signal', '2026-05-23T11:02:00Z', '2026-05-23T11:02:05Z', 5000.0, 'succeeded', '{}', null)
+      `).run();
+    } finally {
+      failureDb.close();
+    }
+    const afterFailure = runTypescriptRuntimeCommand({
+      args: ["loop-status", "loop-status-task", "--run", "run-loop-status-target", "--path", dbPath, "--json"],
+      env: {},
+    });
+    const failurePayload = JSON.parse(afterFailure.stdout ?? "{}") as {
+      failures: { failed_cycles: number; pane_capture_failures: number };
+      recommendation: string;
+    };
+    assert.equal(failurePayload.failures.failed_cycles, 1);
+    assert.equal(failurePayload.failures.pane_capture_failures, 1);
+    assert.equal(failurePayload.recommendation, "inspect_failures");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("TypeScript runtime handles bind and unbind by default", () => {
   const root = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-bind."));
   try {

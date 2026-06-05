@@ -218,6 +218,18 @@ export function runTypescriptRuntimeCommand(options: TypescriptRuntimeOptions): 
     if (parsed.command === "loop-evidence") {
       return runLoopEvidenceCommand(parsed, options);
     }
+    if (parsed.command === "loop-templates") {
+      return runLoopTemplatesCommand(parsed, options);
+    }
+    if (parsed.command === "ralph-loop-presets") {
+      return runRalphLoopPresetsCommand(parsed, options);
+    }
+    if (parsed.command === "loop-triggers") {
+      return runLoopTriggersCommand(parsed, options);
+    }
+    if (parsed.command === "loop-status") {
+      return runLoopStatusCommand(parsed, options);
+    }
     if (parsed.command === "tasks") {
       return runTasksCommand(parsed, options);
     }
@@ -358,11 +370,14 @@ interface ParsedRuntimeArgs {
     busyWaitSeconds: number;
     candidate: string | null;
     check: string | null;
+    classifyPrompt: string | null;
     codexSession: string | null;
     create: string | null;
+    createRun: string | null;
     criterion: string | null;
     currentTask: string | null;
     currentIteration: number;
+    currentIterationProvided: boolean;
     cwd: string | null;
     deferCriterion: number | null;
     diffOutput: string | null;
@@ -387,6 +402,7 @@ interface ParsedRuntimeArgs {
     output: string | null;
     path: string | null;
     pid: number | null;
+    preset: string | null;
     role: ReplayRole;
     roleProvided: boolean;
     refresh: boolean;
@@ -396,6 +412,7 @@ interface ParsedRuntimeArgs {
     result: string | null;
     sessionRole: "manager" | "worker" | null;
     sessionState: "active" | "all" | "gone" | null;
+    show: string | null;
     showRun: string | null;
     satisfyCriterion: number | null;
     statusAgeSeconds: number;
@@ -498,6 +515,8 @@ interface ParsedRuntimeArgs {
   task: string | null;
 }
 
+type RuntimeFlagKey = keyof ParsedRuntimeArgs["flags"];
+
 function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): ParsedRuntimeArgs {
   const flags: ParsedRuntimeArgs["flags"] = {
     format: "timeline",
@@ -515,11 +534,14 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
     busyWaitSeconds: DEFAULT_BUSY_WAIT_SECONDS,
     candidate: null,
     check: null,
+    classifyPrompt: null,
     codexSession: null,
     create: null,
+    createRun: null,
     criterion: null,
     currentTask: null,
     currentIteration: 1,
+    currentIterationProvided: false,
     cwd: null,
     deferCriterion: null,
     diffOutput: null,
@@ -544,6 +566,7 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
     output: null,
     path: null,
     pid: null,
+    preset: null,
     role: "all",
     roleProvided: false,
     refresh: true,
@@ -553,6 +576,7 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
     result: null,
     sessionRole: null,
     sessionState: null,
+    show: null,
     showRun: null,
     satisfyCriterion: null,
     statusAgeSeconds: DEFAULT_BUSY_WAIT_SECONDS,
@@ -689,7 +713,13 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       }
       flags.add = true;
     } else if (arg === "--list") {
-      if (command !== "criteria" && command !== "runs") {
+      if (
+        command !== "criteria"
+        && command !== "runs"
+        && command !== "loop-templates"
+        && command !== "ralph-loop-presets"
+        && command !== "loop-triggers"
+      ) {
         return { command, enabled, error: "Unsupported TypeScript runtime option: --list", explicit, flags, passthroughArgs, task };
       }
       flags.list = true;
@@ -873,14 +903,28 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       flags.create = value.value;
       index += 1;
     } else if (arg === "--show") {
-      if (command !== "runs") {
+      if (command !== "runs" && command !== "loop-templates" && command !== "ralph-loop-presets") {
         return { command, enabled, error: "Unsupported TypeScript runtime option: --show", explicit, flags, task };
       }
       const value = valueAfter(queue, index, arg);
       if (value.error) {
         return { command, enabled, error: value.error, explicit, flags, task };
       }
-      flags.showRun = value.value;
+      if (command === "runs") {
+        flags.showRun = value.value;
+      } else {
+        flags.show = value.value;
+      }
+      index += 1;
+    } else if (arg === "--create-run") {
+      if (command !== "loop-templates" && command !== "ralph-loop-presets") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --create-run", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.createRun = value.value;
       index += 1;
     } else if (arg === "--finish") {
       if (command !== "runs") {
@@ -1097,6 +1141,16 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
         return { command, enabled, error: value.error, explicit, flags, task };
       }
       flags.text = value.value;
+      index += 1;
+    } else if (arg === "--classify") {
+      if (command !== "loop-triggers") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --classify", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.classifyPrompt = value.value;
       index += 1;
     } else if (arg === "--from-text") {
       if (command !== "criteria-plan") {
@@ -1394,7 +1448,7 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       flags.manager = value.value;
       index += 1;
     } else if (arg === "--template") {
-      if (command !== "create-disposable-binding") {
+      if (command !== "create-disposable-binding" && command !== "loop-templates") {
         return { command, enabled, error: "Unsupported TypeScript runtime option: --template", explicit, flags, task };
       }
       const value = valueAfter(queue, index, arg);
@@ -1402,6 +1456,16 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
         return { command, enabled, error: value.error, explicit, flags, task };
       }
       flags.template = value.value;
+      index += 1;
+    } else if (arg === "--preset") {
+      if (command !== "ralph-loop-presets") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --preset", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.preset = value.value;
       index += 1;
     } else if (arg === "--run-name") {
       if (command !== "create-disposable-binding") {
@@ -1414,7 +1478,7 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       flags.runName = value.value;
       index += 1;
     } else if (arg === "--seed-prompt-sha256") {
-      if (command !== "create-disposable-binding") {
+      if (command !== "create-disposable-binding" && command !== "loop-templates" && command !== "ralph-loop-presets") {
         return { command, enabled, error: "Unsupported TypeScript runtime option: --seed-prompt-sha256", explicit, flags, task };
       }
       const value = valueAfter(queue, index, arg);
@@ -1662,6 +1726,16 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       }
       flags.loopRun = value.value;
       index += 1;
+    } else if (arg === "--run") {
+      if (command !== "loop-status") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --run", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.run = value.value;
+      index += 1;
     } else if (arg === "--requested-iteration") {
       if (command !== "enqueue-continue-iteration") {
         return { command, enabled, error: "Unsupported TypeScript runtime option: --requested-iteration", explicit, flags, task };
@@ -1840,7 +1914,7 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       flags.leaseSeconds = value;
       index += 1;
     } else if (arg === "--max-iterations") {
-      if (command !== "create-disposable-binding") {
+      if (command !== "create-disposable-binding" && command !== "loop-templates" && command !== "ralph-loop-presets") {
         return { command, enabled, error: "Unsupported TypeScript runtime option: --max-iterations", explicit, flags, task };
       }
       const parsedValue = valueAfter(queue, index, arg);
@@ -1854,7 +1928,7 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       flags.maxIterations = value;
       index += 1;
     } else if (arg === "--current-iteration") {
-      if (command !== "create-disposable-binding") {
+      if (command !== "create-disposable-binding" && command !== "loop-templates" && command !== "ralph-loop-presets") {
         return { command, enabled, error: "Unsupported TypeScript runtime option: --current-iteration", explicit, flags, task };
       }
       const parsedValue = valueAfter(queue, index, arg);
@@ -1866,6 +1940,7 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
         return { command, enabled, error: "--current-iteration must be an integer.", explicit, flags, task };
       }
       flags.currentIteration = value;
+      flags.currentIterationProvided = true;
       index += 1;
     } else if (arg === "--timeout-seconds") {
       if (command !== "start-worker" && command !== "start-manager" && command !== "pair") {
@@ -2299,6 +2374,213 @@ function runLoopEvidenceCommand(
       }));
     }
     return unsupportedRuntimeResult(parsed, `Unsupported loop-evidence action: ${action}`);
+  } finally {
+    database.close();
+  }
+}
+
+function runLoopTemplatesCommand(
+  parsed: ParsedRuntimeArgs,
+  options: { cwd?: string; env?: NodeJS.ProcessEnv },
+): TypescriptRuntimeResult {
+  const unsupported = unsupportedMigratedProofCliOptions(parsed);
+  if (unsupported) {
+    return unsupportedRuntimeResult(parsed, unsupported);
+  }
+  const unsupportedOptions = unsupportedLoopCommandOptions(parsed, {
+    allowedFlags: new Set<RuntimeFlagKey>([
+      "createRun",
+      "currentIteration",
+      "currentIterationProvided",
+      "json",
+      "list",
+      "maxIterations",
+      "names",
+      "path",
+      "seedPromptSha256",
+      "show",
+      "template",
+    ]),
+    commandName: "loop-templates",
+  });
+  if (unsupportedOptions) {
+    return unsupportedRuntimeResult(parsed, unsupportedOptions);
+  }
+  const rejected = rejectLoopCreateOnlyOptions(parsed, { selector: parsed.flags.template, selectorFlag: "--template" });
+  if (rejected) {
+    return rejected;
+  }
+  const actionCount = [parsed.flags.list, parsed.flags.show !== null, parsed.flags.createRun !== null].filter(Boolean).length;
+  if (actionCount !== 1) {
+    return errorResult("Choose one of --list, --show, or --create-run");
+  }
+  if (parsed.flags.list) {
+    return jsonResult({ templates: listLoopTemplates() });
+  }
+  if (parsed.flags.show !== null) {
+    return jsonResult(loopTemplateSummary(parsed.flags.show));
+  }
+  if (!parsed.flags.template) {
+    return errorResult("--create-run requires --template");
+  }
+  const database = openRuntimeDatabase(parsed, options);
+  try {
+    return jsonResult(createLoopPolicyRunSync(database, {
+      metadata: loopTemplateMetadata(parsed.flags.template, {
+        currentIteration: parsed.flags.currentIterationProvided ? parsed.flags.currentIteration : 0,
+        maxIterations: parsed.flags.maxIterations,
+        seedPromptSha256: parsed.flags.seedPromptSha256,
+      }),
+      name: lastParsedName(parsed),
+      taskRef: parsed.flags.createRun ?? "",
+    }));
+  } finally {
+    database.close();
+  }
+}
+
+function runRalphLoopPresetsCommand(
+  parsed: ParsedRuntimeArgs,
+  options: { cwd?: string; env?: NodeJS.ProcessEnv },
+): TypescriptRuntimeResult {
+  const unsupported = unsupportedMigratedProofCliOptions(parsed);
+  if (unsupported) {
+    return unsupportedRuntimeResult(parsed, unsupported);
+  }
+  const unsupportedOptions = unsupportedLoopCommandOptions(parsed, {
+    allowedFlags: new Set<RuntimeFlagKey>([
+      "createRun",
+      "currentIteration",
+      "currentIterationProvided",
+      "json",
+      "list",
+      "maxIterations",
+      "names",
+      "path",
+      "preset",
+      "seedPromptSha256",
+      "show",
+    ]),
+    commandName: "ralph-loop-presets",
+  });
+  if (unsupportedOptions) {
+    return unsupportedRuntimeResult(parsed, unsupportedOptions);
+  }
+  const rejected = rejectLoopCreateOnlyOptions(parsed, { selector: parsed.flags.preset, selectorFlag: "--preset" });
+  if (rejected) {
+    return rejected;
+  }
+  const actionCount = [parsed.flags.list, parsed.flags.show !== null, parsed.flags.createRun !== null].filter(Boolean).length;
+  if (actionCount !== 1) {
+    return errorResult("Choose one of --list, --show, or --create-run");
+  }
+  if (parsed.flags.list) {
+    return jsonResult({ presets: listLoopTemplates() });
+  }
+  if (parsed.flags.show !== null) {
+    return jsonResult(ralphLoopPresetSummary(parsed.flags.show));
+  }
+  if (!parsed.flags.preset) {
+    return errorResult("--create-run requires --preset");
+  }
+  const database = openRuntimeDatabase(parsed, options);
+  try {
+    return jsonResult(createLoopPolicyRunSync(database, {
+      metadata: ralphLoopPresetMetadata(parsed.flags.preset, {
+        currentIteration: parsed.flags.currentIterationProvided ? parsed.flags.currentIteration : 0,
+        maxIterations: parsed.flags.maxIterations,
+        seedPromptSha256: parsed.flags.seedPromptSha256,
+      }),
+      name: lastParsedName(parsed),
+      taskRef: parsed.flags.createRun ?? "",
+    }));
+  } finally {
+    database.close();
+  }
+}
+
+function runLoopTriggersCommand(
+  parsed: ParsedRuntimeArgs,
+  _options: { cwd?: string; env?: NodeJS.ProcessEnv },
+): TypescriptRuntimeResult {
+  const unsupported = unsupportedMigratedProofCliOptions(parsed);
+  if (unsupported) {
+    return unsupportedRuntimeResult(parsed, unsupported);
+  }
+  const unsupportedOptions = unsupportedLoopCommandOptions(parsed, {
+    allowedFlags: new Set<RuntimeFlagKey>(["classifyPrompt", "json", "list"]),
+    commandName: "loop-triggers",
+  });
+  if (unsupportedOptions) {
+    return unsupportedRuntimeResult(parsed, unsupportedOptions);
+  }
+  const actionCount = [parsed.flags.list, parsed.flags.classifyPrompt !== null].filter(Boolean).length;
+  if (actionCount > 1) {
+    return errorResult("Choose only one of --list or --classify");
+  }
+  if (parsed.flags.classifyPrompt !== null) {
+    const result = classifyLoopTrigger(parsed.flags.classifyPrompt);
+    if (parsed.flags.json) {
+      return jsonResult(result);
+    }
+    if (result.matched && result.matched_trigger) {
+      const trigger = result.matched_trigger;
+      const actions = trigger.operator_actions.map((action) => `- ${action}`).join("\n");
+      return {
+        exitCode: 0,
+        handled: true,
+        stdout: `Matched ${trigger.name}: ${trigger.canonical_phrase}\nIntent: ${trigger.intent}\nOperator actions:\n${actions}\n`,
+      };
+    }
+    return { exitCode: 0, handled: true, stdout: `${result.guidance}\n` };
+  }
+  const payload = { triggers: listLoopTriggers() };
+  if (parsed.flags.json) {
+    return jsonResult(payload);
+  }
+  return {
+    exitCode: 0,
+    handled: true,
+    stdout: `Controlled loop triggers:\n${payload.triggers.map((trigger) => `- ${trigger.name}: ${trigger.canonical_phrase}`).join("\n")}\n`,
+  };
+}
+
+function runLoopStatusCommand(
+  parsed: ParsedRuntimeArgs,
+  options: { cwd?: string; env?: NodeJS.ProcessEnv },
+): TypescriptRuntimeResult {
+  const unsupported = unsupportedMigratedProofCliOptions(parsed);
+  if (unsupported) {
+    return unsupportedRuntimeResult(parsed, unsupported);
+  }
+  const unsupportedOptions = unsupportedLoopCommandOptions(parsed, {
+    allowedFlags: new Set<RuntimeFlagKey>(["json", "path", "run"]),
+    allowTask: true,
+    commandName: "loop-status",
+  });
+  if (unsupportedOptions) {
+    return unsupportedRuntimeResult(parsed, unsupportedOptions);
+  }
+  const taskRef = requireTask(parsed);
+  if (!parsed.flags.run) {
+    return errorResult("loop-status requires --run");
+  }
+  const database = openRuntimeDatabase(parsed, options);
+  try {
+    const task = taskRowForLifecycle(database, taskRef);
+    if (task === null) {
+      throw new Error(`Unknown task: ${taskRef}`);
+    }
+    const run = ralphLoopRunForTaskSync(database, { runRef: parsed.flags.run, task });
+    const result = loopStatusSummarySync(database, { run, task });
+    if (parsed.flags.json) {
+      return jsonResult(result);
+    }
+    return {
+      exitCode: 0,
+      handled: true,
+      stdout: renderLoopStatusText(result),
+    };
   } finally {
     database.close();
   }
@@ -6622,6 +6904,10 @@ function isDefaultRuntimeCommand(command: string | null): boolean {
     || command === "criteria-plan"
     || command === "runs"
     || command === "loop-evidence"
+    || command === "loop-status"
+    || command === "loop-templates"
+    || command === "loop-triggers"
+    || command === "ralph-loop-presets"
     || command === "start"
     || command === "create"
     || command === "start-test"
@@ -6729,6 +7015,39 @@ function unsupportedMigratedProofCliOptions(parsed: ParsedRuntimeArgs): string |
     return `Unsupported TypeScript runtime option for ${parsed.command}.`;
   }
   return null;
+}
+
+function unsupportedLoopCommandOptions(
+  parsed: ParsedRuntimeArgs,
+  options: {
+    allowedFlags: Set<RuntimeFlagKey>;
+    allowTask?: boolean;
+    commandName: string;
+  },
+): string | null {
+  if (!options.allowTask && parsed.task !== null) {
+    return `Unexpected argument: ${parsed.task}`;
+  }
+  const defaultFlags = parseRuntimeArgs(parsed.command ? [parsed.command] : [], {}).flags;
+  for (const key of Object.keys(parsed.flags) as RuntimeFlagKey[]) {
+    if (options.allowedFlags.has(key)) {
+      continue;
+    }
+    if (!runtimeFlagValuesEqual(parsed.flags[key], defaultFlags[key])) {
+      return `Unsupported TypeScript runtime option for ${options.commandName}.`;
+    }
+  }
+  return null;
+}
+
+function runtimeFlagValuesEqual(left: unknown, right: unknown): boolean {
+  if (Array.isArray(left) || Array.isArray(right)) {
+    return Array.isArray(left)
+      && Array.isArray(right)
+      && left.length === right.length
+      && left.every((value, index) => Object.is(value, right[index]));
+  }
+  return Object.is(left, right);
 }
 
 function unsupportedCommandsOptions(parsed: ParsedRuntimeArgs): string | null {
@@ -8413,6 +8732,7 @@ function createRalphLoopRunSync(
 interface LoopTemplateDefinition {
   artifactRequirements: Record<string, Record<string, unknown>>;
   cleanupPolicy: string;
+  description: string;
   maxIterations: number;
   name: string;
   recommendedTools: string[];
@@ -8445,6 +8765,7 @@ const LOOP_TEMPLATES: Record<string, LoopTemplateDefinition> = {
   build_then_clear: {
     artifactRequirements: {},
     cleanupPolicy: "clear",
+    description: "Require build evidence before the manager can route another iteration, then clear worker context between iterations.",
     maxIterations: 2,
     name: "build_then_clear",
     recommendedTools: [],
@@ -8455,6 +8776,7 @@ const LOOP_TEMPLATES: Record<string, LoopTemplateDefinition> = {
   compact_then_continue: {
     artifactRequirements: {},
     cleanupPolicy: "compact",
+    description: "Require worker completion and cleanup evidence before compacting context and continuing.",
     maxIterations: 4,
     name: "compact_then_continue",
     recommendedTools: [],
@@ -8465,6 +8787,7 @@ const LOOP_TEMPLATES: Record<string, LoopTemplateDefinition> = {
   pr_ci_merge_loop: {
     artifactRequirements: { adversarial_check: ADVERSARIAL_CHECK_REQUIREMENT },
     cleanupPolicy: "clear",
+    description: "Require PR URL, green CI, and merge evidence before continuing a manager-led PR loop.",
     maxIterations: 2,
     name: "pr_ci_merge_loop",
     recommendedTools: ["gh", "verification.run_tests"],
@@ -8475,6 +8798,7 @@ const LOOP_TEMPLATES: Record<string, LoopTemplateDefinition> = {
   test_coverage_loop: {
     artifactRequirements: { adversarial_check: ADVERSARIAL_CHECK_REQUIREMENT },
     cleanupPolicy: "clear",
+    description: "Repeat a test-coverage analysis/fix loop until coverage evidence is recorded or max iterations is reached.",
     maxIterations: 3,
     name: "test_coverage_loop",
     recommendedTools: ["coverage", "verification.run_tests"],
@@ -8507,6 +8831,7 @@ const LOOP_TEMPLATES: Record<string, LoopTemplateDefinition> = {
       },
     },
     cleanupPolicy: "compact",
+    description: "Repeat screenshot-to-HTML or UX visual-diff passes until screenshot artifacts and an acceptable diff report are recorded.",
     maxIterations: 4,
     name: "visual_diff_loop",
     recommendedTools: ["browser", "playwright", "pixelmatch"],
@@ -8528,6 +8853,213 @@ function loopTemplate(name: string): LoopTemplateDefinition {
     throw new Error(`Unknown loop template: ${name}; expected one of: ${Object.keys(LOOP_TEMPLATES).sort().join(", ")}`);
   }
   return template;
+}
+
+function loopTemplateSummary(name: string): Record<string, unknown> {
+  const template = loopTemplate(name);
+  return loopTemplateSummaryFromDefinition(template);
+}
+
+function loopTemplateSummaryFromDefinition(template: LoopTemplateDefinition): Record<string, unknown> {
+  return {
+    artifact_requirements: structuredClone(template.artifactRequirements),
+    cleanup_policy: template.cleanupPolicy,
+    description: template.description,
+    max_iterations: template.maxIterations,
+    name: template.name,
+    recommended_tools: [...template.recommendedTools],
+    required_before_continue: [...template.requiredBeforeContinue],
+    stop_conditions: [...template.stopConditions],
+    tags: [...template.tags],
+  };
+}
+
+function listLoopTemplates(): Array<Record<string, unknown>> {
+  return Object.keys(LOOP_TEMPLATES).sort().map((name) => loopTemplateSummary(name));
+}
+
+function loopTemplateMetadata(
+  name: string,
+  options: { currentIteration: number; maxIterations: number | null; seedPromptSha256: string | null },
+): Record<string, unknown> {
+  return templateDisposablePolicyMetadata({
+    currentIteration: options.currentIteration,
+    maxIterations: options.maxIterations,
+    requiredBeforeContinue: [],
+    seedPromptSha256: options.seedPromptSha256,
+    templateName: name,
+  });
+}
+
+function ralphLoopPreset(name: string): LoopTemplateDefinition {
+  const template = LOOP_TEMPLATES[name];
+  if (!template) {
+    throw new Error(`Unknown Ralph loop preset: ${name}; expected one of: ${Object.keys(LOOP_TEMPLATES).sort().join(", ")}`);
+  }
+  return template;
+}
+
+function ralphLoopPresetSummary(name: string): Record<string, unknown> {
+  return loopTemplateSummaryFromDefinition(ralphLoopPreset(name));
+}
+
+function ralphLoopPresetMetadata(
+  name: string,
+  options: { currentIteration: number; maxIterations: number | null; seedPromptSha256: string | null },
+): Record<string, unknown> {
+  ralphLoopPreset(name);
+  return loopTemplateMetadata(name, options);
+}
+
+interface LoopTriggerDefinition {
+  acceptance: string;
+  canonical_phrase: string;
+  intent: string;
+  name: string;
+  negative_controls: string[];
+  operator_actions: string[];
+  pattern: RegExp;
+  required_before_continue: string[];
+}
+
+interface LoopTriggerSummary {
+  acceptance: string;
+  canonical_phrase: string;
+  intent: string;
+  name: string;
+  negative_controls: string[];
+  operator_actions: string[];
+  required_before_continue: string[];
+}
+
+const LOOP_TRIGGERS: LoopTriggerDefinition[] = [
+  {
+    acceptance: "Create or reuse a loop policy whose required_before_continue includes adversarial_check.",
+    canonical_phrase: "Run this as an adversarially gated Ralph loop.",
+    intent: "create_loop_policy",
+    name: "loop-gate-trigger",
+    negative_controls: [
+      "Run tests before declaring this done.",
+      "Be adversarial in your review, but do not create a loop.",
+    ],
+    operator_actions: [
+      "loop-triggers --classify '<prompt>' --json",
+      "loop-templates --create-run <task> --template <template> --current-iteration 1",
+      "enqueue-continue-iteration <task> --loop-run <run> --requested-iteration 2",
+    ],
+    pattern: /\brun this as an adversarial(?:ly)? gated (?:ralph )?loop\b/,
+    required_before_continue: ["adversarial_check"],
+  },
+  {
+    acceptance: "Dispatch blocks continue_iteration before worker delivery until structured adversarial_check proof exists.",
+    canonical_phrase: "Do not send the worker another iteration until adversarial proof exists.",
+    intent: "gate_next_iteration",
+    name: "iteration-gate-trigger",
+    negative_controls: [
+      "Ask the worker for another iteration.",
+      "Wait for tests before sending a note.",
+    ],
+    operator_actions: [
+      "enqueue-continue-iteration <task> --loop-run <run> --requested-iteration <next>",
+      "dispatch --once --type continue_iteration",
+      "loop-evidence adversarial-check <task> --loop-run <run> --iteration <previous>",
+    ],
+    pattern: /\b(?:do not send the worker another iteration until adversarial proof exists|require adversarial proof before (?:the worker gets another iteration|another worker iteration))\b/,
+    required_before_continue: ["adversarial_check"],
+  },
+  {
+    acceptance: "finish-task uses --require-adversarial-proof and fails closed before structured proof exists.",
+    canonical_phrase: "Do not mark this done until you have tried to disprove it.",
+    intent: "require_finish_adversarial_proof",
+    name: "finish-gate-trigger",
+    negative_controls: [
+      "Summarize risks before finishing.",
+      "Do not mark this done until tests pass.",
+    ],
+    operator_actions: [
+      "finish-task <task> --require-adversarial-proof",
+      "criteria <task> --satisfy <criterion> --evidence-json <structured adversarial_check>",
+    ],
+    pattern: /\b(?:do not mark this done until you have tried to disprove it|do not finish until you have tried to disprove it|do not let this finish until the manager has tried to disprove it)\b/,
+    required_before_continue: [],
+  },
+  {
+    acceptance: "Worker response must contain failure_mode, check, and result, then be recorded as worker_proposed adversarial_check evidence.",
+    canonical_phrase: "Ask the worker to identify the strongest realistic failure mode and prove it is handled.",
+    intent: "request_worker_adversarial_proof",
+    name: "worker-directed-trigger",
+    negative_controls: [
+      "Ask the worker to summarize what changed.",
+      "Ask the worker to run the tests.",
+    ],
+    operator_actions: [
+      "session-nudge <worker> 'Reply with failure_mode, check, result'",
+      "loop-evidence adversarial-check <task> --source worker_proposed",
+    ],
+    pattern: /\b(?:ask the worker to identify the strongest realistic failure mode and prove it is handled|before continuing, record the strongest realistic failure mode, the check, and the result)\b/,
+    required_before_continue: [],
+  },
+  {
+    acceptance: "Manager records manager_inferred criteria that require negative Dispatch/evidence checks, not only happy-path tests.",
+    canonical_phrase: "Each loop must include adversarial acceptance criteria from manager to worker.",
+    intent: "create_adversarial_acceptance_criteria",
+    name: "acceptance-criteria-trigger",
+    negative_controls: [
+      "Each loop should have acceptance criteria.",
+      "Ask the worker for a checklist.",
+    ],
+    operator_actions: [
+      "criteria <task> --add --source manager_inferred --status accepted",
+      "audit <task> && replay <task> && commands --task <task> --attempts",
+    ],
+    pattern: /\beach loop must include adversarial acceptance criteria from manager to worker\b/,
+    required_before_continue: [],
+  },
+];
+
+function loopTriggerSummary(trigger: LoopTriggerDefinition): LoopTriggerSummary {
+  return {
+    acceptance: trigger.acceptance,
+    canonical_phrase: trigger.canonical_phrase,
+    intent: trigger.intent,
+    name: trigger.name,
+    negative_controls: [...trigger.negative_controls],
+    operator_actions: [...trigger.operator_actions],
+    required_before_continue: [...trigger.required_before_continue],
+  };
+}
+
+function listLoopTriggers(): LoopTriggerSummary[] {
+  return LOOP_TRIGGERS.map(loopTriggerSummary);
+}
+
+function normalizeLoopTriggerPrompt(prompt: string): string {
+  return prompt.trim().toLowerCase().split(/\s+/).filter(Boolean).join(" ");
+}
+
+function classifyLoopTrigger(prompt: string): {
+  guidance: string;
+  matched: boolean;
+  matched_trigger: LoopTriggerSummary | null;
+  prompt: string;
+} {
+  const normalized = normalizeLoopTriggerPrompt(prompt);
+  for (const trigger of LOOP_TRIGGERS) {
+    if (trigger.pattern.test(normalized)) {
+      return {
+        guidance: "Approved loop trigger matched. Follow the operator_actions exactly and preserve the correlation receipt.",
+        matched: true,
+        matched_trigger: loopTriggerSummary(trigger),
+        prompt,
+      };
+    }
+  }
+  return {
+    guidance: "No approved loop trigger matched; treat this as ordinary manager guidance and do not create loop policy or continuation gates automatically.",
+    matched: false,
+    matched_trigger: null,
+    prompt,
+  };
 }
 
 function asInteger(value: unknown, field: string): number {
@@ -8625,6 +9157,362 @@ function runRowSync(database: ReturnType<typeof openRuntimeDatabase>, run: strin
     status: row.status,
     task_id: row.task_id,
   };
+}
+
+function rejectLoopCreateOnlyOptions(
+  parsed: ParsedRuntimeArgs,
+  options: { selector: string | null; selectorFlag: string },
+): TypescriptRuntimeResult | null {
+  if (parsed.flags.createRun !== null) {
+    return null;
+  }
+  const createOnlyOptions: Array<[boolean, string]> = [
+    [options.selector !== null, options.selectorFlag],
+    [parsed.flags.names.length > 0, "--name"],
+    [parsed.flags.maxIterations !== null, "--max-iterations"],
+    [parsed.flags.currentIterationProvided, "--current-iteration"],
+    [parsed.flags.seedPromptSha256 !== null, "--seed-prompt-sha256"],
+    [parsed.flags.path !== null, "--path"],
+  ];
+  const rejected = createOnlyOptions.find(([present]) => present);
+  return rejected ? errorResult(`${rejected[1]} is only valid with --create-run`) : null;
+}
+
+function lastParsedName(parsed: ParsedRuntimeArgs): string | null {
+  if (parsed.flags.names.length === 0) {
+    return null;
+  }
+  return parsed.flags.names[parsed.flags.names.length - 1] ?? null;
+}
+
+function createLoopPolicyRunSync(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  options: { metadata: Record<string, unknown>; name: string | null; taskRef: string },
+): RalphLoopRunRow {
+  const task = taskRowForLifecycle(database, options.taskRef);
+  if (task === null) {
+    throw new Error(`Unknown task: ${options.taskRef}`);
+  }
+  return createRalphLoopRunSync(database, {
+    cleanupPolicy: typeof options.metadata.cleanup_policy === "string" ? options.metadata.cleanup_policy : null,
+    currentIteration: asInteger(options.metadata.current_iteration, "current_iteration"),
+    maxIterations: asInteger(options.metadata.max_iterations, "max_iterations"),
+    metadata: options.metadata,
+    preset: typeof options.metadata.preset === "string" ? options.metadata.preset : null,
+    requiredBeforeContinue: asStringArray(options.metadata.required_before_continue),
+    runName: options.name,
+    seedPromptSha256: typeof options.metadata.seed_prompt_sha256 === "string" ? options.metadata.seed_prompt_sha256 : null,
+    stopConditions: asStringArray(options.metadata.stop_conditions),
+    taskId: task.id,
+    taskName: task.name,
+  });
+}
+
+function mappingRunId(mapping: Record<string, unknown>): string | null {
+  for (const key of ["ralph_loop", "loop_policy"]) {
+    const value = mapping[key];
+    if (isPlainRecord(value) && typeof value.run_id === "string" && value.run_id) {
+      return value.run_id;
+    }
+  }
+  for (const key of ["ralph_loop_run_id", "loop_run_id", "run_id"]) {
+    const value = mapping[key];
+    if (typeof value === "string" && value) {
+      return value;
+    }
+  }
+  return null;
+}
+
+function commandRowMatchesRun(row: { payload_json: string | null; result_json: string | null }, runId: string): boolean {
+  const payload = row.payload_json ? parseJsonObject(row.payload_json) : {};
+  const result = row.result_json ? parseJsonObject(row.result_json) : {};
+  return mappingRunId(payload) === runId || mappingRunId(result) === runId;
+}
+
+function notificationPayloadRunId(payload: Record<string, unknown>): string | null {
+  return mappingRunId(payload);
+}
+
+function notificationRowMatchesRun(row: { payload_json: string }, runId: string): boolean {
+  return notificationPayloadRunId(parseJsonObject(row.payload_json)) === runId;
+}
+
+function ralphLoopRunForTaskSync(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  options: { runRef: string; task: LifecycleTaskRow },
+): EnqueueRalphLoopRun & { name: string; status: string } {
+  const row = database.prepare(`
+    select id
+    from runs
+    where task_id = ?
+      and (id = ? or name = ?)
+    order by started_at desc, id desc
+    limit 1
+  `).get(options.task.id, options.runRef, options.runRef) as { id: string } | undefined;
+  if (!row) {
+    throw new Error(`run ${JSON.stringify(options.runRef)} does not belong to task ${JSON.stringify(options.task.name)}`);
+  }
+  const run = runRowSync(database, row.id);
+  if (run.metadata.kind !== "ralph_loop" && run.purpose !== "ralph_loop") {
+    throw new Error(`Run ${JSON.stringify(options.runRef)} is not a Ralph loop run`);
+  }
+  const currentIteration = integerValue(run.metadata.current_iteration);
+  const maxIterations = integerValue(run.metadata.max_iterations);
+  if (currentIteration === null || maxIterations === null) {
+    throw new Error(`Ralph loop run ${JSON.stringify(options.runRef)} is missing iteration policy`);
+  }
+  return {
+    cleanup_policy: typeof run.metadata.cleanup_policy === "string" ? run.metadata.cleanup_policy : null,
+    current_iteration: currentIteration,
+    id: run.id,
+    max_iterations: maxIterations,
+    metadata: run.metadata,
+    name: run.name,
+    preset: typeof run.metadata.preset === "string" ? run.metadata.preset : null,
+    required_before_continue: asStringArray(run.metadata.required_before_continue).map((item) => item.trim()).filter(Boolean),
+    seed_prompt_sha256: typeof run.metadata.seed_prompt_sha256 === "string" ? run.metadata.seed_prompt_sha256 : null,
+    status: run.status,
+    stop_conditions: asStringArray(run.metadata.stop_conditions),
+    task_id: run.task_id,
+  };
+}
+
+function loopStatusSummarySync(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  options: { run: EnqueueRalphLoopRun & { name: string; status: string }; task: LifecycleTaskRow },
+): Record<string, unknown> {
+  const commandRows = database.prepare(`
+    select id, state, payload_json, result_json
+    from commands
+    where task_id = ?
+    order by created_at, id
+  `).all(options.task.id) as Array<{
+    id: string;
+    payload_json: string | null;
+    result_json: string | null;
+    state: string;
+  }>;
+  const matchingCommands = commandRows.filter((row) => commandRowMatchesRun(row, options.run.id));
+  const commandStates = countBy(matchingCommands.map((row) => row.state));
+
+  const notificationRows = database.prepare(`
+    select state, payload_json
+    from routed_notifications
+    where task_id = ?
+    order by created_at, id
+  `).all(options.task.id) as Array<{ payload_json: string; state: string }>;
+  const matchingNotifications = notificationRows.filter((row) => notificationRowMatchesRun(row, options.run.id));
+  const notificationStates = countBy(matchingNotifications.map((row) => row.state));
+
+  let workerInbox: number;
+  try {
+    const binding = activeBindingForTaskSync(database, options.task.name);
+    const inboxRows = database.prepare(`
+      select payload_json
+      from routed_notifications
+      where task_id = ?
+        and target_session_id = ?
+        and state = 'delivered'
+        and consumed_at is null
+      order by created_at, id
+    `).all(options.task.id, binding.worker_session_id) as Array<{ payload_json: string }>;
+    workerInbox = inboxRows.filter((row) => notificationRowMatchesRun(row, options.run.id)).length;
+  } catch {
+    workerInbox = 0;
+  }
+
+  const criteria = acceptanceCriteriaForTaskSync(database, { taskId: options.task.id });
+  const evidenceItems = criteria
+    .map((criterion) => criterion.evidence)
+    .filter((evidence): evidence is Record<string, unknown> => isPlainRecord(evidence) && evidence.ralph_loop_run_id === options.run.id);
+  const evidenceTypes = [...new Set(evidenceItems
+    .map((evidence) => evidence.evidence_type)
+    .filter((value): value is string => typeof value === "string" && value.length > 0))].sort();
+
+  const telemetryEvents = telemetryEventsForRunSync(database, { runId: options.run.id, taskId: options.task.id });
+  const telemetryByType = countBy(telemetryEvents.map((event) => event.event_type));
+  const failedCommandCount = commandStates.failed ?? 0;
+  const failureCounts = loopFailureCountsSync(database, {
+    failedCommandCount,
+    runId: options.run.id,
+    taskId: options.task.id,
+  });
+  const recommendation = failureCounts.alerts > 0
+    ? "inspect_failures"
+    : workerInbox > 0
+      ? "worker_should_consume_inbox"
+      : "ready_for_manager_review";
+
+  return {
+    commands: {
+      states: sortJson(commandStates),
+      total: matchingCommands.length,
+    },
+    evidence: {
+      total: evidenceItems.length,
+      types: evidenceTypes,
+    },
+    failures: failureCounts,
+    inbox: {
+      worker_unconsumed: workerInbox,
+    },
+    notifications: {
+      delivered: notificationStates.delivered ?? 0,
+      total: matchingNotifications.length,
+    },
+    policy: {
+      cleanup_policy: options.run.cleanup_policy,
+      current_iteration: options.run.current_iteration,
+      max_iterations: options.run.max_iterations,
+      required_before_continue: options.run.required_before_continue,
+      template: typeof options.run.metadata.template === "string" ? options.run.metadata.template : options.run.preset,
+    },
+    recommendation,
+    run: {
+      id: options.run.id,
+      name: options.run.name,
+      status: options.run.status,
+    },
+    task: {
+      id: options.task.id,
+      name: options.task.name,
+      state: options.task.state,
+    },
+    telemetry: {
+      by_event_type: sortJson(telemetryByType),
+      dispatch_inbox_consumed: telemetryByType.dispatch_inbox_consumed ?? 0,
+      total: telemetryEvents.length,
+    },
+  };
+}
+
+function telemetryEventsForRunSync(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  options: { runId: string; taskId: string },
+): Array<{ event_type: string }> {
+  return database.prepare(`
+    select event_type
+    from telemetry_events
+    where task_id = ?
+      and run_id = ?
+    order by timestamp, id
+    limit 1000
+  `).all(options.taskId, options.runId) as Array<{ event_type: string }>;
+}
+
+function loopFailureCountsSync(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  options: { failedCommandCount: number; runId: string; taskId: string },
+): {
+  alerts: number;
+  failed_commands: number;
+  failed_cycles: number;
+  ingest_errors: number;
+  open_accepted_criteria: number;
+  pane_capture_failures: number;
+} {
+  const failedCycles = database.prepare(`
+    select count(distinct mc.id) as count
+    from manager_cycles mc
+    where mc.task_id = ?
+      and mc.state = 'failed'
+      and exists (
+        select 1
+        from manager_cycle_spans mcs
+        where mcs.manager_cycle_id = mc.id
+          and mcs.run_id = ?
+      )
+  `).get(options.taskId, options.runId) as { count: number } | undefined;
+  const paneFailures = database.prepare(`
+    select count(distinct mc.id) as count
+    from manager_cycles mc
+    where mc.task_id = ?
+      and json_extract(mc.status_json, '$.pane_signal.captured') = 0
+      and exists (
+        select 1
+        from manager_cycle_spans mcs
+        where mcs.manager_cycle_id = mc.id
+          and mcs.run_id = ?
+      )
+  `).get(options.taskId, options.runId) as { count: number } | undefined;
+  const ingestEventErrors = database.prepare(`
+    select count(*) as count
+    from telemetry_events
+    where task_id = ?
+      and run_id = ?
+      and (event_type like '%ingest%' or event_type = 'codex_events_ingested')
+      and severity in ('warning', 'error')
+  `).get(options.taskId, options.runId) as { count: number } | undefined;
+  const ingestCycleErrors = database.prepare(`
+    select count(distinct mc.id) as count
+    from manager_cycles mc
+    where mc.task_id = ?
+      and mc.state = 'failed'
+      and (
+        mc.error like '%Ingest%'
+        or json_extract(mc.status_json, '$.error_type') like '%Ingest%'
+      )
+      and exists (
+        select 1
+        from manager_cycle_spans mcs
+        where mcs.manager_cycle_id = mc.id
+          and mcs.run_id = ?
+      )
+  `).get(options.taskId, options.runId) as { count: number } | undefined;
+  const openAcceptedCriteria = database.prepare(`
+    select count(*) as count
+    from acceptance_criteria
+    where task_id = ?
+      and status = 'accepted'
+      and json_extract(evidence_json, '$.ralph_loop_run_id') = ?
+  `).get(options.taskId, options.runId) as { count: number } | undefined;
+  const counts = {
+    failed_commands: options.failedCommandCount,
+    failed_cycles: failedCycles?.count ?? 0,
+    ingest_errors: (ingestEventErrors?.count ?? 0) + (ingestCycleErrors?.count ?? 0),
+    open_accepted_criteria: openAcceptedCriteria?.count ?? 0,
+    pane_capture_failures: paneFailures?.count ?? 0,
+  };
+  return {
+    alerts: [
+      counts.failed_commands,
+      counts.failed_cycles,
+      counts.ingest_errors,
+      counts.open_accepted_criteria,
+      counts.pane_capture_failures,
+    ].filter((value) => value > 0).length,
+    ...counts,
+  };
+}
+
+function countBy(values: string[]): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const value of values) {
+    counts[value] = (counts[value] ?? 0) + 1;
+  }
+  return counts;
+}
+
+function renderLoopStatusText(result: Record<string, unknown>): string {
+  const task = result.task as Record<string, unknown>;
+  const run = result.run as Record<string, unknown>;
+  const policy = result.policy as Record<string, unknown>;
+  const commands = result.commands as Record<string, unknown>;
+  const notifications = result.notifications as Record<string, unknown>;
+  const inbox = result.inbox as Record<string, unknown>;
+  const telemetry = result.telemetry as Record<string, unknown>;
+  return [
+    `task: ${task.name} (${task.state})`,
+    `run: ${run.name || run.id} (${run.status})`,
+    `policy: ${policy.template} iteration ${policy.current_iteration}/${policy.max_iterations}`,
+    `commands: ${JSON.stringify(commands.states ?? {})}`,
+    `notifications: ${notifications.delivered}/${notifications.total} delivered`,
+    `worker_unconsumed: ${inbox.worker_unconsumed}`,
+    `dispatch_inbox_consumed: ${telemetry.dispatch_inbox_consumed}`,
+    `failures: ${JSON.stringify(result.failures ?? {})}`,
+    `recommendation: ${result.recommendation}`,
+  ].join("\n") + "\n";
 }
 
 function activeLifecycleBinding(
