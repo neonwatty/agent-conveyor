@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -63,6 +64,8 @@ import {
   stateRoot,
   statusPath,
   transcriptPath,
+  validateWorkerName,
+  workerDir,
   writeJsonSync,
 } from "../state/files.js";
 import { latestStatusSync } from "../state/status.js";
@@ -80,8 +83,28 @@ export interface TypescriptRuntimeResult {
 
 const DEFAULT_BUSY_WAIT_SECONDS = 90;
 const DEFAULT_HISTORY_LINES = 200;
+const DEFAULT_WAIT_READY_SECONDS = 30;
 const DEFAULT_STATUS_STALE_SECONDS = 300;
 const DEFAULT_TERMINAL_STALE_SECONDS = 300;
+const START_PASSTHROUGH_FLAGS_WITH_VALUES = new Set([
+  "--add-dir",
+  "--ask-for-approval",
+  "--cd",
+  "--config",
+  "--image",
+  "--model",
+  "--profile",
+  "--remote",
+  "--remote-auth-token-env",
+  "--sandbox",
+  "-C",
+  "-a",
+  "-c",
+  "-i",
+  "-m",
+  "-p",
+  "-s",
+]);
 type TerminalChoice = "auto" | "ghostty" | "terminal";
 type TranscriptCaptureMode = "excerpt" | "full" | "metadata" | "segment" | "snapshot";
 const VALID_WORKER_STATUS_STATES = new Set([
@@ -162,6 +185,15 @@ export function runTypescriptRuntimeCommand(options: TypescriptRuntimeOptions): 
     }
     if (parsed.command === "tasks") {
       return runTasksCommand(parsed, options);
+    }
+    if (parsed.command === "start") {
+      return runLegacyStartCommand(parsed, options);
+    }
+    if (parsed.command === "create") {
+      return runLegacyCreateCommand(parsed, options);
+    }
+    if (parsed.command === "start-test") {
+      return runLegacyStartTestCommand(parsed, options);
     }
     if (parsed.command === "bind") {
       return runBindCommand(parsed, options);
@@ -358,9 +390,20 @@ interface ParsedRuntimeArgs {
     taskPrompt: string | null;
     taskSummary: string | null;
     workerName: string | null;
+    reuse: boolean;
+    initialPrompt: boolean;
+    startPrompt: boolean;
+    waitReady: boolean;
+    waitReadyTimeout: number;
+    verify: boolean;
+    verifyTimeout: number;
+    open: boolean;
+    forceOpen: boolean;
+    stopAfter: boolean;
   };
   defaultRuntime?: boolean;
   explicit: boolean;
+  passthroughArgs?: string[];
   task: string | null;
 }
 
@@ -463,8 +506,19 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
     taskPrompt: null,
     taskSummary: null,
     workerName: null,
+    reuse: false,
+    initialPrompt: true,
+    startPrompt: true,
+    waitReady: false,
+    waitReadyTimeout: DEFAULT_WAIT_READY_SECONDS,
+    verify: false,
+    verifyTimeout: 60,
+    open: false,
+    forceOpen: false,
+    stopAfter: false,
   };
   const queue = [...args];
+  const passthroughArgs: string[] = [];
   let explicit = false;
   let enabled = env.AGENT_CONVEYOR_TS_RUNTIME === "1";
   if (queue[0] === "--ts-runtime") {
@@ -480,6 +534,17 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
   let task: string | null = null;
   for (let index = 0; index < queue.length; index += 1) {
     const arg = queue[index];
+    if (command === "start" && isHelpArg(arg)) {
+      return { command, enabled, error: `Unsupported TypeScript runtime option: ${arg}`, explicit, flags, passthroughArgs, task };
+    }
+    if (command === "start" && arg !== "--cwd" && arg !== "--no-start-prompt" && arg !== "--" && isStartPassthroughFlag(arg)) {
+      passthroughArgs.push(arg);
+      if (startPassthroughFlagTakesValue(arg) && queue[index + 1] && !queue[index + 1].startsWith("--")) {
+        passthroughArgs.push(queue[index + 1]);
+        index += 1;
+      }
+      continue;
+    }
     if (arg === "--json") {
       flags.json = true;
     } else if (arg === "--all") {
@@ -502,28 +567,68 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       flags.dryRun = true;
     } else if (arg === "--force") {
       if (command !== "open") {
-        return { command, enabled, error: "Unsupported TypeScript runtime option: --force", explicit, flags, task };
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --force", explicit, flags, passthroughArgs, task };
       }
       flags.force = true;
     } else if (arg === "--terminal") {
-      if (command !== "open" && command !== "open-worker" && command !== "open-manager") {
-        return { command, enabled, error: "Unsupported TypeScript runtime option: --terminal", explicit, flags, task };
+      if (command !== "open" && command !== "open-worker" && command !== "open-manager" && command !== "create" && command !== "start-test") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --terminal", explicit, flags, passthroughArgs, task };
       }
       const parsedValue = valueAfter(queue, index, arg);
       if (parsedValue.error) {
-        return { command, enabled, error: parsedValue.error, explicit, flags, task };
+        return { command, enabled, error: parsedValue.error, explicit, flags, passthroughArgs, task };
       }
       const value = parsedValue.value;
       if (!isTerminalChoice(value)) {
-        return { command, enabled, error: `Unsupported terminal: ${value}`, explicit, flags, task };
+        return { command, enabled, error: `Unsupported terminal: ${value}`, explicit, flags, passthroughArgs, task };
       }
       flags.terminal = value;
       index += 1;
     } else if (arg === "--accept-trust") {
-      if (command !== "start-worker" && command !== "start-manager" && command !== "pair") {
-        return { command, enabled, error: "Unsupported TypeScript runtime option: --accept-trust", explicit, flags, task };
+      if (command !== "start-worker" && command !== "start-manager" && command !== "pair" && command !== "create" && command !== "start-test") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --accept-trust", explicit, flags, passthroughArgs, task };
       }
       flags.acceptTrust = true;
+    } else if (arg === "--reuse") {
+      if (command !== "create" && command !== "start-test") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --reuse", explicit, flags, passthroughArgs, task };
+      }
+      flags.reuse = true;
+    } else if (arg === "--no-initial-prompt" || arg === "--no-send-contract") {
+      if (command !== "create") {
+        return { command, enabled, error: `Unsupported TypeScript runtime option: ${arg}`, explicit, flags, passthroughArgs, task };
+      }
+      flags.initialPrompt = false;
+    } else if (arg === "--no-start-prompt") {
+      if (command !== "start") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --no-start-prompt", explicit, flags, passthroughArgs, task };
+      }
+      flags.startPrompt = false;
+    } else if (arg === "--wait-ready") {
+      if (command !== "create") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --wait-ready", explicit, flags, passthroughArgs, task };
+      }
+      flags.waitReady = true;
+    } else if (arg === "--verify") {
+      if (command !== "create") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --verify", explicit, flags, passthroughArgs, task };
+      }
+      flags.verify = true;
+    } else if (arg === "--open") {
+      if (command !== "create" && command !== "start-test") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --open", explicit, flags, passthroughArgs, task };
+      }
+      flags.open = true;
+    } else if (arg === "--force-open") {
+      if (command !== "create" && command !== "start-test") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --force-open", explicit, flags, passthroughArgs, task };
+      }
+      flags.forceOpen = true;
+    } else if (arg === "--stop-after") {
+      if (command !== "create" && command !== "start-test") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --stop-after", explicit, flags, passthroughArgs, task };
+      }
+      flags.stopAfter = true;
     } else if (arg === "--no-dispatch") {
       if (command !== "pair") {
         return { command, enabled, error: "Unsupported TypeScript runtime option: --no-dispatch", explicit, flags, task };
@@ -1250,15 +1355,62 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       }
       flags.timeoutSeconds = value;
       index += 1;
+    } else if (arg === "--wait-ready-timeout") {
+      if (command !== "create" && command !== "start-test") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --wait-ready-timeout", explicit, flags, task };
+      }
+      const parsedValue = valueAfter(queue, index, arg);
+      if (parsedValue.error) {
+        return { command, enabled, error: parsedValue.error, explicit, flags, task };
+      }
+      const value = Number(parsedValue.value);
+      if (!Number.isInteger(value) || value <= 0) {
+        return { command, enabled, error: "--wait-ready-timeout must be a positive integer.", explicit, flags, task };
+      }
+      flags.waitReadyTimeout = value;
+      index += 1;
+    } else if (arg === "--verify-timeout") {
+      if (command !== "create" && command !== "start-test") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --verify-timeout", explicit, flags, task };
+      }
+      const parsedValue = valueAfter(queue, index, arg);
+      if (parsedValue.error) {
+        return { command, enabled, error: parsedValue.error, explicit, flags, task };
+      }
+      const value = Number(parsedValue.value);
+      if (!Number.isInteger(value) || value <= 0) {
+        return { command, enabled, error: "--verify-timeout must be a positive integer.", explicit, flags, task };
+      }
+      flags.verifyTimeout = value;
+      index += 1;
+    } else if (arg === "--" && command === "start") {
+      passthroughArgs.push(...queue.slice(index + 1));
+      break;
     } else if (arg.startsWith("--")) {
+      if (command === "start") {
+        passthroughArgs.push(arg);
+        if (startPassthroughFlagTakesValue(arg) && queue[index + 1] && !queue[index + 1].startsWith("--")) {
+          passthroughArgs.push(queue[index + 1]);
+          index += 1;
+        }
+        continue;
+      }
       return { command, enabled, error: `Unsupported TypeScript runtime option: ${arg}`, explicit, flags, task };
+    } else if (command === "start" && isStartPassthroughFlag(arg)) {
+      passthroughArgs.push(arg);
+      if (startPassthroughFlagTakesValue(arg) && queue[index + 1] && !queue[index + 1].startsWith("--")) {
+        passthroughArgs.push(queue[index + 1]);
+        index += 1;
+      }
     } else if (task === null) {
       task = arg;
+    } else if (command === "start") {
+      passthroughArgs.push(arg);
     } else {
       return { command, enabled, error: `Unexpected argument: ${arg}`, explicit, flags, task };
     }
   }
-  return { command, enabled, explicit, flags, task };
+  return { command, enabled, explicit, flags, passthroughArgs, task };
 }
 
 function runAuditCommand(
@@ -1364,6 +1516,129 @@ function runTasksCommand(
   } finally {
     database.close();
   }
+}
+
+function runLegacyStartCommand(
+  parsed: ParsedRuntimeArgs,
+  options: TypescriptRuntimeOptions,
+): TypescriptRuntimeResult {
+  if (!parsed.task) {
+    return errorResult("start requires a session.");
+  }
+  const unsupported = unsupportedLegacyStartOptions(parsed);
+  if (unsupported) {
+    return unsupportedRuntimeResult(parsed, unsupported);
+  }
+  const codexPreflight = ensureRequiredTool("codex", options);
+  if (codexPreflight) {
+    return codexPreflight;
+  }
+  const sessionName = parsed.task;
+  validateWorkerName(sessionName);
+  let cwd: string;
+  try {
+    cwd = resolveExistingDirectory(parsed.flags.cwd ?? options.cwd ?? process.cwd(), "Session cwd");
+  } catch (error) {
+    return lifecycleWorkerErrorResult(error instanceof Error ? error.message : String(error));
+  }
+  const runner = options.tmuxRunner ?? defaultTmuxRunner;
+  const tmuxPreflight = ensureTmuxAvailable(runner);
+  if (tmuxPreflight) {
+    return tmuxPreflight;
+  }
+  if (tmuxSessionRunning(sessionName, runner)) {
+    return lifecycleWorkerErrorResult(`tmux session already exists: ${sessionName}`);
+  }
+  const rawCodexArgs = [...(parsed.passthroughArgs ?? [])];
+  if (rawCodexArgs[0] === "--") {
+    rawCodexArgs.shift();
+  }
+  const promptPath = parsed.flags.startPrompt
+    ? join(stateRoot(options), "artifacts", "start-prompts", `${sessionName}.md`)
+    : null;
+  let shellCommand = `${legacyCliPathPrefix()} codex --cd ${shellQuote(cwd)} --no-alt-screen`;
+  if (rawCodexArgs.length > 0) {
+    shellCommand = `${shellCommand} ${rawCodexArgs.map(shellQuote).join(" ")}`;
+  }
+  if (promptPath !== null) {
+    mkdirSync(dirname(promptPath), { recursive: true });
+    writeFileSync(promptPath, legacyRawWorkerStartPrompt(sessionName, cwd, rawCodexArgs));
+    shellCommand = `${shellCommand} "$(cat ${shellQuote(promptPath)})"`;
+  }
+  runTmuxCommandWithRunner(["tmux", "new-session", "-d", "-s", sessionName, shellCommand], runner);
+  return jsonResult({
+    attach_command: attachSessionCommand(sessionName),
+    bind_command_template: "conveyor bind --task <task-name> --worker <worker-name> --manager <manager-name>",
+    cwd,
+    manager_config_questions_command_template: "conveyor manager-config <task-name> --questions",
+    register_worker_command_template: `${workerctlCli()} register-worker --name <worker-name> --pid <pid> --codex-session <rollout.jsonl> --cwd ${shellQuote(cwd)} --tmux-session ${sessionName}`,
+    session: sessionName,
+    start_manager_command_template: `${workerctlCli()} start-manager --name <manager-name> --cwd ${shellQuote(cwd)}${codexArgSuffix(rawCodexArgs)}`,
+    start_prompt_path: promptPath,
+    start_prompt_sent: promptPath !== null,
+  });
+}
+
+function runLegacyCreateCommand(
+  parsed: ParsedRuntimeArgs,
+  options: TypescriptRuntimeOptions,
+): TypescriptRuntimeResult {
+  if (!parsed.task) {
+    return errorResult("create requires a worker name.");
+  }
+  const unsupported = unsupportedLegacyCreateOptions(parsed, false);
+  if (unsupported) {
+    return unsupportedRuntimeResult(parsed, unsupported);
+  }
+  return createLegacyWorker({
+    acceptTrust: parsed.flags.acceptTrust,
+    cwd: parsed.flags.cwd ?? options.cwd ?? process.cwd(),
+    forceOpen: parsed.flags.forceOpen,
+    initialPrompt: parsed.flags.initialPrompt,
+    name: parsed.task,
+    open: parsed.flags.open,
+    parsed,
+    reuse: parsed.flags.reuse,
+    runtimeOptions: options,
+    stopAfter: parsed.flags.stopAfter,
+    task: parsed.flags.taskName,
+    terminal: parsed.flags.terminal,
+    verify: parsed.flags.verify,
+    verifyTimeout: parsed.flags.verifyTimeout,
+    waitReady: parsed.flags.waitReady,
+    waitReadyTimeout: parsed.flags.waitReadyTimeout,
+  });
+}
+
+function runLegacyStartTestCommand(
+  parsed: ParsedRuntimeArgs,
+  options: TypescriptRuntimeOptions,
+): TypescriptRuntimeResult {
+  const unsupported = unsupportedLegacyCreateOptions(parsed, true);
+  if (unsupported) {
+    return unsupportedRuntimeResult(parsed, unsupported);
+  }
+  const name = parsed.task ?? "live-test";
+  const task = parsed.flags.taskName
+    ?? `Read README.md and run conveyor update-status ${name} with a short summary. Do not edit tracked files.`;
+  return createLegacyWorker({
+    acceptTrust: parsed.flags.acceptTrust,
+    cwd: parsed.flags.cwd ?? options.cwd ?? process.cwd(),
+    forceOpen: parsed.flags.forceOpen,
+    initialPrompt: true,
+    name,
+    open: parsed.flags.open,
+    parsed,
+    reuse: parsed.flags.reuse,
+    runtimeOptions: options,
+    stopAfter: parsed.flags.stopAfter,
+    task,
+    terminal: parsed.flags.terminal,
+    verify: true,
+    verifyTimeout: parsed.flags.verifyTimeout,
+    waitReady: true,
+    waitReadyTimeout: parsed.flags.waitReadyTimeout,
+  });
 }
 
 function runBindCommand(
@@ -3824,6 +4099,9 @@ function requireTask(parsed: ParsedRuntimeArgs): string {
 function isDefaultRuntimeCommand(command: string | null): boolean {
   return (
     command === "audit"
+    || command === "start"
+    || command === "create"
+    || command === "start-test"
     || command === "replay"
     || command === "export-task"
     || command === "tasks"
@@ -3865,6 +4143,18 @@ function valueAfter(args: readonly string[], index: number, flag: string): { err
     return { error: `${flag} requires a value.`, value: "" };
   }
   return { value };
+}
+
+function isHelpArg(arg: string): boolean {
+  return arg === "--help" || arg === "-h";
+}
+
+function startPassthroughFlagTakesValue(flag: string): boolean {
+  return START_PASSTHROUGH_FLAGS_WITH_VALUES.has(flag);
+}
+
+function isStartPassthroughFlag(arg: string): boolean {
+  return arg.startsWith("-") && arg !== "-";
 }
 
 function jsonResult(payload: unknown): TypescriptRuntimeResult {
@@ -3938,6 +4228,116 @@ function unsupportedUnbindOptions(parsed: ParsedRuntimeArgs): string | null {
   }
   if (parsed.flags.worker !== null || parsed.flags.manager !== null) {
     return "Unsupported TypeScript runtime option for unbind.";
+  }
+  return null;
+}
+
+function unsupportedLegacyStartOptions(parsed: ParsedRuntimeArgs): string | null {
+  if (
+    parsed.flags.active
+    || parsed.flags.all
+    || parsed.flags.create !== null
+    || parsed.flags.dryRun
+    || parsed.flags.eventType !== null
+    || parsed.flags.force
+    || parsed.flags.forceOpen
+    || parsed.flags.goal !== null
+    || parsed.flags.json
+    || parsed.flags.limit !== null
+    || parsed.flags.names.length > 0
+    || parsed.flags.open
+    || parsed.flags.path !== null
+    || parsed.flags.pid !== null
+    || parsed.flags.codexSession !== null
+    || parsed.flags.reuse
+    || parsed.flags.stopAfter
+    || parsed.flags.taskName !== null
+    || parsed.flags.terminal !== "auto"
+    || parsed.flags.verify
+    || parsed.flags.waitReady
+  ) {
+    return "Unsupported TypeScript runtime option for start.";
+  }
+  return null;
+}
+
+function unsupportedLegacyCreateOptions(parsed: ParsedRuntimeArgs, startTest: boolean): string | null {
+  if (
+    parsed.flags.active
+    || parsed.flags.all
+    || parsed.flags.blocker !== null
+    || parsed.flags.busyWaitSeconds !== DEFAULT_BUSY_WAIT_SECONDS
+    || parsed.flags.captureTranscriptBeforeStop
+    || parsed.flags.captureTranscriptLines !== DEFAULT_HISTORY_LINES
+    || parsed.flags.captureTranscriptMode !== "segment"
+    || parsed.flags.cleanupPolicy !== "clear"
+    || parsed.flags.create !== null
+    || parsed.flags.currentIteration !== 1
+    || parsed.flags.currentTask !== null
+    || parsed.flags.decisionId !== null
+    || parsed.flags.dryRun
+    || parsed.flags.eventType !== null
+    || parsed.flags.file !== null
+    || parsed.flags.format !== "timeline"
+    || parsed.flags.force
+    || parsed.flags.goal !== null
+    || parsed.flags.includeContent
+    || parsed.flags.includeFullTranscripts
+    || parsed.flags.includeLegacy
+    || parsed.flags.includeTranscripts
+    || parsed.flags.json
+    || parsed.flags.keepLatest !== 20
+    || parsed.flags.lines !== DEFAULT_HISTORY_LINES
+    || parsed.flags.limit !== null
+    || parsed.flags.manager !== null
+    || parsed.flags.maxIterations !== null
+    || parsed.flags.message !== null
+    || parsed.flags.names.length > 0
+    || parsed.flags.nextAction !== null
+    || parsed.flags.output !== null
+    || parsed.flags.path !== null
+    || parsed.flags.pid !== null
+    || parsed.flags.codexSession !== null
+    || parsed.flags.reason !== null
+    || parsed.flags.redactIdentityToken
+    || parsed.flags.refresh === false
+    || parsed.flags.requiredBeforeContinue.length > 0
+    || parsed.flags.requireAcks
+    || parsed.flags.requireAdversarialProof
+    || parsed.flags.requireCriteriaAudit
+    || parsed.flags.requireEpilogue
+    || parsed.flags.requireSegment
+    || parsed.flags.requireTranscriptSegment
+    || parsed.flags.roleProvided
+    || parsed.flags.runName !== null
+    || parsed.flags.seedPromptSha256 !== null
+    || parsed.flags.sessionDir !== null
+    || parsed.flags.sessionRole !== null
+    || parsed.flags.sessionState !== null
+    || parsed.flags.statusAgeSeconds !== DEFAULT_BUSY_WAIT_SECONDS
+    || parsed.flags.statusStaleSeconds !== DEFAULT_STATUS_STALE_SECONDS
+    || parsed.flags.statusState !== null
+    || parsed.flags.stopManager
+    || parsed.flags.stopWorker
+    || parsed.flags.strictDecisions
+    || parsed.flags.subtype !== null
+    || parsed.flags.summary !== null
+    || parsed.flags.taskGoal !== null
+    || parsed.flags.taskPrompt !== null
+    || parsed.flags.taskSummary !== null
+    || parsed.flags.template !== null
+    || parsed.flags.terminalStaleSeconds !== DEFAULT_TERMINAL_STALE_SECONDS
+    || parsed.flags.text !== null
+    || parsed.flags.tmuxSession !== null
+    || parsed.flags.transcriptMode !== "segment"
+    || parsed.flags.worker !== null
+    || parsed.flags.workerName !== null
+    || parsed.flags.zip
+  ) {
+    return `Unsupported TypeScript runtime option for ${startTest ? "start-test" : "create"}.`;
+  }
+  if (startTest && (parsed.flags.waitReady || parsed.flags.verify || !parsed.flags.initialPrompt)) {
+    return "Unsupported TypeScript runtime option for start-test.";
   }
   return null;
 }
@@ -7846,7 +8246,7 @@ function idleSummary(
 
 function upsertWorkerSync(
   database: ReturnType<typeof openRuntimeDatabase>,
-  options: { config: Record<string, unknown>; name: string; timestamp: string },
+  options: { config: Record<string, unknown>; name: string; state?: string; timestamp: string },
 ): string {
   const existing = database.prepare("select id, identity_token from workers where name = ?")
     .get(options.name) as { id: string; identity_token: string } | undefined;
@@ -7858,7 +8258,7 @@ function upsertWorkerSync(
     insert into workers(
       id, name, tmux_session, tmux_pane_id, identity_token, cwd, state, created_at, updated_at
     )
-    values (?, ?, ?, ?, ?, ?, 'active', ?, ?)
+    values (?, ?, ?, ?, ?, ?, ?, ?, ?)
     on conflict(name) do update set
       tmux_session = excluded.tmux_session,
       tmux_pane_id = coalesce(excluded.tmux_pane_id, workers.tmux_pane_id),
@@ -7874,11 +8274,574 @@ function upsertWorkerSync(
     typeof options.config.tmux_pane_id === "string" ? options.config.tmux_pane_id : null,
     identityToken,
     typeof options.config.cwd === "string" ? options.config.cwd : "",
+    options.state ?? "active",
     options.timestamp,
     options.timestamp,
   );
   const row = database.prepare("select id from workers where name = ?").get(options.name) as { id: string };
   return row.id;
+}
+
+interface LegacyCreateWorkerOptions {
+  acceptTrust: boolean;
+  cwd: string;
+  forceOpen: boolean;
+  initialPrompt: boolean;
+  name: string;
+  open: boolean;
+  parsed: ParsedRuntimeArgs;
+  reuse: boolean;
+  runtimeOptions: TypescriptRuntimeOptions;
+  stopAfter: boolean;
+  task: string | null;
+  terminal: TerminalChoice;
+  verify: boolean;
+  verifyTimeout: number;
+  waitReady: boolean;
+  waitReadyTimeout: number;
+}
+
+function createLegacyWorker(options: LegacyCreateWorkerOptions): TypescriptRuntimeResult {
+  if (options.open && options.stopAfter) {
+    return lifecycleWorkerErrorResult("--open cannot be combined with --stop-after");
+  }
+  const codexPreflight = ensureRequiredTool("codex", options.runtimeOptions);
+  if (codexPreflight) {
+    return codexPreflight;
+  }
+  validateWorkerName(options.name);
+  let cwd: string;
+  try {
+    cwd = resolveExistingDirectory(options.cwd, "Worker cwd");
+  } catch (error) {
+    return lifecycleWorkerErrorResult(error instanceof Error ? error.message : String(error));
+  }
+  const runner = options.runtimeOptions.tmuxRunner ?? defaultTmuxRunner;
+  const tmuxPreflight = ensureTmuxAvailable(runner);
+  if (tmuxPreflight) {
+    return tmuxPreflight;
+  }
+  const stateOptions = statePathOptions(options.runtimeOptions);
+  const name = options.name;
+  const tmuxSessionName = tmuxSession(name);
+  const createdAt = nowIsoSeconds(options.runtimeOptions);
+
+  if (existsSync(configPath(name, stateOptions)) && !options.reuse) {
+    return lifecycleWorkerErrorResult(`Worker already exists: ${name}. Use --reuse to reuse its state directory.`);
+  }
+  if (sessionExists(name, runner)) {
+    return lifecycleWorkerErrorResult(`tmux session already exists: ${tmuxSessionName}`);
+  }
+
+  const database = openRuntimeDatabase(options.parsed, options.runtimeOptions);
+  try {
+    const existingWorker = database.prepare("select id, tmux_session from workers where name = ?")
+      .get(name) as { id: string; tmux_session: string } | undefined;
+    if (existingWorker && !options.reuse) {
+      return lifecycleWorkerErrorResult(
+        `Worker ${name} already exists as worker id ${existingWorker.id} in tmux session ${existingWorker.tmux_session}. `
+        + "Use --reuse only if continuing that worker is intentional.",
+      );
+    }
+    if (existingWorker && existingWorker.tmux_session !== tmuxSessionName) {
+      return lifecycleWorkerErrorResult(
+        `Worker ${name} already exists as worker id ${existingWorker.id} in tmux session ${existingWorker.tmux_session}; `
+        + `create would use ${tmuxSessionName}.`,
+      );
+    }
+
+    mkdirSync(workerDir(name, stateOptions), { recursive: true });
+    const identityToken = `workerctl-${randomUUID()}`;
+    let config: Record<string, unknown> = {
+      created_at: createdAt,
+      cwd,
+      identity_token: identityToken,
+      name,
+      startup: "launched",
+      startup_reason: "worker session created",
+      state_dir: workerDir(name, stateOptions),
+      tmux_session: tmuxSessionName,
+      tmux_target: tmuxSessionName,
+    };
+    writeJsonSync(configPath(name, stateOptions), config);
+    const initialStatus = initialLegacyStatus(options.task, options.runtimeOptions);
+    writeJsonSync(statusPath(name, stateOptions), initialStatus);
+    writeFileSync(transcriptPath(name, stateOptions), "", { flag: "a" });
+
+    const workerId = upsertWorkerSync(database, {
+      config,
+      name,
+      state: "candidate",
+      timestamp: stringOrNull(initialStatus.last_update) ?? createdAt,
+    });
+    insertStatusSync(database, {
+      blocker: initialStatus.blocker,
+      currentTask: initialStatus.current_task,
+      nextAction: initialStatus.next_action,
+      state: initialStatus.state,
+      timestamp: stringOrNull(initialStatus.last_update) ?? createdAt,
+      workerId,
+    });
+    insertEventSync(database, {
+      payload: { cwd, name, tmux_session: tmuxSessionName },
+      type: "worker_create_recorded",
+      workerId,
+    });
+    config = { ...config, worker_id: workerId };
+    writeJsonSync(configPath(name, stateOptions), config);
+
+    const contractPath = writeLegacyWorkerContract(name, options.task, identityToken, stateOptions);
+    const shellCommand = options.initialPrompt
+      ? `${legacyCliPathPrefix()} codex --cd ${shellQuote(cwd)} --no-alt-screen "$(cat ${shellQuote(contractPath)})"`
+      : `${legacyCliPathPrefix()} codex --cd ${shellQuote(cwd)} --no-alt-screen`;
+    runTmuxCommandWithRunner(["tmux", "new-session", "-d", "-s", tmuxSessionName, shellCommand], runner);
+    const tmuxPaneId = currentPaneIdWithRunner(tmuxSessionName, runner);
+    config = {
+      ...loadJsonSync<Record<string, unknown>>(configPath(name, stateOptions), {}),
+      ...(tmuxPaneId ? { tmux_pane_id: tmuxPaneId } : {}),
+    };
+    writeJsonSync(configPath(name, stateOptions), config);
+    upsertWorkerSync(database, {
+      config,
+      name,
+      state: "active",
+      timestamp: nowIsoSeconds(options.runtimeOptions),
+    });
+    database.prepare("update workers set state = 'active', updated_at = ? where id = ?")
+      .run(nowIsoSeconds(options.runtimeOptions), workerId);
+    insertEventSync(database, {
+      payload: { tmux_pane_id: tmuxPaneId, tmux_session: tmuxSessionName },
+      type: "worker_tmux_started",
+      workerId,
+    });
+    appendCompatibilityEvent(name, "create", {
+      contract_path: contractPath,
+      cwd,
+      initial_prompt: options.initialPrompt,
+      task: options.task,
+    }, stateOptions);
+
+    let startup: Record<string, unknown> | null = null;
+    if (options.waitReady) {
+      startup = waitLegacyReady(name, {
+        acceptTrust: options.acceptTrust,
+        runtimeOptions: options.runtimeOptions,
+        stateOptions,
+        timeoutSeconds: options.waitReadyTimeout,
+        tmuxRunner: runner,
+      });
+      config = {
+        ...loadJsonSync<Record<string, unknown>>(configPath(name, stateOptions), {}),
+        startup: startup.startup,
+        startup_checked_at: nowIsoSeconds(options.runtimeOptions),
+        startup_reason: startup.reason,
+        startup_recommended_action: startup.recommended_action,
+      };
+      writeJsonSync(configPath(name, stateOptions), config);
+      appendCompatibilityEvent(name, "wait_ready", startup, stateOptions);
+    } else if (options.acceptTrust) {
+      sendEnterToTmuxSessionWithRunner(tmuxSessionName, runner);
+      appendCompatibilityEvent(name, "accept_trust", {}, stateOptions);
+    }
+
+    const lines = [
+      `created ${name}`,
+      `tmux session: ${tmuxSessionName}`,
+      `state dir: ${workerDir(name, stateOptions)}`,
+      options.initialPrompt
+        ? "contract provided as initial Codex prompt"
+        : "contract saved but not provided; run conveyor nudge to provide instructions",
+    ];
+    if (options.acceptTrust) {
+      lines.push(options.waitReady && startup
+        ? `trust handling: accepted=${startup.trust_accepted}`
+        : "sent Enter for initial trust prompt");
+    }
+    if (startup) {
+      lines.push(`startup: ${startup.startup} (${startup.reason})`);
+      if (startup.recommended_action !== "none") {
+        lines.push(`recommended action: ${startup.recommended_action}`);
+      }
+    }
+    if (options.verify) {
+      const verification = waitForLegacyStatusUpdate(name, {
+        initialCurrentTask: stringOrNull(initialStatus.current_task),
+        initialLastUpdate: stringOrNull(initialStatus.last_update),
+        parsed: options.parsed,
+        runtimeOptions: options.runtimeOptions,
+        stateOptions,
+        timeoutSeconds: options.verifyTimeout,
+        tmuxRunner: runner,
+      });
+      lines.push(`verification: ${verification.ok ? "ok" : "not verified"} (${verification.reason})`);
+      const status = verification.status;
+      lines.push(`state: ${stringOrNull(status.state) ?? "unknown"}`);
+      const currentTask = stringOrNull(status.current_task);
+      if (currentTask) {
+        lines.push(`current task: ${currentTask}`);
+      }
+    }
+    lines.push("", "Attach:", `  ${attachSessionCommand(tmuxSessionName)}`, "", "Stop:", `  conveyor stop ${name}`);
+    if (options.open) {
+      const opened = openLegacyWorkerWindow(name, {
+        force: options.forceOpen,
+        parsed: options.parsed,
+        runtimeOptions: options.runtimeOptions,
+        stateOptions,
+        terminal: options.terminal,
+        tmuxRunner: runner,
+      });
+      lines.push("", `opened ${opened.terminal} window for ${name}`);
+    }
+    if (options.stopAfter) {
+      if (sessionExists(name, runner)) {
+        killTmuxSessionWithRunner(tmuxSessionName, runner);
+        appendCompatibilityEvent(name, "stop", { killed_session: true, reason: "stop_after" }, stateOptions);
+        lines.push("", `stopped ${name} (--stop-after)`);
+      }
+    }
+    return { exitCode: 0, handled: true, stdout: `${lines.join("\n")}\n` };
+  } finally {
+    database.close();
+  }
+}
+
+function statePathOptions(options: { cwd?: string; env?: NodeJS.ProcessEnv }): { cwd?: string; env?: NodeJS.ProcessEnv } {
+  return { cwd: options.cwd, env: options.env };
+}
+
+function resolveExistingDirectory(path: string, label: string): string {
+  const directory = resolve(expandUserPath(path));
+  if (!existsSync(directory) || !statSync(directory).isDirectory()) {
+    throw new Error(`${label} does not exist or is not a directory: ${directory}`);
+  }
+  return directory;
+}
+
+function expandUserPath(path: string): string {
+  if (path === "~") {
+    return homedir();
+  }
+  if (path.startsWith("~/")) {
+    return join(homedir(), path.slice(2));
+  }
+  return path;
+}
+
+function initialLegacyStatus(task: string | null, options: { now?: () => Date }): Record<string, unknown> {
+  return {
+    blocker: null,
+    current_task: task ?? "Start worker Codex session.",
+    last_update: nowIsoSeconds(options),
+    next_action: "Wait for manager instruction or begin assigned task.",
+    state: "waiting",
+  };
+}
+
+function insertStatusSync(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  options: {
+    blocker: unknown;
+    currentTask: unknown;
+    nextAction: unknown;
+    state: unknown;
+    timestamp: string;
+    workerId: string;
+  },
+): void {
+  database.prepare(`
+    insert into statuses(worker_id, state, current_task, next_action, blocker, created_at)
+    values (?, ?, ?, ?, ?, ?)
+  `).run(
+    options.workerId,
+    stringOrNull(options.state) ?? "unknown",
+    stringOrNull(options.currentTask),
+    stringOrNull(options.nextAction),
+    stringOrNull(options.blocker),
+    options.timestamp,
+  );
+}
+
+function writeLegacyWorkerContract(
+  name: string,
+  task: string | null,
+  identityToken: string,
+  options: { cwd?: string; env?: NodeJS.ProcessEnv },
+): string {
+  const path = join(workerDir(name, options), "contract.txt");
+  writeFileSync(path, legacyWorkerContract(name, task, identityToken, options));
+  return path;
+}
+
+function legacyWorkerContract(
+  name: string,
+  task: string | null,
+  identityToken: string,
+  options: { cwd?: string; env?: NodeJS.ProcessEnv },
+): string {
+  const taskText = task ?? "Wait for a task from the manager.";
+  return `You are a worker Codex session supervised by a manager Codex session.
+
+Task:
+${taskText}
+
+Worker identity token:
+${identityToken}
+
+Keep this token unchanged. It lets workerctl verify that task-scoped manager
+commands are targeting the intended worker session.
+
+Report status whenever you start a new phase, become blocked, begin long-running
+verification, or finish. Use Agent Conveyor as the primary status path:
+
+conveyor update-status ${name} \\
+  --state planning \\
+  --current-task "short description" \\
+  --next-action "short description"
+
+Allowed state values:
+planning, editing, running_tests, blocked, waiting, done, unknown
+
+If you are blocked, include --blocker:
+
+conveyor update-status ${name} \\
+  --state blocked \\
+  --current-task "short description" \\
+  --next-action "wait for direction" \\
+  --blocker "what is blocking progress"
+
+workerctl also exports this compatibility file for existing tooling:
+${statusPath(name, options)}
+
+Dispatcher inbox:
+- If this worker is registered without a tmux session, manager nudges are
+  pull-required dispatcher signals. Poll for them with:
+
+  conveyor worker-inbox <task-name> --consume-next --wait --timeout 60 --json
+
+- Keep polling this inbox through the bounded manager loop until there are no
+  items left or the loop reaches max_iterations. The manager is responsible for
+  queueing only policy-approved continuation items.
+
+- Treat a consumed inbox item as the next manager instruction, then update
+  status with conveyor. Each consumed item records dispatch_inbox_consumed
+  telemetry so the dispatcher-to-session handoff is auditable.
+
+Compatibility JSON shape:
+{
+  "state": "planning | editing | running_tests | blocked | waiting | done",
+  "current_task": "short description",
+  "last_update": "ISO-8601 timestamp",
+  "next_action": "short description",
+  "blocker": null
+}
+
+Do not perform destructive git actions unless the user explicitly asks.
+If you are blocked or need direction, set state to blocked and explain the blocker.
+`;
+}
+
+function waitLegacyReady(
+  name: string,
+  options: {
+    acceptTrust: boolean;
+    runtimeOptions: TypescriptRuntimeOptions;
+    stateOptions: { cwd?: string; env?: NodeJS.ProcessEnv };
+    timeoutSeconds: number;
+    tmuxRunner: TmuxRunner;
+  },
+): Record<string, unknown> {
+  let trustAccepted = false;
+  let lastState = "starting";
+  let lastReason = "waiting for terminal output";
+  const attempts = Math.max(1, options.timeoutSeconds);
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    if (!sessionExists(name, options.tmuxRunner)) {
+      return {
+        reason: "tmux session exited during startup",
+        startup: "exited",
+        trust_accepted: trustAccepted,
+      };
+    }
+    const output = captureTmuxTargetWithRunner(tmuxSession(name), 80, options.tmuxRunner);
+    const [startup, reason] = classifyStartupOutput(output);
+    lastState = startup;
+    lastReason = reason;
+    if (lastState === "needs_trust" && options.acceptTrust && !trustAccepted) {
+      sendEnterToTmuxSessionWithRunner(tmuxSession(name), options.tmuxRunner);
+      trustAccepted = true;
+      appendCompatibilityEvent(name, "accept_trust", {}, options.stateOptions);
+      sleepWithRuntimeOptions(options.runtimeOptions, 1000);
+      continue;
+    }
+    if (lastState === "ready" || lastState === "working" || lastState === "needs_trust" || lastState === "error") {
+      break;
+    }
+    sleepWithRuntimeOptions(options.runtimeOptions, 1000);
+  }
+  return {
+    reason: lastReason,
+    recommended_action: lastState === "needs_trust" && !options.acceptTrust
+      ? "rerun with --accept-trust if this directory is trusted"
+      : lastState === "starting"
+        ? "inspect terminal capture"
+        : "none",
+    startup: lastState,
+    timeout_seconds: options.timeoutSeconds,
+    trust_accepted: trustAccepted,
+  };
+}
+
+function waitForLegacyStatusUpdate(
+  name: string,
+  options: {
+    initialCurrentTask: string | null;
+    initialLastUpdate: string | null;
+    parsed: ParsedRuntimeArgs;
+    runtimeOptions: TypescriptRuntimeOptions;
+    stateOptions: { cwd?: string; env?: NodeJS.ProcessEnv };
+    timeoutSeconds: number;
+    tmuxRunner: TmuxRunner;
+  },
+): { ok: boolean; reason: string; status: Record<string, unknown> } {
+  let lastStatus = loadJsonSync<Record<string, unknown>>(statusPath(name, options.stateOptions), {});
+  const attempts = Math.max(1, options.timeoutSeconds);
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    lastStatus = loadJsonSync<Record<string, unknown>>(statusPath(name, options.stateOptions), {});
+    if (
+      lastStatus.last_update !== options.initialLastUpdate
+      || lastStatus.current_task !== options.initialCurrentTask
+      || ["planning", "editing", "running_tests", "blocked", "done"].includes(stringOrNull(lastStatus.state) ?? "")
+    ) {
+      appendCompatibilityEvent(name, "verify", {
+        ok: true,
+        reason: "status update observed",
+        state: lastStatus.state,
+      }, options.stateOptions);
+      return { ok: true, reason: "status update observed", status: lastStatus };
+    }
+    if (sessionExists(name, options.tmuxRunner)) {
+      try {
+        captureTmuxTargetWithRunner(tmuxSession(name), 80, options.tmuxRunner);
+      } catch (error) {
+        appendCompatibilityEvent(name, "capture_failed", {
+          error: error instanceof Error ? error.message : String(error),
+          phase: "wait_for_status_update",
+        }, options.stateOptions);
+      }
+    }
+    sleepWithRuntimeOptions(options.runtimeOptions, 1000);
+  }
+  appendCompatibilityEvent(name, "verify", {
+    ok: false,
+    reason: "timed out waiting for status update",
+    timeout_seconds: options.timeoutSeconds,
+  }, options.stateOptions);
+  return { ok: false, reason: "timed out waiting for status update", status: lastStatus };
+}
+
+function openLegacyWorkerWindow(
+  name: string,
+  options: {
+    force: boolean;
+    parsed: ParsedRuntimeArgs;
+    runtimeOptions: TypescriptRuntimeOptions;
+    stateOptions: { cwd?: string; env?: NodeJS.ProcessEnv };
+    terminal: TerminalChoice;
+    tmuxRunner: TmuxRunner;
+  },
+): { terminal: Exclude<TerminalChoice, "auto"> } {
+  if ((options.runtimeOptions.platform ?? process.platform) !== "darwin") {
+    throw new Error("conveyor open is currently implemented for macOS only.");
+  }
+  if (!sessionExists(name, options.tmuxRunner)) {
+    throw new Error(`tmux session is not running for worker ${name}: ${tmuxSession(name)}`);
+  }
+  const priorOpen = lastOpenCompatibilityEvent(name, options.stateOptions);
+  if (priorOpen && !options.force) {
+    const time = typeof priorOpen.time === "string" ? priorOpen.time : "unknown time";
+    throw new Error(`Worker ${name} already had a terminal launch at ${time}.`);
+  }
+  const terminal = resolveTerminal(options.terminal);
+  appendCompatibilityEvent(name, "open_attempt", { forced: options.force, terminal }, options.stateOptions);
+  runTerminalCommand(terminalOpenCommand(tmuxSession(name), terminal), options.runtimeOptions);
+  appendCompatibilityEvent(name, "open", { forced: options.force, terminal }, options.stateOptions);
+  return { terminal };
+}
+
+function legacyCliPathPrefix(): string {
+  return `PATH=${shellQuote(join(packageRootFromRuntimeModule(), "bin"))}:$PATH`;
+}
+
+function sleepWithRuntimeOptions(options: { sleepMilliseconds?: (milliseconds: number) => void }, milliseconds: number): void {
+  (options.sleepMilliseconds ?? sleepSync)(milliseconds);
+}
+
+function workerctlCli(): string {
+  const conveyor = join(packageRootFromRuntimeModule(), "bin", "conveyor");
+  return existsSync(conveyor) ? shellQuote(conveyor) : "conveyor";
+}
+
+function codexArgSuffix(codexArgs: string[]): string {
+  return codexArgs.length === 0 ? "" : ` -- ${codexArgs.map(shellQuote).join(" ")}`;
+}
+
+function legacyRawWorkerStartPrompt(sessionName: string, cwd: string, managerCodexArgs: string[]): string {
+  const workerctl = workerctlCli();
+  const managerSuffix = codexArgSuffix(managerCodexArgs);
+  return `You are a raw worker candidate running inside Agent Conveyor tmux session ${sessionName}.
+
+Current working directory: ${cwd}
+
+You are not registered as a worker yet.
+
+The supported manager/worker setup is session-based:
+
+1. Register this session as a worker after identifying the Codex process pid and
+   rollout JSONL:
+
+   ${workerctl} register-worker --name <worker-name> --pid <pid> --codex-session <rollout.jsonl> --cwd ${shellQuote(cwd)} --tmux-session ${sessionName}
+
+2. Create or select a task:
+
+   ${workerctl} tasks --create <task-name> --goal "<goal>"
+
+3. Start a manager:
+
+   ${workerctl} start-manager --name <manager-name> --cwd ${shellQuote(cwd)}${managerSuffix}
+
+4. Bind the sessions:
+
+   ${workerctl} bind --task <task-name> --worker <worker-name> --manager <manager-name>
+
+5. Configure manager supervision:
+
+   ${workerctl} manager-config <task-name> --questions
+
+6. After the task is bound and before editing files for the task, record your
+   acknowledgement:
+
+   ${workerctl} worker-ack <task-name> --from-stdin
+
+   The JSON should include goal_restatement, proposed_criteria,
+   expected_tools, open_questions, and ready_to_start. Proposed criteria should
+   separate must-have and follow-up criteria.
+
+Required fields:
+- worker name
+- manager name
+- task name
+- goal
+
+If any required field is missing, ask the user for it. Do not invent worker
+name, manager name, task name, or goal values unless the user explicitly asks
+you to choose them.
+
+If the user asks to see the manager or worker terminal for your task, run:
+
+${workerctl} open-manager <task-name>
+${workerctl} open-worker <task-name>
+`;
 }
 
 function nowIsoSeconds(options: { now?: () => Date } = {}): string {
@@ -7929,6 +8892,32 @@ function defaultTerminalRunner(args: string[]): { status: number; stderr?: strin
     stderr: result.stderr,
     stdout: result.stdout,
   };
+}
+
+function ensureRequiredTool(name: string, options: TypescriptRuntimeOptions): TypescriptRuntimeResult | null {
+  if (options.codexCommandResolver) {
+    return options.codexCommandResolver(name) ? null : lifecycleWorkerErrorResult(`Required tool not found on PATH: ${name}`);
+  }
+  const result = spawnSync("sh", ["-c", `command -v ${shellQuote(name)}`], {
+    encoding: "utf8",
+    env: { ...process.env, ...(options.env ?? {}) },
+  });
+  if (result.error || result.status !== 0) {
+    return lifecycleWorkerErrorResult(`Required tool not found on PATH: ${name}`);
+  }
+  return null;
+}
+
+function ensureTmuxAvailable(runner: TmuxRunner): TypescriptRuntimeResult | null {
+  const result = runner(["tmux", "-V"], { check: false });
+  if (result.status === 0) {
+    return null;
+  }
+  if (result.status === 127) {
+    return lifecycleWorkerErrorResult("Required tool not found on PATH: tmux");
+  }
+  const detail = (result.stderr || result.stdout || `exit code ${result.status}`).trim();
+  return lifecycleWorkerErrorResult(tmuxCommandFailureMessage(["tmux", "-V"], detail));
 }
 
 const CONTENT_KEYS = new Set(["content", "message", "output", "segment_text", "text"]);
