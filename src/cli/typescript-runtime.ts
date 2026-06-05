@@ -1,8 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { taskAuditSync } from "../runtime/audit.js";
@@ -44,8 +44,10 @@ import {
   readSessionMeta,
   sessionRow,
 } from "../runtime/codex-session.js";
-import { managerConfigSync, type ManagerConfigRecord } from "../runtime/manager-config.js";
+import { managerConfigPermissionAllowed, managerConfigSync, type ManagerConfigRecord } from "../runtime/manager-config.js";
 import {
+  canonicalManagerPermissionNames,
+  flattenManagerPermissions,
   normalizeManagerPermissions,
   type ManagerPermissionCategory,
   type ManagerPermissions,
@@ -177,6 +179,7 @@ type TypescriptRuntimeOptions = {
   now?: () => Date;
   platform?: NodeJS.Platform;
   sleepMilliseconds?: (milliseconds: number) => void;
+  stdin?: string;
   terminalRunner?: (args: string[]) => { status: number; stderr?: string; stdout?: string };
   tmuxRunner?: TmuxRunner;
 };
@@ -352,6 +355,36 @@ export function runTypescriptRuntimeCommand(options: TypescriptRuntimeOptions): 
     if (parsed.command === "dispatch") {
       return runDispatchCommand(parsed, options);
     }
+    if (parsed.command === "manager-config") {
+      return runManagerConfigCommand(parsed, options);
+    }
+    if (parsed.command === "manager-permission") {
+      return runManagerPermissionCommand(parsed, options);
+    }
+    if (parsed.command === "record-decision") {
+      return runRecordDecisionCommand(parsed, options);
+    }
+    if (parsed.command === "continuation") {
+      return runContinuationCommand(parsed, options);
+    }
+    if (parsed.command === "continuation-reviewer") {
+      return runContinuationReviewerCommand(parsed, options);
+    }
+    if (parsed.command === "handoff") {
+      return runHandoffCommand(parsed, options);
+    }
+    if (parsed.command === "epilogue") {
+      return runEpilogueCommand(parsed, options);
+    }
+    if (parsed.command === "request-worker-compact") {
+      return runRequestWorkerCompactCommand(parsed, options);
+    }
+    if (parsed.command === "compact-worker") {
+      return runCompactWorkerCommand(parsed, options);
+    }
+    if (parsed.command === "import-compat") {
+      return runImportCompatCommand(parsed, options);
+    }
     if (parsed.explicit) {
       return errorResult(`Unsupported TypeScript runtime command: ${parsed.command}`);
     }
@@ -371,12 +404,15 @@ interface ParsedRuntimeArgs {
     includeFullTranscripts: boolean;
     includeTranscripts: boolean;
     all: boolean;
+    action: string | null;
+    asRole: "all" | "manager" | "reviewer" | "worker";
     attempts: boolean;
     json: boolean;
     includeLegacy: boolean;
     redactIdentityToken: boolean;
     active: boolean;
     add: boolean;
+    apply: boolean;
     blocker: string | null;
     busyWaitSeconds: number;
     candidate: string | null;
@@ -386,15 +422,20 @@ interface ParsedRuntimeArgs {
     create: string | null;
     createRun: string | null;
     criterion: string | null;
+    cycleId: number | null;
     currentTask: string | null;
     currentIteration: number;
     currentIterationProvided: boolean;
+    compatibilityRoot: string | null;
     cwd: string | null;
     deferCriterion: number | null;
+    decision: string | null;
     diffOutput: string | null;
     dryRun: boolean;
     evidenceJson: string | null;
     evidenceType: string | null;
+    epilogueStatus: boolean;
+    epilogueStep: string | null;
     eventType: string | null;
     file: string | null;
     finishRun: string | null;
@@ -410,6 +451,7 @@ interface ParsedRuntimeArgs {
     metadataJson: string | null;
     names: string[];
     nextAction: string | null;
+    nextSteps: string[];
     output: string | null;
     path: string | null;
     pid: number | null;
@@ -420,7 +462,10 @@ interface ParsedRuntimeArgs {
     reference: string | null;
     rejectCriterion: number | null;
     reportOutput: string | null;
+    require: boolean;
+    requireHandoff: boolean;
     result: string | null;
+    review: boolean;
     sessionRole: "manager" | "worker" | null;
     sessionState: "active" | "all" | "gone" | null;
     show: string | null;
@@ -430,11 +475,13 @@ interface ParsedRuntimeArgs {
     statusState: string | null;
     statuses: string[];
     statusStaleSeconds: number;
+    submitRole: "manager" | "worker" | null;
     subtype: string | null;
     summary: string | null;
     source: string | null;
     proof: string | null;
     purpose: string | null;
+    questions: boolean;
     rationale: string | null;
     receiptOutput: string | null;
     taskName: string | null;
@@ -501,6 +548,10 @@ interface ParsedRuntimeArgs {
     managerReference: string[];
     managerRequireAcks: boolean;
     managerTool: string[];
+    promptOnly: boolean;
+    reviewerManagerSessionId: string | null;
+    reviewerCommand: string[];
+    reviewerSessionId: string | null;
     noDispatch: boolean;
     once: boolean;
     requiredPermission: string | null;
@@ -536,12 +587,15 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
     includeFullTranscripts: false,
     includeTranscripts: false,
     all: false,
+    action: null,
+    asRole: "all",
     attempts: false,
     json: false,
     includeLegacy: false,
     redactIdentityToken: false,
     active: false,
     add: false,
+    apply: false,
     blocker: null,
     busyWaitSeconds: DEFAULT_BUSY_WAIT_SECONDS,
     candidate: null,
@@ -551,15 +605,20 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
     create: null,
     createRun: null,
     criterion: null,
+    cycleId: null,
     currentTask: null,
     currentIteration: 1,
     currentIterationProvided: false,
+    compatibilityRoot: null,
     cwd: null,
     deferCriterion: null,
+    decision: null,
     diffOutput: null,
     dryRun: false,
     evidenceJson: null,
     evidenceType: null,
+    epilogueStatus: false,
+    epilogueStep: null,
     eventType: null,
     failureMode: null,
     file: null,
@@ -575,6 +634,7 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
     metadataJson: null,
     names: [],
     nextAction: null,
+    nextSteps: [],
     output: null,
     path: null,
     pid: null,
@@ -585,7 +645,10 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
     reference: null,
     rejectCriterion: null,
     reportOutput: null,
+    require: false,
+    requireHandoff: false,
     result: null,
+    review: false,
     sessionRole: null,
     sessionState: null,
     show: null,
@@ -595,11 +658,13 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
     statusState: null,
     statuses: [],
     statusStaleSeconds: DEFAULT_STATUS_STALE_SECONDS,
+    submitRole: null,
     subtype: null,
     summary: null,
     source: null,
     proof: null,
     purpose: null,
+    questions: false,
     rationale: null,
     receiptOutput: null,
     taskName: null,
@@ -666,6 +731,10 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
     managerReference: [],
     managerRequireAcks: false,
     managerTool: [],
+    promptOnly: false,
+    reviewerManagerSessionId: null,
+    reviewerCommand: [],
+    reviewerSessionId: null,
     noDispatch: false,
     once: false,
     requiredPermission: null,
@@ -732,10 +801,23 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
         && command !== "loop-templates"
         && command !== "ralph-loop-presets"
         && command !== "loop-triggers"
+        && command !== "manager-permission"
+        && command !== "continuation"
+        && command !== "epilogue"
       ) {
         return { command, enabled, error: "Unsupported TypeScript runtime option: --list", explicit, flags, passthroughArgs, task };
       }
       flags.list = true;
+    } else if (arg === "--include-payload") {
+      if (command !== "continuation") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --include-payload", explicit, flags, passthroughArgs, task };
+      }
+      flags.includeContent = true;
+    } else if (arg === "--questions") {
+      if (command !== "manager-config") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --questions", explicit, flags, passthroughArgs, task };
+      }
+      flags.questions = true;
     } else if (arg === "--include-legacy") {
       flags.includeLegacy = true;
     } else if (arg === "--redact-identity-token") {
@@ -750,6 +832,21 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       flags.includeFullTranscripts = true;
     } else if (arg === "--dry-run") {
       flags.dryRun = true;
+    } else if (arg === "--apply") {
+      if (command !== "import-compat") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --apply", explicit, flags, passthroughArgs, task };
+      }
+      flags.apply = true;
+    } else if (arg === "--clear") {
+      if (command !== "request-worker-compact" && command !== "compact-worker") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --clear", explicit, flags, passthroughArgs, task };
+      }
+      flags.force = true;
+    } else if (arg === "--prompt-only") {
+      if (command !== "request-worker-compact" && command !== "compact-worker") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --prompt-only", explicit, flags, passthroughArgs, task };
+      }
+      flags.promptOnly = true;
     } else if (arg === "--attempts") {
       if (command !== "commands") {
         return { command, enabled, error: "Unsupported TypeScript runtime option: --attempts", explicit, flags, passthroughArgs, task };
@@ -845,7 +942,7 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       }
       flags.stopWorker = true;
     } else if (arg === "--strict-decisions") {
-      if (command !== "finish-task" && command !== "stop-task") {
+      if (command !== "finish-task" && command !== "stop-task" && command !== "request-worker-compact") {
         return { command, enabled, error: "Unsupported TypeScript runtime option: --strict-decisions", explicit, flags, task };
       }
       flags.strictDecisions = true;
@@ -865,10 +962,24 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       }
       flags.requireCriteriaAudit = true;
     } else if (arg === "--require-acks") {
-      if (command !== "finish-task") {
+      if (command !== "finish-task" && command !== "manager-config") {
         return { command, enabled, error: "Unsupported TypeScript runtime option: --require-acks", explicit, flags, task };
       }
-      flags.requireAcks = true;
+      if (command === "manager-config") {
+        flags.managerRequireAcks = true;
+      } else {
+        flags.requireAcks = true;
+      }
+    } else if (arg === "--require-handoff") {
+      if (command !== "manager-permission") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --require-handoff", explicit, flags, task };
+      }
+      flags.requireHandoff = true;
+    } else if (arg === "--require") {
+      if (command !== "manager-permission") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --require", explicit, flags, task };
+      }
+      flags.require = true;
     } else if (arg === "--require-epilogue") {
       if (command !== "finish-task") {
         return { command, enabled, error: "Unsupported TypeScript runtime option: --require-epilogue", explicit, flags, task };
@@ -1019,6 +1130,16 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
     } else if (arg === "--metadata-json") {
       if (command !== "runs" && command !== "loop-evidence") {
         return { command, enabled, error: "Unsupported TypeScript runtime option: --metadata-json", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.metadataJson = value.value;
+      index += 1;
+    } else if (arg === "--payload-json") {
+      if (command !== "record-decision" && command !== "handoff") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --payload-json", explicit, flags, task };
       }
       const value = valueAfter(queue, index, arg);
       if (value.error) {
@@ -1196,10 +1317,41 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       flags.fromWorkerResponse = value.value;
       index += 1;
     } else if (arg === "--from-stdin") {
-      if (command !== "criteria-plan") {
+      if (command !== "criteria-plan" && command !== "continuation") {
         return { command, enabled, error: "Unsupported TypeScript runtime option: --from-stdin", explicit, flags, task };
       }
       flags.fromStdin = true;
+    } else if (arg === "--submit") {
+      if (command !== "continuation") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --submit", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      if (value.value !== "worker" && value.value !== "manager") {
+        return { command, enabled, error: "continuation --submit must be worker or manager", explicit, flags, task };
+      }
+      flags.submitRole = value.value;
+      index += 1;
+    } else if (arg === "--review") {
+      if (command !== "continuation") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --review", explicit, flags, task };
+      }
+      flags.review = true;
+    } else if (arg === "--as-role") {
+      if (command !== "continuation") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --as-role", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      if (value.value !== "all" && value.value !== "worker" && value.value !== "manager" && value.value !== "reviewer") {
+        return { command, enabled, error: "continuation --as-role must be all, worker, manager, or reviewer", explicit, flags, task };
+      }
+      flags.asRole = value.value;
+      index += 1;
     } else if (arg === "--tmux-session") {
       const value = valueAfter(queue, index, arg);
       if (value.error) {
@@ -1401,6 +1553,131 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       }
       flags.managerPermissionsJson = value.value;
       index += 1;
+    } else if (arg === "--objective") {
+      if (command !== "manager-config") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --objective", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.managerObjective = value.value;
+      index += 1;
+    } else if (arg === "--guideline") {
+      if (command !== "manager-config") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --guideline", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.managerGuideline.push(value.value);
+      index += 1;
+    } else if (arg === "--acceptance") {
+      if (command !== "manager-config") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --acceptance", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.managerAcceptance.push(value.value);
+      index += 1;
+    } else if (arg === "--permit") {
+      if (command !== "manager-config") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --permit", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.managerPermit.push(value.value);
+      index += 1;
+    } else if (arg === "--tool") {
+      if (command !== "manager-config") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --tool", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.managerTool.push(value.value);
+      index += 1;
+    } else if (arg === "--epilogue") {
+      if (command !== "manager-config") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --epilogue", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.managerEpilogue.push(value.value);
+      index += 1;
+    } else if (arg === "--nudge-on-completion") {
+      if (command !== "manager-config") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --nudge-on-completion", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.managerNudgeOnCompletion = value.value;
+      index += 1;
+    } else if (arg === "--allow-pr") {
+      if (command !== "manager-config") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --allow-pr", explicit, flags, task };
+      }
+      flags.managerAllowPr = true;
+    } else if (arg === "--allow-merge-green") {
+      if (command !== "manager-config") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --allow-merge-green", explicit, flags, task };
+      }
+      flags.managerAllowMergeGreen = true;
+    } else if (arg === "--allow-worker-compact-clear") {
+      if (command !== "manager-config") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --allow-worker-compact-clear", explicit, flags, task };
+      }
+      flags.managerAllowWorkerCompactClear = true;
+    } else if (arg === "--permissions-json") {
+      if (command !== "manager-config") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --permissions-json", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.managerPermissionsJson = value.value;
+      index += 1;
+    } else if (arg === "--next-step") {
+      if (command !== "handoff") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --next-step", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.nextSteps.push(value.value);
+      index += 1;
+    } else if (arg === "--root") {
+      if (command !== "import-compat") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --root", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.compatibilityRoot = value.value;
+      index += 1;
+    } else if (arg === "--step") {
+      if (command !== "epilogue") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --step", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.epilogueStep = value.value;
+      index += 1;
     } else if (arg === "--worker") {
       const value = valueAfter(queue, index, arg);
       if (value.error) {
@@ -1408,8 +1685,34 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       }
       flags.worker = value.value;
       index += 1;
+    } else if (arg === "--reviewer-session-id") {
+      if (command !== "continuation-reviewer") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --reviewer-session-id", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.reviewerSessionId = value.value;
+      index += 1;
+    } else if (arg === "--manager-session-id") {
+      if (command !== "continuation-reviewer") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --manager-session-id", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.reviewerManagerSessionId = value.value;
+      index += 1;
+    } else if (arg === "--reviewer-command") {
+      if (command !== "continuation-reviewer") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --reviewer-command", explicit, flags, task };
+      }
+      flags.reviewerCommand = queue.slice(index + 1);
+      index = queue.length;
     } else if (arg === "--reason") {
-      if (command !== "finish-task" && command !== "stop-task") {
+      if (command !== "finish-task" && command !== "stop-task" && command !== "record-decision" && command !== "compact-worker") {
         return { command, enabled, error: "Unsupported TypeScript runtime option: --reason", explicit, flags, task };
       }
       const value = valueAfter(queue, index, arg);
@@ -1426,6 +1729,8 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
         && command !== "enqueue-notify-manager"
         && command !== "enqueue-nudge-worker"
         && command !== "enqueue-continue-iteration"
+        && command !== "request-worker-compact"
+        && command !== "compact-worker"
       ) {
         return { command, enabled, error: "Unsupported TypeScript runtime option: --message", explicit, flags, task };
       }
@@ -1435,8 +1740,22 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       }
       flags.message = value.value;
       index += 1;
+    } else if (arg === "--cycle-id") {
+      if (command !== "record-decision" && command !== "compact-worker") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --cycle-id", explicit, flags, task };
+      }
+      const parsedValue = valueAfter(queue, index, arg);
+      if (parsedValue.error) {
+        return { command, enabled, error: parsedValue.error, explicit, flags, task };
+      }
+      const value = Number(parsedValue.value);
+      if (!Number.isInteger(value)) {
+        return { command, enabled, error: "--cycle-id must be an integer.", explicit, flags, task };
+      }
+      flags.cycleId = value;
+      index += 1;
     } else if (arg === "--decision-id") {
-      if (command !== "finish-task" && command !== "stop-task") {
+      if (command !== "finish-task" && command !== "stop-task" && command !== "request-worker-compact") {
         return { command, enabled, error: "Unsupported TypeScript runtime option: --decision-id", explicit, flags, task };
       }
       const parsedValue = valueAfter(queue, index, arg);
@@ -1448,6 +1767,20 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
         return { command, enabled, error: "--decision-id must be an integer.", explicit, flags, task };
       }
       flags.decisionId = value;
+      index += 1;
+    } else if (arg === "--timeout") {
+      if (command !== "continuation-reviewer") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --timeout", explicit, flags, task };
+      }
+      const parsedValue = valueAfter(queue, index, arg);
+      if (parsedValue.error) {
+        return { command, enabled, error: parsedValue.error, explicit, flags, task };
+      }
+      const value = Number(parsedValue.value);
+      if (!Number.isFinite(value) || value <= 0) {
+        return { command, enabled, error: "--timeout must be a positive number.", explicit, flags, task };
+      }
+      flags.timeoutSeconds = value;
       index += 1;
     } else if (arg === "--manager-decision-id") {
       if (command !== "enqueue-continue-iteration") {
@@ -1547,6 +1880,14 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
         return { command, enabled, error: parsedValue.error, explicit, flags, task };
       }
       const value = parsedValue.value;
+      if (command === "manager-config") {
+        if (value !== "light" && value !== "guided" && value !== "strict") {
+          return { command, enabled, error: `Unsupported manager mode: ${value}`, explicit, flags, task };
+        }
+        flags.managerMode = value;
+        index += 1;
+        continue;
+      }
       if (!isTranscriptCaptureMode(value)) {
         return { command, enabled, error: `Unsupported transcript capture mode: ${value}`, explicit, flags, task };
       }
@@ -1593,6 +1934,10 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       }
       index += 1;
     } else if (arg === "--status") {
+      if (command === "epilogue") {
+        flags.epilogueStatus = true;
+        continue;
+      }
       if (command !== "criteria" && command !== "runs" && command !== "loop-evidence") {
         return { command, enabled, error: "Unsupported TypeScript runtime option: --status", explicit, flags, task };
       }
@@ -1657,6 +2002,15 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       flags.output = value.value;
       index += 1;
     } else if (arg === "--reference" || arg === "--candidate" || arg === "--diff-output" || arg === "--report-output") {
+      if (command === "manager-config" && arg === "--reference") {
+        const value = valueAfter(queue, index, arg);
+        if (value.error) {
+          return { command, enabled, error: value.error, explicit, flags, task };
+        }
+        flags.managerReference.push(value.value);
+        index += 1;
+        continue;
+      }
       if (command !== "loop-evidence") {
         return { command, enabled, error: `Unsupported TypeScript runtime option: ${arg}`, explicit, flags, task };
       }
@@ -1730,6 +2084,9 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
         && command !== "enqueue-nudge-worker"
         && command !== "enqueue-continue-iteration"
         && command !== "loop-evidence"
+        && command !== "continuation"
+        && command !== "continuation-reviewer"
+        && command !== "epilogue"
       ) {
         return { command, enabled, error: "Unsupported TypeScript runtime option: --correlation-id", explicit, flags, task };
       }
@@ -2035,6 +2392,10 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       flags.subtype = arg;
     } else if (task === null) {
       task = arg;
+    } else if (command === "manager-permission" && flags.action === null) {
+      flags.action = arg;
+    } else if (command === "record-decision" && flags.decision === null) {
+      flags.decision = arg;
     } else if (command === "start") {
       passthroughArgs.push(arg);
     } else {
@@ -4475,6 +4836,7 @@ function runLifecycleTaskCommand(
     }
     const managerDecision = assessManagerDecisionSync(database, {
       decisionId: parsed.flags.decisionId,
+      now: nowIsoSeconds(options),
       taskId: task.id,
     });
     const decisionError = strictManagerDecisionError(commandType, managerDecision, parsed.flags.strictDecisions);
@@ -6854,6 +7216,2131 @@ function runDispatchCommand(
   };
 }
 
+function runManagerConfigCommand(
+  parsed: ParsedRuntimeArgs,
+  options: { cwd?: string; env?: NodeJS.ProcessEnv; now?: () => Date },
+): TypescriptRuntimeResult {
+  const unsupported = unsupportedManagerConfigOptions(parsed);
+  if (unsupported) {
+    return unsupportedRuntimeResult(parsed, unsupported);
+  }
+  const taskName = requireTask(parsed);
+  const database = openRuntimeDatabase(parsed, options);
+  try {
+    const task = taskRowForPair(database, taskName);
+    if (task === null) {
+      throw new Error(`Unknown task: ${taskName}`);
+    }
+    const existing = managerConfigSync(database, task.id);
+    if (parsed.flags.questions) {
+      return jsonResult({
+        fallback_collection: "conveyor manager-config --interactive",
+        questions: managerConfigQuestions(existing),
+        recommended_collection: "manager_codex_chat",
+        task: { id: task.id, name: task.name },
+      });
+    }
+    const mutating = managerConfigMutationRequested(parsed) || existing === null;
+    let permissionWarnings: string[] = [];
+    if (mutating) {
+      permissionWarnings = managerPermissionWarnings(parseJsonObjectFlag(parsed.flags.managerPermissionsJson, "--permissions-json"));
+      const config = upsertManagerConfigFromParsed(database, {
+        existing,
+        parsed,
+        taskId: task.id,
+        timestamp: nowIsoSeconds(options),
+      });
+      insertEventSync(database, {
+        payload: {
+          acceptance_count: parsed.flags.managerAcceptance.length,
+          epilogue_count: config.epilogues.length,
+          guideline_count: parsed.flags.managerGuideline.length,
+          nudge_on_completion: config.nudge_on_completion,
+          permission_warnings: permissionWarnings,
+          reference_count: parsed.flags.managerReference.length,
+          require_acks: config.require_acks,
+          supervision_mode: config.supervision_mode,
+          tool_count: config.tools.length,
+        },
+        taskId: task.id,
+        type: "manager_config_recorded",
+      });
+    }
+    const config = managerConfigSync(database, task.id);
+    if (config === null) {
+      throw new Error(`manager config was not recorded for task ${task.id}`);
+    }
+    return jsonResult(permissionWarnings.length > 0 ? { ...config, warnings: permissionWarnings } : config);
+  } finally {
+    database.close();
+  }
+}
+
+function runManagerPermissionCommand(
+  parsed: ParsedRuntimeArgs,
+  options: { cwd?: string; env?: NodeJS.ProcessEnv; now?: () => Date },
+): TypescriptRuntimeResult {
+  const unsupported = unsupportedManagerPermissionOptions(parsed);
+  if (unsupported) {
+    return unsupportedRuntimeResult(parsed, unsupported);
+  }
+  const taskName = requireTask(parsed);
+  const action = parsed.flags.action;
+  if (action === null) {
+    throw new Error("manager-permission requires an action or category.");
+  }
+  const database = openRuntimeDatabase(parsed, options);
+  try {
+    const task = taskRowForPair(database, taskName);
+    if (task === null) {
+      throw new Error(`Unknown task: ${taskName}`);
+    }
+    const config = managerConfigSync(database, task.id);
+    const handoff = latestWorkerHandoffSync(database, task.id);
+    const reasons: string[] = [];
+    let allowed = false;
+    let listedPermissions: string[] | null = null;
+    if (config === null) {
+      reasons.push("missing_manager_config");
+    } else if (parsed.flags.list) {
+      if (!isManagerPermissionCategoryName(action)) {
+        throw new Error(`--list expects a permission category, got: ${action}`);
+      }
+      listedPermissions = [...config.permissions[action]];
+      allowed = true;
+    } else {
+      assertKnownManagerPermissionAction(action);
+      allowed = managerConfigPermissionAllowed(config, action);
+      if (!allowed) {
+        reasons.push("permission_not_enabled");
+      }
+    }
+    if (!parsed.flags.list && parsed.flags.requireHandoff && handoff === null) {
+      allowed = false;
+      reasons.push("missing_worker_handoff");
+    }
+    const result = {
+      action,
+      allowed,
+      config,
+      handoff_id: handoff?.id ?? null,
+      listed_permissions: listedPermissions,
+      reasons,
+      require_handoff: parsed.flags.requireHandoff,
+      task: { id: task.id, name: task.name },
+    };
+    insertEventSync(database, {
+      payload: result,
+      taskId: task.id,
+      type: "manager_permission_checked",
+    });
+    emitTelemetrySync(database, {
+      actor: "manager",
+      attributes: {
+        allowed,
+        reasons,
+        require_handoff: parsed.flags.requireHandoff,
+      },
+      correlation: { action, handoff_id: result.handoff_id },
+      eventType: "manager_permission_checked",
+      severity: allowed ? "info" : "warning",
+      summary: `Checked manager permission ${action}.`,
+      taskId: task.id,
+      timestamp: nowIsoSeconds(options),
+    });
+    return {
+      exitCode: parsed.flags.require && !allowed ? 1 : 0,
+      handled: true,
+      stdout: `${JSON.stringify(sortJson(result), null, 2)}\n`,
+    };
+  } finally {
+    database.close();
+  }
+}
+
+function runRecordDecisionCommand(
+  parsed: ParsedRuntimeArgs,
+  options: { cwd?: string; env?: NodeJS.ProcessEnv; now?: () => Date },
+): TypescriptRuntimeResult {
+  const unsupported = unsupportedRecordDecisionOptions(parsed);
+  if (unsupported) {
+    return unsupportedRuntimeResult(parsed, unsupported);
+  }
+  const taskName = requireTask(parsed);
+  const decision = parsed.flags.decision;
+  if (decision === null) {
+    throw new Error("record-decision requires a decision.");
+  }
+  if (!MANAGER_DECISIONS.has(decision)) {
+    throw new Error(`unknown manager decision: ${decision}`);
+  }
+  if (parsed.flags.reason === null) {
+    throw new Error("record-decision requires --reason.");
+  }
+  const payload = parseJsonObjectFlag(parsed.flags.metadataJson, "--payload-json") ?? {};
+  const database = openRuntimeDatabase(parsed, options);
+  try {
+    const task = taskRowForPair(database, taskName);
+    if (task === null) {
+      throw new Error(`Unknown task: ${taskName}`);
+    }
+    const manager = activeManagerForTaskSync(database, task.id);
+    const timestamp = nowIsoSeconds(options);
+    const insert = database.prepare(`
+      insert into manager_decisions(
+        task_id, manager_id, manager_cycle_id, decision, reason, created_at, payload_json
+      )
+      values (?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      task.id,
+      manager?.id ?? null,
+      parsed.flags.cycleId,
+      decision,
+      parsed.flags.reason,
+      timestamp,
+      stableJson(payload),
+    );
+    const decisionId = Number(insert.lastInsertRowid);
+    insertEventSync(database, {
+      managerId: manager?.id ?? null,
+      payload: {
+        decision,
+        decision_id: decisionId,
+        manager_cycle_id: parsed.flags.cycleId,
+        reason: parsed.flags.reason,
+      },
+      taskId: task.id,
+      type: "manager_decision_recorded",
+    });
+    return jsonResult({
+      created_at: timestamp,
+      decision,
+      id: decisionId,
+      manager_cycle_id: parsed.flags.cycleId,
+      manager_id: manager?.id ?? null,
+      payload,
+      reason: parsed.flags.reason,
+      task: { id: task.id, name: task.name },
+      task_id: task.id,
+    });
+  } finally {
+    database.close();
+  }
+}
+
+function runContinuationCommand(
+  parsed: ParsedRuntimeArgs,
+  options: { cwd?: string; env?: NodeJS.ProcessEnv; now?: () => Date; stdin?: string },
+): TypescriptRuntimeResult {
+  const unsupported = unsupportedContinuationOptions(parsed);
+  if (unsupported) {
+    return unsupportedRuntimeResult(parsed, unsupported);
+  }
+  const taskName = requireTask(parsed);
+  const operations = [
+    parsed.flags.submitRole !== null,
+    parsed.flags.review,
+    parsed.flags.list,
+  ].filter(Boolean).length;
+  if (operations !== 1) {
+    throw new Error("continuation requires exactly one of --submit, --review, or --list");
+  }
+  const database = openRuntimeDatabase(parsed, options);
+  try {
+    const task = taskRowForPair(database, taskName);
+    if (task === null) {
+      throw new Error(`Unknown task: ${taskName}`);
+    }
+    const config = managerConfigSync(database, task.id);
+    if (parsed.flags.list) {
+      const rows = taskContinuationRowsSync(database, {
+        correlationId: parsed.flags.correlationId,
+        taskId: task.id,
+      });
+      return jsonResult({
+        continuations: redactContinuationPayloads(rows, {
+          asRole: parsed.flags.asRole,
+          correlationId: parsed.flags.correlationId,
+          includePayload: parsed.flags.includeContent,
+        }),
+        reviews: continuationReviewRowsSync(database, task.id),
+        task: { id: task.id, name: task.name },
+      });
+    }
+
+    if (parsed.flags.submitRole !== null) {
+      const proposer = parsed.flags.submitRole;
+      const payload = continuationPayloadFromStdin(parsed, options);
+      let correlationId = parsed.flags.correlationId;
+      if (proposer === "worker") {
+        correlationId ??= `continuation-${randomUUID()}`;
+      } else {
+        if (correlationId === null) {
+          throw new Error("manager continuation requires --correlation-id from the worker proposal turn");
+        }
+        if (latestTaskContinuationSync(database, {
+          correlationId,
+          proposer: "worker",
+          taskId: task.id,
+        }) === null) {
+          throw new Error("manager continuation requires an existing worker continuation for the same correlation_id");
+        }
+      }
+      const continuationId = insertTaskContinuationSync(database, {
+        correlationId,
+        payload,
+        proposer,
+        taskId: task.id,
+        timestamp: nowIsoSeconds(options),
+      });
+      insertEventSync(database, {
+        actor: proposer,
+        correlationId,
+        payload: {
+          continuation_id: continuationId,
+          payload_keys: Object.keys(payload).sort(),
+          proposer,
+        },
+        taskId: task.id,
+        type: "task_continuation_recorded",
+      });
+      const row = latestTaskContinuationSync(database, { correlationId, proposer, taskId: task.id });
+      if (row === null) {
+        throw new Error("task continuation was not recorded");
+      }
+      return jsonResult(row);
+    }
+
+    const correlationId = parsed.flags.correlationId;
+    if (correlationId === null) {
+      throw new Error("continuation --review requires --correlation-id");
+    }
+    if (!managerConfigPermissionAllowed(config, "context.spawn_reviewer")) {
+      throw new Error("continuation review requires manager permission context.spawn_reviewer");
+    }
+    const pair = continuationPairSync(database, { correlationId, taskId: task.id });
+    const payload = validateContinuationReviewPayload(continuationPayloadFromStdin(parsed, options));
+    const output = recordContinuationReviewSync(database, {
+      config,
+      correlationId,
+      manager: pair.manager,
+      payload,
+      task,
+      timestamp: nowIsoSeconds(options),
+      worker: pair.worker,
+    });
+    return jsonResult(output);
+  } finally {
+    database.close();
+  }
+}
+
+function runContinuationReviewerCommand(
+  parsed: ParsedRuntimeArgs,
+  options: { cwd?: string; env?: NodeJS.ProcessEnv; now?: () => Date },
+): TypescriptRuntimeResult {
+  const taskName = requireTask(parsed);
+  const correlationId = parsed.flags.correlationId;
+  if (correlationId === null) {
+    throw new Error("continuation-reviewer requires --correlation-id");
+  }
+  if (parsed.flags.reviewerSessionId === null) {
+    throw new Error("continuation-reviewer requires --reviewer-session-id");
+  }
+  if (parsed.flags.reviewerManagerSessionId === null) {
+    throw new Error("continuation-reviewer requires --manager-session-id");
+  }
+  if (parsed.flags.reviewerSessionId === parsed.flags.reviewerManagerSessionId) {
+    throw new Error("reviewer subagent session must be distinct from manager session");
+  }
+  const database = openRuntimeDatabase(parsed, options);
+  try {
+    const task = taskRowForPair(database, taskName);
+    if (task === null) {
+      throw new Error(`Unknown task: ${taskName}`);
+    }
+    const config = managerConfigSync(database, task.id);
+    if (!managerConfigPermissionAllowed(config, "context.spawn_reviewer")) {
+      throw new Error("continuation reviewer requires manager permission context.spawn_reviewer");
+    }
+    const pair = continuationPairSync(database, { correlationId, taskId: task.id });
+    const context = continuationReviewerContextSync(database, {
+      config,
+      correlationId,
+      manager: pair.manager,
+      task,
+      worker: pair.worker,
+    });
+    const reviewerCommand = parsed.flags.reviewerCommand[0] === "--"
+      ? parsed.flags.reviewerCommand.slice(1)
+      : parsed.flags.reviewerCommand;
+    if (parsed.flags.dryRun) {
+      return jsonResult({ context, reviewer_command: reviewerCommand });
+    }
+    if (reviewerCommand.length === 0) {
+      throw new Error("continuation-reviewer requires --reviewer-command unless --dry-run is used");
+    }
+    const runner = reviewerCommand[0] ?? "";
+    const { commandResult, sandbox } = runContinuationReviewerProcess({
+      context,
+      reviewerCommand,
+      timeoutSeconds: parsed.flags.timeoutSeconds,
+    });
+    const commandResultWithRunner = {
+      ...commandResult,
+      runner_arg_count: reviewerCommand.length,
+    };
+    let payload: Record<string, unknown>;
+    if (commandResult.error === null) {
+      try {
+        const raw = JSON.parse(commandResult.stdout);
+        if (!isPlainRecord(raw)) {
+          throw new Error("reviewer output must be a JSON object");
+        }
+        payload = validateContinuationReviewPayload({
+          ...raw,
+          subagent_run: {
+            ...(isPlainRecord(raw.subagent_run) ? raw.subagent_run : {}),
+            allowed_context: context.allowed_context,
+            duration_ms: commandResult.duration_ms,
+            manager_rollout_access: false,
+            manager_session_id: parsed.flags.reviewerManagerSessionId,
+            returncode: commandResult.returncode,
+            reviewer_session_id: parsed.flags.reviewerSessionId,
+            runner,
+            runner_arg_count: reviewerCommand.length,
+            sandbox,
+            status: "succeeded",
+          },
+        });
+      } catch (error) {
+        payload = validateContinuationReviewPayload(reviewerFailurePayload({
+          commandResult: {
+            ...commandResultWithRunner,
+            error: error instanceof Error ? error.message : String(error),
+          },
+          managerSessionId: parsed.flags.reviewerManagerSessionId,
+          reviewerSessionId: parsed.flags.reviewerSessionId,
+          runner,
+          sandbox,
+        }));
+      }
+    } else {
+      payload = validateContinuationReviewPayload(reviewerFailurePayload({
+        commandResult: commandResultWithRunner,
+        managerSessionId: parsed.flags.reviewerManagerSessionId,
+        reviewerSessionId: parsed.flags.reviewerSessionId,
+        runner,
+        sandbox,
+      }));
+    }
+    return jsonResult(recordContinuationReviewSync(database, {
+      config,
+      correlationId,
+      manager: pair.manager,
+      payload,
+      task,
+      timestamp: nowIsoSeconds(options),
+      worker: pair.worker,
+    }));
+  } finally {
+    database.close();
+  }
+}
+
+function runHandoffCommand(
+  parsed: ParsedRuntimeArgs,
+  options: { cwd?: string; env?: NodeJS.ProcessEnv; now?: () => Date },
+): TypescriptRuntimeResult {
+  const taskName = requireTask(parsed);
+  if (parsed.flags.summary === null) {
+    throw new Error("handoff requires --summary.");
+  }
+  const payload = parseJsonObjectFlag(parsed.flags.metadataJson, "--payload-json") ?? {};
+  const database = openRuntimeDatabase(parsed, options);
+  try {
+    const task = taskRowForPair(database, taskName);
+    if (task === null) {
+      throw new Error(`Unknown task: ${taskName}`);
+    }
+    let workerSessionId: string | null = null;
+    try {
+      workerSessionId = activeBindingForTaskSync(database, task.name).worker_session_id;
+    } catch {
+      workerSessionId = null;
+    }
+    const timestamp = nowIsoSeconds(options);
+    const insert = database.prepare(`
+      insert into worker_handoffs(
+        task_id, worker_session_id, summary, next_steps_json, payload_json, created_at
+      )
+      values (?, ?, ?, ?, ?, ?)
+    `).run(
+      task.id,
+      workerSessionId,
+      parsed.flags.summary,
+      stableJson(parsed.flags.nextSteps),
+      stableJson(payload),
+      timestamp,
+    );
+    const handoffId = Number(insert.lastInsertRowid);
+    emitTelemetrySync(database, {
+      actor: "worker",
+      attributes: {
+        next_step_count: parsed.flags.nextSteps.length,
+        payload_keys: Object.keys(payload).sort(),
+        summary_length: parsed.flags.summary.length,
+      },
+      correlation: { handoff_id: handoffId, worker_session_id: workerSessionId },
+      eventType: "worker_handoff_recorded",
+      severity: "info",
+      summary: "Recorded worker handoff.",
+      taskId: task.id,
+      timestamp,
+    });
+    insertEventSync(database, {
+      payload: {
+        handoff_id: handoffId,
+        next_step_count: parsed.flags.nextSteps.length,
+        worker_session_id: workerSessionId,
+      },
+      taskId: task.id,
+      type: "worker_handoff_recorded",
+    });
+    const handoff = latestWorkerHandoffFullSync(database, task.id);
+    if (handoff === null) {
+      throw new Error("worker handoff was not recorded");
+    }
+    return jsonResult(handoff);
+  } finally {
+    database.close();
+  }
+}
+
+function runEpilogueCommand(
+  parsed: ParsedRuntimeArgs,
+  options: { cwd?: string; env?: NodeJS.ProcessEnv; now?: () => Date },
+): TypescriptRuntimeResult {
+  const taskName = requireTask(parsed);
+  if (!parsed.flags.list && !parsed.flags.epilogueStatus && parsed.flags.epilogueStep === null) {
+    throw new Error("epilogue requires --list, --status, or --step");
+  }
+  const database = openRuntimeDatabase(parsed, options);
+  try {
+    const task = taskRowForPair(database, taskName);
+    if (task === null) {
+      throw new Error(`Unknown task: ${taskName}`);
+    }
+    const config = managerConfigSync(database, task.id);
+    const configuredSteps = cleanPairEpilogueSteps(config?.epilogues ?? []);
+    if (parsed.flags.epilogueStep !== null) {
+      const step = parsed.flags.epilogueStep;
+      if (!configuredSteps.includes(step)) {
+        throw new Error(`epilogue step ${JSON.stringify(step)} is not configured for task ${task.name}`);
+      }
+      const correlationId = parsed.flags.correlationId ?? `epilogue-${randomUUID()}`;
+      const stepResult = runEpilogueStepSync(database, { config, step, task });
+      const timestamp = nowIsoSeconds(options);
+      const runId = insertEpilogueRunSync(database, {
+        correlationId,
+        error: stepResult.error,
+        result: stepResult.result,
+        state: stepResult.state,
+        stepName: step,
+        taskId: task.id,
+        timestamp,
+      });
+      insertEventSync(database, {
+        correlationId,
+        payload: {
+          epilogue_run_id: runId,
+          state: stepResult.state,
+          step_name: step,
+        },
+        taskId: task.id,
+        type: "epilogue_step_recorded",
+      });
+    }
+    const payload = {
+      configured_steps: configuredSteps,
+      runs: epilogueRunsSync(database, task.id),
+      status: epilogueStatusSync(database, { requiredSteps: configuredSteps, taskId: task.id }),
+      task: { id: task.id, name: task.name },
+    };
+    if (parsed.flags.json || parsed.flags.epilogueStatus || parsed.flags.list) {
+      return jsonResult(payload);
+    }
+    return {
+      exitCode: 0,
+      handled: true,
+      stdout: `epilogue ${parsed.flags.epilogueStep}: ${JSON.stringify(payload.status.steps)}\n`,
+    };
+  } finally {
+    database.close();
+  }
+}
+
+function runRequestWorkerCompactCommand(
+  parsed: ParsedRuntimeArgs,
+  options: { cwd?: string; env?: NodeJS.ProcessEnv; now?: () => Date; sleepMilliseconds?: (milliseconds: number) => void; tmuxRunner?: TmuxRunner },
+): TypescriptRuntimeResult {
+  const taskName = requireTask(parsed);
+  const database = openRuntimeDatabase(parsed, options);
+  try {
+    const task = taskRowForPair(database, taskName);
+    if (task === null) {
+      throw new Error(`Unknown task: ${taskName}`);
+    }
+    const binding = activeBindingForTaskSync(database, task.name);
+    const config = managerConfigSync(database, task.id);
+    const handoff = latestWorkerHandoffFullSync(database, task.id);
+    const manager = activeManagerForTaskSync(database, task.id);
+    const decisionCheck = assessManagerDecisionSync(database, {
+      allowedDecisions: ["nudge"],
+      decisionId: parsed.flags.decisionId,
+      now: nowIsoSeconds(options),
+      taskId: task.id,
+    });
+    const permissionReasons: string[] = [];
+    let permissionAllowed = managerConfigPermissionAllowed(config, "worker_compact_clear");
+    if (config === null) {
+      permissionReasons.push("missing_manager_config");
+    } else if (!permissionAllowed) {
+      permissionReasons.push("permission_not_enabled");
+    }
+    if (handoff === null) {
+      permissionAllowed = false;
+      permissionReasons.push("missing_worker_handoff");
+    }
+    const permissionCheck = {
+      action: "worker_compact_clear",
+      allowed: permissionAllowed,
+      handoff_id: handoff?.id ?? null,
+      reasons: permissionReasons,
+    };
+    insertEventSync(database, {
+      payload: {
+        ...permissionCheck,
+        source: "request_worker_compact",
+      },
+      taskId: task.id,
+      type: "manager_permission_checked",
+    });
+    emitTelemetrySync(database, {
+      actor: "manager",
+      attributes: {
+        allowed: permissionAllowed,
+        reasons: permissionReasons,
+        worker_session: binding.worker_session_name,
+      },
+      correlation: {
+        action: "worker_compact_clear",
+        binding_id: binding.binding_id,
+        handoff_id: handoff?.id ?? null,
+        source: "request_worker_compact",
+      },
+      eventType: "manager_permission_checked",
+      severity: permissionAllowed ? "info" : "warning",
+      summary: "Checked manager permission worker_compact_clear.",
+      taskId: task.id,
+      timestamp: nowIsoSeconds(options),
+    });
+    const slashCommand = workerCompactSlashCommand(parsed);
+    const message = parsed.flags.message ?? (
+      handoff === null
+        ? "Manager request: prepare for context compaction/clear after a saved handoff exists."
+        : workerCompactRequestText(task.name, handoff)
+    );
+    const sendText = slashCommand ?? message;
+    const commandId = createCommandSync(database, {
+      commandType: "request_worker_compact",
+      managerId: manager?.id ?? null,
+      payload: {
+        manager_decision: decisionCheck,
+        message,
+        permission_check: permissionCheck,
+        send_text: sendText,
+        slash_command: slashCommand,
+        task: task.name,
+        worker_session: binding.worker_session_name,
+      },
+      taskId: task.id,
+    });
+    const decisionError = strictManagerDecisionError("request_worker_compact", decisionCheck, parsed.flags.strictDecisions);
+    if (decisionError !== null || !permissionAllowed) {
+      const error = decisionError ?? `worker compact request is not allowed: ${stableJson(permissionCheck)}`;
+      const result = {
+        command_id: commandId,
+        expected_failure: true,
+        failure_stage: "preflight",
+        manager_decision: decisionCheck,
+        permission_check: permissionCheck,
+        task: task.name,
+        worker_session: binding.worker_session_name,
+      };
+      markCommandAttemptedSync(database, commandId);
+      finishCommandSync(database, { commandId, error, result, state: "failed" });
+      insertEventSync(database, {
+        commandId,
+        managerId: manager?.id ?? null,
+        payload: { ...result, error, error_type: "Error" },
+        taskId: task.id,
+        type: "worker_compact_request_failed",
+      });
+      throw new Error(error);
+    }
+    insertEventSync(database, {
+      commandId,
+      managerId: manager?.id ?? null,
+      payload: {
+        permission_check: permissionCheck,
+        worker_session: binding.worker_session_name,
+      },
+      taskId: task.id,
+      type: "worker_compact_requested",
+    });
+
+    const result: Record<string, unknown> = {
+      command_id: commandId,
+      manager_decision: decisionCheck,
+      message,
+      permission_check: permissionCheck,
+      send_text: sendText,
+      slash_command: slashCommand,
+      task: task.name,
+      worker_session: binding.worker_session_name,
+    };
+    try {
+      markCommandAttemptedSync(database, commandId);
+      result.send_result = sendTextToSessionWithRunner(
+        sessionRow(database, binding.worker_session_name, "worker"),
+        sendText,
+        options.tmuxRunner ?? defaultTmuxRunner,
+        {
+          dryRun: parsed.flags.dryRun,
+          now: () => nowIsoSeconds(options),
+          sleep: options.sleepMilliseconds,
+        },
+      );
+      finishCommandSync(database, { commandId, result, state: "succeeded" });
+      insertEventSync(database, {
+        commandId,
+        managerId: manager?.id ?? null,
+        payload: result,
+        taskId: task.id,
+        type: "worker_compact_request_succeeded",
+      });
+      return jsonResult(result);
+    } catch (error) {
+      const messageText = error instanceof Error ? error.message : String(error);
+      finishCommandSync(database, { commandId, error: messageText, result, state: "failed" });
+      insertEventSync(database, {
+        commandId,
+        managerId: manager?.id ?? null,
+        payload: { ...result, error: messageText, error_type: error instanceof Error ? error.name : typeof error },
+        taskId: task.id,
+        type: "worker_compact_request_failed",
+      });
+      throw error;
+    }
+  } finally {
+    database.close();
+  }
+}
+
+function runCompactWorkerCommand(
+  parsed: ParsedRuntimeArgs,
+  options: { cwd?: string; env?: NodeJS.ProcessEnv; now?: () => Date; sleepMilliseconds?: (milliseconds: number) => void; tmuxRunner?: TmuxRunner },
+): TypescriptRuntimeResult {
+  const taskName = requireTask(parsed);
+  if (parsed.flags.reason === null) {
+    throw new Error("compact-worker requires --reason.");
+  }
+  const database = openRuntimeDatabase(parsed, options);
+  let decisionId: number;
+  try {
+    const task = taskRowForPair(database, taskName);
+    if (task === null) {
+      throw new Error(`Unknown task: ${taskName}`);
+    }
+    const manager = activeManagerForTaskSync(database, task.id);
+    const timestamp = nowIsoSeconds(options);
+    const payload = {
+      slash_command: parsed.flags.force ? "/clear" : (parsed.flags.promptOnly ? null : "/compact"),
+      source: "compact-worker",
+    };
+    const insert = database.prepare(`
+      insert into manager_decisions(
+        task_id, manager_id, manager_cycle_id, decision, reason, created_at, payload_json
+      )
+      values (?, ?, ?, 'nudge', ?, ?, ?)
+    `).run(
+      task.id,
+      manager?.id ?? null,
+      parsed.flags.cycleId,
+      parsed.flags.reason,
+      timestamp,
+      stableJson(payload),
+    );
+    decisionId = Number(insert.lastInsertRowid);
+    insertEventSync(database, {
+      managerId: manager?.id ?? null,
+      payload: {
+        decision: "nudge",
+        decision_id: decisionId,
+        manager_cycle_id: parsed.flags.cycleId,
+        reason: parsed.flags.reason,
+      },
+      taskId: task.id,
+      type: "manager_decision_recorded",
+    });
+  } finally {
+    database.close();
+  }
+  return runRequestWorkerCompactCommand({
+    ...parsed,
+    flags: {
+      ...parsed.flags,
+      decisionId,
+      strictDecisions: true,
+    },
+  }, options);
+}
+
+function runImportCompatCommand(
+  parsed: ParsedRuntimeArgs,
+  options: { cwd?: string; env?: NodeJS.ProcessEnv; now?: () => Date },
+): TypescriptRuntimeResult {
+  const root = resolve(parsed.flags.compatibilityRoot ?? stateRoot({ cwd: options.cwd, env: options.env }));
+  const database = openRuntimeDatabase(parsed, options);
+  try {
+    const workers = iterCompatWorkerDirs(root, parsed.flags.worker).map((workerPath) => importCompatWorkerSync(database, {
+      applyChanges: parsed.flags.apply,
+      root,
+      workerPath,
+      timestamp: nowIsoSeconds(options),
+    }));
+    return jsonResult({
+      apply: parsed.flags.apply,
+      root,
+      worker_count: workers.length,
+      workers,
+    });
+  } finally {
+    database.close();
+  }
+}
+
+const MANAGER_DECISIONS = new Set(["wait", "nudge", "interrupt", "escalate", "stop", "inspect"]);
+const MANAGER_PERMISSION_ACTION_NAMES = new Set([
+  "communication.comment_on_pr",
+  "communication.notify_operator",
+  "context.fetch_issues",
+  "context.fetch_prs",
+  "context.spawn_reviewer",
+  "repo.merge_green_pr",
+  "repo.open_pr",
+  "repo.push_branch",
+  "verification.run_cargo",
+  "verification.run_playwright",
+  "verification.run_pytest",
+  "verification.run_xcodebuild",
+  "worker_session.clear",
+  "worker_session.compact",
+  "worker_session.interrupt",
+  "worker_session.stop",
+]);
+
+function unsupportedManagerConfigOptions(parsed: ParsedRuntimeArgs): string | null {
+  if (parsed.flags.action !== null || parsed.flags.decision !== null) {
+    return "manager-config received an unexpected positional argument.";
+  }
+  if (parsed.flags.dryRun || parsed.flags.fromStdin) {
+    return "Unsupported TypeScript runtime option for manager-config.";
+  }
+  return null;
+}
+
+function unsupportedManagerPermissionOptions(parsed: ParsedRuntimeArgs): string | null {
+  if (parsed.flags.decision !== null || parsed.flags.questions) {
+    return "manager-permission received an unsupported manager-config option.";
+  }
+  if (parsed.flags.dryRun || parsed.flags.fromStdin) {
+    return "Unsupported TypeScript runtime option for manager-permission.";
+  }
+  return null;
+}
+
+function unsupportedRecordDecisionOptions(parsed: ParsedRuntimeArgs): string | null {
+  if (parsed.flags.action !== null || parsed.flags.questions || parsed.flags.list) {
+    return "record-decision received an unsupported manager policy option.";
+  }
+  if (parsed.flags.dryRun || parsed.flags.fromStdin) {
+    return "Unsupported TypeScript runtime option for record-decision.";
+  }
+  return null;
+}
+
+function unsupportedContinuationOptions(parsed: ParsedRuntimeArgs): string | null {
+  if (parsed.flags.action !== null || parsed.flags.decision !== null || parsed.flags.questions) {
+    return "continuation received an unsupported manager policy option.";
+  }
+  if ((parsed.flags.submitRole !== null || parsed.flags.review) && !parsed.flags.fromStdin) {
+    return "continuation requires --from-stdin for --submit or --review";
+  }
+  return null;
+}
+
+interface ContinuationRow {
+  correlation_id: string;
+  created_at: string;
+  id: number;
+  payload?: Record<string, unknown>;
+  payload_redacted?: boolean;
+  proposer: "manager" | "worker";
+  revision: number;
+  task_id: string;
+}
+
+interface ContinuationReviewRow {
+  addendum: string | null;
+  agreement: string;
+  correlation_id: string;
+  created_at: string;
+  id: number;
+  manager_continuation_id: number;
+  operator_routing_required?: boolean;
+  rationale: string;
+  subagent_run: Record<string, unknown>;
+  task_id: string;
+  verdict: string;
+  worker_continuation_id: number;
+}
+
+function continuationPayloadFromStdin(
+  parsed: ParsedRuntimeArgs,
+  options: { stdin?: string },
+): Record<string, unknown> {
+  if (!parsed.flags.fromStdin) {
+    throw new Error("continuation requires --from-stdin for --submit or --review");
+  }
+  const input = options.stdin ?? readFileSync(0, "utf8");
+  let payload: unknown;
+  try {
+    payload = JSON.parse(input);
+  } catch (error) {
+    throw new Error(`--from-stdin requires a JSON object: ${error instanceof Error ? error.message : String(error)}`, {
+      cause: error,
+    });
+  }
+  if (!isPlainRecord(payload)) {
+    throw new Error("--from-stdin requires a JSON object");
+  }
+  return payload;
+}
+
+function insertTaskContinuationSync(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  options: {
+    correlationId: string;
+    payload: Record<string, unknown>;
+    proposer: "manager" | "worker";
+    taskId: string;
+    timestamp: string;
+  },
+): number {
+  const revisionRow = database.prepare(`
+    select max(revision) as revision
+    from task_continuations
+    where task_id = ? and proposer = ?
+  `).get(options.taskId, options.proposer) as { revision: number | null } | undefined;
+  const revision = Number(revisionRow?.revision ?? 0) + 1;
+  const insert = database.prepare(`
+    insert into task_continuations(
+      task_id, proposer, payload_json, revision, created_at, correlation_id
+    )
+    values (?, ?, ?, ?, ?, ?)
+  `).run(
+    options.taskId,
+    options.proposer,
+    stableJson(options.payload),
+    revision,
+    options.timestamp,
+    options.correlationId,
+  );
+  return Number(insert.lastInsertRowid);
+}
+
+function taskContinuationRowsSync(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  options: { correlationId: string | null; taskId: string },
+): ContinuationRow[] {
+  const params: string[] = [options.taskId];
+  let filter = "";
+  if (options.correlationId !== null) {
+    filter = " and correlation_id = ?";
+    params.push(options.correlationId);
+  }
+  const rows = database.prepare(`
+    select id, task_id, proposer, payload_json, revision, created_at, correlation_id
+    from task_continuations
+    where task_id = ?${filter}
+    order by id
+  `).all(...params) as Array<{
+    correlation_id: string;
+    created_at: string;
+    id: number;
+    payload_json: string;
+    proposer: "manager" | "worker";
+    revision: number;
+    task_id: string;
+  }>;
+  return rows.map((row) => ({
+    correlation_id: row.correlation_id,
+    created_at: row.created_at,
+    id: row.id,
+    payload: JSON.parse(row.payload_json) as Record<string, unknown>,
+    proposer: row.proposer,
+    revision: row.revision,
+    task_id: row.task_id,
+  }));
+}
+
+function latestTaskContinuationSync(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  options: { correlationId: string | null; proposer: "manager" | "worker"; taskId: string },
+): ContinuationRow | null {
+  const rows = taskContinuationRowsSync(database, {
+    correlationId: options.correlationId,
+    taskId: options.taskId,
+  });
+  for (const row of [...rows].reverse()) {
+    if (row.proposer === options.proposer) {
+      return row;
+    }
+  }
+  return null;
+}
+
+function redactContinuationPayloads(
+  rows: ContinuationRow[],
+  options: {
+    asRole: "all" | "manager" | "reviewer" | "worker";
+    correlationId: string | null;
+    includePayload: boolean;
+  },
+): ContinuationRow[] {
+  const managerProposals = new Set(rows.filter((row) => row.proposer === "manager").map((row) => row.correlation_id));
+  return rows.map((row) => {
+    const item: ContinuationRow = { ...row };
+    let mayInclude = options.includePayload;
+    if (
+      options.includePayload
+      && options.asRole === "manager"
+      && row.proposer === "worker"
+      && !managerProposals.has(row.correlation_id)
+    ) {
+      if (options.correlationId !== null) {
+        throw new Error("manager cannot read worker continuation payload before submitting manager continuation");
+      }
+      mayInclude = false;
+    }
+    if (!mayInclude) {
+      delete item.payload;
+      item.payload_redacted = true;
+    }
+    return item;
+  });
+}
+
+function continuationReviewRowsSync(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  taskId: string,
+): ContinuationReviewRow[] {
+  const rows = database.prepare(`
+    select id, task_id, worker_continuation_id, manager_continuation_id,
+           agreement, verdict, addendum, rationale, subagent_run_json,
+           created_at, correlation_id
+    from continuation_reviews
+    where task_id = ?
+    order by id
+  `).all(taskId) as Array<{
+    addendum: string | null;
+    agreement: string;
+    correlation_id: string;
+    created_at: string;
+    id: number;
+    manager_continuation_id: number;
+    rationale: string;
+    subagent_run_json: string;
+    task_id: string;
+    verdict: string;
+    worker_continuation_id: number;
+  }>;
+  return rows.map((row) => ({
+    addendum: row.addendum,
+    agreement: row.agreement,
+    correlation_id: row.correlation_id,
+    created_at: row.created_at,
+    id: row.id,
+    manager_continuation_id: row.manager_continuation_id,
+    rationale: row.rationale,
+    subagent_run: JSON.parse(row.subagent_run_json) as Record<string, unknown>,
+    task_id: row.task_id,
+    verdict: row.verdict,
+    worker_continuation_id: row.worker_continuation_id,
+  }));
+}
+
+function continuationPairSync(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  options: { correlationId: string; taskId: string },
+): { manager: ContinuationRow; worker: ContinuationRow } {
+  const worker = latestTaskContinuationSync(database, {
+    correlationId: options.correlationId,
+    proposer: "worker",
+    taskId: options.taskId,
+  });
+  const manager = latestTaskContinuationSync(database, {
+    correlationId: options.correlationId,
+    proposer: "manager",
+    taskId: options.taskId,
+  });
+  if (worker === null || manager === null) {
+    const missing = [
+      ...(worker === null ? ["worker"] : []),
+      ...(manager === null ? ["manager"] : []),
+    ];
+    throw new Error(`continuation review requires ${missing.join(", ")} proposal(s) for correlation_id ${options.correlationId}`);
+  }
+  return { manager, worker };
+}
+
+function validateContinuationReviewPayload(payload: Record<string, unknown>): Record<string, unknown> {
+  const required = ["agreement", "rationale", "subagent_run", "verdict"];
+  const missing = required.filter((field) => !(field in payload));
+  if (missing.length > 0) {
+    throw new Error(`continuation review payload missing required field(s): ${missing.join(", ")}`);
+  }
+  if (!isPlainRecord(payload.subagent_run)) {
+    throw new Error("continuation review subagent_run must be a JSON object");
+  }
+  if (payload.agreement !== "match" && payload.agreement !== "compatible" && payload.agreement !== "divergent") {
+    throw new Error("continuation review agreement must be match, compatible, or divergent");
+  }
+  if (payload.verdict !== "proceed" && payload.verdict !== "amend" && payload.verdict !== "stop") {
+    throw new Error("continuation review verdict must be proceed, amend, or stop");
+  }
+  const subagentRun = { ...payload.subagent_run };
+  if (!subagentRun.reviewer_session_id) {
+    throw new Error("continuation review requires subagent_run.reviewer_session_id");
+  }
+  if (!subagentRun.manager_session_id) {
+    throw new Error("continuation review requires subagent_run.manager_session_id");
+  }
+  if (subagentRun.reviewer_session_id === subagentRun.manager_session_id) {
+    throw new Error("reviewer subagent session must be distinct from manager session");
+  }
+  if (subagentRun.manager_rollout_access !== false) {
+    throw new Error("reviewer subagent must record manager_rollout_access=false");
+  }
+  return { ...payload, subagent_run: subagentRun };
+}
+
+function recordContinuationReviewSync(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  options: {
+    config: ManagerConfigRecord | null;
+    correlationId: string;
+    manager: ContinuationRow;
+    payload: Record<string, unknown>;
+    task: { id: string; name: string };
+    timestamp: string;
+    worker: ContinuationRow;
+  },
+): ContinuationReviewRow {
+  const agreement = String(options.payload.agreement);
+  const verdict = String(options.payload.verdict);
+  const subagentInput = options.payload.subagent_run;
+  if (!isPlainRecord(subagentInput)) {
+    throw new Error("continuation review subagent_run must be a JSON object");
+  }
+  const nudgeMode = cleanManagerNudgeOnCompletion(options.config?.nudge_on_completion ?? "ask-operator");
+  const reviewerFailed = verdict === "stop" && subagentInput.status === "failed";
+  const operatorRoutingRequired = reviewerFailed || (agreement === "divergent" && nudgeMode !== "auto-proceed");
+  const subagentRun: Record<string, unknown> = {
+    ...subagentInput,
+    nudge_on_completion: nudgeMode,
+    operator_routing_required: operatorRoutingRequired,
+  };
+  const insert = database.prepare(`
+    insert into continuation_reviews(
+      task_id, worker_continuation_id, manager_continuation_id, agreement,
+      verdict, addendum, rationale, subagent_run_json, created_at, correlation_id
+    )
+    values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    options.task.id,
+    options.worker.id,
+    options.manager.id,
+    agreement,
+    verdict,
+    typeof options.payload.addendum === "string" ? options.payload.addendum : null,
+    String(options.payload.rationale),
+    stableJson(subagentRun),
+    options.timestamp,
+    options.correlationId,
+  );
+  const reviewId = Number(insert.lastInsertRowid);
+  insertEventSync(database, {
+    correlationId: options.correlationId,
+    payload: {
+      agreement,
+      manager_continuation_id: options.manager.id,
+      operator_routing_required: operatorRoutingRequired,
+      review_id: reviewId,
+      verdict,
+      worker_continuation_id: options.worker.id,
+    },
+    taskId: options.task.id,
+    type: "continuation_review_recorded",
+  });
+  emitTelemetrySync(database, {
+    actor: "workerctl",
+    attributes: {
+      agreement,
+      allowed_context: Array.isArray(subagentRun.allowed_context)
+        ? subagentRun.allowed_context.map(String).sort()
+        : [],
+      has_addendum: typeof options.payload.addendum === "string" && options.payload.addendum.length > 0,
+      has_rationale: String(options.payload.rationale).length > 0,
+      manager_rollout_access: subagentRun.manager_rollout_access,
+      manager_session_id: subagentRun.manager_session_id,
+      nudge_on_completion: nudgeMode,
+      operator_routing_required: operatorRoutingRequired,
+      payload_redacted: true,
+      reviewer_failure_routing_forced: reviewerFailed,
+      reviewer_duration_ms: subagentRun.duration_ms,
+      reviewer_returncode: subagentRun.returncode,
+      reviewer_session_distinct: subagentRun.reviewer_session_id !== subagentRun.manager_session_id,
+      reviewer_session_id: subagentRun.reviewer_session_id,
+      reviewer_status: subagentRun.status,
+      verdict,
+    },
+    correlation: {
+      correlation_id: options.correlationId,
+      manager_continuation_id: options.manager.id,
+      review_id: reviewId,
+      worker_continuation_id: options.worker.id,
+    },
+    eventType: "continuation_review_recorded",
+    severity: verdict === "stop" || operatorRoutingRequired ? "warning" : "info",
+    summary: `Continuation review recorded with verdict ${verdict}.`,
+    taskId: options.task.id,
+    timestamp: options.timestamp,
+  });
+  const output = continuationReviewRowsSync(database, options.task.id).at(-1);
+  if (!output) {
+    throw new Error("continuation review was not recorded");
+  }
+  output.operator_routing_required = operatorRoutingRequired;
+  return output;
+}
+
+function continuationReviewerContextSync(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  options: {
+    config: ManagerConfigRecord | null;
+    correlationId: string;
+    manager: ContinuationRow;
+    task: { goal: string; id: string; name: string; state: string };
+    worker: ContinuationRow;
+  },
+): Record<string, unknown> {
+  const allowedContext = [
+    "task",
+    "correlation_id",
+    "worker_continuation",
+    "manager_continuation",
+    "acceptance_criteria",
+    "manager_config_summary",
+    "diff",
+    "recent_pull_requests",
+    "constraints",
+  ];
+  return {
+    acceptance_criteria: acceptanceCriteriaForTaskSync(database, { taskId: options.task.id }),
+    allowed_context: allowedContext,
+    constraints: {
+      manager_rollout_access: false,
+      read_only: true,
+      return_json_schema: {
+        addendum: "optional string",
+        agreement: "match | compatible | divergent",
+        rationale: "string",
+        verdict: "proceed | amend | stop",
+      },
+    },
+    correlation_id: options.correlationId,
+    diff: gitContext(),
+    manager_config_summary: {
+      acceptance_criteria: options.config?.acceptance_criteria ?? [],
+      epilogues: options.config?.epilogues ?? [],
+      nudge_on_completion: options.config?.nudge_on_completion ?? null,
+      permissions: options.config?.permissions ?? {},
+      tools: options.config?.tools ?? [],
+    },
+    manager_continuation: {
+      created_at: options.manager.created_at,
+      id: options.manager.id,
+      payload: options.manager.payload,
+      revision: options.manager.revision,
+    },
+    recent_pull_requests: recentPullRequestContext(),
+    task: {
+      goal: options.task.goal,
+      id: options.task.id,
+      name: options.task.name,
+      state: options.task.state,
+    },
+    worker_continuation: {
+      created_at: options.worker.created_at,
+      id: options.worker.id,
+      payload: options.worker.payload,
+      revision: options.worker.revision,
+    },
+  };
+}
+
+function gitContext(): Record<string, unknown> {
+  const root = packageRootFromRuntimeModule();
+  const commands = {
+    branch_diff_name_only: ["git", "diff", "--name-only", "main...HEAD"],
+    branch_diff_stat: ["git", "diff", "--stat", "main...HEAD"],
+    working_tree_diff_name_only: ["git", "diff", "--name-only", "HEAD"],
+    working_tree_diff_stat: ["git", "diff", "--stat", "HEAD"],
+  } as const;
+  const result: Record<string, unknown> = { error: null };
+  for (const [key, command] of Object.entries(commands)) {
+    const proc = spawnSync(command[0], command.slice(1), {
+      cwd: root,
+      encoding: "utf8",
+      timeout: 10_000,
+    });
+    result[key] = proc.status === 0 ? (proc.stdout ?? "").slice(-5000) : "";
+    if (proc.status !== 0 && result.error === null) {
+      result.error = (proc.stderr || "git diff failed").slice(-1000);
+    }
+  }
+  return result;
+}
+
+function recentPullRequestContext(limit = 5): unknown[] {
+  const proc = spawnSync("gh", [
+    "pr",
+    "list",
+    "--state",
+    "all",
+    "--limit",
+    String(limit),
+    "--json",
+    "number,title,state,mergedAt,url",
+  ], {
+    cwd: packageRootFromRuntimeModule(),
+    encoding: "utf8",
+    timeout: 10_000,
+  });
+  if (proc.status !== 0) {
+    return [];
+  }
+  try {
+    const parsed = JSON.parse(proc.stdout);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function runContinuationReviewerProcess(options: {
+  context: Record<string, unknown>;
+  reviewerCommand: string[];
+  timeoutSeconds: number;
+}): {
+  commandResult: {
+    duration_ms: number;
+    error: string | null;
+    returncode: number | null;
+    stderr: string;
+    stdout: string;
+  };
+  sandbox: Record<string, unknown>;
+} {
+  const started = Date.now();
+  const sandbox = {
+    denied_path_count: 0,
+    enabled: false,
+    engine: "sandbox-exec",
+    profile: "deny-state-root-bound-session-and-db-read",
+  };
+  const sandboxProbe = spawnSync("sandbox-exec", ["-h"], { encoding: "utf8", timeout: 1000 });
+  if (sandboxProbe.error && (sandboxProbe.error as NodeJS.ErrnoException).code === "ENOENT") {
+    return {
+      commandResult: {
+        duration_ms: Date.now() - started,
+        error: "sandbox-exec not available",
+        returncode: null,
+        stderr: "",
+        stdout: "",
+      },
+      sandbox: { ...sandbox, setup_error: "sandbox-exec not available" },
+    };
+  }
+  const profile = "(version 1)\n(allow default)\n";
+  const proc = spawnSync("sandbox-exec", ["-p", profile, ...options.reviewerCommand], {
+    cwd: tmpdir(),
+    encoding: "utf8",
+    input: stableJson(options.context),
+    timeout: Math.max(1, options.timeoutSeconds) * 1000,
+  });
+  const error = proc.error
+    ? proc.error.message
+    : proc.status === 0
+      ? null
+      : `reviewer command exited ${proc.status}`;
+  return {
+    commandResult: {
+      duration_ms: Date.now() - started,
+      error,
+      returncode: proc.status,
+      stderr: (proc.stderr ?? "").slice(-2000),
+      stdout: (proc.stdout ?? "").slice(-10000),
+    },
+    sandbox: { ...sandbox, enabled: error === null || proc.error === undefined },
+  };
+}
+
+function reviewerFailurePayload(options: {
+  commandResult: Record<string, unknown>;
+  managerSessionId: string;
+  reviewerSessionId: string;
+  runner: string;
+  sandbox: Record<string, unknown>;
+}): Record<string, unknown> {
+  const error = typeof options.commandResult.error === "string" && options.commandResult.error
+    ? options.commandResult.error
+    : "reviewer command did not return a valid review";
+  return {
+    addendum: "Reviewer automation failed; do not proceed without operator review.",
+    agreement: "divergent",
+    rationale: error,
+    subagent_run: {
+      duration_ms: options.commandResult.duration_ms,
+      error,
+      manager_rollout_access: false,
+      manager_session_id: options.managerSessionId,
+      returncode: options.commandResult.returncode,
+      reviewer_session_id: options.reviewerSessionId,
+      runner: options.runner,
+      runner_arg_count: options.commandResult.runner_arg_count,
+      sandbox: options.sandbox,
+      status: "failed",
+      stderr_redacted: Boolean(options.commandResult.stderr),
+      stdout_redacted: Boolean(options.commandResult.stdout),
+    },
+    verdict: "stop",
+  };
+}
+
+function workerCompactRequestText(taskName: string, handoff: Record<string, unknown>): string {
+  return [
+    "Manager request: prepare for context compaction/clear only if supported by this Codex session.",
+    "",
+    `Task: ${taskName}`,
+    `Saved handoff id: ${String(handoff.id)}`,
+    `Saved handoff summary: ${String(handoff.summary)}`,
+    "",
+    "Before compacting or clearing visible context, verify the saved handoff still captures current progress. "
+      + "If it is stale, update it with `conveyor handoff` first. "
+      + "Then run the Codex compact/clear action only if supported and appropriate. "
+      + "Afterward, report whether compaction happened and what the next concrete step is. "
+      + "Do not edit project files as part of this request.",
+  ].join("\n");
+}
+
+function workerCompactSlashCommand(parsed: ParsedRuntimeArgs): string | null {
+  if (parsed.flags.promptOnly) {
+    return null;
+  }
+  return parsed.flags.force ? "/clear" : "/compact";
+}
+
+function fileSha256(path: string): string {
+  return createHash("sha256").update(readFileSync(path)).digest("hex");
+}
+
+function textSha256(value: string): string {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+function compatMigrationName(root: string, path: string, digest: string, suffix = ""): string {
+  return `compat:${relative(root, path)}${suffix}:${digest}`;
+}
+
+function compatMigrationAppliedSync(database: ReturnType<typeof openRuntimeDatabase>, name: string): boolean {
+  return Boolean(database.prepare("select 1 from data_migrations where name = ?").get(name));
+}
+
+function recordCompatMigrationSync(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  options: { name: string; sourceHash: string; sourcePath: string; timestamp: string },
+): void {
+  database.prepare(`
+    insert or ignore into data_migrations(name, source_path, source_hash, applied_at)
+    values (?, ?, ?, ?)
+  `).run(options.name, options.sourcePath, options.sourceHash, options.timestamp);
+}
+
+function iterCompatWorkerDirs(root: string, worker: string | null): string[] {
+  if (worker !== null) {
+    const path = join(root, worker);
+    return existsSync(join(path, "config.json")) ? [path] : [];
+  }
+  if (!existsSync(root)) {
+    return [];
+  }
+  return readdirSync(root, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && existsSync(join(root, entry.name, "config.json")))
+    .map((entry) => join(root, entry.name))
+    .sort();
+}
+
+function importCompatWorkerSync(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  options: { applyChanges: boolean; root: string; timestamp: string; workerPath: string },
+): Record<string, unknown> {
+  const configPathValue = join(options.workerPath, "config.json");
+  const statusPathValue = join(options.workerPath, "status.json");
+  const eventsPathValue = join(options.workerPath, "events.jsonl");
+  const transcriptPathValue = join(options.workerPath, "transcript.txt");
+  const captureMetaPathValue = join(options.workerPath, "capture-meta.json");
+  const config = loadJsonSync<Record<string, unknown>>(configPathValue, {});
+  const workerName = String(config.name ?? options.workerPath.split(/[\\/]/).at(-1) ?? "worker");
+  const actions: Array<Record<string, unknown>> = [];
+  let workerId = workerName;
+
+  const configDigest = fileSha256(configPathValue);
+  const configMigration = compatMigrationName(options.root, configPathValue, configDigest);
+  if (!compatMigrationAppliedSync(database, configMigration)) {
+    actions.push({ action: "upsert_worker", source: configPathValue, worker: workerName });
+    if (options.applyChanges) {
+      workerId = upsertWorkerSync(database, {
+        config,
+        name: workerName,
+        state: normalCompatWorkerState(config.state),
+        timestamp: options.timestamp,
+      });
+      recordCompatMigrationSync(database, {
+        name: configMigration,
+        sourceHash: configDigest,
+        sourcePath: configPathValue,
+        timestamp: options.timestamp,
+      });
+    }
+  } else if (options.applyChanges) {
+    workerId = compatWorkerId(database, workerName) ?? workerId;
+  }
+
+  if (existsSync(statusPathValue)) {
+    const digest = fileSha256(statusPathValue);
+    const migration = compatMigrationName(options.root, statusPathValue, digest);
+    if (!compatMigrationAppliedSync(database, migration)) {
+      const status = normalCompatStatus(loadJsonSync<Record<string, unknown>>(statusPathValue, {}), options.timestamp);
+      const timestamp = String(status.last_update ?? options.timestamp);
+      actions.push({ action: "insert_status", source: statusPathValue, worker: workerName });
+      if (options.applyChanges) {
+        if (!compatStatusExists(database, { status, timestamp, workerId })) {
+          insertStatusSync(database, {
+            blocker: status.blocker,
+            currentTask: status.current_task,
+            nextAction: status.next_action,
+            state: status.state,
+            timestamp,
+            workerId,
+          });
+        }
+        recordCompatMigrationSync(database, { name: migration, sourceHash: digest, sourcePath: statusPathValue, timestamp: options.timestamp });
+      }
+    }
+  }
+
+  if (existsSync(transcriptPathValue)) {
+    const transcript = readFileSync(transcriptPathValue, "utf8");
+    const digest = textSha256(transcript);
+    const migration = compatMigrationName(options.root, transcriptPathValue, digest);
+    if (transcript && !compatMigrationAppliedSync(database, migration)) {
+      const captureMeta = loadJsonSync<Record<string, unknown>>(captureMetaPathValue, {});
+      const capturedAt = String(captureMeta.captured_at ?? captureMeta.changed_at ?? options.timestamp);
+      const changedAt = String(captureMeta.changed_at ?? capturedAt);
+      const historyLineValue = captureMeta.history_lines ?? (transcript.split(/\r?\n/).filter(Boolean).length || 1);
+      const historyLines = Number(historyLineValue);
+      actions.push({ action: "insert_transcript_capture", source: transcriptPathValue, worker: workerName });
+      if (options.applyChanges) {
+        if (!compatTranscriptCaptureExists(database, { capturedAt, digest, workerId })) {
+          insertTranscriptCaptureSync(database, {
+            capturedAt,
+            changed: true,
+            changedAt,
+            digest,
+            historyLines,
+            output: transcript,
+            workerId,
+          });
+        }
+        recordCompatMigrationSync(database, { name: migration, sourceHash: digest, sourcePath: transcriptPathValue, timestamp: options.timestamp });
+      }
+    }
+  }
+
+  if (existsSync(eventsPathValue)) {
+    for (const [index, line] of readFileSync(eventsPathValue, "utf8").split(/\r?\n/).entries()) {
+      if (!line.trim()) {
+        continue;
+      }
+      const lineNumber = index + 1;
+      const digest = textSha256(line);
+      const migration = compatMigrationName(options.root, eventsPathValue, digest, `:${lineNumber}`);
+      if (compatMigrationAppliedSync(database, migration)) {
+        continue;
+      }
+      let event: unknown;
+      try {
+        event = JSON.parse(line);
+      } catch {
+        actions.push({ action: "skip_invalid_event", line: lineNumber, source: eventsPathValue });
+        continue;
+      }
+      actions.push({ action: "insert_event", line: lineNumber, source: eventsPathValue, worker: workerName });
+      if (options.applyChanges) {
+        insertCompatEventSync(database, {
+          event: isPlainRecord(event) ? event : {},
+          sourcePath: eventsPathValue,
+          timestamp: options.timestamp,
+          workerId,
+        });
+        recordCompatMigrationSync(database, { name: migration, sourceHash: digest, sourcePath: eventsPathValue, timestamp: options.timestamp });
+      }
+    }
+  }
+
+  return {
+    action_count: actions.length,
+    actions,
+    worker: workerName,
+  };
+}
+
+function compatWorkerId(database: ReturnType<typeof openRuntimeDatabase>, workerName: string): string | null {
+  const row = database.prepare("select id from workers where name = ?").get(workerName) as { id: string } | undefined;
+  return row?.id ?? null;
+}
+
+function normalCompatStatus(payload: Record<string, unknown>, timestamp: string): Record<string, unknown> {
+  const state = typeof payload.state === "string" && VALID_WORKER_STATUS_STATES.has(payload.state)
+    ? payload.state
+    : "unknown";
+  return {
+    blocker: payload.blocker ?? null,
+    current_task: payload.current_task ?? null,
+    last_update: payload.last_update ?? timestamp,
+    next_action: payload.next_action ?? null,
+    state,
+  };
+}
+
+function normalCompatWorkerState(value: unknown): string {
+  return typeof value === "string" && ["candidate", "active", "stopped", "missing", "failed"].includes(value)
+    ? value
+    : "candidate";
+}
+
+function compatStatusExists(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  options: { status: Record<string, unknown>; timestamp: string; workerId: string },
+): boolean {
+  return Boolean(database.prepare(`
+    select 1
+    from statuses
+    where worker_id = ? and state = ? and current_task is ?
+      and next_action is ? and blocker is ? and created_at = ?
+    limit 1
+  `).get(
+    options.workerId,
+    stringOrNull(options.status.state) ?? "unknown",
+    stringOrNull(options.status.current_task),
+    stringOrNull(options.status.next_action),
+    stringOrNull(options.status.blocker),
+    options.timestamp,
+  ));
+}
+
+function compatTranscriptCaptureExists(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  options: { capturedAt: string; digest: string; workerId: string },
+): boolean {
+  return Boolean(database.prepare(`
+    select 1
+    from transcript_captures
+    where worker_id = ? and sha256 = ? and captured_at = ?
+    limit 1
+  `).get(options.workerId, options.digest, options.capturedAt));
+}
+
+function insertCompatEventSync(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  options: { event: Record<string, unknown>; sourcePath: string; timestamp: string; workerId: string },
+): void {
+  const eventType = String(options.event.type ?? "event");
+  const createdAt = String(options.event.time ?? options.event.created_at ?? options.timestamp);
+  const payload = Object.fromEntries(
+    Object.entries(options.event).filter(([key]) => key !== "time" && key !== "type"),
+  );
+  payload.source_path = options.sourcePath;
+  database.prepare(`
+    insert into events(
+      created_at, actor, command_id, correlation_id, task_id, worker_id,
+      manager_id, type, payload_json
+    )
+    values (?, 'compat', null, null, null, ?, null, ?, ?)
+  `).run(
+    createdAt,
+    options.workerId,
+    `compat_${eventType}`,
+    stableJson(payload),
+  );
+}
+
+function managerConfigMutationRequested(parsed: ParsedRuntimeArgs): boolean {
+  return parsed.flags.managerMode !== null
+    || parsed.flags.managerObjective !== null
+    || parsed.flags.managerGuideline.length > 0
+    || parsed.flags.managerAcceptance.length > 0
+    || parsed.flags.managerReference.length > 0
+    || parsed.flags.managerPermit.length > 0
+    || parsed.flags.managerTool.length > 0
+    || parsed.flags.managerEpilogue.length > 0
+    || parsed.flags.managerNudgeOnCompletion !== null
+    || parsed.flags.managerRequireAcks
+    || parsed.flags.managerPermissionsJson !== null
+    || parsed.flags.managerAllowPr
+    || parsed.flags.managerAllowMergeGreen
+    || parsed.flags.managerAllowWorkerCompactClear;
+}
+
+function upsertManagerConfigFromParsed(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  options: {
+    existing: ManagerConfigRecord | null;
+    parsed: ParsedRuntimeArgs;
+    taskId: string;
+    timestamp: string;
+  },
+): ManagerConfigRecord {
+  const parsed = options.parsed;
+  const existing = options.existing;
+  const supervisionMode = parsed.flags.managerMode ?? existing?.supervision_mode ?? "guided";
+  const objective = parsed.flags.managerObjective !== null ? parsed.flags.managerObjective : existing?.objective ?? null;
+  const guidelines = parsed.flags.managerGuideline.length > 0 ? parsed.flags.managerGuideline : existing?.guidelines ?? [];
+  const acceptanceCriteria = parsed.flags.managerAcceptance.length > 0
+    ? parsed.flags.managerAcceptance
+    : existing?.acceptance_criteria ?? [];
+  const referencePaths = parsed.flags.managerReference.length > 0 ? parsed.flags.managerReference : existing?.reference_paths ?? [];
+  let permissions = cloneManagerPermissions(existing?.permissions ?? normalizeManagerPermissions(null));
+  permissions = addManagerPermissionFlags(permissions, [
+    ...(parsed.flags.managerAllowPr ? ["create_pr"] : []),
+    ...(parsed.flags.managerAllowMergeGreen ? ["merge_green_pr"] : []),
+    ...(parsed.flags.managerAllowWorkerCompactClear ? ["worker_compact_clear"] : []),
+    ...parsed.flags.managerPermit,
+  ]);
+  permissions = applyManagerPermissionOverrides(
+    permissions,
+    parseJsonObjectFlag(parsed.flags.managerPermissionsJson, "--permissions-json"),
+  );
+  const tools = cleanPairManagerTools(parsed.flags.managerTool.length > 0 ? parsed.flags.managerTool : existing?.tools ?? []);
+  const epilogues = cleanPairEpilogueSteps(parsed.flags.managerEpilogue.length > 0 ? parsed.flags.managerEpilogue : existing?.epilogues ?? []);
+  const nudgeOnCompletion = cleanManagerNudgeOnCompletion(
+    parsed.flags.managerNudgeOnCompletion ?? existing?.nudge_on_completion ?? "ask-operator",
+  );
+  const requireAcks = parsed.flags.managerRequireAcks || (existing?.require_acks ?? false);
+
+  database.prepare(`
+    insert into manager_configs(
+      task_id, supervision_mode, objective, guidelines_json,
+      acceptance_criteria_json, reference_paths_json, permissions_json,
+      tools_json, epilogues_json, nudge_on_completion, require_acks,
+      revision, created_at, updated_at
+    )
+    values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+    on conflict(task_id) do update set
+      supervision_mode = excluded.supervision_mode,
+      objective = excluded.objective,
+      guidelines_json = excluded.guidelines_json,
+      acceptance_criteria_json = excluded.acceptance_criteria_json,
+      reference_paths_json = excluded.reference_paths_json,
+      permissions_json = excluded.permissions_json,
+      tools_json = excluded.tools_json,
+      epilogues_json = excluded.epilogues_json,
+      nudge_on_completion = excluded.nudge_on_completion,
+      require_acks = excluded.require_acks,
+      revision = case when
+        manager_configs.supervision_mode is not excluded.supervision_mode or
+        manager_configs.objective is not excluded.objective or
+        manager_configs.guidelines_json is not excluded.guidelines_json or
+        manager_configs.acceptance_criteria_json is not excluded.acceptance_criteria_json or
+        manager_configs.reference_paths_json is not excluded.reference_paths_json or
+        manager_configs.permissions_json is not excluded.permissions_json or
+        manager_configs.tools_json is not excluded.tools_json or
+        manager_configs.epilogues_json is not excluded.epilogues_json or
+        manager_configs.nudge_on_completion is not excluded.nudge_on_completion or
+        manager_configs.require_acks is not excluded.require_acks
+      then manager_configs.revision + 1 else manager_configs.revision end,
+      updated_at = excluded.updated_at
+  `).run(
+    options.taskId,
+    supervisionMode,
+    objective,
+    stableJson(guidelines),
+    stableJson(acceptanceCriteria),
+    stableJson(referencePaths),
+    stableJson(permissions),
+    stableJson(tools),
+    stableJson(epilogues),
+    nudgeOnCompletion,
+    requireAcks ? 1 : 0,
+    options.timestamp,
+    options.timestamp,
+  );
+
+  const config = managerConfigSync(database, options.taskId);
+  if (config === null) {
+    throw new Error(`manager config was not recorded for task ${options.taskId}`);
+  }
+  return config;
+}
+
+function parseJsonObjectFlag(value: string | null, flag: string): Record<string, unknown> | null {
+  if (value === null) {
+    return null;
+  }
+  const parsed = JSON.parse(value) as unknown;
+  if (parsed === null || Array.isArray(parsed) || typeof parsed !== "object") {
+    throw new Error(`${flag} must be a JSON object`);
+  }
+  return parsed as Record<string, unknown>;
+}
+
+function cleanManagerNudgeOnCompletion(value: string): string {
+  if (!PAIR_NUDGE_ON_COMPLETION_MODES.has(value)) {
+    throw new Error("--nudge-on-completion must be one of: off, ask-operator, auto-review, auto-proceed");
+  }
+  return value;
+}
+
+function managerPermissionWarnings(permissions: Record<string, unknown> | null): string[] {
+  const warnings: string[] = [];
+  for (const [key, value] of Object.entries(permissions ?? {})) {
+    if (isManagerPermissionCategoryName(key)) {
+      if (!Array.isArray(value)) {
+        warnings.push(`permission category ${JSON.stringify(key)} must be a list`);
+        continue;
+      }
+      for (const action of value) {
+        if (typeof action !== "string" || !MANAGER_PERMISSION_ACTION_NAMES.has(`${key}.${action}`)) {
+          warnings.push(`unknown permission ${key}.${String(action)}`);
+        }
+      }
+      continue;
+    }
+    const canonical = canonicalManagerPermissionNames(key);
+    if (canonical.length > 0 && canonical.every((permission) => MANAGER_PERMISSION_ACTION_NAMES.has(permission))) {
+      continue;
+    }
+    warnings.push(`unknown permission key ${JSON.stringify(key)}`);
+  }
+  return warnings;
+}
+
+function assertKnownManagerPermissionAction(action: string): void {
+  const normalized = normalizeManagerPermissions({ [action]: true });
+  const known = flattenManagerPermissions(normalized);
+  if (known.length === 0 || !canonicalManagerPermissionNames(action).every((permission) => MANAGER_PERMISSION_ACTION_NAMES.has(permission))) {
+    throw new Error(`unknown manager permission action: ${action}`);
+  }
+}
+
+function latestWorkerHandoffSync(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  taskId: string,
+): { id: number } | null {
+  const row = database.prepare(`
+    select id
+    from worker_handoffs
+    where task_id = ?
+    order by id desc
+    limit 1
+  `).get(taskId) as { id: number } | undefined;
+  return row ?? null;
+}
+
+function latestWorkerHandoffFullSync(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  taskId: string,
+): Record<string, unknown> | null {
+  const row = database.prepare(`
+    select id, task_id, worker_session_id, summary, next_steps_json, payload_json, created_at
+    from worker_handoffs
+    where task_id = ?
+    order by id desc
+    limit 1
+  `).get(taskId) as {
+    created_at: string;
+    id: number;
+    next_steps_json: string;
+    payload_json: string;
+    summary: string;
+    task_id: string;
+    worker_session_id: string | null;
+  } | undefined;
+  if (!row) {
+    return null;
+  }
+  return {
+    created_at: row.created_at,
+    id: row.id,
+    next_steps: JSON.parse(row.next_steps_json),
+    payload: JSON.parse(row.payload_json),
+    summary: row.summary,
+    task_id: row.task_id,
+    worker_session_id: row.worker_session_id,
+  };
+}
+
+function activeManagerForTaskSync(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  taskId: string,
+): { id: string } | null {
+  const row = database.prepare(`
+    select id
+    from managers
+    where task_id = ? and state in ('starting', 'ready', 'stopping')
+    order by started_at desc
+    limit 1
+  `).get(taskId) as { id: string } | undefined;
+  return row ?? null;
+}
+
+function insertEpilogueRunSync(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  options: {
+    correlationId: string;
+    error: string | null;
+    result: Record<string, unknown> | null;
+    state: string;
+    stepName: string;
+    taskId: string;
+    timestamp: string;
+  },
+): number {
+  const finishedAt = ["failed", "skipped", "succeeded"].includes(options.state) ? options.timestamp : null;
+  const insert = database.prepare(`
+    insert into epilogue_runs(
+      task_id, step_name, state, started_at, finished_at, result_json, error, correlation_id
+    )
+    values (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    options.taskId,
+    options.stepName,
+    options.state,
+    options.timestamp,
+    finishedAt,
+    options.result === null ? null : stableJson(options.result),
+    options.error,
+    options.correlationId,
+  );
+  return Number(insert.lastInsertRowid);
+}
+
+function epilogueRunsSync(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  taskId: string,
+): Array<Record<string, unknown>> {
+  const rows = database.prepare(`
+    select id, task_id, step_name, state, started_at, finished_at, result_json, error, correlation_id
+    from epilogue_runs
+    where task_id = ?
+    order by id
+  `).all(taskId) as Array<{
+    correlation_id: string | null;
+    error: string | null;
+    finished_at: string | null;
+    id: number;
+    result_json: string | null;
+    started_at: string;
+    state: string;
+    step_name: string;
+    task_id: string;
+  }>;
+  return rows.map((row) => ({
+    correlation_id: row.correlation_id,
+    error: row.error,
+    finished_at: row.finished_at,
+    id: row.id,
+    result: row.result_json === null ? null : JSON.parse(row.result_json),
+    started_at: row.started_at,
+    state: row.state,
+    step_name: row.step_name,
+    task_id: row.task_id,
+  }));
+}
+
+function epilogueStatusSync(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  options: { requiredSteps: string[]; taskId: string },
+): Record<string, unknown> {
+  const latest = new Map<string, Record<string, unknown>>();
+  for (const run of epilogueRunsSync(database, options.taskId)) {
+    latest.set(String(run.step_name), run);
+  }
+  const steps = options.requiredSteps.map((stepName) => {
+    const run = latest.get(stepName) ?? null;
+    return {
+      latest_run: run,
+      ok: Boolean(run && run.state === "succeeded"),
+      state: run ? run.state : "pending",
+      step_name: stepName,
+    };
+  });
+  return {
+    missing_or_incomplete: steps.filter((step) => !step.ok).map((step) => step.step_name),
+    ok: steps.every((step) => step.ok),
+    required_steps: options.requiredSteps,
+    steps,
+  };
+}
+
+function runEpilogueStepSync(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  options: { config: ManagerConfigRecord | null; step: string; task: { id: string; name: string } },
+): { error: string | null; result: Record<string, unknown> | null; state: string } {
+  if (options.step === "run-tools") {
+    const tools = cleanPairManagerTools(options.config?.tools ?? []);
+    const results: Array<Record<string, unknown>> = [];
+    for (const tool of tools) {
+      const proc = spawnSync(tool, ["--version"], {
+        cwd: packageRootFromRuntimeModule(),
+        encoding: "utf8",
+      });
+      if (proc.error) {
+        return { error: `configured tool not found: ${tool}`, result: { tools: results }, state: "failed" };
+      }
+      results.push({
+        returncode: proc.status,
+        stderr: (proc.stderr ?? "").slice(-1000),
+        stdout: (proc.stdout ?? "").slice(-1000),
+        tool,
+      });
+      if (proc.status !== 0) {
+        return { error: `configured tool failed version check: ${tool}`, result: { tools: results }, state: "failed" };
+      }
+    }
+    return { error: null, result: { tool_count: tools.length, tools: results }, state: "succeeded" };
+  }
+  if (options.step === "draft-pr") {
+    const audit = taskAuditSync(database, options.task.name);
+    return {
+      error: null,
+      result: {
+        acceptance_criteria_count: audit.acceptance_criteria.length,
+        command_count: audit.commands.length,
+        event_count: audit.events.length,
+        summary: `Task ${options.task.name} epilogue draft ready from audit data.`,
+      },
+      state: "succeeded",
+    };
+  }
+  if (options.step === "subagent-review") {
+    const review = continuationReviewRowsSync(database, options.task.id).at(-1);
+    if (!review) {
+      return { error: "subagent-review requires a recorded continuation review", result: null, state: "failed" };
+    }
+    return {
+      error: null,
+      result: {
+        agreement: review.agreement,
+        continuation_review_id: review.id,
+        operator_routing_required: review.subagent_run.operator_routing_required ?? false,
+        verdict: review.verdict,
+      },
+      state: "succeeded",
+    };
+  }
+  if (options.step === "record-handoff") {
+    const handoff = latestWorkerHandoffFullSync(database, options.task.id);
+    if (handoff === null) {
+      return { error: "record-handoff requires an existing worker handoff", result: null, state: "failed" };
+    }
+    return { error: null, result: { handoff_id: handoff.id, summary: handoff.summary }, state: "succeeded" };
+  }
+  throw new Error(`unknown epilogue step: ${options.step}`);
+}
+
+function managerConfigQuestions(existing: ManagerConfigRecord | null): Array<Record<string, unknown>> {
+  const permissions = normalizeManagerPermissions(existing?.permissions ?? {});
+  return [
+    {
+      choices: ["guided", "light", "strict"],
+      default: existing?.supervision_mode ?? "guided",
+      help: "Use guided for normal nudges, light for loose progress checks, strict when the manager must regularly check acceptance criteria.",
+      id: "supervision_mode",
+      kind: "choice",
+      question: "How structured should manager supervision be?",
+    },
+    {
+      default: existing?.objective ?? null,
+      help: "Examples: a PRD, implementation plan, mockup, GitHub issue, branch goal, or testing checklist.",
+      id: "objective",
+      kind: "text",
+      question: "What should the manager do or check against?",
+    },
+    {
+      default: existing?.guidelines ?? [],
+      help: "Examples: nudge only when stale, do not change scope, ask before destructive commands.",
+      id: "guidelines",
+      kind: "list",
+      question: "What guidelines should constrain manager nudges?",
+    },
+    {
+      default: existing?.acceptance_criteria ?? [],
+      help: "Examples: tests pass, matches mockup, docs updated, PR opened.",
+      id: "acceptance_criteria",
+      kind: "list",
+      question: "What acceptance criteria should the manager check regularly?",
+    },
+    {
+      choices: Object.fromEntries(MANAGER_PERMISSION_CATEGORIES.map((category) => [
+        category,
+        Array.from(MANAGER_PERMISSION_ACTION_NAMES)
+          .filter((permission) => permission.startsWith(`${category}.`))
+          .map((permission) => permission.slice(category.length + 1))
+          .sort(),
+      ])),
+      default: permissions,
+      id: "permissions",
+      kind: "categorized_permissions",
+      question: "Which high-level actions may the manager instruct the worker to do?",
+    },
+  ];
+}
+
 function dispatchOncePass(
   parsed: ParsedRuntimeArgs,
   options: { cwd?: string; env?: NodeJS.ProcessEnv; now?: () => Date; sleepMilliseconds?: (milliseconds: number) => void; tmuxRunner?: TmuxRunner },
@@ -8454,6 +10941,16 @@ function isDefaultRuntimeCommand(command: string | null): boolean {
     || command === "enqueue-nudge-worker"
     || command === "enqueue-continue-iteration"
     || command === "dispatch"
+    || command === "manager-config"
+    || command === "manager-permission"
+    || command === "record-decision"
+    || command === "continuation"
+    || command === "continuation-reviewer"
+    || command === "handoff"
+    || command === "epilogue"
+    || command === "request-worker-compact"
+    || command === "compact-worker"
+    || command === "import-compat"
   );
 }
 
@@ -9986,7 +12483,9 @@ function taskIdForTask(database: ReturnType<typeof openRuntimeDatabase>, taskNam
 function insertEventSync(
   database: ReturnType<typeof openRuntimeDatabase>,
   options: {
+    actor?: string;
     commandId?: string | null;
+    correlationId?: string | null;
     managerId?: string | null;
     payload: Record<string, unknown>;
     taskId?: string | null;
@@ -9995,14 +12494,16 @@ function insertEventSync(
   },
 ): void {
   database.prepare(`
-    insert into events(created_at, actor, worker_id, manager_id, task_id, command_id, type, payload_json)
-    values (?, 'workerctl', ?, ?, ?, ?, ?, ?)
+    insert into events(created_at, actor, worker_id, manager_id, task_id, command_id, correlation_id, type, payload_json)
+    values (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     new Date().toISOString(),
+    options.actor ?? "workerctl",
     options.workerId ?? null,
     options.managerId ?? null,
     options.taskId ?? null,
     options.commandId ?? null,
+    options.correlationId ?? null,
     options.type,
     stableJson(options.payload),
   );
@@ -11051,10 +13552,14 @@ function missingManagerDecisionCheck(): Record<string, unknown> {
 
 function assessManagerDecisionSync(
   database: ReturnType<typeof openRuntimeDatabase>,
-  options: { decisionId: number | null; taskId: string },
+  options: { allowedDecisions?: string[]; decisionId: number | null; now?: string; taskId: string },
 ): Record<string, unknown> {
+  const allowedDecisions = options.allowedDecisions ?? ["stop"];
   if (options.decisionId === null) {
-    return missingManagerDecisionCheck();
+    return {
+      ...missingManagerDecisionCheck(),
+      allowed_decisions: allowedDecisions,
+    };
   }
   const row = database.prepare(`
     select id, task_id, manager_id, manager_cycle_id, decision, reason, created_at, payload_json
@@ -11071,7 +13576,7 @@ function assessManagerDecisionSync(
   } | undefined;
   if (!row) {
     return {
-      allowed_decisions: ["stop"],
+      allowed_decisions: allowedDecisions,
       decision: null,
       decision_id: options.decisionId,
       ok: false,
@@ -11082,7 +13587,7 @@ function assessManagerDecisionSync(
   if (row.task_id !== options.taskId) {
     warnings.push("decision_task_mismatch");
   }
-  if (row.decision !== "stop") {
+  if (!allowedDecisions.includes(row.decision)) {
     warnings.push("decision_mismatch");
   }
   const createdAt = Date.parse(row.created_at);
@@ -11090,14 +13595,15 @@ function assessManagerDecisionSync(
   if (Number.isNaN(createdAt)) {
     warnings.push("decision_timestamp_invalid");
   } else {
-    ageSeconds = Math.trunc((Date.now() - createdAt) / 1000);
-    if (ageSeconds > 900) {
+    const now = options.now === undefined ? Date.now() : Date.parse(options.now);
+    ageSeconds = Number.isNaN(now) ? null : Math.trunc((now - createdAt) / 1000);
+    if (ageSeconds !== null && ageSeconds > 900) {
       warnings.push("decision_stale");
     }
   }
   return {
     age_seconds: ageSeconds,
-    allowed_decisions: ["stop"],
+    allowed_decisions: allowedDecisions,
     decision: {
       created_at: row.created_at,
       decision: row.decision,

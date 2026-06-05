@@ -6099,6 +6099,957 @@ test("TypeScript runtime dispatch CLI records failed attempts for missing manage
   }
 });
 
+test("TypeScript runtime handles manager-config and manager-permission by default", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-manager-policy."));
+  try {
+    const dbPath = join(root, "workerctl.db");
+    const database = openDatabaseSync(dbPath);
+    try {
+      initializeDatabaseSync(database);
+      createTaskSync(database, {
+        goal: "Ship manager policy.",
+        name: "policy-task",
+        now: "2026-05-23T10:00:00Z",
+        taskId: "task-policy",
+      });
+    } finally {
+      database.close();
+    }
+
+    const created = runTypescriptRuntimeCommand({
+      args: [
+        "manager-config",
+        "policy-task",
+        "--mode",
+        "strict",
+        "--objective",
+        "Check the release contract.",
+        "--guideline",
+        "Nudge only on stale evidence.",
+        "--acceptance",
+        "CI is green.",
+        "--reference",
+        "docs/release.md",
+        "--permit",
+        "context.spawn_reviewer",
+        "--allow-pr",
+        "--allow-merge-green",
+        "--allow-worker-compact-clear",
+        "--tool",
+        "npm test",
+        "--epilogue",
+        "draft-pr",
+        "--nudge-on-completion",
+        "auto-review",
+        "--require-acks",
+        "--permissions-json",
+        "{\"communication.notify_operator\":true,\"unknown_key\":true}",
+        "--path",
+        dbPath,
+      ],
+      env: {},
+    });
+    assert.equal(created.exitCode, 0);
+    assert.equal(created.handled, true);
+    const config = JSON.parse(created.stdout ?? "{}") as {
+      acceptance_criteria: string[];
+      epilogues: string[];
+      guidelines: string[];
+      nudge_on_completion: string;
+      objective: string;
+      permissions: {
+        communication: string[];
+        context: string[];
+        repo: string[];
+        worker_session: string[];
+      };
+      reference_paths: string[];
+      require_acks: boolean;
+      revision: number;
+      supervision_mode: string;
+      tools: string[];
+      warnings: string[];
+    };
+    assert.equal(config.supervision_mode, "strict");
+    assert.equal(config.objective, "Check the release contract.");
+    assert.deepEqual(config.guidelines, ["Nudge only on stale evidence."]);
+    assert.deepEqual(config.acceptance_criteria, ["CI is green."]);
+    assert.deepEqual(config.reference_paths, ["docs/release.md"]);
+    assert.deepEqual(config.permissions.communication, ["notify_operator"]);
+    assert.deepEqual(config.permissions.context, ["spawn_reviewer"]);
+    assert.deepEqual(config.permissions.repo, ["merge_green_pr", "open_pr"]);
+    assert.deepEqual(config.permissions.worker_session, ["clear", "compact"]);
+    assert.deepEqual(config.epilogues, ["draft-pr"]);
+    assert.deepEqual(config.tools, ["npm test"]);
+    assert.equal(config.nudge_on_completion, "auto-review");
+    assert.equal(config.require_acks, true);
+    assert.equal(config.revision, 1);
+    assert.deepEqual(config.warnings, ["unknown permission key \"unknown_key\""]);
+
+    const listed = runTypescriptRuntimeCommand({
+      args: ["manager-permission", "policy-task", "repo", "--list", "--path", dbPath],
+      env: {},
+    });
+    assert.equal(listed.exitCode, 0);
+    const listedPayload = JSON.parse(listed.stdout ?? "{}") as {
+      allowed: boolean;
+      listed_permissions: string[];
+      reasons: string[];
+    };
+    assert.equal(listedPayload.allowed, true);
+    assert.deepEqual(listedPayload.listed_permissions, ["merge_green_pr", "open_pr"]);
+    assert.deepEqual(listedPayload.reasons, []);
+
+    const denied = runTypescriptRuntimeCommand({
+      args: ["manager-permission", "policy-task", "repo.push_branch", "--require", "--path", dbPath],
+      env: {},
+    });
+    assert.equal(denied.exitCode, 1);
+    const deniedPayload = JSON.parse(denied.stdout ?? "{}") as {
+      allowed: boolean;
+      reasons: string[];
+    };
+    assert.equal(deniedPayload.allowed, false);
+    assert.deepEqual(deniedPayload.reasons, ["permission_not_enabled"]);
+
+    const needsHandoff = runTypescriptRuntimeCommand({
+      args: ["manager-permission", "policy-task", "worker_compact_clear", "--require-handoff", "--require", "--path", dbPath],
+      env: {},
+    });
+    assert.equal(needsHandoff.exitCode, 1);
+    assert.deepEqual((JSON.parse(needsHandoff.stdout ?? "{}") as { reasons: string[] }).reasons, ["missing_worker_handoff"]);
+
+    const handoffDb = openDatabaseSync(dbPath);
+    try {
+      handoffDb.prepare(`
+        insert into worker_handoffs(task_id, worker_session_id, summary, next_steps_json, payload_json, created_at)
+        values ('task-policy', null, 'Ready for compact.', '[]', '{}', '2026-05-23T10:01:00Z')
+      `).run();
+    } finally {
+      handoffDb.close();
+    }
+
+    const allowedWithHandoff = runTypescriptRuntimeCommand({
+      args: ["manager-permission", "policy-task", "worker_compact_clear", "--require-handoff", "--require", "--path", dbPath],
+      env: {},
+    });
+    assert.equal(allowedWithHandoff.exitCode, 0);
+    const allowedPayload = JSON.parse(allowedWithHandoff.stdout ?? "{}") as {
+      allowed: boolean;
+      handoff_id: number;
+      reasons: string[];
+    };
+    assert.equal(allowedPayload.allowed, true);
+    assert.equal(allowedPayload.handoff_id, 1);
+    assert.deepEqual(allowedPayload.reasons, []);
+
+    const update = runTypescriptRuntimeCommand({
+      args: ["manager-config", "policy-task", "--objective", "Check the merged PR.", "--path", dbPath],
+      env: {},
+    });
+    assert.equal(update.exitCode, 0);
+    const updated = JSON.parse(update.stdout ?? "{}") as { objective: string; revision: number };
+    assert.equal(updated.objective, "Check the merged PR.");
+    assert.equal(updated.revision, 2);
+
+    const eventDb = openDatabaseSync(dbPath);
+    try {
+      const events = eventDb.prepare(`
+        select type
+        from events
+        where task_id = 'task-policy'
+          and type in ('manager_config_recorded', 'manager_permission_checked')
+        order by id
+      `).all() as Array<{ type: string }>;
+      assert.deepEqual(events.map((row) => row.type), [
+        "manager_config_recorded",
+        "manager_permission_checked",
+        "manager_permission_checked",
+        "manager_permission_checked",
+        "manager_permission_checked",
+        "manager_config_recorded",
+      ]);
+    } finally {
+      eventDb.close();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("TypeScript runtime handles record-decision by default", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-record-decision."));
+  try {
+    const dbPath = join(root, "workerctl.db");
+    const database = openDatabaseSync(dbPath);
+    try {
+      initializeDatabaseSync(database);
+      createTaskSync(database, {
+        goal: "Record a decision.",
+        name: "decision-task",
+        now: "2026-05-23T10:00:00Z",
+        taskId: "task-decision",
+      });
+      database.prepare(`
+        insert into managers(id, name, task_id, tmux_session, state, codex_args_json, started_at)
+        values ('manager-decision', 'decision-manager', 'task-decision', 'tmux-manager-decision', 'ready', '[]', '2026-05-23T10:00:15Z')
+      `).run();
+      database.prepare(`
+        insert into manager_cycles(id, task_id, manager_id, started_at, state)
+        values (7, 'task-decision', 'manager-decision', '2026-05-23T10:01:00Z', 'started')
+      `).run();
+    } finally {
+      database.close();
+    }
+
+    const recorded = runTypescriptRuntimeCommand({
+      args: [
+        "record-decision",
+        "decision-task",
+        "stop",
+        "--reason",
+        "CI is green and the PR is merged.",
+        "--cycle-id",
+        "7",
+        "--payload-json",
+        "{\"ci\":\"green\"}",
+        "--path",
+        dbPath,
+      ],
+      env: {},
+      now: () => new Date("2026-05-23T10:02:00Z"),
+    });
+    assert.equal(recorded.exitCode, 0);
+    const payload = JSON.parse(recorded.stdout ?? "{}") as {
+      created_at: string;
+      decision: string;
+      id: number;
+      manager_cycle_id: number;
+      manager_id: string;
+      payload: Record<string, unknown>;
+      reason: string;
+      task: { id: string; name: string };
+      task_id: string;
+    };
+    assert.equal(payload.created_at, "2026-05-23T10:02:00Z");
+    assert.equal(payload.decision, "stop");
+    assert.equal(payload.id, 1);
+    assert.equal(payload.manager_cycle_id, 7);
+    assert.equal(payload.manager_id, "manager-decision");
+    assert.deepEqual(payload.payload, { ci: "green" });
+    assert.equal(payload.reason, "CI is green and the PR is merged.");
+    assert.deepEqual(payload.task, { id: "task-decision", name: "decision-task" });
+    assert.equal(payload.task_id, "task-decision");
+
+    const proofDb = openDatabaseSync(dbPath);
+    try {
+      const row = proofDb.prepare("select decision, manager_id, manager_cycle_id, payload_json from manager_decisions where id = 1")
+        .get() as { decision: string; manager_cycle_id: number; manager_id: string; payload_json: string };
+      assert.equal(row.decision, "stop");
+      assert.equal(row.manager_id, "manager-decision");
+      assert.equal(row.manager_cycle_id, 7);
+      assert.deepEqual(JSON.parse(row.payload_json), { ci: "green" });
+      const event = proofDb.prepare("select manager_id, payload_json, type from events where type = 'manager_decision_recorded'")
+        .get() as { manager_id: string; payload_json: string; type: string };
+      assert.equal(event.manager_id, "manager-decision");
+      assert.equal(event.type, "manager_decision_recorded");
+      assert.deepEqual(JSON.parse(event.payload_json), {
+        decision: "stop",
+        decision_id: 1,
+        manager_cycle_id: 7,
+        reason: "CI is green and the PR is merged.",
+      });
+    } finally {
+      proofDb.close();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("TypeScript runtime handles continuation submit list and review by default", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-continuation."));
+  try {
+    const dbPath = join(root, "workerctl.db");
+    const database = openDatabaseSync(dbPath);
+    try {
+      initializeDatabaseSync(database);
+      createTaskSync(database, {
+        goal: "Review continuation.",
+        name: "continuation-task",
+        now: "2026-05-23T10:00:00Z",
+        taskId: "task-continuation",
+      });
+    } finally {
+      database.close();
+    }
+
+    const worker = runTypescriptRuntimeCommand({
+      args: [
+        "continuation",
+        "continuation-task",
+        "--submit",
+        "worker",
+        "--from-stdin",
+        "--correlation-id",
+        "corr-continuation",
+        "--path",
+        dbPath,
+      ],
+      env: {},
+      stdin: "{\"next\":\"run tests\",\"private\":\"worker-note\"}",
+    });
+    assert.equal(worker.exitCode, 0);
+    const workerPayload = JSON.parse(worker.stdout ?? "{}") as {
+      correlation_id: string;
+      id: number;
+      payload: Record<string, unknown>;
+      proposer: string;
+      revision: number;
+    };
+    assert.equal(workerPayload.correlation_id, "corr-continuation");
+    assert.equal(workerPayload.id, 1);
+    assert.deepEqual(workerPayload.payload, { next: "run tests", private: "worker-note" });
+    assert.equal(workerPayload.proposer, "worker");
+    assert.equal(workerPayload.revision, 1);
+
+    const blockedRead = runTypescriptRuntimeCommand({
+      args: [
+        "continuation",
+        "continuation-task",
+        "--list",
+        "--as-role",
+        "manager",
+        "--include-payload",
+        "--correlation-id",
+        "corr-continuation",
+        "--path",
+        dbPath,
+      ],
+      env: {},
+    });
+    assert.equal(blockedRead.exitCode, 2);
+    assert.match(blockedRead.stderr ?? "", /manager cannot read worker continuation payload/);
+
+    const manager = runTypescriptRuntimeCommand({
+      args: [
+        "continuation",
+        "continuation-task",
+        "--submit",
+        "manager",
+        "--from-stdin",
+        "--correlation-id",
+        "corr-continuation",
+        "--path",
+        dbPath,
+      ],
+      env: {},
+      stdin: "{\"decision\":\"continue\",\"manager_private\":\"reviewed\"}",
+    });
+    assert.equal(manager.exitCode, 0);
+    const managerPayload = JSON.parse(manager.stdout ?? "{}") as {
+      id: number;
+      payload: Record<string, unknown>;
+      proposer: string;
+      revision: number;
+    };
+    assert.equal(managerPayload.id, 2);
+    assert.deepEqual(managerPayload.payload, { decision: "continue", manager_private: "reviewed" });
+    assert.equal(managerPayload.proposer, "manager");
+    assert.equal(managerPayload.revision, 1);
+
+    const list = runTypescriptRuntimeCommand({
+      args: [
+        "continuation",
+        "continuation-task",
+        "--list",
+        "--as-role",
+        "manager",
+        "--include-payload",
+        "--correlation-id",
+        "corr-continuation",
+        "--path",
+        dbPath,
+      ],
+      env: {},
+    });
+    assert.equal(list.exitCode, 0);
+    const listPayload = JSON.parse(list.stdout ?? "{}") as {
+      continuations: Array<{ payload: Record<string, unknown>; payload_redacted?: boolean; proposer: string }>;
+      reviews: unknown[];
+    };
+    assert.equal(listPayload.continuations.length, 2);
+    assert.equal(listPayload.continuations[0].payload.private, "worker-note");
+    assert.equal(listPayload.continuations[0].payload_redacted, undefined);
+    assert.equal(listPayload.continuations[1].payload.manager_private, "reviewed");
+    assert.deepEqual(listPayload.reviews, []);
+
+    const deniedReview = runTypescriptRuntimeCommand({
+      args: [
+        "continuation",
+        "continuation-task",
+        "--review",
+        "--from-stdin",
+        "--correlation-id",
+        "corr-continuation",
+        "--path",
+        dbPath,
+      ],
+      env: {},
+      stdin: "{\"agreement\":\"match\",\"verdict\":\"proceed\",\"rationale\":\"Aligned.\",\"subagent_run\":{\"reviewer_session_id\":\"reviewer-1\",\"manager_session_id\":\"manager-1\",\"manager_rollout_access\":false}}",
+    });
+    assert.equal(deniedReview.exitCode, 2);
+    assert.match(deniedReview.stderr ?? "", /manager permission context\.spawn_reviewer/);
+
+    const permissionDb = openDatabaseSync(dbPath);
+    try {
+      permissionDb.prepare(`
+        insert into manager_configs(
+          task_id, supervision_mode, objective, guidelines_json,
+          acceptance_criteria_json, reference_paths_json, permissions_json,
+          tools_json, epilogues_json, nudge_on_completion, require_acks,
+          revision, created_at, updated_at
+        )
+        values ('task-continuation', 'guided', null, '[]', '[]', '[]', '{"context":["spawn_reviewer"]}', '[]', '[]', 'ask-operator', 0, 1, '2026-05-23T10:01:00Z', '2026-05-23T10:01:00Z')
+      `).run();
+    } finally {
+      permissionDb.close();
+    }
+
+    const reviewed = runTypescriptRuntimeCommand({
+      args: [
+        "continuation",
+        "continuation-task",
+        "--review",
+        "--from-stdin",
+        "--correlation-id",
+        "corr-continuation",
+        "--path",
+        dbPath,
+      ],
+      env: {},
+      now: () => new Date("2026-05-23T10:02:00Z"),
+      stdin: "{\"agreement\":\"divergent\",\"verdict\":\"amend\",\"rationale\":\"Manager missed the test step.\",\"addendum\":\"Add test proof.\",\"subagent_run\":{\"reviewer_session_id\":\"reviewer-1\",\"manager_session_id\":\"manager-1\",\"manager_rollout_access\":false,\"status\":\"succeeded\",\"allowed_context\":[\"task\",\"diff\"],\"duration_ms\":120,\"returncode\":0}}",
+    });
+    assert.equal(reviewed.exitCode, 0);
+    const review = JSON.parse(reviewed.stdout ?? "{}") as {
+      agreement: string;
+      id: number;
+      manager_continuation_id: number;
+      operator_routing_required: boolean;
+      subagent_run: Record<string, unknown>;
+      verdict: string;
+      worker_continuation_id: number;
+    };
+    assert.equal(review.id, 1);
+    assert.equal(review.agreement, "divergent");
+    assert.equal(review.verdict, "amend");
+    assert.equal(review.operator_routing_required, true);
+    assert.equal(review.worker_continuation_id, 1);
+    assert.equal(review.manager_continuation_id, 2);
+    assert.equal(review.subagent_run.operator_routing_required, true);
+
+    const proofDb = openDatabaseSync(dbPath);
+    try {
+      const events = proofDb.prepare(`
+        select actor, correlation_id, type
+        from events
+        where task_id = 'task-continuation'
+          and type in ('task_continuation_recorded', 'continuation_review_recorded')
+        order by id
+      `).all() as Array<{ actor: string; correlation_id: string; type: string }>;
+      assert.deepEqual(events.map((event) => [event.actor, event.correlation_id, event.type]), [
+        ["worker", "corr-continuation", "task_continuation_recorded"],
+        ["manager", "corr-continuation", "task_continuation_recorded"],
+        ["workerctl", "corr-continuation", "continuation_review_recorded"],
+      ]);
+      const telemetry = proofDb.prepare("select severity, attributes_json from telemetry_events where event_type = 'continuation_review_recorded'")
+        .get() as { attributes_json: string; severity: string };
+      assert.equal(telemetry.severity, "warning");
+      assert.equal(JSON.parse(telemetry.attributes_json).operator_routing_required, true);
+    } finally {
+      proofDb.close();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("TypeScript runtime handles handoff and epilogue by default", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-handoff-epilogue."));
+  try {
+    const dbPath = join(root, "workerctl.db");
+    const database = openDatabaseSync(dbPath);
+    try {
+      initializeDatabaseSync(database);
+      createTaskSync(database, {
+        goal: "Record handoff.",
+        name: "handoff-task",
+        now: "2026-05-23T10:00:00Z",
+        taskId: "task-handoff",
+      });
+      insertSession(database, { id: "session-handoff-worker", name: "handoff-worker", role: "worker" });
+      insertSession(database, { id: "session-handoff-manager", name: "handoff-manager", role: "manager" });
+      bindSessionsSync(database, {
+        bindingId: "binding-handoff",
+        managerSessionName: "handoff-manager",
+        now: "2026-05-23T10:00:10Z",
+        taskName: "handoff-task",
+        workerSessionName: "handoff-worker",
+      });
+      database.prepare(`
+        insert into manager_configs(
+          task_id, supervision_mode, objective, guidelines_json,
+          acceptance_criteria_json, reference_paths_json, permissions_json,
+          tools_json, epilogues_json, nudge_on_completion, require_acks,
+          revision, created_at, updated_at
+        )
+        values ('task-handoff', 'guided', null, '[]', '[]', '[]', '{}', '[]', '["record-handoff","draft-pr"]', 'ask-operator', 0, 1, '2026-05-23T10:00:20Z', '2026-05-23T10:00:20Z')
+      `).run();
+    } finally {
+      database.close();
+    }
+
+    const handoff = runTypescriptRuntimeCommand({
+      args: [
+        "handoff",
+        "handoff-task",
+        "--summary",
+        "Implemented the policy slice.",
+        "--next-step",
+        "Run full gates.",
+        "--next-step",
+        "Open PR.",
+        "--payload-json",
+        "{\"branch\":\"codex/ts-manager-policy-cli\"}",
+        "--path",
+        dbPath,
+      ],
+      env: {},
+      now: () => new Date("2026-05-23T10:01:00Z"),
+    });
+    assert.equal(handoff.exitCode, 0);
+    const handoffPayload = JSON.parse(handoff.stdout ?? "{}") as {
+      id: number;
+      next_steps: string[];
+      payload: Record<string, unknown>;
+      summary: string;
+      worker_session_id: string;
+    };
+    assert.equal(handoffPayload.id, 1);
+    assert.deepEqual(handoffPayload.next_steps, ["Run full gates.", "Open PR."]);
+    assert.deepEqual(handoffPayload.payload, { branch: "codex/ts-manager-policy-cli" });
+    assert.equal(handoffPayload.summary, "Implemented the policy slice.");
+    assert.equal(handoffPayload.worker_session_id, "session-handoff-worker");
+
+    const initialStatus = runTypescriptRuntimeCommand({
+      args: ["epilogue", "handoff-task", "--status", "--path", dbPath],
+      env: {},
+    });
+    assert.equal(initialStatus.exitCode, 0);
+    assert.deepEqual((JSON.parse(initialStatus.stdout ?? "{}") as { status: { missing_or_incomplete: string[] } }).status.missing_or_incomplete, [
+      "record-handoff",
+      "draft-pr",
+    ]);
+
+    const recordHandoff = runTypescriptRuntimeCommand({
+      args: ["epilogue", "handoff-task", "--step", "record-handoff", "--correlation-id", "epi-handoff", "--json", "--path", dbPath],
+      env: {},
+      now: () => new Date("2026-05-23T10:02:00Z"),
+    });
+    assert.equal(recordHandoff.exitCode, 0);
+    const recordPayload = JSON.parse(recordHandoff.stdout ?? "{}") as {
+      runs: Array<{ correlation_id: string; result: Record<string, unknown>; state: string; step_name: string }>;
+      status: { missing_or_incomplete: string[] };
+    };
+    assert.equal(recordPayload.runs[0].correlation_id, "epi-handoff");
+    assert.equal(recordPayload.runs[0].state, "succeeded");
+    assert.equal(recordPayload.runs[0].step_name, "record-handoff");
+    assert.deepEqual(recordPayload.runs[0].result, {
+      handoff_id: 1,
+      summary: "Implemented the policy slice.",
+    });
+    assert.deepEqual(recordPayload.status.missing_or_incomplete, ["draft-pr"]);
+
+    const draftPr = runTypescriptRuntimeCommand({
+      args: ["epilogue", "handoff-task", "--step", "draft-pr", "--correlation-id", "epi-draft", "--json", "--path", dbPath],
+      env: {},
+      now: () => new Date("2026-05-23T10:03:00Z"),
+    });
+    assert.equal(draftPr.exitCode, 0);
+    const draftPayload = JSON.parse(draftPr.stdout ?? "{}") as {
+      runs: Array<{ correlation_id: string; state: string; step_name: string }>;
+      status: { ok: boolean };
+    };
+    assert.equal(draftPayload.status.ok, true);
+    assert.deepEqual(draftPayload.runs.map((run) => [run.correlation_id, run.step_name, run.state]), [
+      ["epi-handoff", "record-handoff", "succeeded"],
+      ["epi-draft", "draft-pr", "succeeded"],
+    ]);
+
+    const proofDb = openDatabaseSync(dbPath);
+    try {
+      const events = proofDb.prepare(`
+        select correlation_id, type
+        from events
+        where task_id = 'task-handoff'
+          and type in ('worker_handoff_recorded', 'epilogue_step_recorded')
+        order by id
+      `).all() as Array<{ correlation_id: string | null; type: string }>;
+      assert.deepEqual(events.map((event) => [event.correlation_id, event.type]), [
+        [null, "worker_handoff_recorded"],
+        ["epi-handoff", "epilogue_step_recorded"],
+        ["epi-draft", "epilogue_step_recorded"],
+      ]);
+    } finally {
+      proofDb.close();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("TypeScript runtime handles request-worker-compact and compact-worker by default", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-worker-compact."));
+  try {
+    const dbPath = join(root, "workerctl.db");
+    const database = openDatabaseSync(dbPath);
+    try {
+      initializeDatabaseSync(database);
+      createTaskSync(database, {
+        goal: "Compact worker context.",
+        name: "compact-task",
+        now: "2026-05-23T10:00:00Z",
+        taskId: "task-compact",
+      });
+      insertSession(database, {
+        id: "session-compact-worker",
+        name: "compact-worker",
+        role: "worker",
+        tmuxSession: "tmux-compact-worker",
+      });
+      insertSession(database, {
+        id: "session-compact-manager",
+        name: "compact-manager",
+        role: "manager",
+        tmuxSession: "tmux-compact-manager",
+      });
+      bindSessionsSync(database, {
+        bindingId: "binding-compact",
+        managerSessionName: "compact-manager",
+        now: "2026-05-23T10:00:10Z",
+        taskName: "compact-task",
+        workerSessionName: "compact-worker",
+      });
+      database.prepare(`
+        insert into manager_configs(
+          task_id, supervision_mode, objective, guidelines_json,
+          acceptance_criteria_json, reference_paths_json, permissions_json,
+          tools_json, epilogues_json, nudge_on_completion, require_acks,
+          revision, created_at, updated_at
+        )
+        values ('task-compact', 'guided', null, '[]', '[]', '[]', '{"worker_session":["compact","clear"]}', '[]', '[]', 'ask-operator', 0, 1, '2026-05-23T10:00:20Z', '2026-05-23T10:00:20Z')
+      `).run();
+      database.prepare(`
+        insert into worker_handoffs(task_id, worker_session_id, summary, next_steps_json, payload_json, created_at)
+        values ('task-compact', 'session-compact-worker', 'Ready to compact.', '[]', '{}', '2026-05-23T10:00:30Z')
+      `).run();
+      database.prepare(`
+        insert into manager_decisions(task_id, manager_id, manager_cycle_id, decision, reason, created_at, payload_json)
+        values ('task-compact', null, null, 'nudge', 'Request worker compaction.', '2026-05-23T10:00:40Z', '{}')
+      `).run();
+    } finally {
+      database.close();
+    }
+
+    const requested = runTypescriptRuntimeCommand({
+      args: [
+        "request-worker-compact",
+        "compact-task",
+        "--decision-id",
+        "1",
+        "--strict-decisions",
+        "--dry-run",
+        "--path",
+        dbPath,
+      ],
+      env: {},
+      now: () => new Date("2026-05-23T10:01:00Z"),
+    });
+    assert.equal(requested.exitCode, 0);
+    const requestPayload = JSON.parse(requested.stdout ?? "{}") as {
+      permission_check: { allowed: boolean; handoff_id: number };
+      send_result: { dry_run: boolean; session: string; text: string };
+      send_text: string;
+      slash_command: string;
+    };
+    assert.equal(requestPayload.permission_check.allowed, true);
+    assert.equal(requestPayload.permission_check.handoff_id, 1);
+    assert.equal(requestPayload.slash_command, "/compact");
+    assert.equal(requestPayload.send_text, "/compact");
+    assert.deepEqual(requestPayload.send_result, {
+      dry_run: true,
+      session: "compact-worker",
+      side_effect_completed: false,
+      side_effect_started: false,
+      target: "tmux-compact-worker",
+      text: "/compact",
+      time: "2026-05-23T10:01:00Z",
+    });
+
+    const cleared = runTypescriptRuntimeCommand({
+      args: [
+        "compact-worker",
+        "compact-task",
+        "--reason",
+        "Clear after saved handoff.",
+        "--clear",
+        "--dry-run",
+        "--path",
+        dbPath,
+      ],
+      env: {},
+      now: () => new Date("2026-05-23T10:02:00Z"),
+    });
+    assert.equal(cleared.exitCode, 0);
+    const clearPayload = JSON.parse(cleared.stdout ?? "{}") as {
+      manager_decision: { decision_id: number; ok: boolean };
+      send_result: { text: string };
+      slash_command: string;
+    };
+    assert.equal(clearPayload.manager_decision.ok, true);
+    assert.equal(clearPayload.manager_decision.decision_id, 2);
+    assert.equal(clearPayload.slash_command, "/clear");
+    assert.equal(clearPayload.send_result.text, "/clear");
+
+    const proofDb = openDatabaseSync(dbPath);
+    try {
+      const commands = (proofDb.prepare("select state, type from commands where type = 'request_worker_compact' order by created_at")
+        .all() as Array<Record<string, unknown>>)
+        .map((row) => ({ state: row.state, type: row.type }));
+      assert.deepEqual(commands, [
+        { state: "succeeded", type: "request_worker_compact" },
+        { state: "succeeded", type: "request_worker_compact" },
+      ]);
+      const events = proofDb.prepare(`
+        select type
+        from events
+        where task_id = 'task-compact'
+          and type in ('manager_decision_recorded', 'worker_compact_requested', 'worker_compact_request_succeeded')
+        order by id
+      `).all() as Array<{ type: string }>;
+      assert.deepEqual(events.map((event) => event.type), [
+        "worker_compact_requested",
+        "worker_compact_request_succeeded",
+        "manager_decision_recorded",
+        "worker_compact_requested",
+        "worker_compact_request_succeeded",
+      ]);
+    } finally {
+      proofDb.close();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("TypeScript runtime handles continuation-reviewer dry-run and fail-closed review by default", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-continuation-reviewer."));
+  try {
+    const dbPath = join(root, "workerctl.db");
+    const database = openDatabaseSync(dbPath);
+    try {
+      initializeDatabaseSync(database);
+      createTaskSync(database, {
+        goal: "Review continuation independently.",
+        name: "reviewer-task",
+        now: "2026-05-23T10:00:00Z",
+        taskId: "task-reviewer",
+      });
+      database.prepare(`
+        insert into manager_configs(
+          task_id, supervision_mode, objective, guidelines_json,
+          acceptance_criteria_json, reference_paths_json, permissions_json,
+          tools_json, epilogues_json, nudge_on_completion, require_acks,
+          revision, created_at, updated_at
+        )
+        values ('task-reviewer', 'guided', null, '[]', '[]', '[]', '{"context":["spawn_reviewer"]}', '[]', '[]', 'ask-operator', 0, 1, '2026-05-23T10:00:20Z', '2026-05-23T10:00:20Z')
+      `).run();
+    } finally {
+      database.close();
+    }
+
+    for (const [submit, stdin] of [
+      ["worker", "{\"next\":\"run focused tests\"}"],
+      ["manager", "{\"decision\":\"continue after tests\"}"],
+    ] as const) {
+      const submitted = runTypescriptRuntimeCommand({
+        args: [
+          "continuation",
+          "reviewer-task",
+          "--submit",
+          submit,
+          "--from-stdin",
+          "--correlation-id",
+          "corr-reviewer",
+          "--path",
+          dbPath,
+        ],
+        env: {},
+        stdin,
+      });
+      assert.equal(submitted.exitCode, 0);
+    }
+
+    const dryRun = runTypescriptRuntimeCommand({
+      args: [
+        "continuation-reviewer",
+        "reviewer-task",
+        "--correlation-id",
+        "corr-reviewer",
+        "--reviewer-session-id",
+        "reviewer-session",
+        "--manager-session-id",
+        "manager-session",
+        "--dry-run",
+        "--path",
+        dbPath,
+      ],
+      env: {},
+    });
+    assert.equal(dryRun.exitCode, 0);
+    const dryRunPayload = JSON.parse(dryRun.stdout ?? "{}") as {
+      context: { allowed_context: string[]; correlation_id: string };
+      reviewer_command: string[];
+    };
+    assert.equal(dryRunPayload.context.correlation_id, "corr-reviewer");
+    assert.ok(dryRunPayload.context.allowed_context.includes("worker_continuation"));
+    assert.deepEqual(dryRunPayload.reviewer_command, []);
+
+    const failedReview = runTypescriptRuntimeCommand({
+      args: [
+        "continuation-reviewer",
+        "reviewer-task",
+        "--correlation-id",
+        "corr-reviewer",
+        "--reviewer-session-id",
+        "reviewer-session",
+        "--manager-session-id",
+        "manager-session",
+        "--path",
+        dbPath,
+        "--reviewer-command",
+        "--",
+        "node",
+        "-e",
+        "process.stdout.write('not-json')",
+      ],
+      env: {},
+      now: () => new Date("2026-05-23T10:02:00Z"),
+    });
+    assert.equal(failedReview.exitCode, 0);
+    const reviewPayload = JSON.parse(failedReview.stdout ?? "{}") as {
+      operator_routing_required: boolean;
+      subagent_run: Record<string, unknown>;
+      verdict: string;
+    };
+    assert.equal(reviewPayload.verdict, "stop");
+    assert.equal(reviewPayload.operator_routing_required, true);
+    assert.equal(reviewPayload.subagent_run.manager_rollout_access, false);
+    assert.equal(reviewPayload.subagent_run.status, "failed");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("TypeScript runtime handles import-compat dry-run apply and idempotency by default", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-import-compat."));
+  try {
+    const compatRoot = join(root, "compat");
+    const workerPath = join(compatRoot, "legacy-worker");
+    mkdirSync(workerPath, { recursive: true });
+    writeFileSync(join(workerPath, "config.json"), `${JSON.stringify({
+      cwd: root,
+      identity_token: "legacy-token",
+      name: "legacy-worker",
+      tmux_session: "legacy-tmux",
+    })}\n`);
+    writeFileSync(join(workerPath, "status.json"), `${JSON.stringify({
+      current_task: "Migrate files.",
+      last_update: "2026-05-23T10:00:00Z",
+      next_action: "Run importer.",
+      state: "planning",
+    })}\n`);
+    writeFileSync(join(workerPath, "events.jsonl"), `${JSON.stringify({ detail: "hello", time: "2026-05-23T10:00:01Z", type: "nudge" })}\n`);
+    writeFileSync(join(workerPath, "transcript.txt"), "line one\nline two\n");
+    writeFileSync(join(workerPath, "capture-meta.json"), `${JSON.stringify({
+      captured_at: "2026-05-23T10:00:02Z",
+      changed_at: "2026-05-23T10:00:02Z",
+      history_lines: 2,
+    })}\n`);
+
+    const dbPath = join(root, "workerctl.db");
+    const database = openDatabaseSync(dbPath);
+    try {
+      initializeDatabaseSync(database);
+    } finally {
+      database.close();
+    }
+
+    const dryRun = runTypescriptRuntimeCommand({
+      args: ["import-compat", "--root", compatRoot, "--path", dbPath],
+      env: {},
+    });
+    assert.equal(dryRun.exitCode, 0);
+    const dryRunPayload = JSON.parse(dryRun.stdout ?? "{}") as { apply: boolean; workers: Array<{ action_count: number }> };
+    assert.equal(dryRunPayload.apply, false);
+    assert.equal(dryRunPayload.workers[0].action_count, 4);
+
+    const applied = runTypescriptRuntimeCommand({
+      args: ["import-compat", "--root", compatRoot, "--apply", "--path", dbPath],
+      env: {},
+      now: () => new Date("2026-05-23T10:01:00Z"),
+    });
+    assert.equal(applied.exitCode, 0);
+    const appliedPayload = JSON.parse(applied.stdout ?? "{}") as { apply: boolean; worker_count: number; workers: Array<{ action_count: number }> };
+    assert.equal(appliedPayload.apply, true);
+    assert.equal(appliedPayload.worker_count, 1);
+    assert.equal(appliedPayload.workers[0].action_count, 4);
+
+    const second = runTypescriptRuntimeCommand({
+      args: ["import-compat", "--root", compatRoot, "--apply", "--path", dbPath],
+      env: {},
+    });
+    assert.equal(second.exitCode, 0);
+    assert.equal((JSON.parse(second.stdout ?? "{}") as { workers: Array<{ action_count: number }> }).workers[0].action_count, 0);
+
+    const proofDb = openDatabaseSync(dbPath);
+    try {
+      const workerRows = (proofDb.prepare("select name, state, tmux_session from workers").all() as Array<Record<string, unknown>>)
+        .map((row) => ({ name: row.name, state: row.state, tmux_session: row.tmux_session }));
+      assert.deepEqual(workerRows, [
+        { name: "legacy-worker", state: "candidate", tmux_session: "legacy-tmux" },
+      ]);
+      const statusRows = (proofDb.prepare("select state, current_task, next_action from statuses").all() as Array<Record<string, unknown>>)
+        .map((row) => ({ current_task: row.current_task, next_action: row.next_action, state: row.state }));
+      assert.deepEqual(statusRows, [
+        { current_task: "Migrate files.", next_action: "Run importer.", state: "planning" },
+      ]);
+      assert.equal((proofDb.prepare("select count(*) as count from transcript_captures").get() as { count: number }).count, 1);
+      const eventRows = (proofDb.prepare("select actor, type from events where actor = 'compat'").all() as Array<Record<string, unknown>>)
+        .map((row) => ({ actor: row.actor, type: row.type }));
+      assert.deepEqual(eventRows, [
+        { actor: "compat", type: "compat_nudge" },
+      ]);
+      assert.equal((proofDb.prepare("select count(*) as count from data_migrations").get() as { count: number }).count, 4);
+    } finally {
+      proofDb.close();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 function seedCliTask(database: DatabaseSync): void {
   initializeDatabaseSync(database);
   createTaskSync(database, {
