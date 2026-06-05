@@ -43,6 +43,7 @@ import {
   sendTextToSessionWithRunner,
   sessionExists,
   startTmuxSessionWithRunner,
+  tmuxCommandFailureMessage,
   tmuxSession,
   tmuxSessionRunning,
   type TmuxRunner,
@@ -184,6 +185,9 @@ export function runTypescriptRuntimeCommand(options: TypescriptRuntimeOptions): 
     }
     if (parsed.command === "open-manager") {
       return runOpenTaskSessionCommand(parsed, options, "manager");
+    }
+    if (parsed.command === "stop") {
+      return runStopCommand(parsed, options);
     }
     if (parsed.command === "register-worker") {
       return runRegisterSessionCommand(parsed, options, "worker");
@@ -710,7 +714,7 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       flags.reason = value.value;
       index += 1;
     } else if (arg === "--message") {
-      if (command !== "finish-task" && command !== "stop-task") {
+      if (command !== "finish-task" && command !== "stop-task" && command !== "stop") {
         return { command, enabled, error: "Unsupported TypeScript runtime option: --message", explicit, flags, task };
       }
       const value = valueAfter(queue, index, arg);
@@ -1928,6 +1932,131 @@ function openTmuxSessionWindow(
   return jsonResult(result);
 }
 
+function runStopCommand(
+  parsed: ParsedRuntimeArgs,
+  options: TypescriptRuntimeOptions,
+): TypescriptRuntimeResult {
+  const unsupported = unsupportedStopOptions(parsed);
+  if (unsupported) {
+    return unsupportedRuntimeResult(parsed, unsupported);
+  }
+  const name = parsed.task;
+  if (!name) {
+    return errorResult("stop requires a worker or session name.");
+  }
+  let config: LiveWorkerConfig;
+  try {
+    config = workerConfigOrSession(name, parsed, options);
+  } catch (error) {
+    return lifecycleWorkerErrorResult(error instanceof Error ? error.message : String(error));
+  }
+  const runner = options.tmuxRunner ?? defaultTmuxRunner;
+  if (config._workerctl_lookup_source === "legacy") {
+    return stopLegacyWorker(name, parsed, options, config, runner);
+  }
+  return stopRegisteredSession(name, parsed, options, config, runner);
+}
+
+function stopLegacyWorker(
+  name: string,
+  parsed: ParsedRuntimeArgs,
+  options: TypescriptRuntimeOptions,
+  config: LiveWorkerConfig,
+  runner: TmuxRunner,
+): TypescriptRuntimeResult {
+  try {
+    if (parsed.flags.message && sessionExistsForConfig(name, config, { tmuxRunner: runner })) {
+      sendTextToLegacyWorker(name, parsed.flags.message, runner);
+      appendCompatibilityEvent(name, "stop_message", { message: parsed.flags.message }, options);
+    }
+    if (sessionExistsForConfig(name, config, { tmuxRunner: runner })) {
+      killTmuxSessionWithRunner(tmuxTargetForConfig(name, config), runner);
+      appendCompatibilityEvent(name, "stop", { killed_session: true }, options);
+      return { exitCode: 0, handled: true, stdout: `stopped ${name}\n` };
+    }
+    appendCompatibilityEvent(name, "stop", { killed_session: false }, options);
+    return { exitCode: 0, handled: true, stdout: `${name} was not running\n` };
+  } catch (error) {
+    return lifecycleWorkerErrorResult(error instanceof Error ? error.message : String(error));
+  }
+}
+
+function stopRegisteredSession(
+  name: string,
+  parsed: ParsedRuntimeArgs,
+  options: TypescriptRuntimeOptions,
+  config: LiveWorkerConfig,
+  runner: TmuxRunner,
+): TypescriptRuntimeResult {
+  const target = tmuxTargetForConfig(name, config);
+  let running: boolean;
+  try {
+    running = sessionExistsForConfig(name, config, { tmuxRunner: runner });
+  } catch (error) {
+    return lifecycleWorkerErrorResult(error instanceof Error ? error.message : String(error));
+  }
+
+  if (parsed.flags.message && running) {
+    const database = openRuntimeDatabase(parsed, options);
+    try {
+      const session = sessionRow(database, name);
+      sendTextToSessionWithRunner(session, parsed.flags.message, runner, { now: () => nowIsoSeconds(options) });
+      insertEventSync(database, {
+        payload: {
+          role: config.role,
+          session: name,
+          target,
+          text_length: parsed.flags.message.length,
+        },
+        type: "session_stop_message",
+      });
+    } catch (error) {
+      return lifecycleWorkerErrorResult(error instanceof Error ? error.message : String(error));
+    } finally {
+      database.close();
+    }
+  }
+
+  let killed = false;
+  try {
+    if (running) {
+      killTmuxSessionWithRunner(target, runner);
+      killed = true;
+    }
+  } catch (error) {
+    return lifecycleWorkerErrorResult(error instanceof Error ? error.message : String(error));
+  }
+
+  const stoppedAt = nowIsoSeconds(options);
+  const database = openRuntimeDatabase(parsed, options);
+  try {
+    database.prepare("update sessions set state = 'gone', last_heartbeat_at = ? where name = ?")
+      .run(stoppedAt, name);
+    insertEventSync(database, {
+      payload: {
+        killed_session: killed,
+        role: config.role,
+        session: name,
+        target,
+      },
+      type: "session_stopped",
+    });
+  } finally {
+    database.close();
+  }
+  appendCompatibilityEvent(name, "stop", {
+    killed_session: killed,
+    lookup_source: "session",
+    role: config.role,
+    target,
+  }, options);
+  return {
+    exitCode: 0,
+    handled: true,
+    stdout: killed ? `stopped ${name}\n` : `${name} was not running\n`,
+  };
+}
+
 function runRegisterSessionCommand(
   parsed: ParsedRuntimeArgs,
   options: { cwd?: string; env?: NodeJS.ProcessEnv },
@@ -2537,6 +2666,7 @@ function isDefaultRuntimeCommand(command: string | null): boolean {
     || command === "open"
     || command === "open-worker"
     || command === "open-manager"
+    || command === "stop"
     || command === "register-worker"
     || command === "register-manager"
     || command === "sessions"
@@ -2918,6 +3048,75 @@ function unsupportedOpenTaskSessionOptions(parsed: ParsedRuntimeArgs, role: "man
     || parsed.flags.zip
   ) {
     return `Unsupported TypeScript runtime option for open-${role}.`;
+  }
+  return null;
+}
+
+function unsupportedStopOptions(parsed: ParsedRuntimeArgs): string | null {
+  if (
+    parsed.flags.active
+    || parsed.flags.all
+    || parsed.flags.blocker !== null
+    || parsed.flags.busyWaitSeconds !== DEFAULT_BUSY_WAIT_SECONDS
+    || parsed.flags.captureTranscriptBeforeStop
+    || parsed.flags.captureTranscriptLines !== DEFAULT_HISTORY_LINES
+    || parsed.flags.captureTranscriptMode !== "segment"
+    || parsed.flags.cleanupPolicy !== "clear"
+    || parsed.flags.codexSession !== null
+    || parsed.flags.create !== null
+    || parsed.flags.currentTask !== null
+    || parsed.flags.cwd !== null
+    || parsed.flags.decisionId !== null
+    || parsed.flags.dryRun
+    || parsed.flags.eventType !== null
+    || parsed.flags.file !== null
+    || parsed.flags.force
+    || parsed.flags.goal !== null
+    || parsed.flags.includeContent
+    || parsed.flags.includeFullTranscripts
+    || parsed.flags.includeLegacy
+    || parsed.flags.includeTranscripts
+    || parsed.flags.json
+    || parsed.flags.keepLatest !== 20
+    || parsed.flags.limit !== null
+    || parsed.flags.manager !== null
+    || parsed.flags.maxIterations !== null
+    || parsed.flags.names.length > 0
+    || parsed.flags.nextAction !== null
+    || parsed.flags.output !== null
+    || parsed.flags.path !== null
+    || parsed.flags.pid !== null
+    || parsed.flags.reason !== null
+    || parsed.flags.redactIdentityToken
+    || parsed.flags.requiredBeforeContinue.length > 0
+    || parsed.flags.requireAcks
+    || parsed.flags.requireAdversarialProof
+    || parsed.flags.requireCriteriaAudit
+    || parsed.flags.requireEpilogue
+    || parsed.flags.requireSegment
+    || parsed.flags.requireTranscriptSegment
+    || parsed.flags.roleProvided
+    || parsed.flags.runName !== null
+    || parsed.flags.seedPromptSha256 !== null
+    || parsed.flags.sessionDir !== null
+    || parsed.flags.sessionRole !== null
+    || parsed.flags.sessionState !== null
+    || parsed.flags.statusAgeSeconds !== DEFAULT_BUSY_WAIT_SECONDS
+    || parsed.flags.statusStaleSeconds !== DEFAULT_STATUS_STALE_SECONDS
+    || parsed.flags.statusState !== null
+    || parsed.flags.strictDecisions
+    || parsed.flags.subtype !== null
+    || parsed.flags.summary !== null
+    || parsed.flags.taskGoal !== null
+    || parsed.flags.taskName !== null
+    || parsed.flags.terminal !== "auto"
+    || parsed.flags.terminalStaleSeconds !== DEFAULT_TERMINAL_STALE_SECONDS
+    || parsed.flags.text !== null
+    || parsed.flags.tmuxSession !== null
+    || parsed.flags.worker !== null
+    || parsed.flags.zip
+  ) {
+    return "Unsupported TypeScript runtime option for stop.";
   }
   return null;
 }
@@ -6085,6 +6284,29 @@ function runTerminalCommand(
   if (result.status !== 0) {
     const detail = (result.stderr || result.stdout || `exit code ${result.status}`).trim();
     throw new Error(`${command.join(" ")} failed: ${detail}`);
+  }
+}
+
+function sendTextToLegacyWorker(name: string, text: string, runner: TmuxRunner): void {
+  const target = tmuxSession(name);
+  if (!sessionExists(name, runner)) {
+    throw new Error(`tmux session is not running for worker ${name}: ${target}`);
+  }
+  const bufferName = `workerctl-${name}`;
+  try {
+    runTmuxCommandWithRunner(["tmux", "set-buffer", "-b", bufferName, text], runner);
+    runTmuxCommandWithRunner(["tmux", "paste-buffer", "-b", bufferName, "-t", target], runner);
+    runTmuxCommandWithRunner(["tmux", "send-keys", "-t", target, "C-m"], runner);
+  } finally {
+    runner(["tmux", "delete-buffer", "-b", bufferName], { check: false });
+  }
+}
+
+function runTmuxCommandWithRunner(args: string[], runner: TmuxRunner): void {
+  const result = runner(args);
+  if (result.status !== 0) {
+    const detail = (result.stderr || result.stdout || `exit code ${result.status}`).trim();
+    throw new Error(tmuxCommandFailureMessage(args, detail));
   }
 }
 

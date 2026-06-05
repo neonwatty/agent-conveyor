@@ -1510,6 +1510,157 @@ test("TypeScript runtime handles open-worker and open-manager dry-run from sessi
   }
 });
 
+test("TypeScript runtime handles legacy stop with optional message and compatibility events", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-stop-legacy."));
+  const calls: string[][] = [];
+  const runningSessions = new Set(["codex-stop-legacy"]);
+  const runner: TmuxRunner = (args) => {
+    calls.push(args);
+    if (args[0] === "tmux" && args[1] === "has-session") {
+      const target = args.at(-1) ?? "";
+      return { status: runningSessions.has(target) ? 0 : 1, stderr: "no session" };
+    }
+    return { status: 0, stdout: "" };
+  };
+  try {
+    const name = "stop-legacy";
+    mkdirSync(join(root, ".codex-workers", name), { recursive: true });
+    writeFileSync(configPath(name, { cwd: root, env: {} }), `${JSON.stringify({
+      name,
+      tmux_session: "codex-stop-legacy",
+    })}\n`);
+
+    const stopped = runTypescriptRuntimeCommand({
+      args: ["stop", name, "--message", "wrap it up"],
+      cwd: root,
+      env: {},
+      tmuxRunner: runner,
+    });
+    assert.equal(stopped.exitCode, 0, stopped.stderr);
+    assert.equal(stopped.handled, true);
+    assert.equal(stopped.stdout, "stopped stop-legacy\n");
+    assert.deepEqual(calls, [
+      ["tmux", "has-session", "-t", "codex-stop-legacy"],
+      ["tmux", "has-session", "-t", "codex-stop-legacy"],
+      ["tmux", "set-buffer", "-b", "workerctl-stop-legacy", "wrap it up"],
+      ["tmux", "paste-buffer", "-b", "workerctl-stop-legacy", "-t", "codex-stop-legacy"],
+      ["tmux", "send-keys", "-t", "codex-stop-legacy", "C-m"],
+      ["tmux", "delete-buffer", "-b", "workerctl-stop-legacy"],
+      ["tmux", "has-session", "-t", "codex-stop-legacy"],
+      ["tmux", "kill-session", "-t", "codex-stop-legacy"],
+    ]);
+    const legacyEvents = readFileSync(eventsPath(name, { cwd: root, env: {} }), "utf8")
+      .trim()
+      .split(/\r?\n/)
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    assert.deepEqual(legacyEvents.map((event) => event.type), ["stop_message", "stop"]);
+    assert.equal(legacyEvents[0].message, "wrap it up");
+    assert.equal(legacyEvents[1].killed_session, true);
+
+    const idleName = "stop-idle";
+    mkdirSync(join(root, ".codex-workers", idleName), { recursive: true });
+    writeFileSync(configPath(idleName, { cwd: root, env: {} }), `${JSON.stringify({
+      name: idleName,
+      tmux_session: "codex-stop-idle",
+    })}\n`);
+    calls.length = 0;
+    const idle = runTypescriptRuntimeCommand({
+      args: ["stop", idleName],
+      cwd: root,
+      env: {},
+      tmuxRunner: runner,
+    });
+    assert.equal(idle.exitCode, 0, idle.stderr);
+    assert.equal(idle.stdout, "stop-idle was not running\n");
+    assert.deepEqual(calls, [["tmux", "has-session", "-t", "codex-stop-idle"]]);
+    const idleEvents = readFileSync(eventsPath(idleName, { cwd: root, env: {} }), "utf8")
+      .trim()
+      .split(/\r?\n/)
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    assert.deepEqual(idleEvents, [{ killed_session: false, time: idleEvents[0].time, type: "stop" }]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("TypeScript runtime handles session-backed stop and marks the registered session gone", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-stop-session."));
+  const calls: string[][] = [];
+  const runner: TmuxRunner = (args) => {
+    calls.push(args);
+    if (args.join(" ") === "tmux has-session -t manager-stop-tmux") {
+      return { status: 0, stdout: "" };
+    }
+    if (args.join(" ") === "tmux kill-session -t manager-stop-tmux") {
+      return { status: 0, stdout: "" };
+    }
+    return { status: 1, stderr: "unexpected tmux command" };
+  };
+  try {
+    const dbPath = defaultDbPath({ cwd: root, env: {} });
+    const database = openDatabaseSync(dbPath);
+    try {
+      initializeDatabaseSync(database);
+      insertSession(database, {
+        id: "session-stop-manager",
+        name: "session-stop-manager",
+        role: "manager",
+        tmuxPaneId: "%9",
+        tmuxSession: "manager-stop-tmux",
+      });
+    } finally {
+      database.close();
+    }
+
+    const stopped = runTypescriptRuntimeCommand({
+      args: ["stop", "session-stop-manager"],
+      cwd: root,
+      env: {},
+      now: () => new Date("2026-06-04T12:34:56.000Z"),
+      tmuxRunner: runner,
+    });
+    assert.equal(stopped.exitCode, 0, stopped.stderr);
+    assert.equal(stopped.handled, true);
+    assert.equal(stopped.stdout, "stopped session-stop-manager\n");
+    assert.deepEqual(calls, [
+      ["tmux", "has-session", "-t", "manager-stop-tmux"],
+      ["tmux", "kill-session", "-t", "manager-stop-tmux"],
+    ]);
+
+    const after = openDatabaseSync(dbPath);
+    try {
+      const session = after.prepare("select state, last_heartbeat_at from sessions where name = ?")
+        .get("session-stop-manager") as { last_heartbeat_at: string; state: string };
+      assert.equal(session.state, "gone");
+      assert.equal(session.last_heartbeat_at, "2026-06-04T12:34:56Z");
+      const event = after.prepare("select payload_json from events where type = 'session_stopped'")
+        .get() as { payload_json: string };
+      assert.deepEqual(JSON.parse(event.payload_json), {
+        killed_session: true,
+        role: "manager",
+        session: "session-stop-manager",
+        target: "manager-stop-tmux",
+      });
+    } finally {
+      after.close();
+    }
+    const compatibilityEvents = readFileSync(eventsPath("session-stop-manager", { cwd: root, env: {} }), "utf8")
+      .trim()
+      .split(/\r?\n/)
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    assert.deepEqual(compatibilityEvents, [{
+      killed_session: true,
+      lookup_source: "session",
+      role: "manager",
+      target: "manager-stop-tmux",
+      time: compatibilityEvents[0].time,
+      type: "stop",
+    }]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("TypeScript runtime default start-worker discovery polls process tree before register", () => {
   const root = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-start-discovery."));
   const calls: string[][] = [];
