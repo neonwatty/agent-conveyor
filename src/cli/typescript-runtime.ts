@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -11,6 +11,7 @@ import { exportTaskAuditSubsetSync } from "../runtime/export.js";
 import { ingestSessionSync } from "../runtime/ingest.js";
 import {
   acceptanceCriteriaForTaskSync,
+  loopEvidenceCriterion,
   recordAdversarialLoopEvidenceSync,
   recordLoopEvidenceSync,
   recordVisualDiffLoopEvidenceSync,
@@ -18,6 +19,7 @@ import {
   type AcceptanceCriterionSource,
   type AcceptanceCriterionStatus,
 } from "../runtime/loop-evidence.js";
+import { writePngRgba } from "../runtime/visual-diff.js";
 import {
   renderReplayText,
   replayResultFromAudit,
@@ -54,6 +56,9 @@ import {
   finishRoutedNotificationSync,
   insertRoutedNotificationSync,
   markRoutedNotificationSideEffectStartedSync,
+  consumeNextSessionInboxItemSync,
+  routedNotificationsSync,
+  sessionInboxSync,
 } from "../runtime/notifications.js";
 import {
   activeBindingForTaskSync,
@@ -229,6 +234,12 @@ export function runTypescriptRuntimeCommand(options: TypescriptRuntimeOptions): 
     }
     if (parsed.command === "loop-status") {
       return runLoopStatusCommand(parsed, options);
+    }
+    if (parsed.command === "qa-plan") {
+      return runQaPlanCommand(parsed);
+    }
+    if (parsed.command === "qa-run") {
+      return runQaRunCommand(parsed, options);
     }
     if (parsed.command === "tasks") {
       return runTasksCommand(parsed, options);
@@ -425,6 +436,7 @@ interface ParsedRuntimeArgs {
     proof: string | null;
     purpose: string | null;
     rationale: string | null;
+    receiptOutput: string | null;
     taskName: string | null;
     terminal: TerminalChoice;
     text: string | null;
@@ -589,6 +601,7 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
     proof: null,
     purpose: null,
     rationale: null,
+    receiptOutput: null,
     taskName: null,
     terminal: "auto",
     text: null,
@@ -983,6 +996,16 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       }
       flags.rationale = value.value;
       index += 1;
+    } else if (arg === "--receipt-output") {
+      if (command !== "qa-run") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --receipt-output", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.receiptOutput = value.value;
+      index += 1;
     } else if (arg === "--evidence-json") {
       if (command !== "criteria") {
         return { command, enabled, error: "Unsupported TypeScript runtime option: --evidence-json", explicit, flags, task };
@@ -1249,7 +1272,7 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       flags.managerName = value.value;
       index += 1;
     } else if (arg === "--dispatcher-id") {
-      if (command !== "pair" && command !== "dispatch") {
+      if (command !== "pair" && command !== "dispatch" && command !== "qa-run") {
         return { command, enabled, error: "Unsupported TypeScript runtime option: --dispatcher-id", explicit, flags, task };
       }
       const value = valueAfter(queue, index, arg);
@@ -2008,6 +2031,8 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
         return { command, enabled, error: `Unsupported loop-evidence action: ${arg}`, explicit, flags, task };
       }
       flags.subtype = arg;
+    } else if ((command === "qa-plan" || command === "qa-run") && flags.subtype === null) {
+      flags.subtype = arg;
     } else if (task === null) {
       task = arg;
     } else if (command === "start") {
@@ -2584,6 +2609,1485 @@ function runLoopStatusCommand(
   } finally {
     database.close();
   }
+}
+
+function runQaPlanCommand(parsed: ParsedRuntimeArgs): TypescriptRuntimeResult {
+  const unsupported = unsupportedLoopCommandOptions(parsed, {
+    allowedFlags: new Set(["json", "subtype"]),
+    commandName: "qa-plan",
+  });
+  if (unsupported) {
+    return errorResult(unsupported);
+  }
+  const scenario = parsed.flags.subtype ?? "self-management";
+  const plan = qaPlan(scenario);
+  if (parsed.flags.json) {
+    return jsonResult(plan);
+  }
+  return { exitCode: 0, handled: true, stdout: renderQaPlanText(plan) };
+}
+
+function runQaRunCommand(
+  parsed: ParsedRuntimeArgs,
+  options: { cwd?: string; env?: NodeJS.ProcessEnv },
+): TypescriptRuntimeResult {
+  const unsupported = unsupportedLoopCommandOptions(parsed, {
+    allowedFlags: new Set(["dispatcherId", "json", "path", "receiptOutput", "subtype"]),
+    commandName: "qa-run",
+  });
+  if (unsupported) {
+    return errorResult(unsupported);
+  }
+  if (!parsed.flags.receiptOutput) {
+    return errorResult("qa-run requires --receipt-output.");
+  }
+  const scenario = parsed.flags.subtype ?? "ralph-loop-guardrails";
+  if (!isSupportedQaRunScenario(scenario)) {
+    return errorResult(`Unsupported QA run scenario: ${scenario}`);
+  }
+  if (scenario === "generic-loop-template-browser") {
+    try {
+      preflightQaBrowserCapture();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return errorResult(`qa-run generic-loop-template-browser requires a launchable browser before writing receipts: ${message}`);
+    }
+  }
+  const dbPath = resolve(expandUserPath(parsed.flags.path ?? join(tmpdir(), `workerctl-qa-run-${randomUUID()}`, "workerctl.db")));
+  mkdirSync(dirname(dbPath), { recursive: true });
+  const receiptOutput = resolve(expandUserPath(parsed.flags.receiptOutput));
+  mkdirSync(dirname(receiptOutput), { recursive: true });
+  const dispatcherId = parsed.flags.dispatcherId ?? `qa-run-${randomUUID().slice(0, 8)}`;
+  const receipt = runQaScenario(scenario, {
+    dbPath,
+    dispatcherId,
+    receiptOutput,
+    runtimeOptions: options,
+  });
+  const finalReceipt = { ...receipt, receipt_path: receiptOutput };
+  writeFileSync(receiptOutput, `${JSON.stringify(sortJson(finalReceipt), null, 2)}\n`);
+  const summary = {
+    checks: Array.isArray(finalReceipt.checks) ? finalReceipt.checks.length : 0,
+    receipt_path: receiptOutput,
+    result: finalReceipt.result,
+    scenario: finalReceipt.scenario,
+  };
+  if (parsed.flags.json) {
+    return jsonResult(summary);
+  }
+  return {
+    exitCode: 0,
+    handled: true,
+    stdout: `QA run ${scenario}: ${finalReceipt.result}\nReceipt: ${receiptOutput}\n`,
+  };
+}
+
+interface QaPlan {
+  acceptance_criteria?: string[];
+  authority_boundaries?: string[];
+  correlation_markers?: Array<Record<string, string>>;
+  evidence_template?: Record<string, unknown>;
+  expected_observations: string[];
+  scenario: string;
+  starter_prompt?: string;
+  steps: string[];
+  trigger_tasks?: Array<Record<string, string>>;
+}
+
+const QA_PLAN_SCENARIOS = new Set([
+  "self-management",
+  "emergent-criteria",
+  "tmux-errors",
+  "dispatch-completion",
+  "ralph-loop",
+  "adversarial-triggers",
+  "goalbuddy-conveyor",
+]);
+
+function qaPlan(scenario: string): QaPlan {
+  if (!QA_PLAN_SCENARIOS.has(scenario)) {
+    throw new Error(`Unsupported QA scenario: ${scenario}`);
+  }
+  const sharedCleanup = [
+    "Run conveyor audit <task> and conveyor replay <task>; verify the evidence chain is present.",
+    "Run conveyor reconcile --stale-cycles-seconds 1 and git status --short --branch after cleanup.",
+  ];
+  if (scenario === "self-management") {
+    return {
+      expected_observations: [
+        "tmux session hosts a live Codex worker process",
+        "register-worker and register-manager record sessions with stable communication metadata",
+        "conveyor cycle <task> returns kind, state, pane_signal, notable_pane_pattern, ingest, and cycle_id",
+        "session-nudge reaches the worker and later cycles ingest new events",
+        "conveyor reconcile reports no dangling bindings, dead pid sessions, or stuck tasks after cleanup",
+      ],
+      scenario,
+      steps: [
+        "Start a Codex worker inside tmux and capture its pid plus rollout JSONL path.",
+        "Register the worker: conveyor register-worker --name foo --pid <WORKER_PID> --cwd \"$PWD\" --tmux-session codex-foo.",
+        "Register the manager: conveyor register-manager --name foo-mgr --pid <MGR_PID> --cwd \"$PWD\".",
+        "Create and bind the task: conveyor tasks --create my-task --goal \"QA: cycle and nudge flow\" && conveyor bind --task my-task --worker foo --manager foo-mgr.",
+        "Run conveyor cycle my-task, conveyor session-nudge foo \"Status?\", and another conveyor cycle my-task.",
+        ...sharedCleanup,
+      ],
+    };
+  }
+  if (scenario === "emergent-criteria") {
+    return {
+      expected_observations: [
+        "manager_context.acceptance_criteria includes summary/open/proposed/satisfied/deferred/rejected",
+        "criteria_negotiation.needed starts true before active criteria and turns false after criteria exist",
+        "criteria-plan drafts reviewed conveyor criteria --add commands without mutation",
+        "accepted criteria block finish-task --require-criteria-audit until satisfied, deferred, or rejected",
+        "finish-task --stop-manager --stop-worker reports killed_worker and killed_manager for the pair",
+        "criteria --list is used as the canonical task state",
+      ],
+      scenario,
+      steps: [
+        "Start a real pair with conveyor pair --task qa-emergent-criteria and a status-only worker prompt.",
+        "Run conveyor cycle qa-emergent-criteria and verify manager_context.acceptance_criteria is present.",
+        "Ask the worker for must-have current-task criteria and deferred follow-up criteria.",
+        "Run conveyor criteria-plan qa-emergent-criteria --from-worker-response response.md --json and review suggestions.",
+        "Record worker_proposed accepted and deferred criteria, then prove accepted criteria block premature audited finish.",
+        "Satisfy accepted criteria with evidence_json receipts and rerun criteria --list, replay, and export-task.",
+        ...sharedCleanup,
+      ],
+    };
+  }
+  if (scenario === "tmux-errors") {
+    return {
+      expected_observations: [
+        "read-only commands preserve stable JSON output with actionable tmux error fields",
+        "mutating commands that depend on tmux fail with nonzero exit and actionable stderr",
+        "failed tmux send attempts do not leave misleading successful session_nudged events",
+        "cycle reports pane_signal.degraded true while worker_alive and manager_alive remain meaningful",
+        "live simulations are isolated to disposable sessions",
+      ],
+      scenario,
+      steps: [
+        "Record preflight: conveyor doctor-self --json, conveyor sessions --state active, tmux list-sessions, and git status --short --branch.",
+        "Run PATH=/usr/bin:/bin conveyor doctor-self --json and verify missing-tmux JSON remains parseable.",
+        "Run conveyor list --json and conveyor status <disposable-worker> under the same missing-tmux simulation.",
+        "Force conveyor session-nudge <disposable-worker> to fail and verify nonzero exit plus no successful audit row.",
+        "Run conveyor cycle <task> with the disposable pane unavailable and inspect pane_signal.degraded.",
+        ...sharedCleanup,
+      ],
+    };
+  }
+  if (scenario === "dispatch-completion") {
+    return {
+      expected_observations: [
+        "dispatch --once routes a bound worker task_complete signal from codex_events",
+        "routed_notifications has worker_task_complete, source_event_id, correlation_id, delivered state, and source-event dedupe",
+        "the manager receives a mechanical notification without Dispatch declaring success",
+        "duplicate-route races emit dispatch_signal_suppressed telemetry",
+        "mixed command-backed and completion-only chains appear in chronological order",
+      ],
+      scenario,
+      steps: [
+        "Create a disposable pair with conveyor pair --task qa-dispatch-completion.",
+        "Run conveyor cycle until codex_events includes last_event_subtype task_complete.",
+        "Run conveyor dispatch --once --type worker_task_complete --dispatcher-id qa-dispatch --json.",
+        "Inspect conveyor audit and replay for routed_notifications and correlation_chains.",
+        "Exercise or simulate a duplicate-route race and inspect dispatch_signal_suppressed telemetry.",
+        ...sharedCleanup,
+      ],
+    };
+  }
+  if (scenario === "ralph-loop") {
+    return {
+      correlation_markers: [
+        { correlation_id: "ralph-iter-1-pr", purpose: "PR readiness and URL receipt" },
+        { correlation_id: "ralph-iter-1-ci-fix", purpose: "CI failure/fix retry receipt" },
+        { correlation_id: "ralph-iter-1-clear", purpose: "audited worker context clear receipt" },
+        { correlation_id: "ralph-iter-2-replay", purpose: "fresh-worker replay of the same seed prompt" },
+        { correlation_id: "ralph-loop-ci-adversarial", purpose: "structured proof before fresh continuation" },
+        { correlation_id: "ralph-loop-preset-missing", purpose: "preset missing-evidence block" },
+        { correlation_id: "ralph-loop-preset-adversarial", purpose: "preset structured adversarial receipt" },
+        { correlation_id: "ralph-loop-preset-allowed", purpose: "preset allowed retry" },
+      ],
+      evidence_template: {
+        ci: { fix_result: "<green|not_needed>", initial_result: "<green|failed|simulated_failed>" },
+        clear_receipt: { command_id: null, correlation_id: "ralph-iter-1-clear" },
+        handoff_id: null,
+        iteration: 1,
+        manager_cycle_ids: [],
+        merge: { permitted: false, result: "<merged|not_merged>" },
+        pr: { url: null },
+        seed_prompt_sha256: "<sha256>",
+      },
+      expected_observations: [
+        "the run records at least two managed iterations from the same seed prompt",
+        "PR creation is blocked until manager config permits repo.open_pr and records PR readiness",
+        "merge is blocked until manager config permits repo.merge_green_pr and CI is green",
+        "worker context clear is blocked until permission and handoff exist",
+        "max_iterations and missing required evidence drills block before worker delivery",
+      ],
+      scenario,
+      steps: [
+        "Choose a disposable target repo, seed prompt, cleanup policy, CI expectation, and max iterations at least 2.",
+        "List policies with conveyor ralph-loop-presets --list --json.",
+        "Start iteration 1 with conveyor pair, configure manager permissions, and require criteria/epilogue closure.",
+        "Capture liveness, PR, CI, merge, handoff, and audited clear receipts with the listed correlation markers.",
+        "Start iteration 2 after audited clear with a fresh worker and inspect-first already-merged guard.",
+        "Run max-iteration, missing-evidence, and preset evidence browser drills with Dispatch, audit, replay, commands, and worker-inbox proof.",
+      ],
+    };
+  }
+  if (scenario === "adversarial-triggers") {
+    return {
+      correlation_markers: [
+        { correlation_id: "nl-loop-gate-policy", purpose: "loop gate prompt to Ralph policy" },
+        { correlation_id: "nl-iteration-gate-missing-proof", purpose: "blocked continuation before proof" },
+        { correlation_id: "nl-iteration-gate-adversarial-proof", purpose: "structured proof receipt" },
+        { correlation_id: "nl-iteration-gate-allowed", purpose: "fresh allowed retry" },
+        { correlation_id: "nl-finish-gate-proof", purpose: "finish-task adversarial proof" },
+        { correlation_id: "nl-worker-directed-proof", purpose: "worker proposed proof" },
+        { correlation_id: "nl-manager-criteria-negative-checks", purpose: "manager negative criteria" },
+      ],
+      expected_observations: [
+        "controlled trigger phrases classify as matches and generic caution text does not",
+        "iteration gate blocks continue_iteration before worker delivery until adversarial_check exists",
+        "finish-task --require-adversarial-proof fails closed before structured proof",
+        "worker-directed proof records source=worker_proposed evidence",
+        "manager-inferred negative criteria name blocked Dispatch and structured evidence checks",
+      ],
+      scenario,
+      steps: [
+        "Run conveyor loop-triggers --classify for each controlled phrase and a generic negative control.",
+        "Create a disposable no-tmux task with required_before_continue=[adversarial_check].",
+        "Dispatch a continue_iteration before proof and verify blocked state plus empty worker inbox.",
+        "Record structured adversarial proof, enqueue a fresh retry, and verify pull_required delivery.",
+        "Record worker_proposed and manager_inferred adversarial criteria receipts.",
+        ...sharedCleanup,
+      ],
+      trigger_tasks: listLoopTriggers().map((trigger) => ({
+        acceptance: trigger.acceptance,
+        name: trigger.name,
+        trigger: trigger.canonical_phrase,
+      })),
+    };
+  }
+  return {
+    acceptance_criteria: [
+      "one active child board at a time",
+      "PR URL, CI result, merge SHA, and satisfied_on_main receipts are recorded",
+      "GoalBuddy checker passes",
+      "negative receipt QA is preserved",
+    ],
+    authority_boundaries: [
+      "Work exactly one child board at a time.",
+      "Do not publish to npm automatically.",
+      "Do not merge without green CI.",
+      "Record PR URL, CI result, merge SHA, and final board evidence.",
+    ],
+    correlation_markers: [
+      { correlation_id: "conveyor-parent-board", purpose: "parent GoalBuddy board source of truth" },
+      { correlation_id: "conveyor-child-activation", purpose: "child board active task handoff" },
+      { correlation_id: "conveyor-pr-ci-merge", purpose: "PR, CI, and merge receipt" },
+      { correlation_id: "conveyor-satisfied-on-main", purpose: "main branch proof" },
+      { correlation_id: "conveyor-adversarial-review", purpose: "negative review receipt" },
+    ],
+    expected_observations: [
+      "there is one active child board",
+      "receipts prove the slice is satisfied on main",
+      "CI failures are inspected, fixed, and pushed before merge",
+      "GoalBuddy checker passes after board updates",
+    ],
+    scenario,
+    starter_prompt: "Create an autonomous GoalBuddy conveyor that runs vertical-slice child GoalBuddy prep boards until the migration is complete.",
+    steps: [
+      "Check the parent active_task points to the current child board.",
+      "Run the implementation slice, local gates, review, PR, CI, and merge loop.",
+      "If CI fails inspect logs, fix, push, and rerun CI.",
+      "Record satisfied_on_main with PR URL, CI result, merge SHA, and negative receipt QA.",
+    ],
+  };
+}
+
+function renderQaPlanText(plan: QaPlan): string {
+  const lines = [`QA plan: ${plan.scenario}`, ""];
+  if (plan.starter_prompt) {
+    lines.push("Starter prompt:", plan.starter_prompt, "");
+  }
+  if (plan.authority_boundaries) {
+    lines.push("Authority boundaries:", ...plan.authority_boundaries.map((item) => `- ${item}`), "");
+  }
+  lines.push(...plan.steps.map((step, index) => `${index + 1}. ${step}`), "", "Expected observations:");
+  lines.push(...plan.expected_observations.map((observation) => `- ${observation}`));
+  if (plan.acceptance_criteria) {
+    lines.push("", "Acceptance criteria:", ...plan.acceptance_criteria.map((criterion) => `- ${criterion}`));
+  }
+  if (plan.trigger_tasks) {
+    lines.push("", "Trigger tasks:", ...plan.trigger_tasks.map((task) => `- ${task.name}: ${task.trigger} -> ${task.acceptance}`));
+  }
+  if (plan.correlation_markers) {
+    lines.push("", "Correlation markers:", ...plan.correlation_markers.map((marker) => `- ${marker.correlation_id}: ${marker.purpose}`));
+  }
+  if (plan.evidence_template) {
+    lines.push("", "Evidence template:", JSON.stringify(sortJson(plan.evidence_template), null, 2));
+  }
+  return `${lines.join("\n")}\n`;
+}
+
+interface QaRunContext {
+  dbPath: string;
+  dispatcherId: string;
+  receiptOutput: string;
+  runtimeOptions: { cwd?: string; env?: NodeJS.ProcessEnv };
+}
+
+interface QaGeneratedTask {
+  binding_id?: string | null;
+  manager_id?: string | null;
+  manager_name?: string | null;
+  suffix: string;
+  task_id: string;
+  task_name: string;
+  worker_id?: string | null;
+  worker_name?: string | null;
+}
+
+interface QaRunReceipt {
+  artifacts: Record<string, unknown>;
+  checks: Array<Record<string, unknown>>;
+  generated_at: string;
+  generated_tasks?: QaGeneratedTask[];
+  replay_commands: string[];
+  result: "passed";
+  scenario: string;
+  [key: string]: unknown;
+}
+
+const SUPPORTED_QA_RUN_SCENARIOS = new Set([
+  "adversarial-triggers",
+  "build-clear-loop",
+  "generic-loop-template",
+  "generic-loop-template-browser",
+  "ralph-loop-guardrails",
+  "test-coverage-loop",
+]);
+
+function isSupportedQaRunScenario(scenario: string): boolean {
+  return SUPPORTED_QA_RUN_SCENARIOS.has(scenario);
+}
+
+function runQaScenario(scenario: string, context: QaRunContext): QaRunReceipt {
+  if (scenario === "ralph-loop-guardrails") {
+    return qaRunRalphLoopGuardrails(context);
+  }
+  if (scenario === "generic-loop-template") {
+    return qaRunEvidenceTemplate(context, {
+      scenario,
+      seed: "qa-run-generic-template-seed",
+      template: "visual_diff_loop",
+      suffix: "generic-loop-template",
+      checkPrefix: "",
+      artifactKind: "visual",
+    });
+  }
+  if (scenario === "generic-loop-template-browser") {
+    return qaRunEvidenceTemplate(context, {
+      scenario,
+      seed: "qa-run-generic-template-browser-seed",
+      template: "visual_diff_loop",
+      suffix: "generic-loop-template-browser",
+      checkPrefix: "browser_",
+      artifactKind: "browser_visual",
+    });
+  }
+  if (scenario === "test-coverage-loop") {
+    return qaRunEvidenceTemplate(context, {
+      scenario,
+      seed: "qa-run-test-coverage-seed",
+      template: "test_coverage_loop",
+      suffix: "test-coverage-loop",
+      checkPrefix: "test_coverage_",
+      artifactKind: "coverage",
+    });
+  }
+  if (scenario === "build-clear-loop") {
+    return qaRunBuildClearLoop(context);
+  }
+  if (scenario === "adversarial-triggers") {
+    return qaRunAdversarialTriggers(context);
+  }
+  throw new Error(`Unsupported QA run scenario: ${scenario}`);
+}
+
+function qaRunRalphLoopGuardrails(context: QaRunContext): QaRunReceipt {
+  const slug = randomUUID().slice(0, 8);
+  const checks: Array<Record<string, unknown>> = [];
+  const maxTask = createQaBoundTask(context, slug, "max-iteration");
+  const maxRun = createQaRalphLoopRun(context, maxTask, {
+    currentIteration: 1,
+    maxIterations: 1,
+    metadata: {
+      cleanup_policy: "clear",
+      current_iteration: 1,
+      kind: "ralph_loop",
+      max_iterations: 1,
+      required_before_continue: [],
+      seed_prompt_sha256: "qa-run-seed",
+      stop_conditions: ["max_iterations"],
+    },
+    seedPromptSha256: "qa-run-seed",
+    stopConditions: ["max_iterations"],
+  });
+  enqueueQaContinue(context, maxTask, maxRun.id, "qa-run-max-block", "Run iteration 2.");
+  const maxDispatch = qaDispatchContinueOnce(context, "qa-run-max-block");
+  const maxCounts = qaDeliveryCounts(context, maxTask);
+  qaExpectBlocked(maxDispatch, maxCounts, {
+    message: "max-iteration drill",
+    reason: "max_iterations_reached",
+  });
+  checks.push(qaCheck("max_iteration_blocks_before_worker_delivery", maxDispatch, maxCounts));
+
+  const evidenceTask = createQaBoundTask(context, slug, "missing-evidence");
+  const evidenceRun = createQaRalphLoopRun(context, evidenceTask, {
+    currentIteration: 1,
+    maxIterations: 3,
+    metadata: {
+      cleanup_policy: "clear",
+      current_iteration: 1,
+      kind: "ralph_loop",
+      max_iterations: 3,
+      required_before_continue: ["ci_green", "adversarial_check"],
+      seed_prompt_sha256: "qa-run-seed",
+      stop_conditions: ["max_iterations", "required_evidence"],
+    },
+    requiredBeforeContinue: ["ci_green", "adversarial_check"],
+    seedPromptSha256: "qa-run-seed",
+    stopConditions: ["max_iterations", "required_evidence"],
+  });
+  enqueueQaContinue(context, evidenceTask, evidenceRun.id, "qa-run-missing-evidence", "Run iteration 2 before evidence.");
+  const missingDispatch = qaDispatchContinueOnce(context, "qa-run-missing-evidence");
+  const missingCounts = qaDeliveryCounts(context, evidenceTask);
+  qaExpectBlocked(missingDispatch, missingCounts, {
+    message: "missing-evidence drill",
+    missingEvidence: ["ci_green", "adversarial_check"],
+    reason: "missing_required_evidence",
+  });
+  checks.push(qaCheck("missing_evidence_blocks_before_worker_delivery", missingDispatch, missingCounts));
+  qaRecordLoopEvidence(context, evidenceTask, evidenceRun.id, "ci_green", "qa-run-ci-green", { status: "green" });
+  qaRecordAdversarialEvidence(context, evidenceTask, evidenceRun.id, "qa-run-adversarial-proof", {
+    check: "Inspect blocked dispatch result, empty inbox, and structured evidence receipt.",
+    failure_mode: "A manager retry could reach the worker after CI green but before adversarial proof.",
+    result: "The first retry stayed blocked until ci_green and adversarial_check receipts existed.",
+  });
+  enqueueQaContinue(context, evidenceTask, evidenceRun.id, "qa-run-evidence-allowed", "Run iteration 2 after CI and adversarial evidence.");
+  const allowedDispatch = qaDispatchContinueOnce(context, "qa-run-evidence-allowed");
+  const allowedCounts = qaDeliveryCounts(context, evidenceTask);
+  qaExpectDelivered(allowedDispatch, allowedCounts, "fresh evidence retry");
+  checks.push(qaCheck("fresh_retry_delivers_after_structured_evidence", allowedDispatch, allowedCounts));
+
+  const presetTask = createQaBoundTask(context, slug, "preset");
+  const presetMetadata = ralphLoopPresetMetadata("pr_ci_merge_loop", {
+    currentIteration: 1,
+    maxIterations: 3,
+    seedPromptSha256: "qa-run-seed",
+  });
+  const presetRun = createQaRalphLoopRun(context, presetTask, {
+    currentIteration: 1,
+    maxIterations: 3,
+    metadata: presetMetadata,
+    preset: "pr_ci_merge_loop",
+    requiredBeforeContinue: ["pr_url", "ci_green", "merge", "adversarial_check"],
+    seedPromptSha256: "qa-run-seed",
+    stopConditions: ["max_iterations", "required_evidence"],
+  });
+  enqueueQaContinue(context, presetTask, presetRun.id, "qa-run-preset-missing", "Run preset iteration 2 before evidence.");
+  const presetBlock = qaDispatchContinueOnce(context, "qa-run-preset-missing");
+  const presetBlockCounts = qaDeliveryCounts(context, presetTask);
+  qaExpectBlocked(presetBlock, presetBlockCounts, {
+    message: "preset evidence drill",
+    missingEvidence: ["pr_url", "ci_green", "merge", "adversarial_check"],
+    reason: "missing_required_evidence",
+  });
+  checks.push(qaCheck("preset_requires_pr_ci_merge_and_adversarial_evidence", presetBlock, presetBlockCounts));
+  for (const evidenceType of ["pr_url", "ci_green", "merge"]) {
+    qaRecordLoopEvidence(context, presetTask, presetRun.id, evidenceType, `qa-run-preset-${evidenceType}`, {
+      status: evidenceType === "ci_green" ? "green" : "pass",
+    });
+  }
+  qaRecordAdversarialEvidence(context, presetTask, presetRun.id, "qa-run-preset-adversarial", {
+    check: "Inspect PR URL, CI, merge, and adversarial receipt set before retry.",
+    failure_mode: "PR, CI, and merge receipts could still hide an unreviewed regression.",
+    result: "All required preset receipts are present with structured adversarial proof.",
+  });
+  enqueueQaContinue(context, presetTask, presetRun.id, "qa-run-preset-allowed", "Run preset iteration 2 after all evidence.");
+  const presetAllowed = qaDispatchContinueOnce(context, "qa-run-preset-allowed");
+  const presetAllowedCounts = qaDeliveryCounts(context, presetTask);
+  qaExpectDelivered(presetAllowed, presetAllowedCounts, "preset evidence retry");
+  checks.push(qaCheck("preset_retry_delivers_after_all_required_evidence", presetAllowed, presetAllowedCounts));
+
+  const helperSyntax = qaCodexReviewHelperSyntax();
+  return {
+    adversarial_review_gate: {
+      codex_review_helper: helperSyntax.helper_path,
+      recursion_guard_expected: "nested codex-review invocation blocked",
+      syntax_check: {
+        command: helperSyntax.command,
+        returncode: helperSyntax.returncode,
+      },
+    },
+    artifacts: { db_path: context.dbPath },
+    checks,
+    generated_at: new Date().toISOString(),
+    generated_tasks: [
+      generatedTask(maxTask, "max-iteration"),
+      generatedTask(evidenceTask, "missing-evidence"),
+      generatedTask(presetTask, "preset"),
+    ],
+    replay_commands: [
+      "conveyor qa-plan ralph-loop --json",
+      "conveyor qa-plan adversarial-triggers --json",
+      `conveyor dispatch --once --type continue_iteration --dispatcher-id ${context.dispatcherId} --path ${context.dbPath}`,
+      "conveyor loop-evidence adversarial-check <task> --loop-run <run-id> --iteration 1 --failure-mode <failure> --check <check> --result <result>",
+    ],
+    result: "passed",
+    scenario: "ralph-loop-guardrails",
+  };
+}
+
+function qaRunEvidenceTemplate(
+  context: QaRunContext,
+  options: {
+    artifactKind: "browser_visual" | "coverage" | "visual";
+    checkPrefix: string;
+    scenario: string;
+    seed: string;
+    suffix: string;
+    template: string;
+  },
+): QaRunReceipt {
+  const slug = randomUUID().slice(0, 8);
+  const task = createQaBoundTask(context, slug, options.suffix);
+  const templateMetadata = loopTemplateMetadata(options.template, {
+    currentIteration: 1,
+    maxIterations: options.template === "test_coverage_loop" ? 3 : 4,
+    seedPromptSha256: options.seed,
+  });
+  const requiredEvidence = asStringArray(templateMetadata.required_before_continue);
+  const run = createQaRalphLoopRun(context, task, {
+    currentIteration: 1,
+    maxIterations: Number(templateMetadata.max_iterations),
+    metadata: templateMetadata,
+    preset: typeof templateMetadata.preset === "string" ? templateMetadata.preset : null,
+    requiredBeforeContinue: requiredEvidence,
+    seedPromptSha256: options.seed,
+    stopConditions: asStringArray(templateMetadata.stop_conditions),
+  });
+  const checks: Array<Record<string, unknown>> = [];
+  enqueueQaContinue(context, task, run.id, `qa-run-${options.suffix}-missing`, `Run ${options.template} iteration 2 before evidence.`);
+  const missing = qaDispatchContinueOnce(context, `qa-run-${options.suffix}-missing`);
+  const missingName = options.artifactKind === "coverage"
+    ? "test_coverage_template_blocks_before_coverage_evidence"
+    : `${options.checkPrefix}visual_template_blocks_before_visual_evidence`;
+  const missingCounts = qaDeliveryCounts(context, task);
+  qaExpectBlocked(missing, missingCounts, {
+    message: `${options.template} missing-evidence drill`,
+    missingEvidence: requiredEvidence,
+    reason: "missing_required_evidence",
+  });
+  checks.push(qaCheck(missingName, missing, missingCounts));
+
+  const artifactDir = qaArtifactDir(context, options.scenario, slug, run.id);
+  const artifacts: Record<string, unknown> = { db_path: context.dbPath };
+  let visualDiff: Record<string, unknown> | null = null;
+  let browser: Record<string, unknown> | null = null;
+  if (options.artifactKind === "coverage") {
+    const coverageReport = join(artifactDir, "coverage-summary.json");
+    mkdirSync(dirname(coverageReport), { recursive: true });
+    writeFileSync(coverageReport, `${JSON.stringify(sortJson({
+      command: "coverage run -m pytest && coverage report",
+      coverage_percent: 87.5,
+      status: "pass",
+    }), null, 2)}\n`);
+    artifacts.coverage_report = coverageReport;
+    qaRecordLoopEvidence(context, task, run.id, "test_coverage", "qa-run-test-coverage-report", {
+      artifactPath: coverageReport,
+      metadata: { command: "coverage run -m pytest && coverage report", coverage_percent: 87.5 },
+    });
+  } else {
+    const reference = join(artifactDir, "reference.png");
+    const candidate = join(artifactDir, options.artifactKind === "browser_visual" ? "candidate-browser.png" : "candidate.png");
+    const diff = join(artifactDir, "diff.png");
+    const report = join(artifactDir, "visual-diff-report.json");
+    writeQaPng(reference);
+    if (options.artifactKind === "browser_visual") {
+      const candidateHtml = join(artifactDir, "candidate.html");
+      writeQaCandidateHtml(candidateHtml);
+      browser = captureQaBrowserScreenshot(candidateHtml, candidate);
+      artifacts.candidate_html = candidateHtml;
+    } else {
+      writeQaPng(candidate);
+    }
+    qaRecordLoopEvidence(context, task, run.id, "reference_artifact", "qa-run-template-reference", { artifactPath: reference });
+    qaRecordLoopEvidence(context, task, run.id, "candidate_screenshot", "qa-run-template-candidate", {
+      artifactPath: candidate,
+      metadata: options.artifactKind === "browser_visual"
+        ? { browser_backend: browser?.backend, candidate_html: browser?.html_path, viewport: browser?.viewport }
+        : { viewport: "2x2" },
+    });
+    const visual = recordVisualDiffInQa(context, task, run.id, reference, candidate, diff, report);
+    visualDiff = visual.diff as unknown as Record<string, unknown>;
+    artifacts.diff = diff;
+    artifacts.reference_artifact = reference;
+    artifacts.candidate_screenshot = candidate;
+    artifacts.visual_diff_report = report;
+  }
+
+  insertMalformedQaAdversarialEvidence(context, task, run.id, `qa-run-${options.suffix}-unstructured-adversarial`);
+  enqueueQaContinue(context, task, run.id, `qa-run-${options.suffix}-unstructured-adversarial`, "Run after malformed adversarial proof.");
+  const unstructured = qaDispatchContinueOnce(context, `qa-run-${options.suffix}-unstructured-adversarial`);
+  const unstructuredName = options.artifactKind === "coverage"
+    ? "test_coverage_unstructured_adversarial_check_still_blocks"
+    : `${options.checkPrefix}unstructured_adversarial_check_still_blocks`;
+  const unstructuredCounts = qaDeliveryCounts(context, task);
+  qaExpectBlocked(unstructured, unstructuredCounts, {
+    message: `${options.template} unstructured adversarial drill`,
+    missingEvidence: ["adversarial_check"],
+    reason: "missing_adversarial_check_evidence",
+  });
+  checks.push(qaCheck(unstructuredName, unstructured, unstructuredCounts));
+
+  qaRecordAdversarialEvidence(context, task, run.id, `qa-run-${options.suffix}-structured-adversarial`, {
+    check: "Inspect missing-evidence block, malformed adversarial block, and structured proof before retry.",
+    failure_mode: "Evidence could exist without a structured adversarial proof for the same run and iteration.",
+    result: "The malformed receipt stayed blocked and the structured retry delivered exactly one inbox item.",
+  });
+  enqueueQaContinue(context, task, run.id, `qa-run-${options.suffix}-structured-allowed`, "Run after structured proof.");
+  const allowed = qaDispatchContinueOnce(context, `qa-run-${options.suffix}-structured-allowed`);
+  const allowedName = options.artifactKind === "coverage"
+    ? "structured_test_coverage_retry_delivers"
+    : `${options.checkPrefix}structured_visual_evidence_retry_delivers`;
+  const allowedCounts = qaDeliveryCounts(context, task);
+  qaExpectDelivered(allowed, allowedCounts, `${options.template} structured retry`);
+  checks.push(qaCheck(allowedName, allowed, allowedCounts));
+
+  const replayCommands = [
+    `conveyor loop-templates --show ${options.template} --json`,
+    `conveyor loop-templates --create-run <task> --template ${options.template} --max-iterations ${templateMetadata.max_iterations} --current-iteration 1 --seed-prompt-sha256 ${options.seed}`,
+  ];
+  if (options.artifactKind === "browser_visual") {
+    replayCommands.push("node scripts/capture-static-html-screenshot.mjs --html <candidate.html> --output <candidate-browser.png> --width 2 --height 2");
+  }
+  if (options.artifactKind === "coverage") {
+    replayCommands.push("conveyor loop-evidence add <task> --loop-run <run-id> --iteration 1 --evidence-type test_coverage --artifact-path <coverage-summary.json>");
+  } else {
+    const candidateArtifact = options.artifactKind === "browser_visual" ? "<candidate-browser.png>" : "<candidate.png>";
+    const candidateMetadata = options.artifactKind === "browser_visual"
+      ? " --metadata-json '{\"browser_backend\":\"<backend>\",\"candidate_html\":\"<candidate.html>\",\"viewport\":\"2x2\"}'"
+      : " --metadata-json '{\"viewport\":\"2x2\"}'";
+    replayCommands.push(
+      "conveyor loop-evidence add <task> --loop-run <run-id> --iteration 1 --evidence-type reference_artifact --artifact-path <reference.png>",
+      `conveyor loop-evidence add <task> --loop-run <run-id> --iteration 1 --evidence-type candidate_screenshot --artifact-path ${candidateArtifact}${candidateMetadata}`,
+      "conveyor loop-evidence visual-diff <task> --loop-run <run-id> --iteration 1 --reference <reference.png> --candidate "
+        + `${candidateArtifact} --threshold 0 --diff-output <diff.png> --report-output <visual-diff-report.json>`,
+    );
+  }
+  replayCommands.push(
+    "conveyor loop-evidence adversarial-check <task> --loop-run <run-id> --iteration 1 --failure-mode <failure> --check <check> --result <result>",
+    `conveyor dispatch --once --type continue_iteration --dispatcher-id ${context.dispatcherId} --path ${context.dbPath}`,
+  );
+
+  return {
+    artifacts,
+    ...(browser ? { browser, browser_capture: browser } : {}),
+    checks,
+    generated_at: new Date().toISOString(),
+    generated_tasks: [generatedTask(task, options.suffix)],
+    replay_commands: replayCommands,
+    result: "passed",
+    scenario: options.scenario,
+    template: options.template,
+    template_metadata: templateMetadata,
+    ...(visualDiff ? { visual_diff: visualDiff } : {}),
+  };
+}
+
+function qaRunBuildClearLoop(context: QaRunContext): QaRunReceipt {
+  const slug = randomUUID().slice(0, 8);
+  const task = createQaBoundTask(context, slug, "build-clear-loop");
+  const templateMetadata = loopTemplateMetadata("build_then_clear", {
+    currentIteration: 1,
+    maxIterations: 2,
+    seedPromptSha256: "qa-run-build-clear-seed",
+  });
+  const run = createQaRalphLoopRun(context, task, {
+    currentIteration: 1,
+    maxIterations: 2,
+    metadata: templateMetadata,
+    requiredBeforeContinue: ["build_passed", "cleanup"],
+    seedPromptSha256: "qa-run-build-clear-seed",
+    stopConditions: asStringArray(templateMetadata.stop_conditions),
+  });
+  const checks: Array<Record<string, unknown>> = [];
+  enqueueQaContinue(context, task, run.id, "qa-run-build-clear-missing", "Run before build or cleanup evidence.");
+  const missingDispatch = qaDispatchContinueOnce(context, "qa-run-build-clear-missing");
+  const missingCounts = qaDeliveryCounts(context, task);
+  qaExpectBlocked(missingDispatch, missingCounts, {
+    message: "build_then_clear missing-evidence drill",
+    missingEvidence: ["build_passed", "cleanup"],
+    reason: "missing_required_evidence",
+  });
+  checks.push(qaCheck("build_clear_blocks_before_build_or_cleanup_evidence", missingDispatch, missingCounts));
+  const artifactDir = qaArtifactDir(context, "build-clear-loop", slug, run.id);
+  const buildReceipt = join(artifactDir, "build-passed.json");
+  mkdirSync(dirname(buildReceipt), { recursive: true });
+  writeFileSync(buildReceipt, `${JSON.stringify(sortJson({ command: "scripts/run-unittests-isolated -k build_clear_loop", result: "pass", status: "build_passed" }), null, 2)}\n`);
+  qaRecordLoopEvidence(context, task, run.id, "build_passed", "qa-run-build-clear-build-passed", {
+    artifactPath: buildReceipt,
+    metadata: { command: "scripts/run-unittests-isolated -k build_clear_loop", result: "Focused build/test command passed before retry." },
+  });
+  enqueueQaContinue(context, task, run.id, "qa-run-build-clear-build-only", "Run after build evidence only.");
+  const buildOnlyDispatch = qaDispatchContinueOnce(context, "qa-run-build-clear-build-only");
+  const buildOnlyCounts = qaDeliveryCounts(context, task);
+  qaExpectBlocked(buildOnlyDispatch, buildOnlyCounts, {
+    message: "build_then_clear cleanup drill",
+    missingEvidence: ["cleanup"],
+    reason: "missing_cleanup_evidence",
+  });
+  checks.push(qaCheck("build_clear_still_blocks_before_cleanup_evidence", buildOnlyDispatch, buildOnlyCounts));
+  const cleanupReceipt = join(artifactDir, "cleanup.json");
+  writeFileSync(cleanupReceipt, `${JSON.stringify(sortJson({ cleanup_policy: "clear", result: "pass", status: "cleanup" }), null, 2)}\n`);
+  qaRecordLoopEvidence(context, task, run.id, "cleanup", "qa-run-build-clear-cleanup", {
+    artifactPath: cleanupReceipt,
+    metadata: { cleanup_policy: "clear", result: "Worker context clear receipt recorded before retry." },
+  });
+  enqueueQaContinue(context, task, run.id, "qa-run-build-clear-allowed", "Run after build and cleanup evidence.");
+  const allowedDispatch = qaDispatchContinueOnce(context, "qa-run-build-clear-allowed");
+  const allowedCounts = qaDeliveryCounts(context, task);
+  qaExpectDelivered(allowedDispatch, allowedCounts, "build_then_clear retry");
+  checks.push(qaCheck("build_clear_retry_delivers_after_build_and_cleanup_evidence", allowedDispatch, allowedCounts));
+  return {
+    artifacts: { build_receipt: buildReceipt, cleanup_receipt: cleanupReceipt, db_path: context.dbPath },
+    checks,
+    generated_at: new Date().toISOString(),
+    generated_tasks: [generatedTask(task, "build-clear-loop")],
+    replay_commands: [
+      "conveyor loop-templates --show build_then_clear --json",
+      "conveyor loop-evidence add <task> --loop-run <run-id> --iteration 1 --evidence-type build_passed --artifact-path <build-passed.json>",
+      "conveyor loop-evidence add <task> --loop-run <run-id> --iteration 1 --evidence-type cleanup --artifact-path <cleanup.json>",
+      `conveyor dispatch --once --type continue_iteration --dispatcher-id ${context.dispatcherId} --path ${context.dbPath}`,
+      `conveyor worker-inbox <task> --consume-next --wait --path ${context.dbPath} --json`,
+    ],
+    result: "passed",
+    scenario: "build-clear-loop",
+    template: "build_then_clear",
+    template_metadata: templateMetadata,
+  };
+}
+
+function qaRunAdversarialTriggers(context: QaRunContext): QaRunReceipt {
+  const slug = randomUUID().slice(0, 8);
+  const triggerDefinitions = listLoopTriggers();
+  const triggerClassifications = triggerDefinitions.map((trigger) => {
+    const classification = classifyLoopTrigger(trigger.canonical_phrase);
+    return {
+      canonical_phrase: trigger.canonical_phrase,
+      intent: classification.matched_trigger?.intent ?? null,
+      matched: classification.matched,
+      matched_name: classification.matched_trigger?.name ?? null,
+      name: trigger.name,
+    };
+  });
+  const negativeControl = classifyLoopTrigger("Please be careful, run tests, and summarize the risks before finishing.");
+  const checks: Array<Record<string, unknown>> = [];
+  for (const classification of triggerClassifications) {
+    qaRequire(classification.matched === true, `trigger ${classification.name} did not match its canonical phrase`);
+    qaRequire(classification.matched_name === classification.name, `trigger ${classification.name} matched ${String(classification.matched_name)}`);
+  }
+  qaRequire(negativeControl.matched !== true, "generic caution text matched an adversarial trigger");
+  checks.push({
+    controlled_triggers: triggerClassifications,
+    name: "trigger_classification_matches_controlled_phrases",
+    negative_control: {
+      matched: negativeControl.matched,
+      prompt: "Please be careful, run tests, and summarize the risks before finishing.",
+    },
+    status: "passed",
+  });
+  const loopTask = createQaBoundTask(context, slug, "adversarial-triggers-loop");
+  const run = createQaRalphLoopRun(context, loopTask, {
+    currentIteration: 1,
+    maxIterations: 3,
+    metadata: {
+      cleanup_policy: "clear",
+      correlation_id: "nl-loop-gate-policy",
+      current_iteration: 1,
+      kind: "ralph_loop",
+      max_iterations: 3,
+      required_before_continue: ["adversarial_check"],
+      seed_prompt_sha256: "qa-run-nl-loop-trigger-seed",
+      stop_conditions: ["max_iterations", "required_evidence"],
+      trigger: "Run this as an adversarially gated Ralph loop.",
+      trigger_intent: "create_loop_policy",
+    },
+    requiredBeforeContinue: ["adversarial_check"],
+    seedPromptSha256: "qa-run-nl-loop-trigger-seed",
+    stopConditions: ["max_iterations", "required_evidence"],
+  });
+  checks.push({
+    correlation_id: "nl-loop-gate-policy",
+    name: "loop_gate_trigger_creates_policy",
+    run: {
+      current_iteration: run.metadata.current_iteration,
+      id: run.id,
+      max_iterations: run.metadata.max_iterations,
+      required_before_continue: run.metadata.required_before_continue,
+    },
+    status: "passed",
+    trigger: "Run this as an adversarially gated Ralph loop.",
+  });
+  enqueueQaContinue(context, loopTask, run.id, "nl-iteration-gate-missing-proof", "Run iteration 2 before adversarial proof.");
+  const missingDispatch = qaDispatchContinueOnce(context, "nl-iteration-gate-missing-proof");
+  const missingCounts = qaDeliveryCounts(context, loopTask);
+  qaExpectBlocked(missingDispatch, missingCounts, {
+    message: "natural-language iteration gate",
+    missingEvidence: ["adversarial_check"],
+    reason: "missing_adversarial_check_evidence",
+  });
+  checks.push(qaCheck("iteration_gate_blocks_before_adversarial_proof", missingDispatch, missingCounts));
+  qaRecordAdversarialEvidence(context, loopTask, run.id, "nl-iteration-gate-adversarial-proof", {
+    check: "Inspect blocked Dispatch result, empty worker inbox, and structured adversarial_check receipt.",
+    failure_mode: "A manager's natural-language retry could reach the worker before adversarial proof exists.",
+    result: "The first continuation was blocked before worker delivery; only a fresh retry after proof is allowed.",
+  });
+  enqueueQaContinue(context, loopTask, run.id, "nl-iteration-gate-allowed", "Run iteration 2 after adversarial proof.");
+  const allowedDispatch = qaDispatchContinueOnce(context, "nl-iteration-gate-allowed");
+  const allowedCounts = qaDeliveryCounts(context, loopTask);
+  qaExpectDelivered(allowedDispatch, allowedCounts, "natural-language iteration gate retry");
+  const allowedCheck = qaCheck("iteration_gate_allows_fresh_retry_after_structured_proof", allowedDispatch, allowedCounts);
+  const database = openDatabaseSync(context.dbPath);
+  try {
+    initializeDatabaseSync(database);
+    const consumed = consumeNextSessionInboxItemSync(database, { sessionName: loopTask.worker_name });
+    qaRequire(consumed !== null, "natural-language iteration gate retry worker inbox item could not be consumed");
+    allowedCheck.worker_inbox = consumed;
+  } finally {
+    database.close();
+  }
+  checks.push(allowedCheck);
+  const finishTask = createQaUnboundTask(context, slug, "adversarial-triggers-finish");
+  const prematureFinish = qaFinishTaskWithAdversarialGate(context, finishTask.task_name, "Done without proof.");
+  qaRequire(prematureFinish.returncode === 1, `finish gate succeeded before proof: ${prematureFinish.stdout}`);
+  qaRequire(prematureFinish.stderr.includes("adversarial proof is required"), `finish gate used the wrong failure: ${prematureFinish.stderr}`);
+  const finishEvidence = qaRecordTaskAdversarialProof(context, finishTask, "nl-finish-gate-proof", {
+    check: "Run finish-task --require-adversarial-proof before and after structured adversarial evidence.",
+    failure_mode: "The finish gate could regress and allow a task to be marked done without proof.",
+    result: "finish-task failed before proof and succeeded only after structured adversarial evidence was recorded.",
+  });
+  const afterProofFinish = qaFinishTaskWithAdversarialGate(context, finishTask.task_name, "Proof exists.");
+  qaRequire(afterProofFinish.returncode === 0, `finish gate failed after proof: ${afterProofFinish.stderr}`);
+  checks.push({
+    after_proof: afterProofFinish,
+    evidence: finishEvidence.evidence,
+    name: "finish_gate_requires_structured_adversarial_proof",
+    premature_finish: prematureFinish,
+    status: "passed",
+    trigger: "Do not mark this done until you have tried to disprove it.",
+  });
+  const workerTask = createQaBoundTask(context, slug, "adversarial-triggers-worker");
+  const workerRun = createQaRalphLoopRun(context, workerTask, {
+    currentIteration: 1,
+    maxIterations: 2,
+    metadata: { current_iteration: 1, kind: "ralph_loop", max_iterations: 2, required_before_continue: ["adversarial_check"] },
+    requiredBeforeContinue: ["adversarial_check"],
+    stopConditions: ["required_evidence"],
+  });
+  const workerEvidence = qaRecordAdversarialEvidence(context, workerTask, workerRun.id, "nl-worker-directed-proof", {
+    check: "Inspect blocked dispatch receipt and post-proof worker inbox delivery.",
+    failure_mode: "The worker could claim completion without checking the dispatcher gate.",
+    result: "The receipt chain proves blocked-before-proof and delivered-after-proof behavior.",
+  }, "worker_proposed");
+  checks.push({
+    evidence: { ...workerEvidence.evidence, source: workerEvidence.criterion.source },
+    name: "worker_directed_trigger_records_worker_proposed_proof",
+    status: "passed",
+    trigger: "Ask the worker to identify the strongest realistic failure mode and prove it is handled.",
+  });
+  const criteriaTask = createQaBoundTask(context, slug, "adversarial-triggers-criteria");
+  const criteria = insertQaManagerCriteria(context, criteriaTask);
+  checks.push({
+    criteria,
+    manager_inferred_criteria_count: criteria.length,
+    name: "acceptance_criteria_trigger_records_negative_manager_criteria",
+    status: "passed",
+    trigger: "Each loop must include adversarial acceptance criteria from manager to worker.",
+  });
+  return {
+    artifacts: { db_path: context.dbPath },
+    checks,
+    generated_at: new Date().toISOString(),
+    generated_tasks: [
+      generatedTask(loopTask, "adversarial-triggers-loop"),
+      generatedTask(finishTask, "adversarial-triggers-finish"),
+      generatedTask(workerTask, "adversarial-triggers-worker"),
+      generatedTask(criteriaTask, "adversarial-triggers-criteria"),
+    ],
+    negative_control: negativeControl,
+    replay_commands: [
+      "conveyor loop-triggers --classify \"Run this as an adversarially gated Ralph loop.\" --json",
+      "conveyor qa-plan adversarial-triggers --json",
+      `conveyor dispatch --once --type continue_iteration --dispatcher-id ${context.dispatcherId} --path ${context.dbPath}`,
+      `conveyor worker-inbox ${loopTask.task_name} --path ${context.dbPath} --json`,
+      `conveyor export-task ${loopTask.task_name} --path ${context.dbPath}`,
+    ],
+    result: "passed",
+    scenario: "adversarial-triggers",
+    trigger_classifications: triggerClassifications,
+  };
+}
+
+function qaFinishTaskWithAdversarialGate(context: QaRunContext, taskName: string, reason: string): { returncode: number; stderr: string; stdout: string } {
+  const result = runTypescriptRuntimeCommand({
+    ...context.runtimeOptions,
+    args: ["finish-task", taskName, "--require-adversarial-proof", "--reason", reason, "--path", context.dbPath],
+    env: {
+      ...(context.runtimeOptions.env ?? {}),
+      AGENT_CONVEYOR_TS_RUNTIME: "1",
+    },
+  });
+  return {
+    returncode: result.exitCode,
+    stderr: result.stderr ?? "",
+    stdout: result.stdout ?? "",
+  };
+}
+
+function createQaBoundTask(context: QaRunContext, slug: string, suffix: string): QaGeneratedTask & {
+  binding_id: string;
+  manager_id: string;
+  manager_name: string;
+  worker_id: string;
+  worker_name: string;
+} {
+  const database = openDatabaseSync(context.dbPath);
+  try {
+    initializeDatabaseSync(database);
+    qaRequireCleanContinueQueue(database);
+    const taskName = `qa-${suffix}-${slug}`;
+    const workerName = `${taskName}-worker`;
+    const managerName = `${taskName}-manager`;
+    const taskId = createTaskSync(database, {
+      goal: `Executable QA run for ${suffix}.`,
+      name: taskName,
+      summary: "Disposable no-tmux manager/worker binding for Dispatch guardrail proof.",
+    });
+    database.prepare("update tasks set state = 'managed' where id = ?").run(taskId);
+    const sessionDir = join(dirname(context.dbPath), "qa-sessions");
+    const workerRollout = writeQaRollout(sessionDir, workerName, context.runtimeOptions.cwd ?? process.cwd());
+    const managerRollout = writeQaRollout(sessionDir, managerName, context.runtimeOptions.cwd ?? process.cwd());
+    const worker = registerSessionSync(database, {
+      codexSessionPath: workerRollout,
+      cwd: context.runtimeOptions.cwd ?? process.cwd(),
+      name: workerName,
+      pid: process.pid,
+      role: "worker",
+      tmuxSession: null,
+    });
+    const manager = registerSessionSync(database, {
+      codexSessionPath: managerRollout,
+      cwd: context.runtimeOptions.cwd ?? process.cwd(),
+      name: managerName,
+      pid: process.pid,
+      role: "manager",
+      tmuxSession: null,
+    });
+    const bindingId = bindSessionsSync(database, {
+      managerSessionName: managerName,
+      taskName,
+      workerSessionName: workerName,
+    });
+    return {
+      binding_id: bindingId,
+      manager_id: manager.session_id,
+      manager_name: managerName,
+      suffix,
+      task_id: taskId,
+      task_name: taskName,
+      worker_id: worker.session_id,
+      worker_name: workerName,
+    };
+  } finally {
+    database.close();
+  }
+}
+
+function createQaUnboundTask(context: QaRunContext, slug: string, suffix: string): QaGeneratedTask {
+  const database = openDatabaseSync(context.dbPath);
+  try {
+    initializeDatabaseSync(database);
+    const taskName = `qa-${suffix}-${slug}`;
+    const taskId = createTaskSync(database, {
+      goal: `Executable QA run for ${suffix}.`,
+      name: taskName,
+      summary: "Disposable unbound task for finish-task adversarial proof verification.",
+    });
+    return {
+      binding_id: null,
+      manager_id: null,
+      manager_name: null,
+      suffix,
+      task_id: taskId,
+      task_name: taskName,
+      worker_id: null,
+      worker_name: null,
+    };
+  } finally {
+    database.close();
+  }
+}
+
+function createQaRalphLoopRun(
+  context: QaRunContext,
+  task: QaGeneratedTask,
+  options: {
+    currentIteration: number;
+    maxIterations: number;
+    metadata: Record<string, unknown>;
+    preset?: string | null;
+    requiredBeforeContinue?: string[];
+    seedPromptSha256?: string | null;
+    stopConditions?: string[];
+  },
+): RalphLoopRunRow {
+  const database = openDatabaseSync(context.dbPath);
+  try {
+    initializeDatabaseSync(database);
+    return createRalphLoopRunSync(database, {
+      cleanupPolicy: typeof options.metadata.cleanup_policy === "string" ? options.metadata.cleanup_policy : "clear",
+      currentIteration: options.currentIteration,
+      maxIterations: options.maxIterations,
+      metadata: options.metadata,
+      preset: options.preset ?? null,
+      requiredBeforeContinue: options.requiredBeforeContinue ?? asStringArray(options.metadata.required_before_continue),
+      runName: `${task.task_name}-run`,
+      seedPromptSha256: options.seedPromptSha256 ?? null,
+      stopConditions: options.stopConditions ?? asStringArray(options.metadata.stop_conditions),
+      taskId: task.task_id,
+      taskName: task.task_name,
+    });
+  } finally {
+    database.close();
+  }
+}
+
+function enqueueQaContinue(
+  context: QaRunContext,
+  task: QaGeneratedTask,
+  runId: string,
+  correlationId: string,
+  message: string,
+): void {
+  const database = openDatabaseSync(context.dbPath);
+  try {
+    initializeDatabaseSync(database);
+    const run = ralphLoopRunForEnqueue(database, runId);
+    createCommandSync(database, {
+      commandType: "continue_iteration",
+      correlationId,
+      payload: {
+        loop_policy: enqueueLoopPolicyPayload(run),
+        message,
+        ralph_loop: { requested_iteration: 2, run_id: run.id },
+      },
+      taskId: task.task_id,
+    });
+  } finally {
+    database.close();
+  }
+}
+
+function qaDispatchContinueOnce(context: QaRunContext, expectedCorrelationId: string): Record<string, unknown> {
+  const before = openDatabaseSync(context.dbPath);
+  try {
+    initializeDatabaseSync(before);
+    const rows = before.prepare(`
+      select correlation_id, state
+      from commands
+      where type = 'continue_iteration' and state in ('pending', 'attempted')
+      order by created_at, id
+    `).all() as Array<{ correlation_id: string | null; state: string }>;
+    const seen = rows.map((row) => `${row.correlation_id}:${row.state}`);
+    if (rows.length !== 1 || rows[0]?.correlation_id !== expectedCorrelationId || rows[0]?.state !== "pending") {
+      throw new Error(`qa-run continue_iteration dispatch queue is not clean; expected only ${expectedCorrelationId}, found ${JSON.stringify(seen)}`);
+    }
+  } finally {
+    before.close();
+  }
+  const parsed = parseRuntimeArgs(["dispatch", "--type", "continue_iteration", "--path", context.dbPath], {
+    AGENT_CONVEYOR_TS_RUNTIME: "1",
+  });
+  const processed = dispatchOncePass(parsed, context.runtimeOptions, {
+    dispatcherId: context.dispatcherId,
+    dryRun: false,
+    leaseSeconds: 60,
+    limit: 1,
+  }) as Record<string, unknown>[];
+  if (processed.length !== 1) {
+    throw new Error(`expected exactly one continue_iteration dispatch item, got ${processed.length}`);
+  }
+  if (processed[0]?.correlation_id !== expectedCorrelationId) {
+    throw new Error(`qa-run dispatched unexpected command ${String(processed[0]?.correlation_id)}`);
+  }
+  return processed[0] ?? {};
+}
+
+function qaDeliveryCounts(context: QaRunContext, task: QaGeneratedTask): Record<string, number> {
+  const database = openDatabaseSync(context.dbPath);
+  try {
+    initializeDatabaseSync(database);
+    return {
+      routed_notifications_count: routedNotificationsSync(database, { taskId: task.task_id }).length,
+      worker_inbox_count: task.worker_name ? sessionInboxSync(database, { sessionName: task.worker_name }).length : 0,
+    };
+  } finally {
+    database.close();
+  }
+}
+
+function qaRequire(condition: boolean, message: string): asserts condition {
+  if (!condition) {
+    throw new Error(`qa-run invariant failed: ${message}`);
+  }
+}
+
+function qaExpectBlocked(
+  dispatch: Record<string, unknown>,
+  counts: Record<string, number>,
+  options: { message: string; missingEvidence?: string[]; reason: string },
+): void {
+  qaRequire(dispatch.state === "blocked", `${options.message} did not block`);
+  qaRequire(dispatch.reason === options.reason, `${options.message} used the wrong block reason`);
+  if (options.missingEvidence) {
+    qaRequire(
+      JSON.stringify(dispatch.missing_evidence ?? []) === JSON.stringify(options.missingEvidence),
+      `${options.message} reported the wrong missing evidence`,
+    );
+  }
+  qaRequire(dispatch.target_worker_notified !== true, `${options.message} notified the worker`);
+  qaRequire(counts.routed_notifications_count === 0, `${options.message} created a routed notification`);
+  qaRequire(counts.worker_inbox_count === 0, `${options.message} left worker inbox mail`);
+}
+
+function qaExpectDelivered(dispatch: Record<string, unknown>, counts: Record<string, number>, message: string): void {
+  qaRequire(dispatch.state === "pull_required", `${message} did not deliver to the pull inbox`);
+  qaRequire(counts.worker_inbox_count === 1, `${message} did not create exactly one worker inbox item`);
+}
+
+function qaCheck(name: string, dispatch: Record<string, unknown>, counts: Record<string, number>): Record<string, unknown> {
+  return {
+    ...counts,
+    command: "conveyor dispatch --once --type continue_iteration --dispatcher-id qa-run",
+    dispatch,
+    name,
+    status: "passed",
+  };
+}
+
+function qaCodexReviewHelperSyntax(): { command: string; helper_path: string; returncode: number } {
+  const packageRoot = packageRootFromRuntimeModule();
+  const packageCandidate = join(packageRoot, "skills", "codex-review", "scripts", "codex-review");
+  const packagedAssetCandidate = join(packageRoot, "workerctl", "assets", "skills", "codex-review", "scripts", "codex-review");
+  const homeCandidate = join(homedir(), ".codex", "skills", "codex-review", "scripts", "codex-review");
+  const helperPath = [packageCandidate, packagedAssetCandidate, homeCandidate].find((candidate) => existsSync(candidate)) ?? homeCandidate;
+  qaRequire(existsSync(helperPath), `codex-review helper is missing: ${helperPath}`);
+  const command = `bash -n ${helperPath}`;
+  const syntax = spawnSync("bash", ["-n", helperPath], { encoding: "utf8" });
+  qaRequire(syntax.status === 0, `codex-review helper syntax failed: ${syntax.stderr || syntax.stdout || `exit ${syntax.status}`}`);
+  return { command, helper_path: helperPath, returncode: syntax.status ?? 1 };
+}
+
+function qaRecordLoopEvidence(
+  context: QaRunContext,
+  task: QaGeneratedTask,
+  runId: string,
+  evidenceType: string,
+  correlationId: string,
+  options: { artifactPath?: string; metadata?: Record<string, unknown>; status?: string } = {},
+) {
+  const database = openDatabaseSync(context.dbPath);
+  try {
+    initializeDatabaseSync(database);
+    return recordLoopEvidenceSync(database, {
+      artifactPath: options.artifactPath,
+      correlationId,
+      evidenceType,
+      iteration: 1,
+      loopRunId: runId,
+      metadata: options.metadata ?? {},
+      proof: `qa-run recorded ${evidenceType} receipt before continuing.`,
+      status: options.status ?? "pass",
+      task: task.task_name,
+    });
+  } finally {
+    database.close();
+  }
+}
+
+function qaRecordAdversarialEvidence(
+  context: QaRunContext,
+  task: QaGeneratedTask,
+  runId: string,
+  correlationId: string,
+  proof: { check: string; failure_mode: string; result: string },
+  source: AcceptanceCriterionSource = "manager_inferred",
+) {
+  const database = openDatabaseSync(context.dbPath);
+  try {
+    initializeDatabaseSync(database);
+    return recordAdversarialLoopEvidenceSync(database, {
+      check: proof.check,
+      correlationId,
+      failureMode: proof.failure_mode,
+      iteration: 1,
+      loopRunId: runId,
+      result: proof.result,
+      source,
+      task: task.task_name,
+    });
+  } finally {
+    database.close();
+  }
+}
+
+function qaRecordTaskAdversarialProof(
+  context: QaRunContext,
+  task: QaGeneratedTask,
+  correlationId: string,
+  proof: { check: string; failure_mode: string; result: string },
+): { criterion: AcceptanceCriterionRecord; evidence: Record<string, unknown> } {
+  const database = openDatabaseSync(context.dbPath);
+  try {
+    initializeDatabaseSync(database);
+    const timestamp = new Date().toISOString();
+    const evidence = {
+      check: proof.check,
+      correlation_id: correlationId,
+      evidence_type: "adversarial_check",
+      failure_mode: proof.failure_mode,
+      result: proof.result,
+      status: "pass",
+    };
+    database.prepare(`
+      insert into acceptance_criteria(task_id, criterion, status, source, proof, rationale, evidence_json, created_at, updated_at)
+      values (?, ?, 'satisfied', 'manager_inferred', ?, null, ?, ?, ?)
+    `).run(
+      task.task_id,
+      "Natural-language finish gate has structured adversarial proof.",
+      "finish-task --require-adversarial-proof fails closed before proof and succeeds after proof.",
+      stableJson(evidence),
+      timestamp,
+      timestamp,
+    );
+    const criterion = acceptanceCriteriaForTaskSync(database, { taskId: task.task_id })
+      .find((candidate) => candidate.status === "satisfied" && candidate.proof?.includes("--require-adversarial-proof"));
+    qaRequire(criterion !== undefined, "task-level adversarial proof criterion was not recorded");
+    return { criterion, evidence };
+  } finally {
+    database.close();
+  }
+}
+
+function recordVisualDiffInQa(
+  context: QaRunContext,
+  task: QaGeneratedTask,
+  runId: string,
+  reference: string,
+  candidate: string,
+  diff: string,
+  report: string,
+) {
+  const database = openDatabaseSync(context.dbPath);
+  try {
+    initializeDatabaseSync(database);
+    return recordVisualDiffLoopEvidenceSync(database, {
+      candidatePath: candidate,
+      correlationId: "qa-run-template-visual-diff",
+      diffOutput: diff,
+      iteration: 1,
+      loopRunId: runId,
+      referencePath: reference,
+      reportOutput: report,
+      task: task.task_name,
+      threshold: 0,
+    });
+  } finally {
+    database.close();
+  }
+}
+
+function insertMalformedQaAdversarialEvidence(
+  context: QaRunContext,
+  task: QaGeneratedTask,
+  runId: string,
+  correlationId: string,
+): void {
+  const database = openDatabaseSync(context.dbPath);
+  try {
+    initializeDatabaseSync(database);
+    const timestamp = new Date().toISOString();
+    database.prepare(`
+      insert into acceptance_criteria(task_id, criterion, status, source, proof, rationale, evidence_json, created_at, updated_at)
+      values (?, ?, 'satisfied', 'manager_inferred', ?, null, ?, ?, ?)
+    `).run(
+      task.task_id,
+      loopEvidenceCriterion(runId, 1, "adversarial_check"),
+      "Malformed adversarial evidence intentionally recorded for QA negative control.",
+      stableJson({
+        correlation_id: correlationId,
+        evidence_type: "adversarial_check",
+        iteration: 1,
+        note: "qa-run intentionally omits failure_mode, check, and result.",
+        ralph_loop_run_id: runId,
+        status: "pass",
+      }),
+      timestamp,
+      timestamp,
+    );
+  } finally {
+    database.close();
+  }
+}
+
+function insertQaManagerCriteria(context: QaRunContext, task: QaGeneratedTask): AcceptanceCriterionRecord[] {
+  const database = openDatabaseSync(context.dbPath);
+  try {
+    initializeDatabaseSync(database);
+    const timestamp = new Date().toISOString();
+    for (const criterion of [
+      "Blocked Dispatch before adversarial proof exists is required.",
+      "Blocked Dispatch must leave the worker inbox empty.",
+      "Structured adversarial evidence is present before a fresh retry is delivered.",
+    ]) {
+      database.prepare(`
+        insert into acceptance_criteria(task_id, criterion, status, source, proof, rationale, evidence_json, created_at, updated_at)
+        values (?, ?, 'accepted', 'manager_inferred', null, ?, ?, ?, ?)
+      `).run(
+        task.task_id,
+        criterion,
+        "Natural-language acceptance criteria trigger drill.",
+        stableJson({ correlation_id: "nl-manager-criteria-negative-checks" }),
+        timestamp,
+        timestamp,
+      );
+    }
+    return acceptanceCriteriaForTaskSync(database, { taskId: task.task_id })
+      .filter((criterion) => criterion.source === "manager_inferred");
+  } finally {
+    database.close();
+  }
+}
+
+function qaRequireCleanContinueQueue(database: ReturnType<typeof openDatabaseSync>): void {
+  const rows = database.prepare(`
+    select correlation_id, state
+    from commands
+    where type = 'continue_iteration' and state in ('pending', 'attempted')
+    order by created_at, id
+  `).all() as Array<{ correlation_id: string | null; state: string }>;
+  if (rows.length > 0) {
+    const seen = rows.map((row) => `${row.correlation_id}:${row.state}`);
+    throw new Error(`qa-run continue_iteration dispatch queue is not clean; found ${JSON.stringify(seen)}`);
+  }
+}
+
+function generatedTask(task: QaGeneratedTask, suffix: string): QaGeneratedTask {
+  return { ...task, suffix };
+}
+
+function qaArtifactDir(context: QaRunContext, scenario: string, slug: string, runId: string): string {
+  return join(dirname(context.receiptOutput), `${scenario}-artifacts`, `${slug}-${runId}`);
+}
+
+function preflightQaBrowserCapture(): void {
+  const preflightDir = mkdtempSync(join(tmpdir(), "agent-conveyor-qa-browser-preflight."));
+  try {
+    const htmlPath = join(preflightDir, "candidate.html");
+    const screenshotPath = join(preflightDir, "candidate.png");
+    writeQaCandidateHtml(htmlPath);
+    captureQaBrowserScreenshot(htmlPath, screenshotPath);
+  } finally {
+    rmSync(preflightDir, { force: true, recursive: true });
+  }
+}
+
+function writeQaRollout(sessionDir: string, sessionName: string, cwd: string): string {
+  mkdirSync(sessionDir, { recursive: true });
+  const rolloutPath = join(sessionDir, `rollout-${sessionName}.jsonl`);
+  writeFileSync(rolloutPath, `${JSON.stringify({
+    payload: { cwd, id: `codex-${sessionName}`, originator: "conveyor qa-run" },
+    type: "session_meta",
+  })}\n`);
+  return rolloutPath;
+}
+
+function writeQaCandidateHtml(path: string): void {
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    html, body { margin: 0; width: 2px; height: 2px; overflow: hidden; background: transparent; }
+    .qa-grid { display: grid; grid-template-columns: 1px 1px; grid-template-rows: 1px 1px; width: 2px; height: 2px; }
+    .qa-pixel { width: 1px; height: 1px; }
+    #qa-pixel-0 { background: rgb(18, 24, 38); }
+    #qa-pixel-1 { background: rgb(44, 92, 152); }
+    #qa-pixel-2 { background: rgb(218, 226, 236); }
+    #qa-pixel-3 { background: rgb(246, 248, 251); }
+  </style>
+</head>
+<body>
+  <div class="qa-grid" aria-label="generic loop browser QA reference">
+    <div id="qa-pixel-0" class="qa-pixel"></div>
+    <div id="qa-pixel-1" class="qa-pixel"></div>
+    <div id="qa-pixel-2" class="qa-pixel"></div>
+    <div id="qa-pixel-3" class="qa-pixel"></div>
+  </div>
+</body>
+</html>
+`);
+}
+
+function captureQaBrowserScreenshot(htmlPath: string, screenshotPath: string): Record<string, string> {
+  const helperPath = join(packageRootFromRuntimeModule(), "scripts", "capture-static-html-screenshot.mjs");
+  qaRequire(existsSync(helperPath), `browser screenshot helper is missing: ${helperPath}`);
+  const result = spawnSync("node", [
+    helperPath,
+    "--html",
+    htmlPath,
+    "--output",
+    screenshotPath,
+    "--width",
+    "2",
+    "--height",
+    "2",
+  ], {
+    cwd: packageRootFromRuntimeModule(),
+    encoding: "utf8",
+  });
+  qaRequire(result.status === 0, result.stderr || result.stdout || `browser screenshot helper exited ${result.status}`);
+  const payload = JSON.parse(result.stdout || "{}") as unknown;
+  qaRequire(isPlainRecord(payload), `browser screenshot helper returned non-object JSON: ${result.stdout}`);
+  return {
+    backend: typeof payload.backend === "string" ? payload.backend : "playwright-chromium",
+    html_path: typeof payload.html_path === "string" ? payload.html_path : htmlPath,
+    screenshot_path: typeof payload.screenshot_path === "string" ? payload.screenshot_path : screenshotPath,
+    viewport: typeof payload.viewport === "string" ? payload.viewport : "2x2",
+  };
+}
+
+function writeQaPng(path: string): void {
+  writePngRgba(path, 2, 2, [
+    [18, 24, 38, 255],
+    [44, 92, 152, 255],
+    [218, 226, 236, 255],
+    [246, 248, 251, 255],
+  ]);
 }
 
 function runTasksCommand(
@@ -6908,6 +8412,8 @@ function isDefaultRuntimeCommand(command: string | null): boolean {
     || command === "loop-templates"
     || command === "loop-triggers"
     || command === "ralph-loop-presets"
+    || command === "qa-plan"
+    || command === "qa-run"
     || command === "start"
     || command === "create"
     || command === "start-test"
