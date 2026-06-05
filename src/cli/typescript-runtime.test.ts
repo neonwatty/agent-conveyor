@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -2000,12 +2000,27 @@ test("TypeScript runtime handles state-only finish-task and stop-task by default
       assert.ok(telemetryTypes.some((event) => event.event_type === "command_succeeded"));
       assert.ok(telemetryTypes.some((event) => event.event_type === "manager_decision_recorded"));
       assert.ok(telemetryTypes.some((event) => event.event_type === "task_finished"));
-    } finally {
-      afterFinish.close();
-    }
+	    } finally {
+	      afterFinish.close();
+	    }
 
-    const stopCreated = runTypescriptRuntimeCommand({
-      args: [
+	    const finishMutationAudit = runTypescriptRuntimeCommand({
+	      args: ["mutation-audit", "finish-slice", "--json", "--path", dbPath],
+	      cwd: root,
+	      env: {},
+	    });
+	    assert.equal(finishMutationAudit.exitCode, 0, finishMutationAudit.stderr);
+	    const finishMutationPayload = JSON.parse(finishMutationAudit.stdout ?? "{}") as {
+	      ok: boolean;
+	      records: Array<{ linked_decision: { id: number } | null; ok: boolean; warnings: string[] }>;
+	    };
+	    assert.equal(finishMutationPayload.ok, true);
+	    assert.equal(finishMutationPayload.records[0].ok, true);
+	    assert.deepEqual(finishMutationPayload.records[0].warnings, []);
+	    assert.equal(finishMutationPayload.records[0].linked_decision?.id, finishPayload.final_decision_id);
+
+	    const stopCreated = runTypescriptRuntimeCommand({
+	      args: [
         "create-disposable-binding",
         "stop-slice",
         "--worker",
@@ -4318,7 +4333,7 @@ test("TypeScript runtime handles classify ingest and tail by default", () => {
         select event_type, correlation_json, attributes_json
         from telemetry_events
         where event_type = 'codex_events_tail_read'
-        order by timestamp desc
+        order by timestamp desc, rowid desc
         limit 1
       `).get() as { attributes_json: string; correlation_json: string; event_type: string };
       assert.equal(telemetry.event_type, "codex_events_tail_read");
@@ -5605,6 +5620,915 @@ test("TypeScript runtime handles migrated audit replay and subset export command
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("TypeScript runtime handles diagnostics telemetry audit and prune commands by default", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-diagnostics."));
+  try {
+    const dbPath = join(root, "workerctl.db");
+    const database = openDatabaseSync(dbPath);
+    try {
+      initializeDatabaseSync(database);
+      createTaskSync(database, {
+        goal: "Exercise diagnostics commands.",
+        name: "diag-task",
+        now: "2026-06-05T10:00:00Z",
+        taskId: "task-diag",
+      });
+      insertSession(database, { id: "session-diag-worker", name: "diag-worker", role: "worker", tmuxSession: "diag-worker-tmux" });
+      insertSession(database, { id: "session-diag-manager", name: "diag-manager", role: "manager", tmuxSession: "diag-manager-tmux" });
+      bindSessionsSync(database, {
+        bindingId: "binding-diag",
+        managerSessionName: "diag-manager",
+        now: "2026-06-05T10:00:05Z",
+        taskName: "diag-task",
+        workerSessionName: "diag-worker",
+      });
+      createTaskSync(database, {
+        goal: "Exercise session-backed live diagnostics.",
+        name: "diag-session-task",
+        now: "2026-06-05T10:00:10Z",
+        taskId: "task-diag-session",
+      });
+      insertSession(database, { id: "session-live-worker", name: "session-live-worker", role: "worker", tmuxSession: "missing-session-worker" });
+      insertSession(database, { id: "session-live-manager", name: "session-live-manager", role: "manager", tmuxSession: "missing-session-manager" });
+	      bindSessionsSync(database, {
+	        bindingId: "binding-diag-session",
+	        managerSessionName: "session-live-manager",
+	        now: "2026-06-05T10:00:15Z",
+	        taskName: "diag-session-task",
+	        workerSessionName: "session-live-worker",
+	      });
+	      createTaskSync(database, {
+	        goal: "Exercise no-tmux app-session diagnostics.",
+	        name: "diag-app-session-task",
+	        now: "2026-06-05T10:00:20Z",
+	        taskId: "task-diag-app-session",
+	      });
+	      const freshHeartbeat = new Date().toISOString();
+	      insertSession(database, { id: "session-app-worker", lastHeartbeatAt: freshHeartbeat, name: "session-app-worker", pid: process.pid, role: "worker" });
+	      insertSession(database, { id: "session-app-manager", lastHeartbeatAt: freshHeartbeat, name: "session-app-manager", pid: process.pid, role: "manager" });
+	      bindSessionsSync(database, {
+	        bindingId: "binding-diag-app-session",
+	        managerSessionName: "session-app-manager",
+	        now: "2026-06-05T10:00:25Z",
+	        taskName: "diag-app-session-task",
+	        workerSessionName: "session-app-worker",
+	      });
+	      createTaskSync(database, {
+	        goal: "Exercise legacy binding telemetry diagnostics.",
+	        name: "diag-legacy-task",
+	        now: "2026-06-05T10:00:30Z",
+	        taskId: "task-diag-legacy",
+	      });
+	      database.prepare("update tasks set state = 'managed' where id = 'task-diag-legacy'").run();
+	      insertLegacyWorker(database, {
+	        identityToken: "diag-legacy-only-token",
+	        name: "diag-legacy-only-worker",
+	        paneId: "%7",
+	        workerId: "worker-diag-legacy-only",
+	      });
+	      database.prepare(`
+	        insert into managers(id, name, task_id, tmux_session, state, codex_args_json, started_at, last_seen_at)
+	        values ('manager-diag-legacy-only', 'diag-legacy-only-manager', 'task-diag-legacy', 'diag-legacy-only-manager-tmux', 'ready', '[]', '2026-06-05T10:00:30Z', '2026-06-05T10:00:31Z')
+	      `).run();
+	      database.prepare(`
+	        insert into bindings(id, task_id, worker_id, manager_id, worker_session_id, manager_session_id, state, created_at, ended_at)
+	        values ('binding-diag-legacy-only', 'task-diag-legacy', 'worker-diag-legacy-only', 'manager-diag-legacy-only', null, null, 'active', '2026-06-05T10:00:32Z', null)
+	      `).run();
+      database.prepare(`
+        insert into managers(id, name, task_id, tmux_session, state, codex_args_json, started_at, last_seen_at)
+        values ('manager-diag-legacy', 'diag-legacy-manager', 'task-diag', 'diag-legacy-manager-tmux', 'ready', '[]', '2026-06-05T10:00:00Z', '2000-01-01T00:00:00Z')
+      `).run();
+      database.prepare("update bindings set manager_id = 'manager-diag-legacy' where id = 'binding-diag'").run();
+      database.prepare(`
+        insert into manager_cycles(id, task_id, manager_id, started_at, completed_at, state, status_json, health_json, decision, error)
+        values (1, 'task-diag', null, '2026-06-05T10:01:00Z', '2026-06-05T10:01:05Z', 'succeeded', ?, '{}', 'wait', null)
+      `).run(JSON.stringify({ notable_pane_pattern: "trust_prompt", pane_signal: { captured: true } }));
+	      database.prepare(`
+	        insert into telemetry_events(id, run_id, task_id, timestamp, actor, event_type, severity, summary, correlation_json, attributes_json)
+	        values
+	          ('telemetry-diag-1', null, 'task-diag', '2026-06-05T10:02:00Z', 'dispatch', 'dispatch_watch_heartbeat', 'info', 'Dispatch heartbeat.', '{}', '{"new_events":2}'),
+	          ('telemetry-diag-2', null, 'task-diag', '2026-06-05T10:03:00Z', 'workerctl', 'command_failed', 'error', 'Command failed.', '{}', '{"skipped_lines":1}'),
+	          ('telemetry-diag-3', null, 'task-diag', '2026-06-05T10:03:30Z', 'workerctl', 'codex_events_ingested', 'warning', 'Ingest warning.', '{}', '{"new_events":3,"skipped_lines":2,"reason":"partial parse"}'),
+	          ('telemetry-diag-fts', null, 'task-diag', '2026-06-05T10:03:45Z', 'workerctl', 'operator_note', 'info', 'Trust signal observed.', '{}', '{"context":"manager prompt review"}'),
+	          ('telemetry-z-same-second', null, 'task-diag', '2026-06-05T10:03:50Z', 'system', 'same_second_first', 'info', 'Same-second event inserted first.', '{}', '{}'),
+	          ('telemetry-a-same-second', null, 'task-diag', '2026-06-05T10:03:50Z', 'system', 'same_second_second', 'info', 'Same-second event inserted second.', '{}', '{}')
+	      `).run();
+	      database.prepare(`
+	        insert into telemetry_events_fts(event_id, task_id, run_id, actor, event_type, summary, attributes)
+	        values
+	          ('telemetry-diag-1', 'task-diag', null, 'dispatch', 'dispatch_watch_heartbeat', 'Dispatch heartbeat.', '{"new_events":2}'),
+	          ('telemetry-diag-2', 'task-diag', null, 'workerctl', 'command_failed', 'Command failed.', '{"skipped_lines":1}'),
+	          ('telemetry-diag-3', 'task-diag', null, 'workerctl', 'codex_events_ingested', 'Ingest warning.', '{"new_events":3,"skipped_lines":2,"reason":"partial parse"}'),
+	          ('telemetry-diag-fts', 'task-diag', null, 'workerctl', 'operator_note', 'Trust signal observed.', '{"context":"manager prompt review"}')
+	      `).run();
+      const decision = database.prepare(`
+        insert into manager_decisions(task_id, manager_id, manager_cycle_id, decision, reason, created_at, payload_json)
+        values ('task-diag', null, null, 'stop', 'Finish task.', '2026-06-05T10:04:00Z', '{}')
+      `).run();
+      const decisionId = Number(decision.lastInsertRowid);
+	      createCommandSync(database, {
+	        commandId: "command-diag-finish",
+	        commandType: "finish_task",
+	        correlationId: "diag-finish",
+        now: "2026-06-05T10:05:00Z",
+        payload: { manager_decision: { decision_id: decisionId } },
+        taskId: "task-diag",
+	      });
+	      database.prepare("update commands set state = 'succeeded', result_json = ? where id = 'command-diag-finish'")
+	        .run(JSON.stringify({ manager_decision: { decision: { decision: "stop", id: decisionId }, warnings: [] } }));
+	      createCommandSync(database, {
+	        commandId: "command-diag-pending",
+	        commandType: "continue_iteration",
+	        correlationId: "diag-pending",
+	        now: "2026-06-05T10:05:30Z",
+	        payload: {},
+	        taskId: "task-diag",
+	      });
+	      insertLegacyWorker(database, {
+	        identityToken: "diag-legacy-token",
+	        name: "diag-legacy",
+	        paneId: "%3",
+	        workerId: "worker-diag-legacy",
+	      });
+	      database.prepare("update bindings set worker_id = 'worker-diag-legacy' where id = 'binding-diag'").run();
+	      database.prepare(`
+	        insert into bindings(id, task_id, worker_id, manager_id, worker_session_id, manager_session_id, state, created_at, ended_at)
+	        values ('binding-diag-ended', 'task-diag', 'worker-diag-legacy', null, null, null, 'ended', '2026-06-05T09:00:00Z', '2026-06-05T09:30:00Z')
+	      `).run();
+	      database.prepare(`
+	        insert into transcript_captures(worker_id, sha256, content, captured_at, changed_at, history_lines, byte_count, line_count, capture_kind, retention_class)
+	        values
+	          ('worker-diag-legacy', 'sha-old', 'old content', '2026-06-05T10:05:00Z', '2026-06-05T10:05:00Z', 20, 11, 1, 'changed', 'hot'),
+	          ('worker-diag-legacy', 'sha-new', 'new content', '2026-06-05T10:06:00Z', '2026-06-05T10:06:00Z', 20, 11, 1, 'latest', 'hot')
+	      `).run();
+	      const captureId = insertTerminalCapture(database, "task-diag", "worker", "2026-06-05T10:06:30Z", "terminal capture bytes");
+	      database.prepare(`
+	        insert into transcript_segments(
+	          task_id, role, source_capture_id, previous_capture_id, captured_at,
+	          content_sha256, segment_text, segment_start_line, segment_end_line,
+	          byte_count, line_count, retention_class, segment_kind, created_at
+	        )
+	        values ('task-diag', 'worker', ?, null, '2026-06-05T10:06:31Z', 'diag-segment-sha', 'segment bytes', 1, 1, 13, 1, 'hot', 'segment', '2026-06-05T10:06:31Z')
+	      `).run(captureId);
+	    } finally {
+	      database.close();
+	    }
+
+    const telemetrySummary = runTypescriptRuntimeCommand({
+      args: ["telemetry", "--task", "diag-task", "--summary", "--json", "--path", dbPath],
+      env: {},
+	    });
+	    assert.equal(telemetrySummary.exitCode, 0);
+	    assert.equal(telemetrySummary.handled, true);
+	    const summaryPayload = JSON.parse(telemetrySummary.stdout ?? "{}") as { by_actor: Record<string, number>; by_severity: Record<string, number>; task_id: string | null; total: number };
+	    assert.equal(summaryPayload.total, 8);
+	    assert.equal(summaryPayload.task_id, "task-diag");
+	    assert.equal(summaryPayload.by_actor.dispatch, 1);
+	    assert.equal(summaryPayload.by_severity.error, 1);
+
+	    const telemetryTimeline = runTypescriptRuntimeCommand({
+	      args: ["telemetry", "--task", "diag-task", "--json", "--path", dbPath],
+	      env: {},
+	    });
+	    assert.equal(telemetryTimeline.exitCode, 0);
+	    const timelinePayload = JSON.parse(telemetryTimeline.stdout ?? "[]") as Array<{ id: string }>;
+	    assert.deepEqual(
+	      timelinePayload.filter((event) => event.id.includes("same-second")).map((event) => event.id),
+	      ["telemetry-z-same-second", "telemetry-a-same-second"],
+	    );
+	    const telemetryNewestTimeline = runTypescriptRuntimeCommand({
+	      args: ["telemetry", "--task", "diag-task", "--newest", "--json", "--path", dbPath],
+	      env: {},
+	    });
+	    assert.equal(telemetryNewestTimeline.exitCode, 0);
+	    const newestTimelinePayload = JSON.parse(telemetryNewestTimeline.stdout ?? "[]") as Array<{ id: string }>;
+	    assert.deepEqual(
+	      newestTimelinePayload.filter((event) => event.id.includes("same-second")).map((event) => event.id),
+	      ["telemetry-a-same-second", "telemetry-z-same-second"],
+	    );
+
+	    const telemetrySearch = runTypescriptRuntimeCommand({
+	      args: ["telemetry", "--task", "diag-task", "--search", "trust prompt", "--json", "--path", dbPath],
+	      env: {},
+	    });
+	    assert.equal(telemetrySearch.exitCode, 0);
+	    const searchPayload = JSON.parse(telemetrySearch.stdout ?? "[]") as Array<{ id: string }>;
+	    assert.deepEqual(searchPayload.map((event) => event.id), ["telemetry-diag-fts"]);
+
+	    const telemetryTask = runTypescriptRuntimeCommand({
+	      args: ["telemetry", "task", "diag-task", "--json", "--path", dbPath],
+	      env: {},
+	    });
+	    assert.equal(telemetryTask.exitCode, 0);
+		    const taskPayload = JSON.parse(telemetryTask.stdout ?? "{}") as {
+		      alerts: Array<{ type: string }>;
+		      commands: { counts_by_state: Record<string, number>; failed_count: number; recent: Array<{ id: string }>; total: number };
+		      criteria: { open: unknown[]; open_count: number; summary: Record<string, number>; total: number };
+		      cycles: { failed: Array<{ id: number }>; failed_count: number; history: Array<{ id: number }>; last_successful: { id: number } | null; pane_capture_failures: Array<{ id: number }>; pane_capture_failure_count: number; total: number };
+		      decisions: { recent: Array<{ decision: string; payload_keys: string[] }> };
+		      ingest: { error_count: number; skipped_lines: number };
+		      storage: { terminal_captures: { bytes: number; count: number }; total_retained: number; transcript_captures: { bytes: number; count: number }; transcript_segments: { bytes: number; count: number } };
+		      task: { name: string };
+		      telemetry: { summary: { by_severity: Record<string, number> } };
+		    };
+	    assert.equal(taskPayload.task.name, "diag-task");
+	    assert.equal(taskPayload.telemetry.summary.by_severity.error, 1);
+	    assert.ok(taskPayload.alerts.some((alert) => alert.type === "notable_pane_pattern"));
+	    assert.equal(taskPayload.ingest.error_count, 1);
+		    assert.equal(taskPayload.ingest.skipped_lines, 2);
+		    assert.equal(taskPayload.storage.terminal_captures.count, 1);
+		    assert.equal(taskPayload.storage.transcript_captures.count, 2);
+		    assert.equal(taskPayload.storage.transcript_captures.bytes, 22);
+		    assert.equal(taskPayload.storage.transcript_segments.count, 1);
+		    assert.ok(taskPayload.storage.total_retained > 0);
+		    assert.deepEqual(taskPayload.criteria, {
+		      open: [],
+		      open_count: 0,
+		      summary: { accepted: 0, deferred: 0, proposed: 0, rejected: 0, satisfied: 0 },
+		      total: 0,
+		    });
+		    assert.equal(taskPayload.cycles.total, 1);
+		    assert.equal(taskPayload.cycles.failed_count, 0);
+		    assert.deepEqual(taskPayload.cycles.failed, []);
+		    assert.equal(taskPayload.cycles.last_successful?.id, 1);
+		    assert.deepEqual(taskPayload.cycles.pane_capture_failures, []);
+		    assert.equal(taskPayload.cycles.pane_capture_failure_count, 0);
+		    assert.equal(taskPayload.decisions.recent[0].decision, "stop");
+		    assert.deepEqual(taskPayload.decisions.recent[0].payload_keys, []);
+		    assert.equal(taskPayload.commands.total, 2);
+		    assert.equal(taskPayload.commands.failed_count, 0);
+
+    const divergences = runTypescriptRuntimeCommand({
+      args: ["divergences", "diag-task", "--limit", "5", "--path", dbPath],
+      env: {},
+    });
+    assert.equal(divergences.exitCode, 0);
+    assert.equal(JSON.parse(divergences.stdout ?? "[]")[0].notable_pane_pattern, "trust_prompt");
+
+    const mutationAudit = runTypescriptRuntimeCommand({
+      args: ["mutation-audit", "diag-task", "--json", "--path", dbPath],
+      env: {},
+    });
+    assert.equal(mutationAudit.exitCode, 0);
+    const mutationPayload = JSON.parse(mutationAudit.stdout ?? "{}") as { records: Array<{ ok: boolean }>; summary: { mutations: number } };
+    assert.equal(mutationPayload.summary.mutations, 1);
+    assert.equal(mutationPayload.records[0].ok, true);
+
+    const dbDoctorTmuxRunner: TmuxRunner = (args) => {
+      const target = args[args.length - 1];
+      if (args[1] === "has-session") {
+        return { status: target === "diag-legacy-manager-tmux" ? 0 : 1, stdout: "", stderr: "" };
+      }
+      if (args[1] === "list-panes" && target === "diag-legacy-manager-tmux") {
+        return { status: 0, stdout: "%9\n", stderr: "" };
+      }
+      return { status: 1, stdout: "", stderr: "" };
+    };
+	    const dbDoctor = runTypescriptRuntimeCommand({
+	      args: ["db-doctor", "--live", "--manager-stale-seconds", "1", "--path", dbPath],
+	      env: {},
+      tmuxRunner: dbDoctorTmuxRunner,
+	    });
+	    assert.equal(dbDoctor.handled, true);
+	    const doctorPayload = JSON.parse(dbDoctor.stdout ?? "{}") as {
+	      checks: Array<{ name: string; unfinished_command_count?: number }>;
+	      live_reconcile: {
+	        manager_liveness_warnings: Array<{ manager: string; reason: string }>;
+	        ok: boolean;
+	        results: Array<{
+	          drift: string[];
+	          manager: { live: boolean; name: string } | null;
+	          task: { name: string };
+	          unfinished_commands: unknown[];
+	          worker: { live: boolean; name: string } | null;
+	        }>;
+	      };
+	      ok: boolean;
+	      path: string;
+	    };
+	    assert.equal(doctorPayload.path, dbPath);
+	    assert.equal(dbDoctor.exitCode, doctorPayload.ok ? 0 : 1);
+	    assert.equal(typeof doctorPayload.live_reconcile.ok, "boolean");
+	    assert.equal(doctorPayload.live_reconcile.ok, false);
+    const legacyDrift = doctorPayload.live_reconcile.results.find((row) => row.task.name === "diag-task");
+	    assert.notEqual(legacyDrift, undefined);
+    assert.equal(legacyDrift?.worker?.name, "diag-legacy");
+    assert.equal(legacyDrift?.worker?.live, false);
+    assert.ok(legacyDrift?.drift.includes("worker_missing"));
+    assert.ok(legacyDrift?.drift.includes("unfinished_commands"));
+    assert.equal(legacyDrift?.unfinished_commands.length, 1);
+	    assert.equal(doctorPayload.checks.find((check) => check.name === "live_reconcile")?.unfinished_command_count, 1);
+	    assert.equal(doctorPayload.live_reconcile.manager_liveness_warnings.length, 1);
+    assert.equal(doctorPayload.live_reconcile.manager_liveness_warnings[0].reason, "manager_seen_stale");
+    const sessionDrift = doctorPayload.live_reconcile.results.find((row) => row.task.name === "diag-session-task");
+    assert.notEqual(sessionDrift, undefined);
+    assert.equal(sessionDrift?.worker?.name, "session-live-worker");
+    assert.equal(sessionDrift?.worker?.live, false);
+	    assert.equal(sessionDrift?.manager?.name, "session-live-manager");
+	    assert.equal(sessionDrift?.manager?.live, false);
+	    assert.ok(sessionDrift?.drift.includes("worker_missing"));
+	    assert.ok(sessionDrift?.drift.includes("manager_missing"));
+	    const appSession = doctorPayload.live_reconcile.results.find((row) => row.task.name === "diag-app-session-task");
+	    assert.notEqual(appSession, undefined);
+	    assert.equal(appSession?.worker?.name, "session-app-worker");
+	    assert.equal(appSession?.worker?.live, true);
+	    assert.equal(appSession?.manager?.name, "session-app-manager");
+	    assert.equal(appSession?.manager?.live, true);
+	    assert.deepEqual(appSession?.drift, []);
+
+    const storageCheck = runTypescriptRuntimeCommand({
+      args: ["telemetry", "check", "--max-storage-bytes", "1", "--json", "--path", dbPath],
+      env: {},
+    });
+    assert.equal(storageCheck.exitCode, 1);
+	    const storagePayload = JSON.parse(storageCheck.stdout ?? "{}") as { alerts: Array<{ type: string }>; storage: { total_bytes: number } };
+	    assert.ok(storagePayload.storage.total_bytes > 1);
+	    assert.ok(storagePayload.alerts.some((alert) => alert.type === "storage_bytes"));
+
+	    const scopedTaskCheck = runTypescriptRuntimeCommand({
+	      args: ["telemetry", "check", "--task", "diag-app-session-task", "--json", "--path", dbPath],
+	      env: {},
+	    });
+	    assert.equal(scopedTaskCheck.exitCode, 0);
+	    const scopedTaskPayload = JSON.parse(scopedTaskCheck.stdout ?? "{}") as {
+	      alerts: Array<{ type: string }>;
+	      checks: { ok: boolean };
+	      task: { name: string };
+	    };
+	    assert.equal(scopedTaskPayload.task.name, "diag-app-session-task");
+	    assert.equal(scopedTaskPayload.checks.ok, true);
+	    assert.deepEqual(scopedTaskPayload.alerts, []);
+
+	    let staleTaskDb = openDatabaseSync(dbPath);
+	    try {
+	      staleTaskDb.prepare("update sessions set last_heartbeat_at = '2000-01-01T00:00:00Z' where id in ('session-app-worker', 'session-app-manager')").run();
+	    } finally {
+	      staleTaskDb.close();
+	    }
+	    const scopedStaleTaskCheck = runTypescriptRuntimeCommand({
+	      args: ["telemetry", "check", "--task", "diag-app-session-task", "--worker-staleness-seconds", "1", "--json", "--path", dbPath],
+	      env: {},
+	    });
+	    assert.equal(scopedStaleTaskCheck.exitCode, 1);
+	    const scopedStaleTaskPayload = JSON.parse(scopedStaleTaskCheck.stdout ?? "{}") as {
+	      alerts: Array<{ type: string }>;
+	      checks: { ok: boolean };
+	    };
+	    assert.equal(scopedStaleTaskPayload.checks.ok, false);
+	    assert.ok(scopedStaleTaskPayload.alerts.some((alert) => alert.type === "stale_sessions"));
+	    staleTaskDb = openDatabaseSync(dbPath);
+	    try {
+	      const restoredHeartbeat = new Date().toISOString();
+	      staleTaskDb.prepare("update sessions set last_heartbeat_at = ? where id in ('session-app-worker', 'session-app-manager')").run(restoredHeartbeat);
+	    } finally {
+	      staleTaskDb.close();
+	    }
+
+		    let metricsNowIso = "";
+	    let proofDb = openDatabaseSync(dbPath);
+	    try {
+	      const nowIso = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
+	      metricsNowIso = nowIso;
+      createTaskSync(proofDb, {
+        goal: "Other completed task.",
+        name: "diag-other-task",
+        now: "2026-06-05T10:07:00Z",
+        taskId: "task-diag-other",
+      });
+      proofDb.prepare("update tasks set state = 'done' where id = 'task-diag-other'").run();
+      proofDb.prepare(`
+        insert into runs(id, task_id, name, purpose, status, started_at, metadata_json)
+        values
+          ('run-diag', 'task-diag', 'diag-run', 'ralph_loop', 'active', ?, '{}'),
+          ('run-other', 'task-diag-other', 'other-run', 'ralph_loop', 'finished', ?, '{}')
+      `).run(nowIso, nowIso);
+	      createTaskSync(proofDb, {
+	        goal: "Extra active task.",
+	        name: "diag-extra-active-task",
+	        now: nowIso,
+	        taskId: "task-diag-extra-active",
+	      });
+	      createTaskSync(proofDb, {
+	        goal: "Managed task missing bindings.",
+	        name: "diag-integrity-task",
+	        now: nowIso,
+	        taskId: "task-diag-integrity",
+	      });
+	      proofDb.prepare("update tasks set state = 'managed' where id = 'task-diag-integrity'").run();
+	      proofDb.prepare(`
+	        insert into runs(id, task_id, name, purpose, status, started_at, metadata_json)
+	        values ('run-diag-shadow', 'task-diag-extra-active', 'diag-run', 'ralph_loop', 'active', ?, '{}')
+      `).run(new Date(Date.now() + 1000).toISOString());
+      proofDb.prepare(`
+        insert into manager_cycles(id, task_id, started_at, completed_at, state, status_json, health_json, error)
+        values
+          (2, 'task-diag', ?, ?, 'failed', '{"notable_pane_pattern":"failure_pattern"}', '{}', 'current run failure'),
+          (3, 'task-diag-other', ?, ?, 'failed', '{}', '{}', 'other run failure'),
+          (4, 'task-diag', '2000-01-01T00:00:00Z', '2000-01-01T00:00:01Z', 'failed', '{}', '{}', 'old run failure'),
+          (5, 'task-diag', ?, ?, 'succeeded', '{"pane_signal":{"captured":false},"error_type":"IngestWarning"}', '{}', 'Ingest pane capture failed')
+      `).run(nowIso, nowIso, nowIso, nowIso, nowIso, nowIso);
+      proofDb.prepare(`
+        insert into manager_cycle_spans(manager_cycle_id, task_id, run_id, phase, started_at, completed_at, duration_ms, state, attributes_json)
+        values
+          (2, 'task-diag', 'run-diag', 'classify', ?, ?, 1, 'failed', '{}'),
+          (3, 'task-diag-other', 'run-other', 'classify', ?, ?, 1, 'failed', '{}'),
+          (4, 'task-diag', 'run-diag', 'classify', '2000-01-01T00:00:00Z', '2000-01-01T00:00:01Z', 1, 'failed', '{}'),
+          (5, 'task-diag', 'run-diag', 'capture', ?, ?, 1, 'succeeded', '{}')
+      `).run(nowIso, nowIso, nowIso, nowIso, nowIso, nowIso);
+      proofDb.prepare(`
+        insert into telemetry_events(id, run_id, task_id, timestamp, actor, event_type, severity, summary, correlation_json, attributes_json)
+        values ('telemetry-diag-run-ingest', 'run-diag', 'task-diag', ?, 'workerctl', 'codex_events_ingested', 'warning', 'Run ingest skipped lines.', '{}', '{"new_events":5,"skipped_lines":4,"reason":"bad line"}')
+      `).run(nowIso);
+      proofDb.prepare(`
+        insert into acceptance_criteria(task_id, criterion, status, source, proof, rationale, evidence_json, created_at, updated_at)
+        values ('task-diag', 'Run criterion remains accepted.', 'accepted', 'manager_inferred', null, null, '{"ralph_loop_run_id":"run-diag"}', ?, ?)
+      `).run(nowIso, nowIso);
+      createCommandSync(proofDb, {
+        commandId: "command-diag-loop",
+        commandType: "continue_iteration",
+        correlationId: "diag-loop",
+        now: nowIso,
+        payload: { ralph_loop_run_id: "run-diag" },
+        taskId: "task-diag",
+      });
+      createCommandSync(proofDb, {
+        commandId: "command-diag-old-loop",
+        commandType: "continue_iteration",
+        correlationId: "diag-old-loop",
+        now: "2000-01-01T00:00:00Z",
+        payload: { ralph_loop_run_id: "run-diag" },
+        taskId: "task-diag",
+      });
+      createCommandSync(proofDb, {
+        commandId: "command-other-loop",
+        commandType: "continue_iteration",
+        correlationId: "other-loop",
+        now: nowIso,
+        payload: { ralph_loop_run_id: "run-other" },
+        taskId: "task-diag-other",
+      });
+	      proofDb.prepare("update commands set state = 'failed', error = 'completed task failed command' where id = 'command-other-loop'").run();
+	    } finally {
+	      proofDb.close();
+	    }
+
+	    const activeOnlyCheck = runTypescriptRuntimeCommand({
+	      args: [
+	        "telemetry",
+	        "check",
+	        "--active-only",
+	        "--max-open-criteria",
+	        "99",
+	        "--max-unfinished-commands",
+	        "99",
+	        "--worker-staleness-seconds",
+	        "999999999",
+	        "--json",
+	        "--path",
+	        dbPath,
+	      ],
+	      env: {},
+	    });
+	    const activeOnlyPayload = JSON.parse(activeOnlyCheck.stdout ?? "{}") as {
+	      alerts: Array<{ type: string }>;
+	      commands: { failed_count: number };
+	    };
+	    assert.equal(activeOnlyPayload.commands.failed_count, 0);
+	    assert.ok(!activeOnlyPayload.alerts.some((alert) => alert.type === "failed_commands"));
+
+	    proofDb = openDatabaseSync(dbPath);
+	    try {
+	      proofDb.prepare("update commands set state = 'failed', error = 'failed command' where id in ('command-diag-loop', 'command-diag-old-loop')").run();
+	      proofDb.prepare("update commands set updated_at = '2000-01-01T00:00:01Z' where id = 'command-diag-old-loop'").run();
+	    } finally {
+	      proofDb.close();
+	    }
+
+	    const failures = runTypescriptRuntimeCommand({
+      args: ["telemetry", "failures", "--task", "diag-task", "--run", "diag-run", "--active-only", "--window", "1h", "--json", "--path", dbPath],
+      env: {},
+    });
+    assert.equal(failures.exitCode, 0);
+    const failuresPayload = JSON.parse(failures.stdout ?? "{}") as {
+      alerts: Array<{ type: string }>;
+      failed_commands: Array<{ id: string; task_name: string }>;
+      failed_cycles: Array<{ id: number; notable_pane_pattern: string | null; status: Record<string, unknown>; task_name: string }>;
+      filters: { active_only: boolean; run_id: string; task_id: string; window: { label: string } };
+      ingest: { error_count: number; skipped_lines: number };
+      open_criteria: { open_accepted_count: number };
+      pane_capture_failures: Array<{ id: number; task_name: string }>;
+    };
+    assert.deepEqual(failuresPayload.failed_cycles.map((cycle) => cycle.id), [2]);
+    assert.deepEqual(failuresPayload.failed_commands.map((command) => command.id), ["command-diag-loop"]);
+    assert.deepEqual(failuresPayload.pane_capture_failures.map((cycle) => cycle.id), [5]);
+    assert.equal(failuresPayload.failed_cycles[0].task_name, "diag-task");
+    assert.equal(failuresPayload.failed_cycles[0].notable_pane_pattern, "failure_pattern");
+    assert.equal(failuresPayload.failed_cycles[0].status.notable_pane_pattern, "failure_pattern");
+    assert.equal(failuresPayload.failed_commands[0].task_name, "diag-task");
+    assert.equal(failuresPayload.ingest.error_count, 1);
+    assert.equal(failuresPayload.ingest.skipped_lines, 4);
+    assert.equal(failuresPayload.open_criteria.open_accepted_count, 1);
+    assert.ok(failuresPayload.alerts.some((alert) => alert.type === "ingest_errors"));
+    assert.ok(failuresPayload.alerts.some((alert) => alert.type === "pane_capture_failures"));
+    assert.ok(failuresPayload.alerts.some((alert) => alert.type === "open_accepted_criteria"));
+    assert.equal(failuresPayload.filters.active_only, true);
+    assert.equal(failuresPayload.filters.run_id, "run-diag");
+    assert.equal(failuresPayload.filters.task_id, "task-diag");
+    assert.equal(failuresPayload.filters.window.label, "1h");
+
+    const limitedTask = runTypescriptRuntimeCommand({
+      args: ["telemetry", "task", "diag-task", "--limit", "1", "--json", "--path", dbPath],
+      env: {},
+    });
+    assert.equal(limitedTask.exitCode, 0);
+	    const limitedTaskPayload = JSON.parse(limitedTask.stdout ?? "{}") as {
+	      cycles: { counts_by_state: Record<string, number>; failed: Array<{ id: number }>; failed_count: number; history: Array<{ id: number }>; last_successful: { id: number } | null; pane_capture_failures: Array<{ id: number }>; pane_capture_failure_count: number; total: number };
+	    };
+	    assert.deepEqual(limitedTaskPayload.cycles.history.map((cycle) => cycle.id), [5]);
+	    assert.equal(limitedTaskPayload.cycles.counts_by_state.failed, 2);
+	    assert.equal(limitedTaskPayload.cycles.counts_by_state.succeeded, 2);
+	    assert.deepEqual(limitedTaskPayload.cycles.failed.map((cycle) => cycle.id), [4]);
+	    assert.equal(limitedTaskPayload.cycles.failed_count, 2);
+	    assert.equal(limitedTaskPayload.cycles.last_successful?.id, 5);
+	    assert.deepEqual(limitedTaskPayload.cycles.pane_capture_failures.map((cycle) => cycle.id), [5]);
+	    assert.equal(limitedTaskPayload.cycles.pane_capture_failure_count, 1);
+	    assert.equal(limitedTaskPayload.cycles.total, 4);
+
+	    const metrics = runTypescriptRuntimeCommand({
+	      args: ["telemetry", "metrics", "--task", "diag-task", "--window", "1h", "--json", "--path", dbPath],
+	      env: {},
+	      now: () => new Date(metricsNowIso.replace(/Z$/, ".789Z")),
+	    });
+	    assert.equal(metrics.exitCode, 0, metrics.stderr);
+	    const metricsPayload = JSON.parse(metrics.stdout ?? "{}") as {
+	      counters: {
+	        cycles: { failed: number; succeeded: number; total: number };
+	        pane_capture: { failed: number };
+	        telemetry_events: {
+	          by_actor_event_type_severity: Record<string, Record<string, Record<string, number>>>;
+	          total: number;
+	        };
+	      };
+	      gauges: { active_tasks: number };
+	      rollups: { commands_by_type: Record<string, Record<string, number>>; cycle_success_rate: number };
+	    };
+    assert.equal(metricsPayload.counters.cycles.failed, 1);
+    assert.equal(metricsPayload.counters.cycles.succeeded, 1);
+    assert.equal(metricsPayload.counters.cycles.total, 2);
+	    assert.equal(metricsPayload.counters.pane_capture.failed, 1);
+	    assert.ok(metricsPayload.counters.telemetry_events.total >= 1);
+	    assert.equal(metricsPayload.counters.telemetry_events.by_actor_event_type_severity.workerctl.codex_events_ingested.warning, 1);
+	    assert.equal(metricsPayload.gauges.active_tasks, 1);
+	    assert.equal(metricsPayload.rollups.commands_by_type.continue_iteration.failed, 1);
+	    assert.equal(metricsPayload.rollups.cycle_success_rate, 0.5);
+
+	    const runMetrics = runTypescriptRuntimeCommand({
+	      args: ["telemetry", "metrics", "--run", "run-diag", "--window", "1h", "--json", "--path", dbPath],
+	      env: {},
+	      now: () => new Date(metricsNowIso.replace(/Z$/, ".789Z")),
+	    });
+	    assert.equal(runMetrics.exitCode, 0, runMetrics.stderr);
+	    const runMetricsPayload = JSON.parse(runMetrics.stdout ?? "{}") as {
+	      counters: { cycles: { failed: number; succeeded: number; total: number }; pane_capture: { failed: number } };
+	      filters: { run_id: string; task_id: string | null };
+	      rollups: { commands_by_type: Record<string, Record<string, number>>; cycle_success_rate: number };
+	    };
+	    assert.equal(runMetricsPayload.filters.run_id, "run-diag");
+	    assert.equal(runMetricsPayload.filters.task_id, null);
+	    assert.equal(runMetricsPayload.counters.cycles.failed, 1);
+	    assert.equal(runMetricsPayload.counters.cycles.succeeded, 1);
+	    assert.equal(runMetricsPayload.counters.cycles.total, 2);
+	    assert.equal(runMetricsPayload.counters.pane_capture.failed, 1);
+	    assert.equal(runMetricsPayload.rollups.commands_by_type.continue_iteration.failed, 1);
+	    assert.equal(runMetricsPayload.rollups.cycle_success_rate, 0.5);
+
+	    const scopedRunNameMetrics = runTypescriptRuntimeCommand({
+	      args: ["telemetry", "metrics", "--task", "diag-task", "--run", "diag-run", "--window", "1h", "--json", "--path", dbPath],
+	      env: {},
+	      now: () => new Date(metricsNowIso.replace(/Z$/, ".789Z")),
+	    });
+	    assert.equal(scopedRunNameMetrics.exitCode, 0, scopedRunNameMetrics.stderr);
+	    const scopedRunNameMetricsPayload = JSON.parse(scopedRunNameMetrics.stdout ?? "{}") as {
+	      counters: { cycles: { failed: number; succeeded: number; total: number } };
+	      filters: { run_id: string; task_id: string | null };
+	    };
+	    assert.equal(scopedRunNameMetricsPayload.filters.run_id, "run-diag");
+	    assert.equal(scopedRunNameMetricsPayload.filters.task_id, "task-diag");
+	    assert.equal(scopedRunNameMetricsPayload.counters.cycles.failed, 1);
+	    assert.equal(scopedRunNameMetricsPayload.counters.cycles.succeeded, 1);
+	    assert.equal(scopedRunNameMetricsPayload.counters.cycles.total, 2);
+
+	    const scopedRunNameEvents = runTypescriptRuntimeCommand({
+	      args: ["telemetry", "--task", "diag-task", "--run", "diag-run", "--json", "--path", dbPath],
+	      env: {},
+	    });
+	    assert.equal(scopedRunNameEvents.exitCode, 0, scopedRunNameEvents.stderr);
+	    const scopedRunNameEventsPayload = JSON.parse(scopedRunNameEvents.stdout ?? "[]") as Array<{ id: string; run_id: string; task_id: string }>;
+	    assert.deepEqual(scopedRunNameEventsPayload.map((event) => event.id), ["telemetry-diag-run-ingest"]);
+	    assert.deepEqual(scopedRunNameEventsPayload.map((event) => [event.run_id, event.task_id]), [["run-diag", "task-diag"]]);
+
+			    const telemetrySnapshot = runTypescriptRuntimeCommand({
+			      args: ["telemetry", "snapshot", "--task", "diag-task", "--json", "--path", dbPath],
+			      env: {},
+			    });
+		    assert.equal(telemetrySnapshot.exitCode, 0, telemetrySnapshot.stderr);
+		    const telemetrySnapshotPayload = JSON.parse(telemetrySnapshot.stdout ?? "{}") as { telemetry: { summary: { run_id: string | null; task_id: string | null } } };
+		    assert.equal(telemetrySnapshotPayload.telemetry.summary.task_id, "task-diag");
+		    assert.equal(telemetrySnapshotPayload.telemetry.summary.run_id, "run-diag");
+
+		    const legacySnapshot = runTypescriptRuntimeCommand({
+		      args: ["telemetry", "snapshot", "--task", "diag-legacy-task", "--json", "--path", dbPath],
+		      env: {},
+		    });
+		    assert.equal(legacySnapshot.exitCode, 0, legacySnapshot.stderr);
+		    const legacySnapshotPayload = JSON.parse(legacySnapshot.stdout ?? "{}") as {
+		      alerts: Array<{ type: string }>;
+		      manager: { name: string; role: string } | null;
+		      task: { integrity: { ok: boolean } };
+		      worker: { name: string; role: string } | null;
+		    };
+		    assert.equal(legacySnapshotPayload.task.integrity.ok, true);
+		    assert.equal(legacySnapshotPayload.worker?.name, "diag-legacy-only-worker");
+		    assert.equal(legacySnapshotPayload.worker?.role, "worker");
+		    assert.equal(legacySnapshotPayload.manager?.name, "diag-legacy-only-manager");
+		    assert.equal(legacySnapshotPayload.manager?.role, "manager");
+		    assert.ok(!legacySnapshotPayload.alerts.some((alert) => alert.type === "integrity_issue"));
+
+			    const integritySnapshot = runTypescriptRuntimeCommand({
+	      args: ["telemetry", "snapshot", "--task", "diag-integrity-task", "--json", "--path", dbPath],
+	      env: {},
+	    });
+	    assert.equal(integritySnapshot.exitCode, 0, integritySnapshot.stderr);
+	    const integritySnapshotPayload = JSON.parse(integritySnapshot.stdout ?? "{}") as {
+	      alerts: Array<{ message: string; type: string }>;
+	      task: { integrity: { issues: string[]; ok: boolean } };
+	    };
+	    assert.deepEqual(integritySnapshotPayload.task.integrity, {
+	      issues: ["managed_without_active_worker_binding", "managed_without_active_manager"],
+	      ok: false,
+	    });
+	    assert.deepEqual(
+	      integritySnapshotPayload.alerts.filter((alert) => alert.type === "integrity_issue").map((alert) => alert.message),
+	      ["managed_without_active_worker_binding", "managed_without_active_manager"],
+	    );
+
+	    const integrityTask = runTypescriptRuntimeCommand({
+	      args: ["telemetry", "task", "diag-integrity-task", "--json", "--path", dbPath],
+	      env: {},
+	    });
+	    assert.equal(integrityTask.exitCode, 0, integrityTask.stderr);
+	    const integrityTaskPayload = JSON.parse(integrityTask.stdout ?? "{}") as { alerts: Array<{ message: string; type: string }> };
+	    assert.deepEqual(
+	      integrityTaskPayload.alerts.filter((alert) => alert.type === "integrity_issue").map((alert) => alert.message),
+	      ["managed_without_active_worker_binding", "managed_without_active_manager"],
+	    );
+
+	    const dryPrune = runTypescriptRuntimeCommand({
+      args: ["prune", "--keep-latest", "1", "--dry-run", "--path", dbPath],
+      env: {},
+    });
+    assert.deepEqual(JSON.parse(dryPrune.stdout ?? "{}"), {
+      dry_run: true,
+      keep_latest: 1,
+      pruned_count: 0,
+      would_prune_count: 1,
+    });
+    proofDb = openDatabaseSync(dbPath);
+    try {
+      const oldCapture = proofDb.prepare("select content, capture_kind, retention_class from transcript_captures where sha256 = 'sha-old'")
+        .get() as { capture_kind: string; content: string | null; retention_class: string };
+      assert.deepEqual(Object.fromEntries(Object.entries(oldCapture)), {
+        capture_kind: "changed",
+        content: "old content",
+        retention_class: "hot",
+      });
+    } finally {
+      proofDb.close();
+    }
+
+    const pruned = runTypescriptRuntimeCommand({
+      args: ["prune", "--keep-latest", "1", "--path", dbPath],
+      env: {},
+    });
+    assert.deepEqual(JSON.parse(pruned.stdout ?? "{}"), {
+      dry_run: false,
+      keep_latest: 1,
+      pruned_count: 1,
+      would_prune_count: 1,
+    });
+    proofDb = openDatabaseSync(dbPath);
+    try {
+      const oldCapture = proofDb.prepare("select content, capture_kind, retention_class from transcript_captures where sha256 = 'sha-old'")
+        .get() as { capture_kind: string; content: string | null; retention_class: string };
+      assert.deepEqual(Object.fromEntries(Object.entries(oldCapture)), {
+        capture_kind: "metadata_only",
+        content: null,
+        retention_class: "warm",
+      });
+      const newestContent = (proofDb.prepare("select content from transcript_captures where sha256 = 'sha-new'").get() as { content: string }).content;
+      assert.equal(newestContent, "new content");
+      const event = proofDb.prepare("select payload_json from events where type = 'transcript_captures_pruned'")
+        .get() as { payload_json: string };
+      assert.deepEqual(JSON.parse(event.payload_json), { capture_ids: [1], keep_latest: 1 });
+    } finally {
+      proofDb.close();
+    }
+    const telemetryTaskAfterPrune = runTypescriptRuntimeCommand({
+      args: ["telemetry", "task", "diag-task", "--json", "--path", dbPath],
+      env: {},
+    });
+    assert.equal(telemetryTaskAfterPrune.exitCode, 0);
+    const afterPrunePayload = JSON.parse(telemetryTaskAfterPrune.stdout ?? "{}") as {
+      storage: { total_retained: number; transcript_captures: { bytes: number; count: number } };
+    };
+    assert.equal(afterPrunePayload.storage.transcript_captures.count, 1);
+    assert.equal(afterPrunePayload.storage.transcript_captures.bytes, 11);
+    assert.ok(afterPrunePayload.storage.total_retained < taskPayload.storage.total_retained);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("TypeScript runtime reconcile dry-run apply and doctor-self preserve mutation guardrails", () => {
+  withTemporaryHome((home) => {
+    const root = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-reconcile."));
+    try {
+      const env = { HOME: home, USERPROFILE: home, WORKERCTL_STATE_ROOT: join(root, "state") };
+      const dbPath = defaultDbPath({ env });
+      const database = openDatabaseSync(dbPath);
+      try {
+        initializeDatabaseSync(database);
+        createTaskSync(database, {
+          goal: "Exercise reconcile.",
+          name: "reconcile-task",
+          now: "2026-06-05T11:00:00Z",
+          taskId: "task-reconcile",
+        });
+        insertSession(database, { id: "session-reconcile-worker", name: "reconcile-worker", role: "worker" });
+        insertSession(database, { id: "session-reconcile-manager", name: "reconcile-manager", role: "manager" });
+        database.prepare("update sessions set pid = 999999999, last_heartbeat_at = '2026-06-05T11:00:00Z' where id = 'session-reconcile-worker'").run();
+        database.prepare("update sessions set state = 'gone' where id = 'session-reconcile-manager'").run();
+        bindSessionsSync(database, {
+          bindingId: "binding-reconcile",
+          managerSessionName: "reconcile-manager",
+          now: "2026-06-05T11:00:05Z",
+          taskName: "reconcile-task",
+          workerSessionName: "reconcile-worker",
+        });
+        database.prepare(`
+          insert into manager_cycles(id, task_id, started_at, completed_at, state, status_json, health_json, error)
+          values (1, 'task-reconcile', '2026-06-05T10:00:00Z', '2026-06-05T10:00:05Z', 'succeeded', '{}', '{}', null)
+        `).run();
+      } finally {
+        database.close();
+      }
+
+      const pathFallback = runTypescriptRuntimeCommand({
+        args: ["reconcile", "--path", dbPath],
+        env,
+      });
+      assert.deepEqual(pathFallback, { exitCode: 0, handled: false });
+
+      const dryRun = runTypescriptRuntimeCommand({
+        args: ["reconcile", "--stale-cycles-seconds", "1"],
+        env,
+      });
+      assert.equal(dryRun.exitCode, 0);
+      const dryPayload = JSON.parse(dryRun.stdout ?? "{}") as { dangling_bindings: unknown[]; dead_pid_sessions: unknown[]; stuck_tasks: unknown[] };
+      assert.equal(dryPayload.dead_pid_sessions.length, 1);
+      assert.equal(dryPayload.dangling_bindings.length, 1);
+      assert.equal(dryPayload.stuck_tasks.length, 1);
+      let proofDb = openDatabaseSync(dbPath);
+      try {
+        assert.equal((proofDb.prepare("select state from sessions where name = 'reconcile-worker'").get() as { state: string }).state, "active");
+        assert.equal((proofDb.prepare("select state from bindings where id = 'binding-reconcile'").get() as { state: string }).state, "active");
+        assert.equal((proofDb.prepare("select count(*) as count from events where type like '%reconcile'").get() as { count: number }).count, 0);
+      } finally {
+        proofDb.close();
+      }
+
+      const applied = runTypescriptRuntimeCommand({
+        args: ["reconcile", "--apply", "--stale-cycles-seconds", "1"],
+        env,
+      });
+      assert.equal(applied.exitCode, 0);
+      const applyPayload = JSON.parse(applied.stdout ?? "{}") as { applied: { bindings_marked_invalid: string[]; sessions_marked_gone: string[] } };
+      assert.deepEqual(applyPayload.applied.sessions_marked_gone, ["reconcile-worker"]);
+      assert.deepEqual(applyPayload.applied.bindings_marked_invalid, ["binding-reconcile"]);
+      proofDb = openDatabaseSync(dbPath);
+      try {
+        assert.equal((proofDb.prepare("select state from sessions where name = 'reconcile-worker'").get() as { state: string }).state, "gone");
+        assert.equal((proofDb.prepare("select state from bindings where id = 'binding-reconcile'").get() as { state: string }).state, "invalid");
+        const eventTypes = proofDb.prepare("select type from events where type like '%reconcile' order by id").all() as Array<{ type: string }>;
+        assert.deepEqual(eventTypes.map((event) => event.type), [
+          "session_marked_gone_by_reconcile",
+          "binding_marked_invalid_by_reconcile",
+        ]);
+      } finally {
+        proofDb.close();
+      }
+
+      const binDir = join(root, "bin");
+      mkdirSync(binDir, { recursive: true });
+	      for (const name of ["codex", "tmux", "workerctl"]) {
+	        const script = join(binDir, name);
+	        writeFileSync(script, "#!/bin/sh\nexit 0\n");
+	        chmodSync(script, 0o755);
+	      }
+	      const cwdFile = join(root, "not-a-directory.txt");
+	      writeFileSync(cwdFile, "not a working directory\n");
+	      const doctor = runTypescriptRuntimeCommand({
+	        args: ["doctor", "--cwd", cwdFile, "--json"],
+	        env: { ...env, PATH: `${binDir}:/bin:/usr/bin` },
+	      });
+	      assert.equal(doctor.exitCode, 1);
+	      const doctorPayload = JSON.parse(doctor.stdout ?? "{}") as { checks: Array<{ name: string; ok: boolean; path?: string }>; ok: boolean };
+	      assert.equal(doctorPayload.ok, false);
+	      const cwdCheck = doctorPayload.checks.find((check) => check.name === "target_cwd_exists");
+	      assert.deepEqual(cwdCheck, { name: "target_cwd_exists", ok: false, path: cwdFile });
+	      const targetProject = join(root, "target-project");
+	      const targetStateRoot = join(targetProject, ".codex-workers");
+	      mkdirSync(targetStateRoot, { recursive: true });
+		      const originalCwd = process.cwd();
+		      const targetDoctor = runTypescriptRuntimeCommand({
+		        args: ["doctor", "--cwd", targetProject, "--json"],
+		        env: { HOME: home, USERPROFILE: home, PATH: `${binDir}:/bin:/usr/bin` },
+		      });
+		      assert.equal(targetDoctor.exitCode, 0, targetDoctor.stdout);
+		      const targetDoctorPayload = JSON.parse(targetDoctor.stdout ?? "{}") as { checks: Array<{ name: string; ok: boolean; path?: string }>; ok: boolean; project_root: string; workers: unknown[] };
+		      assert.equal(targetDoctorPayload.ok, true);
+		      assert.equal(targetDoctorPayload.project_root, originalCwd);
+		      assert.deepEqual(
+		        targetDoctorPayload.checks.find((check) => check.name === "state_root_exists"),
+		        { name: "state_root_exists", ok: true, path: targetStateRoot },
+		      );
+		      assert.deepEqual(targetDoctorPayload.workers, []);
+		      mkdirSync(join(root, "outside-cwd"), { recursive: true });
+		      let targetDoctorFromOutside: ReturnType<typeof runTypescriptRuntimeCommand>;
+		      process.chdir(join(root, "outside-cwd"));
+		      try {
+		        targetDoctorFromOutside = runTypescriptRuntimeCommand({
+		          args: ["doctor", "--cwd", targetProject, "--json"],
+		          env: { HOME: home, USERPROFILE: home, PATH: `${binDir}:/bin:/usr/bin` },
+		        });
+		      } finally {
+		        process.chdir(originalCwd);
+		      }
+		      assert.equal(targetDoctorFromOutside.exitCode, 0, targetDoctorFromOutside.stdout);
+		      const outsideDoctorPayload = JSON.parse(targetDoctorFromOutside.stdout ?? "{}") as { project_root: string };
+		      assert.equal(outsideDoctorPayload.project_root, originalCwd);
+		      const tmuxRunner: TmuxRunner = (args) => {
+        const command = args.join(" ");
+        if (command === "tmux has-session -t live-session") {
+          return { status: 0, stdout: "" };
+        }
+        return { status: 1, stderr: `unexpected tmux command: ${command}` };
+      };
+      const doctorSelf = runTypescriptRuntimeCommand({
+        args: ["doctor-self", "--session", "live-session", "--json"],
+        env: { ...env, PATH: `${binDir}:/bin:/usr/bin` },
+        tmuxRunner,
+      });
+      assert.equal(doctorSelf.exitCode, 0);
+      const selfPayload = JSON.parse(doctorSelf.stdout ?? "{}") as { current_session: string; supported: boolean };
+      assert.equal(selfPayload.current_session, "live-session");
+      assert.equal(selfPayload.supported, true);
+      const codexHome = join(root, "codex-home");
+      const reviewHelper = join(codexHome, "skills", "codex-review", "scripts", "codex-review");
+      mkdirSync(join(codexHome, "skills", "manage-codex-workers"), { recursive: true });
+      mkdirSync(join(codexHome, "skills", "codex-review", "scripts"), { recursive: true });
+      writeFileSync(join(codexHome, "skills", "manage-codex-workers", "SKILL.md"), "manage skill\n");
+	      writeFileSync(join(codexHome, "skills", "codex-review", "SKILL.md"), "review skill\n");
+	      writeFileSync(reviewHelper, "#!/bin/sh\nexit 0\n");
+	      chmodSync(reviewHelper, 0o644);
+		      process.chdir(join(root, "outside-cwd"));
+	      let doctorSelfNonExecutableReview;
+	      try {
+	        doctorSelfNonExecutableReview = runTypescriptRuntimeCommand({
+	          args: ["doctor-self", "--session", "live-session", "--json"],
+	          env: { ...env, CODEX_HOME: codexHome, PATH: "/bin:/usr/bin" },
+	          tmuxRunner,
+	        });
+	      } finally {
+	        process.chdir(originalCwd);
+	      }
+	      assert.equal(doctorSelfNonExecutableReview.exitCode, 1);
+	      const nonExecutablePayload = JSON.parse(doctorSelfNonExecutableReview.stdout ?? "{}") as { checks: Array<{ name: string; ok: boolean; path?: string }>; workerctl_invocation: string | null };
+	      assert.deepEqual(
+	        nonExecutablePayload.checks.find((check) => check.name === "workerctl_script"),
+	        { name: "workerctl_script", ok: true, path: join(process.cwd(), "scripts", "workerctl") },
+	      );
+	      assert.equal(nonExecutablePayload.workerctl_invocation, "scripts/workerctl");
+	      assert.deepEqual(
+	        nonExecutablePayload.checks.find((check) => check.name === "codex_review_helper_installed"),
+	        { name: "codex_review_helper_installed", ok: false, path: reviewHelper },
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });
 
 test("TypeScript runtime handles enqueue commands list and dispatch pull-required queue by default", () => {
@@ -7110,32 +8034,36 @@ function seedCliTask(database: DatabaseSync): void {
 
 function insertSession(
   database: DatabaseSync,
-  options: {
-    id: string;
-    name: string;
-    role: "manager" | "worker";
-    tmuxPaneId?: string | null;
-    tmuxSession?: string | null;
-  },
+	  options: {
+	    id: string;
+	    lastHeartbeatAt?: string;
+	    name: string;
+	    pid?: number | null;
+	    role: "manager" | "worker";
+	    tmuxPaneId?: string | null;
+	    tmuxSession?: string | null;
+	  },
 ): void {
-  database.prepare(`
-    insert into sessions(
-      id, name, role, identity_token, codex_session_path, codex_session_id,
-      cwd, registered_at, state, tmux_session, tmux_pane_id
-    )
-    values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    options.id,
-    options.name,
-    options.role,
+	  database.prepare(`
+	    insert into sessions(
+	      id, name, role, identity_token, codex_session_path, codex_session_id,
+	      cwd, registered_at, last_heartbeat_at, pid, state, tmux_session, tmux_pane_id
+	    )
+	    values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	  `).run(
+	    options.id,
+	    options.name,
+	    options.role,
     `${options.id}-token`,
     `/tmp/${options.id}.jsonl`,
-    `${options.id}-codex`,
-    "/repo",
-    "2026-05-23T10:00:00Z",
-    "active",
-    options.tmuxSession ?? null,
-    options.tmuxPaneId ?? null,
+	    `${options.id}-codex`,
+	    "/repo",
+	    "2026-05-23T10:00:00Z",
+	    options.lastHeartbeatAt ?? "2026-05-23T10:00:00Z",
+	    options.pid ?? null,
+	    "active",
+	    options.tmuxSession ?? null,
+	    options.tmuxPaneId ?? null,
   );
 }
 
