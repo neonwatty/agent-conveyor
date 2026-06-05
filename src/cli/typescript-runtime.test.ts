@@ -1022,6 +1022,238 @@ test("TypeScript runtime handles loop templates presets and triggers by default"
   }
 });
 
+test("TypeScript runtime handles qa-plan by default", () => {
+  const selfManagement = runTypescriptRuntimeCommand({
+    args: ["qa-plan", "self-management", "--json"],
+    env: {},
+  });
+  assert.equal(selfManagement.exitCode, 0, selfManagement.stderr);
+  assert.equal(selfManagement.handled, true);
+  const selfPlan = JSON.parse(selfManagement.stdout ?? "{}") as {
+    expected_observations: string[];
+    scenario: string;
+    steps: string[];
+  };
+  assert.equal(selfPlan.scenario, "self-management");
+  assert.ok(selfPlan.steps.some((step) => step.includes("register-worker")));
+  assert.ok(selfPlan.steps.some((step) => step.includes("conveyor cycle")));
+  assert.ok(selfPlan.expected_observations.some((observation) => observation.includes("pane_signal")));
+
+  const adversarial = runTypescriptRuntimeCommand({
+    args: ["qa-plan", "adversarial-triggers", "--json"],
+    env: {},
+  });
+  assert.equal(adversarial.exitCode, 0, adversarial.stderr);
+  const adversarialPlan = JSON.parse(adversarial.stdout ?? "{}") as {
+    correlation_markers: Array<{ correlation_id: string }>;
+    trigger_tasks: Array<{ name: string }>;
+  };
+  assert.ok(adversarialPlan.trigger_tasks.some((trigger) => trigger.name === "loop-gate-trigger"));
+  assert.ok(adversarialPlan.correlation_markers.some((marker) => marker.correlation_id === "nl-loop-gate-policy"));
+
+  const goalbuddyText = runTypescriptRuntimeCommand({
+    args: ["qa-plan", "goalbuddy-conveyor"],
+    env: {},
+  });
+  assert.equal(goalbuddyText.exitCode, 0, goalbuddyText.stderr);
+  assert.match(goalbuddyText.stdout ?? "", /Starter prompt:/);
+  assert.match(goalbuddyText.stdout ?? "", /Authority boundaries:/);
+  assert.match(goalbuddyText.stdout ?? "", /Correlation markers:/);
+
+  const extraArg = runTypescriptRuntimeCommand({
+    args: ["qa-plan", "self-management", "extra", "--json"],
+    env: { AGENT_CONVEYOR_TS_RUNTIME: "1" },
+  });
+  assert.equal(extraArg.exitCode, 2);
+  assert.match(extraArg.stderr ?? "", /Unexpected argument: extra/);
+});
+
+test("TypeScript runtime qa-run writes deterministic receipts and rejects dirty continue queues by default", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-qa-run."));
+  try {
+    const runScenario = (scenario: string) => {
+      const scenarioRoot = join(root, scenario);
+      mkdirSync(scenarioRoot, { recursive: true });
+      const dbPath = join(scenarioRoot, "workerctl.db");
+      const receiptPath = join(scenarioRoot, "receipt.json");
+      const result = runTypescriptRuntimeCommand({
+        args: [
+          "qa-run",
+          scenario,
+          "--receipt-output",
+          receiptPath,
+          "--path",
+          dbPath,
+          "--dispatcher-id",
+          `qa-${scenario}`,
+          "--json",
+        ],
+        env: {},
+      });
+      assert.equal(result.exitCode, 0, result.stderr);
+      const summary = JSON.parse(result.stdout ?? "{}") as { checks: number; receipt_path: string; result: string; scenario: string };
+      assert.equal(summary.scenario, scenario);
+      assert.equal(summary.result, "passed");
+      assert.equal(summary.receipt_path, receiptPath);
+      assert.equal(existsSync(receiptPath), true);
+      const receipt = JSON.parse(readFileSync(receiptPath, "utf8")) as {
+        artifacts: Record<string, string>;
+        checks: Array<Record<string, unknown>>;
+        generated_tasks?: Array<{
+          binding_id?: string | null;
+          manager_id?: string | null;
+          manager_name?: string | null;
+          suffix: string;
+          worker_id?: string | null;
+          worker_name?: string | null;
+        }>;
+        negative_control?: { matched: boolean };
+        result: string;
+        scenario: string;
+        template?: string;
+        trigger_classifications?: Array<{ matched: boolean; name: string }>;
+        visual_diff?: Record<string, unknown>;
+      };
+      assert.equal(receipt.result, "passed");
+      assert.equal(receipt.scenario, scenario);
+      assert.equal(receipt.checks.length, summary.checks);
+      return { receipt, receiptPath };
+    };
+    const checkByName = (receipt: { checks: Array<Record<string, unknown>> }, name: string) => {
+      const check = receipt.checks.find((candidate) => candidate.name === name);
+      assert.ok(check, `missing qa-run check: ${name}`);
+      return check;
+    };
+
+    const ralph = runScenario("ralph-loop-guardrails").receipt;
+    const maxBlock = checkByName(ralph, "max_iteration_blocks_before_worker_delivery");
+    assert.equal((maxBlock.dispatch as Record<string, unknown>).state, "blocked");
+    assert.equal((maxBlock.dispatch as Record<string, unknown>).reason, "max_iterations_reached");
+    assert.equal(maxBlock.worker_inbox_count, 0);
+    const missingEvidence = checkByName(ralph, "missing_evidence_blocks_before_worker_delivery");
+    assert.deepEqual((missingEvidence.dispatch as Record<string, unknown>).missing_evidence, ["ci_green", "adversarial_check"]);
+    const allowedEvidence = checkByName(ralph, "fresh_retry_delivers_after_structured_evidence");
+    assert.equal((allowedEvidence.dispatch as Record<string, unknown>).state, "pull_required");
+    assert.equal(allowedEvidence.worker_inbox_count, 1);
+    const presetBlock = checkByName(ralph, "preset_requires_pr_ci_merge_and_adversarial_evidence");
+    assert.deepEqual((presetBlock.dispatch as Record<string, unknown>).missing_evidence, ["pr_url", "ci_green", "merge", "adversarial_check"]);
+
+    const generic = runScenario("generic-loop-template").receipt;
+    assert.equal(generic.template, "visual_diff_loop");
+    assert.equal(existsSync(generic.artifacts.reference_artifact), true);
+    assert.equal(existsSync(generic.artifacts.candidate_screenshot), true);
+    assert.equal(existsSync(generic.artifacts.diff), true);
+    assert.equal(generic.visual_diff?.below_threshold, true);
+    const genericMissing = checkByName(generic, "visual_template_blocks_before_visual_evidence");
+    assert.deepEqual((genericMissing.dispatch as Record<string, unknown>).missing_evidence, [
+      "reference_artifact",
+      "candidate_screenshot",
+      "visual_diff_report",
+      "diff_below_threshold",
+      "adversarial_check",
+    ]);
+    const genericUnstructured = checkByName(generic, "unstructured_adversarial_check_still_blocks");
+    assert.equal((genericUnstructured.dispatch as Record<string, unknown>).reason, "missing_adversarial_check_evidence");
+    const genericAllowed = checkByName(generic, "structured_visual_evidence_retry_delivers");
+    assert.equal(genericAllowed.worker_inbox_count, 1);
+
+    const buildClear = runScenario("build-clear-loop").receipt;
+    assert.equal(buildClear.template, "build_then_clear");
+    assert.equal(existsSync(buildClear.artifacts.build_receipt), true);
+    assert.equal(existsSync(buildClear.artifacts.cleanup_receipt), true);
+    const buildOnly = checkByName(buildClear, "build_clear_still_blocks_before_cleanup_evidence");
+    assert.equal((buildOnly.dispatch as Record<string, unknown>).reason, "missing_cleanup_evidence");
+    assert.deepEqual((buildOnly.dispatch as Record<string, unknown>).missing_evidence, ["cleanup"]);
+    const buildAllowed = checkByName(buildClear, "build_clear_retry_delivers_after_build_and_cleanup_evidence");
+    assert.equal(buildAllowed.worker_inbox_count, 1);
+
+    const adversarial = runScenario("adversarial-triggers").receipt;
+    assert.equal(adversarial.negative_control?.matched, false);
+    assert.ok(adversarial.trigger_classifications?.some((trigger) => trigger.name === "loop-gate-trigger" && trigger.matched));
+    const finishTask = adversarial.generated_tasks?.find((task) => task.suffix === "adversarial-triggers-finish");
+    assert.ok(finishTask);
+    assert.equal(finishTask.binding_id, null);
+    assert.equal(finishTask.worker_id, null);
+    assert.equal(finishTask.worker_name, null);
+    assert.equal(finishTask.manager_id, null);
+    assert.equal(finishTask.manager_name, null);
+    const adversarialMissing = checkByName(adversarial, "iteration_gate_blocks_before_adversarial_proof");
+    assert.equal((adversarialMissing.dispatch as Record<string, unknown>).reason, "missing_adversarial_check_evidence");
+    const adversarialAllowed = checkByName(adversarial, "iteration_gate_allows_fresh_retry_after_structured_proof");
+    assert.equal(adversarialAllowed.worker_inbox_count, 1);
+    assert.ok(adversarialAllowed.worker_inbox);
+    assert.equal(checkByName(adversarial, "worker_directed_trigger_records_worker_proposed_proof").status, "passed");
+    assert.equal(checkByName(adversarial, "acceptance_criteria_trigger_records_negative_manager_criteria").manager_inferred_criteria_count, 3);
+
+    const dryRunDb = join(root, "qa-run-dry-run", "workerctl.db");
+    const dryRunReceipt = join(root, "qa-run-dry-run", "receipt.json");
+    const dryRun = runTypescriptRuntimeCommand({
+      args: [
+        "qa-run",
+        "test-coverage-loop",
+        "--receipt-output",
+        dryRunReceipt,
+        "--path",
+        dryRunDb,
+        "--dry-run",
+        "--json",
+      ],
+      env: {},
+    });
+    assert.equal(dryRun.exitCode, 2);
+    assert.match(dryRun.stderr ?? "", /Unsupported TypeScript runtime option for qa-run/);
+    assert.equal(existsSync(dryRunReceipt), false);
+    assert.equal(existsSync(dryRunDb), false);
+
+    const dirtyRoot = join(root, "dirty-queue");
+    mkdirSync(dirtyRoot, { recursive: true });
+    const dirtyDb = join(dirtyRoot, "workerctl.db");
+    const dirtyReceipt = join(dirtyRoot, "receipt.json");
+    const database = openDatabaseSync(dirtyDb);
+    try {
+      initializeDatabaseSync(database);
+      createTaskSync(database, {
+        goal: "Dirty queue should block qa-run setup.",
+        name: "dirty-queue-task",
+        taskId: "task-dirty-queue",
+      });
+      createCommandSync(database, {
+        commandId: "command-dirty-queue",
+        commandType: "continue_iteration",
+        correlationId: "dirty-queue",
+        payload: { message: "leftover continue" },
+        taskId: "task-dirty-queue",
+      });
+    } finally {
+      database.close();
+    }
+    const dirty = runTypescriptRuntimeCommand({
+      args: [
+        "qa-run",
+        "generic-loop-template",
+        "--receipt-output",
+        dirtyReceipt,
+        "--path",
+        dirtyDb,
+        "--json",
+      ],
+      env: {},
+    });
+    assert.equal(dirty.exitCode, 2);
+    assert.match(dirty.stderr ?? "", /continue_iteration dispatch queue is not clean/);
+    assert.equal(existsSync(dirtyReceipt), false);
+    const afterDirty = openDatabaseSync(dirtyDb);
+    try {
+      const row = afterDirty.prepare("select state from commands where id = ?").get("command-dirty-queue") as { state: string };
+      assert.equal(row.state, "pending");
+    } finally {
+      afterDirty.close();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("TypeScript runtime loop-status scopes commands inbox telemetry and failures to the requested run", () => {
   const root = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-loop-status."));
   try {

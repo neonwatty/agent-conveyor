@@ -35,8 +35,32 @@ async function main() {
 
   const { pathToFileURL } = await import("node:url");
   const { chromium } = await import("@playwright/test");
+  const launchAttempts = [
+    { backend: "playwright-chromium", options: { headless: true } },
+    { backend: "playwright-chrome-channel", options: { channel: "chrome", headless: true } },
+    {
+      backend: "playwright-chrome-app",
+      options: {
+        executablePath: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        headless: true,
+      },
+    },
+  ];
   let browser;
-  browser = await chromium.launch({ headless: true });
+  let backend;
+  let lastError;
+  for (const attempt of launchAttempts) {
+    try {
+      browser = await chromium.launch(attempt.options);
+      backend = attempt.backend;
+      break;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  if (!browser || !backend) {
+    throw lastError ?? new Error("No browser launch attempt was made.");
+  }
   try {
     const page = await browser.newPage({
       deviceScaleFactor: 1,
@@ -45,7 +69,7 @@ async function main() {
     await page.goto(pathToFileURL(htmlPath).href, { waitUntil: "load" });
     await page.screenshot({ path: outputPath, fullPage: false });
     console.log(JSON.stringify({
-      backend: "playwright-chromium",
+      backend,
       html_path: htmlPath,
       screenshot_path: outputPath,
       viewport: `${width}x${height}`,
