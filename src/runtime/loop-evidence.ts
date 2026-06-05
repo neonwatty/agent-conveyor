@@ -458,10 +458,18 @@ function ralphLoopRunForTaskSync(
 }
 
 function ralphLoopRunSync(database: DatabaseSync, runId: string): RalphLoopRunRecord {
-  const row = database.prepare(`
+  const exact = database.prepare(`
     select id, task_id, name, purpose, metadata_json
     from runs
     where id = ?
+    limit 1
+  `).get(runId) as { id: string; metadata_json: string; name: string; purpose: string | null; task_id: string } | undefined;
+  const row = exact ?? database.prepare(`
+    select id, task_id, name, purpose, metadata_json
+    from runs
+    where name = ?
+    order by started_at desc, id desc
+    limit 1
   `).get(runId) as { id: string; metadata_json: string; name: string; purpose: string | null; task_id: string } | undefined;
   if (!row) {
     throw new LoopEvidenceError(`Unknown run: ${runId}`);

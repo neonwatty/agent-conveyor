@@ -14,6 +14,7 @@ import {
 } from "../runtime/commands.js";
 import { executeDispatchCommandSync } from "../runtime/dispatch.js";
 import { recordLoopEvidenceSync } from "../runtime/loop-evidence.js";
+import { writePngRgba } from "../runtime/visual-diff.js";
 import {
   bindSessionsSync,
   createTaskSync,
@@ -30,6 +31,35 @@ import {
   transcriptPath,
   workerDir,
 } from "../state/files.js";
+
+function tildePath(path: string): string {
+  const home = homedir();
+  assert.ok(path.startsWith(`${home}/`), `path must be under home directory: ${path}`);
+  return `~/${path.slice(home.length + 1)}`;
+}
+
+function withTemporaryHome(callback: (home: string) => void): void {
+  const fakeHome = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-home."));
+  const originalHome = process.env.HOME;
+  const originalUserProfile = process.env.USERPROFILE;
+  process.env.HOME = fakeHome;
+  process.env.USERPROFILE = fakeHome;
+  try {
+    callback(fakeHome);
+  } finally {
+    if (originalHome === undefined) {
+      delete process.env.HOME;
+    } else {
+      process.env.HOME = originalHome;
+    }
+    if (originalUserProfile === undefined) {
+      delete process.env.USERPROFILE;
+    } else {
+      process.env.USERPROFILE = originalUserProfile;
+    }
+    rmSync(fakeHome, { recursive: true, force: true });
+  }
+}
 
 test("unmigrated TypeScript runtime command falls back when disabled", () => {
   assert.deepEqual(
@@ -114,6 +144,676 @@ test("TypeScript runtime handles task create list and active filtering by defaul
     });
     assert.equal(missingGoal.exitCode, 2);
     assert.match(missingGoal.stderr ?? "", /--goal is required with tasks --create/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("TypeScript runtime handles criteria add list and status transitions by default", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-criteria."));
+  try {
+    const dbPath = join(root, "workerctl.db");
+    const database = openDatabaseSync(dbPath);
+    try {
+      initializeDatabaseSync(database);
+      createTaskSync(database, {
+        goal: "Prove the criteria ledger.",
+        name: "criteria-task",
+        now: "2026-05-23T10:00:00Z",
+        taskId: "task-criteria",
+      });
+    } finally {
+      database.close();
+    }
+
+    const dryRunAdd = runTypescriptRuntimeCommand({
+      args: [
+        "criteria",
+        "criteria-task",
+        "--add",
+        "--criterion",
+        "Dry-run must not mutate.",
+        "--source",
+        "worker_proposed",
+        "--dry-run",
+        "--path",
+        dbPath,
+      ],
+      env: { AGENT_CONVEYOR_TS_RUNTIME: "1" },
+    });
+    assert.equal(dryRunAdd.exitCode, 2);
+    assert.match(dryRunAdd.stderr ?? "", /Unsupported TypeScript runtime option for criteria/);
+    const afterDryRun = openDatabaseSync(dbPath);
+    try {
+      const criteria = afterDryRun.prepare("select count(*) as count from acceptance_criteria where task_id = ?")
+        .get("task-criteria") as { count: number };
+      assert.equal(criteria.count, 0);
+    } finally {
+      afterDryRun.close();
+    }
+
+    const added = runTypescriptRuntimeCommand({
+      args: [
+        "criteria",
+        "criteria-task",
+        "--add",
+        "--criterion",
+        "CLI criteria mutations are durable.",
+        "--source",
+        "worker_proposed",
+        "--status",
+        "accepted",
+        "--proof",
+        "node:test exercised the CLI.",
+        "--evidence-json",
+        "{\"suite\":\"cli\"}",
+        "--path",
+        dbPath,
+      ],
+      env: {},
+    });
+    assert.equal(added.exitCode, 0);
+    assert.equal(added.handled, true);
+    const addedPayload = JSON.parse(added.stdout ?? "{}") as {
+      affected_criterion: { id: number; status: string };
+      summary: Record<string, number>;
+    };
+    assert.equal(addedPayload.affected_criterion.status, "accepted");
+    assert.equal(addedPayload.summary.accepted, 1);
+
+    const duplicate = runTypescriptRuntimeCommand({
+      args: [
+        "criteria",
+        "criteria-task",
+        "--add",
+        "--criterion",
+        "CLI criteria mutations are durable.",
+        "--source",
+        "worker_proposed",
+        "--status",
+        "rejected",
+        "--path",
+        dbPath,
+      ],
+      env: {},
+    });
+    const duplicatePayload = JSON.parse(duplicate.stdout ?? "{}") as {
+      affected_criterion: { id: number; status: string };
+    };
+    assert.equal(duplicatePayload.affected_criterion.id, addedPayload.affected_criterion.id);
+    assert.equal(duplicatePayload.affected_criterion.status, "accepted");
+
+    const rejected = runTypescriptRuntimeCommand({
+      args: [
+        "criteria",
+        "criteria-task",
+        "--reject",
+        String(addedPayload.affected_criterion.id),
+        "--proof",
+        "The first proof was incomplete.",
+        "--path",
+        dbPath,
+      ],
+      env: {},
+    });
+    assert.equal(rejected.exitCode, 0);
+
+    const reopened = runTypescriptRuntimeCommand({
+      args: [
+        "criteria",
+        "criteria-task",
+        "--accept",
+        String(addedPayload.affected_criterion.id),
+        "--rationale",
+        "Reopened after stronger proof.",
+        "--evidence-json",
+        "{\"review\":\"complete\"}",
+        "--path",
+        dbPath,
+      ],
+      env: {},
+    });
+    assert.equal(reopened.exitCode, 0);
+    const listed = runTypescriptRuntimeCommand({
+      args: ["criteria", "criteria-task", "--list", "--status", "accepted", "--path", dbPath],
+      env: {},
+    });
+    const listedPayload = JSON.parse(listed.stdout ?? "{}") as {
+      criteria: Array<{ evidence: Record<string, unknown>; rationale: string | null; status: string }>;
+      summary: Record<string, number>;
+    };
+    assert.equal(listedPayload.criteria.length, 1);
+    assert.deepEqual(listedPayload.criteria[0].evidence, { review: "complete" });
+    assert.equal(listedPayload.criteria[0].rationale, "Reopened after stronger proof.");
+    assert.equal(listedPayload.summary.accepted, 1);
+
+    const eventRows = openDatabaseSync(dbPath);
+    try {
+      const events = eventRows.prepare("select type from events where task_id = ? and type like 'acceptance_criterion_%' order by id")
+        .all("task-criteria") as Array<{ type: string }>;
+      assert.deepEqual(events.map((row) => row.type), [
+        "acceptance_criterion_added",
+        "acceptance_criterion_updated",
+        "acceptance_criterion_updated",
+      ]);
+    } finally {
+      eventRows.close();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("TypeScript runtime criteria-plan suggests add commands without mutating criteria", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-criteria-plan."));
+  try {
+    const dbPath = join(root, "workerctl.db");
+    const database = openDatabaseSync(dbPath);
+    try {
+      initializeDatabaseSync(database);
+      createTaskSync(database, {
+        goal: "Plan criteria.",
+        name: "plan-task",
+        now: "2026-05-23T10:00:00Z",
+        taskId: "task-plan",
+      });
+    } finally {
+      database.close();
+    }
+    const result = runTypescriptRuntimeCommand({
+      args: [
+        "criteria-plan",
+        "plan-task",
+        "--from-text",
+        "Must-have:\n- Unit tests pass\nFollow-up:\n- Browser QA",
+        "--json",
+        "--path",
+        dbPath,
+      ],
+      env: {},
+    });
+    assert.equal(result.exitCode, 0);
+    const payload = JSON.parse(result.stdout ?? "{}") as {
+      suggestions: Array<{ command: string[]; criterion: string; rationale: string | null; status: string }>;
+      warnings: string[];
+    };
+    assert.deepEqual(payload.warnings, []);
+    assert.equal(payload.suggestions[0].criterion, "Unit tests pass");
+    assert.equal(payload.suggestions[0].status, "accepted");
+    assert.deepEqual(payload.suggestions[0].command.slice(0, 6), [
+      "conveyor",
+      "criteria",
+      "plan-task",
+      "--add",
+      "--criterion",
+      "Unit tests pass",
+    ]);
+    assert.equal(payload.suggestions[1].status, "deferred");
+    assert.equal(payload.suggestions[1].rationale, "Follow-up after this QA slice.");
+
+    const after = openDatabaseSync(dbPath);
+    try {
+      const criteria = after.prepare("select count(*) as count from acceptance_criteria where task_id = ?")
+        .get("task-plan") as { count: number };
+      assert.equal(criteria.count, 0);
+    } finally {
+      after.close();
+    }
+
+    withTemporaryHome((homeRoot) => {
+      const homeDbPath = join(homeRoot, "workerctl.db");
+      const responsePath = join(homeRoot, "response.md");
+      const homeDatabase = openDatabaseSync(homeDbPath);
+      try {
+        initializeDatabaseSync(homeDatabase);
+        createTaskSync(homeDatabase, {
+          goal: "Plan criteria from a home-relative file.",
+          name: "home-plan-task",
+          now: "2026-05-23T10:00:00Z",
+          taskId: "task-home-plan",
+        });
+      } finally {
+        homeDatabase.close();
+      }
+      writeFileSync(responsePath, "Must-have:\n- Home response file is readable\n");
+      const fromFile = runTypescriptRuntimeCommand({
+        args: [
+          "criteria-plan",
+          "home-plan-task",
+          "--from-worker-response",
+          tildePath(responsePath),
+          "--json",
+          "--path",
+          tildePath(homeDbPath),
+        ],
+        env: {},
+      });
+      assert.equal(fromFile.exitCode, 0, fromFile.stderr);
+      const fromFilePayload = JSON.parse(fromFile.stdout ?? "{}") as {
+        suggestions: Array<{ command: string[]; criterion: string }>;
+      };
+      assert.equal(fromFilePayload.suggestions[0].criterion, "Home response file is readable");
+      assert.deepEqual(fromFilePayload.suggestions[0].command.slice(-2), ["--path", homeDbPath]);
+    });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("TypeScript runtime handles telemetry runs create list show and finish by default", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-runs."));
+  try {
+    const dbPath = join(root, "workerctl.db");
+    const database = openDatabaseSync(dbPath);
+    try {
+      initializeDatabaseSync(database);
+      createTaskSync(database, {
+        goal: "Run QA.",
+        name: "runs-task",
+        now: "2026-05-23T10:00:00Z",
+        taskId: "task-runs",
+      });
+    } finally {
+      database.close();
+    }
+    const dryRunCreate = runTypescriptRuntimeCommand({
+      args: ["runs", "--create", "runs-task", "--dry-run", "--path", dbPath],
+      env: { AGENT_CONVEYOR_TS_RUNTIME: "1" },
+    });
+    assert.equal(dryRunCreate.exitCode, 2);
+    assert.match(dryRunCreate.stderr ?? "", /Unsupported TypeScript runtime option for runs/);
+    const afterDryRun = openDatabaseSync(dbPath);
+    try {
+      const runs = afterDryRun.prepare("select count(*) as count from runs where task_id = ?")
+        .get("task-runs") as { count: number };
+      assert.equal(runs.count, 0);
+    } finally {
+      afterDryRun.close();
+    }
+
+    const created = runTypescriptRuntimeCommand({
+      args: [
+        "runs",
+        "--create",
+        "runs-task",
+        "--name",
+        "qa-smoke",
+        "--purpose",
+        "qa",
+        "--metadata-json",
+        "{\"suite\":\"smoke\"}",
+        "--path",
+        dbPath,
+      ],
+      env: {},
+    });
+    assert.equal(created.exitCode, 0);
+    const createdPayload = JSON.parse(created.stdout ?? "{}") as {
+      id: string;
+      metadata: Record<string, unknown>;
+      name: string;
+      status: string;
+    };
+    assert.equal(createdPayload.name, "qa-smoke");
+    assert.equal(createdPayload.status, "active");
+    assert.deepEqual(createdPayload.metadata, { suite: "smoke" });
+
+    const listed = runTypescriptRuntimeCommand({
+      args: ["runs", "--list", "--task", "runs-task", "--status", "active", "--path", dbPath],
+      env: {},
+    });
+    const listPayload = JSON.parse(listed.stdout ?? "[]") as Array<{ id: string }>;
+    assert.deepEqual(listPayload.map((run) => run.id), [createdPayload.id]);
+
+    const shown = runTypescriptRuntimeCommand({
+      args: ["runs", "--show", "qa-smoke", "--path", dbPath],
+      env: {},
+    });
+    assert.equal((JSON.parse(shown.stdout ?? "{}") as { id: string }).id, createdPayload.id);
+
+    const policyRun = runTypescriptRuntimeCommand({
+      args: [
+        "runs",
+        "--create",
+        "runs-task",
+        "--purpose",
+        "ralph_loop",
+        "--metadata-json",
+        "{\"kind\":\"ralph_loop\",\"max_iterations\":2,\"current_iteration\":1,\"required_before_continue\":[\"ci_green\"],\"stop_conditions\":[\"max_iterations\"]}",
+        "--path",
+        dbPath,
+      ],
+      env: {},
+    });
+    assert.equal(policyRun.exitCode, 0, policyRun.stderr);
+    const policyPayload = JSON.parse(policyRun.stdout ?? "{}") as {
+      metadata: Record<string, unknown>;
+      name: string;
+      purpose: string;
+      status: string;
+    };
+    assert.equal(policyPayload.purpose, "ralph_loop");
+    assert.equal(policyPayload.status, "finished");
+    assert.match(policyPayload.name, /^runs-task-ralph-loop-/);
+    assert.equal(policyPayload.metadata.cleanup_policy, null);
+    assert.equal(policyPayload.metadata.current_iteration, 1);
+    assert.deepEqual(policyPayload.metadata.required_before_continue, ["ci_green"]);
+
+    const finished = runTypescriptRuntimeCommand({
+      args: ["runs", "--finish", "qa-smoke", "--status", "failed", "--path", dbPath],
+      env: {},
+    });
+    const finishedPayload = JSON.parse(finished.stdout ?? "{}") as { ended_at: string | null; status: string };
+    assert.equal(finishedPayload.status, "failed");
+    assert.ok(finishedPayload.ended_at);
+
+    const after = openDatabaseSync(dbPath);
+    try {
+      const telemetry = after.prepare("select event_type, severity from telemetry_events where run_id = ?")
+        .get(createdPayload.id) as { event_type: string; severity: string };
+      assert.equal(telemetry.event_type, "run_finished");
+      assert.equal(telemetry.severity, "error");
+    } finally {
+      after.close();
+    }
+
+    const badListStatus = runTypescriptRuntimeCommand({
+      args: ["runs", "--list", "--status", "finihsed", "--path", dbPath],
+      env: {},
+    });
+    assert.equal(badListStatus.exitCode, 2);
+    assert.match(badListStatus.stderr ?? "", /invalid run status: finihsed/);
+
+    const badMaxIterations = runTypescriptRuntimeCommand({
+      args: [
+        "runs",
+        "--create",
+        "runs-task",
+        "--purpose",
+        "ralph_loop",
+        "--metadata-json",
+        "{\"max_iterations\":0}",
+        "--path",
+        dbPath,
+      ],
+      env: {},
+    });
+    assert.equal(badMaxIterations.exitCode, 2);
+    assert.match(badMaxIterations.stderr ?? "", /max_iterations must be at least 1/);
+
+    const badRequiredEvidence = runTypescriptRuntimeCommand({
+      args: [
+        "runs",
+        "--create",
+        "runs-task",
+        "--purpose",
+        "ralph_loop",
+        "--metadata-json",
+        "{\"max_iterations\":1,\"required_before_continue\":[123]}",
+        "--path",
+        dbPath,
+      ],
+      env: {},
+    });
+    assert.equal(badRequiredEvidence.exitCode, 2);
+    assert.match(badRequiredEvidence.stderr ?? "", /required_before_continue entries must be non-empty strings/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("TypeScript runtime handles loop evidence add adversarial and visual diff by default", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-loop-evidence."));
+  try {
+    const dbPath = join(root, "workerctl.db");
+    const database = openDatabaseSync(dbPath);
+    try {
+      initializeDatabaseSync(database);
+      createTaskSync(database, {
+        goal: "Record loop evidence.",
+        name: "loop-task",
+        now: "2026-05-23T10:00:00Z",
+        taskId: "task-loop-cli",
+      });
+      insertRalphLoopRun(database, {
+        currentIteration: 1,
+        maxIterations: 3,
+        requiredBeforeContinue: ["ci_green", "adversarial_check", "visual_diff_report", "diff_below_threshold"],
+        runId: "run-loop-cli",
+        taskId: "task-loop-cli",
+      });
+      createTaskSync(database, {
+        goal: "Host a colliding run name.",
+        name: "loop-shadow-task",
+        now: "2026-05-23T10:00:00Z",
+        taskId: "task-loop-shadow",
+      });
+      insertRalphLoopRun(database, {
+        currentIteration: 1,
+        maxIterations: 3,
+        requiredBeforeContinue: [],
+        runId: "run-loop-shadow",
+        runName: "run-loop-cli",
+        startedAt: "2026-05-23T10:01:45Z",
+        taskId: "task-loop-shadow",
+      });
+    } finally {
+      database.close();
+    }
+
+    const dryRunEvidence = runTypescriptRuntimeCommand({
+      args: [
+        "loop-evidence",
+        "add",
+        "loop-task",
+        "--loop-run",
+        "run-loop-cli",
+        "--iteration",
+        "1",
+        "--evidence-type",
+        "dry_run_rejected",
+        "--dry-run",
+        "--path",
+        dbPath,
+      ],
+      env: { AGENT_CONVEYOR_TS_RUNTIME: "1" },
+    });
+    assert.equal(dryRunEvidence.exitCode, 2);
+    assert.match(dryRunEvidence.stderr ?? "", /Unsupported TypeScript runtime option for loop-evidence/);
+    const afterDryRun = openDatabaseSync(dbPath);
+    try {
+      const criteria = afterDryRun.prepare("select count(*) as count from acceptance_criteria where task_id = ?")
+        .get("task-loop-cli") as { count: number };
+      assert.equal(criteria.count, 0);
+    } finally {
+      afterDryRun.close();
+    }
+
+    const generic = runTypescriptRuntimeCommand({
+      args: [
+        "loop-evidence",
+        "add",
+        "loop-task",
+        "--loop-run",
+        "task-loop-cli-ralph-loop",
+        "--iteration",
+        "1",
+        "--evidence-type",
+        "ci_green",
+        "--metadata-json",
+        "{\"suite\":\"unit\"}",
+        "--proof",
+        "CI is green.",
+        "--artifact-path",
+        "/tmp/ci.json",
+        "--correlation-id",
+        "corr-ci",
+        "--path",
+        dbPath,
+      ],
+      env: {},
+    });
+    assert.equal(generic.exitCode, 0);
+    const genericPayload = JSON.parse(generic.stdout ?? "{}") as {
+      criterion: { status: string };
+      evidence: Record<string, unknown>;
+    };
+    assert.equal(genericPayload.criterion.status, "satisfied");
+    assert.equal(genericPayload.evidence.artifact_path, "/tmp/ci.json");
+    assert.equal(genericPayload.evidence.correlation_id, "corr-ci");
+
+    const exactIdOverShadowName = runTypescriptRuntimeCommand({
+      args: [
+        "loop-evidence",
+        "add",
+        "loop-task",
+        "--loop-run",
+        "run-loop-cli",
+        "--iteration",
+        "1",
+        "--evidence-type",
+        "exact_id_wins",
+        "--path",
+        dbPath,
+      ],
+      env: {},
+    });
+    assert.equal(exactIdOverShadowName.exitCode, 0);
+    const exactIdPayload = JSON.parse(exactIdOverShadowName.stdout ?? "{}") as {
+      run: { id: string; task_id: string };
+    };
+    assert.equal(exactIdPayload.run.id, "run-loop-cli");
+    assert.equal(exactIdPayload.run.task_id, "task-loop-cli");
+
+    const weak = runTypescriptRuntimeCommand({
+      args: [
+        "loop-evidence",
+        "adversarial-check",
+        "loop-task",
+        "--loop-run",
+        "run-loop-cli",
+        "--iteration",
+        "1",
+        "--check",
+        "No failure mode.",
+        "--result",
+        "Rejected.",
+        "--path",
+        dbPath,
+      ],
+      env: {},
+    });
+    assert.equal(weak.exitCode, 2);
+    assert.match(weak.stderr ?? "", /--failure-mode must be non-empty/);
+
+    const adversarial = runTypescriptRuntimeCommand({
+      args: [
+        "loop-evidence",
+        "adversarial-check",
+        "loop-task",
+        "--loop-run",
+        "run-loop-cli",
+        "--iteration",
+        "1",
+        "--failure-mode",
+        "Generic text could fake proof.",
+        "--check",
+        "Inspect structured receipt fields.",
+        "--result",
+        "Receipt has failure_mode, check, and result.",
+        "--path",
+        dbPath,
+      ],
+      env: {},
+    });
+    assert.equal(adversarial.exitCode, 0);
+
+    withTemporaryHome((homeRoot) => {
+      const reference = join(homeRoot, "reference.png");
+      const candidate = join(homeRoot, "candidate.png");
+      const diff = join(homeRoot, "diff.png");
+      const report = join(homeRoot, "report.json");
+      writePngRgba(reference, 2, 1, [[255, 0, 0, 255], [0, 255, 0, 255]]);
+      writePngRgba(candidate, 2, 1, [[255, 0, 0, 255], [0, 0, 255, 255]]);
+      const visual = runTypescriptRuntimeCommand({
+        args: [
+          "loop-evidence",
+          "visual-diff",
+          "loop-task",
+          "--loop-run",
+          "run-loop-cli",
+          "--iteration",
+          "1",
+          "--reference",
+          tildePath(reference),
+          "--candidate",
+          tildePath(candidate),
+          "--threshold",
+          "0.6",
+          "--diff-output",
+          tildePath(diff),
+          "--report-output",
+          tildePath(report),
+          "--path",
+          dbPath,
+        ],
+        env: {},
+      });
+      assert.equal(visual.exitCode, 0);
+      const visualPayload = JSON.parse(visual.stdout ?? "{}") as {
+        diff: { below_threshold: boolean; diff_score: number; reference: string; candidate: string };
+        threshold_criterion: { status: string };
+      };
+      assert.equal(visualPayload.diff.reference, reference);
+      assert.equal(visualPayload.diff.candidate, candidate);
+      assert.equal(visualPayload.diff.diff_score, 0.5);
+      assert.equal(visualPayload.diff.below_threshold, true);
+      assert.equal(visualPayload.threshold_criterion.status, "satisfied");
+      assert.equal(existsSync(diff), true);
+      assert.equal(existsSync(report), true);
+
+      const visualWithIgnoredStatus = runTypescriptRuntimeCommand({
+        args: [
+          "loop-evidence",
+          "visual-diff",
+          "loop-task",
+          "--loop-run",
+          "run-loop-cli",
+          "--iteration",
+          "1",
+          "--reference",
+          tildePath(reference),
+          "--candidate",
+          tildePath(candidate),
+          "--threshold",
+          "0.6",
+          "--status",
+          "fail",
+          "--path",
+          dbPath,
+        ],
+        env: {},
+      });
+      assert.equal(visualWithIgnoredStatus.exitCode, 2);
+      assert.match(visualWithIgnoredStatus.stderr ?? "", /visual-diff does not support --status/);
+    });
+
+    const after = openDatabaseSync(dbPath);
+    try {
+      const criteria = after.prepare(`
+        select status, evidence_json
+        from acceptance_criteria
+        where task_id = ?
+        order by id
+      `).all("task-loop-cli") as Array<{ evidence_json: string; status: string }>;
+      assert.deepEqual(
+        criteria.map((criterion) => JSON.parse(criterion.evidence_json).evidence_type),
+        ["ci_green", "exact_id_wins", "adversarial_check", "visual_diff_report", "diff_below_threshold"],
+      );
+      assert.deepEqual(criteria.map((criterion) => criterion.status), ["satisfied", "satisfied", "satisfied", "satisfied", "satisfied"]);
+    } finally {
+      after.close();
+    }
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -4893,6 +5593,8 @@ function insertRalphLoopRun(
     maxIterations: number;
     requiredBeforeContinue: string[];
     runId: string;
+    runName?: string;
+    startedAt?: string;
     taskId: string;
   },
 ): void {
@@ -4902,9 +5604,9 @@ function insertRalphLoopRun(
   `).run(
     options.runId,
     options.taskId,
-    `${options.taskId}-ralph-loop`,
-    "2026-05-23T10:00:45Z",
-    "2026-05-23T10:00:45Z",
+    options.runName ?? `${options.taskId}-ralph-loop`,
+    options.startedAt ?? "2026-05-23T10:00:45Z",
+    options.startedAt ?? "2026-05-23T10:00:45Z",
     JSON.stringify({
       cleanup_policy: "clear",
       current_iteration: options.currentIteration,
