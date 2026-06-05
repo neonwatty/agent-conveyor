@@ -6531,6 +6531,440 @@ test("TypeScript runtime reconcile dry-run apply and doctor-self preserve mutati
   });
 });
 
+test("TypeScript runtime handles remaining dashboard and skill install CLI contracts by default", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-remaining-surface."));
+  try {
+    const dbPath = join(root, "workerctl.db");
+    const dashboard = runTypescriptRuntimeCommand({
+      args: [
+        "dashboard",
+        "--dry-run",
+        "--json",
+        "--task",
+        "demo task",
+        "--host",
+        "127.0.0.2",
+        "--port",
+        "8899",
+        "--workerctl-path",
+        "scripts/workerctl",
+        "--db-path",
+        dbPath,
+        "--ensure-dispatch",
+        "--dispatcher-id",
+        "dispatch-test",
+      ],
+      env: {},
+    });
+    assert.equal(dashboard.exitCode, 0, dashboard.stderr);
+    assert.equal(dashboard.handled, true);
+    const payload = JSON.parse(dashboard.stdout ?? "{}") as {
+      command: string[];
+      dispatch_command: string[];
+      ensure_dispatch: boolean;
+      task: string;
+      url: string;
+    };
+    assert.deepEqual(payload.command, [
+      "npm",
+      "run",
+      "dashboard",
+      "--",
+      "--host",
+      "127.0.0.2",
+      "--port",
+      "8899",
+      "--workerctl-path",
+      "scripts/workerctl",
+      "--task",
+      "demo task",
+      "--db-path",
+      dbPath,
+    ]);
+    assert.deepEqual(payload.dispatch_command, [
+      "scripts/workerctl",
+      "dispatch",
+      "--watch",
+      "--dispatcher-id",
+      "dispatch-test",
+      "--path",
+      dbPath,
+    ]);
+    assert.equal(payload.ensure_dispatch, true);
+    assert.equal(payload.task, "demo task");
+    assert.equal(payload.url, "http://127.0.0.2:8899/?task=demo%20task");
+
+    const codexHome = join(root, "codex-home");
+    const install = runTypescriptRuntimeCommand({
+      args: ["install-skills", "--codex-home", codexHome, "--json"],
+      env: {},
+    });
+    assert.equal(install.exitCode, 0, install.stderr);
+    const installPayload = JSON.parse(install.stdout ?? "{}") as {
+      installed: string[];
+      skills: Array<{ name: string; target: string }>;
+    };
+    assert.deepEqual(installPayload.installed.sort(), ["codex-review", "manage-codex-workers"]);
+    assert.ok(existsSync(join(codexHome, "skills", "manage-codex-workers", "SKILL.md")));
+    assert.ok(existsSync(join(codexHome, "skills", "codex-review", "scripts", "codex-review")));
+    assert.deepEqual(
+      installPayload.skills.map((skill) => skill.name).sort(),
+      ["codex-review", "manage-codex-workers"],
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("TypeScript runtime handles ack inbox and session action CLI contracts by default", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-remaining-dispatch."));
+  try {
+    const dbPath = join(root, "workerctl.db");
+    const database = openDatabaseSync(dbPath);
+    try {
+      initializeDatabaseSync(database);
+      createTaskSync(database, {
+        goal: "Exercise remaining CLI contracts.",
+        name: "remaining-task",
+        now: "2026-05-23T10:00:00Z",
+        taskId: "task-remaining",
+      });
+      insertSession(database, { id: "session-worker-remaining", name: "worker-remaining", role: "worker", tmuxPaneId: "%7", tmuxSession: "tmux-worker-remaining" });
+      insertSession(database, { id: "session-manager-remaining", name: "manager-remaining", role: "manager", tmuxPaneId: "%8", tmuxSession: "tmux-manager-remaining" });
+      bindSessionsSync(database, {
+        bindingId: "binding-remaining",
+        managerSessionName: "manager-remaining",
+        now: "2026-05-23T10:00:30Z",
+        taskName: "remaining-task",
+        workerSessionName: "worker-remaining",
+      });
+      database.prepare(`
+        insert into routed_notifications(
+          task_id, binding_id, correlation_id, source_session_id, target_session_id,
+          signal_type, source_event_id, source_event_timestamp, dedupe_key, command_id,
+          created_at, delivered_at, delivery_mode, state, payload_json,
+          side_effect_started, side_effect_completed
+        )
+        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        "task-remaining",
+        "binding-remaining",
+        "corr-remaining",
+        "session-manager-remaining",
+        "session-worker-remaining",
+        "nudge_worker",
+        null,
+        null,
+        "dedupe-remaining",
+        null,
+        "2026-05-23T10:02:00Z",
+        "2026-05-23T10:02:01Z",
+        "pull_required",
+        "delivered",
+        JSON.stringify({ message: "keep going" }),
+        0,
+        0,
+      );
+    } finally {
+      database.close();
+    }
+
+    const workerAck = runTypescriptRuntimeCommand({
+      args: ["worker-ack", "remaining-task", "--from-stdin", "--correlation-id", "ack-worker", "--path", dbPath],
+      env: {},
+      stdin: "{\"ready_to_start\":true,\"goal_restatement\":\"finish\"}",
+    });
+    assert.equal(workerAck.exitCode, 0, workerAck.stderr);
+    const workerAckPayload = JSON.parse(workerAck.stdout ?? "{}") as {
+      binding_id: string;
+      correlation_id: string;
+      payload: Record<string, unknown>;
+      revision: number;
+      role: string;
+    };
+    assert.equal(workerAckPayload.binding_id, "binding-remaining");
+    assert.equal(workerAckPayload.correlation_id, "ack-worker");
+    assert.deepEqual(workerAckPayload.payload, { goal_restatement: "finish", ready_to_start: true });
+    assert.equal(workerAckPayload.revision, 1);
+    assert.equal(workerAckPayload.role, "worker");
+
+    const managerAck = runTypescriptRuntimeCommand({
+      args: ["manager-ack", "remaining-task", "--from-stdin", "--json", "--correlation-id", "ack-manager", "--path", dbPath],
+      env: {},
+      stdin: "{\"supervision\":\"accepted\"}",
+    });
+    assert.equal(managerAck.exitCode, 0, managerAck.stderr);
+    const managerAckPayload = JSON.parse(managerAck.stdout ?? "{}") as { payload: Record<string, unknown>; role: string };
+    assert.deepEqual(managerAckPayload.payload, { supervision: "accepted" });
+    assert.equal(managerAckPayload.role, "manager");
+
+    const managerRead = runTypescriptRuntimeCommand({
+      args: ["manager-ack", "remaining-task", "--json", "--path", dbPath],
+      env: {},
+    });
+    assert.deepEqual(JSON.parse(managerRead.stdout ?? "{}").payload, { supervision: "accepted" });
+
+    const inbox = runTypescriptRuntimeCommand({
+      args: ["worker-inbox", "remaining-task", "--consume-next", "--wait", "--timeout", "0", "--interval", "1", "--json", "--path", dbPath],
+      env: {},
+    });
+    assert.equal(inbox.exitCode, 0, inbox.stderr);
+    const inboxPayload = JSON.parse(inbox.stdout ?? "{}") as {
+      consumed: { correlation_id: string; consumed_at: string | null; target_session_name: string };
+      items: unknown[];
+      session: { name: string; role: string };
+      task: { name: string };
+    };
+    assert.equal(inboxPayload.consumed.correlation_id, "corr-remaining");
+    assert.ok(inboxPayload.consumed.consumed_at);
+    assert.equal(inboxPayload.consumed.target_session_name, "worker-remaining");
+    assert.deepEqual(inboxPayload.items, []);
+    assert.equal(inboxPayload.session.name, "worker-remaining");
+    assert.equal(inboxPayload.session.role, "worker");
+    assert.equal(inboxPayload.task.name, "remaining-task");
+
+    const dryNudge = runTypescriptRuntimeCommand({
+      args: ["session-nudge", "worker-remaining", "status?", "--dry-run", "--path", dbPath],
+      env: {},
+    });
+    assert.equal(dryNudge.exitCode, 0, dryNudge.stderr);
+    const nudgePayload = JSON.parse(dryNudge.stdout ?? "{}") as {
+      dry_run: boolean;
+      session: string;
+      side_effect_completed: boolean;
+      side_effect_started: boolean;
+      target: string;
+      text: string;
+      time: string;
+    };
+    assert.equal(nudgePayload.dry_run, true);
+    assert.equal(nudgePayload.session, "worker-remaining");
+    assert.equal(nudgePayload.side_effect_completed, false);
+    assert.equal(nudgePayload.side_effect_started, false);
+    assert.equal(nudgePayload.target, "tmux-worker-remaining:%7");
+    assert.equal(nudgePayload.text, "status?");
+    assert.match(nudgePayload.time, /^\d{4}-\d{2}-\d{2}T/);
+
+    const dryInterrupt = runTypescriptRuntimeCommand({
+      args: ["session-interrupt", "manager-remaining", "--dry-run", "--key", "C-g", "--followup", "pause", "--path", dbPath],
+      env: {},
+    });
+    assert.equal(dryInterrupt.exitCode, 0, dryInterrupt.stderr);
+    const interruptPayload = JSON.parse(dryInterrupt.stdout ?? "{}") as {
+      dry_run: boolean;
+      followup: string;
+      key: string;
+      session: string;
+      target: string;
+    };
+    assert.equal(interruptPayload.dry_run, true);
+    assert.equal(interruptPayload.followup, "pause");
+    assert.equal(interruptPayload.key, "C-g");
+    assert.equal(interruptPayload.session, "manager-remaining");
+    assert.equal(interruptPayload.target, "tmux-manager-remaining:%8");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("TypeScript runtime handles legacy list nudge and interrupt contracts by default", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-legacy-misc."));
+  try {
+    const env = { WORKERCTL_STATE_ROOT: root };
+    mkdirSync(workerDir("legacy-worker", { env }), { recursive: true });
+    writeFileSync(configPath("legacy-worker", { env }), JSON.stringify({
+      cwd: "/repo",
+      name: "legacy-worker",
+      tmux_session: "codex-legacy-worker",
+    }));
+    writeFileSync(statusPath("legacy-worker", { env }), JSON.stringify({
+      current_task: "Port commands.",
+      last_update: "2026-05-23T10:00:00Z",
+      next_action: "test",
+      state: "editing",
+    }));
+    const calls: string[][] = [];
+    const runner: TmuxRunner = (args) => {
+      calls.push(args);
+      if (args.join(" ") === "tmux has-session -t codex-legacy-worker") {
+        return { status: 0, stdout: "" };
+      }
+      return { status: 0, stdout: "" };
+    };
+    const listed = runTypescriptRuntimeCommand({
+      args: ["list", "--json"],
+      env,
+      tmuxRunner: runner,
+    });
+    assert.equal(listed.exitCode, 0, listed.stderr);
+    assert.deepEqual(JSON.parse(listed.stdout ?? "[]"), [{
+      current_task: "Port commands.",
+      name: "legacy-worker",
+      running: true,
+      state: "editing",
+      status: "running",
+    }]);
+
+    const nudged = runTypescriptRuntimeCommand({
+      args: ["nudge", "legacy-worker", "please report"],
+      env,
+      tmuxRunner: runner,
+    });
+    assert.equal(nudged.exitCode, 0, nudged.stderr);
+    assert.equal(nudged.stdout, "sent nudge to legacy-worker\n");
+    assert.ok(calls.some((args) => args.join(" ") === "tmux set-buffer -b workerctl-legacy-worker please report"));
+    assert.ok(calls.some((args) => args.join(" ") === "tmux paste-buffer -b workerctl-legacy-worker -t codex-legacy-worker"));
+
+    const interrupted = runTypescriptRuntimeCommand({
+      args: ["interrupt", "legacy-worker", "--dry-run", "--key", "C-g", "--followup", "pause now"],
+      env,
+      tmuxRunner: runner,
+    });
+    assert.equal(interrupted.exitCode, 0, interrupted.stderr);
+    const interruptPayload = JSON.parse(interrupted.stdout ?? "{}") as {
+      dry_run: boolean;
+      followup: string;
+      key: string;
+      name: string;
+    };
+    assert.equal(interruptPayload.dry_run, true);
+    assert.equal(interruptPayload.followup, "pause now");
+    assert.equal(interruptPayload.key, "C-g");
+    assert.equal(interruptPayload.name, "legacy-worker");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("TypeScript runtime handles cycle observation and manager cycle persistence by default", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-cycle."));
+  const rolloutPath = "/tmp/session-worker-cycle-ts.jsonl";
+  try {
+    writeFileSync(rolloutPath, `${JSON.stringify({
+      payload: { type: "task_started" },
+      timestamp: "2026-05-23T10:01:00Z",
+      type: "event_msg",
+    })}\n`);
+    const dbPath = join(root, "workerctl.db");
+    const database = openDatabaseSync(dbPath);
+    try {
+      initializeDatabaseSync(database);
+      createTaskSync(database, {
+        goal: "Observe a cycle.",
+        name: "cycle-task",
+        now: "2026-05-23T10:00:00Z",
+        taskId: "task-cycle",
+      });
+      insertSession(database, { id: "session-worker-cycle-ts", name: "worker-cycle", pid: process.pid, role: "worker", tmuxPaneId: "%7", tmuxSession: "tmux-worker-cycle" });
+      insertSession(database, { id: "session-manager-cycle-ts", name: "manager-cycle", pid: process.pid, role: "manager", tmuxPaneId: "%8", tmuxSession: "tmux-manager-cycle" });
+      bindSessionsSync(database, {
+        bindingId: "binding-cycle",
+        managerSessionName: "manager-cycle",
+        now: "2026-05-23T10:00:30Z",
+        taskName: "cycle-task",
+        workerSessionName: "worker-cycle",
+      });
+      database.prepare(`
+        insert into routed_notifications(
+          task_id, binding_id, correlation_id, source_session_id, target_session_id,
+          signal_type, source_event_id, source_event_timestamp, dedupe_key, command_id,
+          created_at, delivered_at, delivery_mode, state, payload_json,
+          side_effect_started, side_effect_completed
+        )
+        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        "task-cycle",
+        "binding-cycle",
+        "corr-cycle",
+        "session-worker-cycle-ts",
+        "session-manager-cycle-ts",
+        "worker_task_complete",
+        null,
+        null,
+        "dedupe-cycle",
+        null,
+        "2026-05-23T10:02:00Z",
+        "2026-05-23T10:02:01Z",
+        "pull_required",
+        "delivered",
+        JSON.stringify({ message: "review completion" }),
+        0,
+        0,
+      );
+    } finally {
+      database.close();
+    }
+    const tmuxCalls: string[][] = [];
+    const runner: TmuxRunner = (args) => {
+      tmuxCalls.push(args);
+      if (args.join(" ") === "tmux has-session -t tmux-worker-cycle") {
+        return { status: 0, stdout: "" };
+      }
+      if (args[0] === "tmux" && args[1] === "capture-pane") {
+        return { status: 0, stdout: "working on cycle\n" };
+      }
+      return { status: 0, stdout: "" };
+    };
+    const result = runTypescriptRuntimeCommand({
+      args: ["cycle", "cycle-task", "--busy-wait-seconds", "45", "--path", dbPath],
+      env: {},
+      now: () => new Date("2026-05-23T10:05:00Z"),
+      tmuxRunner: runner,
+    });
+    assert.equal(result.exitCode, 0, result.stderr);
+    const payload = JSON.parse(result.stdout ?? "{}") as {
+      binding_id: string;
+      consumed_dispatch_notifications: number;
+      cycle_id: number;
+      ingest: { new_events: number };
+      kind: string;
+      manager_alive: boolean;
+      manager_context: { acceptance_criteria: { summary: Record<string, number> } };
+      pane_signal: { captured: boolean; degraded: boolean };
+      state: string;
+      worker_alive: boolean;
+    };
+    assert.equal(payload.kind, "session_cycle");
+    assert.equal(payload.binding_id, "binding-cycle");
+    assert.equal(payload.ingest.new_events, 1);
+    assert.equal(payload.state, "busy");
+    assert.equal(payload.pane_signal.captured, true);
+    assert.equal(payload.pane_signal.degraded, false);
+    assert.equal(payload.worker_alive, true);
+    assert.equal(payload.manager_alive, true);
+    assert.equal(payload.consumed_dispatch_notifications, 1);
+    assert.equal(payload.manager_context.acceptance_criteria.summary.accepted, 0);
+    assert.ok(tmuxCalls.some((args) => args.join(" ") === "tmux capture-pane -p -S -200 -t tmux-worker-cycle:%7"));
+
+    const proofDb = openDatabaseSync(dbPath);
+    try {
+      const cycle = proofDb.prepare("select state, status_json from manager_cycles where id = ?")
+        .get(payload.cycle_id) as { state: string; status_json: string };
+      assert.equal(cycle.state, "succeeded");
+      assert.equal(JSON.parse(cycle.status_json).kind, "session_cycle");
+      const routed = proofDb.prepare("select consumed_manager_cycle_id from routed_notifications where dedupe_key = ?")
+        .get("dedupe-cycle") as { consumed_manager_cycle_id: number };
+      assert.equal(routed.consumed_manager_cycle_id, payload.cycle_id);
+      const spans = proofDb.prepare("select phase, state from manager_cycle_spans where manager_cycle_id = ? order by id")
+        .all(payload.cycle_id) as Array<{ phase: string; state: string }>;
+      assert.deepEqual(spans.map((span) => span.phase), [
+        "start_cycle",
+        "ingest_rollout",
+        "infer_worker_state",
+        "capture_pane_signal",
+        "load_manager_context",
+        "persist_cycle_row",
+      ]);
+      assert.ok(spans.every((span) => span.state === "succeeded"));
+    } finally {
+      proofDb.close();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(rolloutPath, { force: true });
+  }
+});
+
 test("TypeScript runtime handles enqueue commands list and dispatch pull-required queue by default", () => {
   const root = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-dispatch-cli."));
   try {
