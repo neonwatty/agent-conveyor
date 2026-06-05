@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
-import { accessSync, constants, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { accessSync, chmodSync, constants, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -116,6 +116,7 @@ const DEFAULT_HISTORY_LINES = 200;
 const DEFAULT_WAIT_READY_SECONDS = 30;
 const DEFAULT_STATUS_STALE_SECONDS = 300;
 const DEFAULT_TERMINAL_STALE_SECONDS = 300;
+const DEFAULT_INTERRUPT_FOLLOWUP = "Please pause and update status.json with what was interrupted, whether you are blocked, and the next safe action.";
 const START_PASSTHROUGH_FLAGS_WITH_VALUES = new Set([
   "--add-dir",
   "--ask-for-approval",
@@ -257,6 +258,12 @@ export function runTypescriptRuntimeCommand(options: TypescriptRuntimeOptions): 
     if (parsed.command === "start-test") {
       return runLegacyStartTestCommand(parsed, options);
     }
+    if (parsed.command === "dashboard") {
+      return runDashboardCommand(parsed, options);
+    }
+    if (parsed.command === "install-skills") {
+      return runInstallSkillsCommand(parsed, options);
+    }
     if (parsed.command === "bind") {
       return runBindCommand(parsed, options);
     }
@@ -311,6 +318,9 @@ export function runTypescriptRuntimeCommand(options: TypescriptRuntimeOptions): 
     if (parsed.command === "classify") {
       return runClassifyCommand(parsed);
     }
+    if (parsed.command === "list") {
+      return runLegacyListCommand(parsed, options);
+    }
     if (parsed.command === "ingest") {
       return runIngestCommand(parsed, options);
     }
@@ -322,6 +332,36 @@ export function runTypescriptRuntimeCommand(options: TypescriptRuntimeOptions): 
     }
     if (parsed.command === "update-status") {
       return runUpdateStatusCommand(parsed, options);
+    }
+    if (parsed.command === "interrupt") {
+      return runLegacyInterruptCommand(parsed, options);
+    }
+    if (parsed.command === "nudge") {
+      return runLegacyNudgeCommand(parsed, options);
+    }
+    if (parsed.command === "worker-ack") {
+      return runTaskAckCommand(parsed, options, "worker");
+    }
+    if (parsed.command === "manager-ack") {
+      return runTaskAckCommand(parsed, options, "manager");
+    }
+    if (parsed.command === "session-inbox") {
+      return runSessionInboxCommand(parsed, options, "session");
+    }
+    if (parsed.command === "manager-inbox") {
+      return runSessionInboxCommand(parsed, options, "manager");
+    }
+    if (parsed.command === "worker-inbox") {
+      return runSessionInboxCommand(parsed, options, "worker");
+    }
+    if (parsed.command === "session-nudge") {
+      return runSessionNudgeCommand(parsed, options);
+    }
+    if (parsed.command === "session-interrupt") {
+      return runSessionInterruptCommand(parsed, options);
+    }
+    if (parsed.command === "cycle") {
+      return runCycleCommand(parsed, options);
     }
     if (parsed.command === "transcript-show") {
       return runTranscriptShowCommand(parsed, options);
@@ -449,6 +489,7 @@ interface ParsedRuntimeArgs {
     create: string | null;
     createRun: string | null;
     criterion: string | null;
+    codexHome: string | null;
     cycleId: number | null;
     currentTask: string | null;
     currentIteration: number;
@@ -472,6 +513,7 @@ interface ParsedRuntimeArgs {
     failureMode: string | null;
     goal: string | null;
     keepLatest: number;
+    key: string;
     list: boolean;
     lines: number;
     limit: number | null;
@@ -479,10 +521,12 @@ interface ParsedRuntimeArgs {
     metadataJson: string | null;
     names: string[];
     nextAction: string | null;
+    noFollowup: boolean;
     nextSteps: string[];
     output: string | null;
     path: string | null;
     pid: number | null;
+    port: number;
     preset: string | null;
     role: ReplayRole;
     roleProvided: boolean;
@@ -513,6 +557,7 @@ interface ParsedRuntimeArgs {
     rationale: string | null;
     receiptOutput: string | null;
     taskName: string | null;
+    host: string;
     terminal: TerminalChoice;
     text: string | null;
     terminalStaleSeconds: number;
@@ -528,6 +573,7 @@ interface ParsedRuntimeArgs {
     maxStorageBytes: number | null;
     maxUnfinishedCommands: number;
     managerStaleSeconds: number;
+    workerctlPath: string;
     newest: boolean;
     zip: boolean;
     requiredBeforeContinue: string[];
@@ -545,6 +591,8 @@ interface ParsedRuntimeArgs {
     force: boolean;
     message: string | null;
     reason: string | null;
+    consumeNext: boolean;
+    wait: boolean;
     requireAcks: boolean;
     requireAdversarialProof: boolean;
     requireCriteriaAudit: boolean;
@@ -648,6 +696,7 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
     create: null,
     createRun: null,
     criterion: null,
+    codexHome: null,
     cycleId: null,
     currentTask: null,
     currentIteration: 1,
@@ -671,6 +720,7 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
     fromWorkerResponse: null,
     goal: null,
     keepLatest: 20,
+    key: "C-c",
     list: false,
     lines: DEFAULT_HISTORY_LINES,
     limit: null,
@@ -678,10 +728,12 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
     metadataJson: null,
     names: [],
     nextAction: null,
+    noFollowup: false,
     nextSteps: [],
     output: null,
     path: null,
     pid: null,
+    port: 8797,
     preset: null,
     role: "all",
     roleProvided: false,
@@ -712,6 +764,7 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
     rationale: null,
     receiptOutput: null,
     taskName: null,
+    host: "127.0.0.1",
     terminal: "auto",
     text: null,
     terminalStaleSeconds: DEFAULT_TERMINAL_STALE_SECONDS,
@@ -727,6 +780,7 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
     maxStorageBytes: null,
     maxUnfinishedCommands: 0,
     managerStaleSeconds: DEFAULT_STATUS_STALE_SECONDS,
+    workerctlPath: "scripts/workerctl",
     newest: false,
     zip: false,
     requiredBeforeContinue: [],
@@ -744,6 +798,8 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
     force: false,
     message: null,
     reason: null,
+    consumeNext: false,
+    wait: false,
     requireAcks: false,
     requireAdversarialProof: false,
     requireCriteriaAudit: false,
@@ -826,6 +882,12 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
     flags.dispatcherId = "dispatch-pair";
     flags.timeoutSeconds = 60;
   }
+  if (command === "dashboard") {
+    flags.dispatcherId = "dispatch-dashboard";
+  }
+  if (command === "session-inbox" || command === "manager-inbox" || command === "worker-inbox") {
+    flags.timeoutSeconds = 30;
+  }
   let task: string | null = null;
   for (let index = 0; index < queue.length; index += 1) {
     const arg = queue[index];
@@ -894,6 +956,16 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       flags.includeFullTranscripts = true;
     } else if (arg === "--dry-run") {
       flags.dryRun = true;
+    } else if (arg === "--ensure-dispatch") {
+      if (command !== "dashboard") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --ensure-dispatch", explicit, flags, passthroughArgs, task };
+      }
+      flags.require = true;
+    } else if (arg === "--no-followup") {
+      if (command !== "interrupt") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --no-followup", explicit, flags, passthroughArgs, task };
+      }
+      flags.noFollowup = true;
     } else if (arg === "--apply") {
       if (command !== "import-compat" && command !== "reconcile") {
         return { command, enabled, error: "Unsupported TypeScript runtime option: --apply", explicit, flags, passthroughArgs, task };
@@ -1077,12 +1149,59 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
         return { command, enabled, error: "Unsupported TypeScript runtime option: --no-refresh", explicit, flags, task };
       }
       flags.refresh = false;
-    } else if (arg === "--path") {
+    } else if (arg === "--path" || arg === "--db-path") {
+      if (arg === "--db-path" && command !== "dashboard") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --db-path", explicit, flags, task };
+      }
       const value = valueAfter(queue, index, arg);
       if (value.error) {
         return { command, enabled, error: value.error, explicit, flags, task };
       }
       flags.path = value.value;
+      index += 1;
+    } else if (arg === "--codex-home") {
+      if (command !== "install-skills") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --codex-home", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.codexHome = value.value;
+      index += 1;
+    } else if (arg === "--host") {
+      if (command !== "dashboard") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --host", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.host = value.value;
+      index += 1;
+    } else if (arg === "--port") {
+      if (command !== "dashboard") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --port", explicit, flags, task };
+      }
+      const parsedValue = valueAfter(queue, index, arg);
+      if (parsedValue.error) {
+        return { command, enabled, error: parsedValue.error, explicit, flags, task };
+      }
+      const value = Number(parsedValue.value);
+      if (!Number.isInteger(value) || value <= 0) {
+        return { command, enabled, error: "--port must be a positive integer.", explicit, flags, task };
+      }
+      flags.port = value;
+      index += 1;
+    } else if (arg === "--workerctl-path") {
+      if (command !== "dashboard") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --workerctl-path", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.workerctlPath = value.value;
       index += 1;
     } else if (arg === "--output") {
       const value = valueAfter(queue, index, arg);
@@ -1389,7 +1508,7 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       flags.fromWorkerResponse = value.value;
       index += 1;
     } else if (arg === "--from-stdin") {
-      if (command !== "criteria-plan" && command !== "continuation") {
+      if (command !== "criteria-plan" && command !== "continuation" && command !== "worker-ack" && command !== "manager-ack") {
         return { command, enabled, error: "Unsupported TypeScript runtime option: --from-stdin", explicit, flags, task };
       }
       flags.fromStdin = true;
@@ -1503,7 +1622,7 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       flags.managerName = value.value;
       index += 1;
     } else if (arg === "--dispatcher-id") {
-      if (command !== "pair" && command !== "dispatch" && command !== "qa-run") {
+      if (command !== "pair" && command !== "dispatch" && command !== "qa-run" && command !== "dashboard") {
         return { command, enabled, error: "Unsupported TypeScript runtime option: --dispatcher-id", explicit, flags, task };
       }
       const value = valueAfter(queue, index, arg);
@@ -1848,7 +1967,7 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       flags.decisionId = value;
       index += 1;
     } else if (arg === "--timeout") {
-      if (command !== "continuation-reviewer") {
+      if (command !== "continuation-reviewer" && command !== "session-inbox" && command !== "manager-inbox" && command !== "worker-inbox") {
         return { command, enabled, error: "Unsupported TypeScript runtime option: --timeout", explicit, flags, task };
       }
       const parsedValue = valueAfter(queue, index, arg);
@@ -1856,10 +1975,49 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
         return { command, enabled, error: parsedValue.error, explicit, flags, task };
       }
       const value = Number(parsedValue.value);
-      if (!Number.isFinite(value) || value <= 0) {
-        return { command, enabled, error: "--timeout must be a positive number.", explicit, flags, task };
+      if (!Number.isFinite(value) || (command === "continuation-reviewer" ? value <= 0 : value < 0)) {
+        return {
+          command,
+          enabled,
+          error: command === "continuation-reviewer"
+            ? "--timeout must be a positive number."
+            : "--timeout must be a non-negative number.",
+          explicit,
+          flags,
+          task,
+        };
       }
       flags.timeoutSeconds = value;
+      index += 1;
+    } else if (arg === "--consume-next") {
+      if (command !== "session-inbox" && command !== "manager-inbox" && command !== "worker-inbox") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --consume-next", explicit, flags, task };
+      }
+      flags.consumeNext = true;
+    } else if (arg === "--wait") {
+      if (command !== "session-inbox" && command !== "manager-inbox" && command !== "worker-inbox") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --wait", explicit, flags, task };
+      }
+      flags.wait = true;
+    } else if (arg === "--key") {
+      if (command !== "interrupt" && command !== "session-interrupt") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --key", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.key = value.value;
+      index += 1;
+    } else if (arg === "--followup") {
+      if (command !== "interrupt" && command !== "session-interrupt") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --followup", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.message = value.value;
       index += 1;
     } else if (arg === "--manager-decision-id") {
       if (command !== "enqueue-continue-iteration") {
@@ -2162,6 +2320,8 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
         command !== "enqueue-notify-manager"
         && command !== "enqueue-nudge-worker"
         && command !== "enqueue-continue-iteration"
+        && command !== "worker-ack"
+        && command !== "manager-ack"
         && command !== "loop-evidence"
         && command !== "continuation"
         && command !== "continuation-reviewer"
@@ -2449,7 +2609,7 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       }
       index += 1;
     } else if (arg === "--interval") {
-      if (command !== "dispatch") {
+      if (command !== "dispatch" && command !== "session-inbox" && command !== "manager-inbox" && command !== "worker-inbox") {
         return { command, enabled, error: "Unsupported TypeScript runtime option: --interval", explicit, flags, task };
       }
       const parsedValue = valueAfter(queue, index, arg);
@@ -2593,6 +2753,8 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       flags.telemetryViewTask = arg;
     } else if (task === null) {
       task = arg;
+    } else if ((command === "nudge" || command === "session-nudge") && flags.message === null) {
+      flags.message = arg;
     } else if (command === "manager-permission" && flags.action === null) {
       flags.action = arg;
     } else if (command === "record-decision" && flags.decision === null) {
@@ -4805,6 +4967,158 @@ function runLegacyStartTestCommand(
   });
 }
 
+function runDashboardCommand(
+  parsed: ParsedRuntimeArgs,
+  options: TypescriptRuntimeOptions,
+): TypescriptRuntimeResult {
+  const unsupported = unsupportedDashboardOptions(parsed);
+  if (unsupported) {
+    return unsupportedRuntimeResult(parsed, unsupported);
+  }
+  const payload = dashboardLaunchPayload(parsed);
+  if (parsed.flags.dryRun) {
+    if (parsed.flags.json) {
+      return jsonResult(payload);
+    }
+    return { exitCode: 0, handled: true, stdout: `${payload.command.map(shellQuote).join(" ")}\n${payload.url}\n` };
+  }
+  let dispatchProcess: { pid: number | null } | null = null;
+  if (payload.ensure_dispatch && payload.dispatch_command) {
+    const database = openRuntimeDatabase(parsed, options);
+    let hasHeartbeat: boolean;
+    try {
+      hasHeartbeat = recentActiveDispatchHeartbeat(database, {
+        dispatcherId: parsed.flags.dispatcherId,
+        now: options.now?.() ?? new Date(),
+      });
+    } finally {
+      database.close();
+    }
+    if (!hasHeartbeat) {
+      dispatchProcess = (options.dispatchRunner ?? defaultDispatchRunner)(payload.dispatch_command, { cwd: packageRootFromRuntimeModule() });
+    }
+  }
+  const result = spawnSync(payload.command[0] ?? "", payload.command.slice(1), {
+    cwd: packageRootFromRuntimeModule(),
+    encoding: "utf8",
+    stdio: "inherit",
+  });
+  if (dispatchProcess?.pid) {
+    try {
+      process.kill(dispatchProcess.pid, "SIGTERM");
+    } catch {
+      // The watcher may already have exited with the dashboard process.
+    }
+  }
+  return { exitCode: result.status ?? (result.signal ? 1 : 0), handled: true };
+}
+
+function runInstallSkillsCommand(
+  parsed: ParsedRuntimeArgs,
+  options: { env?: NodeJS.ProcessEnv },
+): TypescriptRuntimeResult {
+  const unsupported = unsupportedInstallSkillsOptions(parsed);
+  if (unsupported) {
+    return unsupportedRuntimeResult(parsed, unsupported);
+  }
+  const codexHome = resolve(expandUserPath(parsed.flags.codexHome ?? options.env?.CODEX_HOME ?? join(homedir(), ".codex")));
+  const skills = installableSkillSources();
+  const targets = skills.map((skill) => ({
+    name: skill.name,
+    source: skill.source,
+    target: join(codexHome, "skills", skill.name),
+  }));
+  if (!parsed.flags.dryRun) {
+    for (const target of targets) {
+      rmSync(target.target, { force: true, recursive: true });
+      mkdirSync(dirname(target.target), { recursive: true });
+      cpSync(target.source, target.target, { recursive: true });
+      if (target.name === "codex-review") {
+        const helper = join(target.target, "scripts", "codex-review");
+        if (existsSync(helper)) {
+          chmodSync(helper, 0o755);
+        }
+      }
+    }
+  }
+  const payload = {
+    codex_home: codexHome,
+    dry_run: parsed.flags.dryRun,
+    installed: parsed.flags.dryRun ? [] : targets.map((target) => target.name),
+    skills: targets,
+  };
+  if (parsed.flags.json) {
+    return jsonResult(payload);
+  }
+  const lines = targets.map((target) => `${parsed.flags.dryRun ? "would install" : "installed"} ${target.name} skill in ${target.target}`);
+  return { exitCode: 0, handled: true, stdout: `${lines.join("\n")}\n` };
+}
+
+function dashboardLaunchPayload(parsed: ParsedRuntimeArgs): {
+  command: string[];
+  dispatch_command: string[] | null;
+  ensure_dispatch: boolean;
+  host: string;
+  port: number;
+  task: string | null;
+  url: string;
+} {
+  const query = parsed.flags.taskName ? `?task=${encodeURIComponent(parsed.flags.taskName)}` : "";
+  const command = [
+    "npm",
+    "run",
+    "dashboard",
+    "--",
+    "--host",
+    parsed.flags.host,
+    "--port",
+    String(parsed.flags.port),
+    "--workerctl-path",
+    parsed.flags.workerctlPath,
+  ];
+  if (parsed.flags.taskName) {
+    command.push("--task", parsed.flags.taskName);
+  }
+  if (parsed.flags.path) {
+    command.push("--db-path", parsed.flags.path);
+  }
+  const dispatcherId = parsed.flags.dispatcherId ?? "dispatch-dashboard";
+  return {
+    command,
+    dispatch_command: parsed.flags.require ? dispatchWatchCommand(parsed.flags.workerctlPath, dispatcherId, parsed.flags.path) : null,
+    ensure_dispatch: parsed.flags.require,
+    host: parsed.flags.host,
+    port: parsed.flags.port,
+    task: parsed.flags.taskName,
+    url: `http://${parsed.flags.host}:${parsed.flags.port}/${query}`,
+  };
+}
+
+function dispatchWatchCommand(workerctlPath: string, dispatcherId: string, dbPath: string | null): string[] {
+  const command = [workerctlPath, "dispatch", "--watch", "--dispatcher-id", dispatcherId];
+  if (dbPath) {
+    command.push("--path", dbPath);
+  }
+  return command;
+}
+
+function installableSkillSources(): Array<{ name: string; source: string }> {
+  const root = packageRootFromRuntimeModule();
+  const candidates = [
+    join(root, "skills"),
+    join(root, "workerctl", "assets", "skills"),
+  ];
+  for (const candidate of candidates) {
+    const skills = ["manage-codex-workers", "codex-review"]
+      .map((name) => ({ name, source: join(candidate, name) }))
+      .filter((skill) => existsSync(join(skill.source, "SKILL.md")));
+    if (skills.length === 2) {
+      return skills;
+    }
+  }
+  throw new Error("Bundled Agent Conveyor skills not found in skills/ or workerctl/assets/skills.");
+}
+
 function runBindCommand(
   parsed: ParsedRuntimeArgs,
   options: { cwd?: string; env?: NodeJS.ProcessEnv },
@@ -6845,6 +7159,62 @@ function runClassifyCommand(parsed: ParsedRuntimeArgs): TypescriptRuntimeResult 
   });
 }
 
+function runLegacyListCommand(
+  parsed: ParsedRuntimeArgs,
+  options: { cwd?: string; env?: NodeJS.ProcessEnv; tmuxRunner?: TmuxRunner },
+): TypescriptRuntimeResult {
+  const unsupported = unsupportedLegacyListOptions(parsed);
+  if (unsupported) {
+    return unsupportedRuntimeResult(parsed, unsupported);
+  }
+  const root = stateRoot(options);
+  if (!existsSync(root)) {
+    return parsed.flags.json ? jsonResult([]) : { exitCode: 0, handled: true, stdout: "" };
+  }
+  const workers: Array<Record<string, unknown>> = [];
+  for (const entry of readdirSync(root).sort()) {
+    const dir = join(root, entry);
+    if (!statSync(dir).isDirectory()) {
+      continue;
+    }
+    const config = loadJsonSync<Record<string, unknown>>(join(dir, "config.json"), {});
+    const name = stringOrNull(config.name) ?? entry;
+    const fallbackStatus = loadJsonSync<Record<string, unknown>>(join(dir, "status.json"), {});
+    let status: Record<string, unknown>;
+    try {
+      status = { ...latestStatusSync(name, options) };
+    } catch {
+      status = fallbackStatus;
+    }
+    let running = false;
+    let terminalError: string | null = null;
+    try {
+      running = sessionExists(name, options.tmuxRunner ?? defaultTmuxRunner);
+    } catch (error) {
+      terminalError = error instanceof Error ? error.message : String(error);
+    }
+    const worker: Record<string, unknown> = {
+      current_task: status.current_task ?? "",
+      name,
+      running,
+      state: status.state ?? "unknown",
+      status: running ? "running" : "stopped",
+    };
+    if (terminalError !== null) {
+      worker.terminal_error = terminalError;
+    }
+    workers.push(worker);
+  }
+  if (parsed.flags.json) {
+    return jsonResult(workers);
+  }
+  return {
+    exitCode: 0,
+    handled: true,
+    stdout: workers.map((worker) => `${worker.name}\t${worker.status}\t${worker.state}\t${worker.current_task}`).join("\n") + (workers.length ? "\n" : ""),
+  };
+}
+
 function runIngestCommand(
   parsed: ParsedRuntimeArgs,
   options: { cwd?: string; env?: NodeJS.ProcessEnv },
@@ -6983,6 +7353,1278 @@ function runUpdateStatusCommand(
   writeJsonSync(statusPath(parsed.task, options), payload);
   appendCompatibilityEvent(parsed.task, "status_updated", eventPayload, options, timestamp);
   return jsonResult(payload);
+}
+
+function runLegacyNudgeCommand(
+  parsed: ParsedRuntimeArgs,
+  options: { cwd?: string; env?: NodeJS.ProcessEnv; tmuxRunner?: TmuxRunner },
+): TypescriptRuntimeResult {
+  const unsupported = unsupportedLegacyNudgeOptions(parsed);
+  if (unsupported) {
+    return unsupportedRuntimeResult(parsed, unsupported);
+  }
+  const name = parsed.task ?? "";
+  const message = parsed.flags.message ?? "";
+  const runner = options.tmuxRunner ?? defaultTmuxRunner;
+  try {
+    requireWorkerConfig(name, options);
+    sendTextToLegacyWorker(name, message, runner);
+    appendCompatibilityEvent(name, "nudge", { message }, options);
+    return { exitCode: 0, handled: true, stdout: `sent nudge to ${name}\n` };
+  } catch (error) {
+    const messageText = error instanceof Error ? error.message : String(error);
+    if (!messageText.startsWith("Unknown worker:")) {
+      throw error;
+    }
+    const database = openRuntimeDatabase(parsed, options);
+    try {
+      const result = sendTextToRegisteredSession(database, {
+        dryRun: false,
+        name,
+        text: message,
+        tmuxRunner: runner,
+      });
+      insertEventSync(database, {
+        payload: {
+          dry_run: false,
+          session: name,
+          success: true,
+          text_length: message.length,
+        },
+        type: "session_nudged",
+      });
+      return jsonResult(result);
+    } catch (sessionError) {
+      const detail = sessionError instanceof Error ? sessionError.message : String(sessionError);
+      throw new Error(
+        `Unknown worker: ${name}; also failed to resolve registered session ${JSON.stringify(name)}. `
+        + `For session-backed workers, use \`conveyor session-nudge ${name} "..."\`. Session lookup error: ${detail}`,
+        { cause: sessionError },
+      );
+    } finally {
+      database.close();
+    }
+  }
+}
+
+function runLegacyInterruptCommand(
+  parsed: ParsedRuntimeArgs,
+  options: { cwd?: string; env?: NodeJS.ProcessEnv; tmuxRunner?: TmuxRunner },
+): TypescriptRuntimeResult {
+  const unsupported = unsupportedLegacyInterruptOptions(parsed);
+  if (unsupported) {
+    return unsupportedRuntimeResult(parsed, unsupported);
+  }
+  const name = parsed.task ?? "";
+  requireWorkerConfig(name, options);
+  const followup = parsed.flags.noFollowup ? null : parsed.flags.message ?? DEFAULT_INTERRUPT_FOLLOWUP;
+  const result = interruptLegacyWorker(name, {
+    dryRun: parsed.flags.dryRun,
+    followup,
+    key: parsed.flags.key,
+    tmuxRunner: options.tmuxRunner ?? defaultTmuxRunner,
+  });
+  if (!parsed.flags.dryRun) {
+    appendCompatibilityEvent(name, "interrupt", result, options);
+  }
+  return jsonResult(result);
+}
+
+function runTaskAckCommand(
+  parsed: ParsedRuntimeArgs,
+  options: { cwd?: string; env?: NodeJS.ProcessEnv; stdin?: string },
+  role: "manager" | "worker",
+): TypescriptRuntimeResult {
+  const unsupported = unsupportedTaskAckOptions(parsed);
+  if (unsupported) {
+    return unsupportedRuntimeResult(parsed, unsupported);
+  }
+  const taskName = requireTask(parsed);
+  const database = openRuntimeDatabase(parsed, options);
+  try {
+    const task = taskRowForLifecycle(database, taskName);
+    if (task === null) {
+      throw new Error(`Unknown task: ${taskName}`);
+    }
+    if (parsed.flags.json && !parsed.flags.fromStdin) {
+      return jsonResult(latestTaskAcknowledgementSync(database, { role, taskId: task.id }));
+    }
+    if (!parsed.flags.fromStdin) {
+      return errorResult(`${role}-ack requires --from-stdin to write or --json to read`);
+    }
+    const payload = parseStdinJsonObject(options.stdin);
+    const binding = maybeActiveBindingForTask(database, task.name);
+    const ackId = insertTaskAcknowledgementSync(database, {
+      bindingId: binding?.binding_id ?? null,
+      correlationId: parsed.flags.correlationId,
+      payload,
+      role,
+      taskId: task.id,
+      timestamp: new Date().toISOString(),
+    });
+    insertEventSync(database, {
+      correlationId: parsed.flags.correlationId,
+      payload: {
+        ack_id: ackId,
+        binding_id: binding?.binding_id ?? null,
+        payload_keys: Object.keys(payload).sort(),
+        role,
+      },
+      taskId: task.id,
+      type: `${role}_ack_recorded`,
+    });
+    return jsonResult(latestTaskAcknowledgementSync(database, { role, taskId: task.id }));
+  } finally {
+    database.close();
+  }
+}
+
+function runSessionInboxCommand(
+  parsed: ParsedRuntimeArgs,
+  options: { cwd?: string; env?: NodeJS.ProcessEnv; now?: () => Date; sleepMilliseconds?: (milliseconds: number) => void },
+  kind: "manager" | "session" | "worker",
+): TypescriptRuntimeResult {
+  const unsupported = unsupportedSessionInboxOptions(parsed, kind);
+  if (unsupported) {
+    return unsupportedRuntimeResult(parsed, unsupported);
+  }
+  if (!parsed.task) {
+    return errorResult(kind === "session" ? "session-inbox requires a session name." : `${kind}-inbox requires a task.`);
+  }
+  if (parsed.flags.intervalSeconds <= 0) {
+    return errorResult("--interval must be greater than zero.");
+  }
+  const database = openRuntimeDatabase(parsed, options);
+  try {
+    let sessionName = parsed.task;
+    let task: { id: string; name: string } | null = null;
+    if (kind !== "session") {
+      const binding = activeBindingForTaskSync(database, parsed.task);
+      sessionName = kind === "worker" ? binding.worker_session_name : binding.manager_session_name;
+      task = { id: binding.task_id, name: parsed.task };
+    }
+    const result = sessionInboxResponse(database, {
+      consumeNext: parsed.flags.consumeNext,
+      intervalSeconds: parsed.flags.intervalSeconds,
+      limit: parsed.flags.limit ?? 10,
+      now: options.now?.() ?? new Date(),
+      sessionName,
+      sleepMilliseconds: options.sleepMilliseconds,
+      timeoutSeconds: parsed.flags.timeoutSeconds,
+      wait: parsed.flags.wait,
+    });
+    if (task) {
+      result.task = task;
+    }
+    if (parsed.flags.json) {
+      return jsonResult(result);
+    }
+    return { exitCode: 0, handled: true, stdout: renderSessionInboxText(result) };
+  } finally {
+    database.close();
+  }
+}
+
+function runSessionNudgeCommand(
+  parsed: ParsedRuntimeArgs,
+  options: { cwd?: string; env?: NodeJS.ProcessEnv; now?: () => Date; sleepMilliseconds?: (milliseconds: number) => void; tmuxRunner?: TmuxRunner },
+): TypescriptRuntimeResult {
+  const unsupported = unsupportedSessionNudgeOptions(parsed);
+  if (unsupported) {
+    return unsupportedRuntimeResult(parsed, unsupported);
+  }
+  const name = parsed.task ?? "";
+  const text = parsed.flags.message ?? "";
+  const database = openRuntimeDatabase(parsed, options);
+  try {
+    const telemetry = sessionActionTelemetryContext(database, name);
+    try {
+      const result = sendTextToRegisteredSession(database, {
+        dryRun: parsed.flags.dryRun,
+        name,
+        sleepMilliseconds: options.sleepMilliseconds,
+        text,
+        tmuxRunner: options.tmuxRunner ?? defaultTmuxRunner,
+      });
+      insertEventSync(database, {
+        payload: {
+          dry_run: parsed.flags.dryRun,
+          session: name,
+          success: true,
+          text_length: text.length,
+        },
+        type: "session_nudged",
+      });
+      emitTelemetrySync(database, {
+        actor: "workerctl",
+        attributes: {
+          dry_run: parsed.flags.dryRun,
+          success: true,
+          text_length: text.length,
+        },
+        correlation: { ...telemetry.correlation, dry_run: parsed.flags.dryRun, session: name },
+        eventType: "session_nudge_succeeded",
+        severity: "info",
+        summary: `Nudged session ${name}.`,
+        taskId: telemetry.taskId,
+        timestamp: nowIsoSeconds(options),
+      });
+      return jsonResult(result);
+    } catch (error) {
+      recordSessionActionFailure(database, {
+        action: "nudge",
+        dryRun: parsed.flags.dryRun,
+        error,
+        key: null,
+        name,
+        telemetry,
+        textLength: text.length,
+        timestamp: nowIsoSeconds(options),
+      });
+      throw error;
+    }
+  } finally {
+    database.close();
+  }
+}
+
+function runSessionInterruptCommand(
+  parsed: ParsedRuntimeArgs,
+  options: { cwd?: string; env?: NodeJS.ProcessEnv; now?: () => Date; sleepMilliseconds?: (milliseconds: number) => void; tmuxRunner?: TmuxRunner },
+): TypescriptRuntimeResult {
+  const unsupported = unsupportedSessionInterruptOptions(parsed);
+  if (unsupported) {
+    return unsupportedRuntimeResult(parsed, unsupported);
+  }
+  const name = parsed.task ?? "";
+  const followup = parsed.flags.message;
+  const database = openRuntimeDatabase(parsed, options);
+  try {
+    const telemetry = sessionActionTelemetryContext(database, name);
+    try {
+      const result = interruptRegisteredSession(database, {
+        dryRun: parsed.flags.dryRun,
+        followup,
+        key: parsed.flags.key,
+        name,
+        sleepMilliseconds: options.sleepMilliseconds,
+        tmuxRunner: options.tmuxRunner ?? defaultTmuxRunner,
+      });
+      insertEventSync(database, {
+        payload: {
+          dry_run: parsed.flags.dryRun,
+          followup_length: followup?.length ?? 0,
+          key: parsed.flags.key,
+          session: name,
+          success: true,
+        },
+        type: "session_interrupted",
+      });
+      emitTelemetrySync(database, {
+        actor: "workerctl",
+        attributes: {
+          dry_run: parsed.flags.dryRun,
+          followup_length: followup?.length ?? 0,
+          success: true,
+        },
+        correlation: { ...telemetry.correlation, dry_run: parsed.flags.dryRun, key: parsed.flags.key, session: name },
+        eventType: "session_interrupt_succeeded",
+        severity: "info",
+        summary: `Interrupted session ${name}.`,
+        taskId: telemetry.taskId,
+        timestamp: nowIsoSeconds(options),
+      });
+      return jsonResult(result);
+    } catch (error) {
+      recordSessionActionFailure(database, {
+        action: "interrupt",
+        dryRun: parsed.flags.dryRun,
+        error,
+        key: parsed.flags.key,
+        name,
+        telemetry,
+        textLength: followup?.length ?? 0,
+        timestamp: nowIsoSeconds(options),
+      });
+      throw error;
+    }
+  } finally {
+    database.close();
+  }
+}
+
+function runCycleCommand(
+  parsed: ParsedRuntimeArgs,
+  options: { cwd?: string; env?: NodeJS.ProcessEnv; now?: () => Date; tmuxRunner?: TmuxRunner },
+): TypescriptRuntimeResult {
+  const unsupported = unsupportedCycleOptions(parsed);
+  if (unsupported) {
+    return unsupportedRuntimeResult(parsed, unsupported);
+  }
+  const taskName = requireTask(parsed);
+  const database = openRuntimeDatabase(parsed, options);
+  try {
+    const result = runCycleSync(database, {
+      busyWaitSeconds: parsed.flags.busyWaitSeconds,
+      now: nowIsoSeconds(options),
+      taskName,
+      tmuxRunner: options.tmuxRunner ?? defaultTmuxRunner,
+    });
+    return jsonResult(result);
+  } finally {
+    database.close();
+  }
+}
+
+function parseStdinJsonObject(input: string | undefined): Record<string, unknown> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(input ?? "");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`--from-stdin requires a JSON object: ${message}`, { cause: error });
+  }
+  if (!isPlainRecord(parsed)) {
+    throw new Error("--from-stdin requires a JSON object");
+  }
+  return parsed;
+}
+
+function maybeActiveBindingForTask(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  taskName: string,
+): { binding_id: string } | null {
+  try {
+    return activeBindingForTaskSync(database, taskName);
+  } catch {
+    return null;
+  }
+}
+
+function insertTaskAcknowledgementSync(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  options: {
+    bindingId: string | null;
+    correlationId: string | null;
+    payload: Record<string, unknown>;
+    role: "manager" | "worker";
+    taskId: string;
+    timestamp: string;
+  },
+): number {
+  const config = database.prepare("select revision from manager_configs where task_id = ?")
+    .get(options.taskId) as { revision: number } | undefined;
+  const row = database.prepare(`
+    select max(revision) as revision
+    from task_acknowledgements
+    where task_id = ? and role = ?
+  `).get(options.taskId, options.role) as { revision: number | null } | undefined;
+  const revision = Number(row?.revision ?? 0) + 1;
+  const result = database.prepare(`
+    insert into task_acknowledgements(
+      task_id, binding_id, role, payload_json, revision, manager_config_revision, created_at, correlation_id
+    )
+    values (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    options.taskId,
+    options.bindingId,
+    options.role,
+    stableJson(options.payload),
+    revision,
+    config?.revision ?? null,
+    options.timestamp,
+    options.correlationId,
+  );
+  return Number(result.lastInsertRowid);
+}
+
+function latestTaskAcknowledgementSync(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  options: { role: "manager" | "worker"; taskId: string },
+): Record<string, unknown> | null {
+  const row = database.prepare(`
+    select id, task_id, binding_id, role, payload_json, revision,
+           manager_config_revision, created_at, correlation_id
+    from task_acknowledgements
+    where task_id = ? and role = ?
+    order by revision desc, id desc
+    limit 1
+  `).get(options.taskId, options.role) as {
+    binding_id: string | null;
+    correlation_id: string | null;
+    created_at: string;
+    id: number;
+    manager_config_revision: number | null;
+    payload_json: string;
+    revision: number;
+    role: string;
+    task_id: string;
+  } | undefined;
+  if (!row) {
+    return null;
+  }
+  return {
+    binding_id: row.binding_id,
+    correlation_id: row.correlation_id,
+    created_at: row.created_at,
+    id: row.id,
+    manager_config_revision: row.manager_config_revision,
+    payload: parseJsonObject(row.payload_json),
+    revision: row.revision,
+    role: row.role,
+    task_id: row.task_id,
+  };
+}
+
+function sessionInboxResponse(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  options: {
+    consumeNext: boolean;
+    intervalSeconds: number;
+    limit: number;
+    now: Date;
+    sessionName: string;
+    sleepMilliseconds?: (milliseconds: number) => void;
+    timeoutSeconds: number;
+    wait: boolean;
+  },
+): Record<string, unknown> {
+  if (options.timeoutSeconds < 0) {
+    throw new Error("--timeout must be non-negative");
+  }
+  if (options.intervalSeconds <= 0) {
+    throw new Error("--interval must be greater than zero");
+  }
+  const session = sessionRow(database, options.sessionName);
+  const started = options.now.getTime();
+  let consumed: Record<string, unknown> | null = null;
+  let items: Array<Record<string, unknown>>;
+  let pollCount = 0;
+  let timedOut = false;
+  while (true) {
+    pollCount += 1;
+    const now = new Date(started + Math.max(0, pollCount - 1) * options.intervalSeconds * 1000);
+    if (options.consumeNext) {
+      consumed = consumeNextSessionInboxItemSync(database, {
+        now: now.toISOString(),
+        sessionName: options.sessionName,
+      }) as unknown as Record<string, unknown> | null;
+      if (consumed !== null) {
+        emitInboxConsumedTelemetry(database, { consumed, pollCount, session, wait: options.wait });
+        break;
+      }
+    } else {
+      items = sessionInboxSync(database, {
+        limit: options.limit,
+        sessionName: options.sessionName,
+      }) as unknown as Array<Record<string, unknown>>;
+      if (items.length > 0) {
+        break;
+      }
+    }
+    if (!options.wait) {
+      break;
+    }
+    const syntheticElapsed = ((pollCount - 1) * options.intervalSeconds);
+    if (syntheticElapsed >= options.timeoutSeconds) {
+      timedOut = true;
+      break;
+    }
+    (options.sleepMilliseconds ?? sleepSync)(Math.min(options.intervalSeconds, Math.max(0, options.timeoutSeconds - syntheticElapsed)) * 1000);
+  }
+  items = sessionInboxSync(database, {
+    limit: options.limit,
+    sessionName: options.sessionName,
+  }) as unknown as Array<Record<string, unknown>>;
+  return {
+    consumed,
+    items,
+    session: {
+      id: session.id,
+      name: session.name,
+      role: session.role,
+    },
+    wait: {
+      enabled: options.wait,
+      elapsed_seconds: Math.round(Math.min(options.timeoutSeconds, ((pollCount - 1) * options.intervalSeconds)) * 1000) / 1000,
+      interval_seconds: options.intervalSeconds,
+      poll_count: pollCount,
+      timed_out: timedOut,
+      timeout_seconds: options.timeoutSeconds,
+    },
+  };
+}
+
+function emitInboxConsumedTelemetry(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  options: {
+    consumed: Record<string, unknown>;
+    pollCount: number;
+    session: { id: string; name: string; role: string };
+    wait: boolean;
+  },
+): void {
+  emitTelemetrySync(database, {
+    actor: "dispatch",
+    attributes: {
+      consumed_by_session_id: options.consumed.consumed_by_session_id ?? null,
+      delivery_mode: options.consumed.delivery_mode ?? null,
+      poll_count: options.pollCount,
+      source_session_name: options.consumed.source_session_name ?? null,
+      target_session_name: options.consumed.target_session_name ?? null,
+      target_session_role: options.session.role,
+      wait_enabled: options.wait,
+    },
+    correlation: {
+      correlation_id: options.consumed.correlation_id ?? null,
+      notification_id: options.consumed.id ?? null,
+      signal_type: options.consumed.signal_type ?? null,
+      target_session_id: options.consumed.target_session_id ?? null,
+    },
+    eventType: "dispatch_inbox_consumed",
+    severity: "info",
+    summary: `${options.session.role} session consumed dispatcher inbox item.`,
+    taskId: typeof options.consumed.task_id === "string" ? options.consumed.task_id : null,
+    timestamp: new Date().toISOString(),
+  });
+}
+
+function renderSessionInboxText(result: Record<string, unknown>): string {
+  const session = result.session as Record<string, unknown> | undefined;
+  const task = result.task as Record<string, unknown> | undefined;
+  const items = (result.items as Array<Record<string, unknown>> | undefined) ?? [];
+  const lines = [`inbox for ${session?.name ?? "unknown session"}${task?.name ? ` on ${task.name}` : ""}`];
+  const consumed = result.consumed as Record<string, unknown> | null | undefined;
+  if (consumed) {
+    lines.push(
+      `consumed #${consumed.id} ${consumed.signal_type} ${consumed.delivery_mode} `
+      + `from ${consumed.source_session_name ?? consumed.source_session_id} `
+      + `to ${consumed.target_session_name ?? consumed.target_session_id} `
+      + `at ${consumed.consumed_at} (${consumed.correlation_id})`,
+    );
+  }
+  if (items.length === 0) {
+    lines.push("pending: none");
+  } else {
+    lines.push(`pending: ${items.length}`);
+    for (const item of items) {
+      lines.push(
+        `#${item.id} ${item.signal_type} ${item.delivery_mode} `
+        + `from ${item.source_session_name ?? item.source_session_id} `
+        + `to ${item.target_session_name ?? item.target_session_id} `
+        + `delivered ${item.delivered_at ?? "not-yet"} (${item.correlation_id})`,
+      );
+    }
+  }
+  return `${lines.join("\n")}\n`;
+}
+
+function sendTextToRegisteredSession(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  options: {
+    dryRun: boolean;
+    name: string;
+    sleepMilliseconds?: (milliseconds: number) => void;
+    text: string;
+    tmuxRunner: TmuxRunner;
+  },
+): Record<string, unknown> {
+  const session = sessionRow(database, options.name);
+  return sendTextToSessionWithRunner(session, options.text, options.tmuxRunner, {
+    dryRun: options.dryRun,
+    now: () => new Date().toISOString(),
+    sleep: options.sleepMilliseconds,
+  }) as unknown as Record<string, unknown>;
+}
+
+function interruptRegisteredSession(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  options: {
+    dryRun: boolean;
+    followup: string | null;
+    key: string;
+    name: string;
+    sleepMilliseconds?: (milliseconds: number) => void;
+    tmuxRunner: TmuxRunner;
+  },
+): Record<string, unknown> {
+  const session = sessionRow(database, options.name);
+  const target = registeredSessionTmuxTarget(session);
+  const result: Record<string, unknown> = {
+    dry_run: options.dryRun,
+    followup: options.followup,
+    key: options.key,
+    session: options.name,
+    target,
+    time: new Date().toISOString(),
+  };
+  if (options.dryRun) {
+    return result;
+  }
+  if (!session.tmux_session || !tmuxSessionRunning(session.tmux_session, options.tmuxRunner)) {
+    throw new Error(`tmux session is not running for session ${JSON.stringify(options.name)}: ${session.tmux_session}`);
+  }
+  runTmuxCommandWithRunner(["tmux", "send-keys", "-t", target, options.key], options.tmuxRunner);
+  if (options.followup) {
+    options.sleepMilliseconds?.(500);
+    sendTextToSessionWithRunner(session, options.followup, options.tmuxRunner, {
+      now: () => new Date().toISOString(),
+      sleep: options.sleepMilliseconds,
+    });
+  }
+  return result;
+}
+
+function registeredSessionTmuxTarget(row: { tmux_pane_id?: string | null; tmux_session?: string | null }): string {
+  if (!row.tmux_session) {
+    throw new Error("session has no tmux_session; cannot build tmux target (session likely registered outside tmux)");
+  }
+  return row.tmux_pane_id ? `${row.tmux_session}:${row.tmux_pane_id}` : row.tmux_session;
+}
+
+function interruptLegacyWorker(
+  name: string,
+  options: { dryRun: boolean; followup: string | null; key: string; tmuxRunner: TmuxRunner },
+): Record<string, unknown> {
+  const target = tmuxSession(name);
+  if (!sessionExists(name, options.tmuxRunner)) {
+    throw new Error(`tmux session is not running for worker ${name}: ${target}`);
+  }
+  const result: Record<string, unknown> = {
+    dry_run: options.dryRun,
+    followup: options.followup,
+    key: options.key,
+    name,
+    time: new Date().toISOString(),
+  };
+  if (!options.dryRun) {
+    runTmuxCommandWithRunner(["tmux", "send-keys", "-t", target, options.key], options.tmuxRunner);
+    if (options.followup) {
+      sleepSync(500);
+      sendTextToLegacyWorker(name, options.followup, options.tmuxRunner);
+    }
+  }
+  return result;
+}
+
+function sessionActionTelemetryContext(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  sessionName: string,
+): { correlation: Record<string, unknown>; taskId: string | null } {
+  const row = database.prepare(`
+    select sessions.id as session_id, sessions.role, bindings.id as binding_id,
+           bindings.task_id as task_id
+    from sessions
+    left join bindings
+      on bindings.state in ('active', 'ending')
+     and (bindings.worker_session_id = sessions.id or bindings.manager_session_id = sessions.id)
+    where sessions.name = ?
+    order by bindings.id desc
+    limit 1
+  `).get(sessionName) as {
+    binding_id: string | null;
+    role: string | null;
+    session_id: string | null;
+    task_id: string | null;
+  } | undefined;
+  if (!row) {
+    return { correlation: { binding_id: null, role: null, session_id: null }, taskId: null };
+  }
+  return {
+    correlation: {
+      binding_id: row.binding_id,
+      role: row.role,
+      session_id: row.session_id,
+    },
+    taskId: row.task_id,
+  };
+}
+
+function recordSessionActionFailure(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  options: {
+    action: "interrupt" | "nudge";
+    dryRun: boolean;
+    error: unknown;
+    key: string | null;
+    name: string;
+    telemetry: { correlation: Record<string, unknown>; taskId: string | null };
+    textLength: number;
+    timestamp: string;
+  },
+): void {
+  const message = options.error instanceof Error ? options.error.message : String(options.error);
+  const errorType = options.error instanceof Error ? options.error.name : typeof options.error;
+  insertEventSync(database, {
+    payload: {
+      dry_run: options.dryRun,
+      error: message,
+      error_type: errorType,
+      ...(options.key ? { key: options.key } : {}),
+      session: options.name,
+      success: false,
+      ...(options.action === "interrupt" ? { followup_length: options.textLength } : { text_length: options.textLength }),
+    },
+    type: options.action === "interrupt" ? "session_interrupted" : "session_nudged",
+  });
+  emitTelemetrySync(database, {
+    actor: "workerctl",
+    attributes: {
+      dry_run: options.dryRun,
+      error: message,
+      error_type: errorType,
+      success: false,
+      ...(options.action === "interrupt" ? { followup_length: options.textLength } : { text_length: options.textLength }),
+    },
+    correlation: { ...options.telemetry.correlation, dry_run: options.dryRun, ...(options.key ? { key: options.key } : {}), session: options.name },
+    eventType: options.action === "interrupt" ? "session_interrupt_failed" : "session_nudge_failed",
+    severity: "error",
+    summary: `Failed to ${options.action} session ${options.name}.`,
+    taskId: options.telemetry.taskId,
+    timestamp: options.timestamp,
+  });
+}
+
+function runCycleSync(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  options: { busyWaitSeconds: number; now: string; taskName: string; tmuxRunner: TmuxRunner },
+): Record<string, unknown> {
+  const binding = activeBindingForTaskSync(database, options.taskName);
+  const cycleId = createManagerCycleSync(database, { taskId: binding.task_id, timestamp: options.now });
+  const spans = new ManagerCycleSpanRecorder(database, { managerCycleId: cycleId, taskId: binding.task_id });
+  spans.instant("start_cycle", {
+    attributes: {
+      binding_id: binding.binding_id,
+      busy_wait_seconds: options.busyWaitSeconds,
+      manager_session: binding.manager_session_name,
+      worker_session: binding.worker_session_name,
+    },
+  });
+  emitTelemetrySync(database, {
+    actor: "manager",
+    attributes: { busy_wait_seconds: options.busyWaitSeconds, cycle_id: cycleId },
+    correlation: {
+      binding_id: binding.binding_id,
+      manager_session: binding.manager_session_name,
+      worker_session: binding.worker_session_name,
+    },
+    eventType: "manager_cycle_started",
+    severity: "info",
+    summary: `Started manager cycle for task ${options.taskName}.`,
+    taskId: binding.task_id,
+    timestamp: options.now,
+  });
+
+  let completedAt: string;
+  let activeSpan: ManagerCycleSpanToken | null = null;
+  try {
+    activeSpan = spans.start("ingest_rollout");
+    const ingest = ingestSessionSync(database, { now: options.now, sessionName: binding.worker_session_name });
+    spans.finish(activeSpan, {
+      attributes: {
+        new_events: ingest.new_events,
+        new_offset: ingest.new_offset,
+        worker_session: binding.worker_session_name,
+      },
+    });
+    activeSpan = null;
+
+    activeSpan = spans.start("infer_worker_state");
+    const workerSession = sessionRow(database, binding.worker_session_name, "worker");
+    const managerSession = sessionRow(database, binding.manager_session_name, "manager");
+    const stateInfo = latestWorkerStateSync(database, workerSession.id, options.now);
+    spans.finish(activeSpan, {
+      attributes: {
+        last_state_event_present: stateInfo.last_state_event_at !== null,
+        state: stateInfo.state,
+        staleness_seconds: stateInfo.staleness_seconds,
+      },
+    });
+    activeSpan = null;
+
+    activeSpan = spans.start("capture_pane_signal");
+    const paneSignal = paneSignalForCycle(workerSession, {
+      busyWaitSeconds: options.busyWaitSeconds,
+      statusAgeSeconds: stateInfo.staleness_seconds,
+      tmuxRunner: options.tmuxRunner,
+    });
+    spans.finish(activeSpan, {
+      attributes: paneSpanAttributes(paneSignal),
+      state: paneSignal.degraded ? "degraded" : "succeeded",
+    });
+    activeSpan = null;
+
+    activeSpan = spans.start("load_manager_context");
+    const managerConfig = managerConfigSync(database, binding.task_id);
+    const workerAck = latestTaskAcknowledgementSync(database, { role: "worker", taskId: binding.task_id });
+    const managerAck = latestTaskAcknowledgementSync(database, { role: "manager", taskId: binding.task_id });
+    if (managerConfig?.require_acks) {
+      const stale = [
+        ["worker", workerAck],
+        ["manager", managerAck],
+      ].flatMap(([role, ack]) => {
+        const record = ack as Record<string, unknown> | null;
+        return record === null
+          || record.binding_id !== binding.binding_id
+          || record.manager_config_revision !== managerConfig.revision
+          ? [role]
+          : [];
+      });
+      if (stale.length > 0) {
+        throw new Error(`cycle requires current acknowledgement(s) before first observation: ${stale.join(", ")}`);
+      }
+    }
+    const consumed = consumeRoutedNotificationsForCycleSync(database, {
+      bindingId: binding.binding_id,
+      managerCycleId: cycleId,
+      now: options.now,
+      taskId: binding.task_id,
+    });
+    const acceptanceContext = acceptanceCriteriaContext(database, binding.task_id);
+    const acceptanceSummary = acceptanceContext.summary as Record<string, number>;
+    const managerContext = {
+      acceptance_criteria: acceptanceContext,
+      criteria_negotiation: { task: options.taskName },
+      manager_ack: managerAck,
+      manager_config: managerConfig,
+      worker_ack: workerAck,
+      worker_handoff: latestWorkerHandoffFullSync(database, binding.task_id),
+      worker_receipt: latestWorkerReceiptForTaskSync(database, binding.task_id),
+    };
+    spans.finish(activeSpan, {
+      attributes: {
+        accepted_criteria: acceptanceSummary.accepted ?? 0,
+        consumed_dispatch_notifications: consumed,
+        manager_ack_present: managerAck !== null,
+        manager_config_present: managerConfig !== null,
+        require_acks: Boolean(managerConfig?.require_acks),
+        worker_ack_present: workerAck !== null,
+        worker_handoff_present: managerContext.worker_handoff !== null,
+        worker_receipt_present: managerContext.worker_receipt !== null,
+      },
+    });
+    activeSpan = null;
+
+    completedAt = new Date().toISOString();
+    const statusPayload: Record<string, unknown> = {
+      binding_id: binding.binding_id,
+      consumed_dispatch_notifications: consumed,
+      ingest,
+      kind: "session_cycle",
+      last_event_subtype: stateInfo.last_event_subtype,
+      last_state_event_at: stateInfo.last_state_event_at,
+      manager_alive: sessionPidAlive(managerSession),
+      manager_context: managerContext,
+      manager_session: binding.manager_session_name,
+      notable_pane_pattern: paneSignal.notable_pattern,
+      pane_signal: paneSignal,
+      staleness_seconds: stateInfo.staleness_seconds,
+      state: stateInfo.state,
+      task: options.taskName,
+      task_completed: stateInfo.last_event_subtype === "task_complete",
+      worker_alive: sessionPidAlive(workerSession),
+      worker_session: binding.worker_session_name,
+    };
+    activeSpan = spans.start("persist_cycle_row");
+    finishManagerCycleSync(database, {
+      cycleId,
+      state: "succeeded",
+      status: statusPayload,
+      timestamp: completedAt,
+    });
+    spans.finish(activeSpan, {
+      attributes: {
+        manager_alive: statusPayload.manager_alive,
+        state: stateInfo.state,
+        task_completed: stateInfo.last_event_subtype === "task_complete",
+        worker_alive: statusPayload.worker_alive,
+      },
+    });
+    activeSpan = null;
+    emitTelemetrySync(database, {
+      actor: "manager",
+      attributes: {
+        ingest,
+        last_event_subtype: stateInfo.last_event_subtype,
+        notable_pane_pattern: paneSignal.notable_pattern,
+        state: stateInfo.state,
+        task_completed: stateInfo.last_event_subtype === "task_complete",
+        worker_alive: statusPayload.worker_alive,
+        manager_alive: statusPayload.manager_alive,
+      },
+      correlation: {
+        binding_id: binding.binding_id,
+        cycle_id: cycleId,
+        manager_session: binding.manager_session_name,
+        worker_session: binding.worker_session_name,
+      },
+      eventType: "manager_cycle_succeeded",
+      severity: "info",
+      summary: `Manager cycle succeeded for task ${options.taskName}.`,
+      taskId: binding.task_id,
+      timestamp: completedAt,
+    });
+    return {
+      ...statusPayload,
+      cycle_completed_at: completedAt,
+      cycle_id: cycleId,
+      cycle_started_at: options.now,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const errorType = error instanceof Error ? error.name : typeof error;
+    if (activeSpan !== null) {
+      spans.finish(activeSpan, { errorType, state: "failed" });
+    }
+    completedAt = new Date().toISOString();
+    const failureStatus = {
+      binding_id: binding.binding_id,
+      error_type: errorType,
+      failure_phase: "cycle",
+      kind: "session_cycle",
+      manager_session: binding.manager_session_name,
+      task: options.taskName,
+      worker_session: binding.worker_session_name,
+    };
+    finishManagerCycleSync(database, {
+      cycleId,
+      error: message,
+      state: "failed",
+      status: failureStatus,
+      timestamp: completedAt,
+    });
+    spans.instant("cycle_failed", {
+      attributes: { error: message, failure_phase: "cycle" },
+      errorType,
+      state: "failed",
+    });
+    emitTelemetrySync(database, {
+      actor: "manager",
+      attributes: {
+        error_type: errorType,
+        failure_phase: "cycle",
+      },
+      correlation: {
+        binding_id: binding.binding_id,
+        cycle_id: cycleId,
+        manager_session: binding.manager_session_name,
+        worker_session: binding.worker_session_name,
+      },
+      eventType: "manager_cycle_failed",
+      severity: "error",
+      summary: `Manager cycle failed for task ${options.taskName}.`,
+      taskId: binding.task_id,
+      timestamp: completedAt,
+    });
+    throw error;
+  }
+}
+
+function createManagerCycleSync(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  options: { taskId: string; timestamp: string },
+): number {
+  const result = database.prepare(`
+    insert into manager_cycles(task_id, manager_id, started_at, state)
+    values (?, null, ?, 'started')
+  `).run(options.taskId, options.timestamp);
+  return Number(result.lastInsertRowid);
+}
+
+function finishManagerCycleSync(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  options: { cycleId: number; error?: string | null; state: "failed" | "succeeded"; status: Record<string, unknown>; timestamp: string },
+): void {
+  database.prepare(`
+    update manager_cycles
+    set completed_at = ?, state = ?, status_json = ?, health_json = ?, decision = null, error = ?
+    where id = ?
+  `).run(
+    options.timestamp,
+    options.state,
+    stableJson(options.status),
+    null,
+    options.error ?? null,
+    options.cycleId,
+  );
+}
+
+interface ManagerCycleSpanToken {
+  phase: string;
+  startedAt: string;
+  startedNs: bigint;
+}
+
+class ManagerCycleSpanRecorder {
+  private readonly database: RuntimeDatabase;
+  private readonly managerCycleId: number;
+  private readonly runId: string | null;
+  private readonly taskId: string;
+
+  constructor(database: RuntimeDatabase, options: { managerCycleId: number; taskId: string }) {
+    this.database = database;
+    this.managerCycleId = options.managerCycleId;
+    this.taskId = options.taskId;
+    const run = activeRunForTaskSync(database, options.taskId);
+    this.runId = typeof run?.id === "string" ? run.id : null;
+  }
+
+  start(phase: string): ManagerCycleSpanToken {
+    return {
+      phase,
+      startedAt: new Date().toISOString(),
+      startedNs: process.hrtime.bigint(),
+    };
+  }
+
+  finish(
+    token: ManagerCycleSpanToken,
+    options?: { attributes?: Record<string, unknown>; errorType?: string | null; state?: "degraded" | "failed" | "succeeded" },
+  ): void {
+    const completedAt = new Date().toISOString();
+    const durationMs = Number((Number(process.hrtime.bigint() - token.startedNs) / 1_000_000).toFixed(3));
+    insertManagerCycleSpanSync(this.database, {
+      attributes: options?.attributes ?? {},
+      completedAt,
+      durationMs: Math.max(durationMs, 0),
+      errorType: options?.errorType ?? null,
+      managerCycleId: this.managerCycleId,
+      phase: token.phase,
+      runId: this.runId,
+      startedAt: token.startedAt,
+      state: options?.state ?? "succeeded",
+      taskId: this.taskId,
+    });
+  }
+
+  instant(
+    phase: string,
+    options?: { attributes?: Record<string, unknown>; errorType?: string | null; state?: "degraded" | "failed" | "succeeded" },
+  ): void {
+    this.finish(this.start(phase), options);
+  }
+}
+
+function insertManagerCycleSpanSync(
+  database: RuntimeDatabase,
+  options: {
+    attributes: Record<string, unknown>;
+    completedAt: string;
+    durationMs: number;
+    errorType: string | null;
+    managerCycleId: number;
+    phase: string;
+    runId: string | null;
+    startedAt: string;
+    state: "degraded" | "failed" | "succeeded";
+    taskId: string;
+  },
+): void {
+  database.prepare(`
+    insert into manager_cycle_spans(
+      manager_cycle_id, task_id, run_id, phase, started_at, completed_at,
+      duration_ms, state, attributes_json, error_type, manager_decision_id,
+      command_id
+    )
+    values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, null, null)
+  `).run(
+    options.managerCycleId,
+    options.taskId,
+    options.runId,
+    options.phase,
+    options.startedAt,
+    options.completedAt,
+    options.durationMs,
+    options.state,
+    stableJson(options.attributes),
+    options.errorType,
+  );
+}
+
+function paneSpanAttributes(paneSignal: Record<string, unknown>): Record<string, unknown> {
+  return {
+    captured: Boolean(paneSignal.captured),
+    classifier: paneSignal.classifier ?? null,
+    degraded: Boolean(paneSignal.degraded),
+    notable_pattern: paneSignal.notable_pattern ?? null,
+    status_age_seconds: paneSignal.status_age_seconds ?? null,
+  };
+}
+
+function latestWorkerStateSync(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  sessionId: string,
+  now: string,
+): { last_event_subtype: string | null; last_state_event_at: string | null; staleness_seconds: number | null; state: string } {
+  const latest = database.prepare(`
+    select timestamp, subtype
+    from codex_events
+    where session_id = ?
+    order by id desc
+    limit 1
+  `).get(sessionId) as { subtype: string | null; timestamp: string } | undefined;
+  const stateRow = database.prepare(`
+    select timestamp, subtype
+    from codex_events
+    where session_id = ?
+      and type = 'event_msg'
+      and subtype in ('task_started', 'user_message', 'task_complete')
+    order by id desc
+    limit 1
+  `).get(sessionId) as { subtype: string | null; timestamp: string } | undefined;
+  const state = stateRow?.subtype === "task_complete"
+    ? "idle"
+    : stateRow?.subtype === "task_started" || stateRow?.subtype === "user_message"
+      ? "busy"
+      : "unknown";
+  return {
+    last_event_subtype: latest?.subtype ?? null,
+    last_state_event_at: stateRow?.timestamp ?? null,
+    staleness_seconds: ageSecondsAt(stateRow?.timestamp, new Date(now)),
+    state,
+  };
+}
+
+function paneSignalForCycle(
+  workerSession: { name: string; tmux_pane_id?: string | null; tmux_session?: string | null },
+  options: { busyWaitSeconds: number; statusAgeSeconds: number | null; tmuxRunner: TmuxRunner },
+): Record<string, unknown> {
+  if (!workerSession.tmux_session) {
+    return {
+      captured: false,
+      classifier: null,
+      degraded: false,
+      notable_pattern: null,
+      reason: "session has no tmux_session",
+      status_age_seconds: options.statusAgeSeconds,
+    };
+  }
+  try {
+    const target = registeredSessionTmuxTarget(workerSession);
+    if (!tmuxSessionRunning(workerSession.tmux_session, options.tmuxRunner)) {
+      return {
+        captured: false,
+        classifier: null,
+        degraded: true,
+        notable_pattern: "tmux_session_missing",
+        reason: `tmux session is not running: ${workerSession.tmux_session}`,
+        status_age_seconds: options.statusAgeSeconds,
+      };
+    }
+    const output = captureTmuxTargetWithRunner(target, DEFAULT_HISTORY_LINES, options.tmuxRunner);
+    const busyWait = classifyBusyWait(output, options.statusAgeSeconds, options.busyWaitSeconds);
+    return {
+      captured: true,
+      classifier: busyWait,
+      degraded: false,
+      notable_pattern: busyWait?.pattern ?? null,
+      reason: busyWait?.reason ?? "pane captured",
+      status_age_seconds: options.statusAgeSeconds,
+    };
+  } catch (error) {
+    return {
+      captured: false,
+      classifier: null,
+      degraded: true,
+      notable_pattern: "pane_signal_error",
+      reason: error instanceof Error ? error.message : String(error),
+      status_age_seconds: options.statusAgeSeconds,
+    };
+  }
+}
+
+function sessionPidAlive(session: { pid?: number | null }): boolean {
+  return typeof session.pid === "number" ? pidIsAlive(session.pid) : false;
+}
+
+function consumeRoutedNotificationsForCycleSync(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  options: { bindingId: string; managerCycleId: number; now: string; taskId: string },
+): number {
+  const result = database.prepare(`
+    update routed_notifications
+    set consumed_manager_cycle_id = ?, consumed_at = ?
+    where task_id = ?
+      and binding_id = ?
+      and state = 'delivered'
+      and consumed_manager_cycle_id is null
+      and consumed_at is null
+      and target_session_id = (
+        select manager_session_id from bindings where id = ?
+      )
+  `).run(options.managerCycleId, options.now, options.taskId, options.bindingId, options.bindingId);
+  return Number(result.changes ?? 0);
+}
+
+function acceptanceCriteriaContext(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  taskId: string,
+): Record<string, unknown> {
+  const criteria = acceptanceCriteriaForTaskSync(database, { taskId });
+  const summary: Record<string, number> = {
+    accepted: 0,
+    deferred: 0,
+    proposed: 0,
+    rejected: 0,
+    satisfied: 0,
+  };
+  for (const criterion of criteria) {
+    summary[criterion.status] = (summary[criterion.status] ?? 0) + 1;
+  }
+  return {
+    accepted: criteria.filter((criterion) => criterion.status === "accepted"),
+    deferred: criteria.filter((criterion) => criterion.status === "deferred"),
+    open: criteria.filter((criterion) => criterion.status === "accepted" || criterion.status === "proposed"),
+    proposed: criteria.filter((criterion) => criterion.status === "proposed"),
+    rejected: criteria.filter((criterion) => criterion.status === "rejected"),
+    satisfied: criteria.filter((criterion) => criterion.status === "satisfied"),
+    summary,
+  };
+}
+
+function latestWorkerReceiptForTaskSync(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  taskId: string,
+): Record<string, unknown> | null {
+  const row = database.prepare(`
+    select
+      ce.id as source_event_id,
+      ce.timestamp as source_event_timestamp,
+      ce.session_id as source_session_id,
+      ce.payload_json as source_payload_json,
+      s.name as source_session_name,
+      b.id as binding_id
+    from codex_events ce
+    join bindings b on b.worker_session_id = ce.session_id
+    join sessions s on s.id = ce.session_id
+    where b.task_id = ?
+      and ce.subtype = 'task_complete'
+    order by ce.id desc
+    limit 1
+  `).get(taskId) as {
+    binding_id: string;
+    source_event_id: number;
+    source_event_timestamp: string;
+    source_payload_json: string;
+    source_session_id: string;
+    source_session_name: string;
+  } | undefined;
+  if (!row) {
+    return null;
+  }
+  const payload = parseJsonObject(row.source_payload_json);
+  return {
+    binding_id: row.binding_id,
+    completed_at: payload.completed_at ?? null,
+    duration_ms: payload.duration_ms ?? null,
+    last_agent_message: payload.last_agent_message ?? null,
+    source_event_id: row.source_event_id,
+    source_event_timestamp: row.source_event_timestamp,
+    source_session_id: row.source_session_id,
+    source_session_name: row.source_session_name,
+    time_to_first_token_ms: payload.time_to_first_token_ms ?? null,
+    turn_id: payload.turn_id ?? null,
+  };
 }
 
 function runTranscriptShowCommand(
@@ -12828,6 +14470,91 @@ function jsonObjectArg(value: string | null, flag: string): Record<string, unkno
   throw new Error(`${flag} must be a JSON object`);
 }
 
+function unsupportedDashboardOptions(parsed: ParsedRuntimeArgs): string | null {
+  if (parsed.task !== null) {
+    return `Unexpected argument: ${parsed.task}`;
+  }
+  if (parsed.flags.port <= 0 || parsed.flags.port > 65535) {
+    return "--port must be between 1 and 65535.";
+  }
+  return null;
+}
+
+function unsupportedInstallSkillsOptions(parsed: ParsedRuntimeArgs): string | null {
+  if (parsed.task !== null) {
+    return `Unexpected argument: ${parsed.task}`;
+  }
+  return null;
+}
+
+function unsupportedLegacyListOptions(parsed: ParsedRuntimeArgs): string | null {
+  if (parsed.task !== null) {
+    return `Unexpected argument: ${parsed.task}`;
+  }
+  return null;
+}
+
+function unsupportedLegacyNudgeOptions(parsed: ParsedRuntimeArgs): string | null {
+  if (!parsed.task || parsed.flags.message === null) {
+    return "nudge requires a worker/session name and message.";
+  }
+  return null;
+}
+
+function unsupportedLegacyInterruptOptions(parsed: ParsedRuntimeArgs): string | null {
+  if (!parsed.task) {
+    return "interrupt requires a worker name.";
+  }
+  return null;
+}
+
+function unsupportedTaskAckOptions(parsed: ParsedRuntimeArgs): string | null {
+  if (!parsed.task) {
+    return `${parsed.command ?? "ack"} requires a task.`;
+  }
+  if (parsed.flags.fromStdin && parsed.flags.json) {
+    return null;
+  }
+  if (!parsed.flags.fromStdin && !parsed.flags.json) {
+    return `${parsed.command ?? "ack"} requires --from-stdin to write or --json to read.`;
+  }
+  return null;
+}
+
+function unsupportedSessionInboxOptions(parsed: ParsedRuntimeArgs, kind: "manager" | "session" | "worker"): string | null {
+  if (!parsed.task) {
+    return kind === "session" ? "session-inbox requires a session name." : `${kind}-inbox requires a task.`;
+  }
+  if (parsed.flags.limit !== null && parsed.flags.limit < 0) {
+    return "--limit must be a non-negative integer.";
+  }
+  return null;
+}
+
+function unsupportedSessionNudgeOptions(parsed: ParsedRuntimeArgs): string | null {
+  if (!parsed.task || parsed.flags.message === null) {
+    return "session-nudge requires a session name and text.";
+  }
+  return null;
+}
+
+function unsupportedSessionInterruptOptions(parsed: ParsedRuntimeArgs): string | null {
+  if (!parsed.task) {
+    return "session-interrupt requires a session name.";
+  }
+  return null;
+}
+
+function unsupportedCycleOptions(parsed: ParsedRuntimeArgs): string | null {
+  if (!parsed.task) {
+    return "cycle requires a task.";
+  }
+  if (parsed.flags.busyWaitSeconds < 0) {
+    return "--busy-wait-seconds must be non-negative.";
+  }
+  return null;
+}
+
 function parseCriterionStatus(status: string): AcceptanceCriterionStatus {
   if (["accepted", "deferred", "proposed", "rejected", "satisfied"].includes(status)) {
     return status as AcceptanceCriterionStatus;
@@ -13404,6 +15131,8 @@ function isDefaultRuntimeCommand(command: string | null): boolean {
     || command === "start"
     || command === "create"
     || command === "start-test"
+    || command === "dashboard"
+    || command === "install-skills"
     || command === "replay"
     || command === "export-task"
     || command === "tasks"
@@ -13426,10 +15155,21 @@ function isDefaultRuntimeCommand(command: string | null): boolean {
     || command === "discover"
     || command === "search"
     || command === "classify"
+    || command === "list"
     || command === "ingest"
     || command === "tail"
     || command === "events"
     || command === "update-status"
+    || command === "interrupt"
+    || command === "nudge"
+    || command === "worker-ack"
+    || command === "manager-ack"
+    || command === "session-inbox"
+    || command === "manager-inbox"
+    || command === "worker-inbox"
+    || command === "session-nudge"
+    || command === "session-interrupt"
+    || command === "cycle"
     || command === "transcript-show"
     || command === "transcript-prune"
     || command === "transcript-capture"
