@@ -16,8 +16,14 @@ import {
   type ReplayRole,
 } from "../runtime/replay.js";
 import {
+  claimNextDispatchCommandSync,
+  claimableDispatchCommandsSync,
   createCommandSync,
+  finishCommandAttemptSync,
+  recoverStaleDispatchClaimsSync,
+  type ClaimedCommand,
 } from "../runtime/commands.js";
+import { executeDispatchCommandSync } from "../runtime/dispatch.js";
 import {
   deregisterSessionSync,
   discoverRegistrySync,
@@ -33,6 +39,13 @@ import {
   type ManagerPermissionCategory,
   type ManagerPermissions,
 } from "../runtime/manager-permissions.js";
+import {
+  deferRoutedNotificationBeforeSideEffectSync,
+  deliveryModeForTargetSessionSync,
+  finishRoutedNotificationSync,
+  insertRoutedNotificationSync,
+  markRoutedNotificationSideEffectStartedSync,
+} from "../runtime/notifications.js";
 import {
   activeBindingForTaskSync,
   bindSessionsSync,
@@ -279,6 +292,21 @@ export function runTypescriptRuntimeCommand(options: TypescriptRuntimeOptions): 
     if (parsed.command === "idle-check") {
       return runIdleCheckCommand(parsed, options);
     }
+    if (parsed.command === "commands") {
+      return runCommandsCommand(parsed, options);
+    }
+    if (parsed.command === "enqueue-notify-manager") {
+      return runEnqueueCommand(parsed, options, "notify_manager");
+    }
+    if (parsed.command === "enqueue-nudge-worker") {
+      return runEnqueueCommand(parsed, options, "nudge_worker");
+    }
+    if (parsed.command === "enqueue-continue-iteration") {
+      return runEnqueueCommand(parsed, options, "continue_iteration");
+    }
+    if (parsed.command === "dispatch") {
+      return runDispatchCommand(parsed, options);
+    }
     if (parsed.explicit) {
       return errorResult(`Unsupported TypeScript runtime command: ${parsed.command}`);
     }
@@ -298,6 +326,7 @@ interface ParsedRuntimeArgs {
     includeFullTranscripts: boolean;
     includeTranscripts: boolean;
     all: boolean;
+    attempts: boolean;
     json: boolean;
     includeLegacy: boolean;
     redactIdentityToken: boolean;
@@ -370,7 +399,13 @@ interface ParsedRuntimeArgs {
     acceptTrust: boolean;
     askForApproval: string | null;
     codexProfile: string | null;
+    correlationId: string | null;
     dispatcherId: string | null;
+    dispatchType: string | null;
+    idempotencyKey: string | null;
+    intervalSeconds: number;
+    leaseSeconds: number;
+    loopRun: string | null;
     managerAllowMergeGreen: boolean;
     managerAllowPr: boolean;
     managerAllowWorkerCompactClear: boolean;
@@ -387,6 +422,9 @@ interface ParsedRuntimeArgs {
     managerRequireAcks: boolean;
     managerTool: string[];
     noDispatch: boolean;
+    once: boolean;
+    requiredPermission: string | null;
+    requestedIteration: number | null;
     taskPrompt: string | null;
     taskSummary: string | null;
     workerName: string | null;
@@ -400,6 +438,8 @@ interface ParsedRuntimeArgs {
     open: boolean;
     forceOpen: boolean;
     stopAfter: boolean;
+    watch: boolean;
+    watchIterations: number | null;
   };
   defaultRuntime?: boolean;
   explicit: boolean;
@@ -414,6 +454,7 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
     includeFullTranscripts: false,
     includeTranscripts: false,
     all: false,
+    attempts: false,
     json: false,
     includeLegacy: false,
     redactIdentityToken: false,
@@ -486,7 +527,13 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
     acceptTrust: false,
     askForApproval: null,
     codexProfile: null,
+    correlationId: null,
     dispatcherId: null,
+    dispatchType: null,
+    idempotencyKey: null,
+    intervalSeconds: 2.0,
+    leaseSeconds: 60,
+    loopRun: null,
     managerAllowMergeGreen: false,
     managerAllowPr: false,
     managerAllowWorkerCompactClear: false,
@@ -503,6 +550,9 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
     managerRequireAcks: false,
     managerTool: [],
     noDispatch: false,
+    once: false,
+    requiredPermission: null,
+    requestedIteration: null,
     taskPrompt: null,
     taskSummary: null,
     workerName: null,
@@ -516,6 +566,8 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
     open: false,
     forceOpen: false,
     stopAfter: false,
+    watch: false,
+    watchIterations: null,
   };
   const queue = [...args];
   const passthroughArgs: string[] = [];
@@ -565,6 +617,21 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       flags.includeFullTranscripts = true;
     } else if (arg === "--dry-run") {
       flags.dryRun = true;
+    } else if (arg === "--attempts") {
+      if (command !== "commands") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --attempts", explicit, flags, passthroughArgs, task };
+      }
+      flags.attempts = true;
+    } else if (arg === "--once") {
+      if (command !== "dispatch") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --once", explicit, flags, passthroughArgs, task };
+      }
+      flags.once = true;
+    } else if (arg === "--watch") {
+      if (command !== "dispatch") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --watch", explicit, flags, passthroughArgs, task };
+      }
+      flags.watch = true;
     } else if (arg === "--force") {
       if (command !== "open") {
         return { command, enabled, error: "Unsupported TypeScript runtime option: --force", explicit, flags, passthroughArgs, task };
@@ -901,7 +968,7 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       flags.managerName = value.value;
       index += 1;
     } else if (arg === "--dispatcher-id") {
-      if (command !== "pair") {
+      if (command !== "pair" && command !== "dispatch") {
         return { command, enabled, error: "Unsupported TypeScript runtime option: --dispatcher-id", explicit, flags, task };
       }
       const value = valueAfter(queue, index, arg);
@@ -1048,7 +1115,14 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       flags.reason = value.value;
       index += 1;
     } else if (arg === "--message") {
-      if (command !== "finish-task" && command !== "stop-task" && command !== "stop") {
+      if (
+        command !== "finish-task"
+        && command !== "stop-task"
+        && command !== "stop"
+        && command !== "enqueue-notify-manager"
+        && command !== "enqueue-nudge-worker"
+        && command !== "enqueue-continue-iteration"
+      ) {
         return { command, enabled, error: "Unsupported TypeScript runtime option: --message", explicit, flags, task };
       }
       const value = valueAfter(queue, index, arg);
@@ -1068,6 +1142,20 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       const value = Number(parsedValue.value);
       if (!Number.isInteger(value)) {
         return { command, enabled, error: "--decision-id must be an integer.", explicit, flags, task };
+      }
+      flags.decisionId = value;
+      index += 1;
+    } else if (arg === "--manager-decision-id") {
+      if (command !== "enqueue-continue-iteration") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --manager-decision-id", explicit, flags, task };
+      }
+      const parsedValue = valueAfter(queue, index, arg);
+      if (parsedValue.error) {
+        return { command, enabled, error: parsedValue.error, explicit, flags, task };
+      }
+      const value = Number(parsedValue.value);
+      if (!Number.isInteger(value)) {
+        return { command, enabled, error: "--manager-decision-id must be an integer.", explicit, flags, task };
       }
       flags.decisionId = value;
       index += 1;
@@ -1174,7 +1262,12 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
         return { command, enabled, error: parsedValue.error, explicit, flags, task };
       }
       const value = parsedValue.value;
-      if (command === "update-status") {
+      if (command === "commands") {
+        if (!["pending", "attempted", "succeeded", "failed", "blocked"].includes(value)) {
+          return { command, enabled, error: `Unsupported command state: ${value}`, explicit, flags, task };
+        }
+        flags.statusState = value;
+      } else if (command === "update-status") {
         if (!VALID_WORKER_STATUS_STATES.has(value)) {
           return { command, enabled, error: `Unsupported worker status state: ${value}`, explicit, flags, task };
         }
@@ -1190,7 +1283,70 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       if (value.error) {
         return { command, enabled, error: value.error, explicit, flags, task };
       }
-      flags.eventType = value.value;
+      if (command === "dispatch") {
+        if (!["notify_manager", "nudge_worker", "continue_iteration", "worker_task_complete"].includes(value.value)) {
+          return { command, enabled, error: "dispatch --type supports notify_manager, nudge_worker, continue_iteration, and worker_task_complete", explicit, flags, task };
+        }
+        flags.dispatchType = value.value;
+      } else if (command === "commands") {
+        flags.dispatchType = value.value;
+      } else {
+        flags.eventType = value.value;
+      }
+      index += 1;
+    } else if (arg === "--required-permission") {
+      if (command !== "enqueue-notify-manager" && command !== "enqueue-nudge-worker" && command !== "enqueue-continue-iteration") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --required-permission", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.requiredPermission = value.value;
+      index += 1;
+    } else if (arg === "--idempotency-key") {
+      if (command !== "enqueue-notify-manager" && command !== "enqueue-nudge-worker" && command !== "enqueue-continue-iteration") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --idempotency-key", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.idempotencyKey = value.value;
+      index += 1;
+    } else if (arg === "--correlation-id") {
+      if (command !== "enqueue-notify-manager" && command !== "enqueue-nudge-worker" && command !== "enqueue-continue-iteration") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --correlation-id", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.correlationId = value.value;
+      index += 1;
+    } else if (arg === "--loop-run") {
+      if (command !== "enqueue-continue-iteration") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --loop-run", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.loopRun = value.value;
+      index += 1;
+    } else if (arg === "--requested-iteration") {
+      if (command !== "enqueue-continue-iteration") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --requested-iteration", explicit, flags, task };
+      }
+      const parsedValue = valueAfter(queue, index, arg);
+      if (parsedValue.error) {
+        return { command, enabled, error: parsedValue.error, explicit, flags, task };
+      }
+      const value = Number(parsedValue.value);
+      if (!Number.isInteger(value)) {
+        return { command, enabled, error: "--requested-iteration must be an integer.", explicit, flags, task };
+      }
+      flags.requestedIteration = value;
       index += 1;
     } else if (arg === "--subtype") {
       const value = valueAfter(queue, index, arg);
@@ -1312,6 +1468,48 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
         return { command, enabled, error: "--limit must be a non-negative integer.", explicit, flags, task };
       }
       flags.limit = value;
+      index += 1;
+    } else if (arg === "--interval") {
+      if (command !== "dispatch") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --interval", explicit, flags, task };
+      }
+      const parsedValue = valueAfter(queue, index, arg);
+      if (parsedValue.error) {
+        return { command, enabled, error: parsedValue.error, explicit, flags, task };
+      }
+      const value = Number(parsedValue.value);
+      if (!Number.isFinite(value)) {
+        return { command, enabled, error: "--interval must be a number.", explicit, flags, task };
+      }
+      flags.intervalSeconds = value;
+      index += 1;
+    } else if (arg === "--watch-iterations") {
+      if (command !== "dispatch") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --watch-iterations", explicit, flags, task };
+      }
+      const parsedValue = valueAfter(queue, index, arg);
+      if (parsedValue.error) {
+        return { command, enabled, error: parsedValue.error, explicit, flags, task };
+      }
+      const value = Number(parsedValue.value);
+      if (!Number.isInteger(value)) {
+        return { command, enabled, error: "--watch-iterations must be an integer.", explicit, flags, task };
+      }
+      flags.watchIterations = value;
+      index += 1;
+    } else if (arg === "--lease-seconds") {
+      if (command !== "dispatch") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --lease-seconds", explicit, flags, task };
+      }
+      const parsedValue = valueAfter(queue, index, arg);
+      if (parsedValue.error) {
+        return { command, enabled, error: parsedValue.error, explicit, flags, task };
+      }
+      const value = Number(parsedValue.value);
+      if (!Number.isInteger(value)) {
+        return { command, enabled, error: "--lease-seconds must be an integer.", explicit, flags, task };
+      }
+      flags.leaseSeconds = value;
       index += 1;
     } else if (arg === "--max-iterations") {
       if (command !== "create-disposable-binding") {
@@ -4076,6 +4274,1143 @@ function runIdleCheckCommand(
   return jsonResult(idleSummary(parsed.task, parsed, options));
 }
 
+function runCommandsCommand(
+  parsed: ParsedRuntimeArgs,
+  options: { cwd?: string; env?: NodeJS.ProcessEnv },
+): TypescriptRuntimeResult {
+  const unsupported = unsupportedCommandsOptions(parsed);
+  if (unsupported) {
+    return unsupportedRuntimeResult(parsed, unsupported);
+  }
+  const database = openRuntimeDatabase(parsed, options);
+  try {
+    const records = commandRowsForCli(database, {
+      attempts: parsed.flags.attempts,
+      commandType: parsed.flags.dispatchType,
+      managerId: parsed.flags.manager,
+      state: parsed.flags.statusState,
+      task: parsed.flags.taskName,
+      workerId: parsed.flags.worker,
+    });
+    if (parsed.flags.json) {
+      return jsonResult(records);
+    }
+    return {
+      exitCode: 0,
+      handled: true,
+      stdout: renderCommandsText(records),
+    };
+  } finally {
+    database.close();
+  }
+}
+
+function runEnqueueCommand(
+  parsed: ParsedRuntimeArgs,
+  options: { cwd?: string; env?: NodeJS.ProcessEnv },
+  commandType: "continue_iteration" | "notify_manager" | "nudge_worker",
+): TypescriptRuntimeResult {
+  const unsupported = unsupportedEnqueueOptions(parsed, commandType);
+  if (unsupported) {
+    return unsupportedRuntimeResult(parsed, unsupported);
+  }
+  const taskName = requireTask(parsed);
+  const message = parsed.flags.message ?? "";
+  const database = openRuntimeDatabase(parsed, options);
+  try {
+    const task = taskRowForLifecycle(database, taskName);
+    if (task === null) {
+      throw new Error(`Unknown task: ${taskName}`);
+    }
+    const payload: Record<string, unknown> = { message };
+    let loopPolicy: Record<string, unknown> | null = null;
+    if (commandType === "continue_iteration") {
+      if (parsed.flags.requestedIteration === null || parsed.flags.loopRun === null) {
+        throw new Error("enqueue-continue-iteration requires --loop-run and --requested-iteration.");
+      }
+      if (parsed.flags.requestedIteration < 1) {
+        throw new Error("requested_iteration must be at least 1");
+      }
+      const run = ralphLoopRunForEnqueue(database, parsed.flags.loopRun);
+      if (run.task_id !== task.id) {
+        throw new Error("Ralph loop run does not belong to the requested task");
+      }
+      if (parsed.flags.requestedIteration <= run.current_iteration) {
+        throw new Error("requested_iteration must be greater than current_iteration for the loop run");
+      }
+      loopPolicy = enqueueLoopPolicyPayload(run);
+      payload.ralph_loop = {
+        requested_iteration: parsed.flags.requestedIteration,
+        run_id: run.id,
+      };
+      payload.loop_policy = loopPolicy;
+      if (parsed.flags.decisionId !== null) {
+        payload.manager_decision = { decision_id: parsed.flags.decisionId };
+      }
+    }
+    const commandId = createCommandSync(database, {
+      commandType,
+      correlationId: parsed.flags.correlationId,
+      idempotencyKey: parsed.flags.idempotencyKey,
+      payload,
+      requiredPermission: parsed.flags.requiredPermission,
+      taskId: task.id,
+    });
+    const command = database.prepare("select correlation_id from commands where id = ?").get(commandId) as {
+      correlation_id: string | null;
+    };
+    const result: Record<string, unknown> = {
+      command_id: commandId,
+      command_type: commandType,
+      correlation_id: command.correlation_id,
+      required_permission: parsed.flags.requiredPermission,
+      task: taskName,
+    };
+    if (commandType === "continue_iteration") {
+      result.loop_policy = loopPolicy;
+      result.loop_run_id = parsed.flags.loopRun;
+      result.manager_decision_id = parsed.flags.decisionId;
+      result.requested_iteration = parsed.flags.requestedIteration;
+    }
+    if (parsed.flags.json) {
+      return jsonResult(result);
+    }
+    return {
+      exitCode: 0,
+      handled: true,
+      stdout: `queued ${commandType} command ${commandId}\n`,
+    };
+  } finally {
+    database.close();
+  }
+}
+
+function runDispatchCommand(
+  parsed: ParsedRuntimeArgs,
+  options: { cwd?: string; env?: NodeJS.ProcessEnv; now?: () => Date; sleepMilliseconds?: (milliseconds: number) => void; tmuxRunner?: TmuxRunner },
+): TypescriptRuntimeResult {
+  const unsupported = unsupportedDispatchOptions(parsed);
+  if (unsupported) {
+    return unsupportedRuntimeResult(parsed, unsupported);
+  }
+  const dispatcherId = parsed.flags.dispatcherId ?? "dispatch-local";
+  const dryRun = parsed.flags.dryRun;
+  const watch = parsed.flags.watch;
+  const intervalSeconds = Math.max(0, parsed.flags.intervalSeconds);
+  const watchIterations = parsed.flags.watchIterations;
+  const limit = Math.max(1, parsed.flags.limit ?? 10);
+  const leaseSeconds = Math.max(1, parsed.flags.leaseSeconds);
+  const processed: unknown[] = [];
+  let iterations = 0;
+  while (true) {
+    iterations += 1;
+    const batch = dispatchOncePass(parsed, options, {
+      dispatcherId,
+      dryRun,
+      leaseSeconds,
+      limit,
+    });
+    processed.push(...batch);
+    if (watch) {
+      const database = openRuntimeDatabase(parsed, options);
+      try {
+        emitTelemetrySync(database, {
+          actor: "dispatch",
+          attributes: { dry_run: dryRun, processed_count: batch.length },
+          correlation: { dispatcher_id: dispatcherId, iteration: iterations },
+          eventType: "dispatch_watch_heartbeat",
+          severity: "info",
+          summary: `Dispatch watch heartbeat ${iterations}.`,
+          timestamp: nowIsoSeconds(options),
+        });
+      } finally {
+        database.close();
+      }
+    }
+    if (!watch || (watchIterations !== null && iterations >= watchIterations)) {
+      break;
+    }
+    (options.sleepMilliseconds ?? sleepSync)(intervalSeconds * 1000);
+  }
+  const output = {
+    dispatcher_id: dispatcherId,
+    dry_run: dryRun,
+    iterations,
+    processed,
+    processed_count: processed.length,
+    watch,
+  };
+  if (parsed.flags.json) {
+    return jsonResult(output);
+  }
+  return {
+    exitCode: 0,
+    handled: true,
+    stdout: `dispatch processed ${processed.length} item(s)\n`,
+  };
+}
+
+function dispatchOncePass(
+  parsed: ParsedRuntimeArgs,
+  options: { cwd?: string; env?: NodeJS.ProcessEnv; now?: () => Date; sleepMilliseconds?: (milliseconds: number) => void; tmuxRunner?: TmuxRunner },
+  dispatchOptions: {
+    dispatcherId: string;
+    dryRun: boolean;
+    leaseSeconds: number;
+    limit: number;
+  },
+): unknown[] {
+  const commandTypes = dispatchCommandTypes(parsed.flags.dispatchType);
+  const database = openRuntimeDatabase(parsed, options);
+  try {
+    const processed: unknown[] = [];
+    let remaining = dispatchOptions.limit;
+    if (commandTypes.length > 0) {
+      if (dispatchOptions.dryRun) {
+        const planned = claimableDispatchCommandsSync(database, {
+          commandTypes,
+          limit: remaining,
+        }).map((command) => ({
+          command_id: command.id,
+          command_type: command.type,
+          correlation_id: command.correlation_id,
+          dry_run: true,
+          state: "planned",
+          task: command.task_id,
+        }));
+        processed.push(...planned);
+        remaining = Math.max(0, dispatchOptions.limit - processed.length);
+      } else {
+        const recovered = recoverStaleDispatchClaimsSync(database, {
+          commandTypes,
+          dispatcherId: dispatchOptions.dispatcherId,
+          limit: remaining,
+        });
+        processed.push(...recovered);
+        remaining = Math.max(0, dispatchOptions.limit - processed.length);
+      }
+    }
+    while (!dispatchOptions.dryRun && commandTypes.length > 0 && remaining > 0) {
+      const claimed = claimNextDispatchCommandSync(database, {
+        commandTypes,
+        dispatcherId: dispatchOptions.dispatcherId,
+        leaseSeconds: dispatchOptions.leaseSeconds,
+      });
+      if (claimed === null) {
+        break;
+      }
+      processed.push(executeDispatchClaim(database, claimed, dispatchOptions.dispatcherId, options));
+      remaining = Math.max(0, dispatchOptions.limit - processed.length);
+    }
+    if (remaining > 0 && dispatchWorkerCompletionEnabled(parsed.flags.dispatchType)) {
+      processed.push(...dispatchWorkerCompletionPass(database, {
+        dispatcherId: dispatchOptions.dispatcherId,
+        dryRun: dispatchOptions.dryRun,
+        leaseSeconds: dispatchOptions.leaseSeconds,
+        limit: remaining,
+        now: nowIsoSeconds(options),
+        sleep: options.sleepMilliseconds,
+        tmuxRunner: options.tmuxRunner ?? defaultTmuxRunner,
+      }));
+    }
+    return processed;
+  } finally {
+    database.close();
+  }
+}
+
+function executeDispatchClaim(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  claimed: ClaimedCommand,
+  dispatcherId: string,
+  options: { now?: () => Date; tmuxRunner?: TmuxRunner },
+): unknown {
+  try {
+    return executeDispatchCommandSync(database, {
+      claimed,
+      dispatcherId,
+      now: nowIsoSeconds(options),
+      tmuxRunner: options.tmuxRunner ?? defaultTmuxRunner,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const result = {
+      attempt_id: claimed.attempt.id,
+      command_id: claimed.command.id,
+      command_type: claimed.command.type,
+      correlation_id: claimed.command.correlation_id,
+      dispatcher_id: dispatcherId,
+      error: message,
+      error_type: error instanceof Error ? error.name : typeof error,
+      notification_id: null,
+      required_permission: claimed.command.required_permission,
+      side_effect_completed: false,
+      side_effect_started: false,
+      state: "failed",
+    };
+    finishCommandAttemptSync(database, {
+      attemptId: claimed.attempt.id,
+      error: message,
+      now: nowIsoSeconds(options),
+      result,
+      sideEffectCompleted: false,
+      sideEffectStarted: false,
+      state: "failed",
+    });
+    return result;
+  }
+}
+
+function dispatchCommandTypes(dispatchType: string | null): string[] {
+  if (dispatchType === "worker_task_complete") {
+    return [];
+  }
+  if (dispatchType === "notify_manager" || dispatchType === "nudge_worker" || dispatchType === "continue_iteration") {
+    return [dispatchType];
+  }
+  return ["notify_manager", "nudge_worker", "continue_iteration"];
+}
+
+function dispatchWorkerCompletionEnabled(dispatchType: string | null): boolean {
+  return dispatchType === null || dispatchType === "worker_task_complete";
+}
+
+interface WorkerCompletionEventRow {
+  binding_id: string;
+  manager_session_name: string;
+  source_event_id: number;
+  source_event_timestamp: string;
+  source_payload_json: string;
+  source_session_id: string;
+  target_session_id: string;
+  task_id: string;
+  task_name: string;
+  worker_session_name: string;
+}
+
+interface ClaimedCompletionNotificationRow {
+  binding_id: string;
+  correlation_id: string;
+  dedupe_key: string;
+  manager_session_name: string;
+  notification_id: number;
+  notification_payload_json: string;
+  source_event_id: number | null;
+  source_event_timestamp: string | null;
+  source_session_id: string;
+  target_session_id: string;
+  task_id: string;
+  task_name: string;
+  worker_session_name: string;
+}
+
+function dispatchWorkerCompletionPass(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  options: {
+    dispatcherId: string;
+    dryRun: boolean;
+    leaseSeconds: number;
+    limit: number;
+    now: string;
+    sleep?: (milliseconds: number) => void;
+    tmuxRunner: TmuxRunner;
+  },
+): unknown[] {
+  const processed: unknown[] = [];
+  let remaining = options.limit;
+  if (!options.dryRun) {
+    const stale = failStaleStartedRoutedNotificationsSync(database, { limit: remaining, now: options.now });
+    for (const notification of stale) {
+      emitTelemetrySync(database, {
+        actor: "dispatch",
+        attributes: {
+          claim_expires_at: notification.claim_expires_at,
+          claimed_by: notification.claimed_by,
+          error: notification.error,
+          side_effect_risk: true,
+        },
+        correlation: {
+          binding_id: notification.binding_id,
+          correlation_id: notification.correlation_id,
+          dispatcher_id: options.dispatcherId,
+          routed_notification_id: notification.notification_id,
+          source_event_id: notification.source_event_id,
+          signal_type: notification.signal_type,
+        },
+        eventType: "dispatch_signal_failed",
+        severity: "error",
+        summary: "Dispatch found stale pending completion notification with side-effect risk.",
+        taskId: typeof notification.task_id === "string" ? notification.task_id : null,
+        timestamp: options.now,
+      });
+    }
+    processed.push(...stale);
+    remaining = Math.max(0, options.limit - processed.length);
+    if (remaining > 0) {
+      for (const row of claimPendingRoutedCompletionNotificationsSync(database, options)) {
+        processed.push(deliverClaimedWorkerCompletion(database, row, options));
+        remaining = Math.max(0, options.limit - processed.length);
+        if (remaining <= 0) {
+          break;
+        }
+      }
+    }
+  }
+  if (remaining <= 0) {
+    return processed;
+  }
+  for (const row of unroutedWorkerCompletionEventsSync(database, { limit: remaining })) {
+    processed.push(routeWorkerCompletion(database, row, options));
+  }
+  return processed;
+}
+
+function unroutedWorkerCompletionEventsSync(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  options: { limit: number },
+): WorkerCompletionEventRow[] {
+  if (options.limit <= 0) {
+    return [];
+  }
+  return database.prepare(`
+    select
+      ce.id as source_event_id,
+      ce.timestamp as source_event_timestamp,
+      ce.session_id as source_session_id,
+      ce.payload_json as source_payload_json,
+      b.id as binding_id,
+      b.task_id as task_id,
+      b.manager_session_id as target_session_id,
+      ws.name as worker_session_name,
+      ms.name as manager_session_name,
+      t.name as task_name
+    from codex_events ce
+    join bindings b on b.worker_session_id = ce.session_id
+    join sessions ws on ws.id = b.worker_session_id
+    join sessions ms on ms.id = b.manager_session_id
+    join tasks t on t.id = b.task_id
+    left join routed_notifications rn on rn.source_event_id = ce.id
+    where ce.subtype = 'task_complete'
+      and b.state in ('active', 'ending')
+      and rn.id is null
+    order by ce.id asc
+    limit ?
+  `).all(options.limit) as unknown as WorkerCompletionEventRow[];
+}
+
+function claimPendingRoutedCompletionNotificationsSync(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  options: { dispatcherId: string; leaseSeconds: number; limit: number; now: string },
+): ClaimedCompletionNotificationRow[] {
+  if (options.limit <= 0) {
+    return [];
+  }
+  const expiresAt = addSecondsIsoSeconds(options.now, options.leaseSeconds);
+  const candidates = database.prepare(`
+    select id
+    from routed_notifications
+    where state = 'pending'
+      and signal_type = 'worker_task_complete'
+      and side_effect_started = 0
+      and (claim_expires_at is null or claim_expires_at <= ?)
+    order by created_at, id
+    limit ?
+  `).all(options.now, options.limit) as Array<{ id: number }>;
+  const claimedIds: number[] = [];
+  for (const row of candidates) {
+    const result = database.prepare(`
+      update routed_notifications
+      set claimed_by = ?, claimed_at = ?, claim_expires_at = ?
+      where id = ?
+        and state = 'pending'
+        and side_effect_started = 0
+        and (claim_expires_at is null or claim_expires_at <= ?)
+    `).run(options.dispatcherId, options.now, expiresAt, row.id, options.now);
+    if (result.changes > 0) {
+      claimedIds.push(row.id);
+    }
+  }
+  if (claimedIds.length === 0) {
+    return [];
+  }
+  const placeholders = claimedIds.map(() => "?").join(",");
+  return database.prepare(`
+    select
+      rn.id as notification_id,
+      rn.task_id as task_id,
+      rn.binding_id as binding_id,
+      rn.correlation_id as correlation_id,
+      rn.source_session_id as source_session_id,
+      rn.target_session_id as target_session_id,
+      rn.source_event_id as source_event_id,
+      rn.source_event_timestamp as source_event_timestamp,
+      rn.dedupe_key as dedupe_key,
+      rn.payload_json as notification_payload_json,
+      ws.name as worker_session_name,
+      ms.name as manager_session_name,
+      t.name as task_name
+    from routed_notifications rn
+    join sessions ws on ws.id = rn.source_session_id
+    join sessions ms on ms.id = rn.target_session_id
+    join tasks t on t.id = rn.task_id
+    where rn.id in (${placeholders})
+    order by rn.created_at, rn.id
+  `).all(...claimedIds) as unknown as ClaimedCompletionNotificationRow[];
+}
+
+function failStaleStartedRoutedNotificationsSync(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  options: { limit: number; now: string },
+): Array<Record<string, unknown>> {
+  if (options.limit <= 0) {
+    return [];
+  }
+  const rows = database.prepare(`
+    select id, task_id, binding_id, correlation_id, source_event_id, signal_type,
+           claimed_by, claim_expires_at
+    from routed_notifications
+    where state = 'pending'
+      and signal_type = 'worker_task_complete'
+      and side_effect_started = 1
+      and side_effect_completed = 0
+      and claim_expires_at is not null
+      and claim_expires_at <= ?
+    order by claim_expires_at, id
+    limit ?
+  `).all(options.now, options.limit) as Array<{
+    binding_id: string;
+    claim_expires_at: string | null;
+    claimed_by: string | null;
+    correlation_id: string;
+    id: number;
+    signal_type: string;
+    source_event_id: number | null;
+    task_id: string;
+  }>;
+  const failed: Array<Record<string, unknown>> = [];
+  for (const row of rows) {
+    const error = "stale pending completion notification had started side effect; not retrying automatically";
+    database.prepare(`
+      update routed_notifications
+      set state = 'failed', error = ?
+      where id = ? and state = 'pending'
+    `).run(error, row.id);
+    failed.push({
+      binding_id: row.binding_id,
+      claim_expires_at: row.claim_expires_at,
+      claimed_by: row.claimed_by,
+      correlation_id: row.correlation_id,
+      error,
+      notification_id: row.id,
+      signal_type: row.signal_type,
+      source_event_id: row.source_event_id,
+      state: "failed",
+      task_id: row.task_id,
+    });
+  }
+  return failed;
+}
+
+function routeWorkerCompletion(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  row: WorkerCompletionEventRow,
+  options: { dispatcherId: string; dryRun: boolean; leaseSeconds: number; now: string; sleep?: (milliseconds: number) => void; tmuxRunner: TmuxRunner },
+): Record<string, unknown> {
+  const dedupeKey = `${row.binding_id}:worker_task_complete:${row.source_session_id}:${row.source_event_id}`;
+  const correlationId = `dispatch-${randomUUID()}`;
+  const message = dispatchCompletionMessage(row.worker_session_name, row.task_name);
+  const sourcePayload = parseJsonObject(row.source_payload_json);
+  const workerReceipt = {
+    completed_at: sourcePayload.completed_at ?? null,
+    duration_ms: sourcePayload.duration_ms ?? null,
+    last_agent_message: sourcePayload.last_agent_message ?? null,
+    source_event_id: row.source_event_id,
+    source_event_timestamp: row.source_event_timestamp,
+    source_session: row.worker_session_name,
+    time_to_first_token_ms: sourcePayload.time_to_first_token_ms ?? null,
+    turn_id: sourcePayload.turn_id ?? null,
+  };
+  const payload = {
+    dispatcher_id: options.dispatcherId,
+    message,
+    signal: "worker_task_complete",
+    source_event_id: row.source_event_id,
+    source_session: row.worker_session_name,
+    target_session: row.manager_session_name,
+    task: row.task_name,
+    worker_receipt: workerReceipt,
+  };
+  const result: Record<string, unknown> = {
+    binding_id: row.binding_id,
+    correlation_id: correlationId,
+    dedupe_key: dedupeKey,
+    dry_run: options.dryRun,
+    signal_type: "worker_task_complete",
+    source_event_id: row.source_event_id,
+    target_session: row.manager_session_name,
+    task: row.task_name,
+  };
+  if (options.dryRun) {
+    result.state = "planned";
+    return result;
+  }
+  const notificationId = insertCompletionNotification(database, {
+    bindingId: row.binding_id,
+    claimExpiresAt: addSecondsIsoSeconds(options.now, options.leaseSeconds),
+    claimedAt: options.now,
+    claimedBy: options.dispatcherId,
+    correlationId,
+    dedupeKey,
+    payload,
+    sourceEventId: row.source_event_id,
+    sourceEventTimestamp: row.source_event_timestamp,
+    sourceSessionId: row.source_session_id,
+    targetSessionId: row.target_session_id,
+    taskId: row.task_id,
+  }, result, {
+    managerSessionName: row.manager_session_name,
+    sourceEventId: row.source_event_id,
+    taskName: row.task_name,
+    workerSessionName: row.worker_session_name,
+  });
+  if (notificationId === null) {
+    return result;
+  }
+  emitTelemetrySync(database, {
+    actor: "dispatch",
+    attributes: {
+      delivery_mode: result.delivery_mode,
+      source_session: row.worker_session_name,
+      target_session: row.manager_session_name,
+    },
+    correlation: {
+      binding_id: row.binding_id,
+      correlation_id: correlationId,
+      dispatcher_id: options.dispatcherId,
+      source_event_id: row.source_event_id,
+      signal_type: "worker_task_complete",
+    },
+    eventType: "dispatch_signal_detected",
+    severity: "info",
+    summary: `Dispatch detected worker completion for ${row.task_name}.`,
+    taskId: row.task_id,
+    timestamp: options.now,
+  });
+  return deliverWorkerCompletionNotification(database, {
+    bindingId: row.binding_id,
+    correlationId,
+    managerSessionName: row.manager_session_name,
+    message,
+    notificationId,
+    recovered: false,
+    result,
+    sourceEventId: row.source_event_id,
+    taskId: row.task_id,
+  }, options);
+}
+
+function deliverClaimedWorkerCompletion(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  row: ClaimedCompletionNotificationRow,
+  options: { dispatcherId: string; leaseSeconds: number; now: string; sleep?: (milliseconds: number) => void; tmuxRunner: TmuxRunner },
+): Record<string, unknown> {
+  const payload = parseJsonObject(row.notification_payload_json);
+  const message = typeof payload.message === "string" && payload.message.trim()
+    ? payload.message
+    : dispatchCompletionMessage(row.worker_session_name, row.task_name);
+  const result: Record<string, unknown> = {
+    binding_id: row.binding_id,
+    correlation_id: row.correlation_id,
+    dedupe_key: row.dedupe_key,
+    dry_run: false,
+    notification_id: row.notification_id,
+    recovered: true,
+    signal_type: "worker_task_complete",
+    source_event_id: row.source_event_id,
+    target_session: row.manager_session_name,
+    task: row.task_name,
+  };
+  const deliveryMode = deliveryModeForTargetSessionSync(database, row.target_session_id);
+  database.prepare("update routed_notifications set delivery_mode = ? where id = ?").run(deliveryMode, row.notification_id);
+  result.delivery_mode = deliveryMode;
+  emitTelemetrySync(database, {
+    actor: "dispatch",
+    attributes: { delivery_mode: deliveryMode, target_session: row.manager_session_name },
+    correlation: {
+      binding_id: row.binding_id,
+      correlation_id: row.correlation_id,
+      dispatcher_id: options.dispatcherId,
+      routed_notification_id: row.notification_id,
+      source_event_id: row.source_event_id,
+      signal_type: "worker_task_complete",
+    },
+    eventType: "dispatch_signal_recovered",
+    severity: "info",
+    summary: `Dispatch recovered pending worker completion notification for ${row.task_name}.`,
+    taskId: row.task_id,
+    timestamp: options.now,
+  });
+  return deliverWorkerCompletionNotification(database, {
+    bindingId: row.binding_id,
+    correlationId: row.correlation_id,
+    managerSessionName: row.manager_session_name,
+    message,
+    notificationId: row.notification_id,
+    recovered: true,
+    result,
+    sourceEventId: row.source_event_id,
+    taskId: row.task_id,
+  }, options);
+}
+
+function insertCompletionNotification(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  notification: {
+    bindingId: string;
+    claimExpiresAt: string;
+    claimedAt: string;
+    claimedBy: string;
+    correlationId: string;
+    dedupeKey: string;
+    payload: Record<string, unknown>;
+    sourceEventId: number;
+    sourceEventTimestamp: string;
+    sourceSessionId: string;
+    targetSessionId: string;
+    taskId: string;
+  },
+  result: Record<string, unknown>,
+  context: { managerSessionName: string; sourceEventId: number; taskName: string; workerSessionName: string },
+): number | null {
+  const deliveryMode = deliveryModeForTargetSessionSync(database, notification.targetSessionId);
+  result.delivery_mode = deliveryMode;
+  try {
+    return insertRoutedNotificationSync(database, {
+      bindingId: notification.bindingId,
+      claimExpiresAt: notification.claimExpiresAt,
+      claimedAt: notification.claimedAt,
+      claimedBy: notification.claimedBy,
+      correlationId: notification.correlationId,
+      dedupeKey: notification.dedupeKey,
+      deliveryMode,
+      now: notification.claimedAt,
+      payload: { ...notification.payload, delivery_mode: deliveryMode },
+      signalType: "worker_task_complete",
+      sourceEventId: notification.sourceEventId,
+      sourceEventTimestamp: notification.sourceEventTimestamp,
+      sourceSessionId: notification.sourceSessionId,
+      targetSessionId: notification.targetSessionId,
+      taskId: notification.taskId,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!message.includes("UNIQUE constraint failed")) {
+      throw error;
+    }
+    result.state = "suppressed";
+    emitTelemetrySync(database, {
+      actor: "dispatch",
+      attributes: {
+        dedupe_key: notification.dedupeKey,
+        error: message,
+        source_session: context.workerSessionName,
+        target_session: context.managerSessionName,
+      },
+      correlation: {
+        binding_id: notification.bindingId,
+        correlation_id: notification.correlationId,
+        dispatcher_id: notification.claimedBy,
+        source_event_id: context.sourceEventId,
+        signal_type: "worker_task_complete",
+      },
+      eventType: "dispatch_signal_suppressed",
+      severity: "info",
+      summary: `Dispatch suppressed duplicate worker_task_complete for ${context.taskName}.`,
+      taskId: notification.taskId,
+      timestamp: notification.claimedAt,
+    });
+    return null;
+  }
+}
+
+function deliverWorkerCompletionNotification(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  delivery: {
+    bindingId: string;
+    correlationId: string;
+    managerSessionName: string;
+    message: string;
+    notificationId: number;
+    recovered: boolean;
+    result: Record<string, unknown>;
+    sourceEventId: number | null;
+    taskId: string;
+  },
+  options: { dispatcherId: string; leaseSeconds: number; now: string; sleep?: (milliseconds: number) => void; tmuxRunner: TmuxRunner },
+): Record<string, unknown> {
+  const deliveryMode = String(delivery.result.delivery_mode ?? "push");
+  if (deliveryMode === "pull_required") {
+    finishRoutedNotificationSync(database, {
+      notificationId: delivery.notificationId,
+      now: options.now,
+      sideEffectCompleted: false,
+      state: "delivered",
+    });
+    emitTelemetrySync(database, {
+      actor: "dispatch",
+      attributes: {
+        delivery_mode: deliveryMode,
+        ...(delivery.recovered ? { recovered: true } : {}),
+        target_session: delivery.managerSessionName,
+      },
+      correlation: {
+        binding_id: delivery.bindingId,
+        correlation_id: delivery.correlationId,
+        dispatcher_id: options.dispatcherId,
+        routed_notification_id: delivery.notificationId,
+        source_event_id: delivery.sourceEventId,
+        signal_type: "worker_task_complete",
+      },
+      eventType: "dispatch_signal_pull_required",
+      severity: "info",
+      summary: delivery.recovered
+        ? `Dispatch recorded pull-required recovered worker completion for ${delivery.managerSessionName}.`
+        : `Dispatch recorded pull-required worker completion for ${delivery.managerSessionName}.`,
+      taskId: delivery.taskId,
+      timestamp: options.now,
+    });
+    Object.assign(delivery.result, {
+      delivery_mode: deliveryMode,
+      notification_id: delivery.notificationId,
+      state: "pull_required",
+    });
+    return delivery.result;
+  }
+  const sideEffectAudit = { side_effect_completed: false, side_effect_started: false };
+  try {
+    const managerSession = sessionRow(database, delivery.managerSessionName, "manager");
+    const claimExpiresAt = addSecondsIsoSeconds(options.now, options.leaseSeconds);
+    const sendResult = sendTextToSessionWithRunner(managerSession, delivery.message, options.tmuxRunner, {
+      now: () => options.now,
+      sideEffectAudit,
+      sideEffectStartedCallback: () => {
+        markRoutedNotificationSideEffectStartedSync(database, {
+          claimExpiresAt,
+          claimedBy: options.dispatcherId,
+          notificationId: delivery.notificationId,
+          now: options.now,
+        });
+      },
+      sleep: options.sleep,
+    });
+    markRoutedNotificationSideEffectStartedSync(database, { notificationId: delivery.notificationId });
+    finishRoutedNotificationSync(database, {
+      notificationId: delivery.notificationId,
+      now: options.now,
+      state: "delivered",
+    });
+    emitTelemetrySync(database, {
+      actor: "dispatch",
+      attributes: {
+        ...(delivery.recovered ? { recovered: true } : {}),
+        target: sendResult.target,
+        target_session: delivery.managerSessionName,
+      },
+      correlation: {
+        binding_id: delivery.bindingId,
+        correlation_id: delivery.correlationId,
+        dispatcher_id: options.dispatcherId,
+        routed_notification_id: delivery.notificationId,
+        source_event_id: delivery.sourceEventId,
+        signal_type: "worker_task_complete",
+      },
+      eventType: "dispatch_signal_routed",
+      severity: "info",
+      summary: `Dispatch notified manager ${delivery.managerSessionName}.`,
+      taskId: delivery.taskId,
+      timestamp: options.now,
+    });
+    Object.assign(delivery.result, {
+      delivery_mode: deliveryMode,
+      notification_id: delivery.notificationId,
+      state: "delivered",
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (sideEffectAudit.side_effect_started) {
+      markRoutedNotificationSideEffectStartedSync(database, { notificationId: delivery.notificationId });
+      finishRoutedNotificationSync(database, {
+        error: message,
+        notificationId: delivery.notificationId,
+        now: options.now,
+        state: "failed",
+      });
+    } else {
+      deferRoutedNotificationBeforeSideEffectSync(database, {
+        error: message,
+        notificationId: delivery.notificationId,
+      });
+    }
+    emitTelemetrySync(database, {
+      actor: "dispatch",
+      attributes: {
+        error: message,
+        error_type: error instanceof Error ? error.name : typeof error,
+        ...(delivery.recovered ? { recovered: true } : {}),
+        target_session: delivery.managerSessionName,
+      },
+      correlation: {
+        binding_id: delivery.bindingId,
+        correlation_id: delivery.correlationId,
+        dispatcher_id: options.dispatcherId,
+        routed_notification_id: delivery.notificationId,
+        source_event_id: delivery.sourceEventId,
+        signal_type: "worker_task_complete",
+      },
+      eventType: "dispatch_signal_failed",
+      severity: "error",
+      summary: `Dispatch failed to notify manager ${delivery.managerSessionName}.`,
+      taskId: delivery.taskId,
+      timestamp: options.now,
+    });
+    Object.assign(delivery.result, {
+      error: message,
+      notification_id: delivery.notificationId,
+      state: "failed",
+    });
+  }
+  return delivery.result;
+}
+
+function dispatchCompletionMessage(workerName: string, taskName: string): string {
+  return `Worker ${workerName} appears to have completed a turn for task ${taskName}. `
+    + "Run/inspect conveyor cycle, review evidence and acceptance criteria, then decide "
+    + "whether to finish, request fixes, or continue observing.";
+}
+
+function addSecondsIsoSeconds(now: string, seconds: number): string {
+  const parsed = new Date(now.replace(/Z$/, "+00:00"));
+  const base = Number.isNaN(parsed.getTime()) ? new Date() : parsed;
+  return new Date(base.getTime() + Math.max(1, seconds) * 1000).toISOString().replace(/\.\d{3}Z$/, "Z");
+}
+
+function commandRowsForCli(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  options: {
+    attempts: boolean;
+    commandType: string | null;
+    managerId: string | null;
+    state: string | null;
+    task: string | null;
+    workerId: string | null;
+  },
+): Array<Record<string, unknown>> {
+  const clauses: string[] = [];
+  const params: Array<number | string> = [];
+  if (options.task !== null) {
+    clauses.push("(commands.task_id = ? or tasks.name = ?)");
+    params.push(options.task, options.task);
+  }
+  if (options.state !== null) {
+    clauses.push("commands.state = ?");
+    params.push(options.state);
+  }
+  if (options.commandType !== null) {
+    clauses.push("commands.type = ?");
+    params.push(options.commandType);
+  }
+  if (options.workerId !== null) {
+    clauses.push("commands.worker_id = ?");
+    params.push(options.workerId);
+  }
+  if (options.managerId !== null) {
+    clauses.push("commands.manager_id = ?");
+    params.push(options.managerId);
+  }
+  const where = clauses.length > 0 ? `where ${clauses.join(" and ")}` : "";
+  const rows = database.prepare(`
+    select commands.id, commands.idempotency_key, commands.created_at, commands.updated_at,
+           commands.task_id, tasks.name as task_name, commands.worker_id, commands.manager_id,
+           commands.correlation_id, commands.type, commands.state, commands.available_at,
+           commands.claimed_by, commands.claimed_at, commands.claim_expires_at,
+           commands.attempts, commands.max_attempts, commands.payload_json,
+           commands.required_permission, commands.result_json, commands.error
+    from commands
+    left join tasks on tasks.id = commands.task_id
+    ${where}
+    order by commands.created_at, commands.id
+  `).all(...params) as Array<{
+    attempts: number;
+    available_at: string | null;
+    claim_expires_at: string | null;
+    claimed_at: string | null;
+    claimed_by: string | null;
+    correlation_id: string | null;
+    created_at: string;
+    error: string | null;
+    id: string;
+    idempotency_key: string;
+    manager_id: string | null;
+    max_attempts: number;
+    payload_json: string;
+    required_permission: string | null;
+    result_json: string | null;
+    state: string;
+    task_id: string | null;
+    task_name: string | null;
+    type: string;
+    updated_at: string;
+    worker_id: string | null;
+  }>;
+  return rows.map((row) => {
+    const record: Record<string, unknown> = {
+      attempts: row.attempts,
+      available_at: row.available_at,
+      claim_expires_at: row.claim_expires_at,
+      claimed_at: row.claimed_at,
+      claimed_by: row.claimed_by,
+      correlation_id: row.correlation_id,
+      created_at: row.created_at,
+      error: row.error,
+      id: row.id,
+      idempotency_key: row.idempotency_key,
+      manager_id: row.manager_id,
+      max_attempts: row.max_attempts,
+      payload: parseJsonObject(row.payload_json),
+      required_permission: row.required_permission,
+      result: row.result_json ? parseJsonObject(row.result_json) : null,
+      state: row.state,
+      task_id: row.task_id,
+      task_name: row.task_name,
+      type: row.type,
+      updated_at: row.updated_at,
+      worker_id: row.worker_id,
+    };
+    if (options.attempts) {
+      record.attempt_history = commandAttemptRowsForCli(database, row.id);
+    }
+    return record;
+  });
+}
+
+function commandAttemptRowsForCli(database: ReturnType<typeof openRuntimeDatabase>, commandId: string): Array<Record<string, unknown>> {
+  const rows = database.prepare(`
+    select id, command_id, correlation_id, dispatcher_id, started_at, finished_at,
+           state, result_json, error, side_effect_started, side_effect_completed
+    from command_attempts
+    where command_id = ?
+    order by id
+  `).all(commandId) as Array<{
+    command_id: string;
+    correlation_id: string;
+    dispatcher_id: string;
+    error: string | null;
+    finished_at: string | null;
+    id: number;
+    result_json: string | null;
+    side_effect_completed: number;
+    side_effect_started: number;
+    started_at: string;
+    state: string;
+  }>;
+  return rows.map((row) => ({
+    command_id: row.command_id,
+    correlation_id: row.correlation_id,
+    dispatcher_id: row.dispatcher_id,
+    error: row.error,
+    finished_at: row.finished_at,
+    id: row.id,
+    result: row.result_json ? parseJsonObject(row.result_json) : null,
+    side_effect_completed: Boolean(row.side_effect_completed),
+    side_effect_started: Boolean(row.side_effect_started),
+    started_at: row.started_at,
+    state: row.state,
+  }));
+}
+
+function renderCommandsText(records: Array<Record<string, unknown>>): string {
+  if (records.length === 0) {
+    return "";
+  }
+  return records.map((record) => {
+    const suffix = Array.isArray(record.attempt_history) ? `\tattempts=${record.attempt_history.length}` : "";
+    return `${record.id}\t${record.state}\t${record.type}\t${record.task_name ?? record.task_id ?? ""}${suffix}`;
+  }).join("\n") + "\n";
+}
+
+interface EnqueueRalphLoopRun {
+  cleanup_policy: string | null;
+  current_iteration: number;
+  id: string;
+  max_iterations: number;
+  metadata: Record<string, unknown>;
+  preset: string | null;
+  required_before_continue: string[];
+  seed_prompt_sha256: string | null;
+  stop_conditions: string[];
+  task_id: string;
+}
+
+function ralphLoopRunForEnqueue(database: ReturnType<typeof openRuntimeDatabase>, run: string): EnqueueRalphLoopRun {
+  const row = runRowSync(database, run);
+  if (row.metadata.kind !== "ralph_loop" && row.purpose !== "ralph_loop") {
+    throw new Error(`Run ${JSON.stringify(run)} is not a Ralph loop run`);
+  }
+  const currentIteration = integerValue(row.metadata.current_iteration);
+  const maxIterations = integerValue(row.metadata.max_iterations);
+  if (currentIteration === null || maxIterations === null) {
+    throw new Error(`Ralph loop run ${JSON.stringify(run)} is missing iteration policy`);
+  }
+  return {
+    cleanup_policy: typeof row.metadata.cleanup_policy === "string" ? row.metadata.cleanup_policy : null,
+    current_iteration: currentIteration,
+    id: row.id,
+    max_iterations: maxIterations,
+    metadata: row.metadata,
+    preset: typeof row.metadata.preset === "string" ? row.metadata.preset : null,
+    required_before_continue: asStringArray(row.metadata.required_before_continue).map((item) => item.trim()).filter(Boolean),
+    seed_prompt_sha256: typeof row.metadata.seed_prompt_sha256 === "string" ? row.metadata.seed_prompt_sha256 : null,
+    stop_conditions: asStringArray(row.metadata.stop_conditions),
+    task_id: row.task_id,
+  };
+}
+
+function enqueueLoopPolicyPayload(run: EnqueueRalphLoopRun): Record<string, unknown> {
+  return {
+    artifact_requirements: isPlainRecord(run.metadata.artifact_requirements) ? run.metadata.artifact_requirements : {},
+    cleanup_policy: run.cleanup_policy,
+    current_iteration: run.current_iteration,
+    max_iterations: run.max_iterations,
+    preset: run.preset,
+    recommended_tools: Array.isArray(run.metadata.recommended_tools) ? run.metadata.recommended_tools : [],
+    required_before_continue: run.required_before_continue,
+    run_id: run.id,
+    seed_prompt_sha256: run.seed_prompt_sha256,
+    stop_conditions: run.stop_conditions,
+    tags: Array.isArray(run.metadata.tags) ? run.metadata.tags : [],
+    template: run.metadata.template ?? run.preset,
+  };
+}
+
+function integerValue(value: unknown): number | null {
+  if (typeof value === "number" && Number.isInteger(value)) {
+    return value;
+  }
+  if (typeof value === "string" && /^-?\d+$/.test(value)) {
+    return Number(value);
+  }
+  return null;
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function parseJsonObject(json: string): Record<string, unknown> {
+  const parsed = JSON.parse(json) as unknown;
+  return isPlainRecord(parsed) ? parsed : {};
+}
+
 function openRuntimeDatabase(
   parsed: ParsedRuntimeArgs,
   options: { cwd?: string; env?: NodeJS.ProcessEnv },
@@ -4134,6 +5469,11 @@ function isDefaultRuntimeCommand(command: string | null): boolean {
     || command === "capture"
     || command === "status"
     || command === "idle-check"
+    || command === "commands"
+    || command === "enqueue-notify-manager"
+    || command === "enqueue-nudge-worker"
+    || command === "enqueue-continue-iteration"
+    || command === "dispatch"
   );
 }
 
@@ -4194,6 +5534,152 @@ function unsupportedRuntimeResult(parsed: ParsedRuntimeArgs, message: string): T
     return { exitCode: 0, handled: false };
   }
   return errorResult(message);
+}
+
+function unsupportedCommandsOptions(parsed: ParsedRuntimeArgs): string | null {
+  if (parsed.task) {
+    return `Unexpected argument: ${parsed.task}`;
+  }
+  if (
+    parsed.flags.active
+    || parsed.flags.all
+    || parsed.flags.blocker !== null
+    || parsed.flags.create !== null
+    || parsed.flags.currentTask !== null
+    || parsed.flags.cwd !== null
+    || parsed.flags.dryRun
+    || parsed.flags.eventType !== null
+    || parsed.flags.file !== null
+    || parsed.flags.goal !== null
+    || parsed.flags.includeContent
+    || parsed.flags.includeFullTranscripts
+    || parsed.flags.includeLegacy
+    || parsed.flags.includeTranscripts
+    || parsed.flags.keepLatest !== 20
+    || parsed.flags.names.length > 0
+    || parsed.flags.nextAction !== null
+    || parsed.flags.output !== null
+    || parsed.flags.pid !== null
+    || parsed.flags.redactIdentityToken
+    || parsed.flags.roleProvided
+    || parsed.flags.sessionRole !== null
+    || parsed.flags.sessionState !== null
+    || parsed.flags.statusAgeSeconds !== DEFAULT_BUSY_WAIT_SECONDS
+    || parsed.flags.subtype !== null
+    || parsed.flags.summary !== null
+    || parsed.flags.text !== null
+    || parsed.flags.tmuxSession !== null
+    || parsed.flags.zip
+  ) {
+    return "Unsupported TypeScript runtime option for commands.";
+  }
+  return null;
+}
+
+function unsupportedEnqueueOptions(
+  parsed: ParsedRuntimeArgs,
+  commandType: "continue_iteration" | "notify_manager" | "nudge_worker",
+): string | null {
+  if (
+    parsed.flags.active
+    || parsed.flags.all
+    || parsed.flags.attempts
+    || parsed.flags.blocker !== null
+    || parsed.flags.create !== null
+    || parsed.flags.currentTask !== null
+    || parsed.flags.cwd !== null
+    || parsed.flags.dryRun
+    || parsed.flags.eventType !== null
+    || parsed.flags.file !== null
+    || parsed.flags.goal !== null
+    || parsed.flags.includeContent
+    || parsed.flags.includeFullTranscripts
+    || parsed.flags.includeLegacy
+    || parsed.flags.includeTranscripts
+    || parsed.flags.keepLatest !== 20
+    || parsed.flags.limit !== null
+    || parsed.flags.names.length > 0
+    || parsed.flags.nextAction !== null
+    || parsed.flags.output !== null
+    || parsed.flags.pid !== null
+    || parsed.flags.redactIdentityToken
+    || parsed.flags.roleProvided
+    || parsed.flags.sessionRole !== null
+    || parsed.flags.sessionState !== null
+    || parsed.flags.statusAgeSeconds !== DEFAULT_BUSY_WAIT_SECONDS
+    || parsed.flags.statusState !== null
+    || parsed.flags.subtype !== null
+    || parsed.flags.summary !== null
+    || parsed.flags.text !== null
+    || parsed.flags.tmuxSession !== null
+    || parsed.flags.worker !== null
+    || parsed.flags.manager !== null
+    || parsed.flags.zip
+  ) {
+    return `Unsupported TypeScript runtime option for ${parsed.command}.`;
+  }
+  if (!parsed.task) {
+    return `${parsed.command} requires a task.`;
+  }
+  if (parsed.flags.message === null || !parsed.flags.message.trim()) {
+    return `${commandType} message must be non-empty`;
+  }
+  if (commandType !== "continue_iteration") {
+    if (parsed.flags.loopRun !== null || parsed.flags.requestedIteration !== null || parsed.flags.decisionId !== null) {
+      return `Unsupported TypeScript runtime option for ${parsed.command}.`;
+    }
+  }
+  if (commandType === "continue_iteration" && (parsed.flags.loopRun === null || parsed.flags.requestedIteration === null)) {
+    return "enqueue-continue-iteration requires --loop-run and --requested-iteration.";
+  }
+  return null;
+}
+
+function unsupportedDispatchOptions(parsed: ParsedRuntimeArgs): string | null {
+  if (parsed.task) {
+    return `Unexpected argument: ${parsed.task}`;
+  }
+  if (
+    parsed.flags.active
+    || parsed.flags.all
+    || parsed.flags.attempts
+    || parsed.flags.blocker !== null
+    || parsed.flags.create !== null
+    || parsed.flags.currentTask !== null
+    || parsed.flags.cwd !== null
+    || parsed.flags.eventType !== null
+    || parsed.flags.file !== null
+    || parsed.flags.goal !== null
+    || parsed.flags.includeContent
+    || parsed.flags.includeFullTranscripts
+    || parsed.flags.includeLegacy
+    || parsed.flags.includeTranscripts
+    || parsed.flags.keepLatest !== 20
+    || parsed.flags.names.length > 0
+    || parsed.flags.nextAction !== null
+    || parsed.flags.output !== null
+    || parsed.flags.pid !== null
+    || parsed.flags.redactIdentityToken
+    || parsed.flags.roleProvided
+    || parsed.flags.sessionRole !== null
+    || parsed.flags.sessionState !== null
+    || parsed.flags.statusAgeSeconds !== DEFAULT_BUSY_WAIT_SECONDS
+    || parsed.flags.statusState !== null
+    || parsed.flags.subtype !== null
+    || parsed.flags.summary !== null
+    || parsed.flags.taskName !== null
+    || parsed.flags.text !== null
+    || parsed.flags.tmuxSession !== null
+    || parsed.flags.worker !== null
+    || parsed.flags.manager !== null
+    || parsed.flags.zip
+  ) {
+    return "Unsupported TypeScript runtime option for dispatch.";
+  }
+  if (parsed.flags.once && parsed.flags.watch) {
+    return "dispatch accepts either --once or --watch, not both";
+  }
+  return null;
 }
 
 function unsupportedBindOptions(parsed: ParsedRuntimeArgs): string | null {
