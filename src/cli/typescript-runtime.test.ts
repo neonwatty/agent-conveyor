@@ -34,7 +34,7 @@ import {
 test("unmigrated TypeScript runtime command falls back when disabled", () => {
   assert.deepEqual(
     runTypescriptRuntimeCommand({
-      args: ["commands", "--json"],
+      args: ["adversarial-check", "--json"],
       env: {},
     }),
     { exitCode: 0, handled: false },
@@ -4194,6 +4194,498 @@ test("TypeScript runtime handles migrated audit replay and subset export command
     });
     assert.equal(unsupportedZip.exitCode, 2);
     assert.match(unsupportedZip.stderr ?? "", /migrated audit subset only/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("TypeScript runtime handles enqueue commands list and dispatch pull-required queue by default", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-dispatch-cli."));
+  try {
+    const dbPath = join(root, "workerctl.db");
+    const database = openDatabaseSync(dbPath);
+    try {
+      initializeDatabaseSync(database);
+      createTaskSync(database, {
+        goal: "Route dispatch queue.",
+        name: "queue-task",
+        now: "2026-05-23T10:00:00Z",
+        taskId: "task-queue-cli",
+      });
+      insertSession(database, { id: "session-worker", name: "worker-cli", role: "worker" });
+      insertSession(database, { id: "session-manager", name: "manager-cli", role: "manager" });
+      bindSessionsSync(database, {
+        bindingId: "binding-queue-cli",
+        managerSessionName: "manager-cli",
+        now: "2026-05-23T10:00:30Z",
+        taskName: "queue-task",
+        workerSessionName: "worker-cli",
+      });
+      insertRalphLoopRun(database, {
+        currentIteration: 1,
+        maxIterations: 3,
+        requiredBeforeContinue: [],
+        runId: "run-queue-cli",
+        taskId: "task-queue-cli",
+      });
+    } finally {
+      database.close();
+    }
+
+    const enqueuedNotify = runTypescriptRuntimeCommand({
+      args: [
+        "enqueue-notify-manager",
+        "queue-task",
+        "--message",
+        "Please inspect the worker result.",
+        "--correlation-id",
+        "corr-notify-cli",
+        "--idempotency-key",
+        "idem-notify-cli",
+        "--path",
+        dbPath,
+        "--json",
+      ],
+      env: {},
+    });
+    assert.equal(enqueuedNotify.exitCode, 0);
+    assert.equal(enqueuedNotify.handled, true);
+    const notifyPayload = JSON.parse(enqueuedNotify.stdout ?? "{}") as {
+      command_id: string;
+      command_type: string;
+      correlation_id: string;
+      task: string;
+    };
+    assert.equal(notifyPayload.command_type, "notify_manager");
+    assert.equal(notifyPayload.correlation_id, "corr-notify-cli");
+    assert.equal(notifyPayload.task, "queue-task");
+
+    const enqueuedContinue = runTypescriptRuntimeCommand({
+      args: [
+        "enqueue-continue-iteration",
+        "queue-task",
+        "--message",
+        "Run iteration 2.",
+        "--loop-run",
+        "run-queue-cli",
+        "--requested-iteration",
+        "2",
+        "--manager-decision-id",
+        "42",
+        "--correlation-id",
+        "corr-continue-cli",
+        "--path",
+        dbPath,
+        "--json",
+      ],
+      env: {},
+    });
+    assert.equal(enqueuedContinue.exitCode, 0);
+    const continuePayload = JSON.parse(enqueuedContinue.stdout ?? "{}") as {
+      command_type: string;
+      loop_policy: { current_iteration: number; max_iterations: number; run_id: string };
+      manager_decision_id: number;
+      requested_iteration: number;
+    };
+    assert.equal(continuePayload.command_type, "continue_iteration");
+    assert.deepEqual(continuePayload.loop_policy, {
+      artifact_requirements: {},
+      cleanup_policy: "clear",
+      current_iteration: 1,
+      max_iterations: 3,
+      preset: null,
+      recommended_tools: [],
+      required_before_continue: [],
+      run_id: "run-queue-cli",
+      seed_prompt_sha256: null,
+      stop_conditions: ["max_iterations", "required_evidence"],
+      tags: [],
+      template: null,
+    });
+    assert.equal(continuePayload.manager_decision_id, 42);
+    assert.equal(continuePayload.requested_iteration, 2);
+
+    const listed = runTypescriptRuntimeCommand({
+      args: ["commands", "--type", "notify_manager", "--attempts", "--path", dbPath, "--json"],
+      env: {},
+    });
+    assert.equal(listed.exitCode, 0);
+    const commandList = JSON.parse(listed.stdout ?? "[]") as Array<{
+      attempt_history: unknown[];
+      idempotency_key: string;
+      payload: { message: string };
+      state: string;
+      task_name: string;
+      type: string;
+    }>;
+    assert.equal(commandList.length, 1);
+    assert.equal(commandList[0].idempotency_key, "idem-notify-cli");
+    assert.deepEqual(commandList[0].attempt_history, []);
+    assert.equal(commandList[0].payload.message, "Please inspect the worker result.");
+    assert.equal(commandList[0].state, "pending");
+    assert.equal(commandList[0].task_name, "queue-task");
+    assert.equal(commandList[0].type, "notify_manager");
+
+    const dryRun = runTypescriptRuntimeCommand({
+      args: [
+        "dispatch",
+        "--once",
+        "--type",
+        "notify_manager",
+        "--dispatcher-id",
+        "dispatch-cli-test",
+        "--path",
+        dbPath,
+        "--dry-run",
+        "--json",
+      ],
+      env: {},
+    });
+    assert.equal(dryRun.exitCode, 0);
+    const dryRunPayload = JSON.parse(dryRun.stdout ?? "{}") as {
+      processed: Array<{ command_id: string; state: string }>;
+      processed_count: number;
+    };
+    assert.equal(dryRunPayload.processed_count, 1);
+    assert.equal(dryRunPayload.processed[0]?.command_id, notifyPayload.command_id);
+    assert.equal(dryRunPayload.processed[0]?.state, "planned");
+
+    let verifyDb = openDatabaseSync(dbPath);
+    try {
+      const row = verifyDb.prepare("select state, attempts from commands where id = ?").get(notifyPayload.command_id) as {
+        attempts: number;
+        state: string;
+      };
+      const notifications = verifyDb.prepare("select count(*) as count from routed_notifications").get() as { count: number };
+      assert.deepEqual({ attempts: row.attempts, state: row.state }, { attempts: 0, state: "pending" });
+      assert.equal(notifications.count, 0);
+    } finally {
+      verifyDb.close();
+    }
+
+    const dispatched = runTypescriptRuntimeCommand({
+      args: [
+        "dispatch",
+        "--once",
+        "--type",
+        "notify_manager",
+        "--dispatcher-id",
+        "dispatch-cli-test",
+        "--lease-seconds",
+        "45",
+        "--path",
+        dbPath,
+        "--json",
+      ],
+      env: {},
+    });
+    assert.equal(dispatched.exitCode, 0);
+    const dispatchPayload = JSON.parse(dispatched.stdout ?? "{}") as {
+      processed: Array<{ delivery_mode: string; state: string; target_session: string }>;
+      processed_count: number;
+    };
+    assert.equal(dispatchPayload.processed_count, 1);
+    assert.deepEqual(dispatchPayload.processed[0], {
+      attempt_id: 1,
+      command_id: notifyPayload.command_id,
+      command_type: "notify_manager",
+      correlation_id: "corr-notify-cli",
+      delivery_mode: "pull_required",
+      dispatcher_id: "dispatch-cli-test",
+      dry_run: false,
+      notification_id: 1,
+      permission_check: null,
+      side_effect_completed: false,
+      side_effect_started: false,
+      state: "pull_required",
+      target_session: "manager-cli",
+    });
+
+    verifyDb = openDatabaseSync(dbPath);
+    try {
+      const command = verifyDb.prepare("select state, attempts, result_json from commands where id = ?").get(notifyPayload.command_id) as {
+        attempts: number;
+        result_json: string;
+        state: string;
+      };
+      const inbox = verifyDb.prepare(`
+        select rn.delivery_mode, rn.side_effect_started, rn.side_effect_completed, rn.state,
+               target.name as target_session_name
+        from routed_notifications rn
+        join sessions target on target.id = rn.target_session_id
+      `).get() as {
+        delivery_mode: string;
+        side_effect_completed: number;
+        side_effect_started: number;
+        state: string;
+        target_session_name: string;
+      };
+      assert.equal(command.state, "succeeded");
+      assert.equal(command.attempts, 1);
+      assert.equal(JSON.parse(command.result_json).notification_id, 1);
+      assert.deepEqual({
+        delivery_mode: inbox.delivery_mode,
+        side_effect_completed: Boolean(inbox.side_effect_completed),
+        side_effect_started: Boolean(inbox.side_effect_started),
+        state: inbox.state,
+        target_session_name: inbox.target_session_name,
+      }, {
+        delivery_mode: "pull_required",
+        side_effect_completed: false,
+        side_effect_started: false,
+        state: "delivered",
+        target_session_name: "manager-cli",
+      });
+    } finally {
+      verifyDb.close();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("TypeScript runtime default dispatch also routes worker completion signals", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-dispatch-completion-cli."));
+  try {
+    const dbPath = join(root, "workerctl.db");
+    const database = openDatabaseSync(dbPath);
+    try {
+      initializeDatabaseSync(database);
+      createTaskSync(database, {
+        goal: "Wake manager on completion.",
+        name: "completion-task",
+        now: "2026-05-23T10:00:00Z",
+        taskId: "task-completion-cli",
+      });
+      insertSession(database, { id: "session-worker-complete", name: "worker-complete", role: "worker" });
+      insertSession(database, { id: "session-manager-complete", name: "manager-complete", role: "manager" });
+      bindSessionsSync(database, {
+        bindingId: "binding-completion-cli",
+        managerSessionName: "manager-complete",
+        now: "2026-05-23T10:00:30Z",
+        taskName: "completion-task",
+        workerSessionName: "worker-complete",
+      });
+      database.prepare(`
+        insert into codex_events(
+          session_id, timestamp, type, subtype, payload_json, byte_offset, ingested_at
+        )
+        values (?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        "session-worker-complete",
+        "2026-05-23T10:02:00Z",
+        "event_msg",
+        "task_complete",
+        JSON.stringify({
+          completed_at: "2026-05-23T10:02:00Z",
+          duration_ms: 1200,
+          last_agent_message: "done",
+          turn_id: "turn-complete-cli",
+        }),
+        12,
+        "2026-05-23T10:02:01Z",
+      );
+    } finally {
+      database.close();
+    }
+
+    const dispatched = runTypescriptRuntimeCommand({
+      args: [
+        "dispatch",
+        "--once",
+        "--dispatcher-id",
+        "dispatch-completion-cli",
+        "--path",
+        dbPath,
+        "--json",
+      ],
+      env: {},
+      now: () => new Date("2026-05-23T10:03:00Z"),
+    });
+    assert.equal(dispatched.exitCode, 0);
+    assert.equal(dispatched.handled, true);
+    const dispatchPayload = JSON.parse(dispatched.stdout ?? "{}") as {
+      processed: Array<{
+        delivery_mode: string;
+        notification_id: number;
+        signal_type: string;
+        source_event_id: number;
+        state: string;
+        target_session: string;
+      }>;
+      processed_count: number;
+    };
+    assert.equal(dispatchPayload.processed_count, 1);
+    assert.deepEqual(dispatchPayload.processed[0], {
+      binding_id: "binding-completion-cli",
+      correlation_id: dispatchPayload.processed[0]?.correlation_id,
+      dedupe_key: "binding-completion-cli:worker_task_complete:session-worker-complete:1",
+      delivery_mode: "pull_required",
+      dry_run: false,
+      notification_id: 1,
+      signal_type: "worker_task_complete",
+      source_event_id: 1,
+      state: "pull_required",
+      target_session: "manager-complete",
+      task: "completion-task",
+    });
+
+    const verifyDb = openDatabaseSync(dbPath);
+    try {
+      const notification = verifyDb.prepare(`
+        select rn.state, rn.delivery_mode, rn.side_effect_started, rn.side_effect_completed,
+               rn.source_event_id, rn.source_event_timestamp, rn.dedupe_key, rn.payload_json,
+               target.name as target_session_name
+        from routed_notifications rn
+        join sessions target on target.id = rn.target_session_id
+      `).get() as {
+        dedupe_key: string;
+        delivery_mode: string;
+        payload_json: string;
+        side_effect_completed: number;
+        side_effect_started: number;
+        source_event_id: number;
+        source_event_timestamp: string;
+        state: string;
+        target_session_name: string;
+      };
+      const payload = JSON.parse(notification.payload_json) as {
+        delivery_mode: string;
+        signal: string;
+        worker_receipt: { last_agent_message: string; turn_id: string };
+      };
+      assert.deepEqual({
+        dedupe_key: notification.dedupe_key,
+        delivery_mode: notification.delivery_mode,
+        side_effect_completed: Boolean(notification.side_effect_completed),
+        side_effect_started: Boolean(notification.side_effect_started),
+        source_event_id: notification.source_event_id,
+        source_event_timestamp: notification.source_event_timestamp,
+        state: notification.state,
+        target_session_name: notification.target_session_name,
+      }, {
+        dedupe_key: "binding-completion-cli:worker_task_complete:session-worker-complete:1",
+        delivery_mode: "pull_required",
+        side_effect_completed: false,
+        side_effect_started: false,
+        source_event_id: 1,
+        source_event_timestamp: "2026-05-23T10:02:00Z",
+        state: "delivered",
+        target_session_name: "manager-complete",
+      });
+      assert.equal(payload.delivery_mode, "pull_required");
+      assert.equal(payload.signal, "worker_task_complete");
+      assert.deepEqual(payload.worker_receipt, {
+        completed_at: "2026-05-23T10:02:00Z",
+        duration_ms: 1200,
+        last_agent_message: "done",
+        source_event_id: 1,
+        source_event_timestamp: "2026-05-23T10:02:00Z",
+        source_session: "worker-complete",
+        time_to_first_token_ms: null,
+        turn_id: "turn-complete-cli",
+      });
+    } finally {
+      verifyDb.close();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("TypeScript runtime dispatch CLI records failed attempts for missing manager permission", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-dispatch-permission."));
+  try {
+    const dbPath = join(root, "workerctl.db");
+    const database = openDatabaseSync(dbPath);
+    try {
+      initializeDatabaseSync(database);
+      createTaskSync(database, {
+        goal: "Route dispatch queue.",
+        name: "permission-task",
+        now: "2026-05-23T10:00:00Z",
+        taskId: "task-permission-cli",
+      });
+      insertSession(database, { id: "session-worker", name: "worker-permission", role: "worker" });
+      insertSession(database, { id: "session-manager", name: "manager-permission", role: "manager" });
+      bindSessionsSync(database, {
+        bindingId: "binding-permission-cli",
+        managerSessionName: "manager-permission",
+        now: "2026-05-23T10:00:30Z",
+        taskName: "permission-task",
+        workerSessionName: "worker-permission",
+      });
+    } finally {
+      database.close();
+    }
+
+    const enqueued = runTypescriptRuntimeCommand({
+      args: [
+        "enqueue-nudge-worker",
+        "permission-task",
+        "--message",
+        "Clear context.",
+        "--required-permission",
+        "worker_compact_clear",
+        "--path",
+        dbPath,
+        "--json",
+      ],
+      env: {},
+    });
+    assert.equal(enqueued.exitCode, 0);
+    const enqueuedPayload = JSON.parse(enqueued.stdout ?? "{}") as { command_id: string };
+
+    const dispatched = runTypescriptRuntimeCommand({
+      args: [
+        "dispatch",
+        "--once",
+        "--type",
+        "nudge_worker",
+        "--dispatcher-id",
+        "dispatch-permission-cli",
+        "--path",
+        dbPath,
+        "--json",
+      ],
+      env: {},
+    });
+    assert.equal(dispatched.exitCode, 0);
+    const dispatchPayload = JSON.parse(dispatched.stdout ?? "{}") as {
+      processed: Array<{ error: string; state: string }>;
+    };
+    assert.equal(dispatchPayload.processed[0]?.state, "failed");
+    assert.match(dispatchPayload.processed[0]?.error ?? "", /manager permission required/);
+
+    const verifyDb = openDatabaseSync(dbPath);
+    try {
+      const command = verifyDb.prepare("select state, error from commands where id = ?").get(enqueuedPayload.command_id) as {
+        error: string;
+        state: string;
+      };
+      const attempt = verifyDb.prepare("select state, error, side_effect_started from command_attempts where command_id = ?").get(enqueuedPayload.command_id) as {
+        error: string;
+        side_effect_started: number;
+        state: string;
+      };
+      const events = verifyDb.prepare(`
+        select event_type, severity
+        from telemetry_events
+        where event_type in ('dispatch_command_permission_checked', 'dispatch_command_failed')
+        order by timestamp, event_type
+      `).all() as Array<{ event_type: string; severity: string }>;
+      assert.equal(command.state, "failed");
+      assert.match(command.error, /manager permission required/);
+      assert.equal(attempt.state, "failed");
+      assert.match(attempt.error, /manager permission required/);
+      assert.equal(Boolean(attempt.side_effect_started), false);
+      assert.deepEqual(events.map((row) => ({ event_type: row.event_type, severity: row.severity })), [
+        { event_type: "dispatch_command_failed", severity: "error" },
+        { event_type: "dispatch_command_permission_checked", severity: "warning" },
+      ]);
+    } finally {
+      verifyDb.close();
+    }
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
