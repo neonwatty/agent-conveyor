@@ -10,6 +10,15 @@ import { classifyBusyWait, classifyStartupOutput } from "../runtime/classify.js"
 import { exportTaskAuditSubsetSync } from "../runtime/export.js";
 import { ingestSessionSync } from "../runtime/ingest.js";
 import {
+  acceptanceCriteriaForTaskSync,
+  recordAdversarialLoopEvidenceSync,
+  recordLoopEvidenceSync,
+  recordVisualDiffLoopEvidenceSync,
+  type AcceptanceCriterionRecord,
+  type AcceptanceCriterionSource,
+  type AcceptanceCriterionStatus,
+} from "../runtime/loop-evidence.js";
+import {
   renderReplayText,
   replayResultFromAudit,
   type ReplayMode,
@@ -129,6 +138,7 @@ const VALID_WORKER_STATUS_STATES = new Set([
   "done",
   "unknown",
 ]);
+const RUN_STATUSES = new Set(["active", "finished", "failed", "abandoned"]);
 
 interface SpawnedCodexSessionDiscovery {
   cli_version?: string;
@@ -195,6 +205,18 @@ export function runTypescriptRuntimeCommand(options: TypescriptRuntimeOptions): 
     }
     if (parsed.command === "export-task") {
       return runExportTaskCommand(parsed, options);
+    }
+    if (parsed.command === "criteria") {
+      return runCriteriaCommand(parsed, options);
+    }
+    if (parsed.command === "criteria-plan") {
+      return runCriteriaPlanCommand(parsed, options);
+    }
+    if (parsed.command === "runs") {
+      return runRunsCommand(parsed, options);
+    }
+    if (parsed.command === "loop-evidence") {
+      return runLoopEvidenceCommand(parsed, options);
     }
     if (parsed.command === "tasks") {
       return runTasksCommand(parsed, options);
@@ -331,20 +353,35 @@ interface ParsedRuntimeArgs {
     includeLegacy: boolean;
     redactIdentityToken: boolean;
     active: boolean;
+    add: boolean;
     blocker: string | null;
     busyWaitSeconds: number;
+    candidate: string | null;
+    check: string | null;
     codexSession: string | null;
     create: string | null;
+    criterion: string | null;
     currentTask: string | null;
     currentIteration: number;
     cwd: string | null;
+    deferCriterion: number | null;
+    diffOutput: string | null;
     dryRun: boolean;
+    evidenceJson: string | null;
+    evidenceType: string | null;
     eventType: string | null;
     file: string | null;
+    finishRun: string | null;
+    fromText: string | null;
+    fromWorkerResponse: string | null;
+    fromStdin: boolean;
+    failureMode: string | null;
     goal: string | null;
     keepLatest: number;
+    list: boolean;
     lines: number;
     limit: number | null;
+    metadataJson: string | null;
     names: string[];
     nextAction: string | null;
     output: string | null;
@@ -353,25 +390,39 @@ interface ParsedRuntimeArgs {
     role: ReplayRole;
     roleProvided: boolean;
     refresh: boolean;
+    reference: string | null;
+    rejectCriterion: number | null;
+    reportOutput: string | null;
+    result: string | null;
     sessionRole: "manager" | "worker" | null;
     sessionState: "active" | "all" | "gone" | null;
+    showRun: string | null;
+    satisfyCriterion: number | null;
     statusAgeSeconds: number;
     statusState: string | null;
+    statuses: string[];
     statusStaleSeconds: number;
     subtype: string | null;
     summary: string | null;
+    source: string | null;
+    proof: string | null;
+    purpose: string | null;
+    rationale: string | null;
     taskName: string | null;
     terminal: TerminalChoice;
     text: string | null;
     terminalStaleSeconds: number;
+    threshold: number | null;
     tmuxSession: string | null;
     transcriptMode: TranscriptCaptureMode;
     requireSegment: boolean;
     worker: string | null;
+    acceptCriterion: number | null;
     manager: string | null;
     maxIterations: number | null;
     zip: boolean;
     requiredBeforeContinue: string[];
+    run: string | null;
     runName: string | null;
     seedPromptSha256: string | null;
     sessionDir: string | null;
@@ -459,20 +510,35 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
     includeLegacy: false,
     redactIdentityToken: false,
     active: false,
+    add: false,
     blocker: null,
     busyWaitSeconds: DEFAULT_BUSY_WAIT_SECONDS,
+    candidate: null,
+    check: null,
     codexSession: null,
     create: null,
+    criterion: null,
     currentTask: null,
     currentIteration: 1,
     cwd: null,
+    deferCriterion: null,
+    diffOutput: null,
     dryRun: false,
+    evidenceJson: null,
+    evidenceType: null,
     eventType: null,
+    failureMode: null,
     file: null,
+    finishRun: null,
+    fromStdin: false,
+    fromText: null,
+    fromWorkerResponse: null,
     goal: null,
     keepLatest: 20,
+    list: false,
     lines: DEFAULT_HISTORY_LINES,
     limit: null,
+    metadataJson: null,
     names: [],
     nextAction: null,
     output: null,
@@ -481,25 +547,39 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
     role: "all",
     roleProvided: false,
     refresh: true,
+    reference: null,
+    rejectCriterion: null,
+    reportOutput: null,
+    result: null,
     sessionRole: null,
     sessionState: null,
+    showRun: null,
+    satisfyCriterion: null,
     statusAgeSeconds: DEFAULT_BUSY_WAIT_SECONDS,
     statusState: null,
+    statuses: [],
     statusStaleSeconds: DEFAULT_STATUS_STALE_SECONDS,
     subtype: null,
     summary: null,
+    source: null,
+    proof: null,
+    purpose: null,
+    rationale: null,
     taskName: null,
     terminal: "auto",
     text: null,
     terminalStaleSeconds: DEFAULT_TERMINAL_STALE_SECONDS,
+    threshold: null,
     tmuxSession: null,
     transcriptMode: "segment",
     requireSegment: false,
     worker: null,
+    acceptCriterion: null,
     manager: null,
     maxIterations: null,
     zip: false,
     requiredBeforeContinue: [],
+    run: null,
     runName: null,
     seedPromptSha256: null,
     sessionDir: null,
@@ -603,6 +683,16 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       flags.all = true;
     } else if (arg === "--active") {
       flags.active = true;
+    } else if (arg === "--add") {
+      if (command !== "criteria") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --add", explicit, flags, passthroughArgs, task };
+      }
+      flags.add = true;
+    } else if (arg === "--list") {
+      if (command !== "criteria" && command !== "runs") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --list", explicit, flags, passthroughArgs, task };
+      }
+      flags.list = true;
     } else if (arg === "--include-legacy") {
       flags.includeLegacy = true;
     } else if (arg === "--redact-identity-token") {
@@ -782,12 +872,124 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       }
       flags.create = value.value;
       index += 1;
+    } else if (arg === "--show") {
+      if (command !== "runs") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --show", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.showRun = value.value;
+      index += 1;
+    } else if (arg === "--finish") {
+      if (command !== "runs") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --finish", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.finishRun = value.value;
+      index += 1;
     } else if (arg === "--goal") {
       const value = valueAfter(queue, index, arg);
       if (value.error) {
         return { command, enabled, error: value.error, explicit, flags, task };
       }
       flags.goal = value.value;
+      index += 1;
+    } else if (arg === "--criterion") {
+      if (command !== "criteria") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --criterion", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.criterion = value.value;
+      index += 1;
+    } else if (arg === "--source") {
+      if (command !== "criteria" && command !== "loop-evidence") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --source", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.source = value.value;
+      index += 1;
+    } else if (arg === "--proof") {
+      if (command !== "criteria" && command !== "loop-evidence") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --proof", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.proof = value.value;
+      index += 1;
+    } else if (arg === "--rationale") {
+      if (command !== "criteria") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --rationale", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.rationale = value.value;
+      index += 1;
+    } else if (arg === "--evidence-json") {
+      if (command !== "criteria") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --evidence-json", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.evidenceJson = value.value;
+      index += 1;
+    } else if (arg === "--metadata-json") {
+      if (command !== "runs" && command !== "loop-evidence") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --metadata-json", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.metadataJson = value.value;
+      index += 1;
+    } else if (arg === "--accept" || arg === "--satisfy" || arg === "--defer" || arg === "--reject") {
+      if (command !== "criteria") {
+        return { command, enabled, error: `Unsupported TypeScript runtime option: ${arg}`, explicit, flags, task };
+      }
+      const parsedValue = valueAfter(queue, index, arg);
+      if (parsedValue.error) {
+        return { command, enabled, error: parsedValue.error, explicit, flags, task };
+      }
+      const value = Number(parsedValue.value);
+      if (!Number.isInteger(value)) {
+        return { command, enabled, error: `${arg} must be an integer.`, explicit, flags, task };
+      }
+      if (arg === "--accept") {
+        flags.acceptCriterion = value;
+      } else if (arg === "--satisfy") {
+        flags.satisfyCriterion = value;
+      } else if (arg === "--defer") {
+        flags.deferCriterion = value;
+      } else {
+        flags.rejectCriterion = value;
+      }
+      index += 1;
+    } else if (arg === "--purpose") {
+      if (command !== "runs") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --purpose", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.purpose = value.value;
       index += 1;
     } else if (arg === "--name") {
       const value = valueAfter(queue, index, arg);
@@ -896,6 +1098,31 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       }
       flags.text = value.value;
       index += 1;
+    } else if (arg === "--from-text") {
+      if (command !== "criteria-plan") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --from-text", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.fromText = value.value;
+      index += 1;
+    } else if (arg === "--from-worker-response") {
+      if (command !== "criteria-plan") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --from-worker-response", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.fromWorkerResponse = value.value;
+      index += 1;
+    } else if (arg === "--from-stdin") {
+      if (command !== "criteria-plan") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --from-stdin", explicit, flags, task };
+      }
+      flags.fromStdin = true;
     } else if (arg === "--tmux-session") {
       const value = valueAfter(queue, index, arg);
       if (value.error) {
@@ -1278,6 +1505,20 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
         flags.sessionState = value;
       }
       index += 1;
+    } else if (arg === "--status") {
+      if (command !== "criteria" && command !== "runs" && command !== "loop-evidence") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --status", explicit, flags, task };
+      }
+      const parsedValue = valueAfter(queue, index, arg);
+      if (parsedValue.error) {
+        return { command, enabled, error: parsedValue.error, explicit, flags, task };
+      }
+      if (command === "criteria") {
+        flags.statuses.push(parsedValue.value);
+      } else {
+        flags.statusState = parsedValue.value;
+      }
+      index += 1;
     } else if (arg === "--type") {
       const value = valueAfter(queue, index, arg);
       if (value.error) {
@@ -1292,6 +1533,88 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
         flags.dispatchType = value.value;
       } else {
         flags.eventType = value.value;
+      }
+      index += 1;
+    } else if (arg === "--iteration") {
+      if (command !== "loop-evidence") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --iteration", explicit, flags, task };
+      }
+      const parsedValue = valueAfter(queue, index, arg);
+      if (parsedValue.error) {
+        return { command, enabled, error: parsedValue.error, explicit, flags, task };
+      }
+      const value = Number(parsedValue.value);
+      if (!Number.isInteger(value)) {
+        return { command, enabled, error: "--iteration must be an integer.", explicit, flags, task };
+      }
+      flags.currentIteration = value;
+      index += 1;
+    } else if (arg === "--evidence-type") {
+      if (command !== "loop-evidence") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --evidence-type", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.evidenceType = value.value;
+      index += 1;
+    } else if (arg === "--artifact-path") {
+      if (command !== "loop-evidence") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --artifact-path", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.output = value.value;
+      index += 1;
+    } else if (arg === "--reference" || arg === "--candidate" || arg === "--diff-output" || arg === "--report-output") {
+      if (command !== "loop-evidence") {
+        return { command, enabled, error: `Unsupported TypeScript runtime option: ${arg}`, explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      if (arg === "--reference") {
+        flags.reference = value.value;
+      } else if (arg === "--candidate") {
+        flags.candidate = value.value;
+      } else if (arg === "--diff-output") {
+        flags.diffOutput = value.value;
+      } else {
+        flags.reportOutput = value.value;
+      }
+      index += 1;
+    } else if (arg === "--threshold") {
+      if (command !== "loop-evidence") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --threshold", explicit, flags, task };
+      }
+      const parsedValue = valueAfter(queue, index, arg);
+      if (parsedValue.error) {
+        return { command, enabled, error: parsedValue.error, explicit, flags, task };
+      }
+      const value = Number(parsedValue.value);
+      if (!Number.isFinite(value)) {
+        return { command, enabled, error: "--threshold must be a number.", explicit, flags, task };
+      }
+      flags.threshold = value;
+      index += 1;
+    } else if (arg === "--failure-mode" || arg === "--check" || arg === "--result") {
+      if (command !== "loop-evidence") {
+        return { command, enabled, error: `Unsupported TypeScript runtime option: ${arg}`, explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      if (arg === "--failure-mode") {
+        flags.failureMode = value.value;
+      } else if (arg === "--check") {
+        flags.check = value.value;
+      } else {
+        flags.result = value.value;
       }
       index += 1;
     } else if (arg === "--required-permission") {
@@ -1315,7 +1638,12 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       flags.idempotencyKey = value.value;
       index += 1;
     } else if (arg === "--correlation-id") {
-      if (command !== "enqueue-notify-manager" && command !== "enqueue-nudge-worker" && command !== "enqueue-continue-iteration") {
+      if (
+        command !== "enqueue-notify-manager"
+        && command !== "enqueue-nudge-worker"
+        && command !== "enqueue-continue-iteration"
+        && command !== "loop-evidence"
+      ) {
         return { command, enabled, error: "Unsupported TypeScript runtime option: --correlation-id", explicit, flags, task };
       }
       const value = valueAfter(queue, index, arg);
@@ -1325,7 +1653,7 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       flags.correlationId = value.value;
       index += 1;
     } else if (arg === "--loop-run") {
-      if (command !== "enqueue-continue-iteration") {
+      if (command !== "enqueue-continue-iteration" && command !== "loop-evidence") {
         return { command, enabled, error: "Unsupported TypeScript runtime option: --loop-run", explicit, flags, task };
       }
       const value = valueAfter(queue, index, arg);
@@ -1600,6 +1928,11 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
         passthroughArgs.push(queue[index + 1]);
         index += 1;
       }
+    } else if (command === "loop-evidence" && flags.subtype === null) {
+      if (!["add", "visual-diff", "visual_diff", "adversarial-check", "adversarial_check"].includes(arg)) {
+        return { command, enabled, error: `Unsupported loop-evidence action: ${arg}`, explicit, flags, task };
+      }
+      flags.subtype = arg;
     } else if (task === null) {
       task = arg;
     } else if (command === "start") {
@@ -1681,6 +2014,291 @@ function runExportTaskCommand(
       ? resolve(parsed.flags.output)
       : join(stateRoot({ cwd: options.cwd, env: options.env }), "artifacts", "tasks", audit.task.id, "export");
     return jsonResult(exportTaskAuditSubsetSync(database, { outputDir, task }));
+  } finally {
+    database.close();
+  }
+}
+
+function runCriteriaCommand(
+  parsed: ParsedRuntimeArgs,
+  options: { cwd?: string; env?: NodeJS.ProcessEnv },
+): TypescriptRuntimeResult {
+  const unsupported = unsupportedMigratedProofCliOptions(parsed);
+  if (unsupported) {
+    return unsupportedRuntimeResult(parsed, unsupported);
+  }
+  const actionCount = [
+    parsed.flags.list,
+    parsed.flags.add,
+    parsed.flags.acceptCriterion !== null,
+    parsed.flags.satisfyCriterion !== null,
+    parsed.flags.deferCriterion !== null,
+    parsed.flags.rejectCriterion !== null,
+  ].filter(Boolean).length;
+  if (actionCount !== 1) {
+    return unsupportedRuntimeResult(parsed, "criteria requires exactly one action: --list, --add, --accept, --satisfy, --defer, or --reject.");
+  }
+  const taskName = requireTask(parsed);
+  const evidence = jsonObjectArg(parsed.flags.evidenceJson, "--evidence-json");
+  const database = openRuntimeDatabase(parsed, options);
+  let criteriaMutation = false;
+  try {
+    const taskRow = taskRowForLifecycle(database, taskName);
+    if (taskRow === null) {
+      throw new Error(`Unknown task: ${taskName}`);
+    }
+    let affected: AcceptanceCriterionRecord | null = null;
+    if (parsed.flags.add) {
+      if (!parsed.flags.criterion) {
+        return errorResult("--criterion is required with criteria --add");
+      }
+      if (!parsed.flags.source) {
+        return errorResult("--source is required with criteria --add");
+      }
+      if (parsed.flags.statuses.length > 1) {
+        return errorResult("criteria --add accepts at most one --status");
+      }
+      const status = parseCriterionStatus(parsed.flags.statuses[0] ?? "proposed");
+      const source = parseCriterionSource(parsed.flags.source);
+      beginImmediateSync(database);
+      criteriaMutation = true;
+      affected = insertAcceptanceCriterionFromCliSync(database, {
+        criterion: parsed.flags.criterion,
+        evidence,
+        proof: parsed.flags.proof,
+        rationale: parsed.flags.rationale,
+        source,
+        status,
+        taskId: taskRow.id,
+      });
+    } else if (!parsed.flags.list) {
+      if (parsed.flags.statuses.length > 0) {
+        return errorResult("--status is only supported with criteria --list or --add");
+      }
+      const transition = criteriaTransition(parsed);
+      if (transition === null) {
+        return errorResult("criteria update requires --accept, --satisfy, --defer, or --reject.");
+      }
+      beginImmediateSync(database);
+      criteriaMutation = true;
+      affected = updateAcceptanceCriterionFromCliSync(database, {
+        criterionId: transition.criterionId,
+        evidence: parsed.flags.evidenceJson === null ? null : evidence,
+        proof: parsed.flags.proof,
+        rationale: parsed.flags.rationale,
+        status: transition.status,
+        taskId: taskRow.id,
+        taskName: taskRow.name,
+      });
+    }
+    const statuses = parsed.flags.list && parsed.flags.statuses.length > 0
+      ? parsed.flags.statuses.map(parseCriterionStatus)
+      : undefined;
+    const result = jsonResult(criteriaResponseSync(database, { affected, statuses, task: taskRow }));
+    if (criteriaMutation) {
+      database.exec("COMMIT");
+      criteriaMutation = false;
+    }
+    return result;
+  } catch (error) {
+    if (criteriaMutation) {
+      rollbackSync(database);
+    }
+    throw error;
+  } finally {
+    database.close();
+  }
+}
+
+function runCriteriaPlanCommand(
+  parsed: ParsedRuntimeArgs,
+  options: { cwd?: string; env?: NodeJS.ProcessEnv },
+): TypescriptRuntimeResult {
+  const inputCount = [
+    parsed.flags.fromText !== null,
+    parsed.flags.fromWorkerResponse !== null,
+    parsed.flags.fromStdin,
+  ].filter(Boolean).length;
+  if (inputCount !== 1) {
+    return unsupportedRuntimeResult(parsed, "criteria-plan requires exactly one of --from-text, --from-worker-response, or --from-stdin.");
+  }
+  if (parsed.flags.fromStdin) {
+    return unsupportedRuntimeResult(parsed, "criteria-plan --from-stdin is handled by the Python runtime until CLI stdin plumbing is migrated.");
+  }
+  const taskName = requireTask(parsed);
+  const database = openRuntimeDatabase(parsed, options);
+  try {
+    const taskRow = taskRowForLifecycle(database, taskName);
+    if (taskRow === null) {
+      throw new Error(`Unknown task: ${taskName}`);
+    }
+    const text = parsed.flags.fromText ?? readFileSync(resolve(expandUserPath(parsed.flags.fromWorkerResponse ?? "")), "utf8");
+    const result = planCriteriaCommands(taskRow.name, text, {
+      path: parsed.flags.path ? resolve(expandUserPath(parsed.flags.path)) : null,
+    });
+    if (parsed.flags.json) {
+      return jsonResult(result);
+    }
+    return { exitCode: 0, handled: true, stdout: renderCriteriaPlanText(result) };
+  } finally {
+    database.close();
+  }
+}
+
+function runRunsCommand(
+  parsed: ParsedRuntimeArgs,
+  options: { cwd?: string; env?: NodeJS.ProcessEnv },
+): TypescriptRuntimeResult {
+  const unsupported = unsupportedMigratedProofCliOptions(parsed);
+  if (unsupported) {
+    return unsupportedRuntimeResult(parsed, unsupported);
+  }
+  const actionCount = [
+    parsed.flags.create !== null,
+    parsed.flags.list,
+    parsed.flags.showRun !== null,
+    parsed.flags.finishRun !== null,
+  ].filter(Boolean).length;
+  if (actionCount !== 1) {
+    return unsupportedRuntimeResult(parsed, "runs requires exactly one action: --create, --list, --show, or --finish.");
+  }
+  const database = openRuntimeDatabase(parsed, options);
+  try {
+    if (parsed.flags.create !== null) {
+      const task = taskRowForLifecycle(database, parsed.flags.create);
+      if (task === null) {
+        throw new Error(`Unknown task: ${parsed.flags.create}`);
+      }
+      const metadata = jsonObjectArg(parsed.flags.metadataJson, "--metadata-json");
+      const purpose = parsed.flags.purpose;
+      if (purpose === "ralph_loop" || metadata.kind === "ralph_loop") {
+        if (!("max_iterations" in metadata)) {
+          throw new Error("ralph_loop run metadata requires max_iterations");
+        }
+        const maxIterations = integerMetadataField(metadata.max_iterations, "ralph_loop run metadata requires integer max_iterations and current_iteration");
+        const currentIteration = integerMetadataField(metadata.current_iteration ?? 0, "ralph_loop run metadata requires integer max_iterations and current_iteration");
+        validateRalphLoopIterationPolicy({ currentIteration, maxIterations });
+        const required = metadata.required_before_continue;
+        if (required !== undefined && !Array.isArray(required)) {
+          throw new Error("ralph_loop run metadata required_before_continue must be a JSON array");
+        }
+        const run = createRalphLoopRunSync(database, {
+          cleanupPolicy: typeof metadata.cleanup_policy === "string" ? metadata.cleanup_policy : null,
+          currentIteration,
+          maxIterations,
+          metadata,
+          preset: typeof metadata.preset === "string" ? metadata.preset : null,
+          requiredBeforeContinue: requiredBeforeContinueMetadataList(metadata.required_before_continue),
+          runName: parsed.flags.names[0] ?? null,
+          seedPromptSha256: typeof metadata.seed_prompt_sha256 === "string" ? metadata.seed_prompt_sha256 : null,
+          stopConditions: asStringArray(metadata.stop_conditions),
+          taskId: task.id,
+          taskName: task.name,
+        });
+        return jsonResult(run);
+      }
+      return jsonResult(createRunFromCliSync(database, {
+        metadata,
+        name: parsed.flags.names[0] ?? null,
+        purpose,
+        task,
+      }));
+    }
+    if (parsed.flags.showRun !== null) {
+      return jsonResult(runRowSync(database, parsed.flags.showRun));
+    }
+    if (parsed.flags.finishRun !== null) {
+      return jsonResult(finishRunFromCliSync(database, {
+        run: parsed.flags.finishRun,
+        status: parsed.flags.statusState ?? "finished",
+      }));
+    }
+    const taskId = parsed.flags.taskName ? taskIdForTask(database, parsed.flags.taskName) : null;
+    if (parsed.flags.statusState !== null && !RUN_STATUSES.has(parsed.flags.statusState)) {
+      throw new Error(`invalid run status: ${parsed.flags.statusState}; expected one of: ${[...RUN_STATUSES].join(", ")}`);
+    }
+    return jsonResult(listRunsFromCliSync(database, {
+      status: parsed.flags.statusState,
+      taskId,
+    }));
+  } finally {
+    database.close();
+  }
+}
+
+function runLoopEvidenceCommand(
+  parsed: ParsedRuntimeArgs,
+  options: { cwd?: string; env?: NodeJS.ProcessEnv },
+): TypescriptRuntimeResult {
+  const unsupported = unsupportedMigratedProofCliOptions(parsed);
+  if (unsupported) {
+    return unsupportedRuntimeResult(parsed, unsupported);
+  }
+  const action = parsed.flags.subtype;
+  if (!action) {
+    return unsupportedRuntimeResult(parsed, "loop-evidence requires an action: add, visual-diff, or adversarial-check.");
+  }
+  const task = requireTask(parsed);
+  if (!parsed.flags.loopRun) {
+    return errorResult("--loop-run is required.");
+  }
+  const source = parseCriterionSource(parsed.flags.source ?? "manager_inferred");
+  const database = openRuntimeDatabase(parsed, options);
+  try {
+    if (action === "add") {
+      if (!parsed.flags.evidenceType) {
+        return errorResult("--evidence-type is required.");
+      }
+      const result = recordLoopEvidenceSync(database, {
+        artifactPath: parsed.flags.output,
+        correlationId: parsed.flags.correlationId,
+        evidenceType: parsed.flags.evidenceType,
+        iteration: parsed.flags.currentIteration,
+        loopRunId: parsed.flags.loopRun,
+        metadata: jsonObjectArg(parsed.flags.metadataJson, "--metadata-json"),
+        proof: parsed.flags.proof,
+        source,
+        status: parsed.flags.statusState ?? "pass",
+        task,
+      });
+      return jsonResult(result);
+    }
+    if (action === "adversarial-check" || action === "adversarial_check") {
+      const result = recordAdversarialLoopEvidenceSync(database, {
+        artifactPath: parsed.flags.output,
+        check: parsed.flags.check ?? "",
+        correlationId: parsed.flags.correlationId,
+        failureMode: parsed.flags.failureMode ?? "",
+        iteration: parsed.flags.currentIteration,
+        loopRunId: parsed.flags.loopRun,
+        result: parsed.flags.result ?? "",
+        source,
+        status: parsed.flags.statusState ?? "pass",
+        task,
+      });
+      return jsonResult(result);
+    }
+    if (action === "visual-diff" || action === "visual_diff") {
+      if (parsed.flags.statusState !== null) {
+        return errorResult("loop-evidence visual-diff does not support --status.");
+      }
+      if (!parsed.flags.reference || !parsed.flags.candidate || parsed.flags.threshold === null) {
+        return errorResult("loop-evidence visual-diff requires --reference, --candidate, and --threshold.");
+      }
+      return jsonResult(recordVisualDiffLoopEvidenceSync(database, {
+        candidatePath: resolve(expandUserPath(parsed.flags.candidate)),
+        correlationId: parsed.flags.correlationId,
+        diffOutput: parsed.flags.diffOutput ? resolve(expandUserPath(parsed.flags.diffOutput)) : null,
+        iteration: parsed.flags.currentIteration,
+        loopRunId: parsed.flags.loopRun,
+        referencePath: resolve(expandUserPath(parsed.flags.reference)),
+        reportOutput: parsed.flags.reportOutput ? resolve(expandUserPath(parsed.flags.reportOutput)) : null,
+        source,
+        task,
+        threshold: parsed.flags.threshold,
+      }));
+    }
+    return unsupportedRuntimeResult(parsed, `Unsupported loop-evidence action: ${action}`);
   } finally {
     database.close();
   }
@@ -5402,6 +6020,572 @@ function integerValue(value: unknown): number | null {
   return null;
 }
 
+function integerMetadataField(value: unknown, message: string): number {
+  const parsed = integerValue(value);
+  if (parsed === null) {
+    throw new Error(message);
+  }
+  return parsed;
+}
+
+function beginImmediateSync(database: ReturnType<typeof openRuntimeDatabase>): void {
+  database.exec("BEGIN IMMEDIATE");
+}
+
+function rollbackSync(database: ReturnType<typeof openRuntimeDatabase>): void {
+  try {
+    database.exec("ROLLBACK");
+  } catch {
+    // Preserve the primary criteria mutation error.
+  }
+}
+
+function jsonObjectArg(value: string | null, flag: string): Record<string, unknown> {
+  if (!value) {
+    return {};
+  }
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (isPlainRecord(parsed)) {
+      return parsed;
+    }
+  } catch (error) {
+    throw new Error(`${flag} must be valid JSON: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
+  }
+  throw new Error(`${flag} must be a JSON object`);
+}
+
+function parseCriterionStatus(status: string): AcceptanceCriterionStatus {
+  if (["accepted", "deferred", "proposed", "rejected", "satisfied"].includes(status)) {
+    return status as AcceptanceCriterionStatus;
+  }
+  throw new Error(`Invalid acceptance criterion status: ${status}`);
+}
+
+function parseCriterionSource(source: string): AcceptanceCriterionSource {
+  if (["final_audit", "manager_inferred", "user_requested", "worker_proposed"].includes(source)) {
+    return source as AcceptanceCriterionSource;
+  }
+  throw new Error(`Invalid acceptance criterion source: ${source}`);
+}
+
+function criteriaTransition(parsed: ParsedRuntimeArgs): { criterionId: number; status: AcceptanceCriterionStatus } | null {
+  if (parsed.flags.acceptCriterion !== null) {
+    return { criterionId: parsed.flags.acceptCriterion, status: "accepted" };
+  }
+  if (parsed.flags.satisfyCriterion !== null) {
+    return { criterionId: parsed.flags.satisfyCriterion, status: "satisfied" };
+  }
+  if (parsed.flags.deferCriterion !== null) {
+    return { criterionId: parsed.flags.deferCriterion, status: "deferred" };
+  }
+  if (parsed.flags.rejectCriterion !== null) {
+    return { criterionId: parsed.flags.rejectCriterion, status: "rejected" };
+  }
+  return null;
+}
+
+function criteriaResponseSync(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  options: {
+    affected: AcceptanceCriterionRecord | null;
+    statuses?: AcceptanceCriterionStatus[];
+    task: LifecycleTaskRow;
+  },
+): Record<string, unknown> {
+  const allCriteria = acceptanceCriteriaForTaskSync(database, { taskId: options.task.id });
+  const criteria = options.statuses === undefined
+    ? allCriteria
+    : acceptanceCriteriaForTaskSync(database, { statuses: options.statuses, taskId: options.task.id });
+  const response: Record<string, unknown> = {
+    criteria,
+    summary: criteriaSummary(allCriteria),
+    task: { id: options.task.id, name: options.task.name },
+  };
+  if (options.affected !== null) {
+    response.affected_criterion = options.affected;
+  }
+  return response;
+}
+
+function criteriaSummary(criteria: AcceptanceCriterionRecord[]): Record<AcceptanceCriterionStatus, number> {
+  const summary: Record<AcceptanceCriterionStatus, number> = {
+    accepted: 0,
+    deferred: 0,
+    proposed: 0,
+    rejected: 0,
+    satisfied: 0,
+  };
+  for (const criterion of criteria) {
+    summary[criterion.status] += 1;
+  }
+  return summary;
+}
+
+function insertAcceptanceCriterionFromCliSync(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  options: {
+    criterion: string;
+    evidence: Record<string, unknown>;
+    proof: string | null;
+    rationale: string | null;
+    source: AcceptanceCriterionSource;
+    status: AcceptanceCriterionStatus;
+    taskId: string;
+  },
+): AcceptanceCriterionRecord {
+  const existing = database.prepare(`
+    select id
+    from acceptance_criteria
+    where task_id = ? and source = ? and criterion = ?
+  `).get(options.taskId, options.source, options.criterion) as { id: number } | undefined;
+  if (existing) {
+    return criterionByIdSync(database, existing.id);
+  }
+  const timestamp = new Date().toISOString();
+  const result = database.prepare(`
+    insert into acceptance_criteria(
+      task_id, criterion, status, source, proof, rationale,
+      evidence_json, created_at, updated_at
+    )
+    values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    options.taskId,
+    options.criterion,
+    options.status,
+    options.source,
+    options.proof,
+    options.rationale,
+    stableJson(options.evidence),
+    timestamp,
+    timestamp,
+  );
+  const criterion = criterionByIdSync(database, Number(result.lastInsertRowid));
+  insertEventSync(database, {
+    payload: acceptanceCriterionEventPayload(criterion, { created: true, taskId: options.taskId }),
+    taskId: options.taskId,
+    type: "acceptance_criterion_added",
+  });
+  insertWorkerctlTelemetrySync(database, {
+    attributes: {
+      criterion: options.criterion,
+      has_evidence: Object.keys(options.evidence).length > 0,
+      has_proof: options.proof !== null,
+      status: options.status,
+    },
+    correlation: { criterion_id: criterion.id, source: options.source },
+    eventType: "acceptance_criterion_added",
+    severity: "info",
+    summary: "Added acceptance criterion.",
+    taskId: options.taskId,
+    timestamp,
+  });
+  return criterion;
+}
+
+function updateAcceptanceCriterionFromCliSync(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  options: {
+    criterionId: number;
+    evidence: Record<string, unknown> | null;
+    proof: string | null;
+    rationale: string | null;
+    status: AcceptanceCriterionStatus;
+    taskId: string;
+    taskName: string;
+  },
+): AcceptanceCriterionRecord {
+  const existing = criterionByIdForTaskSync(database, options.criterionId, options.taskId, options.taskName);
+  const timestamp = new Date().toISOString();
+  database.prepare(`
+    update acceptance_criteria
+    set status = ?,
+        evidence_json = ?,
+        proof = ?,
+        rationale = ?,
+        updated_at = ?
+    where id = ?
+  `).run(
+    options.status,
+    stableJson(options.evidence ?? existing.evidence),
+    options.proof ?? existing.proof,
+    options.rationale ?? existing.rationale,
+    timestamp,
+    options.criterionId,
+  );
+  const criterion = criterionByIdSync(database, options.criterionId);
+  insertEventSync(database, {
+    payload: acceptanceCriterionEventPayload(criterion, { previous: existing, taskId: options.taskId }),
+    taskId: options.taskId,
+    type: "acceptance_criterion_updated",
+  });
+  insertWorkerctlTelemetrySync(database, {
+    attributes: {
+      criterion: criterion.criterion,
+      has_evidence: Object.keys(criterion.evidence).length > 0,
+      has_proof: criterion.proof !== null,
+      previous_status: existing.status,
+      status: criterion.status,
+    },
+    correlation: { criterion_id: criterion.id, source: criterion.source },
+    eventType: "acceptance_criterion_updated",
+    severity: "info",
+    summary: "Updated acceptance criterion.",
+    taskId: options.taskId,
+    timestamp,
+  });
+  return criterion;
+}
+
+function criterionByIdForTaskSync(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  criterionId: number,
+  taskId: string,
+  taskName: string,
+): AcceptanceCriterionRecord {
+  const existing = acceptanceCriteriaForTaskSync(database, { taskId })
+    .find((criterion) => criterion.id === criterionId);
+  if (!existing) {
+    throw new Error(`Unknown acceptance criterion for task ${taskName}: ${criterionId}`);
+  }
+  return existing;
+}
+
+function criterionByIdSync(database: ReturnType<typeof openRuntimeDatabase>, criterionId: number): AcceptanceCriterionRecord {
+  const row = database.prepare(`
+    select id, task_id, criterion, status, source, proof, rationale,
+           evidence_json, created_at, updated_at
+    from acceptance_criteria
+    where id = ?
+  `).get(criterionId) as {
+    created_at: string;
+    criterion: string;
+    evidence_json: string;
+    id: number;
+    proof: string | null;
+    rationale: string | null;
+    source: AcceptanceCriterionSource;
+    status: AcceptanceCriterionStatus;
+    task_id: string;
+    updated_at: string;
+  } | undefined;
+  if (!row) {
+    throw new Error(`Unknown acceptance criterion: ${criterionId}`);
+  }
+  return {
+    created_at: row.created_at,
+    criterion: row.criterion,
+    evidence: parseJsonObject(row.evidence_json),
+    id: row.id,
+    proof: row.proof,
+    rationale: row.rationale,
+    source: row.source,
+    status: row.status,
+    task_id: row.task_id,
+    updated_at: row.updated_at,
+  };
+}
+
+function acceptanceCriterionEventPayload(
+  criterion: AcceptanceCriterionRecord,
+  options: {
+    created?: boolean;
+    previous?: AcceptanceCriterionRecord;
+    taskId: string;
+  },
+): Record<string, unknown> {
+  const payload: Record<string, unknown> = {
+    criterion: criterion.criterion,
+    criterion_id: criterion.id,
+    evidence: criterion.evidence,
+    proof: criterion.proof,
+    rationale: criterion.rationale,
+    source: criterion.source,
+    status: criterion.status,
+    task_id: options.taskId,
+  };
+  if (options.created !== undefined) {
+    payload.created = options.created;
+  }
+  if (options.previous) {
+    payload.previous_evidence = options.previous.evidence;
+    payload.previous_proof = options.previous.proof;
+    payload.previous_rationale = options.previous.rationale;
+    payload.previous_status = options.previous.status;
+  }
+  return payload;
+}
+
+function createRunFromCliSync(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  options: {
+    metadata: Record<string, unknown>;
+    name: string | null;
+    purpose: string | null;
+    task: LifecycleTaskRow;
+  },
+): RalphLoopRunRow {
+  const active = database.prepare(`
+    select id
+    from runs
+    where task_id = ? and status = 'active'
+    order by started_at desc, id desc
+    limit 1
+  `).get(options.task.id) as { id: string } | undefined;
+  if (active) {
+    throw new Error(`task ${JSON.stringify(options.task.name)} already has active run ${JSON.stringify(active.id)}`);
+  }
+  const timestamp = new Date().toISOString();
+  const runId = `run-${randomUUID()}`;
+  const name = options.name ?? `${options.task.name}-${timestamp.replace(/:/g, "").replace(/\./g, "-")}`;
+  database.prepare(`
+    insert into runs(id, task_id, name, purpose, status, started_at, ended_at, metadata_json)
+    values (?, ?, ?, ?, 'active', ?, null, ?)
+  `).run(runId, options.task.id, name, options.purpose, timestamp, stableJson(options.metadata));
+  return runRowSync(database, runId);
+}
+
+function finishRunFromCliSync(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  options: {
+    run: string;
+    status: string;
+  },
+): RalphLoopRunRow {
+  if (!["finished", "failed", "abandoned"].includes(options.status)) {
+    throw new Error("run finish status must be one of: finished, failed, abandoned");
+  }
+  const current = runRowSync(database, options.run);
+  const timestamp = new Date().toISOString();
+  database.prepare("update runs set status = ?, ended_at = ? where id = ?")
+    .run(options.status, timestamp, current.id);
+  insertWorkerctlTelemetrySync(database, {
+    attributes: { status: options.status },
+    correlation: { run_id: current.id, run_name: current.name },
+    eventType: "run_finished",
+    runId: current.id,
+    severity: options.status === "failed" ? "error" : "info",
+    summary: `Run ${current.name} marked ${options.status}.`,
+    timestamp,
+  });
+  return runRowSync(database, current.id);
+}
+
+function listRunsFromCliSync(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  options: {
+    status: string | null;
+    taskId: string | null;
+  },
+): RalphLoopRunRow[] {
+  const clauses: string[] = [];
+  const params: string[] = [];
+  if (options.taskId !== null) {
+    clauses.push("task_id = ?");
+    params.push(options.taskId);
+  }
+  if (options.status !== null) {
+    clauses.push("status = ?");
+    params.push(options.status);
+  }
+  const where = clauses.length > 0 ? `where ${clauses.join(" and ")}` : "";
+  const rows = database.prepare(`
+    select id
+    from runs
+    ${where}
+    order by started_at desc, id desc
+  `).all(...params) as Array<{ id: string }>;
+  return rows.map((row) => runRowSync(database, row.id));
+}
+
+function insertWorkerctlTelemetrySync(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  options: {
+    attributes: Record<string, unknown>;
+    correlation: Record<string, unknown>;
+    eventType: string;
+    runId?: string | null;
+    severity: "debug" | "error" | "info" | "warning";
+    summary: string;
+    taskId?: string | null;
+    timestamp: string;
+  },
+): void {
+  const eventId = `telemetry-${randomUUID()}`;
+  const attributesJson = stableJson(options.attributes);
+  database.prepare(`
+    insert into telemetry_events(
+      id, run_id, task_id, timestamp, actor, event_type, severity,
+      summary, correlation_json, attributes_json
+    )
+    values (?, ?, ?, ?, 'workerctl', ?, ?, ?, ?, ?)
+  `).run(
+    eventId,
+    options.runId ?? null,
+    options.taskId ?? null,
+    options.timestamp,
+    options.eventType,
+    options.severity,
+    options.summary,
+    stableJson(options.correlation),
+    attributesJson,
+  );
+  database.prepare(`
+    insert into telemetry_events_fts(
+      event_id, task_id, run_id, actor, event_type, summary, attributes
+    )
+    values (?, ?, ?, 'workerctl', ?, ?, ?)
+  `).run(eventId, options.taskId ?? null, options.runId ?? null, options.eventType, options.summary, attributesJson);
+}
+
+interface CriteriaSuggestion {
+  criterion: string;
+  rationale: string | null;
+  source: "worker_proposed";
+  status: "accepted" | "deferred";
+}
+
+const DEFAULT_DEFERRED_RATIONALE = "Follow-up after this QA slice.";
+const ACCEPTED_HEADING_RE = /\b(must[- ]?have|current[- ]?task|accepted)\b/i;
+const DEFERRED_HEADING_RE = /\b(follow[- ]?up|deferred)\b/i;
+const LIST_ITEM_RE = /^\s*(?:[-*+]|\d+[.)]|\[[ xX]\])\s+(?<text>.+?)\s*$/;
+const EMPTY_ITEM_RE = /^(?:n\/?a|none|no follow[- ]?ups?|no deferred(?: criteria)?|nothing)$/i;
+const INDENTED_CONTINUATION_RE = /^\s+\S/;
+
+function planCriteriaCommands(task: string, text: string, options: { path: string | null }): Record<string, unknown> {
+  const { suggestions, warnings } = parseWorkerCriteriaResponse(text);
+  return {
+    suggestions: suggestions.map((suggestion) => ({
+      ...suggestion,
+      command: suggestionToArgv(task, suggestion, options),
+    })),
+    task,
+    warnings,
+  };
+}
+
+function parseWorkerCriteriaResponse(text: string): { suggestions: CriteriaSuggestion[]; warnings: string[] } {
+  const suggestions: CriteriaSuggestion[] = [];
+  const warnings: string[] = [];
+  let currentStatus: "accepted" | "deferred" | null = null;
+  let activeItemParts: string[] = [];
+  let activeItemStatus: "accepted" | "deferred" | null = null;
+  let sawHeading = false;
+
+  const flushActiveItem = () => {
+    if (activeItemStatus !== null) {
+      const suggestion = makeCriteriaSuggestion(activeItemParts.join(" "), activeItemStatus);
+      if (suggestion !== null) {
+        suggestions.push(suggestion);
+      }
+    }
+    activeItemParts = [];
+    activeItemStatus = null;
+  };
+
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line) {
+      flushActiveItem();
+      continue;
+    }
+    const listItem = LIST_ITEM_RE.exec(rawLine);
+    if (listItem?.groups?.text && currentStatus !== null) {
+      flushActiveItem();
+      activeItemParts = [listItem.groups.text];
+      activeItemStatus = currentStatus;
+      continue;
+    }
+    if (activeItemStatus !== null && INDENTED_CONTINUATION_RE.test(rawLine)) {
+      activeItemParts.push(line);
+      continue;
+    }
+    const heading = headingStatus(line);
+    if (heading !== null) {
+      flushActiveItem();
+      currentStatus = heading;
+      sawHeading = true;
+      continue;
+    }
+    flushActiveItem();
+  }
+  flushActiveItem();
+
+  if (!sawHeading) {
+    warnings.push(
+      "No clear must-have/current-task or follow-up/deferred headings found. Ask the worker to separate current-task criteria from deferred follow-ups.",
+    );
+  } else if (suggestions.length === 0) {
+    warnings.push("Clear criteria headings were found, but no bullet or numbered criteria items were detected.");
+  }
+  return { suggestions, warnings };
+}
+
+function headingStatus(line: string): "accepted" | "deferred" | null {
+  const cleaned = line.trim().replace(/^#+/, "").trim().replace(/:$/, "").trim();
+  if (!cleaned) {
+    return null;
+  }
+  if (DEFERRED_HEADING_RE.test(cleaned)) {
+    return "deferred";
+  }
+  if (ACCEPTED_HEADING_RE.test(cleaned)) {
+    return "accepted";
+  }
+  return null;
+}
+
+function makeCriteriaSuggestion(text: string, status: "accepted" | "deferred"): CriteriaSuggestion | null {
+  const criterion = text.trim().replace(/^`|`$/g, "").replace(/\s+/g, " ");
+  if (!criterion || EMPTY_ITEM_RE.test(criterion.replace(/\.$/, ""))) {
+    return null;
+  }
+  return {
+    criterion,
+    rationale: status === "deferred" ? DEFAULT_DEFERRED_RATIONALE : null,
+    source: "worker_proposed",
+    status,
+  };
+}
+
+function suggestionToArgv(task: string, suggestion: CriteriaSuggestion, options: { path: string | null }): string[] {
+  const argv = [
+    "conveyor",
+    "criteria",
+    task,
+    "--add",
+    "--criterion",
+    suggestion.criterion,
+    "--source",
+    suggestion.source,
+    "--status",
+    suggestion.status,
+  ];
+  if (suggestion.rationale) {
+    argv.push("--rationale", suggestion.rationale);
+  }
+  if (options.path) {
+    argv.push("--path", options.path);
+  }
+  return argv;
+}
+
+function renderCriteriaPlanText(result: Record<string, unknown>): string {
+  const task = String(result.task ?? "");
+  const suggestions = Array.isArray(result.suggestions) ? result.suggestions : [];
+  const warnings = Array.isArray(result.warnings) ? result.warnings : [];
+  const lines = [`Suggested criteria commands for ${task}`];
+  for (const suggestion of suggestions) {
+    if (isPlainRecord(suggestion) && Array.isArray(suggestion.command)) {
+      lines.push(suggestion.command.map((part) => shellQuote(String(part))).join(" "));
+    }
+  }
+  for (const warning of warnings) {
+    lines.push(`warning: ${String(warning)}`);
+  }
+  return `${lines.join("\n")}\n`;
+}
+
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -5421,7 +6605,7 @@ function openRuntimeDatabase(
 }
 
 function runtimeDbPath(parsed: ParsedRuntimeArgs, options: { cwd?: string; env?: NodeJS.ProcessEnv }): string {
-  return resolve(parsed.flags.path ?? defaultDbPath({ cwd: options.cwd, env: options.env }));
+  return resolve(expandUserPath(parsed.flags.path ?? defaultDbPath({ cwd: options.cwd, env: options.env })));
 }
 
 function requireTask(parsed: ParsedRuntimeArgs): string {
@@ -5434,6 +6618,10 @@ function requireTask(parsed: ParsedRuntimeArgs): string {
 function isDefaultRuntimeCommand(command: string | null): boolean {
   return (
     command === "audit"
+    || command === "criteria"
+    || command === "criteria-plan"
+    || command === "runs"
+    || command === "loop-evidence"
     || command === "start"
     || command === "create"
     || command === "start-test"
@@ -5534,6 +6722,13 @@ function unsupportedRuntimeResult(parsed: ParsedRuntimeArgs, message: string): T
     return { exitCode: 0, handled: false };
   }
   return errorResult(message);
+}
+
+function unsupportedMigratedProofCliOptions(parsed: ParsedRuntimeArgs): string | null {
+  if (parsed.flags.dryRun) {
+    return `Unsupported TypeScript runtime option for ${parsed.command}.`;
+  }
+  return null;
 }
 
 function unsupportedCommandsOptions(parsed: ParsedRuntimeArgs): string | null {
@@ -7171,7 +8366,7 @@ function templateDisposablePolicyMetadata(options: {
 function createRalphLoopRunSync(
   database: ReturnType<typeof openRuntimeDatabase>,
   options: {
-    cleanupPolicy: string;
+    cleanupPolicy: string | null;
     currentIteration: number;
     maxIterations: number;
     metadata: Record<string, unknown>;
@@ -7184,19 +8379,18 @@ function createRalphLoopRunSync(
     taskName: string;
   },
 ): RalphLoopRunRow {
-  const active = database.prepare(`
-    select id
-    from runs
-    where task_id = ? and status = 'active'
-    order by started_at desc, id desc
-    limit 1
-  `).get(options.taskId) as { id: string } | undefined;
-  if (active) {
-    throw new Error(`task ${JSON.stringify(options.taskName)} already has active run ${JSON.stringify(active.id)}`);
+  validateRalphLoopIterationPolicy({
+    currentIteration: options.currentIteration,
+    maxIterations: options.maxIterations,
+  });
+  for (const evidence of options.requiredBeforeContinue) {
+    if (!evidence.trim()) {
+      throw new Error("required_before_continue entries must be non-empty strings");
+    }
   }
   const timestamp = new Date().toISOString();
   const runId = `run-${randomUUID()}`;
-  const runName = options.runName ?? `${options.taskName}-${timestamp.replace(/:/g, "").replace(/\./g, "-")}`;
+  const runName = options.runName ?? `${options.taskName}-ralph-loop-${timestamp.replace(/:/g, "").replace(/\./g, "-")}`;
   const metadata = {
     ...options.metadata,
     cleanup_policy: options.cleanupPolicy,
@@ -7354,14 +8548,61 @@ function asStringArray(value: unknown): string[] {
   return value.filter((item): item is string => typeof item === "string");
 }
 
+function validateRalphLoopIterationPolicy(options: {
+  currentIteration: number;
+  maxIterations: number;
+}): void {
+  if (options.maxIterations < 1) {
+    throw new Error("max_iterations must be at least 1");
+  }
+  if (options.currentIteration < 0) {
+    throw new Error("current_iteration must be non-negative");
+  }
+  if (options.currentIteration > options.maxIterations) {
+    throw new Error("current_iteration must not exceed max_iterations");
+  }
+}
+
+function requiredBeforeContinueMetadataList(value: unknown): string[] {
+  if (value === undefined) {
+    return [];
+  }
+  if (!Array.isArray(value)) {
+    throw new Error("ralph_loop run metadata required_before_continue must be a JSON array");
+  }
+  const result: string[] = [];
+  for (const item of value) {
+    if (typeof item !== "string" || !item.trim()) {
+      throw new Error("required_before_continue entries must be non-empty strings");
+    }
+    result.push(item.trim());
+  }
+  return result;
+}
+
 function runRowSync(database: ReturnType<typeof openRuntimeDatabase>, run: string): RalphLoopRunRow {
-  const row = database.prepare(`
+  const exact = database.prepare(`
     select id, task_id, name, purpose, status, started_at, ended_at, metadata_json
     from runs
-    where id = ? or name = ?
+    where id = ?
+    limit 1
+  `).get(run) as {
+    ended_at: string | null;
+    id: string;
+    metadata_json: string;
+    name: string;
+    purpose: string | null;
+    started_at: string;
+    status: "abandoned" | "active" | "failed" | "finished";
+    task_id: string;
+  } | undefined;
+  const row = exact ?? database.prepare(`
+    select id, task_id, name, purpose, status, started_at, ended_at, metadata_json
+    from runs
+    where name = ?
     order by started_at desc, id desc
     limit 1
-  `).get(run, run) as {
+  `).get(run) as {
     ended_at: string | null;
     id: string;
     metadata_json: string;
