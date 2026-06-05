@@ -1661,6 +1661,529 @@ test("TypeScript runtime handles session-backed stop and marks the registered se
   }
 });
 
+test("TypeScript runtime pair dry-run keeps Python default dispatch and accepts json", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-pair-dry-run."));
+  try {
+    const dbPath = join(root, "workerctl.db");
+    const result = runTypescriptRuntimeCommand({
+      args: [
+        "pair",
+        "--task",
+        "pair-task",
+        "--worker-name",
+        "pair-worker",
+        "--manager-name",
+        "pair-manager",
+        "--path",
+        dbPath,
+        "--dry-run",
+        "--json",
+      ],
+      env: {},
+    });
+
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.equal(result.handled, true);
+    const payload = JSON.parse(result.stdout ?? "{}") as {
+      dispatch_command: string[];
+      ensure_dispatch: boolean;
+      manager: string;
+      task: string;
+      worker: string;
+    };
+    assert.equal(payload.ensure_dispatch, true);
+    assert.equal(payload.manager, "pair-manager");
+    assert.equal(payload.task, "pair-task");
+    assert.equal(payload.worker, "pair-worker");
+    assert.deepEqual(payload.dispatch_command.slice(0, 4), [
+      join(process.cwd(), "scripts", "workerctl"),
+      "dispatch",
+      "--watch",
+      "--dispatcher-id",
+    ]);
+    assert.ok(payload.dispatch_command.includes("dispatch-pair"));
+    assert.ok(payload.dispatch_command.includes(dbPath));
+
+    const withoutDispatch = runTypescriptRuntimeCommand({
+      args: [
+        "pair",
+        "--task",
+        "pair-task",
+        "--worker-name",
+        "pair-worker",
+        "--manager-name",
+        "pair-manager",
+        "--path",
+        dbPath,
+        "--dry-run",
+        "--no-dispatch",
+      ],
+      env: {},
+    });
+    assert.equal(withoutDispatch.exitCode, 0, withoutDispatch.stderr);
+    const withoutDispatchPayload = JSON.parse(withoutDispatch.stdout ?? "{}") as {
+      dispatch_command: string[] | null;
+      ensure_dispatch: boolean;
+    };
+    assert.equal(withoutDispatchPayload.ensure_dispatch, false);
+    assert.equal(withoutDispatchPayload.dispatch_command, null);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("TypeScript runtime handles pair spawn bind run and dispatch with fake runners", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-pair."));
+  const calls: string[][] = [];
+  const dispatches: Array<{ command: string[]; cwd: string }> = [];
+  const runner: TmuxRunner = (args) => {
+    calls.push(args);
+    if (args.join(" ") === "tmux has-session -t codex-pair-worker") {
+      return { status: 1, stderr: "no worker session" };
+    }
+    if (args.join(" ") === "tmux has-session -t codex-pair-manager") {
+      return { status: 1, stderr: "no manager session" };
+    }
+    return { status: 0, stdout: "" };
+  };
+  try {
+    const dbPath = join(root, "workerctl.db");
+    const rolloutDir = join(root, ".codex", "sessions", "2026");
+    mkdirSync(rolloutDir, { recursive: true });
+    const workerRollout = join(rolloutDir, "rollout-worker.jsonl");
+    const managerRollout = join(rolloutDir, "rollout-manager.jsonl");
+    writeFileSync(workerRollout, `${JSON.stringify({
+      payload: { cwd: "/repo", id: "codex-worker", originator: "codex-tui" },
+      type: "session_meta",
+    })}\n`);
+    writeFileSync(managerRollout, `${JSON.stringify({
+      payload: { cwd: "/repo", id: "codex-manager", originator: "codex-tui" },
+      type: "session_meta",
+    })}\n`);
+
+    const result = runTypescriptRuntimeCommand({
+      args: [
+        "pair",
+        "--task",
+        "pair-task",
+        "--worker-name",
+        "pair-worker",
+        "--manager-name",
+        "pair-manager",
+        "--task-goal",
+        "Build a thing",
+        "--task-prompt",
+        "Do the worker part",
+        "--manager-permit",
+        "verification.run_pytest",
+        "--manager-tool",
+        "verification.run_tests",
+        "--manager-tool",
+        "verification.run_tests",
+        "--manager-epilogue",
+        "draft-pr",
+        "--manager-epilogue",
+        "draft-pr",
+        "--manager-nudge-on-completion",
+        "auto-proceed",
+        "--manager-require-acks",
+        "--manager-allow-pr",
+        "--manager-allow-merge-green",
+        "--manager-allow-worker-compact-clear",
+        "--manager-permissions-json",
+        JSON.stringify({ context: ["fetch_prs"], "repo.push_branch": true }),
+        "--dispatcher-id",
+        "dispatch-pair-test",
+        "--cwd",
+        "/repo",
+        "--path",
+        dbPath,
+        "--timeout-seconds",
+        "9",
+        "--accept-trust",
+      ],
+      codexCommandResolver: () => "codex",
+      cwd: root,
+      discoverSpawnedCodexSession: (options) => {
+        assert.equal(options.acceptTrust, true);
+        assert.equal(options.timeoutSeconds, 9);
+        if (options.tmuxSessionName === "codex-pair-worker") {
+          return {
+            codex_session_id: "codex-worker",
+            codex_session_path: workerRollout,
+            cwd: "/repo",
+            native_pid: 11111,
+            originator: "codex-tui",
+          };
+        }
+        assert.equal(options.tmuxSessionName, "codex-pair-manager");
+        return {
+          codex_session_id: "codex-manager",
+          codex_session_path: managerRollout,
+          cwd: "/repo",
+          native_pid: 22222,
+          originator: "codex-tui",
+        };
+      },
+      dispatchRunner: (command: string[], options: { cwd: string }) => {
+        dispatches.push({ command, cwd: options.cwd });
+        return { pid: 33333 };
+      },
+      env: {},
+      tmuxRunner: runner,
+    });
+
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.equal(result.handled, true);
+    const payload = JSON.parse(result.stdout ?? "{}") as {
+      binding_id: string;
+      dispatch: { command: string[]; ensure: boolean; pid: number; started: boolean };
+      dispatch_command: string[];
+      ensure_dispatch: boolean;
+      manager: { name: string; pid: number; role: string; tmux_session: string };
+      manager_config_seeded: boolean;
+      manager_config_seeded_by_pair: boolean;
+      run_id: string;
+      task: { created: boolean; id: string; name: string };
+      worker: { name: string; pid: number; role: string; tmux_session: string };
+    };
+    assert.equal(payload.task.name, "pair-task");
+    assert.equal(payload.task.created, true);
+    assert.match(payload.task.id, /^task-/);
+    assert.equal(payload.worker.name, "pair-worker");
+    assert.equal(payload.worker.role, "worker");
+    assert.equal(payload.worker.pid, 11111);
+    assert.equal(payload.worker.tmux_session, "codex-pair-worker");
+    assert.equal(payload.manager.name, "pair-manager");
+    assert.equal(payload.manager.role, "manager");
+    assert.equal(payload.manager.pid, 22222);
+    assert.equal(payload.manager.tmux_session, "codex-pair-manager");
+    assert.match(payload.binding_id, /^binding-/);
+    assert.match(payload.run_id, /^run-/);
+    assert.equal(payload.manager_config_seeded, true);
+    assert.equal(payload.manager_config_seeded_by_pair, true);
+    assert.equal(payload.ensure_dispatch, true);
+    assert.equal(payload.dispatch.ensure, true);
+    assert.equal(payload.dispatch.started, true);
+    assert.equal(payload.dispatch.pid, 33333);
+    assert.deepEqual(payload.dispatch.command, payload.dispatch_command);
+    assert.deepEqual(dispatches, [{
+      command: payload.dispatch_command,
+      cwd: process.cwd(),
+    }]);
+    assert.deepEqual(payload.dispatch_command.slice(0, 4), [
+      join(process.cwd(), "scripts", "workerctl"),
+      "dispatch",
+      "--watch",
+      "--dispatcher-id",
+    ]);
+    assert.ok(payload.dispatch_command.includes("dispatch-pair-test"));
+    assert.ok(payload.dispatch_command.includes("--path"));
+    assert.ok(payload.dispatch_command.includes(dbPath));
+
+    assert.deepEqual(calls.filter((args) => args[0] === "tmux" && args[1] === "send-keys"), [
+      ["tmux", "send-keys", "-t", "codex-pair-worker", "Enter"],
+      ["tmux", "send-keys", "-t", "codex-pair-manager", "Enter"],
+    ]);
+    const workerShell = calls.find((args) => args[1] === "new-session" && args.includes("codex-pair-worker"))?.at(-1) ?? "";
+    const managerShell = calls.find((args) => args[1] === "new-session" && args.includes("codex-pair-manager"))?.at(-1) ?? "";
+    assert.match(workerShell, /Do the worker part/);
+    assert.match(workerShell, /worker-ack pair-task --from-stdin/);
+    assert.match(managerShell, /You are a Codex manager session/);
+    assert.match(managerShell, /Task: pair-task/);
+    assert.match(managerShell, /Task goal: Build a thing/);
+    assert.match(managerShell, /Worker session: pair-worker/);
+    assert.match(managerShell, /Manager config has already been recorded/);
+
+    const database = openDatabaseSync(dbPath);
+    try {
+      const task = database.prepare("select id, name, goal from tasks where name = ?")
+        .get("pair-task") as { goal: string; id: string; name: string };
+      assert.equal(task.id, payload.task.id);
+      assert.equal(task.goal, "Build a thing");
+      const binding = database.prepare("select task_id, state from bindings where id = ?")
+        .get(payload.binding_id) as { state: string; task_id: string };
+      assert.equal(binding.task_id, payload.task.id);
+      assert.equal(binding.state, "active");
+      const run = database.prepare("select task_id, status, metadata_json from runs where id = ?")
+        .get(payload.run_id) as { metadata_json: string; status: string; task_id: string };
+      assert.equal(run.task_id, payload.task.id);
+      assert.equal(run.status, "active");
+      assert.deepEqual(JSON.parse(run.metadata_json), {
+        binding_id: payload.binding_id,
+        manager: "pair-manager",
+        manager_config_seeded: true,
+        manager_config_seeded_by_pair: true,
+        source: "pair",
+        worker: "pair-worker",
+      });
+      const managerConfig = database.prepare(`
+        select permissions_json, tools_json, epilogues_json, nudge_on_completion, require_acks
+        from manager_configs
+        where task_id = ?
+      `).get(payload.task.id) as {
+        epilogues_json: string;
+        nudge_on_completion: string;
+        permissions_json: string;
+        require_acks: number;
+        tools_json: string;
+      };
+      assert.deepEqual(JSON.parse(managerConfig.permissions_json), {
+        communication: [],
+        context: ["fetch_prs"],
+        repo: ["merge_green_pr", "open_pr", "push_branch"],
+        verification: ["run_pytest"],
+        worker_session: ["clear", "compact"],
+      });
+      assert.deepEqual(JSON.parse(managerConfig.tools_json), ["verification.run_tests"]);
+      assert.deepEqual(JSON.parse(managerConfig.epilogues_json), ["draft-pr"]);
+      assert.equal(managerConfig.nudge_on_completion, "auto-proceed");
+      assert.equal(managerConfig.require_acks, 1);
+      const eventTypes = database.prepare("select event_type from telemetry_events where task_id = ? order by rowid")
+        .all(payload.task.id)
+        .map((row) => (row as { event_type: string }).event_type);
+      assert.deepEqual(eventTypes, [
+        "pair_started",
+        "pair_task_resolved",
+        "pair_manager_config_seeded",
+        "pair_worker_spawned",
+        "pair_manager_spawned",
+        "pair_binding_created",
+        "pair_run_created",
+      ]);
+    } finally {
+      database.close();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("TypeScript runtime records pair failure telemetry after partial spawn", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-pair-failure."));
+  const calls: string[][] = [];
+  const runner: TmuxRunner = (args) => {
+    calls.push(args);
+    if (args.join(" ") === "tmux has-session -t codex-pair-worker") {
+      return { status: 1, stderr: "no worker session" };
+    }
+    if (args.join(" ") === "tmux has-session -t codex-pair-manager") {
+      return { status: 1, stderr: "no manager session" };
+    }
+    return { status: 0, stdout: "" };
+  };
+  try {
+    const dbPath = join(root, "workerctl.db");
+    const rolloutDir = join(root, ".codex", "sessions", "2026");
+    mkdirSync(rolloutDir, { recursive: true });
+    const workerRollout = join(rolloutDir, "rollout-worker.jsonl");
+    writeFileSync(workerRollout, `${JSON.stringify({
+      payload: { cwd: "/repo", id: "codex-worker", originator: "codex-tui" },
+      type: "session_meta",
+    })}\n`);
+
+    const result = runTypescriptRuntimeCommand({
+      args: [
+        "pair",
+        "--task",
+        "pair-task",
+        "--worker-name",
+        "pair-worker",
+        "--manager-name",
+        "pair-manager",
+        "--task-goal",
+        "Build a thing",
+        "--cwd",
+        "/repo",
+        "--path",
+        dbPath,
+      ],
+      codexCommandResolver: () => "codex",
+      cwd: root,
+      discoverSpawnedCodexSession: (options) => {
+        assert.equal(options.timeoutSeconds, 60);
+        if (options.tmuxSessionName === "codex-pair-worker") {
+          return {
+            codex_session_id: "codex-worker",
+            codex_session_path: workerRollout,
+            cwd: "/repo",
+            native_pid: 11111,
+            originator: "codex-tui",
+          };
+        }
+        throw new Error("manager rollout did not appear");
+      },
+      env: {},
+      tmuxRunner: runner,
+    });
+
+    assert.equal(result.exitCode, 1);
+    assert.match(result.stderr ?? "", /manager rollout did not appear/);
+    assert.equal(calls.filter((args) => args[1] === "new-session").length, 2);
+
+    const database = openDatabaseSync(dbPath);
+    try {
+      const task = database.prepare("select id from tasks where name = ?").get("pair-task") as { id: string };
+      const sessions = database.prepare("select name, role from sessions order by registered_at")
+        .all() as Array<{ name: string; role: string }>;
+      assert.deepEqual(sessions.map((session) => `${session.role}:${session.name}`), ["worker:pair-worker"]);
+      const events = database.prepare(`
+        select event_type, severity, attributes_json
+        from telemetry_events
+        where task_id = ?
+        order by rowid
+      `).all(task.id) as Array<{ attributes_json: string; event_type: string; severity: string }>;
+      assert.deepEqual(events.map((event) => event.event_type), [
+        "pair_started",
+        "pair_task_resolved",
+        "pair_manager_config_seeded",
+        "pair_worker_spawned",
+        "pair_failed",
+      ]);
+      const failure = events.at(-1);
+      const failureAttributes = JSON.parse(failure?.attributes_json ?? "{}") as Record<string, unknown>;
+      assert.equal(failure?.severity, "error");
+      assert.deepEqual(failureAttributes, {
+        binding_created: false,
+        error: failureAttributes.error,
+        error_type: "Error",
+        manager_spawned: false,
+        run_created: false,
+        worker_spawned: true,
+      });
+      assert.match(String(failureAttributes.error), /manager rollout did not appear/);
+    } finally {
+      database.close();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("TypeScript runtime pair reuses a recent matching dispatch heartbeat", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-pair-heartbeat."));
+  const calls: string[][] = [];
+  const dispatches: string[][] = [];
+  const runner: TmuxRunner = (args) => {
+    calls.push(args);
+    if (args.join(" ") === "tmux has-session -t codex-pair-worker") {
+      return { status: 1, stderr: "no worker session" };
+    }
+    if (args.join(" ") === "tmux has-session -t codex-pair-manager") {
+      return { status: 1, stderr: "no manager session" };
+    }
+    return { status: 0, stdout: "" };
+  };
+  try {
+    const dbPath = join(root, "workerctl.db");
+    const rolloutDir = join(root, ".codex", "sessions", "2026");
+    mkdirSync(rolloutDir, { recursive: true });
+    const workerRollout = join(rolloutDir, "rollout-worker.jsonl");
+    const managerRollout = join(rolloutDir, "rollout-manager.jsonl");
+    writeFileSync(workerRollout, `${JSON.stringify({
+      payload: { cwd: "/repo", id: "codex-worker", originator: "codex-tui" },
+      type: "session_meta",
+    })}\n`);
+    writeFileSync(managerRollout, `${JSON.stringify({
+      payload: { cwd: "/repo", id: "codex-manager", originator: "codex-tui" },
+      type: "session_meta",
+    })}\n`);
+
+    const database = openDatabaseSync(dbPath);
+    try {
+      initializeDatabaseSync(database);
+      database.prepare(`
+        insert into telemetry_events(
+          id, run_id, task_id, timestamp, actor, event_type, severity,
+          summary, correlation_json, attributes_json
+        )
+        values (?, null, null, ?, 'dispatch', 'dispatch_watch_heartbeat', 'info', ?, ?, ?)
+      `).run(
+        "heartbeat-pair",
+        "2026-06-04T12:00:00.000Z",
+        "Dispatch watch heartbeat.",
+        JSON.stringify({ dispatcher_id: "dispatch-pair-test", iteration: 12 }),
+        JSON.stringify({ dry_run: false, processed_count: 0 }),
+      );
+      database.prepare(`
+        insert into telemetry_events(
+          id, run_id, task_id, timestamp, actor, event_type, severity,
+          summary, correlation_json, attributes_json
+        )
+        values (?, null, null, ?, 'dispatch', 'dispatch_watch_heartbeat', 'info', ?, ?, ?)
+      `).run(
+        "heartbeat-other",
+        "2026-06-04T12:00:04.000Z",
+        "Dispatch watch heartbeat.",
+        JSON.stringify({ dispatcher_id: "other-dispatcher", iteration: 99 }),
+        JSON.stringify({ dry_run: false, processed_count: 0 }),
+      );
+    } finally {
+      database.close();
+    }
+
+    const result = runTypescriptRuntimeCommand({
+      args: [
+        "pair",
+        "--task",
+        "pair-task",
+        "--worker-name",
+        "pair-worker",
+        "--manager-name",
+        "pair-manager",
+        "--task-goal",
+        "Build a thing",
+        "--dispatcher-id",
+        "dispatch-pair-test",
+        "--cwd",
+        "/repo",
+        "--path",
+        dbPath,
+      ],
+      codexCommandResolver: () => "codex",
+      cwd: root,
+      discoverSpawnedCodexSession: (options) => {
+        if (options.tmuxSessionName === "codex-pair-worker") {
+          return {
+            codex_session_id: "codex-worker",
+            codex_session_path: workerRollout,
+            cwd: "/repo",
+            native_pid: 11111,
+            originator: "codex-tui",
+          };
+        }
+        return {
+          codex_session_id: "codex-manager",
+          codex_session_path: managerRollout,
+          cwd: "/repo",
+          native_pid: 22222,
+          originator: "codex-tui",
+        };
+      },
+      dispatchRunner: (command) => {
+        dispatches.push(command);
+        return { pid: 33333 };
+      },
+      env: {},
+      now: () => new Date("2026-06-04T12:00:05.000Z"),
+      tmuxRunner: runner,
+    });
+
+    assert.equal(result.exitCode, 0, result.stderr);
+    const payload = JSON.parse(result.stdout ?? "{}") as {
+      dispatch: { ensure: boolean; pid: number | null; started: boolean };
+      ensure_dispatch: boolean;
+    };
+    assert.equal(payload.ensure_dispatch, true);
+    assert.equal(payload.dispatch.ensure, true);
+    assert.equal(payload.dispatch.started, false);
+    assert.equal(payload.dispatch.pid, null);
+    assert.deepEqual(dispatches, []);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("TypeScript runtime default start-worker discovery polls process tree before register", () => {
   const root = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-start-discovery."));
   const calls: string[][] = [];

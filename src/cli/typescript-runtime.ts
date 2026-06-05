@@ -1,7 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { taskAuditSync } from "../runtime/audit.js";
 import { classifyBusyWait, classifyStartupOutput } from "../runtime/classify.js";
@@ -26,6 +27,11 @@ import {
   sessionRow,
 } from "../runtime/codex-session.js";
 import { managerConfigSync, type ManagerConfigRecord } from "../runtime/manager-config.js";
+import {
+  normalizeManagerPermissions,
+  type ManagerPermissionCategory,
+  type ManagerPermissions,
+} from "../runtime/manager-permissions.js";
 import {
   activeBindingForTaskSync,
   bindSessionsSync,
@@ -113,6 +119,7 @@ type TypescriptRuntimeOptions = {
   codexCommandResolver?: (name: string) => string | null;
   cwd?: string;
   discoverSpawnedCodexSession?: (options: SpawnedCodexSessionDiscoveryOptions) => SpawnedCodexSessionDiscovery;
+  dispatchRunner?: (command: string[], options: { cwd: string }) => { pid: number | null };
   env?: NodeJS.ProcessEnv;
   childrenForPid?: (pid: number) => number[];
   lsofForPid?: (pid: number) => string;
@@ -188,6 +195,9 @@ export function runTypescriptRuntimeCommand(options: TypescriptRuntimeOptions): 
     }
     if (parsed.command === "stop") {
       return runStopCommand(parsed, options);
+    }
+    if (parsed.command === "pair") {
+      return runPairCommand(parsed, options);
     }
     if (parsed.command === "register-worker") {
       return runRegisterSessionCommand(parsed, options, "worker");
@@ -328,6 +338,26 @@ interface ParsedRuntimeArgs {
     acceptTrust: boolean;
     askForApproval: string | null;
     codexProfile: string | null;
+    dispatcherId: string | null;
+    managerAllowMergeGreen: boolean;
+    managerAllowPr: boolean;
+    managerAllowWorkerCompactClear: boolean;
+    managerAcceptance: string[];
+    managerEpilogue: string[];
+    managerGuideline: string[];
+    managerMode: string | null;
+    managerName: string | null;
+    managerNudgeOnCompletion: string | null;
+    managerObjective: string | null;
+    managerPermissionsJson: string | null;
+    managerPermit: string[];
+    managerReference: string[];
+    managerRequireAcks: boolean;
+    managerTool: string[];
+    noDispatch: boolean;
+    taskPrompt: string | null;
+    taskSummary: string | null;
+    workerName: string | null;
   };
   defaultRuntime?: boolean;
   explicit: boolean;
@@ -413,6 +443,26 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
     acceptTrust: false,
     askForApproval: null,
     codexProfile: null,
+    dispatcherId: null,
+    managerAllowMergeGreen: false,
+    managerAllowPr: false,
+    managerAllowWorkerCompactClear: false,
+    managerAcceptance: [],
+    managerEpilogue: [],
+    managerGuideline: [],
+    managerMode: null,
+    managerName: null,
+    managerNudgeOnCompletion: null,
+    managerObjective: null,
+    managerPermissionsJson: null,
+    managerPermit: [],
+    managerReference: [],
+    managerRequireAcks: false,
+    managerTool: [],
+    noDispatch: false,
+    taskPrompt: null,
+    taskSummary: null,
+    workerName: null,
   };
   const queue = [...args];
   let explicit = false;
@@ -423,6 +473,10 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
     queue.shift();
   }
   const command = queue.shift() ?? null;
+  if (command === "pair") {
+    flags.dispatcherId = "dispatch-pair";
+    flags.timeoutSeconds = 60;
+  }
   let task: string | null = null;
   for (let index = 0; index < queue.length; index += 1) {
     const arg = queue[index];
@@ -466,10 +520,15 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       flags.terminal = value;
       index += 1;
     } else if (arg === "--accept-trust") {
-      if (command !== "start-worker" && command !== "start-manager") {
+      if (command !== "start-worker" && command !== "start-manager" && command !== "pair") {
         return { command, enabled, error: "Unsupported TypeScript runtime option: --accept-trust", explicit, flags, task };
       }
       flags.acceptTrust = true;
+    } else if (arg === "--no-dispatch") {
+      if (command !== "pair") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --no-dispatch", explicit, flags, task };
+      }
+      flags.noDispatch = true;
     } else if (arg === "--stop-manager") {
       if (command !== "finish-task") {
         return { command, enabled, error: "Unsupported TypeScript runtime option: --stop-manager", explicit, flags, task };
@@ -591,7 +650,7 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       flags.cwd = value.value;
       index += 1;
     } else if (arg === "--sandbox") {
-      if (command !== "start-worker" && command !== "start-manager") {
+      if (command !== "start-worker" && command !== "start-manager" && command !== "pair") {
         return { command, enabled, error: "Unsupported TypeScript runtime option: --sandbox", explicit, flags, task };
       }
       const value = valueAfter(queue, index, arg);
@@ -601,7 +660,7 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       flags.sandbox = value.value;
       index += 1;
     } else if (arg === "--ask-for-approval") {
-      if (command !== "start-worker" && command !== "start-manager") {
+      if (command !== "start-worker" && command !== "start-manager" && command !== "pair") {
         return { command, enabled, error: "Unsupported TypeScript runtime option: --ask-for-approval", explicit, flags, task };
       }
       const value = valueAfter(queue, index, arg);
@@ -611,7 +670,7 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       flags.askForApproval = value.value;
       index += 1;
     } else if (arg === "--codex-profile") {
-      if (command !== "start-worker" && command !== "start-manager") {
+      if (command !== "start-worker" && command !== "start-manager" && command !== "pair") {
         return { command, enabled, error: "Unsupported TypeScript runtime option: --codex-profile", explicit, flags, task };
       }
       const value = valueAfter(queue, index, arg);
@@ -687,7 +746,7 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       flags.taskName = value.value;
       index += 1;
     } else if (arg === "--task-goal") {
-      if (command !== "start-manager") {
+      if (command !== "start-manager" && command !== "pair") {
         return { command, enabled, error: "Unsupported TypeScript runtime option: --task-goal", explicit, flags, task };
       }
       const value = valueAfter(queue, index, arg);
@@ -695,6 +754,176 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
         return { command, enabled, error: value.error, explicit, flags, task };
       }
       flags.taskGoal = value.value;
+      index += 1;
+    } else if (arg === "--task-prompt") {
+      if (command !== "pair") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --task-prompt", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.taskPrompt = value.value;
+      index += 1;
+    } else if (arg === "--task-summary") {
+      if (command !== "pair") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --task-summary", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.taskSummary = value.value;
+      index += 1;
+    } else if (arg === "--worker-name") {
+      if (command !== "pair") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --worker-name", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.workerName = value.value;
+      index += 1;
+    } else if (arg === "--manager-name") {
+      if (command !== "pair") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --manager-name", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.managerName = value.value;
+      index += 1;
+    } else if (arg === "--dispatcher-id") {
+      if (command !== "pair") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --dispatcher-id", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.dispatcherId = value.value;
+      index += 1;
+    } else if (arg === "--manager-mode") {
+      if (command !== "pair") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --manager-mode", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.managerMode = value.value;
+      index += 1;
+    } else if (arg === "--manager-objective") {
+      if (command !== "pair") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --manager-objective", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.managerObjective = value.value;
+      index += 1;
+    } else if (arg === "--manager-guideline") {
+      if (command !== "pair") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --manager-guideline", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.managerGuideline.push(value.value);
+      index += 1;
+    } else if (arg === "--manager-acceptance") {
+      if (command !== "pair") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --manager-acceptance", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.managerAcceptance.push(value.value);
+      index += 1;
+    } else if (arg === "--manager-reference") {
+      if (command !== "pair") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --manager-reference", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.managerReference.push(value.value);
+      index += 1;
+    } else if (arg === "--manager-permit") {
+      if (command !== "pair") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --manager-permit", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.managerPermit.push(value.value);
+      index += 1;
+    } else if (arg === "--manager-tool") {
+      if (command !== "pair") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --manager-tool", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.managerTool.push(value.value);
+      index += 1;
+    } else if (arg === "--manager-epilogue") {
+      if (command !== "pair") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --manager-epilogue", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.managerEpilogue.push(value.value);
+      index += 1;
+    } else if (arg === "--manager-nudge-on-completion") {
+      if (command !== "pair") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --manager-nudge-on-completion", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.managerNudgeOnCompletion = value.value;
+      index += 1;
+    } else if (arg === "--manager-require-acks") {
+      if (command !== "pair") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --manager-require-acks", explicit, flags, task };
+      }
+      flags.managerRequireAcks = true;
+    } else if (arg === "--manager-allow-pr") {
+      if (command !== "pair") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --manager-allow-pr", explicit, flags, task };
+      }
+      flags.managerAllowPr = true;
+    } else if (arg === "--manager-allow-merge-green") {
+      if (command !== "pair") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --manager-allow-merge-green", explicit, flags, task };
+      }
+      flags.managerAllowMergeGreen = true;
+    } else if (arg === "--manager-allow-worker-compact-clear") {
+      if (command !== "pair") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --manager-allow-worker-compact-clear", explicit, flags, task };
+      }
+      flags.managerAllowWorkerCompactClear = true;
+    } else if (arg === "--manager-permissions-json") {
+      if (command !== "pair") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --manager-permissions-json", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.managerPermissionsJson = value.value;
       index += 1;
     } else if (arg === "--worker") {
       const value = valueAfter(queue, index, arg);
@@ -1008,7 +1237,7 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       flags.currentIteration = value;
       index += 1;
     } else if (arg === "--timeout-seconds") {
-      if (command !== "start-worker" && command !== "start-manager") {
+      if (command !== "start-worker" && command !== "start-manager" && command !== "pair") {
         return { command, enabled, error: "Unsupported TypeScript runtime option: --timeout-seconds", explicit, flags, task };
       }
       const parsedValue = valueAfter(queue, index, arg);
@@ -2057,6 +2286,948 @@ function stopRegisteredSession(
   };
 }
 
+function runPairCommand(
+  parsed: ParsedRuntimeArgs,
+  options: TypescriptRuntimeOptions,
+): TypescriptRuntimeResult {
+  const unsupported = unsupportedPairOptions(parsed);
+  if (unsupported) {
+    return unsupportedRuntimeResult(parsed, unsupported);
+  }
+  const taskName = parsed.flags.taskName;
+  const workerName = parsed.flags.workerName;
+  const managerName = parsed.flags.managerName;
+  if (!taskName || !workerName || !managerName) {
+    return unsupportedRuntimeResult(parsed, "pair requires --task, --worker-name, and --manager-name.");
+  }
+  const dbPath = runtimeDbPath(parsed, options);
+  const dispatch = pairDispatchPayload(parsed, dbPath);
+  const packageRoot = packageRootFromRuntimeModule();
+  if (parsed.flags.dryRun) {
+    return jsonResult({
+      dispatch_command: dispatch.dispatchCommand,
+      ensure_dispatch: dispatch.ensureDispatch,
+      manager: managerName,
+      task: taskName,
+      worker: workerName,
+    });
+  }
+  const cwd = parsed.flags.cwd ?? options.cwd ?? process.cwd();
+  const database = openRuntimeDatabase(parsed, options);
+  let taskId: string | null = null;
+  let taskCreated = false;
+  let bindingId: string | null = null;
+  let runId: string | null = null;
+  let workerInfo: PairSpawnResult | null = null;
+  let managerInfo: PairSpawnResult | null = null;
+  try {
+    const timestamp = nowIsoSeconds(options);
+    let task = taskRowForPair(database, taskName);
+    if (task === null) {
+      if (!parsed.flags.taskGoal) {
+        throw new Error(`Task ${JSON.stringify(taskName)} does not exist. Pass --task-goal to create it, or run \`conveyor tasks --create ...\` first.`);
+      }
+      taskId = createTaskSync(database, {
+        goal: parsed.flags.taskGoal,
+        name: taskName,
+        now: timestamp,
+        summary: parsed.flags.taskSummary,
+      });
+      taskCreated = true;
+      task = taskRowForPair(database, taskName);
+    } else {
+      taskId = task.id;
+    }
+    if (task === null || taskId === null) {
+      throw new Error(`Unknown task: ${taskName}`);
+    }
+    emitPairTelemetry(database, {
+      attributes: {
+        cwd,
+        task_created: taskCreated,
+        task_goal_provided: parsed.flags.taskGoal !== null,
+      },
+      eventType: "pair_started",
+      managerName,
+      summary: `Started pair setup for task ${taskName}.`,
+      taskId,
+      taskName,
+      timestamp,
+      workerName,
+    });
+    emitPairTelemetry(database, {
+      attributes: { created: taskCreated },
+      eventType: "pair_task_resolved",
+      managerName,
+      summary: `${taskCreated ? "Created" : "Resolved"} task ${taskName}.`,
+      taskId,
+      taskName,
+      timestamp,
+      workerName,
+    });
+
+    const managerSeed = ensurePairManagerConfig(database, {
+      managerAllowMergeGreen: parsed.flags.managerAllowMergeGreen,
+      managerAllowPr: parsed.flags.managerAllowPr,
+      managerAllowWorkerCompactClear: parsed.flags.managerAllowWorkerCompactClear,
+      managerAcceptance: parsed.flags.managerAcceptance,
+      managerEpilogue: parsed.flags.managerEpilogue,
+      managerGuideline: parsed.flags.managerGuideline,
+      managerMode: parsed.flags.managerMode,
+      managerNudgeOnCompletion: parsed.flags.managerNudgeOnCompletion,
+      managerObjective: parsed.flags.managerObjective,
+      managerPermissionsJson: parsed.flags.managerPermissionsJson,
+      managerPermit: parsed.flags.managerPermit,
+      managerReference: parsed.flags.managerReference,
+      managerRequireAcks: parsed.flags.managerRequireAcks,
+      managerTool: parsed.flags.managerTool,
+      taskId,
+      timestamp,
+    });
+    if (managerSeed.seededByPair) {
+      insertEventSync(database, {
+        payload: {
+          acceptance_count: managerSeed.config.acceptance_criteria.length,
+          guideline_count: managerSeed.config.guidelines.length,
+          reference_count: managerSeed.config.reference_paths.length,
+          nudge_on_completion: managerSeed.config.nudge_on_completion,
+          source: "pair",
+          supervision_mode: managerSeed.config.supervision_mode,
+        },
+        taskId,
+        type: "manager_config_recorded",
+      });
+      emitPairTelemetry(database, {
+        attributes: {
+          acceptance_count: managerSeed.config.acceptance_criteria.length,
+          guideline_count: managerSeed.config.guidelines.length,
+          reference_count: managerSeed.config.reference_paths.length,
+          nudge_on_completion: managerSeed.config.nudge_on_completion,
+          supervision_mode: managerSeed.config.supervision_mode,
+        },
+        eventType: "pair_manager_config_seeded",
+        managerName,
+        summary: `Seeded manager config for task ${taskName}.`,
+        taskId,
+        taskName,
+        timestamp,
+        workerName,
+      });
+    }
+    const managerAcceptanceCriteriaSeeded = seedPairManagerAcceptanceCriteria(database, {
+      criteria: managerSeed.config.acceptance_criteria,
+      taskId,
+      timestamp,
+    });
+
+    const startup = resolveCodexStartupOptions({
+      askForApproval: parsed.flags.askForApproval,
+      profile: parsed.flags.codexProfile,
+      sandbox: parsed.flags.sandbox,
+    });
+    workerInfo = spawnCodexAndRegisterPairSession(database, parsed, options, {
+      acceptTrust: parsed.flags.acceptTrust,
+      askForApproval: startup.askForApproval,
+      cwd,
+      initialPrompt: workerAckTaskPrompt(taskName, parsed.flags.taskPrompt),
+      name: workerName,
+      role: "worker",
+      sandbox: startup.sandbox,
+      timeoutSeconds: parsed.flags.timeoutSeconds,
+    });
+    emitPairTelemetry(database, {
+      attributes: {
+        codex_session_id: workerInfo.codex_session_id,
+        codex_session_path: workerInfo.codex_session_path,
+        pid: workerInfo.pid,
+        tmux_session: workerInfo.tmux_session,
+      },
+      correlationExtra: { worker_session_id: workerInfo.session_id },
+      eventType: "pair_worker_spawned",
+      managerName,
+      summary: `Spawned worker session ${workerName}.`,
+      taskId,
+      taskName,
+      timestamp,
+      workerName,
+    });
+
+    managerInfo = spawnCodexAndRegisterPairSession(database, parsed, options, {
+      acceptTrust: parsed.flags.acceptTrust,
+      askForApproval: startup.askForApproval,
+      cwd,
+      initialPrompt: startManagerBootstrapPrompt(database, {
+        cwd,
+        managerName,
+        taskGoal: task.goal,
+        taskName,
+        workerName,
+      }),
+      name: managerName,
+      role: "manager",
+      sandbox: startup.sandbox,
+      timeoutSeconds: parsed.flags.timeoutSeconds,
+    });
+    emitPairTelemetry(database, {
+      attributes: {
+        codex_session_id: managerInfo.codex_session_id,
+        codex_session_path: managerInfo.codex_session_path,
+        pid: managerInfo.pid,
+        tmux_session: managerInfo.tmux_session,
+      },
+      correlationExtra: { manager_session_id: managerInfo.session_id },
+      eventType: "pair_manager_spawned",
+      managerName,
+      summary: `Spawned manager session ${managerName}.`,
+      taskId,
+      taskName,
+      timestamp,
+      workerName,
+    });
+
+    bindingId = bindSessionsSync(database, {
+      managerSessionName: managerName,
+      now: timestamp,
+      taskName,
+      workerSessionName: workerName,
+    });
+    insertEventSync(database, {
+      payload: {
+        binding_id: bindingId,
+        manager: managerName,
+        task: taskName,
+        worker: workerName,
+      },
+      taskId,
+      type: "binding_created",
+    });
+    emitPairTelemetry(database, {
+      attributes: {
+        manager_session_id: managerInfo.session_id,
+        worker_session_id: workerInfo.session_id,
+      },
+      bindingId,
+      eventType: "pair_binding_created",
+      managerName,
+      summary: `Bound worker ${workerName} and manager ${managerName}.`,
+      taskId,
+      taskName,
+      timestamp,
+      workerName,
+    });
+
+    runId = createPairRunSync(database, {
+      bindingId,
+      managerConfigSeeded: managerSeed.config !== null,
+      managerConfigSeededByPair: managerSeed.seededByPair,
+      managerName,
+      purpose: task.goal,
+      taskId,
+      timestamp,
+      workerName,
+    });
+    insertEventSync(database, {
+      payload: { run_id: runId, source: "pair" },
+      taskId,
+      type: "run_created",
+    });
+    emitPairTelemetry(database, {
+      attributes: {
+        manager_acceptance_criteria_seeded: managerAcceptanceCriteriaSeeded,
+        manager_config_seeded: managerSeed.config !== null,
+        manager_config_seeded_by_pair: managerSeed.seededByPair,
+      },
+      bindingId,
+      eventType: "pair_run_created",
+      managerName,
+      runId,
+      summary: `Created active telemetry run for pair task ${taskName}.`,
+      taskId,
+      taskName,
+      timestamp,
+      workerName,
+    });
+
+    const dispatchResult = {
+      command: dispatch.dispatchCommand,
+      ensure: dispatch.ensureDispatch,
+      pid: null as number | null,
+      started: false,
+    };
+    if (dispatch.ensureDispatch && dispatch.dispatchCommand) {
+      if (!recentActiveDispatchHeartbeat(database, {
+        dispatcherId: parsed.flags.dispatcherId,
+        now: options.now?.() ?? new Date(),
+      })) {
+        const dispatchProcess = (options.dispatchRunner ?? defaultDispatchRunner)(dispatch.dispatchCommand, { cwd: packageRoot });
+        dispatchResult.pid = dispatchProcess.pid;
+        dispatchResult.started = true;
+      }
+    }
+
+    return jsonResult({
+      binding_id: bindingId,
+      dispatch: dispatchResult,
+      dispatch_command: dispatch.dispatchCommand,
+      ensure_dispatch: dispatch.ensureDispatch,
+      manager: managerInfo,
+      manager_acceptance_criteria_seeded: managerAcceptanceCriteriaSeeded,
+      manager_config_seeded: managerSeed.config !== null,
+      manager_config_seeded_by_pair: managerSeed.seededByPair,
+      run_id: runId,
+      task: { created: taskCreated, id: taskId, name: taskName },
+      worker: workerInfo,
+    });
+  } catch (error) {
+    if (taskId !== null) {
+      try {
+        emitPairTelemetry(database, {
+          attributes: {
+            binding_created: bindingId !== null,
+            error: error instanceof Error ? error.message : String(error),
+            error_type: error instanceof Error ? error.name : "Error",
+            manager_spawned: managerInfo !== null,
+            run_created: runId !== null,
+            worker_spawned: workerInfo !== null,
+          },
+          eventType: "pair_failed",
+          managerName,
+          severity: "error",
+          summary: `Pair setup failed for task ${taskName}.`,
+          taskId,
+          taskName,
+          timestamp: nowIsoSeconds(options),
+          workerName,
+        });
+      } catch {
+        // Preserve the original failure.
+      }
+    }
+    return lifecycleWorkerErrorResult(error instanceof Error ? error.message : String(error));
+  } finally {
+    database.close();
+  }
+}
+
+interface PairSpawnResult {
+  codex_session_id: string;
+  codex_session_path: string;
+  cwd: string;
+  name: string;
+  pid: number;
+  role: "manager" | "worker";
+  session_id: string;
+  tmux_session: string | null;
+}
+
+interface PairTaskRow {
+  goal: string;
+  id: string;
+  name: string;
+  state: string;
+  summary: string | null;
+}
+
+function taskRowForPair(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  taskName: string,
+): PairTaskRow | null {
+  const row = database.prepare(`
+    select id, name, goal, summary, state
+    from tasks
+    where id = ? or name = ?
+    order by created_at desc
+    limit 1
+  `).get(taskName, taskName) as PairTaskRow | undefined;
+  return row ?? null;
+}
+
+function pairDispatchPayload(
+  parsed: ParsedRuntimeArgs,
+  dbPath: string,
+): { dispatchCommand: string[] | null; ensureDispatch: boolean } {
+  const dispatcherId = parsed.flags.dispatcherId;
+  const ensureDispatch = dispatcherId !== null && !parsed.flags.noDispatch;
+  const packageRoot = packageRootFromRuntimeModule();
+  return {
+    dispatchCommand: ensureDispatch
+      ? [
+        join(packageRoot, "scripts", "workerctl"),
+        "dispatch",
+        "--watch",
+        "--dispatcher-id",
+        dispatcherId,
+        "--path",
+        resolve(dbPath),
+      ]
+      : null,
+    ensureDispatch,
+  };
+}
+
+function emitPairTelemetry(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  options: {
+    attributes: Record<string, unknown>;
+    bindingId?: string | null;
+    correlationExtra?: Record<string, unknown>;
+    eventType: string;
+    managerName: string;
+    runId?: string | null;
+    severity?: "debug" | "info" | "warning" | "error";
+    summary: string;
+    taskId: string;
+    taskName: string;
+    timestamp: string;
+    workerName: string;
+  },
+): void {
+  emitTelemetrySync(database, {
+    actor: "workerctl",
+    attributes: options.attributes,
+    correlation: {
+      binding_id: options.bindingId ?? null,
+      manager: options.managerName,
+      source: "pair",
+      task: options.taskName,
+      worker: options.workerName,
+      ...(options.correlationExtra ?? {}),
+    },
+    eventType: options.eventType,
+    runId: options.runId ?? null,
+    severity: options.severity ?? "info",
+    summary: options.summary,
+    taskId: options.taskId,
+    timestamp: options.timestamp,
+  });
+}
+
+function ensurePairManagerConfig(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  options: {
+    managerAllowMergeGreen: boolean;
+    managerAllowPr: boolean;
+    managerAllowWorkerCompactClear: boolean;
+    managerAcceptance: string[];
+    managerEpilogue: string[];
+    managerGuideline: string[];
+    managerMode: string | null;
+    managerNudgeOnCompletion: string | null;
+    managerObjective: string | null;
+    managerPermissionsJson: string | null;
+    managerPermit: string[];
+    managerReference: string[];
+    managerRequireAcks: boolean;
+    managerTool: string[];
+    taskId: string;
+    timestamp: string;
+  },
+): { config: ManagerConfigRecord; seededByPair: boolean } {
+  const existing = managerConfigSync(database, options.taskId);
+  const requested = options.managerMode !== null
+    || options.managerObjective !== null
+    || options.managerGuideline.length > 0
+    || options.managerAcceptance.length > 0
+    || options.managerReference.length > 0
+    || options.managerPermit.length > 0
+    || options.managerTool.length > 0
+    || options.managerEpilogue.length > 0
+    || options.managerNudgeOnCompletion !== null
+    || options.managerRequireAcks
+    || options.managerPermissionsJson !== null
+    || options.managerAllowPr
+    || options.managerAllowMergeGreen
+    || options.managerAllowWorkerCompactClear;
+  if (!requested && existing !== null) {
+    return { config: existing, seededByPair: false };
+  }
+
+  const supervisionMode = options.managerMode ?? existing?.supervision_mode ?? "guided";
+  if (supervisionMode !== "light" && supervisionMode !== "guided" && supervisionMode !== "strict") {
+    throw new Error("manager_mode must be light, guided, or strict");
+  }
+  const objective = options.managerObjective !== null ? options.managerObjective : existing?.objective ?? null;
+  const guidelines = options.managerGuideline.length > 0 ? options.managerGuideline : existing?.guidelines ?? [];
+  const acceptanceCriteria = options.managerAcceptance.length > 0
+    ? options.managerAcceptance
+    : existing?.acceptance_criteria ?? [];
+  const referencePaths = options.managerReference.length > 0 ? options.managerReference : existing?.reference_paths ?? [];
+  let permissions = cloneManagerPermissions(existing?.permissions ?? normalizeManagerPermissions(null));
+  permissions = addManagerPermissionFlags(permissions, [
+    ...(options.managerAllowPr ? ["create_pr"] : []),
+    ...(options.managerAllowMergeGreen ? ["merge_green_pr"] : []),
+    ...(options.managerAllowWorkerCompactClear ? ["worker_compact_clear"] : []),
+    ...options.managerPermit,
+  ]);
+  permissions = applyManagerPermissionOverrides(permissions, parsePairPermissionsJson(options.managerPermissionsJson));
+  const tools = cleanPairManagerTools(options.managerTool.length > 0 ? options.managerTool : existing?.tools ?? []);
+  const epilogues = cleanPairEpilogueSteps(options.managerEpilogue.length > 0 ? options.managerEpilogue : existing?.epilogues ?? []);
+  const nudgeOnCompletion = cleanPairNudgeOnCompletion(options.managerNudgeOnCompletion ?? existing?.nudge_on_completion ?? "ask-operator");
+  const requireAcks = options.managerRequireAcks || (existing?.require_acks ?? false);
+
+  database.prepare(`
+    insert into manager_configs(
+      task_id, supervision_mode, objective, guidelines_json,
+      acceptance_criteria_json, reference_paths_json, permissions_json,
+      tools_json, epilogues_json, nudge_on_completion, require_acks,
+      revision, created_at, updated_at
+    )
+    values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+    on conflict(task_id) do update set
+      supervision_mode = excluded.supervision_mode,
+      objective = excluded.objective,
+      guidelines_json = excluded.guidelines_json,
+      acceptance_criteria_json = excluded.acceptance_criteria_json,
+      reference_paths_json = excluded.reference_paths_json,
+      permissions_json = excluded.permissions_json,
+      tools_json = excluded.tools_json,
+      epilogues_json = excluded.epilogues_json,
+      nudge_on_completion = excluded.nudge_on_completion,
+      require_acks = excluded.require_acks,
+      revision = case when
+        manager_configs.supervision_mode is not excluded.supervision_mode or
+        manager_configs.objective is not excluded.objective or
+        manager_configs.guidelines_json is not excluded.guidelines_json or
+        manager_configs.acceptance_criteria_json is not excluded.acceptance_criteria_json or
+        manager_configs.reference_paths_json is not excluded.reference_paths_json or
+        manager_configs.permissions_json is not excluded.permissions_json or
+        manager_configs.tools_json is not excluded.tools_json or
+        manager_configs.epilogues_json is not excluded.epilogues_json or
+        manager_configs.nudge_on_completion is not excluded.nudge_on_completion or
+        manager_configs.require_acks is not excluded.require_acks
+      then manager_configs.revision + 1 else manager_configs.revision end,
+      updated_at = excluded.updated_at
+  `).run(
+    options.taskId,
+    supervisionMode,
+    objective,
+    stableJson(guidelines),
+    stableJson(acceptanceCriteria),
+    stableJson(referencePaths),
+    stableJson(permissions),
+    stableJson(tools),
+    stableJson(epilogues),
+    nudgeOnCompletion,
+    requireAcks ? 1 : 0,
+    options.timestamp,
+    options.timestamp,
+  );
+
+  const config = managerConfigSync(database, options.taskId);
+  if (config === null) {
+    throw new Error(`manager config was not recorded for task ${options.taskId}`);
+  }
+  return { config, seededByPair: true };
+}
+
+const PAIR_EPILOGUE_STEPS = new Set(["run-tools", "draft-pr", "subagent-review", "record-handoff"]);
+const PAIR_NUDGE_ON_COMPLETION_MODES = new Set(["off", "ask-operator", "auto-review", "auto-proceed"]);
+const MANAGER_PERMISSION_CATEGORIES: ManagerPermissionCategory[] = [
+  "communication",
+  "context",
+  "repo",
+  "verification",
+  "worker_session",
+];
+
+function cloneManagerPermissions(permissions: ManagerPermissions): ManagerPermissions {
+  return {
+    communication: [...permissions.communication],
+    context: [...permissions.context],
+    repo: [...permissions.repo],
+    verification: [...permissions.verification],
+    worker_session: [...permissions.worker_session],
+  };
+}
+
+function addManagerPermissionFlags(permissions: ManagerPermissions, flags: string[]): ManagerPermissions {
+  let updated = cloneManagerPermissions(permissions);
+  for (const flag of flags) {
+    updated = mergeManagerPermissions(updated, normalizeManagerPermissions({ [flag]: true }));
+  }
+  return updated;
+}
+
+function applyManagerPermissionOverrides(
+  permissions: ManagerPermissions,
+  overrides: Record<string, unknown> | null,
+): ManagerPermissions {
+  const updated = cloneManagerPermissions(permissions);
+  for (const [key, value] of Object.entries(overrides ?? {})) {
+    if (isManagerPermissionCategoryName(key) && Array.isArray(value)) {
+      updated[key] = normalizeManagerPermissions({ [key]: value })[key];
+      continue;
+    }
+    const normalized = normalizeManagerPermissions({ [key]: true });
+    if (value) {
+      mergeManagerPermissionsInto(updated, normalized);
+    } else {
+      revokeManagerPermissions(updated, normalized);
+    }
+  }
+  return updated;
+}
+
+function mergeManagerPermissions(base: ManagerPermissions, extra: ManagerPermissions): ManagerPermissions {
+  const updated = cloneManagerPermissions(base);
+  mergeManagerPermissionsInto(updated, extra);
+  return updated;
+}
+
+function mergeManagerPermissionsInto(base: ManagerPermissions, extra: ManagerPermissions): void {
+  for (const category of MANAGER_PERMISSION_CATEGORIES) {
+    for (const action of extra[category]) {
+      if (!base[category].includes(action)) {
+        base[category].push(action);
+        base[category].sort();
+      }
+    }
+  }
+}
+
+function revokeManagerPermissions(base: ManagerPermissions, extra: ManagerPermissions): void {
+  for (const category of MANAGER_PERMISSION_CATEGORIES) {
+    base[category] = base[category].filter((action) => !extra[category].includes(action));
+  }
+}
+
+function parsePairPermissionsJson(value: string | null): Record<string, unknown> | null {
+  if (value === null) {
+    return null;
+  }
+  const parsed = JSON.parse(value) as unknown;
+  if (parsed === null || Array.isArray(parsed) || typeof parsed !== "object") {
+    throw new Error("--manager-permissions-json must be a JSON object");
+  }
+  return parsed as Record<string, unknown>;
+}
+
+function cleanPairManagerTools(values: string[]): string[] {
+  const seen = new Set<string>();
+  const tools: string[] = [];
+  for (const value of values) {
+    const tool = value.trim();
+    if (tool && !seen.has(tool)) {
+      seen.add(tool);
+      tools.push(tool);
+    }
+  }
+  return tools;
+}
+
+function cleanPairEpilogueSteps(values: string[]): string[] {
+  const seen = new Set<string>();
+  const steps: string[] = [];
+  for (const value of values) {
+    const step = value.trim();
+    if (!step) {
+      continue;
+    }
+    if (!PAIR_EPILOGUE_STEPS.has(step)) {
+      throw new Error(`unknown epilogue step: ${step}`);
+    }
+    if (!seen.has(step)) {
+      seen.add(step);
+      steps.push(step);
+    }
+  }
+  return steps;
+}
+
+function cleanPairNudgeOnCompletion(value: string): string {
+  if (!PAIR_NUDGE_ON_COMPLETION_MODES.has(value)) {
+    throw new Error("--manager-nudge-on-completion must be one of: off, ask-operator, auto-review, auto-proceed");
+  }
+  return value;
+}
+
+function isManagerPermissionCategoryName(value: string): value is ManagerPermissionCategory {
+  return MANAGER_PERMISSION_CATEGORIES.includes(value as ManagerPermissionCategory);
+}
+
+function seedPairManagerAcceptanceCriteria(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  options: { criteria: string[]; taskId: string; timestamp: string },
+): number {
+  const inserted: number[] = [];
+  const seen = new Set<string>();
+  for (const raw of options.criteria) {
+    const criterion = raw.trim();
+    if (!criterion || seen.has(criterion)) {
+      continue;
+    }
+    seen.add(criterion);
+    const existing = database.prepare(`
+      select id
+      from acceptance_criteria
+      where task_id = ? and criterion = ?
+      limit 1
+    `).get(options.taskId, criterion) as { id: number } | undefined;
+    if (existing) {
+      continue;
+    }
+    const result = database.prepare(`
+      insert into acceptance_criteria(
+        task_id, criterion, status, source, proof, rationale,
+        evidence_json, created_at, updated_at
+      )
+      values (?, ?, 'accepted', 'manager_inferred', null, ?, ?, ?, ?)
+    `).run(
+      options.taskId,
+      criterion,
+      "Seeded from manager acceptance configuration.",
+      stableJson({ source: "manager_config" }),
+      options.timestamp,
+      options.timestamp,
+    );
+    const criterionId = Number(result.lastInsertRowid);
+    inserted.push(criterionId);
+    emitTelemetrySync(database, {
+      actor: "workerctl",
+      attributes: {
+        criterion,
+        has_evidence: true,
+        has_proof: false,
+        status: "accepted",
+      },
+      correlation: { criterion_id: criterionId, source: "manager_inferred" },
+      eventType: "acceptance_criterion_added",
+      severity: "info",
+      summary: "Added acceptance criterion.",
+      taskId: options.taskId,
+      timestamp: options.timestamp,
+    });
+  }
+  if (inserted.length > 0) {
+    insertEventSync(database, {
+      payload: {
+        criterion_ids: inserted,
+        source: "manager_config",
+      },
+      taskId: options.taskId,
+      type: "manager_acceptance_criteria_seeded",
+    });
+  }
+  return inserted.length;
+}
+
+function spawnCodexAndRegisterPairSession(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  parsed: ParsedRuntimeArgs,
+  options: TypescriptRuntimeOptions,
+  params: {
+    acceptTrust: boolean;
+    askForApproval: string | null;
+    cwd: string;
+    initialPrompt: string | null;
+    name: string;
+    role: "manager" | "worker";
+    sandbox: string | null;
+    timeoutSeconds: number;
+  },
+): PairSpawnResult {
+  const existing = database.prepare("select id from sessions where name = ?").get(params.name) as { id: string } | undefined;
+  if (existing) {
+    throw new Error(
+      `a session named ${JSON.stringify(params.name)} is already registered; `
+      + `choose a different name or \`conveyor deregister ${params.name}\` first`,
+    );
+  }
+  const runner = options.tmuxRunner ?? defaultTmuxRunner;
+  const tmuxSessionName = tmuxSession(params.name);
+  if (sessionExists(params.name, runner)) {
+    throw new Error(
+      `tmux session ${JSON.stringify(tmuxSessionName)} already exists; `
+      + `choose a different name or \`tmux kill-session -t ${tmuxSessionName}\` first`,
+    );
+  }
+
+  const codexExecutable = options.codexCommandResolver?.("codex") ?? "codex";
+  const codexArgs = [codexExecutable];
+  if (params.sandbox) {
+    codexArgs.push("--sandbox", params.sandbox);
+  }
+  if (params.askForApproval) {
+    codexArgs.push("--ask-for-approval", params.askForApproval);
+  }
+  if (params.initialPrompt) {
+    codexArgs.push(params.initialPrompt);
+  }
+  const minimumSessionTimestamp = options.now?.() ?? new Date();
+  startTmuxSessionWithRunner({
+    cwd: params.cwd,
+    shellCommand: codexTmuxShellCommand(codexArgs),
+    tmuxSessionName,
+  }, runner);
+  if (params.acceptTrust) {
+    sendEnterToTmuxSessionWithRunner(tmuxSessionName, runner);
+  }
+
+  let discovery: SpawnedCodexSessionDiscovery;
+  try {
+    discovery = (options.discoverSpawnedCodexSession ?? defaultDiscoverSpawnedCodexSession)({
+      acceptTrust: params.acceptTrust,
+      childrenForPid: options.childrenForPid,
+      lsofForPid: options.lsofForPid,
+      minimumSessionTimestamp,
+      sleepMilliseconds: options.sleepMilliseconds,
+      timeoutSeconds: params.timeoutSeconds,
+      tmuxRunner: runner,
+      tmuxSessionName,
+    });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `${detail}\nRecovery: tmux session ${JSON.stringify(tmuxSessionName)} may still be alive. `
+      + `Inspect it with \`tmux attach -t ${tmuxSessionName}\`. If Codex is visible, submit a prompt or press Enter, `
+      + `then register it with \`conveyor register-${params.role} --name ${params.name} --pid <pid> --codex-session <rollout.jsonl> `
+      + `--cwd ${shellQuote(params.cwd)} --tmux-session ${tmuxSessionName}\`. To clean up, run `
+      + `\`tmux kill-session -t ${tmuxSessionName}\` and \`conveyor deregister ${params.name}\` if it was registered.`,
+      { cause: error },
+    );
+  }
+
+  const registered = registerSessionSync(database, {
+    codexSessionPath: discovery.codex_session_path,
+    cwd: params.cwd,
+    name: params.name,
+    pid: discovery.native_pid,
+    role: params.role,
+    tmuxSession: tmuxSessionName,
+  });
+  insertEventSync(database, {
+    payload: {
+      codex_session_id: registered.codex_session_id,
+      name: params.name,
+      pid: registered.pid,
+      role: params.role,
+      session_id: registered.session_id,
+      via: "pair",
+    },
+    type: "session_registered",
+  });
+  return {
+    codex_session_id: registered.codex_session_id,
+    codex_session_path: registered.codex_session_path,
+    cwd: registered.cwd,
+    name: registered.name,
+    pid: registered.pid,
+    role: registered.role,
+    session_id: registered.session_id,
+    tmux_session: registered.tmux_session,
+  };
+}
+
+function workerAckTaskPrompt(taskName: string | null, taskPrompt: string | null): string | null {
+  if (taskPrompt === null) {
+    return null;
+  }
+  const taskRef = taskName ?? "<task>";
+  return [
+    taskPrompt,
+    "",
+    "Before editing files or running implementation work, acknowledge the task contract:",
+    "",
+    `conveyor worker-ack ${taskRef} --from-stdin`,
+    "",
+    "Use a JSON object with goal_restatement, proposed_criteria, expected_tools,",
+    "open_questions, and ready_to_start.",
+  ].join("\n");
+}
+
+function createPairRunSync(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  options: {
+    bindingId: string;
+    managerConfigSeeded: boolean;
+    managerConfigSeededByPair: boolean;
+    managerName: string;
+    purpose: string;
+    taskId: string;
+    timestamp: string;
+    workerName: string;
+  },
+): string {
+  const active = database.prepare(`
+    select id
+    from runs
+    where task_id = ? and status = 'active'
+    order by started_at desc, id desc
+    limit 1
+  `).get(options.taskId) as { id: string } | undefined;
+  if (active) {
+    throw new Error(`task ${JSON.stringify(options.taskId)} already has active run ${JSON.stringify(active.id)}`);
+  }
+  const runId = `run-${randomUUID()}`;
+  database.prepare(`
+    insert into runs(id, task_id, name, purpose, status, started_at, ended_at, metadata_json)
+    values (?, ?, ?, ?, 'active', ?, null, ?)
+  `).run(
+    runId,
+    options.taskId,
+    `${options.taskId}-pair`,
+    options.purpose,
+    options.timestamp,
+    stableJson({
+      binding_id: options.bindingId,
+      manager: options.managerName,
+      manager_config_seeded: options.managerConfigSeeded,
+      manager_config_seeded_by_pair: options.managerConfigSeededByPair,
+      source: "pair",
+      worker: options.workerName,
+    }),
+  );
+  return runId;
+}
+
+function recentActiveDispatchHeartbeat(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  options: { dispatcherId: string | null; now: Date; staleSeconds?: number },
+): boolean {
+  const rows = database.prepare(`
+    select timestamp, correlation_json, attributes_json
+    from telemetry_events
+    where actor = 'dispatch' and event_type = 'dispatch_watch_heartbeat'
+    order by timestamp desc, id desc
+    limit 25
+  `).all() as Array<{ attributes_json: string; correlation_json: string; timestamp: string }>;
+  const staleSeconds = options.staleSeconds ?? 10;
+  for (const row of rows) {
+    const timestamp = new Date(row.timestamp);
+    if (Number.isNaN(timestamp.getTime())) {
+      continue;
+    }
+    const ageSeconds = (options.now.getTime() - timestamp.getTime()) / 1000;
+    if (ageSeconds > staleSeconds) {
+      break;
+    }
+    const attributes = JSON.parse(row.attributes_json) as Record<string, unknown>;
+    if (attributes.dry_run === true) {
+      continue;
+    }
+    const correlation = JSON.parse(row.correlation_json) as Record<string, unknown>;
+    if (options.dispatcherId !== null && correlation.dispatcher_id !== options.dispatcherId) {
+      continue;
+    }
+    return true;
+  }
+  return false;
+}
+
+function defaultDispatchRunner(command: string[], options: { cwd: string }): { pid: number | null } {
+  const child = spawn(command[0] ?? "", command.slice(1), {
+    cwd: options.cwd,
+    detached: true,
+    stdio: "ignore",
+  });
+  child.unref();
+  return { pid: child.pid ?? null };
+}
+
+function packageRootFromRuntimeModule(): string {
+  return resolve(dirname(fileURLToPath(import.meta.url)), "../..");
+}
+
 function runRegisterSessionCommand(
   parsed: ParsedRuntimeArgs,
   options: { cwd?: string; env?: NodeJS.ProcessEnv },
@@ -2667,6 +3838,7 @@ function isDefaultRuntimeCommand(command: string | null): boolean {
     || command === "open-worker"
     || command === "open-manager"
     || command === "stop"
+    || command === "pair"
     || command === "register-worker"
     || command === "register-manager"
     || command === "sessions"
@@ -2914,6 +4086,74 @@ function unsupportedStartSessionOptions(parsed: ParsedRuntimeArgs, role: "manage
   }
   if (role === "worker" && (parsed.flags.taskGoal !== null || parsed.flags.worker !== null)) {
     return "Unsupported TypeScript runtime option for start-worker.";
+  }
+  return null;
+}
+
+function unsupportedPairOptions(parsed: ParsedRuntimeArgs): string | null {
+  if (parsed.task) {
+    return `Unexpected argument: ${parsed.task}`;
+  }
+  if (
+    parsed.flags.active
+    || parsed.flags.all
+    || parsed.flags.blocker !== null
+    || parsed.flags.busyWaitSeconds !== DEFAULT_BUSY_WAIT_SECONDS
+    || parsed.flags.captureTranscriptBeforeStop
+    || parsed.flags.captureTranscriptLines !== DEFAULT_HISTORY_LINES
+    || parsed.flags.captureTranscriptMode !== "segment"
+    || parsed.flags.cleanupPolicy !== "clear"
+    || parsed.flags.codexSession !== null
+    || parsed.flags.create !== null
+    || parsed.flags.currentTask !== null
+    || parsed.flags.decisionId !== null
+    || parsed.flags.eventType !== null
+    || parsed.flags.file !== null
+    || parsed.flags.goal !== null
+    || parsed.flags.includeContent
+    || parsed.flags.includeFullTranscripts
+    || parsed.flags.includeLegacy
+    || parsed.flags.includeTranscripts
+    || parsed.flags.keepLatest !== 20
+    || parsed.flags.limit !== null
+    || parsed.flags.manager !== null
+    || parsed.flags.maxIterations !== null
+    || parsed.flags.message !== null
+    || parsed.flags.names.length > 0
+    || parsed.flags.nextAction !== null
+    || parsed.flags.output !== null
+    || parsed.flags.pid !== null
+    || parsed.flags.reason !== null
+    || parsed.flags.redactIdentityToken
+    || parsed.flags.requiredBeforeContinue.length > 0
+    || parsed.flags.requireAcks
+    || parsed.flags.requireAdversarialProof
+    || parsed.flags.requireCriteriaAudit
+    || parsed.flags.requireEpilogue
+    || parsed.flags.requireSegment
+    || parsed.flags.requireTranscriptSegment
+    || parsed.flags.roleProvided
+    || parsed.flags.runName !== null
+    || parsed.flags.seedPromptSha256 !== null
+    || parsed.flags.sessionDir !== null
+    || parsed.flags.sessionRole !== null
+    || parsed.flags.sessionState !== null
+    || parsed.flags.statusAgeSeconds !== DEFAULT_BUSY_WAIT_SECONDS
+    || parsed.flags.statusStaleSeconds !== DEFAULT_STATUS_STALE_SECONDS
+    || parsed.flags.statusState !== null
+    || parsed.flags.stopManager
+    || parsed.flags.stopWorker
+    || parsed.flags.strictDecisions
+    || parsed.flags.subtype !== null
+    || parsed.flags.summary !== null
+    || parsed.flags.terminal !== "auto"
+    || parsed.flags.terminalStaleSeconds !== DEFAULT_TERMINAL_STALE_SECONDS
+    || parsed.flags.text !== null
+    || parsed.flags.tmuxSession !== null
+    || parsed.flags.worker !== null
+    || parsed.flags.zip
+  ) {
+    return "Unsupported TypeScript runtime option for pair.";
   }
   return null;
 }
