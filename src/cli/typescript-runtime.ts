@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { accessSync, constants, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -99,6 +99,7 @@ import {
 } from "../state/files.js";
 import { latestStatusSync } from "../state/status.js";
 import {
+  databaseHealthSync,
   initializeDatabaseSync,
   openDatabaseSync,
 } from "../state/database.js";
@@ -385,6 +386,30 @@ export function runTypescriptRuntimeCommand(options: TypescriptRuntimeOptions): 
     if (parsed.command === "import-compat") {
       return runImportCompatCommand(parsed, options);
     }
+    if (parsed.command === "db-doctor") {
+      return runDbDoctorCommand(parsed, options);
+    }
+    if (parsed.command === "doctor") {
+      return runDoctorCommand(parsed, options);
+    }
+    if (parsed.command === "doctor-self") {
+      return runDoctorSelfCommand(parsed, options);
+    }
+    if (parsed.command === "reconcile") {
+      return runReconcileCommand(parsed, options);
+    }
+    if (parsed.command === "divergences") {
+      return runDivergencesCommand(parsed, options);
+    }
+    if (parsed.command === "prune") {
+      return runPruneCommand(parsed, options);
+    }
+    if (parsed.command === "mutation-audit") {
+      return runMutationAuditCommand(parsed, options);
+    }
+    if (parsed.command === "telemetry") {
+      return runTelemetryCommand(parsed, options);
+    }
     if (parsed.explicit) {
       return errorResult(`Unsupported TypeScript runtime command: ${parsed.command}`);
     }
@@ -408,6 +433,8 @@ interface ParsedRuntimeArgs {
     asRole: "all" | "manager" | "reviewer" | "worker";
     attempts: boolean;
     json: boolean;
+    activeOnly: boolean;
+    actor: string | null;
     includeLegacy: boolean;
     redactIdentityToken: boolean;
     active: boolean;
@@ -448,6 +475,7 @@ interface ParsedRuntimeArgs {
     list: boolean;
     lines: number;
     limit: number | null;
+    live: boolean;
     metadataJson: string | null;
     names: string[];
     nextAction: string | null;
@@ -496,6 +524,11 @@ interface ParsedRuntimeArgs {
     acceptCriterion: number | null;
     manager: string | null;
     maxIterations: number | null;
+    maxOpenCriteria: number;
+    maxStorageBytes: number | null;
+    maxUnfinishedCommands: number;
+    managerStaleSeconds: number;
+    newest: boolean;
     zip: boolean;
     requiredBeforeContinue: string[];
     run: string | null;
@@ -558,7 +591,15 @@ interface ParsedRuntimeArgs {
     requestedIteration: number | null;
     taskPrompt: string | null;
     taskSummary: string | null;
+    telemetrySummary: boolean;
+    telemetryView: string | null;
+    telemetryViewTask: string | null;
     workerName: string | null;
+    search: string | null;
+    severity: string | null;
+    staleCycleSeconds: number;
+    window: string | null;
+    workerStalenessSeconds: number;
     reuse: boolean;
     initialPrompt: boolean;
     startPrompt: boolean;
@@ -591,6 +632,8 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
     asRole: "all",
     attempts: false,
     json: false,
+    activeOnly: false,
+    actor: null,
     includeLegacy: false,
     redactIdentityToken: false,
     active: false,
@@ -631,6 +674,7 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
     list: false,
     lines: DEFAULT_HISTORY_LINES,
     limit: null,
+    live: false,
     metadataJson: null,
     names: [],
     nextAction: null,
@@ -679,6 +723,11 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
     acceptCriterion: null,
     manager: null,
     maxIterations: null,
+    maxOpenCriteria: 0,
+    maxStorageBytes: null,
+    maxUnfinishedCommands: 0,
+    managerStaleSeconds: DEFAULT_STATUS_STALE_SECONDS,
+    newest: false,
     zip: false,
     requiredBeforeContinue: [],
     run: null,
@@ -741,7 +790,15 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
     requestedIteration: null,
     taskPrompt: null,
     taskSummary: null,
+    telemetrySummary: false,
+    telemetryView: null,
+    telemetryViewTask: null,
     workerName: null,
+    search: null,
+    severity: null,
+    staleCycleSeconds: 3600.0,
+    window: null,
+    workerStalenessSeconds: 3600.0,
     reuse: false,
     initialPrompt: true,
     startPrompt: true,
@@ -808,6 +865,11 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
         return { command, enabled, error: "Unsupported TypeScript runtime option: --list", explicit, flags, passthroughArgs, task };
       }
       flags.list = true;
+    } else if (arg === "--live") {
+      if (command !== "db-doctor") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --live", explicit, flags, passthroughArgs, task };
+      }
+      flags.live = true;
     } else if (arg === "--include-payload") {
       if (command !== "continuation") {
         return { command, enabled, error: "Unsupported TypeScript runtime option: --include-payload", explicit, flags, passthroughArgs, task };
@@ -833,10 +895,20 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
     } else if (arg === "--dry-run") {
       flags.dryRun = true;
     } else if (arg === "--apply") {
-      if (command !== "import-compat") {
+      if (command !== "import-compat" && command !== "reconcile") {
         return { command, enabled, error: "Unsupported TypeScript runtime option: --apply", explicit, flags, passthroughArgs, task };
       }
       flags.apply = true;
+    } else if (arg === "--active-only") {
+      if (command !== "telemetry") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --active-only", explicit, flags, passthroughArgs, task };
+      }
+      flags.activeOnly = true;
+    } else if (arg === "--newest") {
+      if (command !== "telemetry") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --newest", explicit, flags, passthroughArgs, task };
+      }
+      flags.newest = true;
     } else if (arg === "--clear") {
       if (command !== "request-worker-compact" && command !== "compact-worker") {
         return { command, enabled, error: "Unsupported TypeScript runtime option: --clear", explicit, flags, passthroughArgs, task };
@@ -1352,7 +1424,10 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       }
       flags.asRole = value.value;
       index += 1;
-    } else if (arg === "--tmux-session") {
+    } else if (arg === "--tmux-session" || arg === "--session") {
+      if (arg === "--session" && command !== "doctor-self") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --session", explicit, flags, task };
+      }
       const value = valueAfter(queue, index, arg);
       if (value.error) {
         return { command, enabled, error: value.error, explicit, flags, task };
@@ -1360,6 +1435,10 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       flags.tmuxSession = value.value;
       index += 1;
     } else if (arg === "--summary") {
+      if (command === "telemetry") {
+        flags.telemetrySummary = true;
+        continue;
+      }
       const value = valueAfter(queue, index, arg);
       if (value.error) {
         return { command, enabled, error: value.error, explicit, flags, task };
@@ -2107,7 +2186,7 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       flags.loopRun = value.value;
       index += 1;
     } else if (arg === "--run") {
-      if (command !== "loop-status") {
+      if (command !== "loop-status" && command !== "telemetry") {
         return { command, enabled, error: "Unsupported TypeScript runtime option: --run", explicit, flags, task };
       }
       const value = valueAfter(queue, index, arg);
@@ -2240,6 +2319,62 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       }
       flags.keepLatest = value;
       index += 1;
+    } else if (arg === "--actor") {
+      if (command !== "telemetry") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --actor", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      if (!["dispatch", "manager", "operator", "system", "worker", "workerctl"].includes(value.value)) {
+        return { command, enabled, error: `Unsupported telemetry actor: ${value.value}`, explicit, flags, task };
+      }
+      flags.actor = value.value;
+      index += 1;
+    } else if (arg === "--event-type") {
+      if (command !== "telemetry") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --event-type", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.eventType = value.value;
+      index += 1;
+    } else if (arg === "--severity") {
+      if (command !== "telemetry") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --severity", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      if (!["debug", "info", "warning", "error"].includes(value.value)) {
+        return { command, enabled, error: `Unsupported telemetry severity: ${value.value}`, explicit, flags, task };
+      }
+      flags.severity = value.value;
+      index += 1;
+    } else if (arg === "--search") {
+      if (command !== "telemetry") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --search", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.search = value.value;
+      index += 1;
+    } else if (arg === "--window") {
+      if (command !== "telemetry") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --window", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.window = value.value;
+      index += 1;
     } else if (arg === "--limit") {
       const parsedValue = valueAfter(queue, index, arg);
       if (parsedValue.error) {
@@ -2250,6 +2385,68 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
         return { command, enabled, error: "--limit must be a non-negative integer.", explicit, flags, task };
       }
       flags.limit = value;
+      index += 1;
+    } else if (arg === "--stale-cycles-seconds" || arg === "--stale-cycle-seconds") {
+      if (command !== "telemetry" && command !== "reconcile") {
+        return { command, enabled, error: `Unsupported TypeScript runtime option: ${arg}`, explicit, flags, task };
+      }
+      const parsedValue = valueAfter(queue, index, arg);
+      if (parsedValue.error) {
+        return { command, enabled, error: parsedValue.error, explicit, flags, task };
+      }
+      const value = Number(parsedValue.value);
+      if (!Number.isFinite(value) || value < 0) {
+        return { command, enabled, error: `${arg} must be a non-negative number.`, explicit, flags, task };
+      }
+      flags.staleCycleSeconds = value;
+      index += 1;
+    } else if (arg === "--worker-staleness-seconds") {
+      if (command !== "telemetry") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --worker-staleness-seconds", explicit, flags, task };
+      }
+      const parsedValue = valueAfter(queue, index, arg);
+      if (parsedValue.error) {
+        return { command, enabled, error: parsedValue.error, explicit, flags, task };
+      }
+      const value = Number(parsedValue.value);
+      if (!Number.isFinite(value) || value < 0) {
+        return { command, enabled, error: "--worker-staleness-seconds must be a non-negative number.", explicit, flags, task };
+      }
+      flags.workerStalenessSeconds = value;
+      index += 1;
+    } else if (arg === "--manager-stale-seconds") {
+      if (command !== "db-doctor") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --manager-stale-seconds", explicit, flags, task };
+      }
+      const parsedValue = valueAfter(queue, index, arg);
+      if (parsedValue.error) {
+        return { command, enabled, error: parsedValue.error, explicit, flags, task };
+      }
+      const value = Number(parsedValue.value);
+      if (!Number.isInteger(value) || value < 0) {
+        return { command, enabled, error: "--manager-stale-seconds must be a non-negative integer.", explicit, flags, task };
+      }
+      flags.managerStaleSeconds = value;
+      index += 1;
+    } else if (arg === "--max-unfinished-commands" || arg === "--max-open-criteria" || arg === "--max-storage-bytes") {
+      if (command !== "telemetry") {
+        return { command, enabled, error: `Unsupported TypeScript runtime option: ${arg}`, explicit, flags, task };
+      }
+      const parsedValue = valueAfter(queue, index, arg);
+      if (parsedValue.error) {
+        return { command, enabled, error: parsedValue.error, explicit, flags, task };
+      }
+      const value = Number(parsedValue.value);
+      if (!Number.isInteger(value) || value < 0) {
+        return { command, enabled, error: `${arg} must be a non-negative integer.`, explicit, flags, task };
+      }
+      if (arg === "--max-unfinished-commands") {
+        flags.maxUnfinishedCommands = value;
+      } else if (arg === "--max-open-criteria") {
+        flags.maxOpenCriteria = value;
+      } else {
+        flags.maxStorageBytes = value;
+      }
       index += 1;
     } else if (arg === "--interval") {
       if (command !== "dispatch") {
@@ -2390,6 +2587,10 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       flags.subtype = arg;
     } else if ((command === "qa-plan" || command === "qa-run") && flags.subtype === null) {
       flags.subtype = arg;
+    } else if (command === "telemetry" && flags.telemetryView === null && isTelemetryView(arg)) {
+      flags.telemetryView = arg;
+    } else if (command === "telemetry" && flags.telemetryView === "task" && flags.telemetryViewTask === null) {
+      flags.telemetryViewTask = arg;
     } else if (task === null) {
       task = arg;
     } else if (command === "manager-permission" && flags.action === null) {
@@ -8031,6 +8232,2305 @@ function runImportCompatCommand(
   }
 }
 
+function runDbDoctorCommand(
+  parsed: ParsedRuntimeArgs,
+  options: TypescriptRuntimeOptions,
+): TypescriptRuntimeResult {
+  if (parsed.task !== null) {
+    throw new Error(`Unexpected argument: ${parsed.task}`);
+  }
+  const database = openRuntimeDatabase(parsed, options);
+  try {
+    const health = databaseHealthSync(database);
+    const result: Record<string, unknown> = {
+      ...health,
+      checks: [...health.checks],
+      path: runtimeDbPath(parsed, options),
+    };
+    if (parsed.flags.live) {
+      const runner = options.tmuxRunner ?? defaultTmuxRunner;
+      const liveRows = collectLiveReconcileRowsSync(database, runner);
+      const managerWarnings = managerLivenessWarningsFromRowsSync(liveRows, parsed.flags.managerStaleSeconds);
+      const driftCount = liveRows.filter((row) => (row.drift as string[]).length > 0).length;
+      const unfinishedCommandCount = liveRows.reduce((count, row) => count + (row.unfinished_commands as unknown[]).length, 0);
+      const liveCheck = {
+        drift_count: driftCount,
+        manager_liveness_warning_count: managerWarnings.length,
+        name: "live_reconcile",
+        ok: driftCount === 0 && unfinishedCommandCount === 0,
+        task_count: liveRows.length,
+        unfinished_command_count: unfinishedCommandCount,
+      };
+      (result.checks as unknown[]).push(liveCheck);
+      result.live_reconcile = {
+        manager_liveness_warnings: managerWarnings,
+        ok: liveCheck.ok,
+        results: liveRows,
+      };
+      result.ok = Boolean(result.ok) && liveCheck.ok;
+    }
+    return { ...jsonResult(result), exitCode: result.ok ? 0 : 1 };
+  } finally {
+    database.close();
+  }
+}
+
+function runDoctorCommand(
+  parsed: ParsedRuntimeArgs,
+  options: { codexCommandResolver?: (name: string) => string | null; cwd?: string; env?: NodeJS.ProcessEnv; terminalRunner?: (args: string[]) => { status: number; stderr?: string; stdout?: string } },
+): TypescriptRuntimeResult {
+  if (parsed.task !== null) {
+    throw new Error(`Unexpected argument: ${parsed.task}`);
+  }
+  const targetCwd = resolve(expandUserPath(parsed.flags.cwd ?? options.cwd ?? process.cwd()));
+  const root = stateRoot({ cwd: targetCwd, env: options.env });
+  const tmuxPath = commandPath("tmux", options);
+  const codexPath = options.codexCommandResolver?.("codex") ?? commandPath("codex", options);
+  const checks: Array<Record<string, unknown>> = [
+    { name: "tmux", ok: Boolean(tmuxPath), path: tmuxPath },
+    { name: "codex", ok: Boolean(codexPath), path: codexPath },
+  ];
+  if (tmuxPath) {
+    const proc = runProcess(["tmux", "-V"], options);
+    checks.push({ name: "tmux_version", ok: proc.status === 0, value: (proc.stdout ?? "").trim() });
+  }
+  if (codexPath) {
+    const proc = runProcess(["codex", "--version"], options);
+    checks.push({ name: "codex_version", ok: proc.status === 0, value: ((proc.stdout ?? "").trim() || (proc.stderr ?? "").trim()) });
+  }
+  checks.push({ name: "target_cwd_exists", ok: pathIsDirectory(targetCwd), path: targetCwd });
+  checks.push({ name: "state_root_exists", ok: existsSync(root), path: root });
+  const ok = checks.every((check) => check.name === "state_root_exists" || check.ok === true);
+  return { ...jsonResult({ checks, ok, project_root: packageRootFromRuntimeModule(), workers: doctorWorkerSummaries(root) }), exitCode: ok ? 0 : 1 };
+}
+
+function runDoctorSelfCommand(
+  parsed: ParsedRuntimeArgs,
+  options: { cwd?: string; env?: NodeJS.ProcessEnv; terminalRunner?: (args: string[]) => { status: number; stderr?: string; stdout?: string }; tmuxRunner?: TmuxRunner },
+): TypescriptRuntimeResult {
+  if (parsed.task !== null) {
+    throw new Error(`Unexpected argument: ${parsed.task}`);
+  }
+  const sessionProbe = parsed.flags.tmuxSession ?? currentTmuxSessionName(options);
+  const session = typeof sessionProbe === "string" ? sessionProbe : null;
+  const sessionError = isPlainRecord(sessionProbe) && typeof sessionProbe.error === "string" ? sessionProbe.error : null;
+  const tmuxPath = options.tmuxRunner ? "tmux" : commandPath("tmux", options);
+  const codexPath = commandPath("codex", options);
+  const workerctlPath = commandPath("workerctl", options);
+  const workerctlScript = join(packageRootFromRuntimeModule(), "scripts", "workerctl");
+  const codexHome = expandUserPath(options.env?.CODEX_HOME ?? "~/.codex");
+  const skillPath = join(codexHome, "skills", "manage-codex-workers", "SKILL.md");
+  const codexReviewSkillPath = join(codexHome, "skills", "codex-review", "SKILL.md");
+  const codexReviewHelperPath = join(codexHome, "skills", "codex-review", "scripts", "codex-review");
+  const checks: Array<Record<string, unknown>> = [
+    { name: "workerctl_on_path", ok: Boolean(workerctlPath), path: workerctlPath },
+    { name: "workerctl_script", ok: existsSync(workerctlScript), path: workerctlScript },
+    { name: "tmux_on_path", ok: Boolean(tmuxPath), path: tmuxPath },
+    { name: "codex_on_path", ok: Boolean(codexPath), path: codexPath },
+    { name: "inside_tmux", ok: Boolean(session), session },
+    { name: "manage_skill_installed", ok: existsSync(skillPath), path: skillPath },
+    { name: "codex_review_skill_installed", ok: existsSync(codexReviewSkillPath), path: codexReviewSkillPath },
+    { name: "codex_review_helper_installed", ok: pathIsExecutable(codexReviewHelperPath), path: codexReviewHelperPath },
+  ];
+  if (sessionError) {
+    checks.push({ name: "tmux_access", ok: false, error: sessionError });
+  }
+  if (session && tmuxPath) {
+    const proc = (options.tmuxRunner ?? defaultTmuxRunner)(["tmux", "has-session", "-t", session], { check: false });
+    checks.push({ name: "current_tmux_session_live", ok: proc.status === 0, session, ...(proc.status === 0 ? {} : { error: (proc.stderr ?? proc.stdout ?? "").trim() }) });
+  }
+  if (workerctlPath) {
+    const proc = runProcess(["workerctl", "classify", "--text", "conveyor self doctor"], options);
+    checks.push({ name: "workerctl_executable", ok: proc.status === 0, path: workerctlPath });
+  }
+  const supported = checks
+    .filter((check) => ["workerctl_on_path", "tmux_on_path", "inside_tmux", "current_tmux_session_live"].includes(String(check.name)))
+    .every((check) => check.ok === true);
+  const failed = checks.filter((check) => check.ok !== true).map((check) => String(check.name));
+  const payload = newPathPayload();
+  const result = {
+    checks,
+    codex_app_inbox_guidance: "Codex app manager/worker sessions are first-class pull targets: register them without --tmux-session, then poll manager-inbox or worker-inbox with --consume-next --wait --json at the start of a turn.",
+    codex_review_helper_path: codexReviewHelperPath,
+    codex_review_skill_path: codexReviewSkillPath,
+    command_context_note: "The tmux checks describe the command environment running doctor-self. For Codex app sessions, use rollout JSONL path/lsof evidence plus register-manager/register-worker role metadata to prove the app session identity.",
+    command_template: payload.command_template,
+    current_session: session,
+    follow_up: payload.follow_up,
+    ok: supported,
+    skill_path: skillPath,
+    supported,
+    why_or_why_not: supported
+      ? "This Codex session is inside a live tmux session and conveyor is on PATH; it can register itself as a worker via `conveyor register-worker`."
+      : `This Codex session cannot register itself as a tmux-backed worker. Failed checks: ${failed.length ? failed.join(", ") : "unknown"}. A Codex session running outside tmux can still register itself as a manager via \`conveyor register-manager\`.`,
+    workerctl_invocation: workerctlPath ? "workerctl" : (existsSync(workerctlScript) ? "scripts/workerctl" : null),
+  };
+  return { ...jsonResult(result), exitCode: supported ? 0 : 1 };
+}
+
+function runReconcileCommand(
+  parsed: ParsedRuntimeArgs,
+  options: { env?: NodeJS.ProcessEnv; cwd?: string; now?: () => Date },
+): TypescriptRuntimeResult {
+  if (parsed.task !== null) {
+    throw new Error(`Unexpected argument: ${parsed.task}`);
+  }
+  if (parsed.flags.path !== null) {
+    return unsupportedRuntimeResult(parsed, "Unsupported TypeScript runtime option for reconcile.");
+  }
+  const database = openRuntimeDatabase(parsed, options);
+  try {
+    const report = parsed.flags.apply
+      ? applyReconcileSync(database, { staleCyclesSeconds: parsed.flags.staleCycleSeconds, timestamp: nowIsoSeconds(options) })
+      : collectReconcileReportSync(database, { staleCyclesSeconds: parsed.flags.staleCycleSeconds });
+    return jsonResult(report);
+  } finally {
+    database.close();
+  }
+}
+
+function runDivergencesCommand(
+  parsed: ParsedRuntimeArgs,
+  options: { cwd?: string; env?: NodeJS.ProcessEnv },
+): TypescriptRuntimeResult {
+  const task = requireTask(parsed);
+  const database = openRuntimeDatabase(parsed, options);
+  try {
+    const taskRow = taskRowForDiagnostics(database, task);
+    return jsonResult(divergentCyclesForTaskSync(database, taskRow.id, parsed.flags.limit ?? 50));
+  } finally {
+    database.close();
+  }
+}
+
+function runPruneCommand(
+  parsed: ParsedRuntimeArgs,
+  options: { cwd?: string; env?: NodeJS.ProcessEnv },
+): TypescriptRuntimeResult {
+  if (parsed.task !== null) {
+    throw new Error(`Unexpected argument: ${parsed.task}`);
+  }
+  if (parsed.flags.keepLatest < 0) {
+    throw new Error("--keep-latest must be >= 0");
+  }
+  const database = openRuntimeDatabase(parsed, options);
+  try {
+    const pruneIds = transcriptCapturePruneIdsSync(database, parsed.flags.keepLatest);
+    if (pruneIds.length > 0 && !parsed.flags.dryRun) {
+      const update = database.prepare(`
+        update transcript_captures
+        set content = null, capture_kind = 'metadata_only', retention_class = 'warm'
+        where id = ?
+      `);
+      for (const id of pruneIds) {
+        update.run(id);
+      }
+      insertEventSync(database, {
+        payload: { capture_ids: pruneIds, keep_latest: parsed.flags.keepLatest },
+        type: "transcript_captures_pruned",
+      });
+    }
+    return jsonResult({
+      dry_run: parsed.flags.dryRun,
+      keep_latest: parsed.flags.keepLatest,
+      pruned_count: parsed.flags.dryRun ? 0 : pruneIds.length,
+      would_prune_count: pruneIds.length,
+    });
+  } finally {
+    database.close();
+  }
+}
+
+function runMutationAuditCommand(
+  parsed: ParsedRuntimeArgs,
+  options: { cwd?: string; env?: NodeJS.ProcessEnv },
+): TypescriptRuntimeResult {
+  const task = requireTask(parsed);
+  const database = openRuntimeDatabase(parsed, options);
+  try {
+    const result = mutationAuditResultSync(taskAuditSync(database, task));
+    if (parsed.flags.json) {
+      return { ...jsonResult(result), exitCode: result.ok ? 0 : 1 };
+    }
+    const lines = [
+      `${result.task.name}\tmutations=${result.summary.mutations}\twarnings=${result.summary.with_warnings}`,
+      ...result.records.map((record) => {
+        const warnings = record.warnings.length ? record.warnings.join(",") : "ok";
+        const linked = record.linked_decision && typeof record.linked_decision.id === "number" ? record.linked_decision.id : "-";
+        return `${record.command.created_at}\t${record.command.type}\tdecision=${linked}\t${warnings}`;
+      }),
+    ];
+    return { exitCode: result.ok ? 0 : 1, handled: true, stdout: `${lines.join("\n")}\n` };
+  } finally {
+    database.close();
+  }
+}
+
+function runTelemetryCommand(
+  parsed: ParsedRuntimeArgs,
+  options: { cwd?: string; env?: NodeJS.ProcessEnv; now?: () => Date },
+): TypescriptRuntimeResult {
+  if (parsed.task !== null) {
+    throw new Error(`Unexpected argument: ${parsed.task}`);
+  }
+  const database = openRuntimeDatabase(parsed, options);
+  try {
+    const view = parsed.flags.telemetryView;
+    if (view === "metrics") {
+      const result = telemetryMetricsSync(database, {
+        dbPath: runtimeDbPath(parsed, options),
+        runRef: parsed.flags.run,
+        taskRef: parsed.flags.taskName,
+        now: options.now,
+        window: parsed.flags.window ?? "24h",
+      });
+      if (parsed.flags.json) {
+        return jsonResult(result);
+      }
+      return textResult([
+        `window: ${result.window.label}`,
+        `telemetry_events: ${result.counters.telemetry_events.total}`,
+        `cycle_success_rate: ${result.rollups.cycle_success_rate}`,
+        `skipped_ingest_lines: ${result.counters.ingest.skipped_lines}`,
+      ]);
+    }
+	    if (view === "snapshot") {
+	      const result = parsed.flags.taskName
+	        ? telemetrySnapshotSync(database, { limit: parsed.flags.limit ?? 100, task: parsed.flags.taskName })
+	        : telemetryOperatorSnapshotSync(database, {
+	          activeOnly: parsed.flags.activeOnly,
+	          dbPath: runtimeDbPath(parsed, options),
+	          limit: parsed.flags.limit ?? 100,
+	          maxOpenCriteria: parsed.flags.maxOpenCriteria,
+	          maxStorageBytes: parsed.flags.maxStorageBytes,
+          maxUnfinishedCommands: parsed.flags.maxUnfinishedCommands,
+          staleCycleSeconds: parsed.flags.staleCycleSeconds,
+          workerStalenessSeconds: parsed.flags.workerStalenessSeconds,
+        });
+      return jsonResult(result);
+	    }
+	    if (view === "check") {
+	      const result = parsed.flags.taskName
+	        ? telemetryTaskCheckSync(database, {
+	          dbPath: runtimeDbPath(parsed, options),
+	          limit: parsed.flags.limit ?? 100,
+	          maxOpenCriteria: parsed.flags.maxOpenCriteria,
+	          maxStorageBytes: parsed.flags.maxStorageBytes,
+	          maxUnfinishedCommands: parsed.flags.maxUnfinishedCommands,
+	          staleCycleSeconds: parsed.flags.staleCycleSeconds,
+	          task: parsed.flags.taskName,
+	          workerStalenessSeconds: parsed.flags.workerStalenessSeconds,
+	        })
+	        : telemetryOperatorSnapshotSync(database, {
+	          activeOnly: parsed.flags.activeOnly,
+	          dbPath: runtimeDbPath(parsed, options),
+	          limit: parsed.flags.limit ?? 100,
+	          maxOpenCriteria: parsed.flags.maxOpenCriteria,
+	          maxStorageBytes: parsed.flags.maxStorageBytes,
+        maxUnfinishedCommands: parsed.flags.maxUnfinishedCommands,
+        staleCycleSeconds: parsed.flags.staleCycleSeconds,
+        workerStalenessSeconds: parsed.flags.workerStalenessSeconds,
+      });
+      if (parsed.flags.json) {
+        return { ...jsonResult(result), exitCode: result.checks.ok ? 0 : 1 };
+      }
+      const status = result.checks.ok ? "healthy" : "unhealthy";
+      return { exitCode: result.checks.ok ? 0 : 1, handled: true, stdout: [`telemetry check: ${status}`, ...result.alerts.map((alert: Record<string, string>) => `${alert.severity}: ${alert.type}: ${alert.message}`)].join("\n") + "\n" };
+    }
+    if (view === "task") {
+      const task = parsed.flags.telemetryViewTask ?? parsed.flags.taskName;
+      if (!task) {
+        throw new Error("telemetry task requires a task name or ID");
+      }
+      const result = telemetryTaskViewSync(database, {
+        dbPath: runtimeDbPath(parsed, options),
+        limit: parsed.flags.limit ?? 100,
+        staleCycleSeconds: parsed.flags.staleCycleSeconds,
+        task,
+      });
+      if (parsed.flags.json) {
+        return jsonResult(result);
+      }
+      return textResult([
+        `task: ${result.task.name}`,
+        `worker_alive: ${result.liveness.worker_alive}`,
+        `manager_alive: ${result.liveness.manager_alive}`,
+        `cycles: ${JSON.stringify(result.cycles.counts_by_state)}`,
+        `failed_commands: ${result.failed_commands.length}`,
+        ...result.alerts.map((alert: Record<string, string>) => `${alert.severity}: ${alert.type}: ${alert.message}`),
+      ]);
+    }
+    if (view === "failures") {
+      const result = telemetryFailuresViewSync(database, {
+        activeOnly: parsed.flags.activeOnly,
+        dbPath: runtimeDbPath(parsed, options),
+        limit: parsed.flags.limit ?? 100,
+        runRef: parsed.flags.run,
+        staleCycleSeconds: parsed.flags.staleCycleSeconds,
+        taskRef: parsed.flags.taskName,
+        window: parsed.flags.window,
+      });
+      if (parsed.flags.json) {
+        return jsonResult(result);
+      }
+      return textResult([
+        `failed_cycles: ${result.failed_cycles.length}`,
+        `failed_commands: ${result.failed_commands.length}`,
+        `ingest_errors: ${result.ingest.error_count}`,
+        `pane_capture_failures: ${result.pane_capture_failures.length}`,
+        ...result.alerts.map((alert: Record<string, string>) => `${alert.severity}: ${alert.type}: ${alert.message}`),
+      ]);
+    }
+    const taskId = parsed.flags.taskName ? taskRowForDiagnostics(database, parsed.flags.taskName).id : null;
+    const runId = telemetryRunIdForFilters(database, parsed.flags.run, taskId);
+    const events = telemetryEventsSync(database, {
+      actor: parsed.flags.actor,
+      eventType: parsed.flags.eventType,
+      limit: parsed.flags.limit ?? 100,
+      newest: parsed.flags.newest,
+      runId,
+      search: parsed.flags.search,
+      severity: parsed.flags.severity,
+      taskId,
+    });
+    if (parsed.flags.telemetrySummary) {
+      const summary = telemetrySummarySync(events, { runId, taskId });
+      if (parsed.flags.json) {
+        return jsonResult(summary);
+      }
+      return textResult([
+        `total: ${summary.total}`,
+        `first_timestamp: ${summary.first_timestamp}`,
+        `last_timestamp: ${summary.last_timestamp}`,
+        "by_actor:",
+        ...Object.entries(summary.by_actor).sort().map(([key, value]) => `  ${key}: ${value}`),
+        "by_event_type:",
+        ...Object.entries(summary.by_event_type).sort().map(([key, value]) => `  ${key}: ${value}`),
+        "by_severity:",
+        ...Object.entries(summary.by_severity).sort().map(([key, value]) => `  ${key}: ${value}`),
+      ]);
+    }
+    if (parsed.flags.json) {
+      return jsonResult(events);
+    }
+    return { exitCode: 0, handled: true, stdout: events.map((event) => `${event.timestamp} ${event.actor} ${event.event_type} [${event.severity}] ${event.summary}\n`).join("") };
+  } finally {
+    database.close();
+  }
+}
+
+type RuntimeDatabase = ReturnType<typeof openRuntimeDatabase>;
+
+interface TaskDiagnosticsRow {
+  created_at: string;
+  goal: string;
+  id: string;
+  name: string;
+  state: string;
+  summary: string | null;
+  updated_at: string;
+}
+
+interface TelemetryEventRecord {
+  actor: string;
+  attributes: Record<string, unknown>;
+  correlation: Record<string, unknown>;
+  event_type: string;
+  id: string;
+  run_id: string | null;
+  severity: string;
+  summary: string;
+  task_id: string | null;
+  timestamp: string;
+}
+
+function commandPath(name: string, options: { env?: NodeJS.ProcessEnv }): string | null {
+  const result = spawnSync("sh", ["-c", `command -v ${shellQuote(name)}`], {
+    encoding: "utf8",
+    env: options.env,
+  });
+  return result.status === 0 ? result.stdout.trim() || null : null;
+}
+
+function runProcess(command: string[], options: { env?: NodeJS.ProcessEnv; terminalRunner?: (args: string[]) => { status: number; stderr?: string; stdout?: string } }): { status: number; stderr?: string; stdout?: string } {
+  if (options.terminalRunner) {
+    return options.terminalRunner(command);
+  }
+  const result = spawnSync(command[0], command.slice(1), { encoding: "utf8", env: options.env });
+  return { status: result.status ?? 1, stderr: result.stderr, stdout: result.stdout };
+}
+
+function doctorWorkerSummaries(root: string): Array<Record<string, unknown>> {
+  if (!existsSync(root)) {
+    return [];
+  }
+  return readdirSync(root, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => {
+      const dir = join(root, entry.name);
+      const config = loadJsonSync<Record<string, unknown>>(join(dir, "config.json"), {});
+      return {
+        config_path: join(dir, "config.json"),
+        name: typeof config.name === "string" ? config.name : entry.name,
+        status: loadJsonSync<Record<string, unknown>>(join(dir, "status.json"), {}),
+      };
+    })
+    .filter((worker) => existsSync(worker.config_path as string));
+}
+
+function currentTmuxSessionName(options: { tmuxRunner?: TmuxRunner }): string | { error: string } | null {
+  const runner = options.tmuxRunner ?? defaultTmuxRunner;
+  const result = runner(["tmux", "display-message", "-p", "#S"], { check: false });
+  if (result.status !== 0) {
+    const detail = (result.stderr ?? result.stdout ?? "").trim();
+    return detail ? { error: detail } : null;
+  }
+  return (result.stdout ?? "").trim() || null;
+}
+
+function newPathPayload(): { command_template: string; follow_up: string[] } {
+  return {
+    command_template: "conveyor register-worker --name <NAME> --pid <PID> --cwd <CWD> --tmux-session <SESSION>",
+    follow_up: [
+      "Have a manager Codex session register itself via `conveyor register-manager --name <MGR_NAME> --pid <MGR_PID> --cwd <CWD>`.",
+      "Create a task and bind the pair: `conveyor tasks --create <TASK> --goal \"<goal>\"` then `conveyor bind --task <TASK> --worker <NAME> --manager <MGR_NAME>`.",
+      "The manager Codex drives the supervision loop by calling `conveyor cycle <TASK>` repeatedly and reading the returned JSON.",
+    ],
+  };
+}
+
+function taskRowForDiagnostics(database: RuntimeDatabase, task: string): TaskDiagnosticsRow {
+  const row = database.prepare(`
+    select id, name, goal, summary, state, created_at, updated_at
+    from tasks
+    where id = ? or name = ?
+    order by created_at desc
+    limit 1
+  `).get(task, task) as TaskDiagnosticsRow | undefined;
+  if (!row) {
+    throw new Error(`Unknown task: ${task}`);
+  }
+  return row;
+}
+
+function runRowForDiagnostics(database: RuntimeDatabase, run: string): { id: string; name: string; task_id: string } {
+  const row = database.prepare(`
+    select id, name, task_id
+    from runs
+    where id = ? or name = ?
+    order by started_at desc
+    limit 1
+  `).get(run, run) as { id: string; name: string; task_id: string } | undefined;
+  if (!row) {
+    throw new Error(`Unknown run: ${run}`);
+  }
+  return row;
+}
+
+function runRowForTaskDiagnostics(database: RuntimeDatabase, run: string, taskId: string): { id: string; name: string; task_id: string } {
+  const row = database.prepare(`
+    select id, name, task_id
+    from runs
+    where task_id = ?
+      and (id = ? or name = ?)
+    order by started_at desc
+    limit 1
+  `).get(taskId, run, run) as { id: string; name: string; task_id: string } | undefined;
+  if (!row) {
+    throw new Error(`Unknown run for task: ${run}`);
+  }
+  return row;
+}
+
+function telemetryRunIdForFilters(database: RuntimeDatabase, runRef: string | null, taskId: string | null): string | null {
+  if (runRef === null) {
+    return null;
+  }
+  return taskId !== null
+    ? runRowForTaskDiagnostics(database, runRef, taskId).id
+    : runRowForDiagnostics(database, runRef).id;
+}
+
+function pidIsAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    if (isPlainRecord(error) && error.code === "EPERM") {
+      return true;
+    }
+    return false;
+  }
+}
+
+function collectReconcileReportSync(database: RuntimeDatabase, options: { staleCyclesSeconds: number }): {
+  dangling_bindings: Array<Record<string, unknown>>;
+  dead_pid_sessions: Array<Record<string, unknown>>;
+  schema_health: ReturnType<typeof databaseHealthSync>;
+  stuck_tasks: Array<Record<string, unknown>>;
+} {
+  const dead_pid_sessions = (database.prepare(`
+    select name, role, pid, last_heartbeat_at
+    from sessions
+    where state = 'active' and pid is not null
+    order by name
+  `).all() as Array<{ last_heartbeat_at: string | null; name: string; pid: number; role: string }>)
+    .filter((row) => !pidIsAlive(Number(row.pid)))
+    .map((row) => ({
+      last_heartbeat_at: row.last_heartbeat_at,
+      name: row.name,
+      pid: Number(row.pid),
+      role: row.role,
+    }));
+  const dangling_bindings: Array<Record<string, unknown>> = [];
+  const bindingRows = database.prepare(`
+    select b.id as binding_id, t.id as task_id, t.name as task_name,
+           ws.state as worker_state, ws.name as worker_name,
+           ms.state as manager_state, ms.name as manager_name
+    from bindings b
+    join tasks t on t.id = b.task_id
+    left join sessions ws on ws.id = b.worker_session_id
+    left join sessions ms on ms.id = b.manager_session_id
+    where b.state in ('active', 'ending')
+      and b.worker_session_id is not null
+    order by b.id
+  `).all() as Array<Record<string, number | string | null>>;
+  for (const row of bindingRows) {
+    if (row.worker_state === "gone") {
+      dangling_bindings.push({
+        binding_id: row.binding_id,
+        gone_role: "worker",
+        gone_session_name: row.worker_name,
+        task_id: row.task_id,
+        task_name: row.task_name,
+      });
+    }
+    if (row.manager_state === "gone") {
+      dangling_bindings.push({
+        binding_id: row.binding_id,
+        gone_role: "manager",
+        gone_session_name: row.manager_name,
+        task_id: row.task_id,
+        task_name: row.task_name,
+      });
+    }
+  }
+  const now = Date.now();
+  const stuck_tasks = (database.prepare(`
+    select t.name as task_name, b.id as binding_id, max(mc.completed_at) as last_cycle_at
+    from bindings b
+    join tasks t on t.id = b.task_id
+    left join manager_cycles mc on mc.task_id = b.task_id
+    where b.state in ('active', 'ending')
+    group by b.id
+    having last_cycle_at is not null
+    order by b.id
+  `).all() as Array<{ binding_id: string; last_cycle_at: string; task_name: string }>)
+    .map((row) => ({ ...row, age_seconds: Math.max(0, (now - Date.parse(row.last_cycle_at)) / 1000) }))
+    .filter((row) => row.age_seconds > options.staleCyclesSeconds);
+  return {
+    dangling_bindings,
+    dead_pid_sessions,
+    schema_health: databaseHealthSync(database),
+    stuck_tasks,
+  };
+}
+
+function applyReconcileSync(database: RuntimeDatabase, options: { staleCyclesSeconds: number; timestamp: string }): ReturnType<typeof collectReconcileReportSync> & { applied: Record<string, unknown[]> } {
+  const report = collectReconcileReportSync(database, { staleCyclesSeconds: options.staleCyclesSeconds });
+  const applied = { bindings_marked_invalid: [] as string[], sessions_marked_gone: [] as string[] };
+  for (const session of report.dead_pid_sessions) {
+    database.prepare("update sessions set state = 'gone', last_heartbeat_at = ? where name = ?").run(options.timestamp, String(session.name));
+    applied.sessions_marked_gone.push(String(session.name));
+    insertEventSync(database, {
+      payload: { name: session.name, pid: session.pid, reason: "pid not alive" },
+      type: "session_marked_gone_by_reconcile",
+    });
+  }
+  const post = collectReconcileReportSync(database, { staleCyclesSeconds: options.staleCyclesSeconds });
+  const invalidatedBindings = new Set<string>();
+  for (const binding of post.dangling_bindings) {
+    const bindingId = String(binding.binding_id);
+    if (invalidatedBindings.has(bindingId)) {
+      continue;
+    }
+    invalidatedBindings.add(bindingId);
+    database.prepare("update bindings set state = 'invalid', ended_at = ? where id = ?").run(options.timestamp, bindingId);
+    applied.bindings_marked_invalid.push(bindingId);
+    insertEventSync(database, {
+      payload: {
+        binding_id: binding.binding_id,
+        gone_role: binding.gone_role,
+        gone_session_name: binding.gone_session_name,
+        task_name: binding.task_name,
+      },
+      taskId: String(binding.task_id),
+      type: "binding_marked_invalid_by_reconcile",
+    });
+  }
+  return { ...report, applied };
+}
+
+function liveSessionSnapshotSync(session: string | null, pid: number | null, runner: TmuxRunner): { live: boolean; pane_id: string | null } | null {
+  if (session) {
+    const live = tmuxSessionRunning(session, runner);
+    return { live, pane_id: live ? currentPaneIdWithRunner(session, runner) : null };
+  }
+  if (pid !== null) {
+    return { live: pidIsAlive(pid), pane_id: null };
+  }
+  return null;
+}
+
+function collectLiveReconcileRowsSync(database: RuntimeDatabase, runner: TmuxRunner): Array<Record<string, unknown>> {
+  const unfinishedByTask = new Map<string, Array<Record<string, unknown>>>();
+  const unfinishedRows = database.prepare(`
+    select id, task_id, worker_id, manager_id, type, state, created_at, updated_at, claimed_by, attempts, error
+    from commands
+    where state in ('pending', 'attempted')
+    order by updated_at desc, created_at desc, id
+  `).all() as Array<Record<string, unknown>>;
+  for (const command of unfinishedRows) {
+    const taskId = String(command.task_id ?? "");
+    if (!taskId) {
+      continue;
+    }
+    const commands = unfinishedByTask.get(taskId) ?? [];
+    commands.push(command);
+    unfinishedByTask.set(taskId, commands);
+  }
+
+  const rows = database.prepare(`
+    select t.id as task_id, t.name as task_name, t.state as task_state,
+           w.id as worker_id, w.name as worker_name, w.state as worker_state,
+	           w.tmux_session as worker_session, w.tmux_pane_id as worker_pane_id,
+	           ws.id as worker_session_id, ws.name as worker_session_name, ws.state as worker_session_state,
+	           ws.tmux_session as worker_bound_session, ws.tmux_pane_id as worker_session_pane_id,
+	           ws.pid as worker_session_pid,
+	           m.id as manager_id, m.name as manager_name, m.state as manager_state,
+	           m.tmux_session as manager_session, m.tmux_pane_id as manager_pane_id,
+	           m.last_capture_sha256 as manager_last_capture_sha256,
+	           m.last_seen_at as manager_last_seen_at,
+	           ms.id as manager_session_id, ms.name as manager_session_name, ms.state as manager_session_state,
+	           ms.tmux_session as manager_bound_session, ms.tmux_pane_id as manager_session_pane_id,
+	           ms.pid as manager_session_pid,
+	           ms.last_heartbeat_at as manager_session_last_seen_at
+    from tasks t
+    left join bindings b on b.task_id = t.id and b.state in ('active', 'ending')
+    left join workers w on w.id = b.worker_id
+    left join sessions ws on ws.id = b.worker_session_id
+    left join managers m on m.id = (
+      select m2.id
+      from managers m2
+      where m2.task_id = t.id
+        and m2.state in ('starting', 'ready', 'stopping')
+      order by m2.started_at desc, m2.id desc
+      limit 1
+    )
+    left join sessions ms on ms.id = b.manager_session_id
+    order by t.name
+  `).all() as Array<Record<string, string | null>>;
+
+  return rows.map((row) => {
+    const drift: string[] = [];
+    const workerId = row.worker_id ?? row.worker_session_id;
+    const workerName = row.worker_name ?? row.worker_session_name;
+    const workerState = row.worker_state ?? row.worker_session_state;
+    const workerSession = row.worker_session ?? row.worker_bound_session;
+    const workerPaneId = row.worker_pane_id ?? row.worker_session_pane_id;
+    const managerId = row.manager_id ?? row.manager_session_id;
+    const managerName = row.manager_name ?? row.manager_session_name;
+	    const managerState = row.manager_state ?? row.manager_session_state;
+	    const managerSession = row.manager_session ?? row.manager_bound_session;
+	    const managerPaneId = row.manager_pane_id ?? row.manager_session_pane_id;
+	    const managerLastSeenAt = row.manager_last_seen_at ?? row.manager_session_last_seen_at;
+	    const workerPid = typeof row.worker_session_pid === "number" ? row.worker_session_pid : null;
+	    const managerPid = typeof row.manager_session_pid === "number" ? row.manager_session_pid : null;
+	    const workerSnapshot = liveSessionSnapshotSync(workerSession, workerPid, runner);
+	    const managerSnapshot = liveSessionSnapshotSync(managerSession, managerPid, runner);
+	    if (workerId && ["active", "candidate"].includes(String(workerState)) && workerSnapshot?.live === false) {
+	      drift.push("worker_missing");
+	    }
+	    if (managerId && ["active", "starting", "ready", "stopping"].includes(String(managerState)) && managerSnapshot?.live === false) {
+	      drift.push("manager_missing");
+	    }
+    if (workerPaneId && workerSnapshot?.pane_id && workerPaneId !== workerSnapshot.pane_id) {
+      drift.push("worker_pane_mismatch");
+    }
+    if (managerPaneId && managerSnapshot?.pane_id && managerPaneId !== managerSnapshot.pane_id) {
+      drift.push("manager_pane_mismatch");
+    }
+    const unfinishedCommands = unfinishedByTask.get(String(row.task_id)) ?? [];
+    if (unfinishedCommands.length > 0 && !drift.includes("unfinished_commands")) {
+      drift.push("unfinished_commands");
+    }
+    return {
+      drift,
+      task: {
+        id: row.task_id,
+        name: row.task_name,
+        state: row.task_state,
+      },
+      unfinished_commands: unfinishedCommands,
+	      worker: workerId ? {
+	        id: workerId,
+	        live: workerSnapshot?.live ?? null,
+	        name: workerName,
+	        pid: workerPid,
+	        recorded_pane_id: workerPaneId,
+	        session: workerSession,
+	        state: workerState,
+	        tmux_pane_id: workerSnapshot?.pane_id ?? null,
+      } : null,
+      manager: managerId ? {
+	        id: managerId,
+	        last_capture_sha256: row.manager_last_capture_sha256,
+	        last_seen_age_seconds: managerLastSeenAt ? ageSecondsFromIso(managerLastSeenAt) : null,
+	        last_seen_at: managerLastSeenAt,
+	        live: managerSnapshot?.live ?? null,
+	        name: managerName,
+	        pid: managerPid,
+	        recorded_pane_id: managerPaneId,
+	        session: managerSession,
+        state: managerState,
+        tmux_pane_id: managerSnapshot?.pane_id ?? null,
+      } : null,
+    };
+  });
+}
+
+function managerLivenessWarningsFromRowsSync(rows: Array<Record<string, unknown>>, staleSeconds: number): Array<Record<string, unknown>> {
+  const warnings: Array<Record<string, unknown>> = [];
+  for (const row of rows) {
+    const manager = row.manager as Record<string, unknown> | null;
+    const task = row.task as Record<string, unknown> | null;
+    if (!manager || manager.live !== true || !["starting", "ready", "stopping"].includes(String(manager.state))) {
+      continue;
+    }
+    if (manager.last_seen_at === null) {
+      warnings.push({
+        manager: manager.name,
+        manager_id: manager.id,
+        reason: "manager_never_seen",
+        recommended_action: "observe manager or run a manager lifecycle command to refresh heartbeat",
+        task: task?.name,
+        task_id: task?.id,
+      });
+      continue;
+    }
+    const ageSeconds = ageSecondsFromIso(String(manager.last_seen_at));
+    if (ageSeconds !== null && ageSeconds > staleSeconds) {
+      warnings.push({
+        age_seconds: ageSeconds,
+        last_seen_at: manager.last_seen_at,
+        manager: manager.name,
+        manager_id: manager.id,
+        reason: "manager_seen_stale",
+        recommended_action: "inspect manager terminal; do not auto-recover unless tmux session is missing",
+        stale_seconds: staleSeconds,
+        task: task?.name,
+        task_id: task?.id,
+      });
+    }
+  }
+  return warnings;
+}
+
+function divergentCyclesForTaskSync(database: RuntimeDatabase, taskId: string, limit: number): Array<Record<string, unknown>> {
+  const rows = database.prepare(`
+    select id, task_id, started_at, completed_at, state, status_json
+    from manager_cycles
+    where task_id = ?
+      and json_extract(status_json, '$.notable_pane_pattern') is not null
+    order by id desc
+    limit ?
+  `).all(taskId, limit) as Array<{ completed_at: string | null; id: number; started_at: string; state: string; status_json: string; task_id: string }>;
+  return rows.map((row) => {
+    const status = row.status_json ? parseJsonObject(row.status_json) : {};
+    return {
+      completed_at: row.completed_at,
+      id: row.id,
+      notable_pane_pattern: status.notable_pane_pattern ?? null,
+      started_at: row.started_at,
+      state: row.state,
+      status,
+      task_id: row.task_id,
+    };
+  });
+}
+
+function transcriptCapturePruneIdsSync(database: RuntimeDatabase, keepLatest: number): number[] {
+  const rows = database.prepare(`
+    select id, worker_id
+    from transcript_captures
+    where content is not null
+    order by worker_id, id desc
+  `).all() as Array<{ id: number; worker_id: string }>;
+  const seen = new Map<string, number>();
+  const pruneIds: number[] = [];
+  for (const row of rows) {
+    const count = (seen.get(row.worker_id) ?? 0) + 1;
+    seen.set(row.worker_id, count);
+    if (count > keepLatest) {
+      pruneIds.push(row.id);
+    }
+  }
+  return pruneIds;
+}
+
+function telemetryEventsSync(database: RuntimeDatabase, options: {
+  actor: string | null;
+  eventType: string | null;
+  limit: number;
+  newest: boolean;
+  runId: string | null;
+  search: string | null;
+  severity: string | null;
+  taskId: string | null;
+}): TelemetryEventRecord[] {
+  const clauses: string[] = [];
+  const params: unknown[] = [];
+  for (const [column, value] of [["run_id", options.runId], ["task_id", options.taskId], ["actor", options.actor], ["event_type", options.eventType], ["severity", options.severity]] as const) {
+    if (value !== null) {
+      clauses.push(`${column} = ?`);
+      params.push(value);
+    }
+  }
+  if (options.search) {
+    clauses.push(`
+      (
+        id in (
+          select event_id
+          from telemetry_events_fts
+          where telemetry_events_fts match ?
+        )
+        or event_type = ?
+      )
+    `);
+    params.push(telemetryFtsQuery(options.search), options.search);
+  }
+  const where = clauses.length ? `where ${clauses.join(" and ")}` : "";
+  const rows = database.prepare(`
+    select id, run_id, task_id, timestamp, actor, event_type, severity, summary,
+           correlation_json, attributes_json
+    from telemetry_events
+    ${where}
+    order by timestamp ${options.newest ? "desc" : "asc"}, rowid ${options.newest ? "desc" : "asc"}
+    limit ?
+  `).all(...(params as string[]), options.limit) as Array<Record<string, string | null>>;
+  return rows.map((row) => ({
+    actor: String(row.actor),
+    attributes: parseJsonObject(String(row.attributes_json ?? "{}")),
+    correlation: parseJsonObject(String(row.correlation_json ?? "{}")),
+    event_type: String(row.event_type),
+    id: String(row.id),
+    run_id: row.run_id,
+    severity: String(row.severity),
+    summary: String(row.summary),
+    task_id: row.task_id,
+    timestamp: String(row.timestamp),
+  }));
+}
+
+function telemetryFtsQuery(search: string): string {
+  return search.split(/\s+/).filter(Boolean).map((term) => `"${term.replace(/"/g, "\"\"")}"`).join(" ");
+}
+
+function telemetrySummarySync(events: TelemetryEventRecord[], options?: { runId?: string | null; taskId?: string | null }): {
+  by_actor: Record<string, number>;
+  by_event_type: Record<string, number>;
+  by_severity: Record<string, number>;
+  first_timestamp: string | null;
+  last_timestamp: string | null;
+  run_id: string | null;
+  task_id: string | null;
+  total: number;
+} {
+  const runIds = new Set(events.map((event) => event.run_id).filter((value): value is string => value !== null));
+  const taskIds = new Set(events.map((event) => event.task_id).filter((value): value is string => value !== null));
+  return {
+    by_actor: countByStrings(events.map((event) => event.actor)),
+    by_event_type: countByStrings(events.map((event) => event.event_type)),
+    by_severity: countByStrings(events.map((event) => event.severity)),
+    first_timestamp: events[0]?.timestamp ?? null,
+    last_timestamp: events.at(-1)?.timestamp ?? null,
+    run_id: options?.runId ?? (runIds.size === 1 ? [...runIds][0] : null),
+    task_id: options?.taskId ?? (taskIds.size === 1 ? [...taskIds][0] : null),
+    total: events.length,
+  };
+}
+
+function telemetryMetricsSync(database: RuntimeDatabase, options: { dbPath: string; now?: () => Date; runRef: string | null; taskRef: string | null; window: string }): Record<string, any> {
+  const seconds = parseTelemetryWindowSeconds(options.window);
+  const end = options.now?.() ?? new Date();
+  const start = new Date(end.getTime() - seconds * 1000);
+  const startIso = isoSeconds(start);
+  const endIso = isoSeconds(end);
+  const taskId = options.taskRef ? taskRowForDiagnostics(database, options.taskRef).id : null;
+  const runId = telemetryRunIdForFilters(database, options.runRef, taskId);
+  const eventClauses = ["timestamp >= ?", "timestamp <= ?"];
+  const eventParams: unknown[] = [startIso, endIso];
+  if (runId) {
+    eventClauses.push("run_id = ?");
+    eventParams.push(runId);
+  }
+  if (taskId) {
+    eventClauses.push("task_id = ?");
+    eventParams.push(taskId);
+  }
+  const eventWhere = eventClauses.join(" and ");
+  const telemetryRows = database.prepare(`select actor, event_type, severity from telemetry_events where ${eventWhere}`).all(...(eventParams as string[])) as Array<{ actor: string; event_type: string; severity: string }>;
+  const cycleStates = countRows(database, "manager_cycles", "state", {
+    runId,
+    taskId,
+    timeColumn: "started_at",
+    startIso,
+    endIso,
+  });
+  const commandStates = commandTypeStateCounts(database, {
+    runId,
+    taskId,
+    startIso,
+    endIso,
+  });
+  const commandAttemptStates = commandAttemptTypeStateCounts(database, {
+    runId,
+    taskId,
+    startIso,
+    endIso,
+  });
+  const paneCapture = paneCaptureCountsSync(database, { runId, taskId, startIso, endIso });
+  const reconcile = collectReconcileReportSync(database, { staleCyclesSeconds: 3600 });
+  const storage = storageCountsSync(database, options.dbPath, taskId);
+  return {
+    counters: {
+      cycles: {
+        failed: cycleStates.failed ?? 0,
+        started: cycleStates.started ?? 0,
+        succeeded: cycleStates.succeeded ?? 0,
+        total: Object.values(cycleStates).reduce((sum, count) => sum + count, 0),
+      },
+      exports: { total: telemetryRows.filter((row) => row.event_type.startsWith("export_") || row.event_type.endsWith("_exported")).length },
+      ingest: {
+        new_events: sumTelemetryAttribute(database, eventWhere, eventParams, "new_events"),
+        skipped_lines: sumTelemetryAttribute(database, eventWhere, eventParams, "skipped_lines"),
+      },
+      pane_capture: paneCapture,
+      telemetry_events: {
+        by_actor: countByStrings(telemetryRows.map((row) => row.actor)),
+        by_actor_event_type_severity: countByCompositeNested(telemetryRows, ["actor", "event_type", "severity"]),
+        by_event_type: countByStrings(telemetryRows.map((row) => row.event_type)),
+        by_severity: countByStrings(telemetryRows.map((row) => row.severity)),
+        total: telemetryRows.length,
+      },
+    },
+    filters: { run_id: runId, task_id: taskId },
+    gauges: {
+      active_sessions: activeSessionGauge(database),
+      active_tasks: activeTaskCountSync(database, taskId),
+      criteria: criteriaGauge(database, taskId),
+      reconcile: {
+        dangling_bindings: reconcile.dangling_bindings.length,
+        dead_pid_sessions: reconcile.dead_pid_sessions.length,
+        stuck_tasks: reconcile.stuck_tasks.length,
+        total_drift: reconcile.dangling_bindings.length + reconcile.dead_pid_sessions.length + reconcile.stuck_tasks.length,
+      },
+      storage_bytes: {
+        database_file: storage.database_file,
+        terminal_captures: storage.terminal_captures.bytes,
+        total_retained: storage.total_retained,
+        transcript_captures: storage.transcript_captures.bytes,
+        transcript_segments: storage.transcript_segments.bytes,
+      },
+    },
+    generated_at: endIso,
+    rollups: {
+      command_attempts_by_type: commandAttemptStates,
+      commands_by_type: commandStates,
+      cycle_success_rate: ((cycleStates.succeeded ?? 0) + (cycleStates.failed ?? 0)) > 0
+        ? (cycleStates.succeeded ?? 0) / ((cycleStates.succeeded ?? 0) + (cycleStates.failed ?? 0))
+        : null,
+    },
+    schema_version: 1,
+    window: { end: endIso, label: options.window, seconds, start: startIso },
+  };
+}
+
+function telemetrySnapshotSync(database: RuntimeDatabase, options: { limit: number; task: string }): Record<string, any> {
+  const task = taskRowForDiagnostics(database, options.task);
+  const events = telemetryEventsSync(database, { actor: null, eventType: null, limit: 10000, newest: false, runId: null, search: null, severity: null, taskId: task.id });
+  const report = collectReconcileReportSync(database, { staleCyclesSeconds: 3600 });
+  const commands = recentCommandsForTaskSync(database, task.id, options.limit);
+  const latestCycle = latestCycleForTaskSync(database, task.id);
+  const criteria = criteriaGauge(database, task.id);
+  const worker = boundSessionSnapshotSync(database, task.id, "worker");
+  const manager = boundSessionSnapshotSync(database, task.id, "manager");
+  const integrity = taskIntegrity(task, { manager, worker });
+  const diagnostics = {
+    dangling_bindings: report.dangling_bindings.filter((item) => item.task_id === task.id),
+    dead_pid_sessions: report.dead_pid_sessions,
+    schema_ok: report.schema_health.ok,
+    stuck_tasks: report.stuck_tasks.filter((item) => item.task_name === task.name),
+  };
+  const alerts = dashboardAlerts({ commands, criteria, diagnostics, integrityIssues: integrity.issues, latestCycle, manager, telemetrySummary: telemetrySummarySync(events), worker });
+  return {
+    alerts,
+    binding: bindingSnapshotSync(database, task.id),
+    commands,
+    criteria: { open_accepted: acceptedCriteriaRowsSync(database, task.id, options.limit), open_blocker_count: criteria.by_status.accepted ?? 0, summary: criteria.by_status },
+    diagnostics,
+    latest_cycle: latestCycle,
+    manager,
+    run: activeRunForTaskSync(database, task.id),
+    task: { ...task, integrity },
+    telemetry: { recent: telemetryEventsSync(database, { actor: null, eventType: null, limit: options.limit, newest: false, runId: null, search: null, severity: null, taskId: task.id }), summary: telemetrySummarySync(events) },
+    worker,
+  };
+}
+
+function telemetryTaskViewSync(database: RuntimeDatabase, options: { dbPath: string; limit: number; staleCycleSeconds: number; task: string }): Record<string, any> {
+  const snapshot = telemetrySnapshotSync(database, { limit: options.limit, task: options.task });
+  const cycles = cycleHistoryForTaskSync(database, snapshot.task.id, options.limit);
+  const ingest = ingestViewSync(database, { activeOnly: false, limit: options.limit, runId: null, taskId: snapshot.task.id, updatedSince: null });
+  const latest = cycles.history[0] ?? null;
+  const age = latest ? ageSecondsFromIso(String(latest.completed_at ?? latest.started_at)) : null;
+  return {
+    alerts: [
+      ...snapshot.alerts,
+      ...(age !== null && age > options.staleCycleSeconds ? [{ message: `Latest manager cycle is older than ${options.staleCycleSeconds} seconds.`, severity: "warning", type: "stale_cycle" }] : []),
+      ...(ingest.skipped_lines ? [{ message: `${ingest.skipped_lines} ingest lines were skipped.`, severity: "warning", type: "ingest_skipped_lines" }] : []),
+      ...(ingest.error_count ? [{ message: `${ingest.error_count} ingest errors or warnings were recorded.`, severity: "error", type: "ingest_errors" }] : []),
+    ],
+    commands: taskCommandsViewSync(database, snapshot.task.id, options.limit, false),
+    criteria: criteriaViewSync(database, snapshot.task.id, options.limit),
+    cycles,
+    decisions: decisionsForTaskSync(database, snapshot.task.id, options.limit),
+    failed_commands: taskCommandsViewSync(database, snapshot.task.id, options.limit, true).recent,
+    ingest,
+    liveness: {
+      latest_cycle_age_seconds: age,
+      latest_cycle_stale: age !== null && age > options.staleCycleSeconds,
+      manager_alive: snapshot.manager?.alive ?? null,
+      worker_alive: snapshot.worker?.alive ?? null,
+    },
+    schema_version: 1,
+    storage: storageCountsSync(database, options.dbPath, snapshot.task.id),
+    task: snapshot.task,
+    telemetry: {
+      recent: snapshot.telemetry.recent.map((event: TelemetryEventRecord) => ({
+        actor: event.actor,
+        event_type: event.event_type,
+        id: event.id,
+        run_id: event.run_id,
+        severity: event.severity,
+        summary: event.summary,
+        timestamp: event.timestamp,
+      })),
+      summary: snapshot.telemetry.summary,
+    },
+  };
+}
+
+function telemetryTaskCheckSync(database: RuntimeDatabase, options: {
+  dbPath: string;
+  limit: number;
+  maxOpenCriteria: number;
+  maxStorageBytes: number | null;
+  maxUnfinishedCommands: number;
+  staleCycleSeconds: number;
+  task: string;
+  workerStalenessSeconds: number;
+}): Record<string, any> {
+  const result = telemetryTaskViewSync(database, {
+    dbPath: options.dbPath,
+    limit: options.limit,
+    staleCycleSeconds: options.staleCycleSeconds,
+    task: options.task,
+  });
+  const alerts = result.alerts.filter((alert: Record<string, string>) => {
+    if (alert.type === "unfinished_commands") {
+      return Number(result.commands.counts_by_state.pending ?? 0) + Number(result.commands.counts_by_state.attempted ?? 0) > options.maxUnfinishedCommands;
+    }
+    if (alert.type === "open_accepted_criteria") {
+      return Number(result.criteria.summary.accepted ?? 0) > options.maxOpenCriteria;
+    }
+    return true;
+  });
+  if (options.maxStorageBytes !== null && result.storage.total_retained > options.maxStorageBytes) {
+    alerts.push({ message: `${result.storage.total_retained} storage bytes exceeds threshold ${options.maxStorageBytes}.`, severity: "warning", type: "storage_bytes" });
+  }
+  const staleSessions = (["worker", "manager"] as const)
+    .map((role) => boundSessionSnapshotSync(database, String(result.task.id), role))
+    .filter((session): session is Record<string, unknown> => session !== null)
+    .filter((session) => {
+      const age = session.heartbeat_age_seconds;
+      return typeof age === "number" && age > options.workerStalenessSeconds;
+    });
+  if (staleSessions.length) {
+    alerts.push({ message: `${staleSessions.length} bound sessions have stale heartbeats.`, severity: "warning", type: "stale_sessions" });
+  }
+  return {
+    ...result,
+    alerts,
+    checks: {
+      ok: alerts.length === 0,
+      thresholds: telemetryCheckThresholds(options),
+    },
+  };
+}
+
+function telemetryCheckThresholds(options: {
+  maxOpenCriteria: number;
+  maxStorageBytes: number | null;
+  maxUnfinishedCommands: number;
+  staleCycleSeconds: number;
+  workerStalenessSeconds: number;
+}): Record<string, number | null> {
+  return {
+    max_open_criteria: options.maxOpenCriteria,
+    max_storage_bytes: options.maxStorageBytes,
+    max_unfinished_commands: options.maxUnfinishedCommands,
+    stale_cycle_seconds: options.staleCycleSeconds,
+    worker_staleness_seconds: options.workerStalenessSeconds,
+  };
+}
+
+function telemetryOperatorSnapshotSync(database: RuntimeDatabase, options: {
+  activeOnly: boolean;
+  dbPath: string;
+  limit: number;
+  maxOpenCriteria: number;
+  maxStorageBytes: number | null;
+  maxUnfinishedCommands: number;
+  staleCycleSeconds: number;
+  workerStalenessSeconds: number;
+}): Record<string, any> {
+  const report = collectReconcileReportSync(database, { staleCyclesSeconds: options.staleCycleSeconds });
+  const commands = operatorCommandsSnapshotSync(database, { activeOnly: options.activeOnly, limit: options.limit });
+  const criteria = operatorCriteriaSnapshotSync(database, { activeOnly: options.activeOnly, limit: options.limit });
+  const cycles = operatorCyclesSnapshotSync(database, report, { activeOnly: options.activeOnly, limit: options.limit });
+  const sessions = activeSessionSummariesSync(database, options.workerStalenessSeconds);
+  const databaseBytes = databaseFileSizeSync(options.dbPath);
+  const storage = { database_bytes: databaseBytes, total_bytes: databaseBytes };
+  const alerts: Array<Record<string, string>> = [];
+  if (!report.schema_health.ok) alerts.push({ message: "Database schema health is not OK.", severity: "error", type: "schema_health" });
+  if (report.dead_pid_sessions.length) alerts.push({ message: `${report.dead_pid_sessions.length} active sessions have dead or missing pids.`, severity: "error", type: "dead_pid_sessions" });
+  if (report.dangling_bindings.length) alerts.push({ message: `${report.dangling_bindings.length} bindings reference gone sessions.`, severity: "error", type: "reconcile_drift" });
+  if (cycles.stale_count) alerts.push({ message: `${cycles.stale_count} active tasks have stale manager cycles.`, severity: "warning", type: "stale_cycles" });
+  if (sessions.stale_count) alerts.push({ message: `${sessions.stale_count} active sessions have stale heartbeats.`, severity: "warning", type: "stale_sessions" });
+  if (commands.unfinished_count > options.maxUnfinishedCommands) alerts.push({ message: `${commands.unfinished_count} unfinished commands exceeds threshold ${options.maxUnfinishedCommands}.`, severity: "warning", type: "unfinished_commands" });
+  if (criteria.open_accepted_count > options.maxOpenCriteria) alerts.push({ message: `${criteria.open_accepted_count} open accepted criteria exceeds threshold ${options.maxOpenCriteria}.`, severity: "warning", type: "open_accepted_criteria" });
+  if (options.maxStorageBytes !== null && storage.total_bytes > options.maxStorageBytes) alerts.push({ message: `${storage.total_bytes} storage bytes exceeds threshold ${options.maxStorageBytes}.`, severity: "warning", type: "storage_bytes" });
+  if (cycles.recent_failed.length) alerts.push({ message: `${cycles.recent_failed.length} recent manager cycles failed.`, severity: "error", type: "failed_cycles" });
+  if (commands.failed_count) alerts.push({ message: `${commands.failed_count} commands failed.`, severity: "error", type: "failed_commands" });
+  return {
+    alerts,
+	    checks: {
+	      ok: alerts.length === 0,
+	      thresholds: telemetryCheckThresholds(options),
+	    },
+    commands,
+    criteria,
+    cycles,
+    reconcile: report,
+    sessions: { ...sessions, dead_pid_count: report.dead_pid_sessions.length, dead_pid_sessions: report.dead_pid_sessions },
+    storage,
+    tasks: { active: activeTaskSummariesSync(database), active_count: activeTaskSummariesSync(database).length },
+  };
+}
+
+function telemetryFailuresViewSync(database: RuntimeDatabase, options: { activeOnly: boolean; dbPath: string; limit: number; runRef: string | null; staleCycleSeconds: number; taskRef: string | null; window: string | null }): Record<string, any> {
+  let taskId = options.taskRef ? taskRowForDiagnostics(database, options.taskRef).id : null;
+  let runId: string | null = null;
+  if (options.runRef !== null) {
+    const run = taskId !== null
+      ? runRowForTaskDiagnostics(database, options.runRef, taskId)
+      : runRowForDiagnostics(database, options.runRef);
+    runId = run.id;
+    if (taskId !== null && taskId !== run.task_id) {
+      throw new Error("--run and --task refer to different tasks");
+    }
+    taskId = run.task_id;
+  }
+  const window = telemetryWindowStart(options.window);
+  const failed_cycles = failedCyclesSync(database, { activeOnly: options.activeOnly, limit: options.limit, runId, taskId, updatedSince: window.start });
+  const failed_commands = failedCommandsSync(database, { activeOnly: options.activeOnly, limit: options.limit, runId, taskId, updatedSince: window.start });
+  const ingest = ingestViewSync(database, { activeOnly: options.activeOnly, limit: options.limit, runId, taskId, updatedSince: window.start });
+  const open_criteria = openCriteriaFailureViewSync(database, { activeOnly: options.activeOnly, limit: options.limit, runId, taskId });
+  const pane_capture_failures = paneCaptureFailuresSync(database, { activeOnly: options.activeOnly, limit: options.limit, runId, taskId, updatedSince: window.start });
+  const operator = telemetryOperatorSnapshotSync(database, { activeOnly: options.activeOnly, dbPath: options.dbPath, limit: options.limit, maxOpenCriteria: 0, maxStorageBytes: null, maxUnfinishedCommands: 0, staleCycleSeconds: options.staleCycleSeconds, workerStalenessSeconds: 3600 });
+  return {
+    alerts: [
+      ...(failed_cycles.length ? [{ message: `${failed_cycles.length} manager cycles failed.`, severity: "error", type: "failed_cycles" }] : []),
+      ...(failed_commands.length ? [{ message: `${failed_commands.length} commands failed.`, severity: "error", type: "failed_commands" }] : []),
+      ...(ingest.error_count ? [{ message: `${ingest.error_count} ingest errors or warnings were recorded.`, severity: "error", type: "ingest_errors" }] : []),
+      ...(pane_capture_failures.length ? [{ message: `${pane_capture_failures.length} pane captures failed.`, severity: "warning", type: "pane_capture_failures" }] : []),
+      ...(open_criteria.open_accepted_count ? [{ message: `${open_criteria.open_accepted_count} open accepted criteria remain.`, severity: "warning", type: "open_accepted_criteria" }] : []),
+    ],
+    failed_commands,
+    failed_cycles,
+    ingest,
+    operator: {
+      checks: { ok: !(failed_cycles.length || failed_commands.length || ingest.error_count || pane_capture_failures.length || open_criteria.open_accepted_count), thresholds: operator.checks.thresholds },
+      commands: commandsViewSync(database, { activeOnly: options.activeOnly, limit: options.limit, onlyFailed: false, runId, taskId, updatedSince: window.start }),
+      cycles: {
+        recent_failed: failed_cycles,
+        recent_failed_count: failed_cycles.length,
+        stale: taskId !== null || options.activeOnly || window.start !== null ? [] : operator.cycles.stale,
+        stale_count: taskId !== null || options.activeOnly || window.start !== null ? 0 : operator.cycles.stale_count,
+      },
+      sessions: operator.sessions,
+      tasks: operator.tasks,
+    },
+    open_criteria,
+    pane_capture_failures,
+    filters: {
+      active_only: options.activeOnly,
+      run_id: runId,
+      task_id: taskId,
+      window: window.info,
+    },
+    schema_version: 1,
+    storage: storageCountsSync(database, options.dbPath, taskId),
+  };
+}
+
+function activeTaskSummariesSync(database: RuntimeDatabase): Array<Record<string, unknown>> {
+  return database.prepare(`
+    select id, name, summary, state, created_at, updated_at
+    from tasks
+    where state in ('candidate', 'managed', 'paused')
+    order by updated_at desc, name
+  `).all() as Array<Record<string, unknown>>;
+}
+
+function activeTaskCountSync(database: RuntimeDatabase, taskId: string | null): number {
+  if (taskId !== null) {
+    const row = database.prepare("select count(*) as count from tasks where state in ('candidate', 'managed', 'paused') and id = ?").get(taskId) as { count: number } | undefined;
+    return Number(row?.count ?? 0);
+  }
+  return activeTaskSummariesSync(database).length;
+}
+
+function operatorCommandsSnapshotSync(database: RuntimeDatabase, options: { activeOnly: boolean; limit: number }): Record<string, any> {
+  const activeClause = options.activeOnly ? "where c.task_id in (select id from tasks where state in ('candidate', 'managed', 'paused'))" : "";
+  const counts = database.prepare(`
+    select
+      sum(case when c.state in ('pending', 'attempted') then 1 else 0 end) as unfinished_count,
+      sum(case when c.state = 'failed' then 1 else 0 end) as failed_count
+    from commands c
+    ${activeClause}
+  `).get() as { failed_count: number | null; unfinished_count: number | null };
+  return {
+    failed_count: Number(counts.failed_count ?? 0),
+    recent_failed: failedCommandsSync(database, { activeOnly: options.activeOnly, limit: options.limit, runId: null, taskId: null, updatedSince: null }),
+    recent_unfinished: database.prepare(`
+      select c.id, c.task_id, t.name as task_name, c.type, c.state, c.created_at, c.updated_at,
+             c.claimed_by, c.attempts
+      from commands c
+      left join tasks t on t.id = c.task_id
+      where c.state in ('pending', 'attempted')
+        ${options.activeOnly ? "and c.task_id in (select id from tasks where state in ('candidate', 'managed', 'paused'))" : ""}
+      order by c.updated_at desc, c.created_at desc
+      limit ?
+    `).all(options.limit),
+    unfinished_count: Number(counts.unfinished_count ?? 0),
+  };
+}
+
+function recentCommandsForTaskSync(database: RuntimeDatabase, taskId: string, limit: number, onlyFailed = false): Record<string, any> {
+  const failedOnly = onlyFailed ? "and c.state = 'failed'" : "";
+  const rows = database.prepare(`
+    select c.id, c.type, c.state, c.created_at, c.updated_at, c.task_id, c.worker_id, c.manager_id,
+           c.payload_json, c.result_json, c.error
+    from commands c
+    where c.task_id = ? ${failedOnly}
+    order by c.created_at desc, c.id desc
+    limit ?
+  `).all(taskId, limit) as Array<Record<string, string | null>>;
+  const counts = database.prepare(`
+    select
+      sum(case when state in ('pending', 'attempted') then 1 else 0 end) as unfinished_count,
+      sum(case when state = 'failed' then 1 else 0 end) as failed_count
+    from commands
+    where task_id = ?
+  `).get(taskId) as { failed_count: number | null; unfinished_count: number | null };
+  return {
+    failed_count: Number(counts.failed_count ?? 0),
+    recent: rows.map((row) => ({
+      created_at: row.created_at,
+      error: row.error,
+      id: row.id,
+      manager_id: row.manager_id,
+      payload: parseJsonObject(String(row.payload_json ?? "{}")),
+      result: row.result_json ? parseJsonObject(String(row.result_json)) : null,
+      state: row.state,
+      task_id: row.task_id,
+      type: row.type,
+      updated_at: row.updated_at,
+      worker_id: row.worker_id,
+    })),
+    unfinished_count: Number(counts.unfinished_count ?? 0),
+  };
+}
+
+function taskCommandsViewSync(database: RuntimeDatabase, taskId: string, limit: number, onlyFailed: boolean): Record<string, unknown> {
+  const failedOnly = onlyFailed ? "and state = 'failed'" : "";
+  const rows = database.prepare(`
+    select id, idempotency_key, created_at, updated_at, task_id, worker_id,
+           manager_id, correlation_id, type, state, available_at, claimed_by,
+           claimed_at, claim_expires_at, attempts, max_attempts, payload_json,
+           required_permission, result_json, error
+    from commands
+    where task_id = ? ${failedOnly}
+    order by updated_at desc, created_at desc, id desc
+    limit ?
+  `).all(taskId, limit) as Array<Record<string, string | number | null>>;
+  const countRows = database.prepare(`
+    select state, count(*) as count
+    from commands
+    where task_id = ? ${failedOnly}
+    group by state
+  `).all(taskId) as Array<{ count: number; state: string }>;
+  const countsByState = Object.fromEntries(countRows.map((row) => [row.state, Number(row.count)]));
+  return {
+    counts_by_state: countsByState,
+    failed_count: countsByState.failed ?? 0,
+    recent: rows.map(safeCommandView),
+    total: Object.values(countsByState).reduce((sum, count) => sum + count, 0),
+  };
+}
+
+function safeCommandView(row: Record<string, string | number | null>): Record<string, unknown> {
+  return {
+    attempts: row.attempts,
+    available_at: row.available_at,
+    claimed_at: row.claimed_at,
+    claimed_by: row.claimed_by,
+    claim_expires_at: row.claim_expires_at,
+    correlation_id: row.correlation_id,
+    created_at: row.created_at,
+    error: row.error,
+    id: row.id,
+    idempotency_key: row.idempotency_key,
+    manager_id: row.manager_id,
+    max_attempts: row.max_attempts,
+    payload: parseJsonObject(String(row.payload_json ?? "{}")),
+    required_permission: row.required_permission,
+    result: row.result_json ? parseJsonObject(String(row.result_json)) : null,
+    state: row.state,
+    task_id: row.task_id,
+    type: row.type,
+    updated_at: row.updated_at,
+    worker_id: row.worker_id,
+  };
+}
+
+function failedCommandsSync(database: RuntimeDatabase, options: { activeOnly: boolean; limit: number; runId: string | null; taskId: string | null; updatedSince: string | null }): Array<Record<string, unknown>> {
+  const clauses = ["c.state = 'failed'"];
+  const params: unknown[] = [];
+  if (options.taskId !== null) {
+    clauses.push("c.task_id = ?");
+    params.push(options.taskId);
+  }
+  if (options.updatedSince !== null) {
+    clauses.push("c.updated_at >= ?");
+    params.push(options.updatedSince);
+  }
+  if (options.activeOnly) {
+    clauses.push("c.task_id in (select id from tasks where state in ('candidate', 'managed', 'paused'))");
+  }
+  const rows = database.prepare(`
+    select c.id, c.task_id, t.name as task_name, c.type, c.state, c.created_at, c.updated_at,
+           c.claimed_by, c.attempts, c.error, c.payload_json, c.result_json
+    from commands c
+    left join tasks t on t.id = c.task_id
+    where ${clauses.join(" and ")}
+    order by c.updated_at desc, c.created_at desc
+    ${options.runId === null ? "limit ?" : ""}
+  `).all(...(options.runId === null ? [...params, options.limit] : params) as string[]) as Array<Record<string, unknown>>;
+  return rows
+    .filter((row) => options.runId === null || commandRowMatchesRun(row as { payload_json: string | null; result_json: string | null }, options.runId))
+    .slice(0, options.limit)
+    .map(({ payload_json: _payloadJson, result_json: _resultJson, ...row }) => row);
+}
+
+function failedCyclesSync(database: RuntimeDatabase, options: { activeOnly: boolean; limit: number; runId: string | null; taskId: string | null; updatedSince: string | null }): Array<Record<string, unknown>> {
+  const clauses = ["mc.state = 'failed'"];
+  const params: unknown[] = [];
+  if (options.taskId !== null) {
+    clauses.push("mc.task_id = ?");
+    params.push(options.taskId);
+  }
+  if (options.runId !== null) {
+    clauses.push("exists (select 1 from manager_cycle_spans mcs where mcs.manager_cycle_id = mc.id and mcs.run_id = ?)");
+    params.push(options.runId);
+  }
+  if (options.updatedSince !== null) {
+    clauses.push("coalesce(mc.completed_at, mc.started_at) >= ?");
+    params.push(options.updatedSince);
+  }
+  if (options.activeOnly) {
+    clauses.push("mc.task_id in (select id from tasks where state in ('candidate', 'managed', 'paused'))");
+  }
+  const rows = database.prepare(`
+    select mc.id, mc.task_id, t.name as task_name, mc.manager_id, mc.started_at,
+           mc.completed_at, mc.state, mc.status_json, mc.health_json, mc.decision, mc.error
+    from manager_cycles mc
+    left join tasks t on t.id = mc.task_id
+    where ${clauses.join(" and ")}
+    order by coalesce(mc.completed_at, mc.started_at) desc, mc.id desc
+    limit ?
+  `).all(...[...params, options.limit] as string[]) as Array<Record<string, unknown>>;
+  return rows.map((row) => ({
+    ...cycleView(row as Record<string, string | number | null>),
+    task_name: row.task_name,
+  }));
+}
+
+function commandsViewSync(database: RuntimeDatabase, options: { activeOnly: boolean; limit: number; onlyFailed: boolean; runId: string | null; taskId: string | null; updatedSince: string | null }): Record<string, unknown> {
+  const clauses: string[] = [];
+  const params: unknown[] = [];
+  if (options.onlyFailed) {
+    clauses.push("c.state = 'failed'");
+  }
+  if (options.taskId !== null) {
+    clauses.push("c.task_id = ?");
+    params.push(options.taskId);
+  }
+  if (options.updatedSince !== null) {
+    clauses.push("c.updated_at >= ?");
+    params.push(options.updatedSince);
+  }
+  if (options.activeOnly) {
+    clauses.push("c.task_id in (select id from tasks where state in ('candidate', 'managed', 'paused'))");
+  }
+  const where = clauses.length ? `where ${clauses.join(" and ")}` : "";
+  const rows = database.prepare(`
+    select c.id, c.task_id, t.name as task_name, c.type, c.state, c.created_at, c.updated_at,
+           c.claimed_by, c.attempts, c.error, c.payload_json, c.result_json
+    from commands c
+    left join tasks t on t.id = c.task_id
+    ${where}
+    order by c.updated_at desc, c.created_at desc
+    ${options.runId === null ? "limit ?" : ""}
+  `).all(...(options.runId === null ? [...params, options.limit] : params) as string[]) as Array<Record<string, unknown>>;
+  const matching = rows.filter((row) => options.runId === null || commandRowMatchesRun(row as { payload_json: string | null; result_json: string | null }, options.runId));
+  const countsByState = countByStrings(matching.map((row) => String(row.state ?? "unknown")));
+  return {
+    counts_by_state: countsByState,
+    failed_count: countsByState.failed ?? 0,
+    recent: matching.slice(0, options.limit).map(({ payload_json: _payloadJson, result_json: _resultJson, ...row }) => row),
+    total: Object.values(countsByState).reduce((sum, count) => sum + count, 0),
+  };
+}
+
+function paneCaptureFailuresSync(database: RuntimeDatabase, options: { activeOnly: boolean; limit: number; runId: string | null; taskId: string | null; updatedSince: string | null }): Array<Record<string, unknown>> {
+  const clauses = ["json_extract(mc.status_json, '$.pane_signal.captured') = 0"];
+  const params: unknown[] = [];
+  if (options.taskId !== null) {
+    clauses.push("mc.task_id = ?");
+    params.push(options.taskId);
+  }
+  if (options.runId !== null) {
+    clauses.push("exists (select 1 from manager_cycle_spans mcs where mcs.manager_cycle_id = mc.id and mcs.run_id = ?)");
+    params.push(options.runId);
+  }
+  if (options.updatedSince !== null) {
+    clauses.push("coalesce(mc.completed_at, mc.started_at) >= ?");
+    params.push(options.updatedSince);
+  }
+  if (options.activeOnly) {
+    clauses.push("mc.task_id in (select id from tasks where state in ('candidate', 'managed', 'paused'))");
+  }
+  const rows = database.prepare(`
+    select mc.id, mc.task_id, t.name as task_name, mc.manager_id, mc.started_at,
+           mc.completed_at, mc.state, mc.status_json, mc.health_json, mc.decision, mc.error
+    from manager_cycles mc
+    left join tasks t on t.id = mc.task_id
+    where ${clauses.join(" and ")}
+    order by coalesce(mc.completed_at, mc.started_at) desc, mc.id desc
+    limit ?
+  `).all(...[...params, options.limit] as string[]) as Array<Record<string, string | number | null>>;
+  return rows.map((row) => ({ ...cycleView(row), task_name: row.task_name }));
+}
+
+function ingestViewSync(database: RuntimeDatabase, options: { activeOnly: boolean; limit: number; runId: string | null; taskId: string | null; updatedSince: string | null }): Record<string, unknown> {
+  const eventClauses: string[] = [];
+  const eventParams: unknown[] = [];
+  if (options.taskId !== null) {
+    eventClauses.push("task_id = ?");
+    eventParams.push(options.taskId);
+  }
+  if (options.runId !== null) {
+    eventClauses.push("run_id = ?");
+    eventParams.push(options.runId);
+  }
+  if (options.updatedSince !== null) {
+    eventClauses.push("timestamp >= ?");
+    eventParams.push(options.updatedSince);
+  }
+  if (options.activeOnly) {
+    eventClauses.push("task_id in (select id from tasks where state in ('candidate', 'managed', 'paused'))");
+  }
+  const eventSuffix = eventClauses.length ? `and ${eventClauses.join(" and ")}` : "";
+  const skippedRow = database.prepare(`
+    select
+      sum(coalesce(json_extract(attributes_json, '$.new_events'), 0)) as new_events,
+      sum(coalesce(json_extract(attributes_json, '$.skipped_lines'), 0)) as skipped_lines
+    from telemetry_events
+    where event_type = 'codex_events_ingested' ${eventSuffix}
+  `).get(...(eventParams as string[])) as { new_events: number | null; skipped_lines: number | null } | undefined;
+  const skippedEvents = database.prepare(`
+    select id, run_id, task_id, timestamp, actor, event_type, severity,
+           summary, correlation_json, attributes_json
+    from telemetry_events
+    where event_type = 'codex_events_ingested'
+      and coalesce(json_extract(attributes_json, '$.skipped_lines'), 0) > 0
+      ${eventSuffix}
+    order by timestamp desc, id desc
+    limit ?
+  `).all(...[...eventParams, options.limit] as string[]) as Array<Record<string, string | null>>;
+  const errorEvents = database.prepare(`
+    select id, run_id, task_id, timestamp, actor, event_type, severity,
+           summary, correlation_json, attributes_json
+    from telemetry_events
+    where (event_type like '%ingest%' or event_type = 'codex_events_ingested')
+      and severity in ('warning', 'error')
+      ${eventSuffix}
+    order by timestamp desc, id desc
+    limit ?
+  `).all(...[...eventParams, options.limit] as string[]) as Array<Record<string, string | null>>;
+
+  const cycleClauses = ["mc.state = 'failed'"];
+  const cycleParams: unknown[] = [];
+  if (options.taskId !== null) {
+    cycleClauses.push("mc.task_id = ?");
+    cycleParams.push(options.taskId);
+  }
+  if (options.runId !== null) {
+    cycleClauses.push("exists (select 1 from manager_cycle_spans mcs where mcs.manager_cycle_id = mc.id and mcs.run_id = ?)");
+    cycleParams.push(options.runId);
+  }
+  if (options.updatedSince !== null) {
+    cycleClauses.push("coalesce(mc.completed_at, mc.started_at) >= ?");
+    cycleParams.push(options.updatedSince);
+  }
+  if (options.activeOnly) {
+    cycleClauses.push("mc.task_id in (select id from tasks where state in ('candidate', 'managed', 'paused'))");
+  }
+  const cycleErrors = database.prepare(`
+    select mc.id, mc.task_id, t.name as task_name, mc.started_at, mc.completed_at,
+           mc.state, mc.error, mc.status_json
+    from manager_cycles mc
+    left join tasks t on t.id = mc.task_id
+    where ${cycleClauses.join(" and ")}
+      and (
+        mc.error like '%Ingest%'
+        or json_extract(mc.status_json, '$.error_type') like '%Ingest%'
+      )
+    order by coalesce(mc.completed_at, mc.started_at) desc, mc.id desc
+    limit ?
+  `).all(...[...cycleParams, options.limit] as string[]) as Array<Record<string, unknown>>;
+
+  return {
+    cycle_errors: cycleErrors.map((row) => ({
+      completed_at: row.completed_at,
+      error: row.error,
+      id: row.id,
+      started_at: row.started_at,
+      state: row.state,
+      task_id: row.task_id,
+      task_name: row.task_name,
+    })),
+    error_count: errorEvents.length + cycleErrors.length,
+    new_events: Number(skippedRow?.new_events ?? 0),
+    recent_errors: errorEvents.map(telemetryIngestEventSummary),
+    recent_skipped: skippedEvents.map(telemetryIngestEventSummary),
+    skipped_lines: Number(skippedRow?.skipped_lines ?? 0),
+  };
+}
+
+function telemetryIngestEventSummary(row: Record<string, string | null>): Record<string, unknown> {
+  const attributes = parseJsonObject(row.attributes_json ?? "{}");
+  return {
+    attributes: Object.fromEntries(["new_events", "skipped_lines", "error", "reason"].flatMap((key) => Object.prototype.hasOwnProperty.call(attributes, key) ? [[key, attributes[key]]] : [])),
+    event_type: row.event_type,
+    id: row.id,
+    run_id: row.run_id,
+    severity: row.severity,
+    summary: row.summary,
+    task_id: row.task_id,
+    timestamp: row.timestamp,
+  };
+}
+
+function openCriteriaFailureViewSync(database: RuntimeDatabase, options: { activeOnly: boolean; limit: number; runId: string | null; taskId: string | null }): Record<string, unknown> {
+  const countClauses: string[] = [];
+  const rowClauses: string[] = [];
+  const params: unknown[] = [];
+  if (options.taskId !== null) {
+    countClauses.push("task_id = ?");
+    rowClauses.push("ac.task_id = ?");
+    params.push(options.taskId);
+  }
+  if (options.runId !== null) {
+    countClauses.push("json_extract(evidence_json, '$.ralph_loop_run_id') = ?");
+    rowClauses.push("json_extract(ac.evidence_json, '$.ralph_loop_run_id') = ?");
+    params.push(options.runId);
+  }
+  if (options.activeOnly) {
+    countClauses.push("task_id in (select id from tasks where state in ('candidate', 'managed', 'paused'))");
+    rowClauses.push("ac.task_id in (select id from tasks where state in ('candidate', 'managed', 'paused'))");
+  }
+  const countWhere = countClauses.length ? `where ${countClauses.join(" and ")}` : "";
+  const counts = database.prepare(`
+    select status, count(*) as count
+    from acceptance_criteria
+    ${countWhere}
+    group by status
+  `).all(...(params as string[])) as Array<{ count: number; status: string }>;
+  const byStatus = Object.fromEntries(counts.map((row) => [row.status, Number(row.count)]));
+  const acceptedWhere = [...rowClauses, "ac.status = 'accepted'"].join(" and ");
+  const rows = database.prepare(`
+    select ac.id, ac.task_id, t.name as task_name, ac.status, ac.source, ac.created_at, ac.updated_at
+    from acceptance_criteria ac
+    left join tasks t on t.id = ac.task_id
+    where ${acceptedWhere}
+    order by ac.updated_at desc, ac.id desc
+    limit ?
+  `).all(...[...params, options.limit] as string[]) as Array<Record<string, unknown>>;
+  return {
+    by_status: byStatus,
+    open_accepted: rows,
+    open_accepted_count: byStatus.accepted ?? 0,
+  };
+}
+
+function operatorCyclesSnapshotSync(database: RuntimeDatabase, report: ReturnType<typeof collectReconcileReportSync>, options: { activeOnly: boolean; limit: number }): Record<string, any> {
+  const recent_failed = failedCyclesSync(database, { activeOnly: options.activeOnly, limit: options.limit, runId: null, taskId: null, updatedSince: null });
+  return {
+    recent_failed,
+    recent_failed_count: recent_failed.length,
+    stale: report.stuck_tasks,
+    stale_count: report.stuck_tasks.length,
+  };
+}
+
+function operatorCriteriaSnapshotSync(database: RuntimeDatabase, options: { activeOnly: boolean; limit: number }): Record<string, any> {
+  const view = openCriteriaFailureViewSync(database, { activeOnly: options.activeOnly, limit: options.limit, runId: null, taskId: null });
+  return {
+    by_status: view.by_status,
+    open_accepted: view.open_accepted,
+    open_accepted_count: view.open_accepted_count,
+  };
+}
+
+function acceptedCriteriaRowsSync(database: RuntimeDatabase, taskId: string | null, limit: number): Array<Record<string, unknown>> {
+  const where = taskId ? "where ac.status = 'accepted' and ac.task_id = ?" : "where ac.status = 'accepted'";
+  const params = taskId ? [taskId, limit] : [limit];
+  return database.prepare(`
+    select ac.id, ac.task_id, t.name as task_name, ac.status, ac.source, ac.created_at, ac.updated_at
+    from acceptance_criteria ac
+    left join tasks t on t.id = ac.task_id
+    ${where}
+    order by ac.updated_at desc, ac.id desc
+    limit ?
+	  `).all(...params) as Array<Record<string, unknown>>;
+}
+
+function criteriaViewSync(database: RuntimeDatabase, taskId: string, limit: number): Record<string, unknown> {
+  const rows = database.prepare(`
+    select id, task_id, criterion, status, source, proof, rationale, evidence_json, created_at, updated_at
+    from acceptance_criteria
+    where task_id = ?
+    order by id
+  `).all(taskId) as Array<Record<string, string | number | null>>;
+  const summary = { accepted: 0, deferred: 0, proposed: 0, rejected: 0, satisfied: 0 };
+  for (const row of rows) {
+    const status = String(row.status);
+    if (status in summary) {
+      summary[status as keyof typeof summary] += 1;
+    }
+  }
+  const openRows = rows.filter((row) => row.status === "proposed" || row.status === "accepted");
+  return {
+    open: openRows.slice(0, limit).map((row) => ({
+      created_at: row.created_at,
+      id: row.id,
+      proof: row.proof,
+      source: row.source,
+      status: row.status,
+      updated_at: row.updated_at,
+    })),
+    open_count: openRows.length,
+    summary,
+    total: rows.length,
+  };
+}
+
+function activeSessionSummariesSync(database: RuntimeDatabase, workerStalenessSeconds: number): Record<string, any> {
+  const active = (database.prepare(`
+    select id, name, role, pid, cwd, tmux_session, tmux_pane_id, last_heartbeat_at, registered_at
+    from sessions
+    where state = 'active'
+    order by role, name
+  `).all() as Array<Record<string, string | number | null>>).map((row) => ({
+    ...row,
+    heartbeat_age_seconds: typeof row.last_heartbeat_at === "string" ? ageSecondsFromIso(row.last_heartbeat_at) : null,
+  }));
+  const stale = active.filter((session) => typeof session.heartbeat_age_seconds === "number" && session.heartbeat_age_seconds > workerStalenessSeconds);
+  return { active, active_count: active.length, stale, stale_count: stale.length };
+}
+
+function criteriaGauge(database: RuntimeDatabase, taskId: string | null): { by_status: Record<string, number>; open: number; total: number } {
+  const where = taskId ? "where task_id = ?" : "";
+  const params = taskId ? [taskId] : [];
+  const rows = database.prepare(`select status, count(*) as count from acceptance_criteria ${where} group by status`).all(...params) as Array<{ count: number; status: string }>;
+  const byStatus = { accepted: 0, deferred: 0, proposed: 0, rejected: 0, satisfied: 0 };
+  for (const row of rows) {
+    byStatus[row.status as keyof typeof byStatus] = Number(row.count);
+  }
+  return { by_status: byStatus, open: byStatus.proposed + byStatus.accepted, total: Object.values(byStatus).reduce((sum, count) => sum + count, 0) };
+}
+
+function activeSessionGauge(database: RuntimeDatabase): Record<string, unknown> {
+  const rows = database.prepare("select role, count(*) as count from sessions where state = 'active' group by role").all() as Array<{ count: number; role: string }>;
+  const byRole = { manager: 0, worker: 0 };
+  for (const row of rows) {
+    if (row.role === "manager" || row.role === "worker") {
+      byRole[row.role] = Number(row.count);
+    }
+  }
+  return { by_role: byRole, total: byRole.manager + byRole.worker };
+}
+
+function countRows(database: RuntimeDatabase, table: string, column: string, options: { endIso: string; runId: string | null; startIso: string; taskId: string | null; timeColumn: string }): Record<string, number> {
+  const clauses = [`${options.timeColumn} >= ?`, `${options.timeColumn} <= ?`];
+  const params: unknown[] = [options.startIso, options.endIso];
+  if (options.taskId !== null) {
+    clauses.push("task_id = ?");
+    params.push(options.taskId);
+  }
+  if (options.runId !== null) {
+    clauses.push(`exists (select 1 from manager_cycle_spans mcs where mcs.manager_cycle_id = ${table}.id and mcs.run_id = ?)`);
+    params.push(options.runId);
+  }
+  const rows = database.prepare(`select ${column} as key, count(*) as count from ${table} where ${clauses.join(" and ")} group by ${column}`).all(...(params as string[])) as Array<{ count: number; key: string }>;
+  return Object.fromEntries(rows.map((row) => [row.key, Number(row.count)]));
+}
+
+function commandTypeStateCounts(database: RuntimeDatabase, options: { endIso: string; runId: string | null; startIso: string; taskId: string | null }): Record<string, Record<string, number>> {
+  const clauses = ["created_at >= ?", "created_at <= ?"];
+  const params: unknown[] = [options.startIso, options.endIso];
+  if (options.taskId !== null) {
+    clauses.push("task_id = ?");
+    params.push(options.taskId);
+  }
+  if (options.runId !== null) {
+    clauses.push(commandRunSqlClause("commands"));
+    params.push(...commandRunSqlParams(options.runId));
+  }
+  const rows = database.prepare(`select type, state, count(*) as count from commands where ${clauses.join(" and ")} group by type, state`).all(...(params as string[])) as Array<{ count: number; state: string; type: string }>;
+  const result: Record<string, Record<string, number>> = {};
+  for (const row of rows) {
+    result[row.type] = { ...(result[row.type] ?? {}), [row.state]: Number(row.count) };
+  }
+  return result;
+}
+
+function commandAttemptTypeStateCounts(database: RuntimeDatabase, options: { endIso: string; runId: string | null; startIso: string; taskId: string | null }): Record<string, Record<string, number>> {
+  const clauses = ["ca.started_at >= ?", "ca.started_at <= ?"];
+  const params: unknown[] = [options.startIso, options.endIso];
+  if (options.taskId !== null) {
+    clauses.push("commands.task_id = ?");
+    params.push(options.taskId);
+  }
+  if (options.runId !== null) {
+    clauses.push(commandRunSqlClause("commands"));
+    params.push(...commandRunSqlParams(options.runId));
+  }
+  const rows = database.prepare(`
+    select commands.type, ca.state, count(*) as count
+    from command_attempts ca
+    join commands on commands.id = ca.command_id
+    where ${clauses.join(" and ")}
+    group by commands.type, ca.state
+  `).all(...(params as string[])) as Array<{ count: number; state: string; type: string }>;
+  const result: Record<string, Record<string, number>> = {};
+  for (const row of rows) {
+    result[row.type] = { ...(result[row.type] ?? {}), [row.state]: Number(row.count) };
+  }
+  return result;
+}
+
+function paneCaptureCountsSync(database: RuntimeDatabase, options: { endIso: string; runId: string | null; startIso: string; taskId: string | null }): Record<string, number> {
+  const clauses = ["started_at >= ?", "started_at <= ?"];
+  const params: unknown[] = [options.startIso, options.endIso];
+  if (options.taskId !== null) {
+    clauses.push("task_id = ?");
+    params.push(options.taskId);
+  }
+  if (options.runId !== null) {
+    clauses.push("exists (select 1 from manager_cycle_spans mcs where mcs.manager_cycle_id = manager_cycles.id and mcs.run_id = ?)");
+    params.push(options.runId);
+  }
+  const rows = database.prepare(`
+    select
+      case json_extract(status_json, '$.pane_signal.captured')
+        when 1 then 'succeeded'
+        when 0 then 'failed'
+        else 'unknown'
+      end as state,
+      count(*) as count
+    from manager_cycles
+    where ${clauses.join(" and ")}
+    group by state
+  `).all(...(params as string[])) as Array<{ count: number; state: "failed" | "succeeded" | "unknown" }>;
+  const result = { failed: 0, succeeded: 0, unknown: 0 };
+  for (const row of rows) {
+    result[row.state] = Number(row.count);
+  }
+  return result;
+}
+
+function commandRunSqlClause(alias: string): string {
+  const payload = `${alias}.payload_json`;
+  const result = `${alias}.result_json`;
+  return `(
+    json_extract(${payload}, '$.ralph_loop_run_id') = ?
+    or json_extract(${payload}, '$.loop_run_id') = ?
+    or json_extract(${payload}, '$.run_id') = ?
+    or json_extract(${payload}, '$.ralph_loop.run_id') = ?
+    or json_extract(${payload}, '$.loop_policy.run_id') = ?
+    or json_extract(${result}, '$.ralph_loop_run_id') = ?
+    or json_extract(${result}, '$.loop_run_id') = ?
+    or json_extract(${result}, '$.run_id') = ?
+    or json_extract(${result}, '$.ralph_loop.run_id') = ?
+    or json_extract(${result}, '$.loop_policy.run_id') = ?
+  )`;
+}
+
+function commandRunSqlParams(runId: string): string[] {
+  return Array.from({ length: 10 }, () => runId);
+}
+
+function sumTelemetryAttribute(database: RuntimeDatabase, eventWhere: string, eventParams: unknown[], key: string): number {
+  const row = database.prepare(`select sum(coalesce(json_extract(attributes_json, '$.${key}'), 0)) as total from telemetry_events where ${eventWhere}`).get(...(eventParams as string[])) as { total: number | null };
+  return Number(row.total ?? 0);
+}
+
+function storageCountsSync(database: RuntimeDatabase, dbPath: string, taskId: string | null): Record<string, any> {
+  const taskFilter = taskId !== null ? "where task_id = ?" : "";
+  const taskParams = taskId !== null ? [taskId] : [];
+  const terminal = database.prepare(`select count(*) as count, sum(byte_count) as bytes from terminal_captures ${taskFilter}`).get(...taskParams) as { bytes: number | null; count: number | null } | undefined;
+  const segmentWhere = taskId !== null ? "where task_id = ? and segment_text is not null" : "where segment_text is not null";
+  const segments = database.prepare(`select count(*) as count, sum(byte_count) as bytes from transcript_segments ${segmentWhere}`).get(...taskParams) as { bytes: number | null; count: number | null } | undefined;
+  let transcriptSql = "select count(*) as count, sum(byte_count) as bytes from transcript_captures where content is not null";
+  const transcriptParams: string[] = [];
+  if (taskId !== null) {
+    transcriptSql = `
+      select count(*) as count, sum(byte_count) as bytes
+      from (
+        select distinct transcript_captures.id, transcript_captures.byte_count
+        from transcript_captures
+        join bindings on bindings.worker_id = transcript_captures.worker_id
+        where bindings.task_id = ?
+          and transcript_captures.content is not null
+      )
+    `;
+    transcriptParams.push(taskId);
+  }
+  const transcript = database.prepare(transcriptSql).get(...transcriptParams) as { bytes: number | null; count: number | null } | undefined;
+  const terminalBytes = Number(terminal?.bytes ?? 0);
+  const segmentBytes = Number(segments?.bytes ?? 0);
+  const transcriptBytes = Number(transcript?.bytes ?? 0);
+  return {
+    database_file: databaseFileSizeSync(dbPath),
+    terminal_captures: { bytes: terminalBytes, count: Number(terminal?.count ?? 0) },
+    total_retained: terminalBytes + segmentBytes + transcriptBytes,
+    transcript_captures: { bytes: transcriptBytes, count: Number(transcript?.count ?? 0) },
+    transcript_segments: { bytes: segmentBytes, count: Number(segments?.count ?? 0) },
+  };
+}
+
+function databaseFileSizeSync(dbPath: string): number {
+  try {
+    return statSync(dbPath).size;
+  } catch {
+    return 0;
+  }
+}
+
+function telemetryWindowStart(window: string | null): { info: Record<string, unknown> | null; start: string | null } {
+  if (window === null) {
+    return { info: null, start: null };
+  }
+  const seconds = parseTelemetryWindowSeconds(window);
+  const end = new Date();
+  const start = new Date(end.getTime() - seconds * 1000);
+  return {
+    info: { end: end.toISOString(), label: window, seconds, start: start.toISOString() },
+    start: start.toISOString(),
+  };
+}
+
+function latestCycleForTaskSync(database: RuntimeDatabase, taskId: string): Record<string, unknown> | null {
+  const row = database.prepare(`
+    select id, task_id, started_at, completed_at, state, status_json, health_json, decision, error
+    from manager_cycles
+    where task_id = ?
+    order by id desc
+    limit 1
+  `).get(taskId) as Record<string, string | number | null> | undefined;
+  return row ? cycleView(row) : null;
+}
+
+function cycleHistoryForTaskSync(database: RuntimeDatabase, taskId: string, limit: number): Record<string, any> {
+  const rows = database.prepare(`
+    select id, task_id, manager_id, started_at, completed_at, state, status_json, health_json, decision, error
+    from manager_cycles
+    where task_id = ?
+    order by id desc
+    limit ?
+  `).all(taskId, limit) as Array<Record<string, string | number | null>>;
+  const history = rows.map(cycleView);
+  const lastSuccess = database.prepare(`
+    select id, task_id, manager_id, started_at, completed_at, state, status_json, health_json, decision, error
+    from manager_cycles
+    where task_id = ? and state = 'succeeded'
+    order by id desc
+    limit 1
+  `).get(taskId) as Record<string, string | number | null> | undefined;
+  const failed = database.prepare(`
+    select id, task_id, manager_id, started_at, completed_at, state, status_json, health_json, decision, error
+    from manager_cycles
+    where task_id = ? and state = 'failed'
+    order by id desc
+    limit ?
+  `).all(taskId, limit) as Array<Record<string, string | number | null>>;
+  const paneFailures = database.prepare(`
+    select id, task_id, manager_id, started_at, completed_at, state, status_json, health_json, decision, error
+    from manager_cycles
+    where task_id = ?
+      and json_extract(status_json, '$.pane_signal.captured') = 0
+    order by id desc
+    limit ?
+  `).all(taskId, limit) as Array<Record<string, string | number | null>>;
+  const counts = database.prepare(`
+    select state, count(*) as count
+    from manager_cycles
+    where task_id = ?
+    group by state
+  `).all(taskId) as Array<{ count: number; state: string }>;
+  const countsByState = Object.fromEntries(counts.map((row) => [row.state, Number(row.count)]));
+  return {
+    counts_by_state: countsByState,
+    failed: failed.map(cycleView),
+    failed_count: countsByState.failed ?? 0,
+    history,
+    last_successful: lastSuccess ? cycleView(lastSuccess) : null,
+    pane_capture_failures: paneFailures.map(cycleView),
+    pane_capture_failure_count: paneFailures.length,
+    total: Object.values(countsByState).reduce((sum, count) => sum + count, 0),
+  };
+}
+
+function cycleView(row: Record<string, string | number | null>): Record<string, unknown> {
+  const status = row.status_json ? parseJsonObject(String(row.status_json)) : {};
+  return {
+    completed_at: row.completed_at,
+    decision: row.decision,
+    error: row.error,
+    health: row.health_json ? parseJsonObject(String(row.health_json)) : {},
+    id: row.id,
+    started_at: row.started_at,
+    state: row.state,
+    status,
+    task_id: row.task_id,
+    notable_pane_pattern: status.notable_pane_pattern ?? null,
+  };
+}
+
+function decisionsForTaskSync(database: RuntimeDatabase, taskId: string, limit: number): Record<string, unknown> {
+  const rows = database.prepare(`
+    select id, task_id, manager_id, manager_cycle_id, decision, reason, created_at, payload_json
+    from manager_decisions
+    where task_id = ?
+    order by created_at desc, id desc
+    limit ?
+  `).all(taskId, limit) as Array<Record<string, unknown>>;
+  return {
+    recent: rows.map((row) => ({
+      created_at: row.created_at,
+      decision: row.decision,
+      id: row.id,
+      manager_cycle_id: row.manager_cycle_id,
+      manager_id: row.manager_id,
+      payload_keys: Object.keys(parseJsonObject(String(row.payload_json ?? "{}"))).sort(),
+      reason: row.reason,
+      task_id: row.task_id,
+    })),
+  };
+}
+
+function bindingSnapshotSync(database: RuntimeDatabase, taskId: string): Record<string, unknown> | null {
+  const row = database.prepare(`
+    select b.id, b.task_id, b.worker_session_id, ws.name as worker_session_name,
+           b.manager_session_id, ms.name as manager_session_name, b.state, b.created_at
+    from bindings b
+    left join sessions ws on ws.id = b.worker_session_id
+    left join sessions ms on ms.id = b.manager_session_id
+    where b.task_id = ? and b.state in ('active', 'ending')
+    order by b.created_at desc
+    limit 1
+  `).get(taskId) as Record<string, unknown> | undefined;
+  return row ?? null;
+}
+
+function boundSessionSnapshotSync(database: RuntimeDatabase, taskId: string, role: "manager" | "worker"): Record<string, unknown> | null {
+  const row = role === "worker"
+    ? database.prepare(`
+      select s.id, s.name, s.role, s.state, s.pid, s.tmux_session, s.tmux_pane_id,
+             s.cwd, s.registered_at, s.last_heartbeat_at,
+             w.id as legacy_id, w.name as legacy_name, w.state as legacy_state,
+             w.tmux_session as legacy_tmux_session, w.tmux_pane_id as legacy_tmux_pane_id,
+             w.cwd as legacy_cwd, w.created_at as legacy_registered_at,
+             w.last_seen_at as legacy_last_heartbeat_at
+      from bindings b
+      left join sessions s on s.id = b.worker_session_id
+      left join workers w on w.id = b.worker_id
+      where b.task_id = ? and b.state in ('active', 'ending')
+      order by b.created_at desc
+      limit 1
+    `).get(taskId) as Record<string, string | number | null> | undefined
+    : database.prepare(`
+      select s.id, s.name, s.role, s.state, s.pid, s.tmux_session, s.tmux_pane_id,
+             s.cwd, s.registered_at, s.last_heartbeat_at,
+             m.id as legacy_id, m.name as legacy_name, m.state as legacy_state,
+             m.tmux_session as legacy_tmux_session, m.tmux_pane_id as legacy_tmux_pane_id,
+             null as legacy_cwd, m.started_at as legacy_registered_at,
+             m.last_seen_at as legacy_last_heartbeat_at
+      from bindings b
+      left join sessions s on s.id = b.manager_session_id
+      left join managers m on m.id = b.manager_id
+      where b.task_id = ? and b.state in ('active', 'ending')
+      order by b.created_at desc
+      limit 1
+    `).get(taskId) as Record<string, string | number | null> | undefined;
+  if (!row) {
+    return null;
+  }
+  if (row.id === null && row.legacy_id !== null) {
+    const lastHeartbeat = typeof row.legacy_last_heartbeat_at === "string" ? row.legacy_last_heartbeat_at : null;
+    return {
+      alive: null,
+      cwd: row.legacy_cwd,
+      heartbeat_age_seconds: lastHeartbeat !== null ? ageSecondsFromIso(lastHeartbeat) : null,
+      id: row.legacy_id,
+      last_heartbeat_at: lastHeartbeat,
+      name: row.legacy_name,
+      pid: null,
+      registered_at: row.legacy_registered_at,
+      role,
+      state: row.legacy_state,
+      tmux_pane_id: row.legacy_tmux_pane_id,
+      tmux_session: row.legacy_tmux_session,
+    };
+  }
+  if (row.id === null) {
+    return null;
+  }
+  const alive = typeof row.pid === "number" ? pidIsAlive(row.pid) : null;
+  const heartbeatAge = typeof row.last_heartbeat_at === "string" ? ageSecondsFromIso(row.last_heartbeat_at) : null;
+  return { ...row, alive, heartbeat_age_seconds: heartbeatAge };
+}
+
+function activeRunForTaskSync(database: RuntimeDatabase, taskId: string): Record<string, unknown> | null {
+  const row = database.prepare(`
+    select id, task_id, name, purpose, status, started_at, ended_at, metadata_json
+    from runs
+    where task_id = ? and status = 'active'
+    order by started_at desc
+    limit 1
+  `).get(taskId) as Record<string, string | null> | undefined;
+  return row ? { ...row, metadata: parseJsonObject(row.metadata_json ?? "{}") } : null;
+}
+
+function taskIntegrity(task: TaskDiagnosticsRow, options: { manager: Record<string, unknown> | null; worker: Record<string, unknown> | null }): { issues: string[]; ok: boolean } {
+  const issues: string[] = [];
+  if (task.state === "managed" && options.worker === null) {
+    issues.push("managed_without_active_worker_binding");
+  }
+  if (task.state === "managed" && options.manager === null) {
+    issues.push("managed_without_active_manager");
+  }
+  if (task.state === "failed" && options.manager !== null) {
+    issues.push("closed_task_has_active_manager");
+  }
+  return { issues, ok: issues.length === 0 };
+}
+
+function dashboardAlerts(options: { commands: Record<string, any>; criteria: { by_status: Record<string, number> }; diagnostics: Record<string, any>; integrityIssues: string[]; latestCycle: Record<string, unknown> | null; manager: Record<string, unknown> | null; telemetrySummary: ReturnType<typeof telemetrySummarySync>; worker: Record<string, unknown> | null }): Array<Record<string, string>> {
+  const alerts: Array<Record<string, string>> = [];
+  for (const issue of options.integrityIssues) {
+    alerts.push({ message: issue, severity: "error", type: "integrity_issue" });
+  }
+  if (options.latestCycle?.state === "failed") alerts.push({ message: String(options.latestCycle.error ?? "Latest manager cycle failed."), severity: "error", type: "latest_cycle_failed" });
+  if (options.latestCycle?.notable_pane_pattern) alerts.push({ message: `Pane pattern detected: ${options.latestCycle.notable_pane_pattern}`, severity: "warning", type: "notable_pane_pattern" });
+  if ((options.criteria.by_status.accepted ?? 0) > 0) alerts.push({ message: `${options.criteria.by_status.accepted} accepted criteria remain open.`, severity: "warning", type: "open_accepted_criteria" });
+  if (options.commands.unfinished_count) alerts.push({ message: `${options.commands.unfinished_count} commands are unfinished.`, severity: "warning", type: "unfinished_commands" });
+  if (options.commands.failed_count) alerts.push({ message: `${options.commands.failed_count} commands failed.`, severity: "error", type: "failed_commands" });
+  if (options.telemetrySummary.by_severity.error) alerts.push({ message: `${options.telemetrySummary.by_severity.error} telemetry error events recorded.`, severity: "error", type: "telemetry_errors" });
+  if (options.diagnostics.dangling_bindings.length) alerts.push({ message: "Task has dangling binding drift.", severity: "error", type: "dangling_binding" });
+  if (options.diagnostics.stuck_tasks.length) alerts.push({ message: "Task has stale manager cycles.", severity: "warning", type: "stuck_task" });
+  if (options.worker?.alive === false) alerts.push({ message: `worker session pid is not alive: ${options.worker.name}`, severity: "error", type: "dead_pid_session" });
+  if (options.manager?.alive === false) alerts.push({ message: `manager session pid is not alive: ${options.manager.name}`, severity: "error", type: "dead_pid_session" });
+  return alerts;
+}
+
+function countByStrings(values: string[]): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const value of values) {
+    counts[value] = (counts[value] ?? 0) + 1;
+  }
+  return counts;
+}
+
+function countByCompositeNested<T extends Record<string, string>>(rows: T[], keys: Array<keyof T>): Record<string, any> {
+  const counts: Record<string, any> = {};
+  for (const row of rows) {
+    let bucket = counts;
+    keys.forEach((key, index) => {
+      const value = row[key];
+      if (index === keys.length - 1) {
+        bucket[value] = Number(bucket[value] ?? 0) + 1;
+      } else {
+        bucket[value] = bucket[value] ?? {};
+        bucket = bucket[value];
+      }
+    });
+  }
+  return counts;
+}
+
+function isoSeconds(value: Date): string {
+  return value.toISOString().replace(/\.\d{3}Z$/, "Z");
+}
+
+function pathIsDirectory(path: string): boolean {
+  try {
+    return statSync(path).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+function pathIsExecutable(path: string): boolean {
+  try {
+    accessSync(path, constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function parseTelemetryWindowSeconds(window: string): number {
+  const match = /^([1-9][0-9]*)([smhdw])$/.exec(window.trim().toLowerCase());
+  if (!match) {
+    throw new Error("--window must be a positive duration like 30m, 24h, or 7d");
+  }
+  const value = Number(match[1]);
+  return value * { s: 1, m: 60, h: 3600, d: 86400, w: 604800 }[match[2] as "d" | "h" | "m" | "s" | "w"];
+}
+
+function ageSecondsFromIso(value: string): number | null {
+  const ms = Date.parse(value);
+  return Number.isFinite(ms) ? Math.max(0, (Date.now() - ms) / 1000) : null;
+}
+
+function mutationAuditResultSync(audit: ReturnType<typeof taskAuditSync>): {
+  ok: boolean;
+  records: Array<Record<string, any>>;
+  summary: { mutations: number; with_warnings: number };
+  task: TaskDiagnosticsRow;
+} {
+  const allowedByType: Record<string, string[]> = {
+    deregister_session: [],
+    extend_nudge_budget: ["escalate"],
+    finish_task: ["stop"],
+    pause_manager: ["escalate", "stop"],
+    request_worker_compact: ["nudge"],
+    stop_task: ["stop"],
+    task_interrupt: ["interrupt"],
+    task_nudge: ["nudge"],
+  };
+  const decisionsById = new Map(audit.manager_decisions.map((decision) => [decision.id, decision]));
+  const records = audit.commands.flatMap((command) => {
+    const allowed = allowedByType[command.type];
+    if (allowed === undefined) {
+      return [];
+    }
+    const payload = command.payload ?? {};
+    const result = command.result ?? {};
+    let managerDecision = isPlainRecord(result.manager_decision) ? result.manager_decision : (isPlainRecord(payload.manager_decision) ? payload.manager_decision : null);
+    if (command.type === "finish_task" && typeof result.final_decision_id === "number" && decisionsById.has(result.final_decision_id)) {
+      managerDecision = { decision: decisionsById.get(result.final_decision_id), warnings: [] };
+    }
+    const linked = linkedDecisionFromCheck(managerDecision, decisionsById);
+    const nearest = audit.manager_decisions.filter((decision) => decision.created_at <= command.created_at).at(-1) ?? null;
+    const warnings: string[] = [];
+    const expectedFailure = Boolean(result.expected_failure ?? payload.expected_failure);
+    if (!(expectedFailure && command.state === "failed")) {
+      if (allowed.length === 0) {
+        if (linked) warnings.push("unexpected_linked_decision");
+      } else if (managerDecision) {
+        const checkWarnings = Array.isArray(managerDecision.warnings) ? managerDecision.warnings.map(String) : [];
+        warnings.push(...checkWarnings);
+      } else {
+        warnings.push("missing_decision_metadata");
+      }
+      if (allowed.length > 0 && nearest && !linked) warnings.push("nearest_decision_unlinked");
+      if (allowed.length > 0 && linked && !allowed.includes(linked.decision)) warnings.push("linked_decision_incompatible");
+    }
+    return [{
+      allowed_decisions: allowed,
+      command: { created_at: command.created_at, id: command.id, state: command.state, type: command.type },
+      effect: {
+        dry_run: Boolean(isPlainRecord(result.send_result) && result.send_result.dry_run),
+        permission_check: result.permission_check ?? payload.permission_check,
+        send_text: result.send_text ?? payload.send_text,
+        sent: command.state === "succeeded" && isPlainRecord(result.send_result) && !result.send_result.dry_run,
+        slash_command: "slash_command" in result ? result.slash_command : payload.slash_command,
+        worker_session: result.worker_session ?? payload.worker_session,
+      },
+      expected_failure: expectedFailure,
+      linked_decision: linked,
+      nearest_prior_decision: nearest,
+      ok: warnings.length === 0,
+      warnings,
+    }];
+  });
+  return {
+    ok: records.every((record) => record.ok),
+    records,
+    summary: { mutations: records.length, with_warnings: records.filter((record) => record.warnings.length > 0).length },
+    task: audit.task,
+  };
+}
+
+function linkedDecisionFromCheck(value: Record<string, unknown> | null, decisionsById: Map<number, Record<string, any>>): Record<string, any> | null {
+  if (!value) {
+    return null;
+  }
+  const decision = isPlainRecord(value.decision) ? value.decision : value;
+  const id = typeof value.decision_id === "number" ? value.decision_id : (typeof decision.id === "number" ? decision.id : null);
+  if (id !== null && decisionsById.has(id)) {
+    return decisionsById.get(id) ?? null;
+  }
+  return isPlainRecord(decision) && typeof decision.decision === "string" ? decision : null;
+}
+
 const MANAGER_DECISIONS = new Set(["wait", "nudge", "interrupt", "escalate", "stop", "inspect"]);
 const MANAGER_PERMISSION_ACTION_NAMES = new Set([
   "communication.comment_on_pr",
@@ -10951,6 +13451,14 @@ function isDefaultRuntimeCommand(command: string | null): boolean {
     || command === "request-worker-compact"
     || command === "compact-worker"
     || command === "import-compat"
+    || command === "db-doctor"
+    || command === "doctor"
+    || command === "doctor-self"
+    || command === "reconcile"
+    || command === "divergences"
+    || command === "prune"
+    || command === "mutation-audit"
+    || command === "telemetry"
   );
 }
 
@@ -10980,6 +13488,10 @@ function jsonResult(payload: unknown): TypescriptRuntimeResult {
     handled: true,
     stdout: `${JSON.stringify(sortJson(payload), null, 2)}\n`,
   };
+}
+
+function textResult(lines: string[]): TypescriptRuntimeResult {
+  return { exitCode: 0, handled: true, stdout: `${lines.join("\n")}\n` };
 }
 
 function unbindJsonResult(taskName: string): TypescriptRuntimeResult {
@@ -16610,6 +19122,10 @@ function isSessionState(value: string): value is "active" | "all" | "gone" {
 
 function isTranscriptCaptureMode(value: string): value is TranscriptCaptureMode {
   return value === "metadata" || value === "excerpt" || value === "snapshot" || value === "segment" || value === "full";
+}
+
+function isTelemetryView(value: string): boolean {
+  return value === "metrics" || value === "snapshot" || value === "check" || value === "task" || value === "failures";
 }
 
 function sortJson(value: unknown): unknown {
