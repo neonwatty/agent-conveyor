@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { DatabaseSync } from "node:sqlite";
@@ -27,6 +27,8 @@ import {
   defaultDbPath,
   eventsPath,
   statusPath,
+  transcriptPath,
+  workerDir,
 } from "../state/files.js";
 
 test("unmigrated TypeScript runtime command falls back when disabled", () => {
@@ -1123,6 +1125,446 @@ test("TypeScript runtime handles deterministic session registry and discovery co
     } finally {
       afterDeregister.close();
     }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("TypeScript runtime handles legacy start with bootstrap prompt and Codex passthrough args", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-legacy-start."));
+  const calls: string[][] = [];
+  const runner: TmuxRunner = (args) => {
+    calls.push(args);
+    if (args.join(" ") === "tmux has-session -t qa-raw") {
+      return { status: 1, stderr: "no session" };
+    }
+    return { status: 0, stdout: "" };
+  };
+  try {
+    const stateRoot = join(root, "state");
+    const env = { WORKERCTL_STATE_ROOT: stateRoot };
+
+    const result = runTypescriptRuntimeCommand({
+      args: [
+        "start",
+        "--dangerously-bypass-approvals-and-sandbox",
+        "qa-raw",
+        "--cwd",
+        "~",
+        "--sandbox",
+        "danger-full-access",
+        "--ask-for-approval",
+        "never",
+        "--",
+        "--model",
+        "gpt-5.4-mini",
+      ],
+      cwd: root,
+      codexCommandResolver: () => "codex",
+      env,
+      tmuxRunner: runner,
+    });
+
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.equal(result.handled, true);
+    const payload = JSON.parse(result.stdout ?? "{}") as {
+      attach_command: string;
+      cwd: string;
+      register_worker_command_template: string;
+      session: string;
+      start_manager_command_template: string;
+      start_prompt_path: string;
+      start_prompt_sent: boolean;
+    };
+    assert.equal(payload.session, "qa-raw");
+    assert.equal(payload.attach_command, "tmux attach -t qa-raw");
+    assert.equal(payload.cwd, homedir());
+    assert.equal(payload.start_prompt_sent, true);
+    assert.equal(payload.start_prompt_path, join(stateRoot, "artifacts", "start-prompts", "qa-raw.md"));
+    assert.match(payload.register_worker_command_template, /register-worker --name <worker-name>/);
+    assert.match(payload.start_manager_command_template, /-- '--dangerously-bypass-approvals-and-sandbox' '--sandbox'/);
+    assert.match(payload.start_manager_command_template, /'--sandbox' 'danger-full-access' '--ask-for-approval' 'never'/);
+    assert.match(payload.start_manager_command_template, /'--ask-for-approval' 'never' '--model' 'gpt-5.4-mini'/);
+    const prompt = readFileSync(payload.start_prompt_path, "utf8");
+    assert.match(prompt, /Agent Conveyor tmux session qa-raw/);
+    assert.match(prompt, /worker-ack <task-name>/);
+    assert.match(prompt, /goal_restatement/);
+    assert.match(prompt, /proposed_criteria/);
+    assert.match(prompt, /must-have and follow-up criteria/);
+    assert.match(prompt, /ready_to_start/);
+    assert.match(prompt, /Required fields:\n- worker name\n- manager name\n- task name\n- goal/);
+    assert.match(prompt, /-- '--dangerously-bypass-approvals-and-sandbox' '--sandbox'/);
+    assert.match(prompt, /'--sandbox' 'danger-full-access' '--ask-for-approval' 'never'/);
+    assert.match(prompt, /'--ask-for-approval' 'never' '--model' 'gpt-5.4-mini'/);
+    assert.deepEqual(calls[0], ["tmux", "-V"]);
+    assert.deepEqual(calls[1], ["tmux", "has-session", "-t", "qa-raw"]);
+    assert.deepEqual(calls[2].slice(0, 5), ["tmux", "new-session", "-d", "-s", "qa-raw"]);
+    assert.match(calls[2][5] ?? "", /codex --cd/);
+    assert.match(calls[2][5] ?? "", /--no-alt-screen/);
+    assert.match(calls[2][5] ?? "", /'--dangerously-bypass-approvals-and-sandbox' '--sandbox'/);
+    assert.match(calls[2][5] ?? "", /'--sandbox' 'danger-full-access' '--ask-for-approval' 'never'/);
+    assert.match(calls[2][5] ?? "", /'--model' 'gpt-5.4-mini'/);
+    assert.match(calls[2][5] ?? "", /\$\(cat/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("TypeScript runtime preserves legacy start help fallback without launching tmux", () => {
+  const calls: string[][] = [];
+  const runner: TmuxRunner = (args) => {
+    calls.push(args);
+    return { status: 0, stdout: "" };
+  };
+
+  const commandHelp = runTypescriptRuntimeCommand({
+    args: ["start", "--help"],
+    codexCommandResolver: () => "codex",
+    cwd: "/tmp",
+    tmuxRunner: runner,
+  });
+  assert.equal(commandHelp.handled, false);
+
+  const sessionHelp = runTypescriptRuntimeCommand({
+    args: ["start", "qa-help", "--help"],
+    codexCommandResolver: () => "codex",
+    cwd: "/tmp",
+    tmuxRunner: runner,
+  });
+  assert.equal(sessionHelp.handled, false);
+  assert.deepEqual(calls, []);
+});
+
+test("TypeScript runtime rejects non-create flags before legacy create/start-test launches", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-create-options."));
+  const calls: string[][] = [];
+  const runner: TmuxRunner = (args) => {
+    calls.push(args);
+    return { status: 0, stdout: "" };
+  };
+  try {
+    const repo = join(root, "repo");
+    const env = { WORKERCTL_STATE_ROOT: join(root, "state") };
+    mkdirSync(repo, { recursive: true });
+
+    const createResult = runTypescriptRuntimeCommand({
+      args: ["create", "bad-create-option", "--cwd", repo, "--current-task", "oops"],
+      codexCommandResolver: () => "codex",
+      cwd: root,
+      env,
+      tmuxRunner: runner,
+    });
+    assert.equal(createResult.handled, false);
+
+    const startTestResult = runTypescriptRuntimeCommand({
+      args: ["start-test", "bad-start-test-option", "--cwd", repo, "--busy-wait-seconds", "7"],
+      codexCommandResolver: () => "codex",
+      cwd: root,
+      env,
+      tmuxRunner: runner,
+    });
+    assert.equal(startTestResult.handled, false);
+    assert.deepEqual(calls, []);
+    assert.equal(existsSync(workerDir("bad-create-option", { cwd: root, env })), false);
+    assert.equal(existsSync(workerDir("bad-start-test-option", { cwd: root, env })), false);
+    assert.equal(existsSync(defaultDbPath({ cwd: root, env })), false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("TypeScript runtime reports invalid legacy cwd as runtime failure without state side effects", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-bad-cwd."));
+  const calls: string[][] = [];
+  const runner: TmuxRunner = (args) => {
+    calls.push(args);
+    return { status: 0, stdout: "" };
+  };
+  try {
+    const env = { WORKERCTL_STATE_ROOT: join(root, "state") };
+    const missing = join(root, "missing");
+
+    const startResult = runTypescriptRuntimeCommand({
+      args: ["start", "bad-cwd-start", "--cwd", missing],
+      codexCommandResolver: () => "codex",
+      cwd: root,
+      env,
+      tmuxRunner: runner,
+    });
+    assert.equal(startResult.exitCode, 1);
+    assert.match(startResult.stderr ?? "", /Session cwd does not exist or is not a directory/);
+
+    const createResult = runTypescriptRuntimeCommand({
+      args: ["create", "bad-cwd-create", "--cwd", missing],
+      codexCommandResolver: () => "codex",
+      cwd: root,
+      env,
+      tmuxRunner: runner,
+    });
+    assert.equal(createResult.exitCode, 1);
+    assert.match(createResult.stderr ?? "", /Worker cwd does not exist or is not a directory/);
+
+    const startTestResult = runTypescriptRuntimeCommand({
+      args: ["start-test", "bad-cwd-test", "--cwd", missing],
+      codexCommandResolver: () => "codex",
+      cwd: root,
+      env,
+      tmuxRunner: runner,
+    });
+    assert.equal(startTestResult.exitCode, 1);
+    assert.match(startTestResult.stderr ?? "", /Worker cwd does not exist or is not a directory/);
+    assert.deepEqual(calls, []);
+    assert.equal(existsSync(workerDir("bad-cwd-create", { cwd: root, env })), false);
+    assert.equal(existsSync(workerDir("bad-cwd-test", { cwd: root, env })), false);
+    assert.equal(existsSync(defaultDbPath({ cwd: root, env })), false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("TypeScript runtime preflights Codex and tmux before legacy start and create launches", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-missing-codex."));
+  const calls: string[][] = [];
+  let tmuxMissing = false;
+  const runner: TmuxRunner = (args) => {
+    calls.push(args);
+    if (tmuxMissing && args.join(" ") === "tmux -V") {
+      return { status: 127, stderr: "tmux is not installed or is not available on PATH" };
+    }
+    return { status: 0, stdout: "" };
+  };
+  try {
+    const repo = join(root, "repo");
+    const env = { WORKERCTL_STATE_ROOT: join(root, "state") };
+    mkdirSync(repo, { recursive: true });
+
+    const startResult = runTypescriptRuntimeCommand({
+      args: ["start", "missing-start", "--cwd", repo],
+      codexCommandResolver: () => null,
+      cwd: root,
+      env,
+      tmuxRunner: runner,
+    });
+    assert.equal(startResult.exitCode, 1);
+    assert.match(startResult.stderr ?? "", /Required tool not found on PATH: codex/);
+
+    const createResult = runTypescriptRuntimeCommand({
+      args: ["create", "missing-create", "--cwd", repo],
+      codexCommandResolver: () => null,
+      cwd: root,
+      env,
+      tmuxRunner: runner,
+    });
+    assert.equal(createResult.exitCode, 1);
+    assert.match(createResult.stderr ?? "", /Required tool not found on PATH: codex/);
+    assert.deepEqual(calls, []);
+    assert.equal(existsSync(workerDir("missing-create", { cwd: root, env })), false);
+    assert.equal(existsSync(defaultDbPath({ cwd: root, env })), false);
+
+    tmuxMissing = true;
+    const missingTmuxResult = runTypescriptRuntimeCommand({
+      args: ["create", "missing-tmux", "--cwd", repo],
+      codexCommandResolver: () => "codex",
+      cwd: root,
+      env,
+      tmuxRunner: runner,
+    });
+    assert.equal(missingTmuxResult.exitCode, 1);
+    assert.match(missingTmuxResult.stderr ?? "", /Required tool not found on PATH: tmux/);
+    assert.deepEqual(calls, [["tmux", "-V"]]);
+    assert.equal(existsSync(workerDir("missing-tmux", { cwd: root, env })), false);
+    assert.equal(existsSync(defaultDbPath({ cwd: root, env })), false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("TypeScript runtime handles legacy create dual-write and tmux launch", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-legacy-create."));
+  const calls: string[][] = [];
+  let spawned = false;
+  const runner: TmuxRunner = (args) => {
+    calls.push(args);
+    if (args.join(" ") === "tmux has-session -t codex-db-create-dual-write") {
+      return { status: spawned ? 0 : 1, stderr: spawned ? "" : "no session" };
+    }
+    if (args.join(" ") === "tmux list-panes -t codex-db-create-dual-write -F #{pane_id}") {
+      return { status: 0, stdout: "%1\n" };
+    }
+    if (args.slice(0, 5).join(" ") === "tmux new-session -d -s codex-db-create-dual-write") {
+      spawned = true;
+      return { status: 0, stdout: "" };
+    }
+    return { status: 0, stdout: "" };
+  };
+  try {
+    const repo = join(root, "repo");
+    const env = { WORKERCTL_STATE_ROOT: join(root, "state") };
+    mkdirSync(repo, { recursive: true });
+
+    const result = runTypescriptRuntimeCommand({
+      args: ["create", "db-create-dual-write", "--cwd", repo, "--task", "Write initial status."],
+      codexCommandResolver: () => "codex",
+      cwd: root,
+      env,
+      now: () => new Date("2026-06-05T01:02:03Z"),
+      tmuxRunner: runner,
+    });
+
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.equal(result.handled, true);
+    assert.match(result.stdout ?? "", /created db-create-dual-write/);
+    assert.match(result.stdout ?? "", /tmux session: codex-db-create-dual-write/);
+    assert.match(result.stdout ?? "", /contract provided as initial Codex prompt/);
+
+    const config = JSON.parse(readFileSync(configPath("db-create-dual-write", { cwd: root, env }), "utf8")) as {
+      identity_token: string;
+      tmux_pane_id: string;
+      worker_id: string;
+    };
+    assert.match(config.identity_token, /^workerctl-/);
+    assert.equal(config.tmux_pane_id, "%1");
+    const contract = readFileSync(join(workerDir("db-create-dual-write", { cwd: root, env }), "contract.txt"), "utf8");
+    assert.match(contract, new RegExp(config.identity_token));
+    assert.match(contract, /Dispatcher inbox:/);
+    assert.match(contract, /worker-inbox <task-name> --consume-next --wait --timeout 60 --json/);
+    assert.match(contract, /dispatch_inbox_consumed/);
+    assert.deepEqual(JSON.parse(readFileSync(statusPath("db-create-dual-write", { cwd: root, env }), "utf8")), {
+      blocker: null,
+      current_task: "Write initial status.",
+      last_update: "2026-06-05T01:02:03Z",
+      next_action: "Wait for manager instruction or begin assigned task.",
+      state: "waiting",
+    });
+    assert.equal(readFileSync(transcriptPath("db-create-dual-write", { cwd: root, env }), "utf8"), "");
+    const compatibilityEvents = readFileSync(eventsPath("db-create-dual-write", { cwd: root, env }), "utf8")
+      .trim()
+      .split(/\r?\n/)
+      .map((line) => JSON.parse(line) as { type: string });
+    assert.deepEqual(compatibilityEvents.map((event) => event.type), ["create"]);
+    const database = openDatabaseSync(defaultDbPath({ cwd: root, env }));
+    try {
+      const worker = database.prepare("select id, state, tmux_pane_id, identity_token from workers where name = ?")
+        .get("db-create-dual-write") as { id: string; identity_token: string; state: string; tmux_pane_id: string };
+      assert.equal(worker.id, config.worker_id);
+      assert.equal(worker.state, "active");
+      assert.equal(worker.tmux_pane_id, "%1");
+      assert.equal(worker.identity_token, config.identity_token);
+      const status = database.prepare("select state, current_task from statuses where worker_id = ?")
+        .get(worker.id) as { current_task: string; state: string };
+      assert.equal(status.state, "waiting");
+      assert.equal(status.current_task, "Write initial status.");
+      const dbEvents = database.prepare("select type from events where worker_id = ? order by id")
+        .all(worker.id) as Array<{ type: string }>;
+      assert.deepEqual(dbEvents.map((event) => event.type), ["worker_create_recorded", "worker_tmux_started"]);
+    } finally {
+      database.close();
+    }
+    const launch = calls.find((call) => call.slice(0, 5).join(" ") === "tmux new-session -d -s codex-db-create-dual-write");
+    assert.ok(launch);
+    assert.match(launch[5] ?? "", /codex --cd/);
+    assert.match(launch[5] ?? "", /\$\(cat/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("TypeScript runtime leaves legacy create worker candidate when tmux launch fails", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-legacy-create-fail."));
+  const runner: TmuxRunner = (args) => {
+    if (args.join(" ") === "tmux has-session -t codex-db-create-fail") {
+      return { status: 1, stderr: "no session" };
+    }
+    if (args.slice(0, 5).join(" ") === "tmux new-session -d -s codex-db-create-fail") {
+      return { status: 1, stderr: "tmux refused launch" };
+    }
+    return { status: 0, stdout: "" };
+  };
+  try {
+    const repo = join(root, "repo");
+    const env = { WORKERCTL_STATE_ROOT: join(root, "state") };
+    mkdirSync(repo, { recursive: true });
+
+    const result = runTypescriptRuntimeCommand({
+      args: ["create", "db-create-fail", "--cwd", repo, "--task", "Write initial status."],
+      codexCommandResolver: () => "codex",
+      cwd: root,
+      env,
+      now: () => new Date("2026-06-05T01:02:03Z"),
+      tmuxRunner: runner,
+    });
+
+    assert.equal(result.exitCode, 2);
+    assert.match(result.stderr ?? "", /tmux refused launch/);
+    const database = openDatabaseSync(defaultDbPath({ cwd: root, env }));
+    try {
+      const worker = database.prepare("select state from workers where name = ?")
+        .get("db-create-fail") as { state: string };
+      assert.equal(worker.state, "candidate");
+    } finally {
+      database.close();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("TypeScript runtime handles legacy start-test preset with wait-ready and verify", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-start-test."));
+  const calls: string[][] = [];
+  let spawned = false;
+  const env = { WORKERCTL_STATE_ROOT: join(root, "state") };
+  const runner: TmuxRunner = (args) => {
+    calls.push(args);
+    if (args.join(" ") === "tmux has-session -t codex-live-test") {
+      return { status: spawned ? 0 : 1, stderr: spawned ? "" : "no session" };
+    }
+    if (args.join(" ") === "tmux list-panes -t codex-live-test -F #{pane_id}") {
+      return { status: 0, stdout: "%2\n" };
+    }
+    if (args.slice(0, 5).join(" ") === "tmux new-session -d -s codex-live-test") {
+      spawned = true;
+      return { status: 0, stdout: "" };
+    }
+    if (args.join(" ") === "tmux capture-pane -p -S -80 -t codex-live-test") {
+      writeFileSync(statusPath("live-test", { cwd: root, env }), `${JSON.stringify({
+        blocker: null,
+        current_task: "README checked",
+        last_update: "2026-06-05T01:02:04Z",
+        next_action: "report",
+        state: "planning",
+      }, null, 2)}\n`);
+      return { status: 0, stdout: "OpenAI Codex\n› " };
+    }
+    return { status: 0, stdout: "" };
+  };
+  try {
+    const repo = join(root, "repo");
+    mkdirSync(repo, { recursive: true });
+
+    const result = runTypescriptRuntimeCommand({
+      args: ["start-test", "--cwd", repo, "--wait-ready-timeout", "1", "--verify-timeout", "1"],
+      codexCommandResolver: () => "codex",
+      cwd: root,
+      env,
+      now: () => new Date("2026-06-05T01:02:03Z"),
+      sleepMilliseconds: () => {},
+      tmuxRunner: runner,
+    });
+
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.equal(result.handled, true);
+    assert.match(result.stdout ?? "", /created live-test/);
+    assert.match(result.stdout ?? "", /startup: ready \(Codex input prompt is visible\)/);
+    assert.match(result.stdout ?? "", /verification: ok \(status update observed\)/);
+    assert.match(result.stdout ?? "", /current task: README checked/);
+    const contract = readFileSync(join(workerDir("live-test", { cwd: root, env }), "contract.txt"), "utf8");
+    assert.match(contract, /Read README\.md and run conveyor update-status live-test/);
+    const compatibilityEvents = readFileSync(eventsPath("live-test", { cwd: root, env }), "utf8")
+      .trim()
+      .split(/\r?\n/)
+      .map((line) => JSON.parse(line) as { type: string });
+    assert.deepEqual(compatibilityEvents.map((event) => event.type), ["create", "wait_ready", "verify"]);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
