@@ -75,6 +75,7 @@ const DEFAULT_BUSY_WAIT_SECONDS = 90;
 const DEFAULT_HISTORY_LINES = 200;
 const DEFAULT_STATUS_STALE_SECONDS = 300;
 const DEFAULT_TERMINAL_STALE_SECONDS = 300;
+type TerminalChoice = "auto" | "ghostty" | "terminal";
 type TranscriptCaptureMode = "excerpt" | "full" | "metadata" | "segment" | "snapshot";
 const VALID_WORKER_STATUS_STATES = new Set([
   "planning",
@@ -115,7 +116,9 @@ type TypescriptRuntimeOptions = {
   childrenForPid?: (pid: number) => number[];
   lsofForPid?: (pid: number) => string;
   now?: () => Date;
+  platform?: NodeJS.Platform;
   sleepMilliseconds?: (milliseconds: number) => void;
+  terminalRunner?: (args: string[]) => { status: number; stderr?: string; stdout?: string };
   tmuxRunner?: TmuxRunner;
 };
 
@@ -172,6 +175,15 @@ export function runTypescriptRuntimeCommand(options: TypescriptRuntimeOptions): 
     }
     if (parsed.command === "start-manager") {
       return runStartSessionCommand(parsed, options, "manager");
+    }
+    if (parsed.command === "open") {
+      return runOpenCommand(parsed, options);
+    }
+    if (parsed.command === "open-worker") {
+      return runOpenTaskSessionCommand(parsed, options, "worker");
+    }
+    if (parsed.command === "open-manager") {
+      return runOpenTaskSessionCommand(parsed, options, "manager");
     }
     if (parsed.command === "register-worker") {
       return runRegisterSessionCommand(parsed, options, "worker");
@@ -274,6 +286,7 @@ interface ParsedRuntimeArgs {
     subtype: string | null;
     summary: string | null;
     taskName: string | null;
+    terminal: TerminalChoice;
     text: string | null;
     terminalStaleSeconds: number;
     tmuxSession: string | null;
@@ -294,6 +307,7 @@ interface ParsedRuntimeArgs {
     captureTranscriptLines: number;
     captureTranscriptMode: TranscriptCaptureMode;
     decisionId: number | null;
+    force: boolean;
     message: string | null;
     reason: string | null;
     requireAcks: boolean;
@@ -357,6 +371,7 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
     subtype: null,
     summary: null,
     taskName: null,
+    terminal: "auto",
     text: null,
     terminalStaleSeconds: DEFAULT_TERMINAL_STALE_SECONDS,
     tmuxSession: null,
@@ -377,6 +392,7 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
     captureTranscriptLines: DEFAULT_HISTORY_LINES,
     captureTranscriptMode: "segment",
     decisionId: null,
+    force: false,
     message: null,
     reason: null,
     requireAcks: false,
@@ -426,6 +442,25 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       flags.includeFullTranscripts = true;
     } else if (arg === "--dry-run") {
       flags.dryRun = true;
+    } else if (arg === "--force") {
+      if (command !== "open") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --force", explicit, flags, task };
+      }
+      flags.force = true;
+    } else if (arg === "--terminal") {
+      if (command !== "open" && command !== "open-worker" && command !== "open-manager") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --terminal", explicit, flags, task };
+      }
+      const parsedValue = valueAfter(queue, index, arg);
+      if (parsedValue.error) {
+        return { command, enabled, error: parsedValue.error, explicit, flags, task };
+      }
+      const value = parsedValue.value;
+      if (!isTerminalChoice(value)) {
+        return { command, enabled, error: `Unsupported terminal: ${value}`, explicit, flags, task };
+      }
+      flags.terminal = value;
+      index += 1;
     } else if (arg === "--accept-trust") {
       if (command !== "start-worker" && command !== "start-manager") {
         return { command, enabled, error: "Unsupported TypeScript runtime option: --accept-trust", explicit, flags, task };
@@ -1757,6 +1792,142 @@ function runStartSessionCommand(
   }
 }
 
+function runOpenCommand(
+  parsed: ParsedRuntimeArgs,
+  options: TypescriptRuntimeOptions,
+): TypescriptRuntimeResult {
+  const unsupported = unsupportedOpenOptions(parsed);
+  if (unsupported) {
+    return unsupportedRuntimeResult(parsed, unsupported);
+  }
+  const name = parsed.task;
+  if (!name) {
+    return errorResult("open requires a worker name.");
+  }
+  try {
+    requireWorkerConfig(name, options);
+  } catch (error) {
+    return lifecycleWorkerErrorResult(error instanceof Error ? error.message : String(error));
+  }
+  if ((options.platform ?? process.platform) !== "darwin") {
+    return lifecycleWorkerErrorResult("conveyor open is currently implemented for macOS only.");
+  }
+  const runner = options.tmuxRunner ?? defaultTmuxRunner;
+  const tmuxSessionName = tmuxSession(name);
+  try {
+    if (!sessionExists(name, runner)) {
+      return lifecycleWorkerErrorResult(`tmux session is not running for worker ${name}: ${tmuxSessionName}`);
+    }
+  } catch (error) {
+    return lifecycleWorkerErrorResult(error instanceof Error ? error.message : String(error));
+  }
+  const priorOpen = lastOpenCompatibilityEvent(name, options);
+  if (priorOpen && !parsed.flags.force) {
+    const priorAction = priorOpen.type === "open_attempt" ? "terminal launch attempted" : "terminal opened";
+    const time = typeof priorOpen.time === "string" ? priorOpen.time : "unknown time";
+    return lifecycleWorkerErrorResult(
+      `Worker ${name} already had a ${priorAction} at ${time}. `
+      + `Attach manually with \`${attachSessionCommand(tmuxSessionName)}\` or rerun with --force if you intentionally want another window.`,
+    );
+  }
+
+  const selectedTerminal = resolveTerminal(parsed.flags.terminal);
+  const command = terminalOpenCommand(tmuxSessionName, selectedTerminal);
+  const result: Record<string, unknown> = {
+    attach_command: attachSessionCommand(tmuxSessionName),
+    dry_run: parsed.flags.dryRun,
+    force: parsed.flags.force,
+    name,
+    terminal: selectedTerminal,
+    tmux_session: tmuxSessionName,
+  };
+  if (parsed.flags.dryRun) {
+    result.command = command;
+    return jsonResult(result);
+  }
+  appendCompatibilityEvent(name, "open_attempt", { forced: parsed.flags.force, terminal: selectedTerminal }, options);
+  try {
+    runTerminalCommand(command, options);
+  } catch (error) {
+    return lifecycleWorkerErrorResult(error instanceof Error ? error.message : String(error));
+  }
+  appendCompatibilityEvent(name, "open", { forced: parsed.flags.force, terminal: selectedTerminal }, options);
+  return jsonResult(result);
+}
+
+function runOpenTaskSessionCommand(
+  parsed: ParsedRuntimeArgs,
+  options: TypescriptRuntimeOptions,
+  role: "manager" | "worker",
+): TypescriptRuntimeResult {
+  const unsupported = unsupportedOpenTaskSessionOptions(parsed, role);
+  if (unsupported) {
+    return unsupportedRuntimeResult(parsed, unsupported);
+  }
+  if (!parsed.task) {
+    return errorResult(`open-${role} requires a task.`);
+  }
+  const database = openRuntimeDatabase(parsed, options);
+  try {
+    const snapshot = taskSnapshot(database, parsed.task);
+    const binding = activeBindingForTaskSync(database, parsed.task);
+    const sessionName = role === "worker" ? binding.worker_session_name : binding.manager_session_name;
+    const session = sessionRow(database, sessionName, role);
+    if (!session.tmux_session) {
+      return lifecycleWorkerErrorResult(`Task ${snapshot.name} has no active ${role}`);
+    }
+    const opened = openTmuxSessionWindow(session.tmux_session, parsed, options);
+    if (opened.exitCode !== 0) {
+      return opened;
+    }
+    const result = JSON.parse(opened.stdout ?? "{}") as Record<string, unknown>;
+    result.task = snapshot.name;
+    result[role] = session.name;
+    return jsonResult(result);
+  } catch (error) {
+    return lifecycleWorkerErrorResult(error instanceof Error ? error.message : String(error));
+  } finally {
+    database.close();
+  }
+}
+
+function openTmuxSessionWindow(
+  sessionName: string,
+  parsed: ParsedRuntimeArgs,
+  options: TypescriptRuntimeOptions,
+): TypescriptRuntimeResult {
+  if ((options.platform ?? process.platform) !== "darwin") {
+    return lifecycleWorkerErrorResult("conveyor terminal opening commands are currently implemented for macOS only.");
+  }
+  const runner = options.tmuxRunner ?? defaultTmuxRunner;
+  try {
+    if (!tmuxSessionRunning(sessionName, runner)) {
+      return lifecycleWorkerErrorResult(`tmux session is not running: ${sessionName}`);
+    }
+  } catch (error) {
+    return lifecycleWorkerErrorResult(error instanceof Error ? error.message : String(error));
+  }
+
+  const selectedTerminal = resolveTerminal(parsed.flags.terminal);
+  const command = terminalOpenCommand(sessionName, selectedTerminal);
+  const result: Record<string, unknown> = {
+    attach_command: attachSessionCommand(sessionName),
+    dry_run: parsed.flags.dryRun,
+    terminal: selectedTerminal,
+    tmux_session: sessionName,
+  };
+  if (parsed.flags.dryRun) {
+    result.command = command;
+    return jsonResult(result);
+  }
+  try {
+    runTerminalCommand(command, options);
+  } catch (error) {
+    return lifecycleWorkerErrorResult(error instanceof Error ? error.message : String(error));
+  }
+  return jsonResult(result);
+}
+
 function runRegisterSessionCommand(
   parsed: ParsedRuntimeArgs,
   options: { cwd?: string; env?: NodeJS.ProcessEnv },
@@ -2363,6 +2534,9 @@ function isDefaultRuntimeCommand(command: string | null): boolean {
     || command === "stop-task"
     || command === "start-worker"
     || command === "start-manager"
+    || command === "open"
+    || command === "open-worker"
+    || command === "open-manager"
     || command === "register-worker"
     || command === "register-manager"
     || command === "sessions"
@@ -2610,6 +2784,140 @@ function unsupportedStartSessionOptions(parsed: ParsedRuntimeArgs, role: "manage
   }
   if (role === "worker" && (parsed.flags.taskGoal !== null || parsed.flags.worker !== null)) {
     return "Unsupported TypeScript runtime option for start-worker.";
+  }
+  return null;
+}
+
+function unsupportedOpenOptions(parsed: ParsedRuntimeArgs): string | null {
+  if (
+    parsed.flags.active
+    || parsed.flags.all
+    || parsed.flags.blocker !== null
+    || parsed.flags.busyWaitSeconds !== DEFAULT_BUSY_WAIT_SECONDS
+    || parsed.flags.captureTranscriptBeforeStop
+    || parsed.flags.captureTranscriptLines !== DEFAULT_HISTORY_LINES
+    || parsed.flags.captureTranscriptMode !== "segment"
+    || parsed.flags.cleanupPolicy !== "clear"
+    || parsed.flags.codexSession !== null
+    || parsed.flags.create !== null
+    || parsed.flags.currentTask !== null
+    || parsed.flags.cwd !== null
+    || parsed.flags.decisionId !== null
+    || parsed.flags.eventType !== null
+    || parsed.flags.file !== null
+    || parsed.flags.goal !== null
+    || parsed.flags.includeContent
+    || parsed.flags.includeFullTranscripts
+    || parsed.flags.includeLegacy
+    || parsed.flags.includeTranscripts
+    || parsed.flags.json
+    || parsed.flags.keepLatest !== 20
+    || parsed.flags.limit !== null
+    || parsed.flags.manager !== null
+    || parsed.flags.maxIterations !== null
+    || parsed.flags.message !== null
+    || parsed.flags.names.length > 0
+    || parsed.flags.nextAction !== null
+    || parsed.flags.output !== null
+    || parsed.flags.path !== null
+    || parsed.flags.pid !== null
+    || parsed.flags.reason !== null
+    || parsed.flags.redactIdentityToken
+    || parsed.flags.requiredBeforeContinue.length > 0
+    || parsed.flags.requireAcks
+    || parsed.flags.requireAdversarialProof
+    || parsed.flags.requireCriteriaAudit
+    || parsed.flags.requireEpilogue
+    || parsed.flags.requireSegment
+    || parsed.flags.requireTranscriptSegment
+    || parsed.flags.roleProvided
+    || parsed.flags.runName !== null
+    || parsed.flags.seedPromptSha256 !== null
+    || parsed.flags.sessionDir !== null
+    || parsed.flags.sessionRole !== null
+    || parsed.flags.sessionState !== null
+    || parsed.flags.statusAgeSeconds !== DEFAULT_BUSY_WAIT_SECONDS
+    || parsed.flags.statusStaleSeconds !== DEFAULT_STATUS_STALE_SECONDS
+    || parsed.flags.statusState !== null
+    || parsed.flags.strictDecisions
+    || parsed.flags.subtype !== null
+    || parsed.flags.summary !== null
+    || parsed.flags.taskGoal !== null
+    || parsed.flags.taskName !== null
+    || parsed.flags.terminalStaleSeconds !== DEFAULT_TERMINAL_STALE_SECONDS
+    || parsed.flags.text !== null
+    || parsed.flags.tmuxSession !== null
+    || parsed.flags.worker !== null
+    || parsed.flags.zip
+  ) {
+    return "Unsupported TypeScript runtime option for open.";
+  }
+  return null;
+}
+
+function unsupportedOpenTaskSessionOptions(parsed: ParsedRuntimeArgs, role: "manager" | "worker"): string | null {
+  if (
+    parsed.flags.active
+    || parsed.flags.all
+    || parsed.flags.blocker !== null
+    || parsed.flags.busyWaitSeconds !== DEFAULT_BUSY_WAIT_SECONDS
+    || parsed.flags.captureTranscriptBeforeStop
+    || parsed.flags.captureTranscriptLines !== DEFAULT_HISTORY_LINES
+    || parsed.flags.captureTranscriptMode !== "segment"
+    || parsed.flags.cleanupPolicy !== "clear"
+    || parsed.flags.codexSession !== null
+    || parsed.flags.create !== null
+    || parsed.flags.currentTask !== null
+    || parsed.flags.cwd !== null
+    || parsed.flags.decisionId !== null
+    || parsed.flags.eventType !== null
+    || parsed.flags.file !== null
+    || parsed.flags.force
+    || parsed.flags.goal !== null
+    || parsed.flags.includeContent
+    || parsed.flags.includeFullTranscripts
+    || parsed.flags.includeLegacy
+    || parsed.flags.includeTranscripts
+    || parsed.flags.json
+    || parsed.flags.keepLatest !== 20
+    || parsed.flags.limit !== null
+    || parsed.flags.manager !== null
+    || parsed.flags.maxIterations !== null
+    || parsed.flags.message !== null
+    || parsed.flags.names.length > 0
+    || parsed.flags.nextAction !== null
+    || parsed.flags.output !== null
+    || parsed.flags.pid !== null
+    || parsed.flags.reason !== null
+    || parsed.flags.redactIdentityToken
+    || parsed.flags.requiredBeforeContinue.length > 0
+    || parsed.flags.requireAcks
+    || parsed.flags.requireAdversarialProof
+    || parsed.flags.requireCriteriaAudit
+    || parsed.flags.requireEpilogue
+    || parsed.flags.requireSegment
+    || parsed.flags.requireTranscriptSegment
+    || parsed.flags.roleProvided
+    || parsed.flags.runName !== null
+    || parsed.flags.seedPromptSha256 !== null
+    || parsed.flags.sessionDir !== null
+    || parsed.flags.sessionRole !== null
+    || parsed.flags.sessionState !== null
+    || parsed.flags.statusAgeSeconds !== DEFAULT_BUSY_WAIT_SECONDS
+    || parsed.flags.statusStaleSeconds !== DEFAULT_STATUS_STALE_SECONDS
+    || parsed.flags.statusState !== null
+    || parsed.flags.strictDecisions
+    || parsed.flags.subtype !== null
+    || parsed.flags.summary !== null
+    || parsed.flags.taskGoal !== null
+    || parsed.flags.taskName !== null
+    || parsed.flags.terminalStaleSeconds !== DEFAULT_TERMINAL_STALE_SECONDS
+    || parsed.flags.text !== null
+    || parsed.flags.tmuxSession !== null
+    || parsed.flags.worker !== null
+    || parsed.flags.zip
+  ) {
+    return `Unsupported TypeScript runtime option for open-${role}.`;
   }
   return null;
 }
@@ -5719,6 +6027,20 @@ function readCompatibilityEvents(
   return { events, skipped };
 }
 
+function lastOpenCompatibilityEvent(
+  name: string,
+  options: { cwd?: string; env?: NodeJS.ProcessEnv },
+): Record<string, unknown> | null {
+  const events = readCompatibilityEvents(name, options).events;
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    if (event?.type === "open" || event?.type === "open_attempt") {
+      return event;
+    }
+  }
+  return null;
+}
+
 function appendCompatibilityEvent(
   name: string,
   type: string,
@@ -5729,6 +6051,41 @@ function appendCompatibilityEvent(
   const path = eventsPath(name, options);
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, `${JSON.stringify(sortJson({ time: timestamp, type, ...payload }))}\n`, { flag: "a" });
+}
+
+function resolveTerminal(terminal: TerminalChoice): Exclude<TerminalChoice, "auto"> {
+  if (terminal !== "auto") {
+    return terminal;
+  }
+  return existsSync("/Applications/Ghostty.app") ? "ghostty" : "terminal";
+}
+
+function attachSessionCommand(sessionName: string): string {
+  return `tmux attach -t ${sessionName}`;
+}
+
+function terminalOpenCommand(sessionName: string, terminal: Exclude<TerminalChoice, "auto">): string[] {
+  if (terminal === "ghostty") {
+    return ["open", "-na", "Ghostty.app", "--args", "-e", "tmux", "attach", "-t", sessionName];
+  }
+  return [
+    "osascript",
+    "-e",
+    'tell application "Terminal" to activate',
+    "-e",
+    `tell application "Terminal" to do script "${attachSessionCommand(sessionName)}"`,
+  ];
+}
+
+function runTerminalCommand(
+  command: string[],
+  options: { terminalRunner?: (args: string[]) => { status: number; stderr?: string; stdout?: string } },
+): void {
+  const result = (options.terminalRunner ?? defaultTerminalRunner)(command);
+  if (result.status !== 0) {
+    const detail = (result.stderr || result.stdout || `exit code ${result.status}`).trim();
+    throw new Error(`${command.join(" ")} failed: ${detail}`);
+  }
 }
 
 function requireWorkerConfig(
@@ -6100,6 +6457,18 @@ function defaultTmuxRunner(args: string[]): { status: number; stderr?: string; s
   };
 }
 
+function defaultTerminalRunner(args: string[]): { status: number; stderr?: string; stdout?: string } {
+  const result = spawnSync(args[0] ?? "", args.slice(1), { encoding: "utf8" });
+  if (result.error) {
+    return { status: 127, stderr: result.error.message };
+  }
+  return {
+    status: result.status ?? (result.signal ? 1 : 0),
+    stderr: result.stderr,
+    stdout: result.stdout,
+  };
+}
+
 const CONTENT_KEYS = new Set(["content", "message", "output", "segment_text", "text"]);
 
 function redactPayload(value: unknown): unknown {
@@ -6147,6 +6516,10 @@ function isReplayMode(value: string): value is ReplayMode {
 
 function isReplayRole(value: string): value is ReplayRole {
   return value === "all" || value === "worker" || value === "manager" || value === "reviewer" || value === "workerctl";
+}
+
+function isTerminalChoice(value: string): value is TerminalChoice {
+  return value === "auto" || value === "ghostty" || value === "terminal";
 }
 
 function isSessionRole(value: string): value is "manager" | "worker" {

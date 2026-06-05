@@ -1343,6 +1343,173 @@ test("TypeScript runtime handles start-manager bootstrap with seeded manager con
   }
 });
 
+test("TypeScript runtime handles legacy open dry-run and prior open guard", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-open."));
+  const calls: string[][] = [];
+  const runner: TmuxRunner = (args) => {
+    calls.push(args);
+    if (args.join(" ") === "tmux has-session -t codex-worker-open") {
+      return { status: 0, stdout: "" };
+    }
+    return { status: 1, stderr: "unexpected tmux command" };
+  };
+  try {
+    const name = "worker-open";
+    const workerDir = join(root, ".codex-workers", name);
+    mkdirSync(workerDir, { recursive: true });
+    writeFileSync(configPath(name, { cwd: root, env: {} }), `${JSON.stringify({
+      name,
+      tmux_session: "codex-worker-open",
+    })}\n`);
+
+    const dryRun = runTypescriptRuntimeCommand({
+      args: ["open", name, "--terminal", "ghostty", "--dry-run"],
+      cwd: root,
+      env: {},
+      tmuxRunner: runner,
+    });
+    assert.equal(dryRun.exitCode, 0, dryRun.stderr);
+    assert.equal(dryRun.handled, true);
+    assert.deepEqual(JSON.parse(dryRun.stdout ?? "{}"), {
+      attach_command: "tmux attach -t codex-worker-open",
+      command: ["open", "-na", "Ghostty.app", "--args", "-e", "tmux", "attach", "-t", "codex-worker-open"],
+      dry_run: true,
+      force: false,
+      name,
+      terminal: "ghostty",
+      tmux_session: "codex-worker-open",
+    });
+    assert.deepEqual(calls, [["tmux", "has-session", "-t", "codex-worker-open"]]);
+    assert.equal(existsSync(eventsPath(name, { cwd: root, env: {} })), false);
+
+    writeFileSync(eventsPath(name, { cwd: root, env: {} }), `${JSON.stringify({
+      terminal: "ghostty",
+      time: "2026-06-04T01:00:00Z",
+      type: "open_attempt",
+    })}\n`);
+    const guarded = runTypescriptRuntimeCommand({
+      args: ["open", name, "--terminal", "ghostty", "--dry-run"],
+      cwd: root,
+      env: {},
+      tmuxRunner: runner,
+    });
+    assert.equal(guarded.exitCode, 1);
+    assert.match(guarded.stderr ?? "", /terminal launch attempted/);
+    assert.match(guarded.stderr ?? "", /--force/);
+
+    const forced = runTypescriptRuntimeCommand({
+      args: ["open", name, "--terminal", "ghostty", "--dry-run", "--force"],
+      cwd: root,
+      env: {},
+      tmuxRunner: runner,
+    });
+    assert.equal(forced.exitCode, 0, forced.stderr);
+    const forcedPayload = JSON.parse(forced.stdout ?? "{}") as { force: boolean };
+    assert.equal(forcedPayload.force, true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("TypeScript runtime handles open-worker and open-manager dry-run from session binding", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-open-session."));
+  const calls: string[][] = [];
+  const runner: TmuxRunner = (args) => {
+    calls.push(args);
+    if (
+      args.join(" ") === "tmux has-session -t codex-open-worker"
+      || args.join(" ") === "tmux has-session -t codex-open-manager"
+    ) {
+      return { status: 0, stdout: "" };
+    }
+    return { status: 1, stderr: "unexpected tmux command" };
+  };
+  try {
+    const dbPath = join(root, "workerctl.db");
+    const database = openDatabaseSync(dbPath);
+    try {
+      initializeDatabaseSync(database);
+      createTaskSync(database, {
+        goal: "Open the bound terminals.",
+        name: "task-open",
+        taskId: "task-open-id",
+      });
+      insertSession(database, {
+        id: "session-worker-open",
+        name: "open-worker-session",
+        role: "worker",
+        tmuxSession: "codex-open-worker",
+      });
+      insertSession(database, {
+        id: "session-manager-open",
+        name: "open-manager-session",
+        role: "manager",
+        tmuxSession: "codex-open-manager",
+      });
+      bindSessionsSync(database, {
+        bindingId: "binding-open",
+        managerSessionName: "open-manager-session",
+        taskName: "task-open",
+        workerSessionName: "open-worker-session",
+      });
+    } finally {
+      database.close();
+    }
+
+    const worker = runTypescriptRuntimeCommand({
+      args: ["open-worker", "task-open", "--terminal", "terminal", "--dry-run", "--path", dbPath],
+      cwd: root,
+      env: {},
+      tmuxRunner: runner,
+    });
+    assert.equal(worker.exitCode, 0, worker.stderr);
+    assert.deepEqual(JSON.parse(worker.stdout ?? "{}"), {
+      attach_command: "tmux attach -t codex-open-worker",
+      command: [
+        "osascript",
+        "-e",
+        "tell application \"Terminal\" to activate",
+        "-e",
+        "tell application \"Terminal\" to do script \"tmux attach -t codex-open-worker\"",
+      ],
+      dry_run: true,
+      task: "task-open",
+      terminal: "terminal",
+      tmux_session: "codex-open-worker",
+      worker: "open-worker-session",
+    });
+
+    const manager = runTypescriptRuntimeCommand({
+      args: ["open-manager", "task-open", "--terminal", "terminal", "--dry-run", "--path", dbPath],
+      cwd: root,
+      env: {},
+      tmuxRunner: runner,
+    });
+    assert.equal(manager.exitCode, 0, manager.stderr);
+    assert.deepEqual(JSON.parse(manager.stdout ?? "{}"), {
+      attach_command: "tmux attach -t codex-open-manager",
+      command: [
+        "osascript",
+        "-e",
+        "tell application \"Terminal\" to activate",
+        "-e",
+        "tell application \"Terminal\" to do script \"tmux attach -t codex-open-manager\"",
+      ],
+      dry_run: true,
+      manager: "open-manager-session",
+      task: "task-open",
+      terminal: "terminal",
+      tmux_session: "codex-open-manager",
+    });
+    assert.deepEqual(calls, [
+      ["tmux", "has-session", "-t", "codex-open-worker"],
+      ["tmux", "has-session", "-t", "codex-open-manager"],
+    ]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("TypeScript runtime default start-worker discovery polls process tree before register", () => {
   const root = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-start-discovery."));
   const calls: string[][] = [];
