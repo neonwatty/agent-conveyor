@@ -1,10 +1,5 @@
-export {
-  buildPythonEntrypoint,
-  packageRootFromModuleUrl,
-  programNameFromArgv,
-  runPythonEntrypoint,
-} from "./cli/python-bridge.js";
-export type { CliProgram, PythonEntrypoint } from "./cli/python-bridge.js";
+export { programNameFromArgv } from "./cli/program-name.js";
+export type { CliProgram } from "./cli/program-name.js";
 export {
   captureMetaPath,
   configPath,

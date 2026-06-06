@@ -11557,7 +11557,9 @@ Deferred follow-up criteria:
             "agent-conveyor",
             "package bins must expose conveyor and workerctl",
             "scripts/workerctl",
-            "workerctl/assets/skills/codex-review/scripts/codex-review",
+            "skills/codex-review/scripts/codex-review",
+            "release tarball contains Python runtime/bridge file",
+            "--require-zero-python",
             "expected conveyor --help",
             "expected workerctl --help",
             "install-skills",
@@ -11621,7 +11623,9 @@ Deferred follow-up criteria:
             package_json["bugs"]["url"],
             "https://github.com/neonwatty/codex-terminal-manager/issues",
         )
-        self.assertIn("workerctl/assets/skills/**/*", package_json["files"])
+        self.assertIn("skills/**/*", package_json["files"])
+        self.assertNotIn("workerctl/assets/skills/**/*", package_json["files"])
+        self.assertNotIn("workerctl/**/*.py", package_json["files"])
         self.assertEqual(
             package_json["scripts"]["prepublishOnly"],
             "node scripts/prepublish-guard.mjs",

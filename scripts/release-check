@@ -50,28 +50,33 @@ const files = new Map(pack.files.map((file) => [file.path, file]));
 const required = [
   manifest.bin.conveyor.replace(/^\.\//, ""),
   manifest.bin.workerctl.replace(/^\.\//, ""),
-  "scripts/workerctl",
-  "workerctl/assets/skills/manage-codex-workers/SKILL.md",
-  "workerctl/assets/skills/codex-review/SKILL.md",
-  "workerctl/assets/skills/codex-review/scripts/codex-review",
+  "skills/manage-codex-workers/SKILL.md",
+  "skills/codex-review/SKILL.md",
+  "skills/codex-review/scripts/codex-review",
 ];
 for (const path of required) {
   if (!files.has(path)) {
     throw new Error(`release tarball missing required file: ${path}`);
   }
 }
-for (const path of [
-  "scripts/workerctl",
-  "workerctl/assets/skills/codex-review/scripts/codex-review",
-]) {
+for (const path of ["skills/codex-review/scripts/codex-review"]) {
   if (files.get(path).mode !== 0o755) {
     throw new Error(`release tarball file is not executable: ${path}`);
+  }
+}
+for (const path of files.keys()) {
+  if (
+    path === "scripts/workerctl"
+    || /^workerctl\/.*\.py$/.test(path)
+    || /^dist\/cli\/python-bridge\.(?:js|d\.ts|js\.map)$/.test(path)
+  ) {
+    throw new Error(`release tarball contains Python runtime/bridge file: ${path}`);
   }
 }
 NODE
 
 echo "== TypeScript migration audit =="
-node "$ROOT/scripts/ts-migration-audit.mjs" --pack-json="$PACK_JSON"
+node "$ROOT/scripts/ts-migration-audit.mjs" --require-zero-python --pack-json="$PACK_JSON"
 
 echo "== clean npm install smoke =="
 npm install -g --prefix "$PREFIX" "$TARBALL"
