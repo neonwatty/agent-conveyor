@@ -13,8 +13,9 @@ Current baseline before the migration board:
 | Python unit tests | `python3 -m unittest discover -s tests -v` | pass, 645 tests |
 | ResourceWarning gate | `scripts/check-resource-warnings` | pass, 645 tests |
 | Python compile gate | `python3 -m py_compile scripts/workerctl scripts/check-resource-warnings workerctl/*.py` | pass |
-| Dashboard tests | `npm test -- --runInBand` | pass, 40 tests |
+| Node/dashboard tests | `npm test -- --runInBand` | pass, 161 tests |
 | Dashboard build | `npm run build` | pass |
+| TypeScript migration audit | `npm run migration:audit` | pass in hybrid mode; reports Python runtime blockers until package cutover |
 | Shell syntax | `bash -n scripts/live-smoke scripts/live-smoke-repeat scripts/package-smoke scripts/release-check scripts/rc-check` | pass |
 
 While Python remains in the repository, the Python gates remain required. A
@@ -29,6 +30,7 @@ executes Python for the migrated paths.
 - Python unittest.
 - ResourceWarning gate.
 - Python compile gate.
+- TypeScript migration audit in current hybrid mode.
 - Dashboard tests.
 - Dashboard build.
 - Smoke script syntax checks.
@@ -54,6 +56,8 @@ The migration must replace these with npm tarball semantics while preserving:
 - bundled `manage-codex-workers` and `codex-review` assets
 - executable `codex-review/scripts/codex-review`
 - stale command text guard for installed skills
+- TypeScript migration audit receipt; Board 13/14 must use
+  `npm run migration:audit:final` after Python runtime removal.
 
 ## Live And Manual QA Gates
 
@@ -87,8 +91,9 @@ Current CI:
   `scripts/rc-check --skip-live-smoke-repeat`, and `scripts/package-smoke`.
 - `.github/workflows/live-smoke.yml` runs `scripts/live-smoke` only when Codex
   CLI is available.
-- `.github/workflows/publish.yml` is PyPI/TestPyPI-oriented and must not become
-  an automatic npm publish path during autonomous overnight work.
+- `.github/workflows/publish.yml` verifies the npm package artifact on manual
+  dispatch and must not become an automatic npm publish path during autonomous
+  overnight work.
 
 ## Strongest QA Failure Mode
 

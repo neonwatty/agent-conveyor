@@ -1085,6 +1085,7 @@ Underlying deterministic checks:
 python3 -m unittest discover -s tests -v
 scripts/check-resource-warnings
 python3 -m py_compile scripts/workerctl scripts/check-resource-warnings workerctl/*.py
+npm run migration:audit
 scripts/package-smoke
 scripts/release-check
 ```
