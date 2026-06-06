@@ -6594,6 +6594,33 @@ test("TypeScript runtime handles remaining dashboard and skill install CLI contr
     assert.equal(payload.task, "demo task");
     assert.equal(payload.url, "http://127.0.0.2:8899/?task=demo%20task");
 
+    const defaultDashboard = runTypescriptRuntimeCommand({
+      args: ["dashboard", "--dry-run", "--json", "--task", "demo task", "--db-path", dbPath, "--ensure-dispatch"],
+      env: {},
+    });
+    assert.equal(defaultDashboard.exitCode, 0, defaultDashboard.stderr);
+    const defaultPayload = JSON.parse(defaultDashboard.stdout ?? "{}") as {
+      command: string[];
+      dispatch_command: string[];
+    };
+    assert.deepEqual(defaultPayload.command.slice(0, 8), [
+      "npm",
+      "run",
+      "dashboard",
+      "--",
+      "--host",
+      "127.0.0.1",
+      "--port",
+      "8797",
+    ]);
+    assert.deepEqual(defaultPayload.command.slice(8, 10), ["--workerctl-path", "conveyor"]);
+    assert.deepEqual(defaultPayload.dispatch_command.slice(0, 4), [
+      "conveyor",
+      "dispatch",
+      "--watch",
+      "--dispatcher-id",
+    ]);
+
     const codexHome = join(root, "codex-home");
     const install = runTypescriptRuntimeCommand({
       args: ["install-skills", "--codex-home", codexHome, "--json"],

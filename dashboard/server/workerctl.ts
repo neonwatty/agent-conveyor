@@ -69,7 +69,6 @@ export interface WorkerctlCommandOptions {
   taskSummary?: string;
   text?: string;
   timeoutSeconds?: number;
-  tsRuntime?: boolean;
   worker?: string;
   workerName?: string;
   workerctlPath: string;
@@ -83,18 +82,12 @@ export function normalizeServerOptions(options: PartialServerOptions): ServerOpt
     host: options.host ?? "127.0.0.1",
     port: options.port ?? 8797,
     task: options.task,
-    workerctlPath: options.workerctlPath ?? "scripts/workerctl",
+    workerctlPath: options.workerctlPath ?? "conveyor",
   };
 }
 
 export function buildWorkerctlArgs(options: WorkerctlCommandOptions): string[] {
   const args = [options.workerctlPath];
-  if (options.tsRuntime) {
-    if (!commandSupportsTypescriptRuntime(options.command)) {
-      throw new Error(`${options.command} command does not support the TypeScript runtime yet.`);
-    }
-    args.push("--ts-runtime");
-  }
   if (options.command === "snapshot") {
     if (!options.task) {
       throw new Error("Snapshot command requires a task.");
@@ -274,10 +267,6 @@ function commandSupportsPath(command: DashboardCommand): boolean {
     "telemetry",
     "tasks",
   ].includes(command);
-}
-
-function commandSupportsTypescriptRuntime(command: DashboardCommand): boolean {
-  return ["audit", "export", "replay"].includes(command);
 }
 
 function appendCodexStartArgs(args: string[], options: WorkerctlCommandOptions): void {

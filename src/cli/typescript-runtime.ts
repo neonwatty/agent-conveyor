@@ -780,7 +780,7 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
     maxStorageBytes: null,
     maxUnfinishedCommands: 0,
     managerStaleSeconds: DEFAULT_STATUS_STALE_SECONDS,
-    workerctlPath: "scripts/workerctl",
+    workerctlPath: "conveyor",
     newest: false,
     zip: false,
     requiredBeforeContinue: [],

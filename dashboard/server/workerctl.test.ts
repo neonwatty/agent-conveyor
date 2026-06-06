@@ -28,7 +28,7 @@ test("normalizes loopback dashboard server defaults", () => {
 
   assert.equal(options.host, "127.0.0.1");
   assert.equal(options.port, 8797);
-  assert.equal(options.workerctlPath, "scripts/workerctl");
+  assert.equal(options.workerctlPath, "conveyor");
 });
 
 test("builds task snapshot workerctl arguments without shell interpolation", () => {
@@ -66,19 +66,17 @@ test("builds task audit workerctl arguments", () => {
   ]);
 });
 
-test("builds TypeScript runtime task audit and replay arguments", () => {
+test("builds task audit and replay arguments through the Node CLI path", () => {
   assert.deepEqual(
     buildWorkerctlArgs({
       command: "audit",
       dbPath: "/tmp/workerctl.db",
       includeContent: true,
       task: "snapshot-task",
-      tsRuntime: true,
-      workerctlPath: "dist/cli/main.js",
+      workerctlPath: "conveyor",
     }),
     [
-      "dist/cli/main.js",
-      "--ts-runtime",
+      "conveyor",
       "audit",
       "snapshot-task",
       "--json",
@@ -96,12 +94,10 @@ test("builds TypeScript runtime task audit and replay arguments", () => {
       replayFormat: "full-transcript",
       replayRole: "manager",
       task: "snapshot-task",
-      tsRuntime: true,
-      workerctlPath: "dist/cli/main.js",
+      workerctlPath: "conveyor",
     }),
     [
-      "dist/cli/main.js",
-      "--ts-runtime",
+      "conveyor",
       "replay",
       "snapshot-task",
       "--json",
@@ -116,13 +112,12 @@ test("builds TypeScript runtime task audit and replay arguments", () => {
       "/tmp/workerctl.db",
     ],
   );
-  assert.throws(
-    () => buildWorkerctlArgs({
+  assert.deepEqual(
+    buildWorkerctlArgs({
       command: "tasks",
-      tsRuntime: true,
-      workerctlPath: "dist/cli/main.js",
+      workerctlPath: "conveyor",
     }),
-    /does not support the TypeScript runtime yet/,
+    ["conveyor", "tasks", "--json"],
   );
 });
 
@@ -1183,12 +1178,10 @@ test("builds finish and export task arguments", () => {
       dbPath: "/tmp/workerctl.db",
       outputDir: "/tmp/export",
       task: "task-a",
-      tsRuntime: true,
-      workerctlPath: "dist/cli/main.js",
+      workerctlPath: "conveyor",
     }),
     [
-      "dist/cli/main.js",
-      "--ts-runtime",
+      "conveyor",
       "export-task",
       "task-a",
       "--output",
