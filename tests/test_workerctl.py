@@ -11578,31 +11578,52 @@ Deferred follow-up criteria:
 
         for expected in (
             "workflow_dispatch:",
+            "version:",
+            "publish:",
             "runs-on: macos-latest",
             "contents: read",
             "actions/setup-node@v4",
             "node-version: 24",
+            "registry-url: \"https://registry.npmjs.org\"",
             "npm ci",
+            "Verify requested package version",
             "npm test -- --runInBand",
             "scripts/package-smoke",
             "scripts/release-check",
             "npm pack --json",
             "actions/upload-artifact@v6",
             "agent-conveyor-npm-tarball",
+            "actions/download-artifact@v6",
+            "id-token: write",
+            "environment: npm-production",
+            "Refuse already-published version",
+            "AGENT_CONVEYOR_ALLOW_NPM_PUBLISH",
+            "node scripts/prepublish-guard.mjs",
+            "npm publish dist-release/agent-conveyor-*.tgz --access public",
         ):
             self.assertIn(expected, workflow)
 
         self.assertNotIn("actions/upload-artifact@v5", workflow)
+        self.assertNotIn("actions/download-artifact@v5", workflow)
         self.assertNotIn("pypa/gh-action-pypi-publish", workflow)
         self.assertNotIn("repository-url: https://test.pypi.org/legacy/", workflow)
-        self.assertNotIn("npm publish", workflow)
+        self.assertLess(
+            workflow.index("Refuse already-published version"),
+            workflow.index("npm publish dist-release/agent-conveyor-*.tgz --access public"),
+        )
+        self.assertLess(
+            workflow.index("node scripts/prepublish-guard.mjs"),
+            workflow.index("npm publish dist-release/agent-conveyor-*.tgz --access public"),
+        )
 
         for expected in (
             "manual package",
             "artifact verification workflow",
             ".github/workflows/publish.yml",
             "agent-conveyor-npm-tarball",
-            "It intentionally does not",
+            "Trusted Publishing",
+            "workflow input `publish` is explicitly set to `true`",
+            "Require two-factor authentication and disallow tokens",
         ):
             self.assertIn(expected, release_doc)
 
@@ -11643,6 +11664,7 @@ Deferred follow-up criteria:
             "scripts/package-smoke",
             "scripts/release-check",
             "prepublish guard",
+            "Trusted Publishing",
         ):
             self.assertIn(expected, release_doc)
 

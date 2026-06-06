@@ -14,7 +14,9 @@ that action.
 - The worktree is clean except for intentionally ignored local artifacts.
 - The package version in `package.json` is the version you intend to release.
 - The release candidate has passed CI, including `scripts/package-smoke`.
-- npm auth and two-factor settings have been checked by the operator.
+- npm auth and two-factor settings have been checked by the operator for local
+  publishing, or npm Trusted Publishing is configured for the GitHub Actions
+  workflow.
 - `npm view agent-conveyor name version --json` has been rechecked near release
   time, because registry state can change.
 
@@ -80,21 +82,41 @@ tarball.
 ## GitHub Artifact Workflow
 
 The repository workflow `.github/workflows/publish.yml` is a manual package
-artifact verification workflow. It runs the npm gates, produces a tarball, and
-uploads the `.tgz` as a GitHub Actions artifact. It intentionally does not
-publish.
+artifact verification workflow by default. It runs the npm gates, produces a
+tarball, and uploads the `.tgz` as a GitHub Actions artifact.
 
 Use it when you want a CI-produced package artifact for human review:
 
-1. Run the `Package Verification` workflow.
+1. Run the `Package Verification` workflow with `publish` left as `false`.
 2. Download the `agent-conveyor-npm-tarball` artifact.
 3. Install it in a clean prefix and repeat the help and skill checks above.
 4. Record the workflow URL and tarball filename in the release receipt.
 
+The same workflow can publish through npm Trusted Publishing when all of these
+are true:
+
+- npm package settings trust GitHub Actions for
+  `neonwatty/agent-conveyor`, workflow filename `publish.yml`, environment
+  `npm-production`, and allowed action `npm publish`.
+- The workflow input `publish` is explicitly set to `true`.
+- The workflow input `version` matches `package.json`.
+- The version is not already present on npm.
+- The GitHub `npm-production` environment approval, if configured, is granted.
+
+Trusted Publishing requires npm CLI 11.5.1+ and Node 22.14.0+. GitHub-hosted
+Node 24 runners satisfy the Node requirement. npm generates provenance
+automatically for public packages published from public repositories through
+Trusted Publishing.
+
+After Trusted Publishing is verified, prefer the npm package setting
+`Require two-factor authentication and disallow tokens`; this disables
+traditional publish tokens while leaving the trusted publisher path usable.
+
 ## Publish Handoff
 
 Publishing is a human-approved final action after the migration readiness audit.
-When approved, publish the exact tarball that passed the artifact gates:
+The preferred path is the Trusted Publishing workflow above. For emergency
+local publishing only, publish the exact tarball that passed the artifact gates:
 
 ```bash
 npm publish ./agent-conveyor-<version>.tgz --access public

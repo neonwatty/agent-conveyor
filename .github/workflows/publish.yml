@@ -2,6 +2,16 @@ name: Package Verification
 
 on:
   workflow_dispatch:
+    inputs:
+      version:
+        description: "Package version to verify or publish. Must match package.json."
+        required: true
+        default: "0.1.1"
+      publish:
+        description: "Publish the verified tarball to npm with Trusted Publishing."
+        required: true
+        type: boolean
+        default: false
 
 jobs:
   npm-package:
@@ -23,6 +33,19 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Verify requested package version
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          node -e '
+            const fs = require("node:fs");
+            const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+            if (pkg.version !== process.env.RELEASE_VERSION) {
+              console.error(`package.json version ${pkg.version} does not match requested release ${process.env.RELEASE_VERSION}`);
+              process.exit(1);
+            }
+          '
+
       - name: Run tests
         run: npm test -- --runInBand
 
@@ -41,3 +64,70 @@ jobs:
           name: agent-conveyor-npm-tarball
           path: agent-conveyor-*.tgz
           if-no-files-found: error
+
+  npm-publish:
+    name: Publish npm package with Trusted Publishing
+    if: ${{ inputs.publish }}
+    needs: npm-package
+    runs-on: macos-latest
+    environment: npm-production
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify requested package version
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          node -e '
+            const fs = require("node:fs");
+            const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+            if (pkg.version !== process.env.RELEASE_VERSION) {
+              console.error(`package.json version ${pkg.version} does not match requested release ${process.env.RELEASE_VERSION}`);
+              process.exit(1);
+            }
+          '
+
+      - name: Refuse already-published version
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          if npm view "agent-conveyor@$RELEASE_VERSION" version >/dev/null 2>&1; then
+            echo "agent-conveyor@$RELEASE_VERSION is already published" >&2
+            exit 1
+          fi
+
+      - name: Download verified tarball
+        uses: actions/download-artifact@v6
+        with:
+          name: agent-conveyor-npm-tarball
+          path: dist-release
+
+      - name: Verify downloaded tarball
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          test -f "dist-release/agent-conveyor-$RELEASE_VERSION.tgz"
+          npm install -g --prefix "$RUNNER_TEMP/agent-conveyor-prefix" "dist-release/agent-conveyor-$RELEASE_VERSION.tgz"
+          PATH="$RUNNER_TEMP/agent-conveyor-prefix/bin:$PATH" conveyor --help
+          PATH="$RUNNER_TEMP/agent-conveyor-prefix/bin:$PATH" workerctl --help
+
+      - name: Publish verified tarball
+        env:
+          AGENT_CONVEYOR_ALLOW_NPM_PUBLISH: "1"
+        run: |
+          node scripts/prepublish-guard.mjs
+          npm publish dist-release/agent-conveyor-*.tgz --access public
