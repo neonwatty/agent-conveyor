@@ -125,6 +125,10 @@ PATH="$tmp_prefix/bin:$PATH" workerctl --help
 `conveyor doctor` reports local dependency health (tmux, codex, etc.).
 `conveyor db-doctor` initializes and checks the SQLite control-plane
 database.
+On Node versions where `node:sqlite` is still marked experimental, SQLite
+commands can also print an `ExperimentalWarning` to stderr while returning
+successful JSON. Treat that warning as expected Node runtime noise when the
+command exits 0 and the JSON result reports `"ok": true`.
 Before publishing `agent-conveyor` to npm, use
 [`docs/package-release.md`](docs/package-release.md).
 
@@ -1047,9 +1051,11 @@ SQLite database at `.codex-workers/workerctl.db`. Key tables:
   proposals and reviewer verdicts for "what's next" review flows.
 - `workers`, `managers` — Legacy tables retained for read-only history.
 
-`conveyor db-doctor` reports schema health. `conveyor reconcile` reports
-runtime drift (dead-pid sessions, dangling bindings, stuck tasks); add
-`--apply` to fix.
+`conveyor db-doctor` reports schema health. On Node releases that still mark
+`node:sqlite` experimental, the command may emit an `ExperimentalWarning` to
+stderr even when the schema check succeeds. `conveyor reconcile` reports runtime
+drift (dead-pid sessions, dangling bindings, stuck tasks); add `--apply` to
+fix.
 
 ## Migration from the Legacy Path
 
