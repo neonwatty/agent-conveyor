@@ -325,6 +325,48 @@ tasks:
         evidence: "Workflow run 27073942634 passed the verify job on GitHub and the publish job was explicitly skipped with `publish=false`; local `scripts/release-check` independently packed and clean-installed the tarball without publishing."
 
 checks:
+  post_completion_receipts:
+    - id: public-package-0.1.1-disposable-workflow-smoke
+      result: pass
+      recorded_at: "2026-06-06T21:41:41Z"
+      package:
+        name: "agent-conveyor"
+        version: "0.1.1"
+        dist_tag: "latest"
+        integrity: "sha512-RJAxLSjCmrV6MWROEmye0NlGkkX/nNmUJWpTg+SutdfvSedoHQiuAXA/J6e1vmZeYB40qHnHCDRApbd1dbm23Q=="
+      summary: "Installed `agent-conveyor@0.1.1` from npm into a clean temp prefix and proved the public package can create a disposable no-tmux binding, expose an empty worker inbox after setup, report Ralph-loop status, and validate the fresh SQLite database with `db-doctor --json`."
+      commands:
+        - cmd: "npm view agent-conveyor@0.1.1 name version dist-tags dist.integrity --json"
+          status: pass
+          summary: "Registry reported `agent-conveyor@0.1.1` as `latest` with the expected integrity."
+        - cmd: "npm install -g --prefix <tmp>/prefix agent-conveyor@0.1.1"
+          status: pass
+          summary: "Installed the published package and dependencies into an empty temp prefix."
+        - cmd: "PATH=<tmp>/prefix/bin:$PATH conveyor --help"
+          status: pass
+          summary: "Published CLI printed `usage: conveyor [-h] <command> ...`; Node also printed the documented SQLite ExperimentalWarning."
+        - cmd: "PATH=<tmp>/prefix/bin:$PATH conveyor create-disposable-binding post-release-011-smoke --goal 'Post-release public package 0.1.1 disposable workflow smoke' --worker smoke-011-worker --manager smoke-011-manager --run-name post-release-011-run --required-before-continue adversarial_check --cwd <tmp> --session-dir <tmp>/sessions --path <tmp>/workerctl.db --json"
+          status: pass
+          summary: "Created task `post-release-011-smoke`, worker `smoke-011-worker`, manager `smoke-011-manager`, binding id, and Ralph loop `post-release-011-run`; policy required `adversarial_check` and returned `ready_for_manager_review` replay guidance."
+        - cmd: "PATH=<tmp>/prefix/bin:$PATH conveyor worker-inbox post-release-011-smoke --path <tmp>/workerctl.db --json"
+          status: pass
+          summary: "Returned the expected worker session and zero pending inbox items after disposable setup."
+        - cmd: "PATH=<tmp>/prefix/bin:$PATH conveyor loop-status post-release-011-smoke --run post-release-011-run --path <tmp>/workerctl.db --json"
+          status: pass
+          summary: "Reported run `post-release-011-run` finished, task state `managed`, `required_before_continue: [adversarial_check]`, and `recommendation: ready_for_manager_review`."
+        - cmd: "PATH=<tmp>/prefix/bin:$PATH conveyor db-doctor --path <tmp>/workerctl.db --json"
+          status: pass
+          summary: "Returned `ok: true`, schema/user version 22, WAL mode, required tables/indexes/triggers present, and no foreign key violations."
+        - cmd: "ruby -e 'require \"yaml\"; YAML.load_file(\"docs/goals/agent-conveyor-v0.1.1-hardening/state.yaml\"); puts \"yaml ok\"'"
+          status: pass
+          summary: "Post-completion receipt kept the GoalBuddy board parseable YAML."
+        - cmd: "git diff --check"
+          status: pass
+          summary: "Receipt edit introduced no whitespace errors."
+      disproof:
+        strongest_failure_mode: "The published `0.1.1` package could install and print help while failing the real disposable workflow path."
+        evidence: "The clean-prefix smoke exercised the workflow commands against a fresh temp DB: `create-disposable-binding`, `worker-inbox`, `loop-status`, and `db-doctor` all exited 0 with coherent task/run/database JSON."
+
   last_verification:
     result: pass
     task: "final audit"
