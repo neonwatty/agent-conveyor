@@ -69,13 +69,12 @@ The tarball must include:
 
 - `dist/cli/main.js`
 - `dist/index.js`
-- `scripts/workerctl`
-- `workerctl/**/*.py`
-- `workerctl/assets/skills/manage-codex-workers/SKILL.md`
-- `workerctl/assets/skills/codex-review/SKILL.md`
-- `workerctl/assets/skills/codex-review/scripts/codex-review`
+- `skills/manage-codex-workers/SKILL.md`
+- `skills/codex-review/SKILL.md`
+- `skills/codex-review/scripts/codex-review`
 
-`scripts/workerctl` and the `codex-review` helper must be executable in the
+The npm tarball must not contain `scripts/workerctl`, `workerctl/**/*.py`, or
+`dist/cli/python-bridge.*`. The `codex-review` helper must be executable in the
 tarball.
 
 ## GitHub Artifact Workflow

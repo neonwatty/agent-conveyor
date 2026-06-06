@@ -1,10 +1,5 @@
 #!/usr/bin/env node
-import {
-  buildPythonEntrypoint,
-  packageRootFromModuleUrl,
-  programNameFromArgv,
-  runPythonEntrypoint,
-} from "./python-bridge.js";
+import { programNameFromArgv } from "./program-name.js";
 import { runTypescriptRuntimeCommand } from "./typescript-runtime.js";
 
 const args = process.argv.slice(2);
@@ -16,21 +11,10 @@ const typescriptRuntime = runTypescriptRuntimeCommand({
   program,
 });
 
-if (typescriptRuntime.handled) {
-  if (typescriptRuntime.stdout) {
-    process.stdout.write(typescriptRuntime.stdout);
-  }
-  if (typescriptRuntime.stderr) {
-    process.stderr.write(typescriptRuntime.stderr);
-  }
-  process.exitCode = typescriptRuntime.exitCode;
-} else {
-  const entrypoint = buildPythonEntrypoint({
-    args,
-    env: process.env,
-    packageRoot: packageRootFromModuleUrl(import.meta.url),
-    program,
-  });
-
-  process.exitCode = runPythonEntrypoint(entrypoint);
+if (typescriptRuntime.stdout) {
+  process.stdout.write(typescriptRuntime.stdout);
 }
+if (typescriptRuntime.stderr) {
+  process.stderr.write(typescriptRuntime.stderr);
+}
+process.exitCode = typescriptRuntime.exitCode;

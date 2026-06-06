@@ -16,16 +16,14 @@
       "default": "./dist/index.js"
     },
     "./cli": {
-      "types": "./dist/cli/python-bridge.d.ts",
-      "default": "./dist/cli/python-bridge.js"
+      "types": "./dist/cli/program-name.d.ts",
+      "default": "./dist/cli/program-name.js"
     }
   },
   "files": [
     "dist/",
-    "scripts/workerctl",
     "scripts/capture-static-html-screenshot.mjs",
-    "workerctl/**/*.py",
-    "workerctl/assets/skills/**/*",
+    "skills/**/*",
     "README.md",
     "docs/typescript-migration/*.md"
   ],
@@ -40,7 +38,7 @@
     "migration:audit:final": "node scripts/ts-migration-audit.mjs --require-zero-python",
     "check": "npm run lint && npm run knip && npm test -- --runInBand && npm run build",
     "dashboard": "tsx dashboard/server/index.ts",
-    "prepack": "npm run build:cli",
+    "prepack": "rm -rf dist/cli && npm run build:cli",
     "prepublishOnly": "node scripts/prepublish-guard.mjs"
   },
   "engines": {

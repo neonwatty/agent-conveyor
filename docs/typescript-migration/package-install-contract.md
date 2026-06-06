@@ -49,23 +49,19 @@ The TypeScript migration now produces an npm package that:
 - exposes `bin.workerctl`
 - includes built CLI code
 - includes required dashboard assets if dashboard remains part of the package
-- includes `workerctl/assets/skills/**` bundled skill assets
+- includes top-level `skills/**` bundled skill assets
 - preserves executable mode for the installed `codex-review` helper
+- excludes `scripts/workerctl`, `workerctl/**/*.py`, and
+  `dist/cli/python-bridge.*`
 - avoids automatic npm publish from local scripts or CI unless explicitly
   approved by the operator
 
 ## Runtime Cutover Boundary
 
-T007 proves the package can expose the Node `conveyor` and `workerctl` bins
-while keeping the Python bridge as the default compatibility path. The T006
-TypeScript runtime is opt-in and covers only the migrated audit, replay, and
-non-zip subset export surfaces.
-
-Full `export-task` parity remains Python-backed until a later verified slice
-ports prompts, transcript captures/segments, terminal captures, telemetry
-reports, mutation audit, archive creation, and full-transcript replay output.
-Package smoke must not treat a migrated subset export as a replacement for the
-full Python export contract.
+The npm package exposes the Node `conveyor` and `workerctl` bins without the
+Python bridge or packaged Python runtime. The source tree can still retain the
+historical Python implementation and compatibility tests, but normal npm
+package operation must be TypeScript-owned.
 
 ## Tarball Smoke Contract
 
@@ -86,6 +82,7 @@ The smoke must inspect:
 - both help first lines are correct
 - installed skill files exist
 - `codex-review/scripts/codex-review` is executable
+- no Python runtime, Python bridge, or `scripts/workerctl` files are packed
 - npm tarball contents include only intended package files
 
 ## Docs And CI Contract

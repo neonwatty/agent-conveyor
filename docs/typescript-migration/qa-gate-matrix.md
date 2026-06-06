@@ -15,7 +15,7 @@ Current baseline before the migration board:
 | Python compile gate | `python3 -m py_compile scripts/workerctl scripts/check-resource-warnings workerctl/*.py` | pass |
 | Node/dashboard tests | `npm test -- --runInBand` | pass, 161 tests |
 | Dashboard build | `npm run build` | pass |
-| TypeScript migration audit | `npm run migration:audit` | pass in hybrid mode; reports Python runtime blockers until package cutover |
+| TypeScript migration audit | `npm run migration:audit:final` | pass after package cutover; npm tarball has no Python runtime/bridge files |
 | Shell syntax | `bash -n scripts/live-smoke scripts/live-smoke-repeat scripts/package-smoke scripts/release-check scripts/rc-check` | pass |
 
 While Python remains in the repository, the Python gates remain required. A
@@ -30,7 +30,7 @@ executes Python for the migrated paths.
 - Python unittest.
 - ResourceWarning gate.
 - Python compile gate.
-- TypeScript migration audit in current hybrid mode.
+- TypeScript migration audit.
 - Dashboard tests.
 - Dashboard build.
 - Smoke script syntax checks.
