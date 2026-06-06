@@ -122,7 +122,7 @@ if grep -Fqx "$PATH_LINE" "$PROFILE"; then
 else
   {
     echo
-    echo "# codex-terminal-manager"
+    echo "# agent-conveyor"
     echo "$PATH_LINE"
   } >> "$PROFILE"
   echo "installed Agent Conveyor PATH in $PROFILE"

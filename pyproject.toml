@@ -23,9 +23,9 @@ classifiers = [
 ]
 
 [project.urls]
-"Homepage" = "https://github.com/neonwatty/codex-terminal-manager"
-"Source" = "https://github.com/neonwatty/codex-terminal-manager"
-"Issues" = "https://github.com/neonwatty/codex-terminal-manager/issues"
+"Homepage" = "https://github.com/neonwatty/agent-conveyor"
+"Source" = "https://github.com/neonwatty/agent-conveyor"
+"Issues" = "https://github.com/neonwatty/agent-conveyor/issues"
 
 [project.scripts]
 conveyor = "workerctl.cli:main"

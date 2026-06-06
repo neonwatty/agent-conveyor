@@ -11617,11 +11617,11 @@ Deferred follow-up criteria:
         self.assertEqual(package_json["bin"]["workerctl"], "dist/cli/main.js")
         self.assertEqual(
             package_json["repository"]["url"],
-            "git+https://github.com/neonwatty/codex-terminal-manager.git",
+            "git+https://github.com/neonwatty/agent-conveyor.git",
         )
         self.assertEqual(
             package_json["bugs"]["url"],
-            "https://github.com/neonwatty/codex-terminal-manager/issues",
+            "https://github.com/neonwatty/agent-conveyor/issues",
         )
         self.assertIn("skills/**/*", package_json["files"])
         self.assertNotIn("workerctl/assets/skills/**/*", package_json["files"])
