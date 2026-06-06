@@ -180,6 +180,7 @@ type TypescriptRuntimeOptions = {
   lsofForPid?: (pid: number) => string;
   now?: () => Date;
   platform?: NodeJS.Platform;
+  program?: "conveyor" | "workerctl";
   sleepMilliseconds?: (milliseconds: number) => void;
   stdin?: string;
   terminalRunner?: (args: string[]) => { status: number; stderr?: string; stdout?: string };
@@ -188,22 +189,27 @@ type TypescriptRuntimeOptions = {
 
 export function runTypescriptRuntimeCommand(options: TypescriptRuntimeOptions): TypescriptRuntimeResult {
   const parsed = parseRuntimeArgs(options.args, options.env ?? process.env);
+  const program = options.program ?? "conveyor";
+  if (!parsed.command || isHelpArg(parsed.command)) {
+    return textResult([
+      `usage: ${program} [-h] <command> ...`,
+      "",
+      "Agent Conveyor control plane.",
+    ]);
+  }
   const defaultRuntime = !parsed.enabled && isDefaultRuntimeCommand(parsed.command);
   if (defaultRuntime) {
     parsed.enabled = true;
     parsed.defaultRuntime = true;
   }
   if (!parsed.enabled) {
-    return { exitCode: 0, handled: false };
+    return errorResult(`unknown command: ${parsed.command}`);
+  }
+  if (parsed.flags.help) {
+    return textResult([`usage: ${program} ${parsed.command} [-h] [options]`]);
   }
   if (parsed.error) {
-    if (defaultRuntime) {
-      return { exitCode: 0, handled: false };
-    }
     return errorResult(parsed.error);
-  }
-  if (!parsed.command) {
-    return errorResult("TypeScript runtime requires a command.");
   }
 
   try {
@@ -453,7 +459,7 @@ export function runTypescriptRuntimeCommand(options: TypescriptRuntimeOptions): 
     if (parsed.explicit) {
       return errorResult(`Unsupported TypeScript runtime command: ${parsed.command}`);
     }
-    return { exitCode: 0, handled: false };
+    return errorResult(`unsupported command: ${parsed.command}`);
   } catch (error) {
     return errorResult(error instanceof Error ? error.message : String(error));
   }
@@ -476,6 +482,7 @@ interface ParsedRuntimeArgs {
     activeOnly: boolean;
     actor: string | null;
     includeLegacy: boolean;
+    help: boolean;
     redactIdentityToken: boolean;
     active: boolean;
     add: boolean;
@@ -683,6 +690,7 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
     activeOnly: false,
     actor: null,
     includeLegacy: false,
+    help: false,
     redactIdentityToken: false,
     active: false,
     add: false,
@@ -892,7 +900,12 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
   for (let index = 0; index < queue.length; index += 1) {
     const arg = queue[index];
     if (command === "start" && isHelpArg(arg)) {
-      return { command, enabled, error: `Unsupported TypeScript runtime option: ${arg}`, explicit, flags, passthroughArgs, task };
+      flags.help = true;
+      continue;
+    }
+    if (isHelpArg(arg)) {
+      flags.help = true;
+      continue;
     }
     if (command === "start" && arg !== "--cwd" && arg !== "--no-start-prompt" && arg !== "--" && isStartPassthroughFlag(arg)) {
       passthroughArgs.push(arg);
@@ -2824,11 +2837,8 @@ function runExportTaskCommand(
 ): TypescriptRuntimeResult {
   const task = requireTask(parsed);
   if (parsed.flags.zip || parsed.flags.includeTranscripts || parsed.flags.includeFullTranscripts) {
-    if (parsed.defaultRuntime) {
-      return { exitCode: 0, handled: false };
-    }
     return errorResult(
-      "TypeScript runtime export currently supports the migrated audit subset only; omit --zip and transcript flags or use the Python runtime.",
+      "TypeScript runtime export currently supports the migrated audit subset only; omit --zip and transcript flags.",
     );
   }
   const database = openRuntimeDatabase(parsed, options);
@@ -10017,9 +10027,6 @@ function runReconcileCommand(
   if (parsed.task !== null) {
     throw new Error(`Unexpected argument: ${parsed.task}`);
   }
-  if (parsed.flags.path !== null) {
-    return unsupportedRuntimeResult(parsed, "Unsupported TypeScript runtime option for reconcile.");
-  }
   const database = openRuntimeDatabase(parsed, options);
   try {
     const report = parsed.flags.apply
@@ -15259,9 +15266,6 @@ function errorResult(message: string): TypescriptRuntimeResult {
 }
 
 function unsupportedRuntimeResult(parsed: ParsedRuntimeArgs, message: string): TypescriptRuntimeResult {
-  if (parsed.defaultRuntime) {
-    return { exitCode: 0, handled: false };
-  }
   return errorResult(message);
 }
 
@@ -15478,9 +15482,6 @@ function unsupportedUnbindOptions(parsed: ParsedRuntimeArgs): string | null {
   if (unsupported) {
     return unsupported;
   }
-  if (parsed.flags.path !== null) {
-    return "Unsupported TypeScript runtime option for unbind: --path";
-  }
   if (parsed.flags.worker !== null || parsed.flags.manager !== null) {
     return "Unsupported TypeScript runtime option for unbind.";
   }
@@ -15501,7 +15502,6 @@ function unsupportedLegacyStartOptions(parsed: ParsedRuntimeArgs): string | null
     || parsed.flags.limit !== null
     || parsed.flags.names.length > 0
     || parsed.flags.open
-    || parsed.flags.path !== null
     || parsed.flags.pid !== null
     || parsed.flags.codexSession !== null
     || parsed.flags.reuse
@@ -15550,7 +15550,6 @@ function unsupportedLegacyCreateOptions(parsed: ParsedRuntimeArgs, startTest: bo
     || parsed.flags.names.length > 0
     || parsed.flags.nextAction !== null
     || parsed.flags.output !== null
-    || parsed.flags.path !== null
     || parsed.flags.pid !== null
     || parsed.flags.codexSession !== null
     || parsed.flags.reason !== null
@@ -15844,7 +15843,6 @@ function unsupportedOpenOptions(parsed: ParsedRuntimeArgs): string | null {
     || parsed.flags.names.length > 0
     || parsed.flags.nextAction !== null
     || parsed.flags.output !== null
-    || parsed.flags.path !== null
     || parsed.flags.pid !== null
     || parsed.flags.reason !== null
     || parsed.flags.redactIdentityToken
@@ -15979,7 +15977,6 @@ function unsupportedStopOptions(parsed: ParsedRuntimeArgs): string | null {
     || parsed.flags.names.length > 0
     || parsed.flags.nextAction !== null
     || parsed.flags.output !== null
-    || parsed.flags.path !== null
     || parsed.flags.pid !== null
     || parsed.flags.reason !== null
     || parsed.flags.redactIdentityToken
@@ -16063,7 +16060,6 @@ function unsupportedSessionsOptions(parsed: ParsedRuntimeArgs): string | null {
     || parsed.flags.json
     || parsed.flags.limit !== null
     || parsed.flags.output !== null
-    || parsed.flags.path !== null
     || parsed.flags.pid !== null
     || parsed.flags.summary !== null
     || parsed.flags.taskName !== null
@@ -16093,7 +16089,6 @@ function unsupportedDeregisterOptions(parsed: ParsedRuntimeArgs): string | null 
     || parsed.flags.limit !== null
     || parsed.flags.names.length > 0
     || parsed.flags.output !== null
-    || parsed.flags.path !== null
     || parsed.flags.pid !== null
     || parsed.flags.redactIdentityToken
     || parsed.flags.sessionRole !== null
@@ -16161,7 +16156,6 @@ function unsupportedClassifyOptions(parsed: ParsedRuntimeArgs): string | null {
     || parsed.flags.json
     || parsed.flags.names.length > 0
     || parsed.flags.output !== null
-    || parsed.flags.path !== null
     || parsed.flags.pid !== null
     || parsed.flags.redactIdentityToken
     || parsed.flags.sessionRole !== null
@@ -16197,7 +16191,6 @@ function unsupportedIngestOptions(parsed: ParsedRuntimeArgs): string | null {
     || parsed.flags.limit !== null
     || parsed.flags.names.length > 0
     || parsed.flags.output !== null
-    || parsed.flags.path !== null
     || parsed.flags.pid !== null
     || parsed.flags.redactIdentityToken
     || parsed.flags.sessionRole !== null
@@ -16233,7 +16226,6 @@ function unsupportedTailOptions(parsed: ParsedRuntimeArgs): string | null {
     || parsed.flags.json
     || parsed.flags.names.length > 0
     || parsed.flags.output !== null
-    || parsed.flags.path !== null
     || parsed.flags.pid !== null
     || parsed.flags.redactIdentityToken
     || parsed.flags.sessionRole !== null
@@ -16547,7 +16539,6 @@ function unsupportedTranscriptPruneOptions(parsed: ParsedRuntimeArgs): string | 
     || parsed.flags.output !== null
     || parsed.flags.pid !== null
     || parsed.flags.redactIdentityToken
-    || parsed.flags.roleProvided
     || parsed.flags.sessionRole !== null
     || parsed.flags.sessionState !== null
     || parsed.flags.statusAgeSeconds !== DEFAULT_BUSY_WAIT_SECONDS

@@ -8,10 +8,12 @@ import {
 import { runTypescriptRuntimeCommand } from "./typescript-runtime.js";
 
 const args = process.argv.slice(2);
+const program = programNameFromArgv(process.argv, process.env);
 const typescriptRuntime = runTypescriptRuntimeCommand({
   args,
   cwd: process.cwd(),
   env: process.env,
+  program,
 });
 
 if (typescriptRuntime.handled) {
@@ -27,7 +29,7 @@ if (typescriptRuntime.handled) {
     args,
     env: process.env,
     packageRoot: packageRootFromModuleUrl(import.meta.url),
-    program: programNameFromArgv(process.argv, process.env),
+    program,
   });
 
   process.exitCode = runPythonEntrypoint(entrypoint);
