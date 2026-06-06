@@ -1,0 +1,234 @@
+# GoalBuddy v2 state.yaml
+# Board truth lives here. goal.md is the editable charter; notes/ holds long receipts only.
+
+version: 2
+
+goal:
+  title: "Agent Conveyor v0.1.1 Hardening"
+  slug: "agent-conveyor-v0.1.1-hardening"
+  kind: existing_plan
+  tranche: "Post-release hardening after the npm 0.1.0 TypeScript shipment."
+  status: active
+  oracle:
+    signal: "Trusted Publishing readiness is proven or precisely blocked, public-package real workflow smoke passes, renamed local clone exists, generated artifacts are cleaned without losing user work, and v0.1.1 polish work is scoped with verification."
+    cadence: "after each hardening task and before any PR/merge or release decision"
+    final_proof: "Receipts include workflow/docs/test diffs, npm trust configuration evidence or auth blocker, public-package disposable flow output, local clone/cleanup evidence, and final full_outcome_complete truth."
+  intake:
+    original_request: "Do all next post-release hardening tasks after publishing agent-conveyor."
+    interpreted_outcome: "Make the release path calmer for future versions, clean local rename fallout, prove a real public-package workflow, and queue v0.1.1 polish."
+    input_shape: existing_plan
+    audience: "Agent Conveyor maintainers and future release operators"
+    authority: approved
+    proof_type: artifact
+    completion_proof: "Workflow/docs/tests and local environment evidence prove the post-release hardening checklist is handled, with any npm-side auth limitation recorded as a precise blocker."
+    likely_misfire: "Add a publish workflow that can accidentally republish or delete local worktrees/dirty docs while trying to clean up."
+    blind_spots_considered:
+      - "npm Trusted Publishing has both repo-side workflow requirements and npm-side package trust configuration."
+      - "The local root checkout still has unrelated dirty/untracked docs that must be preserved."
+      - "The existing `v0.1.0` tag belongs to the PyPI release and must not be rewritten."
+      - "A public install `--help` check is weaker than a real disposable binding flow."
+
+rules:
+  pm_owns_state: true
+  one_active_task: true
+  max_write_workers: 1
+  no_completion_without_judge_or_pm_audit: true
+  planning_is_not_completion: true
+  preserve_and_validate_existing_plan: true
+  no_completion_on_weak_proof: true
+  no_automatic_publish: true
+
+agents:
+  scout: installed
+  worker: installed
+  judge: installed
+
+visual_board:
+  selected: local
+  local:
+    status: live
+    url: "http://goalbuddy.localhost:41737/agent-conveyor-v0-1-1-hardening/"
+    command: "npx goalbuddy board /Users/neonwatty/.config/superpowers/worktrees/codex-terminal-manager/agent-conveyor-ts-final-audit/docs/goals/agent-conveyor-v0.1.1-hardening"
+
+active_task: T004
+
+tasks:
+  - id: T001
+    type: scout
+    assignee: Scout
+    status: done
+    reasoning_hint: medium
+    objective: "Map the current post-release hardening state and identify the remaining bounded v0.1.1 tasks."
+    inputs:
+      - "npm Trusted Publishing docs"
+      - ".github/workflows/publish.yml"
+      - "docs/package-release.md"
+      - "Current local clone/worktree status"
+      - "Public npm package smoke evidence"
+    constraints:
+      - "Read-only unless updating this board receipt."
+      - "Do not publish."
+      - "Do not delete worktrees or branches."
+    expected_output:
+      - "Trusted Publishing configured | repo_ready_npm_auth_blocked | not_ready"
+      - "Local clone and cleanup evidence"
+      - "Public package smoke evidence"
+      - "Proposed v0.1.1 task queue"
+    receipt:
+      result: done
+      decision: repo_ready_npm_auth_blocked
+      full_outcome_complete: false
+      summary: "Post-release hardening state is mapped. Repo-side Trusted Publishing workflow support is implemented locally, GitHub `npm-production` environment exists with `neonwatty` as required reviewer, public-package disposable smoke passed, fresh `/Users/neonwatty/Desktop/agent-conveyor` clone exists, and root generated `dist/` was cleaned without touching unrelated dirty docs."
+      evidence:
+        - "npm trust dry-run output for the intended GitHub Actions trusted publisher config."
+        - "GitHub environment API output for `npm-production` with required reviewer `neonwatty`."
+        - "Public package disposable binding smoke output."
+        - "Fresh clone and root cleanup git status output."
+      trusted_publishing:
+        status: "repo_ready_npm_auth_blocked"
+        desired_config:
+          package: "agent-conveyor"
+          provider: "GitHub Actions"
+          repository: "neonwatty/agent-conveyor"
+          workflow_file: "publish.yml"
+          environment: "npm-production"
+          allowed_action: "npm publish"
+        blocker: "`npx npm@11 trust github ...` returned E401 because local npm auth was revoked after the 0.1.0 release. npm trust commands do not support bypass-2FA granular access tokens."
+      commands:
+        - cmd: "npx npm@11 trust github agent-conveyor --repo neonwatty/agent-conveyor --file publish.yml --env npm-production --allow-publish --dry-run --json"
+          status: pass
+          summary: "Dry-run produced the intended trusted publisher config."
+        - cmd: "npx npm@11 trust github agent-conveyor --repo neonwatty/agent-conveyor --file publish.yml --env npm-production --allow-publish --yes --json"
+          status: fail
+          summary: "Registry returned E401 due missing supported npm login after temporary token revocation."
+        - cmd: "gh api repos/neonwatty/agent-conveyor/environments/npm-production"
+          status: pass
+          summary: "`npm-production` exists and has required reviewer `neonwatty`."
+        - cmd: "npm install agent-conveyor@0.1.0 && conveyor create-disposable-binding ... && conveyor worker-inbox ... && conveyor loop-status ..."
+          status: pass
+          summary: "Public package created a no-tmux task, worker, manager, Ralph-loop run, and returned loop policy requiring `adversarial_check`."
+        - cmd: "git clone git@github.com:neonwatty/agent-conveyor.git /Users/neonwatty/Desktop/agent-conveyor"
+          status: pass
+          summary: "Fresh local clone exists at the renamed repo path."
+        - cmd: "rm -rf /Users/neonwatty/Desktop/codex-terminal-manager/dist"
+          status: pass
+          summary: "Removed only the generated root `dist/` artifact; unrelated dirty docs/boards were preserved."
+
+  - id: T002
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "Finish repo-side Trusted Publishing support and release docs/tests."
+    allowed_files:
+      - ".github/workflows/publish.yml"
+      - "docs/package-release.md"
+      - "tests/test_workerctl.py"
+      - "docs/goals/agent-conveyor-v0.1.1-hardening/**"
+    verify:
+      - "ruby -e 'require \"yaml\"; YAML.load_file(\".github/workflows/publish.yml\")'"
+      - "python3 -m unittest tests.test_workerctl.CliTests.test_publish_workflow_verifies_npm_tarball_without_publishing tests.test_workerctl.CliTests.test_package_release_metadata_and_checklist_are_documented -v"
+      - "git diff --check"
+    stop_if:
+      - "Workflow would publish without explicit manual input and version checks."
+      - "npm-side trusted publisher setup requires interactive auth."
+    receipt:
+      result: done
+      full_outcome_complete: false
+      summary: "Repo-side Trusted Publishing support is implemented locally: the manual package workflow now verifies a versioned tarball by default and has a guarded `publish=true` job that downloads the verified artifact, checks the version is not already published, requires the `npm-production` environment, grants OIDC `id-token: write`, runs the prepublish guard, and publishes the exact tarball. Release docs and release-contract tests were updated."
+      changed_files:
+        - ".github/workflows/publish.yml"
+        - "docs/package-release.md"
+        - "tests/test_workerctl.py"
+      commands:
+        - cmd: "python3 -m unittest tests.test_workerctl.CliTests.test_publish_workflow_verifies_npm_tarball_without_publishing tests.test_workerctl.CliTests.test_package_release_metadata_and_checklist_are_documented -v"
+          status: pass
+          summary: "Focused release workflow/docs tests passed."
+        - cmd: "ruby -e 'require \"yaml\"; YAML.load_file(\".github/workflows/publish.yml\")'"
+          status: pass
+          summary: "Workflow YAML parsed."
+        - cmd: "git diff --check"
+          status: pass
+          summary: "No whitespace errors."
+      disproof:
+        strongest_failure_mode: "The workflow could accidentally publish an already-used version or bypass the prepublish guard."
+        evidence: "The publish job is manual-only via workflow input, checks `package.json` version against the requested version, refuses versions already visible via `npm view`, runs inside `npm-production`, calls `node scripts/prepublish-guard.mjs`, and publishes only the downloaded verified tarball."
+
+  - id: T003
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: low
+    objective: "Record and verify local rename cleanup."
+    allowed_files:
+      - "docs/goals/agent-conveyor-v0.1.1-hardening/**"
+    verify:
+      - "test -d /Users/neonwatty/Desktop/agent-conveyor/.git"
+      - "git -C /Users/neonwatty/Desktop/agent-conveyor status -sb"
+      - "git -C /Users/neonwatty/Desktop/codex-terminal-manager status -sb"
+    stop_if:
+      - "A cleanup target is tracked, unmerged, or unrelated user work."
+    receipt:
+      result: done
+      full_outcome_complete: false
+      summary: "Local rename cleanup is complete within safe bounds. A fresh clone exists at `/Users/neonwatty/Desktop/agent-conveyor` on `main`, the old root checkout still exists with user/untracked docs preserved, and the generated untracked root `dist/` artifact was removed."
+      changed_files:
+        - "docs/goals/agent-conveyor-v0.1.1-hardening/state.yaml"
+      commands:
+        - cmd: "test -d /Users/neonwatty/Desktop/agent-conveyor/.git && git -C /Users/neonwatty/Desktop/agent-conveyor status -sb"
+          status: pass
+          summary: "Fresh renamed clone is present and clean on `main...origin/main`."
+        - cmd: "git -C /Users/neonwatty/Desktop/codex-terminal-manager status -sb"
+          status: pass
+          summary: "Root checkout still has pre-existing dirty `state.yaml` and untracked docs/boards, but no generated `dist/`."
+        - cmd: "git for-each-ref ... merge-base --is-ancestor ... origin/main"
+          status: pass
+          summary: "Identified merged and unmerged local branches; no unmerged worktrees were deleted."
+      observations:
+        - type: "preserved-user-work"
+          detail: "Old root folder was not renamed because it contains unrelated dirty/untracked work and is the active workspace for this thread."
+
+  - id: T004
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: medium
+    objective: "Decide the v0.1.1 scope for Node SQLite warning handling and docs polish."
+    inputs:
+      - "Public package smoke output"
+      - "Release docs"
+      - "Node SQLite warning occurrences"
+    constraints:
+      - "Read-only."
+      - "Prefer bounded polish over risky warning suppression."
+    expected_output:
+      - "v0.1.1 recommended scope"
+      - "Warnings to fix, document, or defer"
+      - "Verification commands for each follow-up"
+    receipt: null
+
+  - id: T999
+    type: judge
+    assignee: Judge
+    status: queued
+    reasoning_hint: high
+    objective: "Final audit the post-release hardening board against the oracle."
+    inputs:
+      - "All hardening receipts"
+      - "PR and CI status if repo changes were opened"
+      - "npm trust configuration evidence or blocker"
+      - "Public package smoke evidence"
+    constraints:
+      - "Read-only."
+      - "Do not claim Trusted Publishing is fully active unless npm trust list or npm package settings prove it."
+    expected_output:
+      - "complete | not_complete"
+      - "full_outcome_complete: true | false"
+      - "Exact blockers or next release tasks"
+    receipt: null
+
+checks:
+  last_verification:
+    result: pending
+    task: "board creation"
+    commands: []
