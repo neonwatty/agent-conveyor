@@ -70,6 +70,9 @@ for (const path of [
 }
 NODE
 
+echo "== TypeScript migration audit =="
+node "$ROOT/scripts/ts-migration-audit.mjs" --pack-json="$PACK_JSON"
+
 echo "== clean npm install smoke =="
 npm install -g --prefix "$PREFIX" "$TARBALL"
 

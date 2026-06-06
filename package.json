@@ -36,6 +36,8 @@
     "build:dashboard": "tsc -p dashboard/tsconfig.json && vite build --config dashboard/vite.config.ts",
     "lint": "eslint .",
     "knip": "npm run build:cli && knip",
+    "migration:audit": "node scripts/ts-migration-audit.mjs",
+    "migration:audit:final": "node scripts/ts-migration-audit.mjs --require-zero-python",
     "check": "npm run lint && npm run knip && npm test -- --runInBand && npm run build",
     "dashboard": "tsx dashboard/server/index.ts",
     "prepack": "npm run build:cli",
