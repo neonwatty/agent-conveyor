@@ -5,8 +5,8 @@
   "license": "MIT",
   "type": "module",
   "bin": {
-    "conveyor": "./dist/cli/main.js",
-    "workerctl": "./dist/cli/main.js"
+    "conveyor": "dist/cli/main.js",
+    "workerctl": "dist/cli/main.js"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

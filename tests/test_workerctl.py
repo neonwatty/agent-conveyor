@@ -11613,8 +11613,8 @@ Deferred follow-up criteria:
 
         self.assertEqual(package_json["name"], "agent-conveyor")
         self.assertEqual(package_json["license"], "MIT")
-        self.assertEqual(package_json["bin"]["conveyor"], "./dist/cli/main.js")
-        self.assertEqual(package_json["bin"]["workerctl"], "./dist/cli/main.js")
+        self.assertEqual(package_json["bin"]["conveyor"], "dist/cli/main.js")
+        self.assertEqual(package_json["bin"]["workerctl"], "dist/cli/main.js")
         self.assertEqual(
             package_json["repository"]["url"],
             "git+https://github.com/neonwatty/codex-terminal-manager.git",
