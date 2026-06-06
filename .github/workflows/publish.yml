@@ -121,7 +121,7 @@ jobs:
           RELEASE_VERSION: ${{ inputs.version }}
         run: |
           test -f "dist-release/agent-conveyor-$RELEASE_VERSION.tgz"
-          npm install -g --prefix "$RUNNER_TEMP/agent-conveyor-prefix" "dist-release/agent-conveyor-$RELEASE_VERSION.tgz"
+          npm install -g --prefix "$RUNNER_TEMP/agent-conveyor-prefix" "./dist-release/agent-conveyor-$RELEASE_VERSION.tgz"
           PATH="$RUNNER_TEMP/agent-conveyor-prefix/bin:$PATH" conveyor --help
           PATH="$RUNNER_TEMP/agent-conveyor-prefix/bin:$PATH" workerctl --help
 
@@ -130,4 +130,4 @@ jobs:
           AGENT_CONVEYOR_ALLOW_NPM_PUBLISH: "1"
         run: |
           node scripts/prepublish-guard.mjs
-          npm publish dist-release/agent-conveyor-*.tgz --access public
+          npm publish ./dist-release/agent-conveyor-*.tgz --access public
