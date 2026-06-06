@@ -61,14 +61,31 @@ function withTemporaryHome(callback: (home: string) => void): void {
   }
 }
 
-test("unmigrated TypeScript runtime command falls back when disabled", () => {
-  assert.deepEqual(
-    runTypescriptRuntimeCommand({
-      args: ["adversarial-check", "--json"],
-      env: {},
-    }),
-    { exitCode: 0, handled: false },
-  );
+test("unknown TypeScript runtime command fails without Python fallback", () => {
+  const result = runTypescriptRuntimeCommand({
+    args: ["adversarial-check", "--json"],
+    env: {},
+  });
+  assert.equal(result.exitCode, 2);
+  assert.match(result.stderr ?? "", /unknown command: adversarial-check/);
+});
+
+test("TypeScript runtime help honors workerctl program name", () => {
+  const topLevel = runTypescriptRuntimeCommand({
+    args: ["--help"],
+    env: {},
+    program: "workerctl",
+  });
+  assert.equal(topLevel.exitCode, 0);
+  assert.match(topLevel.stdout ?? "", /^usage: workerctl /);
+
+  const command = runTypescriptRuntimeCommand({
+    args: ["start", "--help"],
+    env: {},
+    program: "workerctl",
+  });
+  assert.equal(command.exitCode, 0);
+  assert.match(command.stdout ?? "", /^usage: workerctl start /);
 });
 
 test("TypeScript runtime handles task create list and active filtering by default", () => {
@@ -1599,14 +1616,20 @@ test("TypeScript runtime handles bind and unbind by default", () => {
       afterBind.close();
     }
 
-    assert.deepEqual(
-      runTypescriptRuntimeCommand({
-        args: ["unbind", "--path", dbPath, "--task", "bind-task"],
-        cwd: root,
-        env: {},
-      }),
-      { exitCode: 0, handled: false },
-    );
+    const unboundByPath = runTypescriptRuntimeCommand({
+      args: ["unbind", "--path", dbPath, "--task", "bind-task"],
+      cwd: root,
+      env: {},
+    });
+    assert.equal(unboundByPath.exitCode, 0);
+    assert.equal(unboundByPath.stdout, "{\"task\": \"bind-task\", \"state\": \"ended\"}\n");
+
+    const rebound = runTypescriptRuntimeCommand({
+      args: ["bind", "--task", "bind-task", "--worker", "worker-bind", "--manager", "manager-bind"],
+      cwd: root,
+      env: {},
+    });
+    assert.equal(rebound.exitCode, 0);
 
     const unbound = runTypescriptRuntimeCommand({
       args: ["unbind", "--task", "bind-task"],
@@ -2145,14 +2168,13 @@ test("TypeScript runtime handles state-only finish-task and stop-task by default
       activeRunCheck.close();
     }
 
-    assert.deepEqual(
-      runTypescriptRuntimeCommand({
-        args: ["finish-task", "needs-json", "--json", "--path", dbPath],
-        cwd: root,
-        env: {},
-      }),
-      { exitCode: 0, handled: false },
-    );
+    const unsupportedFinishJson = runTypescriptRuntimeCommand({
+      args: ["finish-task", "needs-json", "--json", "--path", dbPath],
+      cwd: root,
+      env: {},
+    });
+    assert.equal(unsupportedFinishJson.exitCode, 2);
+    assert.match(unsupportedFinishJson.stderr ?? "", /Unsupported TypeScript runtime option for finish-task/);
     const explicitLive = runTypescriptRuntimeCommand({
       args: ["--ts-runtime", "finish-task", "needs-live", "--stop-worker", "--path", dbPath],
       cwd: root,
@@ -2371,7 +2393,8 @@ test("TypeScript runtime handles deterministic session registry and discovery co
       cwd: root,
       env: {},
     });
-    assert.deepEqual(pidOnlyFallback, { exitCode: 0, handled: false });
+    assert.equal(pidOnlyFallback.exitCode, 2);
+    assert.match(pidOnlyFallback.stderr ?? "", /does not yet discover --codex-session from --pid alone/);
 
     const worker = runTypescriptRuntimeCommand({
       args: [
@@ -2489,7 +2512,8 @@ test("TypeScript runtime handles deterministic session registry and discovery co
       cwd: root,
       env: {},
     });
-    assert.deepEqual(sessionsPathFallback, { exitCode: 0, handled: false });
+    assert.equal(sessionsPathFallback.exitCode, 0);
+    assert.equal(JSON.parse(sessionsPathFallback.stdout ?? "[]").length, 2);
 
     const discovered = runTypescriptRuntimeCommand({
       args: ["discover", "--limit", "5"],
@@ -2517,16 +2541,17 @@ test("TypeScript runtime handles deterministic session registry and discovery co
       cwd: root,
       env: {},
     });
-    assert.deepEqual(deregisterPathFallback, { exitCode: 0, handled: false });
+    assert.equal(deregisterPathFallback.exitCode, 0);
+    assert.equal(deregisterPathFallback.stdout, "{\"name\": \"worker-a\", \"state\": \"gone\"}\n");
 
-    const deregistered = runTypescriptRuntimeCommand({
-      args: ["deregister", "worker-a"],
+    const deregisteredManager = runTypescriptRuntimeCommand({
+      args: ["deregister", "manager-a"],
       cwd: root,
       env: {},
     });
-    assert.equal(deregistered.exitCode, 0);
-    assert.equal(deregistered.handled, true);
-    assert.equal(deregistered.stdout, "{\"name\": \"worker-a\", \"state\": \"gone\"}\n");
+    assert.equal(deregisteredManager.exitCode, 0);
+    assert.equal(deregisteredManager.handled, true);
+    assert.equal(deregisteredManager.stdout, "{\"name\": \"manager-a\", \"state\": \"gone\"}\n");
 
     const afterDeregister = openDatabaseSync(dbPath);
     try {
@@ -2633,7 +2658,7 @@ test("TypeScript runtime handles legacy start with bootstrap prompt and Codex pa
   }
 });
 
-test("TypeScript runtime preserves legacy start help fallback without launching tmux", () => {
+test("TypeScript runtime handles legacy start help without launching tmux", () => {
   const calls: string[][] = [];
   const runner: TmuxRunner = (args) => {
     calls.push(args);
@@ -2646,7 +2671,8 @@ test("TypeScript runtime preserves legacy start help fallback without launching 
     cwd: "/tmp",
     tmuxRunner: runner,
   });
-  assert.equal(commandHelp.handled, false);
+  assert.equal(commandHelp.exitCode, 0);
+  assert.match(commandHelp.stdout ?? "", /usage: conveyor start/);
 
   const sessionHelp = runTypescriptRuntimeCommand({
     args: ["start", "qa-help", "--help"],
@@ -2654,7 +2680,8 @@ test("TypeScript runtime preserves legacy start help fallback without launching 
     cwd: "/tmp",
     tmuxRunner: runner,
   });
-  assert.equal(sessionHelp.handled, false);
+  assert.equal(sessionHelp.exitCode, 0);
+  assert.match(sessionHelp.stdout ?? "", /usage: conveyor start/);
   assert.deepEqual(calls, []);
 });
 
@@ -2677,7 +2704,8 @@ test("TypeScript runtime rejects non-create flags before legacy create/start-tes
       env,
       tmuxRunner: runner,
     });
-    assert.equal(createResult.handled, false);
+    assert.equal(createResult.exitCode, 2);
+    assert.match(createResult.stderr ?? "", /Unsupported TypeScript runtime option for create/);
 
     const startTestResult = runTypescriptRuntimeCommand({
       args: ["start-test", "bad-start-test-option", "--cwd", repo, "--busy-wait-seconds", "7"],
@@ -2686,7 +2714,8 @@ test("TypeScript runtime rejects non-create flags before legacy create/start-tes
       env,
       tmuxRunner: runner,
     });
-    assert.equal(startTestResult.handled, false);
+    assert.equal(startTestResult.exitCode, 2);
+    assert.match(startTestResult.stderr ?? "", /Unsupported TypeScript runtime option for start-test/);
     assert.deepEqual(calls, []);
     assert.equal(existsSync(workerDir("bad-create-option", { cwd: root, env })), false);
     assert.equal(existsSync(workerDir("bad-start-test-option", { cwd: root, env })), false);
@@ -4238,14 +4267,13 @@ test("TypeScript runtime handles classify ingest and tail by default", () => {
       recommended_action: "inspect_or_interrupt",
     });
 
-    assert.deepEqual(
-      runTypescriptRuntimeCommand({
-        args: ["classify"],
-        cwd: root,
-        env: {},
-      }),
-      { exitCode: 0, handled: false },
-    );
+    const missingClassifyInput = runTypescriptRuntimeCommand({
+      args: ["classify"],
+      cwd: root,
+      env: {},
+    });
+    assert.equal(missingClassifyInput.exitCode, 2);
+    assert.match(missingClassifyInput.stderr ?? "", /classify requires --text or --file/);
 
     const registered = runTypescriptRuntimeCommand({
       args: [
@@ -4350,22 +4378,18 @@ test("TypeScript runtime handles classify ingest and tail by default", () => {
       database.close();
     }
 
-    assert.deepEqual(
-      runTypescriptRuntimeCommand({
-        args: ["ingest", "worker-tail", "--path", dbPath],
-        cwd: root,
-        env: {},
-      }),
-      { exitCode: 0, handled: false },
-    );
-    assert.deepEqual(
-      runTypescriptRuntimeCommand({
-        args: ["tail", "worker-tail", "--path", dbPath],
-        cwd: root,
-        env: {},
-      }),
-      { exitCode: 0, handled: false },
-    );
+    const pathIngest = runTypescriptRuntimeCommand({
+      args: ["ingest", "worker-tail", "--path", dbPath],
+      cwd: root,
+      env: {},
+    });
+    assert.equal(pathIngest.exitCode, 0);
+    const pathTail = runTypescriptRuntimeCommand({
+      args: ["tail", "worker-tail", "--path", dbPath],
+      cwd: root,
+      env: {},
+    });
+    assert.equal(pathTail.exitCode, 0);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -4599,14 +4623,12 @@ test("TypeScript runtime handles events update-status and transcript commands by
       afterPrune.close();
     }
 
-    assert.deepEqual(
-      runTypescriptRuntimeCommand({
-        args: ["transcript-prune", "transcript-task", "--role", "all"],
-        cwd: root,
-        env: {},
-      }),
-      { exitCode: 0, handled: false },
-    );
+    const pruneAll = runTypescriptRuntimeCommand({
+      args: ["transcript-prune", "transcript-task", "--role", "all"],
+      cwd: root,
+      env: {},
+    });
+    assert.equal(pruneAll.exitCode, 0);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -5609,7 +5631,8 @@ test("TypeScript runtime handles migrated audit replay and subset export command
       args: ["export-task", "cli-task", "--zip", "--path", dbPath],
       env: {},
     });
-    assert.deepEqual(defaultUnsupportedZip, { exitCode: 0, handled: false });
+    assert.equal(defaultUnsupportedZip.exitCode, 2);
+    assert.match(defaultUnsupportedZip.stderr ?? "", /migrated audit subset only/);
 
     const unsupportedZip = runTypescriptRuntimeCommand({
       args: ["--ts-runtime", "export-task", "cli-task", "--zip", "--path", dbPath],
@@ -6389,7 +6412,7 @@ test("TypeScript runtime reconcile dry-run apply and doctor-self preserve mutati
         args: ["reconcile", "--path", dbPath],
         env,
       });
-      assert.deepEqual(pathFallback, { exitCode: 0, handled: false });
+      assert.equal(pathFallback.exitCode, 0);
 
       const dryRun = runTypescriptRuntimeCommand({
         args: ["reconcile", "--stale-cycles-seconds", "1"],
