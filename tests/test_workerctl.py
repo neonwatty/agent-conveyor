@@ -11599,7 +11599,8 @@ Deferred follow-up criteria:
             "Refuse already-published version",
             "AGENT_CONVEYOR_ALLOW_NPM_PUBLISH",
             "node scripts/prepublish-guard.mjs",
-            "npm publish dist-release/agent-conveyor-*.tgz --access public",
+            "npm install -g --prefix \"$RUNNER_TEMP/agent-conveyor-prefix\" \"./dist-release/agent-conveyor-$RELEASE_VERSION.tgz\"",
+            "npm publish ./dist-release/agent-conveyor-*.tgz --access public",
         ):
             self.assertIn(expected, workflow)
 
@@ -11609,11 +11610,11 @@ Deferred follow-up criteria:
         self.assertNotIn("repository-url: https://test.pypi.org/legacy/", workflow)
         self.assertLess(
             workflow.index("Refuse already-published version"),
-            workflow.index("npm publish dist-release/agent-conveyor-*.tgz --access public"),
+            workflow.index("npm publish ./dist-release/agent-conveyor-*.tgz --access public"),
         )
         self.assertLess(
             workflow.index("node scripts/prepublish-guard.mjs"),
-            workflow.index("npm publish dist-release/agent-conveyor-*.tgz --access public"),
+            workflow.index("npm publish ./dist-release/agent-conveyor-*.tgz --access public"),
         )
 
         for expected in (
