@@ -41,24 +41,19 @@ boundary, such as `src/**`, and imported by dashboard code only where it remains
 browser/server-safe. Do not import `dashboard/server/index.ts` from CLI code.
 Avoid dragging Vite/React/browser dependencies into the CLI runtime.
 
-## T006 Runtime Boundary
+## T012 Runtime Boundary
 
-T006 introduced an opt-in TypeScript runtime for the dashboard-facing migrated
-audit, replay, and subset export surfaces. The default dashboard workerctl path
-and runtime remain Python-backed until T007 package wiring decides the npm
-install path and proves clean tarball behavior.
+T012 moves the dashboard's default workerctl path to the Node CLI command
+`conveyor`. The dashboard may still accept an explicit `--workerctl-path` such
+as `scripts/workerctl` for local compatibility, but default dashboard JSON
+subprocesses should no longer depend on the Python wrapper.
 
-Allowed opt-in TS runtime surfaces:
-
-- `audit <task> --json`
-- `replay <task> --json`
-- `export-task <task>` for the migrated audit subset only
-
-The TypeScript runtime must reject unsupported commands and must reject full
-export flags such as `--zip`, `--include-transcripts`, and
-`--include-full-transcripts` until those surfaces have their own parity proof.
-The dashboard command builder may construct guarded `--ts-runtime` argv arrays
-only for audit, replay, and export.
+The dashboard command builder must construct direct argv arrays for the same
+CLI contracts users can run from `conveyor`: discovery, telemetry snapshots,
+audit, replay, task listing/creation, bind, pair, cycle, session nudge,
+session interrupt, finish, and export. Do not reintroduce dashboard-only
+`--ts-runtime` allowlists; migrated dashboard command targets are owned by the
+default TypeScript runtime.
 
 ## Verification
 
