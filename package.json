@@ -53,12 +53,12 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/neonwatty/codex-terminal-manager.git"
+    "url": "git+https://github.com/neonwatty/agent-conveyor.git"
   },
   "bugs": {
-    "url": "https://github.com/neonwatty/codex-terminal-manager/issues"
+    "url": "https://github.com/neonwatty/agent-conveyor/issues"
   },
-  "homepage": "https://github.com/neonwatty/codex-terminal-manager#readme",
+  "homepage": "https://github.com/neonwatty/agent-conveyor#readme",
   "dependencies": {
     "@homebridge/node-pty-prebuilt-multiarch": "^0.13.1",
     "@playwright/test": "^1.60.0",
