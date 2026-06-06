@@ -43,6 +43,12 @@ the package name, bin aliases, prepublish guard, tarball contents, executable
 asset modes, clean-prefix install, `conveyor` and `workerctl` help output, and
 isolated skill installation. It does not publish.
 
+SQLite-backed commands may emit Node's `node:sqlite` `ExperimentalWarning` to
+stderr on Node versions that still mark that API experimental. Do not treat that
+warning alone as a failed release gate when the command exits 0 and the JSON
+health result reports `"ok": true`; record it in the receipt so first-run stderr
+is not confused with package failure.
+
 If you need to debug the release gate manually, use the equivalent core
 commands:
 
@@ -91,6 +97,11 @@ Use it when you want a CI-produced package artifact for human review:
 2. Download the `agent-conveyor-npm-tarball` artifact.
 3. Install it in a clean prefix and repeat the help and skill checks above.
 4. Record the workflow URL and tarball filename in the release receipt.
+
+For a verification-only dry run before bumping the package version, use the
+current `package.json` version and leave `publish=false`. A future release run
+must bump `package.json` first, then pass the same new version as the workflow
+input.
 
 The same workflow can publish through npm Trusted Publishing when all of these
 are true:

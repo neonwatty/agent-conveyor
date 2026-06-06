@@ -8,7 +8,7 @@ goal:
   slug: "agent-conveyor-v0.1.1-hardening"
   kind: existing_plan
   tranche: "Post-release hardening after the npm 0.1.0 TypeScript shipment."
-  status: active
+  status: complete
   oracle:
     signal: "Trusted Publishing readiness is proven or precisely blocked, public-package real workflow smoke passes, renamed local clone exists, generated artifacts are cleaned without losing user work, and v0.1.1 polish work is scoped with verification."
     cadence: "after each hardening task and before any PR/merge or release decision"
@@ -50,7 +50,7 @@ visual_board:
     url: "http://goalbuddy.localhost:41737/agent-conveyor-v0-1-1-hardening/"
     command: "npx goalbuddy board /Users/neonwatty/.config/superpowers/worktrees/codex-terminal-manager/agent-conveyor-ts-final-audit/docs/goals/agent-conveyor-v0.1.1-hardening"
 
-active_task: T004
+active_task: null
 
 tasks:
   - id: T001
@@ -191,7 +191,7 @@ tasks:
   - id: T004
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: medium
     objective: "Decide the v0.1.1 scope for Node SQLite warning handling and docs polish."
     inputs:
@@ -205,12 +205,66 @@ tasks:
       - "v0.1.1 recommended scope"
       - "Warnings to fix, document, or defer"
       - "Verification commands for each follow-up"
-    receipt: null
+    receipt:
+      result: done
+      full_outcome_complete: false
+      decision: "Document expected Node `node:sqlite` ExperimentalWarning behavior for v0.1.1; do not suppress warnings in runtime code."
+      summary: "The SQLite warning is real on Node v22.22.3 and appears on stderr even when `conveyor db-doctor --json` succeeds. Because suppressing `ExperimentalWarning` globally could hide unrelated runtime warnings, the bounded v0.1.1 scope is docs polish plus release-receipt expectations rather than runtime suppression."
+      evidence:
+        - "`node -e \"require('node:sqlite'); console.log('loaded')\" 2>&1` printed `loaded` followed by Node's SQLite `ExperimentalWarning`."
+        - "Installed `agent-conveyor@0.1.0` `conveyor db-doctor --json` exited 0, returned JSON with `ok: true`, and printed the same SQLite `ExperimentalWarning` on stderr."
+      recommended_scope:
+        fix_now:
+          - "Document that the warning is expected when command exit is 0 and JSON health is `ok: true`."
+          - "Record first-run stderr expectations in package-release receipts."
+        defer:
+          - "Runtime suppression of Node experimental warnings."
+          - "Database driver replacement while Node's built-in SQLite API is still otherwise passing package and workflow gates."
+      verification:
+        - "npm run check"
+        - "scripts/release-check"
+        - "Installed package `conveyor db-doctor --json` smoke with stderr captured."
+
+  - id: T005
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: low
+    objective: "Apply v0.1.1 docs polish for SQLite first-run warning and release workflow dry-run expectations."
+    allowed_files:
+      - "README.md"
+      - "docs/package-release.md"
+      - "docs/goals/agent-conveyor-v0.1.1-hardening/state.yaml"
+    verify:
+      - "git diff --check"
+      - "npm run check"
+      - "scripts/release-check"
+    stop_if:
+      - "Docs imply the warning can be ignored when command exit is nonzero or JSON health is not ok."
+      - "Docs imply `0.1.1` can be published without bumping `package.json` first."
+    receipt:
+      result: done
+      full_outcome_complete: false
+      summary: "README and release docs now explain that Node's `node:sqlite` ExperimentalWarning can appear on successful SQLite commands, and package release docs clarify that workflow dry runs before a version bump should use the current `package.json` version with `publish=false`."
+      changed_files:
+        - "README.md"
+        - "docs/package-release.md"
+        - "docs/goals/agent-conveyor-v0.1.1-hardening/state.yaml"
+      commands:
+        - cmd: "gh workflow run publish.yml --repo neonwatty/agent-conveyor --ref main -f version=0.1.0 -f publish=false && gh run watch 27073942634 --repo neonwatty/agent-conveyor --exit-status"
+          status: pass
+          summary: "Package Verification dry run passed; verify job ran tests, package smoke, release check, tarball pack/upload; publish job was skipped."
+        - cmd: "node -v && node -e \"require('node:sqlite'); console.log('loaded')\" 2>&1"
+          status: pass
+          summary: "Node v22.22.3 loaded SQLite and printed the expected ExperimentalWarning."
+        - cmd: "npm install -g --prefix <tmp>/prefix agent-conveyor@0.1.0 && PATH=<tmp>/prefix/bin:$PATH conveyor db-doctor --path <tmp>/workerctl.db --json"
+          status: pass
+          summary: "Installed package db-doctor exited 0 with `ok: true` JSON and printed the expected SQLite ExperimentalWarning on stderr."
 
   - id: T999
     type: judge
     assignee: Judge
-    status: queued
+    status: done
     reasoning_hint: high
     objective: "Final audit the post-release hardening board against the oracle."
     inputs:
@@ -225,10 +279,58 @@ tasks:
       - "complete | not_complete"
       - "full_outcome_complete: true | false"
       - "Exact blockers or next release tasks"
-    receipt: null
+    receipt:
+      result: complete
+      full_outcome_complete: true
+      summary: "Post-release hardening is complete. The npm package settings page proves Trusted Publishing is configured for `neonwatty/agent-conveyor` with `publish.yml`, `npm publish`, and `npm-production`; the GitHub workflow dry run proved verify/build/test/package/artifact behavior with `publish=false`; the public-package SQLite first-run warning was reproduced and documented; local full check and release artifact gates passed."
+      oracle_mapping:
+        trusted_publishing: "Proven in npm package settings UI: Trusted Publisher lists `neonwatty/agent-conveyor`, `publish.yml`, permission `npm publish`, and environment `npm-production`."
+        github_release_path: "Run 27073942634 passed `Package Verification` on `main` with `version=0.1.0` and `publish=false`; verify job ran tests, package smoke, release check, pack, and tarball upload; publish job was skipped."
+        public_package_smoke: "Earlier public package disposable binding smoke passed for `agent-conveyor@0.1.0`; T005 additionally reproduced installed-package `db-doctor --json` success with expected SQLite warning stderr."
+        local_cleanup: "Fresh renamed clone remains at `/Users/neonwatty/Desktop/agent-conveyor`; generated `dist/` from local verification was removed after checks."
+        v0_1_1_scope: "Recommended v0.1.1 scope is docs/release polish unless the operator wants a version bump and publish run. Do not suppress Node experimental warnings globally."
+      commands:
+        - cmd: "gh workflow run publish.yml --repo neonwatty/agent-conveyor --ref main -f version=0.1.0 -f publish=false; gh run watch 27073942634 --repo neonwatty/agent-conveyor --exit-status"
+          status: pass
+          summary: "GitHub Actions package verification dry run passed; publish job skipped."
+        - cmd: "gh run view 27073942634 --repo neonwatty/agent-conveyor --json databaseId,status,conclusion,createdAt,updatedAt,event,headBranch,headSha,url,jobs"
+          status: pass
+          summary: "Run conclusion success; verify job success; publish job skipped."
+        - cmd: "node -v && node -e \"require('node:sqlite'); console.log('loaded')\" 2>&1"
+          status: pass
+          summary: "Node v22.22.3 reproduced the SQLite ExperimentalWarning."
+        - cmd: "npm install -g --prefix <tmp>/prefix agent-conveyor@0.1.0 && PATH=<tmp>/prefix/bin:$PATH conveyor db-doctor --path <tmp>/workerctl.db --json"
+          status: pass
+          summary: "Installed package returned `ok: true` JSON and expected SQLite ExperimentalWarning stderr."
+        - cmd: "npm ci"
+          status: pass
+          summary: "Installed local dependencies; npm reported 0 vulnerabilities."
+        - cmd: "npm run check"
+          status: pass
+          summary: "Lint, knip, 159 tests, and build passed."
+        - cmd: "scripts/release-check"
+          status: pass
+          summary: "Packed npm tarball, installed in a clean prefix, verified CLI help and bundled skills without publishing."
+        - cmd: "git diff --check"
+          status: pass
+          summary: "No whitespace errors."
+        - cmd: "ruby -e 'require \"yaml\"; YAML.load_file(\"docs/goals/agent-conveyor-v0.1.1-hardening/state.yaml\")'"
+          status: pass
+          summary: "Board YAML parsed."
+        - cmd: "npx goalbuddy check docs/goals/agent-conveyor-v0.1.1-hardening/state.yaml"
+          status: fail
+          summary: "Local GoalBuddy CLI has no `check` subcommand; used YAML parse and repo gates instead."
+      disproof:
+        strongest_failure_mode: "The release workflow could look green locally while GitHub either fails the artifact path or accidentally reaches publish."
+        evidence: "Workflow run 27073942634 passed the verify job on GitHub and the publish job was explicitly skipped with `publish=false`; local `scripts/release-check` independently packed and clean-installed the tarball without publishing."
 
 checks:
   last_verification:
-    result: pending
-    task: "board creation"
-    commands: []
+    result: pass
+    task: "final audit"
+    commands:
+      - "gh run watch 27073942634 --repo neonwatty/agent-conveyor --exit-status"
+      - "npm run check"
+      - "scripts/release-check"
+      - "git diff --check"
+      - "ruby -e 'require \"yaml\"; YAML.load_file(\"docs/goals/agent-conveyor-v0.1.1-hardening/state.yaml\")'"
