@@ -8,7 +8,7 @@ goal:
   slug: "agent-conveyor-ts-migration"
   kind: existing_plan
   tranche: "Coordinate the overnight TypeScript migration from Python package/CLI to npm package/Node CLI using verified compatibility slices and green PRs."
-  status: active
+  status: done
   oracle:
     signal: "Final Judge/PM audit maps Python CLI/package behavior to TypeScript implementation, compatibility shim, or explicit follow-up; local and CI gates are green; npm tarball install smoke proves `conveyor` and `workerctl`; PRs are merged only when green; no automatic npm publish occurred."
     cadence: "after each Worker package, before each PR/merge decision, and at final audit"
@@ -71,7 +71,7 @@ visual_board:
     url: "http://goalbuddy.localhost:41737/agent-conveyor-ts-migration/"
     command: "npx goalbuddy board /Users/neonwatty/Desktop/codex-terminal-manager/docs/goals/agent-conveyor-ts-migration"
 
-active_task: T009
+active_task: null
 
 tasks:
   - id: T001
@@ -1350,7 +1350,7 @@ tasks:
   - id: T009
     type: pm
     assignee: PM
-    status: active
+    status: done
     reasoning_hint: medium
     objective: "Create PRs, monitor CI, fix failures through new bounded Worker tasks, and merge only green PRs when permitted."
     inputs:
@@ -1367,12 +1367,40 @@ tasks:
       - "CI green receipt(s)"
       - "Merge receipt(s) or explicit blocker"
       - "Follow-up Worker tasks for CI failures if any"
-    receipt: null
+    receipt:
+      result: done
+      full_outcome_complete: false
+      summary: "Migration PRs were created, CI was monitored, and green PRs were merged. The repository was renamed to `neonwatty/agent-conveyor`; package metadata was updated after the rename; and all merged PRs had green CI before merge."
+      prs:
+        - url: "https://github.com/neonwatty/agent-conveyor/pull/244"
+          summary: "Cut npm package over to TypeScript runtime."
+          merge_commit: "cfc5231ba257118fcf3387edcb29f1d89d3b4440"
+        - url: "https://github.com/neonwatty/agent-conveyor/pull/245"
+          summary: "Clean npm bin metadata."
+          merge_commit: "22b7d9ff3948e15e0b42e44bbdea53ac6825cbb8"
+        - url: "https://github.com/neonwatty/agent-conveyor/pull/246"
+          summary: "Update repository metadata for the `agent-conveyor` repo rename."
+          merge_commit: "3a96cee7d06122af9d94369c65efa57e952f7b3e"
+      commands:
+        - cmd: "gh pr checks 246 --repo neonwatty/agent-conveyor --watch"
+          status: pass
+          summary: "Both `unittest` check runs passed before PR #246 merge."
+        - cmd: "gh pr view 246 --repo neonwatty/agent-conveyor --json state,mergedAt,mergeCommit,url,statusCheckRollup"
+          status: pass
+          summary: "PR #246 state was MERGED with two successful check runs."
+        - cmd: "git fetch origin main --prune && git log --oneline -3 origin/main"
+          status: pass
+          summary: "`origin/main` advanced to `3a96cee Update repository metadata for agent-conveyor rename (#246)`."
+      observations:
+        - type: "repo-rename"
+          detail: "GitHub repo and local remotes now point at `neonwatty/agent-conveyor`."
+        - type: "no-npm-publish-during-t009"
+          detail: "T009 remained PR/CI/merge work. The later npm publish happened only after explicit operator approval and is recorded in T999."
 
   - id: T999
     type: judge
     assignee: Judge
-    status: queued
+    status: done
     reasoning_hint: high
     objective: "Final audit: prove the full Python-to-TypeScript migration outcome is complete or name the exact remaining blockers."
     inputs:
@@ -1393,7 +1421,52 @@ tasks:
       - "Python contract coverage map"
       - "Disproof attempt and evidence"
       - "Residual risk or explicit follow-up"
-    receipt: null
+    receipt:
+      result: done
+      decision: complete
+      full_outcome_complete: true
+      summary: "Final release closeout proves the TypeScript/npm migration is shipped. `agent-conveyor@0.1.0` is published on npm, `latest` points at `0.1.0`, the npm release is tagged at merged main as `npm-v0.1.0`, the GitHub Release records registry integrity and PR evidence, and a clean public install dogfood verifies CLI entrypoints, `classify`, and bundled skill installation."
+      note: "docs/goals/agent-conveyor-ts-migration/notes/T999-post-publish-release-closeout.md"
+      python_contract_coverage_map:
+        - "CLI/package default runtime: cut over to TypeScript in PR #244."
+        - "Package metadata/bin aliases: cleaned in PR #245 and repo URLs updated in PR #246."
+        - "Dashboard, state, SQLite, Dispatch, audit/replay/export, and skill asset contracts: covered by migration audit, runtime tests, release-check, and clean install dogfood."
+        - "Historical PyPI release provenance: preserved by leaving existing `v0.1.0` tag untouched."
+      commands:
+        - cmd: "npm run migration:audit:final"
+          status: pass
+          summary: "Migration audit passed with `full_outcome_complete: true` and zero packed Python runtime/bridge entrypoints."
+        - cmd: "scripts/release-check"
+          status: pass
+          summary: "Built, packed, clean-prefix installed, verified `conveyor` and `workerctl`, and verified bundled skills without publishing."
+        - cmd: "AGENT_CONVEYOR_ALLOW_NPM_PUBLISH=1 npm publish --dry-run --access public"
+          status: pass
+          summary: "Dry-run tarball contained 85 files, package size 319.0 kB, and expected `dist/cli/main.js` bin target."
+        - cmd: "AGENT_CONVEYOR_ALLOW_NPM_PUBLISH=1 npm publish --access public"
+          status: pass
+          summary: "Published `agent-conveyor@0.1.0` to the public npm registry."
+        - cmd: "npm view agent-conveyor@0.1.0 name version dist-tags time.modified dist.integrity dist.shasum --json"
+          status: pass
+          summary: "Registry returned `latest -> 0.1.0`, modified `2026-06-06T18:13:12.131Z`, integrity `sha512-8BX1Mb...`, and shasum `e7c3a2d032ddc7fa4a61938a51d8ed1441a6efc0`."
+        - cmd: "git tag -a npm-v0.1.0 origin/main -m \"agent-conveyor npm v0.1.0\" && git push origin npm-v0.1.0"
+          status: pass
+          summary: "Created an npm-specific release tag at `3a96cee7d06122af9d94369c65efa57e952f7b3e`."
+        - cmd: "gh release create npm-v0.1.0 --repo neonwatty/agent-conveyor --title \"agent-conveyor npm v0.1.0\" --notes-file <file>"
+          status: pass
+          summary: "Created https://github.com/neonwatty/agent-conveyor/releases/tag/npm-v0.1.0."
+        - cmd: "npm install agent-conveyor@0.1.0 && npx conveyor --help && npx workerctl --help"
+          status: pass
+          summary: "Clean temp-project public install and both CLI help entrypoints passed."
+        - cmd: "npm install agent-conveyor@0.1.0 && npx conveyor classify --text \"release closeout dogfood\" && CODEX_HOME=<tmp> npx conveyor install-skills --json"
+          status: pass
+          summary: "Dogfood beyond help passed; isolated bundled skill install wrote both skill directories and executable `codex-review` helper."
+        - cmd: "npm token revoke <temporary-publish-token-key>"
+          status: pass
+          summary: "Temporary granular npm publish token was revoked after verification."
+      disproof:
+        strongest_failure_mode: "Release closeout could rewrite the existing PyPI `v0.1.0` tag, publish from the wrong commit, or leave the npm package visible but unusable."
+        evidence: "`v0.1.0` was inspected and preserved at the PyPI release commit; `npm-v0.1.0` was created at merged `origin/main` `3a96cee7d06122af9d94369c65efa57e952f7b3e`; npm registry metadata reports the published package and renamed repository links; clean temp-project installation, CLI entrypoints, `classify`, and isolated skill installation all passed from the public package."
+        residual_risk: "Future releases need a fresh npm token, trusted publishing setup, or account-level interactive 2FA because the temporary publish token was revoked."
 
 checks:
   dirty_fingerprint: "pre-board dirty state included untracked docs/superpowers/plans/2026-06-02-agent-evidence-playbook.md"
