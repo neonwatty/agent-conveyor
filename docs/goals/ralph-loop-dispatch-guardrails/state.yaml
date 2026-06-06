@@ -8,7 +8,7 @@ goal:
   slug: "ralph-loop-dispatch-guardrails"
   kind: specific
   tranche: "Implement dispatcher-enforced Ralph-loop continuation policy so invalid manager continue requests never reach workers, then prove it in browser QA."
-  status: active
+  status: done
   oracle:
     signal: "Browser QA proves a max_iterations=1 Ralph loop blocks a manager-requested second iteration before worker delivery and exposes the refusal in operator surfaces."
     cadence: "after Scout, after implementation, after browser QA, and at final audit"
@@ -66,7 +66,7 @@ visual_board:
     url: "http://goalbuddy.localhost:41737/ralph-loop-dispatch-guardrails/"
     command: "npx goalbuddy board /Users/neonwatty/Desktop/codex-terminal-manager/docs/goals/ralph-loop-dispatch-guardrails"
 
-active_task: T005
+active_task: null
 
 tasks:
   - id: T001
@@ -298,7 +298,7 @@ tasks:
   - id: T005
     type: pm
     assignee: PM
-    status: active
+    status: done
     reasoning_hint: medium
     objective: "Run final verification, PR review toolkit, publish the PR, and merge once green if execution has been approved."
     inputs:
@@ -311,12 +311,53 @@ tasks:
       - "Passing full local verification."
       - "Clean PR review toolkit result or fixed findings."
       - "PR URL and merge receipt if green."
-    receipt: null
+    receipt:
+      result: done
+      full_outcome_complete: false
+      summary: "Final verification and PR closeout are complete. The Ralph-loop dispatch guardrail implementation was already merged as PR #169 with green GitHub checks, and current `main` still passes the relevant local regression gates after the TypeScript migration."
+      pr:
+        number: 169
+        url: "https://github.com/neonwatty/agent-conveyor/pull/169"
+        title: "[codex] Add Ralph loop dispatch guardrails"
+        state: "MERGED"
+        merged_at: "2026-05-30T18:27:31Z"
+        merge_commit: "5b919853f011738c1400966c76e15af589e991bb"
+        checks:
+          - workflow: "Tests"
+            name: "unittest"
+            conclusion: "SUCCESS"
+            url: "https://github.com/neonwatty/agent-conveyor/actions/runs/26691514808/job/78668623936"
+          - workflow: "Tests"
+            name: "unittest"
+            conclusion: "SUCCESS"
+            url: "https://github.com/neonwatty/agent-conveyor/actions/runs/26691506016/job/78668598477"
+      commands:
+        - cmd: "gh pr view 169 --repo neonwatty/agent-conveyor --json number,state,mergedAt,mergeCommit,url,title,baseRefName,headRefName,statusCheckRollup"
+          status: pass
+          summary: "Confirmed PR #169 is merged into `main` with two successful `unittest` check runs."
+        - cmd: "npm run migration:audit:final"
+          status: pass
+          summary: "TypeScript migration audit reported `full_outcome_complete: true`, `require_zero_python: true`, no unexpected missing commands, and no packed Python runtime files."
+        - cmd: "npm run check"
+          status: pass
+          summary: "Current `main` passed lint, knip, 159 Node/dashboard/runtime tests, and CLI/dashboard build."
+        - cmd: "python3 -m unittest tests.test_workerctl -v"
+          status: pass
+          summary: "Full Python compatibility/regression suite passed: 645 tests."
+        - cmd: "skills/codex-review/scripts/codex-review --dry-run"
+          status: pass
+          summary: "Before the board-only closeout edit, the helper reported no review target because the checkout was clean on `main`; the merged code PR had already shipped."
+        - cmd: "skills/codex-review/scripts/codex-review --mode local --full-access"
+          status: pass
+          summary: "Board-only closeout diff review completed clean: no accepted/actionable findings reported."
+      disproof:
+        strongest_failure_mode: "The board could be marked done even though the guardrail code never merged or regressed during the TypeScript migration."
+        evidence: "PR #169 is merged with green CI, current source still contains `continue_iteration`, `max_iterations_reached`, `blocked_policy`, and `target_worker_notified` surfaces, and current local gates pass both the TS audit/check and the 645-test Python compatibility suite."
 
   - id: T999
     type: judge
     assignee: Judge
-    status: queued
+    status: done
     reasoning_hint: high
     objective: "Audit whether the dispatcher-enforced Ralph-loop guardrail workflow satisfies the original request."
     inputs:
@@ -334,7 +375,43 @@ tasks:
       - "full_outcome_complete: true | false"
       - "Acceptance-criteria evidence map"
       - "Residual risks or next task"
-    receipt: null
+    receipt:
+      result: done
+      full_outcome_complete: true
+      decision: "complete"
+      summary: "The Ralph Loop Dispatch Guardrails board satisfies the original request. Dispatch mechanically blocks invalid Ralph-loop continuation commands before worker delivery, the refusal is visible in CLI/replay/audit/dashboard surfaces, browser QA proved no worker delivery for the max-iteration case, and the implementation merged in PR #169 with green CI."
+      acceptance_evidence:
+        dispatch_blocks_before_delivery:
+          status: pass
+          evidence:
+            - "T003 tests covered blocked no-tmux worker path with no routed notification and empty worker inbox."
+            - "T003 tests covered blocked tmux worker path with no tmux send side effect."
+            - "Current `python3 -m unittest tests.test_workerctl -v` passed the Dispatch regression suite, including max-iteration and missing-evidence continuation blocks."
+        browser_visible_refusal:
+          status: pass
+          evidence:
+            - "T004 Playwright QA showed `continue_iteration`, `max_iterations_reached`, iteration `1/1`, `0 notifications`, `Inbox 0`, `Pull inbox 0`, and `target_worker_notified=false` on the dashboard."
+            - "Current dashboard code still renders `blocked_policy` reason/current/max/requested iteration and worker notification booleans."
+        no_extra_dispatch_authority:
+          status: pass
+          evidence:
+            - "The implemented gate is mechanical loop policy enforcement over `current_iteration`, `max_iterations`, and required evidence; it does not decide task success, PR quality, or strategic next work."
+        merged_and_green:
+          status: pass
+          evidence:
+            - "PR #169 merged on 2026-05-30 with successful GitHub `unittest` checks."
+            - "Current local `npm run check` and `python3 -m unittest tests.test_workerctl -v` passed on `main`."
+      commands:
+        - cmd: "npm run migration:audit:final"
+          status: pass
+          summary: "Confirmed the broader TypeScript migration remains complete while this older guardrail board is closed."
+        - cmd: "npm run check"
+          status: pass
+          summary: "Confirmed lint, knip, Node/runtime tests, and build pass."
+        - cmd: "python3 -m unittest tests.test_workerctl -v"
+          status: pass
+          summary: "Confirmed Python compatibility and guardrail regression tests pass."
+      residual_risk: "None known for the original max-iteration guardrail request. Future work can extend browser QA for newer generic loop-template variants, but that is outside this board's original oracle."
 
 receipts:
   - task_id: T001
@@ -349,7 +426,17 @@ receipts:
   - task_id: T004
     path: "docs/goals/ralph-loop-dispatch-guardrails/notes/T004-browser-qa.md"
     summary: "Ran browser QA against a local dashboard fixture and proved blocked continuation plus no worker delivery."
+  - task_id: T005
+    path: "docs/goals/ralph-loop-dispatch-guardrails/state.yaml"
+    summary: "Recorded final verification, PR #169 merge/CI evidence, local TS/Python gates, and clean closeout review."
+  - task_id: T999
+    path: "docs/goals/ralph-loop-dispatch-guardrails/state.yaml"
+    summary: "Recorded final audit: complete, full_outcome_complete true, and no known residual risk for the original max-iteration guardrail oracle."
 
 completion:
-  full_outcome_complete: false
-  final_audit: null
+  full_outcome_complete: true
+  final_audit:
+    task_id: T999
+    result: complete
+    recorded_at: "2026-06-06T22:15:00Z"
+    summary: "Final audit completed after current local verification and merged PR inspection."
