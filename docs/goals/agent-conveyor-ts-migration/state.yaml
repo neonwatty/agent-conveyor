@@ -1425,47 +1425,44 @@ tasks:
       result: done
       decision: complete
       full_outcome_complete: true
-      summary: "Final release closeout proves the TypeScript/npm migration is shipped. `agent-conveyor@0.1.0` is published on npm, `latest` points at `0.1.0`, the npm release is tagged at merged main as `npm-v0.1.0`, the GitHub Release records registry integrity and PR evidence, and a clean public install dogfood verifies CLI entrypoints, `classify`, and bundled skill installation."
+      summary: "Final release closeout proves the TypeScript/npm migration is shipped. `agent-conveyor@0.1.2` is published on npm, `latest` points at `0.1.2`, the GitHub Release `v0.1.2` points at merged main, and clean public install dogfood verifies CLI entrypoints, `classify`, `export-task --help`, and bundled skill installation."
       note: "docs/goals/agent-conveyor-ts-migration/notes/T999-post-publish-release-closeout.md"
       python_contract_coverage_map:
-        - "CLI/package default runtime: cut over to TypeScript in PR #244."
-        - "Package metadata/bin aliases: cleaned in PR #245 and repo URLs updated in PR #246."
-        - "Dashboard, state, SQLite, Dispatch, audit/replay/export, and skill asset contracts: covered by migration audit, runtime tests, release-check, and clean install dogfood."
-        - "Historical PyPI release provenance: preserved by leaving existing `v0.1.0` tag untouched."
+        - "CLI/package default runtime: cut over to TypeScript and hardened through PR #254."
+        - "Package metadata/bin aliases: released as `agent-conveyor@0.1.2` in PR #255."
+        - "Dashboard, state, SQLite, Dispatch, audit/replay/export, and skill asset contracts: covered by migration audit, runtime tests, release-check, and clean public install dogfood."
+        - "Historical PyPI release provenance: preserved; the current npm release uses the `v0.1.2` GitHub release tag."
       commands:
         - cmd: "npm run migration:audit:final"
           status: pass
           summary: "Migration audit passed with `full_outcome_complete: true` and zero packed Python runtime/bridge entrypoints."
-        - cmd: "scripts/release-check"
+        - cmd: "scripts/release-check --skip-live-smoke-repeat"
           status: pass
           summary: "Built, packed, clean-prefix installed, verified `conveyor` and `workerctl`, and verified bundled skills without publishing."
-        - cmd: "AGENT_CONVEYOR_ALLOW_NPM_PUBLISH=1 npm publish --dry-run --access public"
+        - cmd: "AGENT_CONVEYOR_ALLOW_NPM_PUBLISH=1 npm publish --dry-run"
           status: pass
-          summary: "Dry-run tarball contained 85 files, package size 319.0 kB, and expected `dist/cli/main.js` bin target."
-        - cmd: "AGENT_CONVEYOR_ALLOW_NPM_PUBLISH=1 npm publish --access public"
+          summary: "Dry-run tarball contained 85 files and expected `dist/cli/main.js` bin target for `agent-conveyor@0.1.2`."
+        - cmd: "AGENT_CONVEYOR_ALLOW_NPM_PUBLISH=1 npm publish"
           status: pass
-          summary: "Published `agent-conveyor@0.1.0` to the public npm registry."
-        - cmd: "npm view agent-conveyor@0.1.0 name version dist-tags time.modified dist.integrity dist.shasum --json"
+          summary: "Published `agent-conveyor@0.1.2` to the public npm registry."
+        - cmd: "npm view agent-conveyor@0.1.2 version dist-tags --json"
           status: pass
-          summary: "Registry returned `latest -> 0.1.0`, modified `2026-06-06T18:13:12.131Z`, integrity `sha512-8BX1Mb...`, and shasum `e7c3a2d032ddc7fa4a61938a51d8ed1441a6efc0`."
-        - cmd: "git tag -a npm-v0.1.0 origin/main -m \"agent-conveyor npm v0.1.0\" && git push origin npm-v0.1.0"
+          summary: "Registry returned `version: 0.1.2` and `latest -> 0.1.2`."
+        - cmd: "gh release create v0.1.2 --repo neonwatty/agent-conveyor --target 9a4f9f85faf776403f3a05c201a2c8fdc935b007"
           status: pass
-          summary: "Created an npm-specific release tag at `3a96cee7d06122af9d94369c65efa57e952f7b3e`."
-        - cmd: "gh release create npm-v0.1.0 --repo neonwatty/agent-conveyor --title \"agent-conveyor npm v0.1.0\" --notes-file <file>"
+          summary: "Created https://github.com/neonwatty/agent-conveyor/releases/tag/v0.1.2."
+        - cmd: "npm install agent-conveyor@0.1.2 && conveyor --help && workerctl --help"
           status: pass
-          summary: "Created https://github.com/neonwatty/agent-conveyor/releases/tag/npm-v0.1.0."
-        - cmd: "npm install agent-conveyor@0.1.0 && npx conveyor --help && npx workerctl --help"
-          status: pass
-          summary: "Clean temp-project public install and both CLI help entrypoints passed."
-        - cmd: "npm install agent-conveyor@0.1.0 && npx conveyor classify --text \"release closeout dogfood\" && CODEX_HOME=<tmp> npx conveyor install-skills --json"
+          summary: "Clean temp-prefix public install and both CLI help entrypoints passed."
+        - cmd: "npm install agent-conveyor@latest && npx conveyor classify --text \"release closeout dogfood\" && npx conveyor export-task --help && CODEX_HOME=<tmp> npx conveyor install-skills --json"
           status: pass
           summary: "Dogfood beyond help passed; isolated bundled skill install wrote both skill directories and executable `codex-review` helper."
         - cmd: "npm token revoke <temporary-publish-token-key>"
           status: pass
-          summary: "Temporary granular npm publish token was revoked after verification."
+          summary: "Temporary granular npm publish token was revoked after verification; local `.npmrc` auth token line was removed."
       disproof:
-        strongest_failure_mode: "Release closeout could rewrite the existing PyPI `v0.1.0` tag, publish from the wrong commit, or leave the npm package visible but unusable."
-        evidence: "`v0.1.0` was inspected and preserved at the PyPI release commit; `npm-v0.1.0` was created at merged `origin/main` `3a96cee7d06122af9d94369c65efa57e952f7b3e`; npm registry metadata reports the published package and renamed repository links; clean temp-project installation, CLI entrypoints, `classify`, and isolated skill installation all passed from the public package."
+        strongest_failure_mode: "The registry could show `0.1.2` while the published package is unusable or missing migrated TypeScript CLI surfaces."
+        evidence: "`npm view` confirmed the public package and latest dist-tag; a clean temp-prefix install of `agent-conveyor@0.1.2` ran both shipped binaries; and a separate temp-project public latest smoke ran help, `classify`, `export-task --help`, and isolated skill installation from the registry package."
         residual_risk: "Future releases need a fresh npm token, trusted publishing setup, or account-level interactive 2FA because the temporary publish token was revoked."
 
 checks:
