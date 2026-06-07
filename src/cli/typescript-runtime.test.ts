@@ -5568,14 +5568,86 @@ test("TypeScript runtime captures legacy worker and manager transcript paths wit
   }
 });
 
-test("TypeScript runtime handles migrated audit replay and subset export commands by default", () => {
+test("TypeScript runtime handles migrated audit replay and full export commands by default", () => {
   const root = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-cli."));
   try {
     const dbPath = join(root, "workerctl.db");
     const outputDir = join(root, "export");
+    const fullOutputDir = join(root, "export-full");
     const database = openDatabaseSync(dbPath);
     try {
       seedCliTask(database);
+      insertLegacyWorker(database, {
+        identityToken: "token-export-worker",
+        name: "export-worker",
+        paneId: "%30",
+        workerId: "worker-export-id",
+      });
+      insertLegacyManager(database, {
+        managerId: "manager-export-id",
+        name: "export-manager",
+        paneId: "%31",
+        taskId: "task-cli",
+      });
+      database.prepare("update bindings set worker_id = ? where id = ?").run("worker-export-id", "binding-cli");
+      database.prepare(`
+        insert into statuses(worker_id, state, current_task, next_action, blocker, created_at)
+        values (?, 'running_tests', ?, ?, null, ?)
+      `).run(
+        "worker-export-id",
+        "cli-task",
+        "Verify export parity.",
+        "2026-05-23T10:02:45Z",
+      );
+      database.prepare(`
+        insert into transcript_captures(
+          worker_id, sha256, content, captured_at, changed_at, history_lines,
+          byte_count, line_count, capture_kind, retention_class
+        )
+        values (?, ?, ?, ?, ?, ?, ?, ?, 'changed', 'hot')
+      `).run(
+        "worker-export-id",
+        "transcript-capture-sha",
+        "raw transcript capture secret\n",
+        "2026-05-23T10:02:30Z",
+        "2026-05-23T10:02:30Z",
+        200,
+        Buffer.byteLength("raw transcript capture secret\n"),
+        1,
+      );
+      database.prepare(`
+        insert into transcript_captures(
+          worker_id, sha256, content, captured_at, changed_at, history_lines,
+          byte_count, line_count, capture_kind, retention_class
+        )
+        values (?, ?, ?, ?, ?, ?, ?, ?, 'changed', 'hot')
+      `).run(
+        "worker-export-id",
+        "transcript-capture-before-binding-sha",
+        "old task capture secret\n",
+        "2026-05-23T09:59:00Z",
+        "2026-05-23T09:59:00Z",
+        200,
+        Buffer.byteLength("old task capture secret\n"),
+        1,
+      );
+      const captureId = insertTerminalCapture(database, "task-cli", "worker", "2026-05-23T10:03:00Z", "worker export line\n");
+      database.prepare(`
+        insert into transcript_segments(
+          task_id, role, source_capture_id, previous_capture_id, captured_at,
+          content_sha256, segment_text, segment_start_line, segment_end_line,
+          byte_count, line_count, retention_class, segment_kind, created_at
+        )
+        values (?, 'worker', ?, null, ?, ?, ?, 1, 1, ?, 1, 'hot', 'segment', ?)
+      `).run(
+        "task-cli",
+        captureId,
+        "2026-05-23T10:03:00Z",
+        "worker-export-segment-sha",
+        "worker export line",
+        Buffer.byteLength("worker export line"),
+        "2026-05-23T10:03:00Z",
+      );
     } finally {
       database.close();
     }
@@ -5586,7 +5658,30 @@ test("TypeScript runtime handles migrated audit replay and subset export command
     });
     assert.equal(audit.exitCode, 0);
     assert.equal(audit.handled, true);
-    assert.equal(JSON.parse(audit.stdout ?? "{}").task.name, "cli-task");
+    const auditPayload = JSON.parse(audit.stdout ?? "{}") as {
+      task: { name: string };
+      terminal_captures: Array<Record<string, unknown>>;
+      transcript_segments: Array<Record<string, unknown>>;
+    };
+    assert.equal(auditPayload.task.name, "cli-task");
+    assert.equal(auditPayload.terminal_captures[0].content, undefined);
+    assert.equal(auditPayload.terminal_captures[0].content_redacted, true);
+    assert.equal(auditPayload.terminal_captures[0].content_byte_count, Buffer.byteLength("worker export line\n"));
+    assert.equal(auditPayload.transcript_segments[0].segment_text, undefined);
+    assert.equal(auditPayload.transcript_segments[0].segment_text_redacted, true);
+    assert.equal(auditPayload.transcript_segments[0].segment_text_byte_count, Buffer.byteLength("worker export line"));
+
+    const auditWithContent = runTypescriptRuntimeCommand({
+      args: ["audit", "cli-task", "--json", "--include-content", "--path", dbPath],
+      env: {},
+    });
+    assert.equal(auditWithContent.exitCode, 0);
+    const auditWithContentPayload = JSON.parse(auditWithContent.stdout ?? "{}") as {
+      terminal_captures: Array<Record<string, unknown>>;
+      transcript_segments: Array<Record<string, unknown>>;
+    };
+    assert.equal(auditWithContentPayload.terminal_captures[0].content, "worker export line\n");
+    assert.equal(auditWithContentPayload.transcript_segments[0].segment_text, "worker export line");
 
     const replay = runTypescriptRuntimeCommand({
       args: ["--ts-runtime", "replay", "cli-task", "--json", "--path", dbPath],
@@ -5606,6 +5701,45 @@ test("TypeScript runtime handles migrated audit replay and subset export command
       "routed_notifications",
     ]);
 
+    const fullTranscriptReplay = runTypescriptRuntimeCommand({
+      args: [
+        "--ts-runtime",
+        "replay",
+        "cli-task",
+        "--json",
+        "--format",
+        "full-transcript",
+        "--include-content",
+        "--path",
+        dbPath,
+      ],
+      env: {},
+    });
+    assert.equal(fullTranscriptReplay.exitCode, 0);
+    const fullTranscriptReplayPayload = JSON.parse(fullTranscriptReplay.stdout ?? "{}") as {
+      entries: Array<{ content?: string; source: string }>;
+    };
+    assert.equal(fullTranscriptReplayPayload.entries.some((entry) => (
+      entry.source === "transcript_segments" && entry.content === "worker export line"
+    )), true);
+
+    const fullTranscriptTextReplay = runTypescriptRuntimeCommand({
+      args: [
+        "--ts-runtime",
+        "replay",
+        "cli-task",
+        "--format",
+        "full-transcript",
+        "--include-content",
+        "--path",
+        dbPath,
+      ],
+      env: {},
+    });
+    assert.equal(fullTranscriptTextReplay.exitCode, 0);
+    assert.match(fullTranscriptTextReplay.stdout ?? "", /worker transcript segment \(1 lines\)/);
+    assert.match(fullTranscriptTextReplay.stdout ?? "", /worker export line/);
+
     const exported = runTypescriptRuntimeCommand({
       args: ["export-task", "cli-task", "--output", outputDir, "--path", dbPath],
       env: {},
@@ -5620,26 +5754,88 @@ test("TypeScript runtime handles migrated audit replay and subset export command
       "task-status.json",
       "audit.json",
       "acceptance-criteria.json",
-      "commands.json",
-      "command-attempts.json",
-      "routed-notifications.json",
+      "prompts.json",
+      "transcript-captures.json",
+      "terminal-captures.json",
+      "agent-observations.json",
+      "manager-cycles.json",
+      "manager-cycle-spans.json",
       "manager-decisions.json",
-      "correlation-chains.json",
+      "mutation-audit.json",
+      "replay.json",
+      "telemetry-events.json",
+      "telemetry-summary.json",
+      "telemetry-report.md",
     ]);
+    const exportedTaskStatus = JSON.parse(readFileSync(join(outputDir, "task-status.json"), "utf8")) as {
+      integrity: { issues: string[]; ok: boolean };
+      manager: { name: string; task_id: string } | null;
+      manager_config: unknown;
+      worker: { binding_id: string; name: string } | null;
+      worker_handoff: unknown;
+      worker_status: { current_task: string; next_action: string; state: string } | null;
+    };
+    assert.equal(exportedTaskStatus.worker?.binding_id, "binding-cli");
+    assert.equal(exportedTaskStatus.worker?.name, "export-worker");
+    assert.equal(exportedTaskStatus.worker_status?.state, "running_tests");
+    assert.equal(exportedTaskStatus.worker_status?.current_task, "cli-task");
+    assert.equal(exportedTaskStatus.worker_status?.next_action, "Verify export parity.");
+    assert.equal(exportedTaskStatus.manager?.name, "export-manager");
+    assert.equal(exportedTaskStatus.manager?.task_id, "task-cli");
+    assert.equal(exportedTaskStatus.manager_config, null);
+    assert.equal(exportedTaskStatus.worker_handoff, null);
+    assert.deepEqual(exportedTaskStatus.integrity, { issues: [], ok: true });
+    const exportedAudit = JSON.parse(readFileSync(join(outputDir, "audit.json"), "utf8")) as {
+      terminal_captures: Array<Record<string, unknown>>;
+      transcript_segments: Array<Record<string, unknown>>;
+    };
+    assert.equal(exportedAudit.terminal_captures[0].content, undefined);
+    assert.equal(exportedAudit.terminal_captures[0].content_redacted, true);
+    assert.equal(exportedAudit.transcript_segments[0].segment_text, undefined);
+    assert.equal(exportedAudit.transcript_segments[0].segment_text_redacted, true);
+    const exportedTerminalCaptures = JSON.parse(readFileSync(join(outputDir, "terminal-captures.json"), "utf8")) as Array<Record<string, unknown>>;
+    assert.equal(exportedTerminalCaptures[0].content, undefined);
+    assert.equal(exportedTerminalCaptures[0].content_redacted, true);
+    const exportedTranscriptCaptures = JSON.parse(readFileSync(join(outputDir, "transcript-captures.json"), "utf8")) as Array<Record<string, unknown>>;
+    assert.equal(exportedTranscriptCaptures.length, 1);
+    assert.equal(exportedTranscriptCaptures[0].sha256, "transcript-capture-sha");
+    assert.equal(exportedTranscriptCaptures[0].content, undefined);
+    assert.equal(exportedTranscriptCaptures[0].content_redacted, true);
+    assert.equal(exportedTranscriptCaptures[0].content_byte_count, Buffer.byteLength("raw transcript capture secret\n"));
+    const exportedTelemetrySummary = JSON.parse(readFileSync(join(outputDir, "telemetry-summary.json"), "utf8")) as Record<string, unknown>;
+    assert.equal(exportedTelemetrySummary.task_id, "task-cli");
 
-    const defaultUnsupportedZip = runTypescriptRuntimeCommand({
-      args: ["export-task", "cli-task", "--zip", "--path", dbPath],
+    const fullExport = runTypescriptRuntimeCommand({
+      args: [
+        "export-task",
+        "cli-task",
+        "--include-full-transcripts",
+        "--zip",
+        "--output",
+        fullOutputDir,
+        "--path",
+        dbPath,
+      ],
       env: {},
     });
-    assert.equal(defaultUnsupportedZip.exitCode, 2);
-    assert.match(defaultUnsupportedZip.stderr ?? "", /migrated audit subset only/);
-
-    const unsupportedZip = runTypescriptRuntimeCommand({
-      args: ["--ts-runtime", "export-task", "cli-task", "--zip", "--path", dbPath],
-      env: {},
-    });
-    assert.equal(unsupportedZip.exitCode, 2);
-    assert.match(unsupportedZip.stderr ?? "", /migrated audit subset only/);
+    assert.equal(fullExport.exitCode, 0);
+    const fullExportPayload = JSON.parse(fullExport.stdout ?? "{}") as { archive: string; export_dir: string };
+    assert.equal(fullExportPayload.export_dir, fullOutputDir);
+    assert.equal(fullExportPayload.archive, `${fullOutputDir}.zip`);
+    assert.equal(existsSync(`${fullOutputDir}.zip`), true);
+    const fullManifest = JSON.parse(readFileSync(join(fullOutputDir, "manifest.json"), "utf8")) as {
+      files: string[];
+    };
+    assert.ok(fullManifest.files.includes("transcript-segments.json"));
+    assert.ok(fullManifest.files.includes("replay-full-transcript.json"));
+    assert.ok(fullManifest.files.includes("transcripts/worker.txt"));
+    const replayFullTranscript = JSON.parse(readFileSync(join(fullOutputDir, "replay-full-transcript.json"), "utf8")) as {
+      entries: Array<{ content?: string; source: string }>;
+    };
+    assert.equal(replayFullTranscript.entries.some((entry) => (
+      entry.source === "transcript_segments" && entry.content === "worker export line"
+    )), true);
+    assert.match(readFileSync(join(fullOutputDir, "transcripts", "worker.txt"), "utf8"), /worker export line/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

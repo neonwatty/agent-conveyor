@@ -2331,6 +2331,28 @@ test("task audit exposes migrated Dispatch and loop evidence surfaces with Pytho
         dispatcherId: "dispatch-audit",
         now: "2026-05-23T10:02:02Z",
       });
+      database.prepare(`
+        insert into manager_cycles(id, task_id, started_at, completed_at, state, status_json, health_json, decision, error)
+        values (9, 'task-audit', '2026-05-23T10:03:00Z', '2026-05-23T10:03:05Z', 'succeeded', '{}', '{}', 'stop', null)
+      `).run();
+      database.prepare(`
+        insert into manager_decisions(id, task_id, manager_cycle_id, decision, reason, created_at, payload_json)
+        values (12, 'task-audit', 9, 'stop', 'Completion signal accepted.', '2026-05-23T10:03:06Z', '{"done":true}')
+      `).run();
+      database.prepare(`
+        insert into routed_notifications(
+          task_id, binding_id, correlation_id, source_session_id, target_session_id,
+          signal_type, source_event_id, source_event_timestamp, dedupe_key,
+          command_id, created_at, delivered_at, consumed_manager_cycle_id,
+          consumed_by_session_id, consumed_at, delivery_mode, state, payload_json
+        )
+        values (
+          'task-audit', 'binding-audit', 'corr-cycle', 'session-worker', 'session-manager',
+          'worker_completion', null, null, 'dedupe-cycle-audit',
+          null, '2026-05-23T10:03:10Z', '2026-05-23T10:03:11Z', 9,
+          'session-manager', '2026-05-23T10:03:12Z', 'push', 'delivered', '{}'
+        )
+      `).run();
 
       audit = taskAuditSync(database, "audit-task");
 
@@ -2354,6 +2376,19 @@ test("task audit exposes migrated Dispatch and loop evidence surfaces with Pytho
           manager_decision_cycle_id: null,
           manager_decision_id: null,
           routed_notification_ids: [audit.routed_notifications[0]?.id],
+        },
+        {
+          attempt_ids: [],
+          command_id: null,
+          command_state: "delivered",
+          command_type: "worker_completion",
+          correlation_id: "corr-cycle",
+          created_at: "2026-05-23T10:03:10Z",
+          manager_cycle_id: 9,
+          manager_decision_id: 12,
+          routed_notification_ids: [audit.routed_notifications[1]?.id],
+          signal_type: "worker_completion",
+          source_event_id: null,
         },
       ]);
       assert.deepEqual(
@@ -2576,6 +2611,36 @@ test("task export writes migrated audit subset files and manifest", () => {
         dispatcherId: "dispatch-export",
         now: "2026-05-23T10:02:02Z",
       });
+      const terminalCapture = database.prepare(`
+        insert into terminal_captures(
+          task_id, worker_id, manager_id, role, tmux_session, tmux_pane_id,
+          command_id, captured_at, history_lines, content_sha256, content,
+          content_path, byte_count, line_count, classifier_json, source
+        )
+        values (?, null, null, 'worker', 'worker-a', null, null, ?, 200, ?, ?, null, ?, 1, '{}', 'test')
+      `).run(
+        "task-export",
+        "2026-05-23T10:02:30Z",
+        "subset-export-capture-sha",
+        "subset export secret\n",
+        Buffer.byteLength("subset export secret\n"),
+      );
+      database.prepare(`
+        insert into transcript_segments(
+          task_id, role, source_capture_id, previous_capture_id, captured_at,
+          content_sha256, segment_text, segment_start_line, segment_end_line,
+          byte_count, line_count, retention_class, segment_kind, created_at
+        )
+        values (?, 'worker', ?, null, ?, ?, ?, 1, 1, ?, 1, 'hot', 'segment', ?)
+      `).run(
+        "task-export",
+        Number(terminalCapture.lastInsertRowid),
+        "2026-05-23T10:02:30Z",
+        "subset-export-segment-sha",
+        "subset export secret",
+        Buffer.byteLength("subset export secret"),
+        "2026-05-23T10:02:30Z",
+      );
       const audit = taskAuditSync(database, "export-task");
 
       const result = exportTaskAuditSubsetSync(database, {
@@ -2607,7 +2672,16 @@ test("task export writes migrated audit subset files and manifest", () => {
         ],
         task: { id: "task-export", name: "export-task" },
       });
-      assert.deepEqual(parsedFiles["audit.json"], audit);
+      const exportedAudit = parsedFiles["audit.json"] as {
+        terminal_captures: Array<Record<string, unknown>>;
+        transcript_segments: Array<Record<string, unknown>>;
+      };
+      assert.equal(exportedAudit.terminal_captures[0].content, undefined);
+      assert.equal(exportedAudit.terminal_captures[0].content_redacted, true);
+      assert.equal(exportedAudit.terminal_captures[0].content_byte_count, Buffer.byteLength("subset export secret\n"));
+      assert.equal(exportedAudit.transcript_segments[0].segment_text, undefined);
+      assert.equal(exportedAudit.transcript_segments[0].segment_text_redacted, true);
+      assert.equal(exportedAudit.transcript_segments[0].segment_text_byte_count, Buffer.byteLength("subset export secret"));
       assert.deepEqual(parsedFiles["acceptance-criteria.json"], audit.acceptance_criteria);
       assert.deepEqual(parsedFiles["commands.json"], audit.commands);
       assert.deepEqual(parsedFiles["command-attempts.json"], audit.command_attempts);

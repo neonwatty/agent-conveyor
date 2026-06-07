@@ -12,6 +12,7 @@ export type ReplayRole = "all" | "worker" | "manager" | "reviewer" | "workerctl"
 
 export interface ReplayEntry {
   actor: string;
+  content?: string | null;
   details: Record<string, unknown>;
   kind: string;
   source: string;
@@ -39,6 +40,9 @@ export function replayEntriesFromAudit(
   const role = options.role ?? "all";
   const entries: ReplayEntry[] = [];
   const includeObserves = mode !== "compact";
+  const includeCaptures = mode === "transcript";
+  const includeSegments = mode === "full-transcript";
+  const seenCaptureHashesByRole = new Map<string, Set<string>>();
 
   for (const command of audit.commands) {
     const [actor, kind, summary] = commandSummary(command);
@@ -109,6 +113,72 @@ export function replayEntriesFromAudit(
     }
   }
 
+  if (includeCaptures) {
+    for (const capture of audit.terminal_captures) {
+      const captureRole = stringValue(capture.role) ?? "workerctl";
+      if (role !== "all" && role !== captureRole) {
+        continue;
+      }
+      const contentSha = stringValue(capture.content_sha256);
+      if (contentSha !== null) {
+        const seenHashes = seenCaptureHashesByRole.get(captureRole) ?? new Set<string>();
+        if (seenHashes.has(contentSha)) {
+          continue;
+        }
+        seenHashes.add(contentSha);
+        seenCaptureHashesByRole.set(captureRole, seenHashes);
+      }
+      const excerpt = captureExcerpt(capture);
+      const summary = `${captureRole} terminal capture: ${captureSummary(capture)}${excerpt ? ` | ${excerpt}` : ""}`;
+      entries.push({
+        actor: captureRole,
+        details: {
+          capture_id: capture.id,
+          classifier: capture.classifier,
+          content_sha256: capture.content_sha256,
+          line_count: capture.line_count,
+          source: capture.source,
+        },
+        kind: "capture",
+        source: "terminal_captures",
+        source_id: sourceId(capture.id),
+        summary,
+        timestamp: stringValue(capture.captured_at) ?? audit.task.created_at,
+      });
+    }
+  }
+
+  if (includeSegments) {
+    for (const segment of audit.transcript_segments) {
+      const segmentRole = stringValue(segment.role) ?? "workerctl";
+      if (role !== "all" && role !== segmentRole) {
+        continue;
+      }
+      const text = stringValue(segment.segment_text);
+      const segmentKind = stringValue(segment.segment_kind) ?? "metadata";
+      const lineCount = segment.line_count;
+      entries.push({
+        actor: segmentRole,
+        content: text,
+        details: {
+          content_sha256: segment.content_sha256,
+          line_count: lineCount,
+          previous_capture_id: segment.previous_capture_id,
+          retention_class: segment.retention_class,
+          segment_kind: segmentKind,
+          source_capture_id: segment.source_capture_id,
+        },
+        kind: "transcript_segment",
+        source: "transcript_segments",
+        source_id: sourceId(segment.id),
+        summary: text
+          ? `${segmentRole} transcript segment (${lineCount} lines)`
+          : `${segmentRole} transcript metadata (${segmentKind})`,
+        timestamp: stringValue(segment.captured_at) ?? audit.task.created_at,
+      });
+    }
+  }
+
   return entries.sort((left, right) => {
     const timestamp = left.timestamp.localeCompare(right.timestamp);
     if (timestamp !== 0) {
@@ -166,6 +236,9 @@ export function renderReplayText(result: ReplayResult): string {
   for (const entry of result.entries) {
     const hhmmss = entry.timestamp.split("T", 2).at(1)?.replace(/Z$/, "") ?? entry.timestamp;
     lines.push(`${hhmmss}  ${entry.actor.padEnd(16, " ")} ${entry.summary}`);
+    if (typeof entry.content === "string" && entry.content.length > 0) {
+      lines.push(entry.content);
+    }
   }
   return lines.join("\n");
 }
@@ -390,6 +463,60 @@ function roleIncludesActor(role: ReplayRole, actor: string): boolean {
     return true;
   }
   return role === "manager" && (actor === "workerctl" || actor === "system");
+}
+
+function captureSummary(capture: Record<string, unknown>): string {
+  const classifier = recordValue(capture.classifier);
+  const busyWait = recordValue(classifier?.busy_wait);
+  const startup = Array.isArray(classifier?.startup) ? classifier.startup : null;
+  const parts: string[] = [];
+  const pattern = stringValue(busyWait?.pattern);
+  if (pattern) {
+    if (pattern === "rate_limit_prompt") {
+      parts.push("waiting_for_model_choice");
+    } else if (pattern !== "approval_prompt") {
+      parts.push(`busy_wait=${pattern}`);
+    }
+  }
+  if (startup && startup.length > 0) {
+    parts.push(`startup=${String(startup[0])}`);
+  }
+  if (parts.length === 0) {
+    parts.push(`${Number(capture.line_count ?? 0)} lines`);
+  }
+  return parts.join(", ");
+}
+
+function captureExcerpt(capture: Record<string, unknown>): string | null {
+  const content = stringValue(capture.content);
+  if (!content) {
+    return null;
+  }
+  const lines = content.split(/\r\n|\r|\n/).map((line) => line.trimEnd()).filter((line) => line.trim().length > 0);
+  if (lines.length === 0) {
+    return null;
+  }
+  const interesting = lines.slice(-12).map((line) => line.trim()).filter((line) => (
+    line.startsWith("•")
+    || line.startsWith("›")
+    || line.startsWith(">")
+    || line.startsWith("Ran ")
+    || line.startsWith("Edited ")
+    || line.startsWith("Added ")
+    || line.startsWith("Built ")
+    || line.startsWith("Task is complete")
+  ));
+  return shorten((interesting.length > 0 ? interesting : lines.slice(-4)).join(" / "), 320);
+}
+
+function sourceId(value: unknown): number | string | null {
+  return typeof value === "number" || typeof value === "string" ? value : null;
+}
+
+function recordValue(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
 }
 
 function shorten(value: string, maxLength = 220): string {
