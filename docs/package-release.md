@@ -119,6 +119,21 @@ Node 24 runners satisfy the Node requirement. npm generates provenance
 automatically for public packages published from public repositories through
 Trusted Publishing.
 
+Configure the npm package-side trusted publisher at
+`https://www.npmjs.com/package/agent-conveyor/settings/trusted-publishers`:
+
+- Publisher: GitHub Actions
+- Organization or user: `neonwatty`
+- Repository: `agent-conveyor`
+- Workflow filename: `publish.yml`
+- Environment name: `npm-production`
+- Allowed action: `npm publish`
+
+The workflow must keep `id-token: write` on the publishing job. npm checks the
+configured workflow filename and environment during publish, and `npm whoami`
+does not prove OIDC readiness because OIDC authentication happens only for the
+publish operation.
+
 After Trusted Publishing is verified, prefer the npm package setting
 `Require two-factor authentication and disallow tokens`; this disables
 traditional publish tokens while leaving the trusted publisher path usable.

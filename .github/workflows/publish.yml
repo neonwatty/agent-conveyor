@@ -6,7 +6,7 @@ on:
       version:
         description: "Package version to verify or publish. Must match package.json."
         required: true
-        default: "0.1.1"
+        default: "0.1.2"
       publish:
         description: "Publish the verified tarball to npm with Trusted Publishing."
         required: true
@@ -25,10 +25,10 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 24
-          cache: npm
+          package-manager-cache: false
 
       - name: Install dependencies
         run: npm ci
@@ -80,10 +80,35 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 24
           registry-url: "https://registry.npmjs.org"
+          package-manager-cache: false
+
+      - name: Verify Trusted Publishing prerequisites
+        run: |
+          node -e '
+            const [major, minor] = process.versions.node.split(".").map(Number);
+            if (major < 22 || (major === 22 && minor < 14)) {
+              console.error(`Trusted Publishing requires Node >=22.14.0, got ${process.version}`);
+              process.exit(1);
+            }
+          '
+          npm --version
+          node -e '
+            const { execSync } = require("node:child_process");
+            const version = execSync("npm --version", { encoding: "utf8" }).trim();
+            const [major, minor, patch] = version.split(".").map(Number);
+            if (
+              major < 11 ||
+              (major === 11 && minor < 5) ||
+              (major === 11 && minor === 5 && patch < 1)
+            ) {
+              console.error(`Trusted Publishing requires npm >=11.5.1, got ${version}`);
+              process.exit(1);
+            }
+          '
 
       - name: Install dependencies
         run: npm ci
