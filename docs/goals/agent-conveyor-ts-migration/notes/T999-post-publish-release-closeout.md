@@ -63,6 +63,34 @@ After post-publish registry and public smoke verification,
 `npm token revoke <temporary-publish-token-key>` returned `Removed 1 token`.
 The local npm auth token line was also removed from `~/.npmrc`.
 
+## Trusted Publishing Hardening
+
+After the 0.1.2 token-based publish, npm package settings were hardened so
+future releases do not require local publish tokens:
+
+- npm Trusted Publisher is configured for `neonwatty/agent-conveyor`.
+- Workflow filename: `publish.yml`.
+- Environment: `npm-production`.
+- Allowed action: `npm publish`.
+- Publishing access is set to
+  `Require two-factor authentication and disallow tokens (recommended)`.
+
+PR #257 hardened the repository workflow and release docs:
+https://github.com/neonwatty/agent-conveyor/pull/257
+
+The no-publish GitHub Actions dry run passed:
+https://github.com/neonwatty/agent-conveyor/actions/runs/27095940731
+
+- Run input: `version=0.1.2`, `publish=false`.
+- `Verify npm package artifact`: success.
+- `Publish npm package with Trusted Publishing`: skipped as expected.
+- Artifact: `agent-conveyor-0.1.2.tgz`.
+- Artifact SHA-256:
+  `2f68ec32e061908970a7ae1a89cdad71085199ebdd5316d6d3fe3b55e218496b`.
+- The downloaded workflow artifact installed into a clean prefix and verified
+  `conveyor --help`, `workerctl --help`, and isolated
+  `conveyor install-skills --json`.
+
 ## Burden Of Proof
 
 Strongest realistic failure mode: the registry could show `0.1.2` while the
