@@ -1,75 +1,74 @@
 # T999 Post-Publish Release Closeout
 
-Date: 2026-06-06
+Date: 2026-06-07
 
 ## Summary
 
 The Python-to-TypeScript migration is shipped through the npm package path.
 The merged repository is `neonwatty/agent-conveyor`, and the public npm package
-`agent-conveyor@0.1.0` is visible with `latest` pointing at `0.1.0`.
+`agent-conveyor@0.1.2` is visible with `latest` pointing at `0.1.2`.
 
 ## Source And Releases
 
 - Repository: https://github.com/neonwatty/agent-conveyor
-- Published npm package: https://www.npmjs.com/package/agent-conveyor/v/0.1.0
-- npm release tag: `npm-v0.1.0`
-- npm GitHub Release: https://github.com/neonwatty/agent-conveyor/releases/tag/npm-v0.1.0
-- npm source commit: `3a96cee7d06122af9d94369c65efa57e952f7b3e`
-- Existing PyPI release tag preserved: `v0.1.0` at `920acb795a4b7ea5dcb264b3ed56eb9bdd7e1fd5`
-
-The plain `v0.1.0` tag already anchored the earlier PyPI release, so the npm
-shipment uses `npm-v0.1.0` rather than rewriting historical release provenance.
+- Published npm package: https://www.npmjs.com/package/agent-conveyor/v/0.1.2
+- GitHub release tag: `v0.1.2`
+- GitHub release: https://github.com/neonwatty/agent-conveyor/releases/tag/v0.1.2
+- Release commit: `9a4f9f85faf776403f3a05c201a2c8fdc935b007`
+- Main migration PR: https://github.com/neonwatty/agent-conveyor/pull/254
+- Version bump PR: https://github.com/neonwatty/agent-conveyor/pull/255
 
 ## npm Registry Receipt
 
 - name: `agent-conveyor`
-- version: `0.1.0`
-- dist-tag: `latest -> 0.1.0`
-- modified: `2026-06-06T18:13:12.131Z`
-- integrity: `sha512-8BX1MbmaakWtLbeVBVgdbsG3vXkcDF3oe+bwq+RI3ADEljb9rmh6sBxU9wyS+oV48+ume0ZgGDLsW7G21uHqvw==`
-- shasum: `e7c3a2d032ddc7fa4a61938a51d8ed1441a6efc0`
+- version: `0.1.2`
+- dist-tag: `latest -> 0.1.2`
+- tarball: https://registry.npmjs.org/agent-conveyor/-/agent-conveyor-0.1.2.tgz
 
 ## Verification
 
-- `npm run migration:audit:final` passed with `full_outcome_complete: true`.
-- `scripts/release-check` packed and clean-prefix installed the npm tarball,
-  verified `conveyor` and `workerctl`, and verified bundled skills.
-- `AGENT_CONVEYOR_ALLOW_NPM_PUBLISH=1 npm publish --dry-run --access public`
-  showed the expected 85-file tarball before the real publish.
-- `AGENT_CONVEYOR_ALLOW_NPM_PUBLISH=1 npm publish --access public` succeeded.
-- `npm view agent-conveyor@0.1.0 name version dist-tags time.modified dist.integrity dist.shasum --json`
-  returned the public registry receipt above.
-- Clean public install smoke passed from a temp project:
-  `npm install agent-conveyor@0.1.0`, `npx conveyor --help`, and
-  `npx workerctl --help`.
-- Dogfood beyond help passed from a temp project:
-  `npx conveyor classify --text "release closeout dogfood"` and isolated
-  `CODEX_HOME=... npx conveyor install-skills --json`, with both bundled skill
-  directories present and the `codex-review` helper executable.
+- `AGENT_CONVEYOR_ALLOW_NPM_PUBLISH=1 npm publish --dry-run` passed before
+  publish and showed the expected 85-file tarball.
+- `scripts/release-check --skip-live-smoke-repeat` passed against
+  `agent-conveyor@0.1.2` before publish.
+- `AGENT_CONVEYOR_ALLOW_NPM_PUBLISH=1 npm publish` succeeded and published
+  `agent-conveyor@0.1.2`.
+- `npm view agent-conveyor@0.1.2 version dist-tags --json` returned
+  `version: 0.1.2` and `latest: 0.1.2`.
+- Clean installed `agent-conveyor@0.1.2` into a temp prefix and verified both
+  shipped binaries start: `conveyor --help` and `workerctl --help`.
+- Public latest consumer smoke passed from a temp project:
+  `npm install agent-conveyor@latest`, `npx conveyor --help`,
+  `npx workerctl --help`, `npx conveyor classify --text ...`,
+  `npx conveyor export-task --help`, and isolated
+  `CODEX_HOME=... npx conveyor install-skills --json`.
+- The isolated skill install verified both bundled skill directories and the
+  executable `codex-review` helper.
+- `npm whoami` returned `neonwatty` during the publish and verification window.
 
 ## PR And CI Receipts
 
-- PR #244 merged: https://github.com/neonwatty/agent-conveyor/pull/244
-- PR #245 merged: https://github.com/neonwatty/agent-conveyor/pull/245
-- PR #246 merged: https://github.com/neonwatty/agent-conveyor/pull/246
-- PR #246 CI had two `unittest` check runs and both completed successfully
-  before merge.
+- PR #254 merged: https://github.com/neonwatty/agent-conveyor/pull/254
+- PR #255 merged: https://github.com/neonwatty/agent-conveyor/pull/255
+- Both PRs were merged only after CI was green.
 
 ## Token Cleanup
 
-The temporary granular npm publish token used for the unscoped package publish
-was revoked after post-publish registry and dogfood verification:
+The temporary granular npm publish token was created only for the 0.1.2 release
+because npm required an OTP for the prior session token. It had read/write
+package access, no organization access, 2FA bypass enabled for publish
+automation, and a seven-day npm-enforced expiry.
+
+After post-publish registry and public smoke verification,
 `npm token revoke <temporary-publish-token-key>` returned `Removed 1 token`.
+The local npm auth token line was also removed from `~/.npmrc`.
 
 ## Burden Of Proof
 
-Strongest realistic failure mode: release closeout could rewrite the existing
-PyPI `v0.1.0` tag, publish from the wrong commit, or leave the npm package
-visible but unusable.
+Strongest realistic failure mode: the registry could show `0.1.2` while the
+published package is unusable or missing migrated TypeScript CLI surfaces.
 
-Disproof evidence: `v0.1.0` was inspected and preserved at the PyPI release
-commit; `npm-v0.1.0` was created at current merged `origin/main`
-`3a96cee7d06122af9d94369c65efa57e952f7b3e`; npm registry metadata reports the
-published package and renamed repository links; clean temp-project installation,
-CLI entrypoints, `classify`, and isolated skill installation all passed from
-the public package.
+Disproof evidence: `npm view` confirmed the public package and latest dist-tag;
+a clean temp-prefix install of `agent-conveyor@0.1.2` ran both shipped binaries;
+and a separate temp-project public latest smoke ran help, `classify`,
+`export-task --help`, and isolated skill installation from the registry package.
