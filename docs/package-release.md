@@ -4,6 +4,10 @@ Use this checklist before preparing or publishing the npm package
 `agent-conveyor`. The goal is to prove the exact `.tgz` artifact works, not
 merely that the checkout works.
 
+The old Python/PyPI package path is archived in
+[`docs/archive/python-package-history.md`](archive/python-package-history.md).
+Do not use PyPI or `pipx install agent-conveyor` for current releases.
+
 Publishing is intentionally not part of the autonomous migration flow. Do not
 run `npm publish` until the TypeScript migration final audit explicitly approves
 that action.
