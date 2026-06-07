@@ -1473,6 +1473,9 @@ tasks:
           - cmd: "npm package settings UI inspection"
             status: pass
             summary: "npm shows Trusted Publisher `neonwatty/agent-conveyor`, workflow `publish.yml`, environment `npm-production`, allowed action `npm publish`, and Publishing access `Require two-factor authentication and disallow tokens (recommended)` checked."
+          - cmd: "gh api repos/neonwatty/agent-conveyor/environments/npm-production"
+            status: pass
+            summary: "GitHub environment `npm-production` exists, requires reviewer approval by `neonwatty`, and has `can_admins_bypass: false`."
           - cmd: "gh workflow run publish.yml --repo neonwatty/agent-conveyor --ref main -f version=0.1.2 -F publish=false"
             status: pass
             summary: "Triggered no-publish Package Verification workflow run `27095940731`."
@@ -1485,6 +1488,9 @@ tasks:
           - cmd: "npm install -g --prefix <tmp> /tmp/agent-conveyor-workflow-artifact-27095940731/agent-conveyor-0.1.2.tgz && conveyor --help && workerctl --help && CODEX_HOME=<tmp> conveyor install-skills --json"
             status: pass
             summary: "The exact GitHub Actions artifact installed into a clean prefix; both CLI help commands and isolated bundled skill installation passed."
+          - cmd: "Archive historical Python/PyPI package docs"
+            status: pass
+            summary: "Added `docs/archive/python-package-history.md` and linked it from the release and migration package docs so Python packaging remains historical context, not the current release path."
 
 checks:
   dirty_fingerprint: "pre-board dirty state included untracked docs/superpowers/plans/2026-06-02-agent-evidence-playbook.md"

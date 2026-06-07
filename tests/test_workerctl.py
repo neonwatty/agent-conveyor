@@ -11664,6 +11664,8 @@ Deferred follow-up criteria:
         self.assertIn("conveyor", package_json["keywords"])
 
         for expected in (
+            "docs/archive/python-package-history.md",
+            "Do not use PyPI or `pipx install agent-conveyor` for current releases.",
             "npm ci",
             "npm run build",
             "npm pack --json",

@@ -78,6 +78,10 @@ future releases do not require local publish tokens:
 PR #257 hardened the repository workflow and release docs:
 https://github.com/neonwatty/agent-conveyor/pull/257
 
+The GitHub environment `npm-production` requires reviewer approval by
+`neonwatty` before the Trusted Publishing job can publish. Admin bypass is
+disabled for that environment.
+
 The no-publish GitHub Actions dry run passed:
 https://github.com/neonwatty/agent-conveyor/actions/runs/27095940731
 
@@ -90,6 +94,10 @@ https://github.com/neonwatty/agent-conveyor/actions/runs/27095940731
 - The downloaded workflow artifact installed into a clean prefix and verified
   `conveyor --help`, `workerctl --help`, and isolated
   `conveyor install-skills --json`.
+
+The old Python/PyPI package instructions are archived in
+`docs/archive/python-package-history.md`; current install and release docs are
+npm-primary.
 
 ## Burden Of Proof
 

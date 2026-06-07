@@ -28,6 +28,9 @@ The historical Python metadata exposed:
 - compatibility console script `workerctl`
 - bundled `workerctl/assets/skills/**/*`
 
+The historical Python/PyPI release path is archived in
+`docs/archive/python-package-history.md`.
+
 The historical wheel package smoke proved:
 
 - wheel builds
