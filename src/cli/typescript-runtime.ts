@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 
 import { taskAuditSync } from "../runtime/audit.js";
 import { classifyBusyWait, classifyStartupOutput } from "../runtime/classify.js";
-import { exportTaskAuditSubsetSync } from "../runtime/export.js";
+import { exportTaskSync } from "../runtime/export.js";
 import { ingestSessionSync } from "../runtime/ingest.js";
 import {
   acceptanceCriteriaForTaskSync,
@@ -2790,7 +2790,7 @@ function runAuditCommand(
   try {
     const audit = taskAuditSync(database, task);
     if (parsed.flags.json) {
-      return jsonResult(audit);
+      return jsonResult(parsed.flags.includeContent ? audit : redactAudit(audit));
     }
     const lines = [
       `${audit.task.name}\t${audit.task.state}\t${audit.task.goal}`,
@@ -2836,18 +2836,19 @@ function runExportTaskCommand(
   options: { cwd?: string; env?: NodeJS.ProcessEnv },
 ): TypescriptRuntimeResult {
   const task = requireTask(parsed);
-  if (parsed.flags.zip || parsed.flags.includeTranscripts || parsed.flags.includeFullTranscripts) {
-    return errorResult(
-      "TypeScript runtime export currently supports the migrated audit subset only; omit --zip and transcript flags.",
-    );
-  }
   const database = openRuntimeDatabase(parsed, options);
   try {
     const audit = taskAuditSync(database, task);
     const outputDir = parsed.flags.output
       ? resolve(parsed.flags.output)
       : join(stateRoot({ cwd: options.cwd, env: options.env }), "artifacts", "tasks", audit.task.id, "export");
-    return jsonResult(exportTaskAuditSubsetSync(database, { outputDir, task }));
+    return jsonResult(exportTaskSync(database, {
+      includeFullTranscripts: parsed.flags.includeFullTranscripts,
+      includeTranscripts: parsed.flags.includeTranscripts,
+      outputDir,
+      task,
+      zip: parsed.flags.zip,
+    }));
   } finally {
     database.close();
   }
@@ -19668,6 +19669,36 @@ function redactTranscriptSegments(result: TranscriptSegmentsResult): unknown {
       };
     }),
     task: result.task,
+  };
+}
+
+function redactAudit(audit: ReturnType<typeof taskAuditSync>): ReturnType<typeof taskAuditSync> {
+  return {
+    ...audit,
+    terminal_captures: audit.terminal_captures.map((capture) => {
+      const { content, ...rest } = capture;
+      if (typeof content !== "string") {
+        return rest;
+      }
+      return {
+        ...rest,
+        content_byte_count: Buffer.byteLength(content),
+        content_line_count: pythonSplitlinesCount(content),
+        content_redacted: true,
+      };
+    }),
+    transcript_segments: audit.transcript_segments.map((segment) => {
+      const { segment_text: segmentText, ...rest } = segment;
+      if (typeof segmentText !== "string") {
+        return rest;
+      }
+      return {
+        ...rest,
+        segment_text_byte_count: Buffer.byteLength(segmentText),
+        segment_text_line_count: pythonSplitlinesCount(segmentText),
+        segment_text_redacted: true,
+      };
+    }),
   };
 }
 

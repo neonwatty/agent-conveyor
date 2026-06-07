@@ -620,8 +620,10 @@ tmux attach -t codex-live-test
   local telemetry and related tables: active tasks/sessions, cycle and command
   success/failure counts, ingest/skipped-line totals, criteria counts,
   reconcile drift counts, export counts, and retained capture/transcript bytes.
-- `export-task <task> [--zip]` — Dump task status, audit, prompts, and
-  transcript metadata into an export bundle. Exports include
+- `export-task <task> [--zip] [--include-transcripts]
+  [--include-full-transcripts]` — Dump task status, audit, prompts, transcript
+  metadata, and optional transcript segments/full transcript replay into an
+  export bundle. Exports include
   `telemetry-events.json`, `telemetry-summary.json`, and
   `telemetry-report.md`; see `docs/local-telemetry-workflow.md`.
 

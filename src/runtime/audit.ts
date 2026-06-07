@@ -89,13 +89,23 @@ export interface TaskAuditCorrelationChain {
 
 export interface TaskAuditResult {
   acceptance_criteria: AcceptanceCriterionRecord[];
+  agent_observations: Record<string, unknown>[];
   command_attempts: CommandAttemptRecord[];
   commands: CommandRecord[];
+  continuation_reviews: Record<string, unknown>[];
   correlation_chains: TaskAuditCorrelationChain[];
+  epilogue_runs: Record<string, unknown>[];
   events: TaskAuditEvent[];
+  manager_cycle_spans: Record<string, unknown>[];
+  manager_cycles: Record<string, unknown>[];
   manager_decisions: TaskAuditManagerDecision[];
   routed_notifications: TaskAuditRoutedNotification[];
+  session_nudges: Record<string, unknown>[];
   task: TaskAuditTask;
+  task_acknowledgements: Record<string, unknown>[];
+  task_continuations: Record<string, unknown>[];
+  terminal_captures: Record<string, unknown>[];
+  transcript_segments: Record<string, unknown>[];
 }
 
 export class TaskAuditError extends Error {
@@ -111,20 +121,32 @@ export function taskAuditSync(database: DatabaseSync, task: string): TaskAuditRe
   const commandAttempts = commandAttemptRecordsForTaskSync(database, taskRow.id);
   const routedNotifications = routedNotificationRecordsForTaskSync(database, taskRow.id);
   const managerDecisions = managerDecisionRecordsForTaskSync(database, taskRow.id);
+  const managerCycles = managerCycleRecordsForTaskSync(database, taskRow.id);
   return {
     acceptance_criteria: acceptanceCriteriaForTaskSync(database, { taskId: taskRow.id }),
+    agent_observations: agentObservationRecordsForTaskSync(database, taskRow.id),
     command_attempts: commandAttempts,
     commands,
+    continuation_reviews: continuationReviewRecordsForTaskSync(database, taskRow.id),
     correlation_chains: buildCorrelationChains({
       commandAttempts,
       commands,
       managerDecisions,
+      managerCycles,
       routedNotifications,
     }),
+    epilogue_runs: epilogueRunRecordsForTaskSync(database, taskRow.id),
     events: eventRecordsForTaskSync(database, taskRow.id),
+    manager_cycle_spans: managerCycleSpanRecordsForTaskSync(database, taskRow.id),
+    manager_cycles: managerCycles,
     manager_decisions: managerDecisions,
     routed_notifications: routedNotifications,
+    session_nudges: sessionNudgeRecordsForTaskSync(database, taskRow.id),
     task: taskRow,
+    task_acknowledgements: taskAcknowledgementRecordsForTaskSync(database, taskRow.id),
+    task_continuations: taskContinuationRecordsForTaskSync(database, taskRow.id),
+    terminal_captures: terminalCaptureRecordsForTaskSync(database, taskRow.id),
+    transcript_segments: transcriptSegmentRecordsForTaskSync(database, taskRow.id),
   };
 }
 
@@ -246,13 +268,145 @@ function managerDecisionRecordsForTaskSync(database: DatabaseSync, taskId: strin
   }));
 }
 
+function terminalCaptureRecordsForTaskSync(database: DatabaseSync, taskId: string): Record<string, unknown>[] {
+  const rows = database.prepare(`
+    select id, task_id, worker_id, manager_id, role, tmux_session,
+           tmux_pane_id, command_id, captured_at, history_lines,
+           content_sha256, content, content_path, byte_count, line_count,
+           classifier_json, source
+    from terminal_captures
+    where task_id = ?
+    order by id
+  `).all(taskId) as Array<Record<string, unknown> & { classifier_json: string }>;
+  return rows.map((row) => parseJsonColumns(row, { classifier_json: "classifier" }));
+}
+
+function transcriptSegmentRecordsForTaskSync(database: DatabaseSync, taskId: string): Record<string, unknown>[] {
+  const rows = database.prepare(`
+    select id, task_id, role, source_capture_id, previous_capture_id,
+           captured_at, content_sha256, segment_text, segment_start_line,
+           segment_end_line, byte_count, line_count, retention_class,
+           segment_kind, redacted, created_at
+    from transcript_segments
+    where task_id = ?
+    order by id
+  `).all(taskId) as Array<Record<string, unknown> & { redacted: number }>;
+  return rows.map((row) => ({ ...row, redacted: Boolean(row.redacted) }));
+}
+
+function agentObservationRecordsForTaskSync(database: DatabaseSync, taskId: string): Record<string, unknown>[] {
+  const rows = database.prepare(`
+    select id, task_id, worker_id, manager_id, role, observation_type,
+           severity, source_capture_id, command_id, created_at, message,
+           payload_json
+    from agent_observations
+    where task_id = ?
+    order by id
+  `).all(taskId) as Array<Record<string, unknown> & { payload_json: string }>;
+  return rows.map((row) => parseJsonColumns(row, { payload_json: "payload" }));
+}
+
+function managerCycleRecordsForTaskSync(database: DatabaseSync, taskId: string): Record<string, unknown>[] {
+  const rows = database.prepare(`
+    select id, task_id, manager_id, started_at, completed_at, state,
+           health_observation_id, manager_capture_id, worker_capture_id,
+           status_json, health_json, decision, error
+    from manager_cycles
+    where task_id = ?
+    order by id
+  `).all(taskId) as Array<Record<string, unknown> & { health_json: string | null; status_json: string | null }>;
+  return rows.map((row) => parseJsonColumns(row, { health_json: "health", status_json: "status" }));
+}
+
+function managerCycleSpanRecordsForTaskSync(database: DatabaseSync, taskId: string): Record<string, unknown>[] {
+  const rows = database.prepare(`
+    select id, manager_cycle_id, task_id, run_id, phase, started_at,
+           completed_at, duration_ms, state, attributes_json, error_type,
+           manager_decision_id, command_id
+    from manager_cycle_spans
+    where task_id = ?
+    order by manager_cycle_id, id
+  `).all(taskId) as Array<Record<string, unknown> & { attributes_json: string }>;
+  return rows.map((row) => parseJsonColumns(row, { attributes_json: "attributes" }));
+}
+
+function taskAcknowledgementRecordsForTaskSync(database: DatabaseSync, taskId: string): Record<string, unknown>[] {
+  const rows = database.prepare(`
+    select id, task_id, binding_id, role, payload_json, revision,
+           manager_config_revision, created_at, correlation_id
+    from task_acknowledgements
+    where task_id = ?
+    order by created_at, id
+  `).all(taskId) as Array<Record<string, unknown> & { payload_json: string }>;
+  return rows.map((row) => parseJsonColumns(row, { payload_json: "payload" }));
+}
+
+function taskContinuationRecordsForTaskSync(database: DatabaseSync, taskId: string): Record<string, unknown>[] {
+  const rows = database.prepare(`
+    select id, task_id, proposer, payload_json, revision, created_at,
+           correlation_id
+    from task_continuations
+    where task_id = ?
+    order by created_at, id
+  `).all(taskId) as Array<Record<string, unknown> & { payload_json: string }>;
+  return rows.map((row) => parseJsonColumns(row, { payload_json: "payload" }));
+}
+
+function continuationReviewRecordsForTaskSync(database: DatabaseSync, taskId: string): Record<string, unknown>[] {
+  const rows = database.prepare(`
+    select id, task_id, worker_continuation_id, manager_continuation_id,
+           agreement, verdict, addendum, rationale, subagent_run_json,
+           created_at, correlation_id
+    from continuation_reviews
+    where task_id = ?
+    order by id
+  `).all(taskId) as Array<Record<string, unknown> & { subagent_run_json: string }>;
+  return rows.map((row) => parseJsonColumns(row, { subagent_run_json: "subagent_run" }));
+}
+
+function epilogueRunRecordsForTaskSync(database: DatabaseSync, taskId: string): Record<string, unknown>[] {
+  const rows = database.prepare(`
+    select id, task_id, step_name, state, started_at, finished_at,
+           result_json, error, correlation_id
+    from epilogue_runs
+    where task_id = ?
+    order by id
+  `).all(taskId) as Array<Record<string, unknown> & { result_json: string | null }>;
+  return rows.map((row) => parseJsonColumns(row, { result_json: "result" }));
+}
+
+function sessionNudgeRecordsForTaskSync(database: DatabaseSync, taskId: string): Record<string, unknown>[] {
+  const rows = database.prepare(`
+    select id, run_id, task_id, timestamp, actor, event_type, severity,
+           summary, correlation_json, attributes_json
+    from telemetry_events
+    where task_id = ?
+      and event_type in ('session_nudge_succeeded', 'session_nudge_failed')
+    order by timestamp, rowid
+  `).all(taskId) as Array<Record<string, unknown> & { attributes_json: string; correlation_json: string }>;
+  return rows.map((row) => parseJsonColumns(row, {
+    attributes_json: "attributes",
+    correlation_json: "correlation",
+  }));
+}
+
 function buildCorrelationChains(options: {
   commandAttempts: CommandAttemptRecord[];
   commands: CommandRecord[];
   managerDecisions: TaskAuditManagerDecision[];
+  managerCycles: Record<string, unknown>[];
   routedNotifications: TaskAuditRoutedNotification[];
 }): TaskAuditCorrelationChain[] {
   const decisionsById = new Map(options.managerDecisions.map((decision) => [decision.id, decision]));
+  const decisionsByCycle = groupBy(
+    options.managerDecisions.filter((decision) => decision.manager_cycle_id !== null),
+    (decision) => String(decision.manager_cycle_id),
+  );
+  const cyclesById = new Map(
+    options.managerCycles
+      .map((cycle) => [numberValue(cycle.id), cycle] as const)
+      .filter((entry): entry is readonly [number, Record<string, unknown>] => entry[0] !== null),
+  );
   const attemptsByCommand = groupBy(options.commandAttempts, (attempt) => attempt.command_id);
   const notificationsByCommand = groupBy(
     options.routedNotifications.filter((notification) => notification.command_id),
@@ -282,6 +436,9 @@ function buildCorrelationChains(options: {
     });
   }
   for (const notification of options.routedNotifications.filter((item) => !item.command_id)) {
+    const cycleId = notification.consumed_manager_cycle_id;
+    const cycle = cycleId === null ? null : cyclesById.get(cycleId) ?? null;
+    const cycleDecision = cycle === null ? null : decisionsByCycle.get(String(cycle.id))?.[0] ?? null;
     chains.push({
       attempt_ids: [],
       command_id: null,
@@ -289,8 +446,8 @@ function buildCorrelationChains(options: {
       command_type: notification.signal_type,
       correlation_id: notification.correlation_id,
       created_at: notification.created_at,
-      manager_cycle_id: notification.consumed_manager_cycle_id,
-      manager_decision_id: null,
+      manager_cycle_id: cycleId,
+      manager_decision_id: cycleDecision?.id ?? null,
       routed_notification_ids: [notification.id],
       signal_type: notification.signal_type,
       source_event_id: notification.source_event_id,
@@ -321,6 +478,10 @@ function commandManagerDecisionId(command: CommandRecord): number | null {
     }
   }
   return null;
+}
+
+function numberValue(value: unknown): number | null {
+  return typeof value === "number" && Number.isInteger(value) ? value : null;
 }
 
 function groupBy<T>(items: T[], keyFor: (item: T) => string): Map<string, T[]> {
@@ -507,6 +668,19 @@ function routedNotificationRecord(row: RoutedNotificationAuditRow): TaskAuditRou
 function parseJsonObject(json: string): Record<string, unknown> {
   const value = JSON.parse(json) as unknown;
   return isRecord(value) ? value : {};
+}
+
+function parseJsonColumns(
+  row: Record<string, unknown>,
+  columns: Record<string, string>,
+): Record<string, unknown> {
+  const parsed = { ...row };
+  for (const [column, key] of Object.entries(columns)) {
+    const value = row[column];
+    delete parsed[column];
+    parsed[key] = typeof value === "string" ? JSON.parse(value) : null;
+  }
+  return parsed;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

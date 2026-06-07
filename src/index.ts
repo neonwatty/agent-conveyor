@@ -33,7 +33,7 @@ export type {
   TaskAuditRoutedNotification,
   TaskAuditTask,
 } from "./runtime/audit.js";
-export { exportTaskAuditSubsetSync, TaskExportError } from "./runtime/export.js";
+export { exportTaskAuditSubsetSync, exportTaskSync, TaskExportError } from "./runtime/export.js";
 export type { TaskExportManifest, TaskExportResult } from "./runtime/export.js";
 export { replayEntriesFromAudit, replayResultFromAudit } from "./runtime/replay.js";
 export type { ReplayEntry, ReplayMode, ReplayResult, ReplayRole } from "./runtime/replay.js";
