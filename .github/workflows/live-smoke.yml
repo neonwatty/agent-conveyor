@@ -3,6 +3,9 @@ name: Live Smoke
 on:
   workflow_dispatch:
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   live-smoke:
     runs-on: macos-latest
