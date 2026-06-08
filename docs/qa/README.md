@@ -7,6 +7,11 @@ Use these when the operator wants Codex to run a lab scenario, open the
 dashboard in Chrome, watch the manager/worker/Dispatch loop, and record
 pass/fail evidence.
 
+Before picking a scenario, choose a manager recipe from
+[`../manager-recipes.md`](../manager-recipes.md) or explicitly label the setup
+as custom. The recipe should tell the manager which mode, permissions, evidence
+gates, cleanup behavior, and disallowed actions to confirm before starting.
+
 ## Task Files
 
 - [Simple calculator](simple-calculator.md) - smallest end-to-end smoke test.

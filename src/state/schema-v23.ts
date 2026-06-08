@@ -1,6 +1,6 @@
 // Generated from a Python-created Agent Conveyor v22 database schema.
 // Regenerate deliberately when workerctl/db.py SCHEMA_VERSION changes.
-export const SCHEMA_V22_SQL = String.raw`
+export const SCHEMA_V23_SQL = String.raw`
 CREATE TABLE acceptance_criteria(
           id integer primary key autoincrement,
           task_id text not null references tasks(id),
@@ -145,6 +145,7 @@ CREATE TABLE events(
 
 CREATE TABLE manager_configs(
           task_id text primary key references tasks(id),
+          recipe_name text,
           supervision_mode text not null check (supervision_mode in ('light','guided','strict')),
           objective text,
           guidelines_json text not null check (json_valid(guidelines_json)),

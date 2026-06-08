@@ -81,6 +81,40 @@ class CoreRunTests(unittest.TestCase):
 
 
 class RalphLoopPresetTests(unittest.TestCase):
+    def test_manager_recipes_include_first_draft_modes(self):
+        from workerctl.manager_recipes import list_manager_recipes, manager_recipe
+
+        recipes = {recipe["name"]: recipe for recipe in list_manager_recipes()}
+
+        self.assertEqual(
+            sorted(recipes),
+            [
+                "goalbuddy-conveyor",
+                "nudge-whats-next",
+                "pr-ci-merge-ralph-loop",
+                "test-coverage-loop",
+                "ux-polish-loop",
+            ],
+        )
+        self.assertEqual(recipes["goalbuddy-conveyor"]["mode"], "strict")
+        self.assertIn("repo.open_pr", recipes["goalbuddy-conveyor"]["permissions"])
+        self.assertIn("worker_session.compact", recipes["goalbuddy-conveyor"]["permissions"])
+        self.assertIn("worker_session.clear", recipes["goalbuddy-conveyor"]["permissions"])
+        self.assertIn("child receipt", recipes["goalbuddy-conveyor"]["evidence_gates"][0])
+        self.assertEqual(recipes["test-coverage-loop"]["loop_template"], "test_coverage_loop")
+        self.assertEqual(recipes["ux-polish-loop"]["loop_template"], "visual_diff_loop")
+        self.assertEqual(recipes["pr-ci-merge-ralph-loop"]["loop_template"], "pr_ci_merge_loop")
+
+        goalbuddy = manager_recipe("GoalBuddy Conveyor").summary()
+        self.assertEqual(goalbuddy["name"], "goalbuddy-conveyor")
+        self.assertIn("Selected recipe: GoalBuddy Conveyor", goalbuddy["locked_summary_template"])
+
+    def test_manager_recipe_rejects_unknown_name(self):
+        from workerctl.manager_recipes import manager_recipe
+
+        with self.assertRaisesRegex(WorkerError, "Unknown manager recipe"):
+            manager_recipe("nope")
+
     def test_ralph_loop_presets_include_operator_ready_templates(self):
         from workerctl.ralph_loop_presets import list_ralph_loop_presets, ralph_loop_preset_metadata
 
@@ -1188,6 +1222,7 @@ class DatabaseTests(unittest.TestCase):
                 conn,
                 task_id=task_id,
                 supervision_mode="strict",
+                recipe_name="goalbuddy-conveyor",
                 objective="Check against PRD.",
                 guidelines=["Nudge only when stale"],
                 acceptance_criteria=["Tests pass"],
@@ -1199,6 +1234,7 @@ class DatabaseTests(unittest.TestCase):
             conn.commit()
 
             config = worker_db.manager_config(conn, task_id=task_id)
+            self.assertEqual(config["recipe_name"], "goalbuddy-conveyor")
             self.assertEqual(config["supervision_mode"], "strict")
             self.assertEqual(config["objective"], "Check against PRD.")
             self.assertEqual(config["guidelines"], ["Nudge only when stale"])
@@ -1214,6 +1250,7 @@ class DatabaseTests(unittest.TestCase):
                 conn,
                 task_id=task_id,
                 supervision_mode="strict",
+                recipe_name="goalbuddy-conveyor",
                 objective="Check against PRD.",
                 guidelines=["Nudge only when stale"],
                 acceptance_criteria=["Tests pass"],
@@ -1228,10 +1265,20 @@ class DatabaseTests(unittest.TestCase):
                 conn,
                 task_id=task_id,
                 supervision_mode="strict",
-                objective="Check against revised PRD.",
+                recipe_name="test-coverage-loop",
+                objective="Check against PRD.",
                 guidelines=["Nudge only when stale"],
             )
             self.assertEqual(worker_db.manager_config(conn, task_id=task_id)["revision"], 2)
+
+            worker_db.upsert_manager_config(
+                conn,
+                task_id=task_id,
+                supervision_mode="strict",
+                objective="Check against revised PRD.",
+                guidelines=["Nudge only when stale"],
+            )
+            self.assertEqual(worker_db.manager_config(conn, task_id=task_id)["revision"], 3)
 
     def test_continuations_and_reviews_round_trip_through_audit(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1543,6 +1590,12 @@ class DatabaseTests(unittest.TestCase):
             conn = self.open_db(tmpdir)
             self.insert_worker(conn, "worker-1", "worker-a")
             self.insert_task(conn, "task-1", "task-a")
+            worker_db.upsert_manager_config(
+                conn,
+                task_id="task-1",
+                supervision_mode="strict",
+                recipe_name="goalbuddy-conveyor",
+            )
             worker_db.bind_task_worker(conn, task="task-a", worker="worker-a", binding_id="binding-1")
             manager_id = worker_db.create_manager(
                 conn,
@@ -1562,6 +1615,7 @@ class DatabaseTests(unittest.TestCase):
             self.assertEqual(snapshot["manager"]["state"], "ready")
             self.assertEqual(snapshot["manager"]["tmux_pane_id"], "%2")
             self.assertEqual(snapshot["manager"]["codex_args"], ["--model", "test"])
+            self.assertEqual(snapshot["manager_config"]["recipe_name"], "goalbuddy-conveyor")
 
     def test_task_audit_returns_events_and_commands(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -6313,6 +6367,30 @@ class CliTests(unittest.TestCase):
                 "adversarial_check",
             ],
         )
+
+    def test_manager_recipes_cli_lists_and_shows_goalbuddy_recipe(self):
+        list_proc = self.run_workerctl("manager-recipes", "--list", "--json")
+
+        self.assertEqual(list_proc.returncode, 0, list_proc.stderr)
+        payload = json.loads(list_proc.stdout)
+        names = [recipe["name"] for recipe in payload["recipes"]]
+        self.assertIn("goalbuddy-conveyor", names)
+        self.assertIn("test-coverage-loop", names)
+        self.assertIn("ux-polish-loop", names)
+        self.assertIn("nudge-whats-next", names)
+        self.assertIn("pr-ci-merge-ralph-loop", names)
+
+        show_proc = self.run_workerctl("manager-recipes", "--show", "goalbuddy-conveyor", "--json")
+
+        self.assertEqual(show_proc.returncode, 0, show_proc.stderr)
+        recipe = json.loads(show_proc.stdout)["recipe"]
+        self.assertEqual(recipe["display_name"], "GoalBuddy Conveyor")
+        self.assertEqual(recipe["mode"], "strict")
+        self.assertIn("repo.open_pr", recipe["permissions"])
+        self.assertIn("worker_session.compact", recipe["permissions"])
+        self.assertIn("worker_session.clear", recipe["permissions"])
+        self.assertIn("--allow-worker-compact-clear", recipe["manager_config_command"])
+        self.assertIn("Selected recipe: GoalBuddy Conveyor", recipe["locked_summary_template"])
 
     def test_loop_templates_cli_creates_visual_diff_policy_run(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -23889,6 +23967,43 @@ class PairCommandTests(unittest.TestCase):
                 conn.close()
             self.assertIsNotNone(config)
             self.assertEqual(config["supervision_mode"], "guided")
+            self.assertEqual(config["recipe_name"], "custom")
+
+    def test_pair_rejects_unknown_manager_recipe_before_spawn(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = self._setup_db(tmpdir)
+            args = argparse.Namespace(
+                task="bad-recipe-pair-task",
+                worker_name="w1",
+                manager_name="m1",
+                cwd=tmpdir,
+                task_prompt=None,
+                task_goal="Reject bad manager recipe.",
+                task_summary=None,
+                manager_mode=None,
+                manager_recipe="not-a-recipe",
+                manager_objective=None,
+                manager_guideline=[],
+                manager_acceptance=[],
+                manager_reference=[],
+                manager_permit=[],
+                manager_tool=[],
+                manager_epilogue=[],
+                manager_nudge_on_completion=None,
+                manager_allow_pr=False,
+                manager_allow_merge_green=False,
+                manager_allow_worker_compact_clear=False,
+                manager_require_acks=False,
+                manager_permissions_json=None,
+                sandbox="danger-full-access",
+                ask_for_approval="never",
+                timeout_seconds=30,
+                path=str(db_path),
+            )
+            with mock.patch.object(commands, "_spawn_codex_and_register") as spawn:
+                with self.assertRaisesRegex(WorkerError, "Unknown manager recipe"):
+                    commands.command_pair(args)
+            spawn.assert_not_called()
 
     def test_pair_passes_accept_trust_to_worker_and_manager_spawns(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -24147,6 +24262,7 @@ class PairCommandTests(unittest.TestCase):
                 task_goal="Dogfood seeded manager config",
                 task_summary=None,
                 manager_mode="strict",
+                manager_recipe="GoalBuddy Conveyor",
                 manager_objective="Drive the worker from seeded criteria.",
                 manager_guideline=["Use session-nudge first."],
                 manager_acceptance=["Worker receipt is verified."],
@@ -24171,6 +24287,7 @@ class PairCommandTests(unittest.TestCase):
             self.assertTrue(output["run_id"].startswith("run-"))
             self.assertTrue(output["manager_config_seeded"])
             self.assertTrue(output["manager_config_seeded_by_pair"])
+            self.assertEqual(output["manager_recipe"], "goalbuddy-conveyor")
             self.assertEqual(output["manager_acceptance_criteria_seeded"], 1)
             manager_spawn = next(r for r in recorded if r["role"] == "manager")
             self.assertIn("Manager config has already been recorded for this task.", manager_spawn["initial_prompt"])
@@ -24179,6 +24296,7 @@ class PairCommandTests(unittest.TestCase):
                 manager_spawn["initial_prompt"],
             )
             self.assertIn("Ask setup questions only if", manager_spawn["initial_prompt"])
+            self.assertIn("Manager recipe: goalbuddy-conveyor.", manager_spawn["initial_prompt"])
             self.assertNotIn("Ask the user the returned setup questions", manager_spawn["initial_prompt"])
 
             conn = worker_db.connect(db_path)
@@ -24193,6 +24311,7 @@ class PairCommandTests(unittest.TestCase):
             finally:
                 conn.close()
             self.assertEqual(config["supervision_mode"], "strict")
+            self.assertEqual(config["recipe_name"], "goalbuddy-conveyor")
             self.assertEqual(config["objective"], "Drive the worker from seeded criteria.")
             self.assertEqual(config["guidelines"], ["Use session-nudge first."])
             self.assertEqual(config["acceptance_criteria"], ["Worker receipt is verified."])
@@ -24207,7 +24326,9 @@ class PairCommandTests(unittest.TestCase):
             self.assertTrue(config["require_acks"])
             self.assertIn("manager-ack seeded-manager-task --from-stdin", manager_spawn["initial_prompt"])
             self.assertIsNotNone(event)
-            self.assertEqual(json.loads(event["payload_json"])["source"], "pair")
+            event_payload = json.loads(event["payload_json"])
+            self.assertEqual(event_payload["source"], "pair")
+            self.assertEqual(event_payload["recipe_name"], "goalbuddy-conveyor")
 
             from workerctl import supervise_cycle
 
@@ -24780,6 +24901,7 @@ class PairCommandTests(unittest.TestCase):
                     conn,
                     task_id=task_id,
                     supervision_mode="guided",
+                    recipe_name="nudge-whats-next",
                     permissions={"context": ["spawn_reviewer"]},
                     nudge_on_completion="auto-review",
                     tools=["pytest"],
@@ -24816,6 +24938,7 @@ class PairCommandTests(unittest.TestCase):
                 "assert ctx['constraints']['manager_rollout_access'] is False; "
                 "assert 'manager_rollout' not in ctx; "
                 "assert 'manager_cycles' not in ctx; "
+                "assert ctx['manager_config_summary']['recipe_name']=='nudge-whats-next'; "
                 "assert ctx['acceptance_criteria']; "
                 "assert ctx['worker_continuation']['payload']['next']=='run focused tests'; "
                 "print(json.dumps({'agreement':'compatible','verdict':'amend','addendum':'Prefer full verification.','rationale':'Allowed context reviewed.'}))"
@@ -25540,6 +25663,8 @@ class PairCommandTests(unittest.TestCase):
                     "workerctl",
                     "manager-config",
                     "config-task",
+                    "--recipe",
+                    "GoalBuddy Conveyor",
                     "--mode",
                     "strict",
                     "--objective",
@@ -25569,6 +25694,7 @@ class PairCommandTests(unittest.TestCase):
 
             self.assertEqual(proc.returncode, 0, proc.stderr)
             payload = json.loads(proc.stdout)
+            self.assertEqual(payload["recipe_name"], "goalbuddy-conveyor")
             self.assertEqual(payload["supervision_mode"], "strict")
             self.assertEqual(payload["objective"], "Check against docs/plan.md")
             self.assertEqual(payload["guidelines"], ["Nudge only when stale"])
@@ -25579,6 +25705,15 @@ class PairCommandTests(unittest.TestCase):
             self.assertEqual(payload["permissions"]["worker_session"], ["clear", "compact"])
             self.assertEqual(payload["epilogues"], ["draft-pr"])
             self.assertEqual(payload["tools"], ["pytest"])
+
+            conn = worker_db.connect(db_path)
+            try:
+                event = conn.execute(
+                    "select payload_json from events where type = 'manager_config_recorded' order by id desc limit 1"
+                ).fetchone()
+            finally:
+                conn.close()
+            self.assertEqual(json.loads(event["payload_json"])["recipe_name"], "goalbuddy-conveyor")
 
     def test_manager_config_permissions_json_normalizes_allow_aliases(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -25825,11 +25960,15 @@ class PairCommandTests(unittest.TestCase):
             payload = json.loads(proc.stdout)
             self.assertEqual(payload["recommended_collection"], "manager_codex_chat")
             question_ids = {question["id"] for question in payload["questions"]}
+            questions = {question["id"]: question for question in payload["questions"]}
+            self.assertIn("recipe_name", question_ids)
             self.assertIn("supervision_mode", question_ids)
             self.assertIn("permissions", question_ids)
             self.assertIn("require_acks", question_ids)
             self.assertIn("epilogues", question_ids)
             self.assertIn("tools", question_ids)
+            self.assertIn("goalbuddy-conveyor", questions["recipe_name"]["choices"])
+            self.assertIn("custom", questions["recipe_name"]["choices"])
 
             conn = worker_db.connect(db_path)
             try:
@@ -25850,6 +25989,7 @@ class PairCommandTests(unittest.TestCase):
 
             answers = "\n".join(
                 [
+                    "GoalBuddy Conveyor",
                     "strict",
                     "Check against docs/plan.md",
                     "Nudge only when stale, Keep scope fixed",
@@ -25884,6 +26024,7 @@ class PairCommandTests(unittest.TestCase):
 
             self.assertEqual(proc.returncode, 0, proc.stderr)
             payload = json.loads(proc.stdout[proc.stdout.index("{"):])
+            self.assertEqual(payload["recipe_name"], "goalbuddy-conveyor")
             self.assertEqual(payload["supervision_mode"], "strict")
             self.assertEqual(payload["objective"], "Check against docs/plan.md")
             self.assertEqual(payload["guidelines"], ["Nudge only when stale", "Keep scope fixed"])
@@ -25916,6 +26057,7 @@ class PairCommandTests(unittest.TestCase):
 
             answers = "\n".join(
                 [
+                    "",
                     "",
                     "",
                     "",

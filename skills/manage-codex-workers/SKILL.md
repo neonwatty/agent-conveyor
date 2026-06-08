@@ -363,6 +363,39 @@ should be, acceptance criteria, planning/PRD/mockup references, and permissions
 such as `--allow-pr`, `--allow-merge-green`, and
 `--allow-worker-compact-clear`.
 
+## Manager Recipes
+
+When the user's setup request is broad or freeform, resolve it to one named
+manager recipe before starting supervision, or explicitly label it `custom`.
+Use `docs/manager-recipes.md` as the canonical reference, and use
+`conveyor manager-recipes --list --json` or
+`conveyor manager-recipes --show <recipe> --json` for stable setup metadata.
+
+First-draft recipes:
+
+- `GoalBuddy Conveyor` — one parent board, one active child board, PR/CI/merge
+  or `satisfied_on_main` proof, and parent receipt update before the next child.
+- `Test Coverage Loop` — require test coverage evidence plus structured
+  adversarial proof before another worker pass.
+- `UX Polish Loop` — require browser/screenshot/visual-diff evidence plus
+  structured adversarial proof before another visual pass.
+- `Nudge / What's Next Manager` — observe, ask status and criteria questions,
+  nudge sparingly, and keep permissions minimal.
+- `PR/CI/Merge Ralph Loop` — manage PR readiness, CI, fixes, merge, handoff,
+  and compact/clear receipts.
+
+Support patterns:
+
+- `Inbox / No-Tmux App Loop` — use `manager-inbox` and `worker-inbox` for
+  Codex app sessions that cannot receive tmux pushes.
+- `Recovery / Resume / Handoff` — inspect saved config, handoff, replay, audit,
+  telemetry, and inbox state before continuing a task.
+
+Before saving config or cutting the manager loose, show a locked setup summary
+with the selected recipe, mode, permissions, tools, epilogues, cleanup policy,
+evidence gates, disallowed actions, and whether the user confirmed it. Then
+persist the settings with `conveyor manager-config`.
+
 When setting up a manager from inside a manager Codex session, prefer:
 
 ```bash

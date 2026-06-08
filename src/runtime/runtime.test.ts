@@ -1019,12 +1019,12 @@ test("manager config permissions normalize aliases and round-trip allowed checks
       });
       database.prepare(`
         insert into manager_configs(
-          task_id, supervision_mode, objective, guidelines_json,
+          task_id, recipe_name, supervision_mode, objective, guidelines_json,
           acceptance_criteria_json, reference_paths_json, permissions_json,
           tools_json, epilogues_json, nudge_on_completion, require_acks,
           revision, created_at, updated_at
         )
-        values (?, 'strict', ?, ?, ?, ?, ?, ?, ?, 'ask-operator', 1, 1, ?, ?)
+        values (?, 'goalbuddy-conveyor', 'strict', ?, ?, ?, ?, ?, ?, ?, 'ask-operator', 1, 1, ?, ?)
       `).run(
         "task-manager-config",
         "Check against PRD.",
@@ -1048,6 +1048,7 @@ test("manager config permissions normalize aliases and round-trip allowed checks
         worker_session: ["clear", "compact"],
       });
       assert.equal(config?.objective, "Check against PRD.");
+      assert.equal(config?.recipe_name, "goalbuddy-conveyor");
       assert.equal(config?.require_acks, true);
       assert.deepEqual(config?.permissions.repo, ["open_pr"]);
       assert.deepEqual(config?.permissions.worker_session, ["clear", "compact"]);

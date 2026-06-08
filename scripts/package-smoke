@@ -33,6 +33,10 @@ const files = new Map(pack.files.map((file) => [file.path, file]));
 const required = [
   "dist/cli/main.js",
   "dist/index.js",
+  "scripts/serve-landing-page.mjs",
+  "README.md",
+  "docs/landing-page.html",
+  "docs/manager-recipes.md",
   "skills/manage-codex-workers/SKILL.md",
   "skills/codex-review/SKILL.md",
   "skills/codex-review/scripts/codex-review",

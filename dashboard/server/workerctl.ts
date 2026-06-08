@@ -53,6 +53,7 @@ export interface WorkerctlCommandOptions {
   managerMode?: "light" | "guided" | "strict";
   managerName?: string;
   managerObjective?: string;
+  managerRecipe?: string;
   managerReference?: string[];
   outputDir?: string;
   telemetryActor?: "dispatch" | "manager" | "operator" | "system" | "worker" | "workerctl";
@@ -230,6 +231,9 @@ export function buildWorkerctlArgs(options: WorkerctlCommandOptions): string[] {
     }
     if (options.managerMode) {
       args.push("--manager-mode", options.managerMode);
+    }
+    if (options.managerRecipe) {
+      args.push("--manager-recipe", options.managerRecipe);
     }
     if (options.managerObjective) {
       args.push("--manager-objective", options.managerObjective);

@@ -1,6 +1,6 @@
 {
   "name": "agent-conveyor",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Local agent manager/worker conveyor control plane for Codex sessions.",
   "license": "MIT",
   "type": "module",
@@ -24,7 +24,10 @@
     "dist/",
     "scripts/capture-static-html-screenshot.mjs",
     "skills/**/*",
+    "scripts/serve-landing-page.mjs",
     "README.md",
+    "docs/landing-page.html",
+    "docs/manager-recipes.md",
     "docs/typescript-migration/*.md"
   ],
   "scripts": {
@@ -38,6 +41,7 @@
     "migration:audit:final": "node scripts/ts-migration-audit.mjs --require-zero-python",
     "check": "npm run lint && npm run knip && npm test -- --runInBand && npm run build",
     "dashboard": "tsx dashboard/server/index.ts",
+    "docs:landing": "node scripts/serve-landing-page.mjs",
     "prepack": "rm -rf dist/cli && npm run build:cli",
     "prepublishOnly": "node scripts/prepublish-guard.mjs"
   },

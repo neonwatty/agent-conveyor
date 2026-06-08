@@ -48,6 +48,7 @@ from workerctl.commands import (
     command_list,
     command_loop_evidence,
     command_loop_status,
+    command_manager_recipes,
     command_mutation_audit,
     command_nudge,
     command_loop_templates,
@@ -444,6 +445,16 @@ def build_parser() -> argparse.ArgumentParser:
     ralph_loop_presets.add_argument("--path", help="Override the Agent Conveyor database path.")
     ralph_loop_presets.set_defaults(func=command_ralph_loop_presets)
 
+    manager_recipes = subparsers.add_parser(
+        "manager-recipes",
+        help="List or show built-in manager setup recipes.",
+    )
+    manager_recipe_action = manager_recipes.add_mutually_exclusive_group(required=True)
+    manager_recipe_action.add_argument("--list", action="store_true", help="List manager recipes.")
+    manager_recipe_action.add_argument("--show", metavar="RECIPE", help="Show one manager recipe by slug or display name.")
+    manager_recipes.add_argument("--json", action="store_true", help="Print stable JSON output.")
+    manager_recipes.set_defaults(func=command_manager_recipes)
+
     doctor = subparsers.add_parser("doctor", help="Check local dependencies and worker state.")
     doctor.add_argument("--cwd", default=str(INVOCATION_CWD), help="Target worker cwd to check.")
     doctor.set_defaults(func=command_doctor)
@@ -722,6 +733,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     manager_config.add_argument("--objective", help="What the manager should do or check against.")
     manager_config.add_argument(
+        "--recipe",
+        help="Named manager recipe slug/display name, or custom for a bespoke setup.",
+    )
+    manager_config.add_argument(
         "--guideline",
         action="append",
         default=[],
@@ -992,6 +1007,11 @@ def build_parser() -> argparse.ArgumentParser:
         choices=("light", "guided", "strict"),
         default=None,
         help="Seed manager supervision mode before launching the manager.",
+    )
+    pair.add_argument(
+        "--manager-recipe",
+        default=None,
+        help="Seed the manager recipe slug/display name, or custom, before launching the manager.",
     )
     pair.add_argument(
         "--manager-objective",

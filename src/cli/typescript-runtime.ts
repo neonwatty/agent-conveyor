@@ -240,6 +240,9 @@ export function runTypescriptRuntimeCommand(options: TypescriptRuntimeOptions): 
     if (parsed.command === "ralph-loop-presets") {
       return runRalphLoopPresetsCommand(parsed, options);
     }
+    if (parsed.command === "manager-recipes") {
+      return runManagerRecipesCommand(parsed);
+    }
     if (parsed.command === "loop-triggers") {
       return runLoopTriggersCommand(parsed, options);
     }
@@ -932,6 +935,7 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
         && command !== "runs"
         && command !== "loop-templates"
         && command !== "ralph-loop-presets"
+        && command !== "manager-recipes"
         && command !== "loop-triggers"
         && command !== "manager-permission"
         && command !== "continuation"
@@ -1231,7 +1235,7 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       flags.create = value.value;
       index += 1;
     } else if (arg === "--show") {
-      if (command !== "runs" && command !== "loop-templates" && command !== "ralph-loop-presets") {
+      if (command !== "runs" && command !== "loop-templates" && command !== "ralph-loop-presets" && command !== "manager-recipes") {
         return { command, enabled, error: "Unsupported TypeScript runtime option: --show", explicit, flags, task };
       }
       const value = valueAfter(queue, index, arg);
@@ -3257,6 +3261,44 @@ function runRalphLoopPresetsCommand(
   } finally {
     database.close();
   }
+}
+
+function runManagerRecipesCommand(parsed: ParsedRuntimeArgs): TypescriptRuntimeResult {
+  const unsupportedOptions = unsupportedLoopCommandOptions(parsed, {
+    allowedFlags: new Set<RuntimeFlagKey>(["json", "list", "show"]),
+    commandName: "manager-recipes",
+  });
+  if (unsupportedOptions) {
+    return unsupportedRuntimeResult(parsed, unsupportedOptions);
+  }
+  const actionCount = [parsed.flags.list, parsed.flags.show !== null].filter(Boolean).length;
+  if (actionCount !== 1) {
+    return errorResult("Choose one of --list or --show");
+  }
+  if (parsed.flags.list) {
+    const recipes = listManagerRecipes();
+    if (parsed.flags.json) {
+      return jsonResult({ recipes });
+    }
+    return textResult(recipes.map((recipe) => {
+      const loop = recipe.loop_template ? ` loop=${recipe.loop_template}` : "";
+      return `${recipe.name}\tmode=${recipe.mode}${loop}\t${recipe.description}`;
+    }));
+  }
+  const recipe = managerRecipeSummary(parsed.flags.show ?? "");
+  if (parsed.flags.json) {
+    return jsonResult({ recipe });
+  }
+  const lines = [
+    String(recipe.locked_summary_template),
+    "",
+    "manager config command:",
+    `  ${(recipe.manager_config_command as string[]).map(shellQuote).join(" ")}`,
+  ];
+  if (recipe.loop_template) {
+    lines.push("", `loop template: ${recipe.loop_template}`);
+  }
+  return textResult(lines);
 }
 
 function runLoopTriggersCommand(
@@ -15134,6 +15176,7 @@ function isDefaultRuntimeCommand(command: string | null): boolean {
     || command === "loop-templates"
     || command === "loop-triggers"
     || command === "ralph-loop-presets"
+    || command === "manager-recipes"
     || command === "qa-plan"
     || command === "qa-run"
     || command === "start"
@@ -17160,6 +17203,258 @@ function ralphLoopPresetMetadata(
 ): Record<string, unknown> {
   ralphLoopPreset(name);
   return loopTemplateMetadata(name, options);
+}
+
+interface ManagerRecipeDefinition {
+  acceptance: string[];
+  cleanup: string;
+  description: string;
+  disallowedActions: string[];
+  displayName: string;
+  epilogues: string[];
+  evidenceGates: string[];
+  guidelines: string[];
+  loopTemplate: string | null;
+  mode: string;
+  name: string;
+  objective: string;
+  permissions: string[];
+  supportPatterns: string[];
+  tools: string[];
+}
+
+const MANAGER_RECIPES: Record<string, ManagerRecipeDefinition> = {
+  "goalbuddy-conveyor": {
+    acceptance: [
+      "Every child board has PR/CI/merge, satisfied_on_main, or blocker proof.",
+      "Parent state records final status for every child.",
+    ],
+    cleanup: "compact between child boards after saved handoff",
+    description: "Run broad work as one parent GoalBuddy board with one active child board at a time.",
+    disallowedActions: [
+      "Do not run two child boards at once.",
+      "Do not merge without green CI.",
+      "Do not compact or clear before a saved handoff.",
+    ],
+    displayName: "GoalBuddy Conveyor",
+    epilogues: ["draft-pr", "record-handoff"],
+    evidenceGates: [
+      "child receipt with focused verification",
+      "adversarial review",
+      "PR/CI/merge or satisfied_on_main proof",
+      "parent receipt update before the next child",
+    ],
+    guidelines: [
+      "Keep exactly one child board active at a time.",
+      "Before activating the next child, update the parent receipt.",
+    ],
+    loopTemplate: null,
+    mode: "strict",
+    name: "goalbuddy-conveyor",
+    objective: "Run a one-child-at-a-time GoalBuddy conveyor until every child is merged, proven satisfied, or blocked with evidence.",
+    permissions: ["repo.open_pr", "repo.merge_green_pr", "worker_session.compact", "worker_session.clear"],
+    supportPatterns: ["Inbox / No-Tmux App Loop", "Recovery / Resume / Handoff"],
+    tools: ["verification.run_tests", "context.fetch_prs"],
+  },
+  "nudge-whats-next": {
+    acceptance: [
+      "Accepted criteria are satisfied or explicitly deferred.",
+      "The final summary names commands run, changed files, and residual risk.",
+    ],
+    cleanup: "off by default",
+    description: "Observe, ask useful status questions, negotiate criteria, and keep permissions minimal.",
+    disallowedActions: ["Do not grant repo or worker-session mutation permissions by default."],
+    displayName: "Nudge / What's Next Manager",
+    epilogues: [],
+    evidenceGates: ["manager decision", "worker receipt", "accepted criteria closure"],
+    guidelines: [
+      "Prefer wait over nudge while the worker is active.",
+      "Ask for must-have current-task criteria versus follow-ups when scope changes.",
+    ],
+    loopTemplate: null,
+    mode: "guided",
+    name: "nudge-whats-next",
+    objective: "Observe the worker, ask useful status and next-step questions, and finish only with evidence.",
+    permissions: [],
+    supportPatterns: ["Inbox / No-Tmux App Loop", "Recovery / Resume / Handoff"],
+    tools: [],
+  },
+  "pr-ci-merge-ralph-loop": {
+    acceptance: [
+      "PR URL, green CI, merge receipt, and adversarial proof are recorded.",
+      "Worker handoff exists before compact or clear.",
+    ],
+    cleanup: "clear after saved handoff",
+    description: "Drive delivery through PR readiness, CI, merge, handoff, and worker clear receipts.",
+    disallowedActions: [
+      "Do not open PRs before repo.open_pr is permitted.",
+      "Do not merge before repo.merge_green_pr is permitted and CI is green.",
+      "Do not clear before a saved handoff.",
+    ],
+    displayName: "PR/CI/Merge Ralph Loop",
+    epilogues: ["draft-pr", "record-handoff"],
+    evidenceGates: ["pr_url", "ci_green", "merge", "adversarial_check"],
+    guidelines: ["Merge only after green CI and recorded manager decision evidence."],
+    loopTemplate: "pr_ci_merge_loop",
+    mode: "strict",
+    name: "pr-ci-merge-ralph-loop",
+    objective: "Drive the worker through PR readiness, CI, merge, handoff, and clear receipts.",
+    permissions: ["repo.open_pr", "repo.merge_green_pr", "worker_session.compact", "worker_session.clear"],
+    supportPatterns: ["Inbox / No-Tmux App Loop", "Recovery / Resume / Handoff"],
+    tools: ["verification.run_tests", "context.fetch_prs"],
+  },
+  "test-coverage-loop": {
+    acceptance: [
+      "Coverage or targeted test evidence is recorded before another worker pass.",
+      "Structured adversarial proof names the strongest realistic failure mode.",
+    ],
+    cleanup: "clear by default",
+    description: "Improve or prove test confidence with coverage evidence before another pass.",
+    disallowedActions: ["Do not continue after only generic tests-passed text."],
+    displayName: "Test Coverage Loop",
+    epilogues: [],
+    evidenceGates: ["test_coverage", "adversarial_check"],
+    guidelines: ["Record coverage evidence before asking for another worker pass."],
+    loopTemplate: "test_coverage_loop",
+    mode: "strict",
+    name: "test-coverage-loop",
+    objective: "Improve or prove test coverage for the requested behavior.",
+    permissions: ["worker_session.compact", "worker_session.clear"],
+    supportPatterns: ["Inbox / No-Tmux App Loop", "Recovery / Resume / Handoff"],
+    tools: ["verification.run_tests"],
+  },
+  "ux-polish-loop": {
+    acceptance: [
+      "Reference artifact, candidate screenshot, visual diff report, and below-threshold evidence are recorded.",
+      "Structured adversarial proof is recorded before another visual pass.",
+    ],
+    cleanup: "compact by default",
+    description: "Iterate on visible UI quality using browser, screenshot, and visual-diff evidence.",
+    disallowedActions: ["Do not approve a visual pass without screenshot or browser evidence."],
+    displayName: "UX Polish Loop",
+    epilogues: [],
+    evidenceGates: [
+      "reference_artifact",
+      "candidate_screenshot",
+      "visual_diff_report",
+      "diff_below_threshold",
+      "adversarial_check",
+    ],
+    guidelines: ["Compare visible output against references before requesting another pass."],
+    loopTemplate: "visual_diff_loop",
+    mode: "guided",
+    name: "ux-polish-loop",
+    objective: "Iterate on visible UI quality using browser and screenshot evidence.",
+    permissions: ["worker_session.compact", "worker_session.clear"],
+    supportPatterns: ["Inbox / No-Tmux App Loop", "Recovery / Resume / Handoff"],
+    tools: ["verification.run_playwright"],
+  },
+};
+
+const MANAGER_RECIPE_ALIASES: Record<string, string> = {
+  "goalbuddy conveyor": "goalbuddy-conveyor",
+  goalbuddy: "goalbuddy-conveyor",
+  "nudge / what's next manager": "nudge-whats-next",
+  "nudge whats next": "nudge-whats-next",
+  "pr ci merge ralph loop": "pr-ci-merge-ralph-loop",
+  "pr/ci/merge ralph loop": "pr-ci-merge-ralph-loop",
+  "ralph loop": "pr-ci-merge-ralph-loop",
+  "test coverage": "test-coverage-loop",
+  "test coverage loop": "test-coverage-loop",
+  "ux polish": "ux-polish-loop",
+  "ux polish loop": "ux-polish-loop",
+  "visual polish": "ux-polish-loop",
+  "what's next": "nudge-whats-next",
+  "whats next": "nudge-whats-next",
+};
+
+function listManagerRecipes(): Array<Record<string, unknown>> {
+  return Object.keys(MANAGER_RECIPES).sort().map((name) => managerRecipeSummary(name));
+}
+
+function managerRecipeDefinition(name: string): ManagerRecipeDefinition {
+  const key = normalizeManagerRecipeName(name);
+  const recipe = MANAGER_RECIPES[key];
+  if (!recipe) {
+    throw new Error(`Unknown manager recipe: ${name}; expected one of: ${Object.keys(MANAGER_RECIPES).sort().join(", ")}`);
+  }
+  return recipe;
+}
+
+function normalizeManagerRecipeName(name: string): string {
+  const normalized = name.trim().toLowerCase().split(/\s+/).join(" ");
+  return MANAGER_RECIPE_ALIASES[normalized] ?? normalized.replace(/_/g, "-").replace(/ /g, "-");
+}
+
+function managerRecipeSummary(name: string): Record<string, unknown> {
+  const recipe = managerRecipeDefinition(name);
+  return {
+    acceptance: [...recipe.acceptance],
+    cleanup: recipe.cleanup,
+    description: recipe.description,
+    disallowed_actions: [...recipe.disallowedActions],
+    display_name: recipe.displayName,
+    epilogues: [...recipe.epilogues],
+    evidence_gates: [...recipe.evidenceGates],
+    guidelines: [...recipe.guidelines],
+    locked_summary_template: lockedManagerRecipeSummary(recipe),
+    loop_template: recipe.loopTemplate,
+    manager_config_command: managerRecipeConfigCommand(recipe),
+    mode: recipe.mode,
+    name: recipe.name,
+    objective: recipe.objective,
+    permissions: [...recipe.permissions],
+    support_patterns: [...recipe.supportPatterns],
+    tools: [...recipe.tools],
+  };
+}
+
+function managerRecipeConfigCommand(recipe: ManagerRecipeDefinition, taskPlaceholder = "<task>"): string[] {
+  const command = ["conveyor", "manager-config", taskPlaceholder, "--mode", recipe.mode, "--objective", recipe.objective];
+  for (const guideline of recipe.guidelines) {
+    command.push("--guideline", guideline);
+  }
+  for (const acceptance of recipe.acceptance) {
+    command.push("--acceptance", acceptance);
+  }
+  const permissions = new Set(recipe.permissions);
+  if (permissions.has("worker_session.compact") && permissions.has("worker_session.clear")) {
+    command.push("--allow-worker-compact-clear");
+    permissions.delete("worker_session.compact");
+    permissions.delete("worker_session.clear");
+  }
+  if (permissions.has("repo.open_pr")) {
+    command.push("--allow-pr");
+    permissions.delete("repo.open_pr");
+  }
+  if (permissions.has("repo.merge_green_pr")) {
+    command.push("--allow-merge-green");
+    permissions.delete("repo.merge_green_pr");
+  }
+  for (const permission of [...permissions].sort()) {
+    command.push("--permit", permission);
+  }
+  for (const tool of recipe.tools) {
+    command.push("--tool", tool);
+  }
+  for (const epilogue of recipe.epilogues) {
+    command.push("--epilogue", epilogue);
+  }
+  return command;
+}
+
+function lockedManagerRecipeSummary(recipe: ManagerRecipeDefinition): string {
+  return [
+    `Selected recipe: ${recipe.displayName}`,
+    `Mode: ${recipe.mode}`,
+    `Permissions: ${recipe.permissions.length > 0 ? recipe.permissions.join(", ") : "none"}`,
+    `Tools: ${recipe.tools.length > 0 ? recipe.tools.join(", ") : "none"}`,
+    `Epilogues: ${recipe.epilogues.length > 0 ? recipe.epilogues.join(", ") : "none"}`,
+    `Cleanup: ${recipe.cleanup}`,
+    `Evidence gates: ${recipe.evidenceGates.length > 0 ? recipe.evidenceGates.join(", ") : "manager-reviewed evidence"}`,
+    `Not allowed: ${recipe.disallowedActions.length > 0 ? recipe.disallowedActions.join("; ") : "unconfirmed custom actions"}`,
+    "User confirmed: <yes|no>",
+  ].join("\n");
 }
 
 interface LoopTriggerDefinition {

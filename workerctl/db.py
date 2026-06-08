@@ -12,7 +12,7 @@ from workerctl.core import now_iso
 from workerctl.state import state_root
 
 
-SCHEMA_VERSION = 22
+SCHEMA_VERSION = 23
 REQUIRED_TABLES = {
     "acceptance_criteria",
     "agent_observations",
@@ -458,6 +458,7 @@ def migrate(conn: sqlite3.Connection, from_version: int) -> None:
 
         create table if not exists manager_configs(
           task_id text primary key references tasks(id),
+          recipe_name text,
           supervision_mode text not null check (supervision_mode in ('light','guided','strict')),
           objective text,
           guidelines_json text not null check (json_valid(guidelines_json)),
@@ -775,6 +776,7 @@ def migrate(conn: sqlite3.Connection, from_version: int) -> None:
     migrate_to_v20_routed_notification_claims(conn)
     migrate_to_v21_session_inbox(conn)
     migrate_to_v22_blocked_command_state(conn)
+    migrate_to_v23_manager_config_recipe(conn)
     sync_worker_ids_to_config_files(conn)
     conn.execute(
         "insert or ignore into schema_migrations(version, applied_at) values (?, ?)",
@@ -1381,6 +1383,11 @@ def migrate_to_v22_blocked_command_state(conn: sqlite3.Connection) -> None:
         foreign_keys = conn.execute("PRAGMA foreign_keys").fetchone()[0]
         if foreign_keys != 1:
             raise RuntimeError("SQLite foreign key enforcement is not enabled after migration v22")
+
+
+def migrate_to_v23_manager_config_recipe(conn: sqlite3.Connection) -> None:
+    """Remember which setup recipe produced a manager config."""
+    _add_column_if_missing(conn, "manager_configs", "recipe_name", "text")
 
 
 def sync_worker_ids_to_config_files(conn: sqlite3.Connection) -> None:
@@ -4658,6 +4665,7 @@ def upsert_manager_config(
     *,
     task_id: str,
     supervision_mode: str,
+    recipe_name: str | None = None,
     objective: str | None = None,
     guidelines: list[str] | None = None,
     acceptance_criteria: list[str] | None = None,
@@ -4675,12 +4683,13 @@ def upsert_manager_config(
     conn.execute(
         """
         insert into manager_configs(
-          task_id, supervision_mode, objective, guidelines_json,
+          task_id, recipe_name, supervision_mode, objective, guidelines_json,
           acceptance_criteria_json, reference_paths_json, permissions_json, tools_json, epilogues_json, nudge_on_completion, require_acks,
           revision, created_at, updated_at
         )
-        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
         on conflict(task_id) do update set
+          recipe_name = excluded.recipe_name,
           supervision_mode = excluded.supervision_mode,
           objective = excluded.objective,
           guidelines_json = excluded.guidelines_json,
@@ -4692,6 +4701,7 @@ def upsert_manager_config(
           nudge_on_completion = excluded.nudge_on_completion,
           require_acks = excluded.require_acks,
           revision = case when
+            manager_configs.recipe_name is not excluded.recipe_name or
             manager_configs.supervision_mode is not excluded.supervision_mode or
             manager_configs.objective is not excluded.objective or
             manager_configs.guidelines_json is not excluded.guidelines_json or
@@ -4707,6 +4717,7 @@ def upsert_manager_config(
         """,
         (
             task_id,
+            recipe_name,
             supervision_mode,
             objective,
             json.dumps(guidelines or [], sort_keys=True),
@@ -4726,7 +4737,7 @@ def upsert_manager_config(
 def manager_config(conn: sqlite3.Connection, *, task_id: str) -> dict[str, Any] | None:
     row = conn.execute(
         """
-        select task_id, supervision_mode, objective, guidelines_json,
+        select task_id, recipe_name, supervision_mode, objective, guidelines_json,
                acceptance_criteria_json, reference_paths_json, permissions_json, tools_json, epilogues_json, nudge_on_completion, require_acks,
                revision, created_at, updated_at
         from manager_configs
@@ -4744,6 +4755,7 @@ def manager_config(conn: sqlite3.Connection, *, task_id: str) -> dict[str, Any] 
         "nudge_on_completion": row["nudge_on_completion"],
         "objective": row["objective"],
         "permissions": normalize_manager_permissions_json(json.loads(row["permissions_json"])),
+        "recipe_name": row["recipe_name"],
         "reference_paths": json.loads(row["reference_paths_json"]),
         "require_acks": bool(row["require_acks"]),
         "revision": row["revision"],
