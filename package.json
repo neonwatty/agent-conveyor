@@ -24,6 +24,7 @@
     "dist/",
     "scripts/capture-static-html-screenshot.mjs",
     "skills/**/*",
+    "scripts/serve-landing-page.mjs",
     "README.md",
     "docs/landing-page.html",
     "docs/manager-recipes.md",
@@ -40,6 +41,7 @@
     "migration:audit:final": "node scripts/ts-migration-audit.mjs --require-zero-python",
     "check": "npm run lint && npm run knip && npm test -- --runInBand && npm run build",
     "dashboard": "tsx dashboard/server/index.ts",
+    "docs:landing": "node scripts/serve-landing-page.mjs",
     "prepack": "rm -rf dist/cli && npm run build:cli",
     "prepublishOnly": "node scripts/prepublish-guard.mjs"
   },

@@ -142,7 +142,8 @@ or `conveyor manager-recipes --show goalbuddy-conveyor --json` for a
 machine-readable setup preview.
 For a package-facing overview of these modes, open
 [`docs/landing-page.html`](docs/landing-page.html) locally or host it as a
-static landing page.
+static landing page. From the repo, `npm run docs:landing` serves it at
+`http://127.0.0.1:8765/`.
 
 After install, the intended Codex app entry point is natural language. Open a
 new Codex app session in the target repo and say:
