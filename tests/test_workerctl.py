@@ -23960,6 +23960,43 @@ class PairCommandTests(unittest.TestCase):
                 conn.close()
             self.assertIsNotNone(config)
             self.assertEqual(config["supervision_mode"], "guided")
+            self.assertEqual(config["recipe_name"], "custom")
+
+    def test_pair_rejects_unknown_manager_recipe_before_spawn(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = self._setup_db(tmpdir)
+            args = argparse.Namespace(
+                task="bad-recipe-pair-task",
+                worker_name="w1",
+                manager_name="m1",
+                cwd=tmpdir,
+                task_prompt=None,
+                task_goal="Reject bad manager recipe.",
+                task_summary=None,
+                manager_mode=None,
+                manager_recipe="not-a-recipe",
+                manager_objective=None,
+                manager_guideline=[],
+                manager_acceptance=[],
+                manager_reference=[],
+                manager_permit=[],
+                manager_tool=[],
+                manager_epilogue=[],
+                manager_nudge_on_completion=None,
+                manager_allow_pr=False,
+                manager_allow_merge_green=False,
+                manager_allow_worker_compact_clear=False,
+                manager_require_acks=False,
+                manager_permissions_json=None,
+                sandbox="danger-full-access",
+                ask_for_approval="never",
+                timeout_seconds=30,
+                path=str(db_path),
+            )
+            with mock.patch.object(commands, "_spawn_codex_and_register") as spawn:
+                with self.assertRaisesRegex(WorkerError, "Unknown manager recipe"):
+                    commands.command_pair(args)
+            spawn.assert_not_called()
 
     def test_pair_passes_accept_trust_to_worker_and_manager_spawns(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -24218,6 +24255,7 @@ class PairCommandTests(unittest.TestCase):
                 task_goal="Dogfood seeded manager config",
                 task_summary=None,
                 manager_mode="strict",
+                manager_recipe="GoalBuddy Conveyor",
                 manager_objective="Drive the worker from seeded criteria.",
                 manager_guideline=["Use session-nudge first."],
                 manager_acceptance=["Worker receipt is verified."],
@@ -24242,6 +24280,7 @@ class PairCommandTests(unittest.TestCase):
             self.assertTrue(output["run_id"].startswith("run-"))
             self.assertTrue(output["manager_config_seeded"])
             self.assertTrue(output["manager_config_seeded_by_pair"])
+            self.assertEqual(output["manager_recipe"], "goalbuddy-conveyor")
             self.assertEqual(output["manager_acceptance_criteria_seeded"], 1)
             manager_spawn = next(r for r in recorded if r["role"] == "manager")
             self.assertIn("Manager config has already been recorded for this task.", manager_spawn["initial_prompt"])
@@ -24250,6 +24289,7 @@ class PairCommandTests(unittest.TestCase):
                 manager_spawn["initial_prompt"],
             )
             self.assertIn("Ask setup questions only if", manager_spawn["initial_prompt"])
+            self.assertIn("Manager recipe: goalbuddy-conveyor.", manager_spawn["initial_prompt"])
             self.assertNotIn("Ask the user the returned setup questions", manager_spawn["initial_prompt"])
 
             conn = worker_db.connect(db_path)
@@ -24264,6 +24304,7 @@ class PairCommandTests(unittest.TestCase):
             finally:
                 conn.close()
             self.assertEqual(config["supervision_mode"], "strict")
+            self.assertEqual(config["recipe_name"], "goalbuddy-conveyor")
             self.assertEqual(config["objective"], "Drive the worker from seeded criteria.")
             self.assertEqual(config["guidelines"], ["Use session-nudge first."])
             self.assertEqual(config["acceptance_criteria"], ["Worker receipt is verified."])
@@ -24278,7 +24319,9 @@ class PairCommandTests(unittest.TestCase):
             self.assertTrue(config["require_acks"])
             self.assertIn("manager-ack seeded-manager-task --from-stdin", manager_spawn["initial_prompt"])
             self.assertIsNotNone(event)
-            self.assertEqual(json.loads(event["payload_json"])["source"], "pair")
+            event_payload = json.loads(event["payload_json"])
+            self.assertEqual(event_payload["source"], "pair")
+            self.assertEqual(event_payload["recipe_name"], "goalbuddy-conveyor")
 
             from workerctl import supervise_cycle
 

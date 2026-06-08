@@ -1009,6 +1009,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Seed manager supervision mode before launching the manager.",
     )
     pair.add_argument(
+        "--manager-recipe",
+        default=None,
+        help="Seed the manager recipe slug/display name, or custom, before launching the manager.",
+    )
+    pair.add_argument(
         "--manager-objective",
         default=None,
         help="Seed the manager objective before launching the manager.",

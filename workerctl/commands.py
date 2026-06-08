@@ -410,6 +410,9 @@ Acknowledgement:
 - Before your first cycle, record the supervision contract you are committing to with `{manager_ack_command}`.
 - Before nudging or finishing, inspect the worker acknowledgement with `{worker_ack_command}` when available."""
     if manager_config_seeded:
+        recipe_summary = ""
+        if manager_config and manager_config.get("recipe_name"):
+            recipe_summary = f"\nManager recipe: {manager_config['recipe_name']}."
         permission_summary = (
             "\n" + manager_permission_display(manager_config)
             if manager_config
@@ -421,7 +424,7 @@ Acknowledgement:
         initial_setup = f"""Initial setup:
 - Manager config has already been recorded for this task.
 - Start with `{cycle_command}` and inspect `manager_context.manager_config`.
-- Ask setup questions only if the cycle output shows missing or unsuitable manager config.{permission_summary}{tool_summary}{ack_setup}"""
+- Ask setup questions only if the cycle output shows missing or unsuitable manager config.{recipe_summary}{permission_summary}{tool_summary}{ack_setup}"""
     else:
         initial_setup = f"""Initial setup:
 1. Run `{setup_command}`.
@@ -11521,6 +11524,7 @@ def pair_manager_config_requested(args: argparse.Namespace) -> bool:
     return any(
         [
             getattr(args, "manager_mode", None) is not None,
+            getattr(args, "manager_recipe", None) is not None,
             getattr(args, "manager_objective", None) is not None,
             bool(getattr(args, "manager_guideline", None)),
             bool(getattr(args, "manager_acceptance", None)),
@@ -11666,6 +11670,10 @@ def command_pair(args: argparse.Namespace) -> int:
 
         existing_manager_config = worker_db.manager_config(conn, task_id=task_id)
         if pair_manager_config_requested(args) or existing_manager_config is None:
+            manager_recipe_name = clean_manager_recipe_name(
+                getattr(args, "manager_recipe", None),
+                existing=existing_manager_config["recipe_name"] if existing_manager_config else "custom",
+            )
             permissions = normalize_manager_permissions(
                 existing_manager_config["permissions"] if existing_manager_config else None
             )
@@ -11700,6 +11708,7 @@ def command_pair(args: argparse.Namespace) -> int:
                 task_id=task_id,
                 supervision_mode=getattr(args, "manager_mode", None)
                 or (existing_manager_config["supervision_mode"] if existing_manager_config else "guided"),
+                recipe_name=manager_recipe_name,
                 objective=getattr(args, "manager_objective", None)
                 if getattr(args, "manager_objective", None) is not None
                 else (existing_manager_config["objective"] if existing_manager_config else None),
@@ -11730,6 +11739,7 @@ def command_pair(args: argparse.Namespace) -> int:
                     "guideline_count": len(existing_manager_config["guidelines"]),
                     "reference_count": len(existing_manager_config["reference_paths"]),
                     "nudge_on_completion": existing_manager_config["nudge_on_completion"],
+                    "recipe_name": existing_manager_config["recipe_name"],
                     "source": "pair",
                     "supervision_mode": existing_manager_config["supervision_mode"],
                 },
@@ -11751,6 +11761,7 @@ def command_pair(args: argparse.Namespace) -> int:
                     "guideline_count": len(existing_manager_config["guidelines"]),
                     "reference_count": len(existing_manager_config["reference_paths"]),
                     "nudge_on_completion": existing_manager_config["nudge_on_completion"],
+                    "recipe_name": existing_manager_config["recipe_name"],
                     "supervision_mode": existing_manager_config["supervision_mode"],
                 },
             )
@@ -11882,6 +11893,7 @@ def command_pair(args: argparse.Namespace) -> int:
                     "manager": args.manager_name,
                     "manager_config_seeded": manager_config_seeded,
                     "manager_config_seeded_by_pair": manager_config_seeded_by_pair,
+                    "manager_recipe": existing_manager_config["recipe_name"] if existing_manager_config else None,
                     "source": "pair",
                     "worker": args.worker_name,
                 },
@@ -11910,6 +11922,7 @@ def command_pair(args: argparse.Namespace) -> int:
                 attributes={
                     "manager_config_seeded": manager_config_seeded,
                     "manager_config_seeded_by_pair": manager_config_seeded_by_pair,
+                    "manager_recipe": existing_manager_config["recipe_name"] if existing_manager_config else None,
                     "manager_acceptance_criteria_seeded": len(manager_acceptance_criteria_seeded),
                 },
             )
@@ -11951,6 +11964,7 @@ def command_pair(args: argparse.Namespace) -> int:
             "ensure_dispatch": dispatch_payload["ensure_dispatch"],
             "manager_config_seeded": manager_config_seeded,
             "manager_config_seeded_by_pair": manager_config_seeded_by_pair,
+            "manager_recipe": existing_manager_config["recipe_name"] if existing_manager_config else None,
             "manager_acceptance_criteria_seeded": len(manager_acceptance_criteria_seeded),
         }
         print(json.dumps(result, indent=2, sort_keys=True))
