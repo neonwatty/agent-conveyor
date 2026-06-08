@@ -281,7 +281,7 @@ The SQLite control plane is the audit surface for these recipes.
 
 | Table | Why It Matters |
 | --- | --- |
-| `manager_configs` | Saved recipe settings: mode, objective, guidelines, permissions, tools, epilogues, ack policy |
+| `manager_configs` | Saved recipe settings: `recipe_name`, mode, objective, guidelines, permissions, tools, epilogues, ack policy |
 | `tasks`, `sessions`, `bindings` | Which manager and worker are bound to which task and where they run |
 | `commands`, `command_attempts` | Manager requests, Dispatch claims, retries, blocks, and side-effect attempts |
 | `routed_notifications` | Manager-to-worker and worker-to-manager messages, delivery mode, consumed state |

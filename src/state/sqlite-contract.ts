@@ -1,4 +1,4 @@
-export const SCHEMA_VERSION = 22;
+export const SCHEMA_VERSION = 23;
 
 export const REQUIRED_TABLES = new Set([
   "acceptance_criteria",

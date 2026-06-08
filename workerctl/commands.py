@@ -76,7 +76,7 @@ from workerctl.lifecycle import manager_liveness_warnings, reconcile_rows
 from workerctl.output_safety import redact_audit, redact_capture_result, redact_payload, redact_transcript_segments
 from workerctl.loop_triggers import classify_loop_trigger, list_loop_triggers
 from workerctl.loop_templates import list_loop_templates, loop_template, loop_template_metadata
-from workerctl.manager_recipes import list_manager_recipes, recipe_for_json
+from workerctl.manager_recipes import list_manager_recipes, manager_recipe, normalize_recipe_name, recipe_for_json
 from workerctl.ralph_loop_presets import list_ralph_loop_presets, ralph_loop_preset, ralph_loop_preset_metadata
 from workerctl.tmux import (
     capture_output,
@@ -9338,7 +9338,16 @@ open_questions, and ready_to_start."""
 def manager_config_questions(existing: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     existing = existing or {}
     permissions = normalize_manager_permissions(existing.get("permissions") or {})
+    recipe_names = [recipe["name"] for recipe in list_manager_recipes()]
     return [
+        {
+            "id": "recipe_name",
+            "kind": "choice",
+            "choices": recipe_names + ["custom"],
+            "default": existing.get("recipe_name") or "custom",
+            "question": "Which manager recipe should this setup use?",
+            "help": "Choose a built-in recipe for common supervision patterns, or custom for a bespoke setup.",
+        },
         {
             "id": "supervision_mode",
             "kind": "choice",
@@ -9428,9 +9437,22 @@ def _interactive_bool(prompt: str, *, default: bool) -> bool:
     return answer in {"y", "yes", "true", "1"}
 
 
+def clean_manager_recipe_name(value: str | None, *, existing: str | None = None) -> str | None:
+    if value is None:
+        return existing
+    normalized = normalize_recipe_name(value)
+    if normalized == "custom":
+        return "custom"
+    return manager_recipe(normalized).name
+
+
 def _apply_interactive_manager_config(args: argparse.Namespace, existing: dict[str, Any] | None) -> None:
     questions = {question["id"]: question for question in manager_config_questions(existing)}
     print("Manager configuration setup. Press Enter to keep defaults.")
+    recipe_default = questions["recipe_name"]["default"]
+    recipe_answer = input(f"{questions['recipe_name']['question']} [{recipe_default}]: ").strip()
+    args.recipe = clean_manager_recipe_name(recipe_answer or recipe_default)
+
     mode_default = questions["supervision_mode"]["default"]
     mode_answer = input(f"{questions['supervision_mode']['question']} [{mode_default}]: ").strip()
     if mode_answer:
@@ -10108,6 +10130,7 @@ def command_manager_config(args: argparse.Namespace) -> int:
         mutating = any(
             [
                 args.mode is not None,
+                getattr(args, "recipe", None) is not None,
                 args.objective is not None,
                 args.guideline,
                 args.acceptance,
@@ -10125,6 +10148,7 @@ def command_manager_config(args: argparse.Namespace) -> int:
         )
         permission_warnings: list[str] = []
         if mutating or existing is None:
+            recipe_name = clean_manager_recipe_name(getattr(args, "recipe", None), existing=existing["recipe_name"] if existing else None)
             permissions = normalize_manager_permissions(existing["permissions"] if existing else None)
             permissions = add_manager_permission_flags(
                 permissions,
@@ -10151,6 +10175,7 @@ def command_manager_config(args: argparse.Namespace) -> int:
                 conn,
                 task_id=task["id"],
                 supervision_mode=args.mode or (existing["supervision_mode"] if existing else "guided"),
+                recipe_name=recipe_name,
                 objective=args.objective if args.objective is not None else (existing["objective"] if existing else None),
                 guidelines=args.guideline or (existing["guidelines"] if existing else []),
                 acceptance_criteria=args.acceptance or (existing["acceptance_criteria"] if existing else []),
@@ -10171,6 +10196,7 @@ def command_manager_config(args: argparse.Namespace) -> int:
                     "epilogue_count": len(epilogues),
                     "guideline_count": len(args.guideline),
                     "permission_warnings": permission_warnings,
+                    "recipe_name": recipe_name,
                     "reference_count": len(args.reference),
                     "require_acks": bool(getattr(args, "require_acks", False) or (existing["require_acks"] if existing else False)),
                     "nudge_on_completion": nudge_on_completion,

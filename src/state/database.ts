@@ -10,7 +10,7 @@ import {
   REQUIRED_TRIGGERS,
   SCHEMA_VERSION,
 } from "./sqlite-contract.js";
-import { SCHEMA_V22_SQL } from "./schema-v22.js";
+import { SCHEMA_V23_SQL } from "./schema-v23.js";
 
 export interface DatabaseCheck {
   name: string;
@@ -66,7 +66,7 @@ export function initializeDatabaseSync(database: DatabaseSync): void {
     return;
   }
 
-  database.exec(SCHEMA_V22_SQL);
+  database.exec(SCHEMA_V23_SQL);
   const now = new Date().toISOString();
   database.prepare(
     "insert or ignore into schema_migrations(version, applied_at) values (?, ?)",

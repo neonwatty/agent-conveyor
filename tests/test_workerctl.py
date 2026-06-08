@@ -1222,6 +1222,7 @@ class DatabaseTests(unittest.TestCase):
                 conn,
                 task_id=task_id,
                 supervision_mode="strict",
+                recipe_name="goalbuddy-conveyor",
                 objective="Check against PRD.",
                 guidelines=["Nudge only when stale"],
                 acceptance_criteria=["Tests pass"],
@@ -1233,6 +1234,7 @@ class DatabaseTests(unittest.TestCase):
             conn.commit()
 
             config = worker_db.manager_config(conn, task_id=task_id)
+            self.assertEqual(config["recipe_name"], "goalbuddy-conveyor")
             self.assertEqual(config["supervision_mode"], "strict")
             self.assertEqual(config["objective"], "Check against PRD.")
             self.assertEqual(config["guidelines"], ["Nudge only when stale"])
@@ -1248,6 +1250,7 @@ class DatabaseTests(unittest.TestCase):
                 conn,
                 task_id=task_id,
                 supervision_mode="strict",
+                recipe_name="goalbuddy-conveyor",
                 objective="Check against PRD.",
                 guidelines=["Nudge only when stale"],
                 acceptance_criteria=["Tests pass"],
@@ -1262,10 +1265,20 @@ class DatabaseTests(unittest.TestCase):
                 conn,
                 task_id=task_id,
                 supervision_mode="strict",
-                objective="Check against revised PRD.",
+                recipe_name="test-coverage-loop",
+                objective="Check against PRD.",
                 guidelines=["Nudge only when stale"],
             )
             self.assertEqual(worker_db.manager_config(conn, task_id=task_id)["revision"], 2)
+
+            worker_db.upsert_manager_config(
+                conn,
+                task_id=task_id,
+                supervision_mode="strict",
+                objective="Check against revised PRD.",
+                guidelines=["Nudge only when stale"],
+            )
+            self.assertEqual(worker_db.manager_config(conn, task_id=task_id)["revision"], 3)
 
     def test_continuations_and_reviews_round_trip_through_audit(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -25598,6 +25611,8 @@ class PairCommandTests(unittest.TestCase):
                     "workerctl",
                     "manager-config",
                     "config-task",
+                    "--recipe",
+                    "GoalBuddy Conveyor",
                     "--mode",
                     "strict",
                     "--objective",
@@ -25627,6 +25642,7 @@ class PairCommandTests(unittest.TestCase):
 
             self.assertEqual(proc.returncode, 0, proc.stderr)
             payload = json.loads(proc.stdout)
+            self.assertEqual(payload["recipe_name"], "goalbuddy-conveyor")
             self.assertEqual(payload["supervision_mode"], "strict")
             self.assertEqual(payload["objective"], "Check against docs/plan.md")
             self.assertEqual(payload["guidelines"], ["Nudge only when stale"])
@@ -25637,6 +25653,15 @@ class PairCommandTests(unittest.TestCase):
             self.assertEqual(payload["permissions"]["worker_session"], ["clear", "compact"])
             self.assertEqual(payload["epilogues"], ["draft-pr"])
             self.assertEqual(payload["tools"], ["pytest"])
+
+            conn = worker_db.connect(db_path)
+            try:
+                event = conn.execute(
+                    "select payload_json from events where type = 'manager_config_recorded' order by id desc limit 1"
+                ).fetchone()
+            finally:
+                conn.close()
+            self.assertEqual(json.loads(event["payload_json"])["recipe_name"], "goalbuddy-conveyor")
 
     def test_manager_config_permissions_json_normalizes_allow_aliases(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -25883,11 +25908,15 @@ class PairCommandTests(unittest.TestCase):
             payload = json.loads(proc.stdout)
             self.assertEqual(payload["recommended_collection"], "manager_codex_chat")
             question_ids = {question["id"] for question in payload["questions"]}
+            questions = {question["id"]: question for question in payload["questions"]}
+            self.assertIn("recipe_name", question_ids)
             self.assertIn("supervision_mode", question_ids)
             self.assertIn("permissions", question_ids)
             self.assertIn("require_acks", question_ids)
             self.assertIn("epilogues", question_ids)
             self.assertIn("tools", question_ids)
+            self.assertIn("goalbuddy-conveyor", questions["recipe_name"]["choices"])
+            self.assertIn("custom", questions["recipe_name"]["choices"])
 
             conn = worker_db.connect(db_path)
             try:
@@ -25908,6 +25937,7 @@ class PairCommandTests(unittest.TestCase):
 
             answers = "\n".join(
                 [
+                    "GoalBuddy Conveyor",
                     "strict",
                     "Check against docs/plan.md",
                     "Nudge only when stale, Keep scope fixed",
@@ -25942,6 +25972,7 @@ class PairCommandTests(unittest.TestCase):
 
             self.assertEqual(proc.returncode, 0, proc.stderr)
             payload = json.loads(proc.stdout[proc.stdout.index("{"):])
+            self.assertEqual(payload["recipe_name"], "goalbuddy-conveyor")
             self.assertEqual(payload["supervision_mode"], "strict")
             self.assertEqual(payload["objective"], "Check against docs/plan.md")
             self.assertEqual(payload["guidelines"], ["Nudge only when stale", "Keep scope fixed"])
@@ -25974,6 +26005,7 @@ class PairCommandTests(unittest.TestCase):
 
             answers = "\n".join(
                 [
+                    "",
                     "",
                     "",
                     "",

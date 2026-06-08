@@ -11,6 +11,7 @@ export interface ManagerConfigRecord {
   nudge_on_completion: string;
   objective: string | null;
   permissions: ManagerPermissions;
+  recipe_name: string | null;
   reference_paths: string[];
   require_acks: boolean;
   revision: number;
@@ -22,7 +23,7 @@ export interface ManagerConfigRecord {
 
 export function managerConfigSync(database: DatabaseSync, taskId: string): ManagerConfigRecord | null {
   const row = database.prepare(`
-    select task_id, supervision_mode, objective, guidelines_json,
+    select task_id, recipe_name, supervision_mode, objective, guidelines_json,
            acceptance_criteria_json, reference_paths_json, permissions_json,
            tools_json, epilogues_json, nudge_on_completion, require_acks,
            revision, created_at, updated_at
@@ -40,6 +41,7 @@ export function managerConfigSync(database: DatabaseSync, taskId: string): Manag
     nudge_on_completion: row.nudge_on_completion,
     objective: row.objective,
     permissions: normalizeManagerPermissions(JSON.parse(row.permissions_json)),
+    recipe_name: row.recipe_name,
     reference_paths: JSON.parse(row.reference_paths_json),
     require_acks: Boolean(row.require_acks),
     revision: row.revision,
@@ -62,6 +64,7 @@ interface ManagerConfigRow {
   nudge_on_completion: string;
   objective: string | null;
   permissions_json: string;
+  recipe_name: string | null;
   reference_paths_json: string;
   require_acks: number;
   revision: number;

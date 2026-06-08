@@ -733,6 +733,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     manager_config.add_argument("--objective", help="What the manager should do or check against.")
     manager_config.add_argument(
+        "--recipe",
+        help="Named manager recipe slug/display name, or custom for a bespoke setup.",
+    )
+    manager_config.add_argument(
         "--guideline",
         action="append",
         default=[],
