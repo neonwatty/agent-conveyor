@@ -76,6 +76,7 @@ from workerctl.lifecycle import manager_liveness_warnings, reconcile_rows
 from workerctl.output_safety import redact_audit, redact_capture_result, redact_payload, redact_transcript_segments
 from workerctl.loop_triggers import classify_loop_trigger, list_loop_triggers
 from workerctl.loop_templates import list_loop_templates, loop_template, loop_template_metadata
+from workerctl.manager_recipes import list_manager_recipes, recipe_for_json
 from workerctl.ralph_loop_presets import list_ralph_loop_presets, ralph_loop_preset, ralph_loop_preset_metadata
 from workerctl.tmux import (
     capture_output,
@@ -4986,6 +4987,32 @@ def command_ralph_loop_presets(args: argparse.Namespace) -> int:
         print(json.dumps(result, indent=2, sort_keys=True))
         return 0
     raise WorkerError("Choose one of --list, --show, or --create-run")
+
+
+def command_manager_recipes(args: argparse.Namespace) -> int:
+    if args.list:
+        recipes = list_manager_recipes()
+        if args.json:
+            print(json.dumps({"recipes": recipes}, indent=2, sort_keys=True))
+            return 0
+        for recipe in recipes:
+            loop = f" loop={recipe['loop_template']}" if recipe["loop_template"] else ""
+            print(f"{recipe['name']}\tmode={recipe['mode']}{loop}\t{recipe['description']}")
+        return 0
+    if args.show:
+        recipe = recipe_for_json(args.show)
+        if args.json:
+            print(json.dumps({"recipe": recipe}, indent=2, sort_keys=True))
+            return 0
+        print(recipe["locked_summary_template"])
+        print("")
+        print("manager-config command:")
+        print("  " + " ".join(sh_quote(part) for part in recipe["manager_config_command"]))
+        if recipe["loop_template"]:
+            print("")
+            print(f"loop template: {recipe['loop_template']}")
+        return 0
+    raise WorkerError("Choose one of --list or --show")
 
 
 def _session_snapshot_for_dashboard(row: Any | None) -> dict[str, Any] | None:

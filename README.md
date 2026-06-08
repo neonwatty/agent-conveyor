@@ -132,6 +132,15 @@ command exits 0 and the JSON result reports `"ok": true`.
 Before publishing `agent-conveyor` to npm, use
 [`docs/package-release.md`](docs/package-release.md).
 
+For common manager setups, start with
+[`docs/manager-recipes.md`](docs/manager-recipes.md). It maps natural-language
+requests such as GoalBuddy conveyor runs, test coverage loops, UX polish loops,
+what-next nudging, and PR/CI/merge Ralph loops to concrete `manager-config`
+settings, permissions, evidence gates, cleanup behavior, and example
+manager/Dispatch/worker interactions. Use `conveyor manager-recipes --list`
+or `conveyor manager-recipes --show goalbuddy-conveyor --json` for a
+machine-readable setup preview.
+
 After install, the intended Codex app entry point is natural language. Open a
 new Codex app session in the target repo and say:
 
@@ -163,6 +172,10 @@ Use `conveyor qa-plan adversarial-triggers` to verify natural-language
 manager prompts activate Ralph-loop adversarial gates.
 Use `conveyor qa-plan goalbuddy-conveyor` when a broad request should become
 sequential GoalBuddy child boards with PR/CI/merge receipts.
+Before cutting a manager loose, have it resolve the freeform setup request to a
+named recipe from `docs/manager-recipes.md` or an explicit `custom` setup, then
+show the saved mode, permissions, evidence gates, cleanup policy, and disallowed
+actions.
 For manual QA, launch the dashboard with Dispatch enforcement so the page can
 show live proof:
 
@@ -411,6 +424,11 @@ tmux attach -t codex-live-test
   Use `--require` when a manager command should fail closed. Use
   `--require-handoff` before worker compact/clear style instructions so visible
   context is persisted first.
+- `manager-recipes --list|--show RECIPE [--json]` — List or show built-in
+  manager setup recipes. Recipe JSON includes the supervision mode,
+  permissions, expected tools, epilogues, evidence gates, cleanup behavior,
+  disallowed actions, locked setup summary template, and suggested
+  `manager-config` command. Use this before cutting a manager loose.
 - `worker-ack <task> --from-stdin|--json [--correlation-id ID]` /
   `manager-ack <task> --from-stdin|--json [--correlation-id ID]` — Persist or
   read the latest structured acknowledgement from the worker or manager. Acks

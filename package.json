@@ -25,6 +25,7 @@
     "scripts/capture-static-html-screenshot.mjs",
     "skills/**/*",
     "README.md",
+    "docs/manager-recipes.md",
     "docs/typescript-migration/*.md"
   ],
   "scripts": {

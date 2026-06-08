@@ -81,6 +81,40 @@ class CoreRunTests(unittest.TestCase):
 
 
 class RalphLoopPresetTests(unittest.TestCase):
+    def test_manager_recipes_include_first_draft_modes(self):
+        from workerctl.manager_recipes import list_manager_recipes, manager_recipe
+
+        recipes = {recipe["name"]: recipe for recipe in list_manager_recipes()}
+
+        self.assertEqual(
+            sorted(recipes),
+            [
+                "goalbuddy-conveyor",
+                "nudge-whats-next",
+                "pr-ci-merge-ralph-loop",
+                "test-coverage-loop",
+                "ux-polish-loop",
+            ],
+        )
+        self.assertEqual(recipes["goalbuddy-conveyor"]["mode"], "strict")
+        self.assertIn("repo.open_pr", recipes["goalbuddy-conveyor"]["permissions"])
+        self.assertIn("worker_session.compact", recipes["goalbuddy-conveyor"]["permissions"])
+        self.assertIn("worker_session.clear", recipes["goalbuddy-conveyor"]["permissions"])
+        self.assertIn("child receipt", recipes["goalbuddy-conveyor"]["evidence_gates"][0])
+        self.assertEqual(recipes["test-coverage-loop"]["loop_template"], "test_coverage_loop")
+        self.assertEqual(recipes["ux-polish-loop"]["loop_template"], "visual_diff_loop")
+        self.assertEqual(recipes["pr-ci-merge-ralph-loop"]["loop_template"], "pr_ci_merge_loop")
+
+        goalbuddy = manager_recipe("GoalBuddy Conveyor").summary()
+        self.assertEqual(goalbuddy["name"], "goalbuddy-conveyor")
+        self.assertIn("Selected recipe: GoalBuddy Conveyor", goalbuddy["locked_summary_template"])
+
+    def test_manager_recipe_rejects_unknown_name(self):
+        from workerctl.manager_recipes import manager_recipe
+
+        with self.assertRaisesRegex(WorkerError, "Unknown manager recipe"):
+            manager_recipe("nope")
+
     def test_ralph_loop_presets_include_operator_ready_templates(self):
         from workerctl.ralph_loop_presets import list_ralph_loop_presets, ralph_loop_preset_metadata
 
@@ -6313,6 +6347,30 @@ class CliTests(unittest.TestCase):
                 "adversarial_check",
             ],
         )
+
+    def test_manager_recipes_cli_lists_and_shows_goalbuddy_recipe(self):
+        list_proc = self.run_workerctl("manager-recipes", "--list", "--json")
+
+        self.assertEqual(list_proc.returncode, 0, list_proc.stderr)
+        payload = json.loads(list_proc.stdout)
+        names = [recipe["name"] for recipe in payload["recipes"]]
+        self.assertIn("goalbuddy-conveyor", names)
+        self.assertIn("test-coverage-loop", names)
+        self.assertIn("ux-polish-loop", names)
+        self.assertIn("nudge-whats-next", names)
+        self.assertIn("pr-ci-merge-ralph-loop", names)
+
+        show_proc = self.run_workerctl("manager-recipes", "--show", "goalbuddy-conveyor", "--json")
+
+        self.assertEqual(show_proc.returncode, 0, show_proc.stderr)
+        recipe = json.loads(show_proc.stdout)["recipe"]
+        self.assertEqual(recipe["display_name"], "GoalBuddy Conveyor")
+        self.assertEqual(recipe["mode"], "strict")
+        self.assertIn("repo.open_pr", recipe["permissions"])
+        self.assertIn("worker_session.compact", recipe["permissions"])
+        self.assertIn("worker_session.clear", recipe["permissions"])
+        self.assertIn("--allow-worker-compact-clear", recipe["manager_config_command"])
+        self.assertIn("Selected recipe: GoalBuddy Conveyor", recipe["locked_summary_template"])
 
     def test_loop_templates_cli_creates_visual_diff_policy_run(self):
         with tempfile.TemporaryDirectory() as tmpdir:
