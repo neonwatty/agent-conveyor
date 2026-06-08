@@ -88,6 +88,67 @@ test("TypeScript runtime help honors workerctl program name", () => {
   assert.match(command.stdout ?? "", /^usage: workerctl start /);
 });
 
+test("TypeScript runtime handles manager recipes by default", () => {
+  const listed = runTypescriptRuntimeCommand({
+    args: ["manager-recipes", "--list", "--json"],
+    env: {},
+  });
+  assert.equal(listed.exitCode, 0, listed.stderr);
+  const listedPayload = JSON.parse(listed.stdout ?? "{}") as {
+    recipes: Array<{
+      description: string;
+      loop_template: string | null;
+      mode: string;
+      name: string;
+    }>;
+  };
+  assert.deepEqual(listedPayload.recipes.map((recipe) => recipe.name), [
+    "goalbuddy-conveyor",
+    "nudge-whats-next",
+    "pr-ci-merge-ralph-loop",
+    "test-coverage-loop",
+    "ux-polish-loop",
+  ]);
+  assert.equal(listedPayload.recipes.find((recipe) => recipe.name === "test-coverage-loop")?.loop_template, "test_coverage_loop");
+
+  const shown = runTypescriptRuntimeCommand({
+    args: ["manager-recipes", "--show", "goalbuddy", "--json"],
+    env: {},
+  });
+  assert.equal(shown.exitCode, 0, shown.stderr);
+  const shownPayload = JSON.parse(shown.stdout ?? "{}") as {
+    recipe: {
+      display_name: string;
+      locked_summary_template: string;
+      manager_config_command: string[];
+      mode: string;
+      name: string;
+      permissions: string[];
+    };
+  };
+  assert.equal(shownPayload.recipe.name, "goalbuddy-conveyor");
+  assert.equal(shownPayload.recipe.display_name, "GoalBuddy Conveyor");
+  assert.equal(shownPayload.recipe.mode, "strict");
+  assert.ok(shownPayload.recipe.permissions.includes("repo.merge_green_pr"));
+  assert.deepEqual(shownPayload.recipe.manager_config_command.slice(0, 5), [
+    "conveyor",
+    "manager-config",
+    "<task>",
+    "--mode",
+    "strict",
+  ]);
+  assert.ok(shownPayload.recipe.manager_config_command.includes("--allow-worker-compact-clear"));
+  assert.match(shownPayload.recipe.locked_summary_template, /Selected recipe: GoalBuddy Conveyor/);
+
+  const text = runTypescriptRuntimeCommand({
+    args: ["manager-recipes", "--show", "ux polish"],
+    env: {},
+  });
+  assert.equal(text.exitCode, 0, text.stderr);
+  assert.match(text.stdout ?? "", /Selected recipe: UX Polish Loop/);
+  assert.match(text.stdout ?? "", /loop template: visual_diff_loop/);
+});
+
 test("TypeScript runtime handles task create list and active filtering by default", () => {
   const root = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-tasks."));
   try {
