@@ -1,0 +1,335 @@
+# GoalBuddy v2 state.yaml
+# Board truth lives here. goal.md is the editable charter; notes/ holds long receipts only.
+
+version: 2
+
+goal:
+  title: "Live Recipe Dogfood"
+  slug: "live-recipe-dogfood"
+  kind: specific
+  tranche: "Run and prove one disposable live tmux-backed goalbuddy-conveyor recipe dogfood."
+  status: done
+  oracle:
+    signal: "A disposable live manager/worker recipe run starts, routes through Dispatch, appears in dashboard evidence, audits/replays/exports, cleans up, and passes package/release gates without npm publish."
+    cadence: "after each Worker package and at final audit"
+    final_proof: "Board receipts for live pair, dashboard spot-check, release gates, cleanup, and final audit with full_outcome_complete: true."
+  intake:
+    original_request: "Plan and run the live recipe dogfood with GoalBuddy prep board."
+    interpreted_outcome: "Agent Conveyor is proven ready for real dogfooding through a live tmux-backed recipe walkthrough."
+    input_shape: specific
+    audience: "package maintainer and dogfood users"
+    authority: approved
+    proof_type: demo
+    completion_proof: "Live recipe dogfood receipts plus package/release verification and cleanup evidence."
+    likely_misfire: "Passing no-tmux or unit/package checks but never proving live Codex/tmux manager-worker behavior."
+    blind_spots_considered:
+      - "Codex/tmux availability and cleanup"
+      - "Dashboard port conflicts"
+      - "Dispatch pull-vs-push delivery semantics"
+      - "Package path versus repo path"
+      - "No automatic npm publish"
+    existing_plan_facts:
+      - "Installed no-tmux dogfood already passed in the parent thread."
+      - "Next proof should be live tmux-backed recipe dogfood."
+      - "Dashboard spot-check should follow the live task."
+      - "Release decision follows only after live evidence."
+
+rules:
+  pm_owns_state: true
+  one_active_task: true
+  max_write_workers: 1
+  no_implementation_without_worker_or_pm_task: true
+  no_completion_without_judge_or_pm_audit: true
+  planning_is_not_completion: true
+  queued_required_worker_blocks_completion: true
+  continuous_until_full_outcome: true
+  missing_input_or_credentials_do_not_stop_goal: true
+  preserve_and_validate_existing_plan: true
+  intake_misfire_must_be_audited: true
+  goal_pressure_requires_oracle: true
+  no_completion_on_weak_proof: true
+  slice_policy:
+    max_consecutive_tiny_tasks: 2
+    prefer_vertical_slices: true
+    judge_picks_largest_safe_slice: true
+    worker_completes_whole_slice: true
+
+agents:
+  scout: bundled_not_installed
+  worker: bundled_not_installed
+  judge: bundled_not_installed
+
+visual_board:
+  selected: local
+  local:
+    status: not_requested
+    url: "http://goalbuddy.localhost:41737/live-recipe-dogfood/"
+    command: "npx goalbuddy board docs/goals/live-recipe-dogfood"
+
+active_task: null
+
+tasks:
+  - id: T001
+    type: scout
+    assignee: Scout
+    status: done
+    reasoning_hint: medium
+    objective: "Map live dogfood prerequisites, exact commands, dashboard target, cleanup commands, and stop conditions."
+    inputs:
+      - "README.md"
+      - "package.json"
+      - "scripts/workerctl --help"
+      - "docs/manager-recipes.md"
+      - "docs/agent-evidence-playbook.md"
+      - "Current git status"
+    constraints:
+      - "Read-only except board receipt updates."
+      - "Do not start live Codex sessions yet."
+      - "Preserve unrelated dirty files."
+    expected_output:
+      - "Exact live pair command or closest supported path."
+      - "Dashboard command and browser verification target."
+      - "Audit/replay/export/reconcile commands."
+      - "Stop conditions and cleanup plan."
+    receipt:
+      result: done
+      summary: "Live recipe dogfood prerequisites are available; use a unique tmux-backed pair with goalbuddy-conveyor, then audit/replay/export and clean up by session name."
+      evidence:
+        - "command -v codex -> /Applications/Codex.app/Contents/Resources/codex"
+        - "tmux -V -> tmux 3.6a"
+        - "scripts/workerctl doctor -> ok true; codex-cli 0.137.0-alpha.4; state root exists"
+        - "scripts/workerctl pair --help includes --manager-recipe, --codex-profile yolo, --accept-trust, --no-dispatch, --path"
+        - "scripts/workerctl pair --dry-run --json returned task live-recipe-dogfood-smoke and dispatch watch command"
+        - "scripts/workerctl dashboard --help supports --task, --port, --db-path, --ensure-dispatch"
+      commands:
+        - cmd: "scripts/workerctl doctor"
+          status: pass
+        - cmd: "scripts/workerctl pair ... --manager-recipe goalbuddy-conveyor --dry-run --json"
+          status: pass
+      cleanup_plan:
+        - "Use unique task/session names with timestamp."
+        - "Stop worker and manager by unique name with scripts/workerctl stop <name>."
+        - "Run scripts/workerctl reconcile --stale-cycles-seconds 1."
+        - "If workerctl cannot stop a tmux session, fall back to tmux kill-session for the unique tmux session only."
+      stop_conditions:
+        - "Codex live session startup times out."
+        - "Workspace trust/auth prompt cannot be accepted safely."
+        - "Worker or manager edits product files despite the no-edit task prompt."
+        - "Cleanup cannot uniquely identify the disposable sessions."
+
+  - id: T002
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "Run one disposable live tmux-backed recipe pair and prove manager, Dispatch, worker, audit, replay, export, and cleanup behavior."
+    allowed_files:
+      - "docs/goals/live-recipe-dogfood/state.yaml"
+      - "docs/goals/live-recipe-dogfood/notes/**"
+    verify:
+      - "conveyor or scripts/workerctl pair/create/start commands for a disposable task"
+      - "conveyor or scripts/workerctl cycle <task>"
+      - "conveyor or scripts/workerctl dispatch --once --json"
+      - "conveyor or scripts/workerctl audit <task> --json"
+      - "conveyor or scripts/workerctl replay <task>"
+      - "conveyor or scripts/workerctl export-task <task> --output <tmpdir>"
+      - "conveyor or scripts/workerctl reconcile --stale-cycles-seconds 1"
+    stop_if:
+      - "Codex CLI cannot start a live tmux session."
+      - "Authentication is required and unavailable."
+      - "A command would mutate product files outside the board."
+      - "Cleanup cannot identify the disposable sessions."
+      - "Verification fails twice with the same unknown root cause."
+    receipt:
+      result: done
+      changed_files:
+        - "docs/goals/live-recipe-dogfood/state.yaml"
+      summary: "Ran disposable live tmux-backed pair live-recipe-dogfood-20260608123801 with goalbuddy-conveyor recipe, proved push Dispatch routing, captured audit/replay/export/transcripts, satisfied task criteria, and cleaned up sessions."
+      live_task: "live-recipe-dogfood-20260608123801"
+      sessions:
+        worker: "live-recipe-dogfood-worker-20260608123801"
+        manager: "live-recipe-dogfood-manager-20260608123801"
+        worker_tmux: "codex-live-recipe-dogfood-worker-20260608123801"
+        manager_tmux: "codex-live-recipe-dogfood-manager-20260608123801"
+      artifacts:
+        - "/tmp/live-recipe-dogfood-20260608123801/pair.json"
+        - "/tmp/live-recipe-dogfood-20260608123801/cycle-2.json"
+        - "/tmp/live-recipe-dogfood-20260608123801/commands-after-nudge.json"
+        - "/tmp/live-recipe-dogfood-20260608123801/audit-final-before-cleanup.json"
+        - "/tmp/live-recipe-dogfood-20260608123801/replay-before-cleanup.txt"
+        - "/tmp/live-recipe-dogfood-20260608123801/export/manifest.json"
+        - "/tmp/live-recipe-dogfood-20260608123801/transcript-capture.json"
+        - "/tmp/live-recipe-dogfood-20260608123801/reconcile-after-stop.json"
+      commands:
+        - cmd: "scripts/workerctl pair ... --manager-recipe goalbuddy-conveyor --codex-profile yolo --accept-trust --json"
+          status: pass
+        - cmd: "scripts/workerctl cycle live-recipe-dogfood-20260608123801"
+          status: pass
+        - cmd: "scripts/workerctl enqueue-nudge-worker live-recipe-dogfood-20260608123801 --message ... --json"
+          status: pass
+        - cmd: "scripts/workerctl dispatch --once --json"
+          status: pass
+          note: "One-shot processed none because dispatch-pair watch had already delivered the queued command."
+        - cmd: "scripts/workerctl audit live-recipe-dogfood-20260608123801 --json"
+          status: pass
+        - cmd: "scripts/workerctl replay live-recipe-dogfood-20260608123801"
+          status: pass
+        - cmd: "scripts/workerctl export-task live-recipe-dogfood-20260608123801 --output /tmp/live-recipe-dogfood-20260608123801/export"
+          status: pass
+        - cmd: "scripts/workerctl transcript-capture live-recipe-dogfood-20260608123801 --role all --mode full --json"
+          status: pass
+        - cmd: "scripts/workerctl stop live-recipe-dogfood-worker-20260608123801"
+          status: pass
+        - cmd: "scripts/workerctl stop live-recipe-dogfood-manager-20260608123801"
+          status: pass
+      evidence:
+        - "Pair receipt recorded worker/manager tmux sessions, manager_recipe goalbuddy-conveyor, and Dispatch watch pid 95468."
+        - "Cycle output showed manager_config.recipe_name goalbuddy-conveyor plus worker and manager acknowledgements."
+        - "Command audit showed nudge_worker succeeded, delivery_mode push, state delivered, side_effect_completed true."
+        - "Audit routed notifications included worker_task_complete -> manager and nudge_worker -> worker, both delivered via push."
+        - "Replay included nudge_worker and push delivery."
+        - "Export manifest included audit, replay, telemetry, transcript, terminal capture, and criteria artifacts."
+        - "Transcript capture recorded 2 live session segments."
+        - "Criteria ids 221-224 are satisfied."
+        - "Cleanup left no matching active sessions and no matching tmux sessions."
+
+  - id: T003
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "Open the dashboard for the live task and capture evidence that recipe, Dispatch chain, inbox/notification, criteria, and replay surfaces are visible."
+    allowed_files:
+      - "docs/goals/live-recipe-dogfood/state.yaml"
+      - "docs/goals/live-recipe-dogfood/notes/**"
+    verify:
+      - "Launch dashboard on a disposable port."
+      - "Use browser or Playwright to open the live task dashboard."
+      - "Capture screenshot or structured browser assertions."
+      - "Stop the dashboard server."
+    stop_if:
+      - "Dashboard cannot start after one alternate port attempt."
+      - "Browser automation is unavailable."
+      - "Dashboard evidence would require editing product files."
+    receipt:
+      result: done
+      changed_files:
+        - "docs/goals/live-recipe-dogfood/state.yaml"
+      summary: "Launched dashboard for the live dogfood task, verified task/session/Dispatch/criteria/replay text with Playwright, captured a screenshot, and stopped the server."
+      artifacts:
+        - "/tmp/live-recipe-dogfood-20260608123801/dashboard.png"
+      commands:
+        - cmd: "scripts/workerctl dashboard --task live-recipe-dogfood-20260608123801 --port 8798 --ensure-dispatch"
+          status: pass
+        - cmd: "Playwright page assertions against http://127.0.0.1:8798/?task=live-recipe-dogfood-20260608123801"
+          status: pass
+        - cmd: "lsof -ti tcp:8798"
+          status: pass
+          note: "Exited 1 after shutdown, proving no listener remained."
+      evidence:
+        - "Playwright checks: hasTask=true, hasWorker=true, hasManager=true, hasDispatch=true, hasCriteria=true, hasReplay=true."
+        - "Screenshot showed task live-recipe-dogfood-20260608123801, 4 satisfied / 0 open criteria, Dispatch active, heartbeat live, and nudge_worker succeeded."
+        - "Dashboard server was stopped after verification."
+
+  - id: T004
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "Run release/package readiness gates after live dogfood and record no-publish proof."
+    allowed_files:
+      - "docs/goals/live-recipe-dogfood/state.yaml"
+      - "docs/goals/live-recipe-dogfood/notes/**"
+    verify:
+      - "scripts/package-smoke"
+      - "scripts/release-check"
+      - "npm test -- --runInBand"
+      - "git diff --check"
+      - "git status --short"
+    stop_if:
+      - "Release gate tries to publish."
+      - "Generated dist output cannot be cleaned safely."
+      - "A gate fails twice with the same unknown root cause."
+    receipt:
+      result: done
+      changed_files:
+        - "docs/goals/live-recipe-dogfood/state.yaml"
+      summary: "Release/package readiness gates passed after live dogfood; no npm publish occurred; generated build output was removed."
+      commands:
+        - cmd: "scripts/package-smoke"
+          status: pass
+          note: "Tarball exposed conveyor/workerctl and bundled skills; package docs/preview assets are covered by the hardened script."
+        - cmd: "scripts/release-check"
+          status: pass
+          note: "Built, packed, installed cleanly, verified bins/skills, and printed no-publish release receipt."
+        - cmd: "npm test -- --runInBand"
+          status: pass
+          note: "103/103 tests passed."
+        - cmd: "git diff --check"
+          status: pass
+        - cmd: "rm -rf dist dashboard/dist"
+          status: pass
+        - cmd: "lsof -ti tcp:8798"
+          status: pass
+          note: "Exited 1 after cleanup, proving no dashboard listener remained."
+      evidence:
+        - "release-check receipt: packed npm tarball, installed it in a clean prefix, and verified bundled skills without publishing."
+        - "npm test TAP summary: tests 103, pass 103, fail 0."
+        - "git status after cleanup contains only existing GoalBuddy/planning dirty files plus this live board."
+
+  - id: T999
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Audit whether the live recipe dogfood oracle is satisfied and name any remaining dogfood blockers."
+    inputs:
+      - "All done task receipts"
+      - "Live task audit/replay/export evidence"
+      - "Dashboard evidence"
+      - "Release gate receipts"
+      - "Current dirty diff"
+    constraints:
+      - "Do not implement."
+      - "Reject completion if live tmux-backed behavior was not proven."
+      - "Reject completion if cleanup or no-publish proof is missing."
+      - "Use docs/agent-evidence-playbook.md closeout shape."
+    expected_output:
+      - "complete | not_complete"
+      - "full_outcome_complete: true | false"
+      - "missing evidence"
+      - "remaining dogfood blockers or release decision"
+    receipt:
+      result: done
+      decision: complete
+      full_outcome_complete: true
+      summary: "The live recipe dogfood oracle is satisfied for this tranche: a disposable tmux-backed goalbuddy-conveyor pair started, acknowledged manager/worker contracts, routed worker completion and nudge_worker through Dispatch push delivery, appeared in the dashboard, exported/audited/replayed, cleaned up, and passed package/release/test gates without npm publish."
+      disproof_attempt:
+        failure_mode: "The run could look successful while leaving live sessions/dashboard processes behind, missing real push delivery, omitting dashboard evidence, or relying only on package/no-tmux proof."
+        checks:
+          - "scripts/workerctl audit live-recipe-dogfood-20260608123801 --json showed worker_task_complete and nudge_worker delivered via push."
+          - "scripts/workerctl replay live-recipe-dogfood-20260608123801 included nudge_worker and push delivery."
+          - "Playwright dashboard assertions found task, worker, manager, Dispatch, criteria, and replay evidence."
+          - "scripts/workerctl sessions --state active had no matching live-recipe-dogfood sessions after cleanup."
+          - "tmux list-sessions had no matching live-recipe-dogfood sessions after cleanup."
+          - "lsof -ti tcp:8798 had no listener after dashboard shutdown."
+          - "scripts/package-smoke, scripts/release-check, npm test -- --runInBand, and git diff --check passed."
+      evidence:
+        - "T001 prerequisite receipt: codex, tmux, pair, dashboard, and cleanup paths mapped."
+        - "T002 live pair receipt: live-recipe-dogfood-20260608123801 with worker/manager tmux sessions and Dispatch watch."
+        - "T003 dashboard receipt: screenshot /tmp/live-recipe-dogfood-20260608123801/dashboard.png and Playwright checks all true."
+        - "T004 release gate receipt: package smoke, release check, tests, diff check passed; no npm publish."
+      residual_risk:
+        - "This proves a disposable read-only live smoke. It does not prove a long-running mutating GoalBuddy conveyor task across multiple child boards."
+        - "Historical unrelated active/stale sessions remain in the default database, but the disposable live-recipe-dogfood sessions were cleaned up."
+
+checks:
+  dirty_fingerprint: unknown
+  last_verification:
+    result: pass
+    task: T999
+    commands:
+      - "scripts/workerctl sessions --state active"
+      - "tmux list-sessions"
+      - "lsof -ti tcp:8798"
+      - "node check-goal-state.mjs docs/goals/live-recipe-dogfood/state.yaml"
