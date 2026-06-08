@@ -636,6 +636,7 @@ interface ParsedRuntimeArgs {
     managerObjective: string | null;
     managerPermissionsJson: string | null;
     managerPermit: string[];
+    managerRecipe: string | null;
     managerReference: string[];
     managerRequireAcks: boolean;
     managerTool: string[];
@@ -844,6 +845,7 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
     managerObjective: null,
     managerPermissionsJson: null,
     managerPermit: [],
+    managerRecipe: null,
     managerReference: [],
     managerRequireAcks: false,
     managerTool: [],
@@ -1658,6 +1660,16 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       }
       flags.managerMode = value.value;
       index += 1;
+    } else if (arg === "--manager-recipe") {
+      if (command !== "pair") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --manager-recipe", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.managerRecipe = value.value;
+      index += 1;
     } else if (arg === "--manager-objective") {
       if (command !== "pair") {
         return { command, enabled, error: "Unsupported TypeScript runtime option: --manager-objective", explicit, flags, task };
@@ -1777,6 +1789,16 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
         return { command, enabled, error: value.error, explicit, flags, task };
       }
       flags.managerObjective = value.value;
+      index += 1;
+    } else if (arg === "--recipe") {
+      if (command !== "manager-config") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --recipe", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.managerRecipe = value.value;
       index += 1;
     } else if (arg === "--guideline") {
       if (command !== "manager-config") {
@@ -6185,6 +6207,7 @@ function runPairCommand(
       managerObjective: parsed.flags.managerObjective,
       managerPermissionsJson: parsed.flags.managerPermissionsJson,
       managerPermit: parsed.flags.managerPermit,
+      managerRecipe: parsed.flags.managerRecipe,
       managerReference: parsed.flags.managerReference,
       managerRequireAcks: parsed.flags.managerRequireAcks,
       managerTool: parsed.flags.managerTool,
@@ -6523,6 +6546,7 @@ function ensurePairManagerConfig(
     managerObjective: string | null;
     managerPermissionsJson: string | null;
     managerPermit: string[];
+    managerRecipe: string | null;
     managerReference: string[];
     managerRequireAcks: boolean;
     managerTool: string[];
@@ -6532,6 +6556,7 @@ function ensurePairManagerConfig(
 ): { config: ManagerConfigRecord; seededByPair: boolean } {
   const existing = managerConfigSync(database, options.taskId);
   const requested = options.managerMode !== null
+    || options.managerRecipe !== null
     || options.managerObjective !== null
     || options.managerGuideline.length > 0
     || options.managerAcceptance.length > 0
@@ -6553,6 +6578,7 @@ function ensurePairManagerConfig(
   if (supervisionMode !== "light" && supervisionMode !== "guided" && supervisionMode !== "strict") {
     throw new Error("manager_mode must be light, guided, or strict");
   }
+  const recipeName = cleanManagerRecipeName(options.managerRecipe, existing?.recipe_name ?? (existing === null ? "custom" : null));
   const objective = options.managerObjective !== null ? options.managerObjective : existing?.objective ?? null;
   const guidelines = options.managerGuideline.length > 0 ? options.managerGuideline : existing?.guidelines ?? [];
   const acceptanceCriteria = options.managerAcceptance.length > 0
@@ -6574,13 +6600,14 @@ function ensurePairManagerConfig(
 
   database.prepare(`
     insert into manager_configs(
-      task_id, supervision_mode, objective, guidelines_json,
+      task_id, recipe_name, supervision_mode, objective, guidelines_json,
       acceptance_criteria_json, reference_paths_json, permissions_json,
       tools_json, epilogues_json, nudge_on_completion, require_acks,
       revision, created_at, updated_at
     )
-    values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+    values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
     on conflict(task_id) do update set
+      recipe_name = excluded.recipe_name,
       supervision_mode = excluded.supervision_mode,
       objective = excluded.objective,
       guidelines_json = excluded.guidelines_json,
@@ -6592,6 +6619,7 @@ function ensurePairManagerConfig(
       nudge_on_completion = excluded.nudge_on_completion,
       require_acks = excluded.require_acks,
       revision = case when
+        manager_configs.recipe_name is not excluded.recipe_name or
         manager_configs.supervision_mode is not excluded.supervision_mode or
         manager_configs.objective is not excluded.objective or
         manager_configs.guidelines_json is not excluded.guidelines_json or
@@ -6606,6 +6634,7 @@ function ensurePairManagerConfig(
       updated_at = excluded.updated_at
   `).run(
     options.taskId,
+    recipeName,
     supervisionMode,
     objective,
     stableJson(guidelines),
@@ -13113,6 +13142,7 @@ function insertCompatEventSync(
 
 function managerConfigMutationRequested(parsed: ParsedRuntimeArgs): boolean {
   return parsed.flags.managerMode !== null
+    || parsed.flags.managerRecipe !== null
     || parsed.flags.managerObjective !== null
     || parsed.flags.managerGuideline.length > 0
     || parsed.flags.managerAcceptance.length > 0
@@ -13140,6 +13170,7 @@ function upsertManagerConfigFromParsed(
   const parsed = options.parsed;
   const existing = options.existing;
   const supervisionMode = parsed.flags.managerMode ?? existing?.supervision_mode ?? "guided";
+  const recipeName = cleanManagerRecipeName(parsed.flags.managerRecipe, existing?.recipe_name ?? null);
   const objective = parsed.flags.managerObjective !== null ? parsed.flags.managerObjective : existing?.objective ?? null;
   const guidelines = parsed.flags.managerGuideline.length > 0 ? parsed.flags.managerGuideline : existing?.guidelines ?? [];
   const acceptanceCriteria = parsed.flags.managerAcceptance.length > 0
@@ -13166,13 +13197,14 @@ function upsertManagerConfigFromParsed(
 
   database.prepare(`
     insert into manager_configs(
-      task_id, supervision_mode, objective, guidelines_json,
+      task_id, recipe_name, supervision_mode, objective, guidelines_json,
       acceptance_criteria_json, reference_paths_json, permissions_json,
       tools_json, epilogues_json, nudge_on_completion, require_acks,
       revision, created_at, updated_at
     )
-    values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+    values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
     on conflict(task_id) do update set
+      recipe_name = excluded.recipe_name,
       supervision_mode = excluded.supervision_mode,
       objective = excluded.objective,
       guidelines_json = excluded.guidelines_json,
@@ -13184,6 +13216,7 @@ function upsertManagerConfigFromParsed(
       nudge_on_completion = excluded.nudge_on_completion,
       require_acks = excluded.require_acks,
       revision = case when
+        manager_configs.recipe_name is not excluded.recipe_name or
         manager_configs.supervision_mode is not excluded.supervision_mode or
         manager_configs.objective is not excluded.objective or
         manager_configs.guidelines_json is not excluded.guidelines_json or
@@ -13198,6 +13231,7 @@ function upsertManagerConfigFromParsed(
       updated_at = excluded.updated_at
   `).run(
     options.taskId,
+    recipeName,
     supervisionMode,
     objective,
     stableJson(guidelines),
@@ -13235,6 +13269,17 @@ function cleanManagerNudgeOnCompletion(value: string): string {
     throw new Error("--nudge-on-completion must be one of: off, ask-operator, auto-review, auto-proceed");
   }
   return value;
+}
+
+function cleanManagerRecipeName(value: string | null, existing: string | null): string | null {
+  if (value === null) {
+    return existing;
+  }
+  const normalized = normalizeManagerRecipeName(value);
+  if (normalized === "custom") {
+    return null;
+  }
+  return managerRecipeDefinition(normalized).name;
 }
 
 function managerPermissionWarnings(permissions: Record<string, unknown> | null): string[] {

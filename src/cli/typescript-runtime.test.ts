@@ -3729,6 +3729,8 @@ test("TypeScript runtime handles pair spawn bind run and dispatch with fake runn
         "Build a thing",
         "--task-prompt",
         "Do the worker part",
+        "--manager-recipe",
+        "goalbuddy",
         "--manager-permit",
         "verification.run_pytest",
         "--manager-tool",
@@ -3873,16 +3875,18 @@ test("TypeScript runtime handles pair spawn bind run and dispatch with fake runn
         worker: "pair-worker",
       });
       const managerConfig = database.prepare(`
-        select permissions_json, tools_json, epilogues_json, nudge_on_completion, require_acks
+        select recipe_name, permissions_json, tools_json, epilogues_json, nudge_on_completion, require_acks
         from manager_configs
         where task_id = ?
       `).get(payload.task.id) as {
         epilogues_json: string;
         nudge_on_completion: string;
         permissions_json: string;
+        recipe_name: string;
         require_acks: number;
         tools_json: string;
       };
+      assert.equal(managerConfig.recipe_name, "goalbuddy-conveyor");
       assert.deepEqual(JSON.parse(managerConfig.permissions_json), {
         communication: [],
         context: ["fetch_prs"],
@@ -7787,6 +7791,8 @@ test("TypeScript runtime handles manager-config and manager-permission by defaul
         "policy-task",
         "--mode",
         "strict",
+        "--recipe",
+        "ux polish",
         "--objective",
         "Check the release contract.",
         "--guideline",
@@ -7828,6 +7834,7 @@ test("TypeScript runtime handles manager-config and manager-permission by defaul
         repo: string[];
         worker_session: string[];
       };
+      recipe_name: string;
       reference_paths: string[];
       require_acks: boolean;
       revision: number;
@@ -7836,6 +7843,7 @@ test("TypeScript runtime handles manager-config and manager-permission by defaul
       warnings: string[];
     };
     assert.equal(config.supervision_mode, "strict");
+    assert.equal(config.recipe_name, "ux-polish-loop");
     assert.equal(config.objective, "Check the release contract.");
     assert.deepEqual(config.guidelines, ["Nudge only on stale evidence."]);
     assert.deepEqual(config.acceptance_criteria, ["CI is green."]);
@@ -7913,8 +7921,9 @@ test("TypeScript runtime handles manager-config and manager-permission by defaul
       env: {},
     });
     assert.equal(update.exitCode, 0);
-    const updated = JSON.parse(update.stdout ?? "{}") as { objective: string; revision: number };
+    const updated = JSON.parse(update.stdout ?? "{}") as { objective: string; recipe_name: string; revision: number };
     assert.equal(updated.objective, "Check the merged PR.");
+    assert.equal(updated.recipe_name, "ux-polish-loop");
     assert.equal(updated.revision, 2);
 
     const eventDb = openDatabaseSync(dbPath);
