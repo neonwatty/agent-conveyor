@@ -1,10 +1,12 @@
 import { createReadStream, statSync } from "node:fs";
 import { createServer } from "node:http";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const port = Number.parseInt(process.env.PORT ?? "8765", 10);
 const host = process.env.HOST ?? "127.0.0.1";
-const landingPage = resolve("docs/landing-page.html");
+const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const landingPage = resolve(packageRoot, "docs/landing-page.html");
 
 try {
   statSync(landingPage);
