@@ -7517,6 +7517,7 @@ def _continuation_reviewer_context(
             "epilogues": (config or {}).get("epilogues") or [],
             "nudge_on_completion": (config or {}).get("nudge_on_completion") if config else None,
             "permissions": (config or {}).get("permissions") or {},
+            "recipe_name": (config or {}).get("recipe_name") if config else None,
             "tools": (config or {}).get("tools") or [],
         },
         "manager_continuation": {

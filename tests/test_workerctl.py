@@ -1590,6 +1590,12 @@ class DatabaseTests(unittest.TestCase):
             conn = self.open_db(tmpdir)
             self.insert_worker(conn, "worker-1", "worker-a")
             self.insert_task(conn, "task-1", "task-a")
+            worker_db.upsert_manager_config(
+                conn,
+                task_id="task-1",
+                supervision_mode="strict",
+                recipe_name="goalbuddy-conveyor",
+            )
             worker_db.bind_task_worker(conn, task="task-a", worker="worker-a", binding_id="binding-1")
             manager_id = worker_db.create_manager(
                 conn,
@@ -1609,6 +1615,7 @@ class DatabaseTests(unittest.TestCase):
             self.assertEqual(snapshot["manager"]["state"], "ready")
             self.assertEqual(snapshot["manager"]["tmux_pane_id"], "%2")
             self.assertEqual(snapshot["manager"]["codex_args"], ["--model", "test"])
+            self.assertEqual(snapshot["manager_config"]["recipe_name"], "goalbuddy-conveyor")
 
     def test_task_audit_returns_events_and_commands(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -24894,6 +24901,7 @@ class PairCommandTests(unittest.TestCase):
                     conn,
                     task_id=task_id,
                     supervision_mode="guided",
+                    recipe_name="nudge-whats-next",
                     permissions={"context": ["spawn_reviewer"]},
                     nudge_on_completion="auto-review",
                     tools=["pytest"],
@@ -24930,6 +24938,7 @@ class PairCommandTests(unittest.TestCase):
                 "assert ctx['constraints']['manager_rollout_access'] is False; "
                 "assert 'manager_rollout' not in ctx; "
                 "assert 'manager_cycles' not in ctx; "
+                "assert ctx['manager_config_summary']['recipe_name']=='nudge-whats-next'; "
                 "assert ctx['acceptance_criteria']; "
                 "assert ctx['worker_continuation']['payload']['next']=='run focused tests'; "
                 "print(json.dumps({'agreement':'compatible','verdict':'amend','addendum':'Prefer full verification.','rationale':'Allowed context reviewed.'}))"
