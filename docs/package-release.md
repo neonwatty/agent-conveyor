@@ -53,6 +53,14 @@ warning alone as a failed release gate when the command exits 0 and the JSON
 health result reports `"ok": true`; record it in the receipt so first-run stderr
 is not confused with package failure.
 
+Live tmux dogfood may pause newly spawned Codex sessions on a "Hooks need
+review" prompt before Codex writes session metadata. For release smoke, choose
+"Continue without trusting" unless the operator explicitly wants to trust the
+hook changes for that workspace. If an unrelated MCP server such as PostHog
+fails to start because of local credentials, treat that as environmental noise
+for Agent Conveyor release gates when `conveyor doctor`, `conveyor db-doctor`,
+cycle/audit/replay/export, and cleanup receipts still pass.
+
 If you need to debug the release gate manually, use the equivalent core
 commands:
 
