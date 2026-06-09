@@ -86,6 +86,63 @@ test("TypeScript runtime help honors workerctl program name", () => {
   });
   assert.equal(command.exitCode, 0);
   assert.match(command.stdout ?? "", /^usage: workerctl start /);
+
+  const workerAck = runTypescriptRuntimeCommand({
+    args: ["worker-ack", "--help"],
+    env: {},
+    program: "workerctl",
+  });
+  assert.equal(workerAck.exitCode, 0);
+  assert.match(workerAck.stdout ?? "", /usage: workerctl worker-ack <task> --from-stdin/);
+  assert.match(workerAck.stdout ?? "", /"goal_restatement"/);
+  assert.match(workerAck.stdout ?? "", /--path <workerctl\.db>/);
+
+  const managerAck = runTypescriptRuntimeCommand({
+    args: ["manager-ack", "--help"],
+    env: {},
+  });
+  assert.equal(managerAck.exitCode, 0);
+  assert.match(managerAck.stdout ?? "", /usage: conveyor manager-ack <task> --from-stdin/);
+  assert.match(managerAck.stdout ?? "", /"supervision_contract"/);
+
+  const criteria = runTypescriptRuntimeCommand({
+    args: ["criteria", "--help"],
+    env: {},
+  });
+  assert.equal(criteria.exitCode, 0);
+  assert.match(criteria.stdout ?? "", /criteria <task> \[--list\|--add --criterion <text> --source <source>\|--accept ID/);
+  assert.match(criteria.stdout ?? "", /--criterion "Note file exists" --source manager_inferred/);
+
+  const finishTask = runTypescriptRuntimeCommand({
+    args: ["finish-task", "--help"],
+    env: {},
+  });
+  assert.equal(finishTask.exitCode, 0);
+  assert.match(finishTask.stdout ?? "", /finish-task <task> --reason <reason>/);
+  assert.match(finishTask.stdout ?? "", /--require-criteria-audit/);
+  assert.doesNotMatch(finishTask.stdout ?? "", /--json/);
+
+  const pair = runTypescriptRuntimeCommand({
+    args: ["pair", "--help"],
+    env: {},
+  });
+  assert.equal(pair.exitCode, 0);
+  assert.match(pair.stdout ?? "", /pair --task <task> --worker-name <worker> --manager-name <manager>/);
+  assert.match(pair.stdout ?? "", /--task-goal <text>/);
+  assert.match(pair.stdout ?? "", /--task-prompt <text>/);
+  assert.match(pair.stdout ?? "", /--manager-acceptance <text>/);
+  assert.match(pair.stdout ?? "", /--cwd <dir>/);
+  assert.match(pair.stdout ?? "", /--accept-trust/);
+  assert.match(pair.stdout ?? "", /--no-dispatch/);
+  assert.match(pair.stdout ?? "", /--dry-run/);
+  assert.match(pair.stdout ?? "", /--json/);
+
+  const nudge = runTypescriptRuntimeCommand({
+    args: ["nudge", "--help"],
+    env: {},
+  });
+  assert.equal(nudge.exitCode, 0);
+  assert.match(nudge.stdout ?? "", /enqueue-nudge-worker/);
 });
 
 test("TypeScript runtime handles manager recipes by default", () => {
@@ -2699,7 +2756,8 @@ test("TypeScript runtime handles legacy start with bootstrap prompt and Codex pa
     assert.match(prompt, /worker-ack <task-name>/);
     assert.match(prompt, /goal_restatement/);
     assert.match(prompt, /proposed_criteria/);
-    assert.match(prompt, /must-have and follow-up criteria/);
+    assert.match(prompt, /must_have/);
+    assert.match(prompt, /follow_up/);
     assert.match(prompt, /ready_to_start/);
     assert.match(prompt, /Required fields:\n- worker name\n- manager name\n- task name\n- goal/);
     assert.match(prompt, /-- '--dangerously-bypass-approvals-and-sandbox' '--sandbox'/);
@@ -3279,9 +3337,13 @@ test("TypeScript runtime handles start-manager bootstrap with seeded manager con
     assert.match(codexShell, /Task goal: Ship the support queue reporter/);
     assert.match(codexShell, /Worker session: late-worker/);
     assert.match(codexShell, /Manager config has already been recorded/);
-    assert.match(codexShell, /cycle late-task/);
+    assert.ok(codexShell.includes("cycle late-task --path"));
+    assert.ok(codexShell.includes(dbPath));
     assert.match(codexShell, /Expected tools: pytest\./);
-    assert.match(codexShell, /finish-task late-task --reason "Accepted criteria satisfied" --require-criteria-audit/);
+    assert.ok(codexShell.includes("manager-ack late-task --from-stdin --path"));
+    assert.ok(codexShell.includes("worker-ack late-task --json --path"));
+    assert.ok(codexShell.includes("criteria late-task --satisfy <id> --proof"));
+    assert.ok(codexShell.includes('finish-task late-task --reason "Accepted criteria satisfied" --require-criteria-audit --path'));
 
     const after = openDatabaseSync(dbPath);
     try {
@@ -3620,6 +3682,11 @@ test("TypeScript runtime pair dry-run keeps Python default dispatch and accepts 
   const root = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-pair-dry-run."));
   try {
     const dbPath = join(root, "workerctl.db");
+    const binDir = join(root, "bin");
+    const workerctlBin = join(binDir, "workerctl");
+    mkdirSync(binDir, { recursive: true });
+    writeFileSync(workerctlBin, "#!/bin/sh\nexit 0\n");
+    chmodSync(workerctlBin, 0o755);
     const result = runTypescriptRuntimeCommand({
       args: [
         "pair",
@@ -3634,7 +3701,7 @@ test("TypeScript runtime pair dry-run keeps Python default dispatch and accepts 
         "--dry-run",
         "--json",
       ],
-      env: {},
+      env: { PATH: `${binDir}:/bin:/usr/bin` },
     });
 
     assert.equal(result.exitCode, 0, result.stderr);
@@ -3651,7 +3718,7 @@ test("TypeScript runtime pair dry-run keeps Python default dispatch and accepts 
     assert.equal(payload.task, "pair-task");
     assert.equal(payload.worker, "pair-worker");
     assert.deepEqual(payload.dispatch_command.slice(0, 4), [
-      join(process.cwd(), "scripts", "workerctl"),
+      workerctlBin,
       "dispatch",
       "--watch",
       "--dispatcher-id",
@@ -3673,7 +3740,7 @@ test("TypeScript runtime pair dry-run keeps Python default dispatch and accepts 
         "--dry-run",
         "--no-dispatch",
       ],
-      env: {},
+      env: { PATH: `${binDir}:/bin:/usr/bin` },
     });
     assert.equal(withoutDispatch.exitCode, 0, withoutDispatch.stderr);
     const withoutDispatchPayload = JSON.parse(withoutDispatch.stdout ?? "{}") as {
@@ -3682,6 +3749,59 @@ test("TypeScript runtime pair dry-run keeps Python default dispatch and accepts 
     };
     assert.equal(withoutDispatchPayload.ensure_dispatch, false);
     assert.equal(withoutDispatchPayload.dispatch_command, null);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("TypeScript runtime pair preflights tmux before mutating task state", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-pair-preflight."));
+  const calls: string[][] = [];
+  const runner: TmuxRunner = (args) => {
+    calls.push(args);
+    if (args.join(" ") === "tmux -V") {
+      return { status: 0, stdout: "tmux 3.5a" };
+    }
+    if (args.join(" ") === "tmux start-server") {
+      return { status: 1, stderr: "tmux access denied" };
+    }
+    return { status: 0, stdout: "" };
+  };
+  try {
+    const dbPath = join(root, "workerctl.db");
+    const binDir = join(root, "bin");
+    const workerctlBin = join(binDir, "workerctl");
+    mkdirSync(binDir, { recursive: true });
+    writeFileSync(workerctlBin, "#!/bin/sh\nexit 0\n");
+    chmodSync(workerctlBin, 0o755);
+
+    const result = runTypescriptRuntimeCommand({
+      args: [
+        "pair",
+        "--task",
+        "pair-task",
+        "--worker-name",
+        "pair-worker",
+        "--manager-name",
+        "pair-manager",
+        "--task-goal",
+        "Build a thing",
+        "--path",
+        dbPath,
+      ],
+      codexCommandResolver: () => "codex",
+      cwd: root,
+      env: { PATH: `${binDir}:/bin:/usr/bin` },
+      tmuxRunner: runner,
+    });
+
+    assert.equal(result.exitCode, 1);
+    assert.match(result.stderr ?? "", /tmux access denied/);
+    assert.deepEqual(calls, [
+      ["tmux", "-V"],
+      ["tmux", "start-server"],
+    ]);
+    assert.equal(existsSync(dbPath), false);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -3703,6 +3823,11 @@ test("TypeScript runtime handles pair spawn bind run and dispatch with fake runn
   };
   try {
     const dbPath = join(root, "workerctl.db");
+    const binDir = join(root, "bin");
+    const workerctlBin = join(binDir, "workerctl");
+    mkdirSync(binDir, { recursive: true });
+    writeFileSync(workerctlBin, "#!/bin/sh\nexit 0\n");
+    chmodSync(workerctlBin, 0o755);
     const rolloutDir = join(root, ".codex", "sessions", "2026");
     mkdirSync(rolloutDir, { recursive: true });
     const workerRollout = join(rolloutDir, "rollout-worker.jsonl");
@@ -3786,7 +3911,7 @@ test("TypeScript runtime handles pair spawn bind run and dispatch with fake runn
         dispatches.push({ command, cwd: options.cwd });
         return { pid: 33333 };
       },
-      env: {},
+      env: { PATH: `${binDir}:/bin:/usr/bin` },
       tmuxRunner: runner,
     });
 
@@ -3829,7 +3954,7 @@ test("TypeScript runtime handles pair spawn bind run and dispatch with fake runn
       cwd: process.cwd(),
     }]);
     assert.deepEqual(payload.dispatch_command.slice(0, 4), [
-      join(process.cwd(), "scripts", "workerctl"),
+      workerctlBin,
       "dispatch",
       "--watch",
       "--dispatcher-id",
@@ -3845,12 +3970,20 @@ test("TypeScript runtime handles pair spawn bind run and dispatch with fake runn
     const workerShell = calls.find((args) => args[1] === "new-session" && args.includes("codex-pair-worker"))?.at(-1) ?? "";
     const managerShell = calls.find((args) => args[1] === "new-session" && args.includes("codex-pair-manager"))?.at(-1) ?? "";
     assert.match(workerShell, /Do the worker part/);
-    assert.match(workerShell, /worker-ack pair-task --from-stdin/);
+    assert.ok(workerShell.includes("worker-ack pair-task --from-stdin --path"));
+    assert.ok(workerShell.includes("Do not call `conveyor finish-task`; the manager owns criteria satisfaction"));
+    assert.ok(workerShell.includes(dbPath));
     assert.match(managerShell, /You are a Codex manager session/);
     assert.match(managerShell, /Task: pair-task/);
     assert.match(managerShell, /Task goal: Build a thing/);
     assert.match(managerShell, /Worker session: pair-worker/);
     assert.match(managerShell, /Manager config has already been recorded/);
+    assert.ok(managerShell.includes("cycle pair-task --path"));
+    assert.ok(managerShell.includes("manager-ack pair-task --from-stdin --path"));
+    assert.ok(managerShell.includes("worker-ack pair-task --json --path"));
+    assert.ok(managerShell.includes("criteria pair-task --satisfy <id> --proof"));
+    assert.ok(managerShell.includes('finish-task pair-task --reason "Accepted criteria satisfied" --require-criteria-audit --path'));
+    assert.ok(managerShell.includes(dbPath));
 
     const database = openDatabaseSync(dbPath);
     try {
