@@ -686,6 +686,332 @@ export function dispatchHeartbeatTelemetryOptions(
   };
 }
 
+type FlowActor = "manager" | "dispatch" | "worker" | "operator" | "workerctl";
+type FlowStatus = "ok" | "waiting" | "blocked" | "failed" | "stale";
+type FlowWaitingOn = "worker" | "manager" | "dispatch" | "operator" | null;
+type FlowProblem = "blocked" | "failed" | "stale" | "side_effect_risk" | "pending_inbox" | "open_criteria" | null;
+
+type FlowLedgerEntry = {
+  actor: FlowActor;
+  correlation_id?: string | null;
+  detail?: Record<string, unknown>;
+  key: string;
+  kind: string;
+  status: FlowStatus;
+  summary: string;
+  time?: string;
+};
+
+type FlowBlocker = {
+  detail?: string;
+  key: string;
+  severity: "warning" | "error";
+  summary: string;
+};
+
+type FlowTerminal = ReturnType<typeof terminalState>;
+type FlowDispatch = {
+  chains: ReturnType<typeof dispatchChainEntries>;
+  health: ReturnType<typeof dispatchHealth>;
+  inbox: ReturnType<typeof dispatchInboxSummary>;
+};
+
+export type FlowObservation = {
+  blockers: FlowBlocker[];
+  counts: {
+    failed_commands: number;
+    open_criteria: number;
+    pending_inbox: number;
+    queued_commands: number;
+  };
+  current: {
+    command_state?: string;
+    command_type?: string;
+    correlation_id?: string | null;
+    problem?: FlowProblem;
+    summary: string;
+    updated_at?: string;
+    waiting_on?: FlowWaitingOn;
+  };
+  dispatch: {
+    dispatcher_id?: string;
+    heartbeat_age_seconds?: number | null;
+    status: "active" | "stale" | "not_observed";
+  };
+  ledger: FlowLedgerEntry[];
+  manager: {
+    alive?: boolean | null;
+    name?: string;
+    state?: string;
+  };
+  task: string | null;
+  worker: {
+    alive?: boolean | null;
+    name?: string;
+    state?: string;
+  };
+};
+
+function flowSession(terminals: FlowTerminal[], role: "manager" | "worker") {
+  return terminals.find((terminal) => terminal.registered_session?.role === role)?.registered_session || null;
+}
+
+function flowChainActor(chain: ReturnType<typeof dispatchChainEntries>[number]): FlowActor {
+  if (chain.command_type === "worker_task_complete") {
+    return "worker";
+  }
+  if (chain.manager_decision_id || chain.manager_cycle_id) {
+    return "manager";
+  }
+  return "dispatch";
+}
+
+function flowChainStatus(chain: ReturnType<typeof dispatchChainEntries>[number]): FlowStatus {
+  if (chain.side_effect_risk) {
+    return "failed";
+  }
+  if (chain.command_state === "failed" || chain.attempts.some((attempt) => attempt.state === "failed")) {
+    return "failed";
+  }
+  if (chain.command_state === "blocked" || chain.attempts.some((attempt) => attempt.state === "blocked")) {
+    return "blocked";
+  }
+  if (chain.notifications?.some((notification) => !notification.consumed_at && notification.state === "delivered")) {
+    return "waiting";
+  }
+  return "ok";
+}
+
+function flowLedgerEntries(chains: ReturnType<typeof dispatchChainEntries>): FlowLedgerEntry[] {
+  return chains.slice(0, 8).map((chain) => ({
+    actor: flowChainActor(chain),
+    correlation_id: chain.correlation_id,
+    detail: {
+      command_id: chain.command_id,
+      manager_cycle_id: chain.manager_cycle_id,
+      manager_decision_id: chain.manager_decision_id,
+      notification_count: chain.notification_count,
+      source_event_id: chain.source_event_id,
+    },
+    key: chain.key,
+    kind: chain.command_type || "handoff",
+    status: flowChainStatus(chain),
+    summary: chain.summary || chain.command_id || chain.correlation_id || "Dispatch handoff",
+    time: chain.time,
+  }));
+}
+
+function flowBlockers({
+  binding,
+  criteria,
+  dispatch,
+  manager,
+  worker,
+}: {
+  binding: Record<string, unknown> | null;
+  criteria: CriteriaSummary;
+  dispatch: FlowDispatch;
+  manager: FlowObservation["manager"];
+  worker: FlowObservation["worker"];
+}): FlowBlocker[] {
+  const blockers: FlowBlocker[] = [];
+  if (!binding) {
+    blockers.push({
+      key: "no-binding",
+      severity: "error",
+      summary: "No active manager/worker binding.",
+    });
+  }
+  if (manager.alive === false) {
+    blockers.push({
+      key: "manager-dead",
+      severity: "error",
+      summary: "Manager session is not alive.",
+    });
+  }
+  if (worker.alive === false) {
+    blockers.push({
+      key: "worker-dead",
+      severity: "error",
+      summary: "Worker session is not alive.",
+    });
+  }
+  if (dispatch.health.core_status !== "active") {
+    blockers.push({
+      detail: dispatch.health.operator_message,
+      key: dispatch.health.core_status === "stale" ? "dispatch-stale" : "dispatch-not-observed",
+      severity: dispatch.health.core_status === "stale" ? "warning" : "error",
+      summary: dispatch.health.core_status === "stale"
+        ? "Dispatch heartbeat is stale."
+        : "Dispatch has not been observed.",
+    });
+  }
+  if (dispatch.health.failed_count > 0) {
+    blockers.push({
+      key: "failed-commands",
+      severity: "error",
+      summary: `${dispatch.health.failed_count} command${dispatch.health.failed_count === 1 ? "" : "s"} failed.`,
+    });
+  }
+  if (dispatch.health.side_effect_risk_count > 0) {
+    blockers.push({
+      key: "side-effect-risk",
+      severity: "error",
+      summary: "A command side effect started but did not complete.",
+    });
+  }
+  if (dispatch.inbox.pending_count > 0) {
+    blockers.push({
+      key: "pending-inbox",
+      severity: "warning",
+      summary: `${dispatch.inbox.pending_count} delivered inbox item${dispatch.inbox.pending_count === 1 ? "" : "s"} remain unconsumed.`,
+    });
+  }
+  if (criteria.open > 0) {
+    blockers.push({
+      key: "open-criteria",
+      severity: "warning",
+      summary: `${criteria.open} accepted/proposed criterion${criteria.open === 1 ? "" : "s"} still open.`,
+    });
+  }
+  return blockers;
+}
+
+function currentFlowProblem(dispatch: FlowDispatch, criteria: CriteriaSummary, blockers: FlowBlocker[]): FlowProblem {
+  if (blockers.some((blocker) => blocker.key === "no-binding")) {
+    return "blocked";
+  }
+  if (dispatch.health.core_status !== "active") {
+    return "stale";
+  }
+  if (dispatch.health.failed_count > 0) {
+    return "failed";
+  }
+  if (dispatch.health.side_effect_risk_count > 0) {
+    return "side_effect_risk";
+  }
+  if (dispatch.inbox.pending_count > 0) {
+    return "pending_inbox";
+  }
+  if (criteria.open > 0) {
+    return "open_criteria";
+  }
+  return null;
+}
+
+function currentFlowWaitingOn(problem: FlowProblem, latestChain: ReturnType<typeof dispatchChainEntries>[number] | undefined): FlowWaitingOn {
+  if (problem === "blocked") {
+    return "operator";
+  }
+  if (problem === "stale" || problem === "failed" || problem === "side_effect_risk") {
+    return "dispatch";
+  }
+  if (problem === "pending_inbox") {
+    return latestChain?.command_type === "nudge_worker" ? "worker" : "manager";
+  }
+  if (problem === "open_criteria") {
+    return "manager";
+  }
+  if (latestChain?.command_type === "nudge_worker") {
+    return "worker";
+  }
+  if (latestChain?.command_type === "worker_task_complete") {
+    return "manager";
+  }
+  return null;
+}
+
+function currentFlowSummary({
+  binding,
+  latestChain,
+  problem,
+}: {
+  binding: Record<string, unknown> | null;
+  latestChain: ReturnType<typeof dispatchChainEntries>[number] | undefined;
+  problem: FlowProblem;
+}): string {
+  if (!binding) {
+    return "No active manager/worker binding";
+  }
+  if (!latestChain) {
+    return "Waiting for first handoff";
+  }
+  if (latestChain.command_type === "worker_task_complete" && latestChain.manager_cycle_id) {
+    return "Worker completed task -> Dispatch routed completion -> Manager consumed it";
+  }
+  if (latestChain.command_type === "worker_task_complete") {
+    return "Worker completed task -> Dispatch routed completion -> waiting for manager";
+  }
+  if (latestChain.command_type === "nudge_worker") {
+    return "Manager decided -> Dispatch routed nudge -> waiting for worker";
+  }
+  if (problem === "failed") {
+    return `${latestChain.command_type || "Command"} failed during Dispatch`;
+  }
+  return latestChain.summary || "Waiting for next handoff";
+}
+
+export function buildFlowObservation({
+  binding,
+  criteria,
+  dispatch,
+  task,
+  terminals,
+}: {
+  binding: Record<string, unknown> | null;
+  criteria: CriteriaSummary;
+  dispatch: FlowDispatch;
+  latestCycle: SnapshotResult["latest_cycle"] | null;
+  task: SnapshotResult["task"] | { name?: string; state?: string } | null;
+  terminals: FlowTerminal[];
+}): FlowObservation {
+  const managerSession = flowSession(terminals, "manager");
+  const workerSession = flowSession(terminals, "worker");
+  const manager = {
+    alive: managerSession?.alive,
+    name: managerSession?.name || (binding?.manager_name ? String(binding.manager_name) : undefined),
+    state: managerSession?.state,
+  };
+  const worker = {
+    alive: workerSession?.alive,
+    name: workerSession?.name || (binding?.worker_name ? String(binding.worker_name) : undefined),
+    state: workerSession?.state,
+  };
+  const blockers = flowBlockers({ binding, criteria, dispatch, manager, worker });
+  const latestChain = dispatch.chains[0];
+  const problem = currentFlowProblem(dispatch, criteria, blockers);
+  const waitingOn = currentFlowWaitingOn(problem, latestChain);
+  const taskName = task?.name || (binding?.task_name ? String(binding.task_name) : null);
+
+  return {
+    blockers,
+    counts: {
+      failed_commands: dispatch.health.failed_count,
+      open_criteria: criteria.open,
+      pending_inbox: dispatch.inbox.pending_count,
+      queued_commands: dispatch.health.queued_count,
+    },
+    current: {
+      command_state: latestChain?.command_state,
+      command_type: latestChain?.command_type,
+      correlation_id: latestChain?.correlation_id,
+      problem,
+      summary: currentFlowSummary({ binding, latestChain, problem }),
+      updated_at: latestChain?.time,
+      waiting_on: waitingOn,
+    },
+    dispatch: {
+      dispatcher_id: typeof dispatch.health.heartbeat?.dispatcher_id === "string" ? dispatch.health.heartbeat.dispatcher_id : undefined,
+      heartbeat_age_seconds: typeof dispatch.health.heartbeat?.stale_seconds === "number" ? dispatch.health.heartbeat.stale_seconds : null,
+      status: dispatch.health.core_status,
+    },
+    ledger: flowLedgerEntries(dispatch.chains),
+    manager,
+    task: taskName,
+    worker,
+  };
+}
+
 function interpretedTimeline({
   binding,
   snapshot,
@@ -805,6 +1131,14 @@ async function dashboardObservation(options: ReturnType<typeof normalizeServerOp
     }
   }
   const observedBinding = binding || bindingFromAudit(audit, taskName);
+  const criteria = acceptanceCriteriaSummary(audit);
+  const dispatch = {
+    chains: dispatchChainEntries(audit),
+    health: dispatchHealth(snapshot, audit, suppressedTelemetry, heartbeatTelemetry),
+    inbox: dispatchInboxSummary(audit),
+  };
+  const latestCycle = snapshot?.latest_cycle || null;
+  const task = snapshot?.task || (taskName ? { name: taskName } : null);
   return {
     audit: audit ? {
       command_attempts: audit.command_attempts || [],
@@ -813,15 +1147,19 @@ async function dashboardObservation(options: ReturnType<typeof normalizeServerOp
       routed_notifications: audit.routed_notifications || [],
     } : null,
     binding: observedBinding,
-    criteria: acceptanceCriteriaSummary(audit),
-    dispatch: {
-      chains: dispatchChainEntries(audit),
-      health: dispatchHealth(snapshot, audit, suppressedTelemetry, heartbeatTelemetry),
-      inbox: dispatchInboxSummary(audit),
-    },
-    latest_cycle: snapshot?.latest_cycle || null,
+    criteria,
+    dispatch,
+    flow: buildFlowObservation({
+      binding: observedBinding,
+      criteria,
+      dispatch,
+      latestCycle,
+      task,
+      terminals,
+    }),
+    latest_cycle: latestCycle,
     polled_at: new Date().toISOString(),
-    task: snapshot?.task || (taskName ? { name: taskName } : null),
+    task,
     terminals,
     timeline: interpretedTimeline({ binding: observedBinding, snapshot, terminals }),
   };
