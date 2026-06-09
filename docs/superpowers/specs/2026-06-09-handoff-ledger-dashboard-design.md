@@ -167,6 +167,22 @@ type FlowObservation = {
     pending_inbox: number;
     open_criteria: number;
   };
+  ledger: Array<{
+    key: string;
+    time?: string;
+    actor: "manager" | "dispatch" | "worker" | "operator" | "workerctl";
+    kind: string;
+    summary: string;
+    status: "ok" | "waiting" | "blocked" | "failed" | "stale";
+    correlation_id?: string | null;
+    detail?: Record<string, unknown>;
+  }>;
+  blockers: Array<{
+    key: string;
+    severity: "warning" | "error";
+    summary: string;
+    detail?: string;
+  }>;
 };
 ```
 
@@ -194,13 +210,18 @@ The Handoff Ledger should become the first thing a user sees in the observation
 rail or a new primary observation band. The existing Dispatch chain list should
 remain available as a drill-down, but it should not be the primary mental model.
 
-Recommended first screen order:
+The selected layout is **Ledger First**:
 
 1. health strip;
 2. current handoff;
 3. actionable blockers;
 4. correlation ledger;
 5. existing detailed Dispatch and timeline sections behind expansion controls.
+
+This layout is the default because it keeps the full operational story visible:
+health, current handoff, blockers, and the event ledger. A small relay treatment
+may be used inside the Current Handoff card, but only when it carries the same
+state as the ledger and does not introduce a second graph-first model.
 
 The visual treatment can be polished, but the layout should stay operational:
 quiet status colors, clear text, stable dimensions, and no decorative graph that
