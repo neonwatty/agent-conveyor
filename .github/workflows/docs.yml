@@ -1,8 +1,8 @@
-name: Tests
+name: Docs
 
 on:
   push:
-    paths-ignore:
+    paths:
       - "README.md"
       - "docs/landing-page.html"
       - "docs/manager-recipes.md"
@@ -10,8 +10,9 @@ on:
       - "scripts/check-landing-page.mjs"
       - "scripts/serve-landing-page.mjs"
       - "scripts/capture-static-html-screenshot.mjs"
+      - ".github/workflows/docs.yml"
   pull_request:
-    paths-ignore:
+    paths:
       - "README.md"
       - "docs/landing-page.html"
       - "docs/manager-recipes.md"
@@ -19,32 +20,28 @@ on:
       - "scripts/check-landing-page.mjs"
       - "scripts/serve-landing-page.mjs"
       - "scripts/capture-static-html-screenshot.mjs"
+      - ".github/workflows/docs.yml"
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
-  unittest:
+  landing-page:
+    name: Landing page static check
     runs-on: macos-latest
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v5
 
-      - name: Show Python version
-        run: python3 --version
-
       - name: Set up Node.js
         uses: actions/setup-node@v6
         with:
           node-version: 24
-          cache: npm
+          package-manager-cache: false
 
-      - name: Install Node dependencies
+      - name: Install dependencies
         run: npm ci
 
-      - name: Run release-candidate deterministic checks
-        run: scripts/rc-check --skip-live-smoke-repeat
-
-      - name: Run package install smoke
-        run: scripts/package-smoke
+      - name: Verify landing page
+        run: node scripts/check-landing-page.mjs

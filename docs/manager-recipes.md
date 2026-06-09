@@ -286,6 +286,59 @@ acceptance criteria, command attempts, routed notifications, inbox backlog, and
 telemetry before deciding whether to wait, nudge, continue, compact, clear, or
 finish.
 
+## Package Dogfood Command
+
+Use a disposable workspace and explicit database path when checking the
+package-facing `goalbuddy-conveyor` recipe flow. The point is to prove the
+published package, not a local checkout.
+
+```bash
+mkdir -p /tmp/agent-conveyor-dogfood/workspace
+git -C /tmp/agent-conveyor-dogfood/workspace init
+
+conveyor pair \
+  --task dogfood-goalbuddy \
+  --worker-name dogfood-worker \
+  --manager-name dogfood-manager \
+  --task-goal "Dogfood the published package GoalBuddy conveyor recipe." \
+  --task-prompt "Create docs/dogfood-note.md with a short received-task note and report a concise receipt." \
+  --manager-recipe goalbuddy-conveyor \
+  --manager-mode strict \
+  --manager-objective "Run a one-child-at-a-time GoalBuddy conveyor until the disposable task is proven satisfied or blocked with evidence." \
+  --manager-guideline "Keep exactly one child board active at a time." \
+  --manager-guideline "Before activating the next child, update the parent receipt." \
+  --manager-acceptance "The disposable worker task has a receipt showing the note file was created or a blocker was recorded." \
+  --manager-acceptance "Manager config records the selected goalbuddy-conveyor recipe." \
+  --manager-allow-worker-compact-clear \
+  --manager-allow-pr \
+  --manager-allow-merge-green \
+  --manager-tool verification.run_tests \
+  --manager-tool context.fetch_prs \
+  --manager-epilogue draft-pr \
+  --manager-epilogue record-handoff \
+  --cwd /tmp/agent-conveyor-dogfood/workspace \
+  --path /tmp/agent-conveyor-dogfood/workerctl.db \
+  --accept-trust
+```
+
+Expected clean transcript shape:
+
+```text
+pair exits 0
+dispatcher watch starts from an executable shipped with the package
+manager_config.recipe_name = goalbuddy-conveyor
+manager-ack and worker-ack are recorded against the same --path database
+cycle shows worker_receipt for docs/dogfood-note.md
+criteria --list shows all accepted criteria satisfied
+finish-task --require-criteria-audit marks the task done
+```
+
+If a dogfood run needs an operator to add `--path`, find the active database, or
+replace a missing source-tree path with the installed `workerctl` bin, the
+package setup is not yet ready for unattended dogfooding. Record the friction in
+the dogfood board so the next recipe or prompt pass has something concrete to
+fix.
+
 ## What The Database Records
 
 The SQLite control plane is the audit surface for these recipes.

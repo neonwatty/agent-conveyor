@@ -14,8 +14,8 @@
         --ink: #17202a;
         --muted: #607080;
         --line: #d7dde4;
-        --page: #f7f4ec;
-        --surface: #fffdf8;
+        --page: #f6f8fb;
+        --surface: #ffffff;
         --coal: #24313d;
         --green: #257a61;
         --blue: #2b68a8;
@@ -174,11 +174,15 @@
         color: #edf7f2;
         display: grid;
         font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
-        font-size: 14px;
+        font-size: 13px;
         gap: 9px;
         margin-top: 30px;
         max-width: 650px;
         padding: 18px;
+      }
+
+      .command code {
+        overflow-wrap: anywhere;
       }
 
       .command span {
@@ -208,6 +212,7 @@
         border: 1px solid var(--line);
         border-radius: 8px;
         min-height: 130px;
+        min-width: 0;
         padding: 16px;
       }
 
@@ -399,7 +404,8 @@
         grid-template-columns: repeat(3, minmax(0, 1fr));
       }
 
-      .db-item {
+      .db-item,
+      .proof-card {
         background: var(--surface);
         border: 1px solid var(--line);
         border-radius: 8px;
@@ -407,15 +413,60 @@
         padding: 16px;
       }
 
-      .db-item strong {
+      .db-item strong,
+      .proof-card strong {
         display: block;
         margin-bottom: 6px;
       }
 
-      .db-item p {
+      .db-item p,
+      .proof-card p {
         color: var(--muted);
         font-size: 14px;
         margin: 0;
+      }
+
+      .proof-grid {
+        display: grid;
+        gap: 12px;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+      }
+
+      .proof-card {
+        min-height: 146px;
+      }
+
+      .proof-card code {
+        color: var(--green);
+        display: block;
+        font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+        font-size: 12px;
+        margin-bottom: 8px;
+      }
+
+      .release-band {
+        background: #eaf1f7;
+      }
+
+      .release-grid {
+        align-items: start;
+        display: grid;
+        gap: 18px;
+        grid-template-columns: minmax(0, 1fr) minmax(360px, 0.78fr);
+      }
+
+      .release-list {
+        display: grid;
+        gap: 10px;
+        margin: 0;
+        padding: 0;
+      }
+
+      .release-list li {
+        background: rgba(255, 255, 255, 0.74);
+        border-left: 4px solid var(--blue);
+        list-style: none;
+        padding: 12px 14px;
       }
 
       .closing {
@@ -448,8 +499,13 @@
         }
 
         .recipes,
+        .proof-grid,
         .db-grid {
           grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .release-grid {
+          grid-template-columns: 1fr;
         }
       }
 
@@ -494,6 +550,7 @@
         }
 
         .recipes,
+        .proof-grid,
         .db-grid {
           grid-template-columns: 1fr;
         }
@@ -511,6 +568,7 @@
         <a href="#recipes">Recipes</a>
         <a href="#flow">Manager Flow</a>
         <a href="#database">Audit Trail</a>
+        <a href="#release">Release</a>
         <a href="../README.md">README</a>
       </nav>
     </header>
@@ -639,6 +697,7 @@
             </p>
             <div class="command">
               <code><span>conveyor</span> manager-config "$TASK" --recipe goalbuddy-conveyor --mode strict</code>
+              <code><span>conveyor</span> pair --task dogfood-goalbuddy --manager-recipe goalbuddy-conveyor --path /tmp/agent-conveyor-dogfood/workerctl.db</code>
               <code><span>conveyor</span> cycle "$TASK"</code>
               <code><span>conveyor</span> replay "$TASK"</code>
             </div>
@@ -660,6 +719,27 @@
               <span class="step-number">4</span>
               <div><strong>Finish with proof</strong><p>Completion needs receipts: tests, screenshots, CI, handoff, audit, or an explicit blocker.</p></div>
             </div>
+            <div class="step">
+              <span class="step-number">5</span>
+              <div><strong>Dogfood the package</strong><p>A clean package run launches Dispatch, records acks, satisfies criteria, and finishes without path fixes.</p></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <div class="section-inner">
+          <h2>Dogfood proof is a first-class recipe output</h2>
+          <p class="section-lede">
+            A useful manager setup is more than a prompt. It should leave enough
+            evidence for another operator to replay what happened and improve
+            the recipe when friction repeats.
+          </p>
+          <div class="proof-grid">
+            <div class="proof-card"><code>manager-config</code><strong>Settings locked</strong><p>Mode, objective, permissions, tools, epilogues, and cleanup policy are saved before the manager starts.</p></div>
+            <div class="proof-card"><code>pair --json</code><strong>Launch is explicit</strong><p>The package records manager, worker, Dispatch PID, cwd, and database path for the run.</p></div>
+            <div class="proof-card"><code>criteria --list</code><strong>Acceptance is visible</strong><p>Criteria move from accepted to satisfied with evidence instead of being inferred from chat.</p></div>
+            <div class="proof-card"><code>replay / audit</code><strong>Closeout is replayable</strong><p>Worker completion, manager decisions, finish task, and cleanup receipts remain inspectable.</p></div>
           </div>
         </div>
       </section>
@@ -680,6 +760,30 @@
             <div class="db-item"><strong>manager_cycles</strong><p>Observation history and the manager context used for each decision.</p></div>
             <div class="db-item"><strong>telemetry_events</strong><p>Dispatch heartbeat, routing issues, stale work, and searchable issue clues.</p></div>
           </div>
+        </div>
+      </section>
+
+      <section id="release" class="release-band">
+        <div class="section-inner release-grid">
+          <div>
+            <h2>Release without token wrangling</h2>
+            <p class="section-lede">
+              Package verification can stay separate from publish. The manual
+              workflow first creates a review tarball; only an explicit publish
+              run with the npm production environment uses Trusted Publishing.
+            </p>
+            <div class="command">
+              <code><span>gh</span> workflow run publish.yml -f version=0.1.8 -f publish=false</code>
+              <code><span>gh</span> workflow run publish.yml -f version=0.1.8 -f publish=true</code>
+              <code><span>npm</span> view agent-conveyor version</code>
+            </div>
+          </div>
+          <ul class="release-list">
+            <li><strong>Verify first</strong><br />Run tests, package smoke, release check, and upload a tarball for review.</li>
+            <li><strong>Publish intentionally</strong><br />Require `publish=true`, a matching version input, and the `npm-production` environment.</li>
+            <li><strong>Use OIDC</strong><br />Trusted Publishing removes long-lived npm tokens from the release path.</li>
+            <li><strong>Dogfood after publish</strong><br />Fresh-install the public package before merging release paperwork.</li>
+          </ul>
         </div>
       </section>
 

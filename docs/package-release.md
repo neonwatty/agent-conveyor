@@ -150,6 +150,28 @@ After Trusted Publishing is verified, prefer the npm package setting
 `Require two-factor authentication and disallow tokens`; this disables
 traditional publish tokens while leaving the trusted publisher path usable.
 
+## Docs And Landing Page Verification
+
+The static package landing page has its own focused check and does not need the
+full package release gate when the change is docs-only:
+
+```bash
+node scripts/check-landing-page.mjs
+```
+
+That command syntax-checks the landing-page helper scripts and captures desktop
+and mobile screenshots of `docs/landing-page.html`. GitHub Actions also has a
+docs-only workflow for landing/docs surfaces. The main package test workflow
+ignores changes that touch only:
+
+- `docs/landing-page.html`
+- `docs/manager-recipes.md`
+- `docs/package-release.md`
+- `README.md`
+- `scripts/check-landing-page.mjs`
+- `scripts/serve-landing-page.mjs`
+- `scripts/capture-static-html-screenshot.mjs`
+
 ## Publish Handoff
 
 Publishing is a human-approved final action after the migration readiness audit.
@@ -159,6 +181,11 @@ local publishing only, publish the exact tarball that passed the artifact gates:
 ```bash
 npm publish ./agent-conveyor-<version>.tgz --access public
 ```
+
+If emergency local publishing needs a granular npm token, create the shortest
+reasonable expiration, restrict it to `agent-conveyor`, enable bypass 2FA only
+for that token, and revoke it immediately after publish and registry
+verification.
 
 After publish, verify the real install path:
 
