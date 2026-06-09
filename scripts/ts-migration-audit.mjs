@@ -13,11 +13,8 @@ function readText(path) {
   return readFileSync(join(root, path), "utf8");
 }
 
-function pythonParserCommands() {
-  const text = readText("workerctl/cli.py");
-  return [...text.matchAll(/\.add_parser\(\s*["']([^"']+)["']/g)]
-    .map((match) => match[1])
-    .sort();
+function archivedPythonParserCommands() {
+  return JSON.parse(readText("docs/archive/python-runtime/cli-command-inventory.json")).sort();
 }
 
 function defaultTypescriptRuntimeCommands() {
@@ -47,7 +44,7 @@ function packageInventory() {
 }
 
 const parserOnlyCommands = new Set(["add", "adversarial-check", "visual-diff"]);
-const pythonCommands = pythonParserCommands();
+const pythonCommands = archivedPythonParserCommands();
 const tsCommands = defaultTypescriptRuntimeCommands();
 const missingFromDefault = pythonCommands.filter((command) => !tsCommands.includes(command));
 const unexpectedMissing = missingFromDefault.filter((command) => !parserOnlyCommands.has(command));

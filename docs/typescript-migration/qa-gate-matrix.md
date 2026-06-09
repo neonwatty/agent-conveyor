@@ -6,32 +6,26 @@ run or inspect evidence that would expose it, and record residual risk.
 
 ## Deterministic Local Gates
 
-Current baseline before the migration board:
+Current post-archive baseline:
 
 | Gate | Command | Current baseline |
 | --- | --- | --- |
-| Python unit tests | `python3 -m unittest discover -s tests -v` | pass, 645 tests |
-| ResourceWarning gate | `scripts/check-resource-warnings` | pass, 645 tests |
-| Python compile gate | `python3 -m py_compile scripts/workerctl scripts/check-resource-warnings workerctl/*.py` | pass |
+| Node test ResourceWarning gate | `scripts/check-resource-warnings -- npm test -- --runInBand` | pass |
 | Node/dashboard tests | `npm test -- --runInBand` | pass, 161 tests |
 | Dashboard build | `npm run build` | pass |
 | TypeScript migration audit | `npm run migration:audit:final` | pass after package cutover; npm tarball has no Python runtime/bridge files |
 | Shell syntax | `bash -n scripts/live-smoke scripts/live-smoke-repeat scripts/package-smoke scripts/release-check scripts/rc-check` | pass |
 
-While Python remains in the repository, the Python gates remain required. A
-TypeScript replacement may retire them only after equivalent TypeScript gates
-and package smoke prove the migrated command surface no longer imports or
-executes Python for the migrated paths.
+The archived Python runtime lives under `docs/archive/python-runtime` for
+historical inspection only. Active gates must use the TypeScript runtime and
+Node-based release helpers.
 
 ## Release-Candidate Gate
 
 `scripts/rc-check --skip-live-smoke-repeat` currently runs:
 
-- Python unittest.
-- ResourceWarning gate.
-- Python compile gate.
-- TypeScript migration audit.
-- Dashboard tests.
+- Node test ResourceWarning gate.
+- TypeScript migration final audit.
 - Dashboard build.
 - Smoke script syntax checks.
 

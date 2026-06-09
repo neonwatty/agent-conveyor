@@ -109,32 +109,35 @@ esac
 
 CODEX_HOME="$CODEX_HOME_DIR" PATH="$PREFIX/bin:$PATH" "$CONVEYOR" install-skills --codex-home "$CODEX_HOME_DIR" --json > "$WORK_DIR/install-skills.json"
 
-python3 - "$WORK_DIR/install-skills.json" "$CODEX_HOME_DIR" <<'PY'
-import json
-import os
-import sys
-from pathlib import Path
+node - "$WORK_DIR/install-skills.json" "$CODEX_HOME_DIR" <<'JS'
+const fs = require("fs");
+const path = require("path");
 
-receipt_path = Path(sys.argv[1])
-codex_home = Path(sys.argv[2])
-receipt = json.loads(receipt_path.read_text())
-skill_names = {row["name"] for row in receipt["skills"]}
-expected = {"manage-codex-workers", "codex-review"}
-missing = expected - skill_names
-if missing:
-    raise SystemExit(f"missing installed skills: {sorted(missing)}")
+const receiptPath = process.argv[2];
+const codexHome = process.argv[3];
+const receipt = JSON.parse(fs.readFileSync(receiptPath, "utf8"));
+const skillNames = new Set(receipt.skills.map((row) => row.name));
+const missing = ["manage-codex-workers", "codex-review"].filter((name) => !skillNames.has(name));
+if (missing.length) {
+  throw new Error(`missing installed skills: ${JSON.stringify(missing)}`);
+}
 
-review_helper = codex_home / "skills" / "codex-review" / "scripts" / "codex-review"
-for path in (
-    codex_home / "skills" / "manage-codex-workers" / "SKILL.md",
-    codex_home / "skills" / "codex-review" / "SKILL.md",
-    review_helper,
-):
-    if not path.exists():
-        raise SystemExit(f"expected installed asset missing: {path}")
-if not os.access(review_helper, os.X_OK):
-    raise SystemExit(f"expected executable helper: {review_helper}")
-PY
+const reviewHelper = path.join(codexHome, "skills", "codex-review", "scripts", "codex-review");
+for (const candidate of [
+  path.join(codexHome, "skills", "manage-codex-workers", "SKILL.md"),
+  path.join(codexHome, "skills", "codex-review", "SKILL.md"),
+  reviewHelper,
+]) {
+  if (!fs.existsSync(candidate)) {
+    throw new Error(`expected installed asset missing: ${candidate}`);
+  }
+}
+try {
+  fs.accessSync(reviewHelper, fs.constants.X_OK);
+} catch {
+  throw new Error(`expected executable helper: ${reviewHelper}`);
+}
+JS
 
 echo "== Release check receipt =="
 printf 'tarball=%s\n' "$TARBALL"

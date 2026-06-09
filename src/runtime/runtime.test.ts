@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -60,7 +59,7 @@ import type { TmuxRunner } from "./tmux.js";
 import { writePngRgba } from "./visual-diff.js";
 import { initializeDatabaseSync, openDatabaseSync } from "../state/database.js";
 
-test("tmux command builders preserve Python argument order", () => {
+test("tmux command builders preserve stable argument order", () => {
   assert.equal(tmuxSession("worker-a"), "codex-worker-a");
   assert.equal(tmuxTarget("worker-a"), "codex-worker-a");
   assert.deepEqual(hasSessionArgs("worker-a"), ["tmux", "has-session", "-t", "codex-worker-a"]);
@@ -459,8 +458,8 @@ test("task lifecycle helpers create tasks, emit events, and list budget shape", 
   }
 });
 
-test("task lifecycle helpers match Python create/list task shape", () => {
-  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-tasks-python."));
+test("task lifecycle helpers expose the archived list task shape", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-tasks-shape."));
   try {
     const dbPath = join(root, "workerctl.db");
     const database = openDatabaseSync(dbPath);
@@ -472,28 +471,21 @@ test("task lifecycle helpers match Python create/list task shape", () => {
       summary: "Middleware replaced.",
       taskId: "task-auth",
     });
-    database.close();
-
-    const python = spawnSync("python3", ["-c", `
-import json
-from pathlib import Path
-from workerctl import db
-conn = db.connect(Path(${JSON.stringify(dbPath)}))
-try:
-    print(json.dumps(db.list_tasks(conn), sort_keys=True))
-finally:
-    conn.close()
-`], {
-      cwd: process.cwd(),
-      encoding: "utf8",
-    });
-    assert.equal(python.status, 0, python.stderr);
-
-    const readDatabase = openDatabaseSync(dbPath);
     try {
-      assert.deepEqual(JSON.parse(python.stdout), listTasksSync(readDatabase));
+      assert.deepEqual(listTasksSync(database), [
+        {
+          budget: null,
+          created_at: "2026-05-08T10:00:00Z",
+          goal: "Finish auth refactor.",
+          id: "task-auth",
+          name: "auth-refactor",
+          state: "candidate",
+          summary: "Middleware replaced.",
+          updated_at: "2026-05-08T10:00:00Z",
+        },
+      ]);
     } finally {
-      readDatabase.close();
+      database.close();
     }
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -575,8 +567,8 @@ test("session binding helpers create active bindings and enforce role/state cons
   }
 });
 
-test("session binding helper matches Python active binding shape", () => {
-  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-bindings-python."));
+test("session binding helper exposes the archived active binding shape", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-bindings-shape."));
   try {
     const dbPath = join(root, "workerctl.db");
     const database = openDatabaseSync(dbPath);
@@ -596,24 +588,17 @@ test("session binding helper matches Python active binding shape", () => {
       taskName: "auth-refactor",
       workerSessionName: "w1",
     });
-    const tsBinding = activeBindingForTaskSync(database, "auth-refactor");
-    database.close();
-
-    const python = spawnSync("python3", ["-c", `
-import json
-from pathlib import Path
-from workerctl import db
-conn = db.connect(Path(${JSON.stringify(dbPath)}))
-try:
-    print(json.dumps(db.active_binding_for_task(conn, task_name="auth-refactor"), sort_keys=True))
-finally:
-    conn.close()
-`], {
-      cwd: process.cwd(),
-      encoding: "utf8",
+    assert.deepEqual(activeBindingForTaskSync(database, "auth-refactor"), {
+      binding_id: "binding-auth",
+      created_at: "2026-05-08T10:01:00Z",
+      manager_session_id: "session-m1",
+      manager_session_name: "m1",
+      state: "active",
+      task_id: "task-auth",
+      worker_session_id: "session-w1",
+      worker_session_name: "w1",
     });
-    assert.equal(python.status, 0, python.stderr);
-    assert.deepEqual(JSON.parse(python.stdout), tsBinding);
+    database.close();
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -948,8 +933,8 @@ test("command queue stale claim recovery fails claims after side effects started
   }
 });
 
-test("command queue claim result matches Python command record shape", () => {
-  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-command-python."));
+test("command queue claim result exposes the archived command record shape", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-command-shape."));
   try {
     const dbPath = join(root, "workerctl.db");
     const database = openDatabaseSync(dbPath);
@@ -976,30 +961,28 @@ test("command queue claim result matches Python command record shape", () => {
     });
     database.close();
     assert.ok(claimed);
-
-    const python = spawnSync("python3", ["-c", `
-import json
-from pathlib import Path
-from workerctl import db
-conn = db.connect(Path(${JSON.stringify(dbPath)}))
-try:
-    row = conn.execute("""
-        select id, idempotency_key, created_at, updated_at, task_id, worker_id,
-               manager_id, correlation_id, type, state, available_at, claimed_by,
-               claimed_at, claim_expires_at, attempts, max_attempts, payload_json,
-               required_permission, result_json, error
-        from commands
-        where id = 'command-claim'
-    """).fetchone()
-    print(json.dumps(db._command_record(row), sort_keys=True))
-finally:
-    conn.close()
-`], {
-      cwd: process.cwd(),
-      encoding: "utf8",
+    assert.deepEqual(claimed.command, {
+      attempts: 1,
+      available_at: null,
+      claimed_at: "2026-05-23T10:01:00Z",
+      claimed_by: "dispatch-a",
+      claim_expires_at: "2026-05-23T10:01:30Z",
+      correlation_id: "corr-command",
+      created_at: "2000-01-01T00:00:00Z",
+      error: null,
+      id: "command-claim",
+      idempotency_key: "command-claim",
+      manager_id: null,
+      max_attempts: 1,
+      payload: { message: "check worker" },
+      required_permission: null,
+      result: null,
+      state: "attempted",
+      task_id: "task-claim",
+      type: "notify_manager",
+      updated_at: "2026-05-23T10:01:00Z",
+      worker_id: null,
     });
-    assert.equal(python.status, 0, python.stderr);
-    assert.deepEqual(JSON.parse(python.stdout), claimed.command);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -2269,7 +2252,7 @@ test("visual diff loop evidence validates the run before writing artifacts", () 
   }
 });
 
-test("task audit exposes migrated Dispatch and loop evidence surfaces with Python-compatible records", () => {
+test("task audit exposes migrated Dispatch and loop evidence surfaces", () => {
   const root = mkdtempSync(join(tmpdir(), "agent-conveyor-task-audit."));
   try {
     const dbPath = join(root, "workerctl.db");
@@ -2400,59 +2383,21 @@ test("task audit exposes migrated Dispatch and loop evidence surfaces with Pytho
       database.close();
     }
 
-    const python = spawnSync("python3", ["-c", `
-import json
-from pathlib import Path
-from workerctl import db
-conn = db.connect(Path(${JSON.stringify(dbPath)}))
-try:
-    audit = db.task_audit(conn, task="audit-task")
-    subset = {
-        "acceptance_criteria": audit["acceptance_criteria"],
-        "command_attempt_states": [row["state"] for row in audit["command_attempts"]],
-        "command_states": [row["state"] for row in audit["commands"]],
-        "correlation_chains": audit["correlation_chains"],
-        "notification_sessions": [
-            {
-                "source_session_name": row["source_session_name"],
-                "target_session_name": row["target_session_name"],
-            }
-            for row in audit["routed_notifications"]
-        ],
-        "task": audit["task"],
-    }
-    print(json.dumps(subset, sort_keys=True))
-finally:
-    conn.close()
-`], {
-      cwd: process.cwd(),
-      encoding: "utf8",
-    });
-    assert.equal(python.status, 0, python.stderr);
-    const pythonAudit = JSON.parse(python.stdout) as {
-      acceptance_criteria: unknown[];
-      command_attempt_states: string[];
-      command_states: string[];
-      correlation_chains: unknown[];
-      notification_sessions: Array<{ source_session_name: string; target_session_name: string }>;
-      task: Record<string, unknown>;
-    };
-
-    assert.deepEqual(pythonAudit.task, audit.task);
-    assert.deepEqual(pythonAudit.acceptance_criteria, audit.acceptance_criteria);
-    assert.deepEqual(pythonAudit.command_states, audit.commands.map((command) => command.state));
-    assert.deepEqual(pythonAudit.command_attempt_states, audit.command_attempts.map((attempt) => attempt.state));
-    assert.deepEqual(pythonAudit.correlation_chains, audit.correlation_chains);
-    assert.deepEqual(pythonAudit.notification_sessions, audit.routed_notifications.map((notification) => ({
+    assert.deepEqual(audit.commands.map((command) => command.state), ["succeeded"]);
+    assert.deepEqual(audit.command_attempts.map((attempt) => attempt.state), ["succeeded"]);
+    assert.deepEqual(audit.routed_notifications.map((notification) => ({
       source_session_name: notification.source_session_name,
       target_session_name: notification.target_session_name,
-    })));
+    })), [
+      { source_session_name: "manager-a", target_session_name: "worker-a" },
+      { source_session_name: "worker-a", target_session_name: "manager-a" },
+    ]);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
 
-test("task replay entries mirror Python migrated audit subset", () => {
+test("task replay entries mirror migrated audit subset", () => {
   const root = mkdtempSync(join(tmpdir(), "agent-conveyor-task-replay."));
   try {
     const dbPath = join(root, "workerctl.db");
@@ -2519,25 +2464,8 @@ test("task replay entries mirror Python migrated audit subset", () => {
       database.close();
     }
 
-    const python = spawnSync("python3", ["-c", `
-import json
-from pathlib import Path
-from workerctl import db, replay
-conn = db.connect(Path(${JSON.stringify(dbPath)}))
-try:
-    audit = db.task_audit(conn, task="replay-task")
-    print(json.dumps(replay.replay_entries(audit), sort_keys=True))
-finally:
-    conn.close()
-`], {
-      cwd: process.cwd(),
-      encoding: "utf8",
-    });
-    assert.equal(python.status, 0, python.stderr);
-    const pythonEntries = JSON.parse(python.stdout) as unknown[];
     const entries = replayEntriesFromAudit(audit);
 
-    assert.deepEqual(entries, pythonEntries);
     assert.deepEqual(entries.map((entry) => entry.source), [
       "events",
       "commands",

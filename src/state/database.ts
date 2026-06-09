@@ -1,5 +1,4 @@
 import { mkdirSync } from "node:fs";
-import { spawnSync } from "node:child_process";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
@@ -62,7 +61,7 @@ export function initializeDatabaseSync(database: DatabaseSync): void {
     return;
   }
   if (userVersion !== 0 || hasUserTables(database)) {
-    delegateLegacyMigrationToPython(database, userVersion);
+    migrateLegacySchemaSync(database, userVersion);
     return;
   }
 
@@ -74,38 +73,139 @@ export function initializeDatabaseSync(database: DatabaseSync): void {
   database.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
 }
 
-function delegateLegacyMigrationToPython(database: DatabaseSync, userVersion: number): void {
-  const path = databasePath(database);
-  if (!path) {
+function migrateLegacySchemaSync(database: DatabaseSync, userVersion: number): void {
+  if (!databasePath(database)) {
     throw new WorkerctlDatabaseError(
       `Migrating existing schema version ${userVersion} requires a file-backed database`,
     );
   }
 
-  const script = `
-from pathlib import Path
-from workerctl import db
-conn = db.connect(Path(${JSON.stringify(path)}))
-try:
-    db.initialize_database(conn)
-finally:
-    conn.close()
-`;
-  const result = spawnSync("python3", ["-c", script], {
-    cwd: process.cwd(),
-    encoding: "utf8",
-  });
-  if (result.status !== 0) {
-    const detail = (result.stderr || result.stdout || "unknown migration error").trim();
-    throw new WorkerctlDatabaseError(`Python legacy migration failed: ${detail}`);
+  database.exec("PRAGMA foreign_keys = OFF");
+  try {
+    migrateCommandsBlockedStateSync(database);
+    migrateCommandAttemptsBlockedStateSync(database);
+    database.exec(idempotentSchemaSql());
+    addColumnIfMissing(database, "manager_configs", "recipe_name", "text");
+    addColumnIfMissing(database, "sessions", "codex_app_thread_id", "text");
+    addColumnIfMissing(database, "sessions", "codex_app_thread_title", "text");
+    database.prepare(
+      "insert or ignore into schema_migrations(version, applied_at) values (?, ?)",
+    ).run(SCHEMA_VERSION, new Date().toISOString());
+    database.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
+  } finally {
+    database.exec("PRAGMA foreign_keys = ON");
   }
 
-  const migratedVersion = pragmaNumber(database, "user_version");
-  if (migratedVersion !== SCHEMA_VERSION) {
-    throw new WorkerctlDatabaseError(
-      `Python legacy migration left schema version ${migratedVersion}; expected ${SCHEMA_VERSION}`,
-    );
+  if (pragmaNumber(database, "foreign_keys") !== 1) {
+    throw new WorkerctlDatabaseError("SQLite foreign key enforcement is not enabled after legacy migration");
   }
+}
+
+function migrateCommandsBlockedStateSync(database: DatabaseSync): void {
+  if (!hasTable(database, "commands") || tableSql(database, "commands").includes("'blocked'")) {
+    return;
+  }
+  const columns = tableColumns(database, "commands");
+  database.exec(`
+    create table commands_v22(
+      id text primary key,
+      idempotency_key text unique not null,
+      created_at text not null,
+      updated_at text not null,
+      task_id text references tasks(id),
+      worker_id text references workers(id),
+      manager_id text references managers(id),
+      correlation_id text,
+      type text not null,
+      state text not null check (state in ('pending','attempted','succeeded','failed','blocked')),
+      available_at text,
+      claimed_by text,
+      claimed_at text,
+      claim_expires_at text,
+      attempts integer not null default 0 check (attempts >= 0),
+      max_attempts integer not null default 1 check (max_attempts > 0),
+      required_permission text,
+      payload_json text not null check (json_valid(payload_json)),
+      result_json text check (result_json is null or json_valid(result_json)),
+      error text
+    );
+
+    insert into commands_v22(
+      id, idempotency_key, created_at, updated_at, task_id, worker_id,
+      manager_id, correlation_id, type, state, available_at, claimed_by,
+      claimed_at, claim_expires_at, attempts, max_attempts,
+      required_permission, payload_json, result_json, error
+    )
+    select
+      ${selectColumnOrDefault(columns, "id", "lower(hex(randomblob(16)))")},
+      ${selectColumnOrDefault(columns, "idempotency_key", "lower(hex(randomblob(16)))")},
+      ${selectColumnOrDefault(columns, "created_at", "datetime('now')")},
+      ${selectColumnOrDefault(columns, "updated_at", "datetime('now')")},
+      ${selectColumnOrDefault(columns, "task_id", "null")},
+      ${selectColumnOrDefault(columns, "worker_id", "null")},
+      ${selectColumnOrDefault(columns, "manager_id", "null")},
+      ${selectColumnOrDefault(columns, "correlation_id", "null")},
+      ${selectColumnOrDefault(columns, "type", "'notify_manager'")},
+      ${selectColumnOrDefault(columns, "state", "'pending'")},
+      ${selectColumnOrDefault(columns, "available_at", "null")},
+      ${selectColumnOrDefault(columns, "claimed_by", "null")},
+      ${selectColumnOrDefault(columns, "claimed_at", "null")},
+      ${selectColumnOrDefault(columns, "claim_expires_at", "null")},
+      ${selectColumnOrDefault(columns, "attempts", "0")},
+      ${selectColumnOrDefault(columns, "max_attempts", "1")},
+      ${selectColumnOrDefault(columns, "required_permission", "null")},
+      ${selectColumnOrDefault(columns, "payload_json", "'{}'")},
+      ${selectColumnOrDefault(columns, "result_json", "null")},
+      ${selectColumnOrDefault(columns, "error", "null")}
+    from commands;
+
+    drop table commands;
+    alter table commands_v22 rename to commands;
+  `);
+}
+
+function migrateCommandAttemptsBlockedStateSync(database: DatabaseSync): void {
+  if (!hasTable(database, "command_attempts") || tableSql(database, "command_attempts").includes("'blocked'")) {
+    return;
+  }
+  const columns = tableColumns(database, "command_attempts");
+  database.exec(`
+    create table command_attempts_v22(
+      id integer primary key autoincrement,
+      command_id text not null references commands(id),
+      correlation_id text not null,
+      dispatcher_id text not null,
+      started_at text not null,
+      finished_at text,
+      state text not null check (state in ('running','succeeded','failed','abandoned','blocked')),
+      result_json text check (result_json is null or json_valid(result_json)),
+      error text,
+      side_effect_started integer not null default 0 check (side_effect_started in (0, 1)),
+      side_effect_completed integer not null default 0 check (side_effect_completed in (0, 1))
+    );
+
+    insert into command_attempts_v22(
+      id, command_id, correlation_id, dispatcher_id, started_at,
+      finished_at, state, result_json, error, side_effect_started,
+      side_effect_completed
+    )
+    select
+      ${selectColumnOrDefault(columns, "id", "null")},
+      ${selectColumnOrDefault(columns, "command_id", "''")},
+      ${selectColumnOrDefault(columns, "correlation_id", "lower(hex(randomblob(16)))")},
+      ${selectColumnOrDefault(columns, "dispatcher_id", "'legacy-migration'")},
+      ${selectColumnOrDefault(columns, "started_at", "datetime('now')")},
+      ${selectColumnOrDefault(columns, "finished_at", "null")},
+      ${selectColumnOrDefault(columns, "state", "'running'")},
+      ${selectColumnOrDefault(columns, "result_json", "null")},
+      ${selectColumnOrDefault(columns, "error", "null")},
+      ${selectColumnOrDefault(columns, "side_effect_started", "0")},
+      ${selectColumnOrDefault(columns, "side_effect_completed", "0")}
+    from command_attempts;
+
+    drop table command_attempts;
+    alter table command_attempts_v22 rename to command_attempts;
+  `);
 }
 
 export function databaseHealthSync(database: DatabaseSync): DatabaseHealth {
@@ -153,6 +253,51 @@ function hasUserTables(database: DatabaseSync): boolean {
       and name not like 'sqlite_%'
   `).get() as { count: number };
   return row.count > 0;
+}
+
+function idempotentSchemaSql(): string {
+  return SCHEMA_V23_SQL
+    .replaceAll("CREATE TABLE ", "CREATE TABLE IF NOT EXISTS ")
+    .replaceAll("CREATE VIRTUAL TABLE ", "CREATE VIRTUAL TABLE IF NOT EXISTS ")
+    .replaceAll("CREATE UNIQUE INDEX ", "CREATE UNIQUE INDEX IF NOT EXISTS ")
+    .replaceAll("CREATE INDEX ", "CREATE INDEX IF NOT EXISTS ")
+    .replaceAll("CREATE TRIGGER ", "CREATE TRIGGER IF NOT EXISTS ");
+}
+
+function hasTable(database: DatabaseSync, table: string): boolean {
+  const row = database.prepare(`
+    select count(*) as count
+    from sqlite_master
+    where type = 'table'
+      and name = ?
+  `).get(table) as { count: number };
+  return row.count > 0;
+}
+
+function tableSql(database: DatabaseSync, table: string): string {
+  const row = database.prepare(`
+    select sql
+    from sqlite_master
+    where type = 'table'
+      and name = ?
+  `).get(table) as { sql?: string } | undefined;
+  return row?.sql ?? "";
+}
+
+function tableColumns(database: DatabaseSync, table: string): Set<string> {
+  const rows = database.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+  return new Set(rows.map((row) => row.name));
+}
+
+function addColumnIfMissing(database: DatabaseSync, table: string, column: string, definition: string): void {
+  if (!hasTable(database, table) || tableColumns(database, table).has(column)) {
+    return;
+  }
+  database.exec(`alter table ${table} add column ${column} ${definition}`);
+}
+
+function selectColumnOrDefault(columns: Set<string>, column: string, fallbackSql: string): string {
+  return columns.has(column) ? column : fallbackSql;
 }
 
 function schemaNames(database: DatabaseSync, type: "index" | "table" | "trigger"): Set<string> {

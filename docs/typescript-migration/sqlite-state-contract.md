@@ -84,9 +84,8 @@ Useful commands:
 
 ```bash
 WORKERCTL_STATE_ROOT="$(mktemp -d)" scripts/workerctl db-doctor --json
-python3 -m unittest tests.test_workerctl.DatabaseTests tests.test_workerctl.SessionsSchemaTests tests.test_workerctl.CodexEventsSchemaTests -v
-python3 -m py_compile workerctl/*.py
+npm test -- --runInBand
 ```
 
 Completion is blocked if the TypeScript-created schema differs from the
-Python-created schema without a recorded Judge decision.
+archived schema contract without a recorded Judge decision.
