@@ -101,6 +101,56 @@ type DispatchHealth = {
   stale_claim_count: number;
   suppressed_signal_count: number;
 };
+type FlowStatus = "ok" | "waiting" | "blocked" | "failed" | "stale";
+type FlowObservation = {
+  blockers: Array<{
+    detail?: string;
+    key: string;
+    severity: "warning" | "error";
+    summary: string;
+  }>;
+  counts: {
+    failed_commands: number;
+    open_criteria: number;
+    pending_inbox: number;
+    queued_commands: number;
+  };
+  current: {
+    command_state?: string;
+    command_type?: string;
+    correlation_id?: string | null;
+    problem?: string | null;
+    summary: string;
+    updated_at?: string;
+    waiting_on?: string | null;
+  };
+  dispatch: {
+    dispatcher_id?: string;
+    heartbeat_age_seconds?: number | null;
+    status: "active" | "stale" | "not_observed";
+  };
+  ledger: Array<{
+    actor: "manager" | "dispatch" | "worker" | "operator" | "workerctl";
+    correlation_id?: string | null;
+    detail?: Record<string, unknown>;
+    key: string;
+    kind: string;
+    status: FlowStatus;
+    summary: string;
+    time?: string;
+  }>;
+  manager: {
+    alive?: boolean | null;
+    name?: string;
+    state?: string;
+  };
+  task: string | null;
+  worker: {
+    alive?: boolean | null;
+    name?: string;
+    state?: string;
+  };
+};
 type CriteriaSummary = {
   accepted: number;
   deferred: number;
@@ -140,6 +190,7 @@ type Observation = {
       }>;
     };
   };
+  flow?: FlowObservation;
   latest_cycle?: { state?: string } | null;
   polled_at: string;
   task?: { goal?: string; name?: string; state?: string } | null;
@@ -210,6 +261,142 @@ function criteriaLabel(criteria: CriteriaSummary | undefined) {
     `${criteria.open} open`,
     ...extra,
   ].join(" / ");
+}
+
+function statusTone(status: FlowStatus | "active" | "not_observed" | "stale" | undefined) {
+  if (status === "ok" || status === "active") {
+    return "ok";
+  }
+  if (status === "failed" || status === "blocked" || status === "not_observed") {
+    return "error";
+  }
+  return "warning";
+}
+
+function actorLabel(actor: string) {
+  return actor.charAt(0).toUpperCase() + actor.slice(1);
+}
+
+function waitingLabel(value?: string | null) {
+  return value ? actorLabel(value) : "none";
+}
+
+function FlowHealthStrip({ flow }: { flow: FlowObservation }) {
+  const items = [
+    ["Task", flow.task || "none", flow.task ? "ok" : "warning"],
+    ["Manager", flow.manager.alive === false ? "dead" : flow.manager.name || "unknown", flow.manager.alive === false ? "error" : "ok"],
+    ["Worker", flow.worker.alive === false ? "dead" : flow.worker.name || "unknown", flow.worker.alive === false ? "error" : "ok"],
+    ["Dispatch", flow.dispatch.status === "not_observed" ? "not observed" : flow.dispatch.status, statusTone(flow.dispatch.status)],
+    ["Criteria", `${flow.counts.open_criteria} open`, flow.counts.open_criteria > 0 ? "warning" : "ok"],
+    ["Inbox", `${flow.counts.pending_inbox} pending`, flow.counts.pending_inbox > 0 ? "warning" : "ok"],
+    ["Commands", `${flow.counts.failed_commands} failed`, flow.counts.failed_commands > 0 ? "error" : "ok"],
+    ["Queued", String(flow.counts.queued_commands), flow.counts.queued_commands > 0 ? "warning" : "ok"],
+  ];
+  return (
+    <div className="flow-health-strip">
+      {items.map(([label, value, tone]) => (
+        <div key={label} data-state={tone}>
+          <span>{label}</span>
+          <strong>{value}</strong>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function CurrentHandoffCard({ flow }: { flow: FlowObservation }) {
+  return (
+    <section className="current-handoff-card">
+      <h2>Current Handoff</h2>
+      <p className="handoff-summary">{flow.current.summary}</p>
+      <div className="handoff-meta-grid">
+        <div>
+          <span>Waiting on</span>
+          <strong>{waitingLabel(flow.current.waiting_on)}</strong>
+        </div>
+        <div>
+          <span>Reason</span>
+          <strong>{flow.current.problem ? flow.current.problem.replaceAll("_", " ") : "none"}</strong>
+        </div>
+        <div>
+          <span>Correlation</span>
+          <strong>{flow.current.correlation_id || "none"}</strong>
+        </div>
+        <div>
+          <span>Updated</span>
+          <strong>{formatTime(flow.current.updated_at) || "unknown"}</strong>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function ActionableBlockers({ flow }: { flow: FlowObservation }) {
+  return (
+    <section className="flow-blockers">
+      <h2>Needs Attention</h2>
+      {flow.blockers.length ? (
+        <ul>
+          {flow.blockers.map((blocker) => (
+            <li key={blocker.key} data-severity={blocker.severity}>
+              <span aria-hidden="true" />
+              <div>
+                <strong>{blocker.summary}</strong>
+                {blocker.detail ? <em>{blocker.detail}</em> : null}
+              </div>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p>No blockers detected.</p>
+      )}
+    </section>
+  );
+}
+
+function CorrelationLedger({ flow }: { flow: FlowObservation }) {
+  return (
+    <section className="correlation-ledger">
+      <h2>Correlation Ledger</h2>
+      <ol>
+        {flow.ledger.map((entry) => (
+          <li key={entry.key} data-state={statusTone(entry.status)}>
+            <time>{formatTime(entry.time) || "now"}</time>
+            <span>{actorLabel(entry.actor)}</span>
+            <strong>{entry.summary}</strong>
+            <em>{entry.status}</em>
+            {entry.detail ? (
+              <details>
+                <summary>Details</summary>
+                <pre>{JSON.stringify(entry.detail, null, 2)}</pre>
+              </details>
+            ) : null}
+          </li>
+        ))}
+        {flow.ledger.length === 0 ? <li><strong>Waiting for first handoff</strong></li> : null}
+      </ol>
+    </section>
+  );
+}
+
+function HandoffLedgerPanel({ observation }: { observation: Observation | null }) {
+  const flow = observation?.flow;
+  if (!flow) {
+    return (
+      <section className="handoff-ledger-panel">
+        <h2>Handoff Ledger</h2>
+        <p>Waiting for observation flow.</p>
+      </section>
+    );
+  }
+  return (
+    <section className="handoff-ledger-panel">
+      <FlowHealthStrip flow={flow} />
+      <CurrentHandoffCard flow={flow} />
+      <ActionableBlockers flow={flow} />
+      <CorrelationLedger flow={flow} />
+    </section>
+  );
 }
 
 function DispatchPanel({ observation }: { observation: Observation | null }) {
@@ -492,8 +679,12 @@ function App() {
             <h1>Observation</h1>
             <p data-state={pollState}>{pollError || (observation ? `Updated ${formatTime(observation.polled_at)}` : "Starting dashboard shells")}</p>
           </header>
-          <StatePanel observation={observation} />
-          <DispatchPanel observation={observation} />
+          <HandoffLedgerPanel observation={observation} />
+          <details className="observation-details">
+            <summary>State and Dispatch details</summary>
+            <StatePanel observation={observation} />
+            <DispatchPanel observation={observation} />
+          </details>
           <Timeline items={observation?.timeline || []} />
         </aside>
       </section>
