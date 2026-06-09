@@ -5698,6 +5698,62 @@ class CliTests(unittest.TestCase):
             self.assertEqual(final_payload["telemetry"]["dispatch_inbox_consumed"], 1)
             self.assertEqual(final_payload["recommendation"], "ready_for_manager_review")
 
+    def test_create_disposable_binding_surfaces_codex_app_thread_metadata(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "workerctl.db"
+
+            proc = self.run_workerctl(
+                "create-disposable-binding",
+                "app-thread-slice",
+                "--worker",
+                "app-thread-worker",
+                "--manager",
+                "app-thread-manager",
+                "--worker-codex-app-thread-id",
+                "thread-worker-123",
+                "--worker-codex-app-thread-title",
+                "Worker Thread",
+                "--manager-codex-app-thread-id",
+                "thread-manager-456",
+                "--manager-codex-app-thread-title",
+                "Manager Thread",
+                "--required-before-continue",
+                "adversarial_check",
+                "--path",
+                str(db_path),
+                "--json",
+            )
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            payload = json.loads(proc.stdout)
+            quoted_db_path = worker_core.sh_quote(str(db_path.resolve()))
+            quoted_task = worker_core.sh_quote("app-thread-slice")
+            self.assertEqual(payload["worker"]["codex_app_thread_id"], "thread-worker-123")
+            self.assertEqual(payload["worker"]["codex_app_thread_title"], "Worker Thread")
+            self.assertEqual(payload["worker"]["communication"]["delivery_mode"], "pull_required")
+            self.assertEqual(payload["manager"]["codex_app_thread_id"], "thread-manager-456")
+            self.assertEqual(payload["manager"]["codex_app_thread_title"], "Manager Thread")
+            self.assertEqual(payload["manager"]["communication"]["delivery_mode"], "pull_required")
+
+            with worker_db.connect(db_path) as conn:
+                worker = conn.execute(
+                    "select codex_app_thread_id, codex_app_thread_title from sessions where name = ?",
+                    ("app-thread-worker",),
+                ).fetchone()
+                manager = conn.execute(
+                    "select codex_app_thread_id, codex_app_thread_title from sessions where name = ?",
+                    ("app-thread-manager",),
+                ).fetchone()
+            self.assertEqual(worker["codex_app_thread_id"], "thread-worker-123")
+            self.assertEqual(worker["codex_app_thread_title"], "Worker Thread")
+            self.assertEqual(manager["codex_app_thread_id"], "thread-manager-456")
+            self.assertEqual(manager["codex_app_thread_title"], "Manager Thread")
+            replay_setup = payload["replay_commands"][0]
+            self.assertIn("--worker-codex-app-thread-id 'thread-worker-123'", replay_setup)
+            self.assertIn("--worker-codex-app-thread-title 'Worker Thread'", replay_setup)
+            self.assertIn("--manager-codex-app-thread-id 'thread-manager-456'", replay_setup)
+            self.assertIn("--manager-codex-app-thread-title 'Manager Thread'", replay_setup)
+
     def test_dashboard_help_includes_loopback_defaults(self):
         proc = self.run_workerctl("dashboard", "--help")
 
@@ -16266,6 +16322,31 @@ class RegisterCommandsTests(unittest.TestCase):
             row = conn.execute("select pid from sessions where id = ?", (id1,)).fetchone()
             self.assertEqual(row["pid"], 2)  # pid updated on re-register
 
+    def test_register_session_persists_codex_app_thread_metadata(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = self.open_db(tmpdir)
+            session_id = worker_db.register_session(
+                conn, name="app-w", role="worker", codex_session_path="/a",
+                codex_session_id="u1", pid=1, cwd="/repo",
+                codex_app_thread_id="thread-1",
+                codex_app_thread_title="Worker Thread",
+            )
+            same_id = worker_db.register_session(
+                conn, name="app-w", role="worker", codex_session_path="/a",
+                codex_session_id="u1", pid=2, cwd="/repo",
+                codex_app_thread_id="thread-2",
+                codex_app_thread_title="Renamed Worker Thread",
+            )
+
+            self.assertEqual(session_id, same_id)
+            row = conn.execute(
+                "select codex_app_thread_id, codex_app_thread_title, pid from sessions where id = ?",
+                (session_id,),
+            ).fetchone()
+            self.assertEqual(row["codex_app_thread_id"], "thread-2")
+            self.assertEqual(row["codex_app_thread_title"], "Renamed Worker Thread")
+            self.assertEqual(row["pid"], 2)
+
     def test_register_session_rejects_role_change(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             conn = self.open_db(tmpdir)
@@ -16360,6 +16441,7 @@ class RegisterCommandsTests(unittest.TestCase):
             state_dir = Path(tmpdir) / "state"
             state_dir.mkdir()
             db_path = state_dir / "workerctl.db"
+            env = {"WORKERCTL_STATE_ROOT": str(state_dir)}
 
             proc = self.run_cli(
                 "register-worker",
@@ -16367,10 +16449,14 @@ class RegisterCommandsTests(unittest.TestCase):
                 "--codex-session", str(rollout),
                 "--pid", "12345",
                 "--cwd", str(ROOT),
-                "--path", str(db_path),
+                "--codex-app-thread-id", "thread-test-w",
+                "--codex-app-thread-title", "Test Worker Thread",
+                env_extra=env,
             )
             self.assertEqual(proc.returncode, 0, proc.stderr)
             payload = json.loads(proc.stdout)
+            self.assertEqual(payload["codex_app_thread_id"], "thread-test-w")
+            self.assertEqual(payload["codex_app_thread_title"], "Test Worker Thread")
             self.assertEqual(payload["communication"]["session_kind"], "codex_app")
             self.assertEqual(payload["communication"]["receive_style"], "pull")
             self.assertEqual(payload["communication"]["delivery_mode"], "pull_required")
@@ -16379,18 +16465,26 @@ class RegisterCommandsTests(unittest.TestCase):
             self.assertTrue(payload["communication"]["requires_polling"])
             self.assertEqual(
                 payload["communication"]["poll_command_template"],
-                f"conveyor worker-inbox <task> --consume-next --wait --timeout 60 --path {worker_core.sh_quote(str(db_path.resolve()))} --json",
+                "conveyor worker-inbox <task> --consume-next --wait --timeout 60 --json",
             )
 
             conn = worker_db.connect(db_path)
             self.addCleanup(conn.close)
             row = conn.execute(
-                "select role, pid, codex_session_id from sessions where name='test-w'"
+                "select role, pid, codex_session_id, codex_app_thread_id, codex_app_thread_title from sessions where name='test-w'"
             ).fetchone()
             self.assertIsNotNone(row)
             self.assertEqual(row["role"], "worker")
             self.assertEqual(row["pid"], 12345)
             self.assertEqual(row["codex_session_id"], "fake-uuid")
+            self.assertEqual(row["codex_app_thread_id"], "thread-test-w")
+            self.assertEqual(row["codex_app_thread_title"], "Test Worker Thread")
+
+            sessions = self.run_cli("sessions", "--name", "test-w", env_extra=env)
+            self.assertEqual(sessions.returncode, 0, sessions.stderr)
+            session_rows = json.loads(sessions.stdout)
+            self.assertEqual(session_rows[0]["codex_app_thread_id"], "thread-test-w")
+            self.assertEqual(session_rows[0]["codex_app_thread_title"], "Test Worker Thread")
 
     def test_cli_register_manager_without_tmux(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -21533,17 +21627,54 @@ class ManagerBootstrapPromptTests(unittest.TestCase):
 
     def test_skill_documents_simple_codex_app_ralph_loop_entrypoint(self):
         skill = (ROOT / "skills" / "manage-codex-workers" / "SKILL.md").read_text()
+        bundled_skill = (
+            ROOT / "workerctl" / "assets" / "skills" / "manage-codex-workers" / "SKILL.md"
+        ).read_text()
 
-        self.assertIn("One-Prompt Codex App Ralph Loop", skill)
-        self.assertIn("Set up a Codex app Ralph loop", skill)
-        self.assertIn("conveyor create-disposable-binding", skill)
-        self.assertIn("conveyor worker-inbox", skill)
-        self.assertIn("communication", skill)
-        self.assertIn("receive_style=push", skill)
-        self.assertIn("receive_style=pull", skill)
-        self.assertIn("conveyor loop-status", skill)
-        self.assertIn("legacy `workerctl` command remains a compatibility alias", skill)
-        self.assertNotIn("scripts/workerctl", skill)
+        for document in (skill, bundled_skill):
+            self.assertIn("One-Prompt Codex App Ralph Loop", document)
+            self.assertIn("Set up a Codex app Ralph loop", document)
+            self.assertIn("conveyor create-disposable-binding", document)
+            self.assertIn("conveyor worker-inbox", document)
+            self.assertIn("communication", document)
+            self.assertIn("receive_style=push", document)
+            self.assertIn("receive_style=pull", document)
+            self.assertIn("conveyor loop-status", document)
+            self.assertIn("legacy `workerctl` command remains a compatibility alias", document)
+            self.assertIn("create_thread", document)
+            self.assertIn("set_thread_title", document)
+            self.assertIn("send_message_to_thread", document)
+            self.assertIn("do not use `fork_thread`", document)
+            self.assertIn("--worker-codex-app-thread-id", document)
+            self.assertIn("--worker-codex-app-thread-title", document)
+            self.assertIn("Idle polling rule for Codex app/no-tmux sessions", document)
+            self.assertIn("conveyor worker-inbox <task> --consume-next --wait --timeout 60 --json", document)
+            self.assertIn("conveyor manager-inbox <task> --consume-next --wait --timeout 60 --json", document)
+            self.assertIn("A timeout is not completion", document)
+            self.assertIn("role-specific inbox poll", document)
+            self.assertIn("while\n  idle", document)
+            self.assertIn("If app thread tools are not", document)
+            self.assertIn("Durable manager/worker communication still", document)
+            self.assertNotIn("scripts/workerctl", document)
+
+    def test_docs_document_codex_app_thread_creation_boundary(self):
+        readme = (ROOT / "README.md").read_text()
+        recipes = (ROOT / "docs" / "manager-recipes.md").read_text()
+
+        for document in (readme, recipes):
+            self.assertIn("create_thread", document)
+            self.assertIn("set_thread_title", document)
+            self.assertIn("send_message_to_thread", document)
+            self.assertIn("fork_thread", document)
+            self.assertIn("--worker-codex-app-thread-id", document)
+            self.assertIn("--worker-codex-app-thread-title", document)
+            self.assertIn("worker_handoff", document)
+        self.assertIn("The raw terminal", readme)
+        self.assertIn("does not create Codex app threads by itself", readme)
+        self.assertIn("human/app navigation metadata", readme)
+        self.assertIn("routed_notifications", readme)
+        self.assertIn("ongoing manager/worker communication", recipes)
+        self.assertIn("through Dispatch and consumed from inboxes", recipes)
 
     def test_docs_include_local_telemetry_workflow(self):
         readme = (ROOT / "README.md").read_text()

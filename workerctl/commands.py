@@ -2095,6 +2095,10 @@ def _disposable_replay_commands(
     adversarial: bool,
     session_dir: Path,
     db_path: Path,
+    worker_codex_app_thread_id: str | None = None,
+    worker_codex_app_thread_title: str | None = None,
+    manager_codex_app_thread_id: str | None = None,
+    manager_codex_app_thread_title: str | None = None,
     workerctl_path: str = "scripts/workerctl",
 ) -> list[str]:
     path_suffix = f" --path {sh_quote(str(db_path))}"
@@ -2111,6 +2115,14 @@ def _disposable_replay_commands(
     ]
     if template:
         setup_parts.extend(["--template", sh_quote(template)])
+    if worker_codex_app_thread_id:
+        setup_parts.extend(["--worker-codex-app-thread-id", sh_quote(worker_codex_app_thread_id)])
+    if worker_codex_app_thread_title:
+        setup_parts.extend(["--worker-codex-app-thread-title", sh_quote(worker_codex_app_thread_title)])
+    if manager_codex_app_thread_id:
+        setup_parts.extend(["--manager-codex-app-thread-id", sh_quote(manager_codex_app_thread_id)])
+    if manager_codex_app_thread_title:
+        setup_parts.extend(["--manager-codex-app-thread-title", sh_quote(manager_codex_app_thread_title)])
     for evidence in required_before_continue:
         setup_parts.extend(["--required-before-continue", sh_quote(evidence)])
     if adversarial and "adversarial_check" not in required_before_continue:
@@ -2233,6 +2245,14 @@ def _session_with_communication(
     return row
 
 
+def _session_app_thread_metadata(session: Any) -> dict[str, str | None]:
+    data = dict(session)
+    return {
+        "codex_app_thread_id": data.get("codex_app_thread_id"),
+        "codex_app_thread_title": data.get("codex_app_thread_title"),
+    }
+
+
 def command_create_disposable_binding(args: argparse.Namespace) -> int:
     from workerctl import db as worker_db
 
@@ -2286,6 +2306,8 @@ def command_create_disposable_binding(args: argparse.Namespace) -> int:
             role="worker",
             codex_session_path=str(worker_rollout_path),
             codex_session_id=worker_codex_session_id,
+            codex_app_thread_id=getattr(args, "worker_codex_app_thread_id", None),
+            codex_app_thread_title=getattr(args, "worker_codex_app_thread_title", None),
             pid=os.getpid(),
             cwd=cwd,
             tmux_session=None,
@@ -2296,6 +2318,8 @@ def command_create_disposable_binding(args: argparse.Namespace) -> int:
             role="manager",
             codex_session_path=str(manager_rollout_path),
             codex_session_id=manager_codex_session_id,
+            codex_app_thread_id=getattr(args, "manager_codex_app_thread_id", None),
+            codex_app_thread_title=getattr(args, "manager_codex_app_thread_title", None),
             pid=os.getpid(),
             cwd=cwd,
             tmux_session=None,
@@ -2385,10 +2409,14 @@ def command_create_disposable_binding(args: argparse.Namespace) -> int:
                     "tmux_session": None,
                     "codex_session_path": str(manager_rollout_path),
                     "codex_session_id": manager_codex_session_id,
+                    "codex_app_thread_id": getattr(args, "manager_codex_app_thread_id", None),
+                    "codex_app_thread_title": getattr(args, "manager_codex_app_thread_title", None),
                 },
                 task_name=task_row["name"],
                 db_path=db_path,
             ),
+            "codex_app_thread_id": getattr(args, "manager_codex_app_thread_id", None),
+            "codex_app_thread_title": getattr(args, "manager_codex_app_thread_title", None),
             "rollout_path": str(manager_rollout_path),
             "tmux_session": None,
         },
@@ -2402,6 +2430,10 @@ def command_create_disposable_binding(args: argparse.Namespace) -> int:
             adversarial=bool(getattr(args, "adversarial", False)),
             session_dir=session_dir,
             db_path=db_path,
+            worker_codex_app_thread_id=getattr(args, "worker_codex_app_thread_id", None),
+            worker_codex_app_thread_title=getattr(args, "worker_codex_app_thread_title", None),
+            manager_codex_app_thread_id=getattr(args, "manager_codex_app_thread_id", None),
+            manager_codex_app_thread_title=getattr(args, "manager_codex_app_thread_title", None),
         ),
         "run": run,
         "task": {
@@ -2419,10 +2451,14 @@ def command_create_disposable_binding(args: argparse.Namespace) -> int:
                     "tmux_session": None,
                     "codex_session_path": str(worker_rollout_path),
                     "codex_session_id": worker_codex_session_id,
+                    "codex_app_thread_id": getattr(args, "worker_codex_app_thread_id", None),
+                    "codex_app_thread_title": getattr(args, "worker_codex_app_thread_title", None),
                 },
                 task_name=task_row["name"],
                 db_path=db_path,
             ),
+            "codex_app_thread_id": getattr(args, "worker_codex_app_thread_id", None),
+            "codex_app_thread_title": getattr(args, "worker_codex_app_thread_title", None),
             "rollout_path": str(worker_rollout_path),
             "tmux_session": None,
         },
@@ -11112,6 +11148,8 @@ def _register_session_from_args(args: argparse.Namespace, *, role: str) -> dict:
             role=role,
             codex_session_path=codex_session_path,
             codex_session_id=codex_session_id,
+            codex_app_thread_id=getattr(args, "codex_app_thread_id", None),
+            codex_app_thread_title=getattr(args, "codex_app_thread_title", None),
             pid=pid,
             cwd=cwd,
             tmux_session=getattr(args, "tmux_session", None),
@@ -11123,6 +11161,7 @@ def _register_session_from_args(args: argparse.Namespace, *, role: str) -> dict:
             payload={
                 "name": args.name, "role": role, "session_id": session_id,
                 "pid": pid, "codex_session_id": codex_session_id,
+                "codex_app_thread_id": getattr(args, "codex_app_thread_id", None),
             },
         )
         session = worker_db.session_row(conn, name=args.name, role=role)
@@ -11132,6 +11171,7 @@ def _register_session_from_args(args: argparse.Namespace, *, role: str) -> dict:
             "pid": pid, "codex_session_id": codex_session_id,
             "codex_session_path": codex_session_path, "cwd": cwd,
             "tmux_session": session["tmux_session"],
+            **_session_app_thread_metadata(session),
         }
         result["communication"] = _session_communication(session, db_path=db_path)
         return result

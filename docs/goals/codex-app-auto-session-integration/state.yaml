@@ -1,0 +1,478 @@
+# GoalBuddy v2 state.yaml
+# Board truth lives here. goal.md is the editable charter; notes/ holds long receipts only.
+
+version: 2
+
+goal:
+  title: "Codex App Auto Session Integration"
+  slug: "codex-app-auto-session-integration"
+  kind: specific
+  tranche: "Implement and prove app-assisted fresh Codex worker thread setup while preserving terminal/tmux and Dispatch inbox behavior."
+  status: done
+  oracle:
+    signal: "A Codex app manager can create a fresh same-project worker thread, name it, record or surface its app-thread identity in Conveyor setup, and route work through pull-required Dispatch inboxes; terminal/tmux setup remains unchanged."
+    cadence: "after each Worker package and at final audit"
+    final_proof: "Final Judge/PM receipt cites focused tests, diff check, skill/docs inspection, and a live no-edit Codex app thread creation/list/read receipt with title, thread id, cwd, and status."
+  intake:
+    original_request: "Work this up as a GoalBuddy prep board, sequence of tasks with measurable acceptance criteria, and implement."
+    interpreted_outcome: "Agent Conveyor gains a practical app-assisted setup path that creates fresh Codex app worker sessions when invoked from a Codex app manager, while terminal users still get tmux setup and app sessions still communicate via Dispatch inboxes."
+    input_shape: specific
+    audience: "Agent Conveyor users, Codex app manager sessions, Codex app worker sessions, maintainers dogfooding manager/dispatcher/worker loops"
+    authority: approved
+    proof_type: "test + live demo + audit"
+    completion_proof: "A verified implementation plus live no-edit app-thread proof demonstrates fresh Codex app worker creation, title/list accessibility, Conveyor metadata/workflow integration, and pull-required Dispatch communication."
+    likely_misfire: "Shipping docs around forked sessions or app-only behavior while failing fresh `create_thread`, breaking tmux pair creation, or bypassing Dispatch inbox audit."
+    blind_spots_considered:
+      - "Codex app thread tools are app-layer capabilities, not guaranteed terminal CLI capabilities."
+      - "Fresh `create_thread` and same-directory `fork_thread` are different and must not be conflated."
+      - "Direct app-thread messages should not replace `routed_notifications` as durable communication truth."
+      - "Operators need human-readable titles and thread ids to confirm the intended worker."
+      - "Fallback behavior must remain useful when app thread tools are unavailable."
+    existing_plan_facts:
+      - "Same-directory `fork_thread` created thread `019ead56-bc10-7ff0-8043-811e9a1d044a` titled `this is a test`, but that was a fork."
+      - "Fresh `create_thread` created thread `019ead57-6769-7b62-b793-aeeb318c3ae1` in `/Users/neonwatty/Desktop/codex-terminal-manager`, titled `this is a created test`, and `list_threads` showed it idle and accessible."
+      - "Existing no-tmux Dispatch flow uses `delivery_mode='pull_required'` and `manager-inbox`/`worker-inbox` polling."
+      - "The package currently has tmux `pair` and no-tmux `create-disposable-binding`, but no first-class app-thread creation integration."
+
+rules:
+  pm_owns_state: true
+  one_active_task: true
+  max_write_workers: 1
+  no_implementation_without_worker_or_pm_task: true
+  no_completion_without_judge_or_pm_audit: true
+  planning_is_not_completion: true
+  queued_required_worker_blocks_completion: true
+  continuous_until_full_outcome: true
+  missing_input_or_credentials_do_not_stop_goal: true
+  preserve_and_validate_existing_plan: true
+  intake_misfire_must_be_audited: true
+  goal_pressure_requires_oracle: true
+  no_completion_on_weak_proof: true
+  slice_policy:
+    max_consecutive_tiny_tasks: 2
+    prefer_vertical_slices: true
+    judge_picks_largest_safe_slice: true
+    worker_completes_whole_slice: true
+
+agents:
+  scout: installed
+  worker: installed
+  judge: installed
+
+visual_board:
+  selected: local
+  local:
+    status: starting
+    url: "http://goalbuddy.localhost:41737/codex-app-auto-session-integration/"
+    command: "npx goalbuddy board /Users/neonwatty/Desktop/codex-terminal-manager/docs/goals/codex-app-auto-session-integration"
+
+active_task: null
+
+tasks:
+  - id: T001
+    type: scout
+    assignee: Scout
+    status: done
+    reasoning_hint: low
+    objective: "Map the exact integration boundary for app-assisted session creation: current CLI/session schema, installed skill behavior, Codex app thread tools, and no-tmux Dispatch communication."
+    inputs:
+      - "README.md"
+      - "skills/manage-codex-workers/SKILL.md"
+      - "workerctl/commands.py"
+      - "workerctl/cli.py"
+      - "workerctl/db.py"
+      - "src/runtime/**"
+      - "tests/test_workerctl.py"
+      - "Fresh create_thread proof from this discussion"
+    constraints:
+      - "Read-only."
+      - "Do not implement."
+      - "Distinguish fresh create_thread from fork_thread."
+      - "Distinguish app-layer tool capabilities from terminal CLI capabilities."
+      - "Prefer concrete file-path and command evidence."
+    expected_output:
+      - "Current setup paths for terminal/tmux, Codex app/no-tmux, and disposable bindings."
+      - "Where session metadata can safely carry Codex app thread id/title."
+      - "Which behavior belongs in package code versus installed skill/app wrapper instructions."
+      - "Recommended red tests and live proof commands."
+      - "Candidate Worker package with allowed_files, verify commands, and stop conditions."
+    receipt:
+      result: done
+      summary: "Package has terminal/tmux setup and no-tmux Codex app pull setup, but no persisted app-thread id/title or fresh app-thread creation integration. Correct boundary: CLI owns durable state and Dispatch inboxes; Codex app skill/tool layer owns `create_thread`/titles/optional wake-ups."
+      evidence:
+        - "workerctl/db.py sessions schema has tmux and rollout identity fields but no codex_app_thread_id/title."
+        - "workerctl/commands.py::_session_communication derives tmux push vs codex_app pull metadata."
+        - "workerctl/commands.py::command_create_disposable_binding creates no-tmux rollout-backed sessions and returns worker_handoff/poll commands."
+        - "workerctl/cli.py exposes register-worker/register-manager/create-disposable-binding/inbox commands but no app-thread metadata flags."
+        - "src/runtime/notifications.ts and src/runtime/dispatch.ts route no-tmux targets as pull_required."
+        - "tests/test_workerctl.py covers codex_app communication metadata and docs/skill no-tmux strings."
+        - "skills/manage-codex-workers/SKILL.md documents manual app/no-tmux handoff, not create_thread."
+        - "Fresh create_thread proof: thread 019ead57-6769-7b62-b793-aeeb318c3ae1 titled `this is a created test`, cwd /Users/neonwatty/Desktop/codex-terminal-manager, status idle."
+      findings:
+        - "Terminal/tmux path: `pair` and `start-*` remain push-capable and start Dispatch."
+        - "Registered app/no-tmux path: register sessions without --tmux-session and poll worker-inbox/manager-inbox."
+        - "Disposable app/no-tmux path: create-disposable-binding registers pull-required sessions with synthetic rollout files."
+        - "Safe extension point is session metadata and registration/setup output, not Dispatch policy."
+        - "Skill/app wrapper should call create_thread when available; raw terminal CLI should not assume app tool access."
+      recommended_worker_slice: "Extend session metadata and registration/disposable setup output for codex_app_thread_id/title; update docs and skill tests so app-assisted fresh creation is described with terminal and manual fallback behavior."
+
+  - id: T002
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Decide the smallest coherent implementation plan for app-assisted fresh worker thread setup."
+    inputs:
+      - "T001 Scout receipt"
+      - "docs/goals/codex-app-auto-session-integration/goal.md"
+      - "Current dirty diff"
+    constraints:
+      - "Read-only."
+      - "Approve only work that preserves tmux setup and Dispatch inbox semantics."
+      - "Reject any design that requires raw terminal `conveyor` to call Codex app-only tools unless a public API is proven."
+      - "Pick the largest safe useful Worker slice with explicit allowed_files and verification."
+    expected_output:
+      - "Decision: approved | blocked | revise."
+      - "Recommended package/app boundary."
+      - "Exact first Worker objective."
+      - "allowed_files"
+      - "verify"
+      - "stop_if"
+      - "Measurable acceptance criteria for the Worker slice."
+    receipt:
+      result: done
+      decision: approved
+      full_outcome_complete: false
+      rationale: "Approve one schema/CLI metadata Worker slice first. The package cannot and should not make raw terminal `conveyor` call Codex app-only `create_thread`; it should persist and expose app-thread identity when the app/skill layer provides it. This preserves tmux and Dispatch behavior while giving app-assisted setup a durable control-plane anchor."
+      package_app_boundary:
+        package_owns:
+          - "sessions table metadata for app thread id/title"
+          - "register-worker/register-manager/create-disposable-binding output"
+          - "communication block and inbox poll commands"
+          - "Dispatch routed_notifications as durable communication truth"
+        app_skill_owns:
+          - "calling create_thread for fresh Codex app workers when available"
+          - "calling set_thread_title for human-readable names"
+          - "optional send_message_to_thread wake-up prompts"
+          - "falling back to manual worker_handoff when app tools are unavailable"
+      first_worker_objective: "Add durable optional Codex app thread identity metadata to session registration and disposable setup output without changing delivery-mode selection, then prove it with focused tests."
+      allowed_files:
+        - "workerctl/db.py"
+        - "workerctl/commands.py"
+        - "workerctl/cli.py"
+        - "tests/test_workerctl.py"
+        - "src/state/schema-v23.ts"
+        - "src/state/sqlite-contract.ts"
+        - "src/state/state.test.ts"
+      verify:
+        - "python3 -m unittest tests.test_workerctl.SessionRedesignTests tests.test_workerctl.CliTests -v"
+        - "npm test -- --runInBand"
+        - "node /Users/neonwatty/.codex/plugins/cache/goalbuddy/goalbuddy/0.3.8/skills/goalbuddy/scripts/check-goal-state.mjs docs/goals/codex-app-auto-session-integration/state.yaml"
+        - "git diff --check"
+      stop_if:
+        - "Need to call create_thread from raw terminal package code."
+        - "Schema changes require a migration strategy that cannot be verified locally."
+        - "Delivery mode changes for existing tmux or no-tmux sessions."
+        - "Existing registration tests imply app thread metadata weakens rollout/pid identity checks."
+        - "Need files outside the allowed_files list."
+      measurable_acceptance:
+        - "`register-worker` and `register-manager` accept optional app-thread id/title metadata and include it in JSON output."
+        - "`sessions` output includes app-thread metadata for registered sessions when present."
+        - "`create-disposable-binding --json` can include app-thread metadata for worker and manager when provided by the caller, or explicitly null/absent when not provided."
+        - "`communication.delivery_mode` remains `pull_required` for app/no-tmux sessions and `push` for tmux sessions."
+        - "SQLite health and TypeScript schema contract remain consistent after metadata changes."
+        - "Focused tests cover idempotent registration/update of app-thread metadata and no change to tmux/pull communication semantics."
+
+  - id: T003
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "Implement the first approved app-assisted setup slice selected by Judge."
+    inputs:
+      - "T002 Judge receipt"
+    constraints:
+      - "Use tests first for changed behavior when feasible."
+      - "Keep Dispatch as mechanical routing and inbox persistence."
+      - "Preserve tmux push behavior."
+      - "Do not require app thread tools from raw terminal-only CLI paths."
+    allowed_files:
+      - "workerctl/db.py"
+      - "workerctl/commands.py"
+      - "workerctl/cli.py"
+      - "tests/test_workerctl.py"
+      - "src/state/schema-v23.ts"
+      - "src/state/sqlite-contract.ts"
+      - "src/state/state.test.ts"
+    verify:
+      - "python3 -m unittest tests.test_workerctl.SessionRedesignTests tests.test_workerctl.CliTests -v"
+      - "npm test -- --runInBand"
+      - "node /Users/neonwatty/.codex/plugins/cache/goalbuddy/goalbuddy/0.3.8/skills/goalbuddy/scripts/check-goal-state.mjs docs/goals/codex-app-auto-session-integration/state.yaml"
+      - "git diff --check"
+    stop_if:
+      - "Need files outside Judge-approved allowed_files."
+      - "Implementation requires Dispatch to decide task correctness or next work."
+      - "Implementation requires terminal-only CLI to call unavailable Codex app tools."
+      - "Verification fails twice for unrelated pre-existing reasons."
+      - "Fresh app-thread creation proof contradicts the planned integration boundary."
+    expected_output:
+      - "Working package/skill support for the approved app-assisted setup slice."
+      - "Focused tests or direct inspection evidence for the changed behavior."
+      - "Receipt listing changed files and commands."
+    receipt:
+      result: done
+      summary: "Implemented durable optional Codex app thread identity metadata for session registration and disposable no-tmux binding setup without changing Dispatch delivery semantics."
+      changed_files:
+        - "workerctl/db.py"
+        - "workerctl/cli.py"
+        - "workerctl/commands.py"
+        - "src/state/sqlite-contract.ts"
+        - "src/state/schema-v23.ts"
+        - "tests/test_workerctl.py"
+      implementation:
+        - "Bumped the Python/TypeScript SQLite contract to schema version 24 and added nullable `sessions.codex_app_thread_id` and `sessions.codex_app_thread_title` columns with migration support."
+        - "`register-worker` and `register-manager` now accept optional `--codex-app-thread-id` and `--codex-app-thread-title` flags and include that metadata in JSON output."
+        - "`create-disposable-binding` now accepts worker/manager app-thread id/title flags, persists them, returns them in setup JSON, and preserves them in replay commands."
+        - "Session communication metadata remains driven by tmux presence: no-tmux Codex app sessions still use `pull_required` inbox delivery."
+      commands:
+        - cmd: "python3 -m unittest tests.test_workerctl.RegisterCommandsTests.test_register_session_persists_codex_app_thread_metadata tests.test_workerctl.RegisterCommandsTests.test_cli_register_worker_with_explicit_session_path tests.test_workerctl.CliTests.test_create_disposable_binding_creates_no_tmux_pair_and_loop_run tests.test_workerctl.CliTests.test_create_disposable_binding_surfaces_codex_app_thread_metadata -v"
+          status: pass
+          summary: "Ran 4 focused metadata/disposable binding tests OK."
+        - cmd: "python3 -m unittest tests.test_workerctl.SessionsSchemaTests tests.test_workerctl.RegisterCommandsTests tests.test_workerctl.SessionTmuxTests tests.test_workerctl.SessionActionCliTests tests.test_workerctl.SessionLookupFallbackTests tests.test_workerctl.SessionsLegacyFilterTests -v"
+          status: pass
+          summary: "Ran 60 actual session/schema/registration/tmux tests OK."
+        - cmd: "npm test -- --runInBand"
+          status: pass
+          summary: "Ran 103 Node/TAP tests OK, including Python/TypeScript schema parity and pull-required Dispatch routing."
+        - cmd: "node /Users/neonwatty/.codex/plugins/cache/goalbuddy/goalbuddy/0.3.8/skills/goalbuddy/scripts/check-goal-state.mjs docs/goals/codex-app-auto-session-integration/state.yaml"
+          status: pass
+          summary: "Board check passed before this receipt update."
+        - cmd: "git diff --check"
+          status: pass
+      evidence:
+        - "`python3 -m unittest tests.test_workerctl.RegisterCommandsTests.test_register_session_persists_codex_app_thread_metadata tests.test_workerctl.RegisterCommandsTests.test_cli_register_worker_with_explicit_session_path tests.test_workerctl.CliTests.test_create_disposable_binding_creates_no_tmux_pair_and_loop_run tests.test_workerctl.CliTests.test_create_disposable_binding_surfaces_codex_app_thread_metadata -v` passed: 4 tests."
+        - "`python3 -m unittest tests.test_workerctl.SessionRedesignTests tests.test_workerctl.CliTests -v` proved the Judge-listed `SessionRedesignTests` class is absent, while `CliTests` passed 206 tests before discovery failed on the nonexistent class."
+        - "`python3 -m unittest tests.test_workerctl.SessionsSchemaTests tests.test_workerctl.RegisterCommandsTests tests.test_workerctl.SessionTmuxTests tests.test_workerctl.SessionActionCliTests tests.test_workerctl.SessionLookupFallbackTests tests.test_workerctl.SessionsLegacyFilterTests -v` passed: 60 tests."
+        - "`npm test -- --runInBand` passed: 103 Node/TAP tests, including schema contract parity and pull-required Dispatch routing."
+        - "`node /Users/neonwatty/.codex/plugins/cache/goalbuddy/goalbuddy/0.3.8/skills/goalbuddy/scripts/check-goal-state.mjs docs/goals/codex-app-auto-session-integration/state.yaml` passed before this receipt update."
+        - "`git diff --check` passed."
+      residual_risk:
+        - "No app tool calls are made by terminal package code; fresh Codex app thread creation still belongs to the Codex app skill/tool layer and must be documented/proven in later tasks."
+
+  - id: T004
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "Update operator-facing workflow docs and installed skill instructions for automatic Codex app worker creation with terminal/tmux and manual no-tmux fallbacks."
+    inputs:
+      - "T001 Scout receipt"
+      - "T002 Judge receipt"
+      - "T003 Worker receipt if completed"
+    constraints:
+      - "Use exact command and tool names."
+      - "Do not claim terminal CLI can create Codex app threads unless proven."
+      - "Include fallback instructions when app thread tools are unavailable."
+      - "Keep docs aligned with implemented behavior."
+    allowed_files:
+      - "README.md"
+      - "skills/manage-codex-workers/SKILL.md"
+      - "workerctl/assets/skills/manage-codex-workers/SKILL.md"
+      - "docs/manager-recipes.md"
+      - "docs/qa/**"
+      - "tests/test_workerctl.py"
+      - "src/**"
+      - "workerctl/**"
+    verify:
+      - "git diff --check"
+      - "Focused docs/skill test or direct `rg` inspection proving the app-assisted workflow and fallback are present."
+    stop_if:
+      - "Docs need to describe behavior not yet implemented or impossible to verify."
+      - "The skill instructions would cause raw terminal users to try app-only tools."
+      - "Changes require broad unrelated docs rewrites."
+    expected_output:
+      - "Skill and docs clearly select tmux, app-thread creation, or manual no-tmux fallback."
+      - "Worker bootstrap prompt tells app workers to register/ack/poll inbox as appropriate."
+      - "Manager guidance keeps Dispatch inbox as durable truth."
+    receipt:
+      result: done
+      summary: "Updated operator-facing docs and installed skill sources to describe fresh Codex app worker creation, metadata recording, Dispatch inbox communication, and terminal/manual fallbacks."
+      changed_files:
+        - "README.md"
+        - "docs/manager-recipes.md"
+        - "skills/manage-codex-workers/SKILL.md"
+        - "workerctl/assets/skills/manage-codex-workers/SKILL.md"
+        - "tests/test_workerctl.py"
+      implementation:
+        - "The one-prompt Codex app Ralph loop now directs app managers to call `create_thread`, set a readable title with `set_thread_title`, pass `--worker-codex-app-thread-id`/`--worker-codex-app-thread-title` to `create-disposable-binding`, and use `send_message_to_thread` only for the initial `worker_handoff` bootstrap."
+        - "Docs explicitly say raw terminal `conveyor` does not create Codex app threads and that app thread metadata is human/app navigation metadata, not a replacement for rollout ingest or Dispatch receipts."
+        - "Manual fallback remains: create the no-tmux binding without app metadata, open a separate Codex app worker manually, and paste the generated `worker_handoff` prompt."
+        - "The skill and manager recipe explicitly discourage `fork_thread` for this setup unless the user asks to fork or resume the current conversation."
+      commands:
+        - cmd: "python3 -m unittest tests.test_workerctl.ManagerBootstrapPromptTests.test_skill_documents_simple_codex_app_ralph_loop_entrypoint tests.test_workerctl.ManagerBootstrapPromptTests.test_docs_document_codex_app_thread_creation_boundary tests.test_workerctl.CliTests.test_install_skills_copies_bundled_skills -v"
+          status: pass
+          summary: "Ran 3 focused docs/skill/install tests OK."
+        - cmd: "rg -n \"create_thread|set_thread_title|send_message_to_thread|fork_thread|worker-codex-app-thread-id|codex_app_thread_id|routed_notifications|worker_handoff|does not create Codex app threads\" README.md docs/manager-recipes.md skills/manage-codex-workers/SKILL.md workerctl/assets/skills/manage-codex-workers/SKILL.md"
+          status: pass
+          summary: "Direct inspection found the app-assisted workflow and fallback language in README, manager recipes, source skill, and bundled skill."
+        - cmd: "git diff --check"
+          status: pass
+        - cmd: "node /Users/neonwatty/.codex/plugins/cache/goalbuddy/goalbuddy/0.3.8/skills/goalbuddy/scripts/check-goal-state.mjs docs/goals/codex-app-auto-session-integration/state.yaml"
+          status: pass
+          summary: "Board check passed before this receipt update."
+      evidence:
+        - "README.md documents `create_thread`, `set_thread_title`, `send_message_to_thread`, manual fallback, and that terminal `conveyor` does not create Codex app threads."
+        - "Both skill sources document `create_thread` over `fork_thread`, app-thread metadata flags, manual fallback, and Dispatch inboxes as durable communication."
+        - "docs/manager-recipes.md documents fresh same-project app-thread setup for the Inbox / No-Tmux App Loop recipe."
+
+  - id: T005
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "Run a live no-edit Codex app proof for fresh worker thread creation and record the receipt."
+    inputs:
+      - "Implemented setup workflow"
+      - "Current Codex app thread tools"
+    constraints:
+      - "No tracked file edits except board receipt updates or notes."
+      - "Use a disposable thread title."
+      - "Do not ask the new thread to mutate files."
+      - "Record whether this was fresh create_thread or fork_thread."
+    allowed_files:
+      - "docs/goals/codex-app-auto-session-integration/state.yaml"
+      - "docs/goals/codex-app-auto-session-integration/notes/**"
+    verify:
+      - "Create a fresh same-project Codex app thread with create_thread."
+      - "Set a human-readable title."
+      - "Read or list the thread and record id, title, cwd, status, and preview."
+      - "If implemented, verify Conveyor setup metadata exposes the created app thread identity."
+    stop_if:
+      - "Only fork_thread is available."
+      - "Fresh create_thread cannot target the current project root."
+      - "The created thread cannot be listed or read by id."
+      - "The proof would require the worker thread to edit project files."
+    expected_output:
+      - "Live proof note or inline receipt with thread id, title, cwd, status, and access evidence."
+      - "Clear pass/partial/fail conclusion for app-assisted setup."
+    receipt:
+      result: done
+      summary: "Proved fresh same-project Codex app thread creation and Conveyor metadata exposure without asking the new thread to mutate files."
+      changed_files:
+        - "docs/goals/codex-app-auto-session-integration/state.yaml"
+      live_thread:
+        creation_method: "create_thread"
+        not_method: "fork_thread"
+        thread_id: "019ead74-0a90-7741-85aa-c75ef5f2da20"
+        title: "goalbuddy app-thread proof worker"
+        cwd: "/Users/neonwatty/Desktop/codex-terminal-manager"
+        status: "idle"
+        preview: "No-edit proof thread for Agent Conveyor Codex app session integration."
+        worker_reply: "No files modified, no commands run. Idle and ready for manager handoff testing."
+      commands:
+        - cmd: "codex_app.create_thread target project /Users/neonwatty/Desktop/codex-terminal-manager environment local"
+          status: pass
+          summary: "Created fresh thread 019ead74-0a90-7741-85aa-c75ef5f2da20."
+        - cmd: "codex_app.set_thread_title 019ead74-0a90-7741-85aa-c75ef5f2da20 'goalbuddy app-thread proof worker'"
+          status: pass
+        - cmd: "codex_app.read_thread 019ead74-0a90-7741-85aa-c75ef5f2da20"
+          status: pass
+          summary: "Read showed title, cwd /Users/neonwatty/Desktop/codex-terminal-manager, completed no-edit reply, and idle status."
+        - cmd: "codex_app.list_threads query 'goalbuddy app-thread proof worker'"
+          status: pass
+          summary: "List returned the same thread id, title, cwd, and idle status."
+        - cmd: "python3 -m workerctl create-disposable-binding app-thread-live-proof --worker app-thread-live-proof-worker --manager app-thread-live-proof-manager --worker-codex-app-thread-id 019ead74-0a90-7741-85aa-c75ef5f2da20 --worker-codex-app-thread-title 'goalbuddy app-thread proof worker' --path \"$tmpdir/workerctl.db\" --json"
+          status: pass
+          summary: "Disposable binding JSON surfaced worker codex_app_thread_id/title and kept worker communication delivery_mode=pull_required, session_kind=codex_app, receive_style=pull."
+      evidence:
+        - "read_thread returned status idle, cwd /Users/neonwatty/Desktop/codex-terminal-manager, title goalbuddy app-thread proof worker, and the worker's no-edit reply."
+        - "list_threads found the same thread by title with idle status."
+        - "create-disposable-binding output included worker.codex_app_thread_id=019ead74-0a90-7741-85aa-c75ef5f2da20 and worker.codex_app_thread_title=goalbuddy app-thread proof worker."
+        - "Conveyor output preserved Dispatch inbox semantics: worker.communication.delivery_mode=pull_required and poll_command used worker-inbox."
+
+  - id: T999
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Audit whether app-assisted Codex session creation is implemented, verified, and safe to use from Agent Conveyor."
+    inputs:
+      - "All done task receipts"
+      - "Last verification commands"
+      - "Current dirty diff"
+      - "Live Codex app thread creation proof"
+    constraints:
+      - "Do not implement."
+      - "Reject completion if any required Worker task remains queued or active."
+      - "Reject completion if only fork_thread was proven."
+      - "Reject completion if terminal/tmux behavior is unverified after relevant changes."
+      - "Map evidence back to the goal oracle and acceptance criteria."
+    expected_output:
+      - "complete | not_complete"
+      - "full_outcome_complete: true | false"
+      - "Evidence summary"
+      - "Residual risks or next task if not complete"
+    receipt:
+      result: done
+      decision: complete
+      full_outcome_complete: true
+      changed_files:
+        - "README.md"
+        - "docs/manager-recipes.md"
+        - "docs/goals/codex-app-auto-session-integration/goal.md"
+        - "docs/goals/codex-app-auto-session-integration/state.yaml"
+        - "skills/manage-codex-workers/SKILL.md"
+        - "src/state/schema-v23.ts"
+        - "src/state/sqlite-contract.ts"
+        - "tests/test_workerctl.py"
+        - "workerctl/assets/skills/manage-codex-workers/SKILL.md"
+        - "workerctl/cli.py"
+        - "workerctl/commands.py"
+        - "workerctl/db.py"
+      summary: "The oracle is satisfied: a Codex app manager can create a fresh same-project worker thread, name it, record/surface its app-thread identity in Conveyor setup, and continue using pull-required Dispatch inboxes. Terminal/tmux behavior remains covered by fresh session/tmux tests."
+      commands:
+        - cmd: "python3 -m unittest tests.test_workerctl.RegisterCommandsTests.test_register_session_persists_codex_app_thread_metadata tests.test_workerctl.RegisterCommandsTests.test_cli_register_worker_with_explicit_session_path tests.test_workerctl.CliTests.test_create_disposable_binding_creates_no_tmux_pair_and_loop_run tests.test_workerctl.CliTests.test_create_disposable_binding_surfaces_codex_app_thread_metadata tests.test_workerctl.ManagerBootstrapPromptTests.test_skill_documents_simple_codex_app_ralph_loop_entrypoint tests.test_workerctl.ManagerBootstrapPromptTests.test_docs_document_codex_app_thread_creation_boundary tests.test_workerctl.CliTests.test_install_skills_copies_bundled_skills -v"
+          status: pass
+          summary: "Ran 7 focused metadata/docs/install tests OK."
+        - cmd: "python3 -m unittest tests.test_workerctl.SessionsSchemaTests tests.test_workerctl.RegisterCommandsTests tests.test_workerctl.SessionTmuxTests tests.test_workerctl.SessionActionCliTests tests.test_workerctl.SessionLookupFallbackTests tests.test_workerctl.SessionsLegacyFilterTests -v"
+          status: pass
+          summary: "Ran 60 session/schema/registration/tmux tests OK."
+        - cmd: "npm test -- --runInBand"
+          status: pass
+          summary: "Ran 103 Node/TAP tests OK, including schema parity, pull-required Dispatch, and tmux push routing."
+        - cmd: "codex_app.create_thread + set_thread_title + read_thread + list_threads for 019ead74-0a90-7741-85aa-c75ef5f2da20"
+          status: pass
+          summary: "Fresh create_thread, not fork_thread; title goalbuddy app-thread proof worker; cwd /Users/neonwatty/Desktop/codex-terminal-manager; idle and accessible."
+        - cmd: "python3 -m workerctl create-disposable-binding app-thread-live-proof --worker app-thread-live-proof-worker --manager app-thread-live-proof-manager --worker-codex-app-thread-id 019ead74-0a90-7741-85aa-c75ef5f2da20 --worker-codex-app-thread-title 'goalbuddy app-thread proof worker' --path \"$tmpdir/workerctl.db\" --json"
+          status: pass
+          summary: "Conveyor surfaced worker thread id/title and preserved worker communication delivery_mode=pull_required."
+        - cmd: "git diff --check"
+          status: pass
+        - cmd: "node /Users/neonwatty/.codex/plugins/cache/goalbuddy/goalbuddy/0.3.8/skills/goalbuddy/scripts/check-goal-state.mjs docs/goals/codex-app-auto-session-integration/state.yaml"
+          status: pass
+          summary: "Board check passed before this final receipt update."
+      evidence_summary:
+        - "Schema v24 adds optional `codex_app_thread_id` and `codex_app_thread_title` to sessions in Python and TypeScript contracts."
+        - "`register-worker`, `register-manager`, and `create-disposable-binding` accept/surface app-thread metadata without changing tmux/pull delivery selection."
+        - "Docs and installed skill assets tell Codex app managers to use fresh `create_thread`, `set_thread_title`, and optional `send_message_to_thread` bootstrap, with manual no-tmux fallback when app tools are unavailable."
+        - "Live thread 019ead74-0a90-7741-85aa-c75ef5f2da20 proves fresh same-project creation, not a fork, and was readable/listable from this manager session."
+        - "Temporary disposable binding proof showed that thread identity flows into Conveyor JSON while Dispatch remains the inbox source of truth."
+      strongest_failure_mode_checked: "The realistic failure mode was that app-thread integration would blur transport semantics or accidentally replace Dispatch with direct app messages. The live binding and tests disprove that for this slice: app thread identity is metadata, while `delivery_mode=pull_required`, `worker-inbox`, `routed_notifications`, and tmux push tests remain intact."
+      residual_risk:
+        - "The terminal CLI still cannot create Codex app threads by itself; that is intentionally delegated to Codex app tools and documented as a fallback boundary."
+        - "The current installed user skill under ~/.codex may need reinstall/update from the package asset to receive the new instructions."
+
+checks:
+  dirty_fingerprint: unknown
+  last_verification:
+    result: pass
+    task: T999
+    commands:
+      - cmd: "python3 -m unittest tests.test_workerctl.RegisterCommandsTests.test_register_session_persists_codex_app_thread_metadata tests.test_workerctl.RegisterCommandsTests.test_cli_register_worker_with_explicit_session_path tests.test_workerctl.CliTests.test_create_disposable_binding_creates_no_tmux_pair_and_loop_run tests.test_workerctl.CliTests.test_create_disposable_binding_surfaces_codex_app_thread_metadata tests.test_workerctl.ManagerBootstrapPromptTests.test_skill_documents_simple_codex_app_ralph_loop_entrypoint tests.test_workerctl.ManagerBootstrapPromptTests.test_docs_document_codex_app_thread_creation_boundary tests.test_workerctl.CliTests.test_install_skills_copies_bundled_skills -v"
+        status: pass
+      - cmd: "python3 -m unittest tests.test_workerctl.SessionsSchemaTests tests.test_workerctl.RegisterCommandsTests tests.test_workerctl.SessionTmuxTests tests.test_workerctl.SessionActionCliTests tests.test_workerctl.SessionLookupFallbackTests tests.test_workerctl.SessionsLegacyFilterTests -v"
+        status: pass
+      - cmd: "npm test -- --runInBand"
+        status: pass
+      - cmd: "git diff --check"
+        status: pass

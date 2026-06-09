@@ -12,7 +12,7 @@ from workerctl.core import now_iso
 from workerctl.state import state_root
 
 
-SCHEMA_VERSION = 23
+SCHEMA_VERSION = 24
 REQUIRED_TABLES = {
     "acceptance_criteria",
     "agent_observations",
@@ -637,6 +637,8 @@ def migrate(conn: sqlite3.Connection, from_version: int) -> None:
           tmux_pane_id text,
           codex_session_path text,
           codex_session_id text,
+          codex_app_thread_id text,
+          codex_app_thread_title text,
           pid integer,
           cwd text not null,
           registered_at text not null,
@@ -777,6 +779,7 @@ def migrate(conn: sqlite3.Connection, from_version: int) -> None:
     migrate_to_v21_session_inbox(conn)
     migrate_to_v22_blocked_command_state(conn)
     migrate_to_v23_manager_config_recipe(conn)
+    migrate_to_v24_codex_app_thread_metadata(conn)
     sync_worker_ids_to_config_files(conn)
     conn.execute(
         "insert or ignore into schema_migrations(version, applied_at) values (?, ?)",
@@ -1388,6 +1391,12 @@ def migrate_to_v22_blocked_command_state(conn: sqlite3.Connection) -> None:
 def migrate_to_v23_manager_config_recipe(conn: sqlite3.Connection) -> None:
     """Remember which setup recipe produced a manager config."""
     _add_column_if_missing(conn, "manager_configs", "recipe_name", "text")
+
+
+def migrate_to_v24_codex_app_thread_metadata(conn: sqlite3.Connection) -> None:
+    """Remember optional Codex app thread identity for app-assisted setup."""
+    _add_column_if_missing(conn, "sessions", "codex_app_thread_id", "text")
+    _add_column_if_missing(conn, "sessions", "codex_app_thread_title", "text")
 
 
 def sync_worker_ids_to_config_files(conn: sqlite3.Connection) -> None:
@@ -2474,6 +2483,8 @@ def register_session(
     codex_session_id: str,
     pid: int,
     cwd: str,
+    codex_app_thread_id: str | None = None,
+    codex_app_thread_title: str | None = None,
     tmux_session: str | None = None,
     tmux_pane_id: str | None = None,
     identity_token: str | None = None,
@@ -2481,9 +2492,9 @@ def register_session(
 ) -> str:
     """Idempotent upsert into `sessions`. Returns the session id.
 
-    On conflict by name: updates pid, codex_session_path, codex_session_id, tmux fields,
-    and state='active'. Raises WorkerError if a row exists with the same name but a
-    different role.
+    On conflict by name: updates pid, codex_session_path, codex_session_id,
+    Codex app thread metadata, tmux fields, and state='active'. Raises
+    WorkerError if a row exists with the same name but a different role.
     """
     if role not in ("worker", "manager"):
         raise WorkerError(f"invalid session role: {role}")
@@ -2503,15 +2514,19 @@ def register_session(
         insert into sessions(
           id, name, role, identity_token,
           tmux_session, tmux_pane_id,
-          codex_session_path, codex_session_id, pid,
+          codex_session_path, codex_session_id,
+          codex_app_thread_id, codex_app_thread_title,
+          pid,
           cwd, registered_at, last_heartbeat_at, state
         )
-        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')
+        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')
         on conflict(name) do update set
           tmux_session = excluded.tmux_session,
           tmux_pane_id = coalesce(excluded.tmux_pane_id, sessions.tmux_pane_id),
           codex_session_path = excluded.codex_session_path,
           codex_session_id = excluded.codex_session_id,
+          codex_app_thread_id = excluded.codex_app_thread_id,
+          codex_app_thread_title = excluded.codex_app_thread_title,
           pid = excluded.pid,
           cwd = excluded.cwd,
           last_heartbeat_at = excluded.last_heartbeat_at,
@@ -2521,7 +2536,9 @@ def register_session(
         (
             session_id, name, role, token,
             tmux_session, tmux_pane_id,
-            codex_session_path, codex_session_id, pid,
+            codex_session_path, codex_session_id,
+            codex_app_thread_id, codex_app_thread_title,
+            pid,
             cwd, now, now,
         ),
     )

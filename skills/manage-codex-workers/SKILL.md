@@ -35,24 +35,52 @@ Skill behavior:
    report blockers.
 3. Choose concise task, worker, manager, and run names when the user does not
    provide them. Do not ask the user to invent generated names.
-4. Create the no-tmux binding with `conveyor create-disposable-binding`
+4. If running in the Codex app and thread tools are available, create a fresh
+   same-project worker thread with `create_thread`, name it with
+   `set_thread_title`, and keep the returned thread id/title. Use
+   `create_thread` for this flow; do not use `fork_thread` unless the user
+   explicitly asks to fork or resume this exact conversation.
+5. Create the no-tmux binding with `conveyor create-disposable-binding`
    using `--template` when a template is known, `--adversarial`, a bounded
-   `--max-iterations`, and `--json`.
-5. Ensure Dispatch is running or tell the user the single command to start it:
+   `--max-iterations`, and `--json`. When step 4 produced a worker thread id,
+   pass it through `--worker-codex-app-thread-id` and
+   `--worker-codex-app-thread-title` so Conveyor can surface the app identity
+   in `sessions`, `discover`, and setup JSON. If app thread tools are not
+   available, create the binding without those flags and ask the user to open a
+   separate Codex app worker session manually.
+6. Ensure Dispatch is running or tell the user the single command to start it:
    `conveyor dispatch --watch --dispatcher-id dispatch-local`.
-6. Read the returned `communication` blocks. A worker or manager with
+7. Read the returned `communication` blocks. A worker or manager with
    `session_kind=tmux` and `receive_style=push` can receive direct tmux pushes;
    one with `session_kind=codex_app` and `receive_style=pull` must poll the
    printed inbox command.
-7. Give the worker Codex app session the generated `worker_handoff` prompt.
-   It should keep polling `conveyor worker-inbox <task> --consume-next --wait
-   --timeout 60 --json` through the bounded loop until no inbox item remains
-   or `max_iterations` is reached.
-8. After each worker pass, require concrete evidence and structured
+8. Give the worker Codex app session the generated `worker_handoff` prompt.
+   If step 4 created a fresh worker thread, use `send_message_to_thread` only
+   to deliver that bootstrap prompt. Durable manager/worker communication still
+   goes through Dispatch and `worker-inbox`/`manager-inbox`; direct app-thread
+   messages are not Dispatch receipts. The worker should keep polling
+   `conveyor worker-inbox <task> --consume-next --wait --timeout 60 --json`
+   through the bounded loop until no inbox item remains or `max_iterations` is
+   reached.
+9. After each worker pass, require concrete evidence and structured
    `loop-evidence adversarial-check` proof before queueing another
    `enqueue-continue-iteration`.
-9. Use `conveyor loop-status <task> --run <run> --json` and telemetry/audit
+10. Use `conveyor loop-status <task> --run <run> --json` and telemetry/audit
    receipts before declaring the loop ready for manager review.
+
+Idle polling rule for Codex app/no-tmux sessions:
+
+- When a worker has `session_kind=codex_app` or `receive_style=pull`, its
+  idle/check-in command is
+  `conveyor worker-inbox <task> --consume-next --wait --timeout 60 --json`.
+- When a manager has `session_kind=codex_app` or `receive_style=pull`, its
+  idle/check-in command is
+  `conveyor manager-inbox <task> --consume-next --wait --timeout 60 --json`.
+- Repeat the appropriate command whenever the session is idle, after finishing
+  a received instruction, and before deciding there is nothing more to do.
+  A timeout is not completion; it is only a quiet poll interval.
+- Keep `conveyor dispatch --watch --dispatcher-id dispatch-local` running so
+  Dispatch can route new messages into those inboxes.
 
 Reference docs:
 
@@ -77,6 +105,9 @@ Supervision is built on three primitives: **sessions**, **tasks**, and
   `communication` block. Use it to decide the receive style for both worker and
   manager: tmux sessions are push-capable, while Codex app/no-tmux sessions
   receive through `manager-inbox` or `worker-inbox` polling.
+- App-assisted setup may also record optional `codex_app_thread_id` and
+  `codex_app_thread_title` metadata. This identifies the human-readable Codex
+  app thread; it does not replace rollout ingest or Dispatch inbox receipts.
 - A **task** is a unit of supervised work with a goal.
 - A **binding** ties one worker session and one manager session to one task.
 
@@ -222,6 +253,15 @@ from the pid via `lsof`):
 ```bash
 conveyor register-worker --name foo --pid <WORKER_PID> \
   --cwd "$PWD" --tmux-session codex-foo
+```
+
+When a Codex app tool created or identified the thread, preserve that identity
+with optional metadata flags:
+
+```bash
+conveyor register-worker --name foo --pid <WORKER_PID> \
+  --cwd "$PWD" --codex-app-thread-id <THREAD_ID> \
+  --codex-app-thread-title "Human readable title"
 ```
 
 If `lsof` discovery fails, pass the rollout path explicitly:
@@ -681,6 +721,16 @@ etc.) run `conveyor db-doctor --live`.
 
 ## Natural-Language Command Mapping
 
+- "set up a Codex app Ralph loop": if the current session has Codex app thread
+  tools, call `create_thread` for a fresh same-project worker, call
+  `set_thread_title`, run `conveyor create-disposable-binding` with
+  `--worker-codex-app-thread-id` and `--worker-codex-app-thread-title`, then
+  send the returned `worker_handoff` using `send_message_to_thread`. If those
+  tools are unavailable, run `create-disposable-binding` without thread
+  metadata and give the user the `worker_handoff` prompt to paste into a
+  manually opened worker. Keep Dispatch as the source of durable communication,
+  and make both Codex app sessions repeat their role-specific inbox poll while
+  idle.
 - "register this Codex session as the worker for dashboard setup <CODE>":
   derive `dashboard-<CODE>-worker`, run `conveyor doctor-self`, then
   `conveyor register-worker --name dashboard-<CODE>-worker --pid <PID> --cwd <CWD> --tmux-session <SESSION>`.

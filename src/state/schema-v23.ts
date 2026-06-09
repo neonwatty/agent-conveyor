@@ -1,4 +1,4 @@
-// Generated from a Python-created Agent Conveyor v22 database schema.
+// Generated from a Python-created Agent Conveyor v24 database schema.
 // Regenerate deliberately when workerctl/db.py SCHEMA_VERSION changes.
 export const SCHEMA_V23_SQL = String.raw`
 CREATE TABLE acceptance_criteria(
@@ -287,6 +287,8 @@ CREATE TABLE sessions(
           tmux_pane_id text,
           codex_session_path text,
           codex_session_id text,
+          codex_app_thread_id text,
+          codex_app_thread_title text,
           pid integer,
           cwd text not null,
           registered_at text not null,
