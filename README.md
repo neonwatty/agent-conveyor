@@ -131,6 +131,10 @@ successful JSON. Treat that warning as expected Node runtime noise when the
 command exits 0 and the JSON result reports `"ok": true`.
 Before publishing `agent-conveyor` to npm, use
 [`docs/package-release.md`](docs/package-release.md).
+The preferred publish path is the manual GitHub Actions `publish.yml` workflow
+with npm Trusted Publishing enabled for the `npm-production` environment. Use
+`publish=false` for artifact review and `publish=true` only for an approved
+release version that is not already on npm.
 
 For common manager setups, start with
 [`docs/manager-recipes.md`](docs/manager-recipes.md). It maps natural-language
@@ -144,6 +148,8 @@ For a package-facing overview of these modes, open
 [`docs/landing-page.html`](docs/landing-page.html) locally or host it as a
 static landing page. From the repo, `npm run docs:landing` serves it at
 `http://127.0.0.1:8765/`.
+Use `node scripts/check-landing-page.mjs` for a docs-only desktop/mobile
+screenshot gate; this does not run the full package release smoke.
 
 After install, the intended Codex app entry point is natural language. Open a
 new Codex app session in the target repo and say:
