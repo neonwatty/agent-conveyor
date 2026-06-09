@@ -28,6 +28,17 @@ Not allowed: merge without green CI; compact/clear before handoff; run two child
 User confirmed: yes
 ```
 
+## Runtime Notes
+
+On Node releases where `node:sqlite` is still experimental, Conveyor commands
+may print a SQLite `ExperimentalWarning` before otherwise valid JSON or status
+output. Treat the process exit code and parsed JSON payload as the command
+result, and keep the warning in receipts only when it obscures a real failure.
+
+If a dogfood run reports `database is locked`, prefer retrying the Conveyor CLI
+command after the active manager/worker write completes. Avoid direct SQLite
+inspection while Dispatch is writing to the same `--path` database.
+
 ## Recipe Summary
 
 | Recipe | Use When | Mode | Main Gates | Cleanup |

@@ -206,7 +206,7 @@ export function runTypescriptRuntimeCommand(options: TypescriptRuntimeOptions): 
     return errorResult(`unknown command: ${parsed.command}`);
   }
   if (parsed.flags.help) {
-    return textResult([`usage: ${program} ${parsed.command} [-h] [options]`]);
+    return textResult(commandHelpText(program, parsed.command));
   }
   if (parsed.error) {
     return errorResult(parsed.error);
@@ -466,6 +466,71 @@ export function runTypescriptRuntimeCommand(options: TypescriptRuntimeOptions): 
   } catch (error) {
     return errorResult(error instanceof Error ? error.message : String(error));
   }
+}
+
+function commandHelpText(program: "conveyor" | "workerctl", command: string): string[] {
+  const path = "[--path <workerctl.db>]";
+  const linesByCommand: Record<string, string[]> = {
+    criteria: [
+      `usage: ${program} criteria <task> [--list|--add --criterion <text> --source <source>|--accept ID|--satisfy ID|--defer ID|--reject ID] ${path} [--json]`,
+      "",
+      "Examples:",
+      `  ${program} criteria my-task --list --json --path /tmp/work/workerctl.db`,
+      `  ${program} criteria my-task --add --criterion "Note file exists" --source manager_inferred --status accepted --path /tmp/work/workerctl.db`,
+      `  ${program} criteria my-task --satisfy 1 --proof "File exists" --evidence-json '{"artifact":{"path":"docs/note.md"}}' --path /tmp/work/workerctl.db`,
+    ],
+    "finish-task": [
+      `usage: ${program} finish-task <task> --reason <reason> [--require-criteria-audit] ${path}`,
+      "",
+      "Examples:",
+      `  ${program} finish-task my-task --reason "Accepted criteria satisfied" --require-criteria-audit --path /tmp/work/workerctl.db`,
+    ],
+    "manager-ack": [
+      `usage: ${program} manager-ack <task> --from-stdin ${path}`,
+      `usage: ${program} manager-ack <task> --json ${path}`,
+      "",
+      "Example JSON:",
+      `  {"task":"my-task","manager_session":"mgr","supervision_contract":"I will supervise through Conveyor and verify criteria before finishing.","will_not_edit_project_files":true}`,
+    ],
+    nudge: [
+      `usage: ${program} nudge <worker-or-session> <message> ${path} [--dry-run]`,
+      `usage: ${program} session-nudge <session> <message> ${path} [--dry-run]`,
+      "",
+      "For task-routed delivery, prefer enqueue-nudge-worker plus dispatch:",
+      `  ${program} enqueue-nudge-worker my-task --message "Status and evidence?" --path /tmp/work/workerctl.db`,
+      `  ${program} dispatch --once --type nudge_worker --path /tmp/work/workerctl.db`,
+    ],
+    pair: [
+      `usage: ${program} pair --task <task> --worker-name <worker> --manager-name <manager> [options] ${path}`,
+      "",
+      "Options:",
+      "  --task-goal <text>             Task goal stored in Conveyor state.",
+      "  --task-prompt <text>           Initial worker prompt; defaults to task goal when omitted.",
+      "  --manager-recipe <recipe>      Seed a manager recipe, for example goalbuddy-conveyor.",
+      "  --manager-acceptance <text>    Seed an accepted manager criterion; repeat for multiple criteria.",
+      "  --manager-tool <tool>          Seed an expected manager/worker tool; repeat for multiple tools.",
+      "  --manager-reference <path>     Seed a manager reference path; repeat for multiple references.",
+      "  --manager-question <text>      Seed a manager setup question; repeat for multiple questions.",
+      "  --manager-guideline <text>     Seed a manager guideline; repeat for multiple guidelines.",
+      "  --cwd <dir>                    Working directory for both Codex sessions.",
+      "  --accept-trust                 Auto-accept the Codex trust prompt for the chosen cwd.",
+      "  --no-dispatch                  Do not start Dispatch after launching the pair.",
+      "  --dry-run                      Print the launch plan without creating sessions.",
+      "  --json                         Emit JSON output.",
+      "",
+      "Examples:",
+      `  ${program} pair --task dogfood --worker-name dogfood-worker --manager-name dogfood-manager --task-goal "Create docs/note.md" --task-prompt "Create docs/note.md" --manager-recipe goalbuddy-conveyor --manager-acceptance "docs/note.md exists" --cwd /tmp/work --path /tmp/work/workerctl.db --accept-trust`,
+      `  ${program} pair --task dogfood --worker-name dogfood-worker --manager-name dogfood-manager --path /tmp/work/workerctl.db --dry-run --json`,
+    ],
+    "worker-ack": [
+      `usage: ${program} worker-ack <task> --from-stdin ${path}`,
+      `usage: ${program} worker-ack <task> --json ${path}`,
+      "",
+      "Example JSON:",
+      `  {"goal_restatement":"Create docs/dogfood-note.md","proposed_criteria":{"must_have":["note file exists"],"follow_up":[]},"expected_tools":["shell"],"open_questions":[],"ready_to_start":true}`,
+    ],
+  };
+  return linesByCommand[command] ?? [`usage: ${program} ${command} [-h] [options]`];
 }
 
 interface ParsedRuntimeArgs {
@@ -5775,6 +5840,7 @@ function runStartSessionCommand(
     const initialPrompt = role === "manager"
       ? startManagerBootstrapPrompt(database, {
         cwd,
+        dbPath: runtimeDbPath(parsed, options),
         managerName: name,
         taskGoal: parsed.flags.taskGoal,
         taskName: parsed.flags.taskName,
@@ -6130,7 +6196,7 @@ function runPairCommand(
     return unsupportedRuntimeResult(parsed, "pair requires --task, --worker-name, and --manager-name.");
   }
   const dbPath = runtimeDbPath(parsed, options);
-  const dispatch = pairDispatchPayload(parsed, dbPath);
+  const dispatch = pairDispatchPayload(parsed, dbPath, options);
   const packageRoot = packageRootFromRuntimeModule();
   if (parsed.flags.dryRun) {
     return jsonResult({
@@ -6140,6 +6206,18 @@ function runPairCommand(
       task: taskName,
       worker: workerName,
     });
+  }
+  const codexPreflight = ensureRequiredTool("codex", options);
+  if (codexPreflight) {
+    return codexPreflight;
+  }
+  const tmuxPreflight = ensureTmuxAvailable(options.tmuxRunner ?? defaultTmuxRunner);
+  if (tmuxPreflight) {
+    return tmuxPreflight;
+  }
+  const tmuxAccessPreflight = ensureTmuxServerAccessible(options.tmuxRunner ?? defaultTmuxRunner);
+  if (tmuxAccessPreflight) {
+    return tmuxAccessPreflight;
   }
   const cwd = parsed.flags.cwd ?? options.cwd ?? process.cwd();
   const database = openRuntimeDatabase(parsed, options);
@@ -6259,7 +6337,7 @@ function runPairCommand(
       acceptTrust: parsed.flags.acceptTrust,
       askForApproval: startup.askForApproval,
       cwd,
-      initialPrompt: workerAckTaskPrompt(taskName, parsed.flags.taskPrompt),
+      initialPrompt: workerAckTaskPrompt(taskName, parsed.flags.taskPrompt, dbPath),
       name: workerName,
       role: "worker",
       sandbox: startup.sandbox,
@@ -6288,6 +6366,7 @@ function runPairCommand(
       cwd,
       initialPrompt: startManagerBootstrapPrompt(database, {
         cwd,
+        dbPath,
         managerName,
         taskGoal: task.goal,
         taskName,
@@ -6475,14 +6554,14 @@ function taskRowForPair(
 function pairDispatchPayload(
   parsed: ParsedRuntimeArgs,
   dbPath: string,
+  options: { env?: NodeJS.ProcessEnv },
 ): { dispatchCommand: string[] | null; ensureDispatch: boolean } {
   const dispatcherId = parsed.flags.dispatcherId;
   const ensureDispatch = dispatcherId !== null && !parsed.flags.noDispatch;
-  const packageRoot = packageRootFromRuntimeModule();
   return {
     dispatchCommand: ensureDispatch
       ? [
-        join(packageRoot, "scripts", "workerctl"),
+        workerctlDispatchExecutable(options),
         "dispatch",
         "--watch",
         "--dispatcher-id",
@@ -6493,6 +6572,20 @@ function pairDispatchPayload(
       : null,
     ensureDispatch,
   };
+}
+
+function workerctlDispatchExecutable(options: { env?: NodeJS.ProcessEnv }): string {
+  const workerctlPath = commandPath("workerctl", options);
+  if (workerctlPath) {
+    return workerctlPath;
+  }
+  const workerctlScript = join(packageRootFromRuntimeModule(), "scripts", "workerctl");
+  if (pathIsExecutable(workerctlScript)) {
+    return workerctlScript;
+  }
+  throw new Error(
+    `Cannot start Dispatch: workerctl is not on PATH and ${workerctlScript} is not executable.`,
+  );
 }
 
 function emitPairTelemetry(
@@ -6954,20 +7047,24 @@ function spawnCodexAndRegisterPairSession(
   };
 }
 
-function workerAckTaskPrompt(taskName: string | null, taskPrompt: string | null): string | null {
+function workerAckTaskPrompt(taskName: string | null, taskPrompt: string | null, dbPath: string | null): string | null {
   if (taskPrompt === null) {
     return null;
   }
   const taskRef = taskName ?? "<task>";
+  const pathSuffix = commandPathSuffix(dbPath);
   return [
     taskPrompt,
     "",
     "Before editing files or running implementation work, acknowledge the task contract:",
     "",
-    `conveyor worker-ack ${taskRef} --from-stdin`,
+    `conveyor worker-ack ${taskRef} --from-stdin${pathSuffix}`,
     "",
-    "Use a JSON object with goal_restatement, proposed_criteria, expected_tools,",
-    "open_questions, and ready_to_start.",
+    "Use a JSON object like:",
+    "",
+    `{"goal_restatement":"Restate the assigned task.","proposed_criteria":{"must_have":["Current-task proof"],"follow_up":[]},"expected_tools":["shell"],"open_questions":[],"ready_to_start":true}`,
+    "",
+    "When your implementation is complete, leave a concise final reply with the files changed and verification you ran. Do not call `conveyor finish-task`; the manager owns criteria satisfaction and audited task closeout.",
   ].join("\n");
 }
 
@@ -18982,6 +19079,7 @@ function startManagerBootstrapPrompt(
   database: ReturnType<typeof openRuntimeDatabase>,
   options: {
     cwd: string;
+    dbPath: string | null;
     managerName: string;
     taskGoal: string | null;
     taskName: string | null;
@@ -18993,16 +19091,20 @@ function startManagerBootstrapPrompt(
   const goalLine = options.taskGoal ?? context?.goal ?? "No task goal supplied yet.";
   const workerLine = options.workerName ?? "No worker session supplied yet.";
   const workerctl = "conveyor";
+  const pathSuffix = commandPathSuffix(options.dbPath);
   const setupCommand = options.taskName
-    ? `${workerctl} manager-config ${taskLine} --questions`
-    : `${workerctl} manager-config <task> --questions`;
-  const cycleCommand = options.taskName ? `${workerctl} cycle ${taskLine}` : `${workerctl} cycle <task>`;
+    ? `${workerctl} manager-config ${taskLine} --questions${pathSuffix}`
+    : `${workerctl} manager-config <task> --questions${pathSuffix}`;
+  const cycleCommand = options.taskName ? `${workerctl} cycle ${taskLine}${pathSuffix}` : `${workerctl} cycle <task>${pathSuffix}`;
   const managerAckCommand = options.taskName
-    ? `${workerctl} manager-ack ${taskLine} --from-stdin`
-    : `${workerctl} manager-ack <task> --from-stdin`;
+    ? `${workerctl} manager-ack ${taskLine} --from-stdin${pathSuffix}`
+    : `${workerctl} manager-ack <task> --from-stdin${pathSuffix}`;
   const workerAckCommand = options.taskName
-    ? `${workerctl} worker-ack ${taskLine} --json`
-    : `${workerctl} worker-ack <task> --json`;
+    ? `${workerctl} worker-ack ${taskLine} --json${pathSuffix}`
+    : `${workerctl} worker-ack <task> --json${pathSuffix}`;
+  const satisfyCriterionCommand = options.taskName
+    ? `${workerctl} criteria ${taskLine} --satisfy <id> --proof "<proof>" --evidence-json '{"status":"pass","command":"<command>","summary":"<what this proved>"}'${pathSuffix}`
+    : `${workerctl} criteria <task> --satisfy <id> --proof "<proof>" --evidence-json '{"status":"pass","command":"<command>","summary":"<what this proved>"}'${pathSuffix}`;
   const config = context ? managerConfigSync(database, context.id) : null;
   const initialSetup = config
     ? seededManagerConfigSetup({ config, cycleCommand, managerAckCommand, workerAckCommand })
@@ -19010,11 +19112,12 @@ function startManagerBootstrapPrompt(
       "Initial setup:",
       `1. Run \`${setupCommand}\`.`,
       "2. Ask the user the returned setup questions in this manager Codex chat.",
-      `3. Persist the answers with \`${workerctl} manager-config\`.`,
+      `3. Persist the answers with \`${workerctl} manager-config${pathSuffix}\`.`,
       "4. Use `conveyor manager-config --interactive` only when a human is directly running conveyor in a terminal.",
       "",
       "Acknowledgement:",
       `- Before your first cycle, record the supervision contract you are committing to with \`${managerAckCommand}\`.`,
+      `  Example JSON: {"task":"${taskLine}","manager_session":"${options.managerName}","supervision_contract":"I will supervise through Conveyor and verify criteria before finishing.","will_not_edit_project_files":true}`,
       `- Before nudging or finishing, inspect the worker acknowledgement with \`${workerAckCommand}\` when available.`,
     ].join("\n");
   return [
@@ -19037,7 +19140,8 @@ function startManagerBootstrapPrompt(
     "- Inspect `manager_context.acceptance_criteria` each cycle.",
     "- If worker progress reveals new edge cases, tests, polish, or scope boundaries, ask the worker to propose must-have vs follow-up criteria.",
     "- Before finishing, compare worker receipts/verification against accepted open criteria.",
-    `- When all accepted criteria are satisfied, deferred, or rejected, finish the task with \`${workerctl} finish-task ${taskLine} --reason "Accepted criteria satisfied" --require-criteria-audit\`.`,
+    `- For each accepted criterion that is proven, record evidence with \`${satisfyCriterionCommand}\`.`,
+    `- When all accepted criteria are satisfied, deferred, or rejected, finish the task with \`${workerctl} finish-task ${taskLine} --reason "Accepted criteria satisfied" --require-criteria-audit${pathSuffix}\`.`,
     "- Communicate with the worker only through conveyor session/task commands.",
     "- Do not edit project files unless the user explicitly asks this manager session to change Agent Conveyor itself.",
   ].join("\n");
@@ -19062,6 +19166,7 @@ function seededManagerConfigSetup(options: {
     "",
     "Acknowledgement:",
     `- Before your first cycle, record the supervision contract you are committing to with \`${options.managerAckCommand}\`.`,
+    `  Example JSON: {"task":"${options.config.task_id}","supervision_contract":"I will supervise through Conveyor and verify criteria before finishing.","will_not_edit_project_files":true}`,
     `- Before nudging or finishing, inspect the worker acknowledgement with \`${options.workerAckCommand}\` when available.`,
   );
   return lines.join("\n");
@@ -19081,6 +19186,10 @@ function startManagerTaskContext(
 
 function shellQuote(value: string): string {
   return `'${value.replace(/'/g, "'\"'\"'")}'`;
+}
+
+function commandPathSuffix(dbPath: string | null): string {
+  return dbPath ? ` --path ${shellQuote(dbPath)}` : "";
 }
 
 function emitTelemetrySync(
@@ -21064,9 +21173,8 @@ The supported manager/worker setup is session-based:
 
    ${workerctl} worker-ack <task-name> --from-stdin
 
-   The JSON should include goal_restatement, proposed_criteria,
-   expected_tools, open_questions, and ready_to_start. Proposed criteria should
-   separate must-have and follow-up criteria.
+   Example JSON:
+   {"goal_restatement":"Restate the assigned task.","proposed_criteria":{"must_have":["Current-task proof"],"follow_up":[]},"expected_tools":["shell"],"open_questions":[],"ready_to_start":true}
 
 Required fields:
 - worker name
@@ -21159,6 +21267,15 @@ function ensureTmuxAvailable(runner: TmuxRunner): TypescriptRuntimeResult | null
   }
   const detail = (result.stderr || result.stdout || `exit code ${result.status}`).trim();
   return lifecycleWorkerErrorResult(tmuxCommandFailureMessage(["tmux", "-V"], detail));
+}
+
+function ensureTmuxServerAccessible(runner: TmuxRunner): TypescriptRuntimeResult | null {
+  const result = runner(["tmux", "start-server"], { check: false });
+  if (result.status === 0) {
+    return null;
+  }
+  const detail = (result.stderr || result.stdout || `exit code ${result.status}`).trim();
+  return lifecycleWorkerErrorResult(tmuxCommandFailureMessage(["tmux", "start-server"], detail));
 }
 
 const CONTENT_KEYS = new Set(["content", "message", "output", "segment_text", "text"]);
