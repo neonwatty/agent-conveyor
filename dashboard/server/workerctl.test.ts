@@ -8,13 +8,14 @@ import {
 } from "./workerctl.ts";
 import {
   acceptanceCriteriaSummary,
-  dispatchInboxSummary,
-  dispatchHealth,
-  dispatchChainEntries,
-  dispatchHeartbeatTelemetryOptions,
-  dashboardTaskName,
   bindingFromAudit,
+  buildFlowObservation,
   cleanupDashboardShells,
+  dashboardTaskName,
+  dispatchChainEntries,
+  dispatchHealth,
+  dispatchHeartbeatTelemetryOptions,
+  dispatchInboxSummary,
   findDashboardBinding,
   isDashboardSession,
 } from "./index.ts";
@@ -500,6 +501,183 @@ test("summarizes missing acceptance criteria as none", () => {
     satisfied: 0,
     total: 0,
   });
+});
+
+test("builds healthy handoff flow from consumed worker completion", () => {
+  const criteria = acceptanceCriteriaSummary({
+    acceptance_criteria: [
+      { status: "satisfied" },
+      { status: "accepted" },
+    ],
+  });
+  const chains = dispatchChainEntries({
+    command_attempts: [],
+    commands: [],
+    correlation_chains: [
+      {
+        command_id: null,
+        command_state: "delivered",
+        command_type: "worker_task_complete",
+        correlation_id: "corr-complete",
+        created_at: "2026-06-09T12:40:00Z",
+        manager_cycle_id: 18,
+        manager_decision_id: null,
+        routed_notification_ids: [28],
+        signal_type: "worker_task_complete",
+        source_event_id: 219,
+      },
+    ],
+    routed_notifications: [
+      {
+        consumed_at: "2026-06-09T12:41:00Z",
+        consumed_by_session_name: "manager-a",
+        correlation_id: "corr-complete",
+        created_at: "2026-06-09T12:40:00Z",
+        delivered_at: "2026-06-09T12:40:02Z",
+        id: 28,
+        signal_type: "worker_task_complete",
+        source_event_id: 219,
+        state: "delivered",
+        target_session_name: "manager-a",
+      },
+    ],
+  });
+  const flow = buildFlowObservation({
+    binding: {
+      manager_name: "manager-a",
+      state: "active",
+      task_name: "task-a",
+      worker_name: "worker-a",
+    },
+    criteria,
+    dispatch: {
+      chains,
+      health: {
+        core_status: "active",
+        failed_count: 0,
+        heartbeat: { dispatcher_id: "dispatch-a", stale: false, stale_seconds: 8, state: "active" },
+        operator_message: "Dispatch is routing worker/manager events.",
+        queued_count: 0,
+        side_effect_risk_count: 0,
+        stale_claim_count: 0,
+        suppressed_signal_count: 0,
+      },
+      inbox: {
+        consumed_count: 1,
+        pending_count: 0,
+        pull_required_pending_count: 0,
+        sessions: [],
+      },
+    },
+    latestCycle: { state: "succeeded" },
+    task: { name: "task-a", state: "managed" },
+    terminals: [
+      {
+        id: "a",
+        label: "Terminal A",
+        registered_session: { alive: true, name: "worker-a", role: "worker", state: "active" },
+        role: "worker",
+        tmux_session: "workerctl-dashboard-a",
+      },
+      {
+        id: "b",
+        label: "Terminal B",
+        registered_session: { alive: true, name: "manager-a", role: "manager", state: "active" },
+        role: "manager",
+        tmux_session: "workerctl-dashboard-b",
+      },
+    ],
+  });
+
+  assert.equal(flow.current.summary, "Worker completed task -> Dispatch routed completion -> Manager consumed it");
+  assert.equal(flow.current.waiting_on, "manager");
+  assert.equal(flow.current.problem, "open_criteria");
+  assert.equal(flow.current.correlation_id, "corr-complete");
+  assert.equal(flow.counts.open_criteria, 1);
+  assert.equal(flow.blockers[0].key, "open-criteria");
+  assert.equal(flow.ledger.length, 1);
+  assert.equal(flow.ledger[0].actor, "worker");
+  assert.equal(flow.ledger[0].status, "ok");
+});
+
+test("builds flow blocker when no active binding is known", () => {
+  const flow = buildFlowObservation({
+    binding: null,
+    criteria: acceptanceCriteriaSummary(null),
+    dispatch: {
+      chains: [],
+      health: {
+        core_status: "not_observed",
+        failed_count: 0,
+        heartbeat: { stale: true, stale_seconds: null, state: "not_observed" },
+        operator_message: "Dispatch has not been observed; worker completions will not wake managers.",
+        queued_count: 0,
+        side_effect_risk_count: 0,
+        stale_claim_count: 0,
+        suppressed_signal_count: 0,
+      },
+      inbox: {
+        consumed_count: 0,
+        pending_count: 0,
+        pull_required_pending_count: 0,
+        sessions: [],
+      },
+    },
+    latestCycle: null,
+    task: null,
+    terminals: [],
+  });
+
+  assert.equal(flow.current.summary, "No active manager/worker binding");
+  assert.equal(flow.current.waiting_on, "operator");
+  assert.equal(flow.current.problem, "blocked");
+  assert.equal(flow.blockers.some((blocker) => blocker.key === "no-binding"), true);
+});
+
+test("builds flow blockers for stale dispatch, pending inbox, failed command, and side-effect risk", () => {
+  const flow = buildFlowObservation({
+    binding: { manager_name: "manager-a", state: "active", task_name: "task-a", worker_name: "worker-a" },
+    criteria: acceptanceCriteriaSummary(null),
+    dispatch: {
+      chains: [],
+      health: {
+        core_status: "stale",
+        failed_count: 1,
+        heartbeat: { dispatcher_id: "dispatch-a", stale: true, stale_seconds: 91, state: "stale" },
+        operator_message: "Dispatch heartbeat is stale; worker completions may not wake managers.",
+        queued_count: 1,
+        side_effect_risk_count: 1,
+        stale_claim_count: 1,
+        suppressed_signal_count: 0,
+      },
+      inbox: {
+        consumed_count: 0,
+        pending_count: 2,
+        pull_required_pending_count: 1,
+        sessions: [],
+      },
+    },
+    latestCycle: null,
+    task: { name: "task-a", state: "managed" },
+    terminals: [
+      {
+        id: "a",
+        label: "Terminal A",
+        registered_session: { alive: false, name: "worker-a", role: "worker", state: "active" },
+        role: "worker",
+        tmux_session: "workerctl-dashboard-a",
+      },
+    ],
+  });
+
+  assert.equal(flow.dispatch.status, "stale");
+  assert.equal(flow.current.problem, "stale");
+  assert.equal(flow.current.waiting_on, "dispatch");
+  assert.equal(flow.blockers.some((blocker) => blocker.key === "dispatch-stale"), true);
+  assert.equal(flow.blockers.some((blocker) => blocker.key === "pending-inbox"), true);
+  assert.equal(flow.blockers.some((blocker) => blocker.key === "failed-commands"), true);
+  assert.equal(flow.blockers.some((blocker) => blocker.key === "side-effect-risk"), true);
+  assert.equal(flow.blockers.some((blocker) => blocker.key === "worker-dead"), true);
 });
 
 test("orders mixed dispatch chains by timestamp before dashboard display", () => {
