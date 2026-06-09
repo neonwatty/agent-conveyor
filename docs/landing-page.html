@@ -139,6 +139,32 @@
         max-width: 650px;
       }
 
+      .hero-proof {
+        display: grid;
+        gap: 10px;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        margin-top: 24px;
+        max-width: 650px;
+      }
+
+      .hero-proof span {
+        background: rgba(255, 255, 255, 0.68);
+        border-left: 4px solid var(--green);
+        color: #354758;
+        font-size: 13px;
+        font-weight: 700;
+        min-height: 62px;
+        padding: 10px 12px;
+      }
+
+      .hero-proof span:nth-child(2) {
+        border-color: var(--blue);
+      }
+
+      .hero-proof span:nth-child(3) {
+        border-color: var(--gold);
+      }
+
       .actions {
         display: flex;
         flex-wrap: wrap;
@@ -187,6 +213,34 @@
 
       .command span {
         color: #91d9bd;
+      }
+
+      .transcript {
+        background: var(--surface);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        display: grid;
+        gap: 10px;
+        margin-top: 16px;
+        padding: 16px;
+      }
+
+      .transcript-row {
+        display: grid;
+        gap: 12px;
+        grid-template-columns: 86px minmax(0, 1fr);
+      }
+
+      .transcript-row strong {
+        color: var(--green);
+        font-size: 12px;
+        text-transform: uppercase;
+      }
+
+      .transcript-row p {
+        color: #425467;
+        font-size: 14px;
+        margin: 0;
       }
 
       .flow-stage {
@@ -314,6 +368,12 @@
         margin: 0;
       }
 
+      .recipe .use-case {
+        color: var(--ink);
+        font-size: 13px;
+        font-weight: 800;
+      }
+
       .tag-row {
         align-content: flex-start;
         align-items: flex-start;
@@ -402,6 +462,27 @@
         display: grid;
         gap: 12px;
         grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+
+      .diagnostic-strip {
+        background: #edf7f2;
+        border: 1px solid rgba(37, 122, 97, 0.22);
+        border-radius: 8px;
+        display: grid;
+        gap: 12px;
+        grid-template-columns: minmax(0, 0.7fr) minmax(0, 1fr);
+        margin-top: 14px;
+        padding: 16px;
+      }
+
+      .diagnostic-strip strong {
+        display: block;
+        margin-bottom: 4px;
+      }
+
+      .diagnostic-strip p {
+        color: #425467;
+        margin: 0;
       }
 
       .db-item,
@@ -507,6 +588,10 @@
         .release-grid {
           grid-template-columns: 1fr;
         }
+
+        .diagnostic-strip {
+          grid-template-columns: 1fr;
+        }
       }
 
       @media (max-width: 640px) {
@@ -550,6 +635,7 @@
         }
 
         .recipes,
+        .hero-proof,
         .proof-grid,
         .db-grid {
           grid-template-columns: 1fr;
@@ -569,7 +655,7 @@
         <a href="#flow">Manager Flow</a>
         <a href="#database">Audit Trail</a>
         <a href="#release">Release</a>
-        <a href="../README.md">README</a>
+        <a href="https://github.com/neonwatty/agent-conveyor#readme">README</a>
       </nav>
     </header>
 
@@ -580,13 +666,18 @@
             <p class="eyebrow">Local Codex manager / worker control plane</p>
             <h1>Agent Conveyor</h1>
             <p class="hero-copy">
-              Turn broad Codex work into repeatable manager recipes: one manager
-              supervises one worker through Dispatch, evidence gates, handoffs,
-              and an auditable SQLite trail.
+              Turn broad Codex work into repeatable manager recipes: pick a
+              mode, launch one supervised worker, and require receipts before
+              the manager continues, compacts, merges, or stops.
             </p>
+            <div class="hero-proof" aria-label="Agent Conveyor outcomes">
+              <span>Manager settings are locked before work starts</span>
+              <span>Dispatch routes each worker handoff mechanically</span>
+              <span>SQLite receipts make progress replayable</span>
+            </div>
             <div class="actions">
               <a class="button primary" href="#recipes">Explore recipes</a>
-              <a class="button secondary" href="manager-recipes.md">Read the docs</a>
+              <a class="button secondary" href="https://github.com/neonwatty/agent-conveyor/blob/main/docs/manager-recipes.md">Read the docs</a>
             </div>
             <div class="command" aria-label="Install and recipe preview commands">
               <code>npm install -g agent-conveyor</code>
@@ -640,6 +731,7 @@
           <div class="recipes">
             <article class="recipe accent-green">
               <h3>GoalBuddy Conveyor</h3>
+              <p class="use-case">Use when the work is bigger than one safe worker turn.</p>
               <p>Runs broad work as sequential child boards with one active child at a time.</p>
               <div class="tag-row">
                 <span class="tag">strict</span>
@@ -649,6 +741,7 @@
             </article>
             <article class="recipe accent-blue">
               <h3>Test Coverage Loop</h3>
+              <p class="use-case">Use when confidence is the blocker.</p>
               <p>Improves or proves test confidence before another worker pass can begin.</p>
               <div class="tag-row">
                 <span class="tag">strict</span>
@@ -658,6 +751,7 @@
             </article>
             <article class="recipe accent-gold">
               <h3>UX Polish Loop</h3>
+              <p class="use-case">Use when screenshots should drive the next fix.</p>
               <p>Iterates visible quality using screenshots, browser evidence, and visual diffs.</p>
               <div class="tag-row">
                 <span class="tag">guided</span>
@@ -667,6 +761,7 @@
             </article>
             <article class="recipe accent-rose">
               <h3>Nudge / What's Next</h3>
+              <p class="use-case">Use when direction is fuzzy and risk should stay low.</p>
               <p>Observes, negotiates criteria, and asks focused next-step questions without taking over.</p>
               <div class="tag-row">
                 <span class="tag">guided</span>
@@ -676,6 +771,7 @@
             </article>
             <article class="recipe accent-violet">
               <h3>PR / CI / Merge Ralph Loop</h3>
+              <p class="use-case">Use when the manager should drive review to green merge.</p>
               <p>Drives PR readiness, CI monitoring, green merge, handoff, and fresh-worker replay.</p>
               <div class="tag-row">
                 <span class="tag">strict</span>
@@ -700,6 +796,12 @@
               <code><span>conveyor</span> pair --task dogfood-goalbuddy --manager-recipe goalbuddy-conveyor --path /tmp/agent-conveyor-dogfood/workerctl.db</code>
               <code><span>conveyor</span> cycle "$TASK"</code>
               <code><span>conveyor</span> replay "$TASK"</code>
+            </div>
+            <div class="transcript" aria-label="Example manager dispatcher worker transcript">
+              <div class="transcript-row"><strong>Manager</strong><p>Start `ux-polish-loop`; require screenshot proof before another worker pass.</p></div>
+              <div class="transcript-row"><strong>Dispatch</strong><p>Routes the task, records the command attempt, and waits for worker receipts.</p></div>
+              <div class="transcript-row"><strong>Worker</strong><p>Returns screenshot paths, changed files, tests run, and the next blocker if one remains.</p></div>
+              <div class="transcript-row"><strong>Manager</strong><p>Accepts proof, asks for one more pass, or closes the loop with replayable evidence.</p></div>
             </div>
           </div>
           <div class="timeline">
@@ -760,6 +862,17 @@
             <div class="db-item"><strong>manager_cycles</strong><p>Observation history and the manager context used for each decision.</p></div>
             <div class="db-item"><strong>telemetry_events</strong><p>Dispatch heartbeat, routing issues, stale work, and searchable issue clues.</p></div>
           </div>
+          <div class="diagnostic-strip">
+            <div>
+              <strong>When a run feels wrong</strong>
+              <p>Use the database as the bug report, not a reconstructed chat summary.</p>
+            </div>
+            <p>
+              Start with `conveyor replay`, attach acceptance criteria and
+              notification receipts, then tune the recipe gate that allowed the
+              weak continuation.
+            </p>
+          </div>
         </div>
       </section>
 
@@ -796,8 +909,8 @@
             continued, stopped, compacted, or finished.
           </p>
           <div class="actions">
-            <a class="button primary" href="manager-recipes.md">Open manager recipes</a>
-            <a class="button secondary" href="../README.md">Read install docs</a>
+            <a class="button primary" href="https://github.com/neonwatty/agent-conveyor/blob/main/docs/manager-recipes.md">Open manager recipes</a>
+            <a class="button secondary" href="https://github.com/neonwatty/agent-conveyor#readme">Read install docs</a>
           </div>
         </div>
       </section>
