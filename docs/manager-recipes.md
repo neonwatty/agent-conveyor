@@ -259,6 +259,18 @@ conveyor worker-inbox "$TASK" --consume-next --wait --timeout 60 --json
 conveyor manager-inbox "$TASK" --consume-next --wait --timeout 60 --json
 ```
 
+When the manager is running in the Codex app and thread tools are available,
+create the worker with fresh same-project `create_thread`, set a readable title
+with `set_thread_title`, and pass the resulting id/title into
+`conveyor create-disposable-binding` with
+`--worker-codex-app-thread-id` and `--worker-codex-app-thread-title`. Use
+`send_message_to_thread` only to deliver the generated `worker_handoff`
+bootstrap prompt; ongoing manager/worker communication should still be routed
+through Dispatch and consumed from inboxes. If app thread tools are unavailable,
+open the worker session manually and paste the same `worker_handoff` prompt.
+Do not use `fork_thread` for this recipe unless the user explicitly wants a
+fork of the current conversation.
+
 The saved dogfood example is
 `docs/goals/live-codex-app-inbox-drill/notes/T001-live-drill.md`. It proves
 manager-to-worker `nudge_worker` delivery and worker-to-manager

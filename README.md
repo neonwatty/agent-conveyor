@@ -166,7 +166,15 @@ Require adversarial proof before another worker iteration.
 The installed skill should call the `conveyor` CLI, choose names, create the
 no-tmux binding with `create-disposable-binding`, point the worker at
 `worker-inbox`, and use `loop-status` plus telemetry receipts before reporting
-that the loop is ready.
+that the loop is ready. When the manager is itself running in the Codex app and
+thread tools are available, the skill should first call `create_thread` for a
+fresh same-project worker, name it with `set_thread_title`, pass the returned
+thread identity through `--worker-codex-app-thread-id` and
+`--worker-codex-app-thread-title`, and use `send_message_to_thread` only to
+deliver the generated `worker_handoff` bootstrap prompt. The raw terminal
+`conveyor` CLI does not create Codex app threads by itself; if app thread tools
+are unavailable, open a separate Codex app worker manually and paste the
+`worker_handoff` prompt.
 
 Dispatch is core infrastructure for supervised worker/manager pairs. The
 `pair` workflow starts a detached Dispatch watch process by default so worker
@@ -317,9 +325,12 @@ tmux attach -t codex-live-test
   Use `--accept-trust` only for directories you intentionally trust; it retries
   Enter during startup discovery so fresh workspaces do not stall before
   registration.
-- `register-worker --name N [--pid P | --codex-session PATH] [--cwd D] [--tmux-session S]` —
+- `register-worker --name N [--pid P | --codex-session PATH] [--cwd D] [--tmux-session S] [--codex-app-thread-id ID] [--codex-app-thread-title TITLE]` —
   Register an already-running Codex session as a worker. Rollout JSONL is
   auto-discovered from the pid via `lsof` unless `--codex-session` is given.
+  The optional Codex app thread flags are metadata supplied by the Codex app
+  skill/tool layer; they help humans identify the app thread but do not change
+  rollout ingest or Dispatch delivery.
 - `register-manager --name N ...` — Same arguments; tmux is not required.
   Both registration commands print a `communication` object. When
   `--tmux-session` is present, `communication.session_kind='tmux'`,
@@ -346,7 +357,7 @@ tmux attach -t codex-live-test
   registration, so managers can detect whether a worker or manager is
   tmux-push capable or must poll its mailbox.
 - `tasks [--create NAME --goal G --summary S]` — List or create tasks.
-- `create-disposable-binding TASK [--worker NAME] [--manager NAME] [--template TEMPLATE | --required-before-continue TYPE] [--adversarial]` —
+- `create-disposable-binding TASK [--worker NAME] [--manager NAME] [--template TEMPLATE | --required-before-continue TYPE] [--adversarial] [--worker-codex-app-thread-id ID] [--worker-codex-app-thread-title TITLE] [--manager-codex-app-thread-id ID] [--manager-codex-app-thread-title TITLE]` —
   Create a no-tmux manager/worker binding for real Ralph-loop slices. The
   helper creates the task when missing, marks it managed, writes valid Codex
   rollout JSONL files, registers worker and manager sessions with
@@ -354,7 +365,10 @@ tmux attach -t codex-live-test
   custom Ralph-loop policy run, and prints replay commands for Dispatch,
   `loop-status`, per-session `communication` metadata, plus a `worker_handoff`
   prompt that tells Codex app workers to keep polling their worker inbox
-  through the bounded loop.
+  through the bounded loop. The optional Codex app thread metadata is normally
+  supplied after a Codex app manager has used `create_thread` and
+  `set_thread_title`; terminal-only users can omit it and still use the manual
+  no-tmux handoff.
 - `discover [QUERY] [--all] [--limit N]` / `search [QUERY]` — Search tasks,
   registered sessions, active bindings, and recent telemetry in one JSON result.
   Use this for conversational setup when a manager or Codex session needs to
@@ -730,7 +744,12 @@ required evidence, adversarial proof, `loop-status`, and telemetry review pass
 bar.
 Use `create-disposable-binding` when the manager and worker are Codex app or
 other no-tmux sessions and you want the same Dispatch rails without manual
-task/session/bind setup.
+task/session/bind setup. In a Codex app manager session, prefer a fresh
+same-project `create_thread` worker plus `set_thread_title` before creating the
+binding, then pass the worker thread id/title into Conveyor. Use `fork_thread`
+only when the user explicitly asks to fork or resume this conversation. If app
+thread tools are unavailable, create the binding anyway and paste the returned
+`worker_handoff` prompt into a manually opened worker session.
 - `enqueue-continue-iteration TASK --loop-run RUN --requested-iteration N` —
   Queue a manager-requested next loop pass for Dispatch. The command refuses
   same/current iteration requests before they become pending queue rows, while
@@ -998,6 +1017,11 @@ Current dispatch state:
   tmux-delivery capable; treat `session_kind='codex_app'` plus
   `receive_style='pull'` as mailbox polling required for that worker or
   manager.
+- App-assisted setup may also expose `codex_app_thread_id` and
+  `codex_app_thread_title` for sessions created or identified by Codex app
+  thread tools. Treat those fields as human/app navigation metadata; the
+  durable communication record is still `routed_notifications` plus inbox
+  consumption telemetry.
 - Template-backed `continue_iteration` deliveries include `loop_policy` in the
   inbox payload, with template name, current/max iteration, cleanup policy,
   required evidence, artifact requirements, and recommended tools. Codex
