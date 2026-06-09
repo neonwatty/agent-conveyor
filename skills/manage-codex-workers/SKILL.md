@@ -473,7 +473,7 @@ manager decision, then run:
 ```bash
 decision_id=$(conveyor record-decision my-task nudge \
   --reason "Worker context should be compacted after handoff" \
-  | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+  | node -e 'const fs = require("fs"); console.log(JSON.parse(fs.readFileSync(0, "utf8")).id)')
 conveyor request-worker-compact my-task \
   --decision-id "$decision_id" --strict-decisions
 ```
@@ -607,7 +607,7 @@ Criteria command examples:
 conveyor criteria my-task --list
 conveyor criteria my-task --add --criterion "..." --source worker_proposed --status proposed
 conveyor criteria my-task --accept 12 --rationale "Must-have for this task"
-conveyor criteria my-task --satisfy 12 --evidence-json '{"command":"python3 -m unittest tests.test_workerctl.ManagerBootstrapPromptTests -v","status":"pass"}'
+conveyor criteria my-task --satisfy 12 --evidence-json '{"command":"npm test -- --runInBand","status":"pass"}'
 conveyor criteria my-task --defer 13 --rationale "Follow-up after this task"
 conveyor criteria my-task --reject 14 --rationale "Duplicate or out of scope"
 ```
@@ -616,8 +616,8 @@ Replace placeholder `...` values with the actual criterion and verification
 command. To add a criterion and satisfy that same row after verification:
 
 ```bash
-criterion_id=$(conveyor criteria my-task --add --criterion "Targeted prompt tests pass" --source worker_proposed --status proposed | python3 -c 'import json,sys; print(json.load(sys.stdin)["affected_criterion"]["id"])')
-conveyor criteria my-task --satisfy "$criterion_id" --evidence-json '{"command":"python3 -m unittest tests.test_workerctl.ManagerBootstrapPromptTests -v","status":"pass"}'
+criterion_id=$(conveyor criteria my-task --add --criterion "Targeted prompt tests pass" --source worker_proposed --status proposed | node -e 'const fs = require("fs"); console.log(JSON.parse(fs.readFileSync(0, "utf8")).affected_criterion.id)')
+conveyor criteria my-task --satisfy "$criterion_id" --evidence-json '{"command":"npm test -- --runInBand","status":"pass"}'
 ```
 
 When making multiple criteria changes, use each mutation response's

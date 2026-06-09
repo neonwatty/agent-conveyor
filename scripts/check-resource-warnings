@@ -1,29 +1,28 @@
-#!/usr/bin/env python3
-from __future__ import annotations
+#!/usr/bin/env node
+import { spawnSync } from "node:child_process";
 
-import subprocess
-import sys
+const args = process.argv.slice(2);
+const command = args[0] === "--" ? args.slice(1) : ["npm", "test", "--", "--runInBand"];
 
+if (command.length === 0) {
+  console.error("usage: check-resource-warnings [-- command ...]");
+  process.exit(2);
+}
 
-def main() -> int:
-    if sys.argv[1:2] == ["--"]:
-        cmd = sys.argv[2:]
-    else:
-        cmd = ["npm", "test", "--", "--runInBand"]
-    if not cmd:
-        print("usage: check-resource-warnings [-- command ...]", file=sys.stderr)
-        return 2
-    proc = subprocess.run(cmd, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    sys.stdout.write(proc.stdout)
-    sys.stderr.write(proc.stderr)
-    if proc.returncode != 0:
-        return proc.returncode
-    combined = f"{proc.stdout}\n{proc.stderr}"
-    if "ResourceWarning" in combined:
-        print("ResourceWarning detected in command output", file=sys.stderr)
-        return 1
-    return 0
+const result = spawnSync(command[0], command.slice(1), {
+  encoding: "utf8",
+  stdio: ["inherit", "pipe", "pipe"],
+});
 
+process.stdout.write(result.stdout ?? "");
+process.stderr.write(result.stderr ?? "");
 
-if __name__ == "__main__":
-    raise SystemExit(main())
+if (result.status !== 0) {
+  process.exit(result.status ?? 1);
+}
+
+const combined = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
+if (combined.includes("ResourceWarning")) {
+  console.error("ResourceWarning detected in command output");
+  process.exit(1);
+}

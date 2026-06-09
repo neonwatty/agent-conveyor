@@ -1,26 +1,23 @@
 # TypeScript Migration CLI Contract
 
-This contract freezes the current Python CLI surface before TypeScript migration.
-The TypeScript CLI must preserve this surface unless a Judge receipt explicitly
-approves and documents a diff.
+This contract records the archived Python CLI surface from before the
+TypeScript migration. The TypeScript CLI must preserve this surface unless a
+Judge receipt explicitly approves and documents a diff.
 
 ## Public Entry Points
 
-- `conveyor` package-installed command from `pyproject.toml`.
-- `workerctl` package-installed compatibility command from `pyproject.toml`.
+- `conveyor` package-installed command from `package.json`.
+- `workerctl` package-installed compatibility command from `package.json`.
 - `bin/conveyor` local wrapper.
 - `bin/workerctl` local wrapper.
 - `scripts/workerctl` repository-local entry point.
-- `python -m workerctl` until Python compatibility is retired by an explicit
-  migration decision.
 
-Program name behavior must preserve both `conveyor` and `workerctl`. The Python
-implementation currently selects the name from `CONVEYOR_CLI_PROG`, the
-invoked filename, or defaults to `conveyor`.
+Program name behavior must preserve both `conveyor` and `workerctl`.
 
 ## Command Inventory
 
-Source of truth: `scripts/workerctl --help` and `workerctl/cli.py`.
+Source of truth: `scripts/workerctl --help` and the archived command inventory
+at `docs/archive/python-runtime/cli-command-inventory.json`.
 
 The top-level command inventory to preserve is:
 
@@ -139,9 +136,9 @@ artifact for:
 scripts/workerctl --help
 CONVEYOR_CLI_PROG=conveyor scripts/workerctl --help
 CONVEYOR_CLI_PROG=workerctl scripts/workerctl --help
-rg -n "add_parser\\(|set_defaults\\(" workerctl/cli.py
+node scripts/ts-migration-audit.mjs --require-zero-python
 ```
 
 The TypeScript implementation must have an adjudicated command/flag diff against
-the Python surface. Unreviewed missing commands, missing aliases, changed JSON
-shape, or changed help program name block migration completion.
+the archived Python surface. Unreviewed missing commands, missing aliases,
+changed JSON shape, or changed help program name block migration completion.

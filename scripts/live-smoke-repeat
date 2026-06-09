@@ -47,73 +47,64 @@ for index in $(seq 1 "${COUNT}"); do
   run_capture "sessions-active" "${WORKERCTL}" sessions --state active
   run_capture "reconcile" "${WORKERCTL}" reconcile --stale-cycles-seconds 1
 
-  python3 - "${index}" "${status}" "${run_dir}/live-smoke.stdout" "${run_dir}/reconcile.stdout" >> "${SUMMARY}" <<'PY'
-import json
-import sys
-from pathlib import Path
+  node - "${index}" "${status}" "${run_dir}/live-smoke.stdout" "${run_dir}/reconcile.stdout" >> "${SUMMARY}" <<'JS'
+const fs = require("fs");
 
-index = int(sys.argv[1])
-status = int(sys.argv[2])
-stdout_path = Path(sys.argv[3])
-reconcile_path = Path(sys.argv[4])
-stdout = stdout_path.read_text()
-artifact_line = next((line for line in stdout.splitlines() if line.startswith("artifact root: ")), "")
-artifact_root = artifact_line.removeprefix("artifact root: ") if artifact_line else None
-worker_line = next((line for line in stdout.splitlines() if line.startswith("smoke worker: ")), "")
-manager_line = next((line for line in stdout.splitlines() if line.startswith("smoke manager: ")), "")
-worker = worker_line.removeprefix("smoke worker: ") if worker_line else None
-manager = manager_line.removeprefix("smoke manager: ") if manager_line else None
-reconcile = json.loads(reconcile_path.read_text())
-record = {
-    "run": index,
-    "status": status,
-    "artifact_root": artifact_root,
-    "worker": worker,
-    "manager": manager,
-    "reconcile_clean": not (
-        reconcile.get("dangling_bindings")
-        or reconcile.get("dead_pid_sessions")
-        or reconcile.get("stuck_tasks")
-    ),
-}
-print(json.dumps(record, sort_keys=True))
-PY
+const index = Number(process.argv[2]);
+const status = Number(process.argv[3]);
+const stdout = fs.readFileSync(process.argv[4], "utf8");
+const reconcile = JSON.parse(fs.readFileSync(process.argv[5], "utf8"));
+const lineValue = (prefix) => {
+  const line = stdout.split(/\r?\n/).find((candidate) => candidate.startsWith(prefix));
+  return line ? line.slice(prefix.length) : null;
+};
+const record = {
+  run: index,
+  status,
+  artifact_root: lineValue("artifact root: "),
+  worker: lineValue("smoke worker: "),
+  manager: lineValue("smoke manager: "),
+  reconcile_clean: !(
+    reconcile.dangling_bindings
+    || reconcile.dead_pid_sessions
+    || reconcile.stuck_tasks
+  ),
+};
+console.log(JSON.stringify(record));
+JS
 
   if [ "${status}" -ne 0 ]; then
     echo "live smoke repeat failed on run ${index}; see ${run_dir}" >&2
     exit "${status}"
   fi
 
-  python3 - "${run_dir}/live-smoke.stdout" "${run_dir}/sessions-active.stdout" <<'PY'
-import json
-import sys
-from pathlib import Path
+  node - "${run_dir}/live-smoke.stdout" "${run_dir}/sessions-active.stdout" <<'JS'
+const fs = require("fs");
 
-stdout = Path(sys.argv[1]).read_text()
-sessions = json.loads(Path(sys.argv[2]).read_text())
-worker_line = next((line for line in stdout.splitlines() if line.startswith("smoke worker: ")), "")
-manager_line = next((line for line in stdout.splitlines() if line.startswith("smoke manager: ")), "")
-names = {
-    line.removeprefix(prefix)
-    for line, prefix in ((worker_line, "smoke worker: "), (manager_line, "smoke manager: "))
-    if line
+const stdout = fs.readFileSync(process.argv[2], "utf8");
+const sessions = JSON.parse(fs.readFileSync(process.argv[3], "utf8"));
+const lineValue = (prefix) => {
+  const line = stdout.split(/\r?\n/).find((candidate) => candidate.startsWith(prefix));
+  return line ? line.slice(prefix.length) : null;
+};
+const names = new Set([lineValue("smoke worker: "), lineValue("smoke manager: ")].filter(Boolean));
+const active = new Set(sessions.map((session) => session.name));
+const leftovers = [...names].filter((name) => active.has(name)).sort();
+if (leftovers.length) {
+  throw new Error(`live smoke sessions still active: ${JSON.stringify(leftovers)}`);
 }
-active = {session.get("name") for session in sessions}
-leftovers = sorted(names & active)
-if leftovers:
-    raise SystemExit(f"live smoke sessions still active: {leftovers}")
-PY
+JS
 
-  python3 - "${run_dir}/reconcile.stdout" <<'PY'
-import json
-import sys
-from pathlib import Path
+  node - "${run_dir}/reconcile.stdout" <<'JS'
+const fs = require("fs");
 
-data = json.loads(Path(sys.argv[1]).read_text())
-for key in ("dangling_bindings", "dead_pid_sessions", "stuck_tasks"):
-    if data.get(key):
-        raise SystemExit(f"reconcile reported {key}: {data[key]}")
-PY
+const data = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+for (const key of ["dangling_bindings", "dead_pid_sessions", "stuck_tasks"]) {
+  if (data[key]) {
+    throw new Error(`reconcile reported ${key}: ${JSON.stringify(data[key])}`);
+  }
+}
+JS
 done
 
 echo "live smoke repeat passed"

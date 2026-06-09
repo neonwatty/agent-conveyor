@@ -91,44 +91,38 @@ esac
 
 CODEX_HOME="$CODEX_HOME_DIR" PATH="$PREFIX/bin:$PATH" "$CONVEYOR" install-skills --codex-home "$CODEX_HOME_DIR" --json > "$SMOKE_DIR/install-skills.json"
 
-python3 - "$SMOKE_DIR/install-skills.json" "$CODEX_HOME_DIR" <<'PY'
-import json
-import os
-import re
-import sys
-from pathlib import Path
+node - "$SMOKE_DIR/install-skills.json" "$CODEX_HOME_DIR" <<'JS'
+const fs = require("fs");
+const path = require("path");
 
-receipt_path = Path(sys.argv[1])
-codex_home = Path(sys.argv[2])
-receipt = json.loads(receipt_path.read_text())
-skill_names = {row["name"] for row in receipt["skills"]}
-expected = {"manage-codex-workers", "codex-review"}
-missing = expected - skill_names
-if missing:
-    raise SystemExit(f"missing installed skills: {sorted(missing)}")
+const receiptPath = process.argv[2];
+const codexHome = process.argv[3];
+const receipt = JSON.parse(fs.readFileSync(receiptPath, "utf8"));
+const skillNames = new Set(receipt.skills.map((row) => row.name));
+const missing = ["manage-codex-workers", "codex-review"].filter((name) => !skillNames.has(name));
+if (missing.length) {
+  throw new Error(`missing installed skills: ${JSON.stringify(missing)}`);
+}
 
-manage_skill = codex_home / "skills" / "manage-codex-workers" / "SKILL.md"
-review_skill = codex_home / "skills" / "codex-review" / "SKILL.md"
-review_helper = codex_home / "skills" / "codex-review" / "scripts" / "codex-review"
-for path in (manage_skill, review_skill, review_helper):
-    if not path.exists():
-        raise SystemExit(f"expected installed asset missing: {path}")
-if not os.access(review_helper, os.X_OK):
-    raise SystemExit(f"expected executable helper: {review_helper}")
+const manageSkill = path.join(codexHome, "skills", "manage-codex-workers", "SKILL.md");
+const reviewSkill = path.join(codexHome, "skills", "codex-review", "SKILL.md");
+const reviewHelper = path.join(codexHome, "skills", "codex-review", "scripts", "codex-review");
+for (const candidate of [manageSkill, reviewSkill, reviewHelper]) {
+  if (!fs.existsSync(candidate)) {
+    throw new Error(`expected installed asset missing: ${candidate}`);
+  }
+}
+try {
+  fs.accessSync(reviewHelper, fs.constants.X_OK);
+} catch {
+  throw new Error(`expected executable helper: ${reviewHelper}`);
+}
 
-copyable_legacy_command = re.compile(
-    r"scripts/(?:workerctl|conveyor)|converyor|"
-    r"workerctl\s+(?:"
-    r"dispatch|qa-plan|cycle|worker-inbox|manager-inbox|update-status|"
-    r"criteria|replay|audit|telemetry|export-task|bind|pair|status|list"
-    r")\b"
-)
-skill_text = manage_skill.read_text()
-match = copyable_legacy_command.search(skill_text)
-if match:
-    raise SystemExit(
-        f"installed manage-codex-workers skill contains stale command text: {match.group(0)!r}"
-    )
-PY
+const copyableLegacyCommand = /scripts\/(?:workerctl|conveyor)|converyor|workerctl\s+(?:dispatch|qa-plan|cycle|worker-inbox|manager-inbox|update-status|criteria|replay|audit|telemetry|export-task|bind|pair|status|list)\b/;
+const match = fs.readFileSync(manageSkill, "utf8").match(copyableLegacyCommand);
+if (match) {
+  throw new Error(`installed manage-codex-workers skill contains stale command text: ${JSON.stringify(match[0])}`);
+}
+JS
 
 echo "package-smoke: npm tarball exposes conveyor and workerctl, and bundled skills are valid"

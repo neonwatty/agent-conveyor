@@ -4200,10 +4200,10 @@ function qaRunBuildClearLoop(context: QaRunContext): QaRunReceipt {
   const artifactDir = qaArtifactDir(context, "build-clear-loop", slug, run.id);
   const buildReceipt = join(artifactDir, "build-passed.json");
   mkdirSync(dirname(buildReceipt), { recursive: true });
-  writeFileSync(buildReceipt, `${JSON.stringify(sortJson({ command: "scripts/run-unittests-isolated -k build_clear_loop", result: "pass", status: "build_passed" }), null, 2)}\n`);
+  writeFileSync(buildReceipt, `${JSON.stringify(sortJson({ command: "npm test -- --runInBand", result: "pass", status: "build_passed" }), null, 2)}\n`);
   qaRecordLoopEvidence(context, task, run.id, "build_passed", "qa-run-build-clear-build-passed", {
     artifactPath: buildReceipt,
-    metadata: { command: "scripts/run-unittests-isolated -k build_clear_loop", result: "Focused build/test command passed before retry." },
+    metadata: { command: "npm test -- --runInBand", result: "Focused build/test command passed before retry." },
   });
   enqueueQaContinue(context, task, run.id, "qa-run-build-clear-build-only", "Run after build evidence only.");
   const buildOnlyDispatch = qaDispatchContinueOnce(context, "qa-run-build-clear-build-only");
@@ -5244,19 +5244,14 @@ function dispatchWatchCommand(workerctlPath: string, dispatcherId: string, dbPat
 
 function installableSkillSources(): Array<{ name: string; source: string }> {
   const root = packageRootFromRuntimeModule();
-  const candidates = [
-    join(root, "skills"),
-    join(root, "workerctl", "assets", "skills"),
-  ];
-  for (const candidate of candidates) {
-    const skills = ["manage-codex-workers", "codex-review"]
-      .map((name) => ({ name, source: join(candidate, name) }))
-      .filter((skill) => existsSync(join(skill.source, "SKILL.md")));
-    if (skills.length === 2) {
-      return skills;
-    }
+  const candidate = join(root, "skills");
+  const skills = ["manage-codex-workers", "codex-review"]
+    .map((name) => ({ name, source: join(candidate, name) }))
+    .filter((skill) => existsSync(join(skill.source, "SKILL.md")));
+  if (skills.length === 2) {
+    return skills;
   }
-  throw new Error("Bundled Agent Conveyor skills not found in skills/ or workerctl/assets/skills.");
+  throw new Error("Bundled Agent Conveyor skills not found in skills/.");
 }
 
 function runBindCommand(

@@ -429,8 +429,8 @@ tmux attach -t codex-live-test
   or manager inspection; `manager_config` is not a valid criteria source.
   To add a criterion and satisfy that same row after verification:
   ```bash
-  criterion_id=$(conveyor criteria my-task --add --criterion "Targeted prompt tests pass" --source worker_proposed --status proposed | python3 -c 'import json,sys; print(json.load(sys.stdin)["affected_criterion"]["id"])')
-  conveyor criteria my-task --satisfy "$criterion_id" --evidence-json '{"command":"python3 -m unittest tests.test_workerctl.ManagerBootstrapPromptTests -v","status":"pass"}'
+  criterion_id=$(conveyor criteria my-task --add --criterion "Targeted prompt tests pass" --source worker_proposed --status proposed | node -e 'const fs = require("fs"); console.log(JSON.parse(fs.readFileSync(0, "utf8")).affected_criterion.id)')
+  conveyor criteria my-task --satisfy "$criterion_id" --evidence-json '{"command":"npm test -- --runInBand","status":"pass"}'
   ```
   For mutation responses, treat `affected_criterion` as the authoritative
   receipt for the row changed by that command. When a manager applies multiple

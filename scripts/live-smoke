@@ -86,7 +86,7 @@ run_capture "04-criteria-add" "${WORKERCTL}" criteria "${TASK}" --add \
   --status accepted \
   --proof "Added by scripts/live-smoke" \
   --evidence-json '{"command":"scripts/live-smoke","status":"running"}'
-CRITERION_ID="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["affected_criterion"]["id"])' < "${ARTIFACT_ROOT}/04-criteria-add.stdout")"
+CRITERION_ID="$(node -e 'const fs = require("fs"); console.log(JSON.parse(fs.readFileSync(0, "utf8")).affected_criterion.id)' < "${ARTIFACT_ROOT}/04-criteria-add.stdout")"
 printf '%s\n' "${CRITERION_ID}" > "${ARTIFACT_ROOT}/04-criteria-id.txt"
 
 run_capture "05-criteria-satisfy" "${WORKERCTL}" criteria "${TASK}" --satisfy "${CRITERION_ID}" \
@@ -116,15 +116,16 @@ if rg "${WORKER}|${MANAGER}" "${ARTIFACT_ROOT}/12-sessions-active.stdout" >/dev/
   exit 1
 fi
 
-python3 - "${ARTIFACT_ROOT}/13-reconcile.stdout" <<'PY'
-import json
-import sys
+node - "${ARTIFACT_ROOT}/13-reconcile.stdout" <<'JS'
+const fs = require("fs");
 
-data = json.load(open(sys.argv[1]))
-for key in ("dangling_bindings", "dead_pid_sessions", "stuck_tasks"):
-    if data.get(key):
-        raise SystemExit(f"reconcile reported {key}: {data[key]}")
-PY
+const data = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+for (const key of ["dangling_bindings", "dead_pid_sessions", "stuck_tasks"]) {
+  if (data[key]) {
+    throw new Error(`reconcile reported ${key}: ${JSON.stringify(data[key])}`);
+  }
+}
+JS
 
 trap - EXIT
 echo "live smoke passed"

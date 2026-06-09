@@ -1,5 +1,5 @@
-// Generated from a Python-created Agent Conveyor v24 database schema.
-// Regenerate deliberately when workerctl/db.py SCHEMA_VERSION changes.
+// Generated from the archived Agent Conveyor v24 database schema.
+// Regenerate deliberately when SCHEMA_VERSION changes.
 export const SCHEMA_V23_SQL = String.raw`
 CREATE TABLE acceptance_criteria(
           id integer primary key autoincrement,

@@ -26,7 +26,7 @@ The historical Python metadata exposed:
 - package name `agent-conveyor`
 - console script `conveyor`
 - compatibility console script `workerctl`
-- bundled `workerctl/assets/skills/**/*`
+- bundled `workerctl/assets/skills/**/*` in the historical wheel
 
 The historical Python/PyPI release path is archived in
 `docs/archive/python-package-history.md`.

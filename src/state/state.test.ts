@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { spawnSync } from "node:child_process";
 import { test } from "node:test";
 import { DatabaseSync } from "node:sqlite";
 
@@ -32,7 +31,7 @@ import {
   SCHEMA_VERSION,
 } from "./sqlite-contract.js";
 
-test("state paths mirror the Python compatibility layout", () => {
+test("state paths mirror the legacy compatibility layout", () => {
   const env = { WORKERCTL_STATE_ROOT: "/tmp/custom-workers" };
 
   assert.equal(stateRoot({ cwd: "/repo", env }), "/tmp/custom-workers");
@@ -46,7 +45,7 @@ test("state paths mirror the Python compatibility layout", () => {
   assert.equal(defaultDbPath({ cwd: "/repo", env: {} }), "/repo/.codex-workers/workerctl.db");
 });
 
-test("worker name validation matches the Python allowed character set", () => {
+test("worker name validation matches the legacy allowed character set", () => {
   assert.doesNotThrow(() => validateWorkerName("worker-A_12"));
   assert.throws(() => validateWorkerName("worker.a"), /letters, numbers, hyphens, and underscores/);
   assert.throws(() => validateWorkerName(""), /letters, numbers, hyphens, and underscores/);
@@ -95,7 +94,7 @@ test("latest status falls back to status.json when sqlite is unavailable", () =>
   }
 });
 
-test("latest status reads Python-created sqlite before stale status.json", () => {
+test("latest status reads sqlite before stale status.json", () => {
   const root = mkdtempSync(join(tmpdir(), "agent-conveyor-status-sqlite."));
   try {
     writeJsonSync(statusPath("worker-a", { env: { WORKERCTL_STATE_ROOT: root } }), {
@@ -105,36 +104,28 @@ test("latest status reads Python-created sqlite before stale status.json", () =>
       next_action: "json next",
       state: "waiting",
     });
-    const script = `
-from workerctl import db
-with db.connect() as conn:
-    db.initialize_database(conn)
-    worker_id = db.upsert_worker(
-        conn,
-        name="worker-a",
-        cwd="/repo",
-        tmux_session="codex-worker-a",
-        state="active",
-        identity_token="worker-token-a",
-    )
-    db.insert_status(
-        conn,
-        worker_id=worker_id,
-        status={
-            "blocker": "db blocker",
-            "current_task": "db task",
-            "next_action": "db next",
-            "state": "blocked",
-        },
-        timestamp="2026-05-08T10:00:00Z",
-    )
-`;
-    const result = spawnSync("python3", ["-c", script], {
-      cwd: process.cwd(),
-      env: { ...process.env, WORKERCTL_STATE_ROOT: root },
-      encoding: "utf8",
-    });
-    assert.equal(result.status, 0, result.stderr);
+    const database = openDatabaseSync(join(root, "workerctl.db"));
+    try {
+      initializeDatabaseSync(database);
+      database.prepare(`
+        insert into workers(
+          id, name, tmux_session, identity_token, cwd, state, created_at, updated_at
+        )
+        values (
+          'worker-id-a', 'worker-a', 'codex-worker-a', 'worker-token-a',
+          '/repo', 'active', '2026-05-08T10:00:00Z', '2026-05-08T10:00:00Z'
+        )
+      `).run();
+      database.prepare(`
+        insert into statuses(worker_id, state, current_task, next_action, blocker, created_at)
+        values (
+          'worker-id-a', 'blocked', 'db task', 'db next', 'db blocker',
+          '2026-05-08T10:00:00Z'
+        )
+      `).run();
+    } finally {
+      database.close();
+    }
 
     assert.deepEqual(latestStatusSync("worker-a", { env: { WORKERCTL_STATE_ROOT: root } }), {
       blocker: "db blocker",
@@ -148,36 +139,48 @@ with db.connect() as conn:
   }
 });
 
-test("sqlite schema contract constants match Python db contract constants", () => {
-  const script = `
-import json
-from workerctl import db
-print(json.dumps({
-    "schema_version": db.SCHEMA_VERSION,
-    "required_tables": sorted(db.REQUIRED_TABLES),
-    "required_indexes": sorted(db.REQUIRED_INDEXES),
-    "required_triggers": sorted(db.REQUIRED_TRIGGERS),
-}, sort_keys=True))
-`;
-  const result = spawnSync("python3", ["-c", script], {
-    cwd: process.cwd(),
-    encoding: "utf8",
-  });
-  assert.equal(result.status, 0, result.stderr);
-  const pythonContract = JSON.parse(result.stdout) as {
-    required_indexes: string[];
-    required_tables: string[];
-    required_triggers: string[];
-    schema_version: number;
-  };
-
-  assert.equal(SCHEMA_VERSION, pythonContract.schema_version);
-  assert.deepEqual([...REQUIRED_TABLES].sort(), pythonContract.required_tables);
-  assert.deepEqual([...REQUIRED_INDEXES].sort(), pythonContract.required_indexes);
-  assert.deepEqual([...REQUIRED_TRIGGERS].sort(), pythonContract.required_triggers);
+test("sqlite schema contract constants cover the expected v24 inventory", () => {
+  assert.equal(SCHEMA_VERSION, 24);
+  assert.deepEqual([...REQUIRED_TABLES].sort(), [
+    "acceptance_criteria",
+    "agent_observations",
+    "bindings",
+    "budgets",
+    "codex_events",
+    "command_attempts",
+    "commands",
+    "continuation_reviews",
+    "data_migrations",
+    "epilogue_runs",
+    "events",
+    "manager_configs",
+    "manager_cycle_spans",
+    "manager_cycles",
+    "manager_decisions",
+    "managers",
+    "prompts",
+    "routed_notifications",
+    "runs",
+    "schema_migrations",
+    "sessions",
+    "statuses",
+    "task_acknowledgements",
+    "task_continuations",
+    "tasks",
+    "telemetry_events",
+    "telemetry_events_fts",
+    "terminal_captures",
+    "transcript_captures",
+    "transcript_segments",
+    "worker_handoffs",
+    "workers",
+  ]);
+  assert.equal(REQUIRED_INDEXES.has("commands_claimable"), true);
+  assert.equal(REQUIRED_INDEXES.has("routed_notifications_target_inbox"), true);
+  assert.deepEqual([...REQUIRED_TRIGGERS].sort(), ["events_no_delete", "events_no_update"]);
 });
 
-test("TypeScript database initialization is healthy under Python database_health", () => {
+test("TypeScript database initialization reports healthy schema", () => {
   const root = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-db."));
   try {
     const dbPath = join(root, "workerctl.db");
@@ -192,34 +195,13 @@ test("TypeScript database initialization is healthy under Python database_health
       database.close();
     }
 
-    const script = `
-import json
-from pathlib import Path
-from workerctl import db
-conn = db.connect(Path(${JSON.stringify(dbPath)}))
-try:
-    db.initialize_database(conn)
-    print(json.dumps(db.database_health(conn), sort_keys=True))
-finally:
-    conn.close()
-`;
-    const result = spawnSync("python3", ["-c", script], {
-      cwd: process.cwd(),
-      encoding: "utf8",
-    });
-    assert.equal(result.status, 0, result.stderr);
-    const pythonHealth = JSON.parse(result.stdout) as { ok: boolean; schema_version: number; user_version: number };
-    assert.equal(pythonHealth.ok, true);
-    assert.equal(pythonHealth.schema_version, SCHEMA_VERSION);
-    assert.equal(pythonHealth.user_version, SCHEMA_VERSION);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
 
-test("TypeScript-created and Python-created empty schema dumps match", () => {
+test("TypeScript-created empty schema contains the required tables indexes and triggers", () => {
   const tsRoot = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-schema."));
-  const pyRoot = mkdtempSync(join(tmpdir(), "agent-conveyor-py-schema."));
   try {
     const tsDbPath = join(tsRoot, "workerctl.db");
     const tsDb = openDatabaseSync(tsDbPath);
@@ -229,22 +211,18 @@ test("TypeScript-created and Python-created empty schema dumps match", () => {
       tsDb.close();
     }
 
-    const script = `
-from pathlib import Path
-from workerctl import db
-with db.connect(Path(${JSON.stringify(join(pyRoot, "workerctl.db"))})) as conn:
-    db.initialize_database(conn)
-`;
-    const result = spawnSync("python3", ["-c", script], {
-      cwd: process.cwd(),
-      encoding: "utf8",
-    });
-    assert.equal(result.status, 0, result.stderr);
-
-    assert.deepEqual(schemaDump(tsDbPath), schemaDump(join(pyRoot, "workerctl.db")));
+    const dumped = schemaDump(tsDbPath).join("\n");
+    for (const table of REQUIRED_TABLES) {
+      assert.match(dumped, new RegExp(`CREATE (VIRTUAL )?TABLE ${table}\\b`));
+    }
+    for (const index of REQUIRED_INDEXES) {
+      assert.match(dumped, new RegExp(`CREATE (UNIQUE )?INDEX ${index}\\b`));
+    }
+    for (const trigger of REQUIRED_TRIGGERS) {
+      assert.match(dumped, new RegExp(`CREATE TRIGGER ${trigger}\\b`));
+    }
   } finally {
     rmSync(tsRoot, { recursive: true, force: true });
-    rmSync(pyRoot, { recursive: true, force: true });
   }
 });
 
@@ -267,8 +245,9 @@ test("TypeScript initialization refuses newer user_version", () => {
   }
 });
 
-test("TypeScript initialization delegates legacy schema repair to Python migrator", () => {
-  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-legacy-db."));
+test("TypeScript initialization migrates legacy schema without Python", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-legacy-no-python."));
+  const originalPath = process.env.PATH;
   try {
     const dbPath = join(root, "workerctl.db");
     const legacyDatabase = new DatabaseSync(dbPath);
@@ -296,16 +275,64 @@ test("TypeScript initialization delegates legacy schema repair to Python migrato
           result_json text check (result_json is null or json_valid(result_json)),
           error text
         );
+        create table command_attempts(
+          id integer primary key autoincrement,
+          command_id text not null references commands(id),
+          correlation_id text not null,
+          dispatcher_id text not null,
+          started_at text not null,
+          finished_at text,
+          state text not null check (state in ('running','succeeded','failed','abandoned')),
+          result_json text check (result_json is null or json_valid(result_json)),
+          error text,
+          side_effect_started integer not null default 0 check (side_effect_started in (0, 1)),
+          side_effect_completed integer not null default 0 check (side_effect_completed in (0, 1))
+        );
+        create table manager_configs(
+          task_id text primary key,
+          supervision_mode text not null check (supervision_mode in ('light','guided','strict')),
+          objective text,
+          guidelines_json text not null check (json_valid(guidelines_json)),
+          acceptance_criteria_json text not null check (json_valid(acceptance_criteria_json)),
+          reference_paths_json text not null check (json_valid(reference_paths_json)),
+          permissions_json text not null check (json_valid(permissions_json)),
+          tools_json text not null default '[]' check (json_valid(tools_json)),
+          epilogues_json text not null default '[]' check (json_valid(epilogues_json)),
+          nudge_on_completion text not null default 'ask-operator' check (nudge_on_completion in ('off','ask-operator','auto-review','auto-proceed')),
+          require_acks integer not null default 0 check (require_acks in (0, 1)),
+          revision integer not null default 1 check (revision > 0),
+          created_at text not null,
+          updated_at text not null
+        );
+        create table sessions(
+          id text primary key,
+          name text unique not null,
+          role text not null check (role in ('worker','manager','operator','dispatch')),
+          pid integer,
+          cwd text,
+          tmux_session text,
+          tmux_pane_id text,
+          state text not null check (state in ('active','gone','unknown')),
+          created_at text not null,
+          updated_at text not null,
+          last_seen_at text,
+          gone_at text,
+          exit_reason text,
+          metadata_json text not null default '{}' check (json_valid(metadata_json)),
+          last_ingest_offset integer
+        );
         pragma user_version = 21;
       `);
     } finally {
       legacyDatabase.close();
     }
 
+    process.env.PATH = "/tmp/agent-conveyor-no-python";
     const database = openDatabaseSync(dbPath);
     try {
       initializeDatabaseSync(database);
       assert.equal(databaseHealthSync(database).ok, true);
+
       database.prepare(`
         insert into commands(
           id, idempotency_key, created_at, updated_at, type, state, payload_json
@@ -313,28 +340,25 @@ test("TypeScript initialization delegates legacy schema repair to Python migrato
         values ('cmd-blocked', 'cmd-blocked', '2026-05-08T10:00:00Z',
                 '2026-05-08T10:00:00Z', 'notify_manager', 'blocked', '{}')
       `).run();
+
+      database.prepare(`
+        insert into command_attempts(
+          command_id, correlation_id, dispatcher_id, started_at, state
+        )
+        values ('cmd-blocked', 'corr-blocked', 'dispatch-a',
+                '2026-05-08T10:00:00Z', 'blocked')
+      `).run();
+
+      const managerConfigColumns = tableColumns(database, "manager_configs");
+      const sessionColumns = tableColumns(database, "sessions");
+      assert.equal(managerConfigColumns.has("recipe_name"), true);
+      assert.equal(sessionColumns.has("codex_app_thread_id"), true);
+      assert.equal(sessionColumns.has("codex_app_thread_title"), true);
     } finally {
       database.close();
     }
-
-    const script = `
-import json
-from pathlib import Path
-from workerctl import db
-conn = db.connect(Path(${JSON.stringify(dbPath)}))
-try:
-    db.initialize_database(conn)
-    print(json.dumps(db.database_health(conn), sort_keys=True))
-finally:
-    conn.close()
-`;
-    const result = spawnSync("python3", ["-c", script], {
-      cwd: process.cwd(),
-      encoding: "utf8",
-    });
-    assert.equal(result.status, 0, result.stderr);
-    assert.equal(JSON.parse(result.stdout).ok, true);
   } finally {
+    process.env.PATH = originalPath;
     rmSync(root, { recursive: true, force: true });
   }
 });
@@ -354,4 +378,9 @@ function schemaDump(dbPath: string): string[] {
   } finally {
     database.close();
   }
+}
+
+function tableColumns(database: DatabaseSync, table: string): Set<string> {
+  const rows = database.prepare(`pragma table_info(${table})`).all() as Array<{ name: string }>;
+  return new Set(rows.map((row) => row.name));
 }
