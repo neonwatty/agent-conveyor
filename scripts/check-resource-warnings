@@ -9,17 +9,7 @@ def main() -> int:
     if sys.argv[1:2] == ["--"]:
         cmd = sys.argv[2:]
     else:
-        cmd = [
-            sys.executable,
-            "-W",
-            "always::ResourceWarning",
-            "-m",
-            "unittest",
-            "discover",
-            "-s",
-            "tests",
-            "-v",
-        ]
+        cmd = ["npm", "test", "--", "--runInBand"]
     if not cmd:
         print("usage: check-resource-warnings [-- command ...]", file=sys.stderr)
         return 2
@@ -30,7 +20,7 @@ def main() -> int:
         return proc.returncode
     combined = f"{proc.stdout}\n{proc.stderr}"
     if "ResourceWarning" in combined:
-        print("ResourceWarning detected in unittest output", file=sys.stderr)
+        print("ResourceWarning detected in command output", file=sys.stderr)
         return 1
     return 0
 

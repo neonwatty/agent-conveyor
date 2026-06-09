@@ -1144,9 +1144,8 @@ scripts/rc-check --with-live-smoke-repeat
 Underlying deterministic checks:
 
 ```bash
-python3 -m unittest discover -s tests -v
-scripts/check-resource-warnings
-python3 -m py_compile scripts/workerctl scripts/check-resource-warnings workerctl/*.py
+scripts/check-resource-warnings -- npm test -- --runInBand
+npm run build
 npm run migration:audit:final
 scripts/package-smoke
 scripts/release-check
@@ -1155,10 +1154,9 @@ scripts/release-check
 For local parallel experiments, prefer:
 
 ```bash
-scripts/run-unittests-isolated
+npm test
 ```
 
-This gives the process a temporary `WORKERCTL_STATE_ROOT` and a test namespace.
 The standard CI job remains serial.
 
 GitHub Actions runs `scripts/rc-check --skip-live-smoke-repeat` and
@@ -1166,7 +1164,7 @@ GitHub Actions runs `scripts/rc-check --skip-live-smoke-repeat` and
 remains local/manual because hosted runners may not have `codex`.
 The ResourceWarning gate intentionally fails on any `ResourceWarning` text in
 test output so finalization-time resource warnings cannot be hidden by a zero
-`unittest` exit status.
+test exit status.
 
 Live local smoke gate:
 

@@ -27,20 +27,11 @@ EOF
   esac
 done
 
-echo "== unit tests =="
-python3 -m unittest discover -s tests -v
+echo "== Node test ResourceWarning output gate =="
+scripts/check-resource-warnings -- npm test -- --runInBand
 
-echo "== ResourceWarning output gate =="
-scripts/check-resource-warnings
-
-echo "== py_compile =="
-python3 -m py_compile scripts/workerctl scripts/check-resource-warnings workerctl/*.py
-
-echo "== TypeScript migration audit =="
-node scripts/ts-migration-audit.mjs
-
-echo "== dashboard tests =="
-npm test -- --runInBand
+echo "== TypeScript migration final audit =="
+node scripts/ts-migration-audit.mjs --require-zero-python
 
 echo "== dashboard build =="
 npm run build
@@ -56,8 +47,8 @@ if [[ "$RUN_LIVE_SMOKE_REPEAT" == "1" ]]; then
   scripts/live-smoke-repeat 3
 
   echo "== cleanup checks =="
-  scripts/workerctl sessions --state active
-  scripts/workerctl reconcile --stale-cycles-seconds 1
+  bin/conveyor sessions --state active
+  bin/conveyor reconcile --stale-cycles-seconds 1
 else
   echo "== repeat live smoke skipped =="
   echo "run scripts/rc-check --with-live-smoke-repeat for the full local RC gate"
