@@ -46,11 +46,11 @@
       .topbar {
         align-items: center;
         display: flex;
-        gap: 24px;
+        gap: 18px;
         justify-content: space-between;
         margin: 0 auto;
         max-width: 1180px;
-        padding: 18px 24px;
+        padding: 14px 24px;
       }
 
       .brand {
@@ -58,6 +58,7 @@
         display: flex;
         font-weight: 800;
         gap: 10px;
+        white-space: nowrap;
       }
 
       .brand-mark {
@@ -73,14 +74,16 @@
       nav {
         display: flex;
         flex-wrap: wrap;
-        gap: 16px;
+        gap: 14px;
         justify-content: flex-end;
       }
 
       nav a {
         color: var(--muted);
-        font-size: 14px;
+        font-size: 13px;
+        font-weight: 700;
         text-decoration: none;
+        white-space: nowrap;
       }
 
       nav a:hover {
@@ -89,7 +92,7 @@
 
       .hero {
         border-top: 1px solid rgba(36, 49, 61, 0.1);
-        min-height: min(760px, 92vh);
+        min-height: min(700px, 88vh);
         overflow: hidden;
         position: relative;
       }
@@ -106,12 +109,12 @@
 
       .hero-inner {
         display: grid;
-        gap: 52px;
+        gap: 46px;
         grid-template-columns: minmax(0, 0.95fr) minmax(430px, 1.05fr);
         margin: 0 auto;
         max-width: 1180px;
-        min-height: min(710px, 86vh);
-        padding: 78px 24px 48px;
+        min-height: min(600px, 76vh);
+        padding: 46px 24px 34px;
         position: relative;
       }
 
@@ -125,7 +128,7 @@
       }
 
       h1 {
-        font-size: clamp(44px, 7vw, 92px);
+        font-size: clamp(44px, 5.8vw, 76px);
         line-height: 0.95;
         letter-spacing: 0;
         margin: 0;
@@ -134,16 +137,24 @@
 
       .hero-copy {
         color: #354758;
-        font-size: 20px;
-        margin: 24px 0 0;
+        font-size: 18px;
+        margin: 20px 0 0;
         max-width: 650px;
+      }
+
+      .hero-summary {
+        color: #425467;
+        font-size: 15px;
+        font-weight: 700;
+        margin: 16px 0 0;
+        max-width: 640px;
       }
 
       .hero-proof {
         display: grid;
-        gap: 10px;
+        gap: 12px;
         grid-template-columns: repeat(3, minmax(0, 1fr));
-        margin-top: 24px;
+        margin-top: 20px;
         max-width: 650px;
       }
 
@@ -151,10 +162,17 @@
         background: rgba(255, 255, 255, 0.68);
         border-left: 4px solid var(--green);
         color: #354758;
+        display: block;
         font-size: 13px;
-        font-weight: 700;
-        min-height: 62px;
-        padding: 10px 12px;
+        min-height: 76px;
+        padding: 12px;
+      }
+
+      .hero-proof strong {
+        color: var(--ink);
+        display: block;
+        font-size: 14px;
+        margin-bottom: 4px;
       }
 
       .hero-proof span:nth-child(2) {
@@ -169,7 +187,7 @@
         display: flex;
         flex-wrap: wrap;
         gap: 12px;
-        margin-top: 34px;
+        margin-top: 26px;
       }
 
       .button {
@@ -202,7 +220,7 @@
         font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
         font-size: 13px;
         gap: 9px;
-        margin-top: 30px;
+        margin-top: 22px;
         max-width: 650px;
         padding: 18px;
       }
@@ -346,6 +364,38 @@
         grid-template-columns: repeat(5, minmax(0, 1fr));
       }
 
+      .mode-guide {
+        display: grid;
+        gap: 12px;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        margin: -12px 0 22px;
+      }
+
+      .mode-guide a {
+        background: rgba(255, 255, 255, 0.72);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        display: grid;
+        gap: 6px;
+        min-height: 104px;
+        padding: 14px;
+        text-decoration: none;
+      }
+
+      .mode-guide a:hover {
+        border-color: var(--blue);
+        box-shadow: 0 10px 28px rgba(23, 32, 42, 0.08);
+      }
+
+      .mode-guide strong {
+        font-size: 15px;
+      }
+
+      .mode-guide span {
+        color: var(--muted);
+        font-size: 13px;
+      }
+
       .recipe {
         background: var(--surface);
         border: 1px solid var(--line);
@@ -422,6 +472,11 @@
         display: grid;
         gap: 34px;
         grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+      }
+
+      .split h2 {
+        font-size: clamp(30px, 3.2vw, 44px);
+        max-width: 640px;
       }
 
       .timeline {
@@ -580,6 +635,7 @@
         }
 
         .recipes,
+        .mode-guide,
         .proof-grid,
         .db-grid {
           grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -598,11 +654,75 @@
         .topbar {
           align-items: flex-start;
           flex-direction: column;
+          gap: 10px;
+          padding: 10px 18px;
+        }
+
+        .brand {
+          font-size: 14px;
+        }
+
+        .brand-mark {
+          height: 18px;
+          width: 26px;
+        }
+
+        nav {
+          gap: 10px;
+          flex-wrap: nowrap;
+          justify-content: flex-start;
+          overflow-x: auto;
+          padding-bottom: 2px;
+          width: 100%;
+        }
+
+        nav a {
+          font-size: 12px;
         }
 
         .hero-inner {
-          gap: 28px;
-          padding-top: 46px;
+          gap: 20px;
+          min-height: auto;
+          padding: 30px 24px 30px;
+        }
+
+        .eyebrow {
+          font-size: 11px;
+          margin-bottom: 10px;
+        }
+
+        .hero-copy {
+          font-size: 16px;
+          margin-top: 16px;
+        }
+
+        .hero-summary {
+          font-size: 13px;
+          margin-top: 12px;
+        }
+
+        .hero-proof {
+          gap: 8px;
+          margin-top: 16px;
+        }
+
+        .hero-proof span {
+          min-height: 0;
+          padding: 10px 12px;
+        }
+
+        .actions {
+          margin-top: 20px;
+        }
+
+        .hero .command {
+          font-size: 12px;
+          margin-top: 16px;
+          padding: 14px;
+        }
+
+        .hero .command code:nth-child(n + 2) {
+          display: none;
         }
 
         .flow-stage {
@@ -610,18 +730,7 @@
         }
 
         .mobile-flow-strip {
-          align-items: center;
-          background: rgba(255, 253, 248, 0.78);
-          border: 1px solid rgba(36, 49, 61, 0.16);
-          border-radius: 8px;
-          box-shadow: 0 12px 32px rgba(23, 32, 42, 0.12);
-          display: grid;
-          gap: 8px;
-          grid-template-columns: 1fr 18px 1fr 18px 1fr;
-          margin-top: 18px;
-          min-height: 64px;
-          padding: 12px;
-          text-align: center;
+          display: none;
         }
 
         .mobile-flow-strip span {
@@ -636,6 +745,7 @@
 
         .recipes,
         .hero-proof,
+        .mode-guide,
         .proof-grid,
         .db-grid {
           grid-template-columns: 1fr;
@@ -670,10 +780,14 @@
               mode, launch one supervised worker, and require receipts before
               the manager continues, compacts, merges, or stops.
             </p>
+            <p class="hero-summary">
+              Built for long-running GoalBuddy boards, screenshot-driven UX
+              polish, coverage loops, and PR/CI merge supervision.
+            </p>
             <div class="hero-proof" aria-label="Agent Conveyor outcomes">
-              <span>Manager settings are locked before work starts</span>
-              <span>Dispatch routes each worker handoff mechanically</span>
-              <span>SQLite receipts make progress replayable</span>
+              <span><strong>Choose a recipe</strong>Modes, tools, permissions, and cleanup rules are locked before work starts.</span>
+              <span><strong>Route the worker</strong>Dispatch sends handoffs, records attempts, and blocks unsafe continuations.</span>
+              <span><strong>Close with proof</strong>SQLite receipts make tests, screenshots, CI, and blockers replayable.</span>
             </div>
             <div class="actions">
               <a class="button primary" href="#recipes">Explore recipes</a>
@@ -728,6 +842,20 @@
             starts it resolves to a named recipe or explicit custom mode. Each
             recipe has settings, permissions, evidence gates, and cleanup rules.
           </p>
+          <div class="mode-guide" aria-label="Choose a starting recipe">
+            <a href="https://github.com/neonwatty/agent-conveyor/blob/main/docs/manager-recipes.md#goalbuddy-conveyor">
+              <strong>Need overnight progress?</strong>
+              <span>Start with GoalBuddy Conveyor and one active board at a time.</span>
+            </a>
+            <a href="https://github.com/neonwatty/agent-conveyor/blob/main/docs/manager-recipes.md#ux-polish-loop">
+              <strong>Need visible quality?</strong>
+              <span>Use UX Polish when screenshots should decide the next pass.</span>
+            </a>
+            <a href="https://github.com/neonwatty/agent-conveyor/blob/main/docs/manager-recipes.md#prcimerge-ralph-loop">
+              <strong>Need a green merge?</strong>
+              <span>Use the PR/CI loop for review, CI monitoring, and merge receipts.</span>
+            </a>
+          </div>
           <div class="recipes">
             <article class="recipe accent-green">
               <h3>GoalBuddy Conveyor</h3>
