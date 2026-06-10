@@ -560,6 +560,10 @@ interface ParsedRuntimeArgs {
     candidate: string | null;
     check: string | null;
     classifyPrompt: string | null;
+    workerCodexAppThreadId: string | null;
+    workerCodexAppThreadTitle: string | null;
+    managerCodexAppThreadId: string | null;
+    managerCodexAppThreadTitle: string | null;
     codexSession: string | null;
     create: string | null;
     createRun: string | null;
@@ -769,6 +773,10 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
     candidate: null,
     check: null,
     classifyPrompt: null,
+    workerCodexAppThreadId: null,
+    workerCodexAppThreadTitle: null,
+    managerCodexAppThreadId: null,
+    managerCodexAppThreadTitle: null,
     codexSession: null,
     create: null,
     createRun: null,
@@ -2143,6 +2151,29 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
         return { command, enabled, error: value.error, explicit, flags, task };
       }
       flags.manager = value.value;
+      index += 1;
+    } else if (
+      arg === "--worker-codex-app-thread-id"
+      || arg === "--worker-codex-app-thread-title"
+      || arg === "--manager-codex-app-thread-id"
+      || arg === "--manager-codex-app-thread-title"
+    ) {
+      if (command !== "create-disposable-binding") {
+        return { command, enabled, error: `Unsupported TypeScript runtime option: ${arg}`, explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      if (arg === "--worker-codex-app-thread-id") {
+        flags.workerCodexAppThreadId = value.value;
+      } else if (arg === "--worker-codex-app-thread-title") {
+        flags.workerCodexAppThreadTitle = value.value;
+      } else if (arg === "--manager-codex-app-thread-id") {
+        flags.managerCodexAppThreadId = value.value;
+      } else {
+        flags.managerCodexAppThreadTitle = value.value;
+      }
       index += 1;
     } else if (arg === "--template") {
       if (command !== "create-disposable-binding" && command !== "loop-templates") {
@@ -5363,6 +5394,8 @@ function runCreateDisposableBindingCommand(
     const workerRollout = writeDisposableRollout(sessionDir, workerName, cwd);
     const managerRollout = writeDisposableRollout(sessionDir, managerName, cwd);
     const worker = registerSessionSync(database, {
+      codexAppThreadId: parsed.flags.workerCodexAppThreadId,
+      codexAppThreadTitle: parsed.flags.workerCodexAppThreadTitle,
       codexSessionPath: workerRollout.path,
       cwd,
       name: workerName,
@@ -5371,6 +5404,8 @@ function runCreateDisposableBindingCommand(
       tmuxSession: null,
     });
     const manager = registerSessionSync(database, {
+      codexAppThreadId: parsed.flags.managerCodexAppThreadId,
+      codexAppThreadTitle: parsed.flags.managerCodexAppThreadTitle,
       codexSessionPath: managerRollout.path,
       cwd,
       name: managerName,
@@ -5409,6 +5444,8 @@ function runCreateDisposableBindingCommand(
       db_path: dbPath,
       manager: {
         communication: disposableSessionCommunication("manager", task.name, dbPath),
+        codex_app_thread_id: manager.codex_app_thread_id,
+        codex_app_thread_title: manager.codex_app_thread_title,
         id: manager.session_id,
         name: managerName,
         rollout_path: managerRollout.path,
@@ -5434,6 +5471,8 @@ function runCreateDisposableBindingCommand(
       },
       worker: {
         communication: disposableSessionCommunication("worker", task.name, dbPath),
+        codex_app_thread_id: worker.codex_app_thread_id,
+        codex_app_thread_title: worker.codex_app_thread_title,
         id: worker.session_id,
         name: workerName,
         rollout_path: workerRollout.path,
@@ -18904,7 +18943,12 @@ function renderDisposableBindingText(result: {
 function sessionPollCommand(role: "manager" | "worker", taskName: string | null, dbPath: string): string {
   const inbox = role === "worker" ? "worker-inbox" : "manager-inbox";
   const task = taskName ? shellQuote(taskName) : "<task>";
-  return `conveyor ${inbox} ${task} --consume-next --wait --timeout 60 --path ${shellQuote(dbPath)} --json`;
+  return `${conveyorPollInvocation()} ${inbox} ${task} --consume-next --wait --timeout 60 --path ${shellQuote(dbPath)} --json`;
+}
+
+function conveyorPollInvocation(): string {
+  const binDir = join(packageRootFromRuntimeModule(), "bin");
+  return pathIsExecutable(join(binDir, "conveyor")) ? `PATH=${shellQuote(binDir)}:$PATH conveyor` : "conveyor";
 }
 
 function resolveCodexStartupOptions(options: {

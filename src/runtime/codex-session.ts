@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { accessSync, constants, readFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
+import { fileURLToPath } from "node:url";
 
 class CodexSessionError extends Error {
   constructor(message: string) {
@@ -28,6 +30,8 @@ export interface CodexSessionDiscovery {
 }
 
 export interface RegisteredSessionRecord {
+  codex_app_thread_id: string | null;
+  codex_app_thread_title: string | null;
   codex_session_id: string | null;
   codex_session_path: string | null;
   communication: SessionCommunication;
@@ -59,6 +63,8 @@ interface SessionCommunication {
 }
 
 export interface RegisterSessionResult {
+  codex_app_thread_id: string | null;
+  codex_app_thread_title: string | null;
   codex_session_id: string;
   codex_session_path: string;
   communication: SessionCommunication;
@@ -156,6 +162,8 @@ export function discoverSession(options: {
 export function registerSessionSync(
   database: DatabaseSync,
   options: {
+    codexAppThreadId?: string | null;
+    codexAppThreadTitle?: string | null;
     codexSessionPath: string;
     cwd?: string | null;
     name: string;
@@ -186,14 +194,17 @@ export function registerSessionSync(
       id, name, role, identity_token,
       tmux_session, tmux_pane_id,
       codex_session_path, codex_session_id, pid,
+      codex_app_thread_id, codex_app_thread_title,
       cwd, registered_at, last_heartbeat_at, state
     )
-    values (?, ?, ?, ?, ?, null, ?, ?, ?, ?, ?, ?, 'active')
+    values (?, ?, ?, ?, ?, null, ?, ?, ?, ?, ?, ?, ?, ?, 'active')
     on conflict(name) do update set
       tmux_session = excluded.tmux_session,
       tmux_pane_id = coalesce(excluded.tmux_pane_id, sessions.tmux_pane_id),
       codex_session_path = excluded.codex_session_path,
       codex_session_id = excluded.codex_session_id,
+      codex_app_thread_id = excluded.codex_app_thread_id,
+      codex_app_thread_title = excluded.codex_app_thread_title,
       pid = excluded.pid,
       cwd = excluded.cwd,
       last_heartbeat_at = excluded.last_heartbeat_at,
@@ -208,12 +219,16 @@ export function registerSessionSync(
     options.codexSessionPath,
     meta.id,
     options.pid,
+    options.codexAppThreadId ?? null,
+    options.codexAppThreadTitle ?? null,
     cwd,
     timestamp,
     timestamp,
   );
   const session = sessionRow(database, options.name, options.role);
   return {
+    codex_app_thread_id: session.codex_app_thread_id,
+    codex_app_thread_title: session.codex_app_thread_title,
     codex_session_id: meta.id,
     codex_session_path: options.codexSessionPath,
     communication: sessionCommunication(session),
@@ -387,12 +402,26 @@ function sessionPollCommand(
   options?: { dbPath?: string | null; taskName?: string | null },
 ): string | null {
   if (role === "worker") {
-    return `conveyor worker-inbox ${pollTaskArg(options?.taskName)} --consume-next --wait --timeout 60${pollPathSuffix(options?.dbPath)} --json`;
+    return `${conveyorPollInvocation()} worker-inbox ${pollTaskArg(options?.taskName)} --consume-next --wait --timeout 60${pollPathSuffix(options?.dbPath)} --json`;
   }
   if (role === "manager") {
-    return `conveyor manager-inbox ${pollTaskArg(options?.taskName)} --consume-next --wait --timeout 60${pollPathSuffix(options?.dbPath)} --json`;
+    return `${conveyorPollInvocation()} manager-inbox ${pollTaskArg(options?.taskName)} --consume-next --wait --timeout 60${pollPathSuffix(options?.dbPath)} --json`;
   }
   return null;
+}
+
+function conveyorPollInvocation(): string {
+  const binDir = join(resolve(dirname(fileURLToPath(import.meta.url)), "../.."), "bin");
+  return pathIsExecutable(join(binDir, "conveyor")) ? `PATH=${shellQuote(binDir)}:$PATH conveyor` : "conveyor";
+}
+
+function pathIsExecutable(path: string): boolean {
+  try {
+    accessSync(path, constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function pollTaskArg(taskName?: string | null): string {
@@ -408,6 +437,8 @@ function shellQuote(value: string): string {
 }
 
 interface SessionRow {
+  codex_app_thread_id: string | null;
+  codex_app_thread_title: string | null;
   codex_session_id: string | null;
   codex_session_path: string | null;
   cwd: string;
@@ -426,6 +457,8 @@ interface SessionRow {
 
 function sessionRecord(row: SessionRow): Omit<RegisteredSessionRecord, "communication"> {
   return {
+    codex_app_thread_id: row.codex_app_thread_id,
+    codex_app_thread_title: row.codex_app_thread_title,
     codex_session_id: row.codex_session_id,
     codex_session_path: row.codex_session_path,
     cwd: row.cwd,

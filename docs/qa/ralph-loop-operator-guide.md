@@ -30,8 +30,8 @@ conveyor create-disposable-binding <task> --worker <worker-session> --manager <m
 
 This writes real Codex rollout JSONL files, registers both sessions, binds them
 to the task, and prints replay commands for Dispatch, inbox polling, and
-`loop-status`. Use it for Codex app managers/workers that will poll
-`worker-inbox` or `manager-inbox` instead of receiving tmux keystrokes.
+`loop-status`. Use it for Codex app managers/workers that will poll with the
+returned `communication.poll_command` instead of receiving tmux keystrokes.
 
 1. Classify the prompt:
 
@@ -66,10 +66,12 @@ to the task, and prints replay commands for Dispatch, inbox polling, and
    conveyor dispatch --once --type continue_iteration --json
    ```
 
-7. For Codex app or no-tmux sessions, poll and consume the inbox:
+7. For Codex app or no-tmux sessions, poll and consume the inbox with the exact
+   generated `communication.poll_command`. It may include a local
+   `PATH=.../bin:$PATH conveyor` prefix:
 
    ```bash
-   conveyor worker-inbox <task> --consume-next --wait --timeout 30 --json
+   PATH='/path/to/package/bin':$PATH conveyor worker-inbox <task> --consume-next --wait --timeout 60 --path /path/to/workerctl.db --json
    ```
 
    Consuming a `continue_iteration` item is the durable "iteration began"

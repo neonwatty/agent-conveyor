@@ -337,7 +337,9 @@ tmux attach -t codex-live-test
   `receive_style='push'`, and `delivery_mode='push'`; without tmux but with a
   Codex rollout identity, `session_kind='codex_app'`, `receive_style='pull'`,
   and `delivery_mode='pull_required'`, with the role-specific inbox polling
-  command template.
+  command template. The generated command may include a local
+  `PATH=.../bin:$PATH conveyor` prefix; preserve that prefix when sending the
+  command to a Codex app thread.
 - `deregister <name>` — Mark a session gone. Refuses if the session is bound
   to an active task.
 - `sessions [--role worker|manager] [--state active|gone|all] [--include-legacy]
@@ -365,10 +367,10 @@ tmux attach -t codex-live-test
   custom Ralph-loop policy run, and prints replay commands for Dispatch,
   `loop-status`, per-session `communication` metadata, plus a `worker_handoff`
   prompt that tells Codex app workers to keep polling their worker inbox
-  through the bounded loop. The optional Codex app thread metadata is normally
-  supplied after a Codex app manager has used `create_thread` and
-  `set_thread_title`; terminal-only users can omit it and still use the manual
-  no-tmux handoff.
+  through the bounded loop using the exact generated command. The optional
+  Codex app thread metadata is normally supplied after a Codex app manager has
+  used `create_thread` and `set_thread_title`; terminal-only users can omit it
+  and still use the manual no-tmux handoff.
 - `discover [QUERY] [--all] [--limit N]` / `search [QUERY]` — Search tasks,
   registered sessions, active bindings, and recent telemetry in one JSON result.
   Use this for conversational setup when a manager or Codex session needs to
@@ -1007,10 +1009,10 @@ Current dispatch state:
   in `routed_notifications`, and threaded with `correlation_id`.
 - The session inbox is the same `routed_notifications` stream addressed by
   `target_session_id`: tmux push is optional transport. Codex app-based sessions
-  should long-poll with `manager-inbox --consume-next --wait --json` or
-  `worker-inbox --consume-next --wait --json`. For disposable Ralph loops, use
-  the generated `worker_handoff` prompt so the worker keeps polling until no
-  inbox item remains or the loop reaches `max_iterations`.
+  should long-poll with the returned `communication.poll_command`. For
+  disposable Ralph loops, use the generated `worker_handoff` prompt so the
+  worker keeps polling until no inbox item remains or the loop reaches
+  `max_iterations`.
 - `register-worker`, `register-manager`, `sessions`, `discover`, and
   `create-disposable-binding --json` expose a `communication` block per
   session. Treat `session_kind='tmux'` plus `receive_style='push'` as direct
