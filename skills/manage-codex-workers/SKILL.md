@@ -59,11 +59,10 @@ Skill behavior:
    to deliver that bootstrap prompt. Durable manager/worker communication still
    goes through Dispatch and `worker-inbox`/`manager-inbox`; direct app-thread
    messages are not Dispatch receipts. The worker should keep polling
-   `conveyor worker-inbox <task> --consume-next --wait --timeout 60 --json`
-   through the bounded loop until no inbox item remains or `max_iterations` is
-   reached. Consuming a `continue_iteration` inbox item advances the Ralph-loop
-   run's durable `current_iteration` and writes `ralph_loop_iteration_advanced`
-   telemetry.
+   the exact command printed in the `worker_handoff` prompt through the bounded
+   loop until no inbox item remains or `max_iterations` is reached. Consuming a
+   `continue_iteration` inbox item advances the Ralph-loop run's durable
+   `current_iteration` and writes `ralph_loop_iteration_advanced` telemetry.
 9. After each worker pass, require concrete evidence and structured
    `loop-evidence adversarial-check` proof before queueing another
    `enqueue-continue-iteration`.
@@ -73,11 +72,12 @@ Skill behavior:
 Idle polling rule for Codex app/no-tmux sessions:
 
 - When a worker has `session_kind=codex_app` or `receive_style=pull`, its
-  idle/check-in command is
-  `conveyor worker-inbox <task> --consume-next --wait --timeout 60 --json`.
+  idle/check-in command is the returned
+  `communication.poll_command` or generated `worker_handoff` command.
 - When a manager has `session_kind=codex_app` or `receive_style=pull`, its
-  idle/check-in command is
-  `conveyor manager-inbox <task> --consume-next --wait --timeout 60 --json`.
+  idle/check-in command is the returned `communication.poll_command`.
+- The printed command may include a local `PATH=.../bin:$PATH conveyor` prefix;
+  preserve that prefix when giving the command to a Codex app thread.
 - Repeat the appropriate command whenever the session is idle, after finishing
   a received instruction, and before deciding there is nothing more to do.
   A timeout is not completion; it is only a quiet poll interval.

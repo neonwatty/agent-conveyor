@@ -1792,6 +1792,14 @@ test("TypeScript runtime handles no-tmux create-disposable-binding by default", 
         "real-worker",
         "--manager",
         "real-manager",
+        "--worker-codex-app-thread-id",
+        "worker-thread-123",
+        "--worker-codex-app-thread-title",
+        "Real Worker Thread",
+        "--manager-codex-app-thread-id",
+        "manager-thread-456",
+        "--manager-codex-app-thread-title",
+        "Real Manager Thread",
         "--run-name",
         "real-slice-run",
         "--required-before-continue",
@@ -1811,6 +1819,8 @@ test("TypeScript runtime handles no-tmux create-disposable-binding by default", 
       binding: { id: string };
       manager: {
         communication: { delivery_mode: string; poll_command: string; receive_style: string; session_kind: string };
+        codex_app_thread_id: string | null;
+        codex_app_thread_title: string | null;
         name: string;
         rollout_path: string;
         tmux_session: string | null;
@@ -1830,6 +1840,8 @@ test("TypeScript runtime handles no-tmux create-disposable-binding by default", 
       task: { created: boolean; id: string; name: string; state: string };
       worker: {
         communication: { delivery_mode: string; poll_command: string; receive_style: string; session_kind: string };
+        codex_app_thread_id: string | null;
+        codex_app_thread_title: string | null;
         name: string;
         rollout_path: string;
         tmux_session: string | null;
@@ -1841,6 +1853,10 @@ test("TypeScript runtime handles no-tmux create-disposable-binding by default", 
     assert.equal(payload.task.state, "managed");
     assert.equal(payload.worker.name, "real-worker");
     assert.equal(payload.manager.name, "real-manager");
+    assert.equal(payload.worker.codex_app_thread_id, "worker-thread-123");
+    assert.equal(payload.worker.codex_app_thread_title, "Real Worker Thread");
+    assert.equal(payload.manager.codex_app_thread_id, "manager-thread-456");
+    assert.equal(payload.manager.codex_app_thread_title, "Real Manager Thread");
     assert.equal(payload.worker.tmux_session, null);
     assert.equal(payload.manager.tmux_session, null);
     assert.equal(payload.worker.communication.session_kind, "codex_app");
@@ -1850,13 +1866,14 @@ test("TypeScript runtime handles no-tmux create-disposable-binding by default", 
     assert.equal(payload.worker.communication.delivery_mode, "pull_required");
     assert.equal(payload.manager.communication.delivery_mode, "pull_required");
     const quotedDbPath = `'${dbPath.replace(/'/g, "'\"'\"'")}'`;
+    const localConveyor = `PATH='${join(process.cwd(), "bin").replace(/'/g, "'\"'\"'")}':$PATH conveyor`;
     assert.equal(
       payload.worker.communication.poll_command,
-      `conveyor worker-inbox 'real-slice' --consume-next --wait --timeout 60 --path ${quotedDbPath} --json`,
+      `${localConveyor} worker-inbox 'real-slice' --consume-next --wait --timeout 60 --path ${quotedDbPath} --json`,
     );
     assert.equal(
       payload.manager.communication.poll_command,
-      `conveyor manager-inbox 'real-slice' --consume-next --wait --timeout 60 --path ${quotedDbPath} --json`,
+      `${localConveyor} manager-inbox 'real-slice' --consume-next --wait --timeout 60 --path ${quotedDbPath} --json`,
     );
     assert.equal(payload.run.name, "real-slice-run");
     assert.equal(payload.run.purpose, "ralph_loop");
@@ -1888,11 +1905,32 @@ test("TypeScript runtime handles no-tmux create-disposable-binding by default", 
       assert.equal(task.id, payload.task.id);
       assert.equal(task.goal, "Run a real no-tmux Ralph loop.");
       assert.equal(task.state, "managed");
-      const sessions = database.prepare("select name, role, tmux_session, state from sessions order by role")
-        .all() as Array<{ name: string; role: string; state: string; tmux_session: string | null }>;
+      const sessions = database.prepare("select name, role, tmux_session, codex_app_thread_id, codex_app_thread_title, state from sessions order by role")
+        .all() as Array<{
+          codex_app_thread_id: string | null;
+          codex_app_thread_title: string | null;
+          name: string;
+          role: string;
+          state: string;
+          tmux_session: string | null;
+        }>;
       assert.deepEqual(sessions.map((session) => ({ ...session })), [
-        { name: "real-manager", role: "manager", state: "active", tmux_session: null },
-        { name: "real-worker", role: "worker", state: "active", tmux_session: null },
+        {
+          codex_app_thread_id: "manager-thread-456",
+          codex_app_thread_title: "Real Manager Thread",
+          name: "real-manager",
+          role: "manager",
+          state: "active",
+          tmux_session: null,
+        },
+        {
+          codex_app_thread_id: "worker-thread-123",
+          codex_app_thread_title: "Real Worker Thread",
+          name: "real-worker",
+          role: "worker",
+          state: "active",
+          tmux_session: null,
+        },
       ]);
       const binding = database.prepare("select id, task_id, state from bindings")
         .get() as { id: string; state: string; task_id: string };
@@ -2548,12 +2586,13 @@ test("TypeScript runtime handles deterministic session registry and discovery co
     assert.equal(workerPayload.role, "worker");
     assert.match(workerPayload.session_id, /^session-/);
     assert.equal(workerPayload.tmux_session, "codex-worker-a");
+    const localConveyor = `PATH='${join(process.cwd(), "bin").replace(/'/g, "'\"'\"'")}':$PATH conveyor`;
     assert.deepEqual(workerPayload.communication, {
       can_receive_pull: true,
       can_receive_push: true,
       delivery_mode: "push",
       detection_source: "tmux_session",
-      poll_command_template: "conveyor worker-inbox <task> --consume-next --wait --timeout 60 --json",
+      poll_command_template: `${localConveyor} worker-inbox <task> --consume-next --wait --timeout 60 --json`,
       receive_style: "push",
       requires_polling: false,
       session_kind: "tmux",
