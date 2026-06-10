@@ -72,6 +72,10 @@ to the task, and prints replay commands for Dispatch, inbox polling, and
    conveyor worker-inbox <task> --consume-next --wait --timeout 30 --json
    ```
 
+   Consuming a `continue_iteration` item is the durable "iteration began"
+   transition: Conveyor advances the run's `current_iteration` to the requested
+   iteration and records `ralph_loop_iteration_advanced` telemetry.
+
 8. Review status and telemetry before continuing:
 
    ```bash
@@ -81,8 +85,9 @@ to the task, and prints replay commands for Dispatch, inbox polling, and
 
 `loop-status` is the compact manager review command. A run is ready for review
 when failures are zero, blocked attempts are explainable policy blocks, worker
-inbox backlog is zero after consumption, and `dispatch_inbox_consumed` telemetry
-is present for pull-required deliveries.
+inbox backlog is zero after consumption, `dispatch_inbox_consumed` telemetry is
+present for pull-required deliveries, and `ralph_loop_iteration_advanced`
+telemetry is present for consumed continuation items.
 
 ## Pass bar for real vertical slices
 
@@ -91,4 +96,5 @@ is present for pull-required deliveries.
 - Blocked Dispatch attempts have `state=blocked`, `delivered=false`, and worker inbox count `0`.
 - Allowed Dispatch attempts include `run_id`, `loop_policy`, `requested_iteration`, `current_iteration`, `max_iterations`, and `missing_evidence=[]`.
 - Worker inbox consumption emits searchable `dispatch_inbox_consumed` telemetry.
+- Consumed continuation items emit searchable `ralph_loop_iteration_advanced` telemetry and advance the run's `current_iteration`.
 - The final report includes `loop-status`, `telemetry failures`, `audit`, `replay`, PR/CI/merge receipts when relevant, and an adversarial proof record.

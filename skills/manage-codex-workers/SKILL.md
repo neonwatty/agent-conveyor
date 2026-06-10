@@ -6,8 +6,8 @@ description: Use when the user asks to set up an Agent Conveyor Ralph loop, regi
 # Manage Codex Workers
 
 Use `conveyor ...` as the primary CLI. It is installed by the `agent-conveyor`
-Python package. The legacy `workerctl` command remains a compatibility alias,
-but skill-driven flows should prefer `conveyor`.
+Node/TypeScript package. The legacy `workerctl` command remains a compatibility
+alias, but skill-driven flows should prefer `conveyor`.
 
 ## One-Prompt Codex App Ralph Loop
 
@@ -61,7 +61,9 @@ Skill behavior:
    messages are not Dispatch receipts. The worker should keep polling
    `conveyor worker-inbox <task> --consume-next --wait --timeout 60 --json`
    through the bounded loop until no inbox item remains or `max_iterations` is
-   reached.
+   reached. Consuming a `continue_iteration` inbox item advances the Ralph-loop
+   run's durable `current_iteration` and writes `ralph_loop_iteration_advanced`
+   telemetry.
 9. After each worker pass, require concrete evidence and structured
    `loop-evidence adversarial-check` proof before queueing another
    `enqueue-continue-iteration`.
@@ -81,6 +83,9 @@ Idle polling rule for Codex app/no-tmux sessions:
   A timeout is not completion; it is only a quiet poll interval.
 - Keep `conveyor dispatch --watch --dispatcher-id dispatch-local` running so
   Dispatch can route new messages into those inboxes.
+- For bounded Ralph loops, treat `ralph_loop_iteration_advanced` telemetry as
+  the receipt that a worker actually consumed and began the requested
+  iteration.
 
 Reference docs:
 

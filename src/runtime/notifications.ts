@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 
 export type RoutedNotificationDeliveryMode = "pull_required" | "push";
@@ -229,7 +230,67 @@ export function consumeNextSessionInboxItemSync(
     return null;
   }
   const consumed = database.prepare(sessionInboxQuery("rn.id = ?")).get(row.id) as SessionInboxRow | undefined;
-  return consumed ? sessionInboxRecord(consumed) : null;
+  if (!consumed) {
+    return null;
+  }
+  const record = sessionInboxRecord(consumed);
+  advanceRalphLoopIterationOnConsumeSync(database, {
+    consumed: record,
+    now: options.now ?? new Date().toISOString(),
+  });
+  return record;
+}
+
+function advanceRalphLoopIterationOnConsumeSync(
+  database: DatabaseSync,
+  options: { consumed: SessionInboxRecord; now: string },
+): void {
+  if (options.consumed.signal_type !== "continue_iteration") {
+    return;
+  }
+  const loopPayload = isRecord(options.consumed.payload.ralph_loop)
+    ? options.consumed.payload.ralph_loop
+    : null;
+  const runId = typeof loopPayload?.run_id === "string" ? loopPayload.run_id : null;
+  const requestedIteration = integerMetadata(loopPayload?.requested_iteration);
+  if (!runId || requestedIteration === null) {
+    return;
+  }
+  const row = database.prepare(`
+    select task_id, metadata_json
+    from runs
+    where id = ?
+  `).get(runId) as { metadata_json: string; task_id: string } | undefined;
+  if (!row || row.task_id !== options.consumed.task_id) {
+    return;
+  }
+  const metadata = parseJsonObject(row.metadata_json);
+  const previousIteration = integerMetadata(metadata.current_iteration);
+  const maxIterations = integerMetadata(metadata.max_iterations);
+  if (
+    previousIteration === null
+    || maxIterations === null
+    || requestedIteration <= previousIteration
+    || requestedIteration > maxIterations
+  ) {
+    return;
+  }
+  metadata.current_iteration = requestedIteration;
+  database.prepare("update runs set metadata_json = ? where id = ?")
+    .run(stableJson(metadata), runId);
+  emitLoopIterationAdvancedTelemetry(database, {
+    commandId: options.consumed.command_id,
+    consumedBySessionId: options.consumed.consumed_by_session_id,
+    correlationId: options.consumed.correlation_id,
+    currentIteration: requestedIteration,
+    notificationId: options.consumed.id,
+    previousIteration,
+    requestedIteration,
+    runId,
+    targetSessionName: options.consumed.target_session_name,
+    taskId: options.consumed.task_id,
+    timestamp: options.now,
+  });
 }
 
 function routedNotificationSelect(): string {
@@ -354,6 +415,85 @@ function sessionRow(database: DatabaseSync, sessionName: string): { id: string; 
     throw new RoutedNotificationError(`no session registered with name ${JSON.stringify(sessionName)}`);
   }
   return row;
+}
+
+function emitLoopIterationAdvancedTelemetry(
+  database: DatabaseSync,
+  options: {
+    commandId: string | null;
+    consumedBySessionId: string | null;
+    correlationId: string;
+    currentIteration: number;
+    notificationId: number;
+    previousIteration: number;
+    requestedIteration: number;
+    runId: string;
+    targetSessionName: string;
+    taskId: string;
+    timestamp: string;
+  },
+): void {
+  const eventId = `telemetry-${randomUUID()}`;
+  const attributes = {
+    consumed_by_session_id: options.consumedBySessionId,
+    current_iteration: options.currentIteration,
+    previous_iteration: options.previousIteration,
+    requested_iteration: options.requestedIteration,
+    target_session_name: options.targetSessionName,
+  };
+  const correlation = {
+    command_id: options.commandId,
+    correlation_id: options.correlationId,
+    notification_id: options.notificationId,
+    run_id: options.runId,
+  };
+  const attributesJson = stableJson(attributes);
+  database.prepare(`
+    insert into telemetry_events(
+      id, run_id, task_id, timestamp, actor, event_type, severity,
+      summary, correlation_json, attributes_json
+    )
+    values (?, ?, ?, ?, 'dispatch', 'ralph_loop_iteration_advanced', 'info', ?, ?, ?)
+  `).run(
+    eventId,
+    options.runId,
+    options.taskId,
+    options.timestamp,
+    `Ralph loop advanced to iteration ${options.currentIteration}.`,
+    stableJson(correlation),
+    attributesJson,
+  );
+  database.prepare(`
+    insert into telemetry_events_fts(
+      event_id, task_id, run_id, actor, event_type, summary, attributes
+    )
+    values (?, ?, ?, 'dispatch', 'ralph_loop_iteration_advanced', ?, ?)
+  `).run(
+    eventId,
+    options.taskId,
+    options.runId,
+    `Ralph loop advanced to iteration ${options.currentIteration}.`,
+    attributesJson,
+  );
+}
+
+function parseJsonObject(json: string): Record<string, unknown> {
+  const value = JSON.parse(json) as unknown;
+  return isRecord(value) ? value : {};
+}
+
+function integerMetadata(value: unknown): number | null {
+  if (typeof value === "number" && Number.isInteger(value)) {
+    return value;
+  }
+  if (typeof value === "string" && /^-?\d+$/.test(value)) {
+    return Number(value);
+  }
+  return null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 function stableJson(value: unknown): string {

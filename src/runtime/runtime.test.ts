@@ -1798,6 +1798,108 @@ test("dispatch command execution allows continue_iteration after structured prio
   }
 });
 
+test("consuming continue_iteration advances the Ralph loop run with a telemetry receipt", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-loop-advance."));
+  try {
+    const database = openDatabaseSync(join(root, "workerctl.db"));
+    try {
+      initializeDatabaseSync(database);
+      createTaskSync(database, {
+        goal: "Run QA.",
+        name: "qa-task",
+        now: "2026-05-23T10:00:00Z",
+        taskId: "task-loop-advance",
+      });
+      insertSession(database, { id: "session-worker", name: "worker-a", role: "worker" });
+      insertSession(database, { id: "session-manager", name: "manager-a", role: "manager" });
+      bindSessionsSync(database, {
+        bindingId: "binding-loop-advance",
+        managerSessionName: "manager-a",
+        now: "2026-05-23T10:00:30Z",
+        taskName: "qa-task",
+        workerSessionName: "worker-a",
+      });
+      insertRalphLoopRun(database, {
+        currentIteration: 1,
+        maxIterations: 3,
+        requiredBeforeContinue: ["adversarial_check"],
+        runId: "run-loop-advance",
+        taskId: "task-loop-advance",
+      });
+      createCommandSync(database, {
+        commandId: "command-loop-advance",
+        commandType: "continue_iteration",
+        correlationId: "corr-loop-advance",
+        now: "2026-05-23T10:00:45Z",
+        payload: {
+          message: "Run iteration 2.",
+          ralph_loop: { requested_iteration: 2, run_id: "run-loop-advance" },
+        },
+        taskId: "task-loop-advance",
+      });
+      const notificationId = insertRoutedNotificationSync(database, {
+        bindingId: "binding-loop-advance",
+        commandId: "command-loop-advance",
+        correlationId: "corr-loop-advance",
+        dedupeKey: "corr-loop-advance:continue_iteration",
+        deliveryMode: "pull_required",
+        now: "2026-05-23T10:01:00Z",
+        payload: {
+          message: "Run iteration 2.",
+          ralph_loop: { requested_iteration: 2, run_id: "run-loop-advance" },
+        },
+        signalType: "continue_iteration",
+        sourceSessionId: "session-manager",
+        state: "delivered",
+        targetSessionId: "session-worker",
+        taskId: "task-loop-advance",
+      });
+
+      const consumed = consumeNextSessionInboxItemSync(database, {
+        now: "2026-05-23T10:02:00Z",
+        sessionName: "worker-a",
+      });
+
+      const run = database.prepare("select metadata_json from runs where id = ?")
+        .get("run-loop-advance") as { metadata_json: string };
+      const telemetry = database.prepare(`
+        select event_type, run_id, task_id, correlation_json, attributes_json
+        from telemetry_events
+        where event_type = 'ralph_loop_iteration_advanced'
+      `).get() as {
+        attributes_json: string;
+        correlation_json: string;
+        event_type: string;
+        run_id: string;
+        task_id: string;
+      };
+
+      assert.equal(consumed?.id, notificationId);
+      assert.equal(JSON.parse(run.metadata_json).current_iteration, 2);
+      assert.equal(telemetry.event_type, "ralph_loop_iteration_advanced");
+      assert.equal(telemetry.run_id, "run-loop-advance");
+      assert.equal(telemetry.task_id, "task-loop-advance");
+      assert.deepEqual(JSON.parse(telemetry.correlation_json), {
+        command_id: "command-loop-advance",
+        correlation_id: "corr-loop-advance",
+        notification_id: notificationId,
+        run_id: "run-loop-advance",
+      });
+      assert.deepEqual(JSON.parse(telemetry.attributes_json), {
+        consumed_by_session_id: "session-worker",
+        current_iteration: 2,
+        previous_iteration: 1,
+        requested_iteration: 2,
+        target_session_name: "worker-a",
+      });
+    } finally {
+      database.close();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("dispatch command execution rejects unstructured adversarial loop evidence", () => {
   const root = mkdtempSync(join(tmpdir(), "agent-conveyor-dispatch-loop-adversarial."));
   try {
