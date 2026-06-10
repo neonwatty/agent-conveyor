@@ -735,7 +735,7 @@ tmux attach -t codex-live-test
 - `loop-status TASK --run RUN [--json]` — Summarize a Ralph-loop run for manager
   review: policy template, iteration bounds, command states, routed
   notifications, worker inbox backlog, evidence types, consumed-inbox
-  telemetry, failure counts, and a recommendation.
+  and iteration-advanced telemetry, failure counts, and a recommendation.
 
 For real vertical slices, start with the Ralph loop operator guide in
 `docs/qa/ralph-loop-operator-guide.md`. It explains the controlled
@@ -1033,6 +1033,10 @@ Current dispatch state:
 - Consuming a mailbox item records `dispatch_inbox_consumed` telemetry with the
   notification id, signal type, delivery mode, target session role, and poll
   count, so manager/worker dispatcher handoffs are visible in audit evidence.
+  When the item is `continue_iteration`, Conveyor also advances the run
+  metadata's durable `current_iteration` to the requested iteration and records
+  `ralph_loop_iteration_advanced` telemetry keyed to the run, notification,
+  command, and consuming session.
 - If `doctor-self --json` reports `workerctl_on_path=false` inside a Codex app
   session, run `conveyor ...` from the repository root or install the
   local wrapper with `scripts/install-local --write`. Its `inside_tmux` check
