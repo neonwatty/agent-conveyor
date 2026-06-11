@@ -259,6 +259,19 @@ conveyor worker-inbox "$TASK" --consume-next --wait --timeout 60 --json
 conveyor manager-inbox "$TASK" --consume-next --wait --timeout 60 --json
 ```
 
+Dispatch delivery is not a wake-up mechanism for idle Codex app threads. When
+`communication.requires_polling=true`, install or verify a thread heartbeat for
+each pull-required manager and worker session. The default heartbeat should run
+about every two minutes, poll the role-specific inbox once with a short wait,
+execute only a consumed item, and otherwise stop after a one-line idle receipt.
+Do not delete or pause heartbeat automation because an inbox poll is idle; idle
+polling is only a quiet interval. The manager or operator owns terminal loop
+teardown. When all accepted criteria are satisfied, deferred, or rejected and
+there is no next worker task, the manager should record the terminal decision,
+run `conveyor finish-task "$TASK" --require-criteria-audit`, and explicitly
+report heartbeat teardown status. If the task or binding still appears active,
+report that as a control-plane blocker instead of calling the loop complete.
+
 When the manager is running in the Codex app and thread tools are available,
 create the worker with fresh same-project `create_thread`, set a readable title
 with `set_thread_title`, and pass the resulting id/title into

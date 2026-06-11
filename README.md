@@ -367,7 +367,15 @@ tmux attach -t codex-live-test
   custom Ralph-loop policy run, and prints replay commands for Dispatch,
   `loop-status`, per-session `communication` metadata, plus a `worker_handoff`
   prompt that tells Codex app workers to keep polling their worker inbox
-  through the bounded loop using the exact generated command. The optional
+  through the bounded loop using the exact generated command. For pull-required
+  Codex app sessions, the JSON output also includes
+  `heartbeat_recommendations` with role-specific poll prompts; Dispatch can
+  deliver into those inboxes, but a heartbeat or operator wake-up is still
+  required to make an idle app thread poll autonomously. Those recommendations
+  include a `teardown_policy`: an idle poll is only a quiet interval, not a
+  reason to delete or pause heartbeat automation; heartbeat teardown belongs to
+  the manager/operator after terminal closeout or explicit operator instruction.
+  The optional
   Codex app thread metadata is normally supplied after a Codex app manager has
   used `create_thread` and `set_thread_title`; terminal-only users can omit it
   and still use the manual no-tmux handoff.
@@ -1012,7 +1020,13 @@ Current dispatch state:
   should long-poll with the returned `communication.poll_command`. For
   disposable Ralph loops, use the generated `worker_handoff` prompt so the
   worker keeps polling until no inbox item remains or the loop reaches
-  `max_iterations`.
+  `max_iterations`. For no-tmux Codex app sessions, treat
+  `communication.requires_polling=true` as requiring a heartbeat/wake layer:
+  a delivered pull inbox item does not by itself wake an idle app thread. Do
+  not delete or pause heartbeats because an inbox poll is idle. A terminal
+  manager decision should be followed by `finish-task --require-criteria-audit`
+  or by an explicit blocker explaining why the task/binding still appears
+  active.
 - `register-worker`, `register-manager`, `sessions`, `discover`, and
   `create-disposable-binding --json` expose a `communication` block per
   session. Treat `session_kind='tmux'` plus `receive_style='push'` as direct

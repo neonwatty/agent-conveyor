@@ -5478,6 +5478,7 @@ function runCreateDisposableBindingCommand(
         rollout_path: workerRollout.path,
         tmux_session: null,
       },
+      heartbeat_recommendations: disposableHeartbeatRecommendations(task.name, dbPath),
       worker_handoff: disposableWorkerHandoff(task.name, run?.name ?? null, dbPath),
     };
     if (parsed.flags.json) {
@@ -18913,11 +18914,35 @@ function disposableWorkerHandoff(taskName: string, runName: string | null, dbPat
     `You are the worker for task ${taskName}${loopClause}.`,
     "Keep polling your Conveyor worker inbox until there are no items left or the loop reaches max_iterations. Consume the next item now, treat each consumed item as the manager's next instruction, complete the requested work, and report changed files, exact commands run, evidence, and any residual risk.",
     "",
+    "Because this is a pull-required Codex app/no-tmux session, autonomous operation requires a heartbeat/wake layer that repeats this worker inbox poll while the thread is idle. If no heartbeat automation is available, report the loop as manual-poll only.",
+    "Do not delete, pause, or disable heartbeat automation just because an inbox poll is idle; the manager or operator owns terminal loop teardown.",
+    "",
     `Run: ${sessionPollCommand("worker", taskName, dbPath)}`,
   ].join("\n");
 }
 
+type DisposableHeartbeatRecommendations = {
+  applies_when: {
+    can_receive_push: false;
+    delivery_mode: "pull_required";
+    receive_style: "pull";
+    session_kind: "codex_app";
+  };
+  interval_minutes: number;
+  manager: { kind: "thread_heartbeat"; poll_command: string; prompt: string };
+  note: string;
+  teardown_policy: {
+    idle_poll: string;
+    owner: "manager_or_operator";
+    terminal_closeout: string;
+    terminal_closeout_command: string;
+    worker_rule: string;
+  };
+  worker: { kind: "thread_heartbeat"; poll_command: string; prompt: string };
+};
+
 function renderDisposableBindingText(result: {
+  heartbeat_recommendations?: DisposableHeartbeatRecommendations;
   manager: { name: string; rollout_path: string };
   replay_commands: string[];
   run: { name: string } | null;
@@ -18935,9 +18960,64 @@ function renderDisposableBindingText(result: {
   }
   lines.push("Replay commands:");
   lines.push(...result.replay_commands.map((command) => `  ${command}`));
+  if (result.heartbeat_recommendations) {
+    lines.push("Heartbeat recommendations:");
+    lines.push(`  interval: every ${result.heartbeat_recommendations.interval_minutes} minutes`);
+    lines.push(`  manager: ${result.heartbeat_recommendations.manager.poll_command}`);
+    lines.push(`  worker: ${result.heartbeat_recommendations.worker.poll_command}`);
+    lines.push(`  teardown: ${result.heartbeat_recommendations.teardown_policy.idle_poll}`);
+    lines.push(`  closeout: ${result.heartbeat_recommendations.teardown_policy.terminal_closeout_command}`);
+  }
   lines.push("Worker handoff:");
   lines.push(result.worker_handoff);
   return `${lines.join("\n")}\n`;
+}
+
+function disposableHeartbeatRecommendations(taskName: string, dbPath: string): DisposableHeartbeatRecommendations {
+  const terminalCloseoutCommand = `${conveyorPollInvocation()} finish-task ${shellQuote(taskName)} --reason ${shellQuote("Verified terminal closeout")} --require-criteria-audit --path ${shellQuote(dbPath)}`;
+  return {
+    applies_when: {
+      can_receive_push: false,
+      delivery_mode: "pull_required",
+      receive_style: "pull",
+      session_kind: "codex_app",
+    },
+    interval_minutes: 2,
+    note: "Dispatch can deliver pull-required inbox items, but Codex app/no-tmux sessions still need a heartbeat or operator wake-up to poll while idle.",
+    teardown_policy: {
+      idle_poll: "Never delete, pause, or disable a manager or worker heartbeat because an inbox poll returned no item; that is only a quiet poll interval.",
+      owner: "manager_or_operator",
+      terminal_closeout: "Only the manager or operator should tear down heartbeats, and only after a terminal manager decision plus verified task closeout, or after explicit operator instruction.",
+      terminal_closeout_command: terminalCloseoutCommand,
+      worker_rule: "The worker must not own loop teardown and must not remove heartbeat automation based on idle polling.",
+    },
+    manager: {
+      kind: "thread_heartbeat",
+      poll_command: sessionPollCommand("manager", taskName, dbPath),
+      prompt: [
+        "Use the manage-codex-workers skill.",
+        `Poll the manager inbox for task ${taskName}.`,
+        `Run: ${sessionPollCommand("manager", taskName, dbPath)}`,
+        "If an item is consumed, execute only that manager instruction, verify worker claims before recording conclusions, update Conveyor state as appropriate, and produce exactly one next worker task.",
+        "If no item is consumed, stop after a one-line idle receipt.",
+        "Do not delete, pause, or disable manager or worker heartbeat automation after an idle poll; an idle poll is only a quiet interval.",
+        `If all accepted criteria are satisfied, deferred, or rejected and there is no next worker task, record the terminal manager decision, run or report the result of: ${terminalCloseoutCommand}`,
+        "After verified task closeout, explicitly report heartbeat teardown status; if the task remains managed/active, report that as a control-plane blocker instead of calling the loop complete.",
+      ].join("\n"),
+    },
+    worker: {
+      kind: "thread_heartbeat",
+      poll_command: sessionPollCommand("worker", taskName, dbPath),
+      prompt: [
+        "Use the manage-codex-workers skill.",
+        `Poll the worker inbox for task ${taskName}.`,
+        `Run: ${sessionPollCommand("worker", taskName, dbPath)}`,
+        "If an item is consumed, execute only that single worker instruction and return exact commands, compact evidence, blockers/residual risk, and exactly one next recommended worker task.",
+        "If no item is consumed, stop after a one-line idle receipt.",
+        "Do not delete, pause, or disable worker heartbeat automation after an idle poll; the manager or operator owns terminal loop teardown.",
+      ].join("\n"),
+    },
+  };
 }
 
 function sessionPollCommand(role: "manager" | "worker", taskName: string | null, dbPath: string): string {
