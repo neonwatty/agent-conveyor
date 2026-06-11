@@ -61,6 +61,34 @@ export interface AppWakeup {
   };
 }
 
+export type AppWakeupDispatchActionStatus = "blocked_missing_thread" | "ready_to_send" | "skipped_healthy";
+
+export interface AppWakeupDispatchAction {
+  blocker: string | null;
+  prompt: string | null;
+  reason: string;
+  role: AppLoopRole;
+  send_ready: boolean;
+  status: AppWakeupDispatchActionStatus;
+  thread: {
+    id: string | null;
+    title: string | null;
+  };
+}
+
+export interface AppWakeupDispatchPlan {
+  actions: AppWakeupDispatchAction[];
+  dispatcher: AppWakeupPlan["dispatcher"];
+  status: AppLoopStatus;
+  summary: {
+    blocked: number;
+    dispatcher_required: boolean;
+    ready_to_send: number;
+    skipped: number;
+    total_actions: number;
+  };
+}
+
 export function appLoopStatusSync(
   database: DatabaseSync,
   options: {
@@ -205,6 +233,73 @@ export function appWakeupPlanSync(
     },
     status,
     wakeups,
+  };
+}
+
+export function appWakeupDispatchPlanSync(
+  database: DatabaseSync,
+  options: {
+    dbPath?: string | null;
+    dispatcherId: string;
+    heartbeatStaleSeconds: number;
+    now: string;
+    taskName: string;
+  },
+): AppWakeupDispatchPlan {
+  const plan = appWakeupPlanSync(database, options);
+  const wakeupsByRole = new Map(plan.wakeups.map((wakeup) => [wakeup.role, wakeup]));
+  const actions = (["manager", "worker"] as const).map((role) => {
+    const roleStatus = role === "manager" ? plan.status.manager : plan.status.worker;
+    const wakeup = wakeupsByRole.get(role);
+    if (!wakeup) {
+      return {
+        blocker: null,
+        prompt: null,
+        reason: `${role} heartbeat is healthy.`,
+        role,
+        send_ready: false,
+        status: "skipped_healthy" as const,
+        thread: {
+          id: roleStatus.codex_app_thread_id,
+          title: roleStatus.codex_app_thread_title,
+        },
+      };
+    }
+    if (!wakeup.thread.id) {
+      return {
+        blocker: `No Codex app thread id is registered for the ${role}; use the prompt manually or register app thread metadata before calling send_message_to_thread.`,
+        prompt: wakeup.prompt,
+        reason: wakeup.reason,
+        role,
+        send_ready: false,
+        status: "blocked_missing_thread" as const,
+        thread: wakeup.thread,
+      };
+    }
+    return {
+      blocker: null,
+      prompt: wakeup.prompt,
+      reason: wakeup.reason,
+      role,
+      send_ready: true,
+      status: "ready_to_send" as const,
+      thread: wakeup.thread,
+    };
+  });
+  const ready = actions.filter((action) => action.status === "ready_to_send").length;
+  const blocked = actions.filter((action) => action.status === "blocked_missing_thread").length;
+  const skipped = actions.filter((action) => action.status === "skipped_healthy").length;
+  return {
+    actions,
+    dispatcher: plan.dispatcher,
+    status: plan.status,
+    summary: {
+      blocked,
+      dispatcher_required: plan.dispatcher.required,
+      ready_to_send: ready,
+      skipped,
+      total_actions: actions.length,
+    },
   };
 }
 

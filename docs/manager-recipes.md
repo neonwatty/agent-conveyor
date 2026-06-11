@@ -303,11 +303,16 @@ conveyor app-heartbeat "$TASK" --role manager --json
 conveyor app-heartbeat "$TASK" --role worker --json
 conveyor app-loop-status "$TASK" --json
 conveyor app-wakeup-plan "$TASK" --json
+conveyor app-wakeup-dispatch "$TASK" --json
 ```
 
 Use `app-loop-status` as the operator status surface. If it reports stale
 manager, worker, or Dispatch leases, use `app-wakeup-plan` to get the exact
 thread prompt to send through Codex app automation or `send_message_to_thread`.
+Use `app-wakeup-dispatch` when the manager needs a durable Conveyor receipt for
+which app wake actions were prepared, skipped, or blocked. It only prepares
+adapter-ready actions; direct app-thread delivery remains an app/operator
+action, and Dispatch/inboxes remain the durable task state.
 
 The saved dogfood example is
 `docs/goals/live-codex-app-inbox-drill/notes/T001-live-drill.md`. It proves

@@ -8,8 +8,10 @@ import { fileURLToPath } from "node:url";
 import { taskAuditSync } from "../runtime/audit.js";
 import {
   appLoopStatusSync,
+  appWakeupDispatchPlanSync,
   appWakeupPlanSync,
   directInboxPollCommand,
+  type AppWakeupDispatchPlan,
   type AppLoopRole,
   type AppLoopStatus,
 } from "../runtime/app-autonomy.js";
@@ -264,6 +266,9 @@ export function runTypescriptRuntimeCommand(options: TypescriptRuntimeOptions): 
     }
     if (parsed.command === "app-wakeup-plan") {
       return runAppWakeupPlanCommand(parsed, options);
+    }
+    if (parsed.command === "app-wakeup-dispatch") {
+      return runAppWakeupDispatchCommand(parsed, options);
     }
     if (parsed.command === "qa-plan") {
       return runQaPlanCommand(parsed);
@@ -1740,6 +1745,7 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
         && command !== "app-heartbeat"
         && command !== "app-loop-status"
         && command !== "app-wakeup-plan"
+        && command !== "app-wakeup-dispatch"
       ) {
         return { command, enabled, error: "Unsupported TypeScript runtime option: --dispatcher-id", explicit, flags, task };
       }
@@ -2588,7 +2594,7 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       flags.statusStaleSeconds = value;
       index += 1;
     } else if (arg === "--stale-after") {
-      if (command !== "app-heartbeat" && command !== "app-loop-status" && command !== "app-wakeup-plan") {
+      if (command !== "app-heartbeat" && command !== "app-loop-status" && command !== "app-wakeup-plan" && command !== "app-wakeup-dispatch") {
         return { command, enabled, error: "Unsupported TypeScript runtime option: --stale-after", explicit, flags, task };
       }
       const parsedValue = valueAfter(queue, index, arg);
@@ -3665,6 +3671,68 @@ function runAppWakeupPlanCommand(
   }
 }
 
+function runAppWakeupDispatchCommand(
+  parsed: ParsedRuntimeArgs,
+  options: { cwd?: string; env?: NodeJS.ProcessEnv; now?: () => Date },
+): TypescriptRuntimeResult {
+  const taskName = requireTask(parsed);
+  const database = openRuntimeDatabase(parsed, options);
+  try {
+    const timestamp = nowIsoSeconds(options);
+    const dispatch = appWakeupDispatchPlanSync(database, {
+      dbPath: runtimeDbPath(parsed, options),
+      dispatcherId: parsed.flags.dispatcherId ?? "dispatch-local",
+      heartbeatStaleSeconds: parsed.flags.appStaleAfterSeconds,
+      now: timestamp,
+      taskName,
+    });
+    const eventId = emitTelemetrySync(database, {
+      actor: "manager",
+      attributes: {
+        actions: dispatch.actions.map((action) => ({
+          blocker: action.blocker,
+          reason: action.reason,
+          role: action.role,
+          send_ready: action.send_ready,
+          status: action.status,
+          thread_id: action.thread.id,
+          thread_title: action.thread.title,
+        })),
+        dispatcher: dispatch.dispatcher,
+        status_ok: dispatch.status.ok,
+        summary: dispatch.summary,
+      },
+      correlation: {
+        command: "app-wakeup-dispatch",
+        dispatcher_id: dispatch.status.dispatch.dispatcher_id,
+      },
+      eventType: "app_wakeup_dispatch_planned",
+      severity: dispatch.summary.blocked > 0 || dispatch.dispatcher.required ? "warning" : "info",
+      summary: `App wakeup dispatch planned for ${dispatch.status.task.name}.`,
+      taskId: dispatch.status.task.id,
+      timestamp,
+    });
+    const output = {
+      ...dispatch,
+      receipt: {
+        event_id: eventId,
+        event_type: "app_wakeup_dispatch_planned",
+        recorded_at: timestamp,
+      },
+    };
+    if (parsed.flags.json) {
+      return jsonResult(output);
+    }
+    return {
+      exitCode: 0,
+      handled: true,
+      stdout: renderAppWakeupDispatchText(output),
+    };
+  } finally {
+    database.close();
+  }
+}
+
 function renderAppLoopStatusText(status: AppLoopStatus): string {
   const lines = [
     `App loop ${status.task.name}: ${status.ok ? "ok" : "attention required"}`,
@@ -3674,6 +3742,27 @@ function renderAppLoopStatusText(status: AppLoopStatus): string {
   ];
   for (const action of status.next_actions) {
     lines.push(`Next: ${action.kind} - ${action.reason}`);
+  }
+  return `${lines.join("\n")}\n`;
+}
+
+function renderAppWakeupDispatchText(plan: AppWakeupDispatchPlan & { receipt: { event_id: string; event_type: string; recorded_at: string } }): string {
+  const lines = [
+    `App wakeup dispatch for ${plan.status.task.name}: ${plan.status.ok ? "ok" : "attention required"}`,
+    `Dispatch: ${plan.dispatcher.state}${plan.dispatcher.required ? ` (${plan.dispatcher.command})` : ""}`,
+    `Receipt: ${plan.receipt.event_type} ${plan.receipt.event_id}`,
+  ];
+  for (const action of plan.actions) {
+    lines.push(`${action.role}: ${action.status} - ${action.reason}`);
+    if (action.blocker) {
+      lines.push(`Blocker: ${action.blocker}`);
+    }
+    if (action.send_ready && action.thread.id) {
+      lines.push(`Thread: ${action.thread.title ?? "(untitled)"} ${action.thread.id}`);
+    }
+    if (action.prompt) {
+      lines.push(action.prompt);
+    }
   }
   return `${lines.join("\n")}\n`;
 }
@@ -15556,6 +15645,7 @@ function isDefaultRuntimeCommand(command: string | null): boolean {
     || command === "app-heartbeat"
     || command === "app-loop-status"
     || command === "app-wakeup-plan"
+    || command === "app-wakeup-dispatch"
     || command === "loop-templates"
     || command === "loop-triggers"
     || command === "ralph-loop-presets"
@@ -19548,7 +19638,7 @@ function emitTelemetrySync(
     taskId?: string | null;
     timestamp: string;
   },
-): void {
+): string {
   const eventId = `telemetry-${randomUUID()}`;
   const attributesJson = stableJson(options.attributes);
   database.prepare(`
@@ -19583,6 +19673,7 @@ function emitTelemetrySync(
     options.summary,
     attributesJson,
   );
+  return eventId;
 }
 
 function latestCodexEventsForSession(

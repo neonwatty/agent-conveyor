@@ -389,6 +389,11 @@ tmux attach -t codex-live-test
 - `app-wakeup-plan TASK [--dispatcher-id ID] [--stale-after N] [--json]` —
   Emit exact manager and worker thread wake prompts, including app thread ids
   and titles when present, for an operator or Codex app automation to send.
+- `app-wakeup-dispatch TASK [--dispatcher-id ID] [--stale-after N] [--json]` —
+  Prepare adapter-ready Codex app wake actions and record a telemetry receipt
+  for prepared, skipped, and blocked role wakeups. This command does not send
+  `send_message_to_thread`; the Codex app/operator layer sends prompts whose
+  actions report `send_ready=true`.
 - `discover [QUERY] [--all] [--limit N]` / `search [QUERY]` — Search tasks,
   registered sessions, active bindings, and recent telemetry in one JSON result.
   Use this for conversational setup when a manager or Codex session needs to
