@@ -1817,6 +1817,19 @@ test("TypeScript runtime handles no-tmux create-disposable-binding by default", 
     assert.equal(created.handled, true);
     const payload = JSON.parse(created.stdout ?? "{}") as {
       binding: { id: string };
+      heartbeat_recommendations: {
+        interval_minutes: number;
+        manager: { poll_command: string; prompt: string };
+        note: string;
+        teardown_policy: {
+          idle_poll: string;
+          owner: string;
+          terminal_closeout: string;
+          terminal_closeout_command: string;
+          worker_rule: string;
+        };
+        worker: { poll_command: string; prompt: string };
+      };
       manager: {
         communication: { delivery_mode: string; poll_command: string; receive_style: string; session_kind: string };
         codex_app_thread_id: string | null;
@@ -1875,6 +1888,28 @@ test("TypeScript runtime handles no-tmux create-disposable-binding by default", 
       payload.manager.communication.poll_command,
       `${localConveyor} manager-inbox 'real-slice' --consume-next --wait --timeout 60 --path ${quotedDbPath} --json`,
     );
+    assert.equal(payload.heartbeat_recommendations.interval_minutes, 2);
+    assert.equal(
+      payload.heartbeat_recommendations.worker.poll_command,
+      payload.worker.communication.poll_command,
+    );
+    assert.equal(
+      payload.heartbeat_recommendations.manager.poll_command,
+      payload.manager.communication.poll_command,
+    );
+    assert.ok(payload.heartbeat_recommendations.note.includes("heartbeat"));
+    assert.equal(payload.heartbeat_recommendations.teardown_policy.owner, "manager_or_operator");
+    assert.ok(payload.heartbeat_recommendations.teardown_policy.idle_poll.includes("Never delete"));
+    assert.ok(payload.heartbeat_recommendations.teardown_policy.terminal_closeout.includes("terminal manager decision"));
+    assert.ok(payload.heartbeat_recommendations.teardown_policy.terminal_closeout_command.includes("finish-task 'real-slice'"));
+    assert.ok(payload.heartbeat_recommendations.teardown_policy.terminal_closeout_command.includes("--require-criteria-audit"));
+    assert.ok(payload.heartbeat_recommendations.teardown_policy.worker_rule.includes("must not own loop teardown"));
+    assert.ok(payload.heartbeat_recommendations.worker.prompt.includes("stop after a one-line idle receipt"));
+    assert.ok(payload.heartbeat_recommendations.worker.prompt.includes("Do not delete, pause, or disable worker heartbeat automation after an idle poll"));
+    assert.ok(payload.heartbeat_recommendations.manager.prompt.includes("produce exactly one next worker task"));
+    assert.ok(payload.heartbeat_recommendations.manager.prompt.includes("Do not delete, pause, or disable manager or worker heartbeat automation after an idle poll"));
+    assert.ok(payload.heartbeat_recommendations.manager.prompt.includes("record the terminal manager decision"));
+    assert.ok(payload.heartbeat_recommendations.manager.prompt.includes("task remains managed/active"));
     assert.equal(payload.run.name, "real-slice-run");
     assert.equal(payload.run.purpose, "ralph_loop");
     assert.equal(payload.run.status, "finished");
@@ -1886,6 +1921,8 @@ test("TypeScript runtime handles no-tmux create-disposable-binding by default", 
     assert.ok(payload.replay_commands.some((command) => command.includes("worker-inbox")));
     assert.ok(payload.replay_commands.some((command) => command.includes("loop-status")));
     assert.ok(payload.worker_handoff.includes("Keep polling your Conveyor worker inbox"));
+    assert.ok(payload.worker_handoff.includes("autonomous operation requires a heartbeat/wake layer"));
+    assert.ok(payload.worker_handoff.includes("Do not delete, pause, or disable heartbeat automation just because an inbox poll is idle"));
     assert.ok(payload.worker_handoff.includes(payload.worker.communication.poll_command));
 
     for (const key of ["worker", "manager"] as const) {
