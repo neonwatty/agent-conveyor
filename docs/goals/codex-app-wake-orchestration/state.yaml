@@ -1,0 +1,294 @@
+# GoalBuddy v2 state.yaml
+# Board truth lives here. goal.md is the editable charter; notes/ holds long receipts only.
+
+version: 2
+
+goal:
+  title: "Codex App Wake Orchestration"
+  slug: "codex-app-wake-orchestration"
+  kind: specific
+  tranche: "Implement and prove a bounded wake orchestration layer for Codex app manager/worker loops while preserving Dispatch/inbox truth."
+  status: done
+  oracle:
+    signal: "A manager can use Conveyor loop status to decide whether a Codex app manager or worker should be woken, produce or drive the correct role-specific wake action, and record receipts without replacing Dispatch inboxes as durable truth."
+    cadence: "after each Worker package and at final audit"
+    final_proof: "Final Judge/PM receipt cites focused tests, CLI/package smoke, release-check or equivalent, diff inspection, and a strongest-failure-mode probe for stale app-thread status versus missing Dispatch heartbeat."
+  intake:
+    original_request: "Think out these next steps very carefully and implement them with Goalbuddy Prepboard."
+    interpreted_outcome: "Agent Conveyor gains a safe app wake orchestration path layered on top of the Codex app's native session creation/messaging ability, with leases, receipts, app-loop status, and manager-verifiable next actions."
+    input_shape: specific
+    audience: "Agent Conveyor maintainers, Codex app manager sessions, Codex app worker sessions, dispatcher operators, GoalBuddy-driven audits"
+    authority: approved
+    proof_type: "test + CLI smoke + audit"
+    completion_proof: "A verified implementation proves wake planning and wake execution boundaries for stale manager/worker loops while preserving Dispatch/routed_notifications/inbox semantics."
+    likely_misfire: "Building an app-message pinger that looks autonomous but has no lease/receipt discipline, wakes healthy roles, ignores missing Dispatch, or treats direct app-thread messages as durable task state."
+    blind_spots_considered:
+      - "Codex app thread tools are app-layer capabilities, not guaranteed terminal package APIs."
+      - "Wake prompts are useful only if tied back to Conveyor loop status and receipts."
+      - "A missing Dispatch heartbeat must not be hidden by successful app-thread messages."
+      - "Healthy manager/worker roles should not be woken just because a prompt can be sent."
+      - "Terminal/tmux and no-tmux app loops must keep their existing communication behavior."
+    existing_plan_facts:
+      - "PR #281 added app-heartbeat, app-loop-status, and app-wakeup-plan runtime support."
+      - "Disposable binding heartbeat recommendations now prefer app-heartbeat with direct inbox fallback."
+      - "A prior failure-mode probe showed fresh manager/worker app-heartbeats with missing dispatch heartbeat still returned unhealthy status and next action start_dispatch."
+      - "The next useful slice is to turn wakeup planning into a safe orchestration boundary rather than another static prompt."
+
+rules:
+  pm_owns_state: true
+  one_active_task: true
+  max_write_workers: 1
+  no_implementation_without_worker_or_pm_task: true
+  no_completion_without_judge_or_pm_audit: true
+  planning_is_not_completion: true
+  queued_required_worker_blocks_completion: true
+  continuous_until_full_outcome: true
+  missing_input_or_credentials_do_not_stop_goal: true
+  preserve_and_validate_existing_plan: true
+  intake_misfire_must_be_audited: true
+  goal_pressure_requires_oracle: true
+  no_completion_on_weak_proof: true
+  slice_policy:
+    max_consecutive_tiny_tasks: 2
+    prefer_vertical_slices: true
+    judge_picks_largest_safe_slice: true
+    worker_completes_whole_slice: true
+
+agents:
+  scout: installed
+  worker: installed
+  judge: installed
+
+visual_board:
+  selected: local
+  local:
+    status: running
+    url: "http://goalbuddy.localhost:41737/codex-app-wake-orchestration/"
+    command: "npx goalbuddy board /Users/neonwatty/Desktop/codex-terminal-manager/docs/goals/codex-app-wake-orchestration"
+
+active_task: null
+
+tasks:
+  - id: T001
+    type: scout
+    assignee: Scout
+    status: done
+    reasoning_hint: high
+    objective: "Map the current app-loop runtime, CLI commands, skill/docs, app-thread tool boundary, and receipt/lease surfaces needed for wake orchestration."
+    inputs:
+      - "Merged PR #281 behavior"
+      - "docs/goals/codex-app-wake-orchestration/goal.md"
+      - "Current app autonomy runtime and CLI surfaces"
+      - "Installed manage-codex-workers skill"
+      - "Existing package smoke and release-check scripts"
+    constraints:
+      - "Read-only."
+      - "Do not implement."
+      - "Do not inspect private phone content."
+      - "Distinguish app-layer `send_message_to_thread` from package-level durable state."
+      - "Require file/command evidence for every conclusion."
+    expected_output:
+      - "Exact current commands and APIs related to app heartbeat, loop status, and wakeup planning."
+      - "Where a wake orchestration adapter should live, and what it must not own."
+      - "Which receipts, lease checks, and skip reasons are already present versus missing."
+      - "Strongest likely failure modes."
+      - "A recommended Worker slice with allowed files, tests, and stop conditions."
+    acceptance_criteria:
+      - "Cites exact files, commands, tests, and existing outputs as evidence."
+      - "Identifies whether the next slice should be CLI-only, skill-only, app-tool-adapter, or mixed."
+      - "Separates durable Dispatch/inbox state from transient app-thread messages."
+      - "Names blockers as blockers, not assumptions."
+    receipt:
+      result: done
+      note: "notes/T001-scout.md"
+      summary: "Current status/plan commands can identify stale roles and produce prompts, but no command records an orchestration receipt or adapter-ready send/skip/block decisions."
+
+  - id: T002
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Decide the largest safe first implementation slice for wake orchestration."
+    inputs:
+      - "T001 Scout receipt"
+      - "docs/goals/codex-app-wake-orchestration/goal.md"
+      - "Current working tree status"
+    constraints:
+      - "Read-only."
+      - "Approve only a slice that can be verified locally."
+      - "Reject any design that makes direct app-thread messages the durable source of truth."
+      - "Reject any design that requires terminal-only package code to invoke unavailable Codex app tools."
+    expected_output:
+      - "Decision: approved | blocked | revise."
+      - "Exact implementation objective."
+      - "Allowed files."
+      - "Verification commands."
+      - "Stop conditions."
+      - "Acceptance criteria."
+    acceptance_criteria:
+      - "Selects one concrete Worker slice."
+      - "Includes stale manager, stale worker, healthy loop, missing dispatch, and skipped wake proof requirements."
+      - "Defines whether the implementation belongs in package runtime, CLI, installed skill, or app-operator instructions."
+    receipt:
+      result: done
+      decision: approved
+      note: "notes/T002-judge.md"
+      summary: "Implement `app-wakeup-dispatch` as a package-runtime orchestration receipt command that prepares adapter-ready app wake actions without sending direct app-thread messages."
+
+  - id: T003
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "Implement the Judge-approved wake orchestration slice."
+    inputs:
+      - "T002 Judge receipt"
+    constraints:
+      - "Use tests first where practical."
+      - "Keep changes inside Judge-approved files."
+      - "Preserve existing tmux and no-tmux app-loop behavior."
+      - "Do not touch generated `dist/`."
+      - "Do not merge or publish."
+    allowed_files:
+      - "src/runtime/app-autonomy.ts"
+      - "src/cli/typescript-runtime.ts"
+      - "src/cli/typescript-runtime.test.ts"
+      - "src/index.ts"
+    expected_output:
+      - "Implementation diff for the approved slice."
+      - "Focused tests for new behavior."
+      - "Receipt explaining how leases, receipts, wake prompts/actions, and skip reasons work."
+    acceptance_criteria:
+      - "All Judge-required tests pass."
+      - "Wake orchestration records attempt/skip evidence."
+      - "Missing dispatch remains unhealthy and does not get hidden by app-thread wake success."
+      - "Healthy manager/worker roles are not woken unnecessarily."
+      - "Direct app-thread messaging remains an adapter action, not durable Conveyor truth."
+    receipt:
+      result: done
+      note: "notes/T003-worker.md"
+      summary: "Implemented `app-wakeup-dispatch` with adapter-ready role actions, skip/block reasons, and `app_wakeup_dispatch_planned` telemetry receipts."
+      changed_files:
+        - "src/runtime/app-autonomy.ts"
+        - "src/cli/typescript-runtime.ts"
+        - "src/cli/typescript-runtime.test.ts"
+        - "src/index.ts"
+      commands:
+        - cmd: "npm test -- --runInBand src/cli/typescript-runtime.test.ts"
+          status: pass
+          summary: "Focused CLI/runtime tests passed: 170 tests, 0 failures."
+        - cmd: "npm run build:cli"
+          status: pass
+          summary: "TypeScript CLI build passed."
+
+  - id: T004
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: low
+    objective: "Update package smoke, docs, and installed/packaged skill guidance for the implemented wake orchestration slice."
+    inputs:
+      - "T003 Worker receipt"
+      - "Current package smoke and release-check scripts"
+      - "Installed manage-codex-workers skill"
+    constraints:
+      - "Keep docs operational, not speculative."
+      - "Do not duplicate long prompt templates unless the implementation requires it."
+      - "Do not touch generated `dist/`."
+    allowed_files:
+      - "README.md"
+      - "docs/manager-recipes.md"
+      - "docs/manual-qa-checklist.md"
+      - "scripts/package-smoke"
+      - "skills/manage-codex-workers/SKILL.md"
+    expected_output:
+      - "Package smoke or equivalent check covers the new wake orchestration behavior."
+      - "Docs and skill explain when to wake, when to skip, and what evidence to collect."
+      - "Receipt with exact files changed and commands run."
+    acceptance_criteria:
+      - "Operators can run the implemented flow from docs/skill instructions."
+      - "Docs say Dispatch/inboxes remain authoritative."
+      - "Smoke coverage catches at least one stale-loop and one healthy-loop scenario."
+    receipt:
+      result: done
+      note: "notes/T004-docs-smoke.md"
+      summary: "Updated README, manager recipes, manual QA, skill guidance, package smoke, and reinstalled local skills."
+      changed_files:
+        - "README.md"
+        - "docs/manager-recipes.md"
+        - "docs/manual-qa-checklist.md"
+        - "scripts/package-smoke"
+        - "skills/manage-codex-workers/SKILL.md"
+      commands:
+        - cmd: "scripts/package-smoke"
+          status: pass
+          summary: "Packed CLI smoke passed, including healthy skipped wake dispatch and stale send-ready wake dispatch."
+        - cmd: "./bin/conveyor install-skills --json"
+          status: pass
+          summary: "Installed updated manage-codex-workers and codex-review skills into /Users/neonwatty/.codex/skills."
+
+  - id: T005
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Final audit of the wake orchestration implementation."
+    inputs:
+      - "T003 Worker receipt"
+      - "T004 Worker receipt"
+      - "Final git diff"
+      - "Verification command outputs"
+    constraints:
+      - "Treat Worker claims as claims until independently verified."
+      - "Do not accept happy-path-only evidence."
+      - "Do not mark done with queued required Worker tasks."
+    expected_output:
+      - "Pass/fail decision."
+      - "Evidence table."
+      - "Strongest realistic failure mode and verification result."
+      - "Close/supersede recommendations."
+      - "Next single worker task."
+    acceptance_criteria:
+      - "Focused tests, package smoke or equivalent, release-check or equivalent, goal state check, and git diff check are cited."
+      - "Final audit explicitly covers stale manager, stale worker, healthy loop, missing dispatch, and skipped wake behavior."
+      - "The final recommendation says whether to PR, release, or continue with another GoalBuddy board."
+    receipt:
+      result: done
+      decision: complete
+      full_outcome_complete: true
+      note: "notes/T005-final-audit.md"
+      summary: "Final audit passed. The implementation records adapter-ready wake orchestration receipts while preserving missing Dispatch as unhealthy."
+      commands:
+        - cmd: "npm test -- --runInBand"
+          status: pass
+          summary: "Full test suite passed: 170 tests, 0 failures."
+        - cmd: "npm run build:cli"
+          status: pass
+          summary: "TypeScript CLI build passed."
+        - cmd: "scripts/package-smoke"
+          status: pass
+          summary: "Packed npm smoke passed, including healthy skipped and stale send-ready wake dispatch checks."
+        - cmd: "scripts/release-check"
+          status: pass
+          summary: "Release check passed: build, pack, clean install, bundled skill verification."
+        - cmd: "node /Users/neonwatty/.codex/plugins/cache/goalbuddy/goalbuddy/0.3.8/skills/goalbuddy/scripts/check-goal-state.mjs docs/goals/codex-app-wake-orchestration/state.yaml"
+          status: pass
+          summary: "GoalBuddy state checker passed after receipt schema repair."
+        - cmd: "git diff --check"
+          status: pass
+          summary: "Whitespace diff check passed."
+        - cmd: "failure-mode probe for stale app roles with missing Dispatch"
+          status: pass
+          summary: "Probe returned ready_to_send=2 while keeping dispatcher.required=true, dispatcher.state=missing, and status.ok=false."
+
+blockers: []
+
+receipts:
+  - "notes/T001-scout.md"
+  - "notes/T002-judge.md"
+  - "notes/T003-worker.md"
+  - "notes/T004-docs-smoke.md"
+  - "notes/T005-final-audit.md"
+
+notes:
+  - "Prepboard created after PR #281 merged. Actual implementation should begin only through `/goal Follow docs/goals/codex-app-wake-orchestration/goal.md.`"

@@ -92,6 +92,10 @@ Idle polling rule for Codex app/no-tmux sessions:
 - Use `conveyor app-loop-status <task> --json` as the operator status surface,
   and `conveyor app-wakeup-plan <task> --json` to produce exact stale-thread
   wake prompts for Codex app automation or `send_message_to_thread`.
+- Use `conveyor app-wakeup-dispatch <task> --json` when the manager needs an
+  auditable wake orchestration receipt. It prepares adapter-ready app-thread
+  actions, reports skipped and blocked roles, and records telemetry; it does
+  not send direct app-thread messages itself.
 - For bounded Ralph loops, treat `ralph_loop_iteration_advanced` telemetry as
   the receipt that a worker actually consumed and began the requested
   iteration.
@@ -747,7 +751,8 @@ etc.) run `conveyor db-doctor --live`.
   Dispatch as the source of durable communication, and make both Codex app
   sessions repeat their role-specific `app-heartbeat` command while idle. Use
   `app-loop-status` and `app-wakeup-plan` for operator status and stale-thread
-  recovery.
+  recovery, and `app-wakeup-dispatch` when the manager needs an auditable
+  prepared/skipped/blocked wake receipt.
 - "register this Codex session as the worker for dashboard setup <CODE>":
   derive `dashboard-<CODE>-worker`, run `conveyor doctor-self`, then
   `conveyor register-worker --name dashboard-<CODE>-worker --pid <PID> --cwd <CWD> --tmux-session <SESSION>`.

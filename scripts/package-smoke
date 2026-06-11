@@ -141,11 +141,36 @@ PATH="$PREFIX/bin:$PATH" "$CONVEYOR" app-heartbeat smoke-app-loop --role worker 
 PATH="$PREFIX/bin:$PATH" "$CONVEYOR" dispatch --watch --watch-iterations 1 --dispatcher-id dispatch-local --path "$SMOKE_DB" --json > "$SMOKE_DIR/dispatch-watch.json"
 PATH="$PREFIX/bin:$PATH" "$CONVEYOR" app-loop-status smoke-app-loop --path "$SMOKE_DB" --json > "$SMOKE_DIR/app-loop-status.json"
 PATH="$PREFIX/bin:$PATH" "$CONVEYOR" app-wakeup-plan smoke-app-loop --path "$SMOKE_DB" --json > "$SMOKE_DIR/app-wakeup-plan.json"
+PATH="$PREFIX/bin:$PATH" "$CONVEYOR" app-wakeup-dispatch smoke-app-loop --path "$SMOKE_DB" --json > "$SMOKE_DIR/app-wakeup-dispatch-healthy.json"
 
-node - "$SMOKE_DIR/app-loop-status.json" "$SMOKE_DIR/app-wakeup-plan.json" <<'JS'
+STALE_DB="$SMOKE_DIR/app-loop-stale.db"
+PATH="$PREFIX/bin:$PATH" "$CONVEYOR" create-disposable-binding smoke-app-stale \
+  --worker smoke-stale-worker \
+  --manager smoke-stale-manager \
+  --worker-codex-app-thread-id thread-worker-stale \
+  --worker-codex-app-thread-title "Smoke Stale Worker" \
+  --manager-codex-app-thread-id thread-manager-stale \
+  --manager-codex-app-thread-title "Smoke Stale Manager" \
+  --adversarial \
+  --path "$STALE_DB" \
+  --json > "$SMOKE_DIR/create-disposable-binding-stale.json"
+node - "$STALE_DB" <<'JS'
+const { DatabaseSync } = require("node:sqlite");
+const database = new DatabaseSync(process.argv[2]);
+try {
+  database.prepare("update sessions set last_heartbeat_at = '2026-01-01T00:00:00Z'").run();
+} finally {
+  database.close();
+}
+JS
+PATH="$PREFIX/bin:$PATH" "$CONVEYOR" app-wakeup-dispatch smoke-app-stale --path "$STALE_DB" --json > "$SMOKE_DIR/app-wakeup-dispatch-stale.json"
+
+node - "$SMOKE_DIR/app-loop-status.json" "$SMOKE_DIR/app-wakeup-plan.json" "$SMOKE_DIR/app-wakeup-dispatch-healthy.json" "$SMOKE_DIR/app-wakeup-dispatch-stale.json" <<'JS'
 const fs = require("fs");
 const status = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
 const wakeup = JSON.parse(fs.readFileSync(process.argv[3], "utf8"));
+const healthyDispatch = JSON.parse(fs.readFileSync(process.argv[4], "utf8"));
+const staleDispatch = JSON.parse(fs.readFileSync(process.argv[5], "utf8"));
 if (!status.ok) {
   throw new Error(`expected healthy app-loop status, got ${JSON.stringify(status.next_actions)}`);
 }
@@ -154,6 +179,21 @@ if (status.dispatch.state !== "healthy" || status.manager.lease.state !== "healt
 }
 if (!Array.isArray(wakeup.wakeups) || wakeup.wakeups.length !== 0) {
   throw new Error(`expected no wakeups for healthy loop, got ${JSON.stringify(wakeup.wakeups)}`);
+}
+if (healthyDispatch.summary.ready_to_send !== 0 || healthyDispatch.summary.skipped !== 2 || healthyDispatch.dispatcher.required) {
+  throw new Error(`expected healthy wake dispatch to skip both roles, got ${JSON.stringify(healthyDispatch.summary)}`);
+}
+if (staleDispatch.summary.ready_to_send !== 2 || staleDispatch.summary.skipped !== 0) {
+  throw new Error(`expected stale wake dispatch to prepare both roles, got ${JSON.stringify(staleDispatch.summary)}`);
+}
+if (!staleDispatch.dispatcher.required || staleDispatch.dispatcher.state !== "missing") {
+  throw new Error(`expected stale wake dispatch to preserve missing dispatch requirement, got ${JSON.stringify(staleDispatch.dispatcher)}`);
+}
+if (!staleDispatch.actions.every((action) => action.status === "ready_to_send" && action.send_ready && action.prompt)) {
+  throw new Error(`expected stale wake dispatch actions to be send-ready with prompts, got ${JSON.stringify(staleDispatch.actions)}`);
+}
+if (staleDispatch.receipt.event_type !== "app_wakeup_dispatch_planned") {
+  throw new Error(`expected wake dispatch telemetry receipt, got ${JSON.stringify(staleDispatch.receipt)}`);
 }
 JS
 

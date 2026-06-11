@@ -37,6 +37,7 @@ export {
   appHeartbeatPollCommand,
   appLoopStatusCommand,
   appLoopStatusSync,
+  appWakeupDispatchPlanSync,
   appWakeupPlanCommand,
   appWakeupPlanSync,
   directInboxPollCommand,
@@ -49,6 +50,9 @@ export type {
   AppLoopRoleStatus,
   AppLoopStatus,
   AppWakeup,
+  AppWakeupDispatchAction,
+  AppWakeupDispatchActionStatus,
+  AppWakeupDispatchPlan,
   AppWakeupPlan,
 } from "./runtime/app-autonomy.js";
 export { exportTaskAuditSubsetSync, exportTaskSync, TaskExportError } from "./runtime/export.js";

@@ -412,6 +412,170 @@ test("TypeScript runtime app-wakeup-plan prints app-thread prompts for stale rol
   }
 });
 
+test("TypeScript runtime app-wakeup-dispatch records ready stale app wake actions", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-app-wakeup-dispatch."));
+  const dbPath = join(root, "workerctl.db");
+  try {
+    seedCliAppLoopFixture(dbPath, {
+      dispatcherHeartbeatAt: "2026-06-11T11:59:50Z",
+      managerHeartbeatAt: "2026-06-11T11:45:00Z",
+      workerHeartbeatAt: "2026-06-11T11:44:00Z",
+    });
+    const result = runTypescriptRuntimeCommand({
+      args: [
+        "app-wakeup-dispatch",
+        "app-loop-task",
+        "--path",
+        dbPath,
+        "--json",
+      ],
+      env: {},
+      now: () => new Date("2026-06-11T12:00:00Z"),
+    });
+
+    assert.equal(result.exitCode, 0, result.stderr);
+    const output = JSON.parse(result.stdout ?? "{}") as {
+      actions: Array<{ prompt: string | null; role: string; send_ready: boolean; status: string; thread: { id: string | null } }>;
+      receipt: { event_id: string; event_type: string; recorded_at: string };
+      summary: { blocked: number; dispatcher_required: boolean; ready_to_send: number; skipped: number };
+    };
+    assert.equal(output.summary.ready_to_send, 2);
+    assert.equal(output.summary.blocked, 0);
+    assert.equal(output.summary.skipped, 0);
+    assert.equal(output.summary.dispatcher_required, false);
+    assert.equal(output.actions[0].role, "manager");
+    assert.equal(output.actions[0].status, "ready_to_send");
+    assert.equal(output.actions[0].send_ready, true);
+    assert.equal(output.actions[0].thread.id, "thread-manager");
+    assert.match(output.actions[0].prompt ?? "", /conveyor app-heartbeat 'app-loop-task' --role manager/);
+    assert.equal(output.actions[1].role, "worker");
+    assert.equal(output.actions[1].status, "ready_to_send");
+    assert.equal(output.actions[1].send_ready, true);
+    assert.equal(output.actions[1].thread.id, "thread-worker");
+    assert.equal(output.receipt.event_type, "app_wakeup_dispatch_planned");
+    assert.equal(output.receipt.recorded_at, "2026-06-11T12:00:00Z");
+
+    const database = openDatabaseSync(dbPath);
+    try {
+      const telemetry = database.prepare(`
+        select event_type, severity, correlation_json, attributes_json
+        from telemetry_events
+        where id = ?
+      `).get(output.receipt.event_id) as { attributes_json: string; correlation_json: string; event_type: string; severity: string } | undefined;
+      assert.ok(telemetry);
+      assert.equal(telemetry.event_type, "app_wakeup_dispatch_planned");
+      assert.equal(telemetry.severity, "info");
+      assert.deepEqual(JSON.parse(telemetry.correlation_json), {
+        command: "app-wakeup-dispatch",
+        dispatcher_id: "dispatch-local",
+      });
+      const attributes = JSON.parse(telemetry.attributes_json) as {
+        actions: Array<{ role: string; status: string }>;
+        summary: { ready_to_send: number };
+      };
+      assert.equal(attributes.summary.ready_to_send, 2);
+      assert.deepEqual(attributes.actions.map((action) => `${action.role}:${action.status}`), [
+        "manager:ready_to_send",
+        "worker:ready_to_send",
+      ]);
+    } finally {
+      database.close();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("TypeScript runtime app-wakeup-dispatch skips healthy roles and keeps missing dispatch visible", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-app-wakeup-dispatch-healthy."));
+  const dbPath = join(root, "workerctl.db");
+  try {
+    seedCliAppLoopFixture(dbPath, {
+      dispatcherHeartbeatAt: null,
+      managerHeartbeatAt: "2026-06-11T11:59:50Z",
+      workerHeartbeatAt: "2026-06-11T11:59:40Z",
+    });
+    const result = runTypescriptRuntimeCommand({
+      args: [
+        "app-wakeup-dispatch",
+        "app-loop-task",
+        "--path",
+        dbPath,
+        "--json",
+      ],
+      env: {},
+      now: () => new Date("2026-06-11T12:00:00Z"),
+    });
+
+    assert.equal(result.exitCode, 0, result.stderr);
+    const output = JSON.parse(result.stdout ?? "{}") as {
+      actions: Array<{ prompt: string | null; role: string; send_ready: boolean; status: string }>;
+      dispatcher: { required: boolean; state: string };
+      status: { ok: boolean };
+      summary: { dispatcher_required: boolean; ready_to_send: number; skipped: number };
+    };
+    assert.equal(output.status.ok, false);
+    assert.equal(output.dispatcher.state, "missing");
+    assert.equal(output.dispatcher.required, true);
+    assert.equal(output.summary.dispatcher_required, true);
+    assert.equal(output.summary.ready_to_send, 0);
+    assert.equal(output.summary.skipped, 2);
+    assert.deepEqual(output.actions.map((action) => `${action.role}:${action.status}:${action.send_ready}:${action.prompt}`), [
+      "manager:skipped_healthy:false:null",
+      "worker:skipped_healthy:false:null",
+    ]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("TypeScript runtime app-wakeup-dispatch blocks stale role without app thread id", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-app-wakeup-dispatch-blocked."));
+  const dbPath = join(root, "workerctl.db");
+  try {
+    seedCliAppLoopFixture(dbPath, {
+      dispatcherHeartbeatAt: "2026-06-11T11:59:50Z",
+      managerHeartbeatAt: "2026-06-11T11:59:50Z",
+      workerHeartbeatAt: "2026-06-11T11:44:00Z",
+    });
+    const database = openDatabaseSync(dbPath);
+    try {
+      database.prepare("update sessions set codex_app_thread_id = null, codex_app_thread_title = null where id = 'session-worker-app'").run();
+    } finally {
+      database.close();
+    }
+    const result = runTypescriptRuntimeCommand({
+      args: [
+        "app-wakeup-dispatch",
+        "app-loop-task",
+        "--path",
+        dbPath,
+        "--json",
+      ],
+      env: {},
+      now: () => new Date("2026-06-11T12:00:00Z"),
+    });
+
+    assert.equal(result.exitCode, 0, result.stderr);
+    const output = JSON.parse(result.stdout ?? "{}") as {
+      actions: Array<{ blocker: string | null; prompt: string | null; role: string; send_ready: boolean; status: string; thread: { id: string | null } }>;
+      summary: { blocked: number; ready_to_send: number; skipped: number };
+    };
+    assert.equal(output.summary.ready_to_send, 0);
+    assert.equal(output.summary.blocked, 1);
+    assert.equal(output.summary.skipped, 1);
+    const worker = output.actions.find((action) => action.role === "worker");
+    assert.ok(worker);
+    assert.equal(worker.status, "blocked_missing_thread");
+    assert.equal(worker.send_ready, false);
+    assert.equal(worker.thread.id, null);
+    assert.match(worker.blocker ?? "", /No Codex app thread id/);
+    assert.match(worker.prompt ?? "", /conveyor app-heartbeat 'app-loop-task' --role worker/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("TypeScript runtime handles task create list and active filtering by default", () => {
   const root = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-tasks."));
   try {
