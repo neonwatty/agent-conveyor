@@ -125,4 +125,36 @@ if (match) {
 }
 JS
 
+SMOKE_DB="$SMOKE_DIR/app-loop.db"
+PATH="$PREFIX/bin:$PATH" "$CONVEYOR" create-disposable-binding smoke-app-loop \
+  --worker smoke-worker \
+  --manager smoke-manager \
+  --worker-codex-app-thread-id thread-worker-smoke \
+  --worker-codex-app-thread-title "Smoke Worker" \
+  --manager-codex-app-thread-id thread-manager-smoke \
+  --manager-codex-app-thread-title "Smoke Manager" \
+  --adversarial \
+  --path "$SMOKE_DB" \
+  --json > "$SMOKE_DIR/create-disposable-binding.json"
+PATH="$PREFIX/bin:$PATH" "$CONVEYOR" app-heartbeat smoke-app-loop --role manager --path "$SMOKE_DB" --json > "$SMOKE_DIR/app-heartbeat-manager.json"
+PATH="$PREFIX/bin:$PATH" "$CONVEYOR" app-heartbeat smoke-app-loop --role worker --path "$SMOKE_DB" --json > "$SMOKE_DIR/app-heartbeat-worker.json"
+PATH="$PREFIX/bin:$PATH" "$CONVEYOR" dispatch --watch --watch-iterations 1 --dispatcher-id dispatch-local --path "$SMOKE_DB" --json > "$SMOKE_DIR/dispatch-watch.json"
+PATH="$PREFIX/bin:$PATH" "$CONVEYOR" app-loop-status smoke-app-loop --path "$SMOKE_DB" --json > "$SMOKE_DIR/app-loop-status.json"
+PATH="$PREFIX/bin:$PATH" "$CONVEYOR" app-wakeup-plan smoke-app-loop --path "$SMOKE_DB" --json > "$SMOKE_DIR/app-wakeup-plan.json"
+
+node - "$SMOKE_DIR/app-loop-status.json" "$SMOKE_DIR/app-wakeup-plan.json" <<'JS'
+const fs = require("fs");
+const status = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+const wakeup = JSON.parse(fs.readFileSync(process.argv[3], "utf8"));
+if (!status.ok) {
+  throw new Error(`expected healthy app-loop status, got ${JSON.stringify(status.next_actions)}`);
+}
+if (status.dispatch.state !== "healthy" || status.manager.lease.state !== "healthy" || status.worker.lease.state !== "healthy") {
+  throw new Error(`expected healthy dispatch/manager/worker leases, got ${JSON.stringify(status)}`);
+}
+if (!Array.isArray(wakeup.wakeups) || wakeup.wakeups.length !== 0) {
+  throw new Error(`expected no wakeups for healthy loop, got ${JSON.stringify(wakeup.wakeups)}`);
+}
+JS
+
 echo "package-smoke: npm tarball exposes conveyor and workerctl, and bundled skills are valid"

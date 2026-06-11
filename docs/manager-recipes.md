@@ -273,16 +273,41 @@ report heartbeat teardown status. If the task or binding still appears active,
 report that as a control-plane blocker instead of calling the loop complete.
 
 When the manager is running in the Codex app and thread tools are available,
-create the worker with fresh same-project `create_thread`, set a readable title
-with `set_thread_title`, and pass the resulting id/title into
-`conveyor create-disposable-binding` with
-`--worker-codex-app-thread-id` and `--worker-codex-app-thread-title`. Use
-`send_message_to_thread` only to deliver the generated `worker_handoff`
-bootstrap prompt; ongoing manager/worker communication should still be routed
+create fresh same-project manager and worker threads with `create_thread`, set
+readable titles, and pass both ids/titles into `conveyor
+create-disposable-binding` with `--manager-codex-app-thread-id`,
+`--manager-codex-app-thread-title`, `--worker-codex-app-thread-id`, and
+`--worker-codex-app-thread-title`. Use `send_message_to_thread` for bootstrap
+prompts only; ongoing manager/worker communication should still be routed
 through Dispatch and consumed from inboxes. If app thread tools are unavailable,
 open the worker session manually and paste the same `worker_handoff` prompt.
 Do not use `fork_thread` for this recipe unless the user explicitly wants a
 fork of the current conversation.
+
+### Codex App Native Manager/Worker Loop
+
+```bash
+conveyor doctor
+conveyor db-doctor
+conveyor create-disposable-binding "$TASK" \
+  --worker "$WORKER" \
+  --manager "$MANAGER" \
+  --worker-codex-app-thread-id "$WORKER_THREAD_ID" \
+  --worker-codex-app-thread-title "$WORKER_THREAD_TITLE" \
+  --manager-codex-app-thread-id "$MANAGER_THREAD_ID" \
+  --manager-codex-app-thread-title "$MANAGER_THREAD_TITLE" \
+  --adversarial \
+  --json
+conveyor dispatch --watch --dispatcher-id dispatch-local
+conveyor app-heartbeat "$TASK" --role manager --json
+conveyor app-heartbeat "$TASK" --role worker --json
+conveyor app-loop-status "$TASK" --json
+conveyor app-wakeup-plan "$TASK" --json
+```
+
+Use `app-loop-status` as the operator status surface. If it reports stale
+manager, worker, or Dispatch leases, use `app-wakeup-plan` to get the exact
+thread prompt to send through Codex app automation or `send_message_to_thread`.
 
 The saved dogfood example is
 `docs/goals/live-codex-app-inbox-drill/notes/T001-live-drill.md`. It proves

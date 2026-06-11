@@ -6,6 +6,13 @@ import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { taskAuditSync } from "../runtime/audit.js";
+import {
+  appLoopStatusSync,
+  appWakeupPlanSync,
+  directInboxPollCommand,
+  type AppLoopRole,
+  type AppLoopStatus,
+} from "../runtime/app-autonomy.js";
 import { classifyBusyWait, classifyStartupOutput } from "../runtime/classify.js";
 import { exportTaskSync } from "../runtime/export.js";
 import { ingestSessionSync } from "../runtime/ingest.js";
@@ -248,6 +255,15 @@ export function runTypescriptRuntimeCommand(options: TypescriptRuntimeOptions): 
     }
     if (parsed.command === "loop-status") {
       return runLoopStatusCommand(parsed, options);
+    }
+    if (parsed.command === "app-heartbeat") {
+      return runAppHeartbeatCommand(parsed, options);
+    }
+    if (parsed.command === "app-loop-status") {
+      return runAppLoopStatusCommand(parsed, options);
+    }
+    if (parsed.command === "app-wakeup-plan") {
+      return runAppWakeupPlanCommand(parsed, options);
     }
     if (parsed.command === "qa-plan") {
       return runQaPlanCommand(parsed);
@@ -552,6 +568,7 @@ interface ParsedRuntimeArgs {
     includeLegacy: boolean;
     help: boolean;
     redactIdentityToken: boolean;
+    appStaleAfterSeconds: number;
     active: boolean;
     add: boolean;
     apply: boolean;
@@ -765,6 +782,7 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
     includeLegacy: false,
     help: false,
     redactIdentityToken: false,
+    appStaleAfterSeconds: 180,
     active: false,
     add: false,
     apply: false,
@@ -1714,7 +1732,15 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       flags.managerName = value.value;
       index += 1;
     } else if (arg === "--dispatcher-id") {
-      if (command !== "pair" && command !== "dispatch" && command !== "qa-run" && command !== "dashboard") {
+      if (
+        command !== "pair"
+        && command !== "dispatch"
+        && command !== "qa-run"
+        && command !== "dashboard"
+        && command !== "app-heartbeat"
+        && command !== "app-loop-status"
+        && command !== "app-wakeup-plan"
+      ) {
         return { command, enabled, error: "Unsupported TypeScript runtime option: --dispatcher-id", explicit, flags, task };
       }
       const value = valueAfter(queue, index, arg);
@@ -2560,6 +2586,20 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
         return { command, enabled, error: "--status-stale-seconds must be an integer.", explicit, flags, task };
       }
       flags.statusStaleSeconds = value;
+      index += 1;
+    } else if (arg === "--stale-after") {
+      if (command !== "app-heartbeat" && command !== "app-loop-status" && command !== "app-wakeup-plan") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --stale-after", explicit, flags, task };
+      }
+      const parsedValue = valueAfter(queue, index, arg);
+      if (parsedValue.error) {
+        return { command, enabled, error: parsedValue.error, explicit, flags, task };
+      }
+      const value = Number(parsedValue.value);
+      if (!Number.isFinite(value) || value < 0) {
+        return { command, enabled, error: "--stale-after must be a non-negative number.", explicit, flags, task };
+      }
+      flags.appStaleAfterSeconds = value;
       index += 1;
     } else if (arg === "--terminal-stale-seconds") {
       if (command !== "idle-check") {
@@ -3504,6 +3544,169 @@ function runLoopStatusCommand(
   } finally {
     database.close();
   }
+}
+
+function runAppHeartbeatCommand(
+  parsed: ParsedRuntimeArgs,
+  options: { cwd?: string; env?: NodeJS.ProcessEnv; now?: () => Date },
+): TypescriptRuntimeResult {
+  const taskName = requireTask(parsed);
+  if (parsed.flags.role !== "manager" && parsed.flags.role !== "worker") {
+    return errorResult("app-heartbeat requires --role manager|worker");
+  }
+  const role = parsed.flags.role;
+  const database = openRuntimeDatabase(parsed, options);
+  try {
+    const task = taskRowForDiagnostics(database, taskName);
+    const session = boundAppSessionForRoleSync(database, { role, taskId: task.id });
+    const timestamp = nowIsoSeconds(options);
+    const dbPath = runtimeDbPath(parsed, options);
+    database.prepare("update sessions set last_heartbeat_at = ? where id = ?").run(timestamp, session.id);
+    emitTelemetrySync(database, {
+      actor: role,
+      attributes: {
+        direct_inbox_command: directInboxPollCommand(role, task.name, dbPath),
+        role,
+        session_id: session.id,
+        task: task.name,
+      },
+      correlation: { command: "app-heartbeat" },
+      eventType: "app_heartbeat",
+      severity: "info",
+      summary: `${role} app heartbeat for ${task.name}.`,
+      taskId: task.id,
+      timestamp,
+    });
+    const status = appLoopStatusSync(database, {
+      dbPath,
+      dispatcherId: parsed.flags.dispatcherId ?? "dispatch-local",
+      heartbeatStaleSeconds: parsed.flags.appStaleAfterSeconds,
+      now: timestamp,
+      taskName: task.name,
+    });
+    const roleStatus = role === "manager" ? status.manager : status.worker;
+    const output = {
+      heartbeat: {
+        recorded_at: timestamp,
+        state: "recorded",
+      },
+      next: {
+        direct_inbox_command: roleStatus.direct_inbox_command,
+        poll_command: roleStatus.poll_command,
+      },
+      role,
+      status,
+      task: { id: task.id, name: task.name },
+    };
+    if (parsed.flags.json) {
+      return jsonResult(output);
+    }
+    return {
+      exitCode: 0,
+      handled: true,
+      stdout: `${role} heartbeat recorded for ${task.name}\nNext: ${roleStatus.direct_inbox_command ?? roleStatus.poll_command ?? "(none)"}\n`,
+    };
+  } finally {
+    database.close();
+  }
+}
+
+function runAppLoopStatusCommand(
+  parsed: ParsedRuntimeArgs,
+  options: { cwd?: string; env?: NodeJS.ProcessEnv; now?: () => Date },
+): TypescriptRuntimeResult {
+  const taskName = requireTask(parsed);
+  const database = openRuntimeDatabase(parsed, options);
+  try {
+    const status = appLoopStatusSync(database, {
+      dbPath: runtimeDbPath(parsed, options),
+      dispatcherId: parsed.flags.dispatcherId ?? "dispatch-local",
+      heartbeatStaleSeconds: parsed.flags.appStaleAfterSeconds,
+      now: nowIsoSeconds(options),
+      taskName,
+    });
+    if (parsed.flags.json) {
+      return jsonResult(status);
+    }
+    return {
+      exitCode: 0,
+      handled: true,
+      stdout: renderAppLoopStatusText(status),
+    };
+  } finally {
+    database.close();
+  }
+}
+
+function runAppWakeupPlanCommand(
+  parsed: ParsedRuntimeArgs,
+  options: { cwd?: string; env?: NodeJS.ProcessEnv; now?: () => Date },
+): TypescriptRuntimeResult {
+  const taskName = requireTask(parsed);
+  const database = openRuntimeDatabase(parsed, options);
+  try {
+    const plan = appWakeupPlanSync(database, {
+      dbPath: runtimeDbPath(parsed, options),
+      dispatcherId: parsed.flags.dispatcherId ?? "dispatch-local",
+      heartbeatStaleSeconds: parsed.flags.appStaleAfterSeconds,
+      now: nowIsoSeconds(options),
+      taskName,
+    });
+    if (parsed.flags.json) {
+      return jsonResult(plan);
+    }
+    return {
+      exitCode: 0,
+      handled: true,
+      stdout: renderAppWakeupPlanText(plan),
+    };
+  } finally {
+    database.close();
+  }
+}
+
+function renderAppLoopStatusText(status: AppLoopStatus): string {
+  const lines = [
+    `App loop ${status.task.name}: ${status.ok ? "ok" : "attention required"}`,
+    `Dispatch ${status.dispatch.dispatcher_id}: ${status.dispatch.state}`,
+    `Manager ${status.manager.name ?? "(missing)"}: ${status.manager.lease.state}`,
+    `Worker ${status.worker.name ?? "(missing)"}: ${status.worker.lease.state}`,
+  ];
+  for (const action of status.next_actions) {
+    lines.push(`Next: ${action.kind} - ${action.reason}`);
+  }
+  return `${lines.join("\n")}\n`;
+}
+
+function renderAppWakeupPlanText(plan: ReturnType<typeof appWakeupPlanSync>): string {
+  const lines = [
+    `App wakeup plan for ${plan.status.task.name}: ${plan.status.ok ? "ok" : "attention required"}`,
+    `Dispatch: ${plan.dispatcher.state}${plan.dispatcher.required ? ` (${plan.dispatcher.command})` : ""}`,
+  ];
+  for (const wakeup of plan.wakeups) {
+    lines.push(`Wake ${wakeup.role}${wakeup.thread.title ? ` (${wakeup.thread.title})` : ""}: ${wakeup.reason}`);
+    lines.push(wakeup.prompt);
+  }
+  return `${lines.join("\n")}\n`;
+}
+
+function boundAppSessionForRoleSync(
+  database: RuntimeDatabase,
+  options: { role: AppLoopRole; taskId: string },
+): { id: string; name: string } {
+  const sessionJoin = options.role === "manager" ? "manager_session_id" : "worker_session_id";
+  const row = database.prepare(`
+    select s.id, s.name
+    from bindings b
+    join sessions s on s.id = b.${sessionJoin}
+    where b.task_id = ? and b.state in ('active', 'ending') and s.role = ? and s.state = 'active'
+    order by b.created_at desc
+    limit 1
+  `).get(options.taskId, options.role) as { id: string; name: string } | undefined;
+  if (!row) {
+    throw new Error(`No active bound ${options.role} session for task.`);
+  }
+  return row;
 }
 
 function runQaPlanCommand(parsed: ParsedRuntimeArgs): TypescriptRuntimeResult {
@@ -15350,6 +15553,9 @@ function isDefaultRuntimeCommand(command: string | null): boolean {
     || command === "runs"
     || command === "loop-evidence"
     || command === "loop-status"
+    || command === "app-heartbeat"
+    || command === "app-loop-status"
+    || command === "app-wakeup-plan"
     || command === "loop-templates"
     || command === "loop-triggers"
     || command === "ralph-loop-presets"
@@ -18929,8 +19135,9 @@ type DisposableHeartbeatRecommendations = {
     session_kind: "codex_app";
   };
   interval_minutes: number;
-  manager: { kind: "thread_heartbeat"; poll_command: string; prompt: string };
+  manager: { direct_inbox_command: string; kind: "thread_heartbeat"; poll_command: string; prompt: string };
   note: string;
+  status_command: string;
   teardown_policy: {
     idle_poll: string;
     owner: "manager_or_operator";
@@ -18938,7 +19145,8 @@ type DisposableHeartbeatRecommendations = {
     terminal_closeout_command: string;
     worker_rule: string;
   };
-  worker: { kind: "thread_heartbeat"; poll_command: string; prompt: string };
+  wakeup_plan_command: string;
+  worker: { direct_inbox_command: string; kind: "thread_heartbeat"; poll_command: string; prompt: string };
 };
 
 function renderDisposableBindingText(result: {
@@ -18965,6 +19173,8 @@ function renderDisposableBindingText(result: {
     lines.push(`  interval: every ${result.heartbeat_recommendations.interval_minutes} minutes`);
     lines.push(`  manager: ${result.heartbeat_recommendations.manager.poll_command}`);
     lines.push(`  worker: ${result.heartbeat_recommendations.worker.poll_command}`);
+    lines.push(`  status: ${result.heartbeat_recommendations.status_command}`);
+    lines.push(`  wakeup plan: ${result.heartbeat_recommendations.wakeup_plan_command}`);
     lines.push(`  teardown: ${result.heartbeat_recommendations.teardown_policy.idle_poll}`);
     lines.push(`  closeout: ${result.heartbeat_recommendations.teardown_policy.terminal_closeout_command}`);
   }
@@ -18975,6 +19185,10 @@ function renderDisposableBindingText(result: {
 
 function disposableHeartbeatRecommendations(taskName: string, dbPath: string): DisposableHeartbeatRecommendations {
   const terminalCloseoutCommand = `${conveyorPollInvocation()} finish-task ${shellQuote(taskName)} --reason ${shellQuote("Verified terminal closeout")} --require-criteria-audit --path ${shellQuote(dbPath)}`;
+  const managerHeartbeatCommand = disposableAppHeartbeatCommand("manager", taskName, dbPath);
+  const workerHeartbeatCommand = disposableAppHeartbeatCommand("worker", taskName, dbPath);
+  const managerInboxCommand = sessionPollCommand("manager", taskName, dbPath);
+  const workerInboxCommand = sessionPollCommand("worker", taskName, dbPath);
   return {
     applies_when: {
       can_receive_push: false,
@@ -18984,6 +19198,7 @@ function disposableHeartbeatRecommendations(taskName: string, dbPath: string): D
     },
     interval_minutes: 2,
     note: "Dispatch can deliver pull-required inbox items, but Codex app/no-tmux sessions still need a heartbeat or operator wake-up to poll while idle.",
+    status_command: `${conveyorPollInvocation()} app-loop-status ${shellQuote(taskName)} --path ${shellQuote(dbPath)} --json`,
     teardown_policy: {
       idle_poll: "Never delete, pause, or disable a manager or worker heartbeat because an inbox poll returned no item; that is only a quiet poll interval.",
       owner: "manager_or_operator",
@@ -18991,13 +19206,16 @@ function disposableHeartbeatRecommendations(taskName: string, dbPath: string): D
       terminal_closeout_command: terminalCloseoutCommand,
       worker_rule: "The worker must not own loop teardown and must not remove heartbeat automation based on idle polling.",
     },
+    wakeup_plan_command: `${conveyorPollInvocation()} app-wakeup-plan ${shellQuote(taskName)} --path ${shellQuote(dbPath)} --json`,
     manager: {
+      direct_inbox_command: managerInboxCommand,
       kind: "thread_heartbeat",
-      poll_command: sessionPollCommand("manager", taskName, dbPath),
+      poll_command: managerHeartbeatCommand,
       prompt: [
         "Use the manage-codex-workers skill.",
-        `Poll the manager inbox for task ${taskName}.`,
-        `Run: ${sessionPollCommand("manager", taskName, dbPath)}`,
+        `Run the manager app heartbeat for task ${taskName}.`,
+        `Run: ${managerHeartbeatCommand}`,
+        `If the heartbeat output asks for direct inbox polling, run: ${managerInboxCommand}`,
         "If an item is consumed, execute only that manager instruction, verify worker claims before recording conclusions, update Conveyor state as appropriate, and produce exactly one next worker task.",
         "If no item is consumed, stop after a one-line idle receipt.",
         "Do not delete, pause, or disable manager or worker heartbeat automation after an idle poll; an idle poll is only a quiet interval.",
@@ -19006,18 +19224,24 @@ function disposableHeartbeatRecommendations(taskName: string, dbPath: string): D
       ].join("\n"),
     },
     worker: {
+      direct_inbox_command: workerInboxCommand,
       kind: "thread_heartbeat",
-      poll_command: sessionPollCommand("worker", taskName, dbPath),
+      poll_command: workerHeartbeatCommand,
       prompt: [
         "Use the manage-codex-workers skill.",
-        `Poll the worker inbox for task ${taskName}.`,
-        `Run: ${sessionPollCommand("worker", taskName, dbPath)}`,
+        `Run the worker app heartbeat for task ${taskName}.`,
+        `Run: ${workerHeartbeatCommand}`,
+        `If the heartbeat output asks for direct inbox polling, run: ${workerInboxCommand}`,
         "If an item is consumed, execute only that single worker instruction and return exact commands, compact evidence, blockers/residual risk, and exactly one next recommended worker task.",
         "If no item is consumed, stop after a one-line idle receipt.",
         "Do not delete, pause, or disable worker heartbeat automation after an idle poll; the manager or operator owns terminal loop teardown.",
       ].join("\n"),
     },
   };
+}
+
+function disposableAppHeartbeatCommand(role: "manager" | "worker", taskName: string, dbPath: string): string {
+  return `${conveyorPollInvocation()} app-heartbeat ${shellQuote(taskName)} --role ${role} --path ${shellQuote(dbPath)} --json`;
 }
 
 function sessionPollCommand(role: "manager" | "worker", taskName: string | null, dbPath: string): string {
