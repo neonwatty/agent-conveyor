@@ -270,6 +270,9 @@ export function runTypescriptRuntimeCommand(options: TypescriptRuntimeOptions): 
     if (parsed.command === "app-wakeup-dispatch") {
       return runAppWakeupDispatchCommand(parsed, options);
     }
+    if (parsed.command === "app-wakeup-record-delivery") {
+      return runAppWakeupRecordDeliveryCommand(parsed, options);
+    }
     if (parsed.command === "qa-plan") {
       return runQaPlanCommand(parsed);
     }
@@ -689,9 +692,12 @@ interface ParsedRuntimeArgs {
     captureTranscriptLines: number;
     captureTranscriptMode: TranscriptCaptureMode;
     decisionId: number | null;
+    deliveryStatus: string | null;
+    dispatchReceipt: string | null;
     force: boolean;
     message: string | null;
     reason: string | null;
+    threadId: string | null;
     consumeNext: boolean;
     wait: boolean;
     requireAcks: boolean;
@@ -903,9 +909,12 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
     captureTranscriptLines: DEFAULT_HISTORY_LINES,
     captureTranscriptMode: "segment",
     decisionId: null,
+    deliveryStatus: null,
+    dispatchReceipt: null,
     force: false,
     message: null,
     reason: null,
+    threadId: null,
     consumeNext: false,
     wait: false,
     requireAcks: false,
@@ -2054,7 +2063,7 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       flags.reviewerCommand = queue.slice(index + 1);
       index = queue.length;
     } else if (arg === "--reason") {
-      if (command !== "finish-task" && command !== "stop-task" && command !== "record-decision" && command !== "compact-worker") {
+      if (command !== "finish-task" && command !== "stop-task" && command !== "record-decision" && command !== "compact-worker" && command !== "app-wakeup-record-delivery") {
         return { command, enabled, error: "Unsupported TypeScript runtime option: --reason", explicit, flags, task };
       }
       const value = valueAfter(queue, index, arg);
@@ -2062,6 +2071,36 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
         return { command, enabled, error: value.error, explicit, flags, task };
       }
       flags.reason = value.value;
+      index += 1;
+    } else if (arg === "--dispatch-receipt") {
+      if (command !== "app-wakeup-record-delivery") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --dispatch-receipt", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.dispatchReceipt = value.value;
+      index += 1;
+    } else if (arg === "--delivery-status") {
+      if (command !== "app-wakeup-record-delivery") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --delivery-status", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.deliveryStatus = value.value;
+      index += 1;
+    } else if (arg === "--thread-id") {
+      if (command !== "app-wakeup-record-delivery") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --thread-id", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.threadId = value.value;
       index += 1;
     } else if (arg === "--message") {
       if (
@@ -3731,6 +3770,203 @@ function runAppWakeupDispatchCommand(
   } finally {
     database.close();
   }
+}
+
+type AppWakeupDeliveryStatus = "blocked" | "sent" | "skipped";
+type AppWakeupSourceActionStatus = "blocked_missing_thread" | "ready_to_send" | "skipped_healthy";
+
+interface AppWakeupSourceAction {
+  blocker?: string | null;
+  reason?: string | null;
+  role?: string | null;
+  send_ready?: boolean | null;
+  status?: string | null;
+  thread_id?: string | null;
+  thread_title?: string | null;
+}
+
+function runAppWakeupRecordDeliveryCommand(
+  parsed: ParsedRuntimeArgs,
+  options: { cwd?: string; env?: NodeJS.ProcessEnv; now?: () => Date },
+): TypescriptRuntimeResult {
+  const taskName = requireTask(parsed);
+  if (parsed.flags.role !== "manager" && parsed.flags.role !== "worker") {
+    return errorResult("app-wakeup-record-delivery requires --role manager|worker");
+  }
+  const role = parsed.flags.role;
+  if (!parsed.flags.dispatchReceipt) {
+    return errorResult("app-wakeup-record-delivery requires --dispatch-receipt");
+  }
+  const deliveryStatus = parseAppWakeupDeliveryStatus(parsed.flags.deliveryStatus);
+  if (deliveryStatus instanceof Error) {
+    return errorResult(deliveryStatus.message);
+  }
+  const database = openRuntimeDatabase(parsed, options);
+  try {
+    const task = taskRowForDiagnostics(database, taskName);
+    const source = database.prepare(`
+      select id, task_id, event_type, attributes_json
+      from telemetry_events
+      where id = ?
+      limit 1
+    `).get(parsed.flags.dispatchReceipt) as { attributes_json: string; event_type: string; id: string; task_id: string | null } | undefined;
+    if (!source) {
+      throw new Error(`Unknown app wakeup dispatch receipt: ${parsed.flags.dispatchReceipt}`);
+    }
+    if (source.event_type !== "app_wakeup_dispatch_planned") {
+      throw new Error(`Receipt ${source.id} is ${source.event_type}, expected app_wakeup_dispatch_planned.`);
+    }
+    if (source.task_id !== task.id) {
+      throw new Error(`Receipt ${source.id} does not belong to task ${task.name}.`);
+    }
+    const attributes = parseAppWakeupDispatchAttributes(source.attributes_json, source.id);
+    const action = attributes.actions.find((candidate) => candidate.role === role);
+    if (!action) {
+      throw new Error(`Receipt ${source.id} has no ${role} wake action.`);
+    }
+    validateAppWakeupDelivery({ action, deliveryStatus, role, threadId: parsed.flags.threadId });
+    const timestamp = nowIsoSeconds(options);
+    const eventId = emitTelemetrySync(database, {
+      actor: "manager",
+      attributes: {
+        delivery_status: deliveryStatus,
+        dispatch_receipt: source.id,
+        dispatch_required: attributes.summary.dispatcher_required,
+        reason: parsed.flags.reason,
+        role,
+        source_action_status: action.status,
+        source_send_ready: action.send_ready === true,
+        thread_id: parsed.flags.threadId ?? action.thread_id ?? null,
+        thread_title: action.thread_title ?? null,
+      },
+      correlation: {
+        command: "app-wakeup-record-delivery",
+        dispatch_receipt: source.id,
+        role,
+        thread_id: parsed.flags.threadId ?? action.thread_id ?? null,
+      },
+      eventType: "app_wakeup_delivery_recorded",
+      severity: deliveryStatus === "sent" ? "info" : "warning",
+      summary: `App wakeup delivery ${deliveryStatus} for ${role} on ${task.name}.`,
+      taskId: task.id,
+      timestamp,
+    });
+    const output = {
+      delivery: {
+        reason: parsed.flags.reason,
+        role,
+        source_action_status: action.status,
+        source_send_ready: action.send_ready === true,
+        status: deliveryStatus,
+        thread_id: parsed.flags.threadId ?? action.thread_id ?? null,
+      },
+      receipt: {
+        event_id: eventId,
+        event_type: "app_wakeup_delivery_recorded",
+        recorded_at: timestamp,
+      },
+      source: {
+        dispatch_receipt: source.id,
+        dispatch_required: attributes.summary.dispatcher_required,
+        dispatcher: attributes.dispatcher,
+      },
+      task: { id: task.id, name: task.name },
+    };
+    if (parsed.flags.json) {
+      return jsonResult(output);
+    }
+    return {
+      exitCode: 0,
+      handled: true,
+      stdout: [
+        `App wakeup delivery ${deliveryStatus} recorded for ${role} on ${task.name}.`,
+        `Source receipt: ${source.id}`,
+        `Receipt: ${eventId}`,
+        attributes.summary.dispatcher_required ? "Dispatch still required by source receipt." : "Dispatch healthy in source receipt.",
+      ].join("\n") + "\n",
+    };
+  } finally {
+    database.close();
+  }
+}
+
+function parseAppWakeupDeliveryStatus(value: string | null): AppWakeupDeliveryStatus | Error {
+  if (value === "sent" || value === "skipped" || value === "blocked") {
+    return value;
+  }
+  return new Error("app-wakeup-record-delivery requires --delivery-status sent|skipped|blocked");
+}
+
+function parseAppWakeupDispatchAttributes(value: string, receiptId: string): {
+  actions: AppWakeupSourceAction[];
+  dispatcher: Record<string, unknown>;
+  summary: { dispatcher_required: boolean };
+} {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    throw new Error(`Receipt ${receiptId} has invalid attributes JSON.`);
+  }
+  if (!parsed || typeof parsed !== "object") {
+    throw new Error(`Receipt ${receiptId} has invalid attributes shape.`);
+  }
+  const attributes = parsed as Record<string, unknown>;
+  if (!Array.isArray(attributes.actions)) {
+    throw new Error(`Receipt ${receiptId} is missing actions.`);
+  }
+  const summary = attributes.summary;
+  if (!summary || typeof summary !== "object" || typeof (summary as Record<string, unknown>).dispatcher_required !== "boolean") {
+    throw new Error(`Receipt ${receiptId} is missing dispatcher_required summary.`);
+  }
+  const dispatcher = attributes.dispatcher && typeof attributes.dispatcher === "object"
+    ? attributes.dispatcher as Record<string, unknown>
+    : {};
+  return {
+    actions: attributes.actions as AppWakeupSourceAction[],
+    dispatcher,
+    summary: { dispatcher_required: Boolean((summary as Record<string, unknown>).dispatcher_required) },
+  };
+}
+
+function validateAppWakeupDelivery(options: {
+  action: AppWakeupSourceAction;
+  deliveryStatus: AppWakeupDeliveryStatus;
+  role: AppLoopRole;
+  threadId: string | null;
+}): void {
+  const sourceStatus = parseAppWakeupSourceActionStatus(options.action.status);
+  if (sourceStatus instanceof Error) {
+    throw sourceStatus;
+  }
+  if (options.deliveryStatus === "sent") {
+    if (sourceStatus !== "ready_to_send" || options.action.send_ready !== true) {
+      throw new Error(`Cannot record sent wakeup for ${options.role}; source action is ${sourceStatus}.`);
+    }
+    if (!options.threadId) {
+      throw new Error("app-wakeup-record-delivery --delivery-status sent requires --thread-id.");
+    }
+    if (options.action.thread_id !== options.threadId) {
+      throw new Error(`Thread id mismatch for ${options.role}; source action targets ${options.action.thread_id ?? "(none)"}.`);
+    }
+    return;
+  }
+  if (options.deliveryStatus === "skipped") {
+    if (sourceStatus !== "skipped_healthy") {
+      throw new Error(`Cannot record skipped wakeup for ${options.role}; source action is ${sourceStatus}.`);
+    }
+    return;
+  }
+  if (sourceStatus !== "blocked_missing_thread") {
+    throw new Error(`Cannot record blocked wakeup for ${options.role}; source action is ${sourceStatus}.`);
+  }
+}
+
+function parseAppWakeupSourceActionStatus(value: string | null | undefined): AppWakeupSourceActionStatus | Error {
+  if (value === "ready_to_send" || value === "skipped_healthy" || value === "blocked_missing_thread") {
+    return value;
+  }
+  return new Error(`Unsupported app wakeup source action status: ${value ?? "(missing)"}.`);
 }
 
 function renderAppLoopStatusText(status: AppLoopStatus): string {
@@ -15646,6 +15882,7 @@ function isDefaultRuntimeCommand(command: string | null): boolean {
     || command === "app-loop-status"
     || command === "app-wakeup-plan"
     || command === "app-wakeup-dispatch"
+    || command === "app-wakeup-record-delivery"
     || command === "loop-templates"
     || command === "loop-triggers"
     || command === "ralph-loop-presets"

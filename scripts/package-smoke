@@ -164,13 +164,35 @@ try {
 }
 JS
 PATH="$PREFIX/bin:$PATH" "$CONVEYOR" app-wakeup-dispatch smoke-app-stale --path "$STALE_DB" --json > "$SMOKE_DIR/app-wakeup-dispatch-stale.json"
+STALE_RECEIPT="$(node -e "process.stdout.write(JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8')).receipt.event_id)" "$SMOKE_DIR/app-wakeup-dispatch-stale.json")"
+HEALTHY_RECEIPT="$(node -e "process.stdout.write(JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8')).receipt.event_id)" "$SMOKE_DIR/app-wakeup-dispatch-healthy.json")"
+PATH="$PREFIX/bin:$PATH" "$CONVEYOR" app-wakeup-record-delivery smoke-app-stale \
+  --role manager \
+  --dispatch-receipt "$STALE_RECEIPT" \
+  --delivery-status sent \
+  --thread-id thread-manager-stale \
+  --reason "package smoke adapter sent" \
+  --path "$STALE_DB" \
+  --json > "$SMOKE_DIR/app-wakeup-delivery-sent.json"
+if PATH="$PREFIX/bin:$PATH" "$CONVEYOR" app-wakeup-record-delivery smoke-app-loop \
+  --role manager \
+  --dispatch-receipt "$HEALTHY_RECEIPT" \
+  --delivery-status sent \
+  --thread-id thread-manager-smoke \
+  --path "$SMOKE_DB" \
+  --json > "$SMOKE_DIR/app-wakeup-delivery-rejected.json" 2> "$SMOKE_DIR/app-wakeup-delivery-rejected.err"; then
+  echo "package-smoke: expected healthy skipped action to reject sent delivery" >&2
+  exit 1
+fi
 
-node - "$SMOKE_DIR/app-loop-status.json" "$SMOKE_DIR/app-wakeup-plan.json" "$SMOKE_DIR/app-wakeup-dispatch-healthy.json" "$SMOKE_DIR/app-wakeup-dispatch-stale.json" <<'JS'
+node - "$SMOKE_DIR/app-loop-status.json" "$SMOKE_DIR/app-wakeup-plan.json" "$SMOKE_DIR/app-wakeup-dispatch-healthy.json" "$SMOKE_DIR/app-wakeup-dispatch-stale.json" "$SMOKE_DIR/app-wakeup-delivery-sent.json" "$SMOKE_DIR/app-wakeup-delivery-rejected.err" <<'JS'
 const fs = require("fs");
 const status = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
 const wakeup = JSON.parse(fs.readFileSync(process.argv[3], "utf8"));
 const healthyDispatch = JSON.parse(fs.readFileSync(process.argv[4], "utf8"));
 const staleDispatch = JSON.parse(fs.readFileSync(process.argv[5], "utf8"));
+const deliverySent = JSON.parse(fs.readFileSync(process.argv[6], "utf8"));
+const deliveryRejected = fs.readFileSync(process.argv[7], "utf8");
 if (!status.ok) {
   throw new Error(`expected healthy app-loop status, got ${JSON.stringify(status.next_actions)}`);
 }
@@ -194,6 +216,15 @@ if (!staleDispatch.actions.every((action) => action.status === "ready_to_send" &
 }
 if (staleDispatch.receipt.event_type !== "app_wakeup_dispatch_planned") {
   throw new Error(`expected wake dispatch telemetry receipt, got ${JSON.stringify(staleDispatch.receipt)}`);
+}
+if (deliverySent.delivery.status !== "sent" || deliverySent.delivery.source_action_status !== "ready_to_send" || !deliverySent.delivery.source_send_ready) {
+  throw new Error(`expected sent delivery receipt for ready action, got ${JSON.stringify(deliverySent.delivery)}`);
+}
+if (deliverySent.source.dispatch_receipt !== staleDispatch.receipt.event_id || !deliverySent.source.dispatch_required) {
+  throw new Error(`expected delivery to link stale dispatch receipt and preserve dispatch requirement, got ${JSON.stringify(deliverySent.source)}`);
+}
+if (!/Cannot record sent wakeup for manager; source action is skipped_healthy/.test(deliveryRejected)) {
+  throw new Error(`expected rejected healthy sent receipt, got ${JSON.stringify(deliveryRejected)}`);
 }
 JS
 
