@@ -61,6 +61,88 @@ function withTemporaryHome(callback: (home: string) => void): void {
   }
 }
 
+function seedCliAppLoopFixture(
+  dbPath: string,
+  options: {
+    dispatcherHeartbeatAt: string | null;
+    managerHeartbeatAt: string | null;
+    now?: string;
+    workerHeartbeatAt: string | null;
+  },
+): void {
+  const now = options.now ?? "2026-06-11T12:00:00Z";
+  const database = openDatabaseSync(dbPath);
+  initializeDatabaseSync(database);
+  try {
+    database.prepare("insert into tasks(id, name, goal, summary, state, created_at, updated_at) values (?, ?, ?, ?, ?, ?, ?)").run(
+      "task-app-loop",
+      "app-loop-task",
+      "Exercise app loop CLI.",
+      null,
+      "managed",
+      now,
+      now,
+    );
+    database.prepare(`
+      insert into sessions(id, name, role, identity_token, codex_session_id, codex_session_path,
+        codex_app_thread_id, codex_app_thread_title, cwd, registered_at, last_heartbeat_at, state)
+      values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      "session-worker-app",
+      "worker-app",
+      "worker",
+      "worker-token",
+      "codex-worker",
+      "/tmp/worker.jsonl",
+      "thread-worker",
+      "Worker App",
+      "/repo",
+      now,
+      options.workerHeartbeatAt,
+      "active",
+    );
+    database.prepare(`
+      insert into sessions(id, name, role, identity_token, codex_session_id, codex_session_path,
+        codex_app_thread_id, codex_app_thread_title, cwd, registered_at, last_heartbeat_at, state)
+      values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      "session-manager-app",
+      "manager-app",
+      "manager",
+      "manager-token",
+      "codex-manager",
+      "/tmp/manager.jsonl",
+      "thread-manager",
+      "Manager App",
+      "/repo",
+      now,
+      options.managerHeartbeatAt,
+      "active",
+    );
+    database.prepare("insert into bindings(id, task_id, worker_session_id, manager_session_id, state, created_at) values (?, ?, ?, ?, ?, ?)").run(
+      "binding-app-loop",
+      "task-app-loop",
+      "session-worker-app",
+      "session-manager-app",
+      "active",
+      now,
+    );
+    if (options.dispatcherHeartbeatAt) {
+      database.prepare(`
+        insert into telemetry_events(id, actor, event_type, severity, summary, timestamp, correlation_json, attributes_json)
+        values (?, 'dispatch', 'dispatch_watch_heartbeat', 'info', 'Dispatch watch heartbeat 1.', ?, ?, ?)
+      `).run(
+        "telemetry-dispatch-app-loop",
+        options.dispatcherHeartbeatAt,
+        JSON.stringify({ dispatcher_id: "dispatch-local", iteration: 1 }),
+        JSON.stringify({ dry_run: false, processed_count: 0 }),
+      );
+    }
+  } finally {
+    database.close();
+  }
+}
+
 test("unknown TypeScript runtime command fails without Python fallback", () => {
   const result = runTypescriptRuntimeCommand({
     args: ["adversarial-check", "--json"],
@@ -204,6 +286,130 @@ test("TypeScript runtime handles manager recipes by default", () => {
   assert.equal(text.exitCode, 0, text.stderr);
   assert.match(text.stdout ?? "", /Selected recipe: UX Polish Loop/);
   assert.match(text.stdout ?? "", /loop template: visual_diff_loop/);
+});
+
+test("TypeScript runtime app-heartbeat refreshes bound manager session and returns poll commands", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-app-heartbeat."));
+  const dbPath = join(root, "workerctl.db");
+  try {
+    seedCliAppLoopFixture(dbPath, {
+      dispatcherHeartbeatAt: "2026-06-11T11:59:30Z",
+      managerHeartbeatAt: "2026-06-11T11:40:00Z",
+      workerHeartbeatAt: "2026-06-11T11:59:00Z",
+    });
+    const result = runTypescriptRuntimeCommand({
+      args: [
+        "app-heartbeat",
+        "app-loop-task",
+        "--role",
+        "manager",
+        "--path",
+        dbPath,
+        "--json",
+      ],
+      env: {},
+      now: () => new Date("2026-06-11T12:00:00Z"),
+    });
+
+    assert.equal(result.exitCode, 0, result.stderr);
+    const output = JSON.parse(result.stdout ?? "{}") as {
+      heartbeat: { recorded_at: string; state: string };
+      next: { direct_inbox_command: string; poll_command: string };
+      role: string;
+      status: { manager: { lease: { state: string } } };
+      task: { name: string };
+    };
+    assert.equal(output.role, "manager");
+    assert.equal(output.task.name, "app-loop-task");
+    assert.equal(output.heartbeat.state, "recorded");
+    assert.equal(output.heartbeat.recorded_at, "2026-06-11T12:00:00Z");
+    assert.match(output.next.poll_command, /app-heartbeat 'app-loop-task' --role manager/);
+    assert.match(output.next.direct_inbox_command, /manager-inbox 'app-loop-task' --consume-next/);
+    assert.equal(output.status.manager.lease.state, "healthy");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("TypeScript runtime app-loop-status reports stale worker and start-dispatch action", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-app-loop-status."));
+  const dbPath = join(root, "workerctl.db");
+  try {
+    seedCliAppLoopFixture(dbPath, {
+      dispatcherHeartbeatAt: null,
+      managerHeartbeatAt: "2026-06-11T11:59:50Z",
+      workerHeartbeatAt: "2026-06-11T11:45:00Z",
+    });
+    const result = runTypescriptRuntimeCommand({
+      args: [
+        "app-loop-status",
+        "app-loop-task",
+        "--path",
+        dbPath,
+        "--json",
+      ],
+      env: {},
+      now: () => new Date("2026-06-11T12:00:00Z"),
+    });
+
+    assert.equal(result.exitCode, 0, result.stderr);
+    const output = JSON.parse(result.stdout ?? "{}") as {
+      dispatch: { state: string };
+      next_actions: Array<{ kind: string }>;
+      ok: boolean;
+      worker: { lease: { state: string } };
+    };
+    assert.equal(output.ok, false);
+    assert.equal(output.dispatch.state, "missing");
+    assert.equal(output.worker.lease.state, "stale");
+    assert.equal(output.next_actions.some((action) => action.kind === "start_dispatch"), true);
+    assert.equal(output.next_actions.some((action) => action.kind === "wake_worker"), true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("TypeScript runtime app-wakeup-plan prints app-thread prompts for stale roles", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-app-wakeup-plan."));
+  const dbPath = join(root, "workerctl.db");
+  try {
+    seedCliAppLoopFixture(dbPath, {
+      dispatcherHeartbeatAt: "2026-06-11T11:59:00Z",
+      managerHeartbeatAt: "2026-06-11T11:45:00Z",
+      workerHeartbeatAt: "2026-06-11T11:44:00Z",
+    });
+    const result = runTypescriptRuntimeCommand({
+      args: [
+        "app-wakeup-plan",
+        "app-loop-task",
+        "--path",
+        dbPath,
+        "--json",
+      ],
+      env: {},
+      now: () => new Date("2026-06-11T12:00:00Z"),
+    });
+
+    assert.equal(result.exitCode, 0, result.stderr);
+    const output = JSON.parse(result.stdout ?? "{}") as {
+      wakeups: Array<{
+        prompt: string;
+        role: string;
+        thread: { id: string | null; title: string | null };
+      }>;
+    };
+    assert.equal(output.wakeups.length, 2);
+    assert.equal(output.wakeups[0].role, "manager");
+    assert.equal(output.wakeups[0].thread.id, "thread-manager");
+    assert.match(output.wakeups[0].prompt, /conveyor app-heartbeat 'app-loop-task' --role manager/);
+    assert.match(output.wakeups[0].prompt, /verify worker claims/);
+    assert.equal(output.wakeups[1].role, "worker");
+    assert.equal(output.wakeups[1].thread.id, "thread-worker");
+    assert.match(output.wakeups[1].prompt, /conveyor app-heartbeat 'app-loop-task' --role worker/);
+    assert.match(output.wakeups[1].prompt, /execute only that single worker instruction/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("TypeScript runtime handles task create list and active filtering by default", () => {
@@ -1819,8 +2025,9 @@ test("TypeScript runtime handles no-tmux create-disposable-binding by default", 
       binding: { id: string };
       heartbeat_recommendations: {
         interval_minutes: number;
-        manager: { poll_command: string; prompt: string };
+        manager: { direct_inbox_command: string; poll_command: string; prompt: string };
         note: string;
+        status_command: string;
         teardown_policy: {
           idle_poll: string;
           owner: string;
@@ -1828,7 +2035,8 @@ test("TypeScript runtime handles no-tmux create-disposable-binding by default", 
           terminal_closeout_command: string;
           worker_rule: string;
         };
-        worker: { poll_command: string; prompt: string };
+        wakeup_plan_command: string;
+        worker: { direct_inbox_command: string; poll_command: string; prompt: string };
       };
       manager: {
         communication: { delivery_mode: string; poll_command: string; receive_style: string; session_kind: string };
@@ -1889,14 +2097,12 @@ test("TypeScript runtime handles no-tmux create-disposable-binding by default", 
       `${localConveyor} manager-inbox 'real-slice' --consume-next --wait --timeout 60 --path ${quotedDbPath} --json`,
     );
     assert.equal(payload.heartbeat_recommendations.interval_minutes, 2);
-    assert.equal(
-      payload.heartbeat_recommendations.worker.poll_command,
-      payload.worker.communication.poll_command,
-    );
-    assert.equal(
-      payload.heartbeat_recommendations.manager.poll_command,
-      payload.manager.communication.poll_command,
-    );
+    assert.ok(payload.heartbeat_recommendations.worker.poll_command.includes("app-heartbeat 'real-slice' --role worker"));
+    assert.ok(payload.heartbeat_recommendations.manager.poll_command.includes("app-heartbeat 'real-slice' --role manager"));
+    assert.equal(payload.heartbeat_recommendations.worker.direct_inbox_command, payload.worker.communication.poll_command);
+    assert.equal(payload.heartbeat_recommendations.manager.direct_inbox_command, payload.manager.communication.poll_command);
+    assert.ok(payload.heartbeat_recommendations.status_command.includes("app-loop-status 'real-slice'"));
+    assert.ok(payload.heartbeat_recommendations.wakeup_plan_command.includes("app-wakeup-plan 'real-slice'"));
     assert.ok(payload.heartbeat_recommendations.note.includes("heartbeat"));
     assert.equal(payload.heartbeat_recommendations.teardown_policy.owner, "manager_or_operator");
     assert.ok(payload.heartbeat_recommendations.teardown_policy.idle_poll.includes("Never delete"));
@@ -1905,8 +2111,10 @@ test("TypeScript runtime handles no-tmux create-disposable-binding by default", 
     assert.ok(payload.heartbeat_recommendations.teardown_policy.terminal_closeout_command.includes("--require-criteria-audit"));
     assert.ok(payload.heartbeat_recommendations.teardown_policy.worker_rule.includes("must not own loop teardown"));
     assert.ok(payload.heartbeat_recommendations.worker.prompt.includes("stop after a one-line idle receipt"));
+    assert.ok(payload.heartbeat_recommendations.worker.prompt.includes("Run the worker app heartbeat"));
     assert.ok(payload.heartbeat_recommendations.worker.prompt.includes("Do not delete, pause, or disable worker heartbeat automation after an idle poll"));
     assert.ok(payload.heartbeat_recommendations.manager.prompt.includes("produce exactly one next worker task"));
+    assert.ok(payload.heartbeat_recommendations.manager.prompt.includes("Run the manager app heartbeat"));
     assert.ok(payload.heartbeat_recommendations.manager.prompt.includes("Do not delete, pause, or disable manager or worker heartbeat automation after an idle poll"));
     assert.ok(payload.heartbeat_recommendations.manager.prompt.includes("record the terminal manager decision"));
     assert.ok(payload.heartbeat_recommendations.manager.prompt.includes("task remains managed/active"));

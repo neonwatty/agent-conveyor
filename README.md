@@ -379,6 +379,16 @@ tmux attach -t codex-live-test
   Codex app thread metadata is normally supplied after a Codex app manager has
   used `create_thread` and `set_thread_title`; terminal-only users can omit it
   and still use the manual no-tmux handoff.
+- `app-heartbeat TASK --role manager|worker [--dispatcher-id ID]
+  [--stale-after N] [--json]` — Record a Codex app/no-tmux manager or worker
+  heartbeat for the active binding and return that role's next poll commands.
+  Use this as the recurring heartbeat command for pull-required app sessions.
+- `app-loop-status TASK [--dispatcher-id ID] [--stale-after N] [--json]` —
+  Summarize manager lease, worker lease, Dispatch heartbeat, and next required
+  actions for an app-native Conveyor loop.
+- `app-wakeup-plan TASK [--dispatcher-id ID] [--stale-after N] [--json]` —
+  Emit exact manager and worker thread wake prompts, including app thread ids
+  and titles when present, for an operator or Codex app automation to send.
 - `discover [QUERY] [--all] [--limit N]` / `search [QUERY]` — Search tasks,
   registered sessions, active bindings, and recent telemetry in one JSON result.
   Use this for conversational setup when a manager or Codex session needs to
@@ -1017,10 +1027,11 @@ Current dispatch state:
   in `routed_notifications`, and threaded with `correlation_id`.
 - The session inbox is the same `routed_notifications` stream addressed by
   `target_session_id`: tmux push is optional transport. Codex app-based sessions
-  should long-poll with the returned `communication.poll_command`. For
-  disposable Ralph loops, use the generated `worker_handoff` prompt so the
-  worker keeps polling until no inbox item remains or the loop reaches
-  `max_iterations`. For no-tmux Codex app sessions, treat
+  should run `app-heartbeat` as their recurring heartbeat, using the direct
+  `communication.poll_command` only as a fallback or when returned in heartbeat
+  guidance. For disposable Ralph loops, use the generated `worker_handoff`
+  prompt so the worker keeps polling until no inbox item remains or the loop
+  reaches `max_iterations`. For no-tmux Codex app sessions, treat
   `communication.requires_polling=true` as requiring a heartbeat/wake layer:
   a delivered pull inbox item does not by itself wake an idle app thread. Do
   not delete or pause heartbeats because an inbox poll is idle. A terminal

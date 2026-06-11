@@ -35,25 +35,29 @@ Skill behavior:
    report blockers.
 3. Choose concise task, worker, manager, and run names when the user does not
    provide them. Do not ask the user to invent generated names.
-4. If running in the Codex app and thread tools are available, create a fresh
-   same-project worker thread with `create_thread`, name it with
-   `set_thread_title`, and keep the returned thread id/title. Use
-   `create_thread` for this flow; do not use `fork_thread` unless the user
-   explicitly asks to fork or resume this exact conversation.
+4. Preferred fully app-native setup: if running in the Codex app and thread
+   tools are available, create fresh same-project manager and worker threads
+   with `create_thread`, give both readable titles, and keep both returned
+   thread ids/titles. Use `create_thread` for this flow; do not use
+   `fork_thread` unless the user explicitly asks to fork or resume this exact
+   conversation. If the current thread is explicitly acting as the manager,
+   use the current thread as manager and create only the worker thread.
 5. Create the no-tmux binding with `conveyor create-disposable-binding`
    using `--template` when a template is known, `--adversarial`, a bounded
-   `--max-iterations`, and `--json`. When step 4 produced a worker thread id,
-   pass it through `--worker-codex-app-thread-id` and
-   `--worker-codex-app-thread-title` so Conveyor can surface the app identity
-   in `sessions`, `discover`, and setup JSON. If app thread tools are not
-   available, create the binding without those flags and ask the user to open a
-   separate Codex app worker session manually.
+   `--max-iterations`, and `--json`. When step 4 produced app thread ids, pass
+   them through `--manager-codex-app-thread-id`,
+   `--manager-codex-app-thread-title`, `--worker-codex-app-thread-id`, and
+   `--worker-codex-app-thread-title` so Conveyor can surface app identities in
+   `sessions`, `discover`, and setup JSON. If app thread tools are not
+   available, create the binding without those flags and ask the user to open
+   separate Codex app sessions manually.
 6. Ensure Dispatch is running or tell the user the single command to start it:
    `conveyor dispatch --watch --dispatcher-id dispatch-local`.
 7. Read the returned `communication` blocks. A worker or manager with
    `session_kind=tmux` and `receive_style=push` can receive direct tmux pushes;
    one with `session_kind=codex_app` and `receive_style=pull` must poll the
-   printed inbox command.
+   printed `app-heartbeat` command, using direct inbox commands only when the
+   heartbeat output or setup JSON provides them as fallbacks.
 8. Give the worker Codex app session the generated `worker_handoff` prompt.
    If step 4 created a fresh worker thread, use `send_message_to_thread` only
    to deliver that bootstrap prompt. Durable manager/worker communication still
@@ -72,10 +76,12 @@ Skill behavior:
 Idle polling rule for Codex app/no-tmux sessions:
 
 - When a worker has `session_kind=codex_app` or `receive_style=pull`, its
-  idle/check-in command is the returned
-  `communication.poll_command` or generated `worker_handoff` command.
+  default idle/check-in command is the returned `app-heartbeat` worker command.
+  Use `communication.poll_command` or the generated `worker_handoff` command as
+  fallback/direct inbox polling.
 - When a manager has `session_kind=codex_app` or `receive_style=pull`, its
-  idle/check-in command is the returned `communication.poll_command`.
+  default idle/check-in command is the returned `app-heartbeat` manager command.
+  Use `communication.poll_command` as fallback/direct inbox polling.
 - The printed command may include a local `PATH=.../bin:$PATH conveyor` prefix;
   preserve that prefix when giving the command to a Codex app thread.
 - Repeat the appropriate command whenever the session is idle, after finishing
@@ -83,6 +89,9 @@ Idle polling rule for Codex app/no-tmux sessions:
   A timeout is not completion; it is only a quiet poll interval.
 - Keep `conveyor dispatch --watch --dispatcher-id dispatch-local` running so
   Dispatch can route new messages into those inboxes.
+- Use `conveyor app-loop-status <task> --json` as the operator status surface,
+  and `conveyor app-wakeup-plan <task> --json` to produce exact stale-thread
+  wake prompts for Codex app automation or `send_message_to_thread`.
 - For bounded Ralph loops, treat `ralph_loop_iteration_advanced` telemetry as
   the receipt that a worker actually consumed and began the requested
   iteration.
@@ -727,15 +736,18 @@ etc.) run `conveyor db-doctor --live`.
 ## Natural-Language Command Mapping
 
 - "set up a Codex app Ralph loop": if the current session has Codex app thread
-  tools, call `create_thread` for a fresh same-project worker, call
-  `set_thread_title`, run `conveyor create-disposable-binding` with
-  `--worker-codex-app-thread-id` and `--worker-codex-app-thread-title`, then
-  send the returned `worker_handoff` using `send_message_to_thread`. If those
-  tools are unavailable, run `create-disposable-binding` without thread
-  metadata and give the user the `worker_handoff` prompt to paste into a
-  manually opened worker. Keep Dispatch as the source of durable communication,
-  and make both Codex app sessions repeat their role-specific inbox poll while
-  idle.
+  tools, call `create_thread` for fresh same-project manager and worker
+  threads unless the current thread is explicitly the manager, set readable
+  titles, run `conveyor create-disposable-binding` with both
+  `--manager-codex-app-thread-id`/`--manager-codex-app-thread-title` and
+  `--worker-codex-app-thread-id`/`--worker-codex-app-thread-title`, then send
+  the returned bootstrap prompts using `send_message_to_thread`. If those tools
+  are unavailable, run `create-disposable-binding` without thread metadata and
+  give the user the handoff prompts to paste into manually opened sessions. Keep
+  Dispatch as the source of durable communication, and make both Codex app
+  sessions repeat their role-specific `app-heartbeat` command while idle. Use
+  `app-loop-status` and `app-wakeup-plan` for operator status and stale-thread
+  recovery.
 - "register this Codex session as the worker for dashboard setup <CODE>":
   derive `dashboard-<CODE>-worker`, run `conveyor doctor-self`, then
   `conveyor register-worker --name dashboard-<CODE>-worker --pid <PID> --cwd <CWD> --tmux-session <SESSION>`.

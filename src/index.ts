@@ -33,6 +33,24 @@ export type {
   TaskAuditRoutedNotification,
   TaskAuditTask,
 } from "./runtime/audit.js";
+export {
+  appHeartbeatPollCommand,
+  appLoopStatusCommand,
+  appLoopStatusSync,
+  appWakeupPlanCommand,
+  appWakeupPlanSync,
+  directInboxPollCommand,
+} from "./runtime/app-autonomy.js";
+export type {
+  AppLoopDispatchState,
+  AppLoopLeaseState,
+  AppLoopNextAction,
+  AppLoopRole,
+  AppLoopRoleStatus,
+  AppLoopStatus,
+  AppWakeup,
+  AppWakeupPlan,
+} from "./runtime/app-autonomy.js";
 export { exportTaskAuditSubsetSync, exportTaskSync, TaskExportError } from "./runtime/export.js";
 export type { TaskExportManifest, TaskExportResult } from "./runtime/export.js";
 export { replayEntriesFromAudit, replayResultFromAudit } from "./runtime/replay.js";

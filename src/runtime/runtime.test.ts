@@ -7,6 +7,7 @@ import type { DatabaseSync } from "node:sqlite";
 
 import { classifyBusyWait, classifyStartupOutput } from "./classify.js";
 import { taskAuditSync } from "./audit.js";
+import { appLoopStatusSync, appWakeupPlanSync } from "./app-autonomy.js";
 import { exportTaskAuditSubsetSync } from "./export.js";
 import { replayEntriesFromAudit } from "./replay.js";
 import {
@@ -58,6 +59,81 @@ import {
 import type { TmuxRunner } from "./tmux.js";
 import { writePngRgba } from "./visual-diff.js";
 import { initializeDatabaseSync, openDatabaseSync } from "../state/database.js";
+
+function seedAppLoopFixture(
+  database: DatabaseSync,
+  options: {
+    dispatcherHeartbeatAt: string | null;
+    managerHeartbeatAt: string | null;
+    now: string;
+    workerHeartbeatAt: string | null;
+  },
+): void {
+  database.prepare("insert into tasks(id, name, goal, summary, state, created_at, updated_at) values (?, ?, ?, ?, ?, ?, ?)").run(
+    "task-app-loop",
+    "app-loop-task",
+    "Exercise app loop status.",
+    null,
+    "managed",
+    options.now,
+    options.now,
+  );
+  database.prepare(`
+    insert into sessions(id, name, role, identity_token, codex_session_id, codex_session_path,
+      codex_app_thread_id, codex_app_thread_title, cwd, registered_at, last_heartbeat_at, state)
+    values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    "session-worker-app",
+    "worker-app",
+    "worker",
+    "worker-token",
+    "codex-worker",
+    "/tmp/worker.jsonl",
+    "thread-worker",
+    "Worker App",
+    "/repo",
+    options.now,
+    options.workerHeartbeatAt,
+    "active",
+  );
+  database.prepare(`
+    insert into sessions(id, name, role, identity_token, codex_session_id, codex_session_path,
+      codex_app_thread_id, codex_app_thread_title, cwd, registered_at, last_heartbeat_at, state)
+    values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    "session-manager-app",
+    "manager-app",
+    "manager",
+    "manager-token",
+    "codex-manager",
+    "/tmp/manager.jsonl",
+    "thread-manager",
+    "Manager App",
+    "/repo",
+    options.now,
+    options.managerHeartbeatAt,
+    "active",
+  );
+  database.prepare("insert into bindings(id, task_id, worker_session_id, manager_session_id, state, created_at) values (?, ?, ?, ?, ?, ?)").run(
+    "binding-app-loop",
+    "task-app-loop",
+    "session-worker-app",
+    "session-manager-app",
+    "active",
+    options.now,
+  );
+  if (options.dispatcherHeartbeatAt) {
+    database.prepare(`
+      insert into telemetry_events(id, actor, event_type, severity, summary, timestamp, correlation_json, attributes_json)
+      values (?, 'dispatch', 'dispatch_watch_heartbeat', 'info', 'Dispatch watch heartbeat 1.', ?, ?, ?)
+    `).run(
+      "telemetry-dispatch-app-loop",
+      options.dispatcherHeartbeatAt,
+      JSON.stringify({ dispatcher_id: "dispatch-local", iteration: 1 }),
+      JSON.stringify({ dry_run: false, processed_count: 0 }),
+    );
+  }
+}
 
 test("tmux command builders preserve stable argument order", () => {
   assert.equal(tmuxSession("worker-a"), "codex-worker-a");
@@ -165,6 +241,84 @@ test("session-keyed tmux send records side-effect progress and pane target", () 
     ["tmux", "send-keys", "-t", "codex-worker-a:%5", "C-m"],
     ["tmux", "delete-buffer", "-b", "workerctl-session-worker-a"],
   ]);
+});
+
+test("app loop status classifies healthy codex app sessions and dispatch heartbeat", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-app-loop."));
+  const dbPath = join(root, "workerctl.db");
+  const database = openDatabaseSync(dbPath);
+  initializeDatabaseSync(database);
+  try {
+    const now = "2026-06-11T12:00:00Z";
+    seedAppLoopFixture(database, {
+      dispatcherHeartbeatAt: "2026-06-11T11:59:10Z",
+      managerHeartbeatAt: "2026-06-11T11:59:20Z",
+      now,
+      workerHeartbeatAt: "2026-06-11T11:59:30Z",
+    });
+
+    const status = appLoopStatusSync(database, {
+      dbPath,
+      dispatcherId: "dispatch-local",
+      heartbeatStaleSeconds: 180,
+      now,
+      taskName: "app-loop-task",
+    });
+
+    assert.equal(status.ok, true);
+    assert.equal(status.dispatch.state, "healthy");
+    assert.equal(status.manager.lease.state, "healthy");
+    assert.equal(status.worker.lease.state, "healthy");
+    assert.deepEqual(status.next_actions, []);
+  } finally {
+    database.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("app loop status recommends waking stale pull-required sessions", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-app-loop-stale."));
+  const dbPath = join(root, "workerctl.db");
+  const database = openDatabaseSync(dbPath);
+  initializeDatabaseSync(database);
+  try {
+    const now = "2026-06-11T12:00:00Z";
+    seedAppLoopFixture(database, {
+      dispatcherHeartbeatAt: "2026-06-11T11:59:10Z",
+      managerHeartbeatAt: "2026-06-11T11:51:00Z",
+      now,
+      workerHeartbeatAt: "2026-06-11T11:50:00Z",
+    });
+
+    const status = appLoopStatusSync(database, {
+      dbPath,
+      dispatcherId: "dispatch-local",
+      heartbeatStaleSeconds: 180,
+      now,
+      taskName: "app-loop-task",
+    });
+
+    assert.equal(status.ok, false);
+    assert.equal(status.manager.lease.state, "stale");
+    assert.equal(status.worker.lease.state, "stale");
+    assert.equal(status.next_actions[0].kind, "wake_manager");
+    assert.equal(status.next_actions[1].kind, "wake_worker");
+
+    const plan = appWakeupPlanSync(database, {
+      dbPath,
+      dispatcherId: "dispatch-local",
+      heartbeatStaleSeconds: 180,
+      now,
+      taskName: "app-loop-task",
+    });
+    assert.equal(plan.wakeups.length, 2);
+    assert.equal(plan.wakeups[0].thread.id, "thread-manager");
+    assert.match(plan.wakeups[0].prompt, /conveyor app-heartbeat 'app-loop-task' --role manager/);
+    assert.equal(plan.wakeups[1].thread.id, "thread-worker");
+  } finally {
+    database.close();
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("Codex session helpers parse rollout metadata and lsof output", () => {
