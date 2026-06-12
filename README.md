@@ -394,6 +394,12 @@ tmux attach -t codex-live-test
   for prepared, skipped, and blocked role wakeups. This command does not send
   `send_message_to_thread`; the Codex app/operator layer sends prompts whose
   actions report `send_ready=true`.
+- `app-wakeup-record-delivery TASK --role manager|worker --dispatch-receipt ID
+  --delivery-status sent|skipped|blocked [--thread-id ID] [--reason TEXT]
+  [--json]` — Record what the Codex app/operator layer did with a wake action.
+  `sent` is accepted only when the referenced `app-wakeup-dispatch` receipt has
+  a matching `ready_to_send` action with `send_ready=true` and the same thread
+  id; healthy and blocked roles must be recorded as `skipped` or `blocked`.
 - `discover [QUERY] [--all] [--limit N]` / `search [QUERY]` — Search tasks,
   registered sessions, active bindings, and recent telemetry in one JSON result.
   Use this for conversational setup when a manager or Codex session needs to

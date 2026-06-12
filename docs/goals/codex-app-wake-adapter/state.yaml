@@ -1,0 +1,247 @@
+# GoalBuddy v2 state.yaml
+# Board truth lives here. goal.md is the editable charter; notes/ holds long receipts only.
+
+version: 2
+
+goal:
+  title: "Codex App Wake Adapter"
+  slug: "codex-app-wake-adapter"
+  kind: specific
+  tranche: "Build and prove the Codex app/operator adapter that consumes app-wakeup-dispatch receipts and sends only authorized app-thread wake prompts."
+  status: done
+  oracle:
+    signal: "A Codex app manager can consume app-wakeup-dispatch JSON, send wake prompts only for send_ready=true actions, skip healthy/blocked roles, and keep Dispatch/inbox telemetry authoritative."
+    cadence: "after each Worker package and at final audit"
+    final_proof: "Final Judge receipt cites app-thread tool availability evidence, focused tests or dry-run adapter proof, package/skill smoke or equivalent, GoalBuddy checker, and strongest-failure-mode proof."
+  intake:
+    original_request: "Publish the patch release, then start a new GoalBuddy board for the app adapter slice."
+    interpreted_outcome: "Create the next GoalBuddy prepboard for a Codex app-native adapter layer that can safely call send_message_to_thread from app sessions using app-wakeup-dispatch output."
+    input_shape: specific
+    audience: "Agent Conveyor maintainers, Codex app manager sessions, Codex app worker sessions, GoalBuddy supervisors"
+    authority: approved_for_prep
+    proof_type: "tool availability + tests/dry-run + audit"
+    completion_proof: "A verified implementation or dry-run adapter proves send/skip/block behavior against app-wakeup-dispatch actions without weakening Dispatch authority."
+    likely_misfire: "Blindly sending all prompts or claiming delivery success as task progress while Dispatch is missing or role actions are skipped/blocked."
+    blind_spots_considered:
+      - "Codex app tools are not terminal package APIs."
+      - "send_message_to_thread delivery is not durable task state."
+      - "A missing Dispatch heartbeat must remain a required action."
+      - "Tests must not send messages to non-disposable user/private threads."
+      - "The adapter may belong in the installed skill/operator instructions instead of package code."
+    existing_plan_facts:
+      - "PR #282 added app-wakeup-dispatch."
+      - "agent-conveyor@0.1.9 is published and public install smoke passed."
+      - "The strongest failure-mode probe for PR #282 kept status.ok=false when Dispatch was missing despite send_ready=2."
+
+rules:
+  pm_owns_state: true
+  one_active_task: true
+  max_write_workers: 1
+  no_implementation_without_worker_or_pm_task: true
+  no_completion_without_judge_or_pm_audit: true
+  planning_is_not_completion: true
+  queued_required_worker_blocks_completion: true
+  continuous_until_full_outcome: true
+  missing_input_or_credentials_do_not_stop_goal: true
+  preserve_and_validate_existing_plan: true
+  intake_misfire_must_be_audited: true
+  goal_pressure_requires_oracle: true
+  no_completion_on_weak_proof: true
+  slice_policy:
+    max_consecutive_tiny_tasks: 2
+    prefer_vertical_slices: true
+    judge_picks_largest_safe_slice: true
+    worker_completes_whole_slice: true
+
+agents:
+  scout: installed
+  worker: installed
+  judge: installed
+
+visual_board:
+  selected: local
+  local:
+    status: running
+    url: "http://goalbuddy.localhost:41737/codex-app-wake-adapter/"
+    command: "npx goalbuddy board /Users/neonwatty/Desktop/codex-terminal-manager/docs/goals/codex-app-wake-adapter"
+
+active_task: null
+
+tasks:
+  - id: T001
+    type: scout
+    assignee: Scout
+    status: done
+    reasoning_hint: high
+    objective: "Map the adapter boundary: current app-wakeup-dispatch output, installed skill guidance, Codex app thread tools, and safe test strategy for send_message_to_thread."
+    constraints:
+      - "Read-only."
+      - "Do not send app-thread messages."
+      - "Do not inspect private phone content."
+      - "Require current evidence for app-thread tool availability."
+      - "Distinguish package code, installed skill guidance, and Codex app operator behavior."
+    expected_output:
+      - "Exact current app-wakeup-dispatch output shape."
+      - "Which Codex app thread tools are callable in this environment."
+      - "Safe test/dry-run strategy for message sending."
+      - "Recommendation: package change, skill change, app-operator procedure, or mixed slice."
+      - "Allowed files, verification commands, and stop conditions for Worker."
+    acceptance_criteria:
+      - "Cites exact evidence for every tool/API claim."
+      - "Names any missing app-thread capability as a blocker."
+      - "Defines how to prove only send_ready=true actions are sent."
+    receipt:
+      result: done
+      note: "notes/T001-scout.md"
+      summary: "Scout found Codex app send/read/create thread tools are callable, sampled app-wakeup-dispatch output, and recommended a package receipt command plus skill-level send procedure."
+
+  - id: T002
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Decide the largest safe implementation slice for the app wake adapter."
+    constraints:
+      - "Read-only."
+      - "Reject any design that makes app-thread messages durable task state."
+      - "Reject any design that sends to non-disposable/private threads during verification."
+      - "Reject package code that assumes Codex app-only tools are available in terminal environments."
+    expected_output:
+      - "Decision: approved | blocked | revise."
+      - "Implementation boundary and allowed files."
+      - "Verification commands."
+      - "Stop conditions."
+      - "Acceptance criteria."
+    acceptance_criteria:
+      - "Selects exactly one Worker slice."
+      - "Includes send_ready, skipped_healthy, blocked_missing_thread, and missing Dispatch proof."
+    receipt:
+      result: done
+      decision: approved
+      note: "notes/T002-judge.md"
+      summary: "Approve a mixed package + skill slice: package validates/records app wake delivery receipts; Codex app skill/operator layer calls send_message_to_thread."
+
+  - id: T003
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "Implement the Judge-approved app wake adapter slice."
+    constraints:
+      - "Keep changes inside Judge-approved files."
+      - "Do not touch generated dist."
+      - "Do not send app messages except to explicitly disposable test threads approved by Judge."
+      - "Preserve Dispatch/inbox/telemetry authority."
+    allowed_files:
+      - "src/cli/typescript-runtime.ts"
+      - "src/cli/typescript-runtime.test.ts"
+    expected_output:
+      - "Implementation diff."
+      - "Focused tests or dry-run proof."
+      - "Receipt with changed files and commands."
+    acceptance_criteria:
+      - "Only send_ready=true actions are send candidates."
+      - "Healthy and blocked roles are skipped with reasons."
+      - "Missing Dispatch stays visible."
+      - "No private thread content is inspected."
+    receipt:
+      result: done
+      note: "notes/T003-worker.md"
+      summary: "Implemented `app-wakeup-record-delivery` to validate and record post-app-tool wake delivery outcomes linked to `app-wakeup-dispatch` receipts."
+      changed_files:
+        - "src/cli/typescript-runtime.ts"
+        - "src/cli/typescript-runtime.test.ts"
+      commands:
+        - cmd: "npm test -- --runInBand src/cli/typescript-runtime.test.ts"
+          status: pass
+          summary: "Focused CLI/runtime tests passed: 173 tests, 0 failures."
+        - cmd: "npm run build:cli"
+          status: pass
+          summary: "TypeScript CLI build passed."
+
+  - id: T004
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: low
+    objective: "Update docs/skill/smoke for the implemented adapter slice."
+    constraints:
+      - "Keep guidance operational and concise."
+      - "Do not imply direct app messages are durable receipts."
+      - "Do not touch generated dist."
+    allowed_files:
+      - "README.md"
+      - "docs/manager-recipes.md"
+      - "docs/manual-qa-checklist.md"
+      - "scripts/package-smoke"
+      - "skills/manage-codex-workers/SKILL.md"
+    expected_output:
+      - "Docs or skill instructions for safe adapter usage."
+      - "Smoke or manual QA coverage for send/skip/block behavior."
+    acceptance_criteria:
+      - "Operators know when to run app-wakeup-dispatch versus the adapter."
+      - "Docs preserve Dispatch/inbox authority."
+    receipt:
+      result: done
+      note: "notes/T004-docs-smoke.md"
+      summary: "Updated docs/skill guidance and package smoke for app wake delivery receipts."
+      changed_files:
+        - "README.md"
+        - "docs/manager-recipes.md"
+        - "docs/manual-qa-checklist.md"
+        - "scripts/package-smoke"
+        - "skills/manage-codex-workers/SKILL.md"
+      commands:
+        - cmd: "scripts/package-smoke"
+          status: pass
+          summary: "Packed CLI smoke passed, including sent receipt and rejected sent-for-skipped receipt checks."
+        - cmd: "./bin/conveyor install-skills --json"
+          status: pass
+          summary: "Updated manage-codex-workers skill installed into /Users/neonwatty/.codex/skills."
+
+  - id: T005
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Final audit of the app wake adapter slice."
+    constraints:
+      - "Treat Worker claims as claims until verified."
+      - "Require strongest-failure-mode proof."
+      - "Do not mark done with queued required Worker tasks."
+    expected_output:
+      - "Pass/fail decision."
+      - "Evidence table."
+      - "Strongest failure mode and proof."
+      - "PR/release/next-task recommendation."
+    acceptance_criteria:
+      - "Covers send_ready, skipped_healthy, blocked_missing_thread, missing Dispatch, and no private-content inspection."
+      - "Cites tests/checks and GoalBuddy state checker."
+    receipt:
+      result: done
+      decision: complete
+      full_outcome_complete: true
+      note: "notes/T005-final-audit.md"
+      summary: "Final audit passed after live disposable app-thread proof, full test suite, smoke, release-check, and failure-mode guard verification."
+
+blockers: []
+
+receipts:
+  - task: T001
+    note: "notes/T001-scout.md"
+    result: done
+  - task: T002
+    note: "notes/T002-judge.md"
+    result: approved
+  - task: T003
+    note: "notes/T003-worker.md"
+    result: done
+  - task: T004
+    note: "notes/T004-docs-smoke.md"
+    result: done
+  - task: T005
+    note: "notes/T005-final-audit.md"
+    result: complete
+
+notes:
+  - "Prepboard created after agent-conveyor@0.1.9 publish. Do not start implementation except through `/goal Follow docs/goals/codex-app-wake-adapter/goal.md.`"

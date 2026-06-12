@@ -576,6 +576,233 @@ test("TypeScript runtime app-wakeup-dispatch blocks stale role without app threa
   }
 });
 
+test("TypeScript runtime app-wakeup-record-delivery records sent only for send-ready source actions", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-app-wakeup-record-sent."));
+  const dbPath = join(root, "workerctl.db");
+  try {
+    seedCliAppLoopFixture(dbPath, {
+      dispatcherHeartbeatAt: null,
+      managerHeartbeatAt: "2026-06-11T11:45:00Z",
+      workerHeartbeatAt: "2026-06-11T11:44:00Z",
+    });
+    const dispatch = runTypescriptRuntimeCommand({
+      args: ["app-wakeup-dispatch", "app-loop-task", "--path", dbPath, "--json"],
+      env: {},
+      now: () => new Date("2026-06-11T12:00:00Z"),
+    });
+    assert.equal(dispatch.exitCode, 0, dispatch.stderr);
+    const dispatchOutput = JSON.parse(dispatch.stdout ?? "{}") as {
+      receipt: { event_id: string };
+      summary: { dispatcher_required: boolean; ready_to_send: number };
+    };
+    assert.equal(dispatchOutput.summary.ready_to_send, 2);
+    assert.equal(dispatchOutput.summary.dispatcher_required, true);
+
+    const result = runTypescriptRuntimeCommand({
+      args: [
+        "app-wakeup-record-delivery",
+        "app-loop-task",
+        "--role",
+        "manager",
+        "--dispatch-receipt",
+        dispatchOutput.receipt.event_id,
+        "--delivery-status",
+        "sent",
+        "--thread-id",
+        "thread-manager",
+        "--reason",
+        "send_message_to_thread returned ok",
+        "--path",
+        dbPath,
+        "--json",
+      ],
+      env: {},
+      now: () => new Date("2026-06-11T12:01:00Z"),
+    });
+
+    assert.equal(result.exitCode, 0, result.stderr);
+    const output = JSON.parse(result.stdout ?? "{}") as {
+      delivery: { role: string; source_action_status: string; source_send_ready: boolean; status: string; thread_id: string };
+      receipt: { event_id: string; event_type: string; recorded_at: string };
+      source: { dispatch_receipt: string; dispatch_required: boolean };
+    };
+    assert.equal(output.delivery.role, "manager");
+    assert.equal(output.delivery.status, "sent");
+    assert.equal(output.delivery.source_action_status, "ready_to_send");
+    assert.equal(output.delivery.source_send_ready, true);
+    assert.equal(output.delivery.thread_id, "thread-manager");
+    assert.equal(output.source.dispatch_receipt, dispatchOutput.receipt.event_id);
+    assert.equal(output.source.dispatch_required, true);
+    assert.equal(output.receipt.event_type, "app_wakeup_delivery_recorded");
+    assert.equal(output.receipt.recorded_at, "2026-06-11T12:01:00Z");
+
+    const database = openDatabaseSync(dbPath);
+    try {
+      const telemetry = database.prepare("select event_type, attributes_json from telemetry_events where id = ?")
+        .get(output.receipt.event_id) as { attributes_json: string; event_type: string } | undefined;
+      assert.ok(telemetry);
+      assert.equal(telemetry.event_type, "app_wakeup_delivery_recorded");
+      const attributes = JSON.parse(telemetry.attributes_json) as {
+        delivery_status: string;
+        dispatch_required: boolean;
+        dispatch_receipt: string;
+        role: string;
+        source_action_status: string;
+        source_send_ready: boolean;
+        thread_id: string;
+      };
+      assert.equal(attributes.delivery_status, "sent");
+      assert.equal(attributes.dispatch_required, true);
+      assert.equal(attributes.dispatch_receipt, dispatchOutput.receipt.event_id);
+      assert.equal(attributes.role, "manager");
+      assert.equal(attributes.source_action_status, "ready_to_send");
+      assert.equal(attributes.source_send_ready, true);
+      assert.equal(attributes.thread_id, "thread-manager");
+    } finally {
+      database.close();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("TypeScript runtime app-wakeup-record-delivery rejects sent for skipped healthy actions", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-app-wakeup-record-reject-skipped."));
+  const dbPath = join(root, "workerctl.db");
+  try {
+    seedCliAppLoopFixture(dbPath, {
+      dispatcherHeartbeatAt: "2026-06-11T11:59:50Z",
+      managerHeartbeatAt: "2026-06-11T11:59:50Z",
+      workerHeartbeatAt: "2026-06-11T11:59:40Z",
+    });
+    const dispatch = runTypescriptRuntimeCommand({
+      args: ["app-wakeup-dispatch", "app-loop-task", "--path", dbPath, "--json"],
+      env: {},
+      now: () => new Date("2026-06-11T12:00:00Z"),
+    });
+    assert.equal(dispatch.exitCode, 0, dispatch.stderr);
+    const dispatchOutput = JSON.parse(dispatch.stdout ?? "{}") as {
+      receipt: { event_id: string };
+      summary: { skipped: number };
+    };
+    assert.equal(dispatchOutput.summary.skipped, 2);
+
+    const result = runTypescriptRuntimeCommand({
+      args: [
+        "app-wakeup-record-delivery",
+        "app-loop-task",
+        "--role",
+        "manager",
+        "--dispatch-receipt",
+        dispatchOutput.receipt.event_id,
+        "--delivery-status",
+        "sent",
+        "--thread-id",
+        "thread-manager",
+        "--path",
+        dbPath,
+        "--json",
+      ],
+      env: {},
+      now: () => new Date("2026-06-11T12:01:00Z"),
+    });
+
+    assert.equal(result.exitCode, 2);
+    assert.match(result.stderr ?? "", /Cannot record sent wakeup for manager; source action is skipped_healthy/);
+    const database = openDatabaseSync(dbPath);
+    try {
+      const count = database.prepare("select count(*) as count from telemetry_events where event_type = 'app_wakeup_delivery_recorded'")
+        .get() as { count: number };
+      assert.equal(count.count, 0);
+    } finally {
+      database.close();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("TypeScript runtime app-wakeup-record-delivery records blocked missing-thread actions and rejects sent", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-app-wakeup-record-blocked."));
+  const dbPath = join(root, "workerctl.db");
+  try {
+    seedCliAppLoopFixture(dbPath, {
+      dispatcherHeartbeatAt: "2026-06-11T11:59:50Z",
+      managerHeartbeatAt: "2026-06-11T11:59:50Z",
+      workerHeartbeatAt: "2026-06-11T11:44:00Z",
+    });
+    const database = openDatabaseSync(dbPath);
+    try {
+      database.prepare("update sessions set codex_app_thread_id = null, codex_app_thread_title = null where id = 'session-worker-app'").run();
+    } finally {
+      database.close();
+    }
+    const dispatch = runTypescriptRuntimeCommand({
+      args: ["app-wakeup-dispatch", "app-loop-task", "--path", dbPath, "--json"],
+      env: {},
+      now: () => new Date("2026-06-11T12:00:00Z"),
+    });
+    assert.equal(dispatch.exitCode, 0, dispatch.stderr);
+    const dispatchOutput = JSON.parse(dispatch.stdout ?? "{}") as {
+      receipt: { event_id: string };
+      summary: { blocked: number };
+    };
+    assert.equal(dispatchOutput.summary.blocked, 1);
+
+    const rejected = runTypescriptRuntimeCommand({
+      args: [
+        "app-wakeup-record-delivery",
+        "app-loop-task",
+        "--role",
+        "worker",
+        "--dispatch-receipt",
+        dispatchOutput.receipt.event_id,
+        "--delivery-status",
+        "sent",
+        "--thread-id",
+        "thread-worker",
+        "--path",
+        dbPath,
+        "--json",
+      ],
+      env: {},
+      now: () => new Date("2026-06-11T12:01:00Z"),
+    });
+    assert.equal(rejected.exitCode, 2);
+    assert.match(rejected.stderr ?? "", /Cannot record sent wakeup for worker; source action is blocked_missing_thread/);
+
+    const recorded = runTypescriptRuntimeCommand({
+      args: [
+        "app-wakeup-record-delivery",
+        "app-loop-task",
+        "--role",
+        "worker",
+        "--dispatch-receipt",
+        dispatchOutput.receipt.event_id,
+        "--delivery-status",
+        "blocked",
+        "--reason",
+        "missing app thread id",
+        "--path",
+        dbPath,
+        "--json",
+      ],
+      env: {},
+      now: () => new Date("2026-06-11T12:02:00Z"),
+    });
+    assert.equal(recorded.exitCode, 0, recorded.stderr);
+    const output = JSON.parse(recorded.stdout ?? "{}") as {
+      delivery: { source_action_status: string; source_send_ready: boolean; status: string; thread_id: string | null };
+    };
+    assert.equal(output.delivery.status, "blocked");
+    assert.equal(output.delivery.source_action_status, "blocked_missing_thread");
+    assert.equal(output.delivery.source_send_ready, false);
+    assert.equal(output.delivery.thread_id, null);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("TypeScript runtime handles task create list and active filtering by default", () => {
   const root = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-tasks."));
   try {

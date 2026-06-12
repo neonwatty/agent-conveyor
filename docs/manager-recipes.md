@@ -313,6 +313,11 @@ Use `app-wakeup-dispatch` when the manager needs a durable Conveyor receipt for
 which app wake actions were prepared, skipped, or blocked. It only prepares
 adapter-ready actions; direct app-thread delivery remains an app/operator
 action, and Dispatch/inboxes remain the durable task state.
+When running from a Codex app manager with thread tools available, send only
+actions whose JSON has `send_ready=true` using `send_message_to_thread`, then
+record each outcome with `app-wakeup-record-delivery` linked to the dispatch
+receipt. Record healthy roles as `skipped` and missing-thread roles as
+`blocked`; do not treat the app-thread send as task completion.
 
 The saved dogfood example is
 `docs/goals/live-codex-app-inbox-drill/notes/T001-live-drill.md`. It proves
