@@ -405,7 +405,8 @@ tmux attach -t codex-live-test
   a matching `ready_to_send` action with `send_ready=true` and the same thread
   id; healthy and blocked roles must be recorded as `skipped` or `blocked`.
 - `app-autopilot start|stop|status TASK [--dispatcher-id ID]
-  [--interval SECONDS] [--watch-iterations N] [--stale-after N] [--json]` —
+  [--interval SECONDS] [--watch-iterations N] [--stale-after N]
+  [--quiet-after N] [--json]` —
   Manage the pair-level app-native heartbeat policy for the active
   manager/worker binding. `start` and `stop` write telemetry receipts and emit
   the exact manager/worker Codex app heartbeat automation specs plus the
@@ -413,6 +414,11 @@ tmux attach -t codex-live-test
   thread tools, so create/pause those heartbeat automations from a Codex app
   operator session using the emitted specs; Conveyor remains the durable source
   of truth through Dispatch, inboxes, wake receipts, and app heartbeat status.
+  `status` also reports `plan.quiescence`: when the loop is healthy, has no
+  `next_actions`, and both roles have produced `--quiet-after` paired
+  heartbeats since the last command or inbox-consumption receipt, it recommends
+  `stop_autopilot` so operators can quiesce blocked/no-progress loops instead
+  of repeating idle pulses.
 - `discover [QUERY] [--all] [--limit N]` / `search [QUERY]` — Search tasks,
   registered sessions, active bindings, and recent telemetry in one JSON result.
   Use this for conversational setup when a manager or Codex session needs to

@@ -315,6 +315,11 @@ heartbeat policy and emit the exact Codex app heartbeat automation specs plus a
 bounded Dispatch watch command. `app-autopilot stop` records the teardown policy
 decision; it does not itself delete Codex app automations because that action
 belongs to the Codex app automation layer.
+Each operator pulse should inspect `app-autopilot status --json`; if
+`plan.quiescence.recommended_action` is `stop_autopilot`, record
+`app-autopilot stop`, pause/delete the app heartbeat automations, and report the
+blocked or idle state once instead of continuing to wake healthy sessions with
+empty `next_actions`.
 Use `app-wakeup-dispatch` when the manager needs a durable Conveyor receipt for
 which app wake actions were prepared, skipped, or blocked. It only prepares
 adapter-ready actions; direct app-thread delivery remains an app/operator
