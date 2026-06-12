@@ -1,0 +1,289 @@
+# GoalBuddy v2 state.yaml
+# Board truth lives here. goal.md is the editable charter; notes/ holds long receipts only.
+
+version: 2
+
+goal:
+  title: "Codex App Session Bootstrap Templates"
+  slug: "codex-app-session-bootstrap-templates"
+  kind: specific
+  tranche: "Design and implement the next safe Agent Conveyor slice for reusable Codex app manager/worker bootstrap prompts."
+  status: done
+  oracle:
+    signal: "Generated Codex app manager and worker bootstrap prompts include heartbeat, inbox, Dispatch, wake recovery, delivery receipts, evidence rules, and safe app-thread boundaries, with tests or dry-run proof that omissions are caught."
+    cadence: "after Scout, after Judge, after each Worker package, and at final audit"
+    final_proof: "Final Judge receipt cites app-thread tool availability evidence, prompt/template assertions, package/skill smoke or equivalent, GoalBuddy checker, and strongest-failure-mode proof."
+  intake:
+    original_request: "Create the Codex app session bootstrap templates slice."
+    interpreted_outcome: "Prepare and execute a GoalBuddy-backed Agent Conveyor slice that makes app-native manager/worker session bootstraps reusable, auditable, and safe."
+    input_shape: specific
+    audience: "Agent Conveyor maintainers, Codex app manager sessions, Codex app worker sessions, GoalBuddy supervisors"
+    authority: approved_for_prep
+    proof_type: "test + artifact + audit"
+    completion_proof: "A verified implementation or approved boundary produces reusable manager/worker bootstrap prompts with tests/dry-run evidence for all autonomy-critical loops."
+    likely_misfire: "A prompt generator that sounds right but omits heartbeat, inbox polling, Dispatch, wake recovery, delivery receipts, or evidence verification."
+    blind_spots_considered:
+      - "Codex app thread tools are available to app sessions, not terminal package code."
+      - "Thread creation and thread messaging are delivery actions, not durable task state."
+      - "Binding existing created app threads may already be covered by current commands."
+      - "A pair-level command may be useful, but role-by-role output could be safer for a first slice."
+      - "Tests need to assert prompt content instead of relying on visual/prose inspection."
+    existing_plan_facts:
+      - "agent-conveyor@0.1.10 is published and includes app-wakeup-record-delivery."
+      - "The prior wake-adapter board proved send_ready, skipped_healthy, missing Dispatch, and failed sent-for-skipped behavior."
+      - "The recommended first task is a read-only Scout map of existing bootstrap/session APIs and boundary options."
+
+rules:
+  pm_owns_state: true
+  one_active_task: true
+  max_write_workers: 1
+  no_implementation_without_worker_or_pm_task: true
+  no_completion_without_judge_or_pm_audit: true
+  planning_is_not_completion: true
+  queued_required_worker_blocks_completion: true
+  continuous_until_full_outcome: true
+  missing_input_or_credentials_do_not_stop_goal: true
+  preserve_and_validate_existing_plan: true
+  intake_misfire_must_be_audited: true
+  goal_pressure_requires_oracle: true
+  no_completion_on_weak_proof: true
+  slice_policy:
+    max_consecutive_tiny_tasks: 2
+    prefer_vertical_slices: true
+    judge_picks_largest_safe_slice: true
+    worker_completes_whole_slice: true
+
+agents:
+  scout: installed
+  worker: installed
+  judge: installed
+
+visual_board:
+  selected: local
+  local:
+    status: running
+    url: "http://goalbuddy.localhost:41737/codex-app-session-bootstrap-templates/"
+    command: "npx goalbuddy board /Users/neonwatty/Desktop/codex-terminal-manager/docs/goals/codex-app-session-bootstrap-templates"
+
+active_task: null
+
+tasks:
+  - id: T001
+    type: scout
+    assignee: Scout
+    status: done
+    reasoning_hint: high
+    objective: "Map the existing session creation, session binding, heartbeat, inbox, wake dispatch, and prompt/template surfaces for Codex app manager/worker bootstraps."
+    constraints:
+      - "Read-only."
+      - "Do not send app-thread messages."
+      - "Do not inspect private phone content."
+      - "Treat app-thread tool availability as a claim until verified in the current Codex app environment."
+      - "Distinguish package code, installed skill guidance, and Codex app operator behavior."
+      - "Do not propose implementation before checking existing commands and docs."
+    expected_output:
+      - "Exact current commands/APIs for creating or binding Codex app sessions."
+      - "Exact current commands/APIs for app heartbeat, app loop status, inbox polling, app wake dispatch, and app wake delivery receipt recording."
+      - "Which Codex app thread tools are callable in this environment."
+      - "Existing prompt/template helper locations, if any."
+      - "Recommendation: package command, skill-only guidance, app-operator procedure, or mixed slice."
+      - "Allowed files, verification commands, and stop conditions for Judge/Worker."
+    acceptance_criteria:
+      - "Cites file paths, commands, or tool-discovery evidence for every surface claim."
+      - "Names any missing app-thread capability as a blocker."
+      - "Defines how to prove manager and worker prompt omissions are caught."
+    receipt:
+      result: done
+      note: "notes/T001-scout.md"
+      summary: "Mapped existing Codex app session binding, heartbeat, inbox, wake dispatch, delivery receipt, docs/skill, and prompt test surfaces; recommended extending generated bootstrap recommendations with wake dispatch/delivery receipt commands."
+
+  - id: T002
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Choose the largest safe implementation slice for Codex app bootstrap templates."
+    constraints:
+      - "Read-only."
+      - "Reject any design that makes app-thread creation or delivery durable task state."
+      - "Reject package code that directly calls Codex app-only thread tools."
+      - "Reject prompt tests that only snapshot broad prose without checking critical commands/rules."
+    expected_output:
+      - "Decision: approved | blocked | revise."
+      - "Implementation boundary and allowed files."
+      - "Verification commands."
+      - "Stop conditions."
+      - "Acceptance criteria."
+    acceptance_criteria:
+      - "Selects exactly one Worker slice."
+      - "Covers manager prompt, worker prompt, heartbeat cadence, inbox polling, Dispatch, wake recovery, delivery receipts, and evidence rules."
+    receipt:
+      result: done
+      decision: approved
+      note: "notes/T002-judge.md"
+      summary: "Approved one mixed package + skill/docs/smoke Worker slice that extends generated bootstrap recommendations with wake-dispatch and delivery-receipt guidance while keeping app-thread tools in the Codex app/operator layer."
+
+  - id: T003
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "Implement the Judge-approved app bootstrap template slice, including package output, tests, docs, skill guidance, and smoke coverage."
+    constraints:
+      - "Keep changes inside Judge-approved files."
+      - "Do not touch generated dist."
+      - "Do not call Codex app thread tools from terminal package code."
+      - "Do not send app messages except to explicitly disposable test threads approved by Judge."
+      - "Preserve Dispatch/inbox/telemetry authority."
+    allowed_files:
+      - "src/cli/typescript-runtime.ts"
+      - "src/cli/typescript-runtime.test.ts"
+      - "README.md"
+      - "docs/manager-recipes.md"
+      - "docs/manual-qa-checklist.md"
+      - "scripts/package-smoke"
+      - "skills/manage-codex-workers/SKILL.md"
+      - "docs/goals/codex-app-session-bootstrap-templates/state.yaml"
+      - "docs/goals/codex-app-session-bootstrap-templates/notes/*"
+    expected_output:
+      - "Implementation diff."
+      - "Prompt/template tests or dry-run proof."
+      - "Receipt with changed files and commands."
+    acceptance_criteria:
+      - "Manager bootstrap includes heartbeat, manager inbox polling, Dispatch expectation, wake dispatch, delivery receipts, evidence verification, and exactly one next worker task discipline."
+      - "Worker bootstrap includes heartbeat, worker inbox polling, evidence reporting, and stop/await-next discipline."
+      - "Tests fail if any autonomy-critical loop is omitted."
+      - "No private thread content is inspected."
+    verify:
+      - "npm test -- --runInBand src/cli/typescript-runtime.test.ts"
+      - "npm run build:cli"
+      - "scripts/package-smoke"
+      - "./bin/conveyor install-skills --json"
+      - "node /Users/neonwatty/.codex/plugins/cache/goalbuddy/goalbuddy/0.3.8/skills/goalbuddy/scripts/check-goal-state.mjs docs/goals/codex-app-session-bootstrap-templates/state.yaml"
+      - "git diff --check"
+    stop_if:
+      - "Need files outside Judge-approved allowed_files."
+      - "Need terminal package code to call Codex app-only thread tools."
+      - "Need to send messages to non-disposable/private threads."
+      - "Cannot write tests or dry-run assertions that catch prompt omissions."
+    receipt:
+      result: done
+      note: "notes/T003-worker.md"
+      summary: "Implemented generated wake-dispatch and delivery-receipt bootstrap guidance, hardened manager/worker prompts and tests, updated docs/skill/smoke, and verified with focused tests, build, direct generated-output proof, package smoke, skill install, and diff check."
+      changed_files:
+        - "src/cli/typescript-runtime.ts"
+        - "src/cli/typescript-runtime.test.ts"
+        - "scripts/package-smoke"
+        - "README.md"
+        - "docs/manager-recipes.md"
+        - "docs/manual-qa-checklist.md"
+        - "skills/manage-codex-workers/SKILL.md"
+        - "docs/goals/codex-app-session-bootstrap-templates/notes/T003-worker.md"
+        - "docs/goals/codex-app-session-bootstrap-templates/state.yaml"
+      commands:
+        - cmd: "npm test -- --runInBand src/cli/typescript-runtime.test.ts"
+          status: pass
+          summary: "Passed 173 tests, including create-disposable-binding prompt contract assertions."
+        - cmd: "npm run build:cli"
+          status: pass
+        - cmd: "./bin/conveyor create-disposable-binding bootstrap-proof ... --json + 20-clause generated-output assertion"
+          status: pass
+          summary: "Verified emitted heartbeat, inbox, status, wake dispatch, delivery receipts, manager discipline, worker evidence, and no-teardown clauses."
+        - cmd: "scripts/package-smoke"
+          status: pass
+          summary: "Passed package smoke, including bootstrap recommendation assertions."
+        - cmd: "./bin/conveyor install-skills --json"
+          status: pass
+          summary: "Installed manage-codex-workers and codex-review skills."
+        - cmd: "git diff --check"
+          status: pass
+
+  - id: T004
+    type: worker
+    assignee: Worker
+    status: blocked
+    reasoning_hint: low
+    objective: "Update docs, skill guidance, and smoke coverage for the implemented bootstrap template slice."
+    constraints:
+      - "Keep guidance operational and concise."
+      - "Do not imply create_thread or send_message_to_thread are durable task receipts."
+      - "Do not touch generated dist."
+    allowed_files: []
+    expected_output:
+      - "Docs or skill instructions for safe app bootstrap usage."
+      - "Smoke or manual QA coverage for manager/worker prompt generation."
+    acceptance_criteria:
+      - "Operators know when to create Codex app threads, bind/register them, and start heartbeat/inbox loops."
+      - "Docs preserve Dispatch/inbox/telemetry authority."
+    verify: []
+    stop_if:
+      - "Need implementation files outside Judge-approved allowed_files."
+      - "Docs would need to describe unavailable app-thread tooling as guaranteed."
+    receipt:
+      result: superseded
+      note: "Superseded by T003; Judge selected one mixed package + docs + skill + smoke Worker slice to avoid splitting a single prompt-contract change."
+
+  - id: T999
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Final audit of the Codex app bootstrap template slice."
+    constraints:
+      - "Treat Worker claims as claims until verified."
+      - "Require strongest-failure-mode proof."
+      - "Do not mark done with queued required Worker tasks."
+    expected_output:
+      - "complete | not_complete"
+      - "full_outcome_complete: true | false"
+      - "Evidence table."
+      - "Strongest failure mode and proof."
+      - "PR/release/next-task recommendation."
+    acceptance_criteria:
+      - "Covers manager prompt, worker prompt, heartbeat, inbox, Dispatch, wake recovery, delivery receipts, evidence rules, no private-content inspection, and GoalBuddy state checker."
+    receipt:
+      result: done
+      decision: complete
+      full_outcome_complete: true
+      note: "notes/T999-final-audit.md"
+      summary: "Final audit verified generated bootstrap output, prompt tests, build, package smoke, skill install, diff hygiene, and GoalBuddy state; no app-thread messages were sent and app-thread tools remain operator-layer only."
+      strongest_failure_mode: "Generated bootstraps could sound complete while omitting one autonomy-critical command or safety rule: wake dispatch, sent/skipped/blocked delivery receipts, send_ready gating, direct-send-not-completion, worker evidence, inbox polling, or heartbeat/no-teardown guidance."
+      commands:
+        - cmd: "npm test -- --runInBand src/cli/typescript-runtime.test.ts"
+          status: pass
+          summary: "Passed 173 tests."
+        - cmd: "npm run build:cli"
+          status: pass
+        - cmd: "./bin/conveyor create-disposable-binding bootstrap-proof ... --json + 20-clause generated-output assertion"
+          status: pass
+          summary: "Verified rebuilt CLI output includes heartbeat, inbox, status, wake dispatch, delivery receipts, manager discipline, worker evidence, and no-teardown clauses."
+        - cmd: "scripts/package-smoke"
+          status: pass
+          summary: "Passed package smoke with bootstrap recommendation assertions."
+        - cmd: "./bin/conveyor install-skills --json"
+          status: pass
+        - cmd: "git diff --check"
+          status: pass
+        - cmd: "node /Users/neonwatty/.codex/plugins/cache/goalbuddy/goalbuddy/0.3.8/skills/goalbuddy/scripts/check-goal-state.mjs docs/goals/codex-app-session-bootstrap-templates/state.yaml"
+          status: pass
+
+blockers: []
+
+receipts: []
+
+notes:
+  - "Prepboard created after agent-conveyor@0.1.10 publish. Start execution with `/goal Follow docs/goals/codex-app-session-bootstrap-templates/goal.md.`"
+
+checks:
+  dirty_fingerprint: unknown
+  last_verification:
+    result: pass
+    task: T999
+    commands:
+      - "npm test -- --runInBand src/cli/typescript-runtime.test.ts"
+      - "npm run build:cli"
+      - "./bin/conveyor create-disposable-binding bootstrap-proof ... --json + 20-clause generated-output assertion"
+      - "scripts/package-smoke"
+      - "./bin/conveyor install-skills --json"
+      - "git diff --check"
+      - "node /Users/neonwatty/.codex/plugins/cache/goalbuddy/goalbuddy/0.3.8/skills/goalbuddy/scripts/check-goal-state.mjs docs/goals/codex-app-session-bootstrap-templates/state.yaml"
