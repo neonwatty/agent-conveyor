@@ -89,6 +89,15 @@ Idle polling rule for Codex app/no-tmux sessions:
   A timeout is not completion; it is only a quiet poll interval.
 - Keep `conveyor dispatch --watch --dispatcher-id dispatch-local` running so
   Dispatch can route new messages into those inboxes.
+- Prefer `conveyor app-autopilot start <task> --json` from the operator or
+  manager session when setting up a Codex app/no-tmux pair for autonomous
+  heartbeat management. It records a durable pair-level heartbeat policy and
+  emits manager/worker Codex app heartbeat automation specs plus the bounded
+  Dispatch watch command. Use `conveyor app-autopilot status <task> --json` to
+  inspect the current policy and loop health, and `conveyor app-autopilot stop
+  <task> --json` to record terminal teardown intent. The CLI cannot create or
+  delete Codex app automations by itself; apply the emitted automation specs
+  through Codex app automation tools.
 - Use `conveyor app-loop-status <task> --json` as the operator status surface,
   and `conveyor app-wakeup-plan <task> --json` to produce exact stale-thread
   wake prompts for Codex app automation or `send_message_to_thread`.

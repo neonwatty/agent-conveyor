@@ -304,11 +304,17 @@ conveyor app-heartbeat "$TASK" --role worker --json
 conveyor app-loop-status "$TASK" --json
 conveyor app-wakeup-plan "$TASK" --json
 conveyor app-wakeup-dispatch "$TASK" --json
+conveyor app-autopilot start "$TASK" --json
 ```
 
 Use `app-loop-status` as the operator status surface. If it reports stale
 manager, worker, or Dispatch leases, use `app-wakeup-plan` to get the exact
 thread prompt to send through Codex app automation or `send_message_to_thread`.
+Use `app-autopilot start` from the operator session to record the pair-level
+heartbeat policy and emit the exact Codex app heartbeat automation specs plus a
+bounded Dispatch watch command. `app-autopilot stop` records the teardown policy
+decision; it does not itself delete Codex app automations because that action
+belongs to the Codex app automation layer.
 Use `app-wakeup-dispatch` when the manager needs a durable Conveyor receipt for
 which app wake actions were prepared, skipped, or blocked. It only prepares
 adapter-ready actions; direct app-thread delivery remains an app/operator

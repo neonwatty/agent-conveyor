@@ -142,6 +142,9 @@ PATH="$PREFIX/bin:$PATH" "$CONVEYOR" dispatch --watch --watch-iterations 1 --dis
 PATH="$PREFIX/bin:$PATH" "$CONVEYOR" app-loop-status smoke-app-loop --path "$SMOKE_DB" --json > "$SMOKE_DIR/app-loop-status.json"
 PATH="$PREFIX/bin:$PATH" "$CONVEYOR" app-wakeup-plan smoke-app-loop --path "$SMOKE_DB" --json > "$SMOKE_DIR/app-wakeup-plan.json"
 PATH="$PREFIX/bin:$PATH" "$CONVEYOR" app-wakeup-dispatch smoke-app-loop --path "$SMOKE_DB" --json > "$SMOKE_DIR/app-wakeup-dispatch-healthy.json"
+PATH="$PREFIX/bin:$PATH" "$CONVEYOR" app-autopilot start smoke-app-loop --path "$SMOKE_DB" --json > "$SMOKE_DIR/app-autopilot-start.json"
+PATH="$PREFIX/bin:$PATH" "$CONVEYOR" app-autopilot stop smoke-app-loop --path "$SMOKE_DB" --json > "$SMOKE_DIR/app-autopilot-stop.json"
+PATH="$PREFIX/bin:$PATH" "$CONVEYOR" app-autopilot status smoke-app-loop --path "$SMOKE_DB" --json > "$SMOKE_DIR/app-autopilot-status.json"
 
 STALE_DB="$SMOKE_DIR/app-loop-stale.db"
 PATH="$PREFIX/bin:$PATH" "$CONVEYOR" create-disposable-binding smoke-app-stale \
@@ -185,7 +188,7 @@ if PATH="$PREFIX/bin:$PATH" "$CONVEYOR" app-wakeup-record-delivery smoke-app-loo
   exit 1
 fi
 
-node - "$SMOKE_DIR/create-disposable-binding.json" "$SMOKE_DIR/app-loop-status.json" "$SMOKE_DIR/app-wakeup-plan.json" "$SMOKE_DIR/app-wakeup-dispatch-healthy.json" "$SMOKE_DIR/app-wakeup-dispatch-stale.json" "$SMOKE_DIR/app-wakeup-delivery-sent.json" "$SMOKE_DIR/app-wakeup-delivery-rejected.err" <<'JS'
+node - "$SMOKE_DIR/create-disposable-binding.json" "$SMOKE_DIR/app-loop-status.json" "$SMOKE_DIR/app-wakeup-plan.json" "$SMOKE_DIR/app-wakeup-dispatch-healthy.json" "$SMOKE_DIR/app-wakeup-dispatch-stale.json" "$SMOKE_DIR/app-wakeup-delivery-sent.json" "$SMOKE_DIR/app-wakeup-delivery-rejected.err" "$SMOKE_DIR/app-autopilot-start.json" "$SMOKE_DIR/app-autopilot-stop.json" "$SMOKE_DIR/app-autopilot-status.json" <<'JS'
 const fs = require("fs");
 const binding = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
 const status = JSON.parse(fs.readFileSync(process.argv[3], "utf8"));
@@ -194,6 +197,9 @@ const healthyDispatch = JSON.parse(fs.readFileSync(process.argv[5], "utf8"));
 const staleDispatch = JSON.parse(fs.readFileSync(process.argv[6], "utf8"));
 const deliverySent = JSON.parse(fs.readFileSync(process.argv[7], "utf8"));
 const deliveryRejected = fs.readFileSync(process.argv[8], "utf8");
+const autopilotStart = JSON.parse(fs.readFileSync(process.argv[9], "utf8"));
+const autopilotStop = JSON.parse(fs.readFileSync(process.argv[10], "utf8"));
+const autopilotStatus = JSON.parse(fs.readFileSync(process.argv[11], "utf8"));
 if (!binding.heartbeat_recommendations?.wakeup_dispatch_command?.includes("app-wakeup-dispatch 'smoke-app-loop'")) {
   throw new Error(`expected bootstrap wakeup dispatch command, got ${JSON.stringify(binding.heartbeat_recommendations)}`);
 }
@@ -241,6 +247,24 @@ if (deliverySent.source.dispatch_receipt !== staleDispatch.receipt.event_id || !
 }
 if (!/Cannot record sent wakeup for manager; source action is skipped_healthy/.test(deliveryRejected)) {
   throw new Error(`expected rejected healthy sent receipt, got ${JSON.stringify(deliveryRejected)}`);
+}
+if (autopilotStart.receipt?.event_type !== "app_autopilot_started" || autopilotStart.plan?.desired_state !== "active") {
+  throw new Error(`expected app-autopilot start receipt and active state, got ${JSON.stringify(autopilotStart)}`);
+}
+if (autopilotStart.plan.summary.creatable_automations !== 2 || autopilotStart.plan.summary.blocked_automations !== 0) {
+  throw new Error(`expected app-autopilot to emit two creatable automations, got ${JSON.stringify(autopilotStart.plan.summary)}`);
+}
+if (!autopilotStart.plan.control.dispatcher_command.includes("dispatch --watch --watch-iterations 1000000")) {
+  throw new Error(`expected bounded dispatch command in app-autopilot output, got ${autopilotStart.plan.control.dispatcher_command}`);
+}
+if (!autopilotStart.plan.automation_specs.every((spec) => spec.kind === "heartbeat" && spec.rrule === "FREQ=MINUTELY;INTERVAL=2" && spec.prompt.includes("app-heartbeat"))) {
+  throw new Error(`expected heartbeat automation specs, got ${JSON.stringify(autopilotStart.plan.automation_specs)}`);
+}
+if (autopilotStop.receipt?.event_type !== "app_autopilot_stopped" || autopilotStop.plan?.desired_state !== "stopped") {
+  throw new Error(`expected app-autopilot stop receipt and stopped state, got ${JSON.stringify(autopilotStop)}`);
+}
+if (autopilotStatus.receipt !== null || autopilotStatus.plan?.desired_state !== "stopped" || autopilotStatus.plan.last_policy_event?.event_id !== autopilotStop.receipt.event_id) {
+  throw new Error(`expected app-autopilot status to read stopped policy, got ${JSON.stringify(autopilotStatus)}`);
 }
 JS
 

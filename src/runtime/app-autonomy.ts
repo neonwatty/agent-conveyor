@@ -89,6 +89,48 @@ export interface AppWakeupDispatchPlan {
   };
 }
 
+export type AppAutopilotDesiredState = "active" | "stopped" | "unconfigured";
+
+export interface AppAutopilotRoleAutomation {
+  blocker: string | null;
+  can_create: boolean;
+  interval_minutes: number;
+  kind: "heartbeat";
+  name: string;
+  prompt: string;
+  role: AppLoopRole;
+  rrule: string;
+  target_thread_id: string | null;
+  target_thread_title: string | null;
+}
+
+export interface AppAutopilotPlan {
+  automation_specs: AppAutopilotRoleAutomation[];
+  control: {
+    dispatcher_command: string;
+    note: string;
+    status_command: string;
+    stop_command: string;
+    wakeup_dispatch_command: string;
+  };
+  desired_state: AppAutopilotDesiredState;
+  dispatcher: AppWakeupPlan["dispatcher"];
+  interval_minutes: number;
+  last_policy_event: {
+    event_id: string;
+    event_type: string;
+    recorded_at: string;
+  } | null;
+  status: AppLoopStatus;
+  summary: {
+    blocked_automations: number;
+    creatable_automations: number;
+    dispatcher_required: boolean;
+    total_automations: number;
+  };
+  task: { id: string; name: string };
+}
+
 export function appLoopStatusSync(
   database: DatabaseSync,
   options: {
@@ -204,6 +246,90 @@ export function appLoopStatusSync(
     ok: dispatch.state === "healthy" && manager.lease.state === "healthy" && worker.lease.state === "healthy",
     task,
     worker,
+  };
+}
+
+export function appAutopilotPlanSync(
+  database: DatabaseSync,
+  options: {
+    dbPath?: string | null;
+    dispatchIntervalSeconds: number;
+    dispatcherId: string;
+    desiredState?: AppAutopilotDesiredState | null;
+    heartbeatIntervalMinutes: number;
+    heartbeatStaleSeconds: number;
+    now: string;
+    taskName: string;
+    watchIterations: number;
+  },
+): AppAutopilotPlan {
+  const status = appLoopStatusSync(database, {
+    dbPath: options.dbPath ?? null,
+    dispatcherId: options.dispatcherId,
+    heartbeatStaleSeconds: options.heartbeatStaleSeconds,
+    now: options.now,
+    taskName: options.taskName,
+  });
+  const lastPolicy = latestAppAutopilotPolicyEvent(database, status.task.id, options.dispatcherId);
+  const desiredState = options.desiredState ?? lastPolicy?.desired_state ?? "unconfigured";
+  const dispatcherCommand = [
+    "conveyor dispatch --watch",
+    `--watch-iterations ${options.watchIterations}`,
+    `--interval ${formatNumber(options.dispatchIntervalSeconds)}`,
+    `--dispatcher-id ${shellQuote(options.dispatcherId)}`,
+    pathFlag(options.dbPath ?? null).trim(),
+  ].filter(Boolean).join(" ");
+  const automationSpecs = (["manager", "worker"] as const).map((role) => {
+    const roleStatus = role === "manager" ? status.manager : status.worker;
+    const wakeup = roleWakeup(role, roleStatus, status.task.name, options.dbPath ?? null, roleStatus.lease.state);
+    const name = `Conveyor ${status.task.name} ${role} heartbeat`;
+    return {
+      blocker: roleStatus.codex_app_thread_id
+        ? null
+        : `No Codex app thread id is registered for the ${role}; register app thread metadata before creating an app heartbeat automation.`,
+      can_create: Boolean(roleStatus.codex_app_thread_id),
+      interval_minutes: options.heartbeatIntervalMinutes,
+      kind: "heartbeat" as const,
+      name,
+      prompt: wakeup.prompt,
+      role,
+      rrule: `FREQ=MINUTELY;INTERVAL=${options.heartbeatIntervalMinutes}`,
+      target_thread_id: roleStatus.codex_app_thread_id,
+      target_thread_title: roleStatus.codex_app_thread_title,
+    };
+  });
+  const creatable = automationSpecs.filter((spec) => spec.can_create).length;
+  return {
+    automation_specs: automationSpecs,
+    control: {
+      dispatcher_command: dispatcherCommand,
+      note: "A plain shell CLI cannot call Codex app thread tools. Create or pause these heartbeat automations from a Codex app session, then use this CLI for status/start/stop receipts.",
+      status_command: `conveyor app-autopilot status ${shellQuote(status.task.name)}${pathFlag(options.dbPath ?? null)} --json`,
+      stop_command: `conveyor app-autopilot stop ${shellQuote(status.task.name)}${pathFlag(options.dbPath ?? null)} --json`,
+      wakeup_dispatch_command: `conveyor app-wakeup-dispatch ${shellQuote(status.task.name)} --dispatcher-id ${shellQuote(options.dispatcherId)}${pathFlag(options.dbPath ?? null)} --json`,
+    },
+    desired_state: desiredState,
+    dispatcher: {
+      command: dispatcherCommand,
+      required: status.dispatch.state !== "healthy",
+      state: status.dispatch.state,
+    },
+    interval_minutes: options.heartbeatIntervalMinutes,
+    last_policy_event: lastPolicy
+      ? {
+        event_id: lastPolicy.event_id,
+        event_type: lastPolicy.event_type,
+        recorded_at: lastPolicy.recorded_at,
+      }
+      : null,
+    status,
+    summary: {
+      blocked_automations: automationSpecs.length - creatable,
+      creatable_automations: creatable,
+      dispatcher_required: status.dispatch.state !== "healthy",
+      total_automations: automationSpecs.length,
+    },
+    task: status.task,
   };
 }
 
@@ -388,6 +514,31 @@ function dispatchLeaseState(value: string | null, now: string, staleSeconds: num
   return state === "healthy" ? "healthy" : state === "stale" ? "stale" : "missing";
 }
 
+function latestAppAutopilotPolicyEvent(
+  database: DatabaseSync,
+  taskId: string,
+  dispatcherId: string,
+): { desired_state: AppAutopilotDesiredState; event_id: string; event_type: string; recorded_at: string } | null {
+  const row = database.prepare(`
+    select id, event_type, timestamp
+    from telemetry_events
+    where task_id = ?
+      and event_type in ('app_autopilot_started', 'app_autopilot_stopped')
+      and json_extract(correlation_json, '$.dispatcher_id') = ?
+    order by timestamp desc, rowid desc
+    limit 1
+  `).get(taskId, dispatcherId) as { event_type: string; id: string; timestamp: string } | undefined;
+  if (!row) {
+    return null;
+  }
+  return {
+    desired_state: row.event_type === "app_autopilot_started" ? "active" : "stopped",
+    event_id: row.id,
+    event_type: row.event_type,
+    recorded_at: row.timestamp,
+  };
+}
+
 function leaseState(value: string | null, now: string, staleSeconds: number): AppLoopLeaseState {
   if (!value) {
     return "missing";
@@ -410,6 +561,10 @@ function ageSeconds(value: string | null, now: string): number | null {
 
 function pathFlag(dbPath: string | null): string {
   return dbPath ? ` --path ${shellQuote(dbPath)}` : "";
+}
+
+function formatNumber(value: number): string {
+  return Number.isInteger(value) ? String(value) : String(value);
 }
 
 function shellQuote(value: string): string {

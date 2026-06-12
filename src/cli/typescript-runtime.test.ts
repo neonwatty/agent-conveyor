@@ -803,6 +803,139 @@ test("TypeScript runtime app-wakeup-record-delivery records blocked missing-thre
   }
 });
 
+test("TypeScript runtime app-autopilot start emits automation specs and durable receipt", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-app-autopilot-start."));
+  const dbPath = join(root, "workerctl.db");
+  try {
+    seedCliAppLoopFixture(dbPath, {
+      dispatcherHeartbeatAt: null,
+      managerHeartbeatAt: "2026-06-11T11:45:00Z",
+      workerHeartbeatAt: "2026-06-11T11:44:00Z",
+    });
+    const result = runTypescriptRuntimeCommand({
+      args: [
+        "app-autopilot",
+        "start",
+        "app-loop-task",
+        "--dispatcher-id",
+        "dispatch-app-loop",
+        "--interval",
+        "30",
+        "--watch-iterations",
+        "500",
+        "--path",
+        dbPath,
+        "--json",
+      ],
+      env: {},
+      now: () => new Date("2026-06-11T12:00:00Z"),
+    });
+
+    assert.equal(result.exitCode, 0, result.stderr);
+    const output = JSON.parse(result.stdout ?? "{}") as {
+      action: string;
+      plan: {
+        automation_specs: Array<{ can_create: boolean; prompt: string; role: string; rrule: string; target_thread_id: string | null }>;
+        control: { dispatcher_command: string; note: string; wakeup_dispatch_command: string };
+        desired_state: string;
+        summary: { blocked_automations: number; creatable_automations: number; dispatcher_required: boolean };
+      };
+      receipt: { event_id: string; event_type: string; recorded_at: string };
+    };
+    assert.equal(output.action, "start");
+    assert.equal(output.plan.desired_state, "active");
+    assert.equal(output.plan.summary.creatable_automations, 2);
+    assert.equal(output.plan.summary.blocked_automations, 0);
+    assert.equal(output.plan.summary.dispatcher_required, true);
+    assert.match(output.plan.control.dispatcher_command, /dispatch --watch --watch-iterations 500 --interval 30 --dispatcher-id 'dispatch-app-loop'/);
+    assert.match(output.plan.control.wakeup_dispatch_command, /app-wakeup-dispatch 'app-loop-task' --dispatcher-id 'dispatch-app-loop'/);
+    assert.match(output.plan.control.note, /plain shell CLI cannot call Codex app thread tools/);
+    assert.deepEqual(output.plan.automation_specs.map((spec) => `${spec.role}:${spec.can_create}:${spec.target_thread_id}`), [
+      "manager:true:thread-manager",
+      "worker:true:thread-worker",
+    ]);
+    assert.equal(output.plan.automation_specs[0].rrule, "FREQ=MINUTELY;INTERVAL=2");
+    assert.match(output.plan.automation_specs[0].prompt, /conveyor app-heartbeat 'app-loop-task' --role manager/);
+    assert.equal(output.receipt.event_type, "app_autopilot_started");
+    assert.equal(output.receipt.recorded_at, "2026-06-11T12:00:00Z");
+
+    const database = openDatabaseSync(dbPath);
+    try {
+      const telemetry = database.prepare("select event_type, actor, correlation_json, attributes_json from telemetry_events where id = ?")
+        .get(output.receipt.event_id) as { actor: string; attributes_json: string; correlation_json: string; event_type: string } | undefined;
+      assert.ok(telemetry);
+      assert.equal(telemetry.event_type, "app_autopilot_started");
+      assert.equal(telemetry.actor, "operator");
+      assert.deepEqual(JSON.parse(telemetry.correlation_json), {
+        action: "start",
+        command: "app-autopilot",
+        dispatcher_id: "dispatch-app-loop",
+      });
+      const attributes = JSON.parse(telemetry.attributes_json) as {
+        automation_specs: Array<{ role: string; target_thread_id: string | null }>;
+        desired_state: string;
+      };
+      assert.equal(attributes.desired_state, "active");
+      assert.deepEqual(attributes.automation_specs.map((spec) => `${spec.role}:${spec.target_thread_id}`), [
+        "manager:thread-manager",
+        "worker:thread-worker",
+      ]);
+    } finally {
+      database.close();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("TypeScript runtime app-autopilot stop and status read last policy", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-app-autopilot-stop."));
+  const dbPath = join(root, "workerctl.db");
+  try {
+    seedCliAppLoopFixture(dbPath, {
+      dispatcherHeartbeatAt: "2026-06-11T11:59:50Z",
+      managerHeartbeatAt: "2026-06-11T11:59:50Z",
+      workerHeartbeatAt: "2026-06-11T11:59:40Z",
+    });
+    const started = runTypescriptRuntimeCommand({
+      args: ["app-autopilot", "start", "app-loop-task", "--path", dbPath, "--json"],
+      env: {},
+      now: () => new Date("2026-06-11T12:00:00Z"),
+    });
+    assert.equal(started.exitCode, 0, started.stderr);
+
+    const stopped = runTypescriptRuntimeCommand({
+      args: ["app-autopilot", "stop", "app-loop-task", "--path", dbPath, "--json"],
+      env: {},
+      now: () => new Date("2026-06-11T12:00:00Z"),
+    });
+    assert.equal(stopped.exitCode, 0, stopped.stderr);
+    const stopOutput = JSON.parse(stopped.stdout ?? "{}") as {
+      plan: { desired_state: string; last_policy_event: { event_type: string } };
+      receipt: { event_id: string; event_type: string };
+    };
+    assert.equal(stopOutput.plan.desired_state, "stopped");
+    assert.equal(stopOutput.plan.last_policy_event.event_type, "app_autopilot_stopped");
+    assert.equal(stopOutput.receipt.event_type, "app_autopilot_stopped");
+
+    const status = runTypescriptRuntimeCommand({
+      args: ["app-autopilot", "status", "app-loop-task", "--path", dbPath, "--json"],
+      env: {},
+      now: () => new Date("2026-06-11T12:02:00Z"),
+    });
+    assert.equal(status.exitCode, 0, status.stderr);
+    const statusOutput = JSON.parse(status.stdout ?? "{}") as {
+      plan: { desired_state: string; last_policy_event: { event_id: string; event_type: string } | null };
+      receipt: null;
+    };
+    assert.equal(statusOutput.plan.desired_state, "stopped");
+    assert.equal(statusOutput.plan.last_policy_event?.event_id, stopOutput.receipt.event_id);
+    assert.equal(statusOutput.receipt, null);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("TypeScript runtime handles task create list and active filtering by default", () => {
   const root = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-tasks."));
   try {
