@@ -531,7 +531,7 @@ function commandHelpText(program: "conveyor" | "workerctl", command: string): st
       `  ${program} dispatch --once --type nudge_worker --path /tmp/work/workerctl.db`,
     ],
     "app-autopilot": [
-      `usage: ${program} app-autopilot start|stop|status <task> [--dispatcher-id ID] [--interval SECONDS] [--watch-iterations N] [--stale-after N] ${path} [--json]`,
+      `usage: ${program} app-autopilot start|stop|status <task> [--dispatcher-id ID] [--interval SECONDS] [--watch-iterations N] [--stale-after N] [--quiet-after N] ${path} [--json]`,
       "",
       "Manage the app-native heartbeat policy for a bound manager/worker pair.",
       "The CLI records policy receipts and emits Codex app heartbeat automation specs; app-thread automation creation still happens through Codex app tools.",
@@ -674,6 +674,7 @@ interface ParsedRuntimeArgs {
     source: string | null;
     proof: string | null;
     purpose: string | null;
+    quietAfterCycles: number;
     questions: boolean;
     rationale: string | null;
     receiptOutput: string | null;
@@ -891,6 +892,7 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
     source: null,
     proof: null,
     purpose: null,
+    quietAfterCycles: 3,
     questions: false,
     rationale: null,
     receiptOutput: null,
@@ -2670,6 +2672,20 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       }
       flags.appStaleAfterSeconds = value;
       index += 1;
+    } else if (arg === "--quiet-after") {
+      if (command !== "app-autopilot") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --quiet-after", explicit, flags, task };
+      }
+      const parsedValue = valueAfter(queue, index, arg);
+      if (parsedValue.error) {
+        return { command, enabled, error: parsedValue.error, explicit, flags, task };
+      }
+      const value = Number(parsedValue.value);
+      if (!Number.isInteger(value) || value < 0) {
+        return { command, enabled, error: "--quiet-after must be a non-negative integer.", explicit, flags, task };
+      }
+      flags.quietAfterCycles = value;
+      index += 1;
     } else if (arg === "--terminal-stale-seconds") {
       if (command !== "idle-check") {
         return { command, enabled, error: "Unsupported TypeScript runtime option: --terminal-stale-seconds", explicit, flags, task };
@@ -3942,6 +3958,7 @@ function runAppAutopilotCommand(
       heartbeatIntervalMinutes: 2,
       heartbeatStaleSeconds: parsed.flags.appStaleAfterSeconds,
       now: timestamp,
+      quietAfterCycles: parsed.flags.quietAfterCycles,
       taskName,
       watchIterations: parsed.flags.watchIterations ?? 1000000,
     });
@@ -3963,6 +3980,7 @@ function runAppAutopilotCommand(
           dispatcher_command: plan.control.dispatcher_command,
           dispatcher_id: dispatcherId,
           interval_minutes: plan.interval_minutes,
+          quiescence: plan.quiescence,
           summary: plan.summary,
         },
         correlation: {
@@ -4141,6 +4159,12 @@ function renderAppAutopilotText(result: {
     `Dispatch command: ${result.plan.control.dispatcher_command}`,
     `Wake dispatch: ${result.plan.control.wakeup_dispatch_command}`,
   ];
+  if (result.plan.quiescence.recommended_action === "stop_autopilot") {
+    lines.push(`Quiescence: stop recommended - ${result.plan.quiescence.reason}`);
+    lines.push(`Stop command: ${result.plan.control.stop_command}`);
+  } else {
+    lines.push(`Quiescence: ${result.plan.quiescence.state} (${result.plan.quiescence.quiet_cycles}/${result.plan.quiescence.threshold_cycles} quiet cycles)`);
+  }
   if (result.receipt) {
     lines.push(`Receipt: ${result.receipt.event_type} ${result.receipt.event_id}`);
   } else if (result.plan.last_policy_event) {

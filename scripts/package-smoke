@@ -254,6 +254,9 @@ if (autopilotStart.receipt?.event_type !== "app_autopilot_started" || autopilotS
 if (autopilotStart.plan.summary.creatable_automations !== 2 || autopilotStart.plan.summary.blocked_automations !== 0) {
   throw new Error(`expected app-autopilot to emit two creatable automations, got ${JSON.stringify(autopilotStart.plan.summary)}`);
 }
+if (autopilotStart.plan.quiescence?.threshold_cycles !== 3 || autopilotStart.plan.quiescence?.recommended_action !== "continue") {
+  throw new Error(`expected app-autopilot quiescence guard to default to monitoring after 3 quiet cycles, got ${JSON.stringify(autopilotStart.plan.quiescence)}`);
+}
 if (!autopilotStart.plan.control.dispatcher_command.includes("dispatch --watch --watch-iterations 1000000")) {
   throw new Error(`expected bounded dispatch command in app-autopilot output, got ${autopilotStart.plan.control.dispatcher_command}`);
 }

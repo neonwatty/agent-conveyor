@@ -90,6 +90,7 @@ export interface AppWakeupDispatchPlan {
 }
 
 export type AppAutopilotDesiredState = "active" | "stopped" | "unconfigured";
+export type AppAutopilotQuiescenceState = "monitoring" | "not_applicable" | "stop_recommended";
 
 export interface AppAutopilotRoleAutomation {
   blocker: string | null;
@@ -121,11 +122,20 @@ export interface AppAutopilotPlan {
     event_type: string;
     recorded_at: string;
   } | null;
+  quiescence: {
+    quiet_after: string | null;
+    quiet_cycles: number;
+    reason: string | null;
+    recommended_action: "continue" | "stop_autopilot";
+    state: AppAutopilotQuiescenceState;
+    threshold_cycles: number;
+  };
   status: AppLoopStatus;
   summary: {
     blocked_automations: number;
     creatable_automations: number;
     dispatcher_required: boolean;
+    quiescence_recommended: boolean;
     total_automations: number;
   };
   task: { id: string; name: string };
@@ -257,6 +267,7 @@ export function appAutopilotPlanSync(
     dispatcherId: string;
     desiredState?: AppAutopilotDesiredState | null;
     heartbeatIntervalMinutes: number;
+    quietAfterCycles: number;
     heartbeatStaleSeconds: number;
     now: string;
     taskName: string;
@@ -272,6 +283,13 @@ export function appAutopilotPlanSync(
   });
   const lastPolicy = latestAppAutopilotPolicyEvent(database, status.task.id, options.dispatcherId);
   const desiredState = options.desiredState ?? lastPolicy?.desired_state ?? "unconfigured";
+  const quiescence = appAutopilotQuiescenceSync(database, {
+    desiredState,
+    dispatcherId: options.dispatcherId,
+    quietAfterCycles: options.quietAfterCycles,
+    status,
+    taskId: status.task.id,
+  });
   const dispatcherCommand = [
     "conveyor dispatch --watch",
     `--watch-iterations ${options.watchIterations}`,
@@ -322,11 +340,13 @@ export function appAutopilotPlanSync(
         recorded_at: lastPolicy.recorded_at,
       }
       : null,
+    quiescence,
     status,
     summary: {
       blocked_automations: automationSpecs.length - creatable,
       creatable_automations: creatable,
       dispatcher_required: status.dispatch.state !== "healthy",
+      quiescence_recommended: quiescence.recommended_action === "stop_autopilot",
       total_automations: automationSpecs.length,
     },
     task: status.task,
@@ -536,6 +556,94 @@ function latestAppAutopilotPolicyEvent(
     event_id: row.id,
     event_type: row.event_type,
     recorded_at: row.timestamp,
+  };
+}
+
+function appAutopilotQuiescenceSync(
+  database: DatabaseSync,
+  options: {
+    desiredState: AppAutopilotDesiredState;
+    dispatcherId: string;
+    quietAfterCycles: number;
+    status: AppLoopStatus;
+    taskId: string;
+  },
+): AppAutopilotPlan["quiescence"] {
+  const threshold = Math.max(0, options.quietAfterCycles);
+  if (options.desiredState !== "active" || threshold === 0) {
+    return {
+      quiet_after: null,
+      quiet_cycles: 0,
+      reason: null,
+      recommended_action: "continue",
+      state: "not_applicable",
+      threshold_cycles: threshold,
+    };
+  }
+
+  const anchor = database.prepare(`
+    select max(timestamp) as timestamp
+    from telemetry_events
+    where task_id = ?
+      and (
+        event_type in ('command_created', 'dispatch_inbox_consumed')
+        or (
+          event_type = 'app_autopilot_started'
+          and json_extract(correlation_json, '$.dispatcher_id') = ?
+        )
+      )
+  `).get(options.taskId, options.dispatcherId) as { timestamp: string | null } | undefined;
+  const quietAfter = anchor?.timestamp ?? null;
+  if (!quietAfter) {
+    return {
+      quiet_after: null,
+      quiet_cycles: 0,
+      reason: "No app-autopilot start or task command receipt anchors the quiet-cycle window.",
+      recommended_action: "continue",
+      state: "monitoring",
+      threshold_cycles: threshold,
+    };
+  }
+
+  const heartbeatRows = database.prepare(`
+    select actor, count(*) as count
+    from telemetry_events
+    where task_id = ?
+      and event_type = 'app_heartbeat'
+      and timestamp > ?
+      and actor in ('manager', 'worker')
+    group by actor
+  `).all(options.taskId, quietAfter) as Array<{ actor: string; count: number }>;
+  let managerHeartbeats = 0;
+  let workerHeartbeats = 0;
+  for (const row of heartbeatRows) {
+    if (row.actor === "manager") {
+      managerHeartbeats = Number(row.count);
+    } else if (row.actor === "worker") {
+      workerHeartbeats = Number(row.count);
+    }
+  }
+  const quietCycles = Math.min(managerHeartbeats, workerHeartbeats);
+  const idleHealthy = options.status.ok && options.status.next_actions.length === 0;
+  if (idleHealthy && quietCycles >= threshold) {
+    return {
+      quiet_after: quietAfter,
+      quiet_cycles: quietCycles,
+      reason: `No app-loop action has been recorded for ${quietCycles} healthy heartbeat cycle(s) since ${quietAfter}. Stop autopilot or wait for an external unblock before restarting.`,
+      recommended_action: "stop_autopilot",
+      state: "stop_recommended",
+      threshold_cycles: threshold,
+    };
+  }
+  return {
+    quiet_after: quietAfter,
+    quiet_cycles: quietCycles,
+    reason: idleHealthy
+      ? `Healthy idle loop has ${quietCycles}/${threshold} quiet heartbeat cycle(s) since ${quietAfter}.`
+      : "Loop still has pending health actions, so quiet-cycle stop is not evaluated.",
+    recommended_action: "continue",
+    state: "monitoring",
+    threshold_cycles: threshold,
   };
 }
 

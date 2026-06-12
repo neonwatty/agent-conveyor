@@ -936,6 +936,177 @@ test("TypeScript runtime app-autopilot stop and status read last policy", () => 
   }
 });
 
+test("TypeScript runtime app-autopilot status recommends stop after quiet healthy cycles", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-app-autopilot-quiet."));
+  const dbPath = join(root, "workerctl.db");
+  try {
+    seedCliAppLoopFixture(dbPath, {
+      dispatcherHeartbeatAt: "2026-06-11T11:59:50Z",
+      managerHeartbeatAt: "2026-06-11T11:59:50Z",
+      workerHeartbeatAt: "2026-06-11T11:59:50Z",
+    });
+    const started = runTypescriptRuntimeCommand({
+      args: ["app-autopilot", "start", "app-loop-task", "--path", dbPath, "--json"],
+      env: {},
+      now: () => new Date("2026-06-11T12:00:00Z"),
+    });
+    assert.equal(started.exitCode, 0, started.stderr);
+
+    const database = openDatabaseSync(dbPath);
+    try {
+      database.prepare("update sessions set last_heartbeat_at = ? where id in (?, ?)").run(
+        "2026-06-11T12:03:50Z",
+        "session-manager-app",
+        "session-worker-app",
+      );
+      database.prepare(`
+        insert into telemetry_events(id, actor, event_type, severity, summary, timestamp, task_id, correlation_json, attributes_json)
+        values (?, 'dispatch', 'dispatch_watch_heartbeat', 'info', 'Dispatch watch heartbeat 2.', ?, 'task-app-loop', ?, ?)
+      `).run(
+        "telemetry-dispatch-app-loop-quiet",
+        "2026-06-11T12:03:50Z",
+        JSON.stringify({ dispatcher_id: "dispatch-local", iteration: 2 }),
+        JSON.stringify({ dry_run: false, processed_count: 0 }),
+      );
+      const insertHeartbeat = database.prepare(`
+        insert into telemetry_events(id, actor, event_type, severity, summary, timestamp, task_id, correlation_json, attributes_json)
+        values (?, ?, 'app_heartbeat', 'info', ?, ?, 'task-app-loop', ?, ?)
+      `);
+      for (const [index, timestamp] of ["2026-06-11T12:01:00Z", "2026-06-11T12:02:00Z", "2026-06-11T12:03:00Z"].entries()) {
+        insertHeartbeat.run(
+          `telemetry-manager-quiet-${index}`,
+          "manager",
+          "manager app heartbeat for app-loop-task.",
+          timestamp,
+          JSON.stringify({ command: "app-heartbeat" }),
+          JSON.stringify({ role: "manager", task: "app-loop-task" }),
+        );
+        insertHeartbeat.run(
+          `telemetry-worker-quiet-${index}`,
+          "worker",
+          "worker app heartbeat for app-loop-task.",
+          timestamp,
+          JSON.stringify({ command: "app-heartbeat" }),
+          JSON.stringify({ role: "worker", task: "app-loop-task" }),
+        );
+      }
+    } finally {
+      database.close();
+    }
+
+    const status = runTypescriptRuntimeCommand({
+      args: ["app-autopilot", "status", "app-loop-task", "--path", dbPath, "--json"],
+      env: {},
+      now: () => new Date("2026-06-11T12:04:00Z"),
+    });
+    assert.equal(status.exitCode, 0, status.stderr);
+    const output = JSON.parse(status.stdout ?? "{}") as {
+      plan: {
+        quiescence: {
+          quiet_after: string | null;
+          quiet_cycles: number;
+          recommended_action: string;
+          state: string;
+          threshold_cycles: number;
+        };
+        status: { next_actions: unknown[]; ok: boolean };
+        summary: { quiescence_recommended: boolean };
+      };
+    };
+    assert.equal(output.plan.status.ok, true);
+    assert.deepEqual(output.plan.status.next_actions, []);
+    assert.equal(output.plan.quiescence.quiet_after, "2026-06-11T12:00:00Z");
+    assert.equal(output.plan.quiescence.quiet_cycles, 3);
+    assert.equal(output.plan.quiescence.threshold_cycles, 3);
+    assert.equal(output.plan.quiescence.state, "stop_recommended");
+    assert.equal(output.plan.quiescence.recommended_action, "stop_autopilot");
+    assert.equal(output.plan.summary.quiescence_recommended, true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("TypeScript runtime app-autopilot status keeps monitoring when quiet cycles still have pending health actions", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-app-autopilot-quiet-pending."));
+  const dbPath = join(root, "workerctl.db");
+  try {
+    seedCliAppLoopFixture(dbPath, {
+      dispatcherHeartbeatAt: null,
+      managerHeartbeatAt: "2026-06-11T11:59:50Z",
+      workerHeartbeatAt: "2026-06-11T11:59:50Z",
+    });
+    const started = runTypescriptRuntimeCommand({
+      args: ["app-autopilot", "start", "app-loop-task", "--path", dbPath, "--json"],
+      env: {},
+      now: () => new Date("2026-06-11T12:00:00Z"),
+    });
+    assert.equal(started.exitCode, 0, started.stderr);
+
+    const database = openDatabaseSync(dbPath);
+    try {
+      database.prepare("update sessions set last_heartbeat_at = ? where id in (?, ?)").run(
+        "2026-06-11T12:03:50Z",
+        "session-manager-app",
+        "session-worker-app",
+      );
+      const insertHeartbeat = database.prepare(`
+        insert into telemetry_events(id, actor, event_type, severity, summary, timestamp, task_id, correlation_json, attributes_json)
+        values (?, ?, 'app_heartbeat', 'info', ?, ?, 'task-app-loop', ?, ?)
+      `);
+      for (const [index, timestamp] of ["2026-06-11T12:01:00Z", "2026-06-11T12:02:00Z", "2026-06-11T12:03:00Z"].entries()) {
+        insertHeartbeat.run(
+          `telemetry-manager-quiet-pending-${index}`,
+          "manager",
+          "manager app heartbeat for app-loop-task.",
+          timestamp,
+          JSON.stringify({ command: "app-heartbeat" }),
+          JSON.stringify({ role: "manager", task: "app-loop-task" }),
+        );
+        insertHeartbeat.run(
+          `telemetry-worker-quiet-pending-${index}`,
+          "worker",
+          "worker app heartbeat for app-loop-task.",
+          timestamp,
+          JSON.stringify({ command: "app-heartbeat" }),
+          JSON.stringify({ role: "worker", task: "app-loop-task" }),
+        );
+      }
+    } finally {
+      database.close();
+    }
+
+    const status = runTypescriptRuntimeCommand({
+      args: ["app-autopilot", "status", "app-loop-task", "--path", dbPath, "--json"],
+      env: {},
+      now: () => new Date("2026-06-11T12:04:00Z"),
+    });
+    assert.equal(status.exitCode, 0, status.stderr);
+    const output = JSON.parse(status.stdout ?? "{}") as {
+      plan: {
+        quiescence: {
+          quiet_cycles: number;
+          recommended_action: string;
+          reason: string | null;
+          state: string;
+          threshold_cycles: number;
+        };
+        status: { next_actions: Array<{ kind: string }>; ok: boolean };
+        summary: { quiescence_recommended: boolean };
+      };
+    };
+    assert.equal(output.plan.status.ok, false);
+    assert.deepEqual(output.plan.status.next_actions.map((action) => action.kind), ["start_dispatch"]);
+    assert.equal(output.plan.quiescence.quiet_cycles, 3);
+    assert.equal(output.plan.quiescence.threshold_cycles, 3);
+    assert.equal(output.plan.quiescence.state, "monitoring");
+    assert.equal(output.plan.quiescence.recommended_action, "continue");
+    assert.match(output.plan.quiescence.reason ?? "", /pending health actions/);
+    assert.equal(output.plan.summary.quiescence_recommended, false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("TypeScript runtime handles task create list and active filtering by default", () => {
   const root = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-tasks."));
   try {

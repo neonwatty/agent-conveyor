@@ -94,8 +94,12 @@ Idle polling rule for Codex app/no-tmux sessions:
   heartbeat management. It records a durable pair-level heartbeat policy and
   emits manager/worker Codex app heartbeat automation specs plus the bounded
   Dispatch watch command. Use `conveyor app-autopilot status <task> --json` to
-  inspect the current policy and loop health, and `conveyor app-autopilot stop
-  <task> --json` to record terminal teardown intent. The CLI cannot create or
+  inspect the current policy, loop health, and `plan.quiescence`. If
+  `plan.quiescence.recommended_action` is `stop_autopilot`, the operator should
+  record `conveyor app-autopilot stop <task> --json` and pause/delete the Codex
+  app heartbeat automations instead of sending another idle pulse. Use
+  `--quiet-after N` to tune the number of paired manager/worker idle
+  heartbeats required before that recommendation. The CLI cannot create or
   delete Codex app automations by itself; apply the emitted automation specs
   through Codex app automation tools.
 - Use `conveyor app-loop-status <task> --json` as the operator status surface,
