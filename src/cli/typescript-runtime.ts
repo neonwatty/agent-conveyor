@@ -7,10 +7,13 @@ import { fileURLToPath } from "node:url";
 
 import { taskAuditSync } from "../runtime/audit.js";
 import {
+  appAutopilotPlanSync,
   appLoopStatusSync,
   appWakeupDispatchPlanSync,
   appWakeupPlanSync,
   directInboxPollCommand,
+  type AppAutopilotDesiredState,
+  type AppAutopilotPlan,
   type AppWakeupDispatchPlan,
   type AppLoopRole,
   type AppLoopStatus,
@@ -273,6 +276,9 @@ export function runTypescriptRuntimeCommand(options: TypescriptRuntimeOptions): 
     if (parsed.command === "app-wakeup-record-delivery") {
       return runAppWakeupRecordDeliveryCommand(parsed, options);
     }
+    if (parsed.command === "app-autopilot") {
+      return runAppAutopilotCommand(parsed, options);
+    }
     if (parsed.command === "qa-plan") {
       return runQaPlanCommand(parsed);
     }
@@ -523,6 +529,17 @@ function commandHelpText(program: "conveyor" | "workerctl", command: string): st
       "For task-routed delivery, prefer enqueue-nudge-worker plus dispatch:",
       `  ${program} enqueue-nudge-worker my-task --message "Status and evidence?" --path /tmp/work/workerctl.db`,
       `  ${program} dispatch --once --type nudge_worker --path /tmp/work/workerctl.db`,
+    ],
+    "app-autopilot": [
+      `usage: ${program} app-autopilot start|stop|status <task> [--dispatcher-id ID] [--interval SECONDS] [--watch-iterations N] [--stale-after N] ${path} [--json]`,
+      "",
+      "Manage the app-native heartbeat policy for a bound manager/worker pair.",
+      "The CLI records policy receipts and emits Codex app heartbeat automation specs; app-thread automation creation still happens through Codex app tools.",
+      "",
+      "Examples:",
+      `  ${program} app-autopilot start dogfood --dispatcher-id dispatch-local --path /tmp/work/workerctl.db --json`,
+      `  ${program} app-autopilot status dogfood --path /tmp/work/workerctl.db`,
+      `  ${program} app-autopilot stop dogfood --path /tmp/work/workerctl.db --json`,
     ],
     pair: [
       `usage: ${program} pair --task <task> --worker-name <worker> --manager-name <manager> [options] ${path}`,
@@ -1755,6 +1772,7 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
         && command !== "app-loop-status"
         && command !== "app-wakeup-plan"
         && command !== "app-wakeup-dispatch"
+        && command !== "app-autopilot"
       ) {
         return { command, enabled, error: "Unsupported TypeScript runtime option: --dispatcher-id", explicit, flags, task };
       }
@@ -2633,7 +2651,13 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       flags.statusStaleSeconds = value;
       index += 1;
     } else if (arg === "--stale-after") {
-      if (command !== "app-heartbeat" && command !== "app-loop-status" && command !== "app-wakeup-plan" && command !== "app-wakeup-dispatch") {
+      if (
+        command !== "app-heartbeat"
+        && command !== "app-loop-status"
+        && command !== "app-wakeup-plan"
+        && command !== "app-wakeup-dispatch"
+        && command !== "app-autopilot"
+      ) {
         return { command, enabled, error: "Unsupported TypeScript runtime option: --stale-after", explicit, flags, task };
       }
       const parsedValue = valueAfter(queue, index, arg);
@@ -2829,7 +2853,7 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       }
       index += 1;
     } else if (arg === "--interval") {
-      if (command !== "dispatch" && command !== "session-inbox" && command !== "manager-inbox" && command !== "worker-inbox") {
+      if (command !== "dispatch" && command !== "session-inbox" && command !== "manager-inbox" && command !== "worker-inbox" && command !== "app-autopilot") {
         return { command, enabled, error: "Unsupported TypeScript runtime option: --interval", explicit, flags, task };
       }
       const parsedValue = valueAfter(queue, index, arg);
@@ -2843,7 +2867,7 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       flags.intervalSeconds = value;
       index += 1;
     } else if (arg === "--watch-iterations") {
-      if (command !== "dispatch") {
+      if (command !== "dispatch" && command !== "app-autopilot") {
         return { command, enabled, error: "Unsupported TypeScript runtime option: --watch-iterations", explicit, flags, task };
       }
       const parsedValue = valueAfter(queue, index, arg);
@@ -2965,6 +2989,11 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
         return { command, enabled, error: `Unsupported loop-evidence action: ${arg}`, explicit, flags, task };
       }
       flags.subtype = arg;
+    } else if (command === "app-autopilot" && flags.action === null) {
+      if (!["start", "stop", "status"].includes(arg)) {
+        return { command, enabled, error: `Unsupported app-autopilot action: ${arg}`, explicit, flags, task };
+      }
+      flags.action = arg;
     } else if ((command === "qa-plan" || command === "qa-run") && flags.subtype === null) {
       flags.subtype = arg;
     } else if (command === "telemetry" && flags.telemetryView === null && isTelemetryView(arg)) {
@@ -3890,6 +3919,91 @@ function runAppWakeupRecordDeliveryCommand(
   }
 }
 
+function runAppAutopilotCommand(
+  parsed: ParsedRuntimeArgs,
+  options: { cwd?: string; env?: NodeJS.ProcessEnv; now?: () => Date },
+): TypescriptRuntimeResult {
+  const action = parsed.flags.action;
+  if (action !== "start" && action !== "stop" && action !== "status") {
+    return errorResult("app-autopilot requires an action: start, stop, or status");
+  }
+  const taskName = requireTask(parsed);
+  const database = openRuntimeDatabase(parsed, options);
+  try {
+    const timestamp = nowIsoSeconds(options);
+    const dbPath = runtimeDbPath(parsed, options);
+    const dispatcherId = parsed.flags.dispatcherId ?? "dispatch-local";
+    const desiredState: AppAutopilotDesiredState | null = action === "start" ? "active" : action === "stop" ? "stopped" : null;
+    let plan = appAutopilotPlanSync(database, {
+      dbPath,
+      dispatchIntervalSeconds: parsed.flags.intervalSeconds,
+      dispatcherId,
+      desiredState,
+      heartbeatIntervalMinutes: 2,
+      heartbeatStaleSeconds: parsed.flags.appStaleAfterSeconds,
+      now: timestamp,
+      taskName,
+      watchIterations: parsed.flags.watchIterations ?? 1000000,
+    });
+    let receipt: { event_id: string; event_type: string; recorded_at: string } | null = null;
+    if (action === "start" || action === "stop") {
+      const eventType = action === "start" ? "app_autopilot_started" : "app_autopilot_stopped";
+      const eventId = emitTelemetrySync(database, {
+        actor: "operator",
+        attributes: {
+          automation_specs: plan.automation_specs.map((spec) => ({
+            can_create: spec.can_create,
+            interval_minutes: spec.interval_minutes,
+            name: spec.name,
+            role: spec.role,
+            target_thread_id: spec.target_thread_id,
+            target_thread_title: spec.target_thread_title,
+          })),
+          desired_state: desiredState,
+          dispatcher_command: plan.control.dispatcher_command,
+          dispatcher_id: dispatcherId,
+          interval_minutes: plan.interval_minutes,
+          summary: plan.summary,
+        },
+        correlation: {
+          action,
+          command: "app-autopilot",
+          dispatcher_id: dispatcherId,
+        },
+        eventType,
+        severity: plan.summary.blocked_automations > 0 ? "warning" : "info",
+        summary: `App autopilot ${action} for ${plan.task.name}.`,
+        taskId: plan.task.id,
+        timestamp,
+      });
+      receipt = {
+        event_id: eventId,
+        event_type: eventType,
+        recorded_at: timestamp,
+      };
+      plan = {
+        ...plan,
+        last_policy_event: receipt,
+      };
+    }
+    const output = {
+      action,
+      plan,
+      receipt,
+    };
+    if (parsed.flags.json) {
+      return jsonResult(output);
+    }
+    return {
+      exitCode: 0,
+      handled: true,
+      stdout: renderAppAutopilotText(output),
+    };
+  } finally {
+    database.close();
+  }
+}
+
 function parseAppWakeupDeliveryStatus(value: string | null): AppWakeupDeliveryStatus | Error {
   if (value === "sent" || value === "skipped" || value === "blocked") {
     return value;
@@ -4012,6 +4126,39 @@ function renderAppWakeupPlanText(plan: ReturnType<typeof appWakeupPlanSync>): st
     lines.push(`Wake ${wakeup.role}${wakeup.thread.title ? ` (${wakeup.thread.title})` : ""}: ${wakeup.reason}`);
     lines.push(wakeup.prompt);
   }
+  return `${lines.join("\n")}\n`;
+}
+
+function renderAppAutopilotText(result: {
+  action: string;
+  plan: AppAutopilotPlan;
+  receipt: { event_id: string; event_type: string; recorded_at: string } | null;
+}): string {
+  const lines = [
+    `App autopilot ${result.action} for ${result.plan.task.name}: ${result.plan.desired_state}`,
+    `Loop status: ${result.plan.status.ok ? "ok" : "attention required"}`,
+    `Dispatch: ${result.plan.dispatcher.state}${result.plan.dispatcher.required ? " required" : ""}`,
+    `Dispatch command: ${result.plan.control.dispatcher_command}`,
+    `Wake dispatch: ${result.plan.control.wakeup_dispatch_command}`,
+  ];
+  if (result.receipt) {
+    lines.push(`Receipt: ${result.receipt.event_type} ${result.receipt.event_id}`);
+  } else if (result.plan.last_policy_event) {
+    lines.push(`Last policy: ${result.plan.last_policy_event.event_type} ${result.plan.last_policy_event.event_id}`);
+  } else {
+    lines.push("Last policy: unconfigured");
+  }
+  for (const spec of result.plan.automation_specs) {
+    lines.push(
+      `${spec.role} automation: ${spec.can_create ? "ready" : "blocked"} ${spec.name}`,
+      `  thread: ${spec.target_thread_title ?? "(untitled)"} ${spec.target_thread_id ?? "(missing)"}`,
+      `  schedule: ${spec.rrule}`,
+    );
+    if (spec.blocker) {
+      lines.push(`  blocker: ${spec.blocker}`);
+    }
+  }
+  lines.push(result.plan.control.note);
   return `${lines.join("\n")}\n`;
 }
 
@@ -15883,6 +16030,7 @@ function isDefaultRuntimeCommand(command: string | null): boolean {
     || command === "app-wakeup-plan"
     || command === "app-wakeup-dispatch"
     || command === "app-wakeup-record-delivery"
+    || command === "app-autopilot"
     || command === "loop-templates"
     || command === "loop-triggers"
     || command === "ralph-loop-presets"
