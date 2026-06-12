@@ -372,9 +372,13 @@ tmux attach -t codex-live-test
   `heartbeat_recommendations` with role-specific poll prompts; Dispatch can
   deliver into those inboxes, but a heartbeat or operator wake-up is still
   required to make an idle app thread poll autonomously. Those recommendations
-  include a `teardown_policy`: an idle poll is only a quiet interval, not a
-  reason to delete or pause heartbeat automation; heartbeat teardown belongs to
-  the manager/operator after terminal closeout or explicit operator instruction.
+  also include `wakeup_dispatch_command` and `delivery_receipt_commands` for
+  app-thread wake recovery. Use them to record sent, skipped, and blocked wake
+  outcomes after `app-wakeup-dispatch`; an app-thread send is not task
+  completion. The recommendations include a `teardown_policy`: an idle poll is
+  only a quiet interval, not a reason to delete or pause heartbeat automation;
+  heartbeat teardown belongs to the manager/operator after terminal closeout or
+  explicit operator instruction.
   The optional
   Codex app thread metadata is normally supplied after a Codex app manager has
   used `create_thread` and `set_thread_title`; terminal-only users can omit it
@@ -1045,10 +1049,12 @@ Current dispatch state:
   reaches `max_iterations`. For no-tmux Codex app sessions, treat
   `communication.requires_polling=true` as requiring a heartbeat/wake layer:
   a delivered pull inbox item does not by itself wake an idle app thread. Do
-  not delete or pause heartbeats because an inbox poll is idle. A terminal
-  manager decision should be followed by `finish-task --require-criteria-audit`
-  or by an explicit blocker explaining why the task/binding still appears
-  active.
+  not delete or pause heartbeats because an inbox poll is idle. Use generated
+  `heartbeat_recommendations.wakeup_dispatch_command` and
+  `heartbeat_recommendations.delivery_receipt_commands` for stale-thread wake
+  recovery receipts. A terminal manager decision should be followed by
+  `finish-task --require-criteria-audit` or by an explicit blocker explaining
+  why the task/binding still appears active.
 - `register-worker`, `register-manager`, `sessions`, `discover`, and
   `create-disposable-binding --json` expose a `communication` block per
   session. Treat `session_kind='tmux'` plus `receive_style='push'` as direct

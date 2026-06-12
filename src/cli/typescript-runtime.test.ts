@@ -2415,6 +2415,7 @@ test("TypeScript runtime handles no-tmux create-disposable-binding by default", 
     const payload = JSON.parse(created.stdout ?? "{}") as {
       binding: { id: string };
       heartbeat_recommendations: {
+        delivery_receipt_commands: { blocked: string; note: string; sent: string; skipped: string };
         interval_minutes: number;
         manager: { direct_inbox_command: string; poll_command: string; prompt: string };
         note: string;
@@ -2426,6 +2427,7 @@ test("TypeScript runtime handles no-tmux create-disposable-binding by default", 
           terminal_closeout_command: string;
           worker_rule: string;
         };
+        wakeup_dispatch_command: string;
         wakeup_plan_command: string;
         worker: { direct_inbox_command: string; poll_command: string; prompt: string };
       };
@@ -2494,6 +2496,14 @@ test("TypeScript runtime handles no-tmux create-disposable-binding by default", 
     assert.equal(payload.heartbeat_recommendations.manager.direct_inbox_command, payload.manager.communication.poll_command);
     assert.ok(payload.heartbeat_recommendations.status_command.includes("app-loop-status 'real-slice'"));
     assert.ok(payload.heartbeat_recommendations.wakeup_plan_command.includes("app-wakeup-plan 'real-slice'"));
+    assert.ok(payload.heartbeat_recommendations.wakeup_dispatch_command.includes("app-wakeup-dispatch 'real-slice'"));
+    assert.ok(payload.heartbeat_recommendations.wakeup_dispatch_command.includes("--path"));
+    assert.ok(payload.heartbeat_recommendations.delivery_receipt_commands.sent.includes("app-wakeup-record-delivery 'real-slice'"));
+    assert.ok(payload.heartbeat_recommendations.delivery_receipt_commands.sent.includes("--delivery-status sent"));
+    assert.ok(payload.heartbeat_recommendations.delivery_receipt_commands.sent.includes("--thread-id <action.thread.id>"));
+    assert.ok(payload.heartbeat_recommendations.delivery_receipt_commands.skipped.includes("--delivery-status skipped"));
+    assert.ok(payload.heartbeat_recommendations.delivery_receipt_commands.blocked.includes("--delivery-status blocked"));
+    assert.ok(payload.heartbeat_recommendations.delivery_receipt_commands.note.includes("send_ready=true"));
     assert.ok(payload.heartbeat_recommendations.note.includes("heartbeat"));
     assert.equal(payload.heartbeat_recommendations.teardown_policy.owner, "manager_or_operator");
     assert.ok(payload.heartbeat_recommendations.teardown_policy.idle_poll.includes("Never delete"));
@@ -2503,9 +2513,17 @@ test("TypeScript runtime handles no-tmux create-disposable-binding by default", 
     assert.ok(payload.heartbeat_recommendations.teardown_policy.worker_rule.includes("must not own loop teardown"));
     assert.ok(payload.heartbeat_recommendations.worker.prompt.includes("stop after a one-line idle receipt"));
     assert.ok(payload.heartbeat_recommendations.worker.prompt.includes("Run the worker app heartbeat"));
+    assert.ok(payload.heartbeat_recommendations.worker.prompt.includes("compact evidence for any completion claim"));
     assert.ok(payload.heartbeat_recommendations.worker.prompt.includes("Do not delete, pause, or disable worker heartbeat automation after an idle poll"));
     assert.ok(payload.heartbeat_recommendations.manager.prompt.includes("produce exactly one next worker task"));
     assert.ok(payload.heartbeat_recommendations.manager.prompt.includes("Run the manager app heartbeat"));
+    assert.ok(payload.heartbeat_recommendations.manager.prompt.includes("app-wakeup-dispatch"));
+    assert.ok(payload.heartbeat_recommendations.manager.prompt.includes("send_ready=true"));
+    assert.ok(payload.heartbeat_recommendations.manager.prompt.includes("direct app-thread delivery is not task completion"));
+    assert.ok(payload.heartbeat_recommendations.manager.prompt.includes("app-wakeup-record-delivery"));
+    assert.ok(payload.heartbeat_recommendations.manager.prompt.includes("--delivery-status sent"));
+    assert.ok(payload.heartbeat_recommendations.manager.prompt.includes("--delivery-status skipped"));
+    assert.ok(payload.heartbeat_recommendations.manager.prompt.includes("--delivery-status blocked"));
     assert.ok(payload.heartbeat_recommendations.manager.prompt.includes("Do not delete, pause, or disable manager or worker heartbeat automation after an idle poll"));
     assert.ok(payload.heartbeat_recommendations.manager.prompt.includes("record the terminal manager decision"));
     assert.ok(payload.heartbeat_recommendations.manager.prompt.includes("task remains managed/active"));

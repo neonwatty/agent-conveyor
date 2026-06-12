@@ -19462,6 +19462,12 @@ type DisposableHeartbeatRecommendations = {
     session_kind: "codex_app";
   };
   interval_minutes: number;
+  delivery_receipt_commands: {
+    blocked: string;
+    note: string;
+    sent: string;
+    skipped: string;
+  };
   manager: { direct_inbox_command: string; kind: "thread_heartbeat"; poll_command: string; prompt: string };
   note: string;
   status_command: string;
@@ -19472,6 +19478,7 @@ type DisposableHeartbeatRecommendations = {
     terminal_closeout_command: string;
     worker_rule: string;
   };
+  wakeup_dispatch_command: string;
   wakeup_plan_command: string;
   worker: { direct_inbox_command: string; kind: "thread_heartbeat"; poll_command: string; prompt: string };
 };
@@ -19502,6 +19509,8 @@ function renderDisposableBindingText(result: {
     lines.push(`  worker: ${result.heartbeat_recommendations.worker.poll_command}`);
     lines.push(`  status: ${result.heartbeat_recommendations.status_command}`);
     lines.push(`  wakeup plan: ${result.heartbeat_recommendations.wakeup_plan_command}`);
+    lines.push(`  wakeup dispatch: ${result.heartbeat_recommendations.wakeup_dispatch_command}`);
+    lines.push(`  delivery sent: ${result.heartbeat_recommendations.delivery_receipt_commands.sent}`);
     lines.push(`  teardown: ${result.heartbeat_recommendations.teardown_policy.idle_poll}`);
     lines.push(`  closeout: ${result.heartbeat_recommendations.teardown_policy.terminal_closeout_command}`);
   }
@@ -19516,6 +19525,8 @@ function disposableHeartbeatRecommendations(taskName: string, dbPath: string): D
   const workerHeartbeatCommand = disposableAppHeartbeatCommand("worker", taskName, dbPath);
   const managerInboxCommand = sessionPollCommand("manager", taskName, dbPath);
   const workerInboxCommand = sessionPollCommand("worker", taskName, dbPath);
+  const wakeupDispatchCommand = `${conveyorPollInvocation()} app-wakeup-dispatch ${shellQuote(taskName)} --path ${shellQuote(dbPath)} --json`;
+  const deliveryReceiptCommands = disposableDeliveryReceiptCommands(taskName, dbPath);
   return {
     applies_when: {
       can_receive_push: false,
@@ -19523,6 +19534,7 @@ function disposableHeartbeatRecommendations(taskName: string, dbPath: string): D
       receive_style: "pull",
       session_kind: "codex_app",
     },
+    delivery_receipt_commands: deliveryReceiptCommands,
     interval_minutes: 2,
     note: "Dispatch can deliver pull-required inbox items, but Codex app/no-tmux sessions still need a heartbeat or operator wake-up to poll while idle.",
     status_command: `${conveyorPollInvocation()} app-loop-status ${shellQuote(taskName)} --path ${shellQuote(dbPath)} --json`,
@@ -19533,6 +19545,7 @@ function disposableHeartbeatRecommendations(taskName: string, dbPath: string): D
       terminal_closeout_command: terminalCloseoutCommand,
       worker_rule: "The worker must not own loop teardown and must not remove heartbeat automation based on idle polling.",
     },
+    wakeup_dispatch_command: wakeupDispatchCommand,
     wakeup_plan_command: `${conveyorPollInvocation()} app-wakeup-plan ${shellQuote(taskName)} --path ${shellQuote(dbPath)} --json`,
     manager: {
       direct_inbox_command: managerInboxCommand,
@@ -19543,6 +19556,11 @@ function disposableHeartbeatRecommendations(taskName: string, dbPath: string): D
         `Run the manager app heartbeat for task ${taskName}.`,
         `Run: ${managerHeartbeatCommand}`,
         `If the heartbeat output asks for direct inbox polling, run: ${managerInboxCommand}`,
+        `For stale app-thread recovery with an auditable receipt, run: ${wakeupDispatchCommand}`,
+        "Send app-thread wake prompts only for actions where `send_ready=true`; direct app-thread delivery is not task completion.",
+        `After a successful app-thread send, record it with: ${deliveryReceiptCommands.sent}`,
+        `For healthy skipped actions, record: ${deliveryReceiptCommands.skipped}`,
+        `For missing-thread blocked actions, record: ${deliveryReceiptCommands.blocked}`,
         "If an item is consumed, execute only that manager instruction, verify worker claims before recording conclusions, update Conveyor state as appropriate, and produce exactly one next worker task.",
         "If no item is consumed, stop after a one-line idle receipt.",
         "Do not delete, pause, or disable manager or worker heartbeat automation after an idle poll; an idle poll is only a quiet interval.",
@@ -19559,11 +19577,22 @@ function disposableHeartbeatRecommendations(taskName: string, dbPath: string): D
         `Run the worker app heartbeat for task ${taskName}.`,
         `Run: ${workerHeartbeatCommand}`,
         `If the heartbeat output asks for direct inbox polling, run: ${workerInboxCommand}`,
-        "If an item is consumed, execute only that single worker instruction and return exact commands, compact evidence, blockers/residual risk, and exactly one next recommended worker task.",
+        "If an item is consumed, execute only that single worker instruction and return exact commands, compact evidence for any completion claim, blockers/residual risk, and exactly one next recommended worker task.",
         "If no item is consumed, stop after a one-line idle receipt.",
         "Do not delete, pause, or disable worker heartbeat automation after an idle poll; the manager or operator owns terminal loop teardown.",
       ].join("\n"),
     },
+  };
+}
+
+function disposableDeliveryReceiptCommands(taskName: string, dbPath: string): DisposableHeartbeatRecommendations["delivery_receipt_commands"] {
+  const base = `${conveyorPollInvocation()} app-wakeup-record-delivery ${shellQuote(taskName)} --role <role> --dispatch-receipt <receipt.event_id>`;
+  const pathAndJson = ` --path ${shellQuote(dbPath)} --json`;
+  return {
+    blocked: `${base} --delivery-status blocked${pathAndJson}`,
+    note: "Run these only after app-wakeup-dispatch. Replace <role>, <receipt.event_id>, and <action.thread.id> from the dispatch JSON; sent is valid only for send_ready=true actions.",
+    sent: `${base} --delivery-status sent --thread-id <action.thread.id>${pathAndJson}`,
+    skipped: `${base} --delivery-status skipped${pathAndJson}`,
   };
 }
 

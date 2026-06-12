@@ -96,6 +96,11 @@ Idle polling rule for Codex app/no-tmux sessions:
   auditable wake orchestration receipt. It prepares adapter-ready app-thread
   actions, reports skipped and blocked roles, and records telemetry; it does
   not send direct app-thread messages itself.
+- If `create-disposable-binding --json` returned
+  `heartbeat_recommendations.wakeup_dispatch_command` and
+  `heartbeat_recommendations.delivery_receipt_commands`, prefer those exact
+  generated commands when waking app threads and recording sent/skipped/blocked
+  outcomes.
 - In a Codex app manager with thread tools available, use the native
   `send_message_to_thread` tool only for `app-wakeup-dispatch` actions where
   `send_ready=true`. After each send, run
@@ -761,10 +766,12 @@ etc.) run `conveyor db-doctor --live`.
   sessions repeat their role-specific `app-heartbeat` command while idle. Use
   `app-loop-status` and `app-wakeup-plan` for operator status and stale-thread
   recovery, and `app-wakeup-dispatch` when the manager needs an auditable
-  prepared/skipped/blocked wake receipt. If the current manager is a Codex app
-  session with thread tools, send only `send_ready=true` wake prompts with
-  `send_message_to_thread`, then record the outcome with
-  `app-wakeup-record-delivery`.
+  prepared/skipped/blocked wake receipt. Prefer generated
+  `heartbeat_recommendations.wakeup_dispatch_command` and
+  `heartbeat_recommendations.delivery_receipt_commands` when present. If the
+  current manager is a Codex app session with thread tools, send only
+  `send_ready=true` wake prompts with `send_message_to_thread`, then record the
+  outcome with `app-wakeup-record-delivery`.
 - "register this Codex session as the worker for dashboard setup <CODE>":
   derive `dashboard-<CODE>-worker`, run `conveyor doctor-self`, then
   `conveyor register-worker --name dashboard-<CODE>-worker --pid <PID> --cwd <CWD> --tmux-session <SESSION>`.

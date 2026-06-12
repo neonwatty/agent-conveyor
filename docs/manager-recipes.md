@@ -313,6 +313,10 @@ Use `app-wakeup-dispatch` when the manager needs a durable Conveyor receipt for
 which app wake actions were prepared, skipped, or blocked. It only prepares
 adapter-ready actions; direct app-thread delivery remains an app/operator
 action, and Dispatch/inboxes remain the durable task state.
+For loops created by `create-disposable-binding --json`, prefer the generated
+`heartbeat_recommendations.wakeup_dispatch_command` and
+`heartbeat_recommendations.delivery_receipt_commands` fields instead of
+reconstructing those commands manually.
 When running from a Codex app manager with thread tools available, send only
 actions whose JSON has `send_ready=true` using `send_message_to_thread`, then
 record each outcome with `app-wakeup-record-delivery` linked to the dispatch
