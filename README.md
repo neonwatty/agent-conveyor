@@ -174,7 +174,10 @@ thread identity through `--worker-codex-app-thread-id` and
 deliver the generated `worker_handoff` bootstrap prompt. The raw terminal
 `conveyor` CLI does not create Codex app threads by itself; if app thread tools
 are unavailable, open a separate Codex app worker manually and paste the
-`worker_handoff` prompt.
+`worker_handoff` prompt. After a worker consumes a manager instruction, its
+completion or blocker report must go back through the generated
+`enqueue-notify-manager` command and a bounded Dispatch watch tick; a direct
+Codex app final answer is not a durable manager receipt.
 
 Dispatch is core infrastructure for supervised worker/manager pairs. The
 `pair` workflow starts a detached Dispatch watch process by default so worker
@@ -371,8 +374,12 @@ tmux attach -t codex-live-test
   Codex app sessions, the JSON output also includes
   `heartbeat_recommendations` with role-specific poll prompts; Dispatch can
   deliver into those inboxes, but a heartbeat or operator wake-up is still
-  required to make an idle app thread poll autonomously. Those recommendations
-  also include `wakeup_dispatch_command` and `delivery_receipt_commands` for
+  required to make an idle app thread poll autonomously. The worker handoff and
+  worker heartbeat prompt also include the exact durable
+  `enqueue-notify-manager` and one-iteration `dispatch --watch` commands that a
+  worker must run after completing or blocking on a consumed item. Those
+  recommendations also include `wakeup_dispatch_command` and
+  `delivery_receipt_commands` for
   app-thread wake recovery. Use them to record sent, skipped, and blocked wake
   outcomes after `app-wakeup-dispatch`; an app-thread send is not task
   completion. The recommendations include a `teardown_policy`: an idle poll is
@@ -646,7 +653,10 @@ tmux attach -t codex-live-test
   recovery; `--once` performs one pass.
 - `enqueue-notify-manager <task> --message "..." [--correlation-id C]
   [--required-permission P] [--idempotency-key K] [--json]` — Queue a `notify_manager` command row for
-  Dispatch to claim and deliver to the bound manager.
+  Dispatch to claim and deliver to the bound manager. Codex app/no-tmux
+  workers must use this route for completion and blocker reports after
+  consuming a manager instruction; direct app-thread final answers are local
+  text, not manager inbox receipts.
 - `enqueue-nudge-worker <task> --message "..." [--correlation-id C]
   [--required-permission P] [--idempotency-key K] [--json]` — Queue a `nudge_worker` command row for
   Dispatch to claim and deliver to the bound worker. Use this dispatcher-backed
@@ -799,7 +809,10 @@ same-project `create_thread` worker plus `set_thread_title` before creating the
 binding, then pass the worker thread id/title into Conveyor. Use `fork_thread`
 only when the user explicitly asks to fork or resume this conversation. If app
 thread tools are unavailable, create the binding anyway and paste the returned
-`worker_handoff` prompt into a manually opened worker session.
+`worker_handoff` prompt into a manually opened worker session. The handoff
+requires a worker to report completion/blockers through
+`enqueue-notify-manager` plus a bounded Dispatch watch run before treating the
+manager as notified.
 - `enqueue-continue-iteration TASK --loop-run RUN --requested-iteration N` —
   Queue a manager-requested next loop pass for Dispatch. The command refuses
   same/current iteration requests before they become pending queue rows, while

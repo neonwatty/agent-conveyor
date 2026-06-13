@@ -19613,11 +19613,17 @@ function disposableWorkerHandoff(taskName: string, runName: string | null, dbPat
   const loopClause = runName
     ? ` for Ralph loop run ${runName}`
     : " for this disposable no-tmux binding";
+  const notifyCommand = durableWorkerNotifyManagerCommand(taskName, dbPath);
+  const dispatchCommand = durableWorkerNotifyDispatchCommand(dbPath);
   return [
     "Use the manage-codex-workers skill.",
     "",
     `You are the worker for task ${taskName}${loopClause}.`,
     "Keep polling your Conveyor worker inbox until there are no items left or the loop reaches max_iterations. Consume the next item now, treat each consumed item as the manager's next instruction, complete the requested work, and report changed files, exact commands run, evidence, and any residual risk.",
+    "After completing or blocking on a consumed item, send the manager a durable Conveyor notification before your final answer. A direct app-thread final answer is not a manager receipt and is not task completion.",
+    `Run: ${notifyCommand}`,
+    `Then run: ${dispatchCommand}`,
+    "If either notify/dispatch command fails, include that failure as the blocker and do not claim the manager was notified.",
     "",
     "Because this is a pull-required Codex app/no-tmux session, autonomous operation requires a heartbeat/wake layer that repeats this worker inbox poll while the thread is idle. If no heartbeat automation is available, report the loop as manual-poll only.",
     "Do not delete, pause, or disable heartbeat automation just because an inbox poll is idle; the manager or operator owns terminal loop teardown.",
@@ -19697,6 +19703,8 @@ function disposableHeartbeatRecommendations(taskName: string, dbPath: string): D
   const workerHeartbeatCommand = disposableAppHeartbeatCommand("worker", taskName, dbPath);
   const managerInboxCommand = sessionPollCommand("manager", taskName, dbPath);
   const workerInboxCommand = sessionPollCommand("worker", taskName, dbPath);
+  const workerNotifyCommand = durableWorkerNotifyManagerCommand(taskName, dbPath);
+  const workerNotifyDispatchCommand = durableWorkerNotifyDispatchCommand(dbPath);
   const wakeupDispatchCommand = `${conveyorPollInvocation()} app-wakeup-dispatch ${shellQuote(taskName)} --path ${shellQuote(dbPath)} --json`;
   const deliveryReceiptCommands = disposableDeliveryReceiptCommands(taskName, dbPath);
   return {
@@ -19750,6 +19758,10 @@ function disposableHeartbeatRecommendations(taskName: string, dbPath: string): D
         `Run: ${workerHeartbeatCommand}`,
         `If the heartbeat output asks for direct inbox polling, run: ${workerInboxCommand}`,
         "If an item is consumed, execute only that single worker instruction and return exact commands, compact evidence for any completion claim, blockers/residual risk, and exactly one next recommended worker task.",
+        "Before your final answer after any consumed item, notify the manager durably; a direct app-thread final answer is not a manager receipt and is not task completion.",
+        `Run: ${workerNotifyCommand}`,
+        `Then run: ${workerNotifyDispatchCommand}`,
+        "If either notify/dispatch command fails, include that failure as the blocker and do not claim the manager was notified.",
         "If no item is consumed, stop after a one-line idle receipt.",
         "Do not delete, pause, or disable worker heartbeat automation after an idle poll; the manager or operator owns terminal loop teardown.",
       ].join("\n"),
@@ -19770,6 +19782,14 @@ function disposableDeliveryReceiptCommands(taskName: string, dbPath: string): Di
 
 function disposableAppHeartbeatCommand(role: "manager" | "worker", taskName: string, dbPath: string): string {
   return `${conveyorPollInvocation()} app-heartbeat ${shellQuote(taskName)} --role ${role} --path ${shellQuote(dbPath)} --json`;
+}
+
+function durableWorkerNotifyManagerCommand(taskName: string, dbPath: string): string {
+  return `${conveyorPollInvocation()} enqueue-notify-manager ${shellQuote(taskName)} --message ${shellQuote("<compact completion/blocker report with files, commands, evidence, residual risk, and next recommended worker task>")} --correlation-id ${shellQuote("<worker-result-id>")} --path ${shellQuote(dbPath)} --json`;
+}
+
+function durableWorkerNotifyDispatchCommand(dbPath: string): string {
+  return `${conveyorPollInvocation()} dispatch --watch --watch-iterations 1 --interval 2 --dispatcher-id dispatch-local --path ${shellQuote(dbPath)} --json`;
 }
 
 function sessionPollCommand(role: "manager" | "worker", taskName: string | null, dbPath: string): string {
