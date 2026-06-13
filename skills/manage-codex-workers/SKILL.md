@@ -67,6 +67,12 @@ Skill behavior:
    loop until no inbox item remains or `max_iterations` is reached. Consuming a
    `continue_iteration` inbox item advances the Ralph-loop run's durable
    `current_iteration` and writes `ralph_loop_iteration_advanced` telemetry.
+   After completing or blocking on any consumed item, the worker must run the
+   generated `conveyor enqueue-notify-manager ... --json` command and then run
+   the generated one-iteration `conveyor dispatch --watch ... --json` command
+   before its final app-thread answer. If either command fails, treat that as
+   the blocker; a direct app-thread final answer alone is not manager
+   notification and is not task completion.
 9. After each worker pass, require concrete evidence and structured
    `loop-evidence adversarial-check` proof before queueing another
    `enqueue-continue-iteration`.
@@ -89,6 +95,11 @@ Idle polling rule for Codex app/no-tmux sessions:
   A timeout is not completion; it is only a quiet poll interval.
 - Keep `conveyor dispatch --watch --dispatcher-id dispatch-local` running so
   Dispatch can route new messages into those inboxes.
+- After a worker consumes and acts on a manager instruction, require a durable
+  `conveyor enqueue-notify-manager <task> --message ... --json` receipt plus a
+  one-iteration Dispatch run before treating the worker pass as reported. A
+  direct Codex app final answer is local thread text; it does not notify the
+  manager inbox or prove the manager saw the result.
 - Prefer `conveyor app-autopilot start <task> --json` from the operator or
   manager session when setting up a Codex app/no-tmux pair for autonomous
   heartbeat management. It records a durable pair-level heartbeat policy and

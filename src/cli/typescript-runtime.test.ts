@@ -407,6 +407,9 @@ test("TypeScript runtime app-wakeup-plan prints app-thread prompts for stale rol
     assert.equal(output.wakeups[1].thread.id, "thread-worker");
     assert.match(output.wakeups[1].prompt, /conveyor app-heartbeat 'app-loop-task' --role worker/);
     assert.match(output.wakeups[1].prompt, /execute only that single worker instruction/);
+    assert.match(output.wakeups[1].prompt, /conveyor enqueue-notify-manager 'app-loop-task'/);
+    assert.match(output.wakeups[1].prompt, /conveyor dispatch --watch --watch-iterations 1 --interval 2 --dispatcher-id dispatch-local/);
+    assert.match(output.wakeups[1].prompt, /direct app-thread final answer is not a manager receipt/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -2818,6 +2821,9 @@ test("TypeScript runtime handles no-tmux create-disposable-binding by default", 
     assert.ok(payload.heartbeat_recommendations.worker.prompt.includes("stop after a one-line idle receipt"));
     assert.ok(payload.heartbeat_recommendations.worker.prompt.includes("Run the worker app heartbeat"));
     assert.ok(payload.heartbeat_recommendations.worker.prompt.includes("compact evidence for any completion claim"));
+    assert.ok(payload.heartbeat_recommendations.worker.prompt.includes("enqueue-notify-manager 'real-slice'"));
+    assert.ok(payload.heartbeat_recommendations.worker.prompt.includes("dispatch --watch --watch-iterations 1 --interval 2 --dispatcher-id dispatch-local"));
+    assert.ok(payload.heartbeat_recommendations.worker.prompt.includes("direct app-thread final answer is not a manager receipt"));
     assert.ok(payload.heartbeat_recommendations.worker.prompt.includes("Do not delete, pause, or disable worker heartbeat automation after an idle poll"));
     assert.ok(payload.heartbeat_recommendations.manager.prompt.includes("produce exactly one next worker task"));
     assert.ok(payload.heartbeat_recommendations.manager.prompt.includes("Run the manager app heartbeat"));
@@ -2842,6 +2848,9 @@ test("TypeScript runtime handles no-tmux create-disposable-binding by default", 
     assert.ok(payload.replay_commands.some((command) => command.includes("worker-inbox")));
     assert.ok(payload.replay_commands.some((command) => command.includes("loop-status")));
     assert.ok(payload.worker_handoff.includes("Keep polling your Conveyor worker inbox"));
+    assert.ok(payload.worker_handoff.includes("enqueue-notify-manager 'real-slice'"));
+    assert.ok(payload.worker_handoff.includes("dispatch --watch --watch-iterations 1 --interval 2 --dispatcher-id dispatch-local"));
+    assert.ok(payload.worker_handoff.includes("direct app-thread final answer is not a manager receipt"));
     assert.ok(payload.worker_handoff.includes("autonomous operation requires a heartbeat/wake layer"));
     assert.ok(payload.worker_handoff.includes("Do not delete, pause, or disable heartbeat automation just because an inbox poll is idle"));
     assert.ok(payload.worker_handoff.includes(payload.worker.communication.poll_command));

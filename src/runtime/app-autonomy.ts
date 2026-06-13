@@ -466,6 +466,14 @@ export function directInboxPollCommand(role: AppLoopRole, taskName: string, dbPa
   return `conveyor ${inbox} ${shellQuote(taskName)} --consume-next --wait --timeout 60${pathFlag(dbPath ?? null)} --json`;
 }
 
+function workerNotifyManagerCommand(taskName: string, dbPath?: string | null): string {
+  return `conveyor enqueue-notify-manager ${shellQuote(taskName)} --message ${shellQuote("<compact completion/blocker report with files, commands, evidence, residual risk, and next recommended worker task>")} --correlation-id ${shellQuote("<worker-result-id>")}${pathFlag(dbPath ?? null)} --json`;
+}
+
+function workerNotifyDispatchCommand(dbPath?: string | null): string {
+  return `conveyor dispatch --watch --watch-iterations 1 --interval 2 --dispatcher-id dispatch-local${pathFlag(dbPath ?? null)} --json`;
+}
+
 function roleStatus(options: {
   dbPath: string | null;
   heartbeatStaleSeconds: number;
@@ -507,9 +515,19 @@ function roleWakeup(
 ): AppWakeup {
   const pollCommand = appHeartbeatPollCommand(role, taskName, dbPath);
   const directInboxCommand = directInboxPollCommand(role, taskName, dbPath);
+  const workerNotifyCommand = workerNotifyManagerCommand(taskName, dbPath);
+  const workerDispatchCommand = workerNotifyDispatchCommand(dbPath);
   const roleInstruction = role === "manager"
     ? "If an item is consumed, verify worker claims before recording conclusions, require concrete evidence, update Conveyor state as appropriate, and produce exactly one next worker task."
     : "If an item is consumed, execute only that single worker instruction and return exact commands, compact evidence, blockers or residual risk, and exactly one next recommended worker task.";
+  const durableWorkerNotification = role === "worker"
+    ? [
+      "Before your final answer after any consumed item, notify the manager durably; a direct app-thread final answer is not a manager receipt and is not task completion.",
+      `Run: ${workerNotifyCommand}`,
+      `Then run: ${workerDispatchCommand}`,
+      "If either notify/dispatch command fails, include that failure as the blocker and do not claim the manager was notified.",
+    ]
+    : [];
   return {
     prompt: [
       "Use the manage-codex-workers skill.",
@@ -517,6 +535,7 @@ function roleWakeup(
       `Run: ${pollCommand}`,
       `If the heartbeat result asks for direct inbox polling, run: ${directInboxCommand}`,
       roleInstruction,
+      ...durableWorkerNotification,
       "If no item is consumed, stop after a one-line idle receipt.",
       "Idle polling is not completion and does not authorize heartbeat teardown.",
     ].join("\n"),
