@@ -12,6 +12,7 @@ import {
   appWakeupDispatchPlanSync,
   appWakeupPlanSync,
   directInboxPollCommand,
+  visibleSessionProtocolLines,
   type AppAutopilotDesiredState,
   type AppAutopilotPlan,
   type AppWakeupDispatchPlan,
@@ -17938,6 +17939,17 @@ const ADVERSARIAL_CHECK_REQUIREMENT = {
 } satisfies Record<string, unknown>;
 
 const LOOP_TEMPLATES: Record<string, LoopTemplateDefinition> = {
+  app_visible_build_loop: {
+    artifactRequirements: { adversarial_check: ADVERSARIAL_CHECK_REQUIREMENT },
+    cleanupPolicy: "off",
+    description: "Require build evidence and adversarial proof between visible Codex app iterations without a cleanup gate.",
+    maxIterations: 2,
+    name: "app_visible_build_loop",
+    recommendedTools: ["verification.run_tests"],
+    requiredBeforeContinue: ["build_passed", "adversarial_check"],
+    stopConditions: ["max_iterations", "required_evidence"],
+    tags: ["build", "codex_app", "visible_session"],
+  },
   build_then_clear: {
     artifactRequirements: {},
     cleanupPolicy: "clear",
@@ -18725,11 +18737,11 @@ function loopStatusSummarySync(
   const commandStates = countBy(matchingCommands.map((row) => row.state));
 
   const notificationRows = database.prepare(`
-    select state, payload_json
+    select consumed_at, state, payload_json
     from routed_notifications
     where task_id = ?
     order by created_at, id
-  `).all(options.task.id) as Array<{ payload_json: string; state: string }>;
+  `).all(options.task.id) as Array<{ consumed_at: string | null; payload_json: string; state: string }>;
   const matchingNotifications = notificationRows.filter((row) => notificationRowMatchesRun(row, options.run.id));
   const notificationStates = countBy(matchingNotifications.map((row) => row.state));
 
@@ -18760,6 +18772,12 @@ function loopStatusSummarySync(
 
   const telemetryEvents = telemetryEventsForRunSync(database, { runId: options.run.id, taskId: options.task.id });
   const telemetryByType = countBy(telemetryEvents.map((event) => event.event_type));
+  const appTaskDispatch = appTaskDispatchSummarySync(database, {
+    commandRows,
+    notificationRows,
+    runScopedActivityTotal: matchingCommands.length + matchingNotifications.length + telemetryEvents.length,
+    taskId: options.task.id,
+  });
   const failedCommandCount = commandStates.failed ?? 0;
   const failureCounts = loopFailureCountsSync(database, {
     failedCommandCount,
@@ -18781,6 +18799,7 @@ function loopStatusSummarySync(
       total: evidenceItems.length,
       types: evidenceTypes,
     },
+    app_task_dispatch: appTaskDispatch,
     failures: failureCounts,
     inbox: {
       worker_unconsumed: workerInbox,
@@ -18827,6 +18846,61 @@ function telemetryEventsForRunSync(
     order by timestamp, id
     limit 1000
   `).all(options.taskId, options.runId) as Array<{ event_type: string }>;
+}
+
+function appTaskDispatchSummarySync(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  options: {
+    commandRows: Array<{ state: string }>;
+    notificationRows: Array<{ consumed_at: string | null; state: string }>;
+    runScopedActivityTotal: number;
+    taskId: string;
+  },
+): Record<string, unknown> {
+  const taskDispatchEventTypes = [
+    "app_autopilot_started",
+    "app_autopilot_stopped",
+    "app_heartbeat",
+    "app_wakeup_delivery_recorded",
+    "app_wakeup_dispatch_planned",
+    "command_created",
+    "dispatch_inbox_consumed",
+  ];
+  const telemetryRows = database.prepare(`
+    select event_type, timestamp
+    from telemetry_events
+    where task_id = ?
+      and event_type in (${taskDispatchEventTypes.map(() => "?").join(", ")})
+    order by timestamp, id
+  `).all(options.taskId, ...taskDispatchEventTypes) as Array<{ event_type: string; timestamp: string }>;
+  const telemetryByType = countBy(telemetryRows.map((row) => row.event_type));
+  const commandStates = countBy(options.commandRows.map((row) => row.state));
+  const notificationStates = countBy(options.notificationRows.map((row) => row.state));
+  const recordsTotal = options.commandRows.length + options.notificationRows.length + telemetryRows.length;
+  const blindToRun = options.runScopedActivityTotal === 0 && recordsTotal > 0;
+  return {
+    commands: {
+      states: sortJson(commandStates),
+      total: options.commandRows.length,
+    },
+    latest_event_at: telemetryRows.at(-1)?.timestamp ?? null,
+    note: blindToRun
+      ? "Requested run has no run-scoped activity, but task-level app Dispatch records exist."
+      : null,
+    notifications: {
+      delivered_unconsumed: options.notificationRows
+        .filter((row) => row.state === "delivered" && row.consumed_at === null).length,
+      states: sortJson(notificationStates),
+      total: options.notificationRows.length,
+    },
+    records_total: recordsTotal,
+    telemetry: {
+      by_event_type: sortJson(telemetryByType),
+      command_created: telemetryByType.command_created ?? 0,
+      dispatch_inbox_consumed: telemetryByType.dispatch_inbox_consumed ?? 0,
+      total: telemetryRows.length,
+    },
+  };
 }
 
 function loopFailureCountsSync(
@@ -18930,6 +19004,8 @@ function renderLoopStatusText(result: Record<string, unknown>): string {
   const notifications = result.notifications as Record<string, unknown>;
   const inbox = result.inbox as Record<string, unknown>;
   const telemetry = result.telemetry as Record<string, unknown>;
+  const appTaskDispatch = result.app_task_dispatch as Record<string, unknown> | undefined;
+  const appTaskDispatchTelemetry = appTaskDispatch?.telemetry as Record<string, unknown> | undefined;
   return [
     `task: ${task.name} (${task.state})`,
     `run: ${run.name || run.id} (${run.status})`,
@@ -18938,6 +19014,7 @@ function renderLoopStatusText(result: Record<string, unknown>): string {
     `notifications: ${notifications.delivered}/${notifications.total} delivered`,
     `worker_unconsumed: ${inbox.worker_unconsumed}`,
     `dispatch_inbox_consumed: ${telemetry.dispatch_inbox_consumed}`,
+    `app_task_dispatch: ${appTaskDispatch?.records_total ?? 0} records ${JSON.stringify(appTaskDispatchTelemetry?.by_event_type ?? {})}${appTaskDispatch?.note ? ` (${appTaskDispatch.note})` : ""}`,
     `failures: ${JSON.stringify(result.failures ?? {})}`,
     `recommendation: ${result.recommendation}`,
   ].join("\n") + "\n";
@@ -19620,6 +19697,7 @@ function disposableWorkerHandoff(taskName: string, runName: string | null, dbPat
     "",
     `You are the worker for task ${taskName}${loopClause}.`,
     "Keep polling your Conveyor worker inbox until there are no items left or the loop reaches max_iterations. Consume the next item now, treat each consumed item as the manager's next instruction, complete the requested work, and report changed files, exact commands run, evidence, and any residual risk.",
+    ...visibleSessionProtocolLines("worker"),
     "After completing or blocking on a consumed item, send the manager a durable Conveyor notification before your final answer. A direct app-thread final answer is not a manager receipt and is not task completion.",
     `Run: ${notifyCommand}`,
     `Then run: ${dispatchCommand}`,
@@ -19741,6 +19819,7 @@ function disposableHeartbeatRecommendations(taskName: string, dbPath: string): D
         `After a successful app-thread send, record it with: ${deliveryReceiptCommands.sent}`,
         `For healthy skipped actions, record: ${deliveryReceiptCommands.skipped}`,
         `For missing-thread blocked actions, record: ${deliveryReceiptCommands.blocked}`,
+        ...visibleSessionProtocolLines("manager"),
         "If an item is consumed, execute only that manager instruction, verify worker claims before recording conclusions, update Conveyor state as appropriate, and produce exactly one next worker task.",
         "If no item is consumed, stop after a one-line idle receipt.",
         "Do not delete, pause, or disable manager or worker heartbeat automation after an idle poll; an idle poll is only a quiet interval.",
@@ -19757,6 +19836,7 @@ function disposableHeartbeatRecommendations(taskName: string, dbPath: string): D
         `Run the worker app heartbeat for task ${taskName}.`,
         `Run: ${workerHeartbeatCommand}`,
         `If the heartbeat output asks for direct inbox polling, run: ${workerInboxCommand}`,
+        ...visibleSessionProtocolLines("worker"),
         "If an item is consumed, execute only that single worker instruction and return exact commands, compact evidence for any completion claim, blockers/residual risk, and exactly one next recommended worker task.",
         "Before your final answer after any consumed item, notify the manager durably; a direct app-thread final answer is not a manager receipt and is not task completion.",
         `Run: ${workerNotifyCommand}`,

@@ -272,6 +272,12 @@ run `conveyor finish-task "$TASK" --require-criteria-audit`, and explicitly
 report heartbeat teardown status. If the task or binding still appears active,
 report that as a control-plane blocker instead of calling the loop complete.
 
+For operator review, the live app or tmux session is the primary transcript.
+Any consumed inbox item must be visible in that same session while the turn is
+running: print `CONVEYOR POLL`, `CONVEYOR RECEIVED`, `WORK`, `CONVEYOR SEND`,
+and `DISPATCH` sections. A one-line idle receipt is acceptable only when no
+item is consumed.
+
 When the manager is running in the Codex app and thread tools are available,
 create fresh same-project manager and worker threads with `create_thread`, set
 readable titles, and pass both ids/titles into `conveyor
@@ -315,6 +321,9 @@ heartbeat policy and emit the exact Codex app heartbeat automation specs plus a
 bounded Dispatch watch command. `app-autopilot stop` records the teardown policy
 decision; it does not itself delete Codex app automations because that action
 belongs to the Codex app automation layer.
+The emitted heartbeat prompts include the visible-session protocol; do not
+replace them with compact prompts that hide consumed work behind SQLite or
+replay.
 Each operator pulse should inspect `app-autopilot status --json`; if
 `plan.quiescence.recommended_action` is `stop_autopilot`, record
 `app-autopilot stop`, pause/delete the app heartbeat automations, and report the

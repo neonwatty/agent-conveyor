@@ -42,10 +42,15 @@ Skill behavior:
    `fork_thread` unless the user explicitly asks to fork or resume this exact
    conversation. If the current thread is explicitly acting as the manager,
    use the current thread as manager and create only the worker thread.
-5. Create the no-tmux binding with `conveyor create-disposable-binding`
-   using `--template` when a template is known, `--adversarial`, a bounded
-   `--max-iterations`, and `--json`. When step 4 produced app thread ids, pass
-   them through `--manager-codex-app-thread-id`,
+5. Create the no-tmux binding with `conveyor create-disposable-binding`.
+   For same-thread Codex app visible-session loops, prefer
+   `--template app_visible_build_loop` for build/test dogfood or a custom
+   `--required-before-continue adversarial_check` gate; do not choose
+   cleanup-gated templates such as `build_then_clear` or
+   `compact_then_continue` unless the setup creates a fresh worker thread per
+   iteration or has a concrete app-session cleanup receipt path. Use
+   `--adversarial`, a bounded `--max-iterations`, and `--json`. When step 4
+   produced app thread ids, pass them through `--manager-codex-app-thread-id`,
    `--manager-codex-app-thread-title`, `--worker-codex-app-thread-id`, and
    `--worker-codex-app-thread-title` so Conveyor can surface app identities in
    `sessions`, `discover`, and setup JSON. If app thread tools are not
@@ -100,6 +105,13 @@ Idle polling rule for Codex app/no-tmux sessions:
   one-iteration Dispatch run before treating the worker pass as reported. A
   direct Codex app final answer is local thread text; it does not notify the
   manager inbox or prove the manager saw the result.
+- The actual manager and worker sessions are the primary human-reviewable
+  transcript. SQLite, replay, and status commands are audit proof, not a
+  substitute for visible work. When a manager or worker consumes an inbox item,
+  it must print live session sections before acting and before final answer:
+  `CONVEYOR POLL`, `CONVEYOR RECEIVED`, `WORK`, `CONVEYOR SEND`, and
+  `DISPATCH`. Idle polls may end with one short `CONVEYOR IDLE` receipt, but
+  consumed work must never be handled silently or only summarized later.
 - Prefer `conveyor app-autopilot start <task> --json` from the operator or
   manager session when setting up a Codex app/no-tmux pair for autonomous
   heartbeat management. It records a durable pair-level heartbeat policy and
