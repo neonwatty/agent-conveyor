@@ -178,6 +178,12 @@ are unavailable, open a separate Codex app worker manually and paste the
 completion or blocker report must go back through the generated
 `enqueue-notify-manager` command and a bounded Dispatch watch tick; a direct
 Codex app final answer is not a durable manager receipt.
+The live manager and worker sessions should also be readable as the primary
+operator transcript: after consuming an inbox item, the consuming session must
+print `CONVEYOR POLL`, `CONVEYOR RECEIVED`, `WORK`, `CONVEYOR SEND`, and
+`DISPATCH` sections while the turn is happening. SQLite/replay/status output is
+audit proof, not a replacement for the live session story. Idle polls may be a
+single `CONVEYOR IDLE` line.
 
 Dispatch is core infrastructure for supervised worker/manager pairs. The
 `pair` workflow starts a detached Dispatch watch process by default so worker
@@ -377,7 +383,10 @@ tmux attach -t codex-live-test
   required to make an idle app thread poll autonomously. The worker handoff and
   worker heartbeat prompt also include the exact durable
   `enqueue-notify-manager` and one-iteration `dispatch --watch` commands that a
-  worker must run after completing or blocking on a consumed item. Those
+  worker must run after completing or blocking on a consumed item. Those prompts
+  require live session transcript blocks for consumed items, so the operator can
+  inspect the actual Codex app sessions and see the same flow the durable inbox
+  later proves. Those
   recommendations also include `wakeup_dispatch_command` and
   `delivery_receipt_commands` for
   app-thread wake recovery. Use them to record sent, skipped, and blocked wake
@@ -385,7 +394,11 @@ tmux attach -t codex-live-test
   completion. The recommendations include a `teardown_policy`: an idle poll is
   only a quiet interval, not a reason to delete or pause heartbeat automation;
   heartbeat teardown belongs to the manager/operator after terminal closeout or
-  explicit operator instruction.
+  explicit operator instruction. For same-thread Codex app visible-session
+  dogfood, prefer `--template app_visible_build_loop` or a custom adversarial
+  gate; reserve cleanup-gated templates such as `build_then_clear` for flows
+  that create a fresh worker context or can record a real cleanup receipt
+  between iterations.
   The optional
   Codex app thread metadata is normally supplied after a Codex app manager has
   used `create_thread` and `set_thread_title`; terminal-only users can omit it
@@ -785,11 +798,15 @@ tmux attach -t codex-live-test
   evidence blocks a manager continuation before worker delivery until matching
   satisfied criterion evidence exists. `ralph-loop-presets` remains as a
   compatibility alias for the current Ralph-loop QA flows. The built-in
+  `app_visible_build_loop` template requires `build_passed` plus structured
+  `adversarial_check` evidence, but no cleanup evidence, so visible Codex app
+  threads can continue without pretending that same-thread context was cleared.
+  The built-in
   `visual_diff_loop` template requires `reference_artifact`,
   `candidate_screenshot`, `visual_diff_report`, `diff_below_threshold`, and
   `adversarial_check` evidence before a manager-requested next visual pass can
-  reach the worker. Quality-oriented templates (`pr_ci_merge_loop`,
-  `test_coverage_loop`, and `visual_diff_loop`) also expose an
+  reach the worker. Quality-oriented templates (`app_visible_build_loop`,
+  `pr_ci_merge_loop`, `test_coverage_loop`, and `visual_diff_loop`) also expose an
   `artifact_requirements["adversarial_check"]` object requiring
   `failure_mode`, `check`, and `result` fields.
 - `loop-status TASK --run RUN [--json]` — Summarize a Ralph-loop run for manager
@@ -812,7 +829,9 @@ thread tools are unavailable, create the binding anyway and paste the returned
 `worker_handoff` prompt into a manually opened worker session. The handoff
 requires a worker to report completion/blockers through
 `enqueue-notify-manager` plus a bounded Dispatch watch run before treating the
-manager as notified.
+manager as notified, and to print the live `CONVEYOR POLL` / `CONVEYOR
+RECEIVED` / `WORK` / `CONVEYOR SEND` / `DISPATCH` transcript in the worker
+session for any consumed item.
 - `enqueue-continue-iteration TASK --loop-run RUN --requested-iteration N` —
   Queue a manager-requested next loop pass for Dispatch. The command refuses
   same/current iteration requests before they become pending queue rows, while

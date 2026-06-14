@@ -1,0 +1,388 @@
+version: 2
+
+goal:
+  title: "Visible Conveyor Sessions"
+  slug: "visible-conveyor-sessions"
+  kind: specific
+  tranche: "Implement and verify live, reviewable manager-worker session output for app-native Conveyor loops."
+  status: done
+  oracle:
+    signal: "Fresh app-native manager-worker dogfood loop where both live Codex sessions visibly show poll, receive, work, send, and dispatch transcript blocks while the work happens."
+    cadence: "after each Worker package and at final audit"
+    final_proof: "Package tests pass, a fresh dogfood run shows live visible transcript in both sessions, and task-level Dispatch receipts match the visible session story."
+  intake:
+    original_request: "Make a detailed /goal plan to fix Conveyor manager-worker sessions so live Codex/tmux sessions show what is going on as if the operator drove them."
+    interpreted_outcome: "Agent Conveyor app-native loops default to a visible-session protocol where the actual manager and worker sessions narrate every consumed inbox item and outgoing Conveyor message live."
+    input_shape: specific
+    audience: "Agent Conveyor operators using Codex app or tmux manager-worker loops"
+    authority: requested
+    proof_type: demo
+    completion_proof: "A fresh dogfood pair proves live visible session output plus matching durable inbox receipts; no after-the-fact replay is required to understand the run."
+    likely_misfire: "Add better replay/status/SQLite summaries while the live manager and worker sessions still look idle, silent, or disconnected."
+    blind_spots_considered:
+      - "Prompt-only enforcement may be cooperative unless generated prompts and tests make the protocol explicit."
+      - "Heartbeat DONT_NOTIFY language can suppress the exact output the operator expects."
+      - "Ralph run summaries can be blind to task-level Dispatch when the run row is already finished."
+      - "tmux push flows and Codex app pull flows need the same human-readable contract."
+      - "A later transcript replay would not satisfy the operator's requirement."
+    existing_plan_facts:
+      - "Do not make after-the-fact replay the primary fix."
+      - "The actual manager and worker agents must print the visible transcript during their own turns."
+      - "Any consumed inbox item must be visible in the consuming session before action and visible again in the final receipt."
+      - "Outgoing enqueue-notify-manager/enqueue-nudge-worker and bounded dispatch results must be shown in the sending session."
+      - "Idle polls may be short, but cannot hide consumed work."
+
+rules:
+  pm_owns_state: true
+  one_active_task: true
+  max_write_workers: 1
+  no_implementation_without_worker_or_pm_task: true
+  no_completion_without_judge_or_pm_audit: true
+  planning_is_not_completion: true
+  queued_required_worker_blocks_completion: true
+  continuous_until_full_outcome: true
+  missing_input_or_credentials_do_not_stop_goal: true
+  preserve_and_validate_existing_plan: true
+  intake_misfire_must_be_audited: true
+  goal_pressure_requires_oracle: true
+  no_completion_on_weak_proof: true
+  slice_policy:
+    max_consecutive_tiny_tasks: 2
+    prefer_vertical_slices: true
+    judge_picks_largest_safe_slice: true
+    worker_completes_whole_slice: true
+
+agents:
+  scout: bundled_not_installed
+  worker: bundled_not_installed
+  judge: bundled_not_installed
+
+visual_board:
+  selected: local
+  local:
+    status: live
+    url: "http://goalbuddy.localhost:41737/visible-conveyor-sessions/"
+    command: "npx goalbuddy board docs/goals/visible-conveyor-sessions"
+
+active_task: null
+
+tasks:
+  - id: T001
+    type: scout
+    assignee: Scout
+    status: done
+    reasoning_hint: medium
+    objective: "Map every Conveyor prompt/status surface involved in app-native manager-worker inbox polling, receipt sending, heartbeat wakeups, and Ralph loop summaries."
+    inputs:
+      - "skills/manage-codex-workers/SKILL.md"
+      - "src/cli/typescript-runtime.ts"
+      - "src/runtime/app-autonomy.ts"
+      - "src/runtime/dispatch.ts"
+      - "src/cli/typescript-runtime.test.ts"
+      - "README.md"
+      - "docs/manager-recipes.md"
+      - "Recent Deckchecker dogfood evidence from task deckchecker-issue-1181-ralph-visible"
+    constraints:
+      - "Read-only."
+      - "Do not edit implementation files."
+      - "Preserve the distinction between live session output and after-the-fact replay."
+      - "Prefer exact file/function/test references over broad descriptions."
+    expected_output:
+      - "Prompt surfaces that must include the visible-session protocol."
+      - "Status surfaces that currently mislead operators."
+      - "Existing tests to extend."
+      - "Recommended first Worker package with allowed_files, verify commands, and stop conditions."
+    receipt:
+      result: done
+      note: "notes/T001-scout-map.md"
+      summary: "Mapped app-native Conveyor prompt/status surfaces. Transport works through pull-required inboxes; the first fix should be generated prompt protocol, not replay. Status repair is a separate package because loop-status is deliberately run-scoped."
+      evidence:
+        - "src/runtime/app-autonomy.ts:509"
+        - "src/cli/typescript-runtime.ts:19612"
+        - "src/cli/typescript-runtime.ts:19700"
+        - "src/cli/typescript-runtime.ts:18818"
+        - "src/cli/typescript-runtime.test.ts:2684"
+        - "src/cli/typescript-runtime.test.ts:809"
+      spawned_tasks:
+        - T003
+        - T004
+
+  - id: T002
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Choose the largest safe first implementation package that makes live manager/worker sessions visibly show inbox communication while preserving durable Conveyor semantics."
+    inputs:
+      - "T001 receipt"
+      - "Goal oracle"
+    constraints:
+      - "Do not implement."
+      - "Reject package scopes that only improve replay/status after the fact."
+      - "Require tests that inspect generated prompts or protocol text."
+    expected_output:
+      - "Decision."
+      - "Exact Worker objective."
+      - "allowed_files."
+      - "verify commands."
+      - "stop_if conditions."
+      - "Deferred follow-up tasks if status-surface fixes need a second package."
+    receipt:
+      result: done
+      decision: approved
+      full_outcome_complete: false
+      summary: "Approve T003 as the first implementation package. It directly moves the oracle by changing generated live-session prompts, while deferring run/status-summary repair to T004."
+      rationale:
+        - "Scout found the transport/inbox path already works; the missing behavior is generated prompt protocol visibility."
+        - "The mapped files and tests can prove generated app-native handoff and heartbeat prompts contain required live transcript sections."
+        - "Changing status surfaces now would increase compatibility risk and does not by itself satisfy the live-session oracle."
+      worker_objective: "Implement a visible-session protocol across generated app-native manager/worker handoff and heartbeat prompts so consumed inbox items cannot be handled silently."
+      allowed_files:
+        - "skills/manage-codex-workers/SKILL.md"
+        - "src/cli/typescript-runtime.ts"
+        - "src/runtime/app-autonomy.ts"
+        - "src/cli/typescript-runtime.test.ts"
+        - "README.md"
+        - "docs/manager-recipes.md"
+        - "scripts/package-smoke"
+      verify:
+        - "pnpm test -- src/cli/typescript-runtime.test.ts"
+        - "pnpm test"
+        - "npm pack --dry-run"
+        - "git diff --check"
+      stop_if:
+        - "Need files outside allowed_files."
+        - "The implementation becomes after-the-fact replay rather than live prompt protocol."
+        - "Tests cannot assert generated prompt content."
+        - "Verification fails twice with different unexplained failures."
+
+  - id: T003
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "Implement the visible-session protocol across generated manager/worker handoff and heartbeat prompts, as selected by Judge."
+    allowed_files:
+      - "skills/manage-codex-workers/SKILL.md"
+      - "src/cli/typescript-runtime.ts"
+      - "src/runtime/app-autonomy.ts"
+      - "src/cli/typescript-runtime.test.ts"
+      - "README.md"
+      - "docs/manager-recipes.md"
+      - "scripts/package-smoke"
+    verify:
+      - "pnpm test -- src/cli/typescript-runtime.test.ts"
+      - "pnpm test"
+      - "npm pack --dry-run"
+      - "git diff --check"
+    stop_if:
+      - "Need files outside allowed_files."
+      - "Generated prompt ownership is unclear after Scout/Judge."
+      - "Tests cannot prove consumed inbox items must be visibly rendered."
+      - "Verification fails twice with different unexplained failures."
+    receipt:
+      result: done
+      changed_files:
+        - "src/runtime/app-autonomy.ts"
+        - "src/cli/typescript-runtime.ts"
+        - "src/cli/typescript-runtime.test.ts"
+        - "skills/manage-codex-workers/SKILL.md"
+        - "README.md"
+        - "docs/manager-recipes.md"
+      commands:
+        - cmd: "npm test -- src/cli/typescript-runtime.test.ts"
+          status: pass
+        - cmd: "git diff --check"
+          status: pass
+        - cmd: "npm test"
+          status: pass
+        - cmd: "npm pack --dry-run"
+          status: pass
+      summary: "Generated app-native manager/worker handoff and heartbeat prompts now include a shared visible-session protocol requiring CONVEYOR POLL, CONVEYOR RECEIVED, WORK, CONVEYOR SEND, and DISPATCH live transcript sections for consumed inbox items. Operator docs and the manage-codex-workers skill now state that live app/tmux sessions are primary review surfaces, with SQLite/replay/status as audit proof."
+
+  - id: T004
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "Repair operator status surfaces so app-native task-level Dispatch traffic is visible when Ralph run status is finished or blind."
+    allowed_files:
+      - "src/cli/typescript-runtime.ts"
+      - "src/runtime/app-autonomy.ts"
+      - "src/runtime/commands.ts"
+      - "src/cli/typescript-runtime.test.ts"
+      - "README.md"
+      - "docs/qa/ralph-loop-operator-guide.md"
+    verify:
+      - "pnpm test -- src/cli/typescript-runtime.test.ts"
+      - "pnpm test"
+      - "git diff --check"
+    stop_if:
+      - "T002 defers this as unnecessary for the first tranche."
+      - "Need schema migration or broad dashboard changes not approved by Judge."
+      - "Status changes risk breaking existing Ralph loop tests without a clear compatibility plan."
+    receipt:
+      result: done
+      changed_files:
+        - "src/cli/typescript-runtime.ts"
+        - "src/cli/typescript-runtime.test.ts"
+      commands:
+        - cmd: "npm test -- src/cli/typescript-runtime.test.ts"
+          status: pass
+        - cmd: "pnpm test -- src/cli/typescript-runtime.test.ts"
+          status: pass
+        - cmd: "pnpm test"
+          status: pass
+        - cmd: "git diff --check"
+          status: pass
+      summary: "loop-status now includes an additive app_task_dispatch section with task-level commands, routed notifications, and app Dispatch telemetry so a run-scoped zero summary no longer hides active app-native manager-worker traffic. Added a blind-run regression proving run-scoped commands, notifications, and telemetry can be zero while app_task_dispatch exposes task-level activity and a warning note."
+
+  - id: T005
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "Run package-level verification, package smoke checks, reinstall locally if needed, and document the visible-session protocol for operators."
+    allowed_files:
+      - "README.md"
+      - "docs/manager-recipes.md"
+      - "docs/qa/ralph-loop-operator-guide.md"
+      - "scripts/package-smoke"
+      - "package.json"
+      - "pnpm-lock.yaml"
+    verify:
+      - "pnpm test"
+      - "scripts/package-smoke"
+      - "npm pack --dry-run"
+      - "git diff --check"
+    stop_if:
+      - "Implementation packages are not complete."
+      - "Package smoke exposes a behavioral regression requiring code changes outside allowed_files."
+      - "Local reinstall requires publishing or credentials."
+    receipt:
+      result: done
+      changed_files:
+        - "README.md"
+        - "docs/manager-recipes.md"
+      commands:
+        - cmd: "pnpm test"
+          status: pass
+        - cmd: "scripts/package-smoke"
+          status: pass
+        - cmd: "npm pack --dry-run"
+          status: pass
+        - cmd: "git diff --check"
+          status: pass
+      summary: "Package-level verification passed. package-smoke rebuilt the CLI, audited the tarball for zero Python runtime/bridge files, installed the packed package into a temporary prefix, validated bundled skills, and exercised app loop/autopilot commands. npm pack --dry-run reported agent-conveyor@0.1.13 with 91 files and the updated docs/skills/dist surfaces included."
+
+  - id: T006
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Dogfood the fix with a fresh app-native manager-worker pair and judge whether the actual live sessions satisfy the goal oracle."
+    inputs:
+      - "Implementation receipts."
+      - "Fresh dogfood manager thread transcript."
+      - "Fresh dogfood worker thread transcript."
+      - "Conveyor task-level command and routed notification receipts."
+      - "App-autopilot/status receipts."
+    constraints:
+      - "Do not rely on replay injected after the fact."
+      - "Reject completion if the live sessions do not clearly show received instructions, work progress, outgoing messages, and dispatch results."
+      - "Reject completion if only SQLite/replay proves communication."
+    expected_output:
+      - "dogfood_passed: true | false"
+      - "live session evidence summary."
+      - "durable receipt cross-check."
+      - "missing behavior or next Worker task if not passed."
+    receipt:
+      result: done
+      decision: pass
+      dogfood_passed: true
+      summary: "Fresh Codex app manager/worker dogfood passed: both live sessions visibly printed the generated Conveyor protocol while consuming and acting on real inbox items, and durable Conveyor receipts matched the session story."
+      live_session_evidence:
+        - "Manager thread 019ec81f-6e2a-7bf0-ab7c-3e9a1b4ceacc (Dogfood Visible Conveyor Manager) printed CONVEYOR POLL before app-heartbeat and manager-inbox, CONVEYOR RECEIVED for command-9394985f-c61f-42b0-8c68-e78f3c8ecd64, WORK updates for verification/decision/closeout, DISPATCH for closeout command-500ec93d-2408-4d95-953a-03dd499799bc, and a final receipt with commands/evidence/next state."
+        - "Worker thread 019ec81f-8754-7cf0-a646-e04bc0d6f824 (Dogfood Visible Conveyor Worker) printed CONVEYOR POLL, CONVEYOR RECEIVED for command-31ad803f-abdd-4064-aefd-06d200907542, WORK updates while inspecting generated prompt/docs/test surfaces, CONVEYOR SEND for notify-manager, DISPATCH for the routed notification, and a final receipt."
+      durable_receipts:
+        - "Dogfood DB: /Users/neonwatty/Desktop/codex-terminal-manager/.codex-workers/visible-session-dogfood.db"
+        - "Task visible-session-dogfood reached state done at 2026-06-14T21:57:14.179Z with finish_task_succeeded."
+        - "Worker nudge command-31ad803f-abdd-4064-aefd-06d200907542 routed notification 1, consumed by visible-dogfood-worker."
+        - "Worker result command-9394985f-c61f-42b0-8c68-e78f3c8ecd64 routed notification 2, consumed by visible-dogfood-manager."
+        - "Manager closeout command-500ec93d-2408-4d95-953a-03dd499799bc succeeded; app-loop-status returned no active binding for visible-session-dogfood."
+      residual_risks:
+        - "Worker needed a continuation nudge after a visible WORK update stalled and no local test process was active; visibility improved, but autonomous liveness still depends on configured pulses."
+        - "A duplicate final worker notification command-4c18144e-2bc3-4d5e-9457-d460763d0921 remained delivered/unconsumed after the manager had already closed the task."
+        - "finish-task result emitted a manager_decision warning missing_decision_id while also creating final_decision_id 2; task closeout still succeeded and no active binding remained."
+
+  - id: T999
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Audit whether the visible-session Conveyor tranche is complete."
+    inputs:
+      - "All done task receipts."
+      - "Latest package verification."
+      - "Fresh dogfood live-session transcripts."
+      - "Task-level Dispatch receipts."
+      - "Current dirty diff."
+    constraints:
+      - "Do not implement."
+      - "Reject completion if any required Worker task remains queued or active."
+      - "Reject completion if the proof depends on after-the-fact replay."
+      - "Reject completion if the actual manager and worker sessions still look idle or disconnected during consumed work."
+    expected_output:
+      - "complete | not_complete."
+      - "full_outcome_complete: true | false."
+      - "missing evidence."
+      - "next task if not complete."
+    receipt:
+      result: done
+      decision: complete
+      full_outcome_complete: true
+      summary: "Visible Conveyor Sessions tranche is complete. The implementation changed generated app-native prompts rather than adding after-the-fact replay, status output now exposes task-level app Dispatch when run-scoped views are blind, package verification passed, and a fresh Codex app dogfood pair showed live manager/worker transcripts during consumed work."
+      evidence:
+        - "src/runtime/app-autonomy.ts exports visibleSessionProtocolLines and app heartbeat prompts include the live transcript protocol."
+        - "src/cli/typescript-runtime.ts includes the protocol in disposable worker handoffs and manager/worker heartbeat recommendations."
+        - "src/cli/typescript-runtime.ts adds app_task_dispatch to loop status so task-level app Dispatch is visible when a run is blind."
+        - "src/cli/typescript-runtime.test.ts asserts generated prompts contain CONVEYOR POLL, CONVEYOR RECEIVED, WORK, CONVEYOR SEND, and DISPATCH and covers blind-run app_task_dispatch output."
+        - "skills/manage-codex-workers/SKILL.md, README.md, and docs/manager-recipes.md now state the live app/tmux session is the primary human-reviewable transcript."
+        - "Dogfood manager thread 019ec81f-6e2a-7bf0-ab7c-3e9a1b4ceacc and worker thread 019ec81f-8754-7cf0-a646-e04bc0d6f824 showed the protocol live while durable notifications 1 and 2 were consumed."
+        - "conveyor audit visible-session-dogfood shows task state done and finish_task_succeeded; app-loop-status reports no active binding."
+      verification:
+        - cmd: "npm test -- src/cli/typescript-runtime.test.ts"
+          status: pass
+          summary: "178/178 tests passed."
+        - cmd: "pnpm test -- src/cli/typescript-runtime.test.ts"
+          status: pass
+          summary: "178/178 tests passed."
+        - cmd: "pnpm test"
+          status: pass
+          summary: "178/178 tests passed."
+        - cmd: "git diff --check"
+          status: pass
+        - cmd: "scripts/package-smoke"
+          status: pass
+        - cmd: "npm pack --dry-run"
+          status: pass
+          summary: "Dry-run package was agent-conveyor@0.1.13 with 91 files."
+      disproof_attempt:
+        failure_mode: "Generated prompt strings exist but live sessions still look idle/disconnected or the control plane remains active after closeout."
+        evidence: "The dogfood manager and worker Codex threads showed live CONVEYOR sections for consumed commands, Conveyor audit showed consumed routed notifications and task state done, and app-loop-status reported no active binding."
+      residual_risks:
+        - "The dogfood found cooperative stall recovery still benefits from operator/heartbeat nudges; this does not block the visible-session tranche because the session made the stall visible."
+        - "Duplicate final worker notification and finish-task missing_decision_id warning are follow-up polish, not blockers for the live transcript oracle."
+
+checks:
+  dirty_fingerprint: unknown
+  last_verification:
+    result: pass
+    task: T999
+    commands:
+      - "npm test -- src/cli/typescript-runtime.test.ts"
+      - "pnpm test -- src/cli/typescript-runtime.test.ts"
+      - "pnpm test"
+      - "git diff --check"
+      - "scripts/package-smoke"
+      - "npm pack --dry-run"

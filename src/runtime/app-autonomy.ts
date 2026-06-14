@@ -474,6 +474,22 @@ function workerNotifyDispatchCommand(dbPath?: string | null): string {
   return `conveyor dispatch --watch --watch-iterations 1 --interval 2 --dispatcher-id dispatch-local${pathFlag(dbPath ?? null)} --json`;
 }
 
+export function visibleSessionProtocolLines(role: AppLoopRole): string[] {
+  const outgoing = role === "worker"
+    ? "Before enqueueing `enqueue-notify-manager`, print `CONVEYOR SEND` with target manager, result summary, changed files, commands run, evidence, residual risk, and the exact command you are about to run."
+    : "Before enqueueing any worker task or wake, print `CONVEYOR SEND` with target worker, task summary, evidence requirement, and the exact command you are about to run.";
+  return [
+    "Visible session protocol, required for operator review; this must be live output in this session, not a later replay:",
+    "1. Before polling, print `CONVEYOR POLL` with role, task, and the inbox or heartbeat command you are about to run.",
+    "2. If no item is consumed, print one short `CONVEYOR IDLE` receipt and stop.",
+    "3. If an item is consumed, before acting print `CONVEYOR RECEIVED` with command id, correlation id, source role, and a concise instruction summary.",
+    "4. During non-idle work, print `WORK` updates before and after meaningful commands or decisions, including files inspected and evidence gathered.",
+    outgoing,
+    "6. After the bounded Dispatch command or app wake delivery receipt, print `DISPATCH` with processed count/state or the exact blocker.",
+    "7. The final answer for any consumed item must repeat the received command id, action taken, files changed or none, commands run, durable send result, Dispatch result, and next state.",
+  ];
+}
+
 function roleStatus(options: {
   dbPath: string | null;
   heartbeatStaleSeconds: number;
@@ -534,6 +550,7 @@ function roleWakeup(
       `This is the ${role} heartbeat wakeup for task ${taskName}.`,
       `Run: ${pollCommand}`,
       `If the heartbeat result asks for direct inbox polling, run: ${directInboxCommand}`,
+      ...visibleSessionProtocolLines(role),
       roleInstruction,
       ...durableWorkerNotification,
       "If no item is consumed, stop after a one-line idle receipt.",

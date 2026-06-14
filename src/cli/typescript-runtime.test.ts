@@ -859,6 +859,13 @@ test("TypeScript runtime app-autopilot start emits automation specs and durable 
     ]);
     assert.equal(output.plan.automation_specs[0].rrule, "FREQ=MINUTELY;INTERVAL=2");
     assert.match(output.plan.automation_specs[0].prompt, /conveyor app-heartbeat 'app-loop-task' --role manager/);
+    assert.match(output.plan.automation_specs[0].prompt, /Visible session protocol, required for operator review/);
+    assert.match(output.plan.automation_specs[0].prompt, /CONVEYOR RECEIVED/);
+    assert.match(output.plan.automation_specs[0].prompt, /CONVEYOR SEND/);
+    assert.match(output.plan.automation_specs[1].prompt, /conveyor app-heartbeat 'app-loop-task' --role worker/);
+    assert.match(output.plan.automation_specs[1].prompt, /Visible session protocol, required for operator review/);
+    assert.match(output.plan.automation_specs[1].prompt, /CONVEYOR RECEIVED/);
+    assert.match(output.plan.automation_specs[1].prompt, /DISPATCH/);
     assert.equal(output.receipt.event_type, "app_autopilot_started");
     assert.equal(output.receipt.recorded_at, "2026-06-11T12:00:00Z");
 
@@ -1880,7 +1887,15 @@ test("TypeScript runtime handles loop templates presets and triggers by default"
       env: {},
     });
     assert.equal(listTemplates.exitCode, 0, listTemplates.stderr);
-    const templateList = JSON.parse(listTemplates.stdout ?? "{}") as { templates: Array<{ name: string }> };
+    const templateList = JSON.parse(listTemplates.stdout ?? "{}") as { templates: Array<{
+      cleanup_policy: string;
+      name: string;
+      required_before_continue: string[];
+    }> };
+    const appVisibleTemplate = templateList.templates.find((template) => template.name === "app_visible_build_loop");
+    assert.ok(appVisibleTemplate);
+    assert.equal(appVisibleTemplate.cleanup_policy, "off");
+    assert.deepEqual(appVisibleTemplate.required_before_continue, ["build_passed", "adversarial_check"]);
     assert.ok(templateList.templates.some((template) => template.name === "visual_diff_loop"));
 
     const badListArg = runTypescriptRuntimeCommand({
@@ -2681,6 +2696,110 @@ test("TypeScript runtime handles bind and unbind by default", () => {
   }
 });
 
+test("TypeScript runtime loop-status exposes task-level app Dispatch when requested run is blind", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-loop-status-app-dispatch."));
+  try {
+    const dbPath = join(root, "workerctl.db");
+    const database = openDatabaseSync(dbPath);
+    try {
+      initializeDatabaseSync(database);
+      createTaskSync(database, {
+        goal: "Inspect app-native task traffic.",
+        name: "app-dispatch-status-task",
+        now: "2026-05-24T10:00:00Z",
+        taskId: "task-app-dispatch-status",
+      });
+      insertRalphLoopRun(database, {
+        currentIteration: 1,
+        maxIterations: 3,
+        requiredBeforeContinue: [],
+        runId: "run-app-dispatch-blind",
+        runName: "blind-run",
+        taskId: "task-app-dispatch-status",
+      });
+      createCommandSync(database, {
+        commandId: "command-app-dispatch-task",
+        commandType: "continue_iteration",
+        correlationId: "app-dispatch-command",
+        payload: { app_loop: { task: "app-dispatch-status-task" } },
+        taskId: "task-app-dispatch-status",
+      });
+      database.prepare(`
+        insert into sessions(id, name, role, identity_token, cwd, registered_at, state)
+        values
+          ('session-worker-app-dispatch-status', 'app-dispatch-worker', 'worker', 'token-worker-app-dispatch-status', '/repo', '2026-05-24T10:00:00Z', 'active'),
+          ('session-manager-app-dispatch-status', 'app-dispatch-manager', 'manager', 'token-manager-app-dispatch-status', '/repo', '2026-05-24T10:00:00Z', 'active')
+      `).run();
+      database.prepare(`
+        insert into bindings(id, task_id, worker_session_id, manager_session_id, state, created_at)
+        values ('binding-app-dispatch-status', 'task-app-dispatch-status', 'session-worker-app-dispatch-status', 'session-manager-app-dispatch-status', 'active', '2026-05-24T10:00:00Z')
+      `).run();
+      database.prepare(`
+        insert into routed_notifications(
+          task_id, binding_id, correlation_id, source_session_id, target_session_id,
+          signal_type, dedupe_key, created_at, state, payload_json, delivery_mode
+        )
+        values (?, ?, ?, ?, ?, 'worker_task', ?, ?, 'delivered', ?, 'pull_required')
+      `).run(
+        "task-app-dispatch-status",
+        "binding-app-dispatch-status",
+        "app-dispatch-notification",
+        "session-manager-app-dispatch-status",
+        "session-worker-app-dispatch-status",
+        "app-dispatch-notification",
+        "2026-05-24T10:01:00Z",
+        JSON.stringify({ app_loop: { task: "app-dispatch-status-task" } }),
+      );
+      database.prepare(`
+        insert into telemetry_events(
+          id, run_id, task_id, timestamp, actor, event_type, severity, summary, correlation_json, attributes_json
+        )
+        values ('telemetry-app-dispatch-consumed', null, 'task-app-dispatch-status', '2026-05-24T10:02:00Z', 'dispatch', 'dispatch_inbox_consumed', 'info', 'Task-level app inbox item consumed.', '{}', '{}')
+      `).run();
+    } finally {
+      database.close();
+    }
+
+    const result = runTypescriptRuntimeCommand({
+      args: ["loop-status", "app-dispatch-status-task", "--run", "blind-run", "--path", dbPath, "--json"],
+      env: {},
+    });
+    assert.equal(result.exitCode, 0, result.stderr);
+    const payload = JSON.parse(result.stdout ?? "{}") as {
+      app_task_dispatch: {
+        commands: { total: number };
+        note: string | null;
+        notifications: { delivered_unconsumed: number; total: number };
+        records_total: number;
+        telemetry: { command_created: number; dispatch_inbox_consumed: number; total: number };
+      };
+      commands: { total: number };
+      notifications: { total: number };
+      telemetry: { total: number };
+    };
+    assert.equal(payload.commands.total, 0);
+    assert.equal(payload.notifications.total, 0);
+    assert.equal(payload.telemetry.total, 0);
+    assert.equal(payload.app_task_dispatch.commands.total, 1);
+    assert.equal(payload.app_task_dispatch.notifications.total, 1);
+    assert.equal(payload.app_task_dispatch.notifications.delivered_unconsumed, 1);
+    assert.equal(payload.app_task_dispatch.telemetry.command_created, 1);
+    assert.equal(payload.app_task_dispatch.telemetry.dispatch_inbox_consumed, 1);
+    assert.equal(payload.app_task_dispatch.records_total, 4);
+    assert.match(payload.app_task_dispatch.note ?? "", /task-level app Dispatch records exist/);
+
+    const textResult = runTypescriptRuntimeCommand({
+      args: ["loop-status", "app-dispatch-status-task", "--run", "blind-run", "--path", dbPath],
+      env: {},
+    });
+    assert.equal(textResult.exitCode, 0, textResult.stderr);
+    assert.match(textResult.stdout ?? "", /app_task_dispatch: 4 records/);
+    assert.match(textResult.stdout ?? "", /task-level app Dispatch records exist/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("TypeScript runtime handles no-tmux create-disposable-binding by default", () => {
   const root = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-disposable."));
   try {
@@ -2821,12 +2940,22 @@ test("TypeScript runtime handles no-tmux create-disposable-binding by default", 
     assert.ok(payload.heartbeat_recommendations.worker.prompt.includes("stop after a one-line idle receipt"));
     assert.ok(payload.heartbeat_recommendations.worker.prompt.includes("Run the worker app heartbeat"));
     assert.ok(payload.heartbeat_recommendations.worker.prompt.includes("compact evidence for any completion claim"));
+    assert.ok(payload.heartbeat_recommendations.worker.prompt.includes("Visible session protocol, required for operator review"));
+    assert.ok(payload.heartbeat_recommendations.worker.prompt.includes("CONVEYOR POLL"));
+    assert.ok(payload.heartbeat_recommendations.worker.prompt.includes("CONVEYOR RECEIVED"));
+    assert.ok(payload.heartbeat_recommendations.worker.prompt.includes("CONVEYOR SEND"));
+    assert.ok(payload.heartbeat_recommendations.worker.prompt.includes("DISPATCH"));
     assert.ok(payload.heartbeat_recommendations.worker.prompt.includes("enqueue-notify-manager 'real-slice'"));
     assert.ok(payload.heartbeat_recommendations.worker.prompt.includes("dispatch --watch --watch-iterations 1 --interval 2 --dispatcher-id dispatch-local"));
     assert.ok(payload.heartbeat_recommendations.worker.prompt.includes("direct app-thread final answer is not a manager receipt"));
     assert.ok(payload.heartbeat_recommendations.worker.prompt.includes("Do not delete, pause, or disable worker heartbeat automation after an idle poll"));
     assert.ok(payload.heartbeat_recommendations.manager.prompt.includes("produce exactly one next worker task"));
     assert.ok(payload.heartbeat_recommendations.manager.prompt.includes("Run the manager app heartbeat"));
+    assert.ok(payload.heartbeat_recommendations.manager.prompt.includes("Visible session protocol, required for operator review"));
+    assert.ok(payload.heartbeat_recommendations.manager.prompt.includes("CONVEYOR POLL"));
+    assert.ok(payload.heartbeat_recommendations.manager.prompt.includes("CONVEYOR RECEIVED"));
+    assert.ok(payload.heartbeat_recommendations.manager.prompt.includes("WORK"));
+    assert.ok(payload.heartbeat_recommendations.manager.prompt.includes("CONVEYOR SEND"));
     assert.ok(payload.heartbeat_recommendations.manager.prompt.includes("app-wakeup-dispatch"));
     assert.ok(payload.heartbeat_recommendations.manager.prompt.includes("send_ready=true"));
     assert.ok(payload.heartbeat_recommendations.manager.prompt.includes("direct app-thread delivery is not task completion"));
@@ -2848,6 +2977,11 @@ test("TypeScript runtime handles no-tmux create-disposable-binding by default", 
     assert.ok(payload.replay_commands.some((command) => command.includes("worker-inbox")));
     assert.ok(payload.replay_commands.some((command) => command.includes("loop-status")));
     assert.ok(payload.worker_handoff.includes("Keep polling your Conveyor worker inbox"));
+    assert.ok(payload.worker_handoff.includes("Visible session protocol, required for operator review"));
+    assert.ok(payload.worker_handoff.includes("CONVEYOR POLL"));
+    assert.ok(payload.worker_handoff.includes("CONVEYOR RECEIVED"));
+    assert.ok(payload.worker_handoff.includes("CONVEYOR SEND"));
+    assert.ok(payload.worker_handoff.includes("DISPATCH"));
     assert.ok(payload.worker_handoff.includes("enqueue-notify-manager 'real-slice'"));
     assert.ok(payload.worker_handoff.includes("dispatch --watch --watch-iterations 1 --interval 2 --dispatcher-id dispatch-local"));
     assert.ok(payload.worker_handoff.includes("direct app-thread final answer is not a manager receipt"));
@@ -3003,6 +3137,47 @@ test("TypeScript runtime handles no-tmux create-disposable-binding by default", 
     assert.ok("visual_diff_report" in templatedPayload.run.metadata.artifact_requirements);
     assert.ok(templatedPayload.replay_commands[0].includes("--template"));
     assert.ok(templatedPayload.replay_commands[0].includes("visual_diff_loop"));
+    const appVisible = runTypescriptRuntimeCommand({
+      args: [
+        "create-disposable-binding",
+        "app-visible-slice",
+        "--worker",
+        "app-visible-worker",
+        "--manager",
+        "app-visible-manager",
+        "--worker-codex-app-thread-id",
+        "app-visible-worker-thread",
+        "--manager-codex-app-thread-id",
+        "app-visible-manager-thread",
+        "--template",
+        "app_visible_build_loop",
+        "--run-name",
+        "app-visible-run",
+        "--path",
+        dbPath,
+        "--json",
+      ],
+      cwd: root,
+      env: {},
+    });
+    assert.equal(appVisible.exitCode, 0, appVisible.stderr);
+    const appVisiblePayload = JSON.parse(appVisible.stdout ?? "{}") as {
+      run: {
+        metadata: {
+          cleanup_policy: string;
+          recommended_tools: string[];
+          required_before_continue: string[];
+          tags: string[];
+          template: string;
+        };
+      };
+    };
+    assert.equal(appVisiblePayload.run.metadata.template, "app_visible_build_loop");
+    assert.equal(appVisiblePayload.run.metadata.cleanup_policy, "off");
+    assert.deepEqual(appVisiblePayload.run.metadata.required_before_continue, ["build_passed", "adversarial_check"]);
+    assert.deepEqual(appVisiblePayload.run.metadata.recommended_tools, ["verification.run_tests"]);
+    assert.deepEqual(appVisiblePayload.run.metadata.tags, ["build", "codex_app", "visible_session"]);
+    assert.equal(appVisiblePayload.run.metadata.required_before_continue.includes("cleanup"), false);
     const unknownTemplate = runTypescriptRuntimeCommand({
       args: ["create-disposable-binding", "unknown-template", "--template", "not_real", "--path", dbPath],
       cwd: root,
