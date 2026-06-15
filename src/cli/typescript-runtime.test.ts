@@ -245,10 +245,12 @@ test("TypeScript runtime handles manager recipes by default", () => {
     "goalbuddy-conveyor",
     "nudge-whats-next",
     "pr-ci-merge-ralph-loop",
+    "ship-it-loop",
     "test-coverage-loop",
     "ux-polish-loop",
   ]);
   assert.equal(listedPayload.recipes.find((recipe) => recipe.name === "test-coverage-loop")?.loop_template, "test_coverage_loop");
+  assert.equal(listedPayload.recipes.find((recipe) => recipe.name === "ship-it-loop")?.loop_template, "ship_it_loop");
 
   const shown = runTypescriptRuntimeCommand({
     args: ["manager-recipes", "--show", "goalbuddy", "--json"],
@@ -283,6 +285,23 @@ test("TypeScript runtime handles manager recipes by default", () => {
   assert.match(shownPayload.recipe.locked_summary_template, /Selected recipe: GoalBuddy Conveyor/);
   assert.match(shownPayload.recipe.locked_summary_template, /Final report:/);
   assert.doesNotMatch(shownPayload.recipe.manager_config_command.join(" "), /final report/i);
+
+  const shipIt = runTypescriptRuntimeCommand({
+    args: ["manager-recipes", "--show", "ship it", "--json"],
+    env: {},
+  });
+  assert.equal(shipIt.exitCode, 0, shipIt.stderr);
+  const shipItPayload = JSON.parse(shipIt.stdout ?? "{}") as {
+    recipe: {
+      evidence_gates: string[];
+      manager_config_command: string[];
+      permissions: string[];
+    };
+  };
+  assert.ok(shipItPayload.recipe.permissions.includes("repo.push_branch"));
+  assert.ok(shipItPayload.recipe.permissions.includes("repo.resolve_conflicts"));
+  assert.ok(shipItPayload.recipe.manager_config_command.includes("repo.monitor_ci"));
+  assert.ok(shipItPayload.recipe.evidence_gates.includes("manager_merge_decision"));
 
   const text = runTypescriptRuntimeCommand({
     args: ["manager-recipes", "--show", "ux polish"],
@@ -1976,6 +1995,19 @@ test("TypeScript runtime handles loop templates presets and triggers by default"
     assert.equal(appVisibleTemplate.cleanup_policy, "off");
     assert.deepEqual(appVisibleTemplate.required_before_continue, ["build_passed", "adversarial_check"]);
     assert.ok(templateList.templates.some((template) => template.name === "visual_diff_loop"));
+    const shipItTemplate = templateList.templates.find((template) => template.name === "ship_it_loop");
+    assert.ok(shipItTemplate);
+    assert.deepEqual(shipItTemplate.required_before_continue, [
+      "branch_ready",
+      "branch_pushed",
+      "pr_url",
+      "ci_green",
+      "mergeability_clean",
+      "manager_merge_decision",
+      "merge",
+      "post_merge_verification",
+      "adversarial_check",
+    ]);
 
     const badListArg = runTypescriptRuntimeCommand({
       args: ["loop-templates", "--list", "extra", "--json"],
@@ -2299,6 +2331,41 @@ test("TypeScript runtime qa-run writes deterministic receipts and rejects dirty 
     assert.deepEqual((buildOnly.dispatch as Record<string, unknown>).missing_evidence, ["cleanup"]);
     const buildAllowed = checkByName(buildClear, "build_clear_retry_delivers_after_build_and_cleanup_evidence");
     assert.equal(buildAllowed.worker_inbox_count, 1);
+
+    const shipIt = runScenario("ship-it-loop").receipt;
+    assert.equal(shipIt.template, "ship_it_loop");
+    assert.equal(existsSync(shipIt.artifacts.conflict_receipt), true);
+    const pushDenied = checkByName(shipIt, "ship_it_push_branch_requires_repo_push_branch");
+    assert.equal((pushDenied.dispatch as Record<string, unknown>).state, "failed");
+    const pushAllowed = checkByName(shipIt, "ship_it_push_branch_delivers_after_permission");
+    assert.equal(pushAllowed.worker_inbox_count, 1);
+    const prDenied = checkByName(shipIt, "ship_it_open_pr_requires_repo_open_pr");
+    assert.equal((prDenied.dispatch as Record<string, unknown>).state, "failed");
+    const mergeDenied = checkByName(shipIt, "ship_it_merge_requires_repo_merge_green_pr");
+    assert.equal((mergeDenied.dispatch as Record<string, unknown>).state, "failed");
+    const lifecycleMissing = checkByName(shipIt, "ship_it_lifecycle_blocks_before_any_evidence");
+    assert.deepEqual((lifecycleMissing.dispatch as Record<string, unknown>).missing_evidence, [
+      "branch_ready",
+      "branch_pushed",
+      "pr_url",
+      "ci_green",
+      "mergeability_clean",
+      "manager_merge_decision",
+      "merge",
+      "post_merge_verification",
+      "adversarial_check",
+    ]);
+    const partialShipIt = checkByName(shipIt, "ship_it_lifecycle_blocks_before_mergeability_and_manager_decision");
+    assert.deepEqual((partialShipIt.dispatch as Record<string, unknown>).missing_evidence, [
+      "mergeability_clean",
+      "manager_merge_decision",
+      "merge",
+      "post_merge_verification",
+      "adversarial_check",
+    ]);
+    assert.equal(checkByName(shipIt, "ship_it_conflict_retry_blocks_after_limit").status, "passed");
+    const shipItAllowed = checkByName(shipIt, "ship_it_lifecycle_retry_delivers_after_all_evidence");
+    assert.equal(shipItAllowed.worker_inbox_count, 1);
 
     const adversarial = runScenario("adversarial-triggers").receipt;
     assert.equal(adversarial.negative_control?.matched, false);

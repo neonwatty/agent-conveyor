@@ -49,6 +49,7 @@ inspection while Dispatch is writing to the same `--path` database.
 | UX Polish Loop | Worker should iterate on visible UI quality | guided or strict | screenshots, visual diff, browser evidence, `adversarial_check` | compact by default |
 | Nudge / What's Next Manager | Manager should observe, ask status, and negotiate criteria | guided | manager decision, worker receipt, accepted criteria | off by default |
 | PR/CI/Merge Ralph Loop | Manager should drive delivery through PR, CI, merge, handoff | strict | PR URL, green CI, merge receipt, adversarial proof | clear after handoff |
+| Autonomous Ship-It Loop | Manager may push, open PRs, monitor CI, fix bounded conflicts, and merge | strict | branch, PR, CI, mergeability, manager decision, merge, post-merge, adversarial proof | clear after handoff |
 
 Two support patterns apply across recipes:
 
@@ -253,6 +254,72 @@ sequenceDiagram
   M->>W: Open PR only after repo.open_pr is permitted
   M->>M: Check CI, request fixes if needed, merge only when green
   M->>W: Clear after saved handoff and worker_compact_clear permission
+```
+
+## Autonomous Ship-It Loop
+
+Use this when the operator explicitly wants a manager-worker pair to ship a
+bounded repo task through branch push, PR creation, CI monitoring, conflict
+repair, and merge. This recipe is stricter than a PR/CI/Merge Ralph loop:
+green CI is necessary, but never sufficient. The manager must also record a
+fresh mergeability check, an explicit manager merge decision, the merge receipt,
+post-merge verification, and structured adversarial proof.
+
+Suggested setup:
+
+```bash
+conveyor loop-templates --create-run "$TASK" \
+  --template ship_it_loop \
+  --max-iterations 2 \
+  --current-iteration 1 \
+  --json
+
+conveyor manager-config "$TASK" \
+  --mode strict \
+  --objective "Ship the bounded repo task through branch, PR, CI, conflict handling, manager merge decision, merge, and post-merge verification." \
+  --acceptance "Branch, PR URL, green CI, clean mergeability, manager merge decision, merge receipt, post-merge verification, and adversarial proof are recorded before closeout." \
+  --acceptance "Blocked conflict loops stop with retry count, last sanitized evidence, and next exact operator action." \
+  --permit repo.push_branch \
+  --permit repo.open_pr \
+  --permit repo.monitor_ci \
+  --permit repo.resolve_conflicts \
+  --permit repo.merge_green_pr \
+  --allow-worker-compact-clear \
+  --tool verification.run_tests \
+  --tool context.fetch_prs
+```
+
+Conversation storyboard:
+
+```mermaid
+sequenceDiagram
+  participant M as Manager
+  participant D as Dispatch
+  participant W as Worker
+  M->>W: Ask for bounded implementation and local proof
+  W->>D: completion event with branch/test receipt
+  D->>M: worker_task_complete notification
+  M->>M: Verify diff, branch receipt, and push authority
+  M->>M: Open PR only with repo.open_pr permission
+  M->>M: Monitor CI and mergeability; request conflict fixes only within policy
+  M->>M: Record explicit manager_merge_decision
+  M->>M: Merge only with repo.merge_green_pr plus post-merge/adversarial proof
+```
+
+Fail closed on these conditions:
+
+- no explicit permission for the requested repo side effect;
+- CI green but mergeability, manager decision, or post-merge proof is missing;
+- conflict retries reach the configured limit;
+- a worker proposes merge based only on its own completion claim;
+- the live manager/worker transcript is not reviewable through the app or tmux
+  session.
+
+Local proof:
+
+```bash
+conveyor qa-plan ship-it-loop
+conveyor qa-run ship-it-loop --receipt-output /tmp/ship-it-loop-receipt.json --json
 ```
 
 ## Inbox / No-Tmux App Loop

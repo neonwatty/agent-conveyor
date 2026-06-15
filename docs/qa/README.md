@@ -33,6 +33,10 @@ gates, cleanup behavior, and disallowed actions to confirm before starting.
 - [GoalBuddy conveyor live dogfood](goalbuddy-conveyor-live-dogfood.md) -
   two-child smoke for `satisfied_on_main`, one-active-child sequencing, and
   PR/CI/merge receipt rails.
+- [Autonomous ship-it loop](ship-it-loop.md) - deterministic proof for
+  permission-gated branch push, PR creation, CI/mergeability, bounded conflict
+  blocking, manager-only merge decision, post-merge verification, and
+  adversarial proof.
 - [Codex review recursion guard](codex-review-recursion-guard.md) - proves the
   local review helper blocks nested review invocations and does not leave stale
   review processes behind.
