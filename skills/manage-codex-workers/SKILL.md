@@ -163,6 +163,16 @@ Idle polling rule for Codex app/no-tmux sessions:
   `--delivery-status skipped`; for `blocked_missing_thread`, record
   `--delivery-status blocked`. These delivery receipts audit app-thread wake
   attempts; they do not replace Dispatch inbox, heartbeat, or task evidence.
+- For Codex app/no-tmux worker cleanup, do not rely on sending `/compact` or
+  `/clear` with `send_message_to_thread`; that arrives as ordinary prompt text.
+  Prefer `conveyor app-worker-rotation-plan <task> --old-worker-thread-id
+  <active-worker-thread-id> --require-handoff --json`. Only if the plan reports
+  `eligible=true`, create the replacement worker thread from the emitted
+  `create_replacement_worker_thread.prompt`, archive exactly the emitted
+  `archive_old_worker_thread.thread.id`, then run the emitted
+  `app-worker-rotation-record` command with the new thread id/title. The
+  manager must never archive a thread that is not the active bound worker in the
+  current plan.
 - For bounded Ralph loops, treat `ralph_loop_iteration_advanced` telemetry as
   the receipt that a worker actually consumed and began the requested
   iteration.
@@ -579,6 +589,11 @@ This command checks `worker_compact_clear`, requires a saved handoff, records a
 durable command, and sends Codex `/compact` to the worker's tmux pane. Use
 `--clear` for `/clear`, or `--prompt-only` to send the conservative
 verify/update-handoff prompt instead of a slash command.
+For Codex app workers, use app worker rotation instead of this tmux slash path:
+`conveyor app-worker-rotation-plan my-task --old-worker-thread-id
+<active-worker-thread-id> --require-handoff --json`, followed by Codex app
+`create_thread`, exact old-worker `set_thread_archived`, and
+`app-worker-rotation-record`.
 
 ## Manager Loop Pattern
 
@@ -852,6 +867,13 @@ etc.) run `conveyor db-doctor --live`.
   current manager is a Codex app session with thread tools, send only
   `send_ready=true` wake prompts with `send_message_to_thread`, then record the
   outcome with `app-wakeup-record-delivery`.
+- "fresh worker", "clear app worker", or "rotate Codex app worker": require a
+  saved worker handoff, run `app-worker-rotation-plan` with the active bound
+  worker thread id, create a new same-project worker thread from the emitted
+  prompt, archive only the exact old worker thread id emitted by the plan, and
+  record with `app-worker-rotation-record`. If the plan is blocked or the old
+  id does not exactly match the active bound worker, stop and report the
+  blocker.
 - "set up an autonomous ship-it loop", "ship this through PR and merge", or
   "merge when green": resolve to `ship-it-loop` unless the user explicitly
   chooses a custom policy. Show the locked recipe summary, require explicit

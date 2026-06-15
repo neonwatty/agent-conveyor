@@ -443,6 +443,18 @@ tmux attach -t codex-live-test
   heartbeats since the last command or inbox-consumption receipt, it recommends
   `stop_autopilot` so operators can quiesce blocked/no-progress loops instead
   of repeating idle pulses.
+- `app-worker-rotation-plan TASK --old-worker-thread-id ID [--require-handoff]
+  [--reason TEXT] [--json]` — Prepare a Codex app fresh-worker rotation. The
+  CLI verifies that `ID` exactly matches the active bound worker session before
+  emitting adapter-ready actions to create a replacement worker thread and
+  archive the old worker thread. Blocked plans contain no archive action.
+- `app-worker-rotation-record TASK --old-worker-thread-id OLD
+  --new-worker-thread-id NEW [--new-worker-thread-title TITLE]
+  --archive-status archived|blocked [--reason TEXT] [--json]` — Record the
+  result after the Codex app layer creates the replacement worker thread and
+  archives, or blocks on archiving, the old thread. The command re-checks active
+  binding ownership before updating the worker session to the new app thread id,
+  so a stale plan cannot archive or replace an unrelated thread.
 - `discover [QUERY] [--all] [--limit N]` / `search [QUERY]` — Search tasks,
   registered sessions, active bindings, and recent telemetry in one JSON result.
   Use this for conversational setup when a manager or Codex session needs to
@@ -587,6 +599,10 @@ tmux attach -t codex-live-test
   before/after sending the worker instruction. `--dry-run` still records the
   command in `commands`, `replay`, and `mutation-audit` with `dry_run: true`
   and `sent: false`.
+  In Codex app threads, remote `/compact` or `/clear` sent through
+  `send_message_to_thread` is prompt text, not an executable slash command. Use
+  `app-worker-rotation-plan` plus Codex app `create_thread` and
+  `set_thread_archived` when fresh context is required for app-native workers.
 - `bind --task T --worker W --manager M` — Create the task binding.
 - `unbind --task T` — End the active binding for a task.
 - `finish-task <task> [--reason R] [--require-criteria-audit]
