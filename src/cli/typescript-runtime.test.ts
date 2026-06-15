@@ -830,6 +830,236 @@ test("TypeScript runtime app-wakeup-record-delivery records blocked missing-thre
   }
 });
 
+test("TypeScript runtime app-worker-rotation plans and records only the active bound worker thread", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-app-worker-rotation."));
+  const dbPath = join(root, "workerctl.db");
+  try {
+    seedCliAppLoopFixture(dbPath, {
+      dispatcherHeartbeatAt: "2026-06-11T11:59:50Z",
+      managerHeartbeatAt: "2026-06-11T11:59:40Z",
+      workerHeartbeatAt: "2026-06-11T11:58:00Z",
+    });
+    const database = openDatabaseSync(dbPath);
+    try {
+      database.prepare(`
+        insert into worker_handoffs(task_id, worker_session_id, summary, next_steps_json, payload_json, created_at)
+        values ('task-app-loop', 'session-worker-app', 'Ready for fresh worker.', '["poll worker inbox"]', '{}', '2026-06-11T11:59:00Z')
+      `).run();
+    } finally {
+      database.close();
+    }
+
+    const planned = runTypescriptRuntimeCommand({
+      args: [
+        "app-worker-rotation-plan",
+        "app-loop-task",
+        "--old-worker-thread-id",
+        "thread-worker",
+        "--require-handoff",
+        "--reason",
+        "fresh worker context",
+        "--path",
+        dbPath,
+        "--json",
+      ],
+      env: {},
+      now: () => new Date("2026-06-11T12:00:00Z"),
+    });
+    assert.equal(planned.exitCode, 0, planned.stderr);
+    const plan = JSON.parse(planned.stdout ?? "{}") as {
+      actions: Array<{
+        prompt?: string;
+        send_ready: boolean;
+        status: string;
+        thread: { id: string | null; title: string | null };
+        type: string;
+      }>;
+      blockers: string[];
+      eligible: boolean;
+      guard: {
+        binding_id: string;
+        exact_thread_match: boolean;
+        manager_thread_id: string;
+        role: string;
+        worker_session_id: string;
+      };
+      handoff: { id: number; summary: string; worker_session_id: string };
+      record_command: string;
+      receipt: { event_id: string; event_type: string };
+    };
+    assert.equal(plan.eligible, true);
+    assert.deepEqual(plan.blockers, []);
+    assert.equal(plan.guard.binding_id, "binding-app-loop");
+    assert.equal(plan.guard.role, "worker");
+    assert.equal(plan.guard.worker_session_id, "session-worker-app");
+    assert.equal(plan.guard.manager_thread_id, "thread-manager");
+    assert.equal(plan.guard.exact_thread_match, true);
+    assert.equal(plan.handoff.summary, "Ready for fresh worker.");
+    assert.equal(plan.handoff.worker_session_id, "session-worker-app");
+    assert.equal(plan.actions.length, 2);
+    const createAction = plan.actions.find((action) => action.type === "create_replacement_worker_thread");
+    const archiveAction = plan.actions.find((action) => action.type === "archive_old_worker_thread");
+    assert.ok(createAction);
+    assert.ok(archiveAction);
+    assert.equal(createAction.send_ready, true);
+    assert.equal(createAction.status, "ready_to_create");
+    assert.equal(createAction.thread.id, null);
+    assert.equal(createAction.thread.title, "Worker App fresh");
+    assert.match(createAction.prompt ?? "", /Saved handoff id: 1/);
+    assert.match(createAction.prompt ?? "", /Visible session protocol, required for operator review/);
+    assert.match(createAction.prompt ?? "", /conveyor app-heartbeat 'app-loop-task' --role worker/);
+    assert.equal(archiveAction.send_ready, true);
+    assert.equal(archiveAction.status, "ready_to_archive");
+    assert.equal(archiveAction.thread.id, "thread-worker");
+    assert.notEqual(archiveAction.thread.id, plan.guard.manager_thread_id);
+    assert.match(plan.record_command, /app-worker-rotation-record 'app-loop-task'/);
+    assert.equal(plan.receipt.event_type, "app_worker_rotation_planned");
+
+    const recorded = runTypescriptRuntimeCommand({
+      args: [
+        "app-worker-rotation-record",
+        "app-loop-task",
+        "--old-worker-thread-id",
+        "thread-worker",
+        "--new-worker-thread-id",
+        "thread-worker-fresh",
+        "--new-worker-thread-title",
+        "Worker App fresh",
+        "--archive-status",
+        "archived",
+        "--reason",
+        "set_thread_archived returned ok",
+        "--path",
+        dbPath,
+        "--json",
+      ],
+      env: {},
+      now: () => new Date("2026-06-11T12:01:00Z"),
+    });
+    assert.equal(recorded.exitCode, 0, recorded.stderr);
+    const recordPayload = JSON.parse(recorded.stdout ?? "{}") as {
+      archive: { old_worker_thread_id: string; status: string };
+      new_worker: { codex_app_thread_id: string; session_id: string; session_updated: boolean };
+      receipt: { event_type: string };
+    };
+    assert.equal(recordPayload.archive.status, "archived");
+    assert.equal(recordPayload.archive.old_worker_thread_id, "thread-worker");
+    assert.equal(recordPayload.new_worker.session_id, "session-worker-app");
+    assert.equal(recordPayload.new_worker.codex_app_thread_id, "thread-worker-fresh");
+    assert.equal(recordPayload.new_worker.session_updated, true);
+    assert.equal(recordPayload.receipt.event_type, "app_worker_rotation_recorded");
+
+    const updatedDb = openDatabaseSync(dbPath);
+    try {
+      const worker = updatedDb.prepare(`
+        select codex_app_thread_id, codex_app_thread_title, last_heartbeat_at
+        from sessions
+        where id = 'session-worker-app'
+      `).get() as { codex_app_thread_id: string; codex_app_thread_title: string; last_heartbeat_at: string | null };
+      assert.equal(worker.codex_app_thread_id, "thread-worker-fresh");
+      assert.equal(worker.codex_app_thread_title, "Worker App fresh");
+      assert.equal(worker.last_heartbeat_at, null);
+      const telemetry = updatedDb.prepare(`
+        select count(*) as count
+        from telemetry_events
+        where event_type in ('app_worker_rotation_planned', 'app_worker_rotation_recorded')
+      `).get() as { count: number };
+      assert.equal(telemetry.count, 2);
+    } finally {
+      updatedDb.close();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("TypeScript runtime app-worker-rotation refuses manager or unrelated thread ids", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-app-worker-rotation-refuse."));
+  const dbPath = join(root, "workerctl.db");
+  try {
+    seedCliAppLoopFixture(dbPath, {
+      dispatcherHeartbeatAt: "2026-06-11T11:59:50Z",
+      managerHeartbeatAt: "2026-06-11T11:59:40Z",
+      workerHeartbeatAt: "2026-06-11T11:58:00Z",
+    });
+    const database = openDatabaseSync(dbPath);
+    try {
+      database.prepare(`
+        insert into worker_handoffs(task_id, worker_session_id, summary, next_steps_json, payload_json, created_at)
+        values ('task-app-loop', 'session-worker-app', 'Ready for fresh worker.', '[]', '{}', '2026-06-11T11:59:00Z')
+      `).run();
+    } finally {
+      database.close();
+    }
+
+    const planned = runTypescriptRuntimeCommand({
+      args: [
+        "app-worker-rotation-plan",
+        "app-loop-task",
+        "--old-worker-thread-id",
+        "thread-manager",
+        "--require-handoff",
+        "--path",
+        dbPath,
+        "--json",
+      ],
+      env: {},
+      now: () => new Date("2026-06-11T12:00:00Z"),
+    });
+    assert.equal(planned.exitCode, 0, planned.stderr);
+    const plan = JSON.parse(planned.stdout ?? "{}") as {
+      actions: unknown[];
+      blockers: string[];
+      eligible: boolean;
+      record_command: string | null;
+    };
+    assert.equal(plan.eligible, false);
+    assert.deepEqual(plan.actions, []);
+    assert.equal(plan.record_command, null);
+    assert.ok(plan.blockers.includes("old_worker_thread_id_mismatch"));
+
+    const recorded = runTypescriptRuntimeCommand({
+      args: [
+        "app-worker-rotation-record",
+        "app-loop-task",
+        "--old-worker-thread-id",
+        "thread-manager",
+        "--new-worker-thread-id",
+        "thread-worker-fresh",
+        "--archive-status",
+        "archived",
+        "--path",
+        dbPath,
+        "--json",
+      ],
+      env: {},
+      now: () => new Date("2026-06-11T12:01:00Z"),
+    });
+    assert.equal(recorded.exitCode, 2);
+    assert.match(recorded.stderr ?? "", /active worker ownership check failed: old_worker_thread_id_mismatch/);
+
+    const updatedDb = openDatabaseSync(dbPath);
+    try {
+      const worker = updatedDb.prepare(`
+        select codex_app_thread_id
+        from sessions
+        where id = 'session-worker-app'
+      `).get() as { codex_app_thread_id: string };
+      assert.equal(worker.codex_app_thread_id, "thread-worker");
+      const recordedCount = updatedDb.prepare(`
+        select count(*) as count
+        from telemetry_events
+        where event_type = 'app_worker_rotation_recorded'
+      `).get() as { count: number };
+      assert.equal(recordedCount.count, 0);
+    } finally {
+      updatedDb.close();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("TypeScript runtime app-autopilot start emits automation specs and durable receipt", () => {
   const root = mkdtempSync(join(tmpdir(), "agent-conveyor-app-autopilot-start."));
   const dbPath = join(root, "workerctl.db");

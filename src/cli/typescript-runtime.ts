@@ -277,6 +277,12 @@ export function runTypescriptRuntimeCommand(options: TypescriptRuntimeOptions): 
     if (parsed.command === "app-wakeup-record-delivery") {
       return runAppWakeupRecordDeliveryCommand(parsed, options);
     }
+    if (parsed.command === "app-worker-rotation-plan") {
+      return runAppWorkerRotationPlanCommand(parsed, options);
+    }
+    if (parsed.command === "app-worker-rotation-record") {
+      return runAppWorkerRotationRecordCommand(parsed, options);
+    }
     if (parsed.command === "app-autopilot") {
       return runAppAutopilotCommand(parsed, options);
     }
@@ -542,6 +548,21 @@ function commandHelpText(program: "conveyor" | "workerctl", command: string): st
       `  ${program} app-autopilot status dogfood --path /tmp/work/workerctl.db`,
       `  ${program} app-autopilot stop dogfood --path /tmp/work/workerctl.db --json`,
     ],
+    "app-worker-rotation-plan": [
+      `usage: ${program} app-worker-rotation-plan <task> --old-worker-thread-id ID [--require-handoff] [--reason TEXT] ${path} [--json]`,
+      "",
+      "Emit Codex app actions for replacing a worker thread with a fresh thread.",
+      "The plan fails closed unless the old thread id exactly matches the active bound worker session; it never authorizes archiving a manager or unrelated thread.",
+      "",
+      "Examples:",
+      `  ${program} app-worker-rotation-plan dogfood --old-worker-thread-id thread-old --require-handoff --path /tmp/work/workerctl.db --json`,
+    ],
+    "app-worker-rotation-record": [
+      `usage: ${program} app-worker-rotation-record <task> --old-worker-thread-id OLD --new-worker-thread-id NEW [--new-worker-thread-title TITLE] --archive-status archived|blocked [--reason TEXT] ${path} [--json]`,
+      "",
+      "Record the Codex app worker-thread rotation after the app layer creates the new worker thread and archives or blocks on the old one.",
+      "The command re-checks active binding ownership before updating the worker session to the new thread id.",
+    ],
     pair: [
       `usage: ${program} pair --task <task> --worker-name <worker> --manager-name <manager> [options] ${path}`,
       "",
@@ -715,8 +736,12 @@ interface ParsedRuntimeArgs {
     dispatchReceipt: string | null;
     force: boolean;
     message: string | null;
+    newWorkerThreadId: string | null;
+    newWorkerThreadTitle: string | null;
+    oldWorkerThreadId: string | null;
     reason: string | null;
     threadId: string | null;
+    archiveStatus: string | null;
     consumeNext: boolean;
     wait: boolean;
     requireAcks: boolean;
@@ -933,8 +958,12 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
     dispatchReceipt: null,
     force: false,
     message: null,
+    newWorkerThreadId: null,
+    newWorkerThreadTitle: null,
+    oldWorkerThreadId: null,
     reason: null,
     threadId: null,
+    archiveStatus: null,
     consumeNext: false,
     wait: false,
     requireAcks: false,
@@ -1259,7 +1288,7 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
         flags.requireAcks = true;
       }
     } else if (arg === "--require-handoff") {
-      if (command !== "manager-permission") {
+      if (command !== "manager-permission" && command !== "app-worker-rotation-plan") {
         return { command, enabled, error: "Unsupported TypeScript runtime option: --require-handoff", explicit, flags, task };
       }
       flags.requireHandoff = true;
@@ -2084,7 +2113,15 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       flags.reviewerCommand = queue.slice(index + 1);
       index = queue.length;
     } else if (arg === "--reason") {
-      if (command !== "finish-task" && command !== "stop-task" && command !== "record-decision" && command !== "compact-worker" && command !== "app-wakeup-record-delivery") {
+      if (
+        command !== "finish-task"
+        && command !== "stop-task"
+        && command !== "record-decision"
+        && command !== "compact-worker"
+        && command !== "app-wakeup-record-delivery"
+        && command !== "app-worker-rotation-plan"
+        && command !== "app-worker-rotation-record"
+      ) {
         return { command, enabled, error: "Unsupported TypeScript runtime option: --reason", explicit, flags, task };
       }
       const value = valueAfter(queue, index, arg);
@@ -2113,6 +2150,16 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       }
       flags.deliveryStatus = value.value;
       index += 1;
+    } else if (arg === "--archive-status") {
+      if (command !== "app-worker-rotation-record") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --archive-status", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.archiveStatus = value.value;
+      index += 1;
     } else if (arg === "--thread-id") {
       if (command !== "app-wakeup-record-delivery") {
         return { command, enabled, error: "Unsupported TypeScript runtime option: --thread-id", explicit, flags, task };
@@ -2122,6 +2169,25 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
         return { command, enabled, error: value.error, explicit, flags, task };
       }
       flags.threadId = value.value;
+      index += 1;
+    } else if (arg === "--old-worker-thread-id" || arg === "--new-worker-thread-id" || arg === "--new-worker-thread-title") {
+      if (command !== "app-worker-rotation-plan" && command !== "app-worker-rotation-record") {
+        return { command, enabled, error: `Unsupported TypeScript runtime option: ${arg}`, explicit, flags, task };
+      }
+      if (arg !== "--old-worker-thread-id" && command !== "app-worker-rotation-record") {
+        return { command, enabled, error: `Unsupported TypeScript runtime option: ${arg}`, explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      if (arg === "--old-worker-thread-id") {
+        flags.oldWorkerThreadId = value.value;
+      } else if (arg === "--new-worker-thread-id") {
+        flags.newWorkerThreadId = value.value;
+      } else {
+        flags.newWorkerThreadTitle = value.value;
+      }
       index += 1;
     } else if (arg === "--message") {
       if (
@@ -3952,6 +4018,384 @@ function runAppWakeupRecordDeliveryCommand(
   } finally {
     database.close();
   }
+}
+
+type AppWorkerArchiveStatus = "archived" | "blocked";
+
+function runAppWorkerRotationPlanCommand(
+  parsed: ParsedRuntimeArgs,
+  options: { cwd?: string; env?: NodeJS.ProcessEnv; now?: () => Date },
+): TypescriptRuntimeResult {
+  const taskName = requireTask(parsed);
+  if (!parsed.flags.oldWorkerThreadId) {
+    return errorResult("app-worker-rotation-plan requires --old-worker-thread-id.");
+  }
+  const database = openRuntimeDatabase(parsed, options);
+  try {
+    const timestamp = nowIsoSeconds(options);
+    const dbPath = runtimeDbPath(parsed, options);
+    const plan = appWorkerRotationPlanSync(database, {
+      dbPath,
+      now: timestamp,
+      oldWorkerThreadId: parsed.flags.oldWorkerThreadId,
+      reason: parsed.flags.reason,
+      requireHandoff: parsed.flags.requireHandoff,
+      taskName,
+    });
+    const eventId = emitTelemetrySync(database, {
+      actor: "manager",
+      attributes: {
+        actions: plan.actions.map((action) => ({
+          status: action.status,
+          thread_id: action.thread.id,
+          type: action.type,
+        })),
+        blockers: plan.blockers,
+        eligible: plan.eligible,
+        handoff_id: plan.handoff?.id ?? null,
+        old_worker_thread_id: parsed.flags.oldWorkerThreadId,
+        reason: parsed.flags.reason,
+      },
+      correlation: {
+        command: "app-worker-rotation-plan",
+        old_worker_thread_id: parsed.flags.oldWorkerThreadId,
+      },
+      eventType: "app_worker_rotation_planned",
+      severity: plan.eligible ? "info" : "warning",
+      summary: `Codex app worker rotation ${plan.eligible ? "planned" : "blocked"} for ${plan.task.name}.`,
+      taskId: plan.task.id,
+      timestamp,
+    });
+    const output = {
+      ...plan,
+      receipt: {
+        event_id: eventId,
+        event_type: "app_worker_rotation_planned",
+        recorded_at: timestamp,
+      },
+    };
+    if (parsed.flags.json) {
+      return jsonResult(output);
+    }
+    return {
+      exitCode: 0,
+      handled: true,
+      stdout: renderAppWorkerRotationPlanText(output),
+    };
+  } finally {
+    database.close();
+  }
+}
+
+function runAppWorkerRotationRecordCommand(
+  parsed: ParsedRuntimeArgs,
+  options: { cwd?: string; env?: NodeJS.ProcessEnv; now?: () => Date },
+): TypescriptRuntimeResult {
+  const taskName = requireTask(parsed);
+  if (!parsed.flags.oldWorkerThreadId) {
+    return errorResult("app-worker-rotation-record requires --old-worker-thread-id.");
+  }
+  if (!parsed.flags.newWorkerThreadId) {
+    return errorResult("app-worker-rotation-record requires --new-worker-thread-id.");
+  }
+  const archiveStatus = parseAppWorkerArchiveStatus(parsed.flags.archiveStatus);
+  if (archiveStatus instanceof Error) {
+    return errorResult(archiveStatus.message);
+  }
+  const database = openRuntimeDatabase(parsed, options);
+  try {
+    const timestamp = nowIsoSeconds(options);
+    const dbPath = runtimeDbPath(parsed, options);
+    const plan = appWorkerRotationPlanSync(database, {
+      dbPath,
+      now: timestamp,
+      oldWorkerThreadId: parsed.flags.oldWorkerThreadId,
+      reason: parsed.flags.reason,
+      requireHandoff: false,
+      taskName,
+    });
+    if (!plan.eligible) {
+      throw new Error(`Cannot record worker rotation; active worker ownership check failed: ${plan.blockers.join(", ")}`);
+    }
+    if (archiveStatus === "archived") {
+      database.prepare(`
+        update sessions
+        set codex_app_thread_id = ?, codex_app_thread_title = ?, last_heartbeat_at = null
+        where id = ? and role = 'worker'
+      `).run(parsed.flags.newWorkerThreadId, parsed.flags.newWorkerThreadTitle, plan.old_worker.session_id);
+    }
+    const eventId = emitTelemetrySync(database, {
+      actor: "manager",
+      attributes: {
+        archive_status: archiveStatus,
+        binding_id: plan.guard.binding_id,
+        handoff_id: plan.handoff?.id ?? null,
+        new_worker_thread_id: parsed.flags.newWorkerThreadId,
+        new_worker_thread_title: parsed.flags.newWorkerThreadTitle,
+        old_worker_session_id: plan.old_worker.session_id,
+        old_worker_thread_id: parsed.flags.oldWorkerThreadId,
+        reason: parsed.flags.reason,
+        session_updated: archiveStatus === "archived",
+      },
+      correlation: {
+        command: "app-worker-rotation-record",
+        new_worker_thread_id: parsed.flags.newWorkerThreadId,
+        old_worker_thread_id: parsed.flags.oldWorkerThreadId,
+      },
+      eventType: "app_worker_rotation_recorded",
+      severity: archiveStatus === "archived" ? "info" : "warning",
+      summary: `Codex app worker rotation ${archiveStatus} for ${plan.task.name}.`,
+      taskId: plan.task.id,
+      timestamp,
+    });
+    const output = {
+      archive: {
+        old_worker_thread_id: parsed.flags.oldWorkerThreadId,
+        status: archiveStatus,
+      },
+      guard: plan.guard,
+      new_worker: {
+        codex_app_thread_id: parsed.flags.newWorkerThreadId,
+        codex_app_thread_title: parsed.flags.newWorkerThreadTitle,
+        session_id: plan.old_worker.session_id,
+        session_updated: archiveStatus === "archived",
+      },
+      old_worker: plan.old_worker,
+      receipt: {
+        event_id: eventId,
+        event_type: "app_worker_rotation_recorded",
+        recorded_at: timestamp,
+      },
+      task: plan.task,
+    };
+    if (parsed.flags.json) {
+      return jsonResult(output);
+    }
+    return {
+      exitCode: 0,
+      handled: true,
+      stdout: [
+        `App worker rotation ${archiveStatus} for ${plan.task.name}.`,
+        `Old worker thread: ${parsed.flags.oldWorkerThreadId}`,
+        `New worker thread: ${parsed.flags.newWorkerThreadId}`,
+        `Receipt: ${eventId}`,
+      ].join("\n") + "\n",
+    };
+  } finally {
+    database.close();
+  }
+}
+
+function parseAppWorkerArchiveStatus(value: string | null): AppWorkerArchiveStatus | Error {
+  if (value === "archived" || value === "blocked") {
+    return value;
+  }
+  return new Error("app-worker-rotation-record requires --archive-status archived|blocked");
+}
+
+interface AppWorkerRotationPlan {
+  actions: Array<{
+    guard: AppWorkerRotationGuard;
+    prompt?: string;
+    role: "worker";
+    send_ready: boolean;
+    status: "blocked" | "ready_to_create" | "ready_to_archive";
+    thread: { id: string | null; title: string | null };
+    type: "archive_old_worker_thread" | "create_replacement_worker_thread";
+  }>;
+  blockers: string[];
+  eligible: boolean;
+  guard: AppWorkerRotationGuard;
+  handoff: { created_at: unknown; id: unknown; next_steps: unknown; summary: unknown; worker_session_id: unknown } | null;
+  old_worker: {
+    codex_app_thread_id: string | null;
+    codex_app_thread_title: string | null;
+    name: string;
+    session_id: string;
+  };
+  record_command: string | null;
+  task: { id: string; name: string };
+}
+
+interface AppWorkerRotationGuard {
+  active_binding: boolean;
+  binding_id: string;
+  exact_thread_match: boolean;
+  expected_old_worker_thread_id: string;
+  manager_session_id: string;
+  manager_thread_id: string | null;
+  require_handoff: boolean;
+  role: "worker";
+  task_id: string;
+  worker_session_id: string;
+  worker_state: string;
+}
+
+function appWorkerRotationPlanSync(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  options: {
+    dbPath: string;
+    now: string;
+    oldWorkerThreadId: string;
+    reason: string | null;
+    requireHandoff: boolean;
+    taskName: string;
+  },
+): AppWorkerRotationPlan {
+  const task = taskRowForPair(database, options.taskName);
+  if (task === null) {
+    throw new Error(`Unknown task: ${options.taskName}`);
+  }
+  const binding = activeBindingForTaskSync(database, task.name);
+  const worker = sessionRow(database, binding.worker_session_name, "worker");
+  const manager = sessionRow(database, binding.manager_session_name, "manager");
+  const handoff = latestWorkerHandoffFullSync(database, task.id);
+  const blockers: string[] = [];
+  const exactThreadMatch = worker.codex_app_thread_id === options.oldWorkerThreadId;
+  if (binding.state !== "active") {
+    blockers.push("active_binding_not_active");
+  }
+  if (worker.state !== "active") {
+    blockers.push("worker_session_not_active");
+  }
+  if (worker.tmux_session !== null) {
+    blockers.push("worker_session_is_tmux_backed");
+  }
+  if (!worker.codex_app_thread_id) {
+    blockers.push("missing_worker_codex_app_thread_id");
+  }
+  if (!exactThreadMatch) {
+    blockers.push("old_worker_thread_id_mismatch");
+  }
+  if (manager.id === worker.id || manager.codex_app_thread_id === worker.codex_app_thread_id) {
+    blockers.push("manager_worker_thread_not_distinct");
+  }
+  if (options.requireHandoff) {
+    if (handoff === null) {
+      blockers.push("missing_worker_handoff");
+    } else if (handoff.worker_session_id !== worker.id) {
+      blockers.push("handoff_worker_session_mismatch");
+    }
+  }
+  const guard: AppWorkerRotationGuard = {
+    active_binding: binding.state === "active",
+    binding_id: binding.binding_id,
+    exact_thread_match: exactThreadMatch,
+    expected_old_worker_thread_id: options.oldWorkerThreadId,
+    manager_session_id: manager.id,
+    manager_thread_id: manager.codex_app_thread_id,
+    require_handoff: options.requireHandoff,
+    role: "worker",
+    task_id: task.id,
+    worker_session_id: worker.id,
+    worker_state: worker.state,
+  };
+  const eligible = blockers.length === 0;
+  const replacementTitle = replacementWorkerThreadTitle(task.name, worker.codex_app_thread_title);
+  const recordCommand = `${conveyorPollInvocation()} app-worker-rotation-record ${shellQuote(task.name)} --old-worker-thread-id ${shellQuote(options.oldWorkerThreadId)} --new-worker-thread-id <new.thread.id> --new-worker-thread-title <new.thread.title> --archive-status archived --path ${shellQuote(options.dbPath)} --json`;
+  return {
+    actions: eligible
+      ? [
+        {
+          guard,
+          prompt: replacementWorkerPrompt({
+            dbPath: options.dbPath,
+            handoff,
+            reason: options.reason,
+            taskName: task.name,
+          }),
+          role: "worker",
+          send_ready: true,
+          status: "ready_to_create",
+          thread: { id: null, title: replacementTitle },
+          type: "create_replacement_worker_thread",
+        },
+        {
+          guard,
+          role: "worker",
+          send_ready: true,
+          status: "ready_to_archive",
+          thread: { id: worker.codex_app_thread_id, title: worker.codex_app_thread_title },
+          type: "archive_old_worker_thread",
+        },
+      ]
+      : [],
+    blockers,
+    eligible,
+    guard,
+    handoff: handoff === null
+      ? null
+      : {
+        created_at: handoff.created_at,
+        id: handoff.id,
+        next_steps: handoff.next_steps,
+        summary: handoff.summary,
+        worker_session_id: handoff.worker_session_id,
+      },
+    old_worker: {
+      codex_app_thread_id: worker.codex_app_thread_id,
+      codex_app_thread_title: worker.codex_app_thread_title,
+      name: worker.name,
+      session_id: worker.id,
+    },
+    record_command: eligible ? recordCommand : null,
+    task: { id: task.id, name: task.name },
+  };
+}
+
+function replacementWorkerThreadTitle(taskName: string, oldTitle: string | null): string {
+  const base = oldTitle && oldTitle.trim().length > 0 ? oldTitle.trim() : `${taskName} worker`;
+  return `${base} fresh`;
+}
+
+function replacementWorkerPrompt(options: {
+  dbPath: string;
+  handoff: Record<string, unknown> | null;
+  reason: string | null;
+  taskName: string;
+}): string {
+  const handoffLines = options.handoff === null
+    ? ["No saved handoff was required for this rotation plan."]
+    : [
+      `Saved handoff id: ${String(options.handoff.id)}`,
+      `Saved handoff summary: ${String(options.handoff.summary)}`,
+      `Saved handoff next steps: ${JSON.stringify(options.handoff.next_steps ?? [])}`,
+    ];
+  return [
+    "Use the manage-codex-workers skill.",
+    `You are the replacement Codex app worker thread for task ${options.taskName}.`,
+    options.reason ? `Rotation reason: ${options.reason}` : "Rotation reason: fresh worker context for Codex app usage.",
+    ...handoffLines,
+    "",
+    "Resume from the saved handoff and continue through Conveyor only. Do not rely on the archived worker thread for context beyond the handoff above.",
+    ...visibleSessionProtocolLines("worker"),
+    `Run: ${disposableAppHeartbeatCommand("worker", options.taskName, options.dbPath)}`,
+    `If the heartbeat output asks for direct inbox polling, run: ${sessionPollCommand("worker", options.taskName, options.dbPath)}`,
+    "If no item is consumed, stop after a one-line idle receipt.",
+  ].join("\n");
+}
+
+function renderAppWorkerRotationPlanText(plan: AppWorkerRotationPlan & { receipt?: { event_id: string } }): string {
+  const lines = [
+    `App worker rotation for ${plan.task.name}: ${plan.eligible ? "ready" : "blocked"}`,
+    `Old worker thread: ${plan.old_worker.codex_app_thread_id ?? "(missing)"}`,
+  ];
+  if (plan.blockers.length > 0) {
+    lines.push(`Blockers: ${plan.blockers.join(", ")}`);
+  }
+  for (const action of plan.actions) {
+    lines.push(`${action.type}: ${action.status}`);
+    if (action.thread.id || action.thread.title) {
+      lines.push(`  thread: ${action.thread.title ?? "(untitled)"} ${action.thread.id ?? "(new)"}`);
+    }
+  }
+  if (plan.record_command) {
+    lines.push(`Record after app tools: ${plan.record_command}`);
+  }
+  if (plan.receipt) {
+    lines.push(`Receipt: ${plan.receipt.event_id}`);
+  }
+  return `${lines.join("\n")}\n`;
 }
 
 function runAppAutopilotCommand(
@@ -16391,6 +16835,8 @@ function isDefaultRuntimeCommand(command: string | null): boolean {
     || command === "app-wakeup-plan"
     || command === "app-wakeup-dispatch"
     || command === "app-wakeup-record-delivery"
+    || command === "app-worker-rotation-plan"
+    || command === "app-worker-rotation-record"
     || command === "app-autopilot"
     || command === "loop-templates"
     || command === "loop-triggers"

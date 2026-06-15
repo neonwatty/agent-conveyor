@@ -419,6 +419,24 @@ record each outcome with `app-wakeup-record-delivery` linked to the dispatch
 receipt. Record healthy roles as `skipped` and missing-thread roles as
 `blocked`; do not treat the app-thread send as task completion.
 
+For worker context cleanup in Codex app sessions, prefer fresh-worker rotation
+over remote slash commands. Run:
+
+```bash
+conveyor app-worker-rotation-plan "$TASK" \
+  --old-worker-thread-id "$OLD_WORKER_THREAD_ID" \
+  --require-handoff \
+  --json
+```
+
+Only act on plans where `eligible=true`. First create the replacement worker
+thread with the emitted prompt, then archive exactly the
+`archive_old_worker_thread.thread.id` from the plan, and finally record the
+result with the emitted `record_command`. Conveyor re-checks that the old thread
+still belongs to the active bound worker before updating the worker session to
+the new thread id. Never archive a manager thread, an unrelated worker thread,
+or any thread id that did not come from the current rotation plan.
+
 The saved dogfood example is
 `docs/goals/live-codex-app-inbox-drill/notes/T001-live-drill.md`. It proves
 manager-to-worker `nudge_worker` delivery and worker-to-manager
