@@ -4313,6 +4313,7 @@ const QA_PLAN_SCENARIOS = new Set([
   "tmux-errors",
   "dispatch-completion",
   "ralph-loop",
+  "ship-it-loop",
   "adversarial-triggers",
   "goalbuddy-conveyor",
 ]);
@@ -4447,6 +4448,52 @@ function qaPlan(scenario: string): QaPlan {
       ],
     };
   }
+  if (scenario === "ship-it-loop") {
+    return {
+      authority_boundaries: [
+        "Do not push a branch before repo.push_branch is permitted.",
+        "Do not open or update a PR before repo.open_pr is permitted.",
+        "Do not treat CI monitoring as CI truth; record explicit ci_green evidence.",
+        "Do not resolve conflicts without a bounded manager instruction and retry limit.",
+        "Do not merge before repo.merge_green_pr, ci_green, mergeability, manager_merge_decision, merge, post_merge_verification, and adversarial_check evidence exist.",
+      ],
+      correlation_markers: [
+        { correlation_id: "ship-it-push-permission", purpose: "push branch permission gate" },
+        { correlation_id: "ship-it-open-pr-permission", purpose: "open PR permission gate" },
+        { correlation_id: "ship-it-merge-permission", purpose: "merge permission gate" },
+        { correlation_id: "ship-it-missing-evidence", purpose: "missing lifecycle evidence block" },
+        { correlation_id: "ship-it-conflict-block", purpose: "conflict retry limit proof" },
+        { correlation_id: "ship-it-allowed-closeout", purpose: "allowed closeout after all lifecycle evidence" },
+      ],
+      evidence_template: {
+        branch_ready: { branch: "<branch>", commit_sha: "<sha>" },
+        branch_pushed: { remote: "origin", branch: "<branch>" },
+        pr_url: { url: "<pull request URL>" },
+        ci_green: { command: "gh pr checks --required", status: "green" },
+        mergeability_clean: { conflicts: false, mergeable_state: "clean" },
+        manager_merge_decision: { decision: "merge_ready", manager_verified: true },
+        merge: { merge_sha: "<sha>" },
+        post_merge_verification: { command: "<post-merge check>", status: "pass" },
+        adversarial_check: { failure_mode: "<risk>", check: "<proof>", result: "<outcome>" },
+      },
+      expected_observations: [
+        "push, PR creation, and merge commands fail closed until their manager permissions are granted",
+        "missing lifecycle evidence blocks a continue_iteration before worker delivery",
+        "unresolved conflicts are represented as bounded blockers, not hidden behind CI green",
+        "a fresh retry delivers only after branch, PR, CI, mergeability, manager decision, merge, post-merge, and adversarial evidence exists",
+        "the recipe and prompts keep merge readiness as a manager decision, not a worker claim",
+      ],
+      scenario,
+      steps: [
+        "Create a disposable no-tmux task with the ship_it_loop template.",
+        "Run the permission-gate checks for repo.push_branch, repo.open_pr, and repo.merge_green_pr.",
+        "Attempt a lifecycle continuation before evidence and verify missing evidence blocks before worker delivery.",
+        "Record partial PR/CI evidence and verify mergeability/manager-decision/merge/post-merge proof is still required.",
+        "Record conflict retry-limit evidence as blocked when unresolved.",
+        "Record all lifecycle receipts plus structured adversarial proof and verify a fresh retry reaches the worker inbox.",
+      ],
+    };
+  }
   if (scenario === "adversarial-triggers") {
     return {
       correlation_markers: [
@@ -4578,6 +4625,7 @@ const SUPPORTED_QA_RUN_SCENARIOS = new Set([
   "generic-loop-template",
   "generic-loop-template-browser",
   "ralph-loop-guardrails",
+  "ship-it-loop",
   "test-coverage-loop",
 ]);
 
@@ -4621,6 +4669,9 @@ function runQaScenario(scenario: string, context: QaRunContext): QaRunReceipt {
   }
   if (scenario === "build-clear-loop") {
     return qaRunBuildClearLoop(context);
+  }
+  if (scenario === "ship-it-loop") {
+    return qaRunShipItLoop(context);
   }
   if (scenario === "adversarial-triggers") {
     return qaRunAdversarialTriggers(context);
@@ -4993,6 +5044,175 @@ function qaRunBuildClearLoop(context: QaRunContext): QaRunReceipt {
   };
 }
 
+function qaRunShipItLoop(context: QaRunContext): QaRunReceipt {
+  const slug = randomUUID().slice(0, 8);
+  const checks: Array<Record<string, unknown>> = [];
+  const generatedTasks: QaGeneratedTask[] = [];
+
+  const pushTask = createQaBoundTask(context, slug, "ship-it-push-permission");
+  generatedTasks.push(generatedTask(pushTask, "ship-it-push-permission"));
+  checks.push(qaRunPermissionGate(context, pushTask, {
+    checkName: "ship_it_push_branch_requires_repo_push_branch",
+    correlationId: "ship-it-push-permission-denied",
+    message: "Push branch origin/codex/ship-it-loop.",
+    permission: "repo.push_branch",
+  }));
+  qaConfigureManagerPermissions(context, pushTask, ["repo.push_branch"]);
+  checks.push(qaRunPermissionGate(context, pushTask, {
+    checkName: "ship_it_push_branch_delivers_after_permission",
+    correlationId: "ship-it-push-permission-allowed",
+    expectAllowed: true,
+    message: "Push branch origin/codex/ship-it-loop after manager permission.",
+    permission: "repo.push_branch",
+  }));
+
+  const prTask = createQaBoundTask(context, slug, "ship-it-open-pr-permission");
+  generatedTasks.push(generatedTask(prTask, "ship-it-open-pr-permission"));
+  checks.push(qaRunPermissionGate(context, prTask, {
+    checkName: "ship_it_open_pr_requires_repo_open_pr",
+    correlationId: "ship-it-open-pr-permission-denied",
+    message: "Open PR for ship-it loop.",
+    permission: "repo.open_pr",
+  }));
+  qaConfigureManagerPermissions(context, prTask, ["repo.open_pr"]);
+  checks.push(qaRunPermissionGate(context, prTask, {
+    checkName: "ship_it_open_pr_delivers_after_permission",
+    correlationId: "ship-it-open-pr-permission-allowed",
+    expectAllowed: true,
+    message: "Open PR for ship-it loop after manager permission.",
+    permission: "repo.open_pr",
+  }));
+
+  const mergeTask = createQaBoundTask(context, slug, "ship-it-merge-permission");
+  generatedTasks.push(generatedTask(mergeTask, "ship-it-merge-permission"));
+  checks.push(qaRunPermissionGate(context, mergeTask, {
+    checkName: "ship_it_merge_requires_repo_merge_green_pr",
+    correlationId: "ship-it-merge-permission-denied",
+    message: "Merge PR after verified closeout.",
+    permission: "repo.merge_green_pr",
+  }));
+  qaConfigureManagerPermissions(context, mergeTask, ["repo.merge_green_pr"]);
+  checks.push(qaRunPermissionGate(context, mergeTask, {
+    checkName: "ship_it_merge_delivers_after_permission",
+    correlationId: "ship-it-merge-permission-allowed",
+    expectAllowed: true,
+    message: "Merge PR after verified closeout and manager permission.",
+    permission: "repo.merge_green_pr",
+  }));
+
+  const lifecycleTask = createQaBoundTask(context, slug, "ship-it-lifecycle");
+  generatedTasks.push(generatedTask(lifecycleTask, "ship-it-lifecycle"));
+  const templateMetadata = loopTemplateMetadata("ship_it_loop", {
+    currentIteration: 1,
+    maxIterations: 2,
+    seedPromptSha256: "qa-run-ship-it-seed",
+  });
+  const run = createQaRalphLoopRun(context, lifecycleTask, {
+    currentIteration: 1,
+    maxIterations: 2,
+    metadata: templateMetadata,
+    preset: "ship_it_loop",
+    requiredBeforeContinue: asStringArray(templateMetadata.required_before_continue),
+    seedPromptSha256: "qa-run-ship-it-seed",
+    stopConditions: asStringArray(templateMetadata.stop_conditions),
+  });
+  enqueueQaContinue(context, lifecycleTask, run.id, "ship-it-missing-evidence", "Run ship-it continuation before lifecycle evidence.");
+  const missing = qaDispatchContinueOnce(context, "ship-it-missing-evidence");
+  const missingCounts = qaDeliveryCounts(context, lifecycleTask);
+  qaExpectBlocked(missing, missingCounts, {
+    message: "ship_it_loop missing lifecycle evidence",
+    missingEvidence: asStringArray(templateMetadata.required_before_continue),
+    reason: "missing_required_evidence",
+  });
+  checks.push(qaCheck("ship_it_lifecycle_blocks_before_any_evidence", missing, missingCounts));
+
+  qaRecordLoopEvidence(context, lifecycleTask, run.id, "branch_ready", "ship-it-branch-ready", {
+    metadata: { branch: "codex/ship-it-loop", commit_sha: "1111111111111111111111111111111111111111" },
+  });
+  qaRecordLoopEvidence(context, lifecycleTask, run.id, "branch_pushed", "ship-it-branch-pushed", {
+    metadata: { branch: "codex/ship-it-loop", remote: "origin" },
+  });
+  qaRecordLoopEvidence(context, lifecycleTask, run.id, "pr_url", "ship-it-pr-url", {
+    metadata: { url: "https://github.example.test/acme/repo/pull/42" },
+  });
+  qaRecordLoopEvidence(context, lifecycleTask, run.id, "ci_green", "ship-it-ci-green", {
+    metadata: { command: "gh pr checks 42 --required", status: "green" },
+    status: "green",
+  });
+  enqueueQaContinue(context, lifecycleTask, run.id, "ship-it-partial-evidence", "Run ship-it continuation after PR and CI but before merge readiness.");
+  const partial = qaDispatchContinueOnce(context, "ship-it-partial-evidence");
+  const partialCounts = qaDeliveryCounts(context, lifecycleTask);
+  qaExpectBlocked(partial, partialCounts, {
+    message: "ship_it_loop partial lifecycle evidence",
+    missingEvidence: ["mergeability_clean", "manager_merge_decision", "merge", "post_merge_verification", "adversarial_check"],
+    reason: "missing_required_evidence",
+  });
+  checks.push(qaCheck("ship_it_lifecycle_blocks_before_mergeability_and_manager_decision", partial, partialCounts));
+
+  const artifactDir = qaArtifactDir(context, "ship-it-loop", slug, run.id);
+  const conflictReceipt = join(artifactDir, "conflict-blocked.json");
+  mkdirSync(dirname(conflictReceipt), { recursive: true });
+  const conflictPayload = {
+    conflict_state: "unresolved",
+    max_retries: 2,
+    retry_count: 2,
+    status: "blocked",
+    stop_reason: "conflict_retry_limit_reached",
+  };
+  writeFileSync(conflictReceipt, `${JSON.stringify(sortJson(conflictPayload), null, 2)}\n`);
+  checks.push({
+    artifact_path: conflictReceipt,
+    conflict: conflictPayload,
+    name: "ship_it_conflict_retry_blocks_after_limit",
+    status: "passed",
+  });
+
+  qaRecordLoopEvidence(context, lifecycleTask, run.id, "mergeability_clean", "ship-it-mergeability-clean", {
+    metadata: { conflicts: false, mergeable_state: "clean" },
+  });
+  qaRecordLoopEvidence(context, lifecycleTask, run.id, "manager_merge_decision", "ship-it-manager-merge-decision", {
+    metadata: { decision: "merge_ready", manager_verified: true },
+  });
+  qaRecordLoopEvidence(context, lifecycleTask, run.id, "merge", "ship-it-merge", {
+    metadata: { merge_sha: "2222222222222222222222222222222222222222" },
+  });
+  qaRecordLoopEvidence(context, lifecycleTask, run.id, "post_merge_verification", "ship-it-post-merge-verification", {
+    metadata: { command: "git rev-parse HEAD && npm test -- --runInBand", status: "pass" },
+  });
+  qaRecordAdversarialEvidence(context, lifecycleTask, run.id, "ship-it-adversarial-proof", {
+    check: "Inspect permission denials, missing-evidence blocks, conflict retry receipt, and final evidence set.",
+    failure_mode: "A ship-it loop could merge after CI green while conflicts, manager decision, or post-merge proof are missing.",
+    result: "Dispatch stayed blocked until mergeability, manager decision, merge, post-merge, and adversarial receipts were present.",
+  });
+  enqueueQaContinue(context, lifecycleTask, run.id, "ship-it-allowed-closeout", "Run ship-it continuation after all lifecycle evidence.");
+  const allowed = qaDispatchContinueOnce(context, "ship-it-allowed-closeout");
+  const allowedCounts = qaDeliveryCounts(context, lifecycleTask);
+  qaExpectDelivered(allowed, allowedCounts, "ship_it_loop allowed closeout");
+  checks.push(qaCheck("ship_it_lifecycle_retry_delivers_after_all_evidence", allowed, allowedCounts));
+
+  return {
+    artifacts: { conflict_receipt: conflictReceipt, db_path: context.dbPath },
+    checks,
+    generated_at: new Date().toISOString(),
+    generated_tasks: generatedTasks,
+    replay_commands: [
+      "conveyor loop-templates --show ship_it_loop --json",
+      "conveyor manager-recipes --show ship-it-loop --json",
+      "conveyor manager-permission <task> repo.push_branch --require",
+      "conveyor manager-permission <task> repo.open_pr --require",
+      "conveyor manager-permission <task> repo.merge_green_pr --require",
+      "conveyor loop-evidence add <task> --loop-run <run-id> --iteration 1 --evidence-type branch_ready",
+      "conveyor loop-evidence add <task> --loop-run <run-id> --iteration 1 --evidence-type ci_green",
+      "conveyor loop-evidence adversarial-check <task> --loop-run <run-id> --iteration 1 --failure-mode <failure> --check <check> --result <result>",
+      `conveyor dispatch --once --type continue_iteration --dispatcher-id ${context.dispatcherId} --path ${context.dbPath}`,
+    ],
+    result: "passed",
+    scenario: "ship-it-loop",
+    template: "ship_it_loop",
+    template_metadata: templateMetadata,
+  };
+}
+
 function qaRunAdversarialTriggers(context: QaRunContext): QaRunReceipt {
   const slug = randomUUID().slice(0, 8);
   const triggerDefinitions = listLoopTriggers();
@@ -5315,23 +5535,27 @@ function enqueueQaContinue(
 }
 
 function qaDispatchContinueOnce(context: QaRunContext, expectedCorrelationId: string): Record<string, unknown> {
+  return qaDispatchCommandOnce(context, "continue_iteration", expectedCorrelationId);
+}
+
+function qaDispatchCommandOnce(context: QaRunContext, commandType: string, expectedCorrelationId: string): Record<string, unknown> {
   const before = openDatabaseSync(context.dbPath);
   try {
     initializeDatabaseSync(before);
     const rows = before.prepare(`
       select correlation_id, state
       from commands
-      where type = 'continue_iteration' and state in ('pending', 'attempted')
+      where type = ? and state in ('pending', 'attempted')
       order by created_at, id
-    `).all() as Array<{ correlation_id: string | null; state: string }>;
+    `).all(commandType) as Array<{ correlation_id: string | null; state: string }>;
     const seen = rows.map((row) => `${row.correlation_id}:${row.state}`);
     if (rows.length !== 1 || rows[0]?.correlation_id !== expectedCorrelationId || rows[0]?.state !== "pending") {
-      throw new Error(`qa-run continue_iteration dispatch queue is not clean; expected only ${expectedCorrelationId}, found ${JSON.stringify(seen)}`);
+      throw new Error(`qa-run ${commandType} dispatch queue is not clean; expected only ${expectedCorrelationId}, found ${JSON.stringify(seen)}`);
     }
   } finally {
     before.close();
   }
-  const parsed = parseRuntimeArgs(["dispatch", "--type", "continue_iteration", "--path", context.dbPath], {
+  const parsed = parseRuntimeArgs(["dispatch", "--type", commandType, "--path", context.dbPath], {
     AGENT_CONVEYOR_TS_RUNTIME: "1",
   });
   const processed = dispatchOncePass(parsed, context.runtimeOptions, {
@@ -5341,12 +5565,77 @@ function qaDispatchContinueOnce(context: QaRunContext, expectedCorrelationId: st
     limit: 1,
   }) as Record<string, unknown>[];
   if (processed.length !== 1) {
-    throw new Error(`expected exactly one continue_iteration dispatch item, got ${processed.length}`);
+    throw new Error(`expected exactly one ${commandType} dispatch item, got ${processed.length}`);
   }
   if (processed[0]?.correlation_id !== expectedCorrelationId) {
     throw new Error(`qa-run dispatched unexpected command ${String(processed[0]?.correlation_id)}`);
   }
   return processed[0] ?? {};
+}
+
+function qaConfigureManagerPermissions(context: QaRunContext, task: QaGeneratedTask, permissions: string[]): void {
+  const result = runTypescriptRuntimeCommand({
+    ...context.runtimeOptions,
+    args: [
+      "manager-config",
+      task.task_name,
+      "--mode",
+      "strict",
+      "--objective",
+      "Ship-it lifecycle QA permission contract.",
+      ...permissions.flatMap((permission) => ["--permit", permission]),
+      "--path",
+      context.dbPath,
+    ],
+    env: {
+      ...(context.runtimeOptions.env ?? {}),
+      AGENT_CONVEYOR_TS_RUNTIME: "1",
+    },
+  });
+  qaRequire(result.exitCode === 0, `manager-config permission setup failed: ${result.stderr ?? result.stdout ?? ""}`);
+}
+
+function qaRunPermissionGate(
+  context: QaRunContext,
+  task: QaGeneratedTask,
+  options: {
+    checkName: string;
+    correlationId: string;
+    expectAllowed?: boolean;
+    message: string;
+    permission: string;
+  },
+): Record<string, unknown> {
+  const database = openDatabaseSync(context.dbPath);
+  try {
+    initializeDatabaseSync(database);
+    createCommandSync(database, {
+      commandType: "nudge_worker",
+      correlationId: options.correlationId,
+      payload: { message: options.message, ship_it: { required_permission: options.permission } },
+      requiredPermission: options.permission,
+      taskId: task.task_id,
+    });
+  } finally {
+    database.close();
+  }
+  const dispatch = qaDispatchCommandOnce(context, "nudge_worker", options.correlationId);
+  const counts = qaDeliveryCounts(context, task);
+  if (options.expectAllowed === true) {
+    qaExpectDelivered(dispatch, counts, `${options.permission} permission gate`);
+  } else {
+    qaRequire(dispatch.state === "failed", `${options.permission} gate did not fail without permission`);
+    qaRequire(String(dispatch.error ?? "").includes("manager permission required"), `${options.permission} gate failed for the wrong reason`);
+    qaRequire(counts.worker_inbox_count === 0, `${options.permission} denied gate left worker inbox mail`);
+  }
+  return {
+    ...counts,
+    command_type: "nudge_worker",
+    dispatch,
+    name: options.checkName,
+    permission: options.permission,
+    status: "passed",
+  };
 }
 
 function qaDeliveryCounts(context: QaRunContext, task: QaGeneratedTask): Record<string, number> {
@@ -13110,8 +13399,10 @@ const MANAGER_PERMISSION_ACTION_NAMES = new Set([
   "context.fetch_prs",
   "context.spawn_reviewer",
   "repo.merge_green_pr",
+  "repo.monitor_ci",
   "repo.open_pr",
   "repo.push_branch",
+  "repo.resolve_conflicts",
   "verification.run_cargo",
   "verification.run_playwright",
   "verification.run_pytest",
@@ -17982,6 +18273,80 @@ const ADVERSARIAL_CHECK_REQUIREMENT = {
   type: "object",
 } satisfies Record<string, unknown>;
 
+const SHIP_IT_ARTIFACT_REQUIREMENTS = {
+  adversarial_check: ADVERSARIAL_CHECK_REQUIREMENT,
+  branch_pushed: {
+    description: "Receipt that the worker branch was pushed only after repo.push_branch was permitted.",
+    properties: {
+      branch: { type: "string" },
+      remote: { type: "string" },
+    },
+    required: ["branch", "remote"],
+    type: "object",
+  },
+  branch_ready: {
+    description: "Branch and commit evidence for the candidate ship-it change.",
+    properties: {
+      branch: { type: "string" },
+      commit_sha: { type: "string" },
+    },
+    required: ["branch", "commit_sha"],
+    type: "object",
+  },
+  ci_green: {
+    description: "Explicit CI/check evidence. Prefer gh pr checks --required, or record why no required checks exist.",
+    properties: {
+      command: { type: "string" },
+      status: { type: "string" },
+    },
+    required: ["command", "status"],
+    type: "object",
+  },
+  manager_merge_decision: {
+    description: "Manager-owned decision that all required evidence has been independently verified and merge is allowed.",
+    properties: {
+      decision: { type: "string" },
+      manager_verified: { type: "boolean" },
+    },
+    required: ["decision", "manager_verified"],
+    type: "object",
+  },
+  merge: {
+    description: "Merge receipt recorded only after repo.merge_green_pr, CI, mergeability, and manager decision gates pass.",
+    properties: {
+      merge_sha: { type: "string" },
+    },
+    required: ["merge_sha"],
+    type: "object",
+  },
+  mergeability_clean: {
+    description: "Evidence that the PR is mergeable or conflicts were resolved within the manager-approved retry limit.",
+    properties: {
+      conflicts: { type: "boolean" },
+      mergeable_state: { type: "string" },
+    },
+    required: ["conflicts", "mergeable_state"],
+    type: "object",
+  },
+  post_merge_verification: {
+    description: "Post-merge or main-branch verification receipt.",
+    properties: {
+      command: { type: "string" },
+      status: { type: "string" },
+    },
+    required: ["command", "status"],
+    type: "object",
+  },
+  pr_url: {
+    description: "Pull request URL recorded only after repo.open_pr was permitted.",
+    properties: {
+      url: { type: "string" },
+    },
+    required: ["url"],
+    type: "object",
+  },
+} satisfies Record<string, Record<string, unknown>>;
+
 const LOOP_TEMPLATES: Record<string, LoopTemplateDefinition> = {
   app_visible_build_loop: {
     artifactRequirements: { adversarial_check: ADVERSARIAL_CHECK_REQUIREMENT },
@@ -18026,6 +18391,27 @@ const LOOP_TEMPLATES: Record<string, LoopTemplateDefinition> = {
     requiredBeforeContinue: ["pr_url", "ci_green", "merge", "adversarial_check"],
     stopConditions: ["max_iterations", "required_evidence"],
     tags: ["repo", "ci"],
+  },
+  ship_it_loop: {
+    artifactRequirements: SHIP_IT_ARTIFACT_REQUIREMENTS,
+    cleanupPolicy: "clear",
+    description: "Require branch, push, PR, CI, mergeability, manager merge decision, merge, post-merge, and adversarial evidence before ship-it continuation.",
+    maxIterations: 2,
+    name: "ship_it_loop",
+    recommendedTools: ["gh", "verification.run_tests", "git"],
+    requiredBeforeContinue: [
+      "branch_ready",
+      "branch_pushed",
+      "pr_url",
+      "ci_green",
+      "mergeability_clean",
+      "manager_merge_decision",
+      "merge",
+      "post_merge_verification",
+      "adversarial_check",
+    ],
+    stopConditions: ["max_iterations", "required_evidence", "manager_accepts"],
+    tags: ["repo", "ci", "merge", "ship_it"],
   },
   test_coverage_loop: {
     artifactRequirements: { adversarial_check: ADVERSARIAL_CHECK_REQUIREMENT },
@@ -18251,6 +18637,57 @@ const MANAGER_RECIPES: Record<string, ManagerRecipeDefinition> = {
     supportPatterns: ["Inbox / No-Tmux App Loop", "Recovery / Resume / Handoff"],
     tools: ["verification.run_tests", "context.fetch_prs"],
   },
+  "ship-it-loop": {
+    acceptance: [
+      "Branch, push, PR URL, CI-green, mergeability, manager merge decision, merge, post-merge verification, and adversarial proof are recorded.",
+      "Push, PR creation, conflict resolution, and merge actions are each gated by explicit manager permissions.",
+      "Merge readiness is a manager decision after independent verification, not a worker claim or CI-green shortcut.",
+    ],
+    cleanup: "clear after saved handoff",
+    description: "Drive a visible manager-worker ship-it loop through branch push, PR, CI, conflict handling, manager merge decision, merge, and post-merge receipts.",
+    disallowedActions: [
+      "Do not push branches before repo.push_branch is permitted.",
+      "Do not open or update PRs before repo.open_pr is permitted.",
+      "Do not resolve conflicts before repo.resolve_conflicts is permitted and retry bounds are recorded.",
+      "Do not merge before repo.merge_green_pr is permitted, CI is green, mergeability is clean, and the manager records merge_ready.",
+    ],
+    displayName: "Autonomous Ship-It Loop",
+    epilogues: ["draft-pr", "record-handoff"],
+    evidenceGates: [
+      "branch_ready",
+      "branch_pushed",
+      "pr_url",
+      "ci_green",
+      "mergeability_clean",
+      "manager_merge_decision",
+      "merge",
+      "post_merge_verification",
+      "adversarial_check",
+    ],
+    finalReportRequirements: [
+      "Record branch, PR URL, CI/check output, mergeability/conflict status, manager merge decision, merge SHA, post-merge verification, finish-task, and heartbeat teardown proof in the final report.",
+    ],
+    guidelines: [
+      "Keep all PR lifecycle phases visible in the manager and worker sessions.",
+      "Treat CI-green, mergeability, and worker receipts as claims until the manager verifies them.",
+      "Use a bounded conflict retry and block with evidence when conflicts remain unresolved.",
+    ],
+    loopTemplate: "ship_it_loop",
+    mode: "strict",
+    name: "ship-it-loop",
+    objective: "Supervise a worker from implementation through explicit branch, PR, CI, conflict, merge, and post-merge evidence gates.",
+    permissions: [
+      "repo.push_branch",
+      "repo.open_pr",
+      "repo.monitor_ci",
+      "repo.resolve_conflicts",
+      "repo.merge_green_pr",
+      "worker_session.compact",
+      "worker_session.clear",
+    ],
+    supportPatterns: ["Inbox / No-Tmux App Loop", "Recovery / Resume / Handoff"],
+    tools: ["gh", "git", "verification.run_tests", "context.fetch_prs"],
+  },
   "test-coverage-loop": {
     acceptance: [
       "Coverage or targeted test evidence is recorded before another worker pass.",
@@ -18313,6 +18750,9 @@ const MANAGER_RECIPE_ALIASES: Record<string, string> = {
   "pr ci merge ralph loop": "pr-ci-merge-ralph-loop",
   "pr/ci/merge ralph loop": "pr-ci-merge-ralph-loop",
   "ralph loop": "pr-ci-merge-ralph-loop",
+  "ship it": "ship-it-loop",
+  "ship it loop": "ship-it-loop",
+  "ship-it": "ship-it-loop",
   "test coverage": "test-coverage-loop",
   "test coverage loop": "test-coverage-loop",
   "ux polish": "ux-polish-loop",

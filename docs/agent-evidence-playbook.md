@@ -26,7 +26,7 @@ Pick evidence that matches the risk and surface area of the change.
 | Dashboard or frontend behavior | `npm run build`, browser inspection, screenshot, visible Dispatch/dashboard state |
 | Worker, manager, or Dispatch behavior | `conveyor qa-plan dispatch-completion`, `conveyor qa-run adversarial-triggers --receipt-output /tmp/adversarial-triggers-receipt.json --json`, `conveyor audit <task> --json`, `conveyor replay <task>` |
 | Acceptance criteria | `conveyor criteria <task> --list`, satisfied criteria evidence JSON, deferred or rejected criteria rationale |
-| PR or ship loop | PR URL, CI-green receipt, merge or main-branch receipt, final diff inspection, guarded `codex-review` when requested or when review risk justifies it |
+| PR or ship loop | `conveyor qa-run ship-it-loop --receipt-output /tmp/ship-it-loop-receipt.json --json` for local policy proof; for live work, PR URL, CI-green receipt, mergeability, manager merge decision, merge or main-branch receipt, post-merge verification, final diff inspection, and guarded `codex-review` when requested or when review risk justifies it |
 
 Small documentation edits do not need full release-candidate checks. Broad CLI,
 Dispatch, or dashboard changes usually do.

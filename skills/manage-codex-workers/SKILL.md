@@ -1,6 +1,6 @@
 ---
 name: manage-codex-workers
-description: Use when the user asks to set up an Agent Conveyor Ralph loop, register an existing Codex session as a worker or manager, create a supervised task, bind a pair, run observation cycles, send nudges, interrupt busy-waits, finish a task, or audit/replay supervision history.
+description: Use when the user asks to set up an Agent Conveyor Ralph loop or autonomous ship-it loop, register an existing Codex session as a worker or manager, create a supervised task, bind a pair, run observation cycles, send nudges, interrupt busy-waits, finish a task, or audit/replay supervision history.
 ---
 
 # Manage Codex Workers
@@ -28,6 +28,19 @@ Max iterations: <number, default 3>
 Require adversarial proof before another worker iteration.
 ```
 
+For repo delivery where the user explicitly grants branch, PR, CI, conflict,
+and merge authority, use the `ship-it-loop` recipe and `ship_it_loop` template
+instead of a generic Ralph loop:
+
+```text
+Use the manage-codex-workers skill.
+
+Set up a Codex app autonomous ship-it loop for <bounded repo task>.
+Manager may push a branch, open a PR, monitor CI, resolve bounded conflicts,
+and merge only after explicit manager merge evidence.
+Max iterations: <number, default 2>
+```
+
 Skill behavior:
 
 1. Work from `/Users/neonwatty/Desktop/codex-terminal-manager`.
@@ -48,9 +61,13 @@ Skill behavior:
    `--required-before-continue adversarial_check` gate; do not choose
    cleanup-gated templates such as `build_then_clear` or
    `compact_then_continue` unless the setup creates a fresh worker thread per
-   iteration or has a concrete app-session cleanup receipt path. Use
-   `--adversarial`, a bounded `--max-iterations`, and `--json`. When step 4
-   produced app thread ids, pass them through `--manager-codex-app-thread-id`,
+   iteration or has a concrete app-session cleanup receipt path. For an
+   operator-approved ship-it loop, use `--template ship_it_loop`, save the
+   `ship-it-loop` manager recipe, and require branch, push, PR, CI,
+   mergeability, manager merge decision, merge, post-merge, and
+   `adversarial_check` receipts before merge or closeout. Use `--adversarial`,
+   a bounded `--max-iterations`, and `--json`. When step 4 produced app thread
+   ids, pass them through `--manager-codex-app-thread-id`,
    `--manager-codex-app-thread-title`, `--worker-codex-app-thread-id`, and
    `--worker-codex-app-thread-title` so Conveyor can surface app identities in
    `sessions`, `discover`, and setup JSON. If app thread tools are not
@@ -469,7 +486,10 @@ compact progress summary and likely next steps in SQLite. Use `manager-config`
 to save what the manager should check against, how structured supervision
 should be, acceptance criteria, planning/PRD/mockup references, and permissions
 such as `--allow-pr`, `--allow-merge-green`, and
-`--allow-worker-compact-clear`.
+`--allow-worker-compact-clear`. For ship-it loops, also use explicit
+`--permit repo.push_branch`, `--permit repo.monitor_ci`, and
+`--permit repo.resolve_conflicts`; never imply these from a general request to
+"ship it."
 
 ## Manager Recipes
 
@@ -491,6 +511,9 @@ First-draft recipes:
   nudge sparingly, and keep permissions minimal.
 - `PR/CI/Merge Ralph Loop` — manage PR readiness, CI, fixes, merge, handoff,
   and compact/clear receipts.
+- `Autonomous Ship-It Loop` — push branch, open PR, monitor CI, handle bounded
+  conflicts, and merge only after manager-owned mergeability, merge decision,
+  post-merge, and adversarial evidence.
 
 Support patterns:
 
@@ -516,10 +539,16 @@ the human interaction in the Codex chat where the user is already working and
 keeps SQLite writes explicit. Use `manager-config --interactive` only as a
 terminal fallback for a human running `conveyor` directly.
 
-Before instructing high-level actions such as PR creation, green PR merge, or
-worker compact/clear, check the saved policy:
+Before instructing high-level actions such as branch push, PR creation, CI
+monitoring, conflict resolution, green PR merge, or worker compact/clear, check
+the saved policy:
 
 ```bash
+conveyor manager-permission my-task repo.push_branch --require
+conveyor manager-permission my-task repo.open_pr --require
+conveyor manager-permission my-task repo.monitor_ci --require
+conveyor manager-permission my-task repo.resolve_conflicts --require
+conveyor manager-permission my-task repo.merge_green_pr --require
 conveyor manager-permission my-task worker_compact_clear \
   --require-handoff --require
 ```
@@ -592,6 +621,16 @@ correlation markers, and negative QA checks. The manager should keep exactly one
 child board active, require PR/CI/merge or `satisfied_on_main` proof before
 marking a child done, and update the parent receipt before activating the next
 child.
+
+Natural-language requests such as "ship this autonomously", "let the manager
+open the PR and merge when green", or "have the manager handle conflicts and
+merge" must resolve to the `ship-it-loop` recipe or an explicit custom policy.
+Use `conveyor qa-plan ship-it-loop` to retrieve the permission boundaries,
+correlation markers, lifecycle evidence template, and negative QA checks. The
+manager must record `branch_ready`, `branch_pushed`, `pr_url`, `ci_green`,
+`mergeability_clean`, `manager_merge_decision`, `merge`,
+`post_merge_verification`, and structured `adversarial_check` evidence before
+treating the loop as merge-ready. CI green is not a merge decision.
 
 ```bash
 conveyor cycle my-task
@@ -813,6 +852,16 @@ etc.) run `conveyor db-doctor --live`.
   current manager is a Codex app session with thread tools, send only
   `send_ready=true` wake prompts with `send_message_to_thread`, then record the
   outcome with `app-wakeup-record-delivery`.
+- "set up an autonomous ship-it loop", "ship this through PR and merge", or
+  "merge when green": resolve to `ship-it-loop` unless the user explicitly
+  chooses a custom policy. Show the locked recipe summary, require explicit
+  operator confirmation for `repo.push_branch`, `repo.open_pr`,
+  `repo.monitor_ci`, `repo.resolve_conflicts`, and `repo.merge_green_pr`, then
+  create or use a `ship_it_loop` run. Before merge, require fresh CI,
+  mergeability, manager merge decision, merge receipt, post-merge verification,
+  and adversarial proof receipts. If conflict retries hit the configured limit,
+  block with sanitized evidence and the next exact action instead of continuing
+  to wake the worker.
 - "register this Codex session as the worker for dashboard setup <CODE>":
   derive `dashboard-<CODE>-worker`, run `conveyor doctor-self`, then
   `conveyor register-worker --name dashboard-<CODE>-worker --pid <PID> --cwd <CWD> --tmux-session <SESSION>`.
@@ -850,6 +899,8 @@ conveyor qa-plan emergent-criteria
 conveyor qa-plan emergent-criteria --json
 conveyor qa-plan tmux-errors
 conveyor qa-plan tmux-errors --json
+conveyor qa-plan ship-it-loop
+conveyor qa-run ship-it-loop --receipt-output /tmp/ship-it-loop-receipt.json --json
 ```
 
 Use `emergent-criteria` when validating a real worker/manager pair through

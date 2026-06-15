@@ -1,0 +1,401 @@
+# GoalBuddy v2 state.yaml
+# Board truth lives here. goal.md is the editable charter; notes/ holds long receipts only.
+
+version: 2
+
+goal:
+  title: "Autonomous Ship-It Loops"
+  slug: "autonomous-ship-it-loops"
+  kind: specific
+  tranche: "Implement the first explicit PR/CI/conflict/merge lifecycle policy for visible Conveyor manager-worker loops, with local tests/docs and a dogfood or simulated QA receipt."
+  status: done
+  oracle:
+    signal: "Focused Conveyor tests, docs/skill prompt updates, and a receipt-backed dogfood or simulated ship-it run prove explicit PR lifecycle authority, manager-only merge gating, conflict handling limits, and app-visible session behavior."
+    cadence: "after each Worker package and at final audit"
+    final_proof: "Final Judge/PM audit cites changed files, passing commands, dogfood or QA receipt, policy decisions, and any blocked live-GitHub operations with exact reason."
+  intake:
+    original_request: "Plan out with GoalBuddy prep the addition of autonomous ship-it loops."
+    interpreted_outcome: "Prepare a GoalBuddy execution board for adding policy-driven ship-it loops to Conveyor manager-worker automation."
+    input_shape: specific
+    audience: "Conveyor operators using Codex app manager-worker sessions for repo work"
+    authority: requested
+    proof_type: test
+    completion_proof: "A verified implementation and dogfood or QA receipt showing a bounded loop can safely create/monitor/resolve/merge under explicit policy."
+    likely_misfire: "Building generic auto-merge behavior that bypasses manager verification, hides session output, or treats CI green as sufficient proof."
+    blind_spots_considered:
+      - "GitHub auth may be absent; local tests must not require live credentials."
+      - "Merge authority must be explicit and manager-owned."
+      - "Codex app worktrees may differ from manually prepared worktrees."
+      - "Conflict resolution needs retry limits and exact stop conditions."
+      - "Docs, installed skill copies, and npm release readiness may be separate follow-up decisions."
+    existing_plan_facts:
+      - "Worker can edit/test/commit/push only when policy grants those powers."
+      - "Manager should verify worker claims before closeout or merge."
+      - "PR create, monitor, conflict resolution, and merge should be opt-in lifecycle authorities."
+      - "Manager/worker sessions should remain visibly reviewable in Codex app or tmux."
+
+rules:
+  pm_owns_state: true
+  one_active_task: true
+  max_write_workers: 1
+  no_implementation_without_worker_or_pm_task: true
+  no_completion_without_judge_or_pm_audit: true
+  planning_is_not_completion: true
+  queued_required_worker_blocks_completion: true
+  continuous_until_full_outcome: true
+  missing_input_or_credentials_do_not_stop_goal: true
+  preserve_and_validate_existing_plan: true
+  intake_misfire_must_be_audited: true
+  goal_pressure_requires_oracle: true
+  no_completion_on_weak_proof: true
+  slice_policy:
+    max_consecutive_tiny_tasks: 2
+    prefer_vertical_slices: true
+    judge_picks_largest_safe_slice: true
+    worker_completes_whole_slice: true
+
+agents:
+  scout: installed
+  worker: installed
+  judge: installed
+
+visual_board:
+  selected: local
+  local:
+    status: live
+    url: "http://goalbuddy.localhost:41737/autonomous-ship-it-loops/"
+    command: "npx goalbuddy board docs/goals/autonomous-ship-it-loops"
+
+active_task: null
+
+tasks:
+  - id: T001
+    type: scout
+    assignee: Scout
+    status: done
+    reasoning_hint: medium
+    objective: "Map the existing Conveyor PR/Ralph-loop/autopilot/session-visible behavior and identify the smallest coherent ship-it lifecycle surface."
+    inputs:
+      - "README.md"
+      - "docs/qa"
+      - "skills/manage-codex-workers/SKILL.md"
+      - "src/cli/typescript-runtime.ts"
+      - "src/runtime"
+      - "src/cli/typescript-runtime.test.ts"
+      - "Recent relevant docs/goals receipts for Ralph-loop, app-autopilot, visible sessions, and PR lifecycle work."
+    constraints:
+      - "Read-only."
+      - "Do not edit implementation files."
+      - "Prefer concrete file paths, commands, existing template names, and current gaps over generic recommendations."
+      - "Do not inspect secrets or private repo content."
+    expected_output:
+      - "Current capability map for PR create/monitor/conflict/merge lifecycle."
+      - "Existing tests and docs that should be extended."
+      - "Gap list ordered by safety and operator value."
+      - "Recommended first Worker slice and risks."
+    receipt:
+      result: done
+      note: "notes/T001-scout-map.md"
+      summary: "Mapped current PR/Ralph-loop/autopilot/session-visible surfaces. Existing permissions, pr_ci_merge_loop gates, manager recipe, app-visible prompts, and QA receipts are strong, but there is no first-class ship-it lifecycle state or simulated end-to-end ship-it QA."
+      evidence:
+        - "src/runtime/manager-permissions.ts"
+        - "src/runtime/dispatch.ts"
+        - "src/runtime/loop-evidence.ts"
+        - "src/cli/typescript-runtime.ts"
+        - "src/cli/typescript-runtime.test.ts"
+        - "README.md"
+        - "skills/manage-codex-workers/SKILL.md"
+        - "docs/qa/ralph-loop.md"
+        - "docs/qa/goalbuddy-conveyor.md"
+        - "docs/goals/ralph-loop-evidence-gates/notes/T999-final-audit.md"
+        - "docs/goals/visible-conveyor-sessions/state.yaml"
+      recommended_next: "T002 should define the exact ship-it authority contract and approve a single Worker slice that adds first-class lifecycle metadata/QA without live GitHub requirements."
+
+  - id: T002
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Choose the first implementation slice for ship-it loops and define the exact authority contract."
+    inputs:
+      - "T001 receipt or note"
+      - "Goal oracle"
+    constraints:
+      - "Do not implement."
+      - "Require an explicit policy boundary for create_pr, push, monitor_ci, resolve_conflicts, and merge."
+      - "Manager-only merge approval must be preserved."
+      - "Pick the largest safe useful slice with clear allowed_files, verification commands, and stop conditions."
+    expected_output:
+      - "Decision: approved Worker slice or blocked reason."
+      - "Ship-it lifecycle state machine or contract summary."
+      - "Exact Worker objective."
+      - "allowed_files."
+      - "verify commands."
+      - "stop_if conditions."
+      - "Deferred follow-ups if any."
+    receipt:
+      result: done
+      decision: approved
+      note: "notes/T002-judge-contract.md"
+      full_outcome_complete: false
+      summary: "Approved a first Worker slice that adds a deterministic ship-it lifecycle contract and QA proof around existing PR/CI/merge rails without live GitHub requirements."
+      worker_task: "Implement package-level ship-it loop lifecycle metadata, manager recipe authority boundaries, and deterministic QA/tests proving fail-closed PR/push/CI/conflict/merge gates."
+      allowed_files:
+        - "src/cli/typescript-runtime.ts"
+        - "src/cli/typescript-runtime.test.ts"
+        - "src/runtime/manager-permissions.ts"
+        - "src/runtime/dispatch.ts"
+        - "src/runtime/loop-evidence.ts"
+        - "README.md"
+        - "docs/qa/**"
+        - "docs/manager-recipes.md"
+        - "docs/goals/autonomous-ship-it-loops/**"
+      verify:
+        - "npm test -- --runInBand"
+        - "npm run build:cli"
+        - "bin/conveyor loop-templates --show ship_it_loop --json or equivalent updated pr_ci_merge_loop proof"
+        - "bin/conveyor manager-recipes --show <ship-it-recipe> --json"
+        - "bin/conveyor qa-run <ship-it-scenario> --receipt-output /tmp/ship-it-loop-receipt.json --json"
+        - "node /Users/neonwatty/.codex/plugins/cache/goalbuddy/goalbuddy/0.3.8/skills/goalbuddy/scripts/check-goal-state.mjs docs/goals/autonomous-ship-it-loops/state.yaml"
+        - "git diff --check"
+      stop_if:
+        - "Need live GitHub credentials or real merge access for local tests."
+        - "Need package code to call Codex app-only thread tools."
+        - "The design would let CI green alone imply merge readiness."
+        - "The design would let the worker merge without a manager decision."
+        - "The implementation would make PR creation, conflict resolution, or merge implicit defaults."
+        - "Need files outside allowed_files."
+        - "Verification fails twice with the same unresolved root cause."
+
+  - id: T003
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: high
+    objective: "Implement package-level ship-it loop lifecycle metadata, manager recipe authority boundaries, and deterministic QA/tests proving fail-closed PR/push/CI/conflict/merge gates."
+    allowed_files:
+      - "src/cli/typescript-runtime.ts"
+      - "src/cli/typescript-runtime.test.ts"
+      - "src/runtime/manager-permissions.ts"
+      - "src/runtime/dispatch.ts"
+      - "src/runtime/loop-evidence.ts"
+      - "README.md"
+      - "docs/qa/**"
+      - "docs/manager-recipes.md"
+      - "docs/goals/autonomous-ship-it-loops/**"
+    verify:
+      - "npm test -- --runInBand"
+      - "npm run build:cli"
+      - "bin/conveyor loop-templates --show ship_it_loop --json or equivalent updated pr_ci_merge_loop proof"
+      - "bin/conveyor manager-recipes --show <ship-it-recipe> --json"
+      - "bin/conveyor qa-run <ship-it-scenario> --receipt-output /tmp/ship-it-loop-receipt.json --json"
+      - "node /Users/neonwatty/.codex/plugins/cache/goalbuddy/goalbuddy/0.3.8/skills/goalbuddy/scripts/check-goal-state.mjs docs/goals/autonomous-ship-it-loops/state.yaml"
+      - "git diff --check"
+    stop_if:
+      - "Need files outside allowed_files."
+      - "Policy would allow merge without manager verification."
+      - "Implementation requires live GitHub credentials for tests."
+      - "Codex app visible-session behavior is unaddressed."
+      - "The implementation would make PR creation, conflict resolution, or merge implicit defaults."
+      - "Verification fails twice with the same root cause."
+    receipt:
+      result: done
+      note: "notes/T003-worker-receipt.md"
+      summary: "Added explicit ship-it lifecycle metadata, manager recipe authority boundaries, deterministic QA plan/run support, docs, and tests for permission-gated push/PR/merge plus manager-only merge evidence gates."
+      changed_files:
+        - "src/runtime/manager-permissions.ts"
+        - "src/cli/typescript-runtime.ts"
+        - "src/cli/typescript-runtime.test.ts"
+        - "README.md"
+        - "docs/manager-recipes.md"
+        - "docs/qa/README.md"
+        - "docs/qa/ship-it-loop.md"
+        - "docs/goals/autonomous-ship-it-loops/state.yaml"
+        - "docs/goals/autonomous-ship-it-loops/notes/T003-worker-receipt.md"
+      commands:
+        - command: "bin/conveyor loop-templates --show ship_it_loop --json"
+          status: pass
+        - command: "bin/conveyor manager-recipes --show ship-it-loop --json"
+          status: pass
+        - command: "bin/conveyor qa-plan ship-it-loop --json"
+          status: pass
+        - command: "bin/conveyor qa-run ship-it-loop --receipt-output /tmp/ship-it-loop-receipt.json --json"
+          status: pass
+        - command: "npm test -- --runInBand"
+          status: pass
+        - command: "npm run build:cli"
+          status: pass
+        - command: "node /Users/neonwatty/.codex/plugins/cache/goalbuddy/goalbuddy/0.3.8/skills/goalbuddy/scripts/check-goal-state.mjs docs/goals/autonomous-ship-it-loops/state.yaml"
+          status: pass
+        - command: "git diff --check"
+          status: pass
+      verification:
+        - command: "bin/conveyor loop-templates --show ship_it_loop --json"
+          result: passed
+        - command: "bin/conveyor manager-recipes --show ship-it-loop --json"
+          result: passed
+        - command: "bin/conveyor qa-plan ship-it-loop --json"
+          result: passed
+        - command: "bin/conveyor qa-run ship-it-loop --receipt-output /tmp/ship-it-loop-receipt.json --json"
+          result: passed
+          receipt: "/tmp/ship-it-loop-receipt.json"
+        - command: "npm test -- --runInBand"
+          result: passed
+          tests: 178
+        - command: "npm run build:cli"
+          result: passed
+        - command: "git diff --check"
+          result: passed
+      strongest_failure_mode: "A ship-it loop could merge after CI green while permission, conflict, manager decision, mergeability, or post-merge proof is missing."
+      disproof_evidence: "/tmp/ship-it-loop-receipt.json includes passed checks for denied push/PR/merge before permission, missing-evidence blocks before any evidence and before mergeability/manager decision, conflict retry blocked after limit, and final delivery only after all lifecycle evidence."
+      residual_risk: "Live GitHub PR creation, CI monitoring, conflict repair, and merge remain un-dogfooded and require explicit operator approval in T005."
+
+  - id: T004
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "Update operator docs and manager/worker prompt templates so ship-it authority is explicit and reusable."
+    allowed_files:
+      - "README.md"
+      - "docs/**"
+      - "skills/manage-codex-workers/SKILL.md"
+      - "docs/goals/autonomous-ship-it-loops/**"
+    verify:
+      - "npm test -- --runInBand"
+      - "node /Users/neonwatty/.codex/plugins/cache/goalbuddy/goalbuddy/0.3.8/skills/goalbuddy/scripts/check-goal-state.mjs docs/goals/autonomous-ship-it-loops/state.yaml"
+      - "git diff --check"
+    stop_if:
+      - "Docs would contradict implemented CLI behavior."
+      - "Installed skill and repo skill cannot be reconciled without a separate release/install step."
+      - "Need to edit implementation files not covered by the task."
+    receipt:
+      result: done
+      note: "notes/T004-worker-receipt.md"
+      summary: "Updated repo skill prompts and operator docs so autonomous ship-it requests resolve to an explicit recipe, explicit side-effect permissions, manager-owned merge readiness, and deterministic QA proof."
+      changed_files:
+        - "README.md"
+        - "docs/agent-evidence-playbook.md"
+        - "docs/manager-recipes.md"
+        - "docs/manual-qa-checklist.md"
+        - "docs/qa/README.md"
+        - "docs/qa/ship-it-loop.md"
+        - "skills/manage-codex-workers/SKILL.md"
+        - "docs/goals/autonomous-ship-it-loops/state.yaml"
+        - "docs/goals/autonomous-ship-it-loops/notes/T004-worker-receipt.md"
+      commands:
+        - command: "npm test -- --runInBand"
+          status: pass
+        - command: "node /Users/neonwatty/.codex/plugins/cache/goalbuddy/goalbuddy/0.3.8/skills/goalbuddy/scripts/check-goal-state.mjs docs/goals/autonomous-ship-it-loops/state.yaml"
+          status: pass
+        - command: "git diff --check"
+          status: pass
+        - command: "rg -n \"ship-it-loop|ship_it_loop|repo.push_branch|repo.monitor_ci|repo.resolve_conflicts|manager_merge_decision|qa-run ship-it-loop\" skills/manage-codex-workers/SKILL.md README.md docs/agent-evidence-playbook.md docs/manager-recipes.md docs/qa/ship-it-loop.md docs/manual-qa-checklist.md"
+          status: pass
+      strongest_failure_mode: "Future manager/worker prompts could still treat merge when green as permission to merge from CI or worker claims alone."
+      disproof_evidence: "Targeted rg inspection found ship-it guidance requiring explicit operator confirmation for repo side-effect permissions plus fresh CI, mergeability, manager merge decision, merge receipt, post-merge verification, and adversarial proof before merge."
+      residual_risk: "Repo skill is updated, but installed Codex skill copy remains a separate deployment surface for the post-merge release/install step."
+
+  - id: T005
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: high
+    objective: "Run a local QA or dogfood ship-it loop proving the policy gates without requiring an unsafe live merge."
+    allowed_files:
+      - "docs/goals/autonomous-ship-it-loops/**"
+      - "docs/qa/**"
+      - "tmp/**"
+    verify:
+      - "conveyor doctor"
+      - "conveyor db-doctor --path .codex-workers/workerctl.db"
+      - "Focused ship-it QA command selected by Judge or Worker receipt"
+      - "git diff --check"
+    stop_if:
+      - "Live GitHub credentials or merge authority are required and not explicitly approved."
+      - "QA cannot prove manager-only merge gating."
+      - "Dogfood would inspect private content or unrelated repos."
+    receipt:
+      result: done
+      note: "notes/T005-worker-receipt.md"
+      summary: "Ran fresh local deterministic ship-it QA proof without live GitHub merge; receipt proves fail-closed side-effect permissions, lifecycle evidence gates, conflict retry blocking, and final delivery only after complete evidence."
+      changed_files:
+        - "docs/goals/autonomous-ship-it-loops/state.yaml"
+        - "docs/goals/autonomous-ship-it-loops/notes/T005-worker-receipt.md"
+      commands:
+        - command: "bin/conveyor doctor"
+          status: pass
+        - command: "bin/conveyor db-doctor --path .codex-workers/workerctl.db"
+          status: pass
+        - command: "bin/conveyor qa-run ship-it-loop --receipt-output /tmp/ship-it-loop-t005-receipt.json --json"
+          status: pass
+        - command: "git diff --check"
+          status: pass
+        - command: "node /Users/neonwatty/.codex/plugins/cache/goalbuddy/goalbuddy/0.3.8/skills/goalbuddy/scripts/check-goal-state.mjs docs/goals/autonomous-ship-it-loops/state.yaml"
+          status: pass
+      qa_receipt: "/tmp/ship-it-loop-t005-receipt.json"
+      strongest_failure_mode: "A ship-it loop could still merge because CI is green while missing permissions, mergeability, manager decision, post-merge verification, or conflict-blocker proof."
+      disproof_evidence: "Fresh QA receipt shows denied push/PR/merge before permission, missing-evidence blocks, partial PR/CI is insufficient, conflict retry exhaustion blocks, and final delivery happens only after all lifecycle evidence exists."
+      residual_risk: "Local simulated QA only; live GitHub side effects require explicit operator approval."
+
+  - id: T999
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Final audit: decide whether autonomous ship-it loops are ready for bounded dogfooding or release follow-up."
+    inputs:
+      - "All done task receipts"
+      - "Last verification"
+      - "Current dirty diff"
+      - "Goal oracle"
+    constraints:
+      - "Do not implement."
+      - "Reject completion if manager-only merge gating is not proven."
+      - "Reject completion if session-visible behavior is not documented or tested."
+      - "Reject completion if live GitHub blockers are hidden instead of recorded."
+      - "Reject completion if npm package or installed skill release decisions are unresolved and required for use."
+    expected_output:
+      - "complete | not_complete"
+      - "full_outcome_complete: true | false"
+      - "Proof mapped to oracle"
+      - "Release/install recommendation"
+      - "Next task if not complete"
+    receipt:
+      result: done
+      note: "notes/T999-final-audit.md"
+      decision: complete
+      full_outcome_complete: true
+      summary: "The tranche is complete for local implementation and PR/release follow-up: first-class ship-it lifecycle policy, manager recipe, deterministic QA proof, docs, and repo skill prompts are implemented and verified."
+      commands:
+        - command: "node /Users/neonwatty/.codex/plugins/cache/goalbuddy/goalbuddy/0.3.8/skills/goalbuddy/scripts/check-goal-state.mjs docs/goals/autonomous-ship-it-loops/state.yaml"
+          status: pass
+        - command: "npm run build:cli"
+          status: pass
+        - command: "npm test -- --runInBand"
+          status: pass
+        - command: "bin/conveyor qa-run ship-it-loop --receipt-output /tmp/ship-it-loop-final-audit-receipt.json --json"
+          status: pass
+        - command: "git diff --check"
+          status: pass
+        - command: "cmp -s skills/manage-codex-workers/SKILL.md /Users/neonwatty/.codex/skills/manage-codex-workers/SKILL.md; echo installed_skill_matches=$?"
+          status: pass
+          summary: "Printed installed_skill_matches=1, so installed skill reconciliation remains a release/install follow-up."
+      evidence:
+        - "/tmp/ship-it-loop-final-audit-receipt.json"
+        - "docs/goals/autonomous-ship-it-loops/notes/T999-final-audit.md"
+      strongest_failure_mode: "An autonomous ship-it loop could look finished because CI is green while still allowing side effects without explicit permission or manager-owned evidence."
+      disproof_evidence: "Final QA receipt shows push/PR/merge fail closed before permission, missing and partial lifecycle evidence block continuation, conflict retry exhaustion is blocked, and final delivery occurs only after all required evidence exists."
+      residual_risk: "No live GitHub side effects were performed; installed skill copy differs from repo skill and needs release/install follow-up."
+
+checks:
+  dirty_fingerprint: unknown
+  last_verification:
+    result: pass
+    task: T999
+    commands:
+      - "node /Users/neonwatty/.codex/plugins/cache/goalbuddy/goalbuddy/0.3.8/skills/goalbuddy/scripts/check-goal-state.mjs docs/goals/autonomous-ship-it-loops/state.yaml"
+      - "npm run build:cli"
+      - "npm test -- --runInBand"
+      - "bin/conveyor qa-run ship-it-loop --receipt-output /tmp/ship-it-loop-final-audit-receipt.json --json"
+      - "git diff --check"

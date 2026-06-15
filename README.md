@@ -139,8 +139,9 @@ release version that is not already on npm.
 For common manager setups, start with
 [`docs/manager-recipes.md`](docs/manager-recipes.md). It maps natural-language
 requests such as GoalBuddy conveyor runs, test coverage loops, UX polish loops,
-what-next nudging, and PR/CI/merge Ralph loops to concrete `manager-config`
-settings, permissions, evidence gates, cleanup behavior, and example
+what-next nudging, PR/CI/merge Ralph loops, and autonomous ship-it loops to
+concrete `manager-config` settings, permissions, evidence gates, cleanup
+behavior, and example
 manager/Dispatch/worker interactions. Use `conveyor manager-recipes --list`
 or `conveyor manager-recipes --show goalbuddy-conveyor --json` for a
 machine-readable setup preview.
@@ -201,6 +202,9 @@ Use `conveyor qa-plan adversarial-triggers` to verify natural-language
 manager prompts activate Ralph-loop adversarial gates.
 Use `conveyor qa-plan goalbuddy-conveyor` when a broad request should become
 sequential GoalBuddy child boards with PR/CI/merge receipts.
+Use `conveyor qa-plan ship-it-loop` when a manager is allowed to push a branch,
+open a PR, monitor CI, resolve bounded conflicts, and merge only after explicit
+manager-owned merge evidence.
 Before cutting a manager loose, have it resolve the freeform setup request to a
 named recipe from `docs/manager-recipes.md` or an explicit `custom` setup, then
 show the saved mode, permissions, evidence gates, cleanup policy, and disallowed
@@ -469,7 +473,8 @@ tmux attach -t codex-live-test
   flags. Use `--interactive` only as a terminal fallback when a human is
   running `conveyor` directly.
   `--permit` grants taxonomy permissions such as `repo.open_pr`,
-  `verification.run_pytest`, `context.spawn_reviewer`,
+  `repo.push_branch`, `repo.monitor_ci`, `repo.resolve_conflicts`,
+  `repo.merge_green_pr`, `verification.run_pytest`, `context.spawn_reviewer`,
   `communication.notify_operator`, or `worker_session.compact`. Use `--tool`
   to record expected verification/context tools, `--epilogue` for required
   built-in finish steps (`run-tools`, `draft-pr`, `subagent-review`,
@@ -769,9 +774,9 @@ tmux attach -t codex-live-test
 - `transcript-show <task> [--role R] [--include-content]` — Show stored
   transcript segment metadata. Segment text is redacted unless
   `--include-content` is passed.
-- `qa-plan <self-management|emergent-criteria|tmux-errors|dispatch-completion|ralph-loop|adversarial-triggers|goalbuddy-conveyor>` — Print a
+- `qa-plan <self-management|emergent-criteria|tmux-errors|dispatch-completion|ralph-loop|adversarial-triggers|goalbuddy-conveyor|ship-it-loop>` — Print a
   repeatable manual QA checklist.
-- `qa-run <ralph-loop-guardrails|generic-loop-template|generic-loop-template-browser|test-coverage-loop|adversarial-triggers|build-clear-loop> --receipt-output RECEIPT.json [--path DB]` —
+- `qa-run <ralph-loop-guardrails|generic-loop-template|generic-loop-template-browser|test-coverage-loop|adversarial-triggers|build-clear-loop|ship-it-loop> --receipt-output RECEIPT.json [--path DB]` —
   Run a deterministic no-tmux QA harness and save a JSON receipt.
   `ralph-loop-guardrails` proves max-iteration cutoff, missing-evidence
   cutoff, fresh retry delivery after structured `adversarial_check` evidence,
@@ -791,6 +796,10 @@ tmux attach -t codex-live-test
   `build-clear-loop` proves the non-coverage `build_then_clear` template
   blocks before `build_passed` and `cleanup` receipts, still blocks after build
   evidence alone, and delivers only after both build and cleanup evidence exist.
+  `ship-it-loop` proves push, PR, and merge commands fail closed until their
+  permissions are granted, then proves the `ship_it_loop` lifecycle blocks
+  before branch, PR, CI, mergeability, manager decision, merge, post-merge, and
+  adversarial receipts exist.
 - `loop-triggers --list|--classify PROMPT [--json]` — List the controlled
   natural-language loop triggers or classify a manager/operator prompt before
   creating a loop policy or continuation gate. Approved trigger phrases include
@@ -812,7 +821,8 @@ tmux attach -t codex-live-test
   `candidate_screenshot`, `visual_diff_report`, `diff_below_threshold`, and
   `adversarial_check` evidence before a manager-requested next visual pass can
   reach the worker. Quality-oriented templates (`app_visible_build_loop`,
-  `pr_ci_merge_loop`, `test_coverage_loop`, and `visual_diff_loop`) also expose an
+  `pr_ci_merge_loop`, `ship_it_loop`, `test_coverage_loop`, and
+  `visual_diff_loop`) also expose an
   `artifact_requirements["adversarial_check"]` object requiring
   `failure_mode`, `check`, and `result` fields.
 - `loop-status TASK --run RUN [--json]` — Summarize a Ralph-loop run for manager
@@ -896,14 +906,17 @@ conveyor qa-plan dispatch-completion
 conveyor qa-plan ralph-loop
 conveyor qa-plan adversarial-triggers
 conveyor qa-plan goalbuddy-conveyor
+conveyor qa-plan ship-it-loop
 conveyor qa-run ralph-loop-guardrails --receipt-output /tmp/ralph-loop-guardrails-receipt.json --json
 conveyor qa-run generic-loop-template --receipt-output /tmp/generic-loop-template-receipt.json --json
 conveyor qa-run generic-loop-template-browser --receipt-output /tmp/generic-loop-template-browser-receipt.json --json
 conveyor qa-run test-coverage-loop --receipt-output /tmp/test-coverage-loop-receipt.json --json
 conveyor qa-run adversarial-triggers --receipt-output /tmp/adversarial-triggers-receipt.json --json
 conveyor qa-run build-clear-loop --receipt-output /tmp/build-clear-loop-receipt.json --json
+conveyor qa-run ship-it-loop --receipt-output /tmp/ship-it-loop-receipt.json --json
 conveyor loop-triggers --classify "Run this as an adversarially gated Ralph loop." --json
 conveyor loop-templates --list --json
+conveyor loop-templates --show ship_it_loop --json
 conveyor loop-templates --show visual_diff_loop --json
 conveyor loop-evidence visual-diff qa-task --loop-run "$RUN_ID" --iteration 1 --reference reference.png --candidate candidate.png --threshold 0.02 --report-output visual-diff.json --diff-output visual-diff.png
 conveyor ralph-loop-presets --list --json

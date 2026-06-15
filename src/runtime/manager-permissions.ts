@@ -5,7 +5,7 @@ export type ManagerPermissions = Record<ManagerPermissionCategory, string[]>;
 const MANAGER_PERMISSION_TAXONOMY: Record<ManagerPermissionCategory, Set<string>> = {
   communication: new Set(["comment_on_pr", "notify_operator"]),
   context: new Set(["spawn_reviewer", "fetch_prs", "fetch_issues"]),
-  repo: new Set(["open_pr", "push_branch", "merge_green_pr"]),
+  repo: new Set(["merge_green_pr", "monitor_ci", "open_pr", "push_branch", "resolve_conflicts"]),
   verification: new Set(["run_playwright", "run_xcodebuild", "run_pytest", "run_cargo"]),
   worker_session: new Set(["compact", "clear", "interrupt", "stop"]),
 };
