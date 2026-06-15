@@ -843,6 +843,8 @@ session for any consumed item.
   artifact requirements, and recommended tools.
 - `loop-evidence add TASK --loop-run RUN --iteration N --evidence-type TYPE` —
   Record a run-qualified evidence receipt for a loop policy. Use
+  `loop-evidence build-passed TASK --loop-run RUN --iteration N` as the
+  friendly alias for the common `evidence_type=build_passed` receipt. Use
   `loop-evidence visual-diff` to compare PNG screenshots, write an optional
   diff/report artifact, and record `visual_diff_report` plus
   `diff_below_threshold` as satisfied only when the computed score is within
