@@ -511,10 +511,10 @@ function commandHelpText(program: "conveyor" | "workerctl", command: string): st
       `  ${program} criteria my-task --satisfy 1 --proof "File exists" --evidence-json '{"artifact":{"path":"docs/note.md"}}' --path /tmp/work/workerctl.db`,
     ],
     "finish-task": [
-      `usage: ${program} finish-task <task> --reason <reason> [--require-criteria-audit] ${path}`,
+      `usage: ${program} finish-task <task> --reason <reason> [--require-criteria-audit] ${path} [--json]`,
       "",
       "Examples:",
-      `  ${program} finish-task my-task --reason "Accepted criteria satisfied" --require-criteria-audit --path /tmp/work/workerctl.db`,
+      `  ${program} finish-task my-task --reason "Accepted criteria satisfied" --require-criteria-audit --path /tmp/work/workerctl.db --json`,
     ],
     "manager-ack": [
       `usage: ${program} manager-ack <task> --from-stdin ${path}`,
@@ -3002,7 +3002,7 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
         index += 1;
       }
     } else if (command === "loop-evidence" && flags.subtype === null) {
-      if (!["add", "visual-diff", "visual_diff", "adversarial-check", "adversarial_check"].includes(arg)) {
+      if (!["add", "visual-diff", "visual_diff", "build-passed", "build_passed", "adversarial-check", "adversarial_check"].includes(arg)) {
         return { command, enabled, error: `Unsupported loop-evidence action: ${arg}`, explicit, flags, task };
       }
       flags.subtype = arg;
@@ -3324,7 +3324,7 @@ function runLoopEvidenceCommand(
   }
   const action = parsed.flags.subtype;
   if (!action) {
-    return unsupportedRuntimeResult(parsed, "loop-evidence requires an action: add, visual-diff, or adversarial-check.");
+    return unsupportedRuntimeResult(parsed, "loop-evidence requires an action: add, visual-diff, build-passed, or adversarial-check.");
   }
   const task = requireTask(parsed);
   if (!parsed.flags.loopRun) {
@@ -3341,6 +3341,24 @@ function runLoopEvidenceCommand(
         artifactPath: parsed.flags.output,
         correlationId: parsed.flags.correlationId,
         evidenceType: parsed.flags.evidenceType,
+        iteration: parsed.flags.currentIteration,
+        loopRunId: parsed.flags.loopRun,
+        metadata: jsonObjectArg(parsed.flags.metadataJson, "--metadata-json"),
+        proof: parsed.flags.proof,
+        source,
+        status: parsed.flags.statusState ?? "pass",
+        task,
+      });
+      return jsonResult(result);
+    }
+    if (action === "build-passed" || action === "build_passed") {
+      if (parsed.flags.evidenceType && parsed.flags.evidenceType !== "build_passed") {
+        return errorResult("loop-evidence build-passed records evidence_type=build_passed; omit --evidence-type or use build_passed.");
+      }
+      const result = recordLoopEvidenceSync(database, {
+        artifactPath: parsed.flags.output,
+        correlationId: parsed.flags.correlationId,
+        evidenceType: "build_passed",
         iteration: parsed.flags.currentIteration,
         loopRunId: parsed.flags.loopRun,
         metadata: jsonObjectArg(parsed.flags.metadataJson, "--metadata-json"),
@@ -16569,7 +16587,6 @@ function unsupportedLifecycleTaskOptions(parsed: ParsedRuntimeArgs, finish: bool
     || parsed.flags.includeFullTranscripts
     || parsed.flags.includeLegacy
     || parsed.flags.includeTranscripts
-    || parsed.flags.json
     || parsed.flags.limit !== null
     || parsed.flags.names.length > 0
     || parsed.flags.output !== null

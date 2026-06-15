@@ -202,7 +202,7 @@ test("TypeScript runtime help honors workerctl program name", () => {
   assert.equal(finishTask.exitCode, 0);
   assert.match(finishTask.stdout ?? "", /finish-task <task> --reason <reason>/);
   assert.match(finishTask.stdout ?? "", /--require-criteria-audit/);
-  assert.doesNotMatch(finishTask.stdout ?? "", /--json/);
+  assert.match(finishTask.stdout ?? "", /--json/);
 
   const pair = runTypescriptRuntimeCommand({
     args: ["pair", "--help"],
@@ -1731,6 +1731,55 @@ test("TypeScript runtime handles loop evidence add adversarial and visual diff b
     assert.equal(exactIdPayload.run.id, "run-loop-cli");
     assert.equal(exactIdPayload.run.task_id, "task-loop-cli");
 
+    const buildPassed = runTypescriptRuntimeCommand({
+      args: [
+        "loop-evidence",
+        "build-passed",
+        "loop-task",
+        "--loop-run",
+        "run-loop-cli",
+        "--iteration",
+        "1",
+        "--proof",
+        "Focused build command passed.",
+        "--artifact-path",
+        "/tmp/build-passed.json",
+        "--correlation-id",
+        "corr-build",
+        "--path",
+        dbPath,
+      ],
+      env: {},
+    });
+    assert.equal(buildPassed.exitCode, 0);
+    const buildPayload = JSON.parse(buildPassed.stdout ?? "{}") as {
+      criterion: { status: string };
+      evidence: Record<string, unknown>;
+    };
+    assert.equal(buildPayload.criterion.status, "satisfied");
+    assert.equal(buildPayload.evidence.evidence_type, "build_passed");
+    assert.equal(buildPayload.evidence.artifact_path, "/tmp/build-passed.json");
+    assert.equal(buildPayload.evidence.correlation_id, "corr-build");
+
+    const conflictingBuildPassed = runTypescriptRuntimeCommand({
+      args: [
+        "loop-evidence",
+        "build-passed",
+        "loop-task",
+        "--loop-run",
+        "run-loop-cli",
+        "--iteration",
+        "1",
+        "--evidence-type",
+        "ci_green",
+        "--path",
+        dbPath,
+      ],
+      env: {},
+    });
+    assert.equal(conflictingBuildPassed.exitCode, 2);
+    assert.match(conflictingBuildPassed.stderr ?? "", /records evidence_type=build_passed/);
+
     const weak = runTypescriptRuntimeCommand({
       args: [
         "loop-evidence",
@@ -1854,9 +1903,9 @@ test("TypeScript runtime handles loop evidence add adversarial and visual diff b
       `).all("task-loop-cli") as Array<{ evidence_json: string; status: string }>;
       assert.deepEqual(
         criteria.map((criterion) => JSON.parse(criterion.evidence_json).evidence_type),
-        ["ci_green", "exact_id_wins", "adversarial_check", "visual_diff_report", "diff_below_threshold"],
+        ["ci_green", "exact_id_wins", "build_passed", "adversarial_check", "visual_diff_report", "diff_below_threshold"],
       );
-      assert.deepEqual(criteria.map((criterion) => criterion.status), ["satisfied", "satisfied", "satisfied", "satisfied", "satisfied"]);
+      assert.deepEqual(criteria.map((criterion) => criterion.status), ["satisfied", "satisfied", "satisfied", "satisfied", "satisfied", "satisfied"]);
     } finally {
       after.close();
     }
@@ -3466,13 +3515,29 @@ test("TypeScript runtime handles state-only finish-task and stop-task by default
       activeRunCheck.close();
     }
 
-    const unsupportedFinishJson = runTypescriptRuntimeCommand({
-      args: ["finish-task", "needs-json", "--json", "--path", dbPath],
+    const jsonDb = openDatabaseSync(dbPath);
+    try {
+      createTaskSync(jsonDb, {
+        goal: "Finish through explicit JSON flag.",
+        name: "needs-json",
+      });
+    } finally {
+      jsonDb.close();
+    }
+    const finishJson = runTypescriptRuntimeCommand({
+      args: ["finish-task", "needs-json", "--reason", "JSON closeout.", "--json", "--path", dbPath],
       cwd: root,
       env: {},
     });
-    assert.equal(unsupportedFinishJson.exitCode, 2);
-    assert.match(unsupportedFinishJson.stderr ?? "", /Unsupported TypeScript runtime option for finish-task/);
+    assert.equal(finishJson.exitCode, 0, finishJson.stderr);
+    const finishJsonPayload = JSON.parse(finishJson.stdout ?? "{}") as {
+      finish: boolean;
+      reason: string;
+      task: string;
+    };
+    assert.equal(finishJsonPayload.finish, true);
+    assert.equal(finishJsonPayload.reason, "JSON closeout.");
+    assert.equal(finishJsonPayload.task, "needs-json");
     const explicitLive = runTypescriptRuntimeCommand({
       args: ["--ts-runtime", "finish-task", "needs-live", "--stop-worker", "--path", dbPath],
       cwd: root,
