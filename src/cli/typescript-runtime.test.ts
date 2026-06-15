@@ -258,6 +258,7 @@ test("TypeScript runtime handles manager recipes by default", () => {
   const shownPayload = JSON.parse(shown.stdout ?? "{}") as {
     recipe: {
       display_name: string;
+      final_report_requirements: string[];
       locked_summary_template: string;
       manager_config_command: string[];
       mode: string;
@@ -269,6 +270,8 @@ test("TypeScript runtime handles manager recipes by default", () => {
   assert.equal(shownPayload.recipe.display_name, "GoalBuddy Conveyor");
   assert.equal(shownPayload.recipe.mode, "strict");
   assert.ok(shownPayload.recipe.permissions.includes("repo.merge_green_pr"));
+  assert.match(shownPayload.recipe.final_report_requirements.join(" "), /final report/i);
+  assert.match(shownPayload.recipe.final_report_requirements.join(" "), /finish-task|closeout/i);
   assert.deepEqual(shownPayload.recipe.manager_config_command.slice(0, 5), [
     "conveyor",
     "manager-config",
@@ -278,6 +281,8 @@ test("TypeScript runtime handles manager recipes by default", () => {
   ]);
   assert.ok(shownPayload.recipe.manager_config_command.includes("--allow-worker-compact-clear"));
   assert.match(shownPayload.recipe.locked_summary_template, /Selected recipe: GoalBuddy Conveyor/);
+  assert.match(shownPayload.recipe.locked_summary_template, /Final report:/);
+  assert.doesNotMatch(shownPayload.recipe.manager_config_command.join(" "), /final report/i);
 
   const text = runTypescriptRuntimeCommand({
     args: ["manager-recipes", "--show", "ux polish"],
@@ -1380,11 +1385,12 @@ test("TypeScript runtime criteria-plan suggests add commands without mutating cr
     });
     assert.equal(result.exitCode, 0);
     const payload = JSON.parse(result.stdout ?? "{}") as {
-      suggestions: Array<{ command: string[]; criterion: string; rationale: string | null; status: string }>;
+      suggestions: Array<{ classification: null; command: string[]; criterion: string; rationale: string | null; status: string }>;
       warnings: string[];
     };
     assert.deepEqual(payload.warnings, []);
     assert.equal(payload.suggestions[0].criterion, "Unit tests pass");
+    assert.equal(payload.suggestions[0].classification, null);
     assert.equal(payload.suggestions[0].status, "accepted");
     assert.deepEqual(payload.suggestions[0].command.slice(0, 6), [
       "conveyor",
@@ -1396,6 +1402,30 @@ test("TypeScript runtime criteria-plan suggests add commands without mutating cr
     ]);
     assert.equal(payload.suggestions[1].status, "deferred");
     assert.equal(payload.suggestions[1].rationale, "Follow-up after this QA slice.");
+
+    const closeout = runTypescriptRuntimeCommand({
+      args: [
+        "criteria-plan",
+        "plan-task",
+        "--from-text",
+        "Must-have:\n- finish-task --require-criteria-audit marks the task done\n- Unit tests pass",
+        "--json",
+        "--path",
+        dbPath,
+      ],
+      env: {},
+    });
+    assert.equal(closeout.exitCode, 0, closeout.stderr);
+    const closeoutPayload = JSON.parse(closeout.stdout ?? "{}") as {
+      suggestions: Array<{ classification: { kind: string; recommendation: string } | null; command: string[]; criterion: string; status: string }>;
+      warnings: string[];
+    };
+    assert.equal(closeoutPayload.suggestions[0].status, "accepted");
+    assert.equal(closeoutPayload.suggestions[0].classification?.kind, "manager_closeout_proof");
+    assert.equal(closeoutPayload.suggestions[0].classification?.recommendation, "keep_out_of_acceptance_criteria");
+    assert.ok(closeoutPayload.suggestions[0].command.includes("finish-task --require-criteria-audit marks the task done"));
+    assert.match(closeoutPayload.warnings.join("\n"), /manager closeout\/control-plane proof/);
+    assert.match(closeoutPayload.warnings.join("\n"), /unless this task is explicitly Conveyor closeout QA/);
 
     const after = openDatabaseSync(dbPath);
     try {
@@ -2985,6 +3015,7 @@ test("TypeScript runtime handles no-tmux create-disposable-binding by default", 
     assert.ok(payload.heartbeat_recommendations.teardown_policy.terminal_closeout.includes("terminal manager decision"));
     assert.ok(payload.heartbeat_recommendations.teardown_policy.terminal_closeout_command.includes("finish-task 'real-slice'"));
     assert.ok(payload.heartbeat_recommendations.teardown_policy.terminal_closeout_command.includes("--require-criteria-audit"));
+    assert.ok(payload.heartbeat_recommendations.manager.prompt.includes("Keep manager closeout/control-plane proof out of accepted worker criteria"));
     assert.ok(payload.heartbeat_recommendations.teardown_policy.worker_rule.includes("must not own loop teardown"));
     assert.ok(payload.heartbeat_recommendations.worker.prompt.includes("stop after a one-line idle receipt"));
     assert.ok(payload.heartbeat_recommendations.worker.prompt.includes("Run the worker app heartbeat"));
@@ -4589,6 +4620,7 @@ test("TypeScript runtime handles start-manager bootstrap with seeded manager con
     assert.ok(codexShell.includes("manager-ack late-task --from-stdin --path"));
     assert.ok(codexShell.includes("worker-ack late-task --json --path"));
     assert.ok(codexShell.includes("criteria late-task --satisfy <id> --proof"));
+    assert.ok(codexShell.includes("Keep manager closeout/control-plane proof out of accepted worker criteria"));
     assert.ok(codexShell.includes('finish-task late-task --reason "Accepted criteria satisfied" --require-criteria-audit --path'));
 
     const after = openDatabaseSync(dbPath);
@@ -5228,6 +5260,7 @@ test("TypeScript runtime handles pair spawn bind run and dispatch with fake runn
     assert.ok(managerShell.includes("manager-ack pair-task --from-stdin --path"));
     assert.ok(managerShell.includes("worker-ack pair-task --json --path"));
     assert.ok(managerShell.includes("criteria pair-task --satisfy <id> --proof"));
+    assert.ok(managerShell.includes("Keep manager closeout/control-plane proof out of accepted worker criteria"));
     assert.ok(managerShell.includes('finish-task pair-task --reason "Accepted criteria satisfied" --require-criteria-audit --path'));
     assert.ok(managerShell.includes(dbPath));
 

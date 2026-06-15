@@ -24,6 +24,7 @@ Tools: verification.run_tests, context.fetch_prs
 Epilogues: draft-pr, record-handoff
 Cleanup: compact between child boards after saved handoff
 Evidence gates: child receipt, focused verification, adversarial review, PR/CI/merge or satisfied_on_main
+Final report: record manager closeout proof separately from accepted worker criteria
 Not allowed: merge without green CI; compact/clear before handoff; run two child boards at once
 User confirmed: yes
 ```
@@ -55,6 +56,12 @@ Two support patterns apply across recipes:
   manager or worker sessions cannot receive tmux push delivery.
 - **Recovery / Resume / Handoff**: use saved config, handoff, replay, audit,
   telemetry, and inbox state to resume a managed task safely.
+
+Across all recipes, accepted criteria should describe worker/task deliverables.
+Manager closeout mechanics such as `finish-task`, `--require-criteria-audit`,
+final task state, heartbeat teardown, and final manager reporting are final
+report or audit evidence. Do not seed them as accepted worker criteria unless
+the task is explicitly Conveyor closeout QA.
 
 ## GoalBuddy Conveyor
 
@@ -271,6 +278,8 @@ there is no next worker task, the manager should record the terminal decision,
 run `conveyor finish-task "$TASK" --require-criteria-audit`, and explicitly
 report heartbeat teardown status. If the task or binding still appears active,
 report that as a control-plane blocker instead of calling the loop complete.
+That closeout proof belongs in the manager final report or audit receipts, not
+as a blocking accepted criterion for the worker.
 
 For operator review, the live app or tmux session is the primary transcript.
 Any consumed inbox item must be visible in that same session while the turn is
