@@ -15884,10 +15884,17 @@ function insertWorkerctlTelemetrySync(
 }
 
 interface CriteriaSuggestion {
+  classification: CriteriaSuggestionClassification | null;
   criterion: string;
   rationale: string | null;
   source: "worker_proposed";
   status: "accepted" | "deferred";
+}
+
+interface CriteriaSuggestionClassification {
+  kind: "manager_closeout_proof";
+  recommendation: "keep_out_of_acceptance_criteria";
+  reason: string;
 }
 
 const DEFAULT_DEFERRED_RATIONALE = "Follow-up after this QA slice.";
@@ -15896,6 +15903,7 @@ const DEFERRED_HEADING_RE = /\b(follow[- ]?up|deferred)\b/i;
 const LIST_ITEM_RE = /^\s*(?:[-*+]|\d+[.)]|\[[ xX]\])\s+(?<text>.+?)\s*$/;
 const EMPTY_ITEM_RE = /^(?:n\/?a|none|no follow[- ]?ups?|no deferred(?: criteria)?|nothing)$/i;
 const INDENTED_CONTINUATION_RE = /^\s+\S/;
+const CLOSEOUT_CRITERION_RE = /\b(?:finish-task|require-criteria-audit|task (?:is )?(?:marked )?done|mark(?:ed)? (?:the )?task done|terminal closeout|verified task closeout|heartbeat teardown|final manager (?:report|decision)|manager final (?:report|handoff)|closeout proof|control-plane closeout)\b/i;
 
 function planCriteriaCommands(task: string, text: string, options: { path: string | null }): Record<string, unknown> {
   const { suggestions, warnings } = parseWorkerCriteriaResponse(text);
@@ -15963,6 +15971,13 @@ function parseWorkerCriteriaResponse(text: string): { suggestions: CriteriaSugge
   } else if (suggestions.length === 0) {
     warnings.push("Clear criteria headings were found, but no bullet or numbered criteria items were detected.");
   }
+  for (const suggestion of suggestions) {
+    if (suggestion.classification?.kind === "manager_closeout_proof") {
+      warnings.push(
+        `Criterion "${suggestion.criterion}" appears to describe manager closeout/control-plane proof. Keep closeout proof in the manager final report, audit, replay, or epilogue evidence instead of accepted worker/task criteria unless this task is explicitly Conveyor closeout QA.`,
+      );
+    }
+  }
   return { suggestions, warnings };
 }
 
@@ -15986,10 +16001,22 @@ function makeCriteriaSuggestion(text: string, status: "accepted" | "deferred"): 
     return null;
   }
   return {
+    classification: classifyCriteriaSuggestion(criterion),
     criterion,
     rationale: status === "deferred" ? DEFAULT_DEFERRED_RATIONALE : null,
     source: "worker_proposed",
     status,
+  };
+}
+
+function classifyCriteriaSuggestion(criterion: string): CriteriaSuggestionClassification | null {
+  if (!CLOSEOUT_CRITERION_RE.test(criterion)) {
+    return null;
+  }
+  return {
+    kind: "manager_closeout_proof",
+    reason: "The criterion names manager closeout mechanics rather than the worker/task outcome being accepted.",
+    recommendation: "keep_out_of_acceptance_criteria",
   };
 }
 
@@ -18124,6 +18151,7 @@ interface ManagerRecipeDefinition {
   displayName: string;
   epilogues: string[];
   evidenceGates: string[];
+  finalReportRequirements: string[];
   guidelines: string[];
   loopTemplate: string | null;
   mode: string;
@@ -18155,6 +18183,9 @@ const MANAGER_RECIPES: Record<string, ManagerRecipeDefinition> = {
       "PR/CI/merge or satisfied_on_main proof",
       "parent receipt update before the next child",
     ],
+    finalReportRequirements: [
+      "Record manager closeout proof, including final task state and any finish-task/heartbeat teardown receipt, in the final report instead of accepted worker criteria.",
+    ],
     guidelines: [
       "Keep exactly one child board active at a time.",
       "Before activating the next child, update the parent receipt.",
@@ -18178,6 +18209,9 @@ const MANAGER_RECIPES: Record<string, ManagerRecipeDefinition> = {
     displayName: "Nudge / What's Next Manager",
     epilogues: [],
     evidenceGates: ["manager decision", "worker receipt", "accepted criteria closure"],
+    finalReportRequirements: [
+      "Record status, residual risk, and any finish-task or terminal closeout proof in the final report, not as worker acceptance criteria.",
+    ],
     guidelines: [
       "Prefer wait over nudge while the worker is active.",
       "Ask for must-have current-task criteria versus follow-ups when scope changes.",
@@ -18205,6 +18239,9 @@ const MANAGER_RECIPES: Record<string, ManagerRecipeDefinition> = {
     displayName: "PR/CI/Merge Ralph Loop",
     epilogues: ["draft-pr", "record-handoff"],
     evidenceGates: ["pr_url", "ci_green", "merge", "adversarial_check"],
+    finalReportRequirements: [
+      "Record PR URL, CI, merge, handoff, finish-task, and cleanup receipts in the final report; keep accepted criteria focused on deliverable proof.",
+    ],
     guidelines: ["Merge only after green CI and recorded manager decision evidence."],
     loopTemplate: "pr_ci_merge_loop",
     mode: "strict",
@@ -18225,6 +18262,9 @@ const MANAGER_RECIPES: Record<string, ManagerRecipeDefinition> = {
     displayName: "Test Coverage Loop",
     epilogues: [],
     evidenceGates: ["test_coverage", "adversarial_check"],
+    finalReportRequirements: [
+      "Record final closeout and finish-task proof in the manager final report; do not make closeout mechanics a test-coverage criterion.",
+    ],
     guidelines: ["Record coverage evidence before asking for another worker pass."],
     loopTemplate: "test_coverage_loop",
     mode: "strict",
@@ -18250,6 +18290,9 @@ const MANAGER_RECIPES: Record<string, ManagerRecipeDefinition> = {
       "visual_diff_report",
       "diff_below_threshold",
       "adversarial_check",
+    ],
+    finalReportRequirements: [
+      "Record final visual decision, closeout, and cleanup proof in the manager final report; keep accepted criteria focused on visible-output evidence.",
     ],
     guidelines: ["Compare visible output against references before requesting another pass."],
     loopTemplate: "visual_diff_loop",
@@ -18307,6 +18350,7 @@ function managerRecipeSummary(name: string): Record<string, unknown> {
     display_name: recipe.displayName,
     epilogues: [...recipe.epilogues],
     evidence_gates: [...recipe.evidenceGates],
+    final_report_requirements: [...recipe.finalReportRequirements],
     guidelines: [...recipe.guidelines],
     locked_summary_template: lockedManagerRecipeSummary(recipe),
     loop_template: recipe.loopTemplate,
@@ -18363,6 +18407,7 @@ function lockedManagerRecipeSummary(recipe: ManagerRecipeDefinition): string {
     `Epilogues: ${recipe.epilogues.length > 0 ? recipe.epilogues.join(", ") : "none"}`,
     `Cleanup: ${recipe.cleanup}`,
     `Evidence gates: ${recipe.evidenceGates.length > 0 ? recipe.evidenceGates.join(", ") : "manager-reviewed evidence"}`,
+    `Final report: ${recipe.finalReportRequirements.join("; ")}`,
     `Not allowed: ${recipe.disallowedActions.length > 0 ? recipe.disallowedActions.join("; ") : "unconfirmed custom actions"}`,
     "User confirmed: <yes|no>",
   ].join("\n");
@@ -19840,6 +19885,7 @@ function disposableHeartbeatRecommendations(taskName: string, dbPath: string): D
         "If an item is consumed, execute only that manager instruction, verify worker claims before recording conclusions, update Conveyor state as appropriate, and produce exactly one next worker task.",
         "If no item is consumed, stop after a one-line idle receipt.",
         "Do not delete, pause, or disable manager or worker heartbeat automation after an idle poll; an idle poll is only a quiet interval.",
+        "Keep manager closeout/control-plane proof out of accepted worker criteria; record finish-task, final task state, and heartbeat teardown proof in the manager final report or audit receipts.",
         `If all accepted criteria are satisfied, deferred, or rejected and there is no next worker task, record the terminal manager decision, run or report the result of: ${terminalCloseoutCommand}`,
         "After verified task closeout, explicitly report heartbeat teardown status; if the task remains managed/active, report that as a control-plane blocker instead of calling the loop complete.",
       ].join("\n"),
@@ -20127,6 +20173,7 @@ function startManagerBootstrapPrompt(
     "- Treat acceptance criteria as living supervision state.",
     "- Inspect `manager_context.acceptance_criteria` each cycle.",
     "- If worker progress reveals new edge cases, tests, polish, or scope boundaries, ask the worker to propose must-have vs follow-up criteria.",
+    "- Keep manager closeout/control-plane proof out of accepted worker criteria; record finish-task, final task state, teardown, and final-report proof in manager closeout evidence instead.",
     "- Before finishing, compare worker receipts/verification against accepted open criteria.",
     `- For each accepted criterion that is proven, record evidence with \`${satisfyCriterionCommand}\`.`,
     `- When all accepted criteria are satisfied, deferred, or rejected, finish the task with \`${workerctl} finish-task ${taskLine} --reason "Accepted criteria satisfied" --require-criteria-audit${pathSuffix}\`.`,

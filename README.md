@@ -510,7 +510,13 @@ tmux attach -t codex-live-test
   [--json]` — Draft reviewed `criteria --add` commands from a worker response
   that separates must-have current-task criteria from deferred follow-ups. This
   helper is read-only: it resolves the task and prints suggestions, but does not
-  mutate acceptance criteria, events, or commands.
+  mutate acceptance criteria, events, or commands. If a proposed criterion
+  appears to describe manager closeout mechanics such as `finish-task`,
+  `--require-criteria-audit`, heartbeat teardown, or final manager reporting,
+  the helper emits a non-blocking warning and classifies that suggestion as
+  manager closeout proof. Keep that proof in the manager final report, audit,
+  replay, or epilogue evidence instead of accepted worker/task criteria unless
+  the task is explicitly Conveyor closeout QA.
   ```bash
   conveyor criteria-plan my-task --from-worker-response response.md --json
   ```

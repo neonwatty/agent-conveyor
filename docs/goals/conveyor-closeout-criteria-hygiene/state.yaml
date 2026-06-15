@@ -1,0 +1,296 @@
+# GoalBuddy v2 state.yaml
+# Board truth lives here. goal.md is the editable charter; notes/ holds long receipts only.
+
+version: 2
+
+goal:
+  title: "Conveyor Closeout Criteria Hygiene"
+  slug: "conveyor-closeout-criteria-hygiene"
+  kind: specific
+  tranche: "Implement one bounded hardening tranche that separates manager closeout proof from worker/task acceptance criteria."
+  status: done
+  oracle:
+    signal: "Targeted tests plus direct inspection show Conveyor warns or guides away from self-referential closeout criteria while preserving legitimate finish-task QA."
+    cadence: "after each Worker package and at final audit"
+    final_proof: "Final Judge/PM audit cites changed files, targeted tests, direct inspection of generated prompts/docs, and the strongest realistic failure mode."
+  intake:
+    original_request: "Plan with GoalBuddy prep whether the dogfood closeout-criteria lesson needs package or skill work."
+    interpreted_outcome: "Conveyor should make it hard for manager closeout mechanics to become blocking task acceptance criteria."
+    input_shape: specific
+    audience: "Conveyor maintainers and operators"
+    authority: requested
+    proof_type: test
+    completion_proof: "Package/docs/skill guidance are updated and verified so closeout proof lives in manager final report or audit evidence, not open accepted criteria."
+    likely_misfire: "Only prose changes land, leaving generated manager prompts or criteria-plan suggestions able to seed self-referential blocking criteria."
+    blind_spots_considered:
+      - "Legitimate Conveyor QA may intentionally test finish-task and should not be blocked."
+      - "Installed user skill text and packaged skill source may diverge."
+      - "Docs-only fixes may not affect generated app-visible manager prompts."
+      - "A warning must be visible enough to change manager behavior without corrupting existing criteria flows."
+    existing_plan_facts:
+      - "Add a criteria hygiene warning/classification rather than a universal hard blocker."
+      - "Add recipe or generated-prompt language that closeout proof belongs in final report/audit evidence."
+      - "Update manage-codex-workers skill guidance."
+      - "Verify with targeted tests and direct inspection."
+
+rules:
+  pm_owns_state: true
+  one_active_task: true
+  max_write_workers: 1
+  no_implementation_without_worker_or_pm_task: true
+  no_completion_without_judge_or_pm_audit: true
+  planning_is_not_completion: true
+  queued_required_worker_blocks_completion: true
+  continuous_until_full_outcome: true
+  missing_input_or_credentials_do_not_stop_goal: true
+  preserve_and_validate_existing_plan: true
+  intake_misfire_must_be_audited: true
+  goal_pressure_requires_oracle: true
+  no_completion_on_weak_proof: true
+  slice_policy:
+    max_consecutive_tiny_tasks: 2
+    prefer_vertical_slices: true
+    judge_picks_largest_safe_slice: true
+    worker_completes_whole_slice: true
+
+agents:
+  scout: installed
+  worker: installed
+  judge: installed
+
+visual_board:
+  selected: local
+  local:
+    status: live
+    url: "http://goalbuddy.localhost:41737/conveyor-closeout-criteria-hygiene/"
+    command: "npx goalbuddy board docs/goals/conveyor-closeout-criteria-hygiene"
+
+active_task: null
+
+tasks:
+  - id: T001
+    type: scout
+    assignee: Scout
+    status: done
+    reasoning_hint: medium
+    objective: "Map the exact implementation and documentation surfaces for closeout-criteria hygiene."
+    inputs:
+      - "README.md"
+      - "docs/manager-recipes.md"
+      - "docs/agent-evidence-playbook.md"
+      - "src/cli/typescript-runtime.ts"
+      - "src/cli/typescript-runtime.test.ts"
+      - "packaged or installed manage-codex-workers skill source, if present"
+    constraints:
+      - "Read-only."
+      - "Do not edit implementation files."
+      - "Do not inspect unrelated Foil iOS or product code."
+      - "Prefer exact file/line evidence and existing tests over assumptions."
+    expected_output:
+      - "Surfaces that can seed or suggest acceptance criteria."
+      - "Current behavior for criteria-plan, manager recipes, generated manager prompts, and worker handoff text."
+      - "Whether skill source lives in this repo, installed user config, package artifacts, or both."
+      - "Recommended largest safe Worker slice with allowed_files, verify commands, and stop_if."
+    receipt:
+      result: done
+      summary: "Mapped criteria-plan, manager recipes, generated prompts, docs, and packaged skill surfaces. The package can implement a non-blocking closeout-criteria warning plus prompt/docs guidance without schema migration."
+      evidence:
+        - "src/cli/typescript-runtime.ts:15900 criteria-plan builds suggestions and warnings from parsed worker text."
+        - "src/cli/typescript-runtime.ts:15912 parseWorkerCriteriaResponse only warns for missing headings or empty bullets."
+        - "src/cli/typescript-runtime.ts:15983 makeCriteriaSuggestion currently turns every accepted-section item into an accepted worker_proposed suggestion."
+        - "src/cli/typescript-runtime.ts:18137 MANAGER_RECIPES has acceptance, evidenceGates, epilogues, and guidelines but no final-report/closeout-proof field."
+        - "src/cli/typescript-runtime.ts:18300 managerRecipeSummary exposes recipe metadata used by manager-recipes --show."
+        - "src/cli/typescript-runtime.ts:20124 generated manager bootstrap tells managers to finish after accepted criteria close, but does not separate closeout proof from criteria."
+        - "src/cli/typescript-runtime.ts:19843 disposable app heartbeat prompt tells manager to run terminal closeout after criteria close."
+        - "src/cli/typescript-runtime.ts:7820 worker prompt already says workers must not call conveyor finish-task."
+        - "src/cli/typescript-runtime.test.ts:1353 covers criteria-plan suggestions and read-only behavior."
+        - "src/cli/typescript-runtime.test.ts:4502 and :5200 cover generated manager/worker prompt text."
+        - "skills/manage-codex-workers/SKILL.md:654 covers living criteria but lacks closeout-proof separation guidance."
+        - "package.json:23 includes skills/**/* in npm package files."
+      facts:
+        - "Largest safe Worker slice can update src/cli/typescript-runtime.ts, src/cli/typescript-runtime.test.ts, README.md, docs/manager-recipes.md, and skills/manage-codex-workers/SKILL.md."
+        - "Use a warning/classification, not a hard blocker, so legitimate Conveyor QA finish-task tests remain possible."
+        - "Installed user skill can be refreshed later with conveyor install-skills; repo source is the package source."
+      contradictions: []
+      ambiguity_requiring_judge:
+        - "Whether to add a formal recipe field such as final_report_requirements now, or keep v1 to warnings plus prompt/docs guidance."
+      commands:
+        - cmd: "npx goalbuddy prompt docs/goals/conveyor-closeout-criteria-hygiene"
+          status: pass
+        - cmd: "rg -n 'criteria-plan|finish-task|worker_handoff|MANAGER_RECIPES' src/cli/typescript-runtime.ts src/cli/typescript-runtime.test.ts README.md docs/manager-recipes.md docs/agent-evidence-playbook.md package.json"
+          status: pass
+        - cmd: "find . -maxdepth 4 -type f \\( -name 'SKILL.md' -o -name '*manage-codex-workers*' \\) | sort"
+          status: pass
+      note_needed: false
+
+  - id: T002
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Convert Scout findings into a precise implementation decision."
+    inputs:
+      - "T001 receipt"
+      - "Goal oracle"
+      - "Existing plan facts"
+    constraints:
+      - "Read-only."
+      - "Do not implement."
+      - "Reject a hard universal blocker unless evidence shows legitimate Conveyor QA remains unaffected."
+      - "Select one coherent Worker package when safe; split only for real ownership or risk boundaries."
+    expected_output:
+      - "Decision: implement | split | block"
+      - "Exact Worker objective"
+      - "allowed_files"
+      - "verify commands"
+      - "stop_if conditions"
+      - "Explicit treatment of package changes versus skill changes"
+    receipt:
+      result: done
+      decision: approved
+      full_outcome_complete: false
+      rationale: "Implement one coherent slice: add non-blocking criteria hygiene classification/warnings, surface final-report requirements separately in manager recipes and generated prompts, and update docs/skill guidance. This moves generated behavior, package docs, and installed-skill source together without a schema migration or hard universal blocker."
+      evidence:
+        - "T001 found criteria-plan warning hook at src/cli/typescript-runtime.ts:15900."
+        - "T001 found recipe metadata surface at src/cli/typescript-runtime.ts:18137 and docs surface in docs/manager-recipes.md."
+        - "T001 found generated manager prompts at src/cli/typescript-runtime.ts:19843 and :20124."
+        - "T001 found packaged skill source at skills/manage-codex-workers/SKILL.md and package inclusion at package.json:23."
+      subgoal_contract: null
+      parallel_safety: null
+      blocked_tasks: []
+      missing_evidence: []
+      required_board_updates:
+        - "Activate T003 with allowed files and verification commands."
+
+  - id: T003
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "Implement non-blocking closeout-criteria hygiene warnings and prompt/docs guidance while preserving legitimate finish-task QA."
+    allowed_files:
+      - "src/cli/typescript-runtime.ts"
+      - "src/cli/typescript-runtime.test.ts"
+      - "README.md"
+      - "docs/manager-recipes.md"
+      - "skills/manage-codex-workers/SKILL.md"
+      - "docs/goals/conveyor-closeout-criteria-hygiene/state.yaml"
+    verify:
+      - "npm test -- --runInBand src/cli/typescript-runtime.test.ts"
+      - "node /Users/neonwatty/.codex/plugins/cache/goalbuddy/goalbuddy/0.3.8/skills/goalbuddy/scripts/check-goal-state.mjs docs/goals/conveyor-closeout-criteria-hygiene/state.yaml"
+      - "git diff --check"
+      - "rg -n \"closeout|final report|self-referential|finish-task\" src/cli/typescript-runtime.ts src/cli/typescript-runtime.test.ts README.md docs/manager-recipes.md skills/manage-codex-workers/SKILL.md"
+    stop_if:
+      - "Need files outside Judge-selected allowed_files."
+      - "The guardrail would block legitimate Conveyor QA finish-task tests."
+      - "The relevant skill source cannot be identified."
+      - "Targeted tests fail twice for different reasons."
+      - "The implementation requires a broader criteria schema migration."
+    receipt:
+      result: done
+      changed_files:
+        - "src/cli/typescript-runtime.ts"
+        - "src/cli/typescript-runtime.test.ts"
+        - "README.md"
+        - "docs/manager-recipes.md"
+        - "skills/manage-codex-workers/SKILL.md"
+        - "docs/goals/conveyor-closeout-criteria-hygiene/state.yaml"
+      commands:
+        - cmd: "npm test -- --runInBand src/cli/typescript-runtime.test.ts"
+          status: pass
+          summary: "178 TypeScript runtime tests passed, including updated criteria-plan, recipe, app heartbeat, start-manager, and pair prompt assertions."
+        - cmd: "npx tsc -p tsconfig.cli.json --noEmit"
+          status: pass
+          summary: "TypeScript CLI type check passed without emitting dist files."
+        - cmd: "git diff --check"
+          status: pass
+          summary: "No whitespace errors."
+        - cmd: "node /Users/neonwatty/.codex/plugins/cache/goalbuddy/goalbuddy/0.3.8/skills/goalbuddy/scripts/check-goal-state.mjs docs/goals/conveyor-closeout-criteria-hygiene/state.yaml"
+          status: pass
+          summary: "Board was valid before Worker receipt; final board check remains for next task."
+        - cmd: "rg -n \"closeout|final report|self-referential|finish-task\" src/cli/typescript-runtime.ts src/cli/typescript-runtime.test.ts README.md docs/manager-recipes.md skills/manage-codex-workers/SKILL.md"
+          status: pass
+          summary: "Direct inspection shows the new warning/classification and prompt/docs guidance surfaces."
+      summary: "Implemented warning-only criteria hygiene classification, recipe final_report_requirements, generated manager prompt guidance, README/recipe docs, and manage-codex-workers skill instructions. No hard blocker was added."
+
+  - id: T004
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "Run a focused dogfood-style proof that the new guidance would have prevented the observed self-referential criterion misfire."
+    allowed_files:
+      - "docs/goals/conveyor-closeout-criteria-hygiene/state.yaml"
+    verify:
+      - "Run criteria-plan against a worker response that proposes finish-task closeout as must-have criteria and confirm it emits manager_closeout_proof warning/classification without blocking output."
+      - "Inspect manager-recipes --show JSON and generated prompt tests or source to confirm final report requirements are separate from manager_config_command acceptance criteria."
+      - "Run board checker after recording the proof receipt."
+    stop_if:
+      - "T003 is not done."
+      - "Need to create or merge a PR without explicit operator approval."
+      - "Dogfood setup would require inspecting unrelated private content."
+      - "The proof cannot be made with local CLI/docs inspection."
+    receipt:
+      result: done
+      changed_files:
+        - "docs/goals/conveyor-closeout-criteria-hygiene/state.yaml"
+      commands:
+        - cmd: "node --test --import tsx src/cli/typescript-runtime.test.ts --test-name-pattern 'criteria-plan suggests add commands|manager recipes by default|start-manager bootstrap|no-tmux create-disposable-binding|pair spawn bind run'"
+          status: pass
+          summary: "Focused proof passed; includes criteria-plan closeout warning/classification, recipe final_report_requirements, and generated manager prompt separation assertions."
+        - cmd: "rg -n 'classification|manager_closeout_proof|final_report_requirements|Keep manager closeout/control-plane proof|Do not call `conveyor finish-task`' src/cli/typescript-runtime.ts src/cli/typescript-runtime.test.ts README.md docs/manager-recipes.md skills/manage-codex-workers/SKILL.md"
+          status: pass
+          summary: "Safe quoted inspection confirmed package, tests, docs, and skill contain the new separation/warning surfaces."
+        - cmd: "node /Users/neonwatty/.codex/plugins/cache/goalbuddy/goalbuddy/0.3.8/skills/goalbuddy/scripts/check-goal-state.mjs docs/goals/conveyor-closeout-criteria-hygiene/state.yaml"
+          status: pass
+          summary: "Board was valid before proof receipt; final audit will re-run."
+      summary: "The observed dogfood misfire shape is now covered by source tests: finish-task closeout proposed as must-have criteria remains non-blocked but is classified and warned as manager_closeout_proof, while final-report metadata stays out of manager_config_command acceptance seeding."
+      remaining_blockers: []
+      verification_attempts: 1
+      stopped_because: null
+
+  - id: T999
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Audit whether the tranche satisfies the original closeout-criteria hygiene outcome."
+    inputs:
+      - "All done task receipts"
+      - "Last verification"
+      - "Current dirty diff"
+      - "docs/agent-evidence-playbook.md"
+    constraints:
+      - "Read-only."
+      - "Reject completion if generated prompts still conflate closeout proof with accepted task criteria."
+      - "Reject completion if targeted tests or direct inspection are missing."
+      - "Reject completion if legitimate Conveyor QA finish-task testing appears blocked."
+    expected_output:
+      - "complete | not_complete"
+      - "full_outcome_complete: true | false"
+      - "strongest realistic failure mode"
+      - "evidence that rules it out or remaining blocker"
+      - "next task if not complete"
+    receipt:
+      result: done
+      decision: complete
+      full_outcome_complete: true
+      rationale: "The tranche satisfies the oracle: criteria-plan warns/classifies manager closeout proof without blocking legitimate QA, recipe metadata exposes final-report requirements outside manager_config_command acceptance seeding, generated manager prompts carry the separation rule, and README/skill docs match."
+      evidence:
+        - "npm test -- --runInBand src/cli/typescript-runtime.test.ts: pass, 178 tests."
+        - "npx tsc -p tsconfig.cli.json --noEmit: pass."
+        - "git diff --check: pass."
+        - "node --test --import tsx src/cli/typescript-runtime.test.ts --test-name-pattern 'criteria-plan suggests add commands|manager recipes by default|start-manager bootstrap|no-tmux create-disposable-binding|pair spawn bind run': pass."
+        - "rg safe quoted inspection confirmed manager_closeout_proof, final_report_requirements, generated manager prompt text, worker finish-task boundary, README/docs, and skill guidance."
+        - "git diff inspection confirmed manager_config_command still receives recipe.acceptance only; final_report_requirements is exposed in recipe summary/locked summary and not converted to --acceptance."
+      strongest_realistic_failure_mode: "The fix could accidentally block legitimate Conveyor closeout QA or still seed final-report proof as accepted criteria."
+      disproof: "Tests assert closeout-shaped criteria-plan suggestions still have status accepted and command output, but also carry manager_closeout_proof classification and warnings; recipe tests assert final_report_requirements exist while manager_config_command does not contain final report text."
+      missing_evidence: []
+      next_task_if_not_complete: null
+
+checks:
+  dirty_fingerprint: unknown
+  last_verification:
+    result: unknown
+    task: null
+    commands: []

@@ -664,6 +664,11 @@ Acceptance criteria are living supervision state, not just setup text. Inspect
   versus follow-up.
 - Record current-task criteria as proposed or accepted, and record follow-up
   criteria as deferred.
+- Keep manager closeout/control-plane proof out of accepted worker criteria.
+  Items such as `finish-task`, `--require-criteria-audit`, final task state,
+  heartbeat teardown, and final manager reporting belong in the manager final
+  report, audit, replay, or epilogue evidence unless the task is explicitly
+  Conveyor closeout QA.
 - Use `conveyor criteria` to accept, satisfy, defer, or reject
   criteria as evidence accumulates.
 - Before finishing, compare the worker's receipts and verification against all
