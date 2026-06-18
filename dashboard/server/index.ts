@@ -760,9 +760,25 @@ async function dashboardObservation(options: ReturnType<typeof normalizeServerOp
   const binding = findDashboardBinding(discovered, sessions, options.task);
   let snapshot: SnapshotResult | null = null;
   let audit: AuditResult | null = null;
+  let campaign: unknown = null;
   let suppressedTelemetry: Array<Record<string, unknown>> = [];
   let heartbeatTelemetry: Array<Record<string, unknown>> = [];
   const taskName = dashboardTaskName(options, binding);
+  if (options.campaign) {
+    try {
+      campaign = await runWorkerctlJson({
+        campaignName: options.campaign,
+        command: "campaign-dashboard",
+        workerctlPath: options.workerctlPath,
+        dbPath: options.dbPath,
+      });
+    } catch (error) {
+      campaign = {
+        error: error instanceof Error ? error.message : String(error),
+        name: options.campaign,
+      };
+    }
+  }
   if (taskName) {
     try {
       snapshot = await runWorkerctlJson({
@@ -813,6 +829,7 @@ async function dashboardObservation(options: ReturnType<typeof normalizeServerOp
       routed_notifications: audit.routed_notifications || [],
     } : null,
     binding: observedBinding,
+    campaign,
     criteria: acceptanceCriteriaSummary(audit),
     dispatch: {
       chains: dispatchChainEntries(audit),
@@ -863,6 +880,9 @@ function parseArgs(argv: string[]): PartialServerOptions {
       index += 1;
     } else if (arg === "--task") {
       options.task = value;
+      index += 1;
+    } else if (arg === "--campaign") {
+      options.campaign = value;
       index += 1;
     } else if (arg === "--workerctl-path") {
       options.workerctlPath = value;

@@ -295,6 +295,64 @@ tmux attach -t codex-live-test
 
 ## Commands
 
+### Campaigns
+
+- `campaign create --name C --objective TEXT [--metadata-json JSON] [--json]` —
+  Create a campaign record for a multi-worker initiative.
+- `campaign add-slot --name C --slot-key K --role-label TEXT [--channel CH] [--session-id S] [--thread-id ID] [--thread-title TITLE] [--state planned|active|idle|blocked|archived] [--metadata-json JSON] [--json]` —
+  Add a named worker slot to a campaign. If `--session-id` is supplied, the
+  runtime verifies that it is a registered worker session.
+- `campaign attach-slot --name C --slot SLOT_ID [--session-id S] [--thread-id ID] [--thread-title TITLE] [--state planned|active|idle|blocked|archived] [--metadata-json JSON] [--json]` —
+  Attach or refresh worker-session and Codex app thread metadata for an existing
+  campaign slot. Supplying `--session-id` requires a registered worker session.
+- `campaign rotate-slot --name C --slot SLOT_ID --expected-thread-id OLD --thread-id NEW [--thread-title TITLE] [--session-id S] [--state planned|active|idle|blocked|archived] [--json]` —
+  Record a campaign-owned worker slot rotation. The command refuses to update
+  the slot unless `OLD` matches the slot's current Codex app thread id.
+- `campaign archive-slot --name C --slot SLOT_ID --expected-thread-id CURRENT [--json]` —
+  Mark a campaign worker slot archived only when the expected current thread id
+  matches the slot record.
+- `campaign brief --name C --channel CH --brief-json JSON [--json]` —
+  Upsert the structured brief for a channel.
+- `campaign assign --name C --slot SLOT_ID --title TEXT --instructions TEXT [--status queued|active|blocked|done|cancelled] [--metadata-json JSON] [--json]` —
+  Create a slot-scoped assignment.
+- `campaign asset --name C --slot SLOT_ID --asset-type image|video|hyperframes|copy|audio|other --title TEXT [--assignment ASSIGNMENT_ID] [--channel CH] [--status draft|needs_review|approved|rejected|published] [--prompt-summary TEXT] [--artifact-path PATH] [--metadata-json JSON] [--review-notes TEXT] [--json]` —
+  Record a structured creative asset receipt.
+- `campaign status --name C [--json]` —
+  Show campaign metadata, worker slots, channel briefs, assignment counts, and
+  asset receipt counts.
+- `campaign dashboard --name C [--json]` —
+  Show a manager-oriented campaign aggregate: worker slot lifecycle states,
+  blockers, approval counts, and the next recommended manager action.
+
+Creative Ops Campaign manager loop:
+
+```bash
+conveyor campaign create --name "$CAMPAIGN" \
+  --objective "Produce reviewable channel assets." --json
+conveyor campaign add-slot --name "$CAMPAIGN" --slot-key tiktok \
+  --role-label "TikTok worker" --channel tiktok \
+  --thread-id "$TIKTOK_THREAD_ID" --thread-title "TikTok Worker" \
+  --state active --json
+conveyor campaign brief --name "$CAMPAIGN" --channel tiktok \
+  --brief-json '{"format":"9:16","review_gate":"human approval before publish"}' --json
+conveyor campaign assign --name "$CAMPAIGN" --slot "$SLOT_ID" \
+  --title "Draft TikTok hooks" \
+  --instructions "Create reviewable draft copy only; do not publish." \
+  --status active --json
+conveyor campaign asset --name "$CAMPAIGN" --slot "$SLOT_ID" \
+  --assignment "$ASSIGNMENT_ID" --asset-type copy \
+  --title "TikTok hooks v1" --status needs_review \
+  --prompt-summary "Sanitized prompt summary only." --json
+conveyor campaign dashboard --name "$CAMPAIGN" --json
+conveyor dashboard --campaign "$CAMPAIGN" --ensure-dispatch
+```
+
+Use `campaign rotate-slot` or `campaign archive-slot` only with the exact
+current `--expected-thread-id` for that campaign slot. Public publishing,
+scheduling, posting, external account access, private phone content, raw audio,
+tokens, JWTs, keys, archives, and IPAs require explicit human approval or must
+stay out of receipts.
+
 ### Sessions and binding
 
 - `start-worker --name N [--cwd D] [--task "..."] [--sandbox SANDBOX] [--ask-for-approval ASK_FOR_APPROVAL] [--accept-trust] [--timeout-seconds N]` —
@@ -632,7 +690,7 @@ tmux attach -t codex-live-test
 
 ### Observation
 
-- `dashboard [--task T] [--ensure-dispatch] [--dispatcher-id ID]
+- `dashboard [--task T] [--campaign C] [--ensure-dispatch] [--dispatcher-id ID]
   [--host 127.0.0.1] [--port 8797]` — Launch the
   local live supervision cockpit. The dashboard binds to loopback by default,
   uses the TypeScript backend to shell out to `conveyor` JSON commands, and
@@ -640,10 +698,12 @@ tmux attach -t codex-live-test
   a WebSocket PTY bridge. It includes browser bootstrap controls for creating a
   task, starting a worker/manager pair with `conveyor pair`, auto-attaching the
   terminals, attach/bind controls, and audited action receipts for cycle,
-  nudge, interrupt, finish, and export. With `--ensure-dispatch`, launch also
-  ensures a Dispatch watch process using the supplied `--dispatcher-id` when
-  provided, reusing only a fresh heartbeat from that same dispatcher id. Use
-  `--dry-run --json` to inspect the launch command.
+  nudge, interrupt, finish, and export. With `--campaign`, the observation rail
+  also shows campaign slot lifecycle, blockers, approval counts, and the next
+  manager action. With `--ensure-dispatch`, launch also ensures a Dispatch watch
+  process using the supplied `--dispatcher-id` when provided, reusing only a
+  fresh heartbeat from that same dispatcher id. Use `--dry-run --json` to
+  inspect the launch command.
 - `cycle <task> [--busy-wait-seconds N]` — One observation cycle. Idempotent. Runs `ingest`, computes
   worker state from the JSON event stream, captures the tmux pane as a shadow
   signal, writes a `manager_cycles` row, and returns a JSON dict the manager

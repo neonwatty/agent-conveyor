@@ -139,13 +139,18 @@ test("latest status reads sqlite before stale status.json", () => {
   }
 });
 
-test("sqlite schema contract constants cover the expected v24 inventory", () => {
-  assert.equal(SCHEMA_VERSION, 24);
+test("sqlite schema contract constants cover the expected v25 inventory", () => {
+  assert.equal(SCHEMA_VERSION, 25);
   assert.deepEqual([...REQUIRED_TABLES].sort(), [
     "acceptance_criteria",
     "agent_observations",
     "bindings",
     "budgets",
+    "campaign_asset_receipts",
+    "campaign_assignments",
+    "campaign_channel_briefs",
+    "campaign_worker_slots",
+    "campaigns",
     "codex_events",
     "command_attempts",
     "commands",
@@ -175,6 +180,8 @@ test("sqlite schema contract constants cover the expected v24 inventory", () => 
     "worker_handoffs",
     "workers",
   ]);
+  assert.equal(REQUIRED_INDEXES.has("campaign_worker_slots_campaign_slot"), true);
+  assert.equal(REQUIRED_INDEXES.has("campaign_asset_receipts_campaign_status"), true);
   assert.equal(REQUIRED_INDEXES.has("commands_claimable"), true);
   assert.equal(REQUIRED_INDEXES.has("routed_notifications_target_inbox"), true);
   assert.deepEqual([...REQUIRED_TRIGGERS].sort(), ["events_no_delete", "events_no_update"]);

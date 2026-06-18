@@ -50,6 +50,7 @@ inspection while Dispatch is writing to the same `--path` database.
 | Nudge / What's Next Manager | Manager should observe, ask status, and negotiate criteria | guided | manager decision, worker receipt, accepted criteria | off by default |
 | PR/CI/Merge Ralph Loop | Manager should drive delivery through PR, CI, merge, handoff | strict | PR URL, green CI, merge receipt, adversarial proof | clear after handoff |
 | Autonomous Ship-It Loop | Manager may push, open PRs, monitor CI, fix bounded conflicts, and merge | strict | branch, PR, CI, mergeability, manager decision, merge, post-merge, adversarial proof | clear after handoff |
+| Creative Ops Campaign | One manager should supervise multiple Codex app worker slots for channel-specific creative assets | strict | campaign dashboard, slot lifecycle, assignment receipts, asset review receipts, human publish gate | rotate owned stale workers only |
 
 Two support patterns apply across recipes:
 
@@ -321,6 +322,84 @@ Local proof:
 conveyor qa-plan ship-it-loop
 conveyor qa-run ship-it-loop --receipt-output /tmp/ship-it-loop-receipt.json --json
 ```
+
+## Creative Ops Campaign
+
+Use this when one manager should coordinate multiple Codex app worker sessions
+for channel-specific creative work such as YouTube, TikTok, LinkedIn, Facebook,
+image generation prompts, HyperFrames scripts, or reviewable copy drafts.
+This recipe layers campaign state on top of ordinary manager/worker sessions:
+workers remain visible app or tmux sessions, while the campaign record tracks
+slots, channel briefs, assignments, asset receipts, blockers, and review state.
+
+Suggested setup:
+
+```bash
+conveyor campaign create \
+  --name "$CAMPAIGN" \
+  --objective "Produce reviewable creative assets across named channels." \
+  --json
+
+conveyor campaign add-slot \
+  --name "$CAMPAIGN" \
+  --slot-key tiktok \
+  --role-label "TikTok worker" \
+  --channel tiktok \
+  --thread-id "$TIKTOK_THREAD_ID" \
+  --thread-title "TikTok Campaign Worker" \
+  --state active \
+  --json
+
+conveyor campaign brief \
+  --name "$CAMPAIGN" \
+  --channel tiktok \
+  --brief-json '{"format":"9:16","review_gate":"human approval before publish"}' \
+  --json
+
+conveyor dashboard --campaign "$CAMPAIGN" --ensure-dispatch
+```
+
+Manager operating loop:
+
+```bash
+conveyor campaign dashboard --name "$CAMPAIGN" --json
+conveyor campaign assign --name "$CAMPAIGN" --slot "$SLOT_ID" \
+  --title "Draft first-pass TikTok hooks" \
+  --instructions "Create reviewable draft copy only; do not publish." \
+  --status active --json
+conveyor campaign asset --name "$CAMPAIGN" --slot "$SLOT_ID" \
+  --assignment "$ASSIGNMENT_ID" --asset-type copy \
+  --title "TikTok hooks v1" --status needs_review \
+  --prompt-summary "Sanitized prompt summary only." --json
+```
+
+Evidence gates:
+
+- `campaign dashboard --name "$CAMPAIGN" --json` shows every active worker
+  slot, lifecycle state, blockers, approval counts, and `next_manager_action`.
+- Each worker task has a slot-scoped `campaign assign` receipt before work
+  starts and at least one `campaign asset` receipt before it can be reviewed.
+- Human approval is required before public publishing, scheduling, or posting.
+  Use `approved` or `published` asset receipt statuses only to record actual
+  review outcomes; they are not permission to publish by themselves.
+- Stale or context-heavy Codex app workers are rotated only through
+  `campaign rotate-slot` with the exact current `--expected-thread-id`.
+- Finished or replaced workers are archived only through `campaign archive-slot`
+  with the exact current `--expected-thread-id`.
+
+Fail closed on these conditions:
+
+- the manager cannot see the worker slot in `campaign dashboard`;
+- a worker thread id does not match the slot before rotate/archive;
+- a worker asks to publish or schedule without explicit human approval;
+- raw screenshots, private phone content, tokens, JWTs, keys, audio, or
+  unsanitized transcripts would be committed as receipts;
+- dogfood proof is missing but the manager tries to claim the campaign system
+  is fully validated.
+
+This recipe is ready for local dry runs and controlled dogfood. Treat final
+dogfood success as a separate evidence task: the recipe can configure the loop,
+but it does not by itself prove that a real campaign finished.
 
 ## Inbox / No-Tmux App Loop
 

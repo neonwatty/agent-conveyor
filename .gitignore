@@ -5,5 +5,7 @@ __pycache__/
 .venv/
 .env.local
 node_modules/
+dist/
 dashboard/dist/
+docs/goals/
 docs/goals/*/.goalbuddy-board/

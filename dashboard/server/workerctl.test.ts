@@ -1135,6 +1135,28 @@ test("builds session nudge dry-run arguments", () => {
   ]);
 });
 
+test("builds campaign dashboard arguments and preserves server campaign option", () => {
+  const args = buildWorkerctlArgs({
+    campaignName: "launch",
+    command: "campaign-dashboard",
+    dbPath: "/tmp/workerctl.db",
+    workerctlPath: "conveyor",
+  });
+
+  assert.deepEqual(args, [
+    "conveyor",
+    "campaign",
+    "dashboard",
+    "--name",
+    "launch",
+    "--json",
+    "--path",
+    "/tmp/workerctl.db",
+  ]);
+
+  assert.equal(normalizeServerOptions({ campaign: "launch" }).campaign, "launch");
+});
+
 test("builds interrupt arguments with followup", () => {
   const args = buildWorkerctlArgs({
     command: "interrupt",

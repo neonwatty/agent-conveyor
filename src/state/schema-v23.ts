@@ -1,4 +1,4 @@
-// Generated from the archived Agent Conveyor v24 database schema.
+// Generated from the archived Agent Conveyor v25 database schema.
 // Regenerate deliberately when SCHEMA_VERSION changes.
 export const SCHEMA_V23_SQL = String.raw`
 CREATE TABLE acceptance_criteria(
@@ -47,6 +47,71 @@ CREATE TABLE budgets(
           nudges_used integer not null default 0 check (nudges_used >= 0),
           expires_at text not null,
           check (nudges_used <= max_nudges)
+        );
+
+CREATE TABLE campaigns(
+          id text primary key,
+          name text unique not null,
+          objective text not null,
+          status text not null check (status in ('active','paused','done','blocked','archived')),
+          metadata_json text not null check (json_valid(metadata_json)),
+          created_at text not null,
+          updated_at text not null
+        );
+
+CREATE TABLE campaign_worker_slots(
+          id text primary key,
+          campaign_id text not null references campaigns(id),
+          slot_key text not null,
+          role_label text not null,
+          channel text,
+          session_id text references sessions(id),
+          codex_app_thread_id text,
+          codex_app_thread_title text,
+          state text not null check (state in ('planned','active','idle','blocked','archived')),
+          metadata_json text not null check (json_valid(metadata_json)),
+          created_at text not null,
+          updated_at text not null,
+          unique(campaign_id, slot_key)
+        );
+
+CREATE TABLE campaign_assignments(
+          id text primary key,
+          campaign_id text not null references campaigns(id),
+          slot_id text not null references campaign_worker_slots(id),
+          title text not null,
+          instructions text not null,
+          status text not null check (status in ('queued','active','blocked','done','cancelled')),
+          metadata_json text not null check (json_valid(metadata_json)),
+          created_at text not null,
+          updated_at text not null,
+          completed_at text
+        );
+
+CREATE TABLE campaign_channel_briefs(
+          id text primary key,
+          campaign_id text not null references campaigns(id),
+          channel text not null,
+          brief_json text not null check (json_valid(brief_json)),
+          created_at text not null,
+          updated_at text not null,
+          unique(campaign_id, channel)
+        );
+
+CREATE TABLE campaign_asset_receipts(
+          id text primary key,
+          campaign_id text not null references campaigns(id),
+          slot_id text not null references campaign_worker_slots(id),
+          assignment_id text references campaign_assignments(id),
+          asset_type text not null check (asset_type in ('image','video','hyperframes','copy','audio','other')),
+          channel text,
+          status text not null check (status in ('draft','needs_review','approved','rejected','published')),
+          title text not null,
+          prompt_summary text,
+          artifact_path text,
+          metadata_json text not null check (json_valid(metadata_json)),
+          review_notes text,
+          created_at text not null
         );
 
 CREATE TABLE codex_events(
@@ -465,6 +530,27 @@ CREATE INDEX commands_task_state_created
 
 CREATE INDEX continuation_reviews_task
         on continuation_reviews(task_id, id);
+
+CREATE INDEX campaign_asset_receipts_assignment
+        on campaign_asset_receipts(assignment_id, id);
+
+CREATE INDEX campaign_asset_receipts_campaign_status
+        on campaign_asset_receipts(campaign_id, status, created_at, id);
+
+CREATE INDEX campaign_assignments_campaign_status
+        on campaign_assignments(campaign_id, status, created_at, id);
+
+CREATE UNIQUE INDEX campaign_channel_briefs_campaign_channel
+        on campaign_channel_briefs(campaign_id, channel);
+
+CREATE UNIQUE INDEX campaign_worker_slots_campaign_slot
+        on campaign_worker_slots(campaign_id, slot_key);
+
+CREATE INDEX campaign_worker_slots_session
+        on campaign_worker_slots(session_id);
+
+CREATE UNIQUE INDEX campaigns_name
+        on campaigns(name);
 
 CREATE INDEX epilogue_runs_task_step
         on epilogue_runs(task_id, step_name, id);

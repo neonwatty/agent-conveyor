@@ -1,10 +1,15 @@
-export const SCHEMA_VERSION = 24;
+export const SCHEMA_VERSION = 25;
 
 export const REQUIRED_TABLES = new Set([
   "acceptance_criteria",
   "agent_observations",
   "bindings",
   "budgets",
+  "campaign_asset_receipts",
+  "campaign_assignments",
+  "campaign_channel_briefs",
+  "campaign_worker_slots",
+  "campaigns",
   "codex_events",
   "command_attempts",
   "commands",
@@ -45,6 +50,13 @@ export const REQUIRED_INDEXES = new Set([
   "commands_claimable",
   "commands_task_state_created",
   "continuation_reviews_task",
+  "campaign_asset_receipts_assignment",
+  "campaign_asset_receipts_campaign_status",
+  "campaign_assignments_campaign_status",
+  "campaign_channel_briefs_campaign_channel",
+  "campaign_worker_slots_campaign_slot",
+  "campaign_worker_slots_session",
+  "campaigns_name",
   "epilogue_runs_task_step",
   "events_task_id",
   "manager_configs_task_id",

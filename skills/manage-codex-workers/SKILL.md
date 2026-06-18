@@ -41,6 +41,13 @@ and merge only after explicit manager merge evidence.
 Max iterations: <number, default 2>
 ```
 
+For creative-ops work where the user wants one manager to supervise multiple
+Codex app workers across channels such as YouTube, TikTok, LinkedIn, Facebook,
+image generation, HyperFrames, or copy drafts, use the Creative Ops Campaign
+recipe. It should create campaign records, worker slots, channel briefs,
+slot-scoped assignments, asset receipts, and dashboard status proof. It must
+not imply public publishing or scheduling without explicit human approval.
+
 Skill behavior:
 
 1. Work from `/Users/neonwatty/Desktop/codex-terminal-manager`.
@@ -513,6 +520,9 @@ First-draft recipes:
 
 - `GoalBuddy Conveyor` — one parent board, one active child board, PR/CI/merge
   or `satisfied_on_main` proof, and parent receipt update before the next child.
+- `Creative Ops Campaign` — one manager supervises multiple named worker slots
+  for channel-specific creative assets using campaign state, dashboard status,
+  assignment receipts, asset review receipts, and human publish gates.
 - `Test Coverage Loop` — require test coverage evidence plus structured
   adversarial proof before another worker pass.
 - `UX Polish Loop` — require browser/screenshot/visual-diff evidence plus
@@ -636,6 +646,33 @@ correlation markers, and negative QA checks. The manager should keep exactly one
 child board active, require PR/CI/merge or `satisfied_on_main` proof before
 marking a child done, and update the parent receipt before activating the next
 child.
+
+Natural-language requests such as "run a multi-channel creative ops campaign",
+"have one manager coordinate YouTube, TikTok, LinkedIn, and Facebook workers",
+"generate imagery, HyperFrames, videos, and copy across channels", or "use
+multiple first-time manager guys and girls" should resolve to the Creative Ops
+Campaign recipe unless the user chooses a custom policy. The manager should:
+
+1. Create or reuse a campaign with `conveyor campaign create`.
+2. Create one worker slot per channel or discipline with `campaign add-slot`,
+   preserving Codex app thread ids/titles when available.
+3. Record structured channel briefs with `campaign brief`.
+4. Assign work with `campaign assign` before asking a worker to produce assets.
+5. Record worker output with `campaign asset` using sanitized prompt summaries,
+   asset type, review status, and safe artifact paths.
+6. Use `campaign dashboard --name <campaign> --json` or
+   `dashboard --campaign <campaign>` as the manager status surface.
+7. Rotate stale/context-heavy workers only with `campaign rotate-slot` and an
+   exact `--expected-thread-id`; archive only with `campaign archive-slot` and
+   the exact current thread id.
+8. Treat public publishing, scheduling, posting, external account access,
+   private phone content, raw audio, tokens, JWTs, keys, archives, and IPAs as
+   human-gated or forbidden unless the operator explicitly approves the narrow
+   action.
+
+Do not claim that the campaign system is fully dogfooded merely because the
+recipe was configured. Final campaign dogfood requires dashboard proof, asset
+receipts, manager review decisions, and a separate dogfood receipt or blocker.
 
 Natural-language requests such as "ship this autonomously", "let the manager
 open the PR and merge when green", or "have the manager handle conflicts and
@@ -874,6 +911,14 @@ etc.) run `conveyor db-doctor --live`.
   record with `app-worker-rotation-record`. If the plan is blocked or the old
   id does not exactly match the active bound worker, stop and report the
   blocker.
+- "set up a Creative Ops Campaign", "run a multi-channel campaign", or "one
+  manager with multiple channel workers": use the Creative Ops Campaign recipe;
+  create or reuse a campaign, add one slot per channel or discipline, record
+  briefs, assign work before worker prompts, require `campaign asset` receipts
+  for outputs, run `campaign dashboard --name <campaign> --json` for manager
+  status, and require exact-thread `campaign rotate-slot`/`campaign
+  archive-slot` for owned worker cleanup. Do not publish or schedule without
+  explicit human approval.
 - "set up an autonomous ship-it loop", "ship this through PR and merge", or
   "merge when green": resolve to `ship-it-loop` unless the user explicitly
   chooses a custom policy. Show the locked recipe summary, require explicit
