@@ -20,6 +20,20 @@ import {
   type AppLoopStatus,
 } from "../runtime/app-autonomy.js";
 import { classifyBusyWait, classifyStartupOutput } from "../runtime/classify.js";
+import {
+  addCampaignWorkerSlotSync,
+  campaignDashboardSync,
+  campaignStatusSync,
+  createCampaignAssignmentSync,
+  createCampaignSync,
+  recordCampaignAssetReceiptSync,
+  updateCampaignWorkerSlotLifecycleSync,
+  upsertCampaignChannelBriefSync,
+  type CampaignAssignmentStatus,
+  type CampaignAssetStatus,
+  type CampaignAssetType,
+  type CampaignWorkerSlotState,
+} from "../runtime/campaigns.js";
 import { exportTaskSync } from "../runtime/export.js";
 import { ingestSessionSync } from "../runtime/ingest.js";
 import {
@@ -295,6 +309,9 @@ export function runTypescriptRuntimeCommand(options: TypescriptRuntimeOptions): 
     if (parsed.command === "tasks") {
       return runTasksCommand(parsed, options);
     }
+    if (parsed.command === "campaign") {
+      return runCampaignCommand(parsed, options);
+    }
     if (parsed.command === "start") {
       return runLegacyStartCommand(parsed, options);
     }
@@ -522,6 +539,21 @@ function commandHelpText(program: "conveyor" | "workerctl", command: string): st
       "Examples:",
       `  ${program} finish-task my-task --reason "Accepted criteria satisfied" --require-criteria-audit --path /tmp/work/workerctl.db --json`,
     ],
+    campaign: [
+      `usage: ${program} campaign <create|add-slot|attach-slot|rotate-slot|archive-slot|brief|assign|asset|status|dashboard> --name <campaign> [options] ${path} [--json]`,
+      "",
+      "Examples:",
+      `  ${program} campaign create --name launch --objective "Create launch assets" --metadata-json '{"owner":"ops"}' --json`,
+      `  ${program} campaign add-slot --name launch --slot-key tiktok --role-label "TikTok worker" --channel tiktok --thread-id thread-1 --state active --json`,
+      `  ${program} campaign attach-slot --name launch --slot campaign-slot-id --session-id session-worker --thread-id thread-1 --state active --json`,
+      `  ${program} campaign rotate-slot --name launch --slot campaign-slot-id --expected-thread-id thread-1 --thread-id thread-2 --thread-title "TikTok Worker 2" --json`,
+      `  ${program} campaign archive-slot --name launch --slot campaign-slot-id --expected-thread-id thread-2 --json`,
+      `  ${program} campaign brief --name launch --channel tiktok --brief-json '{"format":"9:16"}' --json`,
+      `  ${program} campaign assign --name launch --slot campaign-slot-id --title "Draft hooks" --instructions "Create hooks" --status active --json`,
+      `  ${program} campaign asset --name launch --slot campaign-slot-id --assignment campaign-assignment-id --asset-type copy --title "Hooks v1" --status needs_review --json`,
+      `  ${program} campaign status --name launch --json`,
+      `  ${program} campaign dashboard --name launch --json`,
+    ],
     "manager-ack": [
       `usage: ${program} manager-ack <task> --from-stdin ${path}`,
       `usage: ${program} manager-ack <task> --json ${path}`,
@@ -607,8 +639,12 @@ interface ParsedRuntimeArgs {
     includeTranscripts: boolean;
     all: boolean;
     action: string | null;
+    artifactPath: string | null;
+    assetType: string | null;
+    assignment: string | null;
     asRole: "all" | "manager" | "reviewer" | "worker";
     attempts: boolean;
+    briefJson: string | null;
     json: boolean;
     activeOnly: boolean;
     actor: string | null;
@@ -622,7 +658,9 @@ interface ParsedRuntimeArgs {
     blocker: string | null;
     busyWaitSeconds: number;
     candidate: string | null;
+    campaignName: string | null;
     check: string | null;
+    channel: string | null;
     classifyPrompt: string | null;
     workerCodexAppThreadId: string | null;
     workerCodexAppThreadTitle: string | null;
@@ -648,6 +686,7 @@ interface ParsedRuntimeArgs {
     epilogueStatus: boolean;
     epilogueStep: string | null;
     eventType: string | null;
+    expectedThreadId: string | null;
     file: string | null;
     finishRun: string | null;
     fromText: string | null;
@@ -655,6 +694,7 @@ interface ParsedRuntimeArgs {
     fromStdin: boolean;
     failureMode: string | null;
     goal: string | null;
+    instructions: string | null;
     keepLatest: number;
     key: string;
     list: boolean;
@@ -680,7 +720,10 @@ interface ParsedRuntimeArgs {
     require: boolean;
     requireHandoff: boolean;
     result: string | null;
+    reviewNotes: string | null;
+    roleLabel: string | null;
     review: boolean;
+    sessionId: string | null;
     sessionRole: "manager" | "worker" | null;
     sessionState: "active" | "all" | "gone" | null;
     show: string | null;
@@ -691,9 +734,13 @@ interface ParsedRuntimeArgs {
     statuses: string[];
     statusStaleSeconds: number;
     submitRole: "manager" | "worker" | null;
+    slot: string | null;
+    slotKey: string | null;
     subtype: string | null;
     summary: string | null;
     source: string | null;
+    objective: string | null;
+    promptSummary: string | null;
     proof: string | null;
     purpose: string | null;
     quietAfterCycles: number;
@@ -741,6 +788,8 @@ interface ParsedRuntimeArgs {
     oldWorkerThreadId: string | null;
     reason: string | null;
     threadId: string | null;
+    threadTitle: string | null;
+    title: string | null;
     archiveStatus: string | null;
     consumeNext: boolean;
     wait: boolean;
@@ -821,6 +870,27 @@ interface ParsedRuntimeArgs {
 
 type RuntimeFlagKey = keyof ParsedRuntimeArgs["flags"];
 
+const CAMPAIGN_ACTIONS = new Set(["create", "add-slot", "attach-slot", "rotate-slot", "archive-slot", "brief", "assign", "asset", "status", "dashboard"]);
+const CAMPAIGN_STRING_FLAGS: Record<string, RuntimeFlagKey> = {
+  "--artifact-path": "artifactPath",
+  "--asset-type": "assetType",
+  "--assignment": "assignment",
+  "--brief-json": "briefJson",
+  "--channel": "channel",
+  "--expected-thread-id": "expectedThreadId",
+  "--instructions": "instructions",
+  "--objective": "objective",
+  "--prompt-summary": "promptSummary",
+  "--review-notes": "reviewNotes",
+  "--role-label": "roleLabel",
+  "--session-id": "sessionId",
+  "--slot": "slot",
+  "--slot-key": "slotKey",
+  "--thread-id": "threadId",
+  "--thread-title": "threadTitle",
+  "--title": "title",
+};
+
 function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): ParsedRuntimeArgs {
   const flags: ParsedRuntimeArgs["flags"] = {
     format: "timeline",
@@ -829,8 +899,12 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
     includeTranscripts: false,
     all: false,
     action: null,
+    artifactPath: null,
+    assetType: null,
+    assignment: null,
     asRole: "all",
     attempts: false,
+    briefJson: null,
     json: false,
     activeOnly: false,
     actor: null,
@@ -844,7 +918,9 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
     blocker: null,
     busyWaitSeconds: DEFAULT_BUSY_WAIT_SECONDS,
     candidate: null,
+    campaignName: null,
     check: null,
+    channel: null,
     classifyPrompt: null,
     workerCodexAppThreadId: null,
     workerCodexAppThreadTitle: null,
@@ -870,6 +946,7 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
     epilogueStatus: false,
     epilogueStep: null,
     eventType: null,
+    expectedThreadId: null,
     failureMode: null,
     file: null,
     finishRun: null,
@@ -877,6 +954,7 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
     fromText: null,
     fromWorkerResponse: null,
     goal: null,
+    instructions: null,
     keepLatest: 20,
     key: "C-c",
     list: false,
@@ -902,7 +980,10 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
     require: false,
     requireHandoff: false,
     result: null,
+    reviewNotes: null,
+    roleLabel: null,
     review: false,
+    sessionId: null,
     sessionRole: null,
     sessionState: null,
     show: null,
@@ -913,9 +994,13 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
     statuses: [],
     statusStaleSeconds: DEFAULT_STATUS_STALE_SECONDS,
     submitRole: null,
+    slot: null,
+    slotKey: null,
     subtype: null,
     summary: null,
     source: null,
+    objective: null,
+    promptSummary: null,
     proof: null,
     purpose: null,
     quietAfterCycles: 3,
@@ -963,6 +1048,8 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
     oldWorkerThreadId: null,
     reason: null,
     threadId: null,
+    threadTitle: null,
+    title: null,
     archiveStatus: null,
     consumeNext: false,
     wait: false,
@@ -1376,6 +1463,16 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       }
       flags.workerctlPath = value.value;
       index += 1;
+    } else if (arg === "--campaign") {
+      if (command !== "dashboard") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --campaign", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.campaignName = value.value;
+      index += 1;
     } else if (arg === "--output") {
       const value = valueAfter(queue, index, arg);
       if (value.error) {
@@ -1492,7 +1589,7 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       flags.evidenceJson = value.value;
       index += 1;
     } else if (arg === "--metadata-json") {
-      if (command !== "runs" && command !== "loop-evidence") {
+      if (command !== "runs" && command !== "loop-evidence" && command !== "campaign") {
         return { command, enabled, error: "Unsupported TypeScript runtime option: --metadata-json", explicit, flags, task };
       }
       const value = valueAfter(queue, index, arg);
@@ -1549,6 +1646,13 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
         return { command, enabled, error: value.error, explicit, flags, task };
       }
       flags.names.push(value.value);
+      index += 1;
+    } else if (command === "campaign" && Object.prototype.hasOwnProperty.call(CAMPAIGN_STRING_FLAGS, arg)) {
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      (flags as Record<string, unknown>)[CAMPAIGN_STRING_FLAGS[arg]] = value.value;
       index += 1;
     } else if (arg === "--pid") {
       const parsedValue = valueAfter(queue, index, arg);
@@ -1945,14 +2049,18 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       flags.managerPermissionsJson = value.value;
       index += 1;
     } else if (arg === "--objective") {
-      if (command !== "manager-config") {
+      if (command !== "manager-config" && command !== "campaign") {
         return { command, enabled, error: "Unsupported TypeScript runtime option: --objective", explicit, flags, task };
       }
       const value = valueAfter(queue, index, arg);
       if (value.error) {
         return { command, enabled, error: value.error, explicit, flags, task };
       }
-      flags.managerObjective = value.value;
+      if (command === "manager-config") {
+        flags.managerObjective = value.value;
+      } else {
+        flags.objective = value.value;
+      }
       index += 1;
     } else if (arg === "--recipe") {
       if (command !== "manager-config") {
@@ -2161,7 +2269,7 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       flags.archiveStatus = value.value;
       index += 1;
     } else if (arg === "--thread-id") {
-      if (command !== "app-wakeup-record-delivery") {
+      if (command !== "app-wakeup-record-delivery" && command !== "campaign") {
         return { command, enabled, error: "Unsupported TypeScript runtime option: --thread-id", explicit, flags, task };
       }
       const value = valueAfter(queue, index, arg);
@@ -2457,6 +2565,8 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
           return { command, enabled, error: `Unsupported worker status state: ${value}`, explicit, flags, task };
         }
         flags.statusState = value;
+      } else if (command === "campaign") {
+        flags.statusState = value;
       } else if (!isSessionState(value)) {
         return { command, enabled, error: `Unsupported sessions state: ${value}`, explicit, flags, task };
       } else {
@@ -2468,7 +2578,7 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
         flags.epilogueStatus = true;
         continue;
       }
-      if (command !== "criteria" && command !== "runs" && command !== "loop-evidence") {
+      if (command !== "criteria" && command !== "runs" && command !== "loop-evidence" && command !== "campaign") {
         return { command, enabled, error: "Unsupported TypeScript runtime option: --status", explicit, flags, task };
       }
       const parsedValue = valueAfter(queue, index, arg);
@@ -3075,6 +3185,11 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
     } else if (command === "app-autopilot" && flags.action === null) {
       if (!["start", "stop", "status"].includes(arg)) {
         return { command, enabled, error: `Unsupported app-autopilot action: ${arg}`, explicit, flags, task };
+      }
+      flags.action = arg;
+    } else if (command === "campaign" && flags.action === null) {
+      if (!CAMPAIGN_ACTIONS.has(arg)) {
+        return { command, enabled, error: `Unsupported campaign action: ${arg}`, explicit, flags, task };
       }
       flags.action = arg;
     } else if ((command === "qa-plan" || command === "qa-run") && flags.subtype === null) {
@@ -6466,6 +6581,292 @@ function runTasksCommand(
   }
 }
 
+function runCampaignCommand(
+  parsed: ParsedRuntimeArgs,
+  options: { cwd?: string; env?: NodeJS.ProcessEnv },
+): TypescriptRuntimeResult {
+  if (parsed.task) {
+    return errorResult(`Unexpected argument: ${parsed.task}`);
+  }
+  const action = parsed.flags.action;
+  if (!action) {
+    return errorResult("campaign requires an action: create, add-slot, brief, assign, asset, or status");
+  }
+  const campaign = campaignNameArg(parsed);
+  const database = openRuntimeDatabase(parsed, options);
+  try {
+    if (action === "create") {
+      const objective = requiredStringFlag(parsed.flags.objective, "--objective");
+      const metadata = jsonObjectArg(parsed.flags.metadataJson, "--metadata-json");
+      const campaignId = createCampaignSync(database, {
+        metadata,
+        name: campaign,
+        objective,
+      });
+      return campaignResult(parsed, {
+        action,
+        campaign,
+        campaign_id: campaignId,
+        created: true,
+      }, [`campaign ${campaign} created ${campaignId}`]);
+    }
+
+    if (action === "add-slot") {
+      const slotKey = requiredStringFlag(parsed.flags.slotKey, "--slot-key");
+      const roleLabel = requiredStringFlag(parsed.flags.roleLabel, "--role-label");
+      const state = campaignSlotStateArg(parsed.flags.statusState);
+      const metadata = jsonObjectArg(parsed.flags.metadataJson, "--metadata-json");
+      const slotId = addCampaignWorkerSlotSync(database, {
+        campaign,
+        channel: parsed.flags.channel,
+        codexAppThreadId: parsed.flags.threadId,
+        codexAppThreadTitle: parsed.flags.threadTitle,
+        metadata,
+        roleLabel,
+        sessionId: parsed.flags.sessionId,
+        slotKey,
+        ...(state ? { state } : {}),
+      });
+      return campaignResult(parsed, {
+        action,
+        campaign,
+        created: true,
+        slot_id: slotId,
+        slot_key: slotKey,
+      }, [`campaign ${campaign} slot ${slotKey} created ${slotId}`]);
+    }
+
+    if (action === "attach-slot") {
+      const slot = requiredStringFlag(parsed.flags.slot, "--slot");
+      const state = campaignSlotStateArg(parsed.flags.statusState) ?? "active";
+      const record = updateCampaignWorkerSlotLifecycleSync(database, {
+        campaign,
+        codexAppThreadId: parsed.flags.threadId,
+        codexAppThreadTitle: parsed.flags.threadTitle,
+        metadata: jsonObjectArg(parsed.flags.metadataJson, "--metadata-json"),
+        sessionId: parsed.flags.sessionId,
+        slot,
+        state,
+      });
+      return campaignResult(parsed, {
+        action,
+        campaign,
+        slot: record,
+        updated: true,
+      }, [`campaign ${campaign} slot ${record.slot_key} attached ${record.id}`]);
+    }
+
+    if (action === "rotate-slot") {
+      const slot = requiredStringFlag(parsed.flags.slot, "--slot");
+      const expectedThreadId = requiredStringFlag(parsed.flags.expectedThreadId, "--expected-thread-id");
+      const nextThreadId = requiredStringFlag(parsed.flags.threadId, "--thread-id");
+      const record = updateCampaignWorkerSlotLifecycleSync(database, {
+        campaign,
+        codexAppThreadId: nextThreadId,
+        codexAppThreadTitle: parsed.flags.threadTitle,
+        expectedThreadId,
+        sessionId: parsed.flags.sessionId,
+        slot,
+        state: campaignSlotStateArg(parsed.flags.statusState) ?? "active",
+      });
+      return campaignResult(parsed, {
+        action,
+        campaign,
+        expected_thread_id: expectedThreadId,
+        slot: record,
+        updated: true,
+      }, [`campaign ${campaign} slot ${record.slot_key} rotated ${expectedThreadId} -> ${record.codex_app_thread_id ?? "none"}`]);
+    }
+
+    if (action === "archive-slot") {
+      const slot = requiredStringFlag(parsed.flags.slot, "--slot");
+      const expectedThreadId = requiredStringFlag(parsed.flags.expectedThreadId, "--expected-thread-id");
+      const record = updateCampaignWorkerSlotLifecycleSync(database, {
+        campaign,
+        expectedThreadId,
+        slot,
+        state: "archived",
+      });
+      return campaignResult(parsed, {
+        action,
+        campaign,
+        expected_thread_id: expectedThreadId,
+        slot: record,
+        updated: true,
+      }, [`campaign ${campaign} slot ${record.slot_key} archived ${record.id}`]);
+    }
+
+    if (action === "brief") {
+      const channel = requiredStringFlag(parsed.flags.channel, "--channel");
+      if (parsed.flags.briefJson === null) {
+        return errorResult("campaign brief requires --brief-json");
+      }
+      const briefId = upsertCampaignChannelBriefSync(database, {
+        brief: jsonObjectArg(parsed.flags.briefJson, "--brief-json"),
+        campaign,
+        channel,
+      });
+      return campaignResult(parsed, {
+        action,
+        brief_id: briefId,
+        campaign,
+        channel,
+        upserted: true,
+      }, [`campaign ${campaign} brief ${channel} upserted ${briefId}`]);
+    }
+
+    if (action === "assign") {
+      const slot = requiredStringFlag(parsed.flags.slot, "--slot");
+      const title = requiredStringFlag(parsed.flags.title, "--title");
+      const instructions = requiredStringFlag(parsed.flags.instructions, "--instructions");
+      const status = campaignAssignmentStatusArg(parsed.flags.statusState);
+      const metadata = jsonObjectArg(parsed.flags.metadataJson, "--metadata-json");
+      const assignmentId = createCampaignAssignmentSync(database, {
+        campaign,
+        instructions,
+        metadata,
+        slot,
+        title,
+        ...(status ? { status } : {}),
+      });
+      return campaignResult(parsed, {
+        action,
+        assignment_id: assignmentId,
+        campaign,
+        created: true,
+        slot_id: slot,
+      }, [`campaign ${campaign} assignment created ${assignmentId}`]);
+    }
+
+    if (action === "asset") {
+      const slot = requiredStringFlag(parsed.flags.slot, "--slot");
+      const title = requiredStringFlag(parsed.flags.title, "--title");
+      const assetType = campaignAssetTypeArg(requiredStringFlag(parsed.flags.assetType, "--asset-type"));
+      const status = campaignAssetStatusArg(parsed.flags.statusState);
+      const metadata = jsonObjectArg(parsed.flags.metadataJson, "--metadata-json");
+      const assetReceiptId = recordCampaignAssetReceiptSync(database, {
+        artifactPath: parsed.flags.artifactPath,
+        assetType,
+        assignment: parsed.flags.assignment,
+        campaign,
+        channel: parsed.flags.channel,
+        metadata,
+        promptSummary: parsed.flags.promptSummary,
+        reviewNotes: parsed.flags.reviewNotes,
+        slot,
+        title,
+        ...(status ? { status } : {}),
+      });
+      return campaignResult(parsed, {
+        action,
+        asset_receipt_id: assetReceiptId,
+        campaign,
+        created: true,
+        slot_id: slot,
+      }, [`campaign ${campaign} asset receipt created ${assetReceiptId}`]);
+    }
+
+    if (action === "status") {
+      const status = campaignStatusSync(database, campaign);
+      return campaignResult(parsed, status, renderCampaignStatusText(status));
+    }
+
+    if (action === "dashboard") {
+      const dashboard = campaignDashboardSync(database, campaign);
+      return campaignResult(parsed, dashboard, renderCampaignDashboardText(dashboard));
+    }
+
+    return errorResult(`Unsupported campaign action: ${action}`);
+  } finally {
+    database.close();
+  }
+}
+
+function campaignResult(parsed: ParsedRuntimeArgs, payload: unknown, lines: string[]): TypescriptRuntimeResult {
+  return parsed.flags.json ? jsonResult(payload) : textResult(lines);
+}
+
+function campaignNameArg(parsed: ParsedRuntimeArgs): string {
+  if (parsed.flags.names.length !== 1) {
+    throw new Error("campaign requires exactly one --name <campaign>");
+  }
+  return parsed.flags.names[0];
+}
+
+function requiredStringFlag(value: string | null, flag: string): string {
+  if (value === null || value.length === 0) {
+    throw new Error(`campaign requires ${flag}`);
+  }
+  return value;
+}
+
+function campaignSlotStateArg(value: string | null): CampaignWorkerSlotState | undefined {
+  if (value === null) {
+    return undefined;
+  }
+  if (value === "active" || value === "archived" || value === "blocked" || value === "idle" || value === "planned") {
+    return value;
+  }
+  throw new Error("--state must be one of: active, archived, blocked, idle, planned");
+}
+
+function campaignAssignmentStatusArg(value: string | null): CampaignAssignmentStatus | undefined {
+  if (value === null) {
+    return undefined;
+  }
+  if (value === "active" || value === "blocked" || value === "cancelled" || value === "done" || value === "queued") {
+    return value;
+  }
+  throw new Error("--status must be one of: active, blocked, cancelled, done, queued");
+}
+
+function campaignAssetStatusArg(value: string | null): CampaignAssetStatus | undefined {
+  if (value === null) {
+    return undefined;
+  }
+  if (value === "approved" || value === "draft" || value === "needs_review" || value === "published" || value === "rejected") {
+    return value;
+  }
+  throw new Error("--status must be one of: approved, draft, needs_review, published, rejected");
+}
+
+function campaignAssetTypeArg(value: string): CampaignAssetType {
+  if (value === "audio" || value === "copy" || value === "hyperframes" || value === "image" || value === "other" || value === "video") {
+    return value;
+  }
+  throw new Error("--asset-type must be one of: audio, copy, hyperframes, image, other, video");
+}
+
+function renderCampaignStatusText(status: ReturnType<typeof campaignStatusSync>): string[] {
+  return [
+    `campaign ${status.campaign.name} ${status.campaign.status}`,
+    `slots ${status.slots.length}`,
+    `assignments ${statusCountsText(status.assignment_counts)}`,
+    `assets ${statusCountsText(status.asset_counts)}`,
+    `briefs ${status.channel_briefs.length}`,
+  ];
+}
+
+function renderCampaignDashboardText(dashboard: ReturnType<typeof campaignDashboardSync>): string[] {
+  const lines = [
+    `campaign ${dashboard.campaign.name} ${dashboard.campaign.status}`,
+    `next ${dashboard.next_manager_action.action}: ${dashboard.next_manager_action.reason}`,
+    `workers active=${dashboard.summary.active_slots} stale=${dashboard.summary.stale_slots} blocked=${dashboard.summary.blocked_slots} archived=${dashboard.summary.archived_slots}`,
+    `assignments ${statusCountsText(dashboard.assignment_counts)}`,
+    `assets ${statusCountsText(dashboard.asset_counts)}`,
+    `approvals needs_review=${dashboard.approvals.needs_review} approved=${dashboard.approvals.approved} rejected=${dashboard.approvals.rejected} published=${dashboard.approvals.published}`,
+    `blockers ${dashboard.blockers.length}`,
+  ];
+  for (const slot of dashboard.slots.slice(0, 8)) {
+    lines.push(`slot ${slot.slot_key} ${slot.state} ${slot.lifecycle.state} assignments=${slot.assignments.length} assets=${slot.assets.length}`);
+  }
+  return lines;
+}
+
+function statusCountsText(counts: Record<string, number>): string {
+  return Object.entries(counts).map(([status, count]) => `${status}=${count}`).join(" ");
+}
+
 function runLegacyStartCommand(
   parsed: ParsedRuntimeArgs,
   options: TypescriptRuntimeOptions,
@@ -6682,10 +7083,18 @@ function dashboardLaunchPayload(parsed: ParsedRuntimeArgs): {
   ensure_dispatch: boolean;
   host: string;
   port: number;
+  campaign: string | null;
   task: string | null;
   url: string;
 } {
-  const query = parsed.flags.taskName ? `?task=${encodeURIComponent(parsed.flags.taskName)}` : "";
+  const queryParams = new URLSearchParams();
+  if (parsed.flags.taskName) {
+    queryParams.set("task", parsed.flags.taskName);
+  }
+  if (parsed.flags.campaignName) {
+    queryParams.set("campaign", parsed.flags.campaignName);
+  }
+  const query = queryParams.toString() ? `?${queryParams.toString()}` : "";
   const command = [
     "npm",
     "run",
@@ -6701,6 +7110,9 @@ function dashboardLaunchPayload(parsed: ParsedRuntimeArgs): {
   if (parsed.flags.taskName) {
     command.push("--task", parsed.flags.taskName);
   }
+  if (parsed.flags.campaignName) {
+    command.push("--campaign", parsed.flags.campaignName);
+  }
   if (parsed.flags.path) {
     command.push("--db-path", parsed.flags.path);
   }
@@ -6711,6 +7123,7 @@ function dashboardLaunchPayload(parsed: ParsedRuntimeArgs): {
     ensure_dispatch: parsed.flags.require,
     host: parsed.flags.host,
     port: parsed.flags.port,
+    campaign: parsed.flags.campaignName,
     task: parsed.flags.taskName,
     url: `http://${parsed.flags.host}:${parsed.flags.port}/${query}`,
   };
@@ -16852,6 +17265,7 @@ function isDefaultRuntimeCommand(command: string | null): boolean {
     || command === "replay"
     || command === "export-task"
     || command === "tasks"
+    || command === "campaign"
     || command === "bind"
     || command === "unbind"
     || command === "create-disposable-binding"

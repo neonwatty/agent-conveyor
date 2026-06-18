@@ -143,6 +143,33 @@ function seedCliAppLoopFixture(
   }
 }
 
+function seedCampaignCliSession(dbPath: string, options: { id: string; role: "manager" | "worker"; threadId: string }): void {
+  const database = openDatabaseSync(dbPath);
+  initializeDatabaseSync(database);
+  try {
+    database.prepare(`
+      insert into sessions(id, name, role, identity_token, codex_session_id, codex_session_path,
+        codex_app_thread_id, codex_app_thread_title, cwd, registered_at, last_heartbeat_at, state)
+      values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      options.id,
+      options.id,
+      options.role,
+      `${options.id}-token`,
+      `codex-${options.id}`,
+      `/tmp/${options.id}.jsonl`,
+      options.threadId,
+      `${options.id} thread`,
+      "/repo",
+      "2026-06-16T12:00:00Z",
+      null,
+      "active",
+    );
+  } finally {
+    database.close();
+  }
+}
+
 test("unknown TypeScript runtime command fails without Python fallback", () => {
   const result = runTypescriptRuntimeCommand({
     args: ["adversarial-check", "--json"],
@@ -203,6 +230,15 @@ test("TypeScript runtime help honors workerctl program name", () => {
   assert.match(finishTask.stdout ?? "", /finish-task <task> --reason <reason>/);
   assert.match(finishTask.stdout ?? "", /--require-criteria-audit/);
   assert.match(finishTask.stdout ?? "", /--json/);
+
+  const campaign = runTypescriptRuntimeCommand({
+    args: ["campaign", "--help"],
+    env: {},
+  });
+  assert.equal(campaign.exitCode, 0);
+  assert.match(campaign.stdout ?? "", /campaign <create\|add-slot\|attach-slot\|rotate-slot\|archive-slot\|brief\|assign\|asset\|status\|dashboard>/);
+  assert.match(campaign.stdout ?? "", /campaign status --name launch --json/);
+  assert.match(campaign.stdout ?? "", /campaign dashboard --name launch --json/);
 
   const pair = runTypescriptRuntimeCommand({
     args: ["pair", "--help"],
@@ -1444,6 +1480,385 @@ test("TypeScript runtime handles task create list and active filtering by defaul
     });
     assert.equal(missingGoal.exitCode, 2);
     assert.match(missingGoal.stderr ?? "", /--goal is required with tasks --create/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("TypeScript runtime handles campaign create slot brief assignment asset and status by default", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-campaign."));
+  try {
+    const dbPath = join(root, "workerctl.db");
+
+    const create = runTypescriptRuntimeCommand({
+      args: [
+        "campaign",
+        "create",
+        "--name",
+        "launch",
+        "--objective",
+        "Create multi-channel launch assets.",
+        "--metadata-json",
+        "{\"owner\":\"ops\"}",
+        "--path",
+        dbPath,
+        "--json",
+      ],
+      env: {},
+    });
+    assert.equal(create.exitCode, 0, create.stderr);
+    const createPayload = JSON.parse(create.stdout ?? "{}") as { campaign_id?: string; created?: boolean };
+    assert.equal(createPayload.created, true);
+    assert.match(createPayload.campaign_id ?? "", /^campaign-/);
+
+    const slot = runTypescriptRuntimeCommand({
+      args: [
+        "campaign",
+        "add-slot",
+        "--name",
+        "launch",
+        "--slot-key",
+        "tiktok",
+        "--role-label",
+        "TikTok worker",
+        "--channel",
+        "tiktok",
+        "--thread-id",
+        "thread-tiktok",
+        "--thread-title",
+        "TikTok Worker",
+        "--state",
+        "active",
+        "--path",
+        dbPath,
+        "--json",
+      ],
+      env: {},
+    });
+    assert.equal(slot.exitCode, 0, slot.stderr);
+    const slotPayload = JSON.parse(slot.stdout ?? "{}") as { slot_id?: string };
+    assert.match(slotPayload.slot_id ?? "", /^campaign-slot-/);
+
+    const brief = runTypescriptRuntimeCommand({
+      args: [
+        "campaign",
+        "brief",
+        "--name",
+        "launch",
+        "--channel",
+        "tiktok",
+        "--brief-json",
+        "{\"format\":\"9:16\",\"tone\":\"direct\"}",
+        "--path",
+        dbPath,
+        "--json",
+      ],
+      env: {},
+    });
+    assert.equal(brief.exitCode, 0, brief.stderr);
+
+    const assignment = runTypescriptRuntimeCommand({
+      args: [
+        "campaign",
+        "assign",
+        "--name",
+        "launch",
+        "--slot",
+        slotPayload.slot_id ?? "",
+        "--title",
+        "Draft hooks",
+        "--instructions",
+        "Create three short hooks.",
+        "--status",
+        "active",
+        "--metadata-json",
+        "{\"round\":1}",
+        "--path",
+        dbPath,
+        "--json",
+      ],
+      env: {},
+    });
+    assert.equal(assignment.exitCode, 0, assignment.stderr);
+    const assignmentPayload = JSON.parse(assignment.stdout ?? "{}") as { assignment_id?: string };
+    assert.match(assignmentPayload.assignment_id ?? "", /^campaign-assignment-/);
+
+    const asset = runTypescriptRuntimeCommand({
+      args: [
+        "campaign",
+        "asset",
+        "--name",
+        "launch",
+        "--slot",
+        slotPayload.slot_id ?? "",
+        "--assignment",
+        assignmentPayload.assignment_id ?? "",
+        "--asset-type",
+        "copy",
+        "--title",
+        "Hooks v1",
+        "--status",
+        "needs_review",
+        "--artifact-path",
+        "receipts/launch/tiktok-hooks.md",
+        "--prompt-summary",
+        "sterile prompt summary",
+        "--review-notes",
+        "needs operator review",
+        "--metadata-json",
+        "{\"variants\":3}",
+        "--path",
+        dbPath,
+        "--json",
+      ],
+      env: {},
+    });
+    assert.equal(asset.exitCode, 0, asset.stderr);
+    const assetPayload = JSON.parse(asset.stdout ?? "{}") as { asset_receipt_id?: string };
+    assert.match(assetPayload.asset_receipt_id ?? "", /^campaign-asset-/);
+
+    const status = runTypescriptRuntimeCommand({
+      args: ["campaign", "status", "--name", "launch", "--path", dbPath, "--json"],
+      env: {},
+    });
+    assert.equal(status.exitCode, 0, status.stderr);
+    const statusPayload = JSON.parse(status.stdout ?? "{}") as {
+      asset_counts?: Record<string, number>;
+      assignment_counts?: Record<string, number>;
+      campaign?: { metadata?: Record<string, unknown>; name?: string };
+      channel_briefs?: Array<{ brief: Record<string, unknown>; channel: string }>;
+      slots?: Array<{ active_assignments: number; asset_receipts: number; codex_app_thread_id: string | null; state: string }>;
+    };
+    assert.equal(statusPayload.campaign?.name, "launch");
+    assert.equal(statusPayload.campaign?.metadata?.owner, "ops");
+    assert.equal(statusPayload.slots?.length, 1);
+    assert.equal(statusPayload.slots?.[0]?.state, "active");
+    assert.equal(statusPayload.slots?.[0]?.codex_app_thread_id, "thread-tiktok");
+    assert.equal(statusPayload.slots?.[0]?.active_assignments, 1);
+    assert.equal(statusPayload.slots?.[0]?.asset_receipts, 1);
+    assert.equal(statusPayload.channel_briefs?.[0]?.channel, "tiktok");
+    assert.equal(statusPayload.channel_briefs?.[0]?.brief.format, "9:16");
+    assert.equal(statusPayload.assignment_counts?.active, 1);
+    assert.equal(statusPayload.asset_counts?.needs_review, 1);
+
+    const dashboard = runTypescriptRuntimeCommand({
+      args: ["campaign", "dashboard", "--name", "launch", "--path", dbPath, "--json"],
+      env: {},
+    });
+    assert.equal(dashboard.exitCode, 0, dashboard.stderr);
+    const dashboardPayload = JSON.parse(dashboard.stdout ?? "{}") as {
+      approvals?: Record<string, number>;
+      next_manager_action?: { action: string; reason: string };
+      slots?: Array<{ lifecycle: { state: string }; session: null | { id: string }; slot_key: string }>;
+      summary?: { asset_total: number; stale_slots: number };
+    };
+    assert.equal(dashboardPayload.next_manager_action?.action, "review_assets");
+    assert.match(dashboardPayload.next_manager_action?.reason ?? "", /Assets need review/);
+    assert.equal(dashboardPayload.approvals?.needs_review, 1);
+    assert.equal(dashboardPayload.summary?.asset_total, 1);
+    assert.equal(dashboardPayload.summary?.stale_slots, 0);
+    assert.equal(dashboardPayload.slots?.[0]?.slot_key, "tiktok");
+    assert.equal(dashboardPayload.slots?.[0]?.lifecycle.state, "active");
+    assert.equal(dashboardPayload.slots?.[0]?.session, null);
+
+    const text = runTypescriptRuntimeCommand({
+      args: ["campaign", "status", "--name", "launch", "--path", dbPath],
+      env: {},
+    });
+    assert.equal(text.exitCode, 0, text.stderr);
+    assert.match(text.stdout ?? "", /campaign launch active/);
+    assert.match(text.stdout ?? "", /slots 1/);
+
+    const dashboardText = runTypescriptRuntimeCommand({
+      args: ["campaign", "dashboard", "--name", "launch", "--path", dbPath],
+      env: {},
+    });
+    assert.equal(dashboardText.exitCode, 0, dashboardText.stderr);
+    assert.match(dashboardText.stdout ?? "", /campaign launch active/);
+    assert.match(dashboardText.stdout ?? "", /next review_assets/);
+    assert.match(dashboardText.stdout ?? "", /slot tiktok active active/);
+
+    const badJson = runTypescriptRuntimeCommand({
+      args: ["campaign", "create", "--name", "bad", "--objective", "Bad JSON.", "--metadata-json", "[]", "--path", dbPath],
+      env: {},
+    });
+    assert.equal(badJson.exitCode, 2);
+    assert.match(badJson.stderr ?? "", /--metadata-json must be a JSON object/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("TypeScript runtime handles campaign worker slot app lifecycle guardrails", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-campaign-lifecycle."));
+  try {
+    const dbPath = join(root, "workerctl.db");
+    seedCampaignCliSession(dbPath, { id: "session-worker", role: "worker", threadId: "thread-worker" });
+    seedCampaignCliSession(dbPath, { id: "session-manager", role: "manager", threadId: "thread-manager" });
+
+    const create = runTypescriptRuntimeCommand({
+      args: ["campaign", "create", "--name", "lifecycle", "--objective", "Manage workers.", "--path", dbPath, "--json"],
+      env: {},
+    });
+    assert.equal(create.exitCode, 0, create.stderr);
+    const other = runTypescriptRuntimeCommand({
+      args: ["campaign", "create", "--name", "other", "--objective", "Other campaign.", "--path", dbPath, "--json"],
+      env: {},
+    });
+    assert.equal(other.exitCode, 0, other.stderr);
+
+    const slot = runTypescriptRuntimeCommand({
+      args: [
+        "campaign",
+        "add-slot",
+        "--name",
+        "lifecycle",
+        "--slot-key",
+        "video",
+        "--role-label",
+        "Video worker",
+        "--path",
+        dbPath,
+        "--json",
+      ],
+      env: {},
+    });
+    assert.equal(slot.exitCode, 0, slot.stderr);
+    const slotPayload = JSON.parse(slot.stdout ?? "{}") as { slot_id?: string };
+    const slotId = slotPayload.slot_id ?? "";
+    assert.match(slotId, /^campaign-slot-/);
+
+    const managerAttach = runTypescriptRuntimeCommand({
+      args: [
+        "campaign",
+        "attach-slot",
+        "--name",
+        "lifecycle",
+        "--slot",
+        slotId,
+        "--session-id",
+        "session-manager",
+        "--thread-id",
+        "thread-manager",
+        "--path",
+        dbPath,
+      ],
+      env: {},
+    });
+    assert.equal(managerAttach.exitCode, 2);
+    assert.match(managerAttach.stderr ?? "", /requires a worker session/);
+
+    const attach = runTypescriptRuntimeCommand({
+      args: [
+        "campaign",
+        "attach-slot",
+        "--name",
+        "lifecycle",
+        "--slot",
+        slotId,
+        "--session-id",
+        "session-worker",
+        "--thread-id",
+        "thread-worker",
+        "--thread-title",
+        "Video Worker",
+        "--state",
+        "active",
+        "--path",
+        dbPath,
+        "--json",
+      ],
+      env: {},
+    });
+    assert.equal(attach.exitCode, 0, attach.stderr);
+    const attachPayload = JSON.parse(attach.stdout ?? "{}") as { slot?: { codex_app_thread_id?: string | null; session_id?: string | null; state?: string } };
+    assert.equal(attachPayload.slot?.session_id, "session-worker");
+    assert.equal(attachPayload.slot?.codex_app_thread_id, "thread-worker");
+    assert.equal(attachPayload.slot?.state, "active");
+
+    const wrongRotate = runTypescriptRuntimeCommand({
+      args: [
+        "campaign",
+        "rotate-slot",
+        "--name",
+        "lifecycle",
+        "--slot",
+        slotId,
+        "--expected-thread-id",
+        "wrong-thread",
+        "--thread-id",
+        "thread-worker-2",
+        "--path",
+        dbPath,
+      ],
+      env: {},
+    });
+    assert.equal(wrongRotate.exitCode, 2);
+    assert.match(wrongRotate.stderr ?? "", /thread guard does not match/);
+
+    const rotate = runTypescriptRuntimeCommand({
+      args: [
+        "campaign",
+        "rotate-slot",
+        "--name",
+        "lifecycle",
+        "--slot",
+        slotId,
+        "--expected-thread-id",
+        "thread-worker",
+        "--thread-id",
+        "thread-worker-2",
+        "--thread-title",
+        "Video Worker 2",
+        "--path",
+        dbPath,
+        "--json",
+      ],
+      env: {},
+    });
+    assert.equal(rotate.exitCode, 0, rotate.stderr);
+    const rotatePayload = JSON.parse(rotate.stdout ?? "{}") as { slot?: { codex_app_thread_id?: string | null; state?: string } };
+    assert.equal(rotatePayload.slot?.codex_app_thread_id, "thread-worker-2");
+    assert.equal(rotatePayload.slot?.state, "active");
+
+    const crossCampaignArchive = runTypescriptRuntimeCommand({
+      args: [
+        "campaign",
+        "archive-slot",
+        "--name",
+        "other",
+        "--slot",
+        slotId,
+        "--expected-thread-id",
+        "thread-worker-2",
+        "--path",
+        dbPath,
+      ],
+      env: {},
+    });
+    assert.equal(crossCampaignArchive.exitCode, 2);
+    assert.match(crossCampaignArchive.stderr ?? "", /slot does not belong to campaign/);
+
+    const archive = runTypescriptRuntimeCommand({
+      args: [
+        "campaign",
+        "archive-slot",
+        "--name",
+        "lifecycle",
+        "--slot",
+        slotId,
+        "--expected-thread-id",
+        "thread-worker-2",
+        "--path",
+        dbPath,
+        "--json",
+      ],
+      env: {},
+    });
+    assert.equal(archive.exitCode, 0, archive.stderr);
+    const archivePayload = JSON.parse(archive.stdout ?? "{}") as { slot?: { codex_app_thread_id?: string | null; state?: string } };
+    assert.equal(archivePayload.slot?.codex_app_thread_id, "thread-worker-2");
+    assert.equal(archivePayload.slot?.state, "archived");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -8543,6 +8958,8 @@ test("TypeScript runtime handles remaining dashboard and skill install CLI contr
         "scripts/workerctl",
         "--db-path",
         dbPath,
+        "--campaign",
+        "launch",
         "--ensure-dispatch",
         "--dispatcher-id",
         "dispatch-test",
@@ -8554,6 +8971,7 @@ test("TypeScript runtime handles remaining dashboard and skill install CLI contr
     const payload = JSON.parse(dashboard.stdout ?? "{}") as {
       command: string[];
       dispatch_command: string[];
+      campaign: string;
       ensure_dispatch: boolean;
       task: string;
       url: string;
@@ -8571,6 +8989,8 @@ test("TypeScript runtime handles remaining dashboard and skill install CLI contr
       "scripts/workerctl",
       "--task",
       "demo task",
+      "--campaign",
+      "launch",
       "--db-path",
       dbPath,
     ]);
@@ -8583,9 +9003,10 @@ test("TypeScript runtime handles remaining dashboard and skill install CLI contr
       "--path",
       dbPath,
     ]);
+    assert.equal(payload.campaign, "launch");
     assert.equal(payload.ensure_dispatch, true);
     assert.equal(payload.task, "demo task");
-    assert.equal(payload.url, "http://127.0.0.2:8899/?task=demo%20task");
+    assert.equal(payload.url, "http://127.0.0.2:8899/?task=demo+task&campaign=launch");
 
     const defaultDashboard = runTypescriptRuntimeCommand({
       args: ["dashboard", "--dry-run", "--json", "--task", "demo task", "--db-path", dbPath, "--ensure-dispatch"],

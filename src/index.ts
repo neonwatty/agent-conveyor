@@ -55,6 +55,34 @@ export type {
   AppWakeupDispatchPlan,
   AppWakeupPlan,
 } from "./runtime/app-autonomy.js";
+export {
+  addCampaignWorkerSlotSync,
+  campaignDashboardSync,
+  campaignStatusSync,
+  CampaignStateError,
+  createCampaignAssignmentSync,
+  createCampaignSync,
+  recordCampaignAssetReceiptSync,
+  updateCampaignWorkerSlotLifecycleSync,
+  upsertCampaignChannelBriefSync,
+} from "./runtime/campaigns.js";
+export type {
+  CampaignAssetReceiptRecord,
+  CampaignAssetStatus,
+  CampaignAssetType,
+  CampaignAssignmentRecord,
+  CampaignAssignmentStatus,
+  CampaignChannelBriefRecord,
+  CampaignDashboardRecord,
+  CampaignDashboardSlotRecord,
+  CampaignNextManagerAction,
+  CampaignRecord,
+  CampaignSlotLifecycleState,
+  CampaignStatus,
+  CampaignStatusRecord,
+  CampaignWorkerSlotRecord,
+  CampaignWorkerSlotState,
+} from "./runtime/campaigns.js";
 export { exportTaskAuditSubsetSync, exportTaskSync, TaskExportError } from "./runtime/export.js";
 export type { TaskExportManifest, TaskExportResult } from "./runtime/export.js";
 export { replayEntriesFromAudit, replayResultFromAudit } from "./runtime/replay.js";

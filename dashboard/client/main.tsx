@@ -110,6 +110,36 @@ type CriteriaSummary = {
   satisfied: number;
   total: number;
 };
+type CampaignDashboard = {
+  approvals?: { approved: number; needs_review: number; published: number; rejected: number };
+  blockers?: string[];
+  campaign?: { name?: string; objective?: string; status?: string };
+  error?: string;
+  name?: string;
+  next_manager_action?: { action?: string; reason?: string };
+  slots?: Array<{
+    active_assignments?: number;
+    asset_receipts?: number;
+    blockers?: string[];
+    channel?: string | null;
+    codex_app_thread_id?: string | null;
+    lifecycle?: { operator_message?: string; stale?: boolean; stale_seconds?: number | null; state?: string };
+    role_label?: string;
+    session?: { last_heartbeat_at?: string | null; name?: string; role?: string; state?: string } | null;
+    slot_key?: string;
+    state?: string;
+  }>;
+  summary?: {
+    active_slots: number;
+    archived_slots: number;
+    asset_total: number;
+    assignment_total: number;
+    blocked_assignments: number;
+    blocked_slots: number;
+    channel_briefs: number;
+    stale_slots: number;
+  };
+};
 type Observation = {
   audit?: {
     command_attempts: unknown[];
@@ -123,6 +153,7 @@ type Observation = {
     task_name?: string;
     worker_name?: string;
   } | null;
+  campaign?: CampaignDashboard | null;
   criteria?: CriteriaSummary;
   dispatch?: {
     chains: DispatchChain[];
@@ -416,6 +447,69 @@ function StatePanel({ observation }: { observation: Observation | null }) {
   );
 }
 
+function CampaignPanel({ campaign }: { campaign: CampaignDashboard | null | undefined }) {
+  if (!campaign) {
+    return null;
+  }
+  if (campaign.error) {
+    return (
+      <section className="campaign-section">
+        <h2>Campaign</h2>
+        <div className="campaign-error">
+          <strong>{campaign.name || "campaign"}</strong>
+          <span>{campaign.error}</span>
+        </div>
+      </section>
+    );
+  }
+  const summary = campaign.summary;
+  const approvals = campaign.approvals;
+  const slots = campaign.slots || [];
+  return (
+    <section className="campaign-section">
+      <h2>Campaign</h2>
+      <div className="campaign-heading">
+        <div>
+          <strong>{campaign.campaign?.name || "campaign"}</strong>
+          <span>{campaign.campaign?.status || "unknown"}</span>
+        </div>
+        <p>{campaign.next_manager_action?.action || "no action"}: {campaign.next_manager_action?.reason || "No campaign recommendation."}</p>
+      </div>
+      <div className="campaign-metrics">
+        <div><span>Workers</span><strong>{summary?.active_slots ?? 0}</strong></div>
+        <div data-state={(summary?.stale_slots ?? 0) > 0 ? "warning" : "ok"}><span>Stale</span><strong>{summary?.stale_slots ?? 0}</strong></div>
+        <div data-state={(summary?.blocked_slots ?? 0) + (summary?.blocked_assignments ?? 0) > 0 ? "error" : "ok"}><span>Blocked</span><strong>{(summary?.blocked_slots ?? 0) + (summary?.blocked_assignments ?? 0)}</strong></div>
+        <div data-state={(approvals?.needs_review ?? 0) > 0 ? "warning" : "ok"}><span>Review</span><strong>{approvals?.needs_review ?? 0}</strong></div>
+        <div><span>Assets</span><strong>{summary?.asset_total ?? 0}</strong></div>
+        <div><span>Briefs</span><strong>{summary?.channel_briefs ?? 0}</strong></div>
+      </div>
+      <ol className="campaign-slots">
+        {slots.map((slot) => (
+          <li key={slot.slot_key || slot.role_label} data-state={slot.lifecycle?.state}>
+            <div>
+              <strong>{slot.slot_key || slot.role_label || "slot"}</strong>
+              <span>{slot.lifecycle?.state || slot.state || "unknown"}</span>
+            </div>
+            <p>{[
+              slot.role_label,
+              slot.channel,
+              slot.session?.name ? `session ${slot.session.name}` : "no session",
+              slot.codex_app_thread_id ? `thread ${slot.codex_app_thread_id}` : "no thread",
+            ].filter(Boolean).join(" / ")}</p>
+            <small>{slot.lifecycle?.operator_message || "No lifecycle message."}</small>
+            <small>{slot.active_assignments ?? 0} active assignments / {slot.asset_receipts ?? 0} assets</small>
+            {slot.blockers?.length ? <em>{slot.blockers.join(" / ")}</em> : null}
+          </li>
+        ))}
+        {slots.length === 0 ? <li><strong>No campaign worker slots</strong></li> : null}
+      </ol>
+      {campaign.blockers?.length ? (
+        <p className="campaign-blockers">{campaign.blockers.join(" / ")}</p>
+      ) : null}
+    </section>
+  );
+}
+
 function Timeline({ items }: { items: TimelineItem[] }) {
   return (
     <section className="timeline-section">
@@ -493,6 +587,7 @@ function App() {
             <p data-state={pollState}>{pollError || (observation ? `Updated ${formatTime(observation.polled_at)}` : "Starting dashboard shells")}</p>
           </header>
           <StatePanel observation={observation} />
+          <CampaignPanel campaign={observation?.campaign} />
           <DispatchPanel observation={observation} />
           <Timeline items={observation?.timeline || []} />
         </aside>

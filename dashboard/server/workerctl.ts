@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 type DashboardCommand =
   | "audit"
   | "bind"
+  | "campaign-dashboard"
   | "cycle"
   | "create-task"
   | "discover"
@@ -20,6 +21,7 @@ type DashboardCommand =
   | "tasks";
 
 export interface ServerOptions {
+  campaign?: string;
   dbPath?: string;
   host: string;
   port: number;
@@ -28,6 +30,7 @@ export interface ServerOptions {
 }
 
 export interface PartialServerOptions {
+  campaign?: string;
   dbPath?: string;
   host?: string;
   port?: number;
@@ -37,6 +40,7 @@ export interface PartialServerOptions {
 
 export interface WorkerctlCommandOptions {
   askForApproval?: string;
+  campaignName?: string;
   command: DashboardCommand;
   cwd?: string;
   dryRun?: boolean;
@@ -80,6 +84,7 @@ export interface WorkerctlCommandOptions {
 export function normalizeServerOptions(options: PartialServerOptions): ServerOptions {
   return {
     dbPath: options.dbPath,
+    campaign: options.campaign,
     host: options.host ?? "127.0.0.1",
     port: options.port ?? 8797,
     task: options.task,
@@ -144,6 +149,9 @@ export function buildWorkerctlArgs(options: WorkerctlCommandOptions): string[] {
     args.push("sessions");
   } else if (options.command === "tasks") {
     args.push("tasks", "--json");
+  } else if (options.command === "campaign-dashboard") {
+    requireFields(options, ["campaignName"]);
+    args.push("campaign", "dashboard", "--name", options.campaignName!, "--json");
   } else if (options.command === "discover") {
     args.push("discover");
     if (options.task) {
@@ -257,6 +265,7 @@ export function buildWorkerctlArgs(options: WorkerctlCommandOptions): string[] {
 function commandSupportsPath(command: DashboardCommand): boolean {
   return [
     "bind",
+    "campaign-dashboard",
     "create-task",
     "cycle",
     "discover",
