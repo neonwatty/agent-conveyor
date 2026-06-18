@@ -181,6 +181,224 @@ body {
   overflow-wrap: anywhere;
 }
 
+.handoff-ledger-panel {
+  display: grid;
+  gap: 10px;
+  min-height: 0;
+}
+
+.flow-health-strip {
+  display: grid;
+  gap: 6px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.flow-health-strip div,
+.current-handoff-card,
+.flow-blockers,
+.correlation-ledger {
+  background: #f2f6f3;
+  border: 1px solid #d7dfda;
+  border-radius: 6px;
+}
+
+.flow-health-strip div {
+  border-top: 3px solid #668577;
+  min-width: 0;
+  padding: 7px 8px;
+}
+
+.flow-health-strip div[data-state="warning"] {
+  border-color: #d8ba83;
+}
+
+.flow-health-strip div[data-state="error"] {
+  border-color: #d9a09c;
+}
+
+.flow-health-strip span,
+.current-handoff-card span,
+.handoff-meta-grid span {
+  color: #68756f;
+  display: block;
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.flow-health-strip strong,
+.handoff-meta-grid strong {
+  color: #26332f;
+  display: block;
+  font-size: 12px;
+  line-height: 1.25;
+  margin-top: 3px;
+  overflow-wrap: anywhere;
+}
+
+.current-handoff-card {
+  border-left: 4px solid #5870a0;
+  display: grid;
+  gap: 10px;
+  padding: 10px;
+}
+
+.current-handoff-card h2,
+.flow-blockers h2,
+.correlation-ledger h2 {
+  margin-bottom: 0;
+}
+
+.handoff-summary {
+  color: #17201d !important;
+  font-size: 14px !important;
+  font-weight: 900;
+  margin: 0 !important;
+}
+
+.handoff-meta-grid {
+  display: grid;
+  gap: 6px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.handoff-meta-grid div {
+  background: #fff;
+  border: 1px solid #d8dfdb;
+  border-radius: 6px;
+  min-width: 0;
+  padding: 7px;
+}
+
+.flow-blockers {
+  border-left: 4px solid #b5812c;
+  padding: 10px;
+}
+
+.flow-blockers ul {
+  display: grid;
+  gap: 7px;
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+}
+
+.flow-blockers li {
+  display: grid;
+  gap: 7px;
+  grid-template-columns: 14px minmax(0, 1fr);
+}
+
+.flow-blockers li > span {
+  background: #f6edda;
+  border: 1px solid #d8ba83;
+  border-radius: 50%;
+  height: 11px;
+  margin-top: 3px;
+  width: 11px;
+}
+
+.flow-blockers li[data-severity="error"] > span {
+  background: #f4deda;
+  border-color: #d9a09c;
+}
+
+.flow-blockers strong {
+  color: #26332f;
+  display: block;
+  font-size: 12px;
+  line-height: 1.3;
+}
+
+.flow-blockers em {
+  color: #59665f;
+  display: block;
+  font-size: 11px;
+  font-style: normal;
+  line-height: 1.3;
+  margin-top: 2px;
+}
+
+.correlation-ledger {
+  min-height: 0;
+  overflow: hidden;
+  padding: 10px;
+}
+
+.correlation-ledger ol {
+  display: grid;
+  gap: 6px;
+  list-style: none;
+  margin: 8px 0 0;
+  max-height: 210px;
+  overflow: auto;
+  padding: 0;
+}
+
+.correlation-ledger li {
+  align-items: center;
+  background: #fff;
+  border: 1px solid #d8dfdb;
+  border-left: 3px solid #668577;
+  border-radius: 6px;
+  display: grid;
+  gap: 4px 7px;
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
+  padding: 7px 8px;
+}
+
+.correlation-ledger li[data-state="warning"] {
+  border-left-color: #b5812c;
+}
+
+.correlation-ledger li[data-state="error"] {
+  border-left-color: #b8403d;
+}
+
+.correlation-ledger time,
+.correlation-ledger span,
+.correlation-ledger em {
+  color: #76837d;
+  font-size: 10px;
+  font-style: normal;
+}
+
+.correlation-ledger span {
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.correlation-ledger strong {
+  color: #26332f;
+  font-size: 11px;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.correlation-ledger details {
+  grid-column: 1 / -1;
+}
+
+.observation-details {
+  border: 1px solid #d8dfdb;
+  border-radius: 6px;
+  min-height: 0;
+  overflow: auto;
+  padding: 8px;
+}
+
+.observation-details summary {
+  color: #42504b;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.observation-details[open] {
+  display: grid;
+  gap: 10px;
+}
+
 .dispatch-section {
   min-width: 0;
 }
@@ -554,6 +772,12 @@ body {
 
 @media (max-width: 560px) {
   .dispatch-core-banner {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .flow-health-strip,
+  .handoff-meta-grid,
+  .correlation-ledger li {
     grid-template-columns: minmax(0, 1fr);
   }
 
