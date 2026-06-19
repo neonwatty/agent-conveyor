@@ -81,6 +81,19 @@ export interface CampaignStatusRecord {
   }>;
 }
 
+export interface CampaignLedgerReadbackProof {
+  campaign_id: string;
+  campaign_name: string;
+  checked_at: string;
+  checks: Array<{
+    entity: "assignment" | "brief" | "campaign" | "slot";
+    id: string;
+    key?: string;
+    ok: true;
+  }>;
+  ok: true;
+}
+
 export type CampaignNextManagerAction =
   | "add_worker_slots"
   | "assign_work"
@@ -413,6 +426,66 @@ export function recordCampaignAssetReceiptSync(
   return receiptId;
 }
 
+export function campaignSetupReadbackProofSync(
+  database: DatabaseSync,
+  options: {
+    assignment?: string;
+    campaign: string;
+    channel?: string;
+    checkedAt?: string;
+    slot?: string;
+  },
+): CampaignLedgerReadbackProof {
+  const campaign = campaignRecord(campaignRow(database, options.campaign));
+  const checks: CampaignLedgerReadbackProof["checks"] = [
+    {
+      entity: "campaign",
+      id: campaign.id,
+      key: campaign.name,
+      ok: true,
+    },
+  ];
+  if (options.slot) {
+    const slot = slotRecord(slotRow(database, options.slot));
+    requireSameCampaign(campaign.id, slot.campaign_id, "slot");
+    checks.push({
+      entity: "slot",
+      id: slot.id,
+      key: slot.slot_key,
+      ok: true,
+    });
+  }
+  if (options.channel) {
+    const brief = channelBriefRow(database, campaign.id, options.channel);
+    checks.push({
+      entity: "brief",
+      id: brief.id,
+      key: brief.channel,
+      ok: true,
+    });
+  }
+  if (options.assignment) {
+    const assignment = assignmentRecord(assignmentRow(database, options.assignment));
+    requireSameCampaign(campaign.id, assignment.campaign_id, "assignment");
+    if (options.slot && assignment.slot_id !== options.slot) {
+      throw new CampaignStateError("assignment does not belong to the provided campaign worker slot");
+    }
+    checks.push({
+      entity: "assignment",
+      id: assignment.id,
+      key: assignment.title,
+      ok: true,
+    });
+  }
+  return {
+    campaign_id: campaign.id,
+    campaign_name: campaign.name,
+    checked_at: options.checkedAt ?? new Date().toISOString(),
+    checks,
+    ok: true,
+  };
+}
+
 function existingAssetReceiptForAssignment(
   database: DatabaseSync,
   assignmentId: string,
@@ -673,6 +746,18 @@ function assignmentRow(database: DatabaseSync, id: string): CampaignAssignmentRo
   const row = database.prepare("select * from campaign_assignments where id = ?").get(id) as CampaignAssignmentRow | undefined;
   if (!row) {
     throw new CampaignStateError(`unknown campaign assignment: ${id}`);
+  }
+  return row;
+}
+
+function channelBriefRow(database: DatabaseSync, campaignId: string, channel: string): CampaignChannelBriefRow {
+  const row = database.prepare(`
+    select *
+    from campaign_channel_briefs
+    where campaign_id = ? and channel = ?
+  `).get(campaignId, channel) as CampaignChannelBriefRow | undefined;
+  if (!row) {
+    throw new CampaignStateError(`unknown campaign channel brief: ${channel}`);
   }
   return row;
 }

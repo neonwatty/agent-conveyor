@@ -1550,9 +1550,15 @@ test("TypeScript runtime handles campaign create slot brief assignment asset and
       env: {},
     });
     assert.equal(create.exitCode, 0, create.stderr);
-    const createPayload = JSON.parse(create.stdout ?? "{}") as { campaign_id?: string; created?: boolean };
+    const createPayload = JSON.parse(create.stdout ?? "{}") as {
+      campaign_id?: string;
+      created?: boolean;
+      ledger_readback?: { checks: Array<{ entity: string }>; ok: boolean };
+    };
     assert.equal(createPayload.created, true);
     assert.match(createPayload.campaign_id ?? "", /^campaign-/);
+    assert.equal(createPayload.ledger_readback?.ok, true);
+    assert.deepEqual(createPayload.ledger_readback?.checks.map((check) => check.entity), ["campaign"]);
 
     const slot = runTypescriptRuntimeCommand({
       args: [
@@ -1579,8 +1585,13 @@ test("TypeScript runtime handles campaign create slot brief assignment asset and
       env: {},
     });
     assert.equal(slot.exitCode, 0, slot.stderr);
-    const slotPayload = JSON.parse(slot.stdout ?? "{}") as { slot_id?: string };
+    const slotPayload = JSON.parse(slot.stdout ?? "{}") as {
+      ledger_readback?: { checks: Array<{ entity: string }>; ok: boolean };
+      slot_id?: string;
+    };
     assert.match(slotPayload.slot_id ?? "", /^campaign-slot-/);
+    assert.equal(slotPayload.ledger_readback?.ok, true);
+    assert.deepEqual(slotPayload.ledger_readback?.checks.map((check) => check.entity), ["campaign", "slot"]);
 
     const brief = runTypescriptRuntimeCommand({
       args: [
@@ -1599,6 +1610,11 @@ test("TypeScript runtime handles campaign create slot brief assignment asset and
       env: {},
     });
     assert.equal(brief.exitCode, 0, brief.stderr);
+    const briefPayload = JSON.parse(brief.stdout ?? "{}") as {
+      ledger_readback?: { checks: Array<{ entity: string }>; ok: boolean };
+    };
+    assert.equal(briefPayload.ledger_readback?.ok, true);
+    assert.deepEqual(briefPayload.ledger_readback?.checks.map((check) => check.entity), ["campaign", "brief"]);
 
     const assignment = runTypescriptRuntimeCommand({
       args: [
@@ -1623,8 +1639,13 @@ test("TypeScript runtime handles campaign create slot brief assignment asset and
       env: {},
     });
     assert.equal(assignment.exitCode, 0, assignment.stderr);
-    const assignmentPayload = JSON.parse(assignment.stdout ?? "{}") as { assignment_id?: string };
+    const assignmentPayload = JSON.parse(assignment.stdout ?? "{}") as {
+      assignment_id?: string;
+      ledger_readback?: { checks: Array<{ entity: string }>; ok: boolean };
+    };
     assert.match(assignmentPayload.assignment_id ?? "", /^campaign-assignment-/);
+    assert.equal(assignmentPayload.ledger_readback?.ok, true);
+    assert.deepEqual(assignmentPayload.ledger_readback?.checks.map((check) => check.entity), ["campaign", "slot", "assignment"]);
 
     const asset = runTypescriptRuntimeCommand({
       args: [
@@ -1747,6 +1768,13 @@ test("TypeScript runtime handles campaign create slot brief assignment asset and
     assert.match(text.stdout ?? "", /campaign launch active/);
     assert.match(text.stdout ?? "", /slots 1/);
 
+    const createText = runTypescriptRuntimeCommand({
+      args: ["campaign", "create", "--name", "text-proof", "--objective", "Text proof.", "--path", dbPath],
+      env: {},
+    });
+    assert.equal(createText.exitCode, 0, createText.stderr);
+    assert.match(createText.stdout ?? "", /ledger_readback ok campaign=campaign-/);
+
     const dashboardText = runTypescriptRuntimeCommand({
       args: ["campaign", "dashboard", "--name", "launch", "--path", dbPath],
       env: {},
@@ -1771,6 +1799,79 @@ test("TypeScript runtime handles campaign create slot brief assignment asset and
     });
     assert.equal(badJson.exitCode, 2);
     assert.match(badJson.stderr ?? "", /--metadata-json must be a JSON object/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("TypeScript runtime campaign setup fails before returning ids when readback is missing", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-campaign-readback-fail."));
+  try {
+    const dbPath = join(root, "workerctl.db");
+
+    const create = runTypescriptRuntimeCommand({
+      args: ["campaign", "create", "--name", "launch", "--objective", "Create assets.", "--path", dbPath, "--json"],
+      env: {},
+    });
+    assert.equal(create.exitCode, 0, create.stderr);
+
+    const slot = runTypescriptRuntimeCommand({
+      args: [
+        "campaign",
+        "add-slot",
+        "--name",
+        "launch",
+        "--slot-key",
+        "linkedin",
+        "--role-label",
+        "LinkedIn worker",
+        "--path",
+        dbPath,
+        "--json",
+      ],
+      env: {},
+    });
+    assert.equal(slot.exitCode, 0, slot.stderr);
+    const slotPayload = JSON.parse(slot.stdout ?? "{}") as { slot_id?: string };
+
+    const assignment = runTypescriptRuntimeCommand({
+      args: [
+        "campaign",
+        "assign",
+        "--name",
+        "launch",
+        "--slot",
+        slotPayload.slot_id ?? "",
+        "--title",
+        "Draft LinkedIn post",
+        "--instructions",
+        "Create one sanitized LinkedIn draft.",
+        "--path",
+        dbPath,
+        "--json",
+      ],
+      campaignReadbackBeforeVerify: ({ databasePath, readback }) => {
+        const database = openDatabaseSync(databasePath);
+        try {
+          database.prepare("delete from campaign_assignments where id = ?").run(readback.assignment ?? "");
+        } finally {
+          database.close();
+        }
+      },
+      env: {},
+    });
+    assert.equal(assignment.exitCode, 2);
+    assert.match(assignment.stderr ?? "", /campaign ledger readback failed after setup write/);
+    assert.match(assignment.stderr ?? "", /unknown campaign assignment/);
+    assert.equal(assignment.stdout ?? "", "");
+
+    const status = runTypescriptRuntimeCommand({
+      args: ["campaign", "status", "--name", "launch", "--path", dbPath, "--json"],
+      env: {},
+    });
+    assert.equal(status.exitCode, 0, status.stderr);
+    const statusPayload = JSON.parse(status.stdout ?? "{}") as { assignment_counts?: Record<string, number> };
+    assert.equal(statusPayload.assignment_counts?.queued, 0);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

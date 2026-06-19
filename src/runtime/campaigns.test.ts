@@ -7,6 +7,7 @@ import { test } from "node:test";
 import {
   addCampaignWorkerSlotSync,
   campaignDashboardSync,
+  campaignSetupReadbackProofSync,
   campaignStatusSync,
   createCampaignAssignmentSync,
   createCampaignSync,
@@ -143,6 +144,100 @@ test("campaign worker slots require worker sessions and unique slot keys", () =>
           slotKey: "missing",
         }),
         /unknown session/,
+      );
+    } finally {
+      database.close();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("campaign setup readback proof verifies fresh connection rows", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-campaign-readback."));
+  const dbPath = join(root, "workerctl.db");
+  try {
+    const writer = openDatabaseSync(dbPath);
+    try {
+      initializeDatabaseSync(writer);
+      createCampaignSync(writer, {
+        campaignId: "campaign-1",
+        name: "creative-launch",
+        objective: "Launch creative assets.",
+      });
+      addCampaignWorkerSlotSync(writer, {
+        campaign: "campaign-1",
+        roleLabel: "TikTok worker",
+        slotId: "slot-tiktok",
+        slotKey: "tiktok",
+      });
+      createCampaignAssignmentSync(writer, {
+        assignmentId: "assignment-hooks",
+        campaign: "campaign-1",
+        instructions: "Draft hooks.",
+        slot: "slot-tiktok",
+        title: "Hook drafts",
+      });
+    } finally {
+      writer.close();
+    }
+
+    const reader = openDatabaseSync(dbPath);
+    try {
+      initializeDatabaseSync(reader);
+      const proof = campaignSetupReadbackProofSync(reader, {
+        assignment: "assignment-hooks",
+        campaign: "creative-launch",
+        checkedAt: "2026-06-19T12:00:00Z",
+        slot: "slot-tiktok",
+      });
+      assert.equal(proof.ok, true);
+      assert.equal(proof.campaign_id, "campaign-1");
+      assert.equal(proof.campaign_name, "creative-launch");
+      assert.equal(proof.checked_at, "2026-06-19T12:00:00Z");
+      assert.deepEqual(proof.checks.map((check) => check.entity), ["campaign", "slot", "assignment"]);
+    } finally {
+      reader.close();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("campaign setup readback proof fails when expected setup rows are absent", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-campaign-readback-missing."));
+  const dbPath = join(root, "workerctl.db");
+  try {
+    const database = openDatabaseSync(dbPath);
+    try {
+      initializeDatabaseSync(database);
+      createCampaignSync(database, {
+        campaignId: "campaign-1",
+        name: "creative-launch",
+        objective: "Launch creative assets.",
+      });
+      addCampaignWorkerSlotSync(database, {
+        campaign: "campaign-1",
+        roleLabel: "TikTok worker",
+        slotId: "slot-tiktok",
+        slotKey: "tiktok",
+      });
+      createCampaignAssignmentSync(database, {
+        assignmentId: "assignment-hooks",
+        campaign: "campaign-1",
+        instructions: "Draft hooks.",
+        slot: "slot-tiktok",
+        title: "Hook drafts",
+      });
+      database.prepare("delete from campaign_assignments where id = ?").run("assignment-hooks");
+
+      assert.throws(
+        () => campaignSetupReadbackProofSync(database, {
+          assignment: "assignment-hooks",
+          campaign: "creative-launch",
+          slot: "slot-tiktok",
+        }),
+        /unknown campaign assignment: assignment-hooks/,
       );
     } finally {
       database.close();
