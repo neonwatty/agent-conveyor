@@ -9476,6 +9476,24 @@ test("TypeScript runtime handles Agent Conveyor plugin install status and path c
     assert.ok(existsSync(join(codexHome, "skills", "conveyor-check-status", "SKILL.md")));
     assert.ok(existsSync(join(codexHome, "skills", "conveyor-create-pair", "SKILL.md")));
     assert.ok(existsSync(join(codexHome, "skills", "conveyor-create-worker-set", "SKILL.md")));
+    const absoluteLedgerPath = /(^|[^\w$])\/[^\s`"']*\.codex-workers\/workerctl\.db/;
+    assert.match("/tmp/project/.codex-workers/workerctl.db", absoluteLedgerPath);
+    assert.match("--path=/tmp/project/.codex-workers/workerctl.db", absoluteLedgerPath);
+    assert.match("(/tmp/project/.codex-workers/workerctl.db)", absoluteLedgerPath);
+    assert.doesNotMatch("$PWD/.codex-workers/workerctl.db", absoluteLedgerPath);
+    assert.doesNotMatch("--path=$PWD/.codex-workers/workerctl.db", absoluteLedgerPath);
+    assert.doesNotMatch(".codex-workers/workerctl.db", absoluteLedgerPath);
+    for (const name of ["conveyor-create-pair", "conveyor-create-worker-set", "conveyor-check-status"]) {
+      const text = readFileSync(join(codexHome, "skills", name, "SKILL.md"), "utf8");
+      assert.match(text, /\.codex-workers\/workerctl\.db/);
+      assert.doesNotMatch(text, absoluteLedgerPath);
+      assert.match(text, /Operator-facing only|operator-facing/i);
+      assert.match(text, /Codex app/i);
+    }
+    assert.match(
+      readFileSync(join(codexHome, "skills", "conveyor-create-pair", "SKILL.md"), "utf8"),
+      /Do not use tmux/,
+    );
     const installedManifest = JSON.parse(readFileSync(installedManifestPath, "utf8")) as { name: string; version: string };
     assert.equal(installedManifest.name, "agent-conveyor");
     assert.equal(installedManifest.version, "0.1.19");
