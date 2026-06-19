@@ -1,6 +1,6 @@
 {
   "name": "agent-conveyor",
-  "version": "0.1.17",
+  "version": "0.1.18",
   "description": "Local agent manager/worker conveyor control plane for Codex sessions.",
   "license": "MIT",
   "type": "module",
