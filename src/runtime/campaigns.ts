@@ -353,6 +353,7 @@ export function createCampaignAssignmentSync(
 export function recordCampaignAssetReceiptSync(
   database: DatabaseSync,
   options: {
+    allowAdditionalReceipt?: boolean;
     artifactPath?: string | null;
     assetReceiptId?: string;
     assetType: CampaignAssetType;
@@ -376,6 +377,14 @@ export function recordCampaignAssetReceiptSync(
     requireSameCampaign(campaign.id, assignment.campaign_id, "assignment");
     if (assignment.slot_id !== slot.id) {
       throw new CampaignStateError("assignment does not belong to the provided campaign worker slot");
+    }
+    if (!options.allowAdditionalReceipt) {
+      const existing = existingAssetReceiptForAssignment(database, assignment.id, slot.id);
+      if (existing) {
+        throw new CampaignStateError(
+          `campaign assignment already has asset receipt ${existing.id}; use --allow-additional-receipt only for intentional variants or revisions`,
+        );
+      }
     }
   }
   const timestamp = options.now ?? new Date().toISOString();
@@ -402,6 +411,21 @@ export function recordCampaignAssetReceiptSync(
     timestamp,
   );
   return receiptId;
+}
+
+function existingAssetReceiptForAssignment(
+  database: DatabaseSync,
+  assignmentId: string,
+  slotId: string,
+): { id: string } | null {
+  const row = database.prepare(`
+    select id
+    from campaign_asset_receipts
+    where assignment_id = ? and slot_id = ?
+    order by created_at, id
+    limit 1
+  `).get(assignmentId, slotId) as { id: string } | undefined;
+  return row ?? null;
 }
 
 export function campaignStatusSync(database: DatabaseSync, campaignNameOrId: string): CampaignStatusRecord {

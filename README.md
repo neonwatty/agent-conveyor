@@ -315,8 +315,10 @@ tmux attach -t codex-live-test
   Upsert the structured brief for a channel.
 - `campaign assign --name C --slot SLOT_ID --title TEXT --instructions TEXT [--status queued|active|blocked|done|cancelled] [--metadata-json JSON] [--json]` —
   Create a slot-scoped assignment.
-- `campaign asset --name C --slot SLOT_ID --asset-type image|video|hyperframes|copy|audio|other --title TEXT [--assignment ASSIGNMENT_ID] [--channel CH] [--status draft|needs_review|approved|rejected|published] [--prompt-summary TEXT] [--artifact-path PATH] [--metadata-json JSON] [--review-notes TEXT] [--json]` —
-  Record a structured creative asset receipt.
+- `campaign asset --name C --slot SLOT_ID --asset-type image|video|hyperframes|copy|audio|other --title TEXT [--assignment ASSIGNMENT_ID] [--channel CH] [--status draft|needs_review|approved|rejected|published] [--prompt-summary TEXT] [--artifact-path PATH] [--metadata-json JSON] [--review-notes TEXT] [--allow-additional-receipt] [--json]` —
+  Record a structured creative asset receipt. Assignment-scoped receipts are
+  one-per-assignment by default; use `--allow-additional-receipt` only for
+  intentional variants or revisions.
 - `campaign status --name C [--json]` —
   Show campaign metadata, worker slots, channel briefs, assignment counts, and
   asset receipt counts.

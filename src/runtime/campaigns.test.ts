@@ -7,7 +7,6 @@ import { test } from "node:test";
 import {
   addCampaignWorkerSlotSync,
   campaignDashboardSync,
-  CampaignStateError,
   campaignStatusSync,
   createCampaignAssignmentSync,
   createCampaignSync,
@@ -201,6 +200,70 @@ test("campaign asset receipts reject cross-campaign assignment and slot mismatch
         }),
         /slot does not belong to campaign/,
       );
+    } finally {
+      database.close();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("campaign asset receipts are one per assignment unless explicitly allowed", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-campaign-asset-idempotency."));
+  try {
+    const database = openDatabaseSync(join(root, "workerctl.db"));
+    try {
+      initializeDatabaseSync(database);
+      createCampaignSync(database, { campaignId: "campaign-a", name: "campaign-a", objective: "A" });
+      const slot = addCampaignWorkerSlotSync(database, {
+        campaign: "campaign-a",
+        roleLabel: "A worker",
+        slotId: "slot-a",
+        slotKey: "a",
+      });
+      const assignment = createCampaignAssignmentSync(database, {
+        assignmentId: "assignment-a",
+        campaign: "campaign-a",
+        instructions: "Do A.",
+        slot,
+        title: "A",
+      });
+
+      const firstReceipt = recordCampaignAssetReceiptSync(database, {
+        assetReceiptId: "asset-a-1",
+        assetType: "copy",
+        assignment,
+        campaign: "campaign-a",
+        slot,
+        status: "needs_review",
+        title: "First receipt",
+      });
+      assert.equal(firstReceipt, "asset-a-1");
+
+      assert.throws(
+        () => recordCampaignAssetReceiptSync(database, {
+          assetReceiptId: "asset-a-2",
+          assetType: "copy",
+          assignment,
+          campaign: "campaign-a",
+          slot,
+          status: "needs_review",
+          title: "Second receipt with different title",
+        }),
+        /assignment already has asset receipt asset-a-1/,
+      );
+
+      const intentionalVariant = recordCampaignAssetReceiptSync(database, {
+        allowAdditionalReceipt: true,
+        assetReceiptId: "asset-a-variant",
+        assetType: "copy",
+        assignment,
+        campaign: "campaign-a",
+        slot,
+        status: "needs_review",
+        title: "Intentional variant",
+      });
+      assert.equal(intentionalVariant, "asset-a-variant");
     } finally {
       database.close();
     }

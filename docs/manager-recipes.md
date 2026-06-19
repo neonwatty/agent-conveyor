@@ -373,6 +373,11 @@ conveyor campaign asset --name "$CAMPAIGN" --slot "$SLOT_ID" \
   --prompt-summary "Sanitized prompt summary only." --json
 ```
 
+By default, an assignment can receive only one `campaign asset` receipt. If a
+manager intentionally asks for variants or a revision under the same assignment,
+the worker must add `--allow-additional-receipt` and explain why the extra
+receipt is deliberate.
+
 Evidence gates:
 
 - `campaign dashboard --name "$CAMPAIGN" --json` shows every active worker

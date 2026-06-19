@@ -551,6 +551,7 @@ function commandHelpText(program: "conveyor" | "workerctl", command: string): st
       `  ${program} campaign brief --name launch --channel tiktok --brief-json '{"format":"9:16"}' --json`,
       `  ${program} campaign assign --name launch --slot campaign-slot-id --title "Draft hooks" --instructions "Create hooks" --status active --json`,
       `  ${program} campaign asset --name launch --slot campaign-slot-id --assignment campaign-assignment-id --asset-type copy --title "Hooks v1" --status needs_review --json`,
+      `  ${program} campaign asset --name launch --slot campaign-slot-id --assignment campaign-assignment-id --asset-type copy --title "Hooks v2" --allow-additional-receipt --json`,
       `  ${program} campaign status --name launch --json`,
       `  ${program} campaign dashboard --name launch --json`,
     ],
@@ -638,6 +639,7 @@ interface ParsedRuntimeArgs {
     includeFullTranscripts: boolean;
     includeTranscripts: boolean;
     all: boolean;
+    allowAdditionalReceipt: boolean;
     action: string | null;
     artifactPath: string | null;
     assetType: string | null;
@@ -898,6 +900,7 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
     includeFullTranscripts: false,
     includeTranscripts: false,
     all: false,
+    allowAdditionalReceipt: false,
     action: null,
     artifactPath: null,
     assetType: null,
@@ -1165,6 +1168,11 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       flags.json = true;
     } else if (arg === "--all") {
       flags.all = true;
+    } else if (arg === "--allow-additional-receipt") {
+      if (command !== "campaign") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --allow-additional-receipt", explicit, flags, passthroughArgs, task };
+      }
+      flags.allowAdditionalReceipt = true;
     } else if (arg === "--active") {
       flags.active = true;
     } else if (arg === "--add") {
@@ -6745,6 +6753,7 @@ function runCampaignCommand(
       const status = campaignAssetStatusArg(parsed.flags.statusState);
       const metadata = jsonObjectArg(parsed.flags.metadataJson, "--metadata-json");
       const assetReceiptId = recordCampaignAssetReceiptSync(database, {
+        allowAdditionalReceipt: parsed.flags.allowAdditionalReceipt,
         artifactPath: parsed.flags.artifactPath,
         assetType,
         assignment: parsed.flags.assignment,

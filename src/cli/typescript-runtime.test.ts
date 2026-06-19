@@ -1689,6 +1689,150 @@ test("TypeScript runtime handles campaign create slot brief assignment asset and
   }
 });
 
+test("TypeScript runtime rejects duplicate campaign assignment receipts unless allowed", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-campaign-assets."));
+  try {
+    const dbPath = join(root, "workerctl.db");
+
+    assert.equal(runTypescriptRuntimeCommand({
+      args: ["campaign", "create", "--name", "launch", "--objective", "Create assets.", "--path", dbPath, "--json"],
+      env: {},
+    }).exitCode, 0);
+
+    const slot = runTypescriptRuntimeCommand({
+      args: [
+        "campaign",
+        "add-slot",
+        "--name",
+        "launch",
+        "--slot-key",
+        "linkedin",
+        "--role-label",
+        "LinkedIn worker",
+        "--thread-id",
+        "thread-linkedin",
+        "--state",
+        "active",
+        "--path",
+        dbPath,
+        "--json",
+      ],
+      env: {},
+    });
+    assert.equal(slot.exitCode, 0, slot.stderr);
+    const slotPayload = JSON.parse(slot.stdout ?? "{}") as { slot_id?: string };
+
+    const assignment = runTypescriptRuntimeCommand({
+      args: [
+        "campaign",
+        "assign",
+        "--name",
+        "launch",
+        "--slot",
+        slotPayload.slot_id ?? "",
+        "--title",
+        "Draft LinkedIn post",
+        "--instructions",
+        "Create one sanitized LinkedIn draft.",
+        "--status",
+        "active",
+        "--path",
+        dbPath,
+        "--json",
+      ],
+      env: {},
+    });
+    assert.equal(assignment.exitCode, 0, assignment.stderr);
+    const assignmentPayload = JSON.parse(assignment.stdout ?? "{}") as { assignment_id?: string };
+
+    const first = runTypescriptRuntimeCommand({
+      args: [
+        "campaign",
+        "asset",
+        "--name",
+        "launch",
+        "--slot",
+        slotPayload.slot_id ?? "",
+        "--assignment",
+        assignmentPayload.assignment_id ?? "",
+        "--asset-type",
+        "copy",
+        "--title",
+        "LinkedIn draft v1",
+        "--status",
+        "needs_review",
+        "--path",
+        dbPath,
+        "--json",
+      ],
+      env: {},
+    });
+    assert.equal(first.exitCode, 0, first.stderr);
+    const firstPayload = JSON.parse(first.stdout ?? "{}") as { asset_receipt_id?: string };
+
+    const duplicate = runTypescriptRuntimeCommand({
+      args: [
+        "campaign",
+        "asset",
+        "--name",
+        "launch",
+        "--slot",
+        slotPayload.slot_id ?? "",
+        "--assignment",
+        assignmentPayload.assignment_id ?? "",
+        "--asset-type",
+        "copy",
+        "--title",
+        "LinkedIn draft duplicate",
+        "--status",
+        "needs_review",
+        "--path",
+        dbPath,
+        "--json",
+      ],
+      env: {},
+    });
+    assert.equal(duplicate.exitCode, 2);
+    assert.match(duplicate.stderr ?? "", new RegExp(`assignment already has asset receipt ${firstPayload.asset_receipt_id}`));
+    assert.match(duplicate.stderr ?? "", /--allow-additional-receipt/);
+
+    const allowed = runTypescriptRuntimeCommand({
+      args: [
+        "campaign",
+        "asset",
+        "--name",
+        "launch",
+        "--slot",
+        slotPayload.slot_id ?? "",
+        "--assignment",
+        assignmentPayload.assignment_id ?? "",
+        "--asset-type",
+        "copy",
+        "--title",
+        "LinkedIn draft intentional variant",
+        "--status",
+        "needs_review",
+        "--allow-additional-receipt",
+        "--path",
+        dbPath,
+        "--json",
+      ],
+      env: {},
+    });
+    assert.equal(allowed.exitCode, 0, allowed.stderr);
+
+    const status = runTypescriptRuntimeCommand({
+      args: ["campaign", "status", "--name", "launch", "--path", dbPath, "--json"],
+      env: {},
+    });
+    assert.equal(status.exitCode, 0, status.stderr);
+    const statusPayload = JSON.parse(status.stdout ?? "{}") as { asset_counts?: Record<string, number> };
+    assert.equal(statusPayload.asset_counts?.needs_review, 2);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("TypeScript runtime handles campaign worker slot app lifecycle guardrails", () => {
   const root = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-campaign-lifecycle."));
   try {
