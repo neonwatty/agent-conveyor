@@ -23,6 +23,7 @@ import { classifyBusyWait, classifyStartupOutput } from "../runtime/classify.js"
 import {
   addCampaignWorkerSlotSync,
   campaignDashboardSync,
+  campaignSetupReadbackProofSync,
   campaignStatusSync,
   createCampaignAssignmentSync,
   createCampaignSync,
@@ -33,6 +34,7 @@ import {
   type CampaignAssetStatus,
   type CampaignAssetType,
   type CampaignDashboardRecord,
+  type CampaignLedgerReadbackProof,
   type CampaignWorkerSlotState,
 } from "../runtime/campaigns.js";
 import { exportTaskSync } from "../runtime/export.js";
@@ -199,6 +201,15 @@ interface SpawnedCodexSessionDiscoveryOptions {
 
 type TypescriptRuntimeOptions = {
   args: readonly string[];
+  campaignReadbackBeforeVerify?: (context: {
+    databasePath: string;
+    readback: {
+      assignment?: string;
+      campaign: string;
+      channel?: string;
+      slot?: string;
+    };
+  }) => void;
   codexCommandResolver?: (name: string) => string | null;
   cwd?: string;
   discoverSpawnedCodexSession?: (options: SpawnedCodexSessionDiscoveryOptions) => SpawnedCodexSessionDiscovery;
@@ -6599,7 +6610,7 @@ function runTasksCommand(
 
 function runCampaignCommand(
   parsed: ParsedRuntimeArgs,
-  options: { cwd?: string; env?: NodeJS.ProcessEnv },
+  options: CampaignReadbackRuntimeOptions,
 ): TypescriptRuntimeResult {
   if (parsed.task) {
     return errorResult(`Unexpected argument: ${parsed.task}`);
@@ -6619,12 +6630,16 @@ function runCampaignCommand(
         name: campaign,
         objective,
       });
+      const readback = campaignSetupReadbackProofFromConfiguredDatabase(parsed, options, {
+        campaign: campaignId,
+      });
       return campaignResult(parsed, {
         action,
         campaign,
         campaign_id: campaignId,
         created: true,
-      }, [`campaign ${campaign} created ${campaignId}`]);
+        ledger_readback: readback,
+      }, [`campaign ${campaign} created ${campaignId}`, campaignLedgerReadbackText(readback)]);
     }
 
     if (action === "add-slot") {
@@ -6643,13 +6658,18 @@ function runCampaignCommand(
         slotKey,
         ...(state ? { state } : {}),
       });
+      const readback = campaignSetupReadbackProofFromConfiguredDatabase(parsed, options, {
+        campaign,
+        slot: slotId,
+      });
       return campaignResult(parsed, {
         action,
         campaign,
         created: true,
+        ledger_readback: readback,
         slot_id: slotId,
         slot_key: slotKey,
-      }, [`campaign ${campaign} slot ${slotKey} created ${slotId}`]);
+      }, [`campaign ${campaign} slot ${slotKey} created ${slotId}`, campaignLedgerReadbackText(readback)]);
     }
 
     if (action === "attach-slot") {
@@ -6722,13 +6742,18 @@ function runCampaignCommand(
         campaign,
         channel,
       });
+      const readback = campaignSetupReadbackProofFromConfiguredDatabase(parsed, options, {
+        campaign,
+        channel,
+      });
       return campaignResult(parsed, {
         action,
         brief_id: briefId,
         campaign,
         channel,
+        ledger_readback: readback,
         upserted: true,
-      }, [`campaign ${campaign} brief ${channel} upserted ${briefId}`]);
+      }, [`campaign ${campaign} brief ${channel} upserted ${briefId}`, campaignLedgerReadbackText(readback)]);
     }
 
     if (action === "assign") {
@@ -6745,13 +6770,19 @@ function runCampaignCommand(
         title,
         ...(status ? { status } : {}),
       });
+      const readback = campaignSetupReadbackProofFromConfiguredDatabase(parsed, options, {
+        assignment: assignmentId,
+        campaign,
+        slot,
+      });
       return campaignResult(parsed, {
         action,
         assignment_id: assignmentId,
         campaign,
         created: true,
+        ledger_readback: readback,
         slot_id: slot,
-      }, [`campaign ${campaign} assignment created ${assignmentId}`]);
+      }, [`campaign ${campaign} assignment created ${assignmentId}`, campaignLedgerReadbackText(readback)]);
     }
 
     if (action === "asset") {
@@ -6810,6 +6841,40 @@ function runCampaignCommand(
 function campaignActionsUsage(): string {
   return CAMPAIGN_ACTION_NAMES.join("|");
 }
+
+function campaignSetupReadbackProofFromConfiguredDatabase(
+  parsed: ParsedRuntimeArgs,
+  options: CampaignReadbackRuntimeOptions,
+  readbackOptions: {
+    assignment?: string;
+    campaign: string;
+    channel?: string;
+    slot?: string;
+  },
+): CampaignLedgerReadbackProof {
+  const databasePath = runtimeDbPath(parsed, options);
+  options.campaignReadbackBeforeVerify?.({ databasePath, readback: readbackOptions });
+  const database = openDatabaseSync(databasePath);
+  initializeDatabaseSync(database);
+  try {
+    return campaignSetupReadbackProofSync(database, readbackOptions);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`campaign ledger readback failed after setup write: ${message}`, { cause: error });
+  } finally {
+    database.close();
+  }
+}
+
+function campaignLedgerReadbackText(proof: CampaignLedgerReadbackProof): string {
+  return `ledger_readback ok campaign=${proof.campaign_id} checks=${proof.checks.map((check) => check.entity).join(",")}`;
+}
+
+type CampaignReadbackRuntimeOptions = {
+  campaignReadbackBeforeVerify?: TypescriptRuntimeOptions["campaignReadbackBeforeVerify"];
+  cwd?: string;
+  env?: NodeJS.ProcessEnv;
+};
 
 function unsupportedCampaignActionMessage(action: string | null): string {
   return `Unsupported campaign action: ${action ?? "<missing>"}; expected one of: ${CAMPAIGN_ACTION_NAMES.join(", ")}. Use \`conveyor campaign dashboard --name <campaign> --json\` to list assets and receipt counts.`;
