@@ -662,10 +662,13 @@ Campaign recipe unless the user chooses a custom policy. The manager should:
    asset type, review status, and safe artifact paths.
 6. Use `campaign dashboard --name <campaign> --json` or
    `dashboard --campaign <campaign>` as the manager status surface.
-7. Rotate stale/context-heavy workers only with `campaign rotate-slot` and an
+7. Use `campaign closeout --name <campaign> --json` for the final read-only
+   manager/operator handoff: verdict, worker thread ids, blockers, receipt
+   counts by assignment, proof checks, and failure-mode evidence.
+8. Rotate stale/context-heavy workers only with `campaign rotate-slot` and an
    exact `--expected-thread-id`; archive only with `campaign archive-slot` and
    the exact current thread id.
-8. Treat public publishing, scheduling, posting, external account access,
+9. Treat public publishing, scheduling, posting, external account access,
    private phone content, raw audio, tokens, JWTs, keys, archives, and IPAs as
    human-gated or forbidden unless the operator explicitly approves the narrow
    action.

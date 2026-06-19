@@ -236,11 +236,12 @@ test("TypeScript runtime help honors workerctl program name", () => {
     env: {},
   });
   assert.equal(campaign.exitCode, 0);
-  assert.match(campaign.stdout ?? "", /campaign <create\|add-slot\|attach-slot\|rotate-slot\|archive-slot\|brief\|assign\|asset\|status\|dashboard>/);
-  assert.match(campaign.stdout ?? "", /Supported subcommands: create\|add-slot\|attach-slot\|rotate-slot\|archive-slot\|brief\|assign\|asset\|status\|dashboard/);
+  assert.match(campaign.stdout ?? "", /campaign <create\|add-slot\|attach-slot\|rotate-slot\|archive-slot\|brief\|assign\|asset\|status\|dashboard\|closeout>/);
+  assert.match(campaign.stdout ?? "", /Supported subcommands: create\|add-slot\|attach-slot\|rotate-slot\|archive-slot\|brief\|assign\|asset\|status\|dashboard\|closeout/);
   assert.match(campaign.stdout ?? "", /there is no separate `assets` subcommand/);
   assert.match(campaign.stdout ?? "", /campaign status --name launch --json/);
   assert.match(campaign.stdout ?? "", /campaign dashboard --name launch --json/);
+  assert.match(campaign.stdout ?? "", /campaign closeout --name launch --failure-mode "hidden duplicate receipt" --json/);
 
   const unsupportedCampaignAction = runTypescriptRuntimeCommand({
     args: ["campaign", "assets", "--name", "launch"],
@@ -248,7 +249,7 @@ test("TypeScript runtime help honors workerctl program name", () => {
   });
   assert.equal(unsupportedCampaignAction.exitCode, 2);
   assert.match(unsupportedCampaignAction.stderr ?? "", /Unsupported campaign action: assets/);
-  assert.match(unsupportedCampaignAction.stderr ?? "", /expected one of: create, add-slot, attach-slot, rotate-slot, archive-slot, brief, assign, asset, status, dashboard/);
+  assert.match(unsupportedCampaignAction.stderr ?? "", /expected one of: create, add-slot, attach-slot, rotate-slot, archive-slot, brief, assign, asset, status, dashboard, closeout/);
   assert.match(unsupportedCampaignAction.stderr ?? "", /campaign dashboard --name <campaign> --json/);
 
   const pair = runTypescriptRuntimeCommand({
@@ -1703,6 +1704,41 @@ test("TypeScript runtime handles campaign create slot brief assignment asset and
     assert.equal(dashboardPayload.slots?.[0]?.lifecycle.state, "active");
     assert.equal(dashboardPayload.slots?.[0]?.session, null);
 
+    const closeout = runTypescriptRuntimeCommand({
+      args: [
+        "campaign",
+        "closeout",
+        "--name",
+        "launch",
+        "--failure-mode",
+        "hidden duplicate receipt",
+        "--path",
+        dbPath,
+        "--json",
+      ],
+      env: {},
+    });
+    assert.equal(closeout.exitCode, 0, closeout.stderr);
+    const closeoutPayload = JSON.parse(closeout.stdout ?? "{}") as {
+      action?: string;
+      failure_mode?: { evidence?: string; strongest_realistic_failure_mode?: string };
+      proof_checks?: Array<{ check: string; status: string }>;
+      receipt_counts_by_assignment?: Array<{ assignment_id: string; receipt_count: number; slot_key: string }>;
+      verdict?: string;
+      workers?: Array<{ codex_app_thread_id: string | null; receipt_ids: string[]; slot_key: string }>;
+    };
+    assert.equal(closeoutPayload.action, "closeout");
+    assert.equal(closeoutPayload.verdict, "needs_review");
+    assert.equal(closeoutPayload.failure_mode?.strongest_realistic_failure_mode, "hidden duplicate receipt");
+    assert.match(closeoutPayload.failure_mode?.evidence ?? "", /asset_total=1/);
+    assert.equal(closeoutPayload.receipt_counts_by_assignment?.[0]?.assignment_id, assignmentPayload.assignment_id);
+    assert.equal(closeoutPayload.receipt_counts_by_assignment?.[0]?.receipt_count, 1);
+    assert.equal(closeoutPayload.receipt_counts_by_assignment?.[0]?.slot_key, "tiktok");
+    assert.equal(closeoutPayload.workers?.[0]?.codex_app_thread_id, "thread-tiktok");
+    assert.deepEqual(closeoutPayload.workers?.[0]?.receipt_ids, [assetPayload.asset_receipt_id]);
+    assert.equal(closeoutPayload.proof_checks?.find((check) => check.check === "blockers_absent")?.status, "passed");
+    assert.equal(closeoutPayload.proof_checks?.find((check) => check.check === "assignment_receipt_counts")?.status, "passed");
+
     const text = runTypescriptRuntimeCommand({
       args: ["campaign", "status", "--name", "launch", "--path", dbPath],
       env: {},
@@ -1719,6 +1755,15 @@ test("TypeScript runtime handles campaign create slot brief assignment asset and
     assert.match(dashboardText.stdout ?? "", /campaign launch active/);
     assert.match(dashboardText.stdout ?? "", /next review_assets/);
     assert.match(dashboardText.stdout ?? "", /slot tiktok active active/);
+
+    const closeoutText = runTypescriptRuntimeCommand({
+      args: ["campaign", "closeout", "--name", "launch", "--path", dbPath],
+      env: {},
+    });
+    assert.equal(closeoutText.exitCode, 0, closeoutText.stderr);
+    assert.match(closeoutText.stdout ?? "", /closeout verdict needs_review/);
+    assert.match(closeoutText.stdout ?? "", /proof passed blockers_absent/);
+    assert.match(closeoutText.stdout ?? "", /assignment_receipts tiktok/);
 
     const badJson = runTypescriptRuntimeCommand({
       args: ["campaign", "create", "--name", "bad", "--objective", "Bad JSON.", "--metadata-json", "[]", "--path", dbPath],
@@ -1870,6 +1915,21 @@ test("TypeScript runtime rejects duplicate campaign assignment receipts unless a
     assert.equal(status.exitCode, 0, status.stderr);
     const statusPayload = JSON.parse(status.stdout ?? "{}") as { asset_counts?: Record<string, number> };
     assert.equal(statusPayload.asset_counts?.needs_review, 2);
+
+    const closeout = runTypescriptRuntimeCommand({
+      args: ["campaign", "closeout", "--name", "launch", "--path", dbPath, "--json"],
+      env: {},
+    });
+    assert.equal(closeout.exitCode, 0, closeout.stderr);
+    const closeoutPayload = JSON.parse(closeout.stdout ?? "{}") as {
+      proof_checks?: Array<{ check: string; evidence: string; status: string }>;
+      receipt_counts_by_assignment?: Array<{ assignment_id: string; receipt_count: number }>;
+    };
+    assert.equal(closeoutPayload.receipt_counts_by_assignment?.[0]?.assignment_id, assignmentPayload.assignment_id);
+    assert.equal(closeoutPayload.receipt_counts_by_assignment?.[0]?.receipt_count, 2);
+    const assignmentReceiptCheck = closeoutPayload.proof_checks?.find((check) => check.check === "assignment_receipt_counts");
+    assert.equal(assignmentReceiptCheck?.status, "attention");
+    assert.match(assignmentReceiptCheck?.evidence ?? "", new RegExp(`${assignmentPayload.assignment_id}:2`));
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

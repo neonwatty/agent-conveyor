@@ -327,6 +327,11 @@ tmux attach -t codex-live-test
   blockers, approval counts, and the next recommended manager action. This is
   also the supported way to inspect asset receipts and per-slot receipt counts;
   there is no separate `campaign assets` subcommand.
+- `campaign closeout --name C [--failure-mode TEXT] [--json]` —
+  Produce a read-only closeout report from the campaign dashboard, including
+  verdict, worker thread ids, blockers, receipt counts by assignment, proof
+  checks, and the strongest realistic failure mode evidence to carry into a
+  manager/operator handoff.
 
 Creative Ops Campaign manager loop:
 

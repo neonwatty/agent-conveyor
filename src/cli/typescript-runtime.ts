@@ -32,6 +32,7 @@ import {
   type CampaignAssignmentStatus,
   type CampaignAssetStatus,
   type CampaignAssetType,
+  type CampaignDashboardRecord,
   type CampaignWorkerSlotState,
 } from "../runtime/campaigns.js";
 import { exportTaskSync } from "../runtime/export.js";
@@ -558,6 +559,7 @@ function commandHelpText(program: "conveyor" | "workerctl", command: string): st
       `  ${program} campaign asset --name launch --slot campaign-slot-id --assignment campaign-assignment-id --asset-type copy --title "Hooks v2" --allow-additional-receipt --json`,
       `  ${program} campaign status --name launch --json`,
       `  ${program} campaign dashboard --name launch --json`,
+      `  ${program} campaign closeout --name launch --failure-mode "hidden duplicate receipt" --json`,
     ],
     "manager-ack": [
       `usage: ${program} manager-ack <task> --from-stdin ${path}`,
@@ -876,7 +878,7 @@ interface ParsedRuntimeArgs {
 
 type RuntimeFlagKey = keyof ParsedRuntimeArgs["flags"];
 
-const CAMPAIGN_ACTION_NAMES = ["create", "add-slot", "attach-slot", "rotate-slot", "archive-slot", "brief", "assign", "asset", "status", "dashboard"] as const;
+const CAMPAIGN_ACTION_NAMES = ["create", "add-slot", "attach-slot", "rotate-slot", "archive-slot", "brief", "assign", "asset", "status", "dashboard", "closeout"] as const;
 const CAMPAIGN_ACTIONS = new Set<string>(CAMPAIGN_ACTION_NAMES);
 const CAMPAIGN_STRING_FLAGS: Record<string, RuntimeFlagKey> = {
   "--artifact-path": "artifactPath",
@@ -885,6 +887,7 @@ const CAMPAIGN_STRING_FLAGS: Record<string, RuntimeFlagKey> = {
   "--brief-json": "briefJson",
   "--channel": "channel",
   "--expected-thread-id": "expectedThreadId",
+  "--failure-mode": "failureMode",
   "--instructions": "instructions",
   "--objective": "objective",
   "--prompt-summary": "promptSummary",
@@ -6790,6 +6793,14 @@ function runCampaignCommand(
       return campaignResult(parsed, dashboard, renderCampaignDashboardText(dashboard));
     }
 
+    if (action === "closeout") {
+      const dashboard = campaignDashboardSync(database, campaign);
+      const closeout = campaignCloseoutReport(dashboard, {
+        failureMode: parsed.flags.failureMode,
+      });
+      return campaignResult(parsed, closeout, renderCampaignCloseoutText(closeout));
+    }
+
     return errorResult(unsupportedCampaignActionMessage(action));
   } finally {
     database.close();
@@ -6883,6 +6894,152 @@ function renderCampaignDashboardText(dashboard: ReturnType<typeof campaignDashbo
     lines.push(`slot ${slot.slot_key} ${slot.state} ${slot.lifecycle.state} assignments=${slot.assignments.length} assets=${slot.assets.length}`);
   }
   return lines;
+}
+
+type CampaignCloseoutVerdict = "blocked" | "needs_review" | "ready_to_close" | "needs_work";
+
+interface CampaignCloseoutReport {
+  action: "closeout";
+  approvals: CampaignDashboardRecord["approvals"];
+  blockers: string[];
+  campaign: CampaignDashboardRecord["campaign"];
+  failure_mode: {
+    evidence: string;
+    strongest_realistic_failure_mode: string;
+  };
+  next_manager_action: CampaignDashboardRecord["next_manager_action"];
+  proof_checks: Array<{
+    check: string;
+    evidence: string;
+    status: "attention" | "failed" | "passed";
+  }>;
+  receipt_counts_by_assignment: Array<{
+    assignment_id: string;
+    receipt_count: number;
+    slot_key: string;
+  }>;
+  summary: CampaignDashboardRecord["summary"];
+  verdict: CampaignCloseoutVerdict;
+  workers: Array<{
+    active_assignments: number;
+    asset_receipts: number;
+    blockers: string[];
+    channel: string | null;
+    codex_app_thread_id: string | null;
+    codex_app_thread_title: string | null;
+    lifecycle_state: string;
+    receipt_ids: string[];
+    slot_key: string;
+    state: string;
+  }>;
+}
+
+function campaignCloseoutReport(
+  dashboard: CampaignDashboardRecord,
+  options: { failureMode?: string | null } = {},
+): CampaignCloseoutReport {
+  const receiptCountsByAssignment = campaignReceiptCountsByAssignment(dashboard);
+  const activeSlots = dashboard.slots.filter((slot) => slot.state !== "archived");
+  const slotsMissingReceipts = activeSlots.filter((slot) => slot.assignments.length > 0 && slot.asset_receipts === 0);
+  const duplicateAssignmentCounts = receiptCountsByAssignment.filter((item) => item.receipt_count > 1);
+  const failureMode = options.failureMode
+    ?? "A hidden duplicate or missing worker receipt could make the campaign look closed while dashboard receipt counts are wrong.";
+  const receiptEvidence = dashboard.slots
+    .map((slot) => `${slot.slot_key}:assignments=${slot.assignments.length},receipts=${slot.asset_receipts}`)
+    .join("; ");
+  return {
+    action: "closeout",
+    approvals: dashboard.approvals,
+    blockers: dashboard.blockers,
+    campaign: dashboard.campaign,
+    failure_mode: {
+      evidence: `dashboard asset_total=${dashboard.summary.asset_total}; assignment_total=${dashboard.summary.assignment_total}; ${receiptEvidence}`,
+      strongest_realistic_failure_mode: failureMode,
+    },
+    next_manager_action: dashboard.next_manager_action,
+    proof_checks: [
+      {
+        check: "dashboard_loaded",
+        evidence: `campaign_id=${dashboard.campaign.id}; updated_at=${dashboard.campaign.updated_at}`,
+        status: "passed",
+      },
+      {
+        check: "blockers_absent",
+        evidence: `blockers=${dashboard.blockers.length}`,
+        status: dashboard.blockers.length === 0 ? "passed" : "failed",
+      },
+      {
+        check: "active_worker_slots_have_receipts",
+        evidence: slotsMissingReceipts.length === 0
+          ? "all active slots with assignments have at least one receipt"
+          : `missing_receipt_slots=${slotsMissingReceipts.map((slot) => slot.slot_key).join(",")}`,
+        status: slotsMissingReceipts.length === 0 ? "passed" : "attention",
+      },
+      {
+        check: "assignment_receipt_counts",
+        evidence: duplicateAssignmentCounts.length === 0
+          ? "no assignment has more than one receipt"
+          : `additional_receipt_assignments=${duplicateAssignmentCounts.map((item) => `${item.assignment_id}:${item.receipt_count}`).join(",")}`,
+        status: duplicateAssignmentCounts.length === 0 ? "passed" : "attention",
+      },
+      {
+        check: "human_review_gate",
+        evidence: `needs_review=${dashboard.approvals.needs_review}; approved=${dashboard.approvals.approved}; published=${dashboard.approvals.published}`,
+        status: dashboard.approvals.needs_review > 0 && dashboard.approvals.published === 0 ? "passed" : "attention",
+      },
+    ],
+    receipt_counts_by_assignment: receiptCountsByAssignment,
+    summary: dashboard.summary,
+    verdict: campaignCloseoutVerdict(dashboard),
+    workers: dashboard.slots.map((slot) => ({
+      active_assignments: slot.active_assignments,
+      asset_receipts: slot.asset_receipts,
+      blockers: slot.blockers,
+      channel: slot.channel,
+      codex_app_thread_id: slot.codex_app_thread_id,
+      codex_app_thread_title: slot.codex_app_thread_title,
+      lifecycle_state: slot.lifecycle.state,
+      receipt_ids: slot.assets.map((asset) => asset.id),
+      slot_key: slot.slot_key,
+      state: slot.state,
+    })),
+  };
+}
+
+function campaignReceiptCountsByAssignment(dashboard: CampaignDashboardRecord): CampaignCloseoutReport["receipt_counts_by_assignment"] {
+  return dashboard.slots.flatMap((slot) => slot.assignments.map((assignment) => ({
+    assignment_id: assignment.id,
+    receipt_count: slot.assets.filter((asset) => asset.assignment_id === assignment.id).length,
+    slot_key: slot.slot_key,
+  })));
+}
+
+function campaignCloseoutVerdict(dashboard: CampaignDashboardRecord): CampaignCloseoutVerdict {
+  if (dashboard.blockers.length > 0 || dashboard.summary.blocked_assignments > 0 || dashboard.summary.blocked_slots > 0 || dashboard.summary.stale_slots > 0) {
+    return "blocked";
+  }
+  if (dashboard.next_manager_action.action === "close_campaign") {
+    return "ready_to_close";
+  }
+  if (dashboard.approvals.needs_review > 0 || dashboard.approvals.rejected > 0) {
+    return "needs_review";
+  }
+  return "needs_work";
+}
+
+function renderCampaignCloseoutText(report: CampaignCloseoutReport): string[] {
+  return [
+    `campaign ${report.campaign.name} ${report.campaign.status}`,
+    `closeout verdict ${report.verdict}`,
+    `next ${report.next_manager_action.action}: ${report.next_manager_action.reason}`,
+    `summary slots=${report.summary.active_slots}/${report.summary.archived_slots} assignments=${report.summary.assignment_total} assets=${report.summary.asset_total} blockers=${report.blockers.length}`,
+    `approvals needs_review=${report.approvals.needs_review} approved=${report.approvals.approved} rejected=${report.approvals.rejected} published=${report.approvals.published}`,
+    `failure_mode ${report.failure_mode.strongest_realistic_failure_mode}`,
+    `failure_mode_evidence ${report.failure_mode.evidence}`,
+    ...report.proof_checks.map((check) => `proof ${check.status} ${check.check}: ${check.evidence}`),
+    ...report.receipt_counts_by_assignment.map((item) => `assignment_receipts ${item.slot_key} ${item.assignment_id}=${item.receipt_count}`),
+    ...report.workers.slice(0, 8).map((worker) => `worker ${worker.slot_key} ${worker.state}/${worker.lifecycle_state} assignments=${worker.active_assignments} receipts=${worker.asset_receipts} thread=${worker.codex_app_thread_id ?? "none"}`),
+  ];
 }
 
 function statusCountsText(counts: Record<string, number>): string {
