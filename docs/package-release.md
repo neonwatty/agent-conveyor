@@ -99,6 +99,10 @@ The tarball must include:
 - `skills/manage-codex-workers/SKILL.md`
 - `skills/codex-review/SKILL.md`
 - `skills/codex-review/scripts/codex-review`
+- `plugin/agent-conveyor/plugin.json`
+- `plugin/agent-conveyor/skills/conveyor-create-pair/SKILL.md`
+- `plugin/agent-conveyor/skills/conveyor-create-worker-set/SKILL.md`
+- `plugin/agent-conveyor/skills/conveyor-check-status/SKILL.md`
 
 The npm tarball must not contain `scripts/workerctl`, `workerctl/**/*.py`, or
 `dist/cli/python-bridge.*`. The `codex-review` helper must be executable in the

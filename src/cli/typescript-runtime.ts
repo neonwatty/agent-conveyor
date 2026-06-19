@@ -7413,16 +7413,20 @@ function pluginSkillTargets(paths: AgentConveyorPluginPaths): Array<{ installed:
   });
 }
 
-function installedAgentConveyorPluginVersion(paths: AgentConveyorPluginPaths): string | null {
+function installedAgentConveyorPluginManifest(paths: AgentConveyorPluginPaths): AgentConveyorPluginManifest | null {
   const manifestPath = join(paths.plugin_install_root, "plugin.json");
   if (!existsSync(manifestPath)) {
     return null;
   }
   const parsed = JSON.parse(readFileSync(manifestPath, "utf8")) as unknown;
-  if (!isPlainRecord(parsed) || typeof parsed.version !== "string") {
+  if (!isPlainRecord(parsed) || parsed.name !== AGENT_CONVEYOR_PLUGIN_NAME || typeof parsed.version !== "string") {
     return null;
   }
-  return parsed.version;
+  return {
+    name: parsed.name,
+    version: parsed.version,
+    skills: Array.isArray(parsed.skills) ? parsed.skills.filter((skill): skill is string => typeof skill === "string") : undefined,
+  };
 }
 
 function agentConveyorPluginStatus(parsed: ParsedRuntimeArgs, options: { env?: NodeJS.ProcessEnv }): {
@@ -7437,15 +7441,17 @@ function agentConveyorPluginStatus(parsed: ParsedRuntimeArgs, options: { env?: N
   const paths = pluginPaths(parsed, options);
   const packageVersion = packageVersionFromRoot(paths.package_root);
   const manifest = readAgentConveyorPluginManifest(paths.plugin_source);
-  const installedVersion = installedAgentConveyorPluginVersion(paths);
-  const installed = installedVersion !== null;
+  const installedManifest = installedAgentConveyorPluginManifest(paths);
+  const installedVersion = installedManifest?.version ?? null;
+  const skills = pluginSkillTargets(paths);
+  const installed = installedManifest !== null && skills.every((skill) => skill.installed);
   return {
     installed,
     installed_version: installedVersion,
     package_version: packageVersion,
     paths,
     plugin_version: manifest.version,
-    skills: pluginSkillTargets(paths),
+    skills,
     version_matches: installed && installedVersion === packageVersion && manifest.version === packageVersion,
   };
 }

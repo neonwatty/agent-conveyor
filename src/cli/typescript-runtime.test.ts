@@ -9512,6 +9512,33 @@ test("TypeScript runtime handles Agent Conveyor plugin install status and path c
     assert.equal(statusAfterPayload.installed_version, "0.1.19");
     assert.equal(statusAfterPayload.version_matches, true);
 
+    const corruptHome = join(root, "corrupt-codex-home");
+    const corruptManifestDir = join(corruptHome, "plugins", "cache", "agent-conveyor", "agent-conveyor", "0.1.19");
+    mkdirSync(corruptManifestDir, { recursive: true });
+    writeFileSync(join(corruptManifestDir, "plugin.json"), JSON.stringify({ name: "not-agent-conveyor", version: "0.1.19" }));
+    const corruptStatus = runTypescriptRuntimeCommand({
+      args: ["plugin-status", "--codex-home", corruptHome, "--json"],
+      env: {},
+    });
+    assert.equal(corruptStatus.exitCode, 0, corruptStatus.stderr);
+    const corruptStatusPayload = JSON.parse(corruptStatus.stdout ?? "{}") as {
+      installed: boolean;
+      installed_version: string | null;
+      skills: Array<{ installed: boolean; name: string }>;
+      version_matches: boolean;
+    };
+    assert.equal(corruptStatusPayload.installed, false);
+    assert.equal(corruptStatusPayload.installed_version, null);
+    assert.equal(corruptStatusPayload.version_matches, false);
+    assert.deepEqual(
+      corruptStatusPayload.skills.map((skill) => ({ installed: skill.installed, name: skill.name })),
+      [
+        { installed: false, name: "conveyor-create-pair" },
+        { installed: false, name: "conveyor-create-worker-set" },
+        { installed: false, name: "conveyor-check-status" },
+      ],
+    );
+
     const installedDryRun = runTypescriptRuntimeCommand({
       args: ["install-plugin", "--codex-home", codexHome, "--dry-run", "--json"],
       env: {},
