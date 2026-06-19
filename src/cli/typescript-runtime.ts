@@ -339,6 +339,15 @@ export function runTypescriptRuntimeCommand(options: TypescriptRuntimeOptions): 
     if (parsed.command === "install-skills") {
       return runInstallSkillsCommand(parsed, options);
     }
+    if (parsed.command === "plugin-path") {
+      return runPluginPathCommand(parsed, options);
+    }
+    if (parsed.command === "plugin-status") {
+      return runPluginStatusCommand(parsed, options);
+    }
+    if (parsed.command === "install-plugin") {
+      return runInstallPluginCommand(parsed, options);
+    }
     if (parsed.command === "bind") {
       return runBindCommand(parsed, options);
     }
@@ -1447,7 +1456,7 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       flags.path = value.value;
       index += 1;
     } else if (arg === "--codex-home") {
-      if (command !== "install-skills") {
+      if (command !== "install-skills" && command !== "install-plugin" && command !== "plugin-status" && command !== "plugin-path") {
         return { command, enabled, error: "Unsupported TypeScript runtime option: --codex-home", explicit, flags, task };
       }
       const value = valueAfter(queue, index, arg);
@@ -7288,7 +7297,7 @@ function runInstallSkillsCommand(
   if (unsupported) {
     return unsupportedRuntimeResult(parsed, unsupported);
   }
-  const codexHome = resolve(expandUserPath(parsed.flags.codexHome ?? options.env?.CODEX_HOME ?? join(homedir(), ".codex")));
+  const codexHome = resolveCodexHome(parsed, options);
   const skills = installableSkillSources();
   const targets = skills.map((skill) => ({
     name: skill.name,
@@ -7318,6 +7327,239 @@ function runInstallSkillsCommand(
     return jsonResult(payload);
   }
   const lines = targets.map((target) => `${parsed.flags.dryRun ? "would install" : "installed"} ${target.name} skill in ${target.target}`);
+  return { exitCode: 0, handled: true, stdout: `${lines.join("\n")}\n` };
+}
+
+const AGENT_CONVEYOR_PLUGIN_NAME = "agent-conveyor";
+const AGENT_CONVEYOR_PLUGIN_SKILLS = ["conveyor-create-pair", "conveyor-create-worker-set", "conveyor-check-status"] as const;
+
+interface AgentConveyorPluginManifest {
+  name?: string;
+  version: string;
+  skills?: string[];
+}
+
+interface AgentConveyorPluginPaths {
+  codex_home: string;
+  package_root: string;
+  plugin_cache_root: string;
+  plugin_install_root: string;
+  plugin_source: string;
+  skills_install_root: string;
+}
+
+function resolveCodexHome(parsed: ParsedRuntimeArgs, options: { env?: NodeJS.ProcessEnv }): string {
+  return resolve(expandUserPath(parsed.flags.codexHome ?? options.env?.CODEX_HOME ?? join(homedir(), ".codex")));
+}
+
+function packageVersionFromRoot(packageRoot: string): string {
+  const packageJsonPath = join(packageRoot, "package.json");
+  const parsed = JSON.parse(readFileSync(packageJsonPath, "utf8")) as unknown;
+  if (!isPlainRecord(parsed) || typeof parsed.version !== "string" || parsed.version.length === 0) {
+    throw new Error(`Package version not found in ${packageJsonPath}.`);
+  }
+  return parsed.version;
+}
+
+function pluginPaths(parsed: ParsedRuntimeArgs, options: { env?: NodeJS.ProcessEnv }): AgentConveyorPluginPaths {
+  const codexHome = resolveCodexHome(parsed, options);
+  const packageRoot = packageRootFromRuntimeModule();
+  const packageVersion = packageVersionFromRoot(packageRoot);
+  const pluginCacheRoot = join(codexHome, "plugins", "cache", AGENT_CONVEYOR_PLUGIN_NAME, AGENT_CONVEYOR_PLUGIN_NAME);
+  return {
+    codex_home: codexHome,
+    package_root: packageRoot,
+    plugin_cache_root: pluginCacheRoot,
+    plugin_install_root: join(pluginCacheRoot, packageVersion),
+    plugin_source: join(packageRoot, "plugin", AGENT_CONVEYOR_PLUGIN_NAME),
+    skills_install_root: join(codexHome, "skills"),
+  };
+}
+
+function readAgentConveyorPluginManifest(source: string): AgentConveyorPluginManifest {
+  const manifestPath = join(source, "plugin.json");
+  const parsed = JSON.parse(readFileSync(manifestPath, "utf8")) as unknown;
+  if (!isPlainRecord(parsed)) {
+    throw new Error(`Agent Conveyor plugin manifest must be a JSON object: ${manifestPath}`);
+  }
+  if (parsed.name !== AGENT_CONVEYOR_PLUGIN_NAME) {
+    throw new Error(`Agent Conveyor plugin manifest name must be "${AGENT_CONVEYOR_PLUGIN_NAME}": ${manifestPath}`);
+  }
+  if (typeof parsed.version !== "string") {
+    throw new Error(`Agent Conveyor plugin manifest is missing a string version: ${manifestPath}`);
+  }
+  return {
+    name: parsed.name,
+    version: parsed.version,
+    skills: Array.isArray(parsed.skills) ? parsed.skills.filter((skill): skill is string => typeof skill === "string") : undefined,
+  };
+}
+
+function assertPluginVersionMatchesPackage(manifest: AgentConveyorPluginManifest, packageVersion: string): void {
+  if (manifest.version !== packageVersion) {
+    throw new Error(`Agent Conveyor plugin version ${manifest.version} does not match package version ${packageVersion}.`);
+  }
+}
+
+function pluginSkillTargets(paths: AgentConveyorPluginPaths): Array<{ installed: boolean; name: string; source: string; target: string }> {
+  return AGENT_CONVEYOR_PLUGIN_SKILLS.map((name) => {
+    const target = join(paths.skills_install_root, name);
+    return {
+      installed: existsSync(join(target, "SKILL.md")),
+      name,
+      source: join(paths.plugin_source, "skills", name),
+      target,
+    };
+  });
+}
+
+function installedAgentConveyorPluginManifest(paths: AgentConveyorPluginPaths): AgentConveyorPluginManifest | null {
+  const manifestPath = join(paths.plugin_install_root, "plugin.json");
+  if (!existsSync(manifestPath)) {
+    return null;
+  }
+  const parsed = JSON.parse(readFileSync(manifestPath, "utf8")) as unknown;
+  if (!isPlainRecord(parsed) || parsed.name !== AGENT_CONVEYOR_PLUGIN_NAME || typeof parsed.version !== "string") {
+    return null;
+  }
+  return {
+    name: parsed.name,
+    version: parsed.version,
+    skills: Array.isArray(parsed.skills) ? parsed.skills.filter((skill): skill is string => typeof skill === "string") : undefined,
+  };
+}
+
+function agentConveyorPluginStatus(parsed: ParsedRuntimeArgs, options: { env?: NodeJS.ProcessEnv }): {
+  installed: boolean;
+  installed_version: string | null;
+  package_version: string;
+  paths: AgentConveyorPluginPaths;
+  plugin_version: string;
+  skills: Array<{ installed: boolean; name: string; source: string; target: string }>;
+  version_matches: boolean;
+} {
+  const paths = pluginPaths(parsed, options);
+  const packageVersion = packageVersionFromRoot(paths.package_root);
+  const manifest = readAgentConveyorPluginManifest(paths.plugin_source);
+  const installedManifest = installedAgentConveyorPluginManifest(paths);
+  const installedVersion = installedManifest?.version ?? null;
+  const skills = pluginSkillTargets(paths);
+  const installed = installedManifest !== null && skills.every((skill) => skill.installed);
+  return {
+    installed,
+    installed_version: installedVersion,
+    package_version: packageVersion,
+    paths,
+    plugin_version: manifest.version,
+    skills,
+    version_matches: installed && installedVersion === packageVersion && manifest.version === packageVersion,
+  };
+}
+
+function unsupportedPluginOptions(parsed: ParsedRuntimeArgs): string | null {
+  if (parsed.task !== null) {
+    return `Unexpected argument: ${parsed.task}`;
+  }
+  return null;
+}
+
+function runPluginPathCommand(
+  parsed: ParsedRuntimeArgs,
+  options: { env?: NodeJS.ProcessEnv },
+): TypescriptRuntimeResult {
+  const unsupported = unsupportedPluginOptions(parsed);
+  if (unsupported) {
+    return unsupportedRuntimeResult(parsed, unsupported);
+  }
+  const paths = pluginPaths(parsed, options);
+  if (parsed.flags.json) {
+    return jsonResult(paths);
+  }
+  return {
+    exitCode: 0,
+    handled: true,
+    stdout: [
+      `codex_home: ${paths.codex_home}`,
+      `package_root: ${paths.package_root}`,
+      `plugin_cache_root: ${paths.plugin_cache_root}`,
+      `plugin_install_root: ${paths.plugin_install_root}`,
+      `plugin_source: ${paths.plugin_source}`,
+      `skills_install_root: ${paths.skills_install_root}`,
+      "",
+    ].join("\n"),
+  };
+}
+
+function runPluginStatusCommand(
+  parsed: ParsedRuntimeArgs,
+  options: { env?: NodeJS.ProcessEnv },
+): TypescriptRuntimeResult {
+  const unsupported = unsupportedPluginOptions(parsed);
+  if (unsupported) {
+    return unsupportedRuntimeResult(parsed, unsupported);
+  }
+  const status = agentConveyorPluginStatus(parsed, options);
+  if (parsed.flags.json) {
+    return jsonResult(status);
+  }
+  const skillLines = status.skills.map((skill) => `skill ${skill.name}: ${skill.installed ? "installed" : "missing"}`);
+  return {
+    exitCode: 0,
+    handled: true,
+    stdout: [
+      `installed: ${status.installed}`,
+      `installed_version: ${status.installed_version ?? "none"}`,
+      `package_version: ${status.package_version}`,
+      `plugin_version: ${status.plugin_version}`,
+      `version_matches: ${status.version_matches}`,
+      ...skillLines,
+      "",
+    ].join("\n"),
+  };
+}
+
+function runInstallPluginCommand(
+  parsed: ParsedRuntimeArgs,
+  options: { env?: NodeJS.ProcessEnv },
+): TypescriptRuntimeResult {
+  const unsupported = unsupportedPluginOptions(parsed);
+  if (unsupported) {
+    return unsupportedRuntimeResult(parsed, unsupported);
+  }
+  const paths = pluginPaths(parsed, options);
+  const packageVersion = packageVersionFromRoot(paths.package_root);
+  const manifest = readAgentConveyorPluginManifest(paths.plugin_source);
+  assertPluginVersionMatchesPackage(manifest, packageVersion);
+  const skillTargets = pluginSkillTargets(paths);
+  for (const target of skillTargets) {
+    if (!existsSync(join(target.source, "SKILL.md"))) {
+      throw new Error(`Agent Conveyor plugin skill not found: ${target.source}`);
+    }
+  }
+  if (!parsed.flags.dryRun) {
+    rmSync(paths.plugin_install_root, { force: true, recursive: true });
+    mkdirSync(dirname(paths.plugin_install_root), { recursive: true });
+    cpSync(paths.plugin_source, paths.plugin_install_root, { recursive: true });
+    for (const target of skillTargets) {
+      rmSync(target.target, { force: true, recursive: true });
+      mkdirSync(dirname(target.target), { recursive: true });
+      cpSync(target.source, target.target, { recursive: true });
+    }
+  }
+  const status = agentConveyorPluginStatus(parsed, options);
+  const payload = {
+    ...status,
+    dry_run: parsed.flags.dryRun,
+    installed: status.installed,
+    installed_skills: parsed.flags.dryRun ? [] : skillTargets.map((target) => target.name),
+  };
+  if (parsed.flags.json) {
+    return jsonResult(payload);
+  }
+  const lines = [
+    `${parsed.flags.dryRun ? "would install" : "installed"} ${AGENT_CONVEYOR_PLUGIN_NAME} plugin in ${paths.plugin_install_root}`,
+    ...skillTargets.map((target) => `${parsed.flags.dryRun ? "would install" : "installed"} ${target.name} skill in ${target.target}`),
+  ];
   return { exitCode: 0, handled: true, stdout: `${lines.join("\n")}\n` };
 }
 
@@ -17506,6 +17748,9 @@ function isDefaultRuntimeCommand(command: string | null): boolean {
     || command === "start-test"
     || command === "dashboard"
     || command === "install-skills"
+    || command === "install-plugin"
+    || command === "plugin-status"
+    || command === "plugin-path"
     || command === "replay"
     || command === "export-task"
     || command === "tasks"

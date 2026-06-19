@@ -1,0 +1,15 @@
+{
+  "name": "agent-conveyor",
+  "version": "0.1.19",
+  "description": "Codex operator skills for Agent Conveyor manager-worker setup.",
+  "skills": [
+    "conveyor-create-pair",
+    "conveyor-create-worker-set",
+    "conveyor-check-status"
+  ],
+  "requires": {
+    "npmPackage": "agent-conveyor",
+    "sessionKind": "codex_app",
+    "ledger": "per_project"
+  }
+}

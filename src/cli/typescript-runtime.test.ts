@@ -9404,6 +9404,174 @@ test("TypeScript runtime handles remaining dashboard and skill install CLI contr
   }
 });
 
+test("TypeScript runtime handles Agent Conveyor plugin install status and path commands", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-plugin."));
+  try {
+    const codexHome = join(root, "codex-home");
+    const pluginPath = runTypescriptRuntimeCommand({
+      args: ["plugin-path", "--codex-home", codexHome, "--json"],
+      env: {},
+    });
+    assert.equal(pluginPath.exitCode, 0, pluginPath.stderr);
+    const pluginPathPayload = JSON.parse(pluginPath.stdout ?? "{}") as {
+      codex_home: string;
+      package_root: string;
+      plugin_cache_root: string;
+      plugin_install_root: string;
+      plugin_source: string;
+      skills_install_root: string;
+    };
+    assert.equal(pluginPathPayload.codex_home, codexHome);
+    assert.ok(pluginPathPayload.plugin_source.endsWith(join("plugin", "agent-conveyor")));
+    assert.ok(pluginPathPayload.plugin_install_root.endsWith(join("plugins", "cache", "agent-conveyor", "agent-conveyor", "0.1.19")));
+    assert.equal(pluginPathPayload.skills_install_root, join(codexHome, "skills"));
+
+    const statusBefore = runTypescriptRuntimeCommand({
+      args: ["plugin-status", "--codex-home", codexHome, "--json"],
+      env: {},
+    });
+    assert.equal(statusBefore.exitCode, 0, statusBefore.stderr);
+    const statusBeforePayload = JSON.parse(statusBefore.stdout ?? "{}") as {
+      installed: boolean;
+      package_version: string;
+      plugin_version: string;
+      skills: Array<{ installed: boolean; name: string }>;
+      version_matches: boolean;
+    };
+    assert.equal(statusBeforePayload.installed, false);
+    assert.equal(statusBeforePayload.package_version, "0.1.19");
+    assert.equal(statusBeforePayload.plugin_version, "0.1.19");
+    assert.equal(statusBeforePayload.version_matches, false);
+    assert.deepEqual(
+      statusBeforePayload.skills.map((skill) => ({ installed: skill.installed, name: skill.name })),
+      [
+        { installed: false, name: "conveyor-create-pair" },
+        { installed: false, name: "conveyor-create-worker-set" },
+        { installed: false, name: "conveyor-check-status" },
+      ],
+    );
+
+    const install = runTypescriptRuntimeCommand({
+      args: ["install-plugin", "--codex-home", codexHome, "--json"],
+      env: {},
+    });
+    assert.equal(install.exitCode, 0, install.stderr);
+    const installPayload = JSON.parse(install.stdout ?? "{}") as {
+      installed: boolean;
+      installed_skills: string[];
+      package_version: string;
+      plugin_version: string;
+    };
+    assert.equal(installPayload.installed, true);
+    assert.equal(installPayload.package_version, "0.1.19");
+    assert.equal(installPayload.plugin_version, "0.1.19");
+    assert.deepEqual(installPayload.installed_skills.sort(), [
+      "conveyor-check-status",
+      "conveyor-create-pair",
+      "conveyor-create-worker-set",
+    ]);
+
+    const installedManifestPath = join(codexHome, "plugins", "cache", "agent-conveyor", "agent-conveyor", "0.1.19", "plugin.json");
+    assert.ok(existsSync(installedManifestPath));
+    assert.ok(existsSync(join(codexHome, "skills", "conveyor-check-status", "SKILL.md")));
+    assert.ok(existsSync(join(codexHome, "skills", "conveyor-create-pair", "SKILL.md")));
+    assert.ok(existsSync(join(codexHome, "skills", "conveyor-create-worker-set", "SKILL.md")));
+    const absoluteLedgerPath = /(^|[^\w$])\/[^\s`"']*\.codex-workers\/workerctl\.db/;
+    assert.match("/tmp/project/.codex-workers/workerctl.db", absoluteLedgerPath);
+    assert.match("--path=/tmp/project/.codex-workers/workerctl.db", absoluteLedgerPath);
+    assert.match("(/tmp/project/.codex-workers/workerctl.db)", absoluteLedgerPath);
+    assert.doesNotMatch("$PWD/.codex-workers/workerctl.db", absoluteLedgerPath);
+    assert.doesNotMatch("--path=$PWD/.codex-workers/workerctl.db", absoluteLedgerPath);
+    assert.doesNotMatch(".codex-workers/workerctl.db", absoluteLedgerPath);
+    for (const name of ["conveyor-create-pair", "conveyor-create-worker-set", "conveyor-check-status"]) {
+      const text = readFileSync(join(codexHome, "skills", name, "SKILL.md"), "utf8");
+      assert.match(text, /\.codex-workers\/workerctl\.db/);
+      assert.doesNotMatch(text, absoluteLedgerPath);
+      assert.match(text, /Operator-facing only|operator-facing/i);
+      assert.match(text, /Codex app/i);
+    }
+    assert.match(
+      readFileSync(join(codexHome, "skills", "conveyor-create-pair", "SKILL.md"), "utf8"),
+      /Do not use tmux/,
+    );
+    const installedManifest = JSON.parse(readFileSync(installedManifestPath, "utf8")) as { name: string; version: string };
+    assert.equal(installedManifest.name, "agent-conveyor");
+    assert.equal(installedManifest.version, "0.1.19");
+
+    const statusAfter = runTypescriptRuntimeCommand({
+      args: ["plugin-status", "--codex-home", codexHome, "--json"],
+      env: {},
+    });
+    assert.equal(statusAfter.exitCode, 0, statusAfter.stderr);
+    const statusAfterPayload = JSON.parse(statusAfter.stdout ?? "{}") as {
+      installed: boolean;
+      installed_version: string | null;
+      version_matches: boolean;
+    };
+    assert.equal(statusAfterPayload.installed, true);
+    assert.equal(statusAfterPayload.installed_version, "0.1.19");
+    assert.equal(statusAfterPayload.version_matches, true);
+
+    const corruptHome = join(root, "corrupt-codex-home");
+    const corruptManifestDir = join(corruptHome, "plugins", "cache", "agent-conveyor", "agent-conveyor", "0.1.19");
+    mkdirSync(corruptManifestDir, { recursive: true });
+    writeFileSync(join(corruptManifestDir, "plugin.json"), JSON.stringify({ name: "not-agent-conveyor", version: "0.1.19" }));
+    const corruptStatus = runTypescriptRuntimeCommand({
+      args: ["plugin-status", "--codex-home", corruptHome, "--json"],
+      env: {},
+    });
+    assert.equal(corruptStatus.exitCode, 0, corruptStatus.stderr);
+    const corruptStatusPayload = JSON.parse(corruptStatus.stdout ?? "{}") as {
+      installed: boolean;
+      installed_version: string | null;
+      skills: Array<{ installed: boolean; name: string }>;
+      version_matches: boolean;
+    };
+    assert.equal(corruptStatusPayload.installed, false);
+    assert.equal(corruptStatusPayload.installed_version, null);
+    assert.equal(corruptStatusPayload.version_matches, false);
+    assert.deepEqual(
+      corruptStatusPayload.skills.map((skill) => ({ installed: skill.installed, name: skill.name })),
+      [
+        { installed: false, name: "conveyor-create-pair" },
+        { installed: false, name: "conveyor-create-worker-set" },
+        { installed: false, name: "conveyor-check-status" },
+      ],
+    );
+
+    const installedDryRun = runTypescriptRuntimeCommand({
+      args: ["install-plugin", "--codex-home", codexHome, "--dry-run", "--json"],
+      env: {},
+    });
+    assert.equal(installedDryRun.exitCode, 0, installedDryRun.stderr);
+    const installedDryRunPayload = JSON.parse(installedDryRun.stdout ?? "{}") as {
+      dry_run: boolean;
+      installed: boolean;
+      installed_skills: string[];
+      version_matches: boolean;
+    };
+    assert.equal(installedDryRunPayload.dry_run, true);
+    assert.equal(installedDryRunPayload.installed, true);
+    assert.deepEqual(installedDryRunPayload.installed_skills, []);
+    assert.equal(installedDryRunPayload.version_matches, true);
+
+    const dryRunHome = join(root, "dry-run-codex-home");
+    const dryRunInstall = runTypescriptRuntimeCommand({
+      args: ["install-plugin", "--codex-home", dryRunHome, "--dry-run", "--json"],
+      env: {},
+    });
+    assert.equal(dryRunInstall.exitCode, 0, dryRunInstall.stderr);
+    const dryRunInstallPayload = JSON.parse(dryRunInstall.stdout ?? "{}") as {
+      installed: boolean;
+      installed_skills: string[];
+    };
+    assert.equal(dryRunInstallPayload.installed, false);
+    assert.deepEqual(dryRunInstallPayload.installed_skills, []);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("TypeScript runtime handles ack inbox and session action CLI contracts by default", () => {
   const root = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-remaining-dispatch."));
   try {
