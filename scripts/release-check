@@ -57,6 +57,10 @@ const required = [
   "skills/manage-codex-workers/SKILL.md",
   "skills/codex-review/SKILL.md",
   "skills/codex-review/scripts/codex-review",
+  "plugin/agent-conveyor/plugin.json",
+  "plugin/agent-conveyor/skills/conveyor-create-pair/SKILL.md",
+  "plugin/agent-conveyor/skills/conveyor-create-worker-set/SKILL.md",
+  "plugin/agent-conveyor/skills/conveyor-check-status/SKILL.md",
 ];
 for (const path of required) {
   if (!files.has(path)) {
@@ -139,8 +143,58 @@ try {
 }
 JS
 
+CODEX_HOME="$CODEX_HOME_DIR" PATH="$PREFIX/bin:$PATH" "$CONVEYOR" install-plugin --codex-home "$CODEX_HOME_DIR" --json > "$WORK_DIR/install-plugin.json"
+CODEX_HOME="$CODEX_HOME_DIR" PATH="$PREFIX/bin:$PATH" "$CONVEYOR" plugin-status --codex-home "$CODEX_HOME_DIR" --json > "$WORK_DIR/plugin-status.json"
+
+node - "$WORK_DIR/install-plugin.json" "$WORK_DIR/plugin-status.json" "$CODEX_HOME_DIR" <<'JS'
+const fs = require("fs");
+const path = require("path");
+
+const installPlugin = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+const pluginStatus = JSON.parse(fs.readFileSync(process.argv[3], "utf8"));
+const codexHome = process.argv[4];
+const expectedSkills = [
+  "conveyor-check-status",
+  "conveyor-create-pair",
+  "conveyor-create-worker-set",
+];
+
+if (installPlugin.package_version !== installPlugin.plugin_version) {
+  throw new Error(`expected plugin version to match package version, got ${installPlugin.plugin_version} vs ${installPlugin.package_version}`);
+}
+if (installPlugin.installed !== true) {
+  throw new Error(`expected install-plugin to report installed=true, got ${JSON.stringify(installPlugin.installed)}`);
+}
+const installedSkills = [...installPlugin.installed_skills].sort();
+if (JSON.stringify(installedSkills) !== JSON.stringify(expectedSkills)) {
+  throw new Error(`expected installed plugin skills ${JSON.stringify(expectedSkills)}, got ${JSON.stringify(installedSkills)}`);
+}
+if (pluginStatus.version_matches !== true) {
+  throw new Error(`expected plugin-status version_matches=true, got ${JSON.stringify(pluginStatus.version_matches)}`);
+}
+
+const versionedManifest = path.join(
+  codexHome,
+  "plugins",
+  "cache",
+  "agent-conveyor",
+  "agent-conveyor",
+  installPlugin.package_version,
+  "plugin.json",
+);
+if (!fs.existsSync(versionedManifest)) {
+  throw new Error(`expected installed plugin manifest missing: ${versionedManifest}`);
+}
+for (const skill of expectedSkills) {
+  const skillPath = path.join(codexHome, "skills", skill, "SKILL.md");
+  if (!fs.existsSync(skillPath)) {
+    throw new Error(`expected installed plugin skill missing: ${skillPath}`);
+  }
+}
+JS
+
 echo "== Release check receipt =="
 printf 'tarball=%s\n' "$TARBALL"
 printf 'conveyor_help=%s\n' "$conveyor_help"
 printf 'workerctl_help=%s\n' "$workerctl_help"
-echo "release-check: packed npm tarball, installed it in a clean prefix, and verified bundled skills without publishing"
+echo "release-check: packed npm tarball, installed it in a clean prefix, verified bundled skills, and verified plugin install/status without publishing"

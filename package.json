@@ -24,6 +24,7 @@
     "dist/",
     "scripts/capture-static-html-screenshot.mjs",
     "skills/**/*",
+    "plugin/**/*",
     "scripts/serve-landing-page.mjs",
     "README.md",
     "docs/landing-page.html",
