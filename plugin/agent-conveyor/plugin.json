@@ -1,6 +1,6 @@
 {
   "name": "agent-conveyor",
-  "version": "0.1.19",
+  "version": "0.1.20",
   "description": "Codex operator skills for Agent Conveyor manager-worker setup.",
   "skills": [
     "conveyor-create-pair",
