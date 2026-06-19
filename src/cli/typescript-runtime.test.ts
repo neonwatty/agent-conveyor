@@ -237,8 +237,19 @@ test("TypeScript runtime help honors workerctl program name", () => {
   });
   assert.equal(campaign.exitCode, 0);
   assert.match(campaign.stdout ?? "", /campaign <create\|add-slot\|attach-slot\|rotate-slot\|archive-slot\|brief\|assign\|asset\|status\|dashboard>/);
+  assert.match(campaign.stdout ?? "", /Supported subcommands: create\|add-slot\|attach-slot\|rotate-slot\|archive-slot\|brief\|assign\|asset\|status\|dashboard/);
+  assert.match(campaign.stdout ?? "", /there is no separate `assets` subcommand/);
   assert.match(campaign.stdout ?? "", /campaign status --name launch --json/);
   assert.match(campaign.stdout ?? "", /campaign dashboard --name launch --json/);
+
+  const unsupportedCampaignAction = runTypescriptRuntimeCommand({
+    args: ["campaign", "assets", "--name", "launch"],
+    env: {},
+  });
+  assert.equal(unsupportedCampaignAction.exitCode, 2);
+  assert.match(unsupportedCampaignAction.stderr ?? "", /Unsupported campaign action: assets/);
+  assert.match(unsupportedCampaignAction.stderr ?? "", /expected one of: create, add-slot, attach-slot, rotate-slot, archive-slot, brief, assign, asset, status, dashboard/);
+  assert.match(unsupportedCampaignAction.stderr ?? "", /campaign dashboard --name <campaign> --json/);
 
   const pair = runTypescriptRuntimeCommand({
     args: ["pair", "--help"],
@@ -278,6 +289,7 @@ test("TypeScript runtime handles manager recipes by default", () => {
     }>;
   };
   assert.deepEqual(listedPayload.recipes.map((recipe) => recipe.name), [
+    "campaign-duplicate-guard-dogfood",
     "goalbuddy-conveyor",
     "nudge-whats-next",
     "pr-ci-merge-ralph-loop",
@@ -287,6 +299,10 @@ test("TypeScript runtime handles manager recipes by default", () => {
   ]);
   assert.equal(listedPayload.recipes.find((recipe) => recipe.name === "test-coverage-loop")?.loop_template, "test_coverage_loop");
   assert.equal(listedPayload.recipes.find((recipe) => recipe.name === "ship-it-loop")?.loop_template, "ship_it_loop");
+  assert.equal(
+    listedPayload.recipes.find((recipe) => recipe.name === "campaign-duplicate-guard-dogfood")?.mode,
+    "strict",
+  );
 
   const shown = runTypescriptRuntimeCommand({
     args: ["manager-recipes", "--show", "goalbuddy", "--json"],
@@ -338,6 +354,32 @@ test("TypeScript runtime handles manager recipes by default", () => {
   assert.ok(shipItPayload.recipe.permissions.includes("repo.resolve_conflicts"));
   assert.ok(shipItPayload.recipe.manager_config_command.includes("repo.monitor_ci"));
   assert.ok(shipItPayload.recipe.evidence_gates.includes("manager_merge_decision"));
+
+  const duplicateGuard = runTypescriptRuntimeCommand({
+    args: ["manager-recipes", "--show", "duplicate guard dogfood", "--json"],
+    env: {},
+  });
+  assert.equal(duplicateGuard.exitCode, 0, duplicateGuard.stderr);
+  const duplicateGuardPayload = JSON.parse(duplicateGuard.stdout ?? "{}") as {
+    recipe: {
+      display_name: string;
+      evidence_gates: string[];
+      final_report_requirements: string[];
+      guidelines: string[];
+      manager_config_command: string[];
+      name: string;
+      permissions: string[];
+      tools: string[];
+    };
+  };
+  assert.equal(duplicateGuardPayload.recipe.name, "campaign-duplicate-guard-dogfood");
+  assert.equal(duplicateGuardPayload.recipe.display_name, "Campaign Duplicate-Guard Dogfood");
+  assert.deepEqual(duplicateGuardPayload.recipe.permissions, []);
+  assert.ok(duplicateGuardPayload.recipe.evidence_gates.includes("post_probe_dashboard_no_extra_asset"));
+  assert.ok(duplicateGuardPayload.recipe.guidelines.some((guideline) => guideline.includes("campaign dashboard --name <campaign> --json")));
+  assert.ok(duplicateGuardPayload.recipe.final_report_requirements.join(" ").includes("duplicate error text"));
+  assert.ok(duplicateGuardPayload.recipe.tools.includes("campaign.dashboard"));
+  assert.ok(!duplicateGuardPayload.recipe.manager_config_command.includes("--allow-additional-receipt"));
 
   const text = runTypescriptRuntimeCommand({
     args: ["manager-recipes", "--show", "ux polish"],

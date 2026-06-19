@@ -51,6 +51,7 @@ inspection while Dispatch is writing to the same `--path` database.
 | PR/CI/Merge Ralph Loop | Manager should drive delivery through PR, CI, merge, handoff | strict | PR URL, green CI, merge receipt, adversarial proof | clear after handoff |
 | Autonomous Ship-It Loop | Manager may push, open PRs, monitor CI, fix bounded conflicts, and merge | strict | branch, PR, CI, mergeability, manager decision, merge, post-merge, adversarial proof | clear after handoff |
 | Creative Ops Campaign | One manager should supervise multiple Codex app worker slots for channel-specific creative assets | strict | campaign dashboard, slot lifecycle, assignment receipts, asset review receipts, human publish gate | rotate owned stale workers only |
+| Campaign Duplicate-Guard Dogfood | Manager should prove campaign assignment receipts reject accidental duplicates in visible app sessions | strict | pre-probe dashboard, worker duplicate failure, post-probe dashboard, manager decision | off by default |
 
 Two support patterns apply across recipes:
 
@@ -405,6 +406,62 @@ Fail closed on these conditions:
 This recipe is ready for local dry runs and controlled dogfood. Treat final
 dogfood success as a separate evidence task: the recipe can configure the loop,
 but it does not by itself prove that a real campaign finished.
+
+## Campaign Duplicate-Guard Dogfood
+
+Use this when validating the campaign receipt guard in a visible Codex app
+manager/worker setup. It is a narrower Creative Ops Campaign recipe: workers
+create normal sanitized asset receipts first, then one worker deliberately
+attempts an accidental duplicate receipt for the same assignment without
+`--allow-additional-receipt`.
+
+Suggested setup:
+
+```bash
+conveyor manager-recipes --show campaign-duplicate-guard-dogfood --json
+
+conveyor manager-config "$TASK" \
+  --mode strict \
+  --objective "Supervise a visible campaign dogfood that proves duplicate assignment receipts fail closed without --allow-additional-receipt." \
+  --guideline "Keep manager and worker sessions visibly chatty with CONVEYOR RECEIVED, WORK, and CONVEYOR SEND sections." \
+  --guideline "Use campaign dashboard --name <campaign> --json as the supported receipt-listing surface." \
+  --guideline "Ask exactly one worker to perform the missing-override duplicate probe, then require manager-side dashboard verification before closeout." \
+  --acceptance "The campaign dashboard shows exactly one normal asset receipt for each active assignment before the duplicate probe." \
+  --acceptance "A worker visibly attempts an accidental duplicate campaign asset receipt without --allow-additional-receipt and records the expected non-zero failure." \
+  --acceptance "Manager independently verifies the post-probe dashboard still has the original asset_total, the probed slot still has one receipt, and blockers are empty." \
+  --tool campaign.dashboard \
+  --tool codex_app.send_message_to_thread
+```
+
+Manager operating loop:
+
+```bash
+conveyor campaign dashboard --name "$CAMPAIGN" --json
+# Send one worker the duplicate probe without --allow-additional-receipt.
+conveyor campaign dashboard --name "$CAMPAIGN" --json
+```
+
+Evidence gates:
+
+- Pre-probe dashboard shows the expected active slots, assignment receipts, and
+  exactly one normal asset receipt for each active assignment.
+- The duplicate-probe worker transcript visibly reports the non-zero failure
+  and the duplicate guard error text.
+- Post-probe dashboard still shows the original `summary.asset_total`, the
+  probed slot still has one `asset_receipts` count, and `blockers` is empty.
+- The manager final report includes manager thread id, worker thread ids,
+  assignment ids, original receipt ids, duplicate error text, pre/post dashboard
+  counts, and cleanup status.
+
+Fail closed on these conditions:
+
+- the worker uses `--allow-additional-receipt` for the accidental duplicate
+  probe;
+- the manager repeats the worker's error text without verifying the dashboard;
+- the operator or manager tries to inspect receipts with an unsupported
+  `campaign assets` command instead of `campaign dashboard`;
+- any worker tries to publish, schedule, contact external services, inspect
+  private content, edit project files, or commit during the dogfood.
 
 ## Inbox / No-Tmux App Loop
 
