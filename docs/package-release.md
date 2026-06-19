@@ -76,6 +76,13 @@ tmp_home="$(mktemp -d)"
 CODEX_HOME="$tmp_home" PATH="$tmp_prefix/bin:$PATH" conveyor install-skills --json
 test -f "$tmp_home/skills/manage-codex-workers/SKILL.md"
 test -x "$tmp_home/skills/codex-review/scripts/codex-review"
+pkg_version="$(node -p 'require("./package.json").version')"
+CODEX_HOME="$tmp_home" PATH="$tmp_prefix/bin:$PATH" conveyor install-plugin --json
+CODEX_HOME="$tmp_home" PATH="$tmp_prefix/bin:$PATH" conveyor plugin-status --json
+test -f "$tmp_home/plugins/cache/agent-conveyor/agent-conveyor/$pkg_version/plugin.json"
+test -f "$tmp_home/skills/conveyor-create-pair/SKILL.md"
+test -f "$tmp_home/skills/conveyor-create-worker-set/SKILL.md"
+test -f "$tmp_home/skills/conveyor-check-status/SKILL.md"
 rm -rf "$tmp_prefix" "$tmp_home"
 ```
 

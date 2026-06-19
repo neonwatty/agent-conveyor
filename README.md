@@ -154,18 +154,36 @@ The GitHub Pages version lives at
 Use `node scripts/check-landing-page.mjs` for a docs-only desktop/mobile
 screenshot gate; this does not run the full package release smoke.
 
+### Codex Operator Plugin
+
+Agent Conveyor also ships Codex-app-only operator scaffolding for visible
+manager/worker sessions from any project. Install the package, then install
+and inspect the plugin:
+
+```bash
+npm install -g agent-conveyor
+conveyor install-plugin
+conveyor plugin-status
+```
+
+The per-project default ledger for operator sessions is
+`.codex-workers/workerctl.db`. The initial included skills are
+`conveyor-create-pair`, `conveyor-create-worker-set`, and
+`conveyor-check-status`.
+
 After install, the intended Codex app entry point is natural language. Open a
 new Codex app session in the target repo and say:
 
 ```text
-Use the manage-codex-workers skill.
+Use the conveyor-create-pair skill.
 
 Set up a Codex app Ralph loop for issue CTL.
 Require adversarial proof before another worker iteration.
 ```
 
-The installed skill should call the `conveyor` CLI, choose names, create the
-no-tmux binding with `create-disposable-binding`, point the worker at
+For multiple workers, start with `Use the conveyor-create-worker-set skill`.
+The installed plugin skill should call the `conveyor` CLI, choose names, create
+the no-tmux binding with `create-disposable-binding`, point the worker at
 `worker-inbox`, and use `loop-status` plus telemetry receipts before reporting
 that the loop is ready. When the manager is itself running in the Codex app and
 thread tools are available, the skill should first call `create_thread` for a
