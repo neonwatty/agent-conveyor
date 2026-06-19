@@ -540,7 +540,11 @@ function commandHelpText(program: "conveyor" | "workerctl", command: string): st
       `  ${program} finish-task my-task --reason "Accepted criteria satisfied" --require-criteria-audit --path /tmp/work/workerctl.db --json`,
     ],
     campaign: [
-      `usage: ${program} campaign <create|add-slot|attach-slot|rotate-slot|archive-slot|brief|assign|asset|status|dashboard> --name <campaign> [options] ${path} [--json]`,
+      `usage: ${program} campaign <${campaignActionsUsage()}> --name <campaign> [options] ${path} [--json]`,
+      "",
+      `Supported subcommands: ${campaignActionsUsage()}`,
+      "",
+      "Use `dashboard` to list campaign assets and slot receipt counts; there is no separate `assets` subcommand.",
       "",
       "Examples:",
       `  ${program} campaign create --name launch --objective "Create launch assets" --metadata-json '{"owner":"ops"}' --json`,
@@ -872,7 +876,8 @@ interface ParsedRuntimeArgs {
 
 type RuntimeFlagKey = keyof ParsedRuntimeArgs["flags"];
 
-const CAMPAIGN_ACTIONS = new Set(["create", "add-slot", "attach-slot", "rotate-slot", "archive-slot", "brief", "assign", "asset", "status", "dashboard"]);
+const CAMPAIGN_ACTION_NAMES = ["create", "add-slot", "attach-slot", "rotate-slot", "archive-slot", "brief", "assign", "asset", "status", "dashboard"] as const;
+const CAMPAIGN_ACTIONS = new Set<string>(CAMPAIGN_ACTION_NAMES);
 const CAMPAIGN_STRING_FLAGS: Record<string, RuntimeFlagKey> = {
   "--artifact-path": "artifactPath",
   "--asset-type": "assetType",
@@ -3197,7 +3202,7 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       flags.action = arg;
     } else if (command === "campaign" && flags.action === null) {
       if (!CAMPAIGN_ACTIONS.has(arg)) {
-        return { command, enabled, error: `Unsupported campaign action: ${arg}`, explicit, flags, task };
+        return { command, enabled, error: unsupportedCampaignActionMessage(arg), explicit, flags, task };
       }
       flags.action = arg;
     } else if ((command === "qa-plan" || command === "qa-run") && flags.subtype === null) {
@@ -6785,10 +6790,18 @@ function runCampaignCommand(
       return campaignResult(parsed, dashboard, renderCampaignDashboardText(dashboard));
     }
 
-    return errorResult(`Unsupported campaign action: ${action}`);
+    return errorResult(unsupportedCampaignActionMessage(action));
   } finally {
     database.close();
   }
+}
+
+function campaignActionsUsage(): string {
+  return CAMPAIGN_ACTION_NAMES.join("|");
+}
+
+function unsupportedCampaignActionMessage(action: string | null): string {
+  return `Unsupported campaign action: ${action ?? "<missing>"}; expected one of: ${CAMPAIGN_ACTION_NAMES.join(", ")}. Use \`conveyor campaign dashboard --name <campaign> --json\` to list assets and receipt counts.`;
 }
 
 function campaignResult(parsed: ParsedRuntimeArgs, payload: unknown, lines: string[]): TypescriptRuntimeResult {
@@ -19453,6 +19466,45 @@ const MANAGER_RECIPES: Record<string, ManagerRecipeDefinition> = {
     supportPatterns: ["Inbox / No-Tmux App Loop", "Recovery / Resume / Handoff"],
     tools: ["verification.run_tests", "context.fetch_prs"],
   },
+  "campaign-duplicate-guard-dogfood": {
+    acceptance: [
+      "The campaign dashboard shows exactly one normal asset receipt for each active assignment before the duplicate probe.",
+      "A worker visibly attempts an accidental duplicate `campaign asset` receipt without --allow-additional-receipt and records the expected non-zero failure.",
+      "Manager independently verifies the post-probe dashboard still has the original asset_total, the probed slot still has one receipt, and blockers are empty.",
+    ],
+    cleanup: "off by default; archive or rotate only campaign-owned worker slots with exact expected thread ids",
+    description: "Dogfood creative campaign workers while proving assignment-scoped duplicate receipts are blocked unless explicitly allowed.",
+    disallowedActions: [
+      "Do not use --allow-additional-receipt for the accidental duplicate probe.",
+      "Do not treat the worker's duplicate-failure claim as proof until the manager verifies the dashboard.",
+      "Do not publish, schedule, contact external services, inspect private content, edit product/content files, or commit during the dogfood.",
+      "Do not archive or rotate a worker thread unless the campaign slot owns that exact thread id.",
+    ],
+    displayName: "Campaign Duplicate-Guard Dogfood",
+    epilogues: [],
+    evidenceGates: [
+      "campaign_dashboard_pre_probe",
+      "visible_worker_duplicate_failure",
+      "duplicate_failure_exit_code",
+      "post_probe_dashboard_no_extra_asset",
+      "manager_duplicate_guard_decision",
+    ],
+    finalReportRequirements: [
+      "Report the manager thread id, worker thread ids, assignment ids, original receipt ids, duplicate error text, pre/post dashboard counts, and residual cleanup status.",
+    ],
+    guidelines: [
+      "Keep manager and worker sessions visibly chatty with CONVEYOR RECEIVED, WORK, and CONVEYOR SEND sections.",
+      "Use `campaign dashboard --name <campaign> --json` as the supported receipt-listing surface.",
+      "Ask exactly one worker to perform the missing-override duplicate probe, then require manager-side dashboard verification before closeout.",
+    ],
+    loopTemplate: null,
+    mode: "strict",
+    name: "campaign-duplicate-guard-dogfood",
+    objective: "Supervise a visible campaign dogfood that proves duplicate assignment receipts fail closed without --allow-additional-receipt.",
+    permissions: [],
+    supportPatterns: ["Creative Ops Campaign", "Inbox / No-Tmux App Loop", "Recovery / Resume / Handoff"],
+    tools: ["campaign.dashboard", "codex_app.send_message_to_thread"],
+  },
   "nudge-whats-next": {
     acceptance: [
       "Accepted criteria are satisfied or explicitly deferred.",
@@ -19612,6 +19664,10 @@ const MANAGER_RECIPES: Record<string, ManagerRecipeDefinition> = {
 };
 
 const MANAGER_RECIPE_ALIASES: Record<string, string> = {
+  "campaign duplicate guard": "campaign-duplicate-guard-dogfood",
+  "campaign duplicate guard dogfood": "campaign-duplicate-guard-dogfood",
+  "creative duplicate guard": "campaign-duplicate-guard-dogfood",
+  "duplicate guard dogfood": "campaign-duplicate-guard-dogfood",
   "goalbuddy conveyor": "goalbuddy-conveyor",
   goalbuddy: "goalbuddy-conveyor",
   "nudge / what's next manager": "nudge-whats-next",

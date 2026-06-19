@@ -324,7 +324,9 @@ tmux attach -t codex-live-test
   asset receipt counts.
 - `campaign dashboard --name C [--json]` —
   Show a manager-oriented campaign aggregate: worker slot lifecycle states,
-  blockers, approval counts, and the next recommended manager action.
+  blockers, approval counts, and the next recommended manager action. This is
+  also the supported way to inspect asset receipts and per-slot receipt counts;
+  there is no separate `campaign assets` subcommand.
 
 Creative Ops Campaign manager loop:
 
@@ -608,6 +610,9 @@ stay out of receipts.
   permissions, expected tools, epilogues, evidence gates, cleanup behavior,
   disallowed actions, locked setup summary template, and suggested
   `manager-config` command. Use this before cutting a manager loose.
+  `campaign-duplicate-guard-dogfood` is the recipe for visible creative
+  campaign dogfoods that prove accidental duplicate assignment receipts are
+  rejected unless a worker explicitly uses `--allow-additional-receipt`.
 - `worker-ack <task> --from-stdin|--json [--correlation-id ID]` /
   `manager-ack <task> --from-stdin|--json [--correlation-id ID]` — Persist or
   read the latest structured acknowledgement from the worker or manager. Acks
