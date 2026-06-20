@@ -61,6 +61,7 @@ const required = [
   "plugin/agent-conveyor/skills/conveyor-create-pair/SKILL.md",
   "plugin/agent-conveyor/skills/conveyor-create-worker-set/SKILL.md",
   "plugin/agent-conveyor/skills/conveyor-check-status/SKILL.md",
+  "plugin/agent-conveyor/skills/conveyor-whats-next-nudger/SKILL.md",
 ];
 for (const path of required) {
   if (!files.has(path)) {
@@ -157,6 +158,7 @@ const expectedSkills = [
   "conveyor-check-status",
   "conveyor-create-pair",
   "conveyor-create-worker-set",
+  "conveyor-whats-next-nudger",
 ];
 
 if (installPlugin.package_version !== installPlugin.plugin_version) {

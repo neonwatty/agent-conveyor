@@ -168,8 +168,8 @@ conveyor plugin-status
 
 The per-project default ledger for operator sessions is
 `.codex-workers/workerctl.db`. The initial included skills are
-`conveyor-create-pair`, `conveyor-create-worker-set`, and
-`conveyor-check-status`.
+`conveyor-create-pair`, `conveyor-create-worker-set`,
+`conveyor-check-status`, and `conveyor-whats-next-nudger`.
 
 After install, the intended Codex app entry point is natural language. Open a
 new Codex app session in the target repo and say:
@@ -203,6 +203,9 @@ print `CONVEYOR POLL`, `CONVEYOR RECEIVED`, `WORK`, `CONVEYOR SEND`, and
 `DISPATCH` sections while the turn is happening. SQLite/replay/status output is
 audit proof, not a replacement for the live session story. Idle polls may be a
 single `CONVEYOR IDLE` line.
+
+For bounded follow-up passes after the first worker result, use
+`Use the conveyor-whats-next-nudger skill`.
 
 Dispatch is core infrastructure for supervised worker/manager pairs. The
 `pair` workflow starts a detached Dispatch watch process by default so worker
