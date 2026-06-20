@@ -9423,7 +9423,7 @@ test("TypeScript runtime handles Agent Conveyor plugin install status and path c
     };
     assert.equal(pluginPathPayload.codex_home, codexHome);
     assert.ok(pluginPathPayload.plugin_source.endsWith(join("plugin", "agent-conveyor")));
-    assert.ok(pluginPathPayload.plugin_install_root.endsWith(join("plugins", "cache", "agent-conveyor", "agent-conveyor", "0.1.20")));
+    assert.ok(pluginPathPayload.plugin_install_root.endsWith(join("plugins", "cache", "agent-conveyor", "agent-conveyor", "0.1.21")));
     assert.equal(pluginPathPayload.skills_install_root, join(codexHome, "skills"));
 
     const statusBefore = runTypescriptRuntimeCommand({
@@ -9439,8 +9439,8 @@ test("TypeScript runtime handles Agent Conveyor plugin install status and path c
       version_matches: boolean;
     };
     assert.equal(statusBeforePayload.installed, false);
-    assert.equal(statusBeforePayload.package_version, "0.1.20");
-    assert.equal(statusBeforePayload.plugin_version, "0.1.20");
+    assert.equal(statusBeforePayload.package_version, "0.1.21");
+    assert.equal(statusBeforePayload.plugin_version, "0.1.21");
     assert.equal(statusBeforePayload.version_matches, false);
     assert.deepEqual(
       statusBeforePayload.skills.map((skill) => ({ installed: skill.installed, name: skill.name })),
@@ -9448,6 +9448,7 @@ test("TypeScript runtime handles Agent Conveyor plugin install status and path c
         { installed: false, name: "conveyor-create-pair" },
         { installed: false, name: "conveyor-create-worker-set" },
         { installed: false, name: "conveyor-check-status" },
+        { installed: false, name: "conveyor-whats-next-nudger" },
       ],
     );
 
@@ -9463,19 +9464,21 @@ test("TypeScript runtime handles Agent Conveyor plugin install status and path c
       plugin_version: string;
     };
     assert.equal(installPayload.installed, true);
-    assert.equal(installPayload.package_version, "0.1.20");
-    assert.equal(installPayload.plugin_version, "0.1.20");
+    assert.equal(installPayload.package_version, "0.1.21");
+    assert.equal(installPayload.plugin_version, "0.1.21");
     assert.deepEqual(installPayload.installed_skills.sort(), [
       "conveyor-check-status",
       "conveyor-create-pair",
       "conveyor-create-worker-set",
+      "conveyor-whats-next-nudger",
     ]);
 
-    const installedManifestPath = join(codexHome, "plugins", "cache", "agent-conveyor", "agent-conveyor", "0.1.20", "plugin.json");
+    const installedManifestPath = join(codexHome, "plugins", "cache", "agent-conveyor", "agent-conveyor", "0.1.21", "plugin.json");
     assert.ok(existsSync(installedManifestPath));
     assert.ok(existsSync(join(codexHome, "skills", "conveyor-check-status", "SKILL.md")));
     assert.ok(existsSync(join(codexHome, "skills", "conveyor-create-pair", "SKILL.md")));
     assert.ok(existsSync(join(codexHome, "skills", "conveyor-create-worker-set", "SKILL.md")));
+    assert.ok(existsSync(join(codexHome, "skills", "conveyor-whats-next-nudger", "SKILL.md")));
     const absoluteLedgerPath = /(^|[^\w$])\/[^\s`"']*\.codex-workers\/workerctl\.db/;
     assert.match("/tmp/project/.codex-workers/workerctl.db", absoluteLedgerPath);
     assert.match("--path=/tmp/project/.codex-workers/workerctl.db", absoluteLedgerPath);
@@ -9483,7 +9486,7 @@ test("TypeScript runtime handles Agent Conveyor plugin install status and path c
     assert.doesNotMatch("$PWD/.codex-workers/workerctl.db", absoluteLedgerPath);
     assert.doesNotMatch("--path=$PWD/.codex-workers/workerctl.db", absoluteLedgerPath);
     assert.doesNotMatch(".codex-workers/workerctl.db", absoluteLedgerPath);
-    for (const name of ["conveyor-create-pair", "conveyor-create-worker-set", "conveyor-check-status"]) {
+    for (const name of ["conveyor-create-pair", "conveyor-create-worker-set", "conveyor-check-status", "conveyor-whats-next-nudger"]) {
       const text = readFileSync(join(codexHome, "skills", name, "SKILL.md"), "utf8");
       assert.match(text, /\.codex-workers\/workerctl\.db/);
       assert.doesNotMatch(text, absoluteLedgerPath);
@@ -9496,7 +9499,7 @@ test("TypeScript runtime handles Agent Conveyor plugin install status and path c
     );
     const installedManifest = JSON.parse(readFileSync(installedManifestPath, "utf8")) as { name: string; version: string };
     assert.equal(installedManifest.name, "agent-conveyor");
-    assert.equal(installedManifest.version, "0.1.20");
+    assert.equal(installedManifest.version, "0.1.21");
 
     const statusAfter = runTypescriptRuntimeCommand({
       args: ["plugin-status", "--codex-home", codexHome, "--json"],
@@ -9509,13 +9512,13 @@ test("TypeScript runtime handles Agent Conveyor plugin install status and path c
       version_matches: boolean;
     };
     assert.equal(statusAfterPayload.installed, true);
-    assert.equal(statusAfterPayload.installed_version, "0.1.20");
+    assert.equal(statusAfterPayload.installed_version, "0.1.21");
     assert.equal(statusAfterPayload.version_matches, true);
 
     const corruptHome = join(root, "corrupt-codex-home");
-    const corruptManifestDir = join(corruptHome, "plugins", "cache", "agent-conveyor", "agent-conveyor", "0.1.20");
+    const corruptManifestDir = join(corruptHome, "plugins", "cache", "agent-conveyor", "agent-conveyor", "0.1.21");
     mkdirSync(corruptManifestDir, { recursive: true });
-    writeFileSync(join(corruptManifestDir, "plugin.json"), JSON.stringify({ name: "not-agent-conveyor", version: "0.1.20" }));
+    writeFileSync(join(corruptManifestDir, "plugin.json"), JSON.stringify({ name: "not-agent-conveyor", version: "0.1.21" }));
     const corruptStatus = runTypescriptRuntimeCommand({
       args: ["plugin-status", "--codex-home", corruptHome, "--json"],
       env: {},
@@ -9536,6 +9539,7 @@ test("TypeScript runtime handles Agent Conveyor plugin install status and path c
         { installed: false, name: "conveyor-create-pair" },
         { installed: false, name: "conveyor-create-worker-set" },
         { installed: false, name: "conveyor-check-status" },
+        { installed: false, name: "conveyor-whats-next-nudger" },
       ],
     );
 

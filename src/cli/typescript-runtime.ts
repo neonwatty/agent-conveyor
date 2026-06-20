@@ -7331,7 +7331,12 @@ function runInstallSkillsCommand(
 }
 
 const AGENT_CONVEYOR_PLUGIN_NAME = "agent-conveyor";
-const AGENT_CONVEYOR_PLUGIN_SKILLS = ["conveyor-create-pair", "conveyor-create-worker-set", "conveyor-check-status"] as const;
+const AGENT_CONVEYOR_PLUGIN_SKILLS = [
+  "conveyor-create-pair",
+  "conveyor-create-worker-set",
+  "conveyor-check-status",
+  "conveyor-whats-next-nudger",
+] as const;
 
 interface AgentConveyorPluginManifest {
   name?: string;
