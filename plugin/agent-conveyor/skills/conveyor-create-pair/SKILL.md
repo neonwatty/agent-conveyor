@@ -24,6 +24,10 @@ tranche.
 - Generated manager and worker prompts must require visible session sections:
   `CONVEYOR POLL`, `CONVEYOR RECEIVED`, `WORK`, `CONVEYOR SEND`, and
   `DISPATCH`.
+- After binding and before sending any real work prompt, run the
+  `conveyor-smoke-app-connections` skill in required mode. If smoke fails, do
+  not send the real task prompt; return the exact smoke blockers and repair
+  action.
 - Tell the operator to use `conveyor-app-wake-relay` for stale app threads;
   direct app-thread prompts are wake prompts only, not durable task truth.
 
@@ -40,6 +44,8 @@ LEDGER="$PWD/.codex-workers/workerctl.db"
 2. Create one manager Codex app thread and one worker Codex app thread.
 3. Run `conveyor create-disposable-binding` with the created thread ids and:
    `--path "$PWD/.codex-workers/workerctl.db" --json`.
-4. Return the manager thread title/id, worker thread title/id, ledger path,
+4. Run `conveyor-smoke-app-connections` for the created task. Required smoke
+   must pass before the real task starts.
+5. Return the manager thread title/id, worker thread title/id, ledger path,
    task name, and exact status command:
    `TASK="example-task"; conveyor app-loop-status "$TASK" --path "$PWD/.codex-workers/workerctl.db" --json`.

@@ -42,6 +42,7 @@ const required = [
   "skills/codex-review/scripts/codex-review",
   "plugin/agent-conveyor/plugin.json",
   "plugin/agent-conveyor/skills/conveyor-app-wake-relay/SKILL.md",
+  "plugin/agent-conveyor/skills/conveyor-smoke-app-connections/SKILL.md",
   "plugin/agent-conveyor/skills/conveyor-create-pair/SKILL.md",
   "plugin/agent-conveyor/skills/conveyor-create-worker-set/SKILL.md",
   "plugin/agent-conveyor/skills/conveyor-check-status/SKILL.md",
@@ -146,6 +147,7 @@ const expectedSkills = [
   "conveyor-check-status",
   "conveyor-create-pair",
   "conveyor-create-worker-set",
+  "conveyor-smoke-app-connections",
   "conveyor-whats-next-nudger",
 ];
 
@@ -229,6 +231,46 @@ PATH="$PREFIX/bin:$PATH" "$CONVEYOR" app-wakeup-dispatch smoke-app-loop --path "
 PATH="$PREFIX/bin:$PATH" "$CONVEYOR" app-autopilot start smoke-app-loop --path "$SMOKE_DB" --json > "$SMOKE_DIR/app-autopilot-start.json"
 PATH="$PREFIX/bin:$PATH" "$CONVEYOR" app-autopilot stop smoke-app-loop --path "$SMOKE_DB" --json > "$SMOKE_DIR/app-autopilot-stop.json"
 PATH="$PREFIX/bin:$PATH" "$CONVEYOR" app-autopilot status smoke-app-loop --path "$SMOKE_DB" --json > "$SMOKE_DIR/app-autopilot-status.json"
+PATH="$PREFIX/bin:$PATH" "$CONVEYOR" app-smoke preflight smoke-app-loop --mode required --scope pair --path "$SMOKE_DB" --json > "$SMOKE_DIR/app-smoke-preflight.json"
+PATH="$PREFIX/bin:$PATH" "$CONVEYOR" app-smoke start smoke-app-loop --mode required --scope pair --smoke-id package-smoke --nonce package-smoke-nonce --path "$SMOKE_DB" --json > "$SMOKE_DIR/app-smoke-start.json"
+PATH="$PREFIX/bin:$PATH" "$CONVEYOR" app-smoke status smoke-app-loop --smoke-id package-smoke --path "$SMOKE_DB" --json > "$SMOKE_DIR/app-smoke-blocked.json"
+PATH="$PREFIX/bin:$PATH" "$CONVEYOR" app-smoke record smoke-app-loop --smoke-id package-smoke --nonce package-smoke-nonce --role manager --status sent --thread-id thread-manager-smoke --path "$SMOKE_DB" --json > "$SMOKE_DIR/app-smoke-manager-sent.json"
+PATH="$PREFIX/bin:$PATH" "$CONVEYOR" app-smoke record smoke-app-loop --smoke-id package-smoke --nonce package-smoke-nonce --role worker --status sent --thread-id thread-worker-smoke --path "$SMOKE_DB" --json > "$SMOKE_DIR/app-smoke-worker-sent.json"
+PATH="$PREFIX/bin:$PATH" "$CONVEYOR" app-heartbeat smoke-app-loop --role manager --path "$SMOKE_DB" --json > "$SMOKE_DIR/app-heartbeat-manager-smoke.json"
+PATH="$PREFIX/bin:$PATH" "$CONVEYOR" app-heartbeat smoke-app-loop --role worker --path "$SMOKE_DB" --json > "$SMOKE_DIR/app-heartbeat-worker-smoke.json"
+printf '%s\n' '{"summary":"Package smoke manager accepted the live-smoke contract."}' \
+  | PATH="$PREFIX/bin:$PATH" "$CONVEYOR" app-smoke record smoke-app-loop \
+    --smoke-id package-smoke \
+    --nonce package-smoke-nonce \
+    --role manager \
+    --status accepted \
+    --thread-id thread-manager-smoke \
+    --from-stdin \
+    --path "$SMOKE_DB" \
+    --json > "$SMOKE_DIR/app-smoke-manager-accepted.json"
+printf '%s\n' '{"summary":"Package smoke worker received the live-smoke contract."}' \
+  | PATH="$PREFIX/bin:$PATH" "$CONVEYOR" app-smoke record smoke-app-loop \
+    --smoke-id package-smoke \
+    --nonce package-smoke-nonce \
+    --role worker \
+    --status received \
+    --thread-id thread-worker-smoke \
+    --notification-id "$SMOKE_NOTIFICATION_ID" \
+    --from-stdin \
+    --path "$SMOKE_DB" \
+    --json > "$SMOKE_DIR/app-smoke-worker-received.json"
+printf '%s\n' '{"summary":"Package smoke worker accepted the live-smoke contract."}' \
+  | PATH="$PREFIX/bin:$PATH" "$CONVEYOR" app-smoke record smoke-app-loop \
+    --smoke-id package-smoke \
+    --nonce package-smoke-nonce \
+    --role worker \
+    --status accepted \
+    --thread-id thread-worker-smoke \
+    --notification-id "$SMOKE_NOTIFICATION_ID" \
+    --from-stdin \
+    --path "$SMOKE_DB" \
+    --json > "$SMOKE_DIR/app-smoke-worker-accepted.json"
+PATH="$PREFIX/bin:$PATH" "$CONVEYOR" app-smoke status smoke-app-loop --smoke-id package-smoke --path "$SMOKE_DB" --json > "$SMOKE_DIR/app-smoke-passed.json"
 
 STALE_DB="$SMOKE_DIR/app-loop-stale.db"
 PATH="$PREFIX/bin:$PATH" "$CONVEYOR" create-disposable-binding smoke-app-stale \
@@ -292,7 +334,7 @@ if (read.latest?.status !== "accepted" || read.acknowledgements?.length !== 2) {
 }
 JS
 
-node - "$SMOKE_DIR/create-disposable-binding.json" "$SMOKE_DIR/app-loop-status.json" "$SMOKE_DIR/app-wakeup-plan.json" "$SMOKE_DIR/app-wakeup-dispatch-healthy.json" "$SMOKE_DIR/app-wakeup-dispatch-stale.json" "$SMOKE_DIR/app-wakeup-delivery-sent.json" "$SMOKE_DIR/app-wakeup-delivery-rejected.err" "$SMOKE_DIR/app-autopilot-start.json" "$SMOKE_DIR/app-autopilot-stop.json" "$SMOKE_DIR/app-autopilot-status.json" <<'JS'
+node - "$SMOKE_DIR/create-disposable-binding.json" "$SMOKE_DIR/app-loop-status.json" "$SMOKE_DIR/app-wakeup-plan.json" "$SMOKE_DIR/app-wakeup-dispatch-healthy.json" "$SMOKE_DIR/app-wakeup-dispatch-stale.json" "$SMOKE_DIR/app-wakeup-delivery-sent.json" "$SMOKE_DIR/app-wakeup-delivery-rejected.err" "$SMOKE_DIR/app-autopilot-start.json" "$SMOKE_DIR/app-autopilot-stop.json" "$SMOKE_DIR/app-autopilot-status.json" "$SMOKE_DIR/app-smoke-preflight.json" "$SMOKE_DIR/app-smoke-start.json" "$SMOKE_DIR/app-smoke-blocked.json" "$SMOKE_DIR/app-smoke-passed.json" <<'JS'
 const fs = require("fs");
 const binding = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
 const status = JSON.parse(fs.readFileSync(process.argv[3], "utf8"));
@@ -304,6 +346,10 @@ const deliveryRejected = fs.readFileSync(process.argv[8], "utf8");
 const autopilotStart = JSON.parse(fs.readFileSync(process.argv[9], "utf8"));
 const autopilotStop = JSON.parse(fs.readFileSync(process.argv[10], "utf8"));
 const autopilotStatus = JSON.parse(fs.readFileSync(process.argv[11], "utf8"));
+const smokePreflight = JSON.parse(fs.readFileSync(process.argv[12], "utf8"));
+const smokeStart = JSON.parse(fs.readFileSync(process.argv[13], "utf8"));
+const smokeBlocked = JSON.parse(fs.readFileSync(process.argv[14], "utf8"));
+const smokePassed = JSON.parse(fs.readFileSync(process.argv[15], "utf8"));
 if (!binding.heartbeat_recommendations?.wakeup_dispatch_command?.includes("app-wakeup-dispatch 'smoke-app-loop'")) {
   throw new Error(`expected bootstrap wakeup dispatch command, got ${JSON.stringify(binding.heartbeat_recommendations)}`);
 }
@@ -372,6 +418,33 @@ if (autopilotStop.receipt?.event_type !== "app_autopilot_stopped" || autopilotSt
 }
 if (autopilotStatus.receipt !== null || autopilotStatus.plan?.desired_state !== "stopped" || autopilotStatus.plan.last_policy_event?.event_id !== autopilotStop.receipt.event_id) {
   throw new Error(`expected app-autopilot status to read stopped policy, got ${JSON.stringify(autopilotStatus)}`);
+}
+if (!smokePreflight.ok || smokePreflight.real_work_allowed !== true) {
+  throw new Error(`expected app-smoke preflight to pass with bound thread metadata, got ${JSON.stringify(smokePreflight)}`);
+}
+if (smokeStart.receipt?.event_type !== "app_smoke_started" || smokeStart.smoke?.id !== "package-smoke") {
+  throw new Error(`expected app-smoke start receipt for package-smoke, got ${JSON.stringify(smokeStart)}`);
+}
+if (smokeBlocked.real_work_allowed !== false || smokeBlocked.ok !== false) {
+  throw new Error(`expected app-smoke to block real work before role receipts, got ${JSON.stringify(smokeBlocked)}`);
+}
+for (const expected of [
+  "manager smoke prompt has not been recorded as sent",
+  "worker smoke prompt has not been recorded as sent",
+  "worker has not recorded smoke received",
+]) {
+  if (!smokeBlocked.blockers.includes(expected)) {
+    throw new Error(`expected missing smoke blocker ${expected}, got ${JSON.stringify(smokeBlocked.blockers)}`);
+  }
+}
+if (smokePassed.real_work_allowed !== true || smokePassed.ok !== true || smokePassed.blockers.length !== 0) {
+  throw new Error(`expected app-smoke to pass after nonce-bound role receipts and fresh heartbeats, got ${JSON.stringify(smokePassed)}`);
+}
+if (!smokePassed.roles.manager.sent || !smokePassed.roles.manager.accepted || !smokePassed.roles.manager.heartbeat_fresh) {
+  throw new Error(`expected manager smoke role to be sent/accepted/fresh, got ${JSON.stringify(smokePassed.roles.manager)}`);
+}
+if (!smokePassed.roles.worker.sent || !smokePassed.roles.worker.received || !smokePassed.roles.worker.accepted || !smokePassed.roles.worker.heartbeat_fresh) {
+  throw new Error(`expected worker smoke role to be sent/received/accepted/fresh, got ${JSON.stringify(smokePassed.roles.worker)}`);
 }
 JS
 

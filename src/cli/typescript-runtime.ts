@@ -317,6 +317,9 @@ export function runTypescriptRuntimeCommand(options: TypescriptRuntimeOptions): 
     if (parsed.command === "app-autopilot") {
       return runAppAutopilotCommand(parsed, options);
     }
+    if (parsed.command === "app-smoke") {
+      return runAppSmokeCommand(parsed, options);
+    }
     if (parsed.command === "qa-plan") {
       return runQaPlanCommand(parsed);
     }
@@ -624,6 +627,18 @@ function commandHelpText(program: "conveyor" | "workerctl", command: string): st
       `  ${program} app-autopilot status dogfood --path /tmp/work/workerctl.db`,
       `  ${program} app-autopilot stop dogfood --path /tmp/work/workerctl.db --json`,
     ],
+    "app-smoke": [
+      `usage: ${program} app-smoke preflight|start|record|status <task> [--mode required|advisory|skip] [--scope pair|worker-set] [--smoke-id ID] [--nonce NONCE] [--role manager|worker] [--status sent|skipped|received|accepted|blocked] [--thread-id ID] [--notification-id N] [--worker-count N] ${path} [--from-stdin] [--json]`,
+      "",
+      "Manage a blocking Codex app connection smoke lifecycle for manager/worker bindings.",
+      "The CLI records durable smoke receipts; the Codex app/plugin layer still performs live app-thread sends.",
+      "",
+      "Examples:",
+      `  ${program} app-smoke preflight dogfood --mode required --path /tmp/work/workerctl.db --json`,
+      `  ${program} app-smoke start dogfood --mode required --path /tmp/work/workerctl.db --json`,
+      `  ${program} app-smoke record dogfood --smoke-id smoke-123 --nonce nonce --role worker --status accepted --thread-id thread-worker --from-stdin --path /tmp/work/workerctl.db --json`,
+      `  ${program} app-smoke status dogfood --path /tmp/work/workerctl.db --json`,
+    ],
     "app-worker-rotation-plan": [
       `usage: ${program} app-worker-rotation-plan <task> --old-worker-thread-id ID [--require-handoff] [--reason TEXT] ${path} [--json]`,
       "",
@@ -785,6 +800,10 @@ interface ParsedRuntimeArgs {
     subtype: string | null;
     summary: string | null;
     source: string | null;
+    smokeId: string | null;
+    smokeMode: string | null;
+    smokeNonce: string | null;
+    smokeScope: string | null;
     objective: string | null;
     promptSummary: string | null;
     proof: string | null;
@@ -890,6 +909,7 @@ interface ParsedRuntimeArgs {
     telemetryView: string | null;
     telemetryViewTask: string | null;
     workerName: string | null;
+    workerCount: number | null;
     search: string | null;
     severity: string | null;
     staleCycleSeconds: number;
@@ -1049,6 +1069,10 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
     subtype: null,
     summary: null,
     source: null,
+    smokeId: null,
+    smokeMode: null,
+    smokeNonce: null,
+    smokeScope: null,
     objective: null,
     promptSummary: null,
     proof: null,
@@ -1154,6 +1178,7 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
     telemetryView: null,
     telemetryViewTask: null,
     workerName: null,
+    workerCount: null,
     search: null,
     severity: null,
     staleCycleSeconds: 3600.0,
@@ -1840,7 +1865,7 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       flags.fromWorkerResponse = value.value;
       index += 1;
     } else if (arg === "--from-stdin") {
-      if (command !== "criteria-plan" && command !== "continuation" && command !== "worker-ack" && command !== "manager-ack" && command !== "inbox-ack") {
+      if (command !== "criteria-plan" && command !== "continuation" && command !== "worker-ack" && command !== "manager-ack" && command !== "inbox-ack" && command !== "app-smoke") {
         return { command, enabled, error: "Unsupported TypeScript runtime option: --from-stdin", explicit, flags, task };
       }
       flags.fromStdin = true;
@@ -1964,6 +1989,7 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
         && command !== "app-wakeup-plan"
         && command !== "app-wakeup-dispatch"
         && command !== "app-autopilot"
+        && command !== "app-smoke"
       ) {
         return { command, enabled, error: "Unsupported TypeScript runtime option: --dispatcher-id", explicit, flags, task };
       }
@@ -2324,7 +2350,7 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       flags.archiveStatus = value.value;
       index += 1;
     } else if (arg === "--thread-id") {
-      if (command !== "app-wakeup-record-delivery" && command !== "campaign") {
+      if (command !== "app-wakeup-record-delivery" && command !== "campaign" && command !== "app-smoke") {
         return { command, enabled, error: "Unsupported TypeScript runtime option: --thread-id", explicit, flags, task };
       }
       const value = valueAfter(queue, index, arg);
@@ -2581,6 +2607,14 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
         index += 1;
         continue;
       }
+      if (command === "app-smoke") {
+        if (value !== "required" && value !== "advisory" && value !== "skip") {
+          return { command, enabled, error: `Unsupported app-smoke mode: ${value}`, explicit, flags, task };
+        }
+        flags.smokeMode = value;
+        index += 1;
+        continue;
+      }
       if (!isTranscriptCaptureMode(value)) {
         return { command, enabled, error: `Unsupported transcript capture mode: ${value}`, explicit, flags, task };
       }
@@ -2633,7 +2667,7 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
         flags.epilogueStatus = true;
         continue;
       }
-      if (command !== "criteria" && command !== "runs" && command !== "loop-evidence" && command !== "campaign" && command !== "inbox-ack") {
+      if (command !== "criteria" && command !== "runs" && command !== "loop-evidence" && command !== "campaign" && command !== "inbox-ack" && command !== "app-smoke") {
         return { command, enabled, error: "Unsupported TypeScript runtime option: --status", explicit, flags, task };
       }
       const parsedValue = valueAfter(queue, index, arg);
@@ -2642,14 +2676,14 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       }
       if (command === "criteria") {
         flags.statuses.push(parsedValue.value);
-      } else if (command === "inbox-ack") {
+      } else if (command === "inbox-ack" || command === "app-smoke") {
         flags.statusState = parsedValue.value;
       } else {
         flags.statusState = parsedValue.value;
       }
       index += 1;
     } else if (arg === "--notification-id") {
-      if (command !== "inbox-ack") {
+      if (command !== "inbox-ack" && command !== "app-smoke") {
         return { command, enabled, error: "Unsupported TypeScript runtime option: --notification-id", explicit, flags, task };
       }
       const parsedValue = valueAfter(queue, index, arg);
@@ -2661,6 +2695,39 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
         return { command, enabled, error: "--notification-id must be a positive integer.", explicit, flags, task };
       }
       flags.notificationId = value;
+      index += 1;
+    } else if (arg === "--smoke-id" || arg === "--nonce" || arg === "--scope") {
+      if (command !== "app-smoke") {
+        return { command, enabled, error: `Unsupported TypeScript runtime option: ${arg}`, explicit, flags, task };
+      }
+      const parsedValue = valueAfter(queue, index, arg);
+      if (parsedValue.error) {
+        return { command, enabled, error: parsedValue.error, explicit, flags, task };
+      }
+      if (arg === "--smoke-id") {
+        flags.smokeId = parsedValue.value;
+      } else if (arg === "--nonce") {
+        flags.smokeNonce = parsedValue.value;
+      } else {
+        if (parsedValue.value !== "pair" && parsedValue.value !== "worker-set") {
+          return { command, enabled, error: `Unsupported app-smoke scope: ${parsedValue.value}`, explicit, flags, task };
+        }
+        flags.smokeScope = parsedValue.value;
+      }
+      index += 1;
+    } else if (arg === "--worker-count") {
+      if (command !== "app-smoke") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --worker-count", explicit, flags, task };
+      }
+      const parsedValue = valueAfter(queue, index, arg);
+      if (parsedValue.error) {
+        return { command, enabled, error: parsedValue.error, explicit, flags, task };
+      }
+      const value = Number(parsedValue.value);
+      if (!Number.isInteger(value) || value <= 0) {
+        return { command, enabled, error: "--worker-count must be a positive integer.", explicit, flags, task };
+      }
+      flags.workerCount = value;
       index += 1;
     } else if (arg === "--type") {
       const value = valueAfter(queue, index, arg);
@@ -2801,6 +2868,7 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
         && command !== "continuation"
         && command !== "continuation-reviewer"
         && command !== "epilogue"
+        && command !== "app-smoke"
       ) {
         return { command, enabled, error: "Unsupported TypeScript runtime option: --correlation-id", explicit, flags, task };
       }
@@ -3257,6 +3325,11 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
     } else if (command === "app-autopilot" && flags.action === null) {
       if (!["start", "stop", "status"].includes(arg)) {
         return { command, enabled, error: `Unsupported app-autopilot action: ${arg}`, explicit, flags, task };
+      }
+      flags.action = arg;
+    } else if (command === "app-smoke" && flags.action === null) {
+      if (!["preflight", "record", "start", "status"].includes(arg)) {
+        return { command, enabled, error: `Unsupported app-smoke action: ${arg}`, explicit, flags, task };
       }
       flags.action = arg;
     } else if (command === "campaign" && flags.action === null) {
@@ -4670,6 +4743,518 @@ function runAppAutopilotCommand(
   } finally {
     database.close();
   }
+}
+
+type AppSmokeMode = "advisory" | "required" | "skip";
+type AppSmokeScope = "pair" | "worker-set";
+type AppSmokeRecordStatus = "accepted" | "blocked" | "received" | "sent" | "skipped";
+
+interface AppSmokeStartAttributes {
+  binding_id: string;
+  mode: AppSmokeMode;
+  nonce: string;
+  scope: AppSmokeScope;
+  smoke_id: string;
+  worker_count: number;
+}
+
+interface AppSmokeReceiptAttributes {
+  notification_id: number | null;
+  nonce: string;
+  payload: Record<string, unknown>;
+  payload_keys: string[];
+  role: AppLoopRole;
+  smoke_id: string;
+  status: AppSmokeRecordStatus;
+  thread_id: string | null;
+}
+
+interface AppSmokeSession {
+  event_id: string;
+  mode: AppSmokeMode;
+  nonce: string;
+  recorded_at: string;
+  scope: AppSmokeScope;
+  smoke_id: string;
+  worker_count: number;
+}
+
+interface AppSmokeRoleStatus {
+  accepted: boolean;
+  blocked: boolean;
+  blocker: string | null;
+  heartbeat_fresh: boolean;
+  last_heartbeat_at: string | null;
+  received: boolean;
+  sent: boolean;
+  session_id: string;
+  session_name: string;
+  thread_id: string | null;
+}
+
+function runAppSmokeCommand(
+  parsed: ParsedRuntimeArgs,
+  options: { cwd?: string; env?: NodeJS.ProcessEnv; now?: () => Date; stdin?: string },
+): TypescriptRuntimeResult {
+  const action = parsed.flags.action;
+  if (action !== "preflight" && action !== "record" && action !== "start" && action !== "status") {
+    return errorResult("app-smoke requires an action: preflight, start, record, or status");
+  }
+  const taskName = requireTask(parsed);
+  const database = openRuntimeDatabase(parsed, options);
+  try {
+    const timestamp = nowIsoSeconds(options);
+    const dbPath = runtimeDbPath(parsed, options);
+    const task = taskRowForDiagnostics(database, taskName);
+    if (action === "preflight") {
+      const output = appSmokePreflightSync(database, {
+        dbPath,
+        mode: parseAppSmokeMode(parsed.flags.smokeMode),
+        scope: parseAppSmokeScope(parsed.flags.smokeScope),
+        task,
+        workerCount: parsed.flags.workerCount ?? 1,
+      });
+      return parsed.flags.json ? jsonResult(output) : { exitCode: 0, handled: true, stdout: renderAppSmokeStatusText(output) };
+    }
+    if (action === "start") {
+      const mode = parseAppSmokeMode(parsed.flags.smokeMode);
+      const scope = parseAppSmokeScope(parsed.flags.smokeScope);
+      const binding = activeBindingForTaskSync(database, task.name);
+      const smokeId = parsed.flags.smokeId ?? `smoke-${randomUUID()}`;
+      const nonce = parsed.flags.smokeNonce ?? `nonce-${randomUUID()}`;
+      const eventId = emitTelemetrySync(database, {
+        actor: "operator",
+        attributes: {
+          binding_id: binding.binding_id,
+          mode,
+          nonce,
+          scope,
+          smoke_id: smokeId,
+          worker_count: parsed.flags.workerCount ?? 1,
+        },
+        correlation: {
+          command: "app-smoke",
+          smoke_id: smokeId,
+        },
+        eventType: mode === "skip" ? "app_smoke_skipped" : "app_smoke_started",
+        severity: mode === "skip" ? "warning" : "info",
+        summary: mode === "skip" ? `App smoke skipped for ${task.name}.` : `App smoke started for ${task.name}.`,
+        taskId: task.id,
+        timestamp,
+      });
+      const status = appSmokeStatusSync(database, {
+        dbPath,
+        now: timestamp,
+        smokeId,
+        staleAfterSeconds: parsed.flags.appStaleAfterSeconds,
+        task,
+      });
+      const output = {
+        receipt: {
+          event_id: eventId,
+          event_type: mode === "skip" ? "app_smoke_skipped" : "app_smoke_started",
+          recorded_at: timestamp,
+        },
+        smoke: {
+          id: smokeId,
+          mode,
+          nonce,
+          scope,
+          worker_count: parsed.flags.workerCount ?? 1,
+        },
+        status,
+        task: { id: task.id, name: task.name },
+      };
+      return parsed.flags.json ? jsonResult(output) : { exitCode: 0, handled: true, stdout: renderAppSmokeStatusText(status) };
+    }
+    if (action === "record") {
+      const smokeId = requiredStringFlag(parsed.flags.smokeId, "--smoke-id");
+      const nonce = requiredStringFlag(parsed.flags.smokeNonce, "--nonce");
+      const role = parseAppSmokeRole(parsed.flags.role);
+      const status = parseAppSmokeRecordStatus(parsed.flags.statusState);
+      if (role instanceof Error) {
+        return errorResult(role.message);
+      }
+      if (status instanceof Error) {
+        return errorResult(status.message);
+      }
+      const session = latestAppSmokeSessionSync(database, { smokeId, taskId: task.id });
+      if (session.nonce !== nonce) {
+        throw new Error(`Smoke nonce mismatch for ${smokeId}; expected ${session.nonce}.`);
+      }
+      validateAppSmokeRecordThread(database, {
+        role,
+        status,
+        taskId: task.id,
+        taskName: task.name,
+        threadId: parsed.flags.threadId,
+      });
+      const payload = parsed.flags.fromStdin ? parseStdinJsonObject(options.stdin) : {};
+      const eventId = emitTelemetrySync(database, {
+        actor: role,
+        attributes: {
+          notification_id: parsed.flags.notificationId,
+          nonce,
+          payload,
+          payload_keys: Object.keys(payload).sort(),
+          role,
+          smoke_id: smokeId,
+          status,
+          thread_id: parsed.flags.threadId,
+        },
+        correlation: {
+          command: "app-smoke",
+          correlation_id: parsed.flags.correlationId,
+          nonce,
+          role,
+          smoke_id: smokeId,
+        },
+        eventType: "app_smoke_receipt_recorded",
+        severity: status === "blocked" ? "warning" : "info",
+        summary: `App smoke ${status} recorded for ${role} on ${task.name}.`,
+        taskId: task.id,
+        timestamp,
+      });
+      const output = {
+        receipt: {
+          event_id: eventId,
+          event_type: "app_smoke_receipt_recorded",
+          recorded_at: timestamp,
+        },
+        smoke: {
+          id: smokeId,
+          nonce,
+        },
+        task: { id: task.id, name: task.name },
+      };
+      return parsed.flags.json ? jsonResult(output) : { exitCode: 0, handled: true, stdout: `App smoke ${status} recorded for ${role}.\n` };
+    }
+    const status = appSmokeStatusSync(database, {
+      dbPath,
+      now: timestamp,
+      smokeId: parsed.flags.smokeId,
+      staleAfterSeconds: parsed.flags.appStaleAfterSeconds,
+      task,
+    });
+    return parsed.flags.json ? jsonResult(status) : { exitCode: 0, handled: true, stdout: renderAppSmokeStatusText(status) };
+  } finally {
+    database.close();
+  }
+}
+
+function appSmokePreflightSync(
+  database: RuntimeDatabase,
+  options: {
+    dbPath: string;
+    mode: AppSmokeMode;
+    scope: AppSmokeScope;
+    task: TaskDiagnosticsRow;
+    workerCount: number;
+  },
+): Record<string, unknown> {
+  let binding: ReturnType<typeof activeBindingForTaskSync> | null = null;
+  let bindingError: string | null = null;
+  try {
+    binding = activeBindingForTaskSync(database, options.task.name);
+  } catch (error) {
+    bindingError = error instanceof Error ? error.message : String(error);
+  }
+  const bound = binding ? appSmokeBoundSessionsSync(database, options.task.id) : null;
+  const checks = [
+    { ok: true, name: "ledger_writable", path: options.dbPath },
+    { ok: true, name: "package_cli_available", command: "app-smoke" },
+    {
+      detail: bindingError,
+      ok: binding !== null,
+      name: "active_binding",
+    },
+    {
+      ok: Boolean(bound?.manager.thread_id),
+      name: "manager_thread_metadata",
+      thread_id: bound?.manager.thread_id ?? null,
+    },
+    {
+      ok: Boolean(bound?.worker.thread_id),
+      name: "worker_thread_metadata",
+      thread_id: bound?.worker.thread_id ?? null,
+    },
+    {
+      ok: false,
+      name: "codex_app_thread_tools",
+      note: "Plain CLI cannot call Codex app thread tools; the plugin skill must perform live sends.",
+      required_in_plugin: true,
+    },
+  ];
+  const blockers = options.mode === "required"
+    ? checks.filter((check) => !check.ok && check.name !== "codex_app_thread_tools").map((check) => `${check.name}${check.detail ? `: ${check.detail}` : ""}`)
+    : [];
+  return {
+    blockers,
+    checks,
+    mode: options.mode,
+    ok: blockers.length === 0,
+    real_work_allowed: options.mode !== "required" || blockers.length === 0,
+    scope: options.scope,
+    task: { id: options.task.id, name: options.task.name },
+    worker_count: options.workerCount,
+  };
+}
+
+function appSmokeStatusSync(
+  database: RuntimeDatabase,
+  options: {
+    dbPath: string;
+    now: string;
+    smokeId: string | null;
+    staleAfterSeconds: number;
+    task: TaskDiagnosticsRow;
+  },
+): Record<string, unknown> {
+  const smoke = latestAppSmokeSessionSync(database, { smokeId: options.smokeId, taskId: options.task.id });
+  const bound = appSmokeBoundSessionsSync(database, options.task.id);
+  const receipts = appSmokeReceiptsSync(database, { smokeId: smoke.smoke_id, taskId: options.task.id });
+  const manager = appSmokeRoleStatus("manager", bound.manager, receipts, smoke, options);
+  const worker = appSmokeRoleStatus("worker", bound.worker, receipts, smoke, options);
+  const blockers = smoke.mode === "skip" ? [] : [
+    ...appSmokeScopeBlockers(smoke),
+    ...appSmokeRoleBlockers("manager", manager),
+    ...appSmokeRoleBlockers("worker", worker),
+  ];
+  const ok = blockers.length === 0;
+  return {
+    blockers,
+    ok,
+    real_work_allowed: smoke.mode === "skip" || smoke.mode === "advisory" || ok,
+    roles: {
+      manager,
+      worker,
+    },
+    smoke: {
+      id: smoke.smoke_id,
+      mode: smoke.mode,
+      nonce: smoke.nonce,
+      recorded_at: smoke.recorded_at,
+      scope: smoke.scope,
+      worker_count: smoke.worker_count,
+    },
+    task: { id: options.task.id, name: options.task.name },
+  };
+}
+
+function appSmokeRoleStatus(
+  role: AppLoopRole,
+  session: ReturnType<typeof appSmokeBoundSessionsSync>["manager"],
+  receipts: AppSmokeReceiptAttributes[],
+  smoke: AppSmokeSession,
+  options: { now: string; staleAfterSeconds: number },
+): AppSmokeRoleStatus {
+  const roleReceipts = receipts.filter((receipt) => receipt.role === role && receipt.nonce === smoke.nonce);
+  const sent = roleReceipts.some((receipt) => receipt.status === "sent");
+  const received = roleReceipts.some((receipt) => receipt.status === "received");
+  const accepted = roleReceipts.some((receipt) => receipt.status === "accepted");
+  const blockedReceipt = roleReceipts.find((receipt) => receipt.status === "blocked");
+  const heartbeatFresh = session.last_heartbeat_at !== null
+    && session.last_heartbeat_at >= smoke.recorded_at
+    && secondsBetweenIso(session.last_heartbeat_at, options.now) <= options.staleAfterSeconds;
+  return {
+    accepted,
+    blocked: Boolean(blockedReceipt),
+    blocker: typeof blockedReceipt?.payload.summary === "string" ? blockedReceipt.payload.summary : null,
+    heartbeat_fresh: heartbeatFresh,
+    last_heartbeat_at: session.last_heartbeat_at,
+    received,
+    sent,
+    session_id: session.session_id,
+    session_name: session.session_name,
+    thread_id: session.thread_id,
+  };
+}
+
+function appSmokeRoleBlockers(role: AppLoopRole, status: AppSmokeRoleStatus): string[] {
+  const blockers: string[] = [];
+  if (!status.thread_id) {
+    blockers.push(`${role} has no Codex app thread id`);
+  }
+  if (!status.sent) {
+    blockers.push(`${role} smoke prompt has not been recorded as sent`);
+  }
+  if (!status.heartbeat_fresh) {
+    blockers.push(`${role} heartbeat is not fresh after smoke start`);
+  }
+  if (role === "worker" && !status.received) {
+    blockers.push("worker has not recorded smoke received");
+  }
+  if (!status.accepted) {
+    blockers.push(`${role} has not accepted smoke`);
+  }
+  if (status.blocked) {
+    blockers.push(`${role} smoke blocked${status.blocker ? `: ${status.blocker}` : ""}`);
+  }
+  return blockers;
+}
+
+function appSmokeScopeBlockers(smoke: AppSmokeSession): string[] {
+  if (smoke.scope === "worker-set" && smoke.worker_count > 1) {
+    return [`worker-set smoke for one task proves 1 of ${smoke.worker_count} workers; run per-worker smoke and aggregate in the plugin skill`];
+  }
+  return [];
+}
+
+function latestAppSmokeSessionSync(
+  database: RuntimeDatabase,
+  options: { smokeId: string | null; taskId: string },
+): AppSmokeSession {
+  const params: string[] = [options.taskId];
+  const smokeClause = options.smokeId ? "and json_extract(attributes_json, '$.smoke_id') = ?" : "";
+  if (options.smokeId) {
+    params.push(options.smokeId);
+  }
+  const row = database.prepare(`
+    select id, timestamp, event_type, attributes_json
+    from telemetry_events
+    where task_id = ?
+      and event_type in ('app_smoke_started', 'app_smoke_skipped')
+      ${smokeClause}
+    order by timestamp desc, id desc
+    limit 1
+  `).get(...params) as { attributes_json: string; event_type: string; id: string; timestamp: string } | undefined;
+  if (!row) {
+    throw new Error(options.smokeId ? `Unknown app smoke session: ${options.smokeId}` : "No app smoke session has been started for this task.");
+  }
+  const attributes = JSON.parse(row.attributes_json) as AppSmokeStartAttributes;
+  return {
+    event_id: row.id,
+    mode: attributes.mode,
+    nonce: attributes.nonce,
+    recorded_at: row.timestamp,
+    scope: attributes.scope,
+    smoke_id: attributes.smoke_id,
+    worker_count: attributes.worker_count,
+  };
+}
+
+function appSmokeReceiptsSync(
+  database: RuntimeDatabase,
+  options: { smokeId: string; taskId: string },
+): AppSmokeReceiptAttributes[] {
+  const rows = database.prepare(`
+    select attributes_json
+    from telemetry_events
+    where task_id = ?
+      and event_type = 'app_smoke_receipt_recorded'
+      and json_extract(attributes_json, '$.smoke_id') = ?
+    order by timestamp, id
+  `).all(options.taskId, options.smokeId) as Array<{ attributes_json: string }>;
+  return rows.map((row) => JSON.parse(row.attributes_json) as AppSmokeReceiptAttributes);
+}
+
+function appSmokeBoundSessionsSync(database: RuntimeDatabase, taskId: string): {
+  manager: { last_heartbeat_at: string | null; session_id: string; session_name: string; thread_id: string | null; thread_title: string | null };
+  worker: { last_heartbeat_at: string | null; session_id: string; session_name: string; thread_id: string | null; thread_title: string | null };
+} {
+  const row = database.prepare(`
+    select
+      ms.id as manager_session_id,
+      ms.name as manager_session_name,
+      ms.codex_app_thread_id as manager_thread_id,
+      ms.codex_app_thread_title as manager_thread_title,
+      ms.last_heartbeat_at as manager_last_heartbeat_at,
+      ws.id as worker_session_id,
+      ws.name as worker_session_name,
+      ws.codex_app_thread_id as worker_thread_id,
+      ws.codex_app_thread_title as worker_thread_title,
+      ws.last_heartbeat_at as worker_last_heartbeat_at
+    from bindings b
+    join sessions ms on ms.id = b.manager_session_id
+    join sessions ws on ws.id = b.worker_session_id
+    where b.task_id = ?
+      and b.state in ('active', 'ending')
+    order by b.created_at desc
+    limit 1
+  `).get(taskId) as {
+    manager_last_heartbeat_at: string | null;
+    manager_session_id: string;
+    manager_session_name: string;
+    manager_thread_id: string | null;
+    manager_thread_title: string | null;
+    worker_last_heartbeat_at: string | null;
+    worker_session_id: string;
+    worker_session_name: string;
+    worker_thread_id: string | null;
+    worker_thread_title: string | null;
+  } | undefined;
+  if (!row) {
+    throw new Error("No active app smoke binding for task.");
+  }
+  return {
+    manager: {
+      last_heartbeat_at: row.manager_last_heartbeat_at,
+      session_id: row.manager_session_id,
+      session_name: row.manager_session_name,
+      thread_id: row.manager_thread_id,
+      thread_title: row.manager_thread_title,
+    },
+    worker: {
+      last_heartbeat_at: row.worker_last_heartbeat_at,
+      session_id: row.worker_session_id,
+      session_name: row.worker_session_name,
+      thread_id: row.worker_thread_id,
+      thread_title: row.worker_thread_title,
+    },
+  };
+}
+
+function validateAppSmokeRecordThread(
+  database: RuntimeDatabase,
+  options: { role: AppLoopRole; status: AppSmokeRecordStatus; taskId: string; taskName: string; threadId: string | null },
+): void {
+  const bound = appSmokeBoundSessionsSync(database, options.taskId);
+  const expected = options.role === "manager" ? bound.manager.thread_id : bound.worker.thread_id;
+  if (options.status === "sent" && !options.threadId) {
+    throw new Error("app-smoke record --status sent requires --thread-id.");
+  }
+  if (options.threadId && expected !== options.threadId) {
+    throw new Error(`Thread id mismatch for ${options.role}; active binding for ${options.taskName} targets ${expected ?? "(missing)"}.`);
+  }
+}
+
+function parseAppSmokeMode(value: string | null): AppSmokeMode {
+  return value === "advisory" || value === "skip" ? value : "required";
+}
+
+function parseAppSmokeScope(value: string | null): AppSmokeScope {
+  return value === "worker-set" ? "worker-set" : "pair";
+}
+
+function parseAppSmokeRole(value: ReplayRole): AppLoopRole | Error {
+  if (value === "manager" || value === "worker") {
+    return value;
+  }
+  return new Error("app-smoke record requires --role manager|worker");
+}
+
+function parseAppSmokeRecordStatus(value: string | null): AppSmokeRecordStatus | Error {
+  if (value === "accepted" || value === "blocked" || value === "received" || value === "sent" || value === "skipped") {
+    return value;
+  }
+  return new Error("app-smoke record requires --status sent|skipped|received|accepted|blocked");
+}
+
+function secondsBetweenIso(left: string, right: string): number {
+  return Math.max(0, (Date.parse(right) - Date.parse(left)) / 1000);
+}
+
+function renderAppSmokeStatusText(status: Record<string, unknown>): string {
+  const smoke = isPlainRecord(status.smoke) ? status.smoke : {};
+  const blockers = Array.isArray(status.blockers) ? status.blockers.map(String) : [];
+  const lines = [
+    `App smoke ${String(smoke.id ?? "(preflight)")}: ${status.ok ? "ok" : "blocked"}`,
+    `Real work allowed: ${String(status.real_work_allowed ?? false)}`,
+  ];
+  for (const blocker of blockers) {
+    lines.push(`Blocker: ${blocker}`);
+  }
+  return `${lines.join("\n")}\n`;
 }
 
 function parseAppWakeupDeliveryStatus(value: string | null): AppWakeupDeliveryStatus | Error {
@@ -7377,6 +7962,7 @@ function runInstallSkillsCommand(
 const AGENT_CONVEYOR_PLUGIN_NAME = "agent-conveyor";
 const AGENT_CONVEYOR_PLUGIN_SKILLS = [
   "conveyor-app-wake-relay",
+  "conveyor-smoke-app-connections",
   "conveyor-create-pair",
   "conveyor-create-worker-set",
   "conveyor-check-status",
@@ -17983,6 +18569,7 @@ function isDefaultRuntimeCommand(command: string | null): boolean {
     || command === "app-worker-rotation-plan"
     || command === "app-worker-rotation-record"
     || command === "app-autopilot"
+    || command === "app-smoke"
     || command === "loop-templates"
     || command === "loop-triggers"
     || command === "ralph-loop-presets"

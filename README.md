@@ -168,9 +168,9 @@ conveyor plugin-status
 
 The per-project default ledger for operator sessions is
 `.codex-workers/workerctl.db`. The initial included skills are
-`conveyor-app-wake-relay`, `conveyor-create-pair`,
-`conveyor-create-worker-set`, `conveyor-check-status`, and
-`conveyor-whats-next-nudger`.
+`conveyor-app-wake-relay`, `conveyor-smoke-app-connections`,
+`conveyor-create-pair`, `conveyor-create-worker-set`,
+`conveyor-check-status`, and `conveyor-whats-next-nudger`.
 
 After install, the intended Codex app entry point is natural language. Open a
 new Codex app session in the target repo and say:
@@ -186,7 +186,16 @@ For multiple workers, start with `Use the conveyor-create-worker-set skill`.
 The installed plugin skill should call the `conveyor` CLI, choose names, create
 the no-tmux binding with `create-disposable-binding`, point the worker at
 `worker-inbox`, and use `loop-status` plus telemetry receipts before reporting
-that the loop is ready. When the manager is itself running in the Codex app and
+that the loop is ready. Pair and worker-set skills run
+`conveyor-smoke-app-connections` before real task work by default. Required
+smoke first checks package/plugin/ledger/thread metadata, then starts a
+nonce-scoped `app-smoke` session and blocks real work until the manager and each
+worker have visible app-thread send receipts, fresh app heartbeats, durable
+received/accepted acknowledgements, and an `app-smoke status` result with
+`real_work_allowed=true`. The plain CLI records and evaluates receipts; the
+Codex app skill/operator layer must perform live `send_message_to_thread`
+delivery and record `sent`, `blocked`, or skipped/advisory evidence.
+When the manager is itself running in the Codex app and
 thread tools are available, the skill should first call `create_thread` for a
 fresh same-project worker, name it with `set_thread_title`, pass the returned
 thread identity through `--worker-codex-app-thread-id` and
@@ -539,6 +548,19 @@ stay out of receipts.
   heartbeats since the last command or inbox-consumption receipt, it recommends
   `stop_autopilot` so operators can quiesce blocked/no-progress loops instead
   of repeating idle pulses.
+- `app-smoke preflight|start|record|status TASK [--mode required|advisory|skip]
+  [--scope pair|worker-set] [--smoke-id ID] [--nonce NONCE]
+  [--role manager|worker] [--status sent|skipped|received|accepted|blocked]
+  [--thread-id ID] [--notification-id N] [--worker-count N] [--from-stdin]
+  [--json]` —
+  Record and evaluate the durable side of Codex app connection smoke. Required
+  mode blocks real work until the active binding has bound app thread ids,
+  nonce-matching send receipts, fresh app heartbeats after smoke start, worker
+  `received`, and manager/worker `accepted` receipts. Advisory mode reports the
+  same blockers without blocking, and skip mode records an explicit bypass. The
+  CLI does not call Codex app thread tools; use the
+  `conveyor-smoke-app-connections` plugin skill from a Codex app operator
+  session for live `send_message_to_thread` delivery.
 - `app-worker-rotation-plan TASK --old-worker-thread-id ID [--require-handoff]
   [--reason TEXT] [--json]` — Prepare a Codex app fresh-worker rotation. The
   CLI verifies that `ID` exactly matches the active bound worker session before

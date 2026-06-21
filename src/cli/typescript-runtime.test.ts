@@ -32,6 +32,8 @@ import {
   workerDir,
 } from "../state/files.js";
 
+const PACKAGE_VERSION = (JSON.parse(readFileSync(join(process.cwd(), "package.json"), "utf8")) as { version: string }).version;
+
 function tildePath(path: string): string {
   const home = homedir();
   assert.ok(path.startsWith(`${home}/`), `path must be under home directory: ${path}`);
@@ -467,6 +469,264 @@ test("TypeScript runtime app-loop-status reports stale worker and start-dispatch
     assert.equal(output.worker.lease.state, "stale");
     assert.equal(output.next_actions.some((action) => action.kind === "start_dispatch"), true);
     assert.equal(output.next_actions.some((action) => action.kind === "wake_worker"), true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("TypeScript runtime app smoke required mode blocks until bound roles have sent receipts, fresh heartbeats, and nonce acknowledgements", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-app-smoke-required."));
+  const dbPath = join(root, "workerctl.db");
+  try {
+    seedCliAppLoopFixture(dbPath, {
+      dispatcherHeartbeatAt: "2026-06-11T11:59:50Z",
+      managerHeartbeatAt: "2026-06-11T11:59:00Z",
+      workerHeartbeatAt: "2026-06-11T11:59:00Z",
+    });
+    const start = runTypescriptRuntimeCommand({
+      args: [
+        "app-smoke",
+        "start",
+        "app-loop-task",
+        "--smoke-id",
+        "smoke-required",
+        "--nonce",
+        "nonce-required",
+        "--mode",
+        "required",
+        "--path",
+        dbPath,
+        "--json",
+      ],
+      env: {},
+      now: () => new Date("2026-06-11T12:00:00Z"),
+    });
+    assert.equal(start.exitCode, 0, start.stderr);
+    const initial = JSON.parse(start.stdout ?? "{}") as {
+      status: { blockers: string[]; ok: boolean; real_work_allowed: boolean };
+    };
+    assert.equal(initial.status.ok, false);
+    assert.equal(initial.status.real_work_allowed, false);
+    assert.ok(initial.status.blockers.includes("manager smoke prompt has not been recorded as sent"));
+    assert.ok(initial.status.blockers.includes("worker has not recorded smoke received"));
+
+    for (const args of [
+      ["app-smoke", "record", "app-loop-task", "--smoke-id", "smoke-required", "--nonce", "nonce-required", "--role", "manager", "--status", "sent", "--thread-id", "thread-manager", "--path", dbPath, "--json"],
+      ["app-smoke", "record", "app-loop-task", "--smoke-id", "smoke-required", "--nonce", "nonce-required", "--role", "worker", "--status", "sent", "--thread-id", "thread-worker", "--path", dbPath, "--json"],
+      ["app-heartbeat", "app-loop-task", "--role", "manager", "--path", dbPath, "--json"],
+      ["app-heartbeat", "app-loop-task", "--role", "worker", "--path", dbPath, "--json"],
+      ["app-smoke", "record", "app-loop-task", "--smoke-id", "smoke-required", "--nonce", "nonce-required", "--role", "manager", "--status", "accepted", "--thread-id", "thread-manager", "--from-stdin", "--path", dbPath, "--json"],
+      ["app-smoke", "record", "app-loop-task", "--smoke-id", "smoke-required", "--nonce", "nonce-required", "--role", "worker", "--status", "received", "--thread-id", "thread-worker", "--from-stdin", "--path", dbPath, "--json"],
+      ["app-smoke", "record", "app-loop-task", "--smoke-id", "smoke-required", "--nonce", "nonce-required", "--role", "worker", "--status", "accepted", "--thread-id", "thread-worker", "--from-stdin", "--path", dbPath, "--json"],
+    ]) {
+      const result = runTypescriptRuntimeCommand({
+        args,
+        env: {},
+        now: () => new Date("2026-06-11T12:00:05Z"),
+        stdin: "{\"summary\":\"nonce-required smoke evidence\"}",
+      });
+      assert.equal(result.exitCode, 0, result.stderr);
+    }
+
+    const status = runTypescriptRuntimeCommand({
+      args: ["app-smoke", "status", "app-loop-task", "--smoke-id", "smoke-required", "--path", dbPath, "--json"],
+      env: {},
+      now: () => new Date("2026-06-11T12:00:10Z"),
+    });
+    assert.equal(status.exitCode, 0, status.stderr);
+    const payload = JSON.parse(status.stdout ?? "{}") as {
+      blockers: string[];
+      ok: boolean;
+      real_work_allowed: boolean;
+      roles: { manager: { accepted: boolean; heartbeat_fresh: boolean; sent: boolean }; worker: { accepted: boolean; heartbeat_fresh: boolean; received: boolean; sent: boolean } };
+    };
+    assert.equal(payload.ok, true);
+    assert.equal(payload.real_work_allowed, true);
+    assert.deepEqual(payload.blockers, []);
+    assert.equal(payload.roles.manager.sent, true);
+    assert.equal(payload.roles.manager.heartbeat_fresh, true);
+    assert.equal(payload.roles.manager.accepted, true);
+    assert.equal(payload.roles.worker.sent, true);
+    assert.equal(payload.roles.worker.heartbeat_fresh, true);
+    assert.equal(payload.roles.worker.received, true);
+    assert.equal(payload.roles.worker.accepted, true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("TypeScript runtime app smoke rejects stale nonce receipts and unbound thread ids", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-app-smoke-nonce."));
+  const dbPath = join(root, "workerctl.db");
+  try {
+    seedCliAppLoopFixture(dbPath, {
+      dispatcherHeartbeatAt: "2026-06-11T11:59:50Z",
+      managerHeartbeatAt: "2026-06-11T11:59:00Z",
+      workerHeartbeatAt: "2026-06-11T11:59:00Z",
+    });
+    const startOld = runTypescriptRuntimeCommand({
+      args: ["app-smoke", "start", "app-loop-task", "--smoke-id", "smoke-old", "--nonce", "nonce-old", "--path", dbPath, "--json"],
+      env: {},
+      now: () => new Date("2026-06-11T12:00:00Z"),
+    });
+    assert.equal(startOld.exitCode, 0, startOld.stderr);
+    const oldReceipt = runTypescriptRuntimeCommand({
+      args: ["app-smoke", "record", "app-loop-task", "--smoke-id", "smoke-old", "--nonce", "nonce-old", "--role", "worker", "--status", "accepted", "--thread-id", "thread-worker", "--from-stdin", "--path", dbPath, "--json"],
+      env: {},
+      stdin: "{\"summary\":\"old nonce\"}",
+    });
+    assert.equal(oldReceipt.exitCode, 0, oldReceipt.stderr);
+
+    const startNew = runTypescriptRuntimeCommand({
+      args: ["app-smoke", "start", "app-loop-task", "--smoke-id", "smoke-new", "--nonce", "nonce-new", "--path", dbPath, "--json"],
+      env: {},
+      now: () => new Date("2026-06-11T12:01:00Z"),
+    });
+    assert.equal(startNew.exitCode, 0, startNew.stderr);
+    const statusNew = JSON.parse(startNew.stdout ?? "{}") as { status: { blockers: string[]; ok: boolean } };
+    assert.equal(statusNew.status.ok, false);
+    assert.ok(statusNew.status.blockers.includes("worker has not accepted smoke"));
+
+    const staleNonce = runTypescriptRuntimeCommand({
+      args: ["app-smoke", "record", "app-loop-task", "--smoke-id", "smoke-new", "--nonce", "nonce-old", "--role", "worker", "--status", "accepted", "--thread-id", "thread-worker", "--from-stdin", "--path", dbPath, "--json"],
+      env: {},
+      stdin: "{\"summary\":\"wrong nonce\"}",
+    });
+    assert.equal(staleNonce.exitCode, 2);
+    assert.match(staleNonce.stderr ?? "", /Smoke nonce mismatch/);
+
+    const wrongThread = runTypescriptRuntimeCommand({
+      args: ["app-smoke", "record", "app-loop-task", "--smoke-id", "smoke-new", "--nonce", "nonce-new", "--role", "worker", "--status", "sent", "--thread-id", "unbound-thread", "--path", dbPath, "--json"],
+      env: {},
+    });
+    assert.equal(wrongThread.exitCode, 2);
+    assert.match(wrongThread.stderr ?? "", /Thread id mismatch for worker/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("TypeScript runtime app smoke advisory mode reports blockers without blocking real work", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-app-smoke-advisory."));
+  const dbPath = join(root, "workerctl.db");
+  try {
+    seedCliAppLoopFixture(dbPath, {
+      dispatcherHeartbeatAt: "2026-06-11T11:59:50Z",
+      managerHeartbeatAt: "2026-06-11T11:59:00Z",
+      workerHeartbeatAt: "2026-06-11T11:59:00Z",
+    });
+    const result = runTypescriptRuntimeCommand({
+      args: [
+        "app-smoke",
+        "start",
+        "app-loop-task",
+        "--smoke-id",
+        "smoke-advisory",
+        "--nonce",
+        "nonce-advisory",
+        "--mode",
+        "advisory",
+        "--path",
+        dbPath,
+        "--json",
+      ],
+      env: {},
+      now: () => new Date("2026-06-11T12:00:00Z"),
+    });
+    assert.equal(result.exitCode, 0, result.stderr);
+    const payload = JSON.parse(result.stdout ?? "{}") as { status: { blockers: string[]; ok: boolean; real_work_allowed: boolean } };
+    assert.equal(payload.status.ok, false);
+    assert.equal(payload.status.real_work_allowed, true);
+    assert.ok(payload.status.blockers.length > 0);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("TypeScript runtime app smoke preflight reports missing thread metadata and skip mode records an explicit bypass", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-app-smoke-preflight."));
+  const dbPath = join(root, "workerctl.db");
+  try {
+    seedCliAppLoopFixture(dbPath, {
+      dispatcherHeartbeatAt: "2026-06-11T11:59:50Z",
+      managerHeartbeatAt: "2026-06-11T11:59:00Z",
+      workerHeartbeatAt: "2026-06-11T11:59:00Z",
+    });
+    const database = openDatabaseSync(dbPath);
+    try {
+      database.prepare("update sessions set codex_app_thread_id = null where role = 'worker'").run();
+    } finally {
+      database.close();
+    }
+
+    const preflight = runTypescriptRuntimeCommand({
+      args: ["app-smoke", "preflight", "app-loop-task", "--mode", "required", "--path", dbPath, "--json"],
+      env: {},
+    });
+    assert.equal(preflight.exitCode, 0, preflight.stderr);
+    const preflightPayload = JSON.parse(preflight.stdout ?? "{}") as {
+      blockers: string[];
+      checks: Array<{ name: string; ok: boolean }>;
+      ok: boolean;
+      real_work_allowed: boolean;
+    };
+    assert.equal(preflightPayload.ok, false);
+    assert.equal(preflightPayload.real_work_allowed, false);
+    assert.ok(preflightPayload.checks.some((check) => check.name === "worker_thread_metadata" && check.ok === false));
+
+    const skip = runTypescriptRuntimeCommand({
+      args: ["app-smoke", "start", "app-loop-task", "--smoke-id", "smoke-skip", "--nonce", "nonce-skip", "--mode", "skip", "--path", dbPath, "--json"],
+      env: {},
+      now: () => new Date("2026-06-11T12:00:00Z"),
+    });
+    assert.equal(skip.exitCode, 0, skip.stderr);
+    const skipPayload = JSON.parse(skip.stdout ?? "{}") as {
+      receipt: { event_type: string };
+      status: { blockers: string[]; ok: boolean; real_work_allowed: boolean };
+    };
+    assert.equal(skipPayload.receipt.event_type, "app_smoke_skipped");
+    assert.equal(skipPayload.status.ok, true);
+    assert.equal(skipPayload.status.real_work_allowed, true);
+    assert.deepEqual(skipPayload.status.blockers, []);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("TypeScript runtime app smoke worker-set scope fails closed for a single task with multiple required workers", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-app-smoke-worker-set."));
+  const dbPath = join(root, "workerctl.db");
+  try {
+    seedCliAppLoopFixture(dbPath, {
+      dispatcherHeartbeatAt: "2026-06-11T11:59:50Z",
+      managerHeartbeatAt: "2026-06-11T11:59:00Z",
+      workerHeartbeatAt: "2026-06-11T11:59:00Z",
+    });
+    const result = runTypescriptRuntimeCommand({
+      args: [
+        "app-smoke",
+        "start",
+        "app-loop-task",
+        "--smoke-id",
+        "smoke-worker-set",
+        "--nonce",
+        "nonce-worker-set",
+        "--scope",
+        "worker-set",
+        "--worker-count",
+        "2",
+        "--path",
+        dbPath,
+        "--json",
+      ],
+      env: {},
+      now: () => new Date("2026-06-11T12:00:00Z"),
+    });
+    assert.equal(result.exitCode, 0, result.stderr);
+    const payload = JSON.parse(result.stdout ?? "{}") as { status: { blockers: string[]; ok: boolean; real_work_allowed: boolean } };
+    assert.equal(payload.status.ok, false);
+    assert.equal(payload.status.real_work_allowed, false);
+    assert.ok(payload.status.blockers.some((blocker) => /proves 1 of 2 workers/.test(blocker)));
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -9501,7 +9761,7 @@ test("TypeScript runtime handles Agent Conveyor plugin install status and path c
     };
     assert.equal(pluginPathPayload.codex_home, codexHome);
     assert.ok(pluginPathPayload.plugin_source.endsWith(join("plugin", "agent-conveyor")));
-    assert.ok(pluginPathPayload.plugin_install_root.endsWith(join("plugins", "cache", "agent-conveyor", "agent-conveyor", "0.1.22")));
+    assert.ok(pluginPathPayload.plugin_install_root.endsWith(join("plugins", "cache", "agent-conveyor", "agent-conveyor", PACKAGE_VERSION)));
     assert.equal(pluginPathPayload.skills_install_root, join(codexHome, "skills"));
 
     const statusBefore = runTypescriptRuntimeCommand({
@@ -9517,13 +9777,14 @@ test("TypeScript runtime handles Agent Conveyor plugin install status and path c
       version_matches: boolean;
     };
     assert.equal(statusBeforePayload.installed, false);
-    assert.equal(statusBeforePayload.package_version, "0.1.22");
-    assert.equal(statusBeforePayload.plugin_version, "0.1.22");
+    assert.equal(statusBeforePayload.package_version, PACKAGE_VERSION);
+    assert.equal(statusBeforePayload.plugin_version, PACKAGE_VERSION);
     assert.equal(statusBeforePayload.version_matches, false);
     assert.deepEqual(
       statusBeforePayload.skills.map((skill) => ({ installed: skill.installed, name: skill.name })),
       [
         { installed: false, name: "conveyor-app-wake-relay" },
+        { installed: false, name: "conveyor-smoke-app-connections" },
         { installed: false, name: "conveyor-create-pair" },
         { installed: false, name: "conveyor-create-worker-set" },
         { installed: false, name: "conveyor-check-status" },
@@ -9543,19 +9804,21 @@ test("TypeScript runtime handles Agent Conveyor plugin install status and path c
       plugin_version: string;
     };
     assert.equal(installPayload.installed, true);
-    assert.equal(installPayload.package_version, "0.1.22");
-    assert.equal(installPayload.plugin_version, "0.1.22");
+    assert.equal(installPayload.package_version, PACKAGE_VERSION);
+    assert.equal(installPayload.plugin_version, PACKAGE_VERSION);
     assert.deepEqual(installPayload.installed_skills.sort(), [
       "conveyor-app-wake-relay",
       "conveyor-check-status",
       "conveyor-create-pair",
       "conveyor-create-worker-set",
+      "conveyor-smoke-app-connections",
       "conveyor-whats-next-nudger",
     ]);
 
-    const installedManifestPath = join(codexHome, "plugins", "cache", "agent-conveyor", "agent-conveyor", "0.1.22", "plugin.json");
+    const installedManifestPath = join(codexHome, "plugins", "cache", "agent-conveyor", "agent-conveyor", PACKAGE_VERSION, "plugin.json");
     assert.ok(existsSync(installedManifestPath));
     assert.ok(existsSync(join(codexHome, "skills", "conveyor-app-wake-relay", "SKILL.md")));
+    assert.ok(existsSync(join(codexHome, "skills", "conveyor-smoke-app-connections", "SKILL.md")));
     assert.ok(existsSync(join(codexHome, "skills", "conveyor-check-status", "SKILL.md")));
     assert.ok(existsSync(join(codexHome, "skills", "conveyor-create-pair", "SKILL.md")));
     assert.ok(existsSync(join(codexHome, "skills", "conveyor-create-worker-set", "SKILL.md")));
@@ -9567,7 +9830,7 @@ test("TypeScript runtime handles Agent Conveyor plugin install status and path c
     assert.doesNotMatch("$PWD/.codex-workers/workerctl.db", absoluteLedgerPath);
     assert.doesNotMatch("--path=$PWD/.codex-workers/workerctl.db", absoluteLedgerPath);
     assert.doesNotMatch(".codex-workers/workerctl.db", absoluteLedgerPath);
-    for (const name of ["conveyor-app-wake-relay", "conveyor-create-pair", "conveyor-create-worker-set", "conveyor-check-status", "conveyor-whats-next-nudger"]) {
+    for (const name of ["conveyor-app-wake-relay", "conveyor-smoke-app-connections", "conveyor-create-pair", "conveyor-create-worker-set", "conveyor-check-status", "conveyor-whats-next-nudger"]) {
       const text = readFileSync(join(codexHome, "skills", name, "SKILL.md"), "utf8");
       assert.match(text, /\.codex-workers\/workerctl\.db/);
       assert.doesNotMatch(text, absoluteLedgerPath);
@@ -9583,9 +9846,13 @@ test("TypeScript runtime handles Agent Conveyor plugin install status and path c
     assert.match(wakeRelaySkill, /app-wakeup-record-delivery/);
     assert.match(wakeRelaySkill, /send_ready=true/);
     assert.match(wakeRelaySkill, /inbox-ack/);
+    const smokeSkill = readFileSync(join(codexHome, "skills", "conveyor-smoke-app-connections", "SKILL.md"), "utf8");
+    assert.match(smokeSkill, /app-smoke start/);
+    assert.match(smokeSkill, /send_message_to_thread|native Codex app thread tools/);
+    assert.match(smokeSkill, /real_work_allowed=false/);
     const installedManifest = JSON.parse(readFileSync(installedManifestPath, "utf8")) as { name: string; version: string };
     assert.equal(installedManifest.name, "agent-conveyor");
-    assert.equal(installedManifest.version, "0.1.22");
+    assert.equal(installedManifest.version, PACKAGE_VERSION);
 
     const statusAfter = runTypescriptRuntimeCommand({
       args: ["plugin-status", "--codex-home", codexHome, "--json"],
@@ -9598,13 +9865,13 @@ test("TypeScript runtime handles Agent Conveyor plugin install status and path c
       version_matches: boolean;
     };
     assert.equal(statusAfterPayload.installed, true);
-    assert.equal(statusAfterPayload.installed_version, "0.1.22");
+    assert.equal(statusAfterPayload.installed_version, PACKAGE_VERSION);
     assert.equal(statusAfterPayload.version_matches, true);
 
     const corruptHome = join(root, "corrupt-codex-home");
-    const corruptManifestDir = join(corruptHome, "plugins", "cache", "agent-conveyor", "agent-conveyor", "0.1.22");
+    const corruptManifestDir = join(corruptHome, "plugins", "cache", "agent-conveyor", "agent-conveyor", PACKAGE_VERSION);
     mkdirSync(corruptManifestDir, { recursive: true });
-    writeFileSync(join(corruptManifestDir, "plugin.json"), JSON.stringify({ name: "not-agent-conveyor", version: "0.1.22" }));
+    writeFileSync(join(corruptManifestDir, "plugin.json"), JSON.stringify({ name: "not-agent-conveyor", version: PACKAGE_VERSION }));
     const corruptStatus = runTypescriptRuntimeCommand({
       args: ["plugin-status", "--codex-home", corruptHome, "--json"],
       env: {},
@@ -9623,6 +9890,7 @@ test("TypeScript runtime handles Agent Conveyor plugin install status and path c
       corruptStatusPayload.skills.map((skill) => ({ installed: skill.installed, name: skill.name })),
       [
         { installed: false, name: "conveyor-app-wake-relay" },
+        { installed: false, name: "conveyor-smoke-app-connections" },
         { installed: false, name: "conveyor-create-pair" },
         { installed: false, name: "conveyor-create-worker-set" },
         { installed: false, name: "conveyor-check-status" },
