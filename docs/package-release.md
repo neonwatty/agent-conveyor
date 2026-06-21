@@ -80,6 +80,7 @@ pkg_version="$(node -p 'require("./package.json").version')"
 CODEX_HOME="$tmp_home" PATH="$tmp_prefix/bin:$PATH" conveyor install-plugin --json
 CODEX_HOME="$tmp_home" PATH="$tmp_prefix/bin:$PATH" conveyor plugin-status --json
 test -f "$tmp_home/plugins/cache/agent-conveyor/agent-conveyor/$pkg_version/plugin.json"
+test -f "$tmp_home/skills/conveyor-smoke-app-connections/SKILL.md"
 test -f "$tmp_home/skills/conveyor-create-pair/SKILL.md"
 test -f "$tmp_home/skills/conveyor-create-worker-set/SKILL.md"
 test -f "$tmp_home/skills/conveyor-check-status/SKILL.md"
@@ -101,6 +102,7 @@ The tarball must include:
 - `skills/codex-review/SKILL.md`
 - `skills/codex-review/scripts/codex-review`
 - `plugin/agent-conveyor/plugin.json`
+- `plugin/agent-conveyor/skills/conveyor-smoke-app-connections/SKILL.md`
 - `plugin/agent-conveyor/skills/conveyor-create-pair/SKILL.md`
 - `plugin/agent-conveyor/skills/conveyor-create-worker-set/SKILL.md`
 - `plugin/agent-conveyor/skills/conveyor-check-status/SKILL.md`

@@ -17,6 +17,11 @@ not run a campaign, Ralph loop, ship-it loop, or tmux workflow.
 - Use `.codex-workers/workerctl.db` under the target project by default.
 - Create concise worker role names when the operator does not provide them.
 - Do not inspect product code during setup.
+- After binding each worker task and before sending any real work prompt, run
+  `conveyor-smoke-app-connections` in required mode for every worker task. The
+  set passes only when every required worker smoke passes. If any smoke fails,
+  do not send real task prompts to any worker; return exact blockers and repair
+  actions.
 - Tell the operator to use `conveyor-app-wake-relay` for stale app threads;
   only Dispatch inboxes and Conveyor receipts are durable task truth.
 
@@ -53,5 +58,8 @@ conveyor create-disposable-binding "$TASK" \
   --json
 ```
 
-5. Return a setup receipt listing every task, worker role, thread id/title,
-   manager thread id/title, ledger path, and status command.
+5. Run `conveyor-smoke-app-connections` once per worker task. Aggregate the
+   resulting `app-smoke status` receipts. Required smoke must pass for every
+   worker before the real task starts.
+6. Return a setup receipt listing every task, worker role, thread id/title,
+   manager thread id/title, ledger path, smoke id/status, and status command.

@@ -59,6 +59,7 @@ const required = [
   "skills/codex-review/scripts/codex-review",
   "plugin/agent-conveyor/plugin.json",
   "plugin/agent-conveyor/skills/conveyor-app-wake-relay/SKILL.md",
+  "plugin/agent-conveyor/skills/conveyor-smoke-app-connections/SKILL.md",
   "plugin/agent-conveyor/skills/conveyor-create-pair/SKILL.md",
   "plugin/agent-conveyor/skills/conveyor-create-worker-set/SKILL.md",
   "plugin/agent-conveyor/skills/conveyor-check-status/SKILL.md",
@@ -160,6 +161,7 @@ const expectedSkills = [
   "conveyor-check-status",
   "conveyor-create-pair",
   "conveyor-create-worker-set",
+  "conveyor-smoke-app-connections",
   "conveyor-whats-next-nudger",
 ];
 
