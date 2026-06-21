@@ -17,6 +17,8 @@ not run a campaign, Ralph loop, ship-it loop, or tmux workflow.
 - Use `.codex-workers/workerctl.db` under the target project by default.
 - Create concise worker role names when the operator does not provide them.
 - Do not inspect product code during setup.
+- Tell the operator to use `conveyor-app-wake-relay` for stale app threads;
+  only Dispatch inboxes and Conveyor receipts are durable task truth.
 
 ## Default Ledger
 

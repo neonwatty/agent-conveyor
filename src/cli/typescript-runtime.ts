@@ -87,10 +87,15 @@ import {
   deliveryModeForTargetSessionSync,
   finishRoutedNotificationSync,
   insertRoutedNotificationSync,
+  insertNotificationAcknowledgementSync,
+  latestNotificationAcknowledgementSync,
   markRoutedNotificationSideEffectStartedSync,
+  notificationAcknowledgementsSync,
   consumeNextSessionInboxItemSync,
   routedNotificationsSync,
   sessionInboxSync,
+  type NotificationAcknowledgementRole,
+  type NotificationAcknowledgementStatus,
 } from "../runtime/notifications.js";
 import {
   activeBindingForTaskSync,
@@ -429,6 +434,9 @@ export function runTypescriptRuntimeCommand(options: TypescriptRuntimeOptions): 
     if (parsed.command === "manager-ack") {
       return runTaskAckCommand(parsed, options, "manager");
     }
+    if (parsed.command === "inbox-ack") {
+      return runInboxAckCommand(parsed, options);
+    }
     if (parsed.command === "session-inbox") {
       return runSessionInboxCommand(parsed, options, "session");
     }
@@ -588,6 +596,15 @@ function commandHelpText(program: "conveyor" | "workerctl", command: string): st
       "Example JSON:",
       `  {"task":"my-task","manager_session":"mgr","supervision_contract":"I will supervise through Conveyor and verify criteria before finishing.","will_not_edit_project_files":true}`,
     ],
+    "inbox-ack": [
+      `usage: ${program} inbox-ack <task> --notification-id N --role manager|worker --status received|accepted|blocked --from-stdin ${path} [--json]`,
+      `usage: ${program} inbox-ack <task> --notification-id N --json ${path}`,
+      "",
+      "Record or read a notification-scoped manager/worker acknowledgement.",
+      "",
+      "Example JSON:",
+      `  {"summary":"Received manager instruction and will run the bounded task.","evidence":[]}`,
+    ],
     nudge: [
       `usage: ${program} nudge <worker-or-session> <message> ${path} [--dry-run]`,
       `usage: ${program} session-nudge <session> <message> ${path} [--dry-run]`,
@@ -734,6 +751,7 @@ interface ParsedRuntimeArgs {
     nextAction: string | null;
     noFollowup: boolean;
     nextSteps: string[];
+    notificationId: number | null;
     output: string | null;
     path: string | null;
     pid: number | null;
@@ -997,6 +1015,7 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
     nextAction: null,
     noFollowup: false,
     nextSteps: [],
+    notificationId: null,
     output: null,
     path: null,
     pid: null,
@@ -1821,7 +1840,7 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       flags.fromWorkerResponse = value.value;
       index += 1;
     } else if (arg === "--from-stdin") {
-      if (command !== "criteria-plan" && command !== "continuation" && command !== "worker-ack" && command !== "manager-ack") {
+      if (command !== "criteria-plan" && command !== "continuation" && command !== "worker-ack" && command !== "manager-ack" && command !== "inbox-ack") {
         return { command, enabled, error: "Unsupported TypeScript runtime option: --from-stdin", explicit, flags, task };
       }
       flags.fromStdin = true;
@@ -2614,7 +2633,7 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
         flags.epilogueStatus = true;
         continue;
       }
-      if (command !== "criteria" && command !== "runs" && command !== "loop-evidence" && command !== "campaign") {
+      if (command !== "criteria" && command !== "runs" && command !== "loop-evidence" && command !== "campaign" && command !== "inbox-ack") {
         return { command, enabled, error: "Unsupported TypeScript runtime option: --status", explicit, flags, task };
       }
       const parsedValue = valueAfter(queue, index, arg);
@@ -2623,9 +2642,25 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       }
       if (command === "criteria") {
         flags.statuses.push(parsedValue.value);
+      } else if (command === "inbox-ack") {
+        flags.statusState = parsedValue.value;
       } else {
         flags.statusState = parsedValue.value;
       }
+      index += 1;
+    } else if (arg === "--notification-id") {
+      if (command !== "inbox-ack") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --notification-id", explicit, flags, task };
+      }
+      const parsedValue = valueAfter(queue, index, arg);
+      if (parsedValue.error) {
+        return { command, enabled, error: parsedValue.error, explicit, flags, task };
+      }
+      const value = Number(parsedValue.value);
+      if (!Number.isInteger(value) || value <= 0) {
+        return { command, enabled, error: "--notification-id must be a positive integer.", explicit, flags, task };
+      }
+      flags.notificationId = value;
       index += 1;
     } else if (arg === "--type") {
       const value = valueAfter(queue, index, arg);
@@ -2761,6 +2796,7 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
         && command !== "enqueue-continue-iteration"
         && command !== "worker-ack"
         && command !== "manager-ack"
+        && command !== "inbox-ack"
         && command !== "loop-evidence"
         && command !== "continuation"
         && command !== "continuation-reviewer"
@@ -4105,7 +4141,7 @@ function runAppWakeupRecordDeliveryCommand(
     if (!action) {
       throw new Error(`Receipt ${source.id} has no ${role} wake action.`);
     }
-    validateAppWakeupDelivery({ action, deliveryStatus, role, threadId: parsed.flags.threadId });
+    validateAppWakeupDelivery({ action, deliveryStatus, reason: parsed.flags.reason, role, threadId: parsed.flags.threadId });
     const timestamp = nowIsoSeconds(options);
     const eventId = emitTelemetrySync(database, {
       actor: "manager",
@@ -4678,6 +4714,7 @@ function parseAppWakeupDispatchAttributes(value: string, receiptId: string): {
 function validateAppWakeupDelivery(options: {
   action: AppWakeupSourceAction;
   deliveryStatus: AppWakeupDeliveryStatus;
+  reason: string | null;
   role: AppLoopRole;
   threadId: string | null;
 }): void {
@@ -4703,9 +4740,16 @@ function validateAppWakeupDelivery(options: {
     }
     return;
   }
-  if (sourceStatus !== "blocked_missing_thread") {
-    throw new Error(`Cannot record blocked wakeup for ${options.role}; source action is ${sourceStatus}.`);
+  if (sourceStatus === "blocked_missing_thread") {
+    return;
   }
+  if (sourceStatus === "ready_to_send" && options.action.send_ready === true) {
+    if (!options.reason?.trim()) {
+      throw new Error(`Cannot record blocked wakeup for ${options.role}; ready-to-send source actions require --reason.`);
+    }
+    return;
+  }
+  throw new Error(`Cannot record blocked wakeup for ${options.role}; source action is ${sourceStatus}.`);
 }
 
 function parseAppWakeupSourceActionStatus(value: string | null | undefined): AppWakeupSourceActionStatus | Error {
@@ -7332,6 +7376,7 @@ function runInstallSkillsCommand(
 
 const AGENT_CONVEYOR_PLUGIN_NAME = "agent-conveyor";
 const AGENT_CONVEYOR_PLUGIN_SKILLS = [
+  "conveyor-app-wake-relay",
   "conveyor-create-pair",
   "conveyor-create-worker-set",
   "conveyor-check-status",
@@ -10048,6 +10093,97 @@ function runTaskAckCommand(
   }
 }
 
+function runInboxAckCommand(
+  parsed: ParsedRuntimeArgs,
+  options: { cwd?: string; env?: NodeJS.ProcessEnv; now?: () => Date; stdin?: string },
+): TypescriptRuntimeResult {
+  const unsupported = unsupportedInboxAckOptions(parsed);
+  if (unsupported) {
+    return unsupportedRuntimeResult(parsed, unsupported);
+  }
+  const taskName = requireTask(parsed);
+  const notificationId = parsed.flags.notificationId;
+  if (notificationId === null) {
+    return errorResult("inbox-ack requires --notification-id.");
+  }
+  const database = openRuntimeDatabase(parsed, options);
+  try {
+    const task = taskRowForLifecycle(database, taskName);
+    if (task === null) {
+      throw new Error(`Unknown task: ${taskName}`);
+    }
+    const binding = activeBindingForTaskSync(database, task.name);
+    const notification = notificationForInboxAckSync(database, {
+      notificationId,
+      taskId: task.id,
+      taskName: task.name,
+    });
+    if (notification.binding_id !== binding.binding_id) {
+      throw new Error(`Notification ${notificationId} does not belong to the active binding for task ${task.name}.`);
+    }
+    if (!parsed.flags.fromStdin) {
+      const acknowledgements = notificationAcknowledgementsSync(database, { notificationId, taskId: task.id });
+      return jsonResult({
+        acknowledgements,
+        latest: latestNotificationAcknowledgementSync(database, { notificationId, taskId: task.id }),
+        notification: inboxAckNotificationPayload(notification),
+        task: { id: task.id, name: task.name },
+      });
+    }
+    const role = parsed.flags.role as NotificationAcknowledgementRole;
+    const status = parseNotificationAcknowledgementStatus(parsed.flags.statusState);
+    if (status instanceof Error) {
+      return errorResult(status.message);
+    }
+    validateInboxAcknowledgement({ notification, role, status });
+    const payload = parseStdinJsonObject(options.stdin);
+    const ack = insertNotificationAcknowledgementSync(database, {
+      bindingId: notification.binding_id,
+      correlationId: parsed.flags.correlationId,
+      notificationId,
+      now: nowIsoSeconds(options),
+      payload,
+      role,
+      status,
+      taskId: task.id,
+    });
+    const eventId = emitTelemetrySync(database, {
+      actor: role,
+      attributes: {
+        binding_id: notification.binding_id,
+        notification_id: notificationId,
+        payload_keys: Object.keys(payload).sort(),
+        role,
+        signal_type: notification.signal_type,
+        status,
+      },
+      correlation: {
+        command: "inbox-ack",
+        correlation_id: parsed.flags.correlationId,
+        notification_id: notificationId,
+        role,
+      },
+      eventType: "dispatch_inbox_ack_recorded",
+      severity: status === "blocked" ? "warning" : "info",
+      summary: `${role} recorded ${status} acknowledgement for notification ${notificationId}.`,
+      taskId: task.id,
+      timestamp: ack.created_at,
+    });
+    return jsonResult({
+      acknowledgement: ack,
+      notification: inboxAckNotificationPayload(notification),
+      receipt: {
+        event_id: eventId,
+        event_type: "dispatch_inbox_ack_recorded",
+        recorded_at: ack.created_at,
+      },
+      task: { id: task.id, name: task.name },
+    });
+  } finally {
+    database.close();
+  }
+}
+
 function runSessionInboxCommand(
   parsed: ParsedRuntimeArgs,
   options: { cwd?: string; env?: NodeJS.ProcessEnv; now?: () => Date; sleepMilliseconds?: (milliseconds: number) => void },
@@ -10343,6 +10479,90 @@ function latestTaskAcknowledgementSync(
     role: row.role,
     task_id: row.task_id,
   };
+}
+
+interface InboxAckNotificationRow {
+  binding_id: string;
+  consumed_at: string | null;
+  delivered_at: string | null;
+  delivery_mode: string;
+  id: number;
+  signal_type: string;
+  state: string;
+  target_session_id: string;
+  target_session_name: string;
+  target_session_role: string;
+  task_id: string;
+}
+
+function notificationForInboxAckSync(
+  database: ReturnType<typeof openRuntimeDatabase>,
+  options: { notificationId: number; taskId: string; taskName: string },
+): InboxAckNotificationRow {
+  const row = database.prepare(`
+    select rn.id, rn.task_id, rn.binding_id, rn.signal_type, rn.delivered_at,
+           rn.consumed_at, rn.delivery_mode, rn.state, rn.target_session_id,
+           ts.name as target_session_name, ts.role as target_session_role
+    from routed_notifications rn
+    join sessions ts on ts.id = rn.target_session_id
+    where rn.id = ? and rn.task_id = ?
+    limit 1
+  `).get(options.notificationId, options.taskId) as InboxAckNotificationRow | undefined;
+  if (!row) {
+    throw new Error(`Unknown routed notification for task ${options.taskName}: ${options.notificationId}`);
+  }
+  return row;
+}
+
+function inboxAckNotificationPayload(notification: InboxAckNotificationRow): Record<string, unknown> {
+  return {
+    binding_id: notification.binding_id,
+    consumed_at: notification.consumed_at,
+    delivered_at: notification.delivered_at,
+    delivery_mode: notification.delivery_mode,
+    id: notification.id,
+    signal_type: notification.signal_type,
+    state: notification.state,
+    target_session_id: notification.target_session_id,
+    target_session_name: notification.target_session_name,
+    target_session_role: notification.target_session_role,
+    task_id: notification.task_id,
+  };
+}
+
+function parseNotificationAcknowledgementStatus(value: string | null): NotificationAcknowledgementStatus | Error {
+  if (value === "received" || value === "accepted" || value === "blocked") {
+    return value;
+  }
+  return new Error("inbox-ack --status must be received, accepted, or blocked.");
+}
+
+function validateInboxAcknowledgement(options: {
+  notification: InboxAckNotificationRow;
+  role: NotificationAcknowledgementRole;
+  status: NotificationAcknowledgementStatus;
+}): void {
+  if (options.notification.target_session_role !== options.role) {
+    throw new Error(
+      `Cannot record ${options.role} acknowledgement for notification ${options.notification.id}; target role is ${options.notification.target_session_role}.`,
+    );
+  }
+  if (options.notification.state !== "delivered") {
+    throw new Error(
+      `Cannot acknowledge notification ${options.notification.id}; state is ${options.notification.state}, expected delivered.`,
+    );
+  }
+  if (options.status === "received") {
+    if (!options.notification.delivered_at) {
+      throw new Error(`Cannot record received acknowledgement for notification ${options.notification.id}; it has no delivered_at receipt.`);
+    }
+    return;
+  }
+  if (!options.notification.consumed_at) {
+    throw new Error(
+      `Cannot record ${options.status} acknowledgement for notification ${options.notification.id}; it has not been consumed by the target session.`,
+    );
+  }
 }
 
 function sessionInboxResponse(
@@ -17105,6 +17325,27 @@ function unsupportedTaskAckOptions(parsed: ParsedRuntimeArgs): string | null {
   return null;
 }
 
+function unsupportedInboxAckOptions(parsed: ParsedRuntimeArgs): string | null {
+  if (!parsed.task) {
+    return "inbox-ack requires a task.";
+  }
+  if (parsed.flags.notificationId === null) {
+    return "inbox-ack requires --notification-id.";
+  }
+  if (!parsed.flags.fromStdin && !parsed.flags.json) {
+    return "inbox-ack requires --from-stdin to write or --json to read.";
+  }
+  if (parsed.flags.fromStdin) {
+    if (parsed.flags.role !== "manager" && parsed.flags.role !== "worker") {
+      return "inbox-ack write requires --role manager|worker.";
+    }
+    if (parsed.flags.statusState === null) {
+      return "inbox-ack write requires --status received|accepted|blocked.";
+    }
+  }
+  return null;
+}
+
 function unsupportedSessionInboxOptions(parsed: ParsedRuntimeArgs, kind: "manager" | "session" | "worker"): string | null {
   if (!parsed.task) {
     return kind === "session" ? "session-inbox requires a session name." : `${kind}-inbox requires a task.`;
@@ -17788,6 +18029,7 @@ function isDefaultRuntimeCommand(command: string | null): boolean {
     || command === "nudge"
     || command === "worker-ack"
     || command === "manager-ack"
+    || command === "inbox-ack"
     || command === "session-inbox"
     || command === "manager-inbox"
     || command === "worker-inbox"

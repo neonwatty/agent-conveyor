@@ -90,6 +90,10 @@ If the task is not a Ralph loop, use the existing setup's generated
 `enqueue-nudge-worker` or manager-approved assignment command instead. Do not
 invent new shipping authority.
 
+When a role is stale and `app-wakeup-dispatch` emits `send_ready=true`, use the
+`conveyor-app-wake-relay` skill to send the prepared wake prompt and record the
+delivery receipt. Do not send ad hoc direct prompts.
+
 5. After each worker pass, require all of:
    - durable worker-to-manager notification receipt;
    - one Dispatch receipt routing that notification;

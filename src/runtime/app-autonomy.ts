@@ -483,10 +483,11 @@ export function visibleSessionProtocolLines(role: AppLoopRole): string[] {
     "1. Before polling, print `CONVEYOR POLL` with role, task, and the inbox or heartbeat command you are about to run.",
     "2. If no item is consumed, print one short `CONVEYOR IDLE` receipt and stop.",
     "3. If an item is consumed, before acting print `CONVEYOR RECEIVED` with command id, correlation id, source role, and a concise instruction summary.",
-    "4. During non-idle work, print `WORK` updates before and after meaningful commands or decisions, including files inspected and evidence gathered.",
+    "4. Immediately after `CONVEYOR RECEIVED`, record durable receipt with `conveyor inbox-ack <task> --notification-id <consumed.id> --role <role> --status received --from-stdin --json`; after the bounded action, record `accepted` or `blocked` for the same notification.",
+    "5. During non-idle work, print `WORK` updates before and after meaningful commands or decisions, including files inspected and evidence gathered.",
     outgoing,
-    "6. After the bounded Dispatch command or app wake delivery receipt, print `DISPATCH` with processed count/state or the exact blocker.",
-    "7. The final answer for any consumed item must repeat the received command id, action taken, files changed or none, commands run, durable send result, Dispatch result, and next state.",
+    "7. After the bounded Dispatch command or app wake delivery receipt, print `DISPATCH` with processed count/state or the exact blocker.",
+    "8. The final answer for any consumed item must repeat the received command id, notification id, acknowledgement status, action taken, files changed or none, commands run, durable send result, Dispatch result, and next state.",
   ];
 }
 

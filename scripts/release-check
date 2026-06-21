@@ -58,6 +58,7 @@ const required = [
   "skills/codex-review/SKILL.md",
   "skills/codex-review/scripts/codex-review",
   "plugin/agent-conveyor/plugin.json",
+  "plugin/agent-conveyor/skills/conveyor-app-wake-relay/SKILL.md",
   "plugin/agent-conveyor/skills/conveyor-create-pair/SKILL.md",
   "plugin/agent-conveyor/skills/conveyor-create-worker-set/SKILL.md",
   "plugin/agent-conveyor/skills/conveyor-check-status/SKILL.md",
@@ -155,6 +156,7 @@ const installPlugin = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
 const pluginStatus = JSON.parse(fs.readFileSync(process.argv[3], "utf8"));
 const codexHome = process.argv[4];
 const expectedSkills = [
+  "conveyor-app-wake-relay",
   "conveyor-check-status",
   "conveyor-create-pair",
   "conveyor-create-worker-set",

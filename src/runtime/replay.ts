@@ -2,6 +2,7 @@ import type {
   TaskAuditCorrelationChain,
   TaskAuditEvent,
   TaskAuditManagerDecision,
+  TaskAuditNotificationAcknowledgement,
   TaskAuditResult,
   TaskAuditRoutedNotification,
 } from "./audit.js";
@@ -76,6 +77,13 @@ export function replayEntriesFromAudit(
       continue;
     }
     entries.push(routedNotificationEntry(notification));
+  }
+
+  for (const acknowledgement of audit.notification_acknowledgements) {
+    if (role !== "all" && role !== acknowledgement.role) {
+      continue;
+    }
+    entries.push(notificationAcknowledgementEntry(acknowledgement));
   }
 
   for (const chain of audit.correlation_chains) {
@@ -292,6 +300,25 @@ function routedNotificationEntry(notification: TaskAuditRoutedNotification): Rep
       + `${notification.state} via ${notification.delivery_mode ?? "unknown"}`
     ),
     timestamp: notification.delivered_at ?? notification.created_at,
+  };
+}
+
+function notificationAcknowledgementEntry(acknowledgement: TaskAuditNotificationAcknowledgement): ReplayEntry {
+  return {
+    actor: acknowledgement.role,
+    details: {
+      acknowledgement_id: acknowledgement.id,
+      correlation_id: acknowledgement.correlation_id,
+      notification_id: acknowledgement.notification_id,
+      payload: acknowledgement.payload,
+      signal_type: acknowledgement.signal_type,
+      status: acknowledgement.status,
+    },
+    kind: "notification_acknowledgement",
+    source: "notification_acknowledgements",
+    source_id: acknowledgement.id,
+    summary: `${acknowledgement.role} acknowledged notification ${acknowledgement.notification_id}: ${acknowledgement.status}`,
+    timestamp: acknowledgement.created_at,
   };
 }
 

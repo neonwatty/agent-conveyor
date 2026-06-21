@@ -24,6 +24,8 @@ tranche.
 - Generated manager and worker prompts must require visible session sections:
   `CONVEYOR POLL`, `CONVEYOR RECEIVED`, `WORK`, `CONVEYOR SEND`, and
   `DISPATCH`.
+- Tell the operator to use `conveyor-app-wake-relay` for stale app threads;
+  direct app-thread prompts are wake prompts only, not durable task truth.
 
 ## Default Ledger
 
