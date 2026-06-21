@@ -194,7 +194,12 @@ worker have visible app-thread send receipts, fresh app heartbeats, durable
 received/accepted acknowledgements, and an `app-smoke status` result with
 `real_work_allowed=true`. The plain CLI records and evaluates receipts; the
 Codex app skill/operator layer must perform live `send_message_to_thread`
-delivery and record `sent`, `blocked`, or skipped/advisory evidence.
+delivery and record `sent`, `blocked`, or skipped/advisory evidence. After
+required smoke passes, pair and worker-set skills start `app-autopilot` before
+real work so the just-proved sessions keep polling. A setup is autonomous only
+when the emitted heartbeat automation specs have been applied, or explicitly
+deferred as `manual-poll only`; smoke-passed by itself only proves connection
+plumbing at that moment.
 When the manager is itself running in the Codex app and
 thread tools are available, the skill should first call `create_thread` for a
 fresh same-project worker, name it with `set_thread_title`, pass the returned
@@ -560,7 +565,9 @@ stay out of receipts.
   same blockers without blocking, and skip mode records an explicit bypass. The
   CLI does not call Codex app thread tools; use the
   `conveyor-smoke-app-connections` plugin skill from a Codex app operator
-  session for live `send_message_to_thread` delivery.
+  session for live `send_message_to_thread` delivery. A smoke-passed operator
+  flow should immediately run `app-autopilot start` and handle the emitted
+  automation specs before sending real task prompts.
 - `app-worker-rotation-plan TASK --old-worker-thread-id ID [--require-handoff]
   [--reason TEXT] [--json]` — Prepare a Codex app fresh-worker rotation. The
   CLI verifies that `ID` exactly matches the active bound worker session before
@@ -845,7 +852,8 @@ stay out of receipts.
   either received, accepted, or blocked on it. `received` requires delivery;
   `accepted` and `blocked` require consumption. Use this after visible Codex app
   sessions print `CONVEYOR RECEIVED`; do not use direct app-thread text as the
-  durable receipt.
+  durable receipt. `--from-stdin` expects a JSON object, for example
+  `printf '%s\n' '{"summary":"accepted","evidence":["consumed notification"],"blockers":[]}' | conveyor inbox-ack ... --from-stdin`.
 
 ### Actuation
 

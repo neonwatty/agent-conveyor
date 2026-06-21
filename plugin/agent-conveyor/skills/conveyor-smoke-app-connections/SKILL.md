@@ -35,6 +35,9 @@ only.
   `app-smoke status`.
 - If `conveyor app-smoke status` reports `real_work_allowed=false`, do not send
   the real task prompt.
+- Prompts that ask a manager or worker to use `--from-stdin` must include an
+  explicit JSON stdin example. Do not rely on the target session to infer the
+  payload format.
 
 ## Default Ledger
 
@@ -109,9 +112,12 @@ Then poll for the worker smoke report:
 conveyor manager-inbox '<TASK>' --consume-next --wait --timeout 60 --path '<LEDGER>' --json
 
 If you consume a manager inbox item for smoke <NONCE>, record:
-conveyor inbox-ack '<TASK>' --notification-id '<consumed.id>' --role manager --status received --from-stdin --path '<LEDGER>' --json
-conveyor inbox-ack '<TASK>' --notification-id '<consumed.id>' --role manager --status accepted --from-stdin --path '<LEDGER>' --json
-conveyor app-smoke record '<TASK>' --smoke-id '<SMOKE_ID>' --nonce '<NONCE>' --role manager --status accepted --thread-id '<MANAGER_THREAD_ID>' --notification-id '<consumed.id>' --from-stdin --path '<LEDGER>' --json
+printf '%s\n' '{"summary":"manager received worker smoke report","evidence":["consumed manager inbox item for smoke <NONCE>"],"blockers":[]}' \
+  | conveyor inbox-ack '<TASK>' --notification-id '<consumed.id>' --role manager --status received --from-stdin --path '<LEDGER>' --json
+printf '%s\n' '{"summary":"manager accepted worker smoke report","evidence":["worker report nonce matched <NONCE>"],"blockers":[]}' \
+  | conveyor inbox-ack '<TASK>' --notification-id '<consumed.id>' --role manager --status accepted --from-stdin --path '<LEDGER>' --json
+printf '%s\n' '{"summary":"manager accepted app smoke","evidence":["fresh manager heartbeat","worker smoke report consumed","worker nonce matched <NONCE>"],"blockers":[]}' \
+  | conveyor app-smoke record '<TASK>' --smoke-id '<SMOKE_ID>' --nonce '<NONCE>' --role manager --status accepted --thread-id '<MANAGER_THREAD_ID>' --notification-id '<consumed.id>' --from-stdin --path '<LEDGER>' --json
 
 If blocked, record app-smoke blocked with the exact blocker.
 Stop after the smoke receipt. Do not start real work.
@@ -152,12 +158,16 @@ conveyor app-heartbeat '<TASK>' --role worker --path '<LEDGER>' --json
 conveyor worker-inbox '<TASK>' --consume-next --wait --timeout 60 --path '<LEDGER>' --json
 
 For the consumed smoke item, record:
-conveyor inbox-ack '<TASK>' --notification-id '<consumed.id>' --role worker --status received --from-stdin --path '<LEDGER>' --json
-conveyor app-smoke record '<TASK>' --smoke-id '<SMOKE_ID>' --nonce '<NONCE>' --role worker --status received --thread-id '<WORKER_THREAD_ID>' --notification-id '<consumed.id>' --from-stdin --path '<LEDGER>' --json
+printf '%s\n' '{"summary":"worker received smoke item","evidence":["consumed worker inbox item for smoke <NONCE>"],"blockers":[]}' \
+  | conveyor inbox-ack '<TASK>' --notification-id '<consumed.id>' --role worker --status received --from-stdin --path '<LEDGER>' --json
+printf '%s\n' '{"summary":"worker received app smoke","evidence":["fresh worker heartbeat","worker inbox item consumed","nonce matched <NONCE>"],"blockers":[]}' \
+  | conveyor app-smoke record '<TASK>' --smoke-id '<SMOKE_ID>' --nonce '<NONCE>' --role worker --status received --thread-id '<WORKER_THREAD_ID>' --notification-id '<consumed.id>' --from-stdin --path '<LEDGER>' --json
 
 Then record accepted:
-conveyor inbox-ack '<TASK>' --notification-id '<consumed.id>' --role worker --status accepted --from-stdin --path '<LEDGER>' --json
-conveyor app-smoke record '<TASK>' --smoke-id '<SMOKE_ID>' --nonce '<NONCE>' --role worker --status accepted --thread-id '<WORKER_THREAD_ID>' --notification-id '<consumed.id>' --from-stdin --path '<LEDGER>' --json
+printf '%s\n' '{"summary":"worker accepted smoke item","evidence":["smoke instructions understood","no product work started"],"blockers":[]}' \
+  | conveyor inbox-ack '<TASK>' --notification-id '<consumed.id>' --role worker --status accepted --from-stdin --path '<LEDGER>' --json
+printf '%s\n' '{"summary":"worker accepted app smoke","evidence":["smoke item accepted","nonce matched <NONCE>"],"blockers":[]}' \
+  | conveyor app-smoke record '<TASK>' --smoke-id '<SMOKE_ID>' --nonce '<NONCE>' --role worker --status accepted --thread-id '<WORKER_THREAD_ID>' --notification-id '<consumed.id>' --from-stdin --path '<LEDGER>' --json
 
 Finally notify the manager:
 conveyor enqueue-notify-manager '<TASK>' --message 'CONVEYOR SMOKE <NONCE>: worker accepted smoke.' --correlation-id '<SMOKE_ID>-worker-report' --path '<LEDGER>' --json
@@ -189,6 +199,33 @@ conveyor app-smoke status "$TASK" --smoke-id "$SMOKE_ID" --path "$LEDGER" --json
 If `real_work_allowed=true`, the setup may send the real work prompt. If
 `real_work_allowed=false`, report exact blockers and stop.
 
+8. Start app-autopilot immediately after required smoke passes and before
+   sending real work:
+
+```bash
+conveyor app-autopilot start "$TASK" \
+  --dispatcher-id dispatch-local \
+  --path "$LEDGER" \
+  --json
+```
+
+The operator or manager must apply the emitted Codex app automation specs with
+Codex app automation tools. If automation tools are unavailable, report the
+task as `manual-poll only` and include the manager and worker heartbeat prompts
+from the autopilot output. Do not report the pair as autonomous until autopilot
+is started and its automation specs are either applied or explicitly deferred.
+
+9. After autopilot start, run:
+
+```bash
+conveyor app-autopilot status "$TASK" --path "$LEDGER" --json
+conveyor app-loop-status "$TASK" --path "$LEDGER" --json
+```
+
+If `app-loop-status` reports stale manager or worker immediately after
+autopilot setup, wake the stale role or report the exact blocker before sending
+real work.
+
 ## Worker Set Flow
 
 For worker sets, run the pair flow once per bound worker task. Treat each worker
@@ -214,7 +251,10 @@ End with:
 - `blocked_roles`
 - `status_after`
 - `real_work_allowed`
+- `autopilot_status`
+- `automation_specs_applied_or_deferred`
 - `next_action`
 
 If any role is blocked, name the exact blocker and do not report the smoke as
-passed.
+passed. If smoke passed but autopilot was not started or automation specs were
+not applied/deferred, report the pair as smoke-passed but not autonomous.
