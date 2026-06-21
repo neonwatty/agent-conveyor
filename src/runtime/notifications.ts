@@ -3,8 +3,23 @@ import { DatabaseSync } from "node:sqlite";
 
 export type RoutedNotificationDeliveryMode = "pull_required" | "push";
 export type RoutedNotificationState = "delivered" | "failed" | "pending" | "suppressed";
+export type NotificationAcknowledgementRole = "manager" | "worker";
+export type NotificationAcknowledgementStatus = "accepted" | "blocked" | "received";
+
+export interface NotificationAcknowledgementRecord {
+  binding_id: string;
+  correlation_id: string | null;
+  created_at: string;
+  id: number;
+  notification_id: number;
+  payload: Record<string, unknown>;
+  role: NotificationAcknowledgementRole;
+  status: NotificationAcknowledgementStatus;
+  task_id: string;
+}
 
 export interface RoutedNotificationRecord {
+  acknowledgement?: NotificationAcknowledgementRecord | null;
   binding_id: string;
   claimed_at: string | null;
   claimed_by: string | null;
@@ -186,6 +201,89 @@ export function routedNotificationsSync(database: DatabaseSync, options?: { task
   return rows.map(routedNotificationRecord);
 }
 
+export function notificationAcknowledgementsSync(
+  database: DatabaseSync,
+  options: { notificationId: number; taskId?: string | null },
+): NotificationAcknowledgementRecord[] {
+  const clauses = ["notification_id = ?"];
+  const params: Array<number | string> = [options.notificationId];
+  if (options.taskId) {
+    clauses.push("task_id = ?");
+    params.push(options.taskId);
+  }
+  const rows = database.prepare(`
+    select id, task_id, binding_id, notification_id, role, status,
+           payload_json, created_at, correlation_id
+    from notification_acknowledgements
+    where ${clauses.join(" and ")}
+    order by created_at, id
+  `).all(...params) as unknown as NotificationAcknowledgementRow[];
+  return rows.map(notificationAcknowledgementRecord);
+}
+
+export function latestNotificationAcknowledgementSync(
+  database: DatabaseSync,
+  options: { notificationId: number; taskId?: string | null },
+): NotificationAcknowledgementRecord | null {
+  const clauses = ["notification_id = ?"];
+  const params: Array<number | string> = [options.notificationId];
+  if (options.taskId) {
+    clauses.push("task_id = ?");
+    params.push(options.taskId);
+  }
+  const row = database.prepare(`
+    select id, task_id, binding_id, notification_id, role, status,
+           payload_json, created_at, correlation_id
+    from notification_acknowledgements
+    where ${clauses.join(" and ")}
+    order by created_at desc, id desc
+    limit 1
+  `).get(...params) as NotificationAcknowledgementRow | undefined;
+  return row ? notificationAcknowledgementRecord(row) : null;
+}
+
+export function insertNotificationAcknowledgementSync(
+  database: DatabaseSync,
+  options: {
+    bindingId: string;
+    correlationId?: string | null;
+    notificationId: number;
+    now?: string;
+    payload: Record<string, unknown>;
+    role: NotificationAcknowledgementRole;
+    status: NotificationAcknowledgementStatus;
+    taskId: string;
+  },
+): NotificationAcknowledgementRecord {
+  const timestamp = options.now ?? new Date().toISOString();
+  const result = database.prepare(`
+    insert into notification_acknowledgements(
+      task_id, binding_id, notification_id, role, status, payload_json,
+      created_at, correlation_id
+    )
+    values (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    options.taskId,
+    options.bindingId,
+    options.notificationId,
+    options.role,
+    options.status,
+    stableJson(options.payload),
+    timestamp,
+    options.correlationId ?? null,
+  );
+  const row = database.prepare(`
+    select id, task_id, binding_id, notification_id, role, status,
+           payload_json, created_at, correlation_id
+    from notification_acknowledgements
+    where id = ?
+  `).get(Number(result.lastInsertRowid)) as NotificationAcknowledgementRow | undefined;
+  if (!row) {
+    throw new RoutedNotificationError("failed to read inserted notification acknowledgement");
+  }
+  return notificationAcknowledgementRecord(row);
+}
+
 export function sessionInboxSync(
   database: DatabaseSync,
   options: { includeConsumed?: boolean; limit?: number; sessionName: string },
@@ -318,11 +416,27 @@ function sessionInboxQuery(whereClause: string): string {
       rn.side_effect_completed, rn.payload_json, rn.error,
       ss.name as source_session_name, ss.role as source_session_role,
       ts.name as target_session_name, ts.role as target_session_role,
-      t.name as task_name
+      t.name as task_name,
+      na.id as ack_id,
+      na.task_id as ack_task_id,
+      na.binding_id as ack_binding_id,
+      na.notification_id as ack_notification_id,
+      na.role as ack_role,
+      na.status as ack_status,
+      na.payload_json as ack_payload_json,
+      na.created_at as ack_created_at,
+      na.correlation_id as ack_correlation_id
     from routed_notifications rn
     join sessions ss on ss.id = rn.source_session_id
     join sessions ts on ts.id = rn.target_session_id
     join tasks t on t.id = rn.task_id
+    left join notification_acknowledgements na on na.id = (
+      select latest_na.id
+      from notification_acknowledgements latest_na
+      where latest_na.notification_id = rn.id
+      order by latest_na.created_at desc, latest_na.id desc
+      limit 1
+    )
     where ${whereClause}
     order by rn.created_at, rn.id
   `;
@@ -357,6 +471,15 @@ interface RoutedNotificationRow {
 }
 
 interface SessionInboxRow extends RoutedNotificationRow {
+  ack_binding_id: string;
+  ack_correlation_id: string | null;
+  ack_created_at: string;
+  ack_id: number | null;
+  ack_notification_id: number;
+  ack_payload_json: string;
+  ack_role: NotificationAcknowledgementRole;
+  ack_status: NotificationAcknowledgementStatus;
+  ack_task_id: string;
   source_session_name: string;
   source_session_role: string;
   target_session_name: string;
@@ -367,6 +490,17 @@ interface SessionInboxRow extends RoutedNotificationRow {
 function sessionInboxRecord(row: SessionInboxRow): SessionInboxRecord {
   return {
     ...routedNotificationRecord(row),
+    acknowledgement: row.ack_id === null ? null : notificationAcknowledgementRecord({
+      binding_id: row.ack_binding_id,
+      correlation_id: row.ack_correlation_id,
+      created_at: row.ack_created_at,
+      id: row.ack_id,
+      notification_id: row.ack_notification_id,
+      payload_json: row.ack_payload_json,
+      role: row.ack_role,
+      status: row.ack_status,
+      task_id: row.ack_task_id,
+    }),
     source_session_name: row.source_session_name,
     source_session_role: row.source_session_role,
     target_session_name: row.target_session_name,
@@ -401,6 +535,32 @@ function routedNotificationRecord(row: RoutedNotificationRow): RoutedNotificatio
     source_session_id: row.source_session_id,
     state: row.state,
     target_session_id: row.target_session_id,
+    task_id: row.task_id,
+  };
+}
+
+interface NotificationAcknowledgementRow {
+  binding_id: string;
+  correlation_id: string | null;
+  created_at: string;
+  id: number;
+  notification_id: number;
+  payload_json: string;
+  role: NotificationAcknowledgementRole;
+  status: NotificationAcknowledgementStatus;
+  task_id: string;
+}
+
+function notificationAcknowledgementRecord(row: NotificationAcknowledgementRow): NotificationAcknowledgementRecord {
+  return {
+    binding_id: row.binding_id,
+    correlation_id: row.correlation_id,
+    created_at: row.created_at,
+    id: row.id,
+    notification_id: row.notification_id,
+    payload: parseJsonObject(row.payload_json),
+    role: row.role,
+    status: row.status,
     task_id: row.task_id,
   };
 }

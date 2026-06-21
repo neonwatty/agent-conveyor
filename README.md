@@ -168,8 +168,9 @@ conveyor plugin-status
 
 The per-project default ledger for operator sessions is
 `.codex-workers/workerctl.db`. The initial included skills are
-`conveyor-create-pair`, `conveyor-create-worker-set`,
-`conveyor-check-status`, and `conveyor-whats-next-nudger`.
+`conveyor-app-wake-relay`, `conveyor-create-pair`,
+`conveyor-create-worker-set`, `conveyor-check-status`, and
+`conveyor-whats-next-nudger`.
 
 After install, the intended Codex app entry point is natural language. Open a
 new Codex app session in the target repo and say:
@@ -206,6 +207,12 @@ single `CONVEYOR IDLE` line.
 
 For bounded follow-up passes after the first worker result, use
 `Use the conveyor-whats-next-nudger skill`.
+
+For stale Codex app roles, use `Use the conveyor-app-wake-relay skill`. It
+runs `app-wakeup-dispatch`, sends only prepared `send_ready=true` prompts with
+Codex app thread tools, and records `sent`, `skipped`, or `blocked` delivery
+receipts with `app-wakeup-record-delivery`. The app-thread prompt wakes the
+session to poll; it is not durable task truth.
 
 Dispatch is core infrastructure for supervised worker/manager pairs. The
 `pair` workflow starts a detached Dispatch watch process by default so worker
@@ -515,7 +522,8 @@ stay out of receipts.
   [--json]` — Record what the Codex app/operator layer did with a wake action.
   `sent` is accepted only when the referenced `app-wakeup-dispatch` receipt has
   a matching `ready_to_send` action with `send_ready=true` and the same thread
-  id; healthy and blocked roles must be recorded as `skipped` or `blocked`.
+  id; healthy roles must be recorded as `skipped`; missing-thread blockers and
+  failed app-thread sends must be recorded as `blocked` with a reason.
 - `app-autopilot start|stop|status TASK [--dispatcher-id ID]
   [--interval SECONDS] [--watch-iterations N] [--stale-after N]
   [--quiet-after N] [--json]` —
@@ -807,6 +815,15 @@ stay out of receipts.
 - `worker-inbox <task> [--consume-next] [--wait] [--timeout N] [--interval N]
   [--limit N] [--json]` — Resolve the task's bound worker session and read its
   dispatcher inbox.
+- `inbox-ack <task> --notification-id N [--json]` — Read durable
+  role-authored acknowledgement history for one routed notification.
+- `inbox-ack <task> --notification-id N --role manager|worker
+  --status received|accepted|blocked --from-stdin [--correlation-id C]
+  [--json]` — Record that the addressed role saw a delivered notification and
+  either received, accepted, or blocked on it. `received` requires delivery;
+  `accepted` and `blocked` require consumption. Use this after visible Codex app
+  sessions print `CONVEYOR RECEIVED`; do not use direct app-thread text as the
+  durable receipt.
 
 ### Actuation
 

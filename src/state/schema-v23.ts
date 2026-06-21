@@ -285,6 +285,18 @@ CREATE TABLE managers(
           exit_reason text
         );
 
+CREATE TABLE notification_acknowledgements(
+          id integer primary key autoincrement,
+          task_id text not null references tasks(id),
+          binding_id text not null references bindings(id),
+          notification_id integer not null references routed_notifications(id),
+          role text not null check (role in ('worker','manager')),
+          status text not null check (status in ('received','accepted','blocked')),
+          payload_json text not null check (json_valid(payload_json)),
+          created_at text not null,
+          correlation_id text
+        );
+
 CREATE TABLE prompts(
           id integer primary key autoincrement,
           task_id text references tasks(id),
@@ -566,6 +578,12 @@ CREATE INDEX manager_cycle_spans_cycle_phase
 
 CREATE INDEX manager_cycle_spans_task
         on manager_cycle_spans(task_id, id);
+
+CREATE INDEX notification_acknowledgements_notification_created
+        on notification_acknowledgements(notification_id, created_at desc, id desc);
+
+CREATE INDEX notification_acknowledgements_task_notification
+        on notification_acknowledgements(task_id, notification_id, id);
 
 CREATE UNIQUE INDEX one_active_binding_per_manager_session
         on bindings(manager_session_id) where state in ('active', 'ending');

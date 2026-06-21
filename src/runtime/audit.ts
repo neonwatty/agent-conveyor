@@ -2,7 +2,12 @@ import { DatabaseSync } from "node:sqlite";
 import { acceptanceCriteriaForTaskSync } from "./loop-evidence.js";
 import type { AcceptanceCriterionRecord } from "./loop-evidence.js";
 import type { CommandAttemptRecord, CommandRecord } from "./commands.js";
-import type { RoutedNotificationDeliveryMode, RoutedNotificationState } from "./notifications.js";
+import type {
+  NotificationAcknowledgementRole,
+  NotificationAcknowledgementStatus,
+  RoutedNotificationDeliveryMode,
+  RoutedNotificationState,
+} from "./notifications.js";
 
 export interface TaskAuditTask {
   created_at: string;
@@ -72,6 +77,19 @@ export interface TaskAuditRoutedNotification {
   task_id: string;
 }
 
+export interface TaskAuditNotificationAcknowledgement {
+  binding_id: string;
+  correlation_id: string | null;
+  created_at: string;
+  id: number;
+  notification_id: number;
+  payload: Record<string, unknown>;
+  role: NotificationAcknowledgementRole;
+  signal_type: string;
+  status: NotificationAcknowledgementStatus;
+  task_id: string;
+}
+
 export interface TaskAuditCorrelationChain {
   attempt_ids: number[];
   command_id: string | null;
@@ -99,6 +117,7 @@ export interface TaskAuditResult {
   manager_cycle_spans: Record<string, unknown>[];
   manager_cycles: Record<string, unknown>[];
   manager_decisions: TaskAuditManagerDecision[];
+  notification_acknowledgements: TaskAuditNotificationAcknowledgement[];
   routed_notifications: TaskAuditRoutedNotification[];
   session_nudges: Record<string, unknown>[];
   task: TaskAuditTask;
@@ -140,6 +159,7 @@ export function taskAuditSync(database: DatabaseSync, task: string): TaskAuditRe
     manager_cycle_spans: managerCycleSpanRecordsForTaskSync(database, taskRow.id),
     manager_cycles: managerCycles,
     manager_decisions: managerDecisions,
+    notification_acknowledgements: notificationAcknowledgementRecordsForTaskSync(database, taskRow.id),
     routed_notifications: routedNotifications,
     session_nudges: sessionNudgeRecordsForTaskSync(database, taskRow.id),
     task: taskRow,
@@ -246,6 +266,41 @@ function routedNotificationRecordsForTaskSync(database: DatabaseSync, taskId: st
     order by rn.created_at, rn.id
   `).all(taskId) as unknown as RoutedNotificationAuditRow[];
   return rows.map(routedNotificationRecord);
+}
+
+function notificationAcknowledgementRecordsForTaskSync(database: DatabaseSync, taskId: string): TaskAuditNotificationAcknowledgement[] {
+  const rows = database.prepare(`
+    select na.id, na.task_id, na.binding_id, na.notification_id, na.role,
+           na.status, na.payload_json, na.created_at, na.correlation_id,
+           rn.signal_type
+    from notification_acknowledgements na
+    join routed_notifications rn on rn.id = na.notification_id
+    where na.task_id = ?
+    order by na.created_at, na.id
+  `).all(taskId) as Array<{
+    binding_id: string;
+    correlation_id: string | null;
+    created_at: string;
+    id: number;
+    notification_id: number;
+    payload_json: string;
+    role: NotificationAcknowledgementRole;
+    signal_type: string;
+    status: NotificationAcknowledgementStatus;
+    task_id: string;
+  }>;
+  return rows.map((row) => ({
+    binding_id: row.binding_id,
+    correlation_id: row.correlation_id,
+    created_at: row.created_at,
+    id: row.id,
+    notification_id: row.notification_id,
+    payload: parseJsonObject(row.payload_json),
+    role: row.role,
+    signal_type: row.signal_type,
+    status: row.status,
+    task_id: row.task_id,
+  }));
 }
 
 function managerDecisionRecordsForTaskSync(database: DatabaseSync, taskId: string): TaskAuditManagerDecision[] {

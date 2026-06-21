@@ -772,6 +772,84 @@ test("TypeScript runtime app-wakeup-record-delivery records sent only for send-r
   }
 });
 
+test("TypeScript runtime app-wakeup-record-delivery records blocked send failures for ready actions", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-app-wakeup-record-blocked-ready."));
+  const dbPath = join(root, "workerctl.db");
+  try {
+    seedCliAppLoopFixture(dbPath, {
+      dispatcherHeartbeatAt: null,
+      managerHeartbeatAt: "2026-06-11T11:45:00Z",
+      workerHeartbeatAt: "2026-06-11T11:44:00Z",
+    });
+    const dispatch = runTypescriptRuntimeCommand({
+      args: ["app-wakeup-dispatch", "app-loop-task", "--path", dbPath, "--json"],
+      env: {},
+      now: () => new Date("2026-06-11T12:00:00Z"),
+    });
+    assert.equal(dispatch.exitCode, 0, dispatch.stderr);
+    const dispatchOutput = JSON.parse(dispatch.stdout ?? "{}") as {
+      receipt: { event_id: string };
+      summary: { ready_to_send: number };
+    };
+    assert.equal(dispatchOutput.summary.ready_to_send, 2);
+
+    const missingReason = runTypescriptRuntimeCommand({
+      args: [
+        "app-wakeup-record-delivery",
+        "app-loop-task",
+        "--role",
+        "worker",
+        "--dispatch-receipt",
+        dispatchOutput.receipt.event_id,
+        "--delivery-status",
+        "blocked",
+        "--path",
+        dbPath,
+        "--json",
+      ],
+      env: {},
+      now: () => new Date("2026-06-11T12:01:00Z"),
+    });
+    assert.equal(missingReason.exitCode, 2);
+    assert.match(missingReason.stderr ?? "", /ready-to-send source actions require --reason/);
+
+    const result = runTypescriptRuntimeCommand({
+      args: [
+        "app-wakeup-record-delivery",
+        "app-loop-task",
+        "--role",
+        "worker",
+        "--dispatch-receipt",
+        dispatchOutput.receipt.event_id,
+        "--delivery-status",
+        "blocked",
+        "--reason",
+        "send_message_to_thread unavailable",
+        "--path",
+        dbPath,
+        "--json",
+      ],
+      env: {},
+      now: () => new Date("2026-06-11T12:02:00Z"),
+    });
+
+    assert.equal(result.exitCode, 0, result.stderr);
+    const output = JSON.parse(result.stdout ?? "{}") as {
+      delivery: { reason: string; role: string; source_action_status: string; source_send_ready: boolean; status: string; thread_id: string };
+      receipt: { event_type: string };
+    };
+    assert.equal(output.delivery.role, "worker");
+    assert.equal(output.delivery.status, "blocked");
+    assert.equal(output.delivery.reason, "send_message_to_thread unavailable");
+    assert.equal(output.delivery.source_action_status, "ready_to_send");
+    assert.equal(output.delivery.source_send_ready, true);
+    assert.equal(output.delivery.thread_id, "thread-worker");
+    assert.equal(output.receipt.event_type, "app_wakeup_delivery_recorded");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("TypeScript runtime app-wakeup-record-delivery rejects sent for skipped healthy actions", () => {
   const root = mkdtempSync(join(tmpdir(), "agent-conveyor-app-wakeup-record-reject-skipped."));
   const dbPath = join(root, "workerctl.db");
@@ -9423,7 +9501,7 @@ test("TypeScript runtime handles Agent Conveyor plugin install status and path c
     };
     assert.equal(pluginPathPayload.codex_home, codexHome);
     assert.ok(pluginPathPayload.plugin_source.endsWith(join("plugin", "agent-conveyor")));
-    assert.ok(pluginPathPayload.plugin_install_root.endsWith(join("plugins", "cache", "agent-conveyor", "agent-conveyor", "0.1.21")));
+    assert.ok(pluginPathPayload.plugin_install_root.endsWith(join("plugins", "cache", "agent-conveyor", "agent-conveyor", "0.1.22")));
     assert.equal(pluginPathPayload.skills_install_root, join(codexHome, "skills"));
 
     const statusBefore = runTypescriptRuntimeCommand({
@@ -9439,12 +9517,13 @@ test("TypeScript runtime handles Agent Conveyor plugin install status and path c
       version_matches: boolean;
     };
     assert.equal(statusBeforePayload.installed, false);
-    assert.equal(statusBeforePayload.package_version, "0.1.21");
-    assert.equal(statusBeforePayload.plugin_version, "0.1.21");
+    assert.equal(statusBeforePayload.package_version, "0.1.22");
+    assert.equal(statusBeforePayload.plugin_version, "0.1.22");
     assert.equal(statusBeforePayload.version_matches, false);
     assert.deepEqual(
       statusBeforePayload.skills.map((skill) => ({ installed: skill.installed, name: skill.name })),
       [
+        { installed: false, name: "conveyor-app-wake-relay" },
         { installed: false, name: "conveyor-create-pair" },
         { installed: false, name: "conveyor-create-worker-set" },
         { installed: false, name: "conveyor-check-status" },
@@ -9464,17 +9543,19 @@ test("TypeScript runtime handles Agent Conveyor plugin install status and path c
       plugin_version: string;
     };
     assert.equal(installPayload.installed, true);
-    assert.equal(installPayload.package_version, "0.1.21");
-    assert.equal(installPayload.plugin_version, "0.1.21");
+    assert.equal(installPayload.package_version, "0.1.22");
+    assert.equal(installPayload.plugin_version, "0.1.22");
     assert.deepEqual(installPayload.installed_skills.sort(), [
+      "conveyor-app-wake-relay",
       "conveyor-check-status",
       "conveyor-create-pair",
       "conveyor-create-worker-set",
       "conveyor-whats-next-nudger",
     ]);
 
-    const installedManifestPath = join(codexHome, "plugins", "cache", "agent-conveyor", "agent-conveyor", "0.1.21", "plugin.json");
+    const installedManifestPath = join(codexHome, "plugins", "cache", "agent-conveyor", "agent-conveyor", "0.1.22", "plugin.json");
     assert.ok(existsSync(installedManifestPath));
+    assert.ok(existsSync(join(codexHome, "skills", "conveyor-app-wake-relay", "SKILL.md")));
     assert.ok(existsSync(join(codexHome, "skills", "conveyor-check-status", "SKILL.md")));
     assert.ok(existsSync(join(codexHome, "skills", "conveyor-create-pair", "SKILL.md")));
     assert.ok(existsSync(join(codexHome, "skills", "conveyor-create-worker-set", "SKILL.md")));
@@ -9486,7 +9567,7 @@ test("TypeScript runtime handles Agent Conveyor plugin install status and path c
     assert.doesNotMatch("$PWD/.codex-workers/workerctl.db", absoluteLedgerPath);
     assert.doesNotMatch("--path=$PWD/.codex-workers/workerctl.db", absoluteLedgerPath);
     assert.doesNotMatch(".codex-workers/workerctl.db", absoluteLedgerPath);
-    for (const name of ["conveyor-create-pair", "conveyor-create-worker-set", "conveyor-check-status", "conveyor-whats-next-nudger"]) {
+    for (const name of ["conveyor-app-wake-relay", "conveyor-create-pair", "conveyor-create-worker-set", "conveyor-check-status", "conveyor-whats-next-nudger"]) {
       const text = readFileSync(join(codexHome, "skills", name, "SKILL.md"), "utf8");
       assert.match(text, /\.codex-workers\/workerctl\.db/);
       assert.doesNotMatch(text, absoluteLedgerPath);
@@ -9497,9 +9578,14 @@ test("TypeScript runtime handles Agent Conveyor plugin install status and path c
       readFileSync(join(codexHome, "skills", "conveyor-create-pair", "SKILL.md"), "utf8"),
       /Do not use tmux/,
     );
+    const wakeRelaySkill = readFileSync(join(codexHome, "skills", "conveyor-app-wake-relay", "SKILL.md"), "utf8");
+    assert.match(wakeRelaySkill, /send_message_to_thread/);
+    assert.match(wakeRelaySkill, /app-wakeup-record-delivery/);
+    assert.match(wakeRelaySkill, /send_ready=true/);
+    assert.match(wakeRelaySkill, /inbox-ack/);
     const installedManifest = JSON.parse(readFileSync(installedManifestPath, "utf8")) as { name: string; version: string };
     assert.equal(installedManifest.name, "agent-conveyor");
-    assert.equal(installedManifest.version, "0.1.21");
+    assert.equal(installedManifest.version, "0.1.22");
 
     const statusAfter = runTypescriptRuntimeCommand({
       args: ["plugin-status", "--codex-home", codexHome, "--json"],
@@ -9512,13 +9598,13 @@ test("TypeScript runtime handles Agent Conveyor plugin install status and path c
       version_matches: boolean;
     };
     assert.equal(statusAfterPayload.installed, true);
-    assert.equal(statusAfterPayload.installed_version, "0.1.21");
+    assert.equal(statusAfterPayload.installed_version, "0.1.22");
     assert.equal(statusAfterPayload.version_matches, true);
 
     const corruptHome = join(root, "corrupt-codex-home");
-    const corruptManifestDir = join(corruptHome, "plugins", "cache", "agent-conveyor", "agent-conveyor", "0.1.21");
+    const corruptManifestDir = join(corruptHome, "plugins", "cache", "agent-conveyor", "agent-conveyor", "0.1.22");
     mkdirSync(corruptManifestDir, { recursive: true });
-    writeFileSync(join(corruptManifestDir, "plugin.json"), JSON.stringify({ name: "not-agent-conveyor", version: "0.1.21" }));
+    writeFileSync(join(corruptManifestDir, "plugin.json"), JSON.stringify({ name: "not-agent-conveyor", version: "0.1.22" }));
     const corruptStatus = runTypescriptRuntimeCommand({
       args: ["plugin-status", "--codex-home", corruptHome, "--json"],
       env: {},
@@ -9536,6 +9622,7 @@ test("TypeScript runtime handles Agent Conveyor plugin install status and path c
     assert.deepEqual(
       corruptStatusPayload.skills.map((skill) => ({ installed: skill.installed, name: skill.name })),
       [
+        { installed: false, name: "conveyor-app-wake-relay" },
         { installed: false, name: "conveyor-create-pair" },
         { installed: false, name: "conveyor-create-worker-set" },
         { installed: false, name: "conveyor-check-status" },
@@ -9589,14 +9676,29 @@ test("TypeScript runtime handles ack inbox and session action CLI contracts by d
         now: "2026-05-23T10:00:00Z",
         taskId: "task-remaining",
       });
+      createTaskSync(database, {
+        goal: "Other task must not own remaining-task notifications.",
+        name: "other-task",
+        now: "2026-05-23T10:00:01Z",
+        taskId: "task-other",
+      });
       insertSession(database, { id: "session-worker-remaining", name: "worker-remaining", role: "worker", tmuxPaneId: "%7", tmuxSession: "tmux-worker-remaining" });
       insertSession(database, { id: "session-manager-remaining", name: "manager-remaining", role: "manager", tmuxPaneId: "%8", tmuxSession: "tmux-manager-remaining" });
+      insertSession(database, { id: "session-worker-other", name: "worker-other", role: "worker", tmuxPaneId: "%9", tmuxSession: "tmux-worker-other" });
+      insertSession(database, { id: "session-manager-other", name: "manager-other", role: "manager", tmuxPaneId: "%10", tmuxSession: "tmux-manager-other" });
       bindSessionsSync(database, {
         bindingId: "binding-remaining",
         managerSessionName: "manager-remaining",
         now: "2026-05-23T10:00:30Z",
         taskName: "remaining-task",
         workerSessionName: "worker-remaining",
+      });
+      bindSessionsSync(database, {
+        bindingId: "binding-other",
+        managerSessionName: "manager-other",
+        now: "2026-05-23T10:00:31Z",
+        taskName: "other-task",
+        workerSessionName: "worker-other",
       });
       database.prepare(`
         insert into routed_notifications(
@@ -9664,6 +9766,101 @@ test("TypeScript runtime handles ack inbox and session action CLI contracts by d
     });
     assert.deepEqual(JSON.parse(managerRead.stdout ?? "{}").payload, { supervision: "accepted" });
 
+    const receivedAck = runTypescriptRuntimeCommand({
+      args: [
+        "inbox-ack",
+        "remaining-task",
+        "--notification-id",
+        "1",
+        "--role",
+        "worker",
+        "--status",
+        "received",
+        "--from-stdin",
+        "--correlation-id",
+        "inbox-received",
+        "--path",
+        dbPath,
+        "--json",
+      ],
+      env: {},
+      now: () => new Date("2026-05-23T10:02:02Z"),
+      stdin: "{\"summary\":\"Worker received manager instruction.\"}",
+    });
+    assert.equal(receivedAck.exitCode, 0, receivedAck.stderr);
+    const receivedAckPayload = JSON.parse(receivedAck.stdout ?? "{}") as {
+      acknowledgement: { notification_id: number; payload: Record<string, unknown>; role: string; status: string };
+      receipt: { event_type: string };
+    };
+    assert.equal(receivedAckPayload.acknowledgement.notification_id, 1);
+    assert.equal(receivedAckPayload.acknowledgement.role, "worker");
+    assert.equal(receivedAckPayload.acknowledgement.status, "received");
+    assert.deepEqual(receivedAckPayload.acknowledgement.payload, { summary: "Worker received manager instruction." });
+    assert.equal(receivedAckPayload.receipt.event_type, "dispatch_inbox_ack_recorded");
+
+    const wrongRoleAck = runTypescriptRuntimeCommand({
+      args: [
+        "inbox-ack",
+        "remaining-task",
+        "--notification-id",
+        "1",
+        "--role",
+        "manager",
+        "--status",
+        "received",
+        "--from-stdin",
+        "--path",
+        dbPath,
+        "--json",
+      ],
+      env: {},
+      stdin: "{\"summary\":\"Wrong side.\"}",
+    });
+    assert.equal(wrongRoleAck.exitCode, 2);
+    assert.match(wrongRoleAck.stderr ?? "", /target role is worker/);
+
+    const crossTaskAck = runTypescriptRuntimeCommand({
+      args: [
+        "inbox-ack",
+        "other-task",
+        "--notification-id",
+        "1",
+        "--role",
+        "worker",
+        "--status",
+        "received",
+        "--from-stdin",
+        "--path",
+        dbPath,
+        "--json",
+      ],
+      env: {},
+      stdin: "{\"summary\":\"Wrong task.\"}",
+    });
+    assert.equal(crossTaskAck.exitCode, 2);
+    assert.match(crossTaskAck.stderr ?? "", /Unknown routed notification for task other-task: 1/);
+
+    const prematureAcceptedAck = runTypescriptRuntimeCommand({
+      args: [
+        "inbox-ack",
+        "remaining-task",
+        "--notification-id",
+        "1",
+        "--role",
+        "worker",
+        "--status",
+        "accepted",
+        "--from-stdin",
+        "--path",
+        dbPath,
+        "--json",
+      ],
+      env: {},
+      stdin: "{\"summary\":\"Accepted before consuming.\"}",
+    });
+    assert.equal(prematureAcceptedAck.exitCode, 2);
+    assert.match(prematureAcceptedAck.stderr ?? "", /has not been consumed/);
+
     const inbox = runTypescriptRuntimeCommand({
       args: ["worker-inbox", "remaining-task", "--consume-next", "--wait", "--timeout", "0", "--interval", "1", "--json", "--path", dbPath],
       env: {},
@@ -9677,11 +9874,74 @@ test("TypeScript runtime handles ack inbox and session action CLI contracts by d
     };
     assert.equal(inboxPayload.consumed.correlation_id, "corr-remaining");
     assert.ok(inboxPayload.consumed.consumed_at);
+    assert.equal((inboxPayload.consumed as unknown as { acknowledgement: { status: string } }).acknowledgement.status, "received");
     assert.equal(inboxPayload.consumed.target_session_name, "worker-remaining");
     assert.deepEqual(inboxPayload.items, []);
     assert.equal(inboxPayload.session.name, "worker-remaining");
     assert.equal(inboxPayload.session.role, "worker");
     assert.equal(inboxPayload.task.name, "remaining-task");
+
+    const acceptedAck = runTypescriptRuntimeCommand({
+      args: [
+        "inbox-ack",
+        "remaining-task",
+        "--notification-id",
+        "1",
+        "--role",
+        "worker",
+        "--status",
+        "accepted",
+        "--from-stdin",
+        "--correlation-id",
+        "inbox-accepted",
+        "--path",
+        dbPath,
+        "--json",
+      ],
+      env: {},
+      now: () => new Date("2026-05-23T10:03:00Z"),
+      stdin: "{\"summary\":\"Worker accepted and acted on manager instruction.\"}",
+    });
+    assert.equal(acceptedAck.exitCode, 0, acceptedAck.stderr);
+    const acceptedAckPayload = JSON.parse(acceptedAck.stdout ?? "{}") as {
+      acknowledgement: { status: string };
+    };
+    assert.equal(acceptedAckPayload.acknowledgement.status, "accepted");
+
+    const ackRead = runTypescriptRuntimeCommand({
+      args: ["inbox-ack", "remaining-task", "--notification-id", "1", "--json", "--path", dbPath],
+      env: {},
+    });
+    assert.equal(ackRead.exitCode, 0, ackRead.stderr);
+    const ackReadPayload = JSON.parse(ackRead.stdout ?? "{}") as {
+      acknowledgements: Array<{ status: string }>;
+      latest: { status: string };
+    };
+    assert.deepEqual(ackReadPayload.acknowledgements.map((ack) => ack.status), ["received", "accepted"]);
+    assert.equal(ackReadPayload.latest.status, "accepted");
+
+    const audit = runTypescriptRuntimeCommand({
+      args: ["audit", "remaining-task", "--json", "--path", dbPath],
+      env: {},
+    });
+    assert.equal(audit.exitCode, 0, audit.stderr);
+    const auditPayload = JSON.parse(audit.stdout ?? "{}") as {
+      notification_acknowledgements: Array<{ notification_id: number; role: string; status: string }>;
+    };
+    assert.deepEqual(auditPayload.notification_acknowledgements.map((ack) => `${ack.notification_id}:${ack.role}:${ack.status}`), [
+      "1:worker:received",
+      "1:worker:accepted",
+    ]);
+
+    const replay = runTypescriptRuntimeCommand({
+      args: ["replay", "remaining-task", "--json", "--path", dbPath],
+      env: {},
+    });
+    assert.equal(replay.exitCode, 0, replay.stderr);
+    const replayPayload = JSON.parse(replay.stdout ?? "{}") as {
+      entries: Array<{ kind: string; source: string; summary: string }>;
+    };
+    assert.ok(replayPayload.entries.some((entry) => entry.source === "notification_acknowledgements" && /worker acknowledged notification 1: accepted/.test(entry.summary)));
 
     const dryNudge = runTypescriptRuntimeCommand({
       args: ["session-nudge", "worker-remaining", "status?", "--dry-run", "--path", dbPath],

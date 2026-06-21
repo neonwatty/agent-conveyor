@@ -1,4 +1,4 @@
-export const SCHEMA_VERSION = 25;
+export const SCHEMA_VERSION = 26;
 
 export const REQUIRED_TABLES = new Set([
   "acceptance_criteria",
@@ -22,6 +22,7 @@ export const REQUIRED_TABLES = new Set([
   "manager_cycle_spans",
   "manager_decisions",
   "managers",
+  "notification_acknowledgements",
   "prompts",
   "routed_notifications",
   "runs",
@@ -62,6 +63,8 @@ export const REQUIRED_INDEXES = new Set([
   "manager_configs_task_id",
   "manager_cycle_spans_cycle_phase",
   "manager_cycle_spans_task",
+  "notification_acknowledgements_notification_created",
+  "notification_acknowledgements_task_notification",
   "one_active_binding_per_manager_session",
   "one_active_binding_per_task",
   "one_active_binding_per_worker",

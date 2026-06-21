@@ -41,6 +41,7 @@ const required = [
   "skills/codex-review/SKILL.md",
   "skills/codex-review/scripts/codex-review",
   "plugin/agent-conveyor/plugin.json",
+  "plugin/agent-conveyor/skills/conveyor-app-wake-relay/SKILL.md",
   "plugin/agent-conveyor/skills/conveyor-create-pair/SKILL.md",
   "plugin/agent-conveyor/skills/conveyor-create-worker-set/SKILL.md",
   "plugin/agent-conveyor/skills/conveyor-check-status/SKILL.md",
@@ -141,6 +142,7 @@ const installPlugin = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
 const pluginStatus = JSON.parse(fs.readFileSync(process.argv[3], "utf8"));
 const codexHome = process.argv[4];
 const expectedSkills = [
+  "conveyor-app-wake-relay",
   "conveyor-check-status",
   "conveyor-create-pair",
   "conveyor-create-worker-set",
@@ -194,7 +196,33 @@ PATH="$PREFIX/bin:$PATH" "$CONVEYOR" create-disposable-binding smoke-app-loop \
   --json > "$SMOKE_DIR/create-disposable-binding.json"
 PATH="$PREFIX/bin:$PATH" "$CONVEYOR" app-heartbeat smoke-app-loop --role manager --path "$SMOKE_DB" --json > "$SMOKE_DIR/app-heartbeat-manager.json"
 PATH="$PREFIX/bin:$PATH" "$CONVEYOR" app-heartbeat smoke-app-loop --role worker --path "$SMOKE_DB" --json > "$SMOKE_DIR/app-heartbeat-worker.json"
+PATH="$PREFIX/bin:$PATH" "$CONVEYOR" enqueue-nudge-worker smoke-app-loop \
+  --message "package smoke worker instruction" \
+  --correlation-id smoke-inbox-ack \
+  --path "$SMOKE_DB" \
+  --json > "$SMOKE_DIR/enqueue-nudge-worker.json"
 PATH="$PREFIX/bin:$PATH" "$CONVEYOR" dispatch --watch --watch-iterations 1 --dispatcher-id dispatch-local --path "$SMOKE_DB" --json > "$SMOKE_DIR/dispatch-watch.json"
+PATH="$PREFIX/bin:$PATH" "$CONVEYOR" worker-inbox smoke-app-loop --consume-next --wait --timeout 0 --interval 1 --path "$SMOKE_DB" --json > "$SMOKE_DIR/worker-inbox-consume.json"
+SMOKE_NOTIFICATION_ID="$(node -e "const payload = JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8')); if (!payload.consumed?.id) throw new Error('expected consumed worker inbox notification'); process.stdout.write(String(payload.consumed.id));" "$SMOKE_DIR/worker-inbox-consume.json")"
+printf '%s\n' '{"summary":"Package smoke received the worker instruction."}' \
+  | PATH="$PREFIX/bin:$PATH" "$CONVEYOR" inbox-ack smoke-app-loop \
+    --notification-id "$SMOKE_NOTIFICATION_ID" \
+    --role worker \
+    --status received \
+    --from-stdin \
+    --correlation-id smoke-inbox-ack-received \
+    --path "$SMOKE_DB" \
+    --json > "$SMOKE_DIR/inbox-ack-received.json"
+printf '%s\n' '{"summary":"Package smoke accepted the worker instruction."}' \
+  | PATH="$PREFIX/bin:$PATH" "$CONVEYOR" inbox-ack smoke-app-loop \
+    --notification-id "$SMOKE_NOTIFICATION_ID" \
+    --role worker \
+    --status accepted \
+    --from-stdin \
+    --correlation-id smoke-inbox-ack-accepted \
+    --path "$SMOKE_DB" \
+    --json > "$SMOKE_DIR/inbox-ack-accepted.json"
+PATH="$PREFIX/bin:$PATH" "$CONVEYOR" inbox-ack smoke-app-loop --notification-id "$SMOKE_NOTIFICATION_ID" --path "$SMOKE_DB" --json > "$SMOKE_DIR/inbox-ack-read.json"
 PATH="$PREFIX/bin:$PATH" "$CONVEYOR" app-loop-status smoke-app-loop --path "$SMOKE_DB" --json > "$SMOKE_DIR/app-loop-status.json"
 PATH="$PREFIX/bin:$PATH" "$CONVEYOR" app-wakeup-plan smoke-app-loop --path "$SMOKE_DB" --json > "$SMOKE_DIR/app-wakeup-plan.json"
 PATH="$PREFIX/bin:$PATH" "$CONVEYOR" app-wakeup-dispatch smoke-app-loop --path "$SMOKE_DB" --json > "$SMOKE_DIR/app-wakeup-dispatch-healthy.json"
@@ -243,6 +271,26 @@ if PATH="$PREFIX/bin:$PATH" "$CONVEYOR" app-wakeup-record-delivery smoke-app-loo
   echo "package-smoke: expected healthy skipped action to reject sent delivery" >&2
   exit 1
 fi
+
+node - "$SMOKE_DIR/worker-inbox-consume.json" "$SMOKE_DIR/inbox-ack-received.json" "$SMOKE_DIR/inbox-ack-accepted.json" "$SMOKE_DIR/inbox-ack-read.json" <<'JS'
+const fs = require("fs");
+const inbox = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+const received = JSON.parse(fs.readFileSync(process.argv[3], "utf8"));
+const accepted = JSON.parse(fs.readFileSync(process.argv[4], "utf8"));
+const read = JSON.parse(fs.readFileSync(process.argv[5], "utf8"));
+if (!inbox.consumed?.id || inbox.consumed.signal_type !== "nudge_worker") {
+  throw new Error(`expected consumed worker nudge notification, got ${JSON.stringify(inbox.consumed)}`);
+}
+if (received.acknowledgement?.status !== "received" || received.acknowledgement?.role !== "worker") {
+  throw new Error(`expected worker received acknowledgement, got ${JSON.stringify(received.acknowledgement)}`);
+}
+if (accepted.acknowledgement?.status !== "accepted" || accepted.acknowledgement?.role !== "worker") {
+  throw new Error(`expected worker accepted acknowledgement, got ${JSON.stringify(accepted.acknowledgement)}`);
+}
+if (read.latest?.status !== "accepted" || read.acknowledgements?.length !== 2) {
+  throw new Error(`expected acknowledgement history ending in accepted, got ${JSON.stringify(read)}`);
+}
+JS
 
 node - "$SMOKE_DIR/create-disposable-binding.json" "$SMOKE_DIR/app-loop-status.json" "$SMOKE_DIR/app-wakeup-plan.json" "$SMOKE_DIR/app-wakeup-dispatch-healthy.json" "$SMOKE_DIR/app-wakeup-dispatch-stale.json" "$SMOKE_DIR/app-wakeup-delivery-sent.json" "$SMOKE_DIR/app-wakeup-delivery-rejected.err" "$SMOKE_DIR/app-autopilot-start.json" "$SMOKE_DIR/app-autopilot-stop.json" "$SMOKE_DIR/app-autopilot-status.json" <<'JS'
 const fs = require("fs");

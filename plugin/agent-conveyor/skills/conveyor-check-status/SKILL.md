@@ -17,6 +17,8 @@ or worker set from any project.
 - Do not inspect product code or private content.
 - Treat ledger claims as claims unless backed by durable receipts.
 - Prefer compact status receipts with exact next action.
+- If a role is stale and app thread metadata is present, recommend the
+  `conveyor-app-wake-relay` skill rather than an ad hoc direct prompt.
 
 ## Commands
 
