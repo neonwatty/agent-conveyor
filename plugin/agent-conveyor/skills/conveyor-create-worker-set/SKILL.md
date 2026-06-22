@@ -26,10 +26,12 @@ not run a campaign, Ralph loop, ship-it loop, or tmux workflow.
   task before sending real work:
   `conveyor app-autopilot start "$TASK" --dispatcher-id dispatch-local --path "$LEDGER" --json`.
   Apply emitted Codex app automation specs when automation tools are available,
-  or report that shard as `manual-poll only`.
+  then record applied manager/worker automations with
+  `conveyor app-autopilot record-automation "$TASK" --role manager|worker --automation-id "<id>" --path "$LEDGER" --json`.
+  If automation tools are unavailable, report that shard as `manual-poll only`.
 - Do not report a worker set as autonomous unless every worker task has passed
-  smoke, started app-autopilot, and had automation specs applied or explicitly
-  deferred by the operator.
+  smoke, started app-autopilot, recorded automation receipts or explicit
+  operator deferrals, and reports `plan.readiness.autonomous_ready=true`.
 - Tell the operator to use `conveyor-app-wake-relay` for stale app threads;
   only Dispatch inboxes and Conveyor receipts are durable task truth.
 
@@ -69,7 +71,8 @@ conveyor create-disposable-binding "$TASK" \
 5. Run `conveyor-smoke-app-connections` once per worker task. Aggregate the
    resulting `app-smoke status` receipts. Required smoke must pass for every
    worker before the real task starts. Each shard must also start
-   app-autopilot before it is treated as autonomous.
+   app-autopilot, record automation receipts, and report
+   `plan.readiness.autonomous_ready=true` before it is treated as autonomous.
 6. Return a setup receipt listing every task, worker role, thread id/title,
    manager thread id/title, ledger path, smoke id/status, autopilot status,
-   automation spec state, and status command.
+   readiness state/blockers, automation spec state, and status command.

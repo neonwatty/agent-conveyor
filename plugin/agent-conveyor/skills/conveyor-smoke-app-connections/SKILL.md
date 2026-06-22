@@ -38,6 +38,13 @@ only.
 - Prompts that ask a manager or worker to use `--from-stdin` must include an
   explicit JSON stdin example. Do not rely on the target session to infer the
   payload format.
+- Run pair smoke worker-first. The worker must consume its smoke item, record
+  worker received/accepted receipts, notify the manager, and Dispatch that
+  report before the manager is prompted to wait for it. This avoids turning
+  normal app-thread scheduling delay into a terminal manager timeout.
+- If a role records `blocked` and later succeeds, record a later `accepted`
+  receipt for the same smoke id and nonce. Conveyor treats the latest terminal
+  role receipt as the current state.
 
 ## Default Ledger
 
@@ -88,55 +95,7 @@ conveyor dispatch --watch --watch-iterations 1 --interval 2 \
   --json
 ```
 
-5. Send the manager smoke prompt to the manager thread with native Codex app
-thread tools. Use only the thread id from `app-smoke start|status`.
-
-Manager prompt:
-
-```text
-Use the manage-codex-workers skill.
-CONVEYOR SMOKE <NONCE>
-
-You are the manager smoke target for Agent Conveyor task <TASK>.
-Do not inspect product code or private content. Do not start the real task.
-
-Print these visible sections:
-CONVEYOR SMOKE RECEIVED
-CONVEYOR SMOKE ACK
-CONVEYOR SMOKE REPORT
-
-Run:
-conveyor app-heartbeat '<TASK>' --role manager --path '<LEDGER>' --json
-
-Then poll for the worker smoke report:
-conveyor manager-inbox '<TASK>' --consume-next --wait --timeout 60 --path '<LEDGER>' --json
-
-If you consume a manager inbox item for smoke <NONCE>, record:
-printf '%s\n' '{"summary":"manager received worker smoke report","evidence":["consumed manager inbox item for smoke <NONCE>"],"blockers":[]}' \
-  | conveyor inbox-ack '<TASK>' --notification-id '<consumed.id>' --role manager --status received --from-stdin --path '<LEDGER>' --json
-printf '%s\n' '{"summary":"manager accepted worker smoke report","evidence":["worker report nonce matched <NONCE>"],"blockers":[]}' \
-  | conveyor inbox-ack '<TASK>' --notification-id '<consumed.id>' --role manager --status accepted --from-stdin --path '<LEDGER>' --json
-printf '%s\n' '{"summary":"manager accepted app smoke","evidence":["fresh manager heartbeat","worker smoke report consumed","worker nonce matched <NONCE>"],"blockers":[]}' \
-  | conveyor app-smoke record '<TASK>' --smoke-id '<SMOKE_ID>' --nonce '<NONCE>' --role manager --status accepted --thread-id '<MANAGER_THREAD_ID>' --notification-id '<consumed.id>' --from-stdin --path '<LEDGER>' --json
-
-If blocked, record app-smoke blocked with the exact blocker.
-Stop after the smoke receipt. Do not start real work.
-```
-
-If the send succeeds, record:
-
-```bash
-conveyor app-smoke record "$TASK" \
-  --smoke-id "$SMOKE_ID" \
-  --nonce "$NONCE" \
-  --role manager \
-  --status sent \
-  --thread-id "<manager thread id from app-smoke status>" \
-  --path "$LEDGER" \
-  --json
-```
-
-6. Send the worker smoke prompt to the worker thread with native Codex app
+5. Send the worker smoke prompt to the worker thread with native Codex app
 thread tools. Use only the thread id from `app-smoke start|status`.
 
 Worker prompt:
@@ -190,7 +149,65 @@ conveyor app-smoke record "$TASK" \
   --json
 ```
 
-7. Poll status until it passes or a blocker is clear:
+6. Poll until the worker has accepted smoke and delivered a manager report:
+
+```bash
+conveyor app-smoke status "$TASK" --smoke-id "$SMOKE_ID" --path "$LEDGER" --json
+conveyor manager-inbox "$TASK" --wait --timeout 5 --path "$LEDGER" --json
+```
+
+Do not send the manager smoke prompt until the manager inbox contains a
+`<SMOKE_ID>-worker-report` item for `<NONCE>`.
+
+7. Send the manager smoke prompt to the manager thread with native Codex app
+thread tools. Use only the thread id from `app-smoke start|status`.
+
+Manager prompt:
+
+```text
+Use the manage-codex-workers skill.
+CONVEYOR SMOKE <NONCE>
+
+You are the manager smoke target for Agent Conveyor task <TASK>.
+The worker smoke report for <SMOKE_ID> and <NONCE> is already delivered in your manager inbox.
+Do not inspect product code or private content. Do not start the real task.
+
+Print these visible sections:
+CONVEYOR SMOKE RECEIVED
+CONVEYOR SMOKE ACK
+CONVEYOR SMOKE REPORT
+
+Run:
+conveyor app-heartbeat '<TASK>' --role manager --path '<LEDGER>' --json
+conveyor manager-inbox '<TASK>' --consume-next --wait --timeout 60 --path '<LEDGER>' --json
+
+If you consume a manager inbox item for smoke <NONCE>, record:
+printf '%s\n' '{"summary":"manager received worker smoke report","evidence":["consumed manager inbox item for smoke <NONCE>"],"blockers":[]}' \
+  | conveyor inbox-ack '<TASK>' --notification-id '<consumed.id>' --role manager --status received --from-stdin --path '<LEDGER>' --json
+printf '%s\n' '{"summary":"manager accepted worker smoke report","evidence":["worker report nonce matched <NONCE>"],"blockers":[]}' \
+  | conveyor inbox-ack '<TASK>' --notification-id '<consumed.id>' --role manager --status accepted --from-stdin --path '<LEDGER>' --json
+printf '%s\n' '{"summary":"manager accepted app smoke","evidence":["fresh manager heartbeat","worker smoke report consumed","worker nonce matched <NONCE>"],"blockers":[]}' \
+  | conveyor app-smoke record '<TASK>' --smoke-id '<SMOKE_ID>' --nonce '<NONCE>' --role manager --status accepted --thread-id '<MANAGER_THREAD_ID>' --notification-id '<consumed.id>' --from-stdin --path '<LEDGER>' --json
+
+If blocked, record app-smoke blocked with the exact blocker. A later successful
+retry must record a later manager accepted receipt for the same smoke id and nonce.
+Stop after the smoke receipt. Do not start real work.
+```
+
+If the send succeeds, record:
+
+```bash
+conveyor app-smoke record "$TASK" \
+  --smoke-id "$SMOKE_ID" \
+  --nonce "$NONCE" \
+  --role manager \
+  --status sent \
+  --thread-id "<manager thread id from app-smoke status>" \
+  --path "$LEDGER" \
+  --json
+```
+
+8. Poll status until it passes or a blocker is clear:
 
 ```bash
 conveyor app-smoke status "$TASK" --smoke-id "$SMOKE_ID" --path "$LEDGER" --json
@@ -199,7 +216,7 @@ conveyor app-smoke status "$TASK" --smoke-id "$SMOKE_ID" --path "$LEDGER" --json
 If `real_work_allowed=true`, the setup may send the real work prompt. If
 `real_work_allowed=false`, report exact blockers and stop.
 
-8. Start app-autopilot immediately after required smoke passes and before
+9. Start app-autopilot immediately after required smoke passes and before
    sending real work:
 
 ```bash
@@ -210,12 +227,20 @@ conveyor app-autopilot start "$TASK" \
 ```
 
 The operator or manager must apply the emitted Codex app automation specs with
-Codex app automation tools. If automation tools are unavailable, report the
-task as `manual-poll only` and include the manager and worker heartbeat prompts
-from the autopilot output. Do not report the pair as autonomous until autopilot
-is started and its automation specs are either applied or explicitly deferred.
+Codex app automation tools. After each automation is created, record it:
 
-9. After autopilot start, run:
+```bash
+conveyor app-autopilot record-automation "$TASK" --role manager --automation-id "<manager automation id>" --path "$LEDGER" --json
+conveyor app-autopilot record-automation "$TASK" --role worker --automation-id "<worker automation id>" --path "$LEDGER" --json
+```
+
+If automation tools are unavailable, report the task as `manual-poll only` and
+include the manager and worker heartbeat prompts from the autopilot output. Do
+not report the pair as autonomous until autopilot is started,
+`plan.readiness.autonomous_ready=true`, and the manager/worker automation
+receipts are recorded.
+
+10. After autopilot start and automation receipts, run:
 
 ```bash
 conveyor app-autopilot status "$TASK" --path "$LEDGER" --json
