@@ -1,6 +1,6 @@
 {
   "name": "agent-conveyor",
-  "version": "0.1.25",
+  "version": "0.1.26",
   "description": "Codex operator skills for Agent Conveyor manager-worker setup.",
   "skills": [
     "conveyor-app-wake-relay",
