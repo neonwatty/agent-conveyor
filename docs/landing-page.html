@@ -3,10 +3,10 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Agent Conveyor - Manager Recipes for Codex Work</title>
+    <title>Agent Conveyor - Codex App Manager Worker Control</title>
     <meta
       name="description"
-      content="Agent Conveyor gives Codex manager sessions repeatable recipes for supervising workers through Dispatch with auditable evidence."
+      content="Agent Conveyor sets up visible Codex app manager and worker sessions with smoke-gated Dispatch, app heartbeats, and auditable receipts."
     />
     <style>
       :root {
@@ -725,10 +725,6 @@
           padding: 14px;
         }
 
-        .hero .command code:nth-child(n + 2) {
-          display: none;
-        }
-
         .flow-stage {
           display: none;
         }
@@ -781,21 +777,21 @@
       <section class="hero">
         <div class="hero-inner">
           <div>
-            <p class="eyebrow">Local Codex manager / worker control plane</p>
+            <p class="eyebrow">Codex app manager / worker control plane</p>
             <h1>Agent Conveyor</h1>
             <p class="hero-copy">
-              Turn broad Codex work into repeatable manager recipes: pick a
-              mode, launch one supervised worker, and require receipts before
-              the manager continues, compacts, merges, or stops.
+              Set up visible Codex app manager and worker sessions from any
+              project, prove they can communicate before real work starts, and
+              keep every continuation tied to Dispatch receipts.
             </p>
             <p class="hero-summary">
-              Built for long-running GoalBuddy boards, screenshot-driven UX
-              polish, coverage loops, and PR/CI merge supervision.
+              Built for smoke-gated operator pairs, worker sets, Ralph loops,
+              coverage passes, and PR/CI merge supervision.
             </p>
             <div class="hero-proof" aria-label="Agent Conveyor outcomes">
-              <span><strong>Choose a recipe</strong>Modes, tools, permissions, and cleanup rules are locked before work starts.</span>
-              <span><strong>Route the worker</strong>Dispatch sends handoffs, records attempts, and blocks unsafe continuations.</span>
-              <span><strong>Close with proof</strong>SQLite receipts make tests, screenshots, CI, and blockers replayable.</span>
+              <span><strong>Smoke first</strong>Doctor and app-smoke gates block real work until app-thread plumbing is proven.</span>
+              <span><strong>Stay awake</strong>Autopilot heartbeats keep manager and worker sessions polling after setup.</span>
+              <span><strong>Cleanly rotate</strong>Owned worker threads can be archived and replaced without touching unrelated sessions.</span>
             </div>
             <div class="actions">
               <a class="button primary" href="#recipes">Explore recipes</a>
@@ -803,8 +799,8 @@
             </div>
             <div class="command" aria-label="Install and recipe preview commands">
               <code>npm install -g agent-conveyor</code>
-              <code><span>conveyor</span> manager-recipes --show goalbuddy-conveyor --json</code>
-              <code><span>conveyor</span> pair --manager-recipe goalbuddy-conveyor ...</code>
+              <code><span>conveyor</span> install-plugin</code>
+              <code><span>conveyor</span> doctor --json</code>
             </div>
             <div class="mobile-flow-strip" aria-label="Manager Dispatch Worker flow">
               <span>Manager</span>
@@ -815,28 +811,28 @@
             </div>
           </div>
 
-          <div class="flow-stage" aria-label="Manager dispatcher worker diagram">
+          <div class="flow-stage" aria-label="Codex app operator smoke diagram">
             <div class="flow-row">
               <div class="node">
-                <strong>Manager</strong>
-                <p>Selects a recipe, checks evidence, records decisions, and nudges only when the gate allows it.</p>
+                <strong>Operator</strong>
+                <p>Creates visible Codex app threads, binds their ids, and starts required smoke before task prompts.</p>
               </div>
               <div class="arrow" aria-hidden="true">→</div>
               <div class="node">
-                <strong>Dispatch</strong>
-                <p>Routes notifications, blocks unsafe continuations, records command attempts, and keeps delivery mechanical.</p>
+                <strong>Smoke Gate</strong>
+                <p>Requires app-thread sends, fresh heartbeats, inbox acks, nonce checks, and manager receipt validation.</p>
               </div>
               <div class="arrow" aria-hidden="true">→</div>
               <div class="node">
-                <strong>Worker</strong>
-                <p>Implements one slice, returns receipts, consumes inbox messages, and hands off before context cleanup.</p>
+                <strong>Manager + Workers</strong>
+                <p>Run the real loop only after the smoke receipt allows work, with Dispatch and autopilot keeping state durable.</p>
               </div>
             </div>
             <div class="receipt-strip" aria-label="Evidence receipts">
-              <div class="receipt">manager_configs<br />recipe + permissions</div>
-              <div class="receipt">routed_notifications<br />delivery + consume state</div>
-              <div class="receipt">acceptance_criteria<br />open + satisfied proof</div>
-              <div class="receipt">worker_handoffs<br />resume + cleanup receipts</div>
+              <div class="receipt">doctor<br />package + plugin ready</div>
+              <div class="receipt">app_smoke<br />sent + accepted receipts</div>
+              <div class="receipt">app_autopilot<br />heartbeat automation</div>
+              <div class="receipt">worker_rotation<br />owned archive only</div>
             </div>
           </div>
         </div>
