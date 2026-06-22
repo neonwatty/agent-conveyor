@@ -155,6 +155,9 @@ Pages deploys from the protected `landing-page` branch through the
 `Pages` GitHub Actions workflow; propose public landing-page edits against
 that branch rather than relying on ordinary `main` package PRs to publish the
 site.
+Pull requests into `landing-page` run the `Landing Page PR` workflow, which
+checks linting, unused exports/files, tests, build output, the landing-page
+screenshot gate, and a diff-scoped max-lines guard for changed text files.
 Use `node scripts/check-landing-page.mjs` for a docs-only desktop/mobile
 screenshot gate; this does not run the full package release smoke.
 

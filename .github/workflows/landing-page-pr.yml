@@ -1,0 +1,50 @@
+name: Landing Page PR
+
+on:
+  pull_request:
+    branches:
+      - landing-page
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+permissions:
+  contents: read
+
+jobs:
+  landing-page-pr-ci:
+    name: Landing page PR CI
+    runs-on: macos-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Check unused exports and files
+        run: npm run knip
+
+      - name: Test
+        run: npm test -- --runInBand
+
+      - name: Build
+        run: npm run build
+
+      - name: Verify landing page
+        run: node scripts/check-landing-page.mjs
+
+      - name: Check max lines for changed files
+        run: node scripts/check-max-lines.mjs --max 1600 --base "${{ github.event.pull_request.base.sha }}" --head HEAD
