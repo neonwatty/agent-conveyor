@@ -151,6 +151,10 @@ static landing page. From the repo, `npm run docs:landing` serves it at
 `http://127.0.0.1:8765/`.
 The GitHub Pages version lives at
 [`neonwatty.github.io/agent-conveyor`](https://neonwatty.github.io/agent-conveyor/).
+Pages deploys from the protected `landing-page` branch through the
+`Pages` GitHub Actions workflow; propose public landing-page edits against
+that branch rather than relying on ordinary `main` package PRs to publish the
+site.
 Use `node scripts/check-landing-page.mjs` for a docs-only desktop/mobile
 screenshot gate; this does not run the full package release smoke.
 

@@ -176,7 +176,10 @@ node scripts/check-landing-page.mjs
 
 That command syntax-checks the landing-page helper scripts and captures desktop
 and mobile screenshots of `docs/landing-page.html`. GitHub Actions also has a
-docs-only workflow for landing/docs surfaces. The main package test workflow
+docs-only workflow for landing/docs surfaces. The public GitHub Pages deploy
+runs from the `landing-page` branch through `.github/workflows/pages.yml`; keep
+landing-page publish changes on that branch so branch protection can guard the
+site separately from package code. The main package test workflow
 ignores changes that touch only:
 
 - `docs/landing-page.html`
