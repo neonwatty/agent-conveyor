@@ -233,6 +233,83 @@ print `CONVEYOR POLL`, `CONVEYOR RECEIVED`, `WORK`, `CONVEYOR SEND`, and
 audit proof, not a replacement for the live session story. Idle polls may be a
 single `CONVEYOR IDLE` line.
 
+#### Known-Good Operator Smoke Recipe
+
+Use this recipe when proving that a global install and plugin can control
+visible Codex app manager/worker sessions from a target project before any real
+work starts. It is a plumbing test only: do not inspect product code, private
+content, or edit target files.
+
+1. From the target project, prove the operator install:
+
+```bash
+conveyor doctor --json
+```
+
+The install is ready only when the JSON reports `ok=true`,
+`operator_ready=true`, the package and installed plugin versions match, and the
+expected operator skills are installed.
+
+2. Create two disposable Codex app threads in the same target project:
+   a worker and a manager. Give them smoke-only names, such as
+   `operator smoke worker` and `operator smoke manager`.
+
+3. Bind those thread ids to a disposable task ledger:
+
+```bash
+mkdir -p .codex-workers
+LEDGER="$PWD/.codex-workers/operator-smoke.db"
+TASK="operator-smoke"
+
+conveyor create-disposable-binding "$TASK" \
+  --goal "Disposable operator smoke; do no product work." \
+  --summary "Prove Agent Conveyor app-thread smoke plumbing only." \
+  --worker "$TASK-worker" \
+  --manager "$TASK-manager" \
+  --worker-codex-app-thread-id "<worker-thread-id>" \
+  --worker-codex-app-thread-title "<worker-thread-title>" \
+  --manager-codex-app-thread-id "<manager-thread-id>" \
+  --manager-codex-app-thread-title "<manager-thread-title>" \
+  --cwd "$PWD" \
+  --path "$LEDGER" \
+  --json
+```
+
+4. Run required connection smoke with the
+   `conveyor-smoke-app-connections` skill from the operator session:
+
+```bash
+conveyor app-smoke preflight "$TASK" --mode required --scope pair --path "$LEDGER" --json
+conveyor app-smoke start "$TASK" --mode required --scope pair --path "$LEDGER" --json
+```
+
+The skill must send the worker smoke prompt with native Codex app thread tools,
+record `app-smoke ... --status sent`, wait for the worker to consume the smoke
+inbox item, then send the manager smoke prompt only after the worker report is
+in the manager inbox.
+
+5. Treat this as the pass receipt:
+
+```bash
+conveyor app-smoke status "$TASK" --smoke-id "<smoke-id>" --path "$LEDGER" --json
+```
+
+The smoke passes only when the JSON reports `ok=true`,
+`real_work_allowed=true`, fresh manager and worker app heartbeats, matching
+nonce-scoped send receipts, and durable received/accepted receipts. A final
+answer in either app thread is not proof by itself.
+
+6. Clean up the disposable proof:
+   archive only the manager and worker threads created for this smoke, then
+   remove the disposable ledger if it was created solely for the test:
+
+```bash
+rm -rf .codex-workers
+```
+
+Never archive a thread unless its id came from the binding or the thread
+creation receipt for this exact smoke run.
+
 For bounded follow-up passes after the first worker result, use
 `Use the conveyor-whats-next-nudger skill`.
 
