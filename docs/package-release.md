@@ -179,7 +179,10 @@ and mobile screenshots of `docs/landing-page.html`. GitHub Actions also has a
 docs-only workflow for landing/docs surfaces. The public GitHub Pages deploy
 runs from the `landing-page` branch through `.github/workflows/pages.yml`; keep
 landing-page publish changes on that branch so branch protection can guard the
-site separately from package code. The main package test workflow
+site separately from package code. Pull requests into `landing-page` run the
+`Landing Page PR` workflow for linting, unused export/file checks, tests, build,
+landing-page screenshots, and a diff-scoped max-lines guard. The main package
+test workflow
 ignores changes that touch only:
 
 - `docs/landing-page.html`
