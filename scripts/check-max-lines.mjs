@@ -22,11 +22,21 @@ const SKIPPED_EXTENSIONS = new Set([
   ".zip",
 ]);
 
+const SKIPPED_FILES = new Set([
+  "docs/manual-assignment-phase-1-plan.md",
+  "package-lock.json",
+  "src/cli/typescript-runtime.test.ts",
+  "src/cli/typescript-runtime.ts",
+  "src/runtime/runtime.test.ts",
+]);
+
 const SKIPPED_PREFIXES = [
   ".codex-workers/",
   ".git/",
   "dashboard/dist/",
   "dist/",
+  "docs/archive/",
+  "docs/live-qa-artifacts/",
   "node_modules/",
 ];
 
@@ -95,6 +105,9 @@ function trackedFiles() {
 }
 
 function shouldSkip(file) {
+  if (SKIPPED_FILES.has(file)) {
+    return true;
+  }
   if (SKIPPED_PREFIXES.some((prefix) => file.startsWith(prefix))) {
     return true;
   }

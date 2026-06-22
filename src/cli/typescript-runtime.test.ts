@@ -10037,6 +10037,38 @@ test("TypeScript runtime handles Agent Conveyor plugin install status and path c
     assert.equal(statusAfterPayload.installed_version, PACKAGE_VERSION);
     assert.equal(statusAfterPayload.version_matches, true);
 
+    const binDir = join(root, "bin");
+    mkdirSync(binDir, { recursive: true });
+    for (const name of ["codex", "conveyor", "tmux", "workerctl"]) {
+      const script = join(binDir, name);
+      writeFileSync(script, "#!/bin/sh\nexit 0\n");
+      chmodSync(script, 0o755);
+    }
+    const doctor = runTypescriptRuntimeCommand({
+      args: ["doctor", "--codex-home", codexHome, "--cwd", root, "--json"],
+      env: { PATH: `${binDir}:/bin:/usr/bin` },
+    });
+    assert.equal(doctor.exitCode, 0, doctor.stderr);
+    const doctorPayload = JSON.parse(doctor.stdout ?? "{}") as {
+      codex_home: string;
+      commands: Record<string, { ok: boolean; path: string | null }>;
+      operator_ready: boolean;
+      package: { version: string };
+      plugin: {
+        installed: boolean;
+        version_matches: boolean;
+        skills: Array<{ installed: boolean; name: string }>;
+      };
+    };
+    assert.equal(doctorPayload.codex_home, codexHome);
+    assert.equal(doctorPayload.package.version, PACKAGE_VERSION);
+    assert.equal(doctorPayload.operator_ready, true);
+    assert.equal(doctorPayload.commands.conveyor.ok, true);
+    assert.equal(doctorPayload.commands.workerctl.ok, true);
+    assert.equal(doctorPayload.plugin.installed, true);
+    assert.equal(doctorPayload.plugin.version_matches, true);
+    assert.equal(doctorPayload.plugin.skills.every((skill) => skill.installed), true);
+
     const corruptHome = join(root, "corrupt-codex-home");
     const corruptManifestDir = join(corruptHome, "plugins", "cache", "agent-conveyor", "agent-conveyor", PACKAGE_VERSION);
     mkdirSync(corruptManifestDir, { recursive: true });

@@ -122,7 +122,10 @@ PATH="$tmp_prefix/bin:$PATH" conveyor --help
 PATH="$tmp_prefix/bin:$PATH" workerctl --help
 ```
 
-`conveyor doctor` reports local dependency health (tmux, codex, etc.).
+`conveyor doctor --json` reports local dependency health (tmux, codex, etc.),
+package/bin resolution, Codex home, installed operator plugin version, installed
+operator skills, and an `operator_ready` summary for Codex app manager/worker
+setup.
 `conveyor db-doctor` initializes and checks the SQLite control-plane
 database.
 On Node versions where `node:sqlite` is still marked experimental, SQLite
@@ -170,7 +173,7 @@ and inspect the plugin:
 ```bash
 npm install -g agent-conveyor
 conveyor install-plugin
-conveyor plugin-status
+conveyor doctor --json
 ```
 
 The per-project default ledger for operator sessions is
