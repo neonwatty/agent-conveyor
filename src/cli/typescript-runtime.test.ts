@@ -9837,10 +9837,13 @@ test("TypeScript runtime handles Agent Conveyor plugin install status and path c
       assert.match(text, /Operator-facing only|operator-facing/i);
       assert.match(text, /Codex app/i);
     }
-    assert.match(
-      readFileSync(join(codexHome, "skills", "conveyor-create-pair", "SKILL.md"), "utf8"),
-      /Do not use tmux/,
-    );
+    const createPairSkill = readFileSync(join(codexHome, "skills", "conveyor-create-pair", "SKILL.md"), "utf8");
+    assert.match(createPairSkill, /Do not use tmux/);
+    assert.match(createPairSkill, /app-autopilot start/);
+    assert.match(createPairSkill, /manual-poll only/);
+    const createWorkerSetSkill = readFileSync(join(codexHome, "skills", "conveyor-create-worker-set", "SKILL.md"), "utf8");
+    assert.match(createWorkerSetSkill, /app-autopilot start/);
+    assert.match(createWorkerSetSkill, /manual-poll only/);
     const wakeRelaySkill = readFileSync(join(codexHome, "skills", "conveyor-app-wake-relay", "SKILL.md"), "utf8");
     assert.match(wakeRelaySkill, /send_message_to_thread/);
     assert.match(wakeRelaySkill, /app-wakeup-record-delivery/);
@@ -9850,6 +9853,10 @@ test("TypeScript runtime handles Agent Conveyor plugin install status and path c
     assert.match(smokeSkill, /app-smoke start/);
     assert.match(smokeSkill, /send_message_to_thread|native Codex app thread tools/);
     assert.match(smokeSkill, /real_work_allowed=false/);
+    assert.match(smokeSkill, /app-autopilot start/);
+    assert.match(smokeSkill, /manual-poll only/);
+    assert.match(smokeSkill, /printf '%s\\n' '\{"summary"/);
+    assert.match(smokeSkill, /--from-stdin expects a JSON object|explicit JSON stdin example/);
     const installedManifest = JSON.parse(readFileSync(installedManifestPath, "utf8")) as { name: string; version: string };
     assert.equal(installedManifest.name, "agent-conveyor");
     assert.equal(installedManifest.version, PACKAGE_VERSION);

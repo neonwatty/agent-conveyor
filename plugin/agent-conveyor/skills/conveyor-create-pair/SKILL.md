@@ -28,6 +28,14 @@ tranche.
   `conveyor-smoke-app-connections` skill in required mode. If smoke fails, do
   not send the real task prompt; return the exact smoke blockers and repair
   action.
+- After required smoke passes, start app-autopilot before sending real work:
+  `conveyor app-autopilot start "$TASK" --dispatcher-id dispatch-local --path "$LEDGER" --json`.
+  Apply the emitted Codex app automation specs when automation tools are
+  available. If they are unavailable, report the pair as `manual-poll only`
+  and include the manager/worker heartbeat prompts.
+- Do not report a created pair as autonomous unless required smoke passed,
+  `app-autopilot start` succeeded, and automation specs were either applied or
+  explicitly deferred by the operator.
 - Tell the operator to use `conveyor-app-wake-relay` for stale app threads;
   direct app-thread prompts are wake prompts only, not durable task truth.
 
@@ -45,7 +53,14 @@ LEDGER="$PWD/.codex-workers/workerctl.db"
 3. Run `conveyor create-disposable-binding` with the created thread ids and:
    `--path "$PWD/.codex-workers/workerctl.db" --json`.
 4. Run `conveyor-smoke-app-connections` for the created task. Required smoke
-   must pass before the real task starts.
-5. Return the manager thread title/id, worker thread title/id, ledger path,
+   must pass before the real task starts, and the smoke skill must start
+   app-autopilot before returning `real_work_allowed=true` as actionable.
+5. If automation tools are available, create the manager and worker heartbeat
+   automations from the `app-autopilot start` output. If automation tools are
+   not available, return the automation specs and mark the setup
+   `manual-poll only`.
+6. Return the manager thread title/id, worker thread title/id, ledger path,
    task name, and exact status command:
    `TASK="example-task"; conveyor app-loop-status "$TASK" --path "$PWD/.codex-workers/workerctl.db" --json`.
+   Include `app-autopilot status` and whether heartbeat automation specs were
+   applied, deferred, or blocked.
