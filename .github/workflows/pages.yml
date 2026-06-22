@@ -3,7 +3,7 @@ name: Pages
 on:
   push:
     branches:
-      - main
+      - landing-page
     paths:
       - "docs/landing-page.html"
       - ".github/workflows/pages.yml"
