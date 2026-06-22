@@ -617,13 +617,14 @@ function commandHelpText(program: "conveyor" | "workerctl", command: string): st
       `  ${program} dispatch --once --type nudge_worker --path /tmp/work/workerctl.db`,
     ],
     "app-autopilot": [
-      `usage: ${program} app-autopilot start|stop|status <task> [--dispatcher-id ID] [--interval SECONDS] [--watch-iterations N] [--stale-after N] [--quiet-after N] ${path} [--json]`,
+      `usage: ${program} app-autopilot start|stop|status|record-automation <task> [--dispatcher-id ID] [--interval SECONDS] [--watch-iterations N] [--stale-after N] [--quiet-after N] [--role manager|worker --automation-id ID] ${path} [--json]`,
       "",
       "Manage the app-native heartbeat policy for a bound manager/worker pair.",
       "The CLI records policy receipts and emits Codex app heartbeat automation specs; app-thread automation creation still happens through Codex app tools.",
       "",
       "Examples:",
       `  ${program} app-autopilot start dogfood --dispatcher-id dispatch-local --path /tmp/work/workerctl.db --json`,
+      `  ${program} app-autopilot record-automation dogfood --role worker --automation-id conveyor-dogfood-worker-heartbeat --path /tmp/work/workerctl.db --json`,
       `  ${program} app-autopilot status dogfood --path /tmp/work/workerctl.db`,
       `  ${program} app-autopilot stop dogfood --path /tmp/work/workerctl.db --json`,
     ],
@@ -699,6 +700,7 @@ interface ParsedRuntimeArgs {
     all: boolean;
     allowAdditionalReceipt: boolean;
     action: string | null;
+    automationId: string | null;
     artifactPath: string | null;
     assetType: string | null;
     assignment: string | null;
@@ -968,6 +970,7 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
     all: false,
     allowAdditionalReceipt: false,
     action: null,
+    automationId: null,
     artifactPath: null,
     assetType: null,
     assignment: null,
@@ -1788,6 +1791,16 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
         return { command, enabled, error: value.error, explicit, flags, task };
       }
       flags.codexProfile = value.value;
+      index += 1;
+    } else if (arg === "--automation-id") {
+      if (command !== "app-autopilot") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --automation-id", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.automationId = value.value;
       index += 1;
     } else if (arg === "--session-dir") {
       if (command !== "create-disposable-binding") {
@@ -3323,7 +3336,7 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       }
       flags.subtype = arg;
     } else if (command === "app-autopilot" && flags.action === null) {
-      if (!["start", "stop", "status"].includes(arg)) {
+      if (!["record-automation", "start", "stop", "status"].includes(arg)) {
         return { command, enabled, error: `Unsupported app-autopilot action: ${arg}`, explicit, flags, task };
       }
       flags.action = arg;
@@ -4663,8 +4676,8 @@ function runAppAutopilotCommand(
   options: { cwd?: string; env?: NodeJS.ProcessEnv; now?: () => Date },
 ): TypescriptRuntimeResult {
   const action = parsed.flags.action;
-  if (action !== "start" && action !== "stop" && action !== "status") {
-    return errorResult("app-autopilot requires an action: start, stop, or status");
+  if (action !== "record-automation" && action !== "start" && action !== "stop" && action !== "status") {
+    return errorResult("app-autopilot requires an action: start, stop, status, or record-automation");
   }
   const taskName = requireTask(parsed);
   const database = openRuntimeDatabase(parsed, options);
@@ -4672,7 +4685,39 @@ function runAppAutopilotCommand(
     const timestamp = nowIsoSeconds(options);
     const dbPath = runtimeDbPath(parsed, options);
     const dispatcherId = parsed.flags.dispatcherId ?? "dispatch-local";
+    const task = taskRowForDiagnostics(database, taskName);
     const desiredState: AppAutopilotDesiredState | null = action === "start" ? "active" : action === "stop" ? "stopped" : null;
+    let receipt: { event_id: string; event_type: string; recorded_at: string } | null = null;
+    if (action === "record-automation") {
+      const role = parseAppSmokeRole(parsed.flags.role);
+      if (role instanceof Error) {
+        return errorResult(role.message);
+      }
+      const automationId = requiredStringFlag(parsed.flags.automationId, "--automation-id");
+      const eventId = emitTelemetrySync(database, {
+        actor: "operator",
+        attributes: {
+          automation_id: automationId,
+          role,
+        },
+        correlation: {
+          action,
+          command: "app-autopilot",
+          dispatcher_id: dispatcherId,
+          role,
+        },
+        eventType: "app_autopilot_automation_applied",
+        severity: "info",
+        summary: `App autopilot ${role} automation applied for ${task.name}.`,
+        taskId: task.id,
+        timestamp,
+      });
+      receipt = {
+        event_id: eventId,
+        event_type: "app_autopilot_automation_applied",
+        recorded_at: timestamp,
+      };
+    }
     let plan = appAutopilotPlanSync(database, {
       dbPath,
       dispatchIntervalSeconds: parsed.flags.intervalSeconds,
@@ -4685,12 +4730,12 @@ function runAppAutopilotCommand(
       taskName,
       watchIterations: parsed.flags.watchIterations ?? 1000000,
     });
-    let receipt: { event_id: string; event_type: string; recorded_at: string } | null = null;
     if (action === "start" || action === "stop") {
       const eventType = action === "start" ? "app_autopilot_started" : "app_autopilot_stopped";
       const eventId = emitTelemetrySync(database, {
         actor: "operator",
         attributes: {
+          automation_state: plan.automation_state,
           automation_specs: plan.automation_specs.map((spec) => ({
             can_create: spec.can_create,
             interval_minutes: spec.interval_minutes,
@@ -4704,6 +4749,7 @@ function runAppAutopilotCommand(
           dispatcher_id: dispatcherId,
           interval_minutes: plan.interval_minutes,
           quiescence: plan.quiescence,
+          readiness: plan.readiness,
           summary: plan.summary,
         },
         correlation: {
@@ -4759,10 +4805,12 @@ interface AppSmokeStartAttributes {
 }
 
 interface AppSmokeReceiptAttributes {
+  event_id?: string;
   notification_id: number | null;
   nonce: string;
   payload: Record<string, unknown>;
   payload_keys: string[];
+  recorded_at?: string;
   role: AppLoopRole;
   smoke_id: string;
   status: AppSmokeRecordStatus;
@@ -5051,8 +5099,10 @@ function appSmokeRoleStatus(
   const roleReceipts = receipts.filter((receipt) => receipt.role === role && receipt.nonce === smoke.nonce);
   const sent = roleReceipts.some((receipt) => receipt.status === "sent");
   const received = roleReceipts.some((receipt) => receipt.status === "received");
-  const accepted = roleReceipts.some((receipt) => receipt.status === "accepted");
-  const blockedReceipt = roleReceipts.find((receipt) => receipt.status === "blocked");
+  const terminalReceipts = roleReceipts.filter((receipt) => receipt.status === "accepted" || receipt.status === "blocked");
+  const terminalReceipt = terminalReceipts.at(-1);
+  const accepted = terminalReceipt?.status === "accepted";
+  const blockedReceipt = terminalReceipt?.status === "blocked" ? terminalReceipt : undefined;
   const heartbeatFresh = session.last_heartbeat_at !== null
     && session.last_heartbeat_at >= smoke.recorded_at
     && secondsBetweenIso(session.last_heartbeat_at, options.now) <= options.staleAfterSeconds;
@@ -5138,14 +5188,18 @@ function appSmokeReceiptsSync(
   options: { smokeId: string; taskId: string },
 ): AppSmokeReceiptAttributes[] {
   const rows = database.prepare(`
-    select attributes_json
+    select id, timestamp, attributes_json
     from telemetry_events
     where task_id = ?
       and event_type = 'app_smoke_receipt_recorded'
       and json_extract(attributes_json, '$.smoke_id') = ?
     order by timestamp, id
-  `).all(options.taskId, options.smokeId) as Array<{ attributes_json: string }>;
-  return rows.map((row) => JSON.parse(row.attributes_json) as AppSmokeReceiptAttributes);
+  `).all(options.taskId, options.smokeId) as Array<{ attributes_json: string; id: string; timestamp: string }>;
+  return rows.map((row) => ({
+    ...JSON.parse(row.attributes_json) as AppSmokeReceiptAttributes,
+    event_id: row.id,
+    recorded_at: row.timestamp,
+  }));
 }
 
 function appSmokeBoundSessionsSync(database: RuntimeDatabase, taskId: string): {
@@ -5397,6 +5451,7 @@ function renderAppAutopilotText(result: {
 }): string {
   const lines = [
     `App autopilot ${result.action} for ${result.plan.task.name}: ${result.plan.desired_state}`,
+    `Readiness: ${result.plan.readiness.state}${result.plan.readiness.autonomous_ready ? " (autonomous)" : " (setup required)"}`,
     `Loop status: ${result.plan.status.ok ? "ok" : "attention required"}`,
     `Dispatch: ${result.plan.dispatcher.state}${result.plan.dispatcher.required ? " required" : ""}`,
     `Dispatch command: ${result.plan.control.dispatcher_command}`,
@@ -5415,6 +5470,9 @@ function renderAppAutopilotText(result: {
   } else {
     lines.push("Last policy: unconfigured");
   }
+  for (const blocker of result.plan.readiness.blockers) {
+    lines.push(`Readiness blocker: ${blocker}`);
+  }
   for (const spec of result.plan.automation_specs) {
     lines.push(
       `${spec.role} automation: ${spec.can_create ? "ready" : "blocked"} ${spec.name}`,
@@ -5424,6 +5482,10 @@ function renderAppAutopilotText(result: {
     if (spec.blocker) {
       lines.push(`  blocker: ${spec.blocker}`);
     }
+  }
+  for (const role of result.plan.automation_state.applied_roles) {
+    const receipt = result.plan.automation_state.receipts.find((item) => item.role === role);
+    lines.push(`${role} automation applied: ${receipt?.automation_id ?? "(unknown)"}`);
   }
   lines.push(result.plan.control.note);
   return `${lines.join("\n")}\n`;
@@ -21586,6 +21648,7 @@ function appTaskDispatchSummarySync(
   },
 ): Record<string, unknown> {
   const taskDispatchEventTypes = [
+    "app_autopilot_automation_applied",
     "app_autopilot_started",
     "app_autopilot_stopped",
     "app_heartbeat",

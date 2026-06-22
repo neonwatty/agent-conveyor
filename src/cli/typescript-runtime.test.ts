@@ -555,6 +555,87 @@ test("TypeScript runtime app smoke required mode blocks until bound roles have s
   }
 });
 
+test("TypeScript runtime app smoke uses latest terminal role receipt so a retry can recover a blocked smoke", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-app-smoke-retry."));
+  const dbPath = join(root, "workerctl.db");
+  try {
+    seedCliAppLoopFixture(dbPath, {
+      dispatcherHeartbeatAt: "2026-06-11T11:59:50Z",
+      managerHeartbeatAt: "2026-06-11T11:59:00Z",
+      workerHeartbeatAt: "2026-06-11T11:59:00Z",
+    });
+    const start = runTypescriptRuntimeCommand({
+      args: ["app-smoke", "start", "app-loop-task", "--smoke-id", "smoke-retry", "--nonce", "nonce-retry", "--mode", "required", "--path", dbPath, "--json"],
+      env: {},
+      now: () => new Date("2026-06-11T12:00:00Z"),
+    });
+    assert.equal(start.exitCode, 0, start.stderr);
+
+    const steps: Array<{ args: string[]; now: string; stdin?: string }> = [
+      { args: ["app-smoke", "record", "app-loop-task", "--smoke-id", "smoke-retry", "--nonce", "nonce-retry", "--role", "manager", "--status", "sent", "--thread-id", "thread-manager", "--path", dbPath, "--json"], now: "2026-06-11T12:00:01Z" },
+      { args: ["app-smoke", "record", "app-loop-task", "--smoke-id", "smoke-retry", "--nonce", "nonce-retry", "--role", "worker", "--status", "sent", "--thread-id", "thread-worker", "--path", dbPath, "--json"], now: "2026-06-11T12:00:01Z" },
+      { args: ["app-heartbeat", "app-loop-task", "--role", "manager", "--path", dbPath, "--json"], now: "2026-06-11T12:00:02Z" },
+      { args: ["app-heartbeat", "app-loop-task", "--role", "worker", "--path", dbPath, "--json"], now: "2026-06-11T12:00:02Z" },
+      { args: ["app-smoke", "record", "app-loop-task", "--smoke-id", "smoke-retry", "--nonce", "nonce-retry", "--role", "worker", "--status", "received", "--thread-id", "thread-worker", "--from-stdin", "--path", dbPath, "--json"], now: "2026-06-11T12:00:03Z", stdin: "{\"summary\":\"worker received nonce-retry\"}" },
+      { args: ["app-smoke", "record", "app-loop-task", "--smoke-id", "smoke-retry", "--nonce", "nonce-retry", "--role", "worker", "--status", "accepted", "--thread-id", "thread-worker", "--from-stdin", "--path", dbPath, "--json"], now: "2026-06-11T12:00:04Z", stdin: "{\"summary\":\"worker accepted nonce-retry\"}" },
+      { args: ["app-smoke", "record", "app-loop-task", "--smoke-id", "smoke-retry", "--nonce", "nonce-retry", "--role", "manager", "--status", "blocked", "--thread-id", "thread-manager", "--from-stdin", "--path", dbPath, "--json"], now: "2026-06-11T12:00:05Z", stdin: "{\"summary\":\"manager timed out waiting for worker report\"}" },
+    ];
+    for (const step of steps) {
+      const result = runTypescriptRuntimeCommand({
+        args: step.args,
+        env: {},
+        now: () => new Date(step.now),
+        stdin: step.stdin,
+      });
+      assert.equal(result.exitCode, 0, result.stderr);
+    }
+
+    const blocked = runTypescriptRuntimeCommand({
+      args: ["app-smoke", "status", "app-loop-task", "--smoke-id", "smoke-retry", "--path", dbPath, "--json"],
+      env: {},
+      now: () => new Date("2026-06-11T12:00:06Z"),
+    });
+    assert.equal(blocked.exitCode, 0, blocked.stderr);
+    const blockedPayload = JSON.parse(blocked.stdout ?? "{}") as {
+      blockers: string[];
+      real_work_allowed: boolean;
+      roles: { manager: { accepted: boolean; blocked: boolean } };
+    };
+    assert.equal(blockedPayload.real_work_allowed, false);
+    assert.equal(blockedPayload.roles.manager.accepted, false);
+    assert.equal(blockedPayload.roles.manager.blocked, true);
+    assert.ok(blockedPayload.blockers.some((blocker) => /manager smoke blocked/.test(blocker)));
+
+    const accepted = runTypescriptRuntimeCommand({
+      args: ["app-smoke", "record", "app-loop-task", "--smoke-id", "smoke-retry", "--nonce", "nonce-retry", "--role", "manager", "--status", "accepted", "--thread-id", "thread-manager", "--from-stdin", "--path", dbPath, "--json"],
+      env: {},
+      now: () => new Date("2026-06-11T12:00:07Z"),
+      stdin: "{\"summary\":\"manager consumed late worker report and accepted nonce-retry\"}",
+    });
+    assert.equal(accepted.exitCode, 0, accepted.stderr);
+
+    const recovered = runTypescriptRuntimeCommand({
+      args: ["app-smoke", "status", "app-loop-task", "--smoke-id", "smoke-retry", "--path", dbPath, "--json"],
+      env: {},
+      now: () => new Date("2026-06-11T12:00:08Z"),
+    });
+    assert.equal(recovered.exitCode, 0, recovered.stderr);
+    const recoveredPayload = JSON.parse(recovered.stdout ?? "{}") as {
+      blockers: string[];
+      ok: boolean;
+      real_work_allowed: boolean;
+      roles: { manager: { accepted: boolean; blocked: boolean } };
+    };
+    assert.equal(recoveredPayload.ok, true);
+    assert.equal(recoveredPayload.real_work_allowed, true);
+    assert.deepEqual(recoveredPayload.blockers, []);
+    assert.equal(recoveredPayload.roles.manager.accepted, true);
+    assert.equal(recoveredPayload.roles.manager.blocked, false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("TypeScript runtime app smoke rejects stale nonce receipts and unbound thread ids", () => {
   const root = mkdtempSync(join(tmpdir(), "agent-conveyor-app-smoke-nonce."));
   const dbPath = join(root, "workerctl.db");
@@ -1512,7 +1593,8 @@ test("TypeScript runtime app-autopilot start emits automation specs and durable 
         automation_specs: Array<{ can_create: boolean; prompt: string; role: string; rrule: string; target_thread_id: string | null }>;
         control: { dispatcher_command: string; note: string; wakeup_dispatch_command: string };
         desired_state: string;
-        summary: { blocked_automations: number; creatable_automations: number; dispatcher_required: boolean };
+        readiness: { autonomous_ready: boolean; blockers: string[]; state: string };
+        summary: { autonomous_ready: boolean; blocked_automations: number; creatable_automations: number; dispatcher_required: boolean };
       };
       receipt: { event_id: string; event_type: string; recorded_at: string };
     };
@@ -1521,6 +1603,11 @@ test("TypeScript runtime app-autopilot start emits automation specs and durable 
     assert.equal(output.plan.summary.creatable_automations, 2);
     assert.equal(output.plan.summary.blocked_automations, 0);
     assert.equal(output.plan.summary.dispatcher_required, true);
+    assert.equal(output.plan.summary.autonomous_ready, false);
+    assert.equal(output.plan.readiness.state, "setup_required");
+    assert.equal(output.plan.readiness.autonomous_ready, false);
+    assert.ok(output.plan.readiness.blockers.some((blocker) => /Dispatch dispatch-app-loop is missing/.test(blocker)));
+    assert.ok(output.plan.readiness.blockers.some((blocker) => /manager heartbeat automation has not been recorded as applied/.test(blocker)));
     assert.match(output.plan.control.dispatcher_command, /dispatch --watch --watch-iterations 500 --interval 30 --dispatcher-id 'dispatch-app-loop'/);
     assert.match(output.plan.control.wakeup_dispatch_command, /app-wakeup-dispatch 'app-loop-task' --dispatcher-id 'dispatch-app-loop'/);
     assert.match(output.plan.control.note, /plain shell CLI cannot call Codex app thread tools/);
@@ -1564,6 +1651,81 @@ test("TypeScript runtime app-autopilot start emits automation specs and durable 
     } finally {
       database.close();
     }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("TypeScript runtime app-autopilot readiness becomes autonomous only after dispatcher, leases, and automation receipts are healthy", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-app-autopilot-readiness."));
+  const dbPath = join(root, "workerctl.db");
+  try {
+    seedCliAppLoopFixture(dbPath, {
+      dispatcherHeartbeatAt: "2026-06-11T11:59:50Z",
+      managerHeartbeatAt: "2026-06-11T11:59:50Z",
+      workerHeartbeatAt: "2026-06-11T11:59:50Z",
+    });
+    const started = runTypescriptRuntimeCommand({
+      args: ["app-autopilot", "start", "app-loop-task", "--path", dbPath, "--json"],
+      env: {},
+      now: () => new Date("2026-06-11T12:00:00Z"),
+    });
+    assert.equal(started.exitCode, 0, started.stderr);
+    const startOutput = JSON.parse(started.stdout ?? "{}") as {
+      plan: {
+        automation_state: { applied_count: number; missing_roles: string[] };
+        readiness: { autonomous_ready: boolean; blockers: string[]; dispatcher_ready: boolean; state: string };
+        summary: { autonomous_ready: boolean };
+      };
+    };
+    assert.equal(startOutput.plan.readiness.dispatcher_ready, true);
+    assert.equal(startOutput.plan.readiness.state, "setup_required");
+    assert.equal(startOutput.plan.readiness.autonomous_ready, false);
+    assert.equal(startOutput.plan.summary.autonomous_ready, false);
+    assert.equal(startOutput.plan.automation_state.applied_count, 0);
+    assert.deepEqual(startOutput.plan.automation_state.missing_roles, ["manager", "worker"]);
+
+    const managerApplied = runTypescriptRuntimeCommand({
+      args: ["app-autopilot", "record-automation", "app-loop-task", "--role", "manager", "--automation-id", "conveyor-app-loop-manager-heartbeat", "--path", dbPath, "--json"],
+      env: {},
+      now: () => new Date("2026-06-11T12:00:05Z"),
+    });
+    assert.equal(managerApplied.exitCode, 0, managerApplied.stderr);
+    const managerOutput = JSON.parse(managerApplied.stdout ?? "{}") as {
+      plan: {
+        automation_state: { applied_count: number; applied_roles: string[]; missing_roles: string[] };
+        readiness: { autonomous_ready: boolean; blockers: string[]; state: string };
+      };
+      receipt: { event_type: string };
+    };
+    assert.equal(managerOutput.receipt.event_type, "app_autopilot_automation_applied");
+    assert.equal(managerOutput.plan.automation_state.applied_count, 1);
+    assert.deepEqual(managerOutput.plan.automation_state.applied_roles, ["manager"]);
+    assert.deepEqual(managerOutput.plan.automation_state.missing_roles, ["worker"]);
+    assert.equal(managerOutput.plan.readiness.state, "setup_required");
+    assert.ok(managerOutput.plan.readiness.blockers.some((blocker) => /worker heartbeat automation has not been recorded as applied/.test(blocker)));
+
+    const workerApplied = runTypescriptRuntimeCommand({
+      args: ["app-autopilot", "record-automation", "app-loop-task", "--role", "worker", "--automation-id", "conveyor-app-loop-worker-heartbeat", "--path", dbPath, "--json"],
+      env: {},
+      now: () => new Date("2026-06-11T12:00:06Z"),
+    });
+    assert.equal(workerApplied.exitCode, 0, workerApplied.stderr);
+    const workerOutput = JSON.parse(workerApplied.stdout ?? "{}") as {
+      plan: {
+        automation_state: { applied_count: number; applied_roles: string[]; missing_roles: string[] };
+        readiness: { autonomous_ready: boolean; blockers: string[]; state: string };
+        summary: { applied_automations: number; autonomous_ready: boolean };
+      };
+    };
+    assert.equal(workerOutput.plan.automation_state.applied_count, 2);
+    assert.deepEqual(workerOutput.plan.automation_state.applied_roles, ["manager", "worker"]);
+    assert.deepEqual(workerOutput.plan.automation_state.missing_roles, []);
+    assert.equal(workerOutput.plan.summary.applied_automations, 2);
+    assert.equal(workerOutput.plan.summary.autonomous_ready, true);
+    assert.equal(workerOutput.plan.readiness.state, "autonomous_ready");
+    assert.equal(workerOutput.plan.readiness.autonomous_ready, true);
+    assert.deepEqual(workerOutput.plan.readiness.blockers, []);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

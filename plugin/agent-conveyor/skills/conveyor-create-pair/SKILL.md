@@ -31,11 +31,14 @@ tranche.
 - After required smoke passes, start app-autopilot before sending real work:
   `conveyor app-autopilot start "$TASK" --dispatcher-id dispatch-local --path "$LEDGER" --json`.
   Apply the emitted Codex app automation specs when automation tools are
-  available. If they are unavailable, report the pair as `manual-poll only`
+  available, then record each applied automation with
+  `conveyor app-autopilot record-automation "$TASK" --role manager|worker --automation-id "<id>" --path "$LEDGER" --json`.
+  If automation tools are unavailable, report the pair as `manual-poll only`
   and include the manager/worker heartbeat prompts.
 - Do not report a created pair as autonomous unless required smoke passed,
-  `app-autopilot start` succeeded, and automation specs were either applied or
-  explicitly deferred by the operator.
+  `app-autopilot start` succeeded, manager/worker automation receipts were
+  recorded or explicitly deferred by the operator, and
+  `app-autopilot status` reports `plan.readiness.autonomous_ready=true`.
 - Tell the operator to use `conveyor-app-wake-relay` for stale app threads;
   direct app-thread prompts are wake prompts only, not durable task truth.
 
@@ -56,11 +59,12 @@ LEDGER="$PWD/.codex-workers/workerctl.db"
    must pass before the real task starts, and the smoke skill must start
    app-autopilot before returning `real_work_allowed=true` as actionable.
 5. If automation tools are available, create the manager and worker heartbeat
-   automations from the `app-autopilot start` output. If automation tools are
-   not available, return the automation specs and mark the setup
-   `manual-poll only`.
+   automations from the `app-autopilot start` output, then record both with
+   `app-autopilot record-automation`. If automation tools are not available,
+   return the automation specs and mark the setup `manual-poll only`.
 6. Return the manager thread title/id, worker thread title/id, ledger path,
    task name, and exact status command:
    `TASK="example-task"; conveyor app-loop-status "$TASK" --path "$PWD/.codex-workers/workerctl.db" --json`.
    Include `app-autopilot status` and whether heartbeat automation specs were
-   applied, deferred, or blocked.
+   applied, deferred, or blocked. Use `plan.readiness.state` and
+   `plan.readiness.blockers` as the autonomy truth.

@@ -90,9 +90,10 @@ export interface AppWakeupDispatchPlan {
 }
 
 export type AppAutopilotDesiredState = "active" | "stopped" | "unconfigured";
-export type AppAutopilotQuiescenceState = "monitoring" | "not_applicable" | "stop_recommended";
+type AppAutopilotQuiescenceState = "monitoring" | "not_applicable" | "stop_recommended";
+type AppAutopilotReadinessState = "autonomous_ready" | "not_active" | "setup_required";
 
-export interface AppAutopilotRoleAutomation {
+interface AppAutopilotRoleAutomation {
   blocker: string | null;
   can_create: boolean;
   interval_minutes: number;
@@ -107,6 +108,18 @@ export interface AppAutopilotRoleAutomation {
 
 export interface AppAutopilotPlan {
   automation_specs: AppAutopilotRoleAutomation[];
+  automation_state: {
+    applied_count: number;
+    applied_roles: AppLoopRole[];
+    missing_roles: AppLoopRole[];
+    receipts: Array<{
+      automation_id: string;
+      event_id: string;
+      recorded_at: string;
+      role: AppLoopRole;
+    }>;
+    required_count: number;
+  };
   control: {
     dispatcher_command: string;
     note: string;
@@ -130,8 +143,21 @@ export interface AppAutopilotPlan {
     state: AppAutopilotQuiescenceState;
     threshold_cycles: number;
   };
+  readiness: {
+    autonomous_ready: boolean;
+    blockers: string[];
+    dispatcher_ready: boolean;
+    policy_started: boolean;
+    roles_ready: {
+      manager: boolean;
+      worker: boolean;
+    };
+    state: AppAutopilotReadinessState;
+  };
   status: AppLoopStatus;
   summary: {
+    applied_automations: number;
+    autonomous_ready: boolean;
     blocked_automations: number;
     creatable_automations: number;
     dispatcher_required: boolean;
@@ -283,6 +309,11 @@ export function appAutopilotPlanSync(
   });
   const lastPolicy = latestAppAutopilotPolicyEvent(database, status.task.id, options.dispatcherId);
   const desiredState = options.desiredState ?? lastPolicy?.desired_state ?? "unconfigured";
+  const automationState = appAutopilotAutomationStateSync(database, {
+    desiredState,
+    since: lastPolicy?.event_type === "app_autopilot_started" ? lastPolicy.recorded_at : null,
+    taskId: status.task.id,
+  });
   const quiescence = appAutopilotQuiescenceSync(database, {
     desiredState,
     dispatcherId: options.dispatcherId,
@@ -317,8 +348,15 @@ export function appAutopilotPlanSync(
     };
   });
   const creatable = automationSpecs.filter((spec) => spec.can_create).length;
+  const readiness = appAutopilotReadiness({
+    automationSpecs,
+    automationState,
+    desiredState,
+    status,
+  });
   return {
     automation_specs: automationSpecs,
+    automation_state: automationState,
     control: {
       dispatcher_command: dispatcherCommand,
       note: "A plain shell CLI cannot call Codex app thread tools. Create or pause these heartbeat automations from a Codex app session, then use this CLI for status/start/stop receipts.",
@@ -341,8 +379,11 @@ export function appAutopilotPlanSync(
       }
       : null,
     quiescence,
+    readiness,
     status,
     summary: {
+      applied_automations: automationState.applied_count,
+      autonomous_ready: readiness.autonomous_ready,
       blocked_automations: automationSpecs.length - creatable,
       creatable_automations: creatable,
       dispatcher_required: status.dispatch.state !== "healthy",
@@ -350,6 +391,106 @@ export function appAutopilotPlanSync(
       total_automations: automationSpecs.length,
     },
     task: status.task,
+  };
+}
+
+function appAutopilotAutomationStateSync(
+  database: DatabaseSync,
+  options: {
+    desiredState: AppAutopilotDesiredState;
+    since: string | null;
+    taskId: string;
+  },
+): AppAutopilotPlan["automation_state"] {
+  const requiredRoles: AppLoopRole[] = ["manager", "worker"];
+  if (options.desiredState !== "active" || !options.since) {
+    return {
+      applied_count: 0,
+      applied_roles: [],
+      missing_roles: requiredRoles,
+      receipts: [],
+      required_count: requiredRoles.length,
+    };
+  }
+  const rows = database.prepare(`
+    select id, actor, timestamp, attributes_json
+    from telemetry_events
+    where task_id = ?
+      and event_type = 'app_autopilot_automation_applied'
+      and timestamp >= ?
+    order by timestamp, id
+  `).all(options.taskId, options.since) as Array<{ actor: string; attributes_json: string; id: string; timestamp: string }>;
+  const latestByRole = new Map<AppLoopRole, { automation_id: string; event_id: string; recorded_at: string; role: AppLoopRole }>();
+  for (const row of rows) {
+    const attributes = JSON.parse(row.attributes_json) as { automation_id?: unknown; role?: unknown };
+    const role = attributes.role === "manager" || attributes.role === "worker" ? attributes.role : null;
+    const automationId = typeof attributes.automation_id === "string" ? attributes.automation_id : null;
+    if (!role || !automationId) {
+      continue;
+    }
+    latestByRole.set(role, {
+      automation_id: automationId,
+      event_id: row.id,
+      recorded_at: row.timestamp,
+      role,
+    });
+  }
+  const receipts = requiredRoles.flatMap((role) => {
+    const receipt = latestByRole.get(role);
+    return receipt ? [receipt] : [];
+  });
+  const appliedRoles = receipts.map((receipt) => receipt.role);
+  return {
+    applied_count: receipts.length,
+    applied_roles: appliedRoles,
+    missing_roles: requiredRoles.filter((role) => !latestByRole.has(role)),
+    receipts,
+    required_count: requiredRoles.length,
+  };
+}
+
+function appAutopilotReadiness(options: {
+  automationSpecs: AppAutopilotRoleAutomation[];
+  automationState: AppAutopilotPlan["automation_state"];
+  desiredState: AppAutopilotDesiredState;
+  status: AppLoopStatus;
+}): AppAutopilotPlan["readiness"] {
+  const policyStarted = options.desiredState === "active";
+  const dispatcherReady = options.status.dispatch.state === "healthy";
+  const rolesReady = {
+    manager: options.status.manager.lease.state === "healthy",
+    worker: options.status.worker.lease.state === "healthy",
+  };
+  const blockers: string[] = [];
+  if (!policyStarted) {
+    blockers.push("App-autopilot policy is not active.");
+  }
+  if (!dispatcherReady) {
+    blockers.push(`Dispatch ${options.status.dispatch.dispatcher_id} is ${options.status.dispatch.state}.`);
+  }
+  for (const role of ["manager", "worker"] as const) {
+    if (!rolesReady[role]) {
+      blockers.push(`${role} heartbeat is ${role === "manager" ? options.status.manager.lease.state : options.status.worker.lease.state}.`);
+    }
+  }
+  if (policyStarted) {
+    for (const spec of options.automationSpecs) {
+      if (!spec.can_create) {
+        blockers.push(spec.blocker ?? `${spec.role} heartbeat automation cannot be created.`);
+      }
+    }
+    for (const role of options.automationState.missing_roles) {
+      blockers.push(`${role} heartbeat automation has not been recorded as applied.`);
+    }
+  }
+  const autonomousReady = policyStarted && blockers.length === 0;
+  return {
+    autonomous_ready: autonomousReady,
+    blockers,
+    dispatcher_ready: dispatcherReady,
+    policy_started: policyStarted,
+    roles_ready: rolesReady,
+    state: autonomousReady ? "autonomous_ready" : policyStarted ? "setup_required" : "not_active",
   };
 }
 

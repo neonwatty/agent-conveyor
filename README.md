@@ -189,15 +189,19 @@ the no-tmux binding with `create-disposable-binding`, point the worker at
 that the loop is ready. Pair and worker-set skills run
 `conveyor-smoke-app-connections` before real task work by default. Required
 smoke first checks package/plugin/ledger/thread metadata, then starts a
-nonce-scoped `app-smoke` session and blocks real work until the manager and each
-worker have visible app-thread send receipts, fresh app heartbeats, durable
-received/accepted acknowledgements, and an `app-smoke status` result with
-`real_work_allowed=true`. The plain CLI records and evaluates receipts; the
-Codex app skill/operator layer must perform live `send_message_to_thread`
-delivery and record `sent`, `blocked`, or skipped/advisory evidence. After
-required smoke passes, pair and worker-set skills start `app-autopilot` before
-real work so the just-proved sessions keep polling. A setup is autonomous only
-when the emitted heartbeat automation specs have been applied, or explicitly
+nonce-scoped `app-smoke` session and blocks real work until the worker has
+accepted smoke and delivered the manager report, then the manager validates
+that report. Both roles need visible app-thread send receipts, fresh app
+heartbeats, durable received/accepted acknowledgements, and an
+`app-smoke status` result with `real_work_allowed=true`. The plain CLI records
+and evaluates receipts; the Codex app skill/operator layer must perform live
+`send_message_to_thread` delivery and record `sent`, `blocked`, or
+skipped/advisory evidence. If a smoke role blocks and later succeeds, the later
+accepted receipt for the same smoke id/nonce becomes the current terminal role
+state. After required smoke passes, pair and worker-set skills start
+`app-autopilot` before real work so the just-proved sessions keep polling. A
+setup is autonomous only when the emitted heartbeat automation specs have been
+applied and recorded with `app-autopilot record-automation`, or explicitly
 deferred as `manual-poll only`; smoke-passed by itself only proves connection
 plumbing at that moment.
 When the manager is itself running in the Codex app and
@@ -538,16 +542,19 @@ stay out of receipts.
   a matching `ready_to_send` action with `send_ready=true` and the same thread
   id; healthy roles must be recorded as `skipped`; missing-thread blockers and
   failed app-thread sends must be recorded as `blocked` with a reason.
-- `app-autopilot start|stop|status TASK [--dispatcher-id ID]
+- `app-autopilot start|stop|status|record-automation TASK [--dispatcher-id ID]
   [--interval SECONDS] [--watch-iterations N] [--stale-after N]
-  [--quiet-after N] [--json]` —
+  [--quiet-after N] [--role manager|worker --automation-id ID] [--json]` —
   Manage the pair-level app-native heartbeat policy for the active
   manager/worker binding. `start` and `stop` write telemetry receipts and emit
   the exact manager/worker Codex app heartbeat automation specs plus the
   bounded Dispatch watch command. A plain shell CLI cannot call Codex app
   thread tools, so create/pause those heartbeat automations from a Codex app
-  operator session using the emitted specs; Conveyor remains the durable source
-  of truth through Dispatch, inboxes, wake receipts, and app heartbeat status.
+  operator session using the emitted specs, then run `record-automation` once
+  per created role automation. Conveyor remains the durable source of truth
+  through Dispatch, inboxes, automation-applied receipts, wake receipts, and app
+  heartbeat status. `status` reports `plan.readiness`; do not call a loop
+  autonomous unless `plan.readiness.autonomous_ready=true`.
   `status` also reports `plan.quiescence`: when the loop is healthy, has no
   `next_actions`, and both roles have produced `--quiet-after` paired
   heartbeats since the last command or inbox-consumption receipt, it recommends
