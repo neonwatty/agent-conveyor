@@ -1503,7 +1503,7 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       flags.path = value.value;
       index += 1;
     } else if (arg === "--codex-home") {
-      if (command !== "install-skills" && command !== "install-plugin" && command !== "plugin-status" && command !== "plugin-path") {
+      if (command !== "install-skills" && command !== "install-plugin" && command !== "plugin-status" && command !== "plugin-path" && command !== "doctor") {
         return { command, enabled, error: "Unsupported TypeScript runtime option: --codex-home", explicit, flags, task };
       }
       const value = valueAfter(queue, index, arg);
@@ -13365,9 +13365,20 @@ function runDoctorCommand(
   const root = stateRoot({ cwd: targetCwd, env: options.env });
   const tmuxPath = commandPath("tmux", options);
   const codexPath = options.codexCommandResolver?.("codex") ?? commandPath("codex", options);
+  const conveyorPath = commandPath("conveyor", options);
+  const workerctlPath = commandPath("workerctl", options);
+  const packageRoot = packageRootFromRuntimeModule();
+  const packageVersion = packageVersionFromRoot(packageRoot);
+  const plugin = agentConveyorPluginStatus(parsed, options);
+  const pluginSkillsInstalled = plugin.skills.every((skill) => skill.installed);
   const checks: Array<Record<string, unknown>> = [
     { name: "tmux", ok: Boolean(tmuxPath), path: tmuxPath },
     { name: "codex", ok: Boolean(codexPath), path: codexPath },
+    { name: "conveyor_on_path", ok: Boolean(conveyorPath), path: conveyorPath },
+    { name: "workerctl_on_path", ok: Boolean(workerctlPath), path: workerctlPath },
+    { name: "plugin_installed", ok: plugin.installed, installed_version: plugin.installed_version },
+    { name: "plugin_version_matches", ok: plugin.version_matches, package_version: packageVersion, plugin_version: plugin.plugin_version },
+    { name: "plugin_skills_installed", ok: pluginSkillsInstalled, missing: plugin.skills.filter((skill) => !skill.installed).map((skill) => skill.name) },
   ];
   if (tmuxPath) {
     const proc = runProcess(["tmux", "-V"], options);
@@ -13379,8 +13390,46 @@ function runDoctorCommand(
   }
   checks.push({ name: "target_cwd_exists", ok: pathIsDirectory(targetCwd), path: targetCwd });
   checks.push({ name: "state_root_exists", ok: existsSync(root), path: root });
-  const ok = checks.every((check) => check.name === "state_root_exists" || check.ok === true);
-  return { ...jsonResult({ checks, ok, project_root: packageRootFromRuntimeModule(), workers: doctorWorkerSummaries(root) }), exitCode: ok ? 0 : 1 };
+  const commandReady = Boolean(conveyorPath) && Boolean(workerctlPath) && Boolean(codexPath) && Boolean(tmuxPath);
+  const operatorReady = commandReady && plugin.installed && plugin.version_matches && pluginSkillsInstalled;
+  const ok = checks.every((check) =>
+    check.name === "state_root_exists"
+    || check.name === "conveyor_on_path"
+    || check.name === "workerctl_on_path"
+    || check.name === "plugin_installed"
+    || check.name === "plugin_version_matches"
+    || check.name === "plugin_skills_installed"
+    || check.ok === true
+  );
+  return {
+    ...jsonResult({
+      checks,
+      codex_home: plugin.paths.codex_home,
+      commands: {
+        codex: { ok: Boolean(codexPath), path: codexPath },
+        conveyor: { ok: Boolean(conveyorPath), path: conveyorPath },
+        tmux: { ok: Boolean(tmuxPath), path: tmuxPath },
+        workerctl: { ok: Boolean(workerctlPath), path: workerctlPath },
+      },
+      ok,
+      operator_ready: operatorReady,
+      package: {
+        name: "agent-conveyor",
+        root: packageRoot,
+        version: packageVersion,
+      },
+      platform: process.platform,
+      plugin,
+      project_root: packageRoot,
+      runtime: {
+        node: process.version,
+        state_root: root,
+        target_cwd: targetCwd,
+      },
+      workers: doctorWorkerSummaries(root),
+    }),
+    exitCode: ok ? 0 : 1,
+  };
 }
 
 function runDoctorSelfCommand(

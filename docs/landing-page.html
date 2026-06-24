@@ -233,6 +233,16 @@
         color: #91d9bd;
       }
 
+      p code,
+      li code {
+        background: rgba(36, 49, 61, 0.07);
+        border-radius: 4px;
+        color: var(--ink);
+        font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+        font-size: 0.9em;
+        padding: 1px 4px;
+      }
+
       .transcript {
         background: var(--surface);
         border: 1px solid var(--line);
@@ -544,6 +554,38 @@
         margin: 0;
       }
 
+      .capture-grid {
+        display: grid;
+        gap: 12px;
+        grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+      }
+
+      .capture-item {
+        background: var(--surface);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        min-height: 152px;
+        padding: 18px;
+      }
+
+      .capture-item strong {
+        display: block;
+        margin-bottom: 6px;
+      }
+
+      .capture-item p {
+        color: var(--muted);
+        margin: 0;
+      }
+
+      .capture-item > code {
+        color: var(--green);
+        display: block;
+        font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+        font-size: 12px;
+        margin-bottom: 8px;
+      }
+
       .db-item,
       .proof-card {
         background: var(--surface);
@@ -576,7 +618,7 @@
         min-height: 146px;
       }
 
-      .proof-card code {
+      .proof-card > code {
         color: var(--green);
         display: block;
         font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
@@ -641,6 +683,7 @@
         .recipes,
         .mode-guide,
         .proof-grid,
+        .capture-grid,
         .db-grid {
           grid-template-columns: repeat(2, minmax(0, 1fr));
         }
@@ -673,9 +716,9 @@
 
         nav {
           gap: 10px;
-          flex-wrap: nowrap;
+          flex-wrap: wrap;
           justify-content: flex-start;
-          overflow-x: auto;
+          overflow-x: visible;
           padding-bottom: 2px;
           width: 100%;
         }
@@ -747,6 +790,7 @@
         .hero-proof,
         .mode-guide,
         .proof-grid,
+        .capture-grid,
         .db-grid {
           grid-template-columns: 1fr;
         }
@@ -766,7 +810,8 @@
       <div class="brand"><span class="brand-mark" aria-hidden="true"></span> Agent Conveyor</div>
       <nav aria-label="Primary">
         <a href="#recipes">Recipes</a>
-        <a href="#flow">Manager Flow</a>
+        <a href="#flow">Operator Flow</a>
+        <a href="#capture">Capture</a>
         <a href="#database">Audit Trail</a>
         <a href="#release">Release</a>
         <a href="https://github.com/neonwatty/agent-conveyor#readme">README</a>
@@ -786,12 +831,13 @@
             </p>
             <p class="hero-summary">
               Built for smoke-gated operator pairs, worker sets, Ralph loops,
-              coverage passes, and PR/CI merge supervision.
+              screenshot-driven UX polish, coverage passes, and PR/CI merge
+              supervision.
             </p>
             <div class="hero-proof" aria-label="Agent Conveyor outcomes">
               <span><strong>Smoke first</strong>Doctor and app-smoke gates block real work until app-thread plumbing is proven.</span>
-              <span><strong>Stay awake</strong>Autopilot heartbeats keep manager and worker sessions polling after setup.</span>
-              <span><strong>Cleanly rotate</strong>Owned worker threads can be archived and replaced without touching unrelated sessions.</span>
+              <span><strong>Stay awake</strong>App-autopilot keeps manager and worker sessions polling after setup.</span>
+              <span><strong>Fan out safely</strong>Worker-set skills smoke every shard before a manager sends task prompts.</span>
             </div>
             <div class="actions">
               <a class="button primary" href="#recipes">Explore recipes</a>
@@ -801,6 +847,7 @@
               <code>npm install -g agent-conveyor</code>
               <code><span>conveyor</span> install-plugin</code>
               <code><span>conveyor</span> doctor --json</code>
+              <code><span>conveyor</span> app-smoke status "$TASK" --smoke-id "$SMOKE_ID" --json</code>
             </div>
             <div class="mobile-flow-strip" aria-label="Manager Dispatch Worker flow">
               <span>Manager</span>
@@ -820,7 +867,7 @@
               <div class="arrow" aria-hidden="true">→</div>
               <div class="node">
                 <strong>Smoke Gate</strong>
-                <p>Requires app-thread sends, fresh heartbeats, inbox acks, nonce checks, and manager receipt validation.</p>
+                <p>Requires matching package and plugin versions, app-thread sends, fresh heartbeats, inbox acks, nonce checks, and manager validation.</p>
               </div>
               <div class="arrow" aria-hidden="true">→</div>
               <div class="node">
@@ -831,8 +878,8 @@
             <div class="receipt-strip" aria-label="Evidence receipts">
               <div class="receipt">doctor<br />package + plugin ready</div>
               <div class="receipt">app_smoke<br />sent + accepted receipts</div>
-              <div class="receipt">app_autopilot<br />heartbeat automation</div>
-              <div class="receipt">worker_rotation<br />owned archive only</div>
+              <div class="receipt">app_autopilot<br />automation readiness</div>
+              <div class="receipt">worker_set<br />every shard passes</div>
             </div>
           </div>
         </div>
@@ -842,9 +889,10 @@
         <div class="section-inner">
           <h2>Five manager modes for the work agents actually do</h2>
           <p class="section-lede">
-            The setup conversation can stay free-form, but before the manager
-            starts it resolves to a named recipe or explicit custom mode. Each
-            recipe has settings, permissions, evidence gates, and cleanup rules.
+            The operator can ask in natural language, but setup resolves to
+            app-visible threads plus a named recipe or explicit custom mode.
+            Each recipe has settings, permissions, evidence gates, and cleanup
+            rules.
           </p>
           <div class="mode-guide" aria-label="Choose a starting recipe">
             <a href="https://github.com/neonwatty/agent-conveyor/blob/main/docs/manager-recipes.md#goalbuddy-conveyor">
@@ -858,6 +906,10 @@
             <a href="https://github.com/neonwatty/agent-conveyor/blob/main/docs/manager-recipes.md#prcimerge-ralph-loop">
               <strong>Need a green merge?</strong>
               <span>Use the PR/CI loop for review, CI monitoring, and merge receipts.</span>
+            </a>
+            <a href="https://github.com/neonwatty/agent-conveyor#codex-operator-plugin">
+              <strong>Need parallel polish?</strong>
+              <span>Create a worker set, smoke every app thread, then fan out the UX slices.</span>
             </a>
           </div>
           <div class="recipes">
@@ -884,7 +936,7 @@
             <article class="recipe accent-gold">
               <h3>UX Polish Loop</h3>
               <p class="use-case">Use when screenshots should drive the next fix.</p>
-              <p>Iterates visible quality using screenshots, browser evidence, and visual diffs.</p>
+              <p>Fans out visible quality work using screenshots, browser evidence, and visual diffs.</p>
               <div class="tag-row">
                 <span class="tag">guided</span>
                 <span class="tag">playwright</span>
@@ -918,44 +970,45 @@
       <section id="flow">
         <div class="section-inner split">
           <div>
-            <h2>From setup to supervision without losing the thread</h2>
+            <h2>From Codex app setup to supervised work</h2>
             <p class="section-lede">
-              Agent Conveyor makes the manager commit to a mode before it gets
-              cut loose, then keeps every loop grounded in Dispatch and receipts.
+              Agent Conveyor now treats live Codex app plumbing as a gate. The
+              operator proves the install, binds visible thread ids, smokes the
+              connection, and only then starts the manager recipe.
             </p>
             <div class="command">
-              <code><span>conveyor</span> manager-config "$TASK" --recipe goalbuddy-conveyor --mode strict</code>
-              <code><span>conveyor</span> pair --task dogfood-goalbuddy --manager-recipe goalbuddy-conveyor --path /tmp/agent-conveyor-dogfood/workerctl.db</code>
-              <code><span>conveyor</span> cycle "$TASK"</code>
+              <code><span>conveyor</span> create-disposable-binding "$TASK" --worker-codex-app-thread-id "$WORKER_THREAD_ID" --manager-codex-app-thread-id "$MANAGER_THREAD_ID" --json</code>
+              <code><span>conveyor</span> app-smoke preflight "$TASK" --mode required --scope pair --json</code>
+              <code><span>conveyor</span> app-autopilot status "$TASK" --json</code>
               <code><span>conveyor</span> replay "$TASK"</code>
             </div>
             <div class="transcript" aria-label="Example manager dispatcher worker transcript">
-              <div class="transcript-row"><strong>Manager</strong><p>Start `ux-polish-loop`; require screenshot proof before another worker pass.</p></div>
-              <div class="transcript-row"><strong>Dispatch</strong><p>Routes the task, records the command attempt, and waits for worker receipts.</p></div>
-              <div class="transcript-row"><strong>Worker</strong><p>Returns screenshot paths, changed files, tests run, and the next blocker if one remains.</p></div>
-              <div class="transcript-row"><strong>Manager</strong><p>Accepts proof, asks for one more pass, or closes the loop with replayable evidence.</p></div>
+              <div class="transcript-row"><strong>Operator</strong><p>Creates a manager plus workers in the Codex app and binds their thread ids to the ledger.</p></div>
+              <div class="transcript-row"><strong>Smoke</strong><p>Sends nonce-scoped prompts, records inbox receipts, and blocks if any role is stale or unbound.</p></div>
+              <div class="transcript-row"><strong>Worker</strong><p>Prints <code>CONVEYOR POLL</code>, consumes work, returns screenshot paths, tests, and blockers through Dispatch.</p></div>
+              <div class="transcript-row"><strong>Manager</strong><p>Accepts proof, asks for another UX pass, rotates a worker, or closes with replayable evidence.</p></div>
             </div>
           </div>
           <div class="timeline">
             <div class="step">
               <span class="step-number">1</span>
-              <div><strong>Resolve the recipe</strong><p>The manager turns free-form intent into `goalbuddy-conveyor`, `ux-polish-loop`, or `custom`.</p></div>
+              <div><strong>Prove operator readiness</strong><p><code>doctor --json</code> checks the package, bin paths, Codex home, plugin version, and installed operator skills.</p></div>
             </div>
             <div class="step">
               <span class="step-number">2</span>
-              <div><strong>Lock settings</strong><p>Mode, objective, permissions, tools, epilogues, and cleanup policy are saved in SQLite.</p></div>
+              <div><strong>Create visible threads</strong><p>The pair and worker-set skills create Codex app threads, title them, and bind their ids in SQLite.</p></div>
             </div>
             <div class="step">
               <span class="step-number">3</span>
-              <div><strong>Route through Dispatch</strong><p>Notifications are delivered by push or inbox, with command attempts and side effects recorded.</p></div>
+              <div><strong>Smoke before work</strong><p>Required <code>app-smoke</code> needs sent, received, accepted, heartbeat, and manager validation receipts.</p></div>
             </div>
             <div class="step">
               <span class="step-number">4</span>
-              <div><strong>Finish with proof</strong><p>Completion needs receipts: tests, screenshots, CI, handoff, audit, or an explicit blocker.</p></div>
+              <div><strong>Start autopilot</strong><p>The operator applies heartbeat automation specs or explicitly reports the setup as manual-poll only.</p></div>
             </div>
             <div class="step">
               <span class="step-number">5</span>
-              <div><strong>Dogfood the package</strong><p>A clean package run launches Dispatch, records acks, satisfies criteria, and finishes without path fixes.</p></div>
+              <div><strong>Run the recipe</strong><p>UX polish, coverage, GoalBuddy, and PR/CI loops continue only when the evidence gate allows it.</p></div>
             </div>
           </div>
         </div>
@@ -963,17 +1016,42 @@
 
       <section>
         <div class="section-inner">
-          <h2>Dogfood proof is a first-class recipe output</h2>
+          <h2>Dogfood proof is a first-class operator output</h2>
           <p class="section-lede">
-            A useful manager setup is more than a prompt. It should leave enough
-            evidence for another operator to replay what happened and improve
-            the recipe when friction repeats.
+            A useful setup is more than a prompt. It should leave enough
+            evidence for another operator to replay what happened, see why real
+            work was allowed, and improve the recipe when friction repeats.
           </p>
           <div class="proof-grid">
-            <div class="proof-card"><code>manager-config</code><strong>Settings locked</strong><p>Mode, objective, permissions, tools, epilogues, and cleanup policy are saved before the manager starts.</p></div>
-            <div class="proof-card"><code>pair --json</code><strong>Launch is explicit</strong><p>The package records manager, worker, Dispatch PID, cwd, and database path for the run.</p></div>
-            <div class="proof-card"><code>criteria --list</code><strong>Acceptance is visible</strong><p>Criteria move from accepted to satisfied with evidence instead of being inferred from chat.</p></div>
-            <div class="proof-card"><code>replay / audit</code><strong>Closeout is replayable</strong><p>Worker completion, manager decisions, finish task, and cleanup receipts remain inspectable.</p></div>
+            <div class="proof-card"><code>doctor --json</code><strong>Install is explicit</strong><p>Operator readiness includes package, plugin, installed skills, command paths, and target project health.</p></div>
+            <div class="proof-card"><code>app-smoke status</code><strong>Connection is proven</strong><p>Real work stays blocked until nonce-scoped sends, heartbeats, and accepted role receipts line up.</p></div>
+            <div class="proof-card"><code>app-autopilot status</code><strong>Autonomy is earned</strong><p>Heartbeat automation receipts or a manual-poll deferral decide whether the loop is actually autonomous.</p></div>
+            <div class="proof-card"><code>replay / audit</code><strong>Closeout is replayable</strong><p>Worker completion, manager decisions, finish task, screenshots, and blockers remain inspectable.</p></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="capture">
+        <div class="section-inner">
+          <h2>Capture the app doing the work</h2>
+          <p class="section-lede">
+            The next public proof should be a short Codex app recording, not a
+            simulated diagram: one operator creates a manager and multiple
+            workers, runs required smoke, then fans out a UX polish pass whose
+            receipts include screenshots or visual diffs.
+            <a href="landing-media-capture-plan.md">Use the capture plan.</a>
+          </p>
+          <div class="capture-grid">
+            <div class="capture-item">
+              <code>conveyor-create-worker-set</code>
+              <strong>Record the setup</strong>
+              <p>Show the operator creating visible same-project threads, <code>doctor --json</code> reporting <code>operator_ready=true</code>, and every worker shard passing required app smoke.</p>
+            </div>
+            <div class="capture-item">
+              <code>ux-polish-loop</code>
+              <strong>Record the payoff</strong>
+              <p>Show the manager assigning visible polish slices, workers returning screenshot evidence, and Dispatch/replay proving why another pass was allowed or stopped.</p>
+            </div>
           </div>
         </div>
       </section>
@@ -982,17 +1060,18 @@
         <div class="section-inner">
           <h2>The database is the product feedback loop</h2>
           <p class="section-lede">
-            Recipe behavior is not hidden in chat memory. The control plane
+            Operator behavior is not hidden in chat memory. The control plane
             records enough state to replay a run, report a bug, and improve the
-            recipes when dogfooding exposes a weak gate.
+            app smoke, wake, and recipe gates when dogfooding exposes a weak
+            continuation.
           </p>
           <div class="db-grid">
             <div class="db-item"><strong>manager_configs</strong><p>Recipe name, supervision mode, permissions, tools, epilogues, and ack policy.</p></div>
-            <div class="db-item"><strong>commands</strong><p>Manager requests, Dispatch claims, retries, blocks, and side-effect risk.</p></div>
+            <div class="db-item"><strong>app smoke receipts</strong><p>Smoke ids, nonces, role status, bound thread ids, blockers, and real-work readiness.</p></div>
             <div class="db-item"><strong>routed_notifications</strong><p>Worker and manager messages, delivery mode, consumed state, and failures.</p></div>
-            <div class="db-item"><strong>acceptance_criteria</strong><p>Living criteria, deferred follow-ups, satisfied proof, and rejected scope.</p></div>
-            <div class="db-item"><strong>manager_cycles</strong><p>Observation history and the manager context used for each decision.</p></div>
-            <div class="db-item"><strong>telemetry_events</strong><p>Dispatch heartbeat, routing issues, stale work, and searchable issue clues.</p></div>
+            <div class="db-item"><strong>acceptance_criteria</strong><p>Living criteria, screenshots, visual-diff proof, deferred follow-ups, and rejected scope.</p></div>
+            <div class="db-item"><strong>autopilot policy</strong><p>Heartbeat automation specs, applied receipts, readiness blockers, quiet-cycle stop recommendations.</p></div>
+            <div class="db-item"><strong>telemetry_events</strong><p>Dispatch heartbeat, routing issues, stale work, wake actions, and searchable issue clues.</p></div>
           </div>
           <div class="diagnostic-strip">
             <div>
@@ -1000,9 +1079,9 @@
               <p>Use the database as the bug report, not a reconstructed chat summary.</p>
             </div>
             <p>
-              Start with `conveyor replay`, attach acceptance criteria and
-              notification receipts, then tune the recipe gate that allowed the
-              weak continuation.
+              Start with <code>conveyor replay</code>, attach app-smoke status, autopilot
+              readiness, acceptance criteria, and notification receipts, then
+              tune the gate that allowed the weak continuation.
             </p>
           </div>
         </div>
@@ -1018,14 +1097,14 @@
               run with the npm production environment uses Trusted Publishing.
             </p>
             <div class="command">
-              <code><span>gh</span> workflow run publish.yml -f version=0.1.8 -f publish=false</code>
-              <code><span>gh</span> workflow run publish.yml -f version=0.1.8 -f publish=true</code>
+              <code><span>gh</span> workflow run publish.yml -f version=0.1.26 -f publish=false</code>
+              <code><span>gh</span> workflow run publish.yml -f version=0.1.26 -f publish=true</code>
               <code><span>npm</span> view agent-conveyor version</code>
             </div>
           </div>
           <ul class="release-list">
             <li><strong>Verify first</strong><br />Run tests, package smoke, release check, and upload a tarball for review.</li>
-            <li><strong>Publish intentionally</strong><br />Require `publish=true`, a matching version input, and the `npm-production` environment.</li>
+            <li><strong>Publish intentionally</strong><br />Require <code>publish=true</code>, a matching version input, and the <code>npm-production</code> environment.</li>
             <li><strong>Use OIDC</strong><br />Trusted Publishing removes long-lived npm tokens from the release path.</li>
             <li><strong>Dogfood after publish</strong><br />Fresh-install the public package before merging release paperwork.</li>
           </ul>
@@ -1036,9 +1115,10 @@
         <div class="section-inner">
           <h2>Start with a recipe. Keep the receipts.</h2>
           <p class="section-lede">
-            Agent Conveyor is for local, auditable supervision: a manager that
-            can watch useful work, ask the next good question, and prove why it
-            continued, stopped, compacted, or finished.
+            Agent Conveyor is for local, auditable Codex app supervision:
+            visible managers and workers that prove their connection, ask the
+            next good question, and show why they continued, stopped, rotated,
+            or finished.
           </p>
           <div class="actions">
             <a class="button primary" href="https://github.com/neonwatty/agent-conveyor/blob/main/docs/manager-recipes.md">Open manager recipes</a>

@@ -79,6 +79,7 @@ test -x "$tmp_home/skills/codex-review/scripts/codex-review"
 pkg_version="$(node -p 'require("./package.json").version')"
 CODEX_HOME="$tmp_home" PATH="$tmp_prefix/bin:$PATH" conveyor install-plugin --json
 CODEX_HOME="$tmp_home" PATH="$tmp_prefix/bin:$PATH" conveyor plugin-status --json
+CODEX_HOME="$tmp_home" PATH="$tmp_prefix/bin:$PATH" conveyor doctor --json
 test -f "$tmp_home/plugins/cache/agent-conveyor/agent-conveyor/$pkg_version/plugin.json"
 test -f "$tmp_home/skills/conveyor-smoke-app-connections/SKILL.md"
 test -f "$tmp_home/skills/conveyor-create-pair/SKILL.md"
@@ -186,6 +187,7 @@ test workflow
 ignores changes that touch only:
 
 - `docs/landing-page.html`
+- `docs/landing-media-capture-plan.md`
 - `docs/manager-recipes.md`
 - `docs/package-release.md`
 - `README.md`

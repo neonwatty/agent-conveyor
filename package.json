@@ -1,6 +1,6 @@
 {
   "name": "agent-conveyor",
-  "version": "0.1.25",
+  "version": "0.1.26",
   "description": "Local agent manager/worker conveyor control plane for Codex sessions.",
   "license": "MIT",
   "type": "module",
@@ -28,6 +28,7 @@
     "scripts/serve-landing-page.mjs",
     "README.md",
     "docs/landing-page.html",
+    "docs/landing-media-capture-plan.md",
     "docs/manager-recipes.md",
     "docs/typescript-migration/*.md"
   ],
