@@ -109,10 +109,10 @@
 
       .hero-inner {
         display: grid;
-        gap: 46px;
-        grid-template-columns: minmax(0, 0.95fr) minmax(430px, 1.05fr);
+        gap: 34px;
+        grid-template-columns: minmax(0, 0.88fr) minmax(500px, 1.16fr);
         margin: 0 auto;
-        max-width: 1180px;
+        max-width: 1240px;
         min-height: min(600px, 76vh);
         padding: 46px 24px 34px;
         position: relative;
@@ -610,6 +610,120 @@
         padding: 12px 14px;
       }
 
+      .workflow-band {
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.78), rgba(255, 255, 255, 0.5)),
+          linear-gradient(90deg, rgba(37, 122, 97, 0.08), rgba(43, 104, 168, 0.08));
+      }
+
+      .workflow-visual {
+        align-items: stretch;
+        display: grid;
+        gap: 10px;
+        grid-template-columns: minmax(0, 0.85fr) 32px minmax(0, 1fr) 32px minmax(0, 1.1fr) 32px minmax(0, 0.95fr);
+        margin-top: 22px;
+      }
+
+      .workflow-node {
+        background: var(--surface);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        display: grid;
+        gap: 8px;
+        min-height: 164px;
+        padding: 16px;
+      }
+
+      .workflow-node strong {
+        font-size: 16px;
+      }
+
+      .workflow-node p {
+        color: var(--muted);
+        font-size: 14px;
+        margin: 0;
+      }
+
+      .workflow-kicker {
+        color: var(--green);
+        font-size: 12px;
+        font-weight: 800;
+        text-transform: uppercase;
+      }
+
+      .workflow-arrow {
+        align-items: center;
+        color: var(--blue);
+        display: flex;
+        font-size: 26px;
+        font-weight: 800;
+        justify-content: center;
+      }
+
+      .receipt-list {
+        display: grid;
+        gap: 8px;
+        margin-top: 6px;
+      }
+
+      .receipt-list span {
+        background: rgba(36, 49, 61, 0.06);
+        border-left: 3px solid var(--green);
+        border-radius: 4px;
+        color: #425467;
+        font-size: 12px;
+        font-weight: 700;
+        padding: 7px 8px;
+      }
+
+      .start-band {
+        background: var(--coal);
+        color: white;
+      }
+
+      .start-band .section-lede {
+        color: #cbd5dd;
+      }
+
+      .start-band .button.primary {
+        background: #ffffff;
+        border-color: #ffffff;
+        color: var(--coal);
+      }
+
+      .start-panel {
+        max-width: 760px;
+      }
+
+      .start-panel h2 {
+        max-width: 680px;
+      }
+
+      .start-use-cases {
+        align-items: center;
+        color: #cbd5dd;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin: 24px 0 0;
+        max-width: 700px;
+      }
+
+      .start-use-cases strong {
+        color: #ffffff;
+        font-size: 14px;
+        margin-right: 2px;
+      }
+
+      .start-use-cases span {
+        border: 1px solid rgba(255, 255, 255, 0.24);
+        border-radius: 999px;
+        color: #e8eef3;
+        font-size: 13px;
+        font-weight: 800;
+        padding: 6px 9px;
+      }
+
       .closing {
         background: var(--coal);
         color: white;
@@ -658,6 +772,15 @@
         .capture-grid,
         .db-grid {
           grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .workflow-visual {
+          grid-template-columns: 1fr;
+        }
+
+        .workflow-arrow {
+          min-height: 18px;
+          transform: rotate(90deg);
         }
 
         .release-grid {
@@ -776,9 +899,8 @@
     <header class="topbar">
       <div class="brand"><span class="brand-mark" aria-hidden="true"></span> Agent Conveyor</div>
       <nav aria-label="Primary">
-        <a href="#flow">Start</a>
-        <a href="#recipes">Recipes</a>
-        <a href="#proof">Proof</a>
+        <a href="#workflow">Workflow</a>
+        <a href="#start">Start</a>
         <a href="https://github.com/neonwatty/agent-conveyor#readme">GitHub</a>
       </nav>
     </header>
@@ -795,8 +917,8 @@
               report back, and resume without losing state.
             </p>
             <div class="actions">
-              <a class="button primary" href="#flow">Give this to Codex to get started</a>
-              <a class="text-link" href="#recipes">See use cases</a>
+              <a class="button primary" href="#start">Give this to Codex to get started</a>
+              <a class="text-link" href="#workflow">See how it works</a>
             </div>
           </div>
 
@@ -813,214 +935,65 @@
         </div>
       </section>
 
-      <section id="flow">
-        <div class="section-inner split">
+      <section id="workflow" class="workflow-band">
+        <div class="section-inner">
           <div>
-            <h2>Give this to Codex to get started</h2>
+            <h2>No more loosely coupled agent fleets.</h2>
             <p class="section-lede">
-              Use this setup path inside the project where you want a manager to
-              coordinate a grounded worker set.
-            </p>
-            <div class="command">
-              <code>npm install -g agent-conveyor</code>
-              <code><span>conveyor</span> install-plugin</code>
-              <code><span>conveyor</span> doctor --json</code>
-              <code><span>conveyor</span> create-disposable-binding "$TASK" --worker-codex-app-thread-id "$WORKER_THREAD_ID" --manager-codex-app-thread-id "$MANAGER_THREAD_ID" --json</code>
-              <code><span>conveyor</span> app-smoke preflight "$TASK" --mode required --scope pair --json</code>
-            </div>
-            <div class="transcript" aria-label="Example manager dispatcher worker transcript">
-              <div class="transcript-row"><strong>Operator</strong><p>Creates visible manager and worker threads.</p></div>
-              <div class="transcript-row"><strong>Dispatch</strong><p>Routes assignments through the project ledger.</p></div>
-              <div class="transcript-row"><strong>Worker</strong><p>Returns receipts, blockers, and handoff state.</p></div>
-              <div class="transcript-row"><strong>Manager</strong><p>Continues, rotates, or closes from durable state.</p></div>
-            </div>
-          </div>
-          <div class="timeline">
-            <div class="step">
-              <span class="step-number">1</span>
-              <div><strong>Install</strong><p>Add Conveyor and its Codex operator plugin.</p></div>
-            </div>
-            <div class="step">
-              <span class="step-number">2</span>
-              <div><strong>Bind threads</strong><p>Create titled manager and worker app threads.</p></div>
-            </div>
-            <div class="step">
-              <span class="step-number">3</span>
-              <div><strong>Dispatch</strong><p>Route work through the project ledger.</p></div>
-            </div>
-            <div class="step">
-              <span class="step-number">4</span>
-              <div><strong>Supervise</strong><p>Track receipts, blockers, and manager decisions.</p></div>
-            </div>
-            <div class="step">
-              <span class="step-number">5</span>
-              <div><strong>Resume</strong><p>Continue from durable state instead of chat memory.</p></div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section id="recipes">
-        <div class="section-inner">
-          <h2>Common manager-worker use cases</h2>
-          <p class="section-lede">
-            Choose a manager mode for the work. Each one keeps coordination in
-            the dispatcher and project ledger.
-          </p>
-          <div class="recipes">
-            <article class="recipe accent-green">
-              <h3>Goal Conveyor</h3>
-              <p class="use-case">For work bigger than one safe worker turn.</p>
-              <p>Runs broad work as one active child board at a time.</p>
-              <div class="tag-row">
-                <span class="tag">strict</span>
-                <span class="tag">PR/CI gates</span>
-                <span class="tag">handoff before compact</span>
-              </div>
-            </article>
-            <article class="recipe accent-blue">
-              <h3>Test Coverage Loop</h3>
-              <p class="use-case">For confidence gaps.</p>
-              <p>Raises test confidence before another worker pass.</p>
-              <div class="tag-row">
-                <span class="tag">strict</span>
-                <span class="tag">coverage receipt</span>
-                <span class="tag">adversarial check</span>
-              </div>
-            </article>
-            <article class="recipe accent-gold">
-              <h3>UX Polish Loop</h3>
-              <p class="use-case">For screenshot-led fixes.</p>
-              <p>Uses screenshots, browser evidence, and visual diffs.</p>
-              <div class="tag-row">
-                <span class="tag">guided</span>
-                <span class="tag">playwright</span>
-                <span class="tag">visual threshold</span>
-              </div>
-            </article>
-            <article class="recipe accent-rose">
-              <h3>Nudge / What's Next</h3>
-              <p class="use-case">For low-risk next steps.</p>
-              <p>Observes, clarifies criteria, and suggests the next step.</p>
-              <div class="tag-row">
-                <span class="tag">guided</span>
-                <span class="tag">criteria negotiation</span>
-                <span class="tag">low risk</span>
-              </div>
-            </article>
-            <article class="recipe accent-violet">
-              <h3>PR / CI / Merge Ralph Loop</h3>
-              <p class="use-case">For review-to-merge work.</p>
-              <p>Drives review, CI, merge, and handoff receipts.</p>
-              <div class="tag-row">
-                <span class="tag">strict</span>
-                <span class="tag">green CI</span>
-                <span class="tag">merge receipt</span>
-              </div>
-            </article>
-          </div>
-        </div>
-      </section>
-
-      <section id="proof">
-        <div class="section-inner">
-          <h2>Proof you can replay</h2>
-          <p class="section-lede">
-            Every run should show why work started, continued, stopped, or
-            shipped.
-          </p>
-          <div class="proof-grid">
-            <div class="proof-card"><code>doctor --json</code><strong>Install</strong><p>Package, plugin, skills, paths, and project health.</p></div>
-            <div class="proof-card"><code>app-smoke status</code><strong>Connection</strong><p>Nonce sends, heartbeats, and accepted role receipts.</p></div>
-            <div class="proof-card"><code>app-autopilot status</code><strong>Autonomy</strong><p>Automation receipts or an explicit manual-poll mode.</p></div>
-            <div class="proof-card"><code>replay / audit</code><strong>Closeout</strong><p>Completions, decisions, screenshots, and blockers.</p></div>
-          </div>
-        </div>
-      </section>
-
-      <section id="capture">
-        <div class="section-inner">
-          <h2>Capture the app at work</h2>
-          <p class="section-lede">
-            Next proof: one recording where a manager and worker set pass smoke,
-            then fan out a UX polish pass with screenshot evidence.
-            <a href="landing-media-capture-plan.md">Use the capture plan.</a>
-          </p>
-          <div class="capture-grid">
-            <div class="capture-item">
-              <code>conveyor-create-worker-set</code>
-              <strong>Record the setup</strong>
-              <p>Show visible threads, <code>operator_ready=true</code>, and smoke passed for every shard.</p>
-            </div>
-            <div class="capture-item">
-              <code>ux-polish-loop</code>
-              <strong>Record the payoff</strong>
-              <p>Show polish slices, screenshot receipts, and replay proof.</p>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section id="database">
-        <div class="section-inner">
-          <h2>The database is the feedback loop</h2>
-          <p class="section-lede">
-            Chat is not the source of truth. Conveyor records the dispatcher
-            state, ledger events, and proof.
-          </p>
-          <div class="db-grid">
-            <div class="db-item"><strong>manager_configs</strong><p>Mode, permissions, tools, and ack policy.</p></div>
-            <div class="db-item"><strong>app smoke receipts</strong><p>Smoke ids, nonces, roles, blockers, and readiness.</p></div>
-            <div class="db-item"><strong>routed_notifications</strong><p>Messages, delivery, consumption, and failures.</p></div>
-            <div class="db-item"><strong>acceptance_criteria</strong><p>Criteria, screenshots, visual diffs, and scope calls.</p></div>
-            <div class="db-item"><strong>autopilot policy</strong><p>Heartbeat specs, applied receipts, and readiness.</p></div>
-            <div class="db-item"><strong>telemetry_events</strong><p>Heartbeats, stale work, wake actions, and clues.</p></div>
-          </div>
-          <div class="diagnostic-strip">
-            <div>
-              <strong>When a run feels wrong</strong>
-              <p>Use the database as the bug report.</p>
-            </div>
-            <p>
-              Start with <code>conveyor replay</code>, attach the receipts, then
-              tune the weak handoff.
+              The dispatcher assigns work, records receipts, and keeps every
+              manager-worker handoff anchored in durable project state.
             </p>
           </div>
+          <div class="workflow-visual" aria-label="Manager, dispatcher, worker, and ledger workflow">
+            <div class="workflow-node">
+              <span class="workflow-kicker">Manager</span>
+              <strong>Defines the outcome</strong>
+              <p>Chooses the mode, scope, and worker set.</p>
+            </div>
+            <div class="workflow-arrow" aria-hidden="true">↔</div>
+            <div class="workflow-node">
+              <span class="workflow-kicker">Dispatcher</span>
+              <strong>Routes every handoff</strong>
+              <p>Assigns, wakes, resumes, and stops work from structured state.</p>
+            </div>
+            <div class="workflow-arrow" aria-hidden="true">↔</div>
+            <div class="workflow-node">
+              <span class="workflow-kicker">Workers</span>
+              <strong>Execute bounded slices</strong>
+              <p>Return blockers, diffs, screenshots, tests, and next-step claims.</p>
+            </div>
+            <div class="workflow-arrow" aria-hidden="true">↔</div>
+            <div class="workflow-node">
+              <span class="workflow-kicker">Ledger</span>
+              <strong>Keeps the run replayable</strong>
+              <div class="receipt-list">
+                <span>criteria</span>
+                <span>receipts</span>
+                <span>audit trail</span>
+              </div>
+            </div>
+          </div>
         </div>
       </section>
 
-      <section id="release" class="release-band">
-        <div class="section-inner release-grid">
-          <div>
-            <h2>Release without token wrangling</h2>
+      <section id="start" class="start-band">
+        <div class="section-inner">
+          <div class="start-panel">
+            <h2>Ground everything.</h2>
             <p class="section-lede">
-              Verify the package first. Publish only through the approved
-              Trusted Publishing run.
+              Give Codex the setup path in your project. Conveyor binds the
+              manager, workers, dispatcher, and ledger before work fans out.
             </p>
-            <div class="command">
-              <code><span>gh</span> workflow run publish.yml -f version=0.1.26 -f publish=false</code>
-              <code><span>gh</span> workflow run publish.yml -f version=0.1.26 -f publish=true</code>
-              <code><span>npm</span> view agent-conveyor version</code>
+            <div class="actions">
+              <a class="button primary" href="https://github.com/neonwatty/agent-conveyor#readme">Give this to Codex to get started</a>
             </div>
-          </div>
-          <ul class="release-list">
-            <li><strong>Verify first</strong><br />Tests, package smoke, release check, tarball.</li>
-            <li><strong>Publish intentionally</strong><br /><code>publish=true</code>, matching version, approved environment.</li>
-            <li><strong>Use OIDC</strong><br />No long-lived npm tokens.</li>
-            <li><strong>Dogfood after publish</strong><br />Fresh-install before release closeout.</li>
-          </ul>
-        </div>
-      </section>
-
-      <section class="closing">
-        <div class="section-inner">
-          <h2>Give Codex managers a real control plane.</h2>
-          <p class="section-lede">
-            Dispatcher-led workers. Ledger-backed state. Replayable decisions.
-          </p>
-          <div class="actions">
-            <a class="button primary" href="#flow">Give this to Codex to get started</a>
-            <a class="text-link" href="https://github.com/neonwatty/agent-conveyor#readme">Read install docs</a>
+            <div class="start-use-cases" aria-label="Recommended use cases">
+              <strong>Use it for</strong>
+              <span>Implementation goals</span>
+              <span>UX polish passes</span>
+              <span>Review/CI loops</span>
+              <span>Long-running investigations</span>
+            </div>
           </div>
         </div>
       </section>

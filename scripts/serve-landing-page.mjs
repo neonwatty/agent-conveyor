@@ -1,12 +1,21 @@
 import { createReadStream, statSync } from "node:fs";
 import { createServer } from "node:http";
-import { dirname, resolve } from "node:path";
+import { dirname, extname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const port = Number.parseInt(process.env.PORT ?? "8765", 10);
 const host = process.env.HOST ?? "127.0.0.1";
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const landingPage = resolve(packageRoot, "docs/landing-page.html");
+const docsRoot = resolve(packageRoot, "docs");
+
+const contentTypes = new Map([
+  [".png", "image/png"],
+  [".jpg", "image/jpeg"],
+  [".jpeg", "image/jpeg"],
+  [".webp", "image/webp"],
+  [".svg", "image/svg+xml"],
+]);
 
 try {
   statSync(landingPage);
@@ -19,6 +28,30 @@ const server = createServer((request, response) => {
   const path = new URL(request.url ?? "/", `http://${host}:${port}`).pathname;
 
   if (path !== "/" && path !== "/landing-page.html") {
+    if (path.startsWith("/assets/")) {
+      const assetPath = resolve(docsRoot, `.${path}`);
+
+      if (!assetPath.startsWith(docsRoot)) {
+        response.writeHead(403, { "Content-Type": "text/plain; charset=utf-8" });
+        response.end("Forbidden\n");
+        return;
+      }
+
+      try {
+        statSync(assetPath);
+      } catch {
+        response.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+        response.end("Not found\n");
+        return;
+      }
+
+      response.writeHead(200, {
+        "Content-Type": contentTypes.get(extname(assetPath).toLowerCase()) ?? "application/octet-stream",
+      });
+      createReadStream(assetPath).pipe(response);
+      return;
+    }
+
     response.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
     response.end("Not found\n");
     return;
