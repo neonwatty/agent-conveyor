@@ -346,7 +346,7 @@
         gap: 10px;
       }
 
-      .control-plane {
+      .dispatcher-hub {
         background:
           linear-gradient(rgba(112, 130, 151, 0.08) 1px, transparent 1px),
           linear-gradient(90deg, rgba(112, 130, 151, 0.08) 1px, transparent 1px),
@@ -355,86 +355,30 @@
         border: 1px solid rgba(36, 49, 61, 0.12);
         border-radius: 8px;
         display: grid;
-        gap: 10px;
+        gap: 12px;
         overflow: hidden;
-        padding: 12px;
+        padding: 14px;
       }
 
-      .plane-header {
+      .hub-flow {
         align-items: center;
-        display: flex;
-        gap: 10px;
-        justify-content: space-between;
-      }
-
-      .plane-header strong,
-      .ledger-heading strong {
-        color: #1d2732;
-        display: block;
-        font-size: 12px;
-        letter-spacing: 0;
-      }
-
-      .plane-header span,
-      .ledger-heading span {
-        color: var(--muted);
-        display: block;
-        font-size: 11px;
-        margin-top: 2px;
-      }
-
-      .plane-signal {
-        align-items: center;
-        background: rgba(29, 39, 50, 0.06);
-        border: 1px solid rgba(29, 39, 50, 0.08);
-        border-radius: 999px;
-        display: flex;
-        gap: 6px;
-        padding: 5px 8px;
-      }
-
-      .plane-signal span {
-        color: var(--green);
-        font-weight: 900;
-        margin: 0;
-        text-transform: uppercase;
-      }
-
-      .plane-signal i {
-        color: #425467;
-        font-size: 10px;
-        font-style: normal;
-        font-weight: 800;
-      }
-
-      .fleet-map {
         display: grid;
-        gap: 10px;
-        grid-template-columns: minmax(128px, 0.8fr) minmax(156px, 0.95fr) minmax(148px, 0.95fr);
-        min-height: 234px;
+        gap: 8px;
+        grid-template-columns: minmax(104px, 0.78fr) 28px minmax(138px, 0.94fr) 30px minmax(128px, 0.9fr);
+        min-height: 224px;
         position: relative;
       }
 
-      .fleet-map::before,
-      .fleet-map::after {
-        background: linear-gradient(90deg, rgba(37, 122, 97, 0.1), rgba(43, 104, 168, 0.5), rgba(37, 122, 97, 0.1));
-        content: "";
-        height: 3px;
-        left: 18%;
-        position: absolute;
-        right: 22%;
-        top: 45%;
-      }
-
-      .fleet-map::after {
-        opacity: 0.58;
-        top: 66%;
+      .hub-card,
+      .ledger-strip {
+        min-width: 0;
+        position: relative;
+        z-index: 1;
       }
 
       .manager-card,
       .dispatcher-card,
-      .worker-card,
-      .ledger-event {
+      .worker-card {
         background: rgba(246, 248, 251, 0.94);
         border: 1px solid var(--line);
         border-radius: 8px;
@@ -445,67 +389,39 @@
         align-self: stretch;
         border-color: rgba(37, 122, 97, 0.34);
         display: grid;
-        gap: 8px;
-        padding: 12px;
-        position: relative;
-        z-index: 1;
+        gap: 12px;
+        justify-items: start;
+        padding: 14px 12px;
       }
 
       .manager-card strong,
       .dispatcher-card strong,
       .worker-card strong,
-      .ledger-event strong {
+      .ledger-strip strong {
         display: block;
         font-size: 13px;
-        margin-bottom: 4px;
       }
 
       .manager-card span,
       .dispatcher-card span,
-      .worker-card span,
-      .ledger-event span {
+      .worker-card span {
         color: var(--muted);
         display: block;
         font-size: 12px;
         line-height: 1.35;
       }
 
-      .manager-pulse {
-        align-items: center;
-        background: rgba(37, 122, 97, 0.1);
-        border: 1px solid rgba(37, 122, 97, 0.18);
-        border-radius: 999px;
-        color: var(--green);
-        display: inline-flex;
-        font-size: 10px;
-        font-style: normal;
-        font-weight: 900;
-        justify-content: center;
-        letter-spacing: 0;
-        min-height: 22px;
-        padding: 4px 7px;
-        text-transform: uppercase;
-        width: fit-content;
-      }
-
-      .manager-actions {
+      .card-lines {
         display: grid;
         gap: 7px;
+        width: 100%;
       }
 
-      .manager-actions i {
-        align-items: center;
-        background: white;
-        border: 1px solid rgba(37, 122, 97, 0.14);
-        border-radius: 6px;
-        color: #425467;
-        display: flex;
-        font-size: 10px;
-        font-style: normal;
-        font-weight: 850;
-        gap: 6px;
-        min-height: 25px;
-        padding: 5px 7px;
+      .card-lines i {
+        background: rgba(37, 122, 97, 0.12);
+        border-radius: 999px;
+        display: block;
+        height: 7px;
       }
 
       .dispatcher-card {
@@ -515,8 +431,9 @@
         align-content: center;
         color: #edf7f2;
         display: grid;
-        gap: 10px;
-        padding: 16px 14px;
+        gap: 14px;
+        min-height: 184px;
+        padding: 18px 16px;
         position: relative;
         z-index: 1;
       }
@@ -528,65 +445,36 @@
         border-radius: 50%;
         box-shadow: 0 0 0 5px rgba(158, 223, 198, 0.2);
         content: "";
-        height: 10px;
+        height: 11px;
         position: absolute;
-        right: -8px;
-        top: 42%;
-        width: 10px;
+        right: -9px;
+        top: 47%;
+        width: 11px;
       }
 
       .dispatcher-card::after {
-        left: -8px;
+        left: -9px;
         right: auto;
-        top: 61%;
+        top: 47%;
       }
 
-      .dispatcher-card span {
-        color: #cbd5dd;
-      }
-
-      .dispatcher-topline {
+      .dispatcher-mark {
         align-items: center;
         display: flex;
         gap: 8px;
-        justify-content: space-between;
-      }
-
-      .dispatcher-topline em {
-        background: rgba(37, 122, 97, 0.28);
-        border: 1px solid rgba(145, 217, 189, 0.28);
-        border-radius: 999px;
-        color: #bdebd7;
-        font-size: 11px;
-        font-style: normal;
-        font-weight: 800;
-        padding: 4px 7px;
-        white-space: nowrap;
+        justify-content: center;
       }
 
       .queue-list {
         display: grid;
-        gap: 7px;
+        gap: 8px;
       }
 
       .queue-item {
-        align-items: center;
         background: rgba(255, 255, 255, 0.08);
         border: 1px solid rgba(255, 255, 255, 0.1);
         border-radius: 6px;
-        color: #dce8ee;
-        display: grid;
-        font-size: 11px;
-        font-weight: 800;
-        gap: 8px;
-        grid-template-columns: minmax(0, 1fr) auto;
-        padding: 6px 8px;
-      }
-
-      .queue-item span {
-        color: #9edfc6;
-        font-size: 10px;
-        text-transform: uppercase;
+        height: 10px;
       }
 
       .worker-fleet {
@@ -601,8 +489,8 @@
         display: grid;
         gap: 6px;
         grid-template-columns: minmax(0, 1fr) auto;
-        min-height: 66px;
-        padding: 9px 10px;
+        min-height: 58px;
+        padding: 9px 9px;
         position: relative;
         z-index: 1;
       }
@@ -615,19 +503,7 @@
         border-left-color: var(--green);
       }
 
-      .worker-card span {
-        color: var(--muted);
-        font-size: 12px;
-      }
-
-      .worker-status {
-        align-items: center;
-        display: flex;
-        gap: 5px;
-        justify-content: space-between;
-      }
-
-      .worker-status i {
+      .worker-dot {
         background: var(--green);
         border-radius: 999px;
         display: block;
@@ -635,65 +511,95 @@
         width: 8px;
       }
 
-      .worker-status b {
-        color: #425467;
-        font-size: 10px;
-        text-transform: uppercase;
+      .hub-link {
+        align-self: center;
+        background: var(--blue);
+        border-radius: 999px;
+        height: 3px;
+        justify-self: stretch;
+        position: relative;
       }
 
-      .ledger-stream {
+      .hub-link::before,
+      .hub-link::after {
+        border-bottom: 5px solid transparent;
+        border-top: 5px solid transparent;
+        content: "";
+        position: absolute;
+        top: 50%;
+        transform: translateY(-50%);
+      }
+
+      .hub-link::before {
+        border-right: 7px solid var(--blue);
+        left: -1px;
+      }
+
+      .hub-link::after {
+        border-left: 7px solid var(--blue);
+        right: -1px;
+      }
+
+      .record-line {
+        background: linear-gradient(180deg, rgba(37, 122, 97, 0.35), rgba(37, 122, 97, 0.08));
+        height: 24px;
+        justify-self: center;
+        position: relative;
+        width: 3px;
+      }
+
+      .record-line::after {
+        border-left: 5px solid transparent;
+        border-right: 5px solid transparent;
+        border-top: 7px solid rgba(37, 122, 97, 0.42);
+        bottom: -1px;
+        content: "";
+        left: 50%;
+        position: absolute;
+        transform: translateX(-50%);
+      }
+
+      .ledger-strip {
         background: rgba(255, 255, 255, 0.78);
         border: 1px solid var(--line);
         border-radius: 8px;
         display: grid;
         gap: 8px;
-        padding: 10px;
+        padding: 11px 12px;
       }
 
-      .ledger-heading {
+      .ledger-title {
         align-items: center;
         display: flex;
         gap: 10px;
         justify-content: space-between;
       }
 
-      .ledger-heading span {
-        margin: 0;
-        text-align: right;
+      .receipt-tag {
+        background: rgba(187, 126, 29, 0.12);
+        border: 1px solid rgba(187, 126, 29, 0.24);
+        border-radius: 999px;
+        color: #8f5f14;
+        font-size: 10px;
+        font-weight: 900;
+        padding: 4px 8px;
+        text-transform: uppercase;
       }
 
-      .ledger-event {
-        align-items: center;
-        background: rgba(246, 248, 251, 0.92);
-        border-left: 4px solid var(--green);
-        color: #425467;
+      .ledger-lines {
         display: grid;
-        gap: 10px;
-        grid-template-columns: 68px minmax(0, 1fr) 74px;
-        min-height: 0;
-        padding: 7px 10px;
+        gap: 6px;
       }
 
-      .ledger-event:nth-child(2) {
-        border-left-color: var(--blue);
+      .ledger-lines i {
+        background: rgba(43, 104, 168, 0.13);
+        border-radius: 999px;
+        display: block;
+        height: 7px;
       }
 
-      .ledger-event:nth-child(3) {
-        border-left-color: var(--gold);
-      }
-
-      .ledger-event code {
-        color: var(--green);
-        font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
-        font-size: 11px;
-        font-weight: 800;
-      }
-
-      .ledger-event small {
-        color: var(--muted);
-        font-size: 11px;
-        font-weight: 800;
-        text-align: right;
+      .ledger-lines i:nth-child(2) {
+        background: rgba(37, 122, 97, 0.14);
       }
 
       section {
@@ -1136,48 +1042,55 @@
           gap: 10px;
         }
 
-        .fleet-map,
-        .worker-fleet,
-        .ledger-stream {
+        .hub-flow,
+        .worker-fleet {
           grid-template-columns: 1fr;
         }
 
-        .control-plane {
+        .dispatcher-hub {
           padding: 10px;
         }
 
-        .plane-header,
-        .ledger-heading {
-          align-items: flex-start;
-          flex-direction: column;
-        }
-
-        .plane-signal {
-          width: fit-content;
-        }
-
-        .fleet-map {
-          background:
-            linear-gradient(180deg, transparent 0 20%, rgba(43, 104, 168, 0.22) 20% 82%, transparent 82%);
-          background-position: center;
-          background-repeat: no-repeat;
-          background-size: 3px 100%;
+        .hub-flow {
+          gap: 8px;
           min-height: 0;
         }
 
-        .fleet-map::before,
-        .fleet-map::after,
-        .dispatcher-card::before,
-        .dispatcher-card::after {
-          display: none;
+        .hub-link {
+          height: 24px;
+          justify-self: center;
+          width: 3px;
+        }
+
+        .hub-link::before,
+        .hub-link::after {
+          border-left: 5px solid transparent;
+          border-right: 5px solid transparent;
+          left: 50%;
+          transform: translateX(-50%);
+        }
+
+        .hub-link::before {
+          border-bottom: 7px solid var(--blue);
+          border-top: 0;
+          top: -1px;
+        }
+
+        .hub-link::after {
+          border-bottom: 0;
+          border-top: 7px solid var(--blue);
+          bottom: -1px;
+          right: auto;
+          top: auto;
         }
 
         .dispatcher-card {
           padding: 14px;
         }
 
-        .ledger-heading span {
-          text-align: left;
+        .dispatcher-card::before,
+        .dispatcher-card::after {
+          display: none;
         }
 
         .actions .button.primary {
@@ -1188,7 +1101,7 @@
         .manager-card,
         .dispatcher-card,
         .worker-card,
-        .ledger-event {
+        .ledger-strip {
           min-height: 0;
         }
 
@@ -1264,55 +1177,46 @@
               <span class="hero-visual-badge">ledger live</span>
             </div>
             <div class="hero-visual-body">
-              <div class="control-plane">
-                <div class="plane-header">
-                  <div>
-                    <strong>Manager command</strong>
-                    <span>one goal, many grounded workers</span>
-                  </div>
-                  <div class="plane-signal">
-                    <span>dispatcher</span>
-                    <i>routes + records</i>
-                  </div>
-                </div>
-                <div class="fleet-map">
-                  <div class="manager-card">
+              <div class="dispatcher-hub">
+                <div class="hub-flow">
+                  <div class="manager-card hub-card" aria-label="Manager">
                     <strong>Manager</strong>
-                    <span>sets scope, reviews proof</span>
-                    <i class="manager-pulse" aria-hidden="true">control thread</i>
-                    <div class="manager-actions" aria-hidden="true">
-                      <i>Goal: polish hero graphic</i>
-                      <i>Criteria: clear fleet model</i>
-                      <i>Review: screenshot evidence</i>
+                    <div class="card-lines" aria-hidden="true">
+                      <i style="width: 84%"></i>
+                      <i style="width: 62%"></i>
+                      <i style="width: 72%"></i>
                     </div>
                   </div>
-                  <div class="dispatcher-card">
-                    <div class="dispatcher-topline">
-                    <strong>Dispatcher</strong>
-                    <em>ledger</em>
+                  <div class="hub-link" aria-hidden="true"></div>
+                  <div class="dispatcher-card hub-card" aria-label="Dispatcher">
+                    <div class="dispatcher-mark">
+                      <strong>Dispatcher</strong>
                     </div>
-                    <span>turns manager intent into auditable assignments</span>
                     <div class="queue-list" aria-label="Dispatch queue">
-                      <div class="queue-item">Plan slice <span>assigned</span></div>
-                      <div class="queue-item">Visual pass <span>active</span></div>
-                      <div class="queue-item">Verify page <span>queued</span></div>
+                      <div class="queue-item" style="width: 94%"></div>
+                      <div class="queue-item" style="width: 78%"></div>
+                      <div class="queue-item" style="width: 88%"></div>
                     </div>
                   </div>
+                  <div class="hub-link" aria-hidden="true"></div>
                   <div class="worker-fleet" aria-label="Managed Codex worker fleet">
-                    <div class="worker-card"><div><strong>Worker A</strong><span>hero composition</span></div><div class="worker-status"><i aria-hidden="true"></i><b>active</b></div></div>
-                    <div class="worker-card"><div><strong>Worker B</strong><span>responsive QA</span></div><div class="worker-status"><i aria-hidden="true"></i><b>ready</b></div></div>
-                    <div class="worker-card"><div><strong>Worker C</strong><span>proof review</span></div><div class="worker-status"><i aria-hidden="true"></i><b>queued</b></div></div>
+                    <div class="worker-card"><strong>Worker A</strong><i class="worker-dot" aria-hidden="true"></i></div>
+                    <div class="worker-card"><strong>Worker B</strong><i class="worker-dot" aria-hidden="true"></i></div>
+                    <div class="worker-card"><strong>Worker C</strong><i class="worker-dot" aria-hidden="true"></i></div>
                   </div>
                 </div>
-              </div>
-              <div class="ledger-stream" aria-label="Transparent ledger stream">
-                <div class="ledger-heading">
-                  <strong>Transparent ledger</strong>
-                  <span>state survives every handoff</span>
+                <div class="record-line" aria-hidden="true"></div>
+                <div class="ledger-strip" aria-label="Ledger with receipt">
+                  <div class="ledger-title">
+                    <strong>Ledger</strong>
+                    <span class="receipt-tag">Receipt</span>
+                  </div>
+                  <div class="ledger-lines" aria-hidden="true">
+                    <i style="width: 96%"></i>
+                    <i style="width: 74%"></i>
+                    <i style="width: 88%"></i>
+                  </div>
                 </div>
-                <div class="ledger-event"><code>dispatch</code><strong>Assigned</strong><small>worker A</small></div>
-                <div class="ledger-event"><code>receipt</code><strong>Reported</strong><small>screenshot</small></div>
-                <div class="ledger-event"><code>handoff</code><strong>Resumed</strong><small>next pass</small></div>
               </div>
             </div>
           </div>
