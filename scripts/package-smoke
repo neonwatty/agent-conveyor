@@ -36,6 +36,7 @@ const required = [
   "scripts/serve-landing-page.mjs",
   "README.md",
   "docs/landing-page.html",
+  "docs/landing-media-capture-plan.md",
   "docs/manager-recipes.md",
   "skills/manage-codex-workers/SKILL.md",
   "skills/codex-review/SKILL.md",

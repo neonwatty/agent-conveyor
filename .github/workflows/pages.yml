@@ -6,6 +6,7 @@ on:
       - landing-page
     paths:
       - "docs/landing-page.html"
+      - "docs/landing-media-capture-plan.md"
       - ".github/workflows/pages.yml"
   workflow_dispatch:
 
@@ -37,6 +38,7 @@ jobs:
         run: |
           mkdir -p _site
           cp docs/landing-page.html _site/index.html
+          cp docs/landing-media-capture-plan.md _site/landing-media-capture-plan.md
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v4

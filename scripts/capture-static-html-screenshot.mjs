@@ -67,6 +67,25 @@ async function main() {
       viewport: { width, height },
     });
     await page.goto(pathToFileURL(htmlPath).href, { waitUntil: "load" });
+    await page.evaluate(async () => {
+      await Promise.all(
+        Array.from(document.images, (image) => {
+          if (typeof image.decode === "function") {
+            return image.decode().catch(() => undefined);
+          }
+          if (image.complete && image.naturalWidth > 0) {
+            return Promise.resolve();
+          }
+          return new Promise((resolve) => {
+            image.addEventListener("load", resolve, { once: true });
+            image.addEventListener("error", resolve, { once: true });
+          });
+        }),
+      );
+      await new Promise((resolve) => {
+        requestAnimationFrame(() => requestAnimationFrame(resolve));
+      });
+    });
     await page.screenshot({ path: outputPath, fullPage: false });
     console.log(JSON.stringify({
       backend,

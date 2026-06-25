@@ -5,6 +5,7 @@ on:
     paths:
       - "README.md"
       - "docs/landing-page.html"
+      - "docs/landing-media-capture-plan.md"
       - "docs/manager-recipes.md"
       - "docs/package-release.md"
       - "scripts/check-landing-page.mjs"
@@ -15,6 +16,7 @@ on:
     paths:
       - "README.md"
       - "docs/landing-page.html"
+      - "docs/landing-media-capture-plan.md"
       - "docs/manager-recipes.md"
       - "docs/package-release.md"
       - "scripts/check-landing-page.mjs"
