@@ -316,13 +316,20 @@
 
       .hero-visual-body {
         display: grid;
-        gap: 14px;
+        gap: 12px;
       }
 
-      .fleet-map {
+      .topology-map {
+        background:
+          linear-gradient(90deg, transparent 0 24%, rgba(43, 104, 168, 0.48) 24% 76%, transparent 76%),
+          linear-gradient(180deg, transparent 0 47%, rgba(43, 104, 168, 0.22) 47% 50%, transparent 50%);
+        background-size: 100% 3px, 100% 100%;
+        background-position: center 50%, center;
+        background-repeat: no-repeat;
         display: grid;
         gap: 12px;
-        grid-template-columns: minmax(138px, 0.8fr) minmax(172px, 1fr);
+        grid-template-columns: minmax(128px, 0.78fr) minmax(184px, 1.05fr) minmax(126px, 0.8fr);
+        position: relative;
       }
 
       .manager-card,
@@ -376,10 +383,31 @@
         display: grid;
         gap: 10px;
         padding: 14px;
+        position: relative;
+        z-index: 1;
       }
 
       .dispatcher-card span {
         color: #cbd5dd;
+      }
+
+      .dispatcher-topline {
+        align-items: center;
+        display: flex;
+        gap: 8px;
+        justify-content: space-between;
+      }
+
+      .dispatcher-topline em {
+        background: rgba(37, 122, 97, 0.28);
+        border: 1px solid rgba(145, 217, 189, 0.28);
+        border-radius: 999px;
+        color: #bdebd7;
+        font-size: 11px;
+        font-style: normal;
+        font-weight: 800;
+        padding: 4px 7px;
+        white-space: nowrap;
       }
 
       .ledger-lines {
@@ -397,13 +425,15 @@
       .worker-fleet {
         display: grid;
         gap: 8px;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
       }
 
       .worker-card {
         border-top: 4px solid var(--blue);
-        min-height: 86px;
+        box-shadow: 0 8px 22px rgba(23, 32, 42, 0.06);
+        min-height: 68px;
         padding: 10px;
+        position: relative;
+        z-index: 1;
       }
 
       .worker-card:nth-child(2) {
@@ -415,17 +445,24 @@
       }
 
       .ledger-stream {
+        background: rgba(255, 255, 255, 0.72);
+        border: 1px solid var(--line);
+        border-radius: 8px;
         display: grid;
-        gap: 8px;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 6px;
+        padding: 10px;
       }
 
       .ledger-event {
-        background: var(--surface);
+        align-items: center;
+        background: rgba(246, 248, 251, 0.92);
         border-left: 4px solid var(--green);
         color: #425467;
-        min-height: 82px;
-        padding: 10px;
+        display: grid;
+        gap: 10px;
+        grid-template-columns: 72px minmax(0, 1fr) 70px;
+        min-height: 0;
+        padding: 8px 10px;
       }
 
       .ledger-event:nth-child(2) {
@@ -434,6 +471,20 @@
 
       .ledger-event:nth-child(3) {
         border-left-color: var(--gold);
+      }
+
+      .ledger-event code {
+        color: var(--green);
+        font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+        font-size: 11px;
+        font-weight: 800;
+      }
+
+      .ledger-event small {
+        color: var(--muted);
+        font-size: 11px;
+        font-weight: 800;
+        text-align: right;
       }
 
       section {
@@ -876,10 +927,18 @@
           gap: 10px;
         }
 
-        .fleet-map,
+        .topology-map,
         .worker-fleet,
         .ledger-stream {
           grid-template-columns: 1fr;
+        }
+
+        .topology-map {
+          background:
+            linear-gradient(180deg, transparent 0 20%, rgba(43, 104, 168, 0.22) 20% 82%, transparent 82%);
+          background-position: center;
+          background-repeat: no-repeat;
+          background-size: 3px 100%;
         }
 
         .actions .button.primary {
@@ -962,31 +1021,34 @@
               <span class="hero-visual-dot"></span>
             </div>
             <div class="hero-visual-body">
-              <div class="fleet-map">
+              <div class="topology-map">
                 <div class="manager-card">
                   <strong>Manager</strong>
-                  <span>assigns, reviews, rotates</span>
+                  <span>plans, delegates, reviews</span>
                   <i class="manager-pulse" aria-hidden="true"></i>
                 </div>
                 <div class="dispatcher-card">
-                  <strong>Dispatcher + project ledger</strong>
-                  <span>durable state for every assignment, receipt, and handoff</span>
+                  <div class="dispatcher-topline">
+                    <strong>Dispatcher</strong>
+                    <em>ledger-backed</em>
+                  </div>
+                  <span>routes assignments and records durable state</span>
                   <div class="ledger-lines" aria-hidden="true">
                     <i style="width: 92%"></i>
                     <i style="width: 78%"></i>
                     <i style="width: 86%"></i>
                   </div>
                 </div>
-              </div>
-              <div class="worker-fleet" aria-label="Managed Codex worker fleet">
-                <div class="worker-card"><strong>Worker A</strong><span>UX slice</span></div>
-                <div class="worker-card"><strong>Worker B</strong><span>tests</span></div>
-                <div class="worker-card"><strong>Worker C</strong><span>review</span></div>
+                <div class="worker-fleet" aria-label="Managed Codex worker fleet">
+                  <div class="worker-card"><strong>Worker A</strong><span>UX slice</span></div>
+                  <div class="worker-card"><strong>Worker B</strong><span>tests</span></div>
+                  <div class="worker-card"><strong>Worker C</strong><span>review</span></div>
+                </div>
               </div>
               <div class="ledger-stream" aria-label="Transparent ledger stream">
-                <div class="ledger-event"><strong>Assigned</strong><span>who owns the slice</span></div>
-                <div class="ledger-event"><strong>Reported</strong><span>what changed</span></div>
-                <div class="ledger-event"><strong>Resumed</strong><span>what continues next</span></div>
+                <div class="ledger-event"><code>dispatch</code><strong>Assigned</strong><small>worker A</small></div>
+                <div class="ledger-event"><code>receipt</code><strong>Reported</strong><small>tests</small></div>
+                <div class="ledger-event"><code>handoff</code><strong>Resumed</strong><small>next pass</small></div>
               </div>
             </div>
           </div>
