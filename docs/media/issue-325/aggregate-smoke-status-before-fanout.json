@@ -1,0 +1,152 @@
+{
+  "recorded_at": "2026-06-26T15:01:52Z",
+  "all_real_work_allowed": true,
+  "blockers": [
+    {
+      "task": "issue-325-capture-hero-polish",
+      "blockers": [],
+      "real_work_allowed": true
+    },
+    {
+      "task": "issue-325-capture-responsive-polish",
+      "blockers": [],
+      "real_work_allowed": true
+    },
+    {
+      "task": "issue-325-capture-evidence-polish",
+      "blockers": [],
+      "real_work_allowed": true
+    }
+  ],
+  "statuses": [
+    {
+      "blockers": [],
+      "ok": true,
+      "real_work_allowed": true,
+      "roles": {
+        "manager": {
+          "accepted": true,
+          "blocked": false,
+          "blocker": null,
+          "heartbeat_fresh": true,
+          "last_heartbeat_at": "2026-06-26T15:01:38Z",
+          "received": false,
+          "sent": true,
+          "session_id": "session-cc85ef53-043c-4f43-a61f-5a35c2e742b5",
+          "session_name": "issue-325-capture-manager-hero",
+          "thread_id": "019f046b-2cc7-7a93-96c0-9bf85a33c97b"
+        },
+        "worker": {
+          "accepted": true,
+          "blocked": false,
+          "blocker": null,
+          "heartbeat_fresh": true,
+          "last_heartbeat_at": "2026-06-26T15:01:38Z",
+          "received": true,
+          "sent": true,
+          "session_id": "session-f8883d3a-17b8-47b4-a23a-e5056751f6b7",
+          "session_name": "issue-325-capture-hero-worker",
+          "thread_id": "019f046b-2e04-7f53-ac09-7703cfead2df"
+        }
+      },
+      "smoke": {
+        "id": "smoke-82c64eaa-5576-4ccd-b9e4-e11e0c31576a",
+        "mode": "required",
+        "nonce": "nonce-d495ca80-5663-4330-b272-037cb9cee96c",
+        "recorded_at": "2026-06-26T14:53:43Z",
+        "scope": "pair",
+        "worker_count": 1
+      },
+      "task": {
+        "id": "task-6b8251e8-3a5a-4f17-ae3b-9c440a97468d",
+        "name": "issue-325-capture-hero-polish"
+      }
+    },
+    {
+      "blockers": [],
+      "ok": true,
+      "real_work_allowed": true,
+      "roles": {
+        "manager": {
+          "accepted": true,
+          "blocked": false,
+          "blocker": null,
+          "heartbeat_fresh": true,
+          "last_heartbeat_at": "2026-06-26T15:01:38Z",
+          "received": false,
+          "sent": true,
+          "session_id": "session-0734a4a9-cf44-462c-b65f-efe35f2531f1",
+          "session_name": "issue-325-capture-manager-responsive",
+          "thread_id": "019f046b-2cc7-7a93-96c0-9bf85a33c97b"
+        },
+        "worker": {
+          "accepted": true,
+          "blocked": false,
+          "blocker": null,
+          "heartbeat_fresh": true,
+          "last_heartbeat_at": "2026-06-26T15:01:38Z",
+          "received": true,
+          "sent": true,
+          "session_id": "session-241a79ec-3a74-4bc5-861b-3c8adefbac8b",
+          "session_name": "issue-325-capture-responsive-worker",
+          "thread_id": "019f046b-2f5c-7753-b36b-0c2fa7e018d9"
+        }
+      },
+      "smoke": {
+        "id": "smoke-fd156433-8849-4d85-a8ac-c3f335f064a9",
+        "mode": "required",
+        "nonce": "nonce-5f2b253c-fe5a-4e09-b34d-6ccb4c3b0007",
+        "recorded_at": "2026-06-26T14:56:25Z",
+        "scope": "pair",
+        "worker_count": 1
+      },
+      "task": {
+        "id": "task-4a3e87ef-6350-4910-9b48-b78b87257070",
+        "name": "issue-325-capture-responsive-polish"
+      }
+    },
+    {
+      "blockers": [],
+      "ok": true,
+      "real_work_allowed": true,
+      "roles": {
+        "manager": {
+          "accepted": true,
+          "blocked": false,
+          "blocker": null,
+          "heartbeat_fresh": true,
+          "last_heartbeat_at": "2026-06-26T15:01:38Z",
+          "received": false,
+          "sent": true,
+          "session_id": "session-c308597d-78b1-4be0-b6cd-69f1d930b2be",
+          "session_name": "issue-325-capture-manager-evidence",
+          "thread_id": "019f046b-2cc7-7a93-96c0-9bf85a33c97b"
+        },
+        "worker": {
+          "accepted": true,
+          "blocked": false,
+          "blocker": null,
+          "heartbeat_fresh": true,
+          "last_heartbeat_at": "2026-06-26T15:01:38Z",
+          "received": true,
+          "sent": true,
+          "session_id": "session-7780205b-d0ac-4673-813f-3fa1afe30eb1",
+          "session_name": "issue-325-capture-evidence-worker",
+          "thread_id": "019f046b-30f5-7ce1-8a68-61c136724985"
+        }
+      },
+      "smoke": {
+        "id": "smoke-d33851e6-5f1a-4abb-96be-c01c942a0449",
+        "mode": "required",
+        "nonce": "nonce-b5f08bb0-671a-46d1-a44d-61e6a3e4beea",
+        "recorded_at": "2026-06-26T14:58:55Z",
+        "scope": "pair",
+        "worker_count": 1
+      },
+      "task": {
+        "id": "task-0424d015-9661-47aa-8b5c-75d5e252c92c",
+        "name": "issue-325-capture-evidence-polish"
+      }
+    }
+  ]
+}

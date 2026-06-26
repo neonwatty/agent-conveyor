@@ -1,0 +1,117 @@
+{
+  "checked_at": "2026-06-26T18:54:21.406Z",
+  "managerThread": "019f046b-2cc7-7a93-96c0-9bf85a33c97b",
+  "smoke": {
+    "recorded_at": "2026-06-26T15:01:52Z",
+    "all_real_work_allowed": true,
+    "shards": [
+      {
+        "task": "issue-325-capture-hero-polish",
+        "real_work_allowed": true,
+        "blocker_count": 0
+      },
+      {
+        "task": "issue-325-capture-responsive-polish",
+        "real_work_allowed": true,
+        "blocker_count": 0
+      },
+      {
+        "task": "issue-325-capture-evidence-polish",
+        "real_work_allowed": true,
+        "blocker_count": 0
+      }
+    ]
+  },
+  "workers": [
+    {
+      "role": "Hero polish worker",
+      "task": "issue-325-capture-hero-polish",
+      "workerThread": "019f046b-2e04-7f53-ac09-7703cfead2df",
+      "smoke": {
+        "workerNotification": 1,
+        "managerNotification": 2,
+        "nonce": "nonce-d495ca80-5663-4330-b272-037cb9cee96c"
+      },
+      "managerFanout": {
+        "command": "command-c8965404-b8ed-44ea-bc9f-28dde73244e6",
+        "workerNotification": 7,
+        "delivered_at": "2026-06-26T15:02:35Z",
+        "consumed_at": "2026-06-26T15:03:26.439Z"
+      },
+      "workerLifecycle": {
+        "received_ack": true,
+        "accepted_ack": true
+      },
+      "workerReport": {
+        "command": "command-6fc5dd4b-484d-43cc-8018-f339d713ed78",
+        "managerNotification": 10,
+        "command_state": "succeeded",
+        "delivery_mode": "pull_required",
+        "delivered_at": "2026-06-26T15:05:44Z",
+        "consumed_at": "2026-06-26T15:08:31.900Z",
+        "consumed_by": "issue-325-capture-manager-hero"
+      },
+      "managerAcceptedCount": 2
+    },
+    {
+      "role": "Responsive polish worker",
+      "task": "issue-325-capture-responsive-polish",
+      "workerThread": "019f046b-2f5c-7753-b36b-0c2fa7e018d9",
+      "smoke": {
+        "workerNotification": 3,
+        "managerNotification": 4,
+        "nonce": "nonce-5f2b253c-fe5a-4e09-b34d-6ccb4c3b0007"
+      },
+      "managerFanout": {
+        "command": "command-2b1399ed-ecdb-4483-bdb6-974c1671f7ff",
+        "workerNotification": 8,
+        "delivered_at": "2026-06-26T15:02:35Z",
+        "consumed_at": "2026-06-26T15:03:32.633Z"
+      },
+      "workerLifecycle": {
+        "received_ack": true,
+        "accepted_ack": true
+      },
+      "workerReport": {
+        "command": "command-aff5feb3-f846-4907-81d9-3e98d1b690a3",
+        "managerNotification": 11,
+        "command_state": "succeeded",
+        "delivery_mode": "pull_required",
+        "delivered_at": "2026-06-26T15:06:43Z",
+        "consumed_at": "2026-06-26T15:08:52.987Z",
+        "consumed_by": "issue-325-capture-manager-responsive"
+      },
+      "managerAcceptedCount": 2
+    },
+    {
+      "role": "Evidence polish worker",
+      "task": "issue-325-capture-evidence-polish",
+      "workerThread": "019f046b-30f5-7ce1-8a68-61c136724985",
+      "smoke": {
+        "workerNotification": 5,
+        "managerNotification": 6,
+        "nonce": "nonce-b5f08bb0-671a-46d1-a44d-61e6a3e4beea"
+      },
+      "managerFanout": {
+        "command": "command-57da3e3b-5b86-41b8-8696-e5932f201a8a",
+        "workerNotification": 9,
+        "delivered_at": "2026-06-26T15:02:35Z",
+        "consumed_at": "2026-06-26T15:03:28.799Z"
+      },
+      "workerLifecycle": {
+        "received_ack": true,
+        "accepted_ack": true
+      },
+      "workerReport": {
+        "command": "command-f25f2d0f-8a4d-4bbe-9e36-d37309e62b8e",
+        "managerNotification": 12,
+        "command_state": "succeeded",
+        "delivery_mode": "pull_required",
+        "delivered_at": "2026-06-26T15:07:11Z",
+        "consumed_at": "2026-06-26T15:09:21.283Z",
+        "consumed_by": "issue-325-capture-manager-evidence"
+      },
+      "managerAcceptedCount": 2
+    }
+  ]
+}
