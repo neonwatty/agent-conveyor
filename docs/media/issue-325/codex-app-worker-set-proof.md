@@ -21,6 +21,21 @@ The app-thread transcripts show the manager and workers standing by, smoke
 receipts, manager fan-out, worker lifecycle sections, worker reports, and
 manager review.
 
+## Codex App Window Media
+
+This package includes sanitized screenshots captured from the actual Codex app
+window:
+
+| File | What it shows |
+| --- | --- |
+| `codex-app-window-media/codex-app-manager-thread-sanitized.png` | Manager thread accepting worker result notifications `10`, `11`, and `12`. |
+| `codex-app-window-media/codex-app-responsive-thread-sanitized.png` | Responsive worker thread with visible worker title and proof of post-smoke work/evidence. |
+| `codex-app-window-media/codex-app-evidence-thread-sanitized.png` | Evidence worker thread with visible worker title and produced evidence attachments. |
+| `codex-app-window-media/codex-app-hero-thread-sanitized.png` | Hero worker thread with visible worker title, receipt notification `7`, and manager notification `10`. |
+
+The captures were cropped and redacted before commit to remove account footer
+content, unrelated lower sidebar items, and local filesystem paths.
+
 ## Smoke Gate
 
 `aggregate-smoke-status-before-fanout.json` recorded:
@@ -106,8 +121,7 @@ NODE
 
 ## Limitation
 
-Direct Computer Use screenshotting of the Codex app window was blocked by the
-app safety policy in this environment. This package therefore uses Codex app
-thread readbacks plus Conveyor ledger receipts, and the PNG is a sanitized
-receipt card generated from those asserted receipts rather than a raw Codex app
-window capture.
+Computer Use direct inspection of the Codex app remains blocked by app safety
+policy, so window media was captured through macOS `screencapture` after Screen
+Recording permission was granted. Raw captures were not committed; only
+sanitized screenshots are included.
