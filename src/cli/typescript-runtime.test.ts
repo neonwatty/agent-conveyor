@@ -950,8 +950,78 @@ test("setup-bundle CLI rejects invalid enum and iteration options", () => {
   }
 });
 
-test("setup-bundle CLI show reads applied setup bundle", () => {
-  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-cli-setup-bundle-show."));
+test("setup-bundle preview supports test coverage and UX Ralph loops", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-setup-bundle-ralph."));
+  const codexHome = makeCodexHomeWithSkills([]);
+  try {
+    const dbPath = join(root, "workerctl.db");
+    const database = openDatabaseSync(dbPath);
+    try {
+      initializeDatabaseSync(database);
+      createTaskSync(database, {
+        goal: "Preview Ralph loops.",
+        name: "ralph-task",
+        now: "2026-06-28T10:00:00Z",
+        taskId: "task-ralph",
+      });
+    } finally {
+      database.close();
+    }
+
+    const coverage = runTypescriptRuntimeCommand({
+      args: [
+        "setup-bundle",
+        "preview",
+        "ralph-task",
+        "--preset",
+        "test_coverage_ralph",
+        "--codex-home",
+        codexHome,
+        "--path",
+        dbPath,
+        "--json",
+      ],
+      env: {},
+    });
+    assert.equal(coverage.exitCode, 0);
+    const coveragePayload = JSON.parse(coverage.stdout ?? "{}") as {
+      policy: { loop: { max_iterations: number; preset: string; required_evidence: string[] } };
+    };
+    assert.equal(coveragePayload.policy.loop.preset, "test_coverage_loop");
+    assert.equal(coveragePayload.policy.loop.max_iterations, 3);
+    assert.deepEqual(coveragePayload.policy.loop.required_evidence, ["test_coverage", "adversarial_check"]);
+
+    const ux = runTypescriptRuntimeCommand({
+      args: [
+        "setup-bundle",
+        "preview",
+        "ralph-task",
+        "--preset",
+        "ux_polish_ralph",
+        "--codex-home",
+        codexHome,
+        "--path",
+        dbPath,
+        "--json",
+      ],
+      env: {},
+    });
+    assert.equal(ux.exitCode, 0);
+    const uxPayload = JSON.parse(ux.stdout ?? "{}") as {
+      policy: { loop: { max_iterations: number; preset: string; required_evidence: string[] } };
+    };
+    assert.equal(uxPayload.policy.loop.preset, "visual_diff_loop");
+    assert.equal(uxPayload.policy.loop.max_iterations, 4);
+    assert.ok(uxPayload.policy.loop.required_evidence.includes("candidate_screenshot"));
+    assert.ok(uxPayload.policy.loop.required_evidence.includes("visual_diff_report"));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(codexHome, { recursive: true, force: true });
+  }
+});
+
+test("setup-bundle show confirms stored policy from ledger", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-setup-bundle-show."));
   const codexHome = makeCodexHomeWithSkills([
     "codex-review",
     "goal-prep",
@@ -964,10 +1034,10 @@ test("setup-bundle CLI show reads applied setup bundle", () => {
     try {
       initializeDatabaseSync(database);
       createTaskSync(database, {
-        goal: "Show applied setup bundle.",
-        name: "cli-bundle-show",
-        now: "2026-06-28T13:30:00Z",
-        taskId: "task-cli-bundle-show",
+        goal: "Show stored setup.",
+        name: "show-task",
+        now: "2026-06-28T10:00:00Z",
+        taskId: "task-show",
       });
     } finally {
       database.close();
@@ -977,7 +1047,7 @@ test("setup-bundle CLI show reads applied setup bundle", () => {
       args: [
         "setup-bundle",
         "apply",
-        "cli-bundle-show",
+        "show-task",
         "--preset",
         "autonomous_ship_it",
         "--approve",
@@ -1000,13 +1070,42 @@ test("setup-bundle CLI show reads applied setup bundle", () => {
     assert.equal(applyPayload.launched, false);
 
     const shown = runTypescriptRuntimeCommand({
-      args: ["setup-bundle", "show", "cli-bundle-show", "--path", dbPath, "--json"],
+      args: ["setup-bundle", "show", "show-task", "--path", dbPath, "--json"],
       env: {},
     });
     assert.equal(shown.exitCode, 0);
-    const showPayload = JSON.parse(shown.stdout ?? "{}") as { id: string; state: string };
+    const showPayload = JSON.parse(shown.stdout ?? "{}") as {
+      id: string;
+      policy: {
+        manager: { pr_review: { role: string } };
+        planning: { backend: string };
+        pr_review: { backend: string };
+        whats_next: { mode: string };
+        workers: { profiles: Array<{ pr_review: { required_before_handoff: boolean } }> };
+      };
+      state: string;
+    };
     assert.equal(showPayload.id, applyPayload.setup_bundle.id);
     assert.equal(showPayload.state, "applied");
+    assert.equal(showPayload.policy.planning.backend, "goalbuddy");
+    assert.equal(showPayload.policy.pr_review.backend, "composite");
+    assert.equal(showPayload.policy.whats_next.mode, "execute_bounded");
+    assert.equal(showPayload.policy.manager.pr_review.role, "gatekeeper");
+    assert.equal(showPayload.policy.workers.profiles[0]?.pr_review.required_before_handoff, true);
+
+    const proofDb = openDatabaseSync(dbPath);
+    try {
+      const stored = proofDb.prepare(`
+        select id, policy_json, state
+        from setup_bundles
+        where task_id = ?
+      `).get("task-show") as { id: string; policy_json: string; state: string };
+      assert.equal(stored.id, showPayload.id);
+      assert.equal(stored.state, showPayload.state);
+      assert.deepEqual(JSON.parse(stored.policy_json), showPayload.policy);
+    } finally {
+      proofDb.close();
+    }
   } finally {
     rmSync(root, { recursive: true, force: true });
     rmSync(codexHome, { recursive: true, force: true });
