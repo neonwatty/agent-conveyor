@@ -718,6 +718,112 @@ test("setup-bundle CLI apply dry-run does not mutate ledger with approval", () =
   }
 });
 
+test("setup-bundle apply stores approved ship-it policy and manager permissions in ledger", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-cli-setup-bundle-approved-ledger."));
+  const codexHome = makeCodexHomeWithSkills([
+    "goal-prep",
+    "requesting-code-review",
+    "receiving-code-review",
+    "codex-review",
+  ]);
+  try {
+    const dbPath = join(root, "workerctl.db");
+    const database = openDatabaseSync(dbPath);
+    try {
+      initializeDatabaseSync(database);
+      createTaskSync(database, {
+        goal: "Prove approved setup bundle authority.",
+        name: "ship-task",
+        now: "2026-06-28T13:24:00Z",
+        taskId: "task-ship",
+      });
+    } finally {
+      database.close();
+    }
+
+    const applied = runTypescriptRuntimeCommand({
+      args: [
+        "setup-bundle",
+        "apply",
+        "ship-task",
+        "--preset",
+        "autonomous_ship_it",
+        "--approve",
+        "--codex-home",
+        codexHome,
+        "--path",
+        dbPath,
+        "--json",
+      ],
+      env: {},
+      now: () => new Date("2026-06-28T13:24:30Z"),
+    });
+    assert.equal(applied.exitCode, 0);
+    const payload = JSON.parse(applied.stdout ?? "{}") as {
+      blocked: boolean;
+      setup_bundle: {
+        policy: {
+          loop: { preset: string | null; required_evidence: string[] };
+          manager: { pr_review: { gate: string; role: string } };
+          pr_review: { backend: string; required: boolean };
+          whats_next: { max_iterations: number; post_merge_allowed: boolean };
+          workers: { profiles: Array<{ pr_review: { required_before_handoff: boolean } }> };
+        };
+        state: string;
+      };
+    };
+    const policy = payload.setup_bundle.policy;
+    assert.equal(payload.blocked, false);
+    assert.equal(payload.setup_bundle.state, "applied");
+    assert.equal(policy.loop.preset, "ship_it_loop");
+    assert.ok(policy.loop.required_evidence.includes("manager_merge_decision"));
+    assert.equal(policy.pr_review.backend, "composite");
+    assert.equal(policy.pr_review.required, true);
+    assert.equal(policy.manager.pr_review.gate, "block_merge_until_review_receipts");
+    assert.equal(policy.manager.pr_review.role, "gatekeeper");
+    assert.equal(policy.workers.profiles[0]?.pr_review.required_before_handoff, true);
+    assert.equal(policy.whats_next.max_iterations, 1);
+    assert.equal(policy.whats_next.post_merge_allowed, true);
+
+    const proofDb = openDatabaseSync(dbPath);
+    try {
+      const setupBundle = proofDb.prepare(`
+        select state, applied_json
+        from setup_bundles
+        where task_id = ?
+      `).get("task-ship") as { applied_json: string; state: string };
+      assert.equal(setupBundle.state, "applied");
+      assert.equal((JSON.parse(setupBundle.applied_json) as { manager_config?: boolean }).manager_config, true);
+
+      const managerConfig = proofDb.prepare(`
+        select recipe_name, nudge_on_completion, permissions_json, acceptance_criteria_json
+        from manager_configs
+        where task_id = ?
+      `).get("task-ship") as {
+        acceptance_criteria_json: string;
+        nudge_on_completion: string;
+        permissions_json: string;
+        recipe_name: string;
+      };
+      assert.equal(managerConfig.recipe_name, "autonomous_ship_it");
+      assert.equal(managerConfig.nudge_on_completion, "auto-review");
+      assert.deepEqual((JSON.parse(managerConfig.permissions_json) as { repo: string[] }).repo, [
+        "merge_green_pr",
+        "monitor_ci",
+        "open_pr",
+        "push_branch",
+        "resolve_conflicts",
+      ]);
+      assert.ok((JSON.parse(managerConfig.acceptance_criteria_json) as string[]).some((criterion) => criterion.includes("manager_merge_decision")));
+    } finally {
+      proofDb.close();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(codexHome, { recursive: true, force: true });
+  }
+});
+
 test("setup-bundle CLI resolves default Codex home for preview and apply", () => {
   const root = mkdtempSync(join(tmpdir(), "agent-conveyor-cli-setup-bundle-default-home."));
   const codexHome = makeCodexHomeWithSkills([
@@ -11878,6 +11984,125 @@ test("TypeScript runtime dispatch CLI records failed attempts for missing manage
     }
   } finally {
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("setup-bundle seeded manager permissions are used by dispatcher gates", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-cli-setup-bundle-dispatch-permission."));
+  const codexHome = makeCodexHomeWithSkills([
+    "goal-prep",
+    "requesting-code-review",
+    "receiving-code-review",
+    "codex-review",
+  ]);
+  try {
+    const dbPath = join(root, "workerctl.db");
+    const database = openDatabaseSync(dbPath);
+    try {
+      initializeDatabaseSync(database);
+      createTaskSync(database, {
+        goal: "Dispatch must honor setup-seeded manager permissions.",
+        name: "dispatch-ship-task",
+        now: "2026-06-28T14:00:00Z",
+        taskId: "task-dispatch-ship",
+      });
+      insertSession(database, { id: "session-worker-setup-dispatch", name: "worker-setup-dispatch", role: "worker" });
+      insertSession(database, { id: "session-manager-setup-dispatch", name: "manager-setup-dispatch", role: "manager" });
+      bindSessionsSync(database, {
+        bindingId: "binding-setup-dispatch",
+        managerSessionName: "manager-setup-dispatch",
+        now: "2026-06-28T14:00:30Z",
+        taskName: "dispatch-ship-task",
+        workerSessionName: "worker-setup-dispatch",
+      });
+    } finally {
+      database.close();
+    }
+
+    const applied = runTypescriptRuntimeCommand({
+      args: [
+        "setup-bundle",
+        "apply",
+        "dispatch-ship-task",
+        "--preset",
+        "autonomous_ship_it",
+        "--approve",
+        "--codex-home",
+        codexHome,
+        "--path",
+        dbPath,
+        "--json",
+      ],
+      env: {},
+      now: () => new Date("2026-06-28T14:01:00Z"),
+    });
+    assert.equal(applied.exitCode, 0);
+    assert.equal((JSON.parse(applied.stdout ?? "{}") as { blocked: boolean }).blocked, false);
+
+    const enqueued = runTypescriptRuntimeCommand({
+      args: [
+        "enqueue-nudge-worker",
+        "dispatch-ship-task",
+        "--message",
+        "Push the branch after setup-approved manager authority.",
+        "--required-permission",
+        "repo.push_branch",
+        "--path",
+        dbPath,
+        "--json",
+      ],
+      env: {},
+    });
+    assert.equal(enqueued.exitCode, 0);
+
+    const dispatched = runTypescriptRuntimeCommand({
+      args: [
+        "dispatch",
+        "--once",
+        "--type",
+        "nudge_worker",
+        "--dispatcher-id",
+        "dispatch-local",
+        "--path",
+        dbPath,
+        "--json",
+      ],
+      env: {},
+      now: () => new Date("2026-06-28T14:02:00Z"),
+    });
+    assert.equal(dispatched.exitCode, 0);
+    const dispatchPayload = JSON.parse(dispatched.stdout ?? "{}") as {
+      processed: Array<{ permission_check: { allowed: boolean; required_permission: string }; state: string }>;
+      processed_count: number;
+    };
+    assert.equal(dispatchPayload.processed_count, 1);
+    assert.equal(dispatchPayload.processed[0]?.state, "pull_required");
+    assert.deepEqual(dispatchPayload.processed[0]?.permission_check, {
+      allowed: true,
+      configured: true,
+      required_permission: "repo.push_branch",
+    });
+
+    const verifyDb = openDatabaseSync(dbPath);
+    try {
+      const event = verifyDb.prepare(`
+        select attributes_json
+        from telemetry_events
+        where event_type = 'dispatch_command_permission_checked'
+        order by timestamp desc, rowid desc
+        limit 1
+      `).get() as { attributes_json: string };
+      assert.deepEqual(JSON.parse(event.attributes_json), {
+        allowed: true,
+        configured: true,
+        required_permission: "repo.push_branch",
+      });
+    } finally {
+      verifyDb.close();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(codexHome, { recursive: true, force: true });
   }
 });
 
