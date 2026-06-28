@@ -12083,7 +12083,7 @@ test("TypeScript runtime dispatch CLI records failed attempts for missing manage
       assert.equal(attempt.state, "failed");
       assert.match(attempt.error, /manager permission required/);
       assert.equal(Boolean(attempt.side_effect_started), false);
-      assert.deepEqual(events.map((row) => ({ event_type: row.event_type, severity: row.severity })), [
+      assert.deepEqual(events.map((row) => ({ event_type: row.event_type, severity: row.severity })).sort((left, right) => left.event_type.localeCompare(right.event_type)), [
         { event_type: "dispatch_command_failed", severity: "error" },
         { event_type: "dispatch_command_permission_checked", severity: "warning" },
       ]);

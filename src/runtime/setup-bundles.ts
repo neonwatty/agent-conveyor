@@ -239,7 +239,6 @@ export function applySetupBundleSync(database: DatabaseSync, options: {
     : !preflight.ok ? `missing required backend: ${preflight.missing_required.join(", ")}` : null;
   const approvalJson = { approved: options.approve, source: "setup-bundle apply" };
   database.exec("begin immediate");
-  let record: SetupBundleRecord | null = null;
   try {
     const appliedJson = blocked ? {} : applyBundleDerivedRecords(database, {
       now: options.now,
@@ -272,16 +271,16 @@ export function applySetupBundleSync(database: DatabaseSync, options: {
       blocked ? null : options.now,
       blocked ? null : options.now,
     );
-    record = setupBundleForTaskSync(database, options.taskId);
+    const record = setupBundleForTaskSync(database, options.taskId);
+    if (record === null) {
+      throw new Error(`setup bundle was not recorded for task ${options.taskId}`);
+    }
     database.exec("commit");
+    return { blocked, missing_required: preflight.missing_required, record };
   } catch (error) {
     database.exec("rollback");
     throw error;
   }
-  if (record === null) {
-    throw new Error(`setup bundle was not recorded for task ${options.taskId}`);
-  }
-  return { blocked, missing_required: preflight.missing_required, record };
 }
 
 export function setupBundleForTaskSync(database: DatabaseSync, taskId: string): SetupBundleRecord | null {
