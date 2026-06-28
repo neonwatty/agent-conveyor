@@ -177,10 +177,11 @@ conveyor doctor --json
 ```
 
 The per-project default ledger for operator sessions is
-`.codex-workers/workerctl.db`. The initial included skills are
+`.codex-workers/workerctl.db`. The included skills are
 `conveyor-app-wake-relay`, `conveyor-smoke-app-connections`,
 `conveyor-create-pair`, `conveyor-create-worker-set`,
-`conveyor-check-status`, and `conveyor-whats-next-nudger`.
+`conveyor-check-status`, `conveyor-setup-bundle`, and
+`conveyor-whats-next-nudger`.
 
 After install, the intended Codex app entry point is natural language. Open a
 new Codex app session in the target repo and say:

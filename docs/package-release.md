@@ -85,6 +85,7 @@ test -f "$tmp_home/skills/conveyor-smoke-app-connections/SKILL.md"
 test -f "$tmp_home/skills/conveyor-create-pair/SKILL.md"
 test -f "$tmp_home/skills/conveyor-create-worker-set/SKILL.md"
 test -f "$tmp_home/skills/conveyor-check-status/SKILL.md"
+test -f "$tmp_home/skills/conveyor-setup-bundle/SKILL.md"
 test -f "$tmp_home/skills/conveyor-whats-next-nudger/SKILL.md"
 rm -rf "$tmp_prefix" "$tmp_home"
 ```
@@ -107,6 +108,7 @@ The tarball must include:
 - `plugin/agent-conveyor/skills/conveyor-create-pair/SKILL.md`
 - `plugin/agent-conveyor/skills/conveyor-create-worker-set/SKILL.md`
 - `plugin/agent-conveyor/skills/conveyor-check-status/SKILL.md`
+- `plugin/agent-conveyor/skills/conveyor-setup-bundle/SKILL.md`
 - `plugin/agent-conveyor/skills/conveyor-whats-next-nudger/SKILL.md`
 
 The npm tarball must not contain `scripts/workerctl`, `workerctl/**/*.py`, or
