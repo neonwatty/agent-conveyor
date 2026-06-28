@@ -51,9 +51,13 @@ locked, preflighted ledger record before manager/worker launch.
 Use:
 
 ```bash
-conveyor setup-bundle preview example-task --preset autonomous_ship_it --json
-conveyor setup-bundle apply example-task --preset autonomous_ship_it --approve --json
-conveyor setup-bundle show example-task --json
+TASK="example-task"
+LEDGER="$PWD/.codex-workers/workerctl.db"
+
+conveyor tasks --create "$TASK" --goal "Configure an autonomous setup before launch." --path "$LEDGER" --json
+conveyor setup-bundle preview "$TASK" --preset autonomous_ship_it --path "$LEDGER" --json
+conveyor setup-bundle apply "$TASK" --preset autonomous_ship_it --approve --path "$LEDGER" --json
+conveyor setup-bundle show "$TASK" --path "$LEDGER" --json
 ```
 
 ## Recipe Summary

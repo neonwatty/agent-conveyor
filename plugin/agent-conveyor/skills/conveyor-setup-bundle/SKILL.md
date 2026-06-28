@@ -25,6 +25,11 @@ and evidence policy before launch.
 TASK="example-task"
 LEDGER="$PWD/.codex-workers/workerctl.db"
 
+conveyor tasks --create "$TASK" \
+  --goal "Configure an autonomous manager-worker setup before launch." \
+  --path "$LEDGER" \
+  --json
+
 conveyor setup-bundle preview "$TASK" \
   --preset autonomous_ship_it \
   --path "$LEDGER" \
