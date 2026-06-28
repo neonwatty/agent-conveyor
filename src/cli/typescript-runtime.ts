@@ -12733,7 +12733,8 @@ function runSetupBundleCommand(
       whatsNextPostMerge: parsed.flags.whatsNextPostMerge ? true : undefined,
     });
     const draftHash = setupBundleHash(policy);
-    const preflight = preflightSetupBundle(policy, { codexHome: parsed.flags.codexHome });
+    const codexHome = resolveCodexHome(parsed, options);
+    const preflight = preflightSetupBundle(policy, { codexHome });
     if (action === "preview") {
       return jsonResult({
         action,
@@ -12759,7 +12760,7 @@ function runSetupBundleCommand(
     }
     const result = applySetupBundleSync(database, {
       approve: true,
-      codexHome: parsed.flags.codexHome,
+      codexHome,
       now: nowIsoSeconds(options),
       policy,
       taskId: task.id,

@@ -718,6 +718,98 @@ test("setup-bundle CLI apply dry-run does not mutate ledger with approval", () =
   }
 });
 
+test("setup-bundle CLI resolves default Codex home for preview and apply", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-cli-setup-bundle-default-home."));
+  const codexHome = makeCodexHomeWithSkills([
+    "codex-review",
+    "goal-prep",
+    "receiving-code-review",
+    "requesting-code-review",
+  ]);
+  const emptyCodexHome = makeCodexHomeWithSkills([]);
+  try {
+    const dbPath = join(root, "workerctl.db");
+    const database = openDatabaseSync(dbPath);
+    try {
+      initializeDatabaseSync(database);
+      createTaskSync(database, {
+        goal: "Preview with default Codex home.",
+        name: "cli-bundle-default-preview",
+        now: "2026-06-28T13:26:00Z",
+        taskId: "task-cli-bundle-default-preview",
+      });
+      createTaskSync(database, {
+        goal: "Apply with default Codex home.",
+        name: "cli-bundle-default-apply",
+        now: "2026-06-28T13:27:00Z",
+        taskId: "task-cli-bundle-default-apply",
+      });
+    } finally {
+      database.close();
+    }
+
+    const preview = runTypescriptRuntimeCommand({
+      args: ["setup-bundle", "preview", "cli-bundle-default-preview", "--preset", "autonomous_ship_it", "--path", dbPath, "--json"],
+      env: { CODEX_HOME: codexHome },
+    });
+    assert.equal(preview.exitCode, 0);
+    const previewPayload = JSON.parse(preview.stdout ?? "{}") as {
+      preflight: { missing_required: string[]; ok: boolean };
+    };
+    assert.equal(previewPayload.preflight.ok, true);
+    assert.deepEqual(previewPayload.preflight.missing_required, []);
+
+    const applied = runTypescriptRuntimeCommand({
+      args: ["setup-bundle", "apply", "cli-bundle-default-apply", "--preset", "autonomous_ship_it", "--approve", "--path", dbPath, "--json"],
+      env: { CODEX_HOME: codexHome },
+      now: () => new Date("2026-06-28T13:28:00Z"),
+    });
+    assert.equal(applied.exitCode, 0);
+    const appliedPayload = JSON.parse(applied.stdout ?? "{}") as {
+      blocked: boolean;
+      setup_bundle: { preflight: { missing_required: string[]; ok: boolean }; state: string };
+    };
+    assert.equal(appliedPayload.blocked, false);
+    assert.equal(appliedPayload.setup_bundle.state, "applied");
+    assert.equal(appliedPayload.setup_bundle.preflight.ok, true);
+    assert.deepEqual(appliedPayload.setup_bundle.preflight.missing_required, []);
+
+    const override = runTypescriptRuntimeCommand({
+      args: [
+        "setup-bundle",
+        "preview",
+        "cli-bundle-default-preview",
+        "--preset",
+        "autonomous_ship_it",
+        "--codex-home",
+        codexHome,
+        "--path",
+        dbPath,
+        "--json",
+      ],
+      env: { CODEX_HOME: emptyCodexHome },
+    });
+    assert.equal(override.exitCode, 0);
+    const overridePayload = JSON.parse(override.stdout ?? "{}") as {
+      preflight: { missing_required: string[]; ok: boolean };
+    };
+    assert.equal(overridePayload.preflight.ok, true);
+    assert.deepEqual(overridePayload.preflight.missing_required, []);
+
+    const proofDb = openDatabaseSync(dbPath);
+    try {
+      assert.equal((proofDb.prepare("select count(*) as count from setup_bundles").get() as { count: number }).count, 1);
+      assert.equal((proofDb.prepare("select count(*) as count from manager_configs").get() as { count: number }).count, 1);
+    } finally {
+      proofDb.close();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(codexHome, { recursive: true, force: true });
+    rmSync(emptyCodexHome, { recursive: true, force: true });
+  }
+});
+
 test("setup-bundle CLI rejects invalid enum and iteration options", () => {
   const cases: Array<{ args: string[]; error: RegExp }> = [
     {
