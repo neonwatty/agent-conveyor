@@ -83,6 +83,17 @@ import {
   type ManagerPermissions,
 } from "../runtime/manager-permissions.js";
 import {
+  applySetupBundleSync,
+  draftSetupBundlePolicy,
+  preflightSetupBundle,
+  setupBundleForTaskSync,
+  setupBundleHash,
+  type LoopBackend,
+  type PlanningBackend,
+  type PrReviewBackend,
+  type WhatsNextMode,
+} from "../runtime/setup-bundles.js";
+import {
   deferRoutedNotificationBeforeSideEffectSync,
   deliveryModeForTargetSessionSync,
   finishRoutedNotificationSync,
@@ -491,6 +502,9 @@ export function runTypescriptRuntimeCommand(options: TypescriptRuntimeOptions): 
     if (parsed.command === "dispatch") {
       return runDispatchCommand(parsed, options);
     }
+    if (parsed.command === "setup-bundle") {
+      return runSetupBundleCommand(parsed, options);
+    }
     if (parsed.command === "manager-config") {
       return runManagerConfigCommand(parsed, options);
     }
@@ -655,6 +669,29 @@ function commandHelpText(program: "conveyor" | "workerctl", command: string): st
       "Record the Codex app worker-thread rotation after the app layer creates the new worker thread and archives or blocks on the old one.",
       "The command re-checks active binding ownership before updating the worker session to the new thread id.",
     ],
+    "setup-bundle": [
+      `usage: ${program} setup-bundle preview|apply|show <task> [options] ${path} [--json]`,
+      "",
+      "Preview, apply, or show a recorded setup bundle without launching sessions.",
+      "",
+      "Options:",
+      "  --preset <name>",
+      "  --planning-backend direct_prompt|codex_goal|goalbuddy|custom",
+      "  --planning-required",
+      "  --loop-backend none|ralph_loop|loop_template|custom",
+      "  --loop-preset <name>",
+      "  --loop-max-iterations <n>",
+      "  --pr-review-backend off|codex_review|superpowers|github|security|composite|custom",
+      "  --pr-review-required",
+      "  --require-skill <name>        Require a skill in preflight; repeatable.",
+      "  --optional-skill <name>       Check an optional skill in preflight; repeatable.",
+      "  --whats-next off|suggest_only|execute_bounded",
+      "  --whats-next-max-iterations <n>",
+      "  --whats-next-post-merge",
+      "  --approve                     Required for apply.",
+      "  --dry-run                     Simulate apply without mutating the ledger.",
+      "  --codex-home <dir>",
+    ],
     pair: [
       `usage: ${program} pair --task <task> --worker-name <worker> --manager-name <manager> [options] ${path}`,
       "",
@@ -789,6 +826,21 @@ interface ParsedRuntimeArgs {
     sessionId: string | null;
     sessionRole: "manager" | "worker" | null;
     sessionState: "active" | "all" | "gone" | null;
+    setupBundleAction: string | null;
+    setupBundlePreset: string | null;
+    planningBackend: PlanningBackend | null;
+    planningRequired: boolean;
+    loopBackend: LoopBackend | null;
+    loopPreset: string | null;
+    loopMaxIterations: number | null;
+    prReviewBackend: PrReviewBackend | null;
+    prReviewRequired: boolean;
+    requiredSkills: string[];
+    optionalSkills: string[];
+    whatsNextMode: WhatsNextMode | null;
+    whatsNextMaxIterations: number | null;
+    whatsNextPostMerge: boolean;
+    approve: boolean;
     show: string | null;
     showRun: string | null;
     satisfyCriterion: number | null;
@@ -1059,6 +1111,21 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
     sessionId: null,
     sessionRole: null,
     sessionState: null,
+    setupBundleAction: null,
+    setupBundlePreset: null,
+    planningBackend: null,
+    planningRequired: false,
+    loopBackend: null,
+    loopPreset: null,
+    loopMaxIterations: null,
+    prReviewBackend: null,
+    prReviewRequired: false,
+    requiredSkills: [],
+    optionalSkills: [],
+    whatsNextMode: null,
+    whatsNextMaxIterations: null,
+    whatsNextPostMerge: false,
+    approve: false,
     show: null,
     showRun: null,
     satisfyCriterion: null,
@@ -1477,6 +1544,26 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
         return { command, enabled, error: "Unsupported TypeScript runtime option: --require-adversarial-proof", explicit, flags, task };
       }
       flags.requireAdversarialProof = true;
+    } else if (arg === "--planning-required") {
+      if (command !== "setup-bundle") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --planning-required", explicit, flags, task };
+      }
+      flags.planningRequired = true;
+    } else if (arg === "--pr-review-required") {
+      if (command !== "setup-bundle") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --pr-review-required", explicit, flags, task };
+      }
+      flags.prReviewRequired = true;
+    } else if (arg === "--whats-next-post-merge") {
+      if (command !== "setup-bundle") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --whats-next-post-merge", explicit, flags, task };
+      }
+      flags.whatsNextPostMerge = true;
+    } else if (arg === "--approve") {
+      if (command !== "setup-bundle") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --approve", explicit, flags, task };
+      }
+      flags.approve = true;
     } else if (arg === "--adversarial") {
       if (command !== "create-disposable-binding") {
         return { command, enabled, error: "Unsupported TypeScript runtime option: --adversarial", explicit, flags, task };
@@ -1503,7 +1590,7 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       flags.path = value.value;
       index += 1;
     } else if (arg === "--codex-home") {
-      if (command !== "install-skills" && command !== "install-plugin" && command !== "plugin-status" && command !== "plugin-path" && command !== "doctor") {
+      if (command !== "install-skills" && command !== "install-plugin" && command !== "plugin-status" && command !== "plugin-path" && command !== "doctor" && command !== "setup-bundle") {
         return { command, enabled, error: "Unsupported TypeScript runtime option: --codex-home", explicit, flags, task };
       }
       const value = valueAfter(queue, index, arg);
@@ -2546,14 +2633,100 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       flags.template = value.value;
       index += 1;
     } else if (arg === "--preset") {
-      if (command !== "ralph-loop-presets") {
+      if (command !== "ralph-loop-presets" && command !== "setup-bundle") {
         return { command, enabled, error: "Unsupported TypeScript runtime option: --preset", explicit, flags, task };
       }
       const value = valueAfter(queue, index, arg);
       if (value.error) {
         return { command, enabled, error: value.error, explicit, flags, task };
       }
-      flags.preset = value.value;
+      if (command === "setup-bundle") {
+        flags.setupBundlePreset = value.value;
+      } else {
+        flags.preset = value.value;
+      }
+      index += 1;
+    } else if (arg === "--planning-backend") {
+      if (command !== "setup-bundle") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --planning-backend", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      if (!isPlanningBackend(value.value)) {
+        return { command, enabled, error: `Unsupported planning backend: ${value.value}`, explicit, flags, task };
+      }
+      flags.planningBackend = value.value;
+      index += 1;
+    } else if (arg === "--loop-backend") {
+      if (command !== "setup-bundle") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --loop-backend", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      if (!isLoopBackend(value.value)) {
+        return { command, enabled, error: `Unsupported loop backend: ${value.value}`, explicit, flags, task };
+      }
+      flags.loopBackend = value.value;
+      index += 1;
+    } else if (arg === "--loop-preset") {
+      if (command !== "setup-bundle") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --loop-preset", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.loopPreset = value.value;
+      index += 1;
+    } else if (arg === "--pr-review-backend") {
+      if (command !== "setup-bundle") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --pr-review-backend", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      if (!isPrReviewBackend(value.value)) {
+        return { command, enabled, error: `Unsupported PR review backend: ${value.value}`, explicit, flags, task };
+      }
+      flags.prReviewBackend = value.value;
+      index += 1;
+    } else if (arg === "--require-skill") {
+      if (command !== "setup-bundle") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --require-skill", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.requiredSkills.push(value.value);
+      index += 1;
+    } else if (arg === "--optional-skill") {
+      if (command !== "setup-bundle") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --optional-skill", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.optionalSkills.push(value.value);
+      index += 1;
+    } else if (arg === "--whats-next") {
+      if (command !== "setup-bundle") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --whats-next", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      if (!isWhatsNextMode(value.value)) {
+        return { command, enabled, error: `Unsupported whats-next mode: ${value.value}`, explicit, flags, task };
+      }
+      flags.whatsNextMode = value.value;
       index += 1;
     } else if (arg === "--run-name") {
       if (command !== "create-disposable-binding") {
@@ -3240,6 +3413,24 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       }
       flags.leaseSeconds = value;
       index += 1;
+    } else if (arg === "--loop-max-iterations" || arg === "--whats-next-max-iterations") {
+      if (command !== "setup-bundle") {
+        return { command, enabled, error: `Unsupported TypeScript runtime option: ${arg}`, explicit, flags, task };
+      }
+      const parsedValue = valueAfter(queue, index, arg);
+      if (parsedValue.error) {
+        return { command, enabled, error: parsedValue.error, explicit, flags, task };
+      }
+      const value = Number(parsedValue.value);
+      if (!Number.isInteger(value) || value < 0) {
+        return { command, enabled, error: `${arg} must be a non-negative integer.`, explicit, flags, task };
+      }
+      if (arg === "--loop-max-iterations") {
+        flags.loopMaxIterations = value;
+      } else {
+        flags.whatsNextMaxIterations = value;
+      }
+      index += 1;
     } else if (arg === "--max-iterations") {
       if (command !== "create-disposable-binding" && command !== "loop-templates" && command !== "ralph-loop-presets") {
         return { command, enabled, error: "Unsupported TypeScript runtime option: --max-iterations", explicit, flags, task };
@@ -3356,6 +3547,10 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       flags.telemetryView = arg;
     } else if (command === "telemetry" && flags.telemetryView === "task" && flags.telemetryViewTask === null) {
       flags.telemetryViewTask = arg;
+    } else if (command === "setup-bundle" && flags.setupBundleAction === null) {
+      flags.setupBundleAction = arg;
+    } else if (command === "setup-bundle" && task === null) {
+      task = arg;
     } else if (task === null) {
       task = arg;
     } else if ((command === "nudge" || command === "session-nudge") && flags.message === null) {
@@ -8028,6 +8223,7 @@ const AGENT_CONVEYOR_PLUGIN_SKILLS = [
   "conveyor-create-pair",
   "conveyor-create-worker-set",
   "conveyor-check-status",
+  "conveyor-setup-bundle",
   "conveyor-whats-next-nudger",
 ] as const;
 
@@ -12494,6 +12690,98 @@ function runDispatchCommand(
     handled: true,
     stdout: `dispatch processed ${processed.length} item(s)\n`,
   };
+}
+
+function runSetupBundleCommand(
+  parsed: ParsedRuntimeArgs,
+  options: { cwd?: string; env?: NodeJS.ProcessEnv; now?: () => Date },
+): TypescriptRuntimeResult {
+  const action = parsed.flags.setupBundleAction;
+  if (action !== "preview" && action !== "apply" && action !== "show") {
+    return errorResult("setup-bundle requires action preview, apply, or show.");
+  }
+  const taskName = parsed.task;
+  if (taskName === null) {
+    return errorResult("setup-bundle requires a task name or id.");
+  }
+  const database = openRuntimeDatabase(parsed, options);
+  try {
+    const task = taskRowForPair(database, taskName);
+    if (task === null) {
+      throw new Error(`Unknown task: ${taskName}`);
+    }
+    if (action === "show") {
+      const record = setupBundleForTaskSync(database, task.id);
+      if (record === null) {
+        throw new Error(`No setup bundle recorded for task: ${taskName}`);
+      }
+      return jsonResult(record);
+    }
+
+    const policy = draftSetupBundlePolicy({
+      loopBackend: parsed.flags.loopBackend ?? undefined,
+      loopMaxIterations: parsed.flags.loopMaxIterations,
+      loopPreset: parsed.flags.loopPreset,
+      optionalSkills: parsed.flags.optionalSkills.length > 0 ? parsed.flags.optionalSkills : undefined,
+      planningBackend: parsed.flags.planningBackend ?? undefined,
+      planningRequired: parsed.flags.planningRequired ? true : undefined,
+      preset: parsed.flags.setupBundlePreset ?? "custom",
+      prReviewBackend: parsed.flags.prReviewBackend ?? undefined,
+      prReviewRequired: parsed.flags.prReviewRequired ? true : undefined,
+      requiredSkills: parsed.flags.requiredSkills,
+      whatsNextMaxIterations: parsed.flags.whatsNextMaxIterations,
+      whatsNextMode: parsed.flags.whatsNextMode ?? undefined,
+      whatsNextPostMerge: parsed.flags.whatsNextPostMerge ? true : undefined,
+    });
+    const draftHash = setupBundleHash(policy);
+    const codexHome = resolveCodexHome(parsed, options);
+    const preflight = preflightSetupBundle(policy, { codexHome });
+    if (action === "preview") {
+      return jsonResult({
+        action,
+        draft_hash: draftHash,
+        policy,
+        preflight,
+      });
+    }
+
+    if (!parsed.flags.approve) {
+      return errorResult("setup-bundle apply requires --approve.");
+    }
+    if (parsed.flags.dryRun) {
+      return jsonResult({
+        action,
+        blocked: !preflight.ok,
+        draft_hash: draftHash,
+        dry_run: true,
+        launched: false,
+        policy,
+        preflight,
+      });
+    }
+    const result = applySetupBundleSync(database, {
+      approve: true,
+      codexHome,
+      now: nowIsoSeconds(options),
+      policy,
+      taskId: task.id,
+    });
+    if (result.blocked) {
+      return jsonExitResult(1, {
+        blocked: true,
+        launched: false,
+        missing_required: result.missing_required,
+        setup_bundle: result.record,
+      });
+    }
+    return jsonResult({
+      blocked: false,
+      launched: false,
+      setup_bundle: result.record,
+    });
+  } finally {
+    database.close();
+  }
 }
 
 function runManagerConfigCommand(
@@ -18745,6 +19033,7 @@ function isDefaultRuntimeCommand(command: string | null): boolean {
     || command === "enqueue-nudge-worker"
     || command === "enqueue-continue-iteration"
     || command === "dispatch"
+    || command === "setup-bundle"
     || command === "manager-config"
     || command === "manager-permission"
     || command === "record-decision"
@@ -18789,6 +19078,14 @@ function isStartPassthroughFlag(arg: string): boolean {
 function jsonResult(payload: unknown): TypescriptRuntimeResult {
   return {
     exitCode: 0,
+    handled: true,
+    stdout: `${JSON.stringify(sortJson(payload), null, 2)}\n`,
+  };
+}
+
+function jsonExitResult(exitCode: number, payload: unknown): TypescriptRuntimeResult {
+  return {
+    exitCode,
     handled: true,
     stdout: `${JSON.stringify(sortJson(payload), null, 2)}\n`,
   };
@@ -25159,6 +25456,28 @@ function isTranscriptCaptureMode(value: string): value is TranscriptCaptureMode 
 
 function isTelemetryView(value: string): boolean {
   return value === "metrics" || value === "snapshot" || value === "check" || value === "task" || value === "failures";
+}
+
+function isPlanningBackend(value: string): value is PlanningBackend {
+  return value === "direct_prompt" || value === "codex_goal" || value === "goalbuddy" || value === "custom";
+}
+
+function isLoopBackend(value: string): value is LoopBackend {
+  return value === "none" || value === "ralph_loop" || value === "loop_template" || value === "custom";
+}
+
+function isPrReviewBackend(value: string): value is PrReviewBackend {
+  return value === "off"
+    || value === "codex_review"
+    || value === "superpowers"
+    || value === "github"
+    || value === "security"
+    || value === "composite"
+    || value === "custom";
+}
+
+function isWhatsNextMode(value: string): value is WhatsNextMode {
+  return value === "off" || value === "suggest_only" || value === "execute_bounded";
 }
 
 function sortJson(value: unknown): unknown {
