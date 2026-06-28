@@ -355,6 +355,25 @@ CREATE TABLE schema_migrations(
           applied_at text not null
         );
 
+CREATE TABLE setup_bundles(
+          id text primary key,
+          task_id text not null references tasks(id),
+          name text not null,
+          preset text not null,
+          state text not null check (state in ('draft','blocked','approved','applied')),
+          draft_hash text not null,
+          approved_hash text,
+          policy_json text not null check (json_valid(policy_json)),
+          preflight_json text not null check (json_valid(preflight_json)),
+          approval_json text not null check (json_valid(approval_json)),
+          applied_json text not null check (json_valid(applied_json)),
+          blocked_reason text,
+          created_at text not null,
+          updated_at text not null,
+          approved_at text,
+          applied_at text
+        );
+
 CREATE TABLE sessions(
           id text primary key,
           name text unique not null,
@@ -624,6 +643,12 @@ CREATE INDEX routed_notifications_target_inbox
 
 CREATE INDEX runs_task_status
         on runs(task_id, status, started_at);
+
+CREATE UNIQUE INDEX setup_bundles_name
+        on setup_bundles(name);
+
+CREATE INDEX setup_bundles_task_state
+        on setup_bundles(task_id, state, updated_at);
 
 CREATE INDEX statuses_worker_id
         on statuses(worker_id, id);

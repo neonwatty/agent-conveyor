@@ -88,6 +88,7 @@ function migrateLegacySchemaSync(database: DatabaseSync, userVersion: number): v
     addColumnIfMissing(database, "manager_configs", "recipe_name", "text");
     addColumnIfMissing(database, "sessions", "codex_app_thread_id", "text");
     addColumnIfMissing(database, "sessions", "codex_app_thread_title", "text");
+    ensureSetupBundlesTable(database);
     database.prepare(
       "insert or ignore into schema_migrations(version, applied_at) values (?, ?)",
     ).run(SCHEMA_VERSION, new Date().toISOString());
@@ -294,6 +295,38 @@ function addColumnIfMissing(database: DatabaseSync, table: string, column: strin
     return;
   }
   database.exec(`alter table ${table} add column ${column} ${definition}`);
+}
+
+function ensureSetupBundlesTable(database: DatabaseSync): void {
+  if (hasTable(database, "setup_bundles")) {
+    return;
+  }
+  database.exec(`
+    CREATE TABLE setup_bundles(
+      id text primary key,
+      task_id text not null references tasks(id),
+      name text not null,
+      preset text not null,
+      state text not null check (state in ('draft','blocked','approved','applied')),
+      draft_hash text not null,
+      approved_hash text,
+      policy_json text not null check (json_valid(policy_json)),
+      preflight_json text not null check (json_valid(preflight_json)),
+      approval_json text not null check (json_valid(approval_json)),
+      applied_json text not null check (json_valid(applied_json)),
+      blocked_reason text,
+      created_at text not null,
+      updated_at text not null,
+      approved_at text,
+      applied_at text
+    );
+
+    CREATE UNIQUE INDEX setup_bundles_name
+      on setup_bundles(name);
+
+    CREATE INDEX setup_bundles_task_state
+      on setup_bundles(task_id, state, updated_at);
+  `);
 }
 
 function selectColumnOrDefault(columns: Set<string>, column: string, fallbackSql: string): string {

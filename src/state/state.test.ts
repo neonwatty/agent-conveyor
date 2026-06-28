@@ -169,6 +169,7 @@ test("sqlite schema contract constants cover the expected v26 inventory", () => 
     "runs",
     "schema_migrations",
     "sessions",
+    "setup_bundles",
     "statuses",
     "task_acknowledgements",
     "task_continuations",
@@ -186,6 +187,8 @@ test("sqlite schema contract constants cover the expected v26 inventory", () => 
   assert.equal(REQUIRED_INDEXES.has("commands_claimable"), true);
   assert.equal(REQUIRED_INDEXES.has("notification_acknowledgements_notification_created"), true);
   assert.equal(REQUIRED_INDEXES.has("routed_notifications_target_inbox"), true);
+  assert.equal(REQUIRED_INDEXES.has("setup_bundles_name"), true);
+  assert.equal(REQUIRED_INDEXES.has("setup_bundles_task_state"), true);
   assert.deepEqual([...REQUIRED_TRIGGERS].sort(), ["events_no_delete", "events_no_update"]);
 });
 
@@ -204,6 +207,59 @@ test("TypeScript database initialization reports healthy schema", () => {
       database.close();
     }
 
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("database schema includes setup bundle ledger table and indexes", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-setup-bundles-schema."));
+  try {
+    const dbPath = join(root, "workerctl.db");
+    const database = openDatabaseSync(dbPath);
+    try {
+      initializeDatabaseSync(database);
+      const table = database.prepare(`
+        select name
+        from sqlite_master
+        where type = 'table' and name = 'setup_bundles'
+      `).get() as { name: string } | undefined;
+      assert.equal(table?.name, "setup_bundles");
+
+      const columns = database.prepare("pragma table_info('setup_bundles')").all() as Array<{ name: string }>;
+      assert.deepEqual(columns.map((column) => column.name), [
+        "id",
+        "task_id",
+        "name",
+        "preset",
+        "state",
+        "draft_hash",
+        "approved_hash",
+        "policy_json",
+        "preflight_json",
+        "approval_json",
+        "applied_json",
+        "blocked_reason",
+        "created_at",
+        "updated_at",
+        "approved_at",
+        "applied_at",
+      ]);
+
+      const indexes = database.prepare(`
+        select name
+        from sqlite_master
+        where type = 'index' and tbl_name = 'setup_bundles'
+          and name not like 'sqlite_%'
+        order by name
+      `).all() as Array<{ name: string }>;
+      assert.deepEqual(indexes.map((row) => row.name), [
+        "setup_bundles_name",
+        "setup_bundles_task_state",
+      ]);
+    } finally {
+      database.close();
+    }
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
