@@ -646,6 +646,78 @@ test("setup-bundle CLI apply requires approval before ledger mutation", () => {
   }
 });
 
+test("setup-bundle CLI apply dry-run does not mutate ledger with approval", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-cli-setup-bundle-dry-run."));
+  const codexHome = makeCodexHomeWithSkills([
+    "codex-review",
+    "goal-prep",
+    "receiving-code-review",
+    "requesting-code-review",
+  ]);
+  try {
+    const dbPath = join(root, "workerctl.db");
+    const database = openDatabaseSync(dbPath);
+    try {
+      initializeDatabaseSync(database);
+      createTaskSync(database, {
+        goal: "Dry-run approved setup bundle apply.",
+        name: "cli-bundle-dry-run",
+        now: "2026-06-28T13:25:00Z",
+        taskId: "task-cli-bundle-dry-run",
+      });
+    } finally {
+      database.close();
+    }
+
+    const dryRun = runTypescriptRuntimeCommand({
+      args: [
+        "setup-bundle",
+        "apply",
+        "cli-bundle-dry-run",
+        "--preset",
+        "autonomous_ship_it",
+        "--approve",
+        "--dry-run",
+        "--codex-home",
+        codexHome,
+        "--path",
+        dbPath,
+        "--json",
+      ],
+      env: {},
+    });
+    assert.equal(dryRun.exitCode, 0);
+    const payload = JSON.parse(dryRun.stdout ?? "{}") as {
+      action: string;
+      blocked: boolean;
+      draft_hash: string;
+      dry_run: boolean;
+      launched: boolean;
+      policy: { preset: string };
+      preflight: { missing_required: string[]; ok: boolean };
+    };
+    assert.equal(payload.action, "apply");
+    assert.equal(payload.dry_run, true);
+    assert.equal(payload.blocked, false);
+    assert.equal(payload.launched, false);
+    assert.match(payload.draft_hash, /^[a-f0-9]{64}$/);
+    assert.equal(payload.policy.preset, "autonomous_ship_it");
+    assert.equal(payload.preflight.ok, true);
+    assert.deepEqual(payload.preflight.missing_required, []);
+
+    const proofDb = openDatabaseSync(dbPath);
+    try {
+      assert.equal((proofDb.prepare("select count(*) as count from setup_bundles").get() as { count: number }).count, 0);
+      assert.equal((proofDb.prepare("select count(*) as count from manager_configs").get() as { count: number }).count, 0);
+    } finally {
+      proofDb.close();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(codexHome, { recursive: true, force: true });
+  }
+});
+
 test("setup-bundle CLI rejects invalid enum and iteration options", () => {
   const cases: Array<{ args: string[]; error: RegExp }> = [
     {

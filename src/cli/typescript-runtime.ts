@@ -670,9 +670,27 @@ function commandHelpText(program: "conveyor" | "workerctl", command: string): st
       "The command re-checks active binding ownership before updating the worker session to the new thread id.",
     ],
     "setup-bundle": [
-      `usage: ${program} setup-bundle preview|apply|show <task> [--preset NAME] [--approve] [--codex-home DIR] ${path} [--json]`,
+      `usage: ${program} setup-bundle preview|apply|show <task> [options] ${path} [--json]`,
       "",
       "Preview, apply, or show a recorded setup bundle without launching sessions.",
+      "",
+      "Options:",
+      "  --preset <name>",
+      "  --planning-backend direct_prompt|codex_goal|goalbuddy|custom",
+      "  --planning-required",
+      "  --loop-backend none|ralph_loop|loop_template|custom",
+      "  --loop-preset <name>",
+      "  --loop-max-iterations <n>",
+      "  --pr-review-backend off|codex_review|superpowers|github|security|composite|custom",
+      "  --pr-review-required",
+      "  --require-skill <name>        Require a skill in preflight; repeatable.",
+      "  --optional-skill <name>       Check an optional skill in preflight; repeatable.",
+      "  --whats-next off|suggest_only|execute_bounded",
+      "  --whats-next-max-iterations <n>",
+      "  --whats-next-post-merge",
+      "  --approve                     Required for apply.",
+      "  --dry-run                     Simulate apply without mutating the ledger.",
+      "  --codex-home <dir>",
     ],
     pair: [
       `usage: ${program} pair --task <task> --worker-name <worker> --manager-name <manager> [options] ${path}`,
@@ -12714,17 +12732,30 @@ function runSetupBundleCommand(
       whatsNextMode: parsed.flags.whatsNextMode ?? undefined,
       whatsNextPostMerge: parsed.flags.whatsNextPostMerge ? true : undefined,
     });
+    const draftHash = setupBundleHash(policy);
+    const preflight = preflightSetupBundle(policy, { codexHome: parsed.flags.codexHome });
     if (action === "preview") {
       return jsonResult({
         action,
-        draft_hash: setupBundleHash(policy),
+        draft_hash: draftHash,
         policy,
-        preflight: preflightSetupBundle(policy, { codexHome: parsed.flags.codexHome }),
+        preflight,
       });
     }
 
     if (!parsed.flags.approve) {
       return errorResult("setup-bundle apply requires --approve.");
+    }
+    if (parsed.flags.dryRun) {
+      return jsonResult({
+        action,
+        blocked: !preflight.ok,
+        draft_hash: draftHash,
+        dry_run: true,
+        launched: false,
+        policy,
+        preflight,
+      });
     }
     const result = applySetupBundleSync(database, {
       approve: true,
