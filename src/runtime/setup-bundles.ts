@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { isAbsolute, relative, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
 import { normalizeManagerPermissions } from "./manager-permissions.js";
@@ -231,11 +231,13 @@ export function applySetupBundleSync(database: DatabaseSync, options: {
   const id = `setup-${randomUUID()}`;
   const name = options.name ?? `${options.taskId}-${options.policy.preset}-${id.slice("setup-".length, "setup-".length + 8)}`;
   const draftHash = setupBundleHash(options.policy);
-  const blocked = !preflight.ok;
+  const blocked = !options.approve || !preflight.ok;
   const state: SetupBundleState = blocked ? "blocked" : "applied";
   const approvedHash = blocked ? null : draftHash;
-  const blockedReason = blocked ? `missing required backend: ${preflight.missing_required.join(", ")}` : null;
-  const approvalJson = blocked ? {} : { approved: options.approve, source: "setup-bundle apply" };
+  const blockedReason = !options.approve
+    ? "missing approval"
+    : !preflight.ok ? `missing required backend: ${preflight.missing_required.join(", ")}` : null;
+  const approvalJson = { approved: options.approve, source: "setup-bundle apply" };
   database.exec("begin immediate");
   let record: SetupBundleRecord | null = null;
   try {
@@ -289,7 +291,7 @@ export function setupBundleForTaskSync(database: DatabaseSync, taskId: string): 
            blocked_reason, created_at, updated_at, approved_at, applied_at
     from setup_bundles
     where task_id = ?
-    order by updated_at desc, id desc
+    order by updated_at desc, rowid desc
     limit 1
   `).get(taskId) as Record<string, unknown> | undefined;
   if (!row) {
@@ -362,7 +364,25 @@ function applyBundleDerivedRecords(database: DatabaseSync, options: {
 }
 
 function skillAvailable(skill: string, codexHome: string | null): boolean {
-  return codexHome !== null && existsSync(join(codexHome, "skills", skill, "SKILL.md"));
+  if (codexHome === null || !validSkillName(skill)) {
+    return false;
+  }
+  const skillsDir = resolve(codexHome, "skills");
+  const skillFile = resolve(skillsDir, skill, "SKILL.md");
+  const skillRelativePath = relative(skillsDir, skillFile);
+  if (skillRelativePath.startsWith("..") || isAbsolute(skillRelativePath)) {
+    return false;
+  }
+  return existsSync(skillFile);
+}
+
+function validSkillName(skill: string): boolean {
+  const normalized = skill.trim();
+  return normalized.length > 0
+    && normalized !== "."
+    && normalized !== ".."
+    && !normalized.includes("/")
+    && !normalized.includes("\\");
 }
 
 function uniqueStrings(values: string[]): string[] {

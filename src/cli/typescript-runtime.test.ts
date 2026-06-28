@@ -287,6 +287,52 @@ test("setup bundle runtime applies blocked bundle without manager authority", ()
   }
 });
 
+test("setup bundle runtime blocks unapproved apply without manager authority", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-setup-bundle-unapproved."));
+  const codexHome = makeCodexHomeWithSkills([
+    "codex-review",
+    "goal-prep",
+    "receiving-code-review",
+    "requesting-code-review",
+  ]);
+  try {
+    const dbPath = join(root, "workerctl.db");
+    const database = openDatabaseSync(dbPath);
+    try {
+      initializeDatabaseSync(database);
+      createTaskSync(database, {
+        goal: "Do not grant authority without approval.",
+        name: "unapproved-bundle-task",
+        now: "2026-06-28T10:30:00Z",
+        taskId: "task-unapproved-bundle",
+      });
+      const policy = draftSetupBundlePolicy({ preset: "autonomous_ship_it" });
+      const result = applySetupBundleSync(database, {
+        approve: false,
+        codexHome,
+        now: "2026-06-28T10:31:00Z",
+        policy,
+        taskId: "task-unapproved-bundle",
+      });
+
+      assert.equal(result.blocked, true);
+      assert.deepEqual(result.missing_required, []);
+      assert.equal(result.record.state, "blocked");
+      assert.equal(result.record.blocked_reason, "missing approval");
+      assert.deepEqual(result.record.approval_json, {
+        approved: false,
+        source: "setup-bundle apply",
+      });
+      assert.equal((database.prepare("select count(*) as count from manager_configs").get() as { count: number }).count, 0);
+    } finally {
+      database.close();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(codexHome, { recursive: true, force: true });
+  }
+});
+
 test("setup bundle runtime applies approved bundle and reads latest setup record", () => {
   const root = mkdtempSync(join(tmpdir(), "agent-conveyor-setup-bundle-approved."));
   const codexHome = makeCodexHomeWithSkills([
@@ -339,6 +385,104 @@ test("setup bundle runtime applies approved bundle and reads latest setup record
     }
   } finally {
     rmSync(root, { recursive: true, force: true });
+    rmSync(codexHome, { recursive: true, force: true });
+  }
+});
+
+test("setup bundle runtime reads latest setup record by insertion order when timestamps tie", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-setup-bundle-latest."));
+  try {
+    const dbPath = join(root, "workerctl.db");
+    const database = openDatabaseSync(dbPath);
+    try {
+      initializeDatabaseSync(database);
+      createTaskSync(database, {
+        goal: "Read latest setup bundle deterministically.",
+        name: "latest-bundle-task",
+        now: "2026-06-28T12:00:00Z",
+        taskId: "task-latest-bundle",
+      });
+      const oldPolicy = draftSetupBundlePolicy({ preset: "autonomous_ship_it" });
+      const newPolicy = draftSetupBundlePolicy({ loopMaxIterations: 5, preset: "autonomous_ship_it" });
+      const oldPreflight = preflightSetupBundle(oldPolicy, { codexHome: null });
+      const newPreflight = preflightSetupBundle(newPolicy, { codexHome: null });
+
+      const insert = database.prepare(`
+        insert into setup_bundles(
+          id, task_id, name, preset, state, draft_hash, approved_hash, policy_json,
+          preflight_json, approval_json, applied_json, blocked_reason,
+          created_at, updated_at, approved_at, applied_at
+        )
+        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      insert.run(
+        "setup-z-old",
+        "task-latest-bundle",
+        "latest-old",
+        oldPolicy.preset,
+        "blocked",
+        setupBundleHash(oldPolicy),
+        null,
+        JSON.stringify(oldPolicy),
+        JSON.stringify(oldPreflight),
+        "{}",
+        "{}",
+        "old row",
+        "2026-06-28T12:01:00Z",
+        "2026-06-28T12:02:00Z",
+        null,
+        null,
+      );
+      insert.run(
+        "setup-a-new",
+        "task-latest-bundle",
+        "latest-new",
+        newPolicy.preset,
+        "blocked",
+        setupBundleHash(newPolicy),
+        null,
+        JSON.stringify(newPolicy),
+        JSON.stringify(newPreflight),
+        "{}",
+        "{}",
+        "new row",
+        "2026-06-28T12:01:30Z",
+        "2026-06-28T12:02:00Z",
+        null,
+        null,
+      );
+
+      const latest = setupBundleForTaskSync(database, "task-latest-bundle");
+      assert.equal(latest?.id, "setup-a-new");
+      assert.equal(latest?.blocked_reason, "new row");
+      assert.equal(latest?.policy.loop.max_iterations, 5);
+    } finally {
+      database.close();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("setup bundle runtime treats unsafe skill names as missing", () => {
+  const codexHome = makeCodexHomeWithSkills(["safe-skill"]);
+  mkdirSync(join(codexHome, "outside"), { recursive: true });
+  writeFileSync(join(codexHome, "outside", "SKILL.md"), "---\nname: outside\n---\n# outside\n");
+  try {
+    const policy = draftSetupBundlePolicy({
+      preset: "custom",
+      requiredSkills: [".", "..", "../outside", "nested/skill", "nested\\skill", "safe-skill"],
+    });
+    const preflight = preflightSetupBundle(policy, { codexHome });
+
+    assert.equal(preflight.ok, false);
+    assert.equal(preflight.missing_required.includes("safe-skill"), false);
+    assert.equal(preflight.missing_required.includes("."), true);
+    assert.equal(preflight.missing_required.includes(".."), true);
+    assert.equal(preflight.missing_required.includes("../outside"), true);
+    assert.equal(preflight.missing_required.includes("nested/skill"), true);
+    assert.equal(preflight.missing_required.includes("nested\\skill"), true);
+  } finally {
     rmSync(codexHome, { recursive: true, force: true });
   }
 });
