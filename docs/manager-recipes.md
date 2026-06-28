@@ -40,6 +40,22 @@ If a dogfood run reports `database is locked`, prefer retrying the Conveyor CLI
 command after the active manager/worker write completes. Avoid direct SQLite
 inspection while Dispatch is writing to the same `--path` database.
 
+## Setup Bundles
+
+`conveyor setup-bundle` is the preferred high-level setup surface when the
+operator needs planning, Ralph-style loops, PR review rigor, what's-next
+nudging, permissions, and evidence gates configured together. Manager recipes
+remain the reusable preset metadata; setup bundles compile those recipes into a
+locked, preflighted ledger record before manager/worker launch.
+
+Use:
+
+```bash
+conveyor setup-bundle preview example-task --preset autonomous_ship_it --json
+conveyor setup-bundle apply example-task --preset autonomous_ship_it --approve --json
+conveyor setup-bundle show example-task --json
+```
+
 ## Recipe Summary
 
 | Recipe | Use When | Mode | Main Gates | Cleanup |

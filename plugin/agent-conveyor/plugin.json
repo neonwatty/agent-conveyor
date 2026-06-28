@@ -8,6 +8,7 @@
     "conveyor-create-pair",
     "conveyor-create-worker-set",
     "conveyor-check-status",
+    "conveyor-setup-bundle",
     "conveyor-whats-next-nudger"
   ],
   "requires": {

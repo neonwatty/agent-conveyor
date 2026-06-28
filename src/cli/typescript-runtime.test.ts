@@ -10890,6 +10890,7 @@ test("TypeScript runtime handles Agent Conveyor plugin install status and path c
         { installed: false, name: "conveyor-create-pair" },
         { installed: false, name: "conveyor-create-worker-set" },
         { installed: false, name: "conveyor-check-status" },
+        { installed: false, name: "conveyor-setup-bundle" },
         { installed: false, name: "conveyor-whats-next-nudger" },
       ],
     );
@@ -10913,6 +10914,7 @@ test("TypeScript runtime handles Agent Conveyor plugin install status and path c
       "conveyor-check-status",
       "conveyor-create-pair",
       "conveyor-create-worker-set",
+      "conveyor-setup-bundle",
       "conveyor-smoke-app-connections",
       "conveyor-whats-next-nudger",
     ]);
@@ -10924,6 +10926,7 @@ test("TypeScript runtime handles Agent Conveyor plugin install status and path c
     assert.ok(existsSync(join(codexHome, "skills", "conveyor-check-status", "SKILL.md")));
     assert.ok(existsSync(join(codexHome, "skills", "conveyor-create-pair", "SKILL.md")));
     assert.ok(existsSync(join(codexHome, "skills", "conveyor-create-worker-set", "SKILL.md")));
+    assert.ok(existsSync(join(codexHome, "skills", "conveyor-setup-bundle", "SKILL.md")));
     assert.ok(existsSync(join(codexHome, "skills", "conveyor-whats-next-nudger", "SKILL.md")));
     const absoluteLedgerPath = /(^|[^\w$])\/[^\s`"']*\.codex-workers\/workerctl\.db/;
     assert.match("/tmp/project/.codex-workers/workerctl.db", absoluteLedgerPath);
@@ -10959,6 +10962,11 @@ test("TypeScript runtime handles Agent Conveyor plugin install status and path c
     assert.match(smokeSkill, /manual-poll only/);
     assert.match(smokeSkill, /printf '%s\\n' '\{"summary"/);
     assert.match(smokeSkill, /--from-stdin expects a JSON object|explicit JSON stdin example/);
+    const setupBundleSkill = readFileSync(join(codexHome, "skills", "conveyor-setup-bundle", "SKILL.md"), "utf8");
+    assert.match(setupBundleSkill, /conveyor setup-bundle preview/);
+    assert.match(setupBundleSkill, /conveyor setup-bundle apply/);
+    assert.match(setupBundleSkill, /conveyor setup-bundle show/);
+    assert.match(setupBundleSkill, /If a required backend is missing, stop\. Do not create sessions/);
     const installedManifest = JSON.parse(readFileSync(installedManifestPath, "utf8")) as { name: string; version: string };
     assert.equal(installedManifest.name, "agent-conveyor");
     assert.equal(installedManifest.version, PACKAGE_VERSION);
@@ -11035,6 +11043,7 @@ test("TypeScript runtime handles Agent Conveyor plugin install status and path c
         { installed: false, name: "conveyor-create-pair" },
         { installed: false, name: "conveyor-create-worker-set" },
         { installed: false, name: "conveyor-check-status" },
+        { installed: false, name: "conveyor-setup-bundle" },
         { installed: false, name: "conveyor-whats-next-nudger" },
       ],
     );

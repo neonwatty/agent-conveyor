@@ -8223,6 +8223,7 @@ const AGENT_CONVEYOR_PLUGIN_SKILLS = [
   "conveyor-create-pair",
   "conveyor-create-worker-set",
   "conveyor-check-status",
+  "conveyor-setup-bundle",
   "conveyor-whats-next-nudger",
 ] as const;
 
