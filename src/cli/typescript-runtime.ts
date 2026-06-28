@@ -12722,7 +12722,7 @@ function runSetupBundleCommand(
       loopBackend: parsed.flags.loopBackend ?? undefined,
       loopMaxIterations: parsed.flags.loopMaxIterations,
       loopPreset: parsed.flags.loopPreset,
-      optionalSkills: parsed.flags.optionalSkills,
+      optionalSkills: parsed.flags.optionalSkills.length > 0 ? parsed.flags.optionalSkills : undefined,
       planningBackend: parsed.flags.planningBackend ?? undefined,
       planningRequired: parsed.flags.planningRequired ? true : undefined,
       preset: parsed.flags.setupBundlePreset ?? "custom",

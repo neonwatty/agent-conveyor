@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { isAbsolute, relative, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
@@ -92,6 +92,13 @@ export interface SetupBundleRecord {
   updated_at: string;
 }
 
+const LOOP_PRESET_REQUIRED_EVIDENCE = new Map<string, string[]>([
+  ["ship_it_loop", ["branch_ready", "branch_pushed", "pr_url", "ci_green", "mergeability_clean", "manager_merge_decision", "merge", "post_merge_verification", "adversarial_check"]],
+  ["test_coverage_loop", ["test_coverage", "adversarial_check"]],
+  ["visual_diff_loop", ["reference_artifact", "candidate_screenshot", "visual_diff_report", "diff_below_threshold", "adversarial_check"]],
+  ["pr_ci_merge_loop", ["pr_url", "ci_green", "merge", "adversarial_check"]],
+]);
+
 export function draftSetupBundlePolicy(options: {
   loopBackend?: LoopBackend;
   loopMaxIterations?: number | null;
@@ -112,22 +119,17 @@ export function draftSetupBundlePolicy(options: {
   const testCoverage = preset === "test_coverage_ralph";
   const uxPolish = preset === "ux_polish_ralph";
   const prCiMerge = preset === "pr_ci_merge_ralph";
-  const loopPreset = options.loopPreset
-    ?? (shipIt ? "ship_it_loop" : testCoverage ? "test_coverage_loop" : uxPolish ? "visual_diff_loop" : prCiMerge ? "pr_ci_merge_loop" : null);
-  const requiredEvidence = loopPreset === "ship_it_loop"
-    ? ["branch_ready", "branch_pushed", "pr_url", "ci_green", "mergeability_clean", "manager_merge_decision", "merge", "post_merge_verification", "adversarial_check"]
-    : loopPreset === "test_coverage_loop"
-      ? ["test_coverage", "adversarial_check"]
-      : loopPreset === "visual_diff_loop"
-        ? ["reference_artifact", "candidate_screenshot", "visual_diff_report", "diff_below_threshold", "adversarial_check"]
-        : loopPreset === "pr_ci_merge_loop"
-          ? ["pr_url", "ci_green", "merge", "adversarial_check"]
-          : [];
-  const prReviewRequired = options.prReviewRequired ?? shipIt;
-  const defaultReviewSkills = shipIt || prReviewRequired
-    ? ["requesting-code-review", "receiving-code-review", "codex-review"]
-    : [];
+  const loopPreset = options.loopBackend === "none"
+    ? null
+    : (options.loopPreset
+      ?? (shipIt ? "ship_it_loop" : testCoverage ? "test_coverage_loop" : uxPolish ? "visual_diff_loop" : prCiMerge ? "pr_ci_merge_loop" : null));
+  const requiredEvidence = requiredEvidenceForLoopPreset(loopPreset);
   const planningRequired = options.planningRequired ?? shipIt;
+  const planningBackend = options.planningBackend ?? (shipIt ? "goalbuddy" : "codex_goal");
+  const prReviewBackend = options.prReviewBackend ?? ((options.prReviewRequired ?? shipIt) ? (shipIt ? "composite" : "codex_review") : "off");
+  const prReviewRequired = prReviewBackend === "off" ? false : options.prReviewRequired ?? shipIt;
+  const defaultReviewSkills = prReviewRequired ? prReviewBackendRequiredSkills(prReviewBackend) : [];
+  const reviewGateEnabled = prReviewRequired && prReviewBackend !== "off";
   const managerPermissions = shipIt
     ? ["repo.push_branch", "repo.open_pr", "repo.monitor_ci", "repo.resolve_conflicts", "repo.merge_green_pr", "worker_session.compact", "worker_session.clear"]
     : prCiMerge
@@ -153,9 +155,9 @@ export function draftSetupBundlePolicy(options: {
       mode: shipIt || prCiMerge || testCoverage || uxPolish ? "strict" : "guided",
       permissions: managerPermissions,
       pr_review: {
-        backend: shipIt ? "inherit" : "off",
-        gate: shipIt ? "block_merge_until_review_receipts" : "none",
-        role: shipIt ? "gatekeeper" : "none",
+        backend: reviewGateEnabled ? "inherit" : "off",
+        gate: reviewGateEnabled ? "block_merge_until_review_receipts" : "none",
+        role: reviewGateEnabled ? "gatekeeper" : "none",
       },
       tools: shipIt || prCiMerge
         ? ["gh", "git", "verification.run_pytest", "context.fetch_prs"]
@@ -164,12 +166,12 @@ export function draftSetupBundlePolicy(options: {
           : uxPolish ? ["verification.run_playwright"] : [],
     },
     planning: {
-      backend: options.planningBackend ?? (shipIt ? "goalbuddy" : "codex_goal"),
+      backend: planningBackend,
       required: planningRequired,
-      required_skills: planningRequired ? ["goal-prep"] : [],
+      required_skills: planningRequired ? planningBackendRequiredSkills(planningBackend) : [],
     },
     pr_review: {
-      backend: options.prReviewBackend ?? (shipIt ? "composite" : "off"),
+      backend: prReviewBackend,
       optional_skills: uniqueStrings(options.optionalSkills ?? ["security-diff-scan"]),
       required: prReviewRequired,
       required_skills: uniqueStringsPreservingOrder([...defaultReviewSkills, ...(options.requiredSkills ?? [])]),
@@ -188,14 +190,25 @@ export function draftSetupBundlePolicy(options: {
         approval: "on-request",
         evidence_contract: shipIt ? "ship_it_worker_receipt" : "worker_receipt",
         pr_review: {
-          backend: shipIt ? "inherit" : "off",
-          required_before_handoff: shipIt,
+          backend: reviewGateEnabled ? "inherit" : "off",
+          required_before_handoff: reviewGateEnabled,
         },
         role: "implementer",
         sandbox: "workspace-write",
       }],
     },
   };
+}
+
+function requiredEvidenceForLoopPreset(loopPreset: string | null): string[] {
+  if (loopPreset === null) {
+    return [];
+  }
+  const requiredEvidence = LOOP_PRESET_REQUIRED_EVIDENCE.get(loopPreset);
+  if (requiredEvidence === undefined) {
+    throw new Error(`Unknown loop preset: ${loopPreset}`);
+  }
+  return [...requiredEvidence];
 }
 
 export function preflightSetupBundle(policy: SetupBundlePolicy, options: { codexHome?: string | null }): SetupBundlePreflight {
@@ -322,6 +335,13 @@ function applyBundleDerivedRecords(database: DatabaseSync, options: {
   taskId: string;
 }): Record<string, unknown> {
   const permissions = normalizeManagerPermissions(Object.fromEntries(options.policy.manager.permissions.map((permission) => [permission, true])));
+  const acceptanceCriteriaSeeded = seedSetupBundleAcceptanceCriteria(database, {
+    criteria: options.policy.evidence.acceptance_criteria,
+    now: options.now,
+    preset: options.policy.preset,
+    setupBundleId: options.setupBundleId,
+    taskId: options.taskId,
+  });
   database.prepare(`
     insert into manager_configs(
       task_id, recipe_name, supervision_mode, objective, guidelines_json,
@@ -357,31 +377,208 @@ function applyBundleDerivedRecords(database: DatabaseSync, options: {
     options.now,
   );
   return {
+    acceptance_criteria_seeded: acceptanceCriteriaSeeded,
     manager_config: true,
     setup_bundle_id: options.setupBundleId,
   };
 }
 
-function skillAvailable(skill: string, codexHome: string | null): boolean {
-  if (codexHome === null || !validSkillName(skill)) {
-    return false;
+function seedSetupBundleAcceptanceCriteria(database: DatabaseSync, options: {
+  criteria: string[];
+  now: string;
+  preset: string;
+  setupBundleId: string;
+  taskId: string;
+}): number {
+  const insert = database.prepare(`
+    insert into acceptance_criteria(
+      task_id, criterion, status, source, proof, rationale,
+      evidence_json, created_at, updated_at
+    )
+    values (?, ?, 'accepted', 'manager_inferred', null, ?, ?, ?, ?)
+  `);
+  const seen = new Set<string>();
+  let seeded = 0;
+  for (const raw of options.criteria) {
+    const criterion = raw.trim();
+    if (criterion.length === 0 || seen.has(criterion)) {
+      continue;
+    }
+    seen.add(criterion);
+    const existing = database.prepare(`
+      select id
+      from acceptance_criteria
+      where task_id = ? and criterion = ?
+      limit 1
+    `).get(options.taskId, criterion) as { id: number } | undefined;
+    if (existing) {
+      continue;
+    }
+    const result = insert.run(
+      options.taskId,
+      criterion,
+      "Seeded from setup bundle evidence policy.",
+      stableJson({
+        preset: options.preset,
+        setup_bundle_id: options.setupBundleId,
+        source: "setup_bundle",
+      }),
+      options.now,
+      options.now,
+    );
+    seeded += Number(result.changes ?? 0);
   }
-  const skillsDir = resolve(codexHome, "skills");
-  const skillFile = resolve(skillsDir, skill, "SKILL.md");
-  const skillRelativePath = relative(skillsDir, skillFile);
-  if (skillRelativePath.startsWith("..") || isAbsolute(skillRelativePath)) {
-    return false;
-  }
-  return existsSync(skillFile);
+  return seeded;
 }
 
-function validSkillName(skill: string): boolean {
+function skillAvailable(skill: string, codexHome: string | null): boolean {
+  if (codexHome === null) {
+    return false;
+  }
+  return skillLookupNames(skill).some((candidate) => {
+    const skillsDir = resolve(codexHome, "skills");
+    if (skillFileExistsUnder(skillsDir, candidate)) {
+      return true;
+    }
+    return pluginSkillAvailable(candidate, codexHome);
+  });
+}
+
+function pluginSkillAvailable(skill: string, codexHome: string): boolean {
+  const cacheDir = resolve(codexHome, "plugins", "cache");
+  if (!existsSync(cacheDir)) {
+    return false;
+  }
+  const pending: Array<{ depth: number; path: string }> = [{ depth: 0, path: cacheDir }];
+  const maxDepth = 5;
+  while (pending.length > 0) {
+    const current = pending.shift();
+    if (!current) {
+      break;
+    }
+    if (skillFileExistsUnder(resolve(current.path, "skills"), skill)) {
+      return true;
+    }
+    if (current.depth >= maxDepth) {
+      continue;
+    }
+    let entries;
+    try {
+      entries = readdirSync(current.path, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      if (entry.isDirectory()) {
+        pending.push({ depth: current.depth + 1, path: resolve(current.path, entry.name) });
+      }
+    }
+  }
+  return false;
+}
+
+function skillFileExistsUnder(skillsDir: string, skill: string): boolean {
+  const skillFile = resolve(skillsDir, skill, "SKILL.md");
+  const skillRelativePath = relative(skillsDir, skillFile);
+  if (!skillRelativePath.startsWith("..")
+    && !isAbsolute(skillRelativePath)
+    && existsSync(skillFile)) {
+    return true;
+  }
+  return declaredSkillFileExistsUnder(skillsDir, skill);
+}
+
+function declaredSkillFileExistsUnder(skillsDir: string, skill: string): boolean {
+  let entries;
+  try {
+    entries = readdirSync(skillsDir, { withFileTypes: true });
+  } catch {
+    return false;
+  }
+  for (const entry of entries) {
+    if (!entry.isDirectory()) {
+      continue;
+    }
+    const skillFile = resolve(skillsDir, entry.name, "SKILL.md");
+    const skillRelativePath = relative(skillsDir, skillFile);
+    if (skillRelativePath.startsWith("..") || isAbsolute(skillRelativePath) || !existsSync(skillFile)) {
+      continue;
+    }
+    if (skillManifestName(skillFile) === skill) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function skillManifestName(skillFile: string): string | null {
+  let contents;
+  try {
+    contents = readFileSync(skillFile, "utf8");
+  } catch {
+    return null;
+  }
+  const frontmatter = /^---\r?\n(?<body>[\s\S]*?)\r?\n---/.exec(contents)?.groups?.body
+    ?? contents.split(/\r?\n/).slice(0, 20).join("\n");
+  for (const line of frontmatter.split(/\r?\n/)) {
+    const match = /^\s*name\s*:\s*(?:"([^"]+)"|'([^']+)'|([^#\s]+))\s*(?:#.*)?$/.exec(line);
+    const name = match?.[1] ?? match?.[2] ?? match?.[3] ?? null;
+    if (name !== null) {
+      return name.trim();
+    }
+  }
+  return null;
+}
+
+function skillLookupNames(skill: string): string[] {
   const normalized = skill.trim();
-  return normalized.length > 0
-    && normalized !== "."
-    && normalized !== ".."
-    && !normalized.includes("/")
-    && !normalized.includes("\\");
+  if (validBareSkillName(normalized)) {
+    return [normalized];
+  }
+  const parts = normalized.split(":");
+  if (parts.length !== 2 || !validBareSkillName(parts[0]) || !validBareSkillName(parts[1])) {
+    return [];
+  }
+  return [parts[1]];
+}
+
+function validBareSkillName(skill: string): boolean {
+  return skill.length > 0
+    && skill !== "."
+    && skill !== ".."
+    && !skill.includes(":")
+    && !skill.includes("/")
+    && !skill.includes("\\");
+}
+
+function planningBackendRequiredSkills(backend: PlanningBackend): string[] {
+  switch (backend) {
+    case "goalbuddy":
+      return ["goal-prep"];
+    case "codex_goal":
+      return ["codex-goal-drafter"];
+    case "custom":
+    case "direct_prompt":
+      return [];
+  }
+}
+
+function prReviewBackendRequiredSkills(backend: PrReviewBackend): string[] {
+  switch (backend) {
+    case "codex_review":
+      return ["codex-review"];
+    case "composite":
+      return ["requesting-code-review", "receiving-code-review", "codex-review"];
+    case "github":
+      return ["gh-address-comments", "gh-fix-ci"];
+    case "security":
+      return ["security-diff-scan"];
+    case "superpowers":
+      return ["requesting-code-review", "receiving-code-review"];
+    case "custom":
+    case "off":
+      return [];
+  }
 }
 
 function uniqueStrings(values: string[]): string[] {

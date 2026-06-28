@@ -81,6 +81,18 @@ function makeCodexHomeWithSkills(skills: string[]): string {
   return codexHome;
 }
 
+function makeCodexHomeWithPluginSkills(skills: Array<string | { directory: string; name: string }>): string {
+  const codexHome = mkdtempSync(join(tmpdir(), "agent-conveyor-codex-home."));
+  for (const skill of skills) {
+    const directory = typeof skill === "string" ? skill : skill.directory;
+    const name = typeof skill === "string" ? skill : skill.name;
+    const skillDir = join(codexHome, "plugins", "cache", "test-plugin", "test-plugin", "1.0.0", "skills", directory);
+    mkdirSync(skillDir, { recursive: true });
+    writeFileSync(join(skillDir, "SKILL.md"), `---\nname: ${name}\n---\n# ${name}\n`);
+  }
+  return codexHome;
+}
+
 function seedCliAppLoopFixture(
   dbPath: string,
   options: {
@@ -191,10 +203,12 @@ function seedCampaignCliSession(dbPath: string, options: { id: string; role: "ma
 }
 
 test("setup bundle runtime drafts actor-scoped PR review defaults and stable preflight", () => {
-  const codexHome = makeCodexHomeWithSkills([
+  const codexHome = makeCodexHomeWithPluginSkills([
     "aa-extra",
     "codex-review",
-    "goal-prep",
+    "gh-address-comments",
+    "gh-fix-ci",
+    { directory: "goalbuddy", name: "goal-prep" },
     "requesting-code-review",
     "security-diff-scan",
   ]);
@@ -237,6 +251,68 @@ test("setup bundle runtime drafts actor-scoped PR review defaults and stable pre
       "security-diff-scan",
       "zz-extra",
     ]);
+
+    const githubPolicy = draftSetupBundlePolicy({
+      optionalSkills: ["security-diff-scan"],
+      planningBackend: "direct_prompt",
+      preset: "autonomous_ship_it",
+      prReviewBackend: "github",
+      prReviewRequired: true,
+    });
+    assert.deepEqual(githubPolicy.planning.required_skills, []);
+    assert.deepEqual(githubPolicy.pr_review.required_skills, ["gh-address-comments", "gh-fix-ci"]);
+    assert.deepEqual(preflightSetupBundle(githubPolicy, { codexHome }).missing_required, []);
+
+    const pluginQualifiedPolicy = draftSetupBundlePolicy({
+      planningBackend: "direct_prompt",
+      preset: "custom",
+      prReviewBackend: "custom",
+      prReviewRequired: true,
+      requiredSkills: ["superpowers:requesting-code-review", "goalbuddy:goal-prep"],
+    });
+    assert.deepEqual(preflightSetupBundle(pluginQualifiedPolicy, { codexHome }).missing_required, []);
+
+    const noReviewPolicy = draftSetupBundlePolicy({
+      planningBackend: "direct_prompt",
+      preset: "autonomous_ship_it",
+      prReviewRequired: false,
+    });
+    assert.equal(noReviewPolicy.pr_review.backend, "off");
+    assert.deepEqual(noReviewPolicy.pr_review.required_skills, []);
+    assert.equal(noReviewPolicy.manager.pr_review.gate, "none");
+    assert.equal(noReviewPolicy.workers.profiles[0]?.pr_review.required_before_handoff, false);
+
+    const reviewOffPolicy = draftSetupBundlePolicy({
+      preset: "autonomous_ship_it",
+      prReviewBackend: "off",
+    });
+    assert.equal(reviewOffPolicy.pr_review.required, false);
+    assert.equal(reviewOffPolicy.manager.pr_review.gate, "none");
+    assert.deepEqual(reviewOffPolicy.pr_review.required_skills, []);
+
+    const loopOffPolicy = draftSetupBundlePolicy({
+      loopBackend: "none",
+      preset: "autonomous_ship_it",
+    });
+    assert.equal(loopOffPolicy.loop.backend, "none");
+    assert.equal(loopOffPolicy.loop.preset, null);
+    assert.deepEqual(loopOffPolicy.loop.required_evidence, []);
+    assert.deepEqual(loopOffPolicy.evidence.acceptance_criteria, []);
+
+    const customRequiredReviewPolicy = draftSetupBundlePolicy({
+      preset: "custom",
+      prReviewBackend: "codex_review",
+      prReviewRequired: true,
+    });
+    assert.deepEqual(customRequiredReviewPolicy.pr_review.required_skills, ["codex-review"]);
+    assert.equal(customRequiredReviewPolicy.manager.pr_review.gate, "block_merge_until_review_receipts");
+    assert.equal(customRequiredReviewPolicy.manager.pr_review.role, "gatekeeper");
+    assert.equal(customRequiredReviewPolicy.workers.profiles[0]?.pr_review.required_before_handoff, true);
+
+    assert.throws(
+      () => draftSetupBundlePolicy({ loopPreset: "ship_it_lop", preset: "custom" }),
+      /Unknown loop preset: ship_it_lop/,
+    );
   } finally {
     rmSync(codexHome, { recursive: true, force: true });
   }
@@ -380,6 +456,27 @@ test("setup bundle runtime applies approved bundle and reads latest setup record
       assert.deepEqual(managerConfig?.permissions.worker_session, ["clear", "compact"]);
       assert.deepEqual(managerConfig?.tools, ["gh", "git", "verification.run_pytest", "context.fetch_prs"]);
       assert.ok(managerConfig?.acceptance_criteria.includes("adversarial_check evidence is recorded."));
+
+      const acceptedCriteria = database.prepare(`
+        select criterion, evidence_json, source, status
+        from acceptance_criteria
+        where task_id = ?
+        order by criterion
+      `).all("task-approved-bundle") as Array<{
+        criterion: string;
+        evidence_json: string;
+        source: string;
+        status: string;
+      }>;
+      assert.equal(acceptedCriteria.length, policy.evidence.acceptance_criteria.length);
+      assert.ok(acceptedCriteria.some((criterion) => criterion.criterion === "adversarial_check evidence is recorded."));
+      assert.deepEqual(Array.from(new Set(acceptedCriteria.map((criterion) => criterion.status))), ["accepted"]);
+      assert.deepEqual(Array.from(new Set(acceptedCriteria.map((criterion) => criterion.source))), ["manager_inferred"]);
+      assert.deepEqual(JSON.parse(acceptedCriteria[0]?.evidence_json ?? "{}") as { source?: string }, {
+        preset: "autonomous_ship_it",
+        setup_bundle_id: result.record.id,
+        source: "setup_bundle",
+      });
     } finally {
       database.close();
     }
@@ -590,13 +687,16 @@ test("setup-bundle CLI preview includes required skill preflight without mutatin
     assert.equal(preview.exitCode, 0);
     const payload = JSON.parse(preview.stdout ?? "{}") as {
       action: string;
-      policy: { pr_review: { required_skills: string[] } };
-      preflight: { missing_required: string[]; ok: boolean };
+      policy: { pr_review: { optional_skills: string[]; required_skills: string[] } };
+      preflight: { checked_skills: string[]; missing_optional: string[]; missing_required: string[]; ok: boolean };
     };
     assert.equal(payload.action, "preview");
     assert.deepEqual(payload.policy.pr_review.required_skills, ["requesting-code-review"]);
+    assert.deepEqual(payload.policy.pr_review.optional_skills, ["security-diff-scan"]);
+    assert.deepEqual(payload.preflight.checked_skills, ["requesting-code-review", "security-diff-scan"]);
     assert.equal(payload.preflight.ok, false);
     assert.deepEqual(payload.preflight.missing_required, ["requesting-code-review"]);
+    assert.deepEqual(payload.preflight.missing_optional, ["security-diff-scan"]);
 
     const proofDb = openDatabaseSync(dbPath);
     try {
@@ -762,6 +862,7 @@ test("setup-bundle apply stores approved ship-it policy and manager permissions 
     const payload = JSON.parse(applied.stdout ?? "{}") as {
       blocked: boolean;
       setup_bundle: {
+        id: string;
         policy: {
           loop: { preset: string | null; required_evidence: string[] };
           manager: { pr_review: { gate: string; role: string } };
@@ -793,7 +894,11 @@ test("setup-bundle apply stores approved ship-it policy and manager permissions 
         where task_id = ?
       `).get("task-ship") as { applied_json: string; state: string };
       assert.equal(setupBundle.state, "applied");
-      assert.equal((JSON.parse(setupBundle.applied_json) as { manager_config?: boolean }).manager_config, true);
+      assert.deepEqual(JSON.parse(setupBundle.applied_json) as { acceptance_criteria_seeded?: number; manager_config?: boolean }, {
+        acceptance_criteria_seeded: policy.loop.required_evidence.length,
+        manager_config: true,
+        setup_bundle_id: payload.setup_bundle.id,
+      });
 
       const managerConfig = proofDb.prepare(`
         select recipe_name, nudge_on_completion, permissions_json, acceptance_criteria_json
@@ -815,8 +920,60 @@ test("setup-bundle apply stores approved ship-it policy and manager permissions 
         "resolve_conflicts",
       ]);
       assert.ok((JSON.parse(managerConfig.acceptance_criteria_json) as string[]).some((criterion) => criterion.includes("manager_merge_decision")));
+      assert.equal((proofDb.prepare(`
+        select count(*) as count
+        from acceptance_criteria
+        where task_id = ? and status = 'accepted' and source = 'manager_inferred'
+      `).get("task-ship") as { count: number }).count, policy.loop.required_evidence.length);
     } finally {
       proofDb.close();
+    }
+
+    const reapplied = runTypescriptRuntimeCommand({
+      args: [
+        "setup-bundle",
+        "apply",
+        "ship-task",
+        "--preset",
+        "autonomous_ship_it",
+        "--approve",
+        "--codex-home",
+        codexHome,
+        "--path",
+        dbPath,
+        "--json",
+      ],
+      env: {},
+      now: () => new Date("2026-06-28T13:25:30Z"),
+    });
+    assert.equal(reapplied.exitCode, 0);
+
+    const reapplyProofDb = openDatabaseSync(dbPath);
+    try {
+      assert.equal((reapplyProofDb.prepare(`
+        select count(*) as count
+        from setup_bundles
+        where task_id = ?
+      `).get("task-ship") as { count: number }).count, 2);
+      const latestSetupBundle = reapplyProofDb.prepare(`
+        select applied_json
+        from setup_bundles
+        where task_id = ?
+        order by updated_at desc, rowid desc
+        limit 1
+      `).get("task-ship") as { applied_json: string };
+      assert.deepEqual(JSON.parse(latestSetupBundle.applied_json) as { acceptance_criteria_seeded?: number; manager_config?: boolean }, {
+        acceptance_criteria_seeded: 0,
+        manager_config: true,
+        setup_bundle_id: JSON.parse(reapplied.stdout ?? "{}").setup_bundle.id,
+      });
+      assert.equal((reapplyProofDb.prepare(`
+        select count(*) as count
+        from acceptance_criteria
+        where task_id = ? and status = 'accepted' and source = 'manager_inferred'
+      `).get("task-ship") as { count: number }).count, policy.loop.required_evidence.length);
+    } finally {
+      reapplyProofDb.close();
     }
   } finally {
     rmSync(root, { recursive: true, force: true });
