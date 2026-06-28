@@ -71,6 +71,13 @@ Important options:
 
 Use `preview` for draft/preflight without ledger mutation. Use `apply` for approved ledger writes. For this tranche, failed `apply` with missing required backends must write one blocked `setup_bundles` row and must not create `manager_configs`, `runs`, `bindings`, `commands`, or sessions.
 
+PR review policy is configurable at three levels. `pr_review` is the bundle
+default. `manager.pr_review` defines the manager's review gate duties.
+`workers.profiles[].pr_review` defines worker or role-specific review duties.
+Changing any of these values creates a new approved setup bundle revision
+rather than mutating the prior record, so the ledger can answer which PR review
+policy was active for a launched manager or worker.
+
 ## Task 1: Add Setup Bundle Schema
 
 **Files:**
@@ -401,6 +408,11 @@ export interface SetupBundlePolicy {
     denied_actions: string[];
     mode: "light" | "guided" | "strict";
     permissions: string[];
+    pr_review: {
+      backend: PrReviewBackend | "inherit";
+      gate: "none" | "block_merge_until_review_receipts";
+      role: "none" | "gatekeeper";
+    };
     tools: string[];
   };
   planning: {
@@ -427,6 +439,10 @@ export interface SetupBundlePolicy {
     profiles: Array<{
       approval: string;
       evidence_contract: string;
+      pr_review: {
+        backend: PrReviewBackend | "inherit";
+        required_before_handoff: boolean;
+      };
       role: string;
       sandbox: string;
     }>;
@@ -520,6 +536,11 @@ export function draftSetupBundlePolicy(options: {
       ],
       mode: shipIt || prCiMerge || testCoverage || uxPolish ? "strict" : "guided",
       permissions: managerPermissions,
+      pr_review: {
+        backend: shipIt ? "inherit" : "off",
+        gate: shipIt ? "block_merge_until_review_receipts" : "none",
+        role: shipIt ? "gatekeeper" : "none",
+      },
       tools: shipIt || prCiMerge ? ["gh", "git", "verification.run_tests", "context.fetch_prs"] : testCoverage ? ["verification.run_tests"] : uxPolish ? ["verification.run_playwright"] : [],
     },
     planning: {
@@ -543,7 +564,16 @@ export function draftSetupBundlePolicy(options: {
     },
     workers: {
       count: 1,
-      profiles: [{ approval: "on-request", evidence_contract: shipIt ? "ship_it_worker_receipt" : "worker_receipt", role: "implementer", sandbox: "workspace-write" }],
+      profiles: [{
+        approval: "on-request",
+        evidence_contract: shipIt ? "ship_it_worker_receipt" : "worker_receipt",
+        pr_review: {
+          backend: shipIt ? "inherit" : "off",
+          required_before_handoff: shipIt,
+        },
+        role: "implementer",
+        sandbox: "workspace-write",
+      }],
     },
   };
 }
@@ -1078,8 +1108,10 @@ test("setup-bundle apply stores approved ship-it policy and manager permissions 
       setup_bundle: {
         policy: {
           loop: { preset: string; required_evidence: string[] };
+          manager: { pr_review: { gate: string; role: string } };
           pr_review: { backend: string; required: boolean };
           whats_next: { max_iterations: number; post_merge_allowed: boolean };
+          workers: { profiles: Array<{ pr_review: { required_before_handoff: boolean } }> };
         };
         state: string;
       };
@@ -1087,8 +1119,11 @@ test("setup-bundle apply stores approved ship-it policy and manager permissions 
     assert.equal(payload.blocked, false);
     assert.equal(payload.setup_bundle.state, "applied");
     assert.equal(payload.setup_bundle.policy.loop.preset, "ship_it_loop");
+    assert.equal(payload.setup_bundle.policy.manager.pr_review.gate, "block_merge_until_review_receipts");
+    assert.equal(payload.setup_bundle.policy.manager.pr_review.role, "gatekeeper");
     assert.equal(payload.setup_bundle.policy.pr_review.backend, "composite");
     assert.equal(payload.setup_bundle.policy.pr_review.required, true);
+    assert.equal(payload.setup_bundle.policy.workers.profiles[0]?.pr_review.required_before_handoff, true);
     assert.equal(payload.setup_bundle.policy.whats_next.max_iterations, 1);
     assert.equal(payload.setup_bundle.policy.whats_next.post_merge_allowed, true);
     assert.ok(payload.setup_bundle.policy.loop.required_evidence.includes("manager_merge_decision"));
