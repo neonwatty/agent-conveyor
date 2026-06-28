@@ -487,6 +487,262 @@ test("setup bundle runtime treats unsafe skill names as missing", () => {
   }
 });
 
+test("setup-bundle CLI apply records blocked bundle when required backend is missing", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-cli-setup-bundle-blocked."));
+  const codexHome = makeCodexHomeWithSkills([]);
+  try {
+    const dbPath = join(root, "workerctl.db");
+    const database = openDatabaseSync(dbPath);
+    try {
+      initializeDatabaseSync(database);
+      createTaskSync(database, {
+        goal: "Block missing setup bundle backends.",
+        name: "cli-bundle-blocked",
+        now: "2026-06-28T13:00:00Z",
+        taskId: "task-cli-bundle-blocked",
+      });
+    } finally {
+      database.close();
+    }
+
+    const applied = runTypescriptRuntimeCommand({
+      args: [
+        "setup-bundle",
+        "apply",
+        "cli-bundle-blocked",
+        "--preset",
+        "autonomous_ship_it",
+        "--approve",
+        "--codex-home",
+        codexHome,
+        "--path",
+        dbPath,
+        "--json",
+      ],
+      env: {},
+      now: () => new Date("2026-06-28T13:01:00Z"),
+    });
+    assert.equal(applied.exitCode, 1);
+    const payload = JSON.parse(applied.stdout ?? "{}") as {
+      blocked: boolean;
+      launched: boolean;
+      missing_required: string[];
+      setup_bundle: { state: string };
+    };
+    assert.equal(payload.blocked, true);
+    assert.equal(payload.launched, false);
+    assert.deepEqual(payload.missing_required, [
+      "codex-review",
+      "goal-prep",
+      "receiving-code-review",
+      "requesting-code-review",
+    ]);
+    assert.equal(payload.setup_bundle.state, "blocked");
+
+    const proofDb = openDatabaseSync(dbPath);
+    try {
+      assert.equal((proofDb.prepare("select count(*) as count from setup_bundles").get() as { count: number }).count, 1);
+      assert.equal((proofDb.prepare("select count(*) as count from manager_configs").get() as { count: number }).count, 0);
+    } finally {
+      proofDb.close();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(codexHome, { recursive: true, force: true });
+  }
+});
+
+test("setup-bundle CLI preview includes required skill preflight without mutating ledger", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-cli-setup-bundle-preview."));
+  const codexHome = makeCodexHomeWithSkills([]);
+  try {
+    const dbPath = join(root, "workerctl.db");
+    const database = openDatabaseSync(dbPath);
+    try {
+      initializeDatabaseSync(database);
+      createTaskSync(database, {
+        goal: "Preview setup bundle only.",
+        name: "cli-bundle-preview",
+        now: "2026-06-28T13:10:00Z",
+        taskId: "task-cli-bundle-preview",
+      });
+    } finally {
+      database.close();
+    }
+
+    const preview = runTypescriptRuntimeCommand({
+      args: [
+        "setup-bundle",
+        "preview",
+        "cli-bundle-preview",
+        "--preset",
+        "custom",
+        "--require-skill",
+        "requesting-code-review",
+        "--codex-home",
+        codexHome,
+        "--path",
+        dbPath,
+        "--json",
+      ],
+      env: {},
+    });
+    assert.equal(preview.exitCode, 0);
+    const payload = JSON.parse(preview.stdout ?? "{}") as {
+      action: string;
+      policy: { pr_review: { required_skills: string[] } };
+      preflight: { missing_required: string[]; ok: boolean };
+    };
+    assert.equal(payload.action, "preview");
+    assert.deepEqual(payload.policy.pr_review.required_skills, ["requesting-code-review"]);
+    assert.equal(payload.preflight.ok, false);
+    assert.deepEqual(payload.preflight.missing_required, ["requesting-code-review"]);
+
+    const proofDb = openDatabaseSync(dbPath);
+    try {
+      assert.equal((proofDb.prepare("select count(*) as count from setup_bundles").get() as { count: number }).count, 0);
+    } finally {
+      proofDb.close();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(codexHome, { recursive: true, force: true });
+  }
+});
+
+test("setup-bundle CLI apply requires approval before ledger mutation", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-cli-setup-bundle-approval."));
+  try {
+    const dbPath = join(root, "workerctl.db");
+    const database = openDatabaseSync(dbPath);
+    try {
+      initializeDatabaseSync(database);
+      createTaskSync(database, {
+        goal: "Require explicit setup bundle approval.",
+        name: "cli-bundle-approval",
+        now: "2026-06-28T13:20:00Z",
+        taskId: "task-cli-bundle-approval",
+      });
+    } finally {
+      database.close();
+    }
+
+    const applied = runTypescriptRuntimeCommand({
+      args: ["setup-bundle", "apply", "cli-bundle-approval", "--preset", "custom", "--path", dbPath, "--json"],
+      env: {},
+    });
+    assert.equal(applied.exitCode, 2);
+    assert.match(applied.stderr ?? "", /setup-bundle apply requires --approve\./);
+
+    const proofDb = openDatabaseSync(dbPath);
+    try {
+      assert.equal((proofDb.prepare("select count(*) as count from setup_bundles").get() as { count: number }).count, 0);
+      assert.equal((proofDb.prepare("select count(*) as count from manager_configs").get() as { count: number }).count, 0);
+    } finally {
+      proofDb.close();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("setup-bundle CLI rejects invalid enum and iteration options", () => {
+  const cases: Array<{ args: string[]; error: RegExp }> = [
+    {
+      args: ["setup-bundle", "preview", "cli-bundle-invalid", "--planning-backend", "magic"],
+      error: /Unsupported planning backend: magic/,
+    },
+    {
+      args: ["setup-bundle", "preview", "cli-bundle-invalid", "--loop-backend", "magic"],
+      error: /Unsupported loop backend: magic/,
+    },
+    {
+      args: ["setup-bundle", "preview", "cli-bundle-invalid", "--pr-review-backend", "magic"],
+      error: /Unsupported PR review backend: magic/,
+    },
+    {
+      args: ["setup-bundle", "preview", "cli-bundle-invalid", "--whats-next", "magic"],
+      error: /Unsupported whats-next mode: magic/,
+    },
+    {
+      args: ["setup-bundle", "preview", "cli-bundle-invalid", "--loop-max-iterations", "-1"],
+      error: /--loop-max-iterations must be a non-negative integer\./,
+    },
+    {
+      args: ["setup-bundle", "preview", "cli-bundle-invalid", "--whats-next-max-iterations", "1.5"],
+      error: /--whats-next-max-iterations must be a non-negative integer\./,
+    },
+  ];
+  for (const item of cases) {
+    const result = runTypescriptRuntimeCommand({ args: item.args, env: {} });
+    assert.equal(result.exitCode, 2);
+    assert.match(result.stderr ?? "", item.error);
+  }
+});
+
+test("setup-bundle CLI show reads applied setup bundle", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-cli-setup-bundle-show."));
+  const codexHome = makeCodexHomeWithSkills([
+    "codex-review",
+    "goal-prep",
+    "receiving-code-review",
+    "requesting-code-review",
+  ]);
+  try {
+    const dbPath = join(root, "workerctl.db");
+    const database = openDatabaseSync(dbPath);
+    try {
+      initializeDatabaseSync(database);
+      createTaskSync(database, {
+        goal: "Show applied setup bundle.",
+        name: "cli-bundle-show",
+        now: "2026-06-28T13:30:00Z",
+        taskId: "task-cli-bundle-show",
+      });
+    } finally {
+      database.close();
+    }
+
+    const applied = runTypescriptRuntimeCommand({
+      args: [
+        "setup-bundle",
+        "apply",
+        "cli-bundle-show",
+        "--preset",
+        "autonomous_ship_it",
+        "--approve",
+        "--codex-home",
+        codexHome,
+        "--path",
+        dbPath,
+        "--json",
+      ],
+      env: {},
+      now: () => new Date("2026-06-28T13:31:00Z"),
+    });
+    assert.equal(applied.exitCode, 0);
+    const applyPayload = JSON.parse(applied.stdout ?? "{}") as {
+      blocked: boolean;
+      launched: boolean;
+      setup_bundle: { id: string };
+    };
+    assert.equal(applyPayload.blocked, false);
+    assert.equal(applyPayload.launched, false);
+
+    const shown = runTypescriptRuntimeCommand({
+      args: ["setup-bundle", "show", "cli-bundle-show", "--path", dbPath, "--json"],
+      env: {},
+    });
+    assert.equal(shown.exitCode, 0);
+    const showPayload = JSON.parse(shown.stdout ?? "{}") as { id: string; state: string };
+    assert.equal(showPayload.id, applyPayload.setup_bundle.id);
+    assert.equal(showPayload.state, "applied");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(codexHome, { recursive: true, force: true });
+  }
+});
+
 test("unknown TypeScript runtime command fails without Python fallback", () => {
   const result = runTypescriptRuntimeCommand({
     args: ["adversarial-check", "--json"],
