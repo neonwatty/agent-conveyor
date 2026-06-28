@@ -265,6 +265,45 @@ test("database schema includes setup bundle ledger table and indexes", () => {
   }
 });
 
+test("same-version initialization repairs missing setup bundle ledger table", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-setup-bundles-same-version."));
+  try {
+    const dbPath = join(root, "workerctl.db");
+    const database = openDatabaseSync(dbPath);
+    try {
+      initializeDatabaseSync(database);
+      database.exec("drop table setup_bundles");
+      assert.equal(databaseHealthSync(database).ok, false);
+
+      initializeDatabaseSync(database);
+
+      const table = database.prepare(`
+        select name
+        from sqlite_master
+        where type = 'table' and name = 'setup_bundles'
+      `).get() as { name: string } | undefined;
+      assert.equal(table?.name, "setup_bundles");
+
+      const indexes = database.prepare(`
+        select name
+        from sqlite_master
+        where type = 'index' and tbl_name = 'setup_bundles'
+          and name not like 'sqlite_%'
+        order by name
+      `).all() as Array<{ name: string }>;
+      assert.deepEqual(indexes.map((row) => row.name), [
+        "setup_bundles_name",
+        "setup_bundles_task_state",
+      ]);
+      assert.equal(databaseHealthSync(database).ok, true);
+    } finally {
+      database.close();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("TypeScript-created empty schema contains the required tables indexes and triggers", () => {
   const tsRoot = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-schema."));
   try {
