@@ -14,6 +14,14 @@ import {
 } from "../runtime/commands.js";
 import { executeDispatchCommandSync } from "../runtime/dispatch.js";
 import { recordLoopEvidenceSync } from "../runtime/loop-evidence.js";
+import { managerConfigSync } from "../runtime/manager-config.js";
+import {
+  applySetupBundleSync,
+  draftSetupBundlePolicy,
+  preflightSetupBundle,
+  setupBundleForTaskSync,
+  setupBundleHash,
+} from "../runtime/setup-bundles.js";
 import { writePngRgba } from "../runtime/visual-diff.js";
 import {
   bindSessionsSync,
@@ -61,6 +69,16 @@ function withTemporaryHome(callback: (home: string) => void): void {
     }
     rmSync(fakeHome, { recursive: true, force: true });
   }
+}
+
+function makeCodexHomeWithSkills(skills: string[]): string {
+  const codexHome = mkdtempSync(join(tmpdir(), "agent-conveyor-codex-home."));
+  for (const skill of skills) {
+    const skillDir = join(codexHome, "skills", skill);
+    mkdirSync(skillDir, { recursive: true });
+    writeFileSync(join(skillDir, "SKILL.md"), `---\nname: ${skill}\n---\n# ${skill}\n`);
+  }
+  return codexHome;
 }
 
 function seedCliAppLoopFixture(
@@ -171,6 +189,159 @@ function seedCampaignCliSession(dbPath: string, options: { id: string; role: "ma
     database.close();
   }
 }
+
+test("setup bundle runtime drafts actor-scoped PR review defaults and stable preflight", () => {
+  const codexHome = makeCodexHomeWithSkills([
+    "aa-extra",
+    "codex-review",
+    "goal-prep",
+    "requesting-code-review",
+    "security-diff-scan",
+  ]);
+  try {
+    const policy = draftSetupBundlePolicy({
+      optionalSkills: ["security-diff-scan", "optional-extra"],
+      preset: "autonomous_ship_it",
+      requiredSkills: ["zz-extra", "aa-extra"],
+    });
+    assert.equal(policy.pr_review.backend, "composite");
+    assert.equal(policy.pr_review.required, true);
+    assert.deepEqual(policy.pr_review.required_skills, [
+      "requesting-code-review",
+      "receiving-code-review",
+      "codex-review",
+      "zz-extra",
+      "aa-extra",
+    ]);
+    assert.deepEqual(policy.manager.pr_review, {
+      backend: "inherit",
+      gate: "block_merge_until_review_receipts",
+      role: "gatekeeper",
+    });
+    assert.deepEqual(policy.workers.profiles[0]?.pr_review, {
+      backend: "inherit",
+      required_before_handoff: true,
+    });
+
+    const preflight = preflightSetupBundle(policy, { codexHome });
+    assert.equal(preflight.ok, false);
+    assert.deepEqual(preflight.missing_required, ["receiving-code-review", "zz-extra"]);
+    assert.deepEqual(preflight.missing_optional, ["optional-extra"]);
+    assert.deepEqual(preflight.checked_skills, [
+      "aa-extra",
+      "codex-review",
+      "goal-prep",
+      "optional-extra",
+      "receiving-code-review",
+      "requesting-code-review",
+      "security-diff-scan",
+      "zz-extra",
+    ]);
+  } finally {
+    rmSync(codexHome, { recursive: true, force: true });
+  }
+});
+
+test("setup bundle runtime applies blocked bundle without manager authority", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-setup-bundle-blocked."));
+  const codexHome = makeCodexHomeWithSkills([]);
+  try {
+    const dbPath = join(root, "workerctl.db");
+    const database = openDatabaseSync(dbPath);
+    try {
+      initializeDatabaseSync(database);
+      createTaskSync(database, {
+        goal: "Ship a setup bundle task.",
+        name: "bundle-task",
+        now: "2026-06-28T10:00:00Z",
+        taskId: "task-bundle",
+      });
+      const policy = draftSetupBundlePolicy({ preset: "autonomous_ship_it" });
+      const result = applySetupBundleSync(database, {
+        approve: true,
+        codexHome,
+        now: "2026-06-28T10:01:00Z",
+        policy,
+        taskId: "task-bundle",
+      });
+
+      assert.equal(result.blocked, true);
+      assert.deepEqual(result.missing_required, [
+        "codex-review",
+        "goal-prep",
+        "receiving-code-review",
+        "requesting-code-review",
+      ]);
+      assert.equal(result.record.state, "blocked");
+      assert.match(result.record.blocked_reason ?? "", /missing required backend/i);
+      assert.equal(result.record.policy.manager.pr_review.gate, "block_merge_until_review_receipts");
+      assert.equal(result.record.policy.workers.profiles[0]?.pr_review.required_before_handoff, true);
+      assert.equal((database.prepare("select count(*) as count from manager_configs").get() as { count: number }).count, 0);
+      assert.equal((database.prepare("select count(*) as count from setup_bundles where task_id = ?").get("task-bundle") as { count: number }).count, 1);
+    } finally {
+      database.close();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(codexHome, { recursive: true, force: true });
+  }
+});
+
+test("setup bundle runtime applies approved bundle and reads latest setup record", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-setup-bundle-approved."));
+  const codexHome = makeCodexHomeWithSkills([
+    "codex-review",
+    "goal-prep",
+    "receiving-code-review",
+    "requesting-code-review",
+  ]);
+  try {
+    const dbPath = join(root, "workerctl.db");
+    const database = openDatabaseSync(dbPath);
+    try {
+      initializeDatabaseSync(database);
+      createTaskSync(database, {
+        goal: "Ship an approved setup bundle task.",
+        name: "approved-bundle-task",
+        now: "2026-06-28T11:00:00Z",
+        taskId: "task-approved-bundle",
+      });
+      const policy = draftSetupBundlePolicy({ preset: "autonomous_ship_it" });
+      const result = applySetupBundleSync(database, {
+        approve: true,
+        codexHome,
+        now: "2026-06-28T11:01:00Z",
+        policy,
+        taskId: "task-approved-bundle",
+      });
+
+      assert.equal(result.blocked, false);
+      assert.deepEqual(result.missing_required, []);
+      assert.equal(result.record.state, "applied");
+      assert.equal(result.record.approved_hash, setupBundleHash(policy));
+      assert.equal(result.record.policy.manager.pr_review.role, "gatekeeper");
+      assert.equal(result.record.policy.workers.profiles[0]?.pr_review.backend, "inherit");
+
+      const latest = setupBundleForTaskSync(database, "task-approved-bundle");
+      assert.equal(latest?.id, result.record.id);
+      assert.equal(latest?.preflight.ok, true);
+      assert.deepEqual(latest?.preflight.missing_required, []);
+
+      const managerConfig = managerConfigSync(database, "task-approved-bundle");
+      assert.equal(managerConfig?.recipe_name, "autonomous_ship_it");
+      assert.equal(managerConfig?.supervision_mode, "strict");
+      assert.deepEqual(managerConfig?.permissions.repo, ["merge_green_pr", "monitor_ci", "open_pr", "push_branch", "resolve_conflicts"]);
+      assert.deepEqual(managerConfig?.permissions.worker_session, ["clear", "compact"]);
+      assert.deepEqual(managerConfig?.tools, ["gh", "git", "verification.run_pytest", "context.fetch_prs"]);
+      assert.ok(managerConfig?.acceptance_criteria.includes("adversarial_check evidence is recorded."));
+    } finally {
+      database.close();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(codexHome, { recursive: true, force: true });
+  }
+});
 
 test("unknown TypeScript runtime command fails without Python fallback", () => {
   const result = runTypescriptRuntimeCommand({

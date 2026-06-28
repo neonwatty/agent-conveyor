@@ -160,6 +160,23 @@ export type {
   RalphLoopRunRecord,
   VisualDiffLoopEvidenceResult,
 } from "./runtime/loop-evidence.js";
+export {
+  applySetupBundleSync,
+  draftSetupBundlePolicy,
+  preflightSetupBundle,
+  setupBundleForTaskSync,
+  setupBundleHash,
+} from "./runtime/setup-bundles.js";
+export type {
+  LoopBackend,
+  PlanningBackend,
+  PrReviewBackend,
+  SetupBundlePolicy,
+  SetupBundlePreflight,
+  SetupBundleRecord,
+  SetupBundleState,
+  WhatsNextMode,
+} from "./runtime/setup-bundles.js";
 export { computeVisualDiffSync, writePngRgba, VisualDiffError } from "./runtime/visual-diff.js";
 export type { VisualDiffReport } from "./runtime/visual-diff.js";
 export {
